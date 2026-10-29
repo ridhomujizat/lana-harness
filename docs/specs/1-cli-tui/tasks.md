@@ -7,7 +7,7 @@
 - **Revisi requirements**: 5
 - **Revisi contract**: 2
 - **Revisi design**: 1
-- **Status**: Draft
+- **Status**: Approved
 
 > **Diblokir oleh spec #2 (core).** Semua task di bawah memakai interface core yang tercantum di
 > [design: Interface core yang dibutuhkan](design.md#interface-core-yang-dibutuhkan-dari-spec-2).
@@ -303,5 +303,5 @@ flowchart LR
 - [x] Setiap acceptance criterion punya tepat satu pemilik bukti.
 - [x] Setiap task punya scope terbatas, dependency, dan verifikasi.
 - [x] Tidak ada task yang memperkenalkan perilaku baru.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29
