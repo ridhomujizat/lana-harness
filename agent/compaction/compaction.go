@@ -10,14 +10,13 @@ import (
 	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
-	"github.com/ridhomujizat/lana-harness/store"
 )
 
 // ErrTurnActive dan ErrNothingToCompact berasal dari package store.
 var (
-	ErrTurnActive       = store.ErrTurnActive
-	ErrNothingToCompact = store.ErrNothingToCompact
-	ErrSessionChanged   = store.ErrSessionChanged
+	ErrTurnActive       = errors.New("masih ada turn yang berjalan")
+	ErrNothingToCompact = errors.New("tidak ada yang bisa diringkas")
+	ErrSessionChanged   = errors.New("session berubah saat compaction")
 )
 
 // Service mengimplementasikan core.Compactor.

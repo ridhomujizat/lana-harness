@@ -45,7 +45,15 @@ func display(pkg string) string {
 }
 
 func allowed(from, to string) bool {
-	if from == "cmd/lana" {
+	if from == "cmd/lana" || strings.HasPrefix(from, "examples/") {
+		return true
+	}
+	if from == "" {
+		for _, forbidden := range []string{"channels", "web", "protocol"} {
+			if to == forbidden || strings.HasPrefix(to, forbidden+"/") {
+				return false
+			}
+		}
 		return true
 	}
 	if from == "core" {
