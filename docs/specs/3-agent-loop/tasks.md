@@ -126,7 +126,7 @@ flowchart LR
     - PR/commit: commit T-001 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-002` Implementasi `store/memstore` sebagai `core.SessionStore`
+- [x] `T-002` Implementasi `store/memstore` sebagai `core.SessionStore`
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-MEM-001`
@@ -141,11 +141,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./store/memstore/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath CGO_ENABLED=1 nix develop -c sh -c 'CGO_ENABLED=1 go test -race ./store/memstore/... ./core/...'`
+    - Hasil: `ok store/memstore`, `ok core`; exit 0. `session/created` seq 1, append berikutnya seq 2 dan 3; `Fork` mengembalikan `ErrNotSupported`; store baru tidak menemukan session lama.
+    - PR/commit: commit T-002 spec #3
+    - Deviasi: `core.DeriveMessages` subset langsung dibuat di package core agar `memstore.DeriveMessages` dapat dikompilasi dan diuji; bukti lengkap derive dicatat di T-012.
 
 - [ ] `T-003` Implementasi `providers/mock` (`MockLlm`)
   - Issue/PR: `—`
