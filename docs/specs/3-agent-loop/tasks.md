@@ -265,7 +265,7 @@ flowchart LR
     - PR/commit: commit T-008 spec #3
     - Deviasi: Dependency `html-to-markdown/v2` dipin ke v2.4.0 dan `x/net` mengikuti agar direktif `go 1.24.0` tetap dipertahankan.
 
-- [ ] `T-009` Implementasi adapter `openai_compat`: config, client, dan klasifikasi error
+- [x] `T-009` Implementasi adapter `openai_compat`: config, client, dan klasifikasi error
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-PROV-001` (sebagian), `REQ-PROV-004`
@@ -278,13 +278,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/openai/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./providers/openai/...'`
+    - Hasil: `ok providers/openai`; exit 0. `TestClassify` (9 kasus), `TestConfigOpenAICompat` (path `/v1/chat/completions`), `TestNoAuthHeaderWithoutEnv`, `TestProviderErrorHTTP` (401 auth) lulus.
+    - PR/commit: commit T-009/T-010 spec #3 (satu commit untuk adapter dan stream; dicatat di docs/eval)
+    - Deviasi: Wire/SSE T-010 ditulis dalam commit yang sama karena adapter tidak dapat dikompilasi tanpa keduanya; bukti T-010 tetap dipisah di task ini.
 
-- [ ] `T-010` Implementasi stream SSE dan konversi pesan OpenAI
+- [x] `T-010` Implementasi stream SSE dan konversi pesan OpenAI
   - Issue/PR: `—`
   - Bergantung pada: `T-009`
   - Requirements: `REQ-PROV-002`, `REQ-PROV-003`
@@ -298,11 +298,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/openai/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./providers/openai/...'`
+    - Hasil: `ok providers/openai`; exit 0. `TestSSETextDeltas` (3 delta), `TestSSEToolCallAccumulate` (argumen 3 potongan menjadi `{\"path\":\"a.txt\"}`), `TestSSEUsage` (12/5), `TestWireConvert`, `TestWireImageUnsupported` lulus. Fixture di `providers/openai/testdata/*.sse`.
+    - PR/commit: commit T-009/T-010 spec #3
+    - Deviasi: Sama dengan T-009; tidak ada perilaku yang dihilangkan.
 
 - [ ] `T-011` Implementasi modul `llm`: `LLMRegistry`, cek kind, dan cek secret saat boot
   - Issue/PR: `—`

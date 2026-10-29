@@ -1,0 +1,10 @@
+data: {"choices":[{"delta":{"content":"Halo"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":" dunia"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":"!"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
