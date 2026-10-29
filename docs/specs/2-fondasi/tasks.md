@@ -229,7 +229,7 @@ flowchart TD
     - PR/commit: commit T-006
     - Deviasi: Validasi pola `rules` belum memanggil `internal/pattern` karena paket itu baru dibuat spec #4; saat ini hanya tipe array string (sesuai `CQ-030`).
 
-- [ ] `T-007` Merge sesuai aturan contract
+- [x] `T-007` Merge sesuai aturan contract
   - Issue/PR: `—`
   - Bergantung pada: `T-006`
   - Requirements: `REQ-CONF-002`
@@ -243,11 +243,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestMerge'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestMerge' -v`
+    - Hasil: 5 test PASS; exit 0. Origin baris modul dan leaf disimpan saat merge.
+    - PR/commit: commit T-007
+    - Deviasi: Bila lapisan atas menulis baris modul tanpa `config`, config lama dipertahankan; penggantian penuh hanya terjadi bila key `config` ditulis. Ini tafsiran paling sederhana dari aturan merge dan dicatat di docs/eval.
 
 - [ ] `T-008` Origins, secret, interpolasi, dan format `Secret`
   - Issue/PR: `—`
