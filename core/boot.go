@@ -66,7 +66,7 @@ func Boot(ctx context.Context, in BootInput) (*Context, error) {
 			return nil, fmt.Errorf("module %s failed to install: %w", pm.row.ID, err)
 		}
 		installed = append(installed, &installedModule{row: pm.row, mod: pm.mod, releases: b.takeOwned(pm.row.ID)})
-		slog.Info("module installed", "id", pm.row.ID, "module", pm.row.Module, "durasi", time.Since(start))
+		slog.Info("module installed", "id", pm.row.ID, "module", pm.row.Module, "duration", time.Since(start))
 	}
 
 	services := b.serviceSnapshot()

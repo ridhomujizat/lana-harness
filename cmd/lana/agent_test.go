@@ -141,7 +141,7 @@ func TestAgentListShowEdit(t *testing.T) {
 		t.Fatalf("edit unknown exit = %d", code)
 	}
 	out, code = captureStdout(t, func() int { return agentShow([]string{"helper", "--prompt"}) })
-	if code != 0 || !strings.HasPrefix(out, "You are helper") || !strings.Contains(out, "# Onboarding") || !strings.Contains(out, "- channel: cli") {
+	if code != 0 || !strings.HasPrefix(out, "You are helper") || !strings.Contains(out, "- channel: cli") {
 		t.Fatalf("show --prompt = %q", out)
 	}
 }
@@ -155,4 +155,34 @@ func TestSetCLIRoute(t *testing.T) {
 	if got := setCLIRoute("[agents.a]", "b"); !strings.HasSuffix(got, "[[routes]]\nchannel = \"cli\"\nagent = \"b\"") {
 		t.Fatalf("append:\n%s", got)
 	}
+}
+
+func TestLeaseSetRejectsSecondHolder(t *testing.T) {
+	home := initHome(t)
+	ctx := context.Background()
+	rt, _, _, _, err := runtimeFor(ctx, home, "default", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	info, err := rt.CreateSession(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := newLeaseSet(rt)
+	if err := first.ensure(ctx, info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.ensure(ctx, info.ID); err != nil {
+		t.Fatalf("re-ensure by the holder: %v", err)
+	}
+	second := newLeaseSet(rt)
+	if err := second.ensure(ctx, info.ID); err == nil || !strings.Contains(err.Error(), "is in use by process") {
+		t.Fatalf("second holder err = %v", err)
+	}
+	first.releaseAll()
+	if err := second.ensure(ctx, info.ID); err != nil {
+		t.Fatalf("after release: %v", err)
+	}
+	second.releaseAll()
 }

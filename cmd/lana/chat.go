@@ -68,6 +68,11 @@ func cmdChat(args []string) int {
 	if err != nil {
 		return fail(err, 2)
 	}
+	leases := newLeaseSet(rt)
+	defer leases.releaseAll()
+	if err := leases.ensure(ctx, info.ID); err != nil {
+		return fail(err, 2)
+	}
 	agentName = info.Agent
 	model := rt.AgentModel(agentName)
 	if missingEnv != "" {
@@ -87,7 +92,7 @@ func cmdChat(args []string) int {
 	}
 	cwd, _ := os.Getwd()
 	options := tui.Options{
-		Backend:   chatBackend{rt: rt, agent: agentName, home: home},
+		Backend:   chatBackend{rt: rt, agent: agentName, home: home, leases: leases},
 		Approver:  approver,
 		Agent:     agentName,
 		Model:     model,
@@ -166,9 +171,10 @@ func restoreEvents(events []core.SessionEvent) []core.SessionEvent {
 
 // chatBackend adapts *lana.Runtime to the TUI port.
 type chatBackend struct {
-	rt    *lana.Runtime
-	agent string
-	home  string
+	rt     *lana.Runtime
+	agent  string
+	home   string
+	leases *leaseSet
 }
 
 func (b chatBackend) CreateSession(ctx context.Context, agent string) (core.SessionInfo, error) {
@@ -183,6 +189,11 @@ func (b chatBackend) LastSession(ctx context.Context) (core.SessionInfo, error) 
 }
 
 func (b chatBackend) RunTurn(ctx context.Context, sessionID, prompt string) (tui.TurnResult, error) {
+	if b.leases != nil {
+		if err := b.leases.ensure(ctx, sessionID); err != nil {
+			return tui.TurnResult{}, err
+		}
+	}
 	result, err := b.rt.Run(ctx, lana.Request{Prompt: prompt, SessionID: sessionID})
 	return tui.TurnResult{
 		Text:         result.Text,

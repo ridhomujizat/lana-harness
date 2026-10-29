@@ -53,6 +53,8 @@ func run(args []string) int {
 		return cmdChat(args[1:])
 	case "agent":
 		return cmdAgent(args[1:])
+	case "daemon":
+		return cmdDaemon(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command: %s\n", args[0])
 		return 2
@@ -60,7 +62,7 @@ func run(args []string) int {
 }
 
 func help() {
-	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana daemon\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
@@ -322,7 +324,7 @@ func cmdConfig(args []string) int {
 	}
 }
 
-func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc) (*lana.Runtime, string, string, string, error) {
+func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc, extra ...lana.Option) (*lana.Runtime, string, string, string, error) {
 	result, err := config.Load(ctx, config.Options{Home: home})
 	if err != nil {
 		return nil, "", "", "", err
@@ -353,6 +355,7 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 			}
 		}
 	}
+	options = append(options, extra...)
 	rt, err := lana.New(ctx, opts, options...)
 	return rt, providerName, model, missingEnv, err
 }

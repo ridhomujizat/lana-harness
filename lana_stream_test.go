@@ -403,3 +403,43 @@ func TestApproveWithLibraryChannel(t *testing.T) {
 		t.Fatalf("file was not written: %v", err)
 	}
 }
+
+func TestApproveChannels(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options []Option
+		written bool
+	}{
+		{"default skips telegram", nil, false},
+		{"telegram enabled", []Option{ApproveChannels("telegram")}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := t.TempDir()
+			srv := newSSEServer(t,
+				sseResponse{body: toolSSE("write_file", `{"path":"x.txt","content":"x"}`)},
+				sseResponse{body: textSSE("done")},
+			)
+			options := append([]Option{ApproveWith(func(context.Context, core.ApprovalRequest) core.ApprovalOutcome {
+				return core.OutcomeAllowedOnce
+			})}, tc.options...)
+			rt, err := New(context.Background(), Options{
+				Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
+			}, options...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = rt.Close() }()
+			info, err := rt.CreateChannelSession(context.Background(), "telegram", "1", "assistant")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := rt.Run(context.Background(), Request{Prompt: "hi", SessionID: info.ID}); err != nil {
+				t.Fatal(err)
+			}
+			_, statErr := os.Stat(filepath.Join(ws, "x.txt"))
+			if written := statErr == nil; written != tc.written {
+				t.Fatalf("written = %v, want %v", written, tc.written)
+			}
+		})
+	}
+}

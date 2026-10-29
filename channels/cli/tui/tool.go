@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/toolfmt"
 )
 
 // ToolRecord is one tool call together with its result.
@@ -112,37 +113,7 @@ func (t *ToolRecord) verboseLines(width int) []string {
 
 // primaryArg extracts the tool's primary argument per API-CLI-003.
 func primaryArg(name string, input json.RawMessage) string {
-	var value map[string]any
-	_ = json.Unmarshal(input, &value)
-	get := func(keys ...string) string {
-		for _, key := range keys {
-			if raw, ok := value[key]; ok {
-				if text, ok := raw.(string); ok && text != "" {
-					return text
-				}
-			}
-		}
-		return ""
-	}
-	var raw string
-	switch name {
-	case "bash":
-		raw = get("command")
-	case "read_file", "write_file", "edit_file":
-		raw = get("path", "file_path")
-	case "glob", "grep":
-		raw = get("pattern")
-	case "web_fetch":
-		raw = get("url")
-	case "task":
-		agent, title := get("agent"), get("title")
-		raw = strings.TrimSpace(agent + " · " + title)
-	default:
-		if len(input) > 0 {
-			raw = string(input)
-		}
-	}
-	raw = strings.Join(strings.Fields(raw), " ")
+	raw := toolfmt.PrimaryArg(name, input)
 	if raw == "" {
 		return ""
 	}

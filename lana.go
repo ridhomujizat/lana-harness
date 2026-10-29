@@ -49,7 +49,8 @@ type Options struct {
 type Option func(*runtimeOptions)
 
 type runtimeOptions struct {
-	approve ApproveFunc
+	approve         ApproveFunc
+	approveChannels map[string]bool
 }
 
 // ApproveFunc answers approvals for the library channel.
@@ -58,6 +59,17 @@ type ApproveFunc = func(ctx context.Context, req core.ApprovalRequest) core.Appr
 // ApproveWith installs an approval responder.
 func ApproveWith(fn ApproveFunc) Option {
 	return func(o *runtimeOptions) { o.approve = fn }
+}
+
+// ApproveChannels sets the session channels the ApproveWith responder answers.
+// The default is "library" and "cli"; other channels go to the next answerer.
+func ApproveChannels(channels ...string) Option {
+	return func(o *runtimeOptions) {
+		o.approveChannels = map[string]bool{}
+		for _, channel := range channels {
+			o.approveChannels[channel] = true
+		}
+	}
 }
 
 var (
@@ -167,9 +179,13 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	}
 	if runtimeOpts.approve != nil {
 		fn := runtimeOpts.approve
+		channels := runtimeOpts.approveChannels
+		if channels == nil {
+			channels = map[string]bool{"library": true, "cli": true}
+		}
 		coreCtx.Hooks.ApprovalRequest.Use(func(ctx context.Context, req core.ApprovalRequest, next core.Next[core.ApprovalRequest, core.ApprovalOutcome]) (outcome core.ApprovalOutcome, err error) {
 			info, infoErr := coreCtx.Sessions.Info(ctx, req.SessionID)
-			if infoErr != nil || (info.Channel != "library" && info.Channel != "cli") {
+			if infoErr != nil || !channels[info.Channel] {
 				return next(ctx, req)
 			}
 			defer func() {
