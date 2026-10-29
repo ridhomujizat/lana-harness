@@ -22,25 +22,26 @@ Referensi:
 | Referensi | Yang diambil |
 |---|---|
 | **deepseek-harness (`dsh`)** | Cara kerja: modul dengan service dan hook, session sebagai event log append-only, turn dan step, approval fail-closed, profile dan patch, subagent, ACP dan SDK |
-| **zeroclaw** | Rust, satu binary, config TOML, memory SQLite |
+| **zeroclaw** | Satu binary, config TOML, memory SQLite |
 | **nouride** | Satu daemon multi-agent, channel chat, scheduled work, web dashboard, data di satu folder |
 
 Ringkasan teknologi:
 
 | Area | Pilihan | ADR |
 |---|---|---|
-| Bahasa dan runtime | Rust edition 2024, `tokio`, satu binary | [0001](adr/0001-gunakan-rust-single-binary-daemon.md) |
+| Bahasa dan runtime | Go, satu static binary sekaligus library (`CGO_ENABLED=0`) | [0013](adr/0013-gunakan-go-sebagai-single-binary.md) (menggantikan [0001](adr/0001-gunakan-rust-single-binary-daemon.md)) |
 | Struktur core | Modul compile-in, service di `Context`, hook bertipe | [0002](adr/0002-core-dari-modul-service-dan-hook.md) |
 | Agent | Multi-agent dalam satu proses, routing dari channel | [0003](adr/0003-multi-agent-dengan-routing-channel.md) |
 | Permission | Policy `trust`/`ask`/`never`, rule `allow`/`deny`, approval fail-closed | [0004](adr/0004-permission-mode-per-agent.md) |
 | Storage | Satu file SQLite, memory FTS5 | [0005](adr/0005-sqlite-sebagai-storage-tunggal.md) |
-| Ekstensi | MCP client (`rmcp`) dan Skills (`SKILL.md`) | [0006](adr/0006-ekstensi-lewat-mcp-client-dan-skills.md) |
+| Ekstensi | MCP client (`modelcontextprotocol/go-sdk`) dan Skills (`SKILL.md`) | [0006](adr/0006-ekstensi-lewat-mcp-client-dan-skills.md) |
 | Scheduler | Cron di dalam proses, state di SQLite | [0007](adr/0007-scheduler-cron-di-dalam-daemon.md) |
 | Interface | CLI/TUI, Telegram, WhatsApp, HTTP API, web dashboard | [0008](adr/0008-interface-cli-channel-http-dan-web-dashboard.md) |
 | Session | Event log append-only, fork, resume | [0009](adr/0009-session-sebagai-event-log-append-only.md) |
 | Komposisi | Profile dan config patch berlapis | [0010](adr/0010-profile-dan-config-patch.md) |
 | Subagent | Child session lewat tool `task` | [0011](adr/0011-subagent-sebagai-child-session.md) |
 | Protokol | Server ACP dan SDK JSON-RPC | [0012](adr/0012-acp-dan-sdk-json-rpc.md) |
+| Integrasi agentic tool | Go library, MCP server, REST + SSE API, A2A | [0014](adr/0014-integrasi-sebagai-agentic-tool.md) |
 
 ```mermaid
 flowchart LR
@@ -113,6 +114,7 @@ lalu `--patch`. Baris `[[modules]]` digabung per `id`, dan baris yang sama mengg
 | `headless` | `lana run --agent X "prompt"` | base + runner one-shot. Policy `never` kecuali `--ask` |
 | `acp` | `lana acp --agent X` | base + server ACP di stdio |
 | `sdk` | `lana sdk` | base + server JSON-RPC di stdio atau unix socket |
+| `mcp` | `lana mcp [--http <addr>]` | base + lana sebagai MCP server (stdio atau streamable HTTP) |
 | `minimal` | `lana --profile minimal` | provider, store, agent loop saja |
 
 Subcommand lain:
@@ -130,37 +132,48 @@ Subcommand lain:
 
 Diagram: [0004. Profile, Fork, Subagent, Dan Protokol](diagram/0004-profile-fork-subagent-dan-protokol.md).
 
-## 4. Struktur workspace
+## 4. Struktur module
+
+Satu Go module `github.com/ridhomujizat/lana-harness` (ADR 0013):
 
 ```text
-flake.nix               Toolchain Rust dan tool dev lewat Nix
-Cargo.toml              Workspace dan profil release kecil
-crates/
-  lana-core/            Context, Module, Hooks, tipe pesan dan event, trait service. Tanpa I/O.
-  lana-agent/           Agent loop (turn dan step), inbox, subagent, compaction
-  lana-store/           SQLite: session event log, projection, memory, cron
-  lana-providers/       anthropic, openai_compat
-  lana-tools/           builtin tools dan modul permission
-  lana-mcp/             MCP client
-  lana-channels/        cli, telegram, whatsapp
-  lana-protocol/        server ACP dan SDK JSON-RPC
-  lana-web/             axum HTTP API, SSE, dashboard embedded
-  lana/                 binary: subcommand, profile bawaan, loader config
+flake.nix             Go dan tool dev lewat Nix
+go.mod
+cmd/lana/             main: subcommand dan wiring
+lana.go               package lana: API publik untuk embed
+core/                 Context, Module, hook generik, tipe pesan dan event, interface service
+agent/                Agent loop (turn dan step), inbox, subagent, compaction
+store/                SQLite (modernc): event log, projection, memory, cron, lease
+config/               Profile loader berlapis
+providers/openai/     openai_compat (OpenAI, OpenRouter, Ollama)
+providers/anthropic/  Anthropic native
+tools/                Builtin tools dan modul permission
+mcp/                  MCP client
+channels/cli/         TUI (Bubble Tea) dan runner one-shot
+channels/telegram/    Telegram
+protocol/acp/         Server ACP
+protocol/sdk/         Server SDK JSON-RPC
+protocol/mcpserver/   lana sebagai MCP server
+protocol/a2a/         A2A
+web/                  REST + SSE API, dashboard (embed.FS)
+internal/             Helper privat
 docs/
   adr/  diagram/  specs/
 ```
 
-Aturan dependency: `lana-core` tidak bergantung pada crate lain di workspace. Crate implementasi
-hanya bergantung pada `lana-core`. Hanya crate `lana` yang merakit semuanya.
+Aturan dependency: `core` tidak meng-import package lain di module ini. Package implementasi
+meng-import `core` dan tidak saling meng-import kecuali lewat interface di `core`. Hanya `cmd/lana`
+dan package `lana` yang merakit semuanya. Aturan ini diuji dengan `go list -deps`.
 
-Feature flag Cargo untuk modul besar:
+API publik untuk embed: package `lana` dan `core`. Package lain tidak dijamin stabil sebelum `v1.0.0`.
 
-| Feature | Isi | Default |
+Build tag untuk modul besar:
+
+| Build tag | Isi | Default |
 |---|---|---|
-| `telegram` | Channel Telegram | ya |
-| `web` | Dashboard embedded | ya |
-| `acp` | Server ACP | ya |
-| `whatsapp` | Channel WhatsApp Cloud API | tidak |
+| `nowhatsapp` | Tanpa channel WhatsApp | WhatsApp ikut |
+| `noweb` | Tanpa dashboard embedded | Dashboard ikut |
+| `noa2a` | Tanpa A2A | A2A ikut |
 
 ## 5. Turn dan step
 
@@ -237,7 +250,7 @@ skills = ["git-workflow"]
 permission = "ask"
 
 [agents.coder.rules]
-allow = ["bash(git status*)", "bash(cargo test*)"]
+allow = ["bash(git status*)", "bash(go test*)"]
 deny  = ["bash(rm -rf*)", "bash(sudo*)"]
 
 [agents.explorer]
@@ -341,7 +354,7 @@ Diagram: [0003. Data Model Dan Scheduler](diagram/0003-data-model-dan-scheduler.
 
 ## 11. Ekstensi: MCP dan Skills
 
-**MCP client** memakai `rmcp` (stdio dan streamable HTTP). Server start saat agent pemakainya aktif
+**MCP client** memakai `modelcontextprotocol/go-sdk` (stdio dan streamable HTTP). Server start saat agent pemakainya aktif
 dan berhenti setelah idle 10 menit. Tool MCP bernama `mcp__<server>__<tool>` dengan risk `Exec`.
 Output MCP diperlakukan sebagai data, bukan instruksi.
 
@@ -360,13 +373,16 @@ tidak overlap dengan dirinya sendiri.
 
 | Pintu | Cara kerja | Approval |
 |---|---|---|
-| CLI/TUI | `lana chat`, attach ke daemon lewat HTTP dan SSE | Prompt `[y]es / [a]lways / [n]o` |
-| Telegram | Bot API lewat `reqwest`, long polling | Inline keyboard |
+| CLI/TUI | `lana chat` (Bubble Tea inline), embedded; attach ke daemon menyusul | Prompt `[y] / [a] / [n]` |
+| Telegram | Bot API lewat `net/http`, long polling | Inline keyboard |
 | WhatsApp | WhatsApp Cloud API resmi, butuh URL publik | Reply button |
-| HTTP API | `POST /v1/agents/{agent}/messages`, `GET /v1/sessions/{id}/events?from_seq=`, `POST /v1/webhooks/{hook}` | `POST /v1/approvals/{id}` |
-| Web dashboard | Preact + `htm` tanpa build step, embedded | Modal |
+| REST + SSE API | `POST /v1/runs`, `/v1/sessions`, `/v1/sessions/{id}/messages`, `GET /v1/sessions/{id}/events?from_seq=`, `POST /v1/webhooks/{hook}` | `POST /v1/approvals/{id}` |
+| Web dashboard | Preact + `htm` tanpa build step, `embed.FS` | Modal |
 | ACP | `lana acp`: `initialize`, `session/new`, `session/load`, `session/prompt`, `session/cancel`, `session/update` | `session/request_permission` |
 | SDK | `lana sdk`: `session.create`, `session.send`, `session.subscribe`, `session.fork`, `session.cancel` | `approval.respond` |
+| Go library | `lana.New(...)`, `rt.Run`, `rt.Stream`, tool kustom dari service | Fungsi penjawab milik service |
+| MCP server | `lana mcp`: tool `lana_run`, `lana_agents`, `lana_sessions` | Elicitation MCP, atau `never` |
+| A2A | Agent card `/.well-known/agent-card.json`, task = session | Status `input-required` |
 
 Semua pintu membaca event dari hook `session.event`. Reconnect memakai `from_seq`, jadi event
 tidak hilang. Method SDK dan endpoint HTTP dibangun dari satu definisi handler.
@@ -386,24 +402,25 @@ tidak hilang. Method SDK dan endpoint HTTP dibangun dari satu definisi handler.
 
 | Metrik | Target v1 |
 |---|---|
-| Ukuran binary release | < 15 MB |
-| RAM idle (profile `daemon`) | < 20 MB |
-| Cold start | < 100 ms |
-| Platform | `aarch64-darwin`, `x86_64-linux-musl`, `aarch64-linux-musl` |
+| Ukuran binary release | < 40 MB |
+| RAM idle (profile `daemon`) | < 30 MB |
+| Cold start | < 150 ms |
+| Platform | `darwin/arm64`, `linux/amd64`, `linux/arm64` (static) |
 
-Profil release: `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
+Target dicatat di CI, tidak menggagalkan build. Build release:
+`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/lana`.
 
 ## 16. Roadmap
 
 | Milestone | Isi |
 |---|---|
-| M0 | `flake.nix`, Cargo workspace, loader profile berlapis, `--dump-config` |
-| M1 | `Context`, `Module`, `Hooks`, provider Anthropic dan OpenAI-compatible, agent loop turn/step, builtin tools, profile `minimal` dan `headless` |
-| M2 | Session event log, derive, resume, permission dan approval fail-closed, compaction |
-| M3 | Profile `daemon`, HTTP API dan SSE, Telegram, routing multi-agent, `lana chat` attach |
-| M4 | MCP client, skills, subagent |
-| M5 | Scheduler, memory FTS5, fork, export session |
-| M6 | ACP, SDK JSON-RPC, web dashboard |
-| M7 | WhatsApp, service install, Docker image, ukur target resource |
+| M0 | Fondasi (spec #2): `flake.nix`, Go module, loader profile berlapis, `core` (Context, Module, hook), CI |
+| M1 | Agent loop (spec #3): turn/step, provider `openai_compat`, builtin tools, `MockLlm`, profile `headless`, **Go library** (`lana.New`, `Run`, `Stream`) |
+| M2 | Session dan permission (spec #4): event log, derive, resume, fork, lock, compaction, permission, approval |
+| M3 | CLI/TUI (spec #1): `lana chat`, `lana run`, `lana init`, `lana config` |
+| M4 | MCP client, skills, subagent, adapter Anthropic, **MCP server** (`lana mcp`) |
+| M5 | Daemon: **REST + SSE API**, Telegram, routing multi-agent, scheduler, memory FTS5 |
+| M6 | ACP, SDK JSON-RPC, web dashboard, **A2A** |
+| M7 | WhatsApp, `lana service install`, Docker image, ukur target resource |
 
 Checklist detail: [0001. System Context Dan Roadmap](diagram/0001-system-context-dan-roadmap.md#implementation-checklist).

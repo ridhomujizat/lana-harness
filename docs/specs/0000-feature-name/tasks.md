@@ -59,7 +59,7 @@ flowchart LR
 - [ ] Tidak ada perilaku terlihat tanpa ID requirement.
 - [ ] Tidak ada perilaku di luar scope.
 - [ ] ADR dan diagram sesuai implementasi.
-- [ ] `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo nextest run`, dan build release lulus.
+- [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
 - [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 
 ## Approval

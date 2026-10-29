@@ -1,6 +1,6 @@
 # 0008. Sediakan interface CLI, channel chat, HTTP API, dan web dashboard
 
-- **Status**: Accepted
+- **Status**: Accepted (detail implementasi Rust diganti oleh [0013](0013-gunakan-go-sebagai-single-binary.md); tabel HTTP API diperluas oleh [0014](0014-integrasi-sebagai-agentic-tool.md))
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0001](0001-gunakan-rust-single-binary-daemon.md), [0004](0004-permission-mode-per-agent.md), [0012](0012-acp-dan-sdk-json-rpc.md)

@@ -1,8 +1,8 @@
 # 0001. System Context Dan Roadmap
 
-- **ADR reference**: [0001. Gunakan Rust single binary daemon](../adr/0001-gunakan-rust-single-binary-daemon.md), [0002. Core dari modul, service, dan hook](../adr/0002-core-dari-modul-service-dan-hook.md), [0008. Interface](../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0012. ACP dan SDK](../adr/0012-acp-dan-sdk-json-rpc.md)
-- **Related diagram**: [0002. Agent Loop Dan Approval](0002-agent-loop-dan-approval.md), [0003. Data Model Dan Scheduler](0003-data-model-dan-scheduler.md), [0004. Profile, Fork, Subagent, Dan Protokol](0004-profile-fork-subagent-dan-protokol.md)
-- **Purpose**: system context, peta service dan hook, dependency antar crate, topologi runtime, dan roadmap implementasi.
+- **ADR reference**: [0013. Gunakan Go](../adr/0013-gunakan-go-sebagai-single-binary.md), [0014. Integrasi agentic tool](../adr/0014-integrasi-sebagai-agentic-tool.md), [0002. Core dari modul, service, dan hook](../adr/0002-core-dari-modul-service-dan-hook.md), [0008. Interface](../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0012. ACP dan SDK](../adr/0012-acp-dan-sdk-json-rpc.md)
+- **Related diagram**: [0002. Agent Loop Dan Approval](0002-agent-loop-dan-approval.md), [0003. Data Model Dan Scheduler](0003-data-model-dan-scheduler.md), [0004. Profile, Fork, Subagent, Dan Protokol](0004-profile-fork-subagent-dan-protokol.md), [0005. Integrasi Agentic Tool](0005-integrasi-agentic-tool.md)
+- **Purpose**: system context, peta service dan hook, dependency antar package, topologi runtime, dan roadmap implementasi.
 
 Diagram ini menunjukkan batas proses `lana`, apa yang ada di dalamnya, dan sistem luar yang
 dihubungi. Untuk alur satu turn agent, lihat diagram 0002.
@@ -21,10 +21,12 @@ flowchart LR
     Editor["Editor ACP - Zed"]
     Script["Script atau program - SDK"]
     Ext["Sistem lain - webhook"]
+    Svc["Service lain - REST, A2A"]
+    Harness["Harness lain - MCP client"]
   end
 
   subgraph Lana["Proses lana - satu binary, profile dipilih saat boot"]
-    Doors["Pintu: channel, HTTP, ACP, SDK"]
+    Doors["Pintu: channel, REST, ACP, SDK, MCP server, A2A"]
     Agents["ctx.agents dan agent loop"]
     Hooks["Hooks: pre_step, llm.stream, tools, approval"]
     Tools["ctx.tools: builtin, MCP, skill, task"]
@@ -48,6 +50,8 @@ flowchart LR
   Ext -->|webhook| Doors
   Editor -->|ACP stdio| Doors
   Script -->|JSON-RPC| Doors
+  Svc -->|REST SSE atau A2A| Doors
+  Harness -->|MCP| Doors
   TG --> TGAPI
   WA --> WAAPI
   Doors <-->|long polling| TGAPI
@@ -93,33 +97,42 @@ flowchart TD
   end
 ```
 
-## Dependency Antar Crate
+## Dependency Antar Package
 
-Arah panah = "bergantung pada". `lana-core` tidak bergantung pada crate lain di workspace.
+Arah panah = "meng-import". `core` tidak meng-import package lain di module ini. Service Go yang
+meng-embed `lana` hanya meng-import package `lana` dan `core`.
 
 ```mermaid
 flowchart TD
-  Bin["lana - binary dan profile"]
-  Core["lana-core"]
-  Agent["lana-agent"]
-  Store["lana-store"]
-  Prov["lana-providers"]
-  Tool["lana-tools"]
-  Mcp["lana-mcp"]
-  Chan["lana-channels"]
-  Proto["lana-protocol"]
-  Web["lana-web"]
+  Main["cmd/lana"]
+  Embed["Service Go lain"]
+  Lana["lana - API publik"]
+  Core["core"]
+  Agent["agent"]
+  Store["store"]
+  Config["config"]
+  Prov["providers"]
+  Tool["tools"]
+  Mcp["mcp"]
+  Chan["channels"]
+  Proto["protocol"]
+  Web["web"]
 
-  Bin --> Agent
-  Bin --> Store
-  Bin --> Prov
-  Bin --> Tool
-  Bin --> Mcp
-  Bin --> Chan
-  Bin --> Proto
-  Bin --> Web
+  Main --> Lana
+  Main --> Chan
+  Main --> Proto
+  Main --> Web
+  Embed --> Lana
+  Embed --> Core
+  Lana --> Config
+  Lana --> Agent
+  Lana --> Store
+  Lana --> Prov
+  Lana --> Tool
+  Lana --> Mcp
   Agent --> Core
   Store --> Core
+  Config --> Core
   Prov --> Core
   Tool --> Core
   Mcp --> Core
@@ -128,34 +141,35 @@ flowchart TD
   Web --> Core
 ```
 
-## Topologi Runtime Tokio
+## Topologi Runtime
 
-Topologi untuk profile `daemon`. Profile lain menjalankan subset task ini.
+Topologi untuk profile `daemon`. Profile lain menjalankan subset goroutine ini.
 
 ```mermaid
 flowchart LR
-  Main["main - susun profile"] --> Axum["axum server task"]
-  Main --> TGPoll["telegram poll task"]
-  Main --> SchedT["scheduler task"]
-  Main --> Writer["store writer task"]
-  Axum --> Reg["ctx.agents"]
+  Main["main - susun profile"] --> HTTP["goroutine net/http: REST, SSE, MCP HTTP, A2A"]
+  Main --> TGPoll["goroutine telegram poll"]
+  Main --> SchedT["goroutine scheduler"]
+  Main --> Writer["goroutine store writer"]
+  HTTP --> Reg["ctx.agents"]
   TGPoll --> Reg
   SchedT --> Reg
-  Reg --> A1["agent task session A dan inbox"]
-  Reg --> A2["agent task session B dan inbox"]
-  A2 --> Sub["agent task child session"]
+  Reg --> A1["goroutine session A dan inbox"]
+  Reg --> A2["goroutine session B dan inbox"]
+  A2 --> Sub["goroutine child session"]
   A1 --> Writer
   A2 --> Writer
   Sub --> Writer
-  Writer --> Bus["broadcast session.event"]
-  Bus --> Axum
+  Writer --> Bus["hook observe session.event"]
+  Bus --> HTTP
   Bus --> TGPoll
 ```
 
 Aturan:
 
-- Satu agent task per session aktif, dengan satu inbox. Session idle 15 menit dihentikan; state tetap di log.
-- Semua tulis ke SQLite lewat satu store writer task.
+- Satu goroutine per session aktif, dengan satu inbox. Session idle 15 menit dihentikan; state tetap di log.
+- Semua tulis ke SQLite lewat satu goroutine store writer.
+- Semua goroutine menerima `context.Context` dari root dan berhenti saat shutdown.
 - MCP server child process hanya hidup saat dibutuhkan.
 
 ## KISS Default Path
@@ -175,6 +189,7 @@ flowchart TD
 KISS defaults:
 
 - Satu binary, satu file DB. Modul dikompilasi ke binary; tidak ada plugin runtime di v1.
+- Service Go yang butuh agent meng-embed package `lana`, bukan menjalankan proses terpisah.
 - Telegram long polling, bukan webhook.
 - Memory FTS5, bukan vektor.
 - Tanpa sandbox OS. Batas workspace dan approval fail-closed adalah garis pertahanan v1.
@@ -183,24 +198,24 @@ KISS defaults:
 
 ```mermaid
 flowchart LR
-  M0["M0 Fondasi"] --> M1["M1 Core dan agent loop"]
-  M1 --> M2["M2 Event log dan permission"]
-  M2 --> M3["M3 Daemon, HTTP, Telegram"]
-  M3 --> M4["M4 MCP, skills, subagent"]
-  M4 --> M5["M5 Cron, memory, fork"]
-  M5 --> M6["M6 ACP, SDK, web"]
+  M0["M0 Fondasi"] --> M1["M1 Agent loop dan Go library"]
+  M1 --> M2["M2 Session dan permission"]
+  M2 --> M3["M3 CLI dan TUI"]
+  M3 --> M4["M4 MCP, skills, subagent, MCP server"]
+  M4 --> M5["M5 Daemon dan REST API"]
+  M5 --> M6["M6 ACP, SDK, web, A2A"]
   M6 --> M7["M7 WhatsApp dan rilis"]
 ```
 
 ## Implementation Checklist
 
-1. **M0 Fondasi** — `flake.nix` (Rust stable, `cargo-nextest`, `sqlite`), Cargo workspace, profil release kecil, CI build `aarch64-darwin` dan `x86_64-linux-musl`. Loader profile berlapis dengan merge `[[modules]]` per `id`, `--dump-config`, `lana config check`.
-2. **M1 Core dan agent loop** — `Context`, `Module`, `Hooks` waterfall dan observe. Adapter `anthropic` dan `openai_compat` (OpenAI, OpenRouter) dengan streaming. Agent loop turn dan step dengan inbox. Builtin tools file dan `bash`. Profile `minimal` dan `headless` (`lana run`).
-3. **M2 Event log dan permission** — `session_events` append-only, projection `sessions`, `derive_messages`, resume setelah crash. Modul `permission` di `tools.pre_execute`, `ctx.approval` dengan outcome fail-closed, `approval/policy`. Compaction lewat `compaction/summary`.
-4. **M3 Daemon, HTTP, Telegram** — profile `daemon`, axum API dan SSE, channel Telegram long polling dengan inline keyboard, routing multi-agent, `/agent`, `lana chat` attach ke daemon.
-5. **M4 MCP, skills, subagent** — `rmcp` stdio dan HTTP dengan lazy start, `skill_load`, tool `task` dan `task_continue` sebagai child session.
-6. **M5 Cron, memory, fork** — scheduler dengan policy `never`, tool `cron_*`, `lana cron`, memory FTS5, `fork` di batas turn, `lana session export`.
-7. **M6 ACP, SDK, web** — profile `acp` dengan crate `agent-client-protocol`, profile `sdk` JSON-RPC di stdio dan unix socket, dashboard Preact + `htm` embedded.
-8. **M7 WhatsApp dan rilis** — channel WhatsApp Cloud API, `lana service install`, Docker image `distroless`. Ukur target: binary < 15 MB, RAM idle < 20 MB.
-9. **Test di setiap milestone** — `MockLlm` untuk agent loop, test golden `derive_messages` dari event, test resume dari log terpotong, test permission matcher, test kontrak format OpenAI, test merge profile.
-10. **Observability** — `tracing` dengan output JSON opsional. Redaksi API key dan token di log dan payload event.
+1. **M0 Fondasi (spec #2)** — `flake.nix` dengan Go dari nixpkgs dan `GOTOOLCHAIN=local`, Go module, layout package, test aturan import, CI GitHub Actions (macOS arm64 dan Linux x86_64). Loader profile berlapis, `core` (Context, Module, hook generik).
+2. **M1 Agent loop dan Go library (spec #3)** — adapter `openai_compat` dengan streaming, agent loop turn dan step dengan inbox, builtin tools, `MockLlm`, profile `minimal` dan `headless`. Package `lana` publik: `New`, `Run`, `Stream`, tool kustom.
+3. **M2 Session dan permission (spec #4)** — `session_events` append-only di `modernc.org/sqlite`, projection, derive, resume, fork, lease, compaction otomatis dan manual. Permission di `tools.pre_execute`, `ctx.approval` fail-closed.
+4. **M3 CLI dan TUI (spec #1)** — `lana chat` (Bubble Tea inline), `lana run`, `lana init`, `lana config`.
+5. **M4 MCP, skills, subagent, MCP server** — MCP client `go-sdk` dengan lazy start, `skill_load`, tool `task`, adapter Anthropic, `lana mcp` (stdio dan streamable HTTP, elicitation untuk approval).
+6. **M5 Daemon dan REST API** — profile `daemon`, REST + SSE (`/v1/runs`, `/v1/sessions`, token per client, OpenAPI), Telegram, routing, scheduler, memory FTS5.
+7. **M6 ACP, SDK, web, A2A** — `lana acp`, `lana sdk`, dashboard (`embed.FS`), A2A server (agent card, task = session).
+8. **M7 WhatsApp dan rilis** — channel WhatsApp, `lana service install`, Docker image `distroless/static`. Ukur target: binary < 40 MB, RAM idle < 30 MB.
+9. **Test di setiap milestone** — `MockLlm`, golden `derive_messages`, resume dari log terpotong, permission matcher, kontrak format OpenAI, merge profile, `testscript` untuk CLI.
+10. **Observability** — `log/slog` dengan handler JSON opsional. Redaksi API key dan token di log dan payload event.

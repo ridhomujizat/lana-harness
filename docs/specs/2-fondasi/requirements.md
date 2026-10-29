@@ -2,10 +2,10 @@
 
 - **Issue**: [`#2`](https://github.com/ridhomujizat/lana-harness/issues/2)
 - **Status**: Draft
-- **Revisi**: 2
+- **Revisi**: 3 (pindah ke Go, ADR 0013)
 - **Pemilik**: Ridho
-- **Contract**: [api-contract.md](api-contract.md) — Diperlukan (format config dan profile, API Rust `lana-core` yang dipakai spec lain)
-- **ADR terkait**: [Index ADR](../../adr/README.md) — [0001](../../adr/0001-gunakan-rust-single-binary-daemon.md), [0002](../../adr/0002-core-dari-modul-service-dan-hook.md), [0010](../../adr/0010-profile-dan-config-patch.md)
+- **Contract**: [api-contract.md](api-contract.md) — Diperlukan (format config dan profile, API Go publik package `core` dan `config`)
+- **ADR terkait**: [Index ADR](../../adr/README.md) — [0013](../../adr/0013-gunakan-go-sebagai-single-binary.md), [0014](../../adr/0014-integrasi-sebagai-agentic-tool.md), [0002](../../adr/0002-core-dari-modul-service-dan-hook.md), [0010](../../adr/0010-profile-dan-config-patch.md)
 - **Diagram terkait**: [Index diagram](../../diagram/README.md) — [0001](../../diagram/0001-system-context-dan-roadmap.md), [0004](../../diagram/0004-profile-fork-subagent-dan-protokol.md)
 
 ## Sumber
@@ -13,8 +13,9 @@
 | Sumber | Referensi | Dipakai untuk |
 |---|---|---|
 | Issue | [`#2`](https://github.com/ridhomujizat/lana-harness/issues/2) | scope |
-| ADR 0001 | Single binary Rust | toolchain, profil release, target ukuran dan platform |
-| ADR 0002 | Modul, service, hook | `Module`, `Context`, mode hook, layout crate |
+| ADR 0013 | Go, single binary dan library | toolchain, layout package, build, target ukuran dan platform |
+| ADR 0014 | Integrasi agentic tool | `core` publik, config tanpa file untuk embed |
+| ADR 0002 | Modul, service, hook | `Module`, `Context`, mode hook |
 | ADR 0010 | Profile dan patch | urutan lapisan, aturan merge, profile bawaan, `--dump-config` |
 | Spec #1 | [design: Interface core](../1-cli-tui/design.md#interface-core-yang-dibutuhkan-dari-spec-2) | `ProfileLoader` dengan peta asal dan error ber-span |
 | Instruksi mesin | Nix development | `nix develop`, tanpa install global |
@@ -23,14 +24,15 @@
 ## Tujuan
 
 Developer (pemilik) punya fondasi yang bisa dibangun dan diuji: lingkungan dev yang
-reprodusibel, workspace Rust dengan batas crate yang dijaga, loader konfigurasi berlapis yang
+reprodusibel, Go module dengan aturan import antar package yang dijaga, loader konfigurasi berlapis yang
 menjelaskan asal setiap nilai dan semua kesalahannya, serta runtime modul dan hook tempat fitur
 lain (agent loop, channel, permission) dipasang.
 
 ## Aktor
 
-- **Developer** — menjalankan `nix develop`, `cargo`, dan test.
-- **Spec lain (#1, #3, #4)** — memakai API `lana-core` dan loader sebagai dependency.
+- **Developer** — menjalankan `nix develop`, `go`, dan test.
+- **Service Go** — meng-import `core` dan `config` saat meng-embed `lana` (ADR 0014).
+- **Spec lain (#1, #3, #4)** — memakai package `core` dan `config` sebagai dependency.
 - **Pemilik sebagai user** — menulis `config.toml` dan patch, membaca pesan error config.
 
 ## Definisi
@@ -48,7 +50,8 @@ lain (agent loop, channel, permission) dipasang.
 ### Termasuk
 
 - `flake.nix` dengan dev shell.
-- Cargo workspace sesuai ADR 0002 dan profil release kecil.
+- Go module dengan layout package ADR 0013, aturan import, dan build release static.
+- Package `core` dan `config` sebagai API publik.
 - Profile loader: lapisan, merge, validasi, peta asal, secret.
 - `Context`, `Module`, urutan install dari dependency, shutdown.
 - Hook `waterfall`, `serial`, dan `observe` beserta semantiknya.
@@ -72,39 +75,39 @@ lain (agent loop, channel, permission) dipasang.
 
 #### REQ-DEV-001: Dev shell Nix
 
-`nix develop` harus menyediakan toolchain Rust, `rustfmt`, `clippy`, `cargo-nextest`, dan `sqlite`.
-Versi Rust, komponen, dan target dipin di `rust-toolchain.toml`, yang dibaca flake lewat
-`rust-overlay`. Target yang tersedia: `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`,
-`aarch64-unknown-linux-musl`.
+`nix develop` harus menyediakan Go, `gopls`, `golangci-lint`, dan `sqlite`. Versi Go dipin oleh
+`flake.lock` (nixpkgs). Dev shell men-set `GOTOOLCHAIN=local` dan `CGO_ENABLED=0`.
 
-- `AC-DEV-001`: Given mesin dengan Nix flakes, when developer menjalankan `nix develop -c cargo --version`, then versi yang tercetak sama dengan `channel` di `rust-toolchain.toml`.
-- `AC-DEV-002`: Given dev shell aktif, when developer menjalankan `cargo nextest --version`, then perintah berhasil.
-- `AC-DEV-003`: Given dev shell aktif di Linux x86_64, when developer menjalankan `cargo build --release --target x86_64-unknown-linux-musl -p lana`, then build berhasil.
+- `AC-DEV-001`: Given mesin dengan Nix flakes, when developer menjalankan `nix develop -c go version`, then versi yang tercetak memenuhi direktif `go` di `go.mod`.
+- `AC-DEV-002`: Given dev shell aktif, when developer menjalankan `golangci-lint version`, then perintah berhasil.
+- `AC-DEV-003`: Given dev shell aktif di macOS arm64, when developer menjalankan `GOOS=linux GOARCH=amd64 go build ./cmd/lana`, then build berhasil tanpa cgo.
 
 #### REQ-CI-001: CI GitHub Actions
 
 Setiap push dan pull request harus menjalankan, di macOS arm64 dan Linux x86_64, lewat `nix develop -c`:
-`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo nextest run --workspace`, dan build release. Ukuran binary release dicetak di ringkasan job.
+`gofmt -l` (harus kosong), `golangci-lint run ./...`, `go test -race ./...`, dan build release.
+Ukuran binary release dicetak di ringkasan job.
 
 - `AC-CI-001`: Given satu test gagal, when CI berjalan, then job gagal.
 - `AC-CI-002`: Given semua langkah lulus, when CI selesai, then ringkasan job berisi ukuran binary untuk kedua platform.
 
-#### REQ-BUILD-001: Workspace dan batas crate
+#### REQ-BUILD-001: Layout package dan aturan import
 
-Workspace harus berisi crate dari ADR 0002. `lana-core` tidak boleh bergantung pada crate lain di
-workspace, dan crate implementasi hanya boleh bergantung pada `lana-core` (kecuali yang diizinkan ADR 0002).
+Module harus memakai layout package dari ADR 0013. `core` tidak boleh meng-import package lain di
+module ini. Package implementasi hanya boleh meng-import `core` dan `internal/...`, kecuali yang
+diizinkan ADR 0013 (`cmd/lana` dan package `lana` merakit semuanya).
 
-- `AC-BUILD-001`: Given workspace bersih, when developer menjalankan `cargo build --workspace`, then build berhasil.
-- `AC-BUILD-002`: Given seseorang menambah dependency dari `lana-core` ke crate workspace lain, when test batas crate dijalankan, then test gagal dan menyebut crate yang dilanggar.
+- `AC-BUILD-001`: Given module bersih, when developer menjalankan `go build ./...`, then build berhasil.
+- `AC-BUILD-002`: Given seseorang menambah import dari `core` ke package lain di module ini, when test aturan import dijalankan, then test gagal dan menyebut package yang dilanggar.
 
-#### REQ-BUILD-002: Profil release
+#### REQ-BUILD-002: Build release
 
-Build release harus memakai `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`,
-dan `strip = true`, lalu ukuran binary `lana` dicatat. Target < 15 MB (ADR 0001) dicatat saja dan
-tidak menggagalkan build.
+Build release harus memakai `CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=<v>"`
+untuk `darwin/arm64`, `linux/amd64`, dan `linux/arm64`, lalu ukuran binary `lana` dicatat. Target
+< 40 MB (ADR 0013) dicatat saja dan tidak menggagalkan build.
 
-- `AC-BUILD-003`: Given `cargo build --release`, when build selesai, then binary `target/release/lana` ada dan ukurannya tercetak oleh script ukur.
+- `AC-BUILD-003`: Given `make release` (atau script build), when build selesai, then tiga binary ada di `dist/` dan ukurannya tercetak.
+- `AC-BUILD-004`: Given binary Linux hasil build, when diperiksa dengan `file`, then binary bertipe statically linked.
 
 ### Profile loader
 
@@ -162,11 +165,11 @@ Loader harus menyediakan peta asal untuk setiap tabel, setiap key daun, dan seti
 #### REQ-CONF-005: Secret
 
 Nilai secret dibaca dari env proses, lalu dari `$LANA_HOME/secrets.env`. Env proses menang.
-Nilai secret tidak boleh muncul di `Debug`, `Display`, serialisasi config efektif, atau log.
+Nilai secret tidak boleh muncul lewat `fmt` (`%v`, `%+v`, `%#v`, `%s`), `slog`, serialisasi JSON atau TOML config efektif.
 
 - `AC-CONF-012`: Given `OPENAI_API_KEY` ada di env dan di `secrets.env` dengan nilai berbeda, when secret dibaca, then nilai dari env yang dipakai.
 - `AC-CONF-013`: Given config efektif diserialisasi, when ada secret, then nilainya `"***"`.
-- `AC-CONF-014`: Given nilai secret, when diformat dengan `{:?}`, then hasilnya tidak mengandung nilai asli.
+- `AC-CONF-014`: Given nilai secret, when diformat dengan `%#v` atau dicatat dengan `slog`, then hasilnya tidak mengandung nilai asli.
 - `AC-CONF-017`: Given `secrets.env` dengan permission `0644`, when config dimuat, then file tetap dibaca dan peringatan berisi permission sekarang dan `chmod 600 <path>` tampil di log dan stderr.
 
 #### REQ-CONF-007: Interpolasi env di MCP
@@ -184,6 +187,14 @@ env yang tidak ditemukan adalah error validasi.
 Setiap lapisan boleh menulis `version = <integer>` di tingkat atas. Tanpa field itu, versi dianggap 1.
 
 - `AC-CONF-021`: Given `version = 2` dan binary hanya mendukung 1, when config dimuat, then error menyebut versi file dan versi yang didukung.
+
+#### REQ-CONF-009: Config tanpa file untuk embed
+
+Loader harus bisa membangun config efektif dari lapisan di memori (teks TOML atau struct Go) tanpa
+membaca `LANA_HOME`, dengan aturan merge dan validasi yang sama. Asal lapisan memori dinamai oleh pemanggil.
+
+- `AC-CONF-022`: Given service Go memberi satu lapisan TOML dari memori bernama `myservice`, when config dimuat, then tidak ada file yang dibaca dan peta asal menyebut `myservice`.
+- `AC-CONF-023`: Given lapisan memori berisi rujukan provider yang tidak ada, when config dimuat, then error validasi sama seperti lapisan file, dengan nama lapisan sebagai lokasi.
 
 #### REQ-CONF-006: Lokasi data
 
@@ -302,7 +313,7 @@ Tidak berlaku (tidak ada antarmuka user baru).
 
 | ID | Pertanyaan | Resolusi |
 |---|---|---|
-| `Q-001` | Pin versi Rust | `rust-toolchain.toml` dibaca `rust-overlay` |
+| `Q-001` | Pin versi toolchain | Rev 2: `rust-toolchain.toml`. Rev 3: diganti ADR 0013, Go dari nixpkgs dipin `flake.lock`, `GOTOOLCHAIN=local` |
 | `Q-002` | CI | GitHub Actions di macOS arm64 dan Linux x86_64 |
 | `Q-003` | Key tidak dikenal | Error dengan saran key terdekat |
 | `Q-004` | Interpolasi `${VAR}` | Hanya di `mcp.*.env` dan `mcp.*.headers`, nilainya secret |
@@ -319,18 +330,19 @@ None.
 
 | Requirement | Acceptance criteria | Sumber |
 |---|---|---|
-| `REQ-DEV-001` | `AC-DEV-001`, `AC-DEV-002`, `AC-DEV-003` | Instruksi mesin, `Q-001` |
-| `REQ-BUILD-001` | `AC-BUILD-001`, `AC-BUILD-002` | ADR 0002 |
-| `REQ-BUILD-002` | `AC-BUILD-003` | ADR 0001, `Q-005` |
+| `REQ-DEV-001` | `AC-DEV-001`, `AC-DEV-002`, `AC-DEV-003` | Instruksi mesin, ADR 0013 |
+| `REQ-BUILD-001` | `AC-BUILD-001`, `AC-BUILD-002` | ADR 0013 |
+| `REQ-BUILD-002` | `AC-BUILD-003`, `AC-BUILD-004` | ADR 0013, `Q-005` |
 | `REQ-CI-001` | `AC-CI-001`, `AC-CI-002` | `Q-002` |
 | `REQ-CONF-001` | `AC-CONF-001`, `AC-CONF-002` | ADR 0010 |
 | `REQ-CONF-002` | `AC-CONF-003` sampai `AC-CONF-008` | ADR 0010 |
 | `REQ-CONF-003` | `AC-CONF-009`, `AC-CONF-010`, `AC-CONF-016` | ADR 0010, spec #1, `Q-003` |
 | `REQ-CONF-004` | `AC-CONF-011` | ADR 0010, spec #1 |
 | `REQ-CONF-005` | `AC-CONF-012`, `AC-CONF-013`, `AC-CONF-014`, `AC-CONF-017` | ADR 0005, spec #1 contract, `Q-007` |
-| `REQ-CONF-006` | `AC-CONF-015` | ADR 0001, spec #1 contract |
+| `REQ-CONF-006` | `AC-CONF-015` | ADR 0013, spec #1 contract |
 | `REQ-CONF-007` | `AC-CONF-018`, `AC-CONF-019`, `AC-CONF-020` | ADR 0006, `Q-004` |
 | `REQ-CONF-008` | `AC-CONF-021` | `Q-008` |
+| `REQ-CONF-009` | `AC-CONF-022`, `AC-CONF-023` | ADR 0014 |
 | `REQ-MOD-001` | `AC-MOD-001`, `AC-MOD-002` | ADR 0002 |
 | `REQ-MOD-002` | `AC-MOD-003`, `AC-MOD-004` | ADR 0010 |
 | `REQ-MOD-003` | `AC-MOD-005`, `AC-MOD-006` | ARCHITECTURE §5 |

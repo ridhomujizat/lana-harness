@@ -1,6 +1,6 @@
 # 0001. Gunakan Rust sebagai single binary daemon
 
-- **Status**: Accepted
+- **Status**: Superseded by [0013](0013-gunakan-go-sebagai-single-binary.md)
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0008](0008-interface-cli-channel-http-dan-web-dashboard.md)

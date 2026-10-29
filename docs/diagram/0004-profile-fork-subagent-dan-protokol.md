@@ -19,7 +19,7 @@ flowchart TD
   V -- "Tidak" --> Fail["Boot gagal dengan pesan jelas"]
   V -- "Ya" --> Sort["Urutkan modul dari dependency service"]
   Sort --> Install["Module.install ke ContextBuilder"]
-  Install --> Run["Context siap, task tokio start"]
+  Install --> Run["Context siap, goroutine start"]
   M -.-> Dump["--dump-config: cetak hasil dan asal tiap baris"]
 ```
 

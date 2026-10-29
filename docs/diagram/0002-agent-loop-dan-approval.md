@@ -4,7 +4,7 @@
 - **Related diagram**: [0001. System Context Dan Roadmap](0001-system-context-dan-roadmap.md), [0004. Profile, Fork, Subagent, Dan Protokol](0004-profile-fork-subagent-dan-protokol.md)
 - **Purpose**: model turn dan step, posisi hook, sequence satu turn, rantai approval, dan failure handling.
 
-Diagram ini untuk orang yang mengimplementasi `lana-agent`. Pola turn, step, dan hook mengikuti
+Diagram ini untuk orang yang mengimplementasi package `agent`. Pola turn, step, dan hook mengikuti
 deepseek-harness (`dsh`).
 
 > Jaga diagram ini sinkron dengan ADR terkait. Jika ADR dan diagram berbeda, perbarui keduanya dalam satu perubahan.

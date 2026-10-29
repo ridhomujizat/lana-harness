@@ -14,7 +14,7 @@ If you are a new engineer, read the ADR index below before diving into code or a
 
 | #    | Title                                                                                     | Status   | Date       |
 |------|-------------------------------------------------------------------------------------------|----------|------------|
-| [0001](0001-gunakan-rust-single-binary-daemon.md) | Gunakan Rust sebagai single binary daemon | Accepted | 2026-10-29 |
+| [0001](0001-gunakan-rust-single-binary-daemon.md) | Gunakan Rust sebagai single binary daemon | Superseded by 0013 | 2026-10-29 |
 | [0002](0002-core-dari-modul-service-dan-hook.md) | Bangun core dari modul, service, dan hook dalam Cargo workspace | Accepted | 2026-10-29 |
 | [0003](0003-multi-agent-dengan-routing-channel.md) | Jalankan multi-agent ringan dengan routing dari channel | Accepted | 2026-10-29 |
 | [0004](0004-permission-mode-per-agent.md) | Atur permission per agent dan putuskan approval lewat hook | Accepted | 2026-10-29 |
@@ -26,6 +26,8 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0010](0010-profile-dan-config-patch.md) | Susun runtime dengan profile dan config patch | Accepted | 2026-10-29 |
 | [0011](0011-subagent-sebagai-child-session.md) | Jalankan subagent sebagai child session | Accepted | 2026-10-29 |
 | [0012](0012-acp-dan-sdk-json-rpc.md) | Sediakan server ACP dan SDK JSON-RPC | Accepted | 2026-10-29 |
+| [0013](0013-gunakan-go-sebagai-single-binary.md) | Gunakan Go sebagai single binary dan library | Accepted | 2026-10-29 |
+| [0014](0014-integrasi-sebagai-agentic-tool.md) | Sediakan lana sebagai agentic tool untuk service lain | Accepted | 2026-10-29 |
 
 ## How to add an ADR
 

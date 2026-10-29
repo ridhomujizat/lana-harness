@@ -1,6 +1,6 @@
 # 0012. Sediakan server ACP dan SDK JSON-RPC
 
-- **Status**: Accepted
+- **Status**: Accepted (detail implementasi Rust diganti oleh [0013](0013-gunakan-go-sebagai-single-binary.md); keputusan arsitekturnya tetap)
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0008](0008-interface-cli-channel-http-dan-web-dashboard.md), [0010](0010-profile-dan-config-patch.md)

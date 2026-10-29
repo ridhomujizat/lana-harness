@@ -5,13 +5,13 @@
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan
 - **Design**: [design.md](design.md)
 - **Revisi requirements**: 5
-- **Revisi contract**: 2
-- **Revisi design**: 1
-- **Status**: Approved
+- **Revisi contract**: 3
+- **Revisi design**: 2
+- **Status**: Draft (revisi 2: pindah ke Go, ADR 0013)
 
-> **Diblokir oleh spec #2 (core).** Semua task di bawah memakai interface core yang tercantum di
-> [design: Interface core yang dibutuhkan](design.md#interface-core-yang-dibutuhkan-dari-spec-2).
-> Task boleh mulai setelah task spec #2 yang menyediakan interface tersebut berstatus Completed.
+> **Diblokir oleh spec #2, #3, dan #4 (core).** Semua task di bawah memakai interface core yang tercantum di
+> [design: Interface core yang dibutuhkan](design.md#interface-core-yang-dibutuhkan-dari-spec-2-3-4).
+> Task boleh mulai setelah task spec yang menyediakan interface tersebut berstatus Completed.
 
 ## Aturan eksekusi
 
@@ -27,18 +27,18 @@
 
 | Acceptance criterion | Operasi contract | Pemilik bukti | Verifikasi | Bukti |
 |---|---|---|---|---|
-| `AC-INIT-001` sampai `AC-INIT-004` | `API-CLI-008` | `T-002` | `tests/init.rs` | Pending |
-| `AC-CONF-001` sampai `AC-CONF-006` | `API-CLI-001`, `009`, `010`, `011` | `T-003` | `tests/config.rs` | Pending |
-| `AC-SESS-001` sampai `AC-SESS-007` | `API-CLI-002` | `T-004` | `tests/chat_sessions.rs` | Pending |
-| `AC-CHAT-022` | `API-CLI-002` | `T-004` | `tests/chat_sessions.rs::workspace_is_cwd` | Pending |
-| `AC-CHAT-001` sampai `AC-CHAT-008` | `API-CLI-002`, `API-CLI-003` | `T-005` | `tests/chat_agent_select.rs`, `tests/chat_embedded.rs`, snapshot status bar | Pending |
-| `AC-CHAT-023` | `API-CLI-002` | `T-005` | `tests/chat_agent_select.rs::requires_tty` | Pending |
-| `AC-CHAT-009`, `AC-CHAT-010`, `AC-CHAT-011`, `AC-CHAT-024` | `API-CLI-003`, `API-CLI-004` | `T-006` | unit `render::markdown`, snapshot `ToolLine` | Pending |
-| `AC-CHAT-012` sampai `AC-CHAT-021` | `API-CLI-004` | `T-007` | unit `input`, `App`; PTY untuk `AC-CHAT-012` | Pending |
-| `AC-APPR-001` sampai `AC-APPR-007` | `API-CLI-002`, `API-CLI-005` | `T-008` | unit `TuiAnswerer`, `tests/chat_policy.rs` | Pending |
-| `AC-CMD-001` sampai `AC-CMD-014` | `API-CLI-006` | `T-009` | unit `commands`, `tests/chat_commands.rs` | Pending |
-| `AC-RUN-001` sampai `AC-RUN-010` | `API-CLI-007` | `T-010` | `tests/run.rs` | Pending |
-| `AC-EXIT-001` sampai `AC-EXIT-003` | `API-CLI-001`, `API-CLI-007` | `T-010` | `tests/run_exit_codes.rs` | Pending |
+| `AC-INIT-001` sampai `AC-INIT-004` | `API-CLI-008` | `T-002` | `testscript init_*.txtar` | Pending |
+| `AC-CONF-001` sampai `AC-CONF-006` | `API-CLI-001`, `009`, `010`, `011` | `T-003` | `testscript config_*.txtar` | Pending |
+| `AC-SESS-001` sampai `AC-SESS-007` | `API-CLI-002` | `T-004` | `TestChatSessions` | Pending |
+| `AC-CHAT-022` | `API-CLI-002` | `T-004` | `TestChatSessions/workspace_is_cwd` | Pending |
+| `AC-CHAT-001` sampai `AC-CHAT-008` | `API-CLI-002`, `API-CLI-003` | `T-005` | `TestChatAgentSelect`, `TestChatEmbedded`, golden status bar | Pending |
+| `AC-CHAT-023` | `API-CLI-002` | `T-005` | `testscript chat_requires_tty.txtar` | Pending |
+| `AC-CHAT-009`, `AC-CHAT-010`, `AC-CHAT-011`, `AC-CHAT-024` | `API-CLI-003`, `API-CLI-004` | `T-006` | unit `render` Markdown streaming, golden ToolLine | Pending |
+| `AC-CHAT-012` sampai `AC-CHAT-021` | `API-CLI-004` | `T-007` | unit `input` dan model tui; PTY untuk `AC-CHAT-012` | Pending |
+| `AC-APPR-001` sampai `AC-APPR-007` | `API-CLI-002`, `API-CLI-005` | `T-008` | unit `TuiAnswerer`, `TestChatPolicy` | Pending |
+| `AC-CMD-001` sampai `AC-CMD-014` | `API-CLI-006` | `T-009` | unit `commands`, `TestChatCommands` | Pending |
+| `AC-RUN-001` sampai `AC-RUN-010` | `API-CLI-007` | `T-010` | `testscript run_*.txtar` | Pending |
+| `AC-EXIT-001` sampai `AC-EXIT-003` | `API-CLI-001`, `API-CLI-007` | `T-010` | `testscript run_exit_codes.txtar` | Pending |
 
 ## Graf task
 
@@ -65,17 +65,17 @@ flowchart LR
 
 - [ ] `T-001` Buat kerangka CLI, error, dan logging
   - Issue/PR: `—`
-  - Bergantung pada: spec #2 (workspace Cargo dan profile loader)
+  - Bergantung pada: spec #2 (Go module dan config loader)
   - Requirements: `REQ-EXIT-001` (sebagian)
   - Acceptance criteria: — (pendukung; bukti `AC-EXIT-*` dimiliki `T-010`)
   - Operasi contract: `API-CLI-001`
   - Scope:
-    - Definisi `clap` untuk flag global dan subcommand `chat`, `run`, `init`, `config`.
-    - `LanaError` dan `exit_code()` sesuai design.
-    - `lana::logging`: file untuk `chat`, stderr untuk lainnya, `-v` dan `LANA_LOG`.
+    - Perintah `cobra` untuk flag global dan subcommand `chat`, `run`, `init`, `config`.
+    - `ExitError` dan pemetaan exit code sesuai design.
+    - Logging `slog`: file untuk `chat`, stderr untuk lainnya, `-v` dan `LANA_LOG`.
     - Pesan error diawali `error: ` di stderr.
   - Verifikasi:
-    - `cargo nextest run -p lana cli::` (unit pemetaan exit code dan parsing flag)
+    - `go test ./cmd/lana/...` (unit pemetaan exit code dan parsing flag)
     - `lana --help` dan `lana --version` exit 0
   - Bukti penyelesaian:
     - Status: Pending
@@ -91,12 +91,12 @@ flowchart LR
   - Acceptance criteria: `AC-INIT-001`, `AC-INIT-002`, `AC-INIT-003`, `AC-INIT-004`
   - Operasi contract: `API-CLI-008`
   - Scope:
-    - Wizard `dialoguer` dengan tiga pertanyaan dan default per provider.
+    - Wizard `huh` dengan tiga pertanyaan dan default per provider.
     - Penulisan atomik; cek semua path dulu tanpa `--force`.
     - `secrets.env` dengan mode `0600` sejak dibuat.
     - Isi `agents/default.md`.
   - Verifikasi:
-    - `cargo nextest run -p lana --test init`
+    - `go test ./cmd/lana -run TestScript/init`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -111,11 +111,11 @@ flowchart LR
   - Acceptance criteria: `AC-CONF-001` sampai `AC-CONF-006`
   - Operasi contract: `API-CLI-001`, `API-CLI-009`, `API-CLI-010`, `API-CLI-011`
   - Scope:
-    - `check` dengan span `toml_edit` dan semua error sekaligus.
-    - `path`, `edit` (`$VISUAL` lalu `$EDITOR`, dipecah `shell-words`).
+    - `check` memakai error ber-posisi dari loader spec #2, semua error sekaligus.
+    - `path`, `edit` (`$VISUAL` lalu `$EDITOR`, dipecah `shlex`).
     - `--dump-config=toml|json` dengan komentar asal dan redaksi `Secret`.
   - Verifikasi:
-    - `cargo nextest run -p lana --test config`
+    - `go test ./cmd/lana -run TestScript/config`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -125,17 +125,17 @@ flowchart LR
 
 - [ ] `T-004` Implementasi session CLI dan lock
   - Issue/PR: `—`
-  - Bergantung pada: `T-001`, spec #2 (`ctx.sessions`, `session_leases`)
+  - Bergantung pada: `T-001`, spec #4 (`ctx.Sessions`, `session_leases`)
   - Requirements: `REQ-SESS-001`, `REQ-SESS-002`, `REQ-CHAT-010`
   - Acceptance criteria: `AC-SESS-001` sampai `AC-SESS-007`, `AC-CHAT-022`
   - Operasi contract: `API-CLI-002`
   - Scope:
     - `CliSessions`: address = cwd canonical, `--continue`, `--resume` dengan prefix ULID, cek cwd asal.
-    - Lease dengan `BEGIN IMMEDIATE`, cek PID lewat `rustix`, lepas saat `Drop` dan panic.
+    - Lease dengan `BEGIN IMMEDIATE`, cek PID lewat `syscall.Kill(pid, 0)`, lepas lewat `defer` dan handler sinyal.
     - Workspace session = cwd.
   - Verifikasi:
-    - `cargo nextest run -p lana-channels --test chat_sessions`
-    - Test dua proses dengan `kill -9` untuk `AC-SESS-007`
+    - `go test ./channels/cli -run TestChatSessions`
+    - Test dua proses dengan `SIGKILL` untuk `AC-SESS-007`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -150,14 +150,14 @@ flowchart LR
   - Acceptance criteria: `AC-CHAT-001` sampai `AC-CHAT-008`, `AC-CHAT-023`
   - Operasi contract: `API-CLI-002`, `API-CLI-003`
   - Scope:
-    - `App` dengan event loop `tokio::select!` dan state machine dari design.
-    - `Viewport::Inline` dengan tinggi dinamis, `insert_before`, header, status bar, banner YOLO.
+    - Model Bubble Tea tanpa alt screen dengan state machine dari design.
+    - `tea.Println` untuk scrollback, `View()` untuk area stream, prompt, input, status bar, banner YOLO.
     - Pemilihan agent dari `--agent` atau route `cli`; cek TTY.
-    - Hook panic yang mengembalikan terminal.
-    - Harness PTY (`portable-pty`) untuk test end-to-end.
+    - `recover` yang mengembalikan terminal dan melepas lease.
+    - Harness PTY (`creack/pty` + `vt10x`) untuk test end-to-end.
   - Verifikasi:
-    - `cargo nextest run -p lana-channels --test chat_agent_select --test chat_embedded`
-    - Snapshot `insta` status bar
+    - `go test ./channels/cli -run 'TestChatAgentSelect|TestChatEmbedded'`
+    - Golden status bar (`go test ./channels/cli/render -update` untuk memperbarui)
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -172,11 +172,11 @@ flowchart LR
   - Acceptance criteria: `AC-CHAT-009`, `AC-CHAT-010`, `AC-CHAT-011`, `AC-CHAT-024`
   - Operasi contract: `API-CLI-003`, `API-CLI-004` (`Ctrl+O`)
   - Scope:
-    - `Markdown`: buffer per blok, render `pulldown-cmark`, blok belum selesai di area stream.
+    - Markdown streaming: buffer per blok, render `glamour`, blok belum selesai di area stream.
     - `ToolLine` ringkas dan verbose, tabel argumen utama.
     - Toggle verbose dengan `Ctrl+O` dan cetak ulang tool call terakhir.
   - Verifikasi:
-    - `cargo nextest run -p lana-channels render::`
+    - `go test ./channels/cli/render/...`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -191,14 +191,14 @@ flowchart LR
   - Acceptance criteria: `AC-CHAT-012` sampai `AC-CHAT-021`
   - Operasi contract: `API-CLI-004`
   - Scope:
-    - `Editor` dengan `tui-textarea`, keyboard enhancement flags, bracketed paste.
+    - Input dengan `bubbles/textarea`, keyboard enhancement Bubble Tea v2, bracketed paste.
     - Baris baru: `Shift+Enter`, `Alt+Enter`, `Ctrl+J`, `\` + `Enter`.
     - `Ctrl+C` batal/kosongkan/keluar dua kali, `Ctrl+D` keluar.
     - Pesan saat turn berjalan dikirim ke inbox dengan label `(antre)`.
     - `History` JSON Lines, 1000 entri, `0600`, `Ctrl+R`.
   - Verifikasi:
-    - `cargo nextest run -p lana-channels input:: app::keys`
-    - PTY: `tests/chat_inbox.rs` untuk `AC-CHAT-012`
+    - `go test ./channels/cli/input/... ./channels/cli/tui/...`
+    - PTY: `TestChatInbox` untuk `AC-CHAT-012`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -208,7 +208,7 @@ flowchart LR
 
 - [ ] `T-008` Implementasi approval TUI dan mode yolo
   - Issue/PR: `—`
-  - Bergantung pada: `T-006`, `T-007`, spec #2 (`ctx.approval`, hook `approval.request`)
+  - Bergantung pada: `T-006`, `T-007`, spec #2 (hook `approval.request`), spec #4 (`ctx.Approval`)
   - Requirements: `REQ-APPR-001`, `REQ-APPR-002`
   - Acceptance criteria: `AC-APPR-001` sampai `AC-APPR-007`
   - Operasi contract: `API-CLI-002` (`--yolo`), `API-CLI-005`
@@ -216,10 +216,10 @@ flowchart LR
     - `TuiAnswerer` sebagai listener `approval.request` untuk session CLI milik proses ini.
     - Prompt `[y]/[a]/[n]`, alasan opsional setelah `n`, `Ctrl+C` = `cancelled`, pesan kedaluwarsa.
     - Label subagent dan input JSON saat verbose.
-    - `--yolo` memanggil `set_policy(trust)` dan menampilkan banner.
+    - `--yolo` memanggil `SetPolicy(trust)` dan menampilkan banner.
   - Verifikasi:
-    - `cargo nextest run -p lana-channels approval::`
-    - `cargo nextest run -p lana-channels --test chat_policy`
+    - `go test ./channels/cli/approval/...`
+    - `go test ./channels/cli -run TestChatPolicy`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -234,12 +234,12 @@ flowchart LR
   - Acceptance criteria: `AC-CMD-001` sampai `AC-CMD-014`
   - Operasi contract: `API-CLI-006`
   - Scope:
-    - Parser `SlashCommand`, `//` sebagai escape, `allowed_while_running()`.
+    - `ParseSlash`, `//` sebagai escape, `AllowedWhileRunning()`.
     - Dispatcher ke service core untuk semua perintah di contract.
     - Picker `/sessions` di viewport.
   - Verifikasi:
-    - `cargo nextest run -p lana-channels commands::`
-    - `cargo nextest run -p lana-channels --test chat_commands`
+    - `go test ./channels/cli/commands/...`
+    - `go test ./channels/cli -run TestChatCommands`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -249,17 +249,17 @@ flowchart LR
 
 - [ ] `T-010` Implementasi `lana run`
   - Issue/PR: `—`
-  - Bergantung pada: `T-004`, spec #2 (profile `headless`, `MockLlm`)
+  - Bergantung pada: `T-004`, spec #3 (profile `headless`, `MockLlm`)
   - Requirements: `REQ-RUN-001`, `REQ-RUN-002`, `REQ-RUN-003`, `REQ-EXIT-001`
   - Acceptance criteria: `AC-RUN-001` sampai `AC-RUN-010`, `AC-EXIT-001` sampai `AC-EXIT-003`
   - Operasi contract: `API-CLI-007`
   - Scope:
     - `Runner`: prompt dari argumen dan stdin, pemilihan agent, policy `never` atau `ask`.
-    - `TextWriter`, `JsonWriter`, `StreamJsonWriter`.
+    - `TextWriter`, `JSONWriter`, `StreamJSONWriter`.
     - `TtyAnswerer` lewat `/dev/tty`, fail-closed.
-    - SIGINT ke exit 130.
+    - `signal.NotifyContext` untuk SIGINT, exit 130.
   - Verifikasi:
-    - `cargo nextest run -p lana --test run --test run_exit_codes`
+    - `go test ./cmd/lana -run 'TestScript/run'`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -274,12 +274,12 @@ flowchart LR
   - Acceptance criteria: — (memeriksa bukti semua task)
   - Operasi contract: semua
   - Scope:
-    - Jalankan seluruh test, clippy, fmt, dan build release.
+    - Jalankan seluruh test, lint, format, dan build release.
     - Smoke manual di Ghostty, iTerm2, dan Terminal.app: `Shift+Enter`, paste, scrollback setelah keluar, `NO_COLOR`, approval, `/fork`.
     - Smoke dengan provider OpenAI sungguhan: `lana init --yes`, `lana chat`, `lana run --output json`.
     - Ukur ukuran binary release dan catat.
   - Verifikasi:
-    - `cargo fmt --check && cargo clippy --workspace -- -D warnings && cargo nextest run --workspace && cargo build --release`
+    - `test -z "$(gofmt -l .)" && golangci-lint run ./... && go test -race ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/lana`
   - Bukti penyelesaian:
     - Status: Pending
     - Perintah/test: —
@@ -293,7 +293,7 @@ flowchart LR
 - [ ] Tidak ada perilaku terlihat tanpa ID requirement.
 - [ ] Tidak ada perilaku di luar scope.
 - [ ] ADR dan diagram sesuai implementasi.
-- [ ] `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo nextest run`, dan build release lulus.
+- [ ] `gofmt`, `golangci-lint`, `go test -race`, dan build release lulus.
 - [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 
 ## Approval
@@ -303,5 +303,5 @@ flowchart LR
 - [x] Setiap acceptance criterion punya tepat satu pemilik bukti.
 - [x] Setiap task punya scope terbatas, dependency, dan verifikasi.
 - [x] Tidak ada task yang memperkenalkan perilaku baru.
-- **Di-approve oleh**: Ridho
-- **Di-approve pada**: 2026-10-29
+- **Di-approve oleh**: — (revisi 1 di-approve Ridho 2026-10-29; revisi 2 menunggu)
+- **Di-approve pada**: —

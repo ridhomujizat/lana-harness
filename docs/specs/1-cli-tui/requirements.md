@@ -406,7 +406,7 @@ Nilai default `--yes` ditetapkan di contract.
 | `Q-001` | Nomor GitHub issue | `#1` di `ridhomujizat/lana-harness` (private) |
 | `Q-002` | Subcommand dalam scope | `chat`, `run`, `init`, `config` |
 | `Q-003` | Attach atau embedded | Embedded saja |
-| `Q-004` | Line mode atau TUI | TUI (`ratatui`) |
+| `Q-004` | Line mode atau TUI | TUI inline. Library mengikuti ADR 0013 (Bubble Tea); catatan editorial setelah pindah ke Go |
 | `Q-005` | Lifecycle session | Baru secara default, `--continue`, `--resume <id>` |
 | `Q-006` | Slash command | `/agent`, `/new`, `/sessions`, `/help`, `/exit`, `/permission`, `/yolo`, `/model`, `/compact`, `/fork`, `/clear` |
 | `Q-007` | `Ctrl+C` dan `Ctrl+D` | `Ctrl+C` batal turn; idle: kosongkan input, dua kali dalam 2 detik keluar; `Ctrl+D` di input kosong keluar |

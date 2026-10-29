@@ -4,9 +4,9 @@
 - **Requirements**: [requirements.md](requirements.md)
 - **Revisi requirements**: 5
 - **Status requirements**: Approved
-- **Revisi contract**: 2
+- **Revisi contract**: 3
 - **Berlaku untuk**: CLI (subcommand, flag, env, exit code, stdout/stderr, format JSON, tombol, slash command, file yang dibuat)
-- **Status**: Approved
+- **Status**: Draft
 
 File ini menetapkan bentuk persis antarmuka terminal. Perilaku dimiliki oleh `requirements.md`.
 
@@ -19,7 +19,7 @@ File ini menetapkan bentuk persis antarmuka terminal. Perilaku dimiliki oleh `re
 | stdout | Hanya hasil yang diminta (jawaban, JSON, output `config`). Tidak pernah berisi log atau prompt approval |
 | stderr | Pesan error dan log untuk `run` dan `config`. Pesan error diawali `error: ` |
 | Log saat `chat` | File `$LANA_HOME/logs/lana.log`. Tidak ada log ke stderr selama TUI aktif |
-| Level log | Env `LANA_LOG` (sintaks filter `tracing`, contoh `debug` atau `lana_agent=trace`). Flag `-v` = `info`, `-vv` = `debug`, `-vvv` = `trace`. Default `warn`. Flag menang atas env |
+| Level log | Env `LANA_LOG` bernilai `debug`, `info`, `warn`, atau `error` (`log/slog`). Flag `-v` = `info`, `-vv` = `debug`, `-vvv` = `debug` dengan lokasi source. Default `warn`. Flag menang atas env. Nilai lain: exit 2 |
 | `LANA_HOME` | Default `~/.lana`. Env `LANA_HOME` mengganti lokasi |
 | Secret | Dibaca dari env proses, lalu dari `$LANA_HOME/secrets.env`. Env proses menang. Tidak pernah dicetak; tampil sebagai `"***"` |
 | Warna | Mati jika env `NO_COLOR` terisi atau output bukan TTY |
@@ -82,7 +82,7 @@ config = { path = "lana.db" }
 
 | Gagal | Exit | Pesan stderr |
 |---|---:|---|
-| Flag tidak dikenal atau nilai salah | 2 | `error: <pesan clap>` |
+| Flag tidak dikenal atau nilai salah | 2 | `error: <pesan parser flag>` |
 | File `--patch` tidak ada | 2 | `error: file patch tidak ditemukan: <path>` |
 | Profile tidak dikenal | 2 | `error: profile tidak dikenal: <nama> (tersedia: ...)` |
 
@@ -103,7 +103,7 @@ Aturan:
 
 - `--continue` dan `--resume` tidak boleh dipakai bersamaan.
 - `--agent` bersama `--continue` atau `--resume` mengganti agent session yang dibuka, sama seperti `/agent <nama>`.
-- Workspace = `std::env::current_dir()` yang sudah di-canonicalize.
+- Workspace = direktori kerja (`os.Getwd`) setelah symlink di-resolve (`filepath.EvalSymlinks`).
 - Saat `--continue` tidak menemukan session, baris info `tidak ada session sebelumnya di <cwd>, membuat session baru` dicetak lalu chat dimulai.
 
 | Kondisi | Exit | Pesan stderr |
@@ -125,7 +125,7 @@ Error provider di tengah chat tidak menghentikan proses. Pesan tampil di scrollb
 
 ## API-CLI-003: Layout TUI dan status bar
 
-TUI inline (ratatui `Viewport::Inline`). Riwayat ditulis ke scrollback di atas viewport.
+TUI inline (Bubble Tea tanpa alt screen). Riwayat ditulis ke scrollback di atas area yang digambar ulang (viewport).
 
 ```text
 lana · default · embedded · ask · openai:gpt-5-mini         ← header, dicetak sekali saat session dibuka
@@ -459,7 +459,7 @@ lana config edit
 
 | Operasi | Requirements | Komponen design | Verifikasi |
 |---|---|---|---|
-| `API-CLI-001` | `REQ-CONF-001`, `REQ-EXIT-001` | Ditetapkan di design | Test CLI (`assert_cmd`) |
+| `API-CLI-001` | `REQ-CONF-001`, `REQ-EXIT-001` | Ditetapkan di design | Test CLI (`testscript`) |
 | `API-CLI-002` | `REQ-CHAT-001`, `REQ-CHAT-002`, `REQ-CHAT-010`, `REQ-CHAT-011`, `REQ-SESS-001`, `REQ-SESS-002`, `REQ-APPR-002` | Ditetapkan di design | Test CLI dan test terminal semu |
 | `API-CLI-003` | `REQ-CHAT-003`, `REQ-CHAT-004`, `REQ-CHAT-005` | Ditetapkan di design | Snapshot render |
 | `API-CLI-004` | `REQ-CHAT-006` sampai `REQ-CHAT-009` | Ditetapkan di design | Test input handler |
@@ -498,5 +498,5 @@ info, ikon status, `//` untuk mengirim teks diawali `/`, label `(antre)`, alias 
 - [x] Input, sukses, gagal, otorisasi, dan kompatibilitas eksplisit.
 - [x] Tidak ada perilaku yang hanya ada di file ini.
 - [x] Blocking Contract Questions bernilai `None`.
-- **Di-approve oleh**: Ridho
-- **Di-approve pada**: 2026-10-29 (revisi 1; revisi 2 menambah error lock session dari `DQ-002`)
+- **Di-approve oleh**: Ridho (revisi 2)
+- **Di-approve pada**: 2026-10-29 (revisi 1; revisi 2 menambah error lock session dari `DQ-002`). Revisi 3 (pindah ke Go, ADR 0013) menunggu approval: format `LANA_LOG` berubah ke level `slog`.

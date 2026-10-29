@@ -1,6 +1,6 @@
 # 0005. Pakai SQLite sebagai storage tunggal
 
-- **Status**: Accepted
+- **Status**: Accepted (detail implementasi Rust diganti oleh [0013](0013-gunakan-go-sebagai-single-binary.md); keputusan arsitekturnya tetap)
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0003](0003-multi-agent-dengan-routing-channel.md), [0007](0007-scheduler-cron-di-dalam-daemon.md), [0009](0009-session-sebagai-event-log-append-only.md)

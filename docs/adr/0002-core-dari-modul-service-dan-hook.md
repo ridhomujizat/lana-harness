@@ -1,6 +1,6 @@
 # 0002. Bangun core dari modul, service, dan hook dalam Cargo workspace
 
-- **Status**: Accepted
+- **Status**: Accepted (detail implementasi Rust diganti oleh [0013](0013-gunakan-go-sebagai-single-binary.md); keputusan arsitekturnya tetap)
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0001](0001-gunakan-rust-single-binary-daemon.md), [0009](0009-session-sebagai-event-log-append-only.md), [0010](0010-profile-dan-config-patch.md)
