@@ -1,5 +1,7 @@
 package core
 
+import "sync"
+
 // ServiceKey adalah nama service di registry Builder.
 type ServiceKey string
 
@@ -24,9 +26,10 @@ type Context struct {
 	Secrets  Secrets
 	Profile  string
 
-	services  map[ServiceKey]any
-	installed []*installedModule
-	closeOnce func()
+	services     map[ServiceKey]any
+	installed    []*installedModule
+	shutdownOnce sync.Once
+	shutdownErr  error
 }
 
 // Lookup mengambil service apa pun.

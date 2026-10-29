@@ -288,10 +288,48 @@ func (c *Context) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if c.closeOnce != nil {
-		c.closeOnce()
+	c.shutdownOnce.Do(func() {
+		c.shutdownErr = c.doShutdown(ctx)
+	})
+	return c.shutdownErr
+}
+
+func (c *Context) doShutdown(ctx context.Context) error {
+	budget := shutdownTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < budget {
+			budget = remaining
+		}
 	}
-	c.closeOnce = func() {}
+	if budget < 0 {
+		budget = 0
+	}
+	sctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	var releases []func()
+	for i := len(c.installed) - 1; i >= 0; i-- {
+		im := c.installed[i]
+		done := make(chan struct{})
+		go func(m Module) {
+			defer close(done)
+			if err := m.Stop(sctx); err != nil {
+				slog.Warn("modul gagal berhenti", "id", im.row.ID, "error", err)
+			}
+		}(im.mod)
+		select {
+		case <-done:
+			slog.Info("modul berhenti", "id", im.row.ID)
+		case <-sctx.Done():
+			slog.Warn("modul melewati batas shutdown dan ditinggalkan", "id", im.row.ID)
+		}
+		releases = append(releases, im.releases...)
+		im.releases = nil
+	}
+	for i := len(releases) - 1; i >= 0; i-- {
+		if releases[i] != nil {
+			releases[i]()
+		}
+	}
 	if c.Hooks != nil && c.Hooks.SessionEvent != nil {
 		c.Hooks.SessionEvent.Close()
 	}

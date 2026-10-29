@@ -312,7 +312,7 @@ flowchart TD
     - PR/commit: commit T-010
     - Deviasi: `core.Context` menyimpan map service internal agar `Lookup` bisa mengambil key di luar lima field typed (kontrak `API-CORE-003`). `Shutdown` masih minimal; perilaku penuh dikerjakan T-011.
 
-- [ ] `T-011` Install lengkap, shutdown berurutan, dan lepas listener
+- [x] `T-011` Install lengkap, shutdown berurutan, dan lepas listener
   - Issue/PR: `—`
   - Bergantung pada: `T-010`, `T-007`
   - Requirements: `REQ-MOD-003`, `REQ-HOOK-004`, `REQ-CONF-002`
@@ -325,11 +325,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=1 nix develop -c go test -race ./core -run 'TestShutdown|TestModuleStopReleasesListeners|TestBootDisabledRowNotInstalled'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath CGO_ENABLED=1 nix develop -c sh -c "CGO_ENABLED=1 go test -race ./core -run 'TestShutdown|TestModuleStopReleasesListeners|TestBootDisabledRowNotInstalled' -v"`
+    - Hasil: 4 test PASS; race detector lulus; exit 0. Budget uji 80ms membuktikan modul macet ditinggalkan dan modul lain tetap dihentikan.
+    - PR/commit: commit T-011
+    - Deviasi: Tidak ada.
 
 - [ ] `T-012` Build release dan cross-compile
   - Issue/PR: `—`
