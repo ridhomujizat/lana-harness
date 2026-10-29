@@ -13,7 +13,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Options mengatur pembacaan config.
+// Options controls how config is read.
 type Options struct {
 	Home    string
 	Profile string
@@ -22,14 +22,14 @@ type Options struct {
 	Env     func(name string) (string, bool)
 }
 
-// Layer adalah lapisan dari memori. Isi TOML atau Value, tepat satu.
+// Layer is an in-memory layer. Set exactly one of TOML or Value.
 type Layer struct {
 	Name  string
 	TOML  []byte
 	Value any
 }
 
-// Result adalah hasil Load yang valid.
+// Result is the valid result of Load.
 type Result struct {
 	Profile  string
 	Home     string
@@ -40,7 +40,7 @@ type Result struct {
 	Secrets  core.Secrets
 }
 
-// LayerInfo menjelaskan satu lapisan.
+// LayerInfo describes a single layer.
 type LayerInfo struct {
 	Name    string
 	Path    string
@@ -53,7 +53,7 @@ type pendingLayer struct {
 	value any
 }
 
-// Load membangun config efektif.
+// Load builds the effective config.
 func Load(ctx context.Context, opts Options) (*Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -70,7 +70,7 @@ func Load(ctx context.Context, opts Options) (*Result, error) {
 		profile = "minimal"
 	}
 	if _, ok := builtinProfiles[profile]; !ok {
-		return nil, Errors{{Msg: fmt.Sprintf("profile tidak dikenal: %s (tersedia: %s)", profile, strings.Join(ProfileNames(), ", "))}}
+		return nil, Errors{{Msg: fmt.Sprintf("unknown profile: %s (available: %s)", profile, strings.Join(ProfileNames(), ", "))}}
 	}
 	home := opts.Home
 	if home != "" {
@@ -103,11 +103,11 @@ func Load(ctx context.Context, opts Options) (*Result, error) {
 		pl := pendingLayer{info: info}
 		switch {
 		case layer.Name == "":
-			return nil, Errors{{Msg: "nama lapisan memori wajib diisi"}}
+			return nil, Errors{{Msg: "in-memory layer name is required"}}
 		case layer.TOML != nil && layer.Value != nil:
-			pl.value = fmt.Errorf("lapisan memori harus memakai TOML atau Value, tidak keduanya")
+			pl.value = fmt.Errorf("in-memory layer must use TOML or Value, not both")
 		case layer.TOML == nil && layer.Value == nil:
-			pl.value = fmt.Errorf("lapisan memori wajib memakai TOML atau Value")
+			pl.value = fmt.Errorf("in-memory layer must use TOML or Value")
 		case layer.TOML != nil:
 			pl.raw = layer.TOML
 		default:
@@ -130,7 +130,7 @@ func Load(ctx context.Context, opts Options) (*Result, error) {
 		layers = append(layers, pl.info)
 		if err, ok := pl.value.(error); ok {
 			if os.IsNotExist(err) {
-				errs = append(errs, Error{File: pl.info.Name, Msg: "file patch tidak ditemukan: " + pl.info.Name})
+				errs = append(errs, Error{File: pl.info.Name, Msg: "patch file not found: " + pl.info.Name})
 			} else {
 				errs = append(errs, Error{File: pl.info.Name, Msg: err.Error()})
 			}
@@ -229,7 +229,7 @@ func decodeConfig(value map[string]any) (core.Config, error) {
 	return cfg, nil
 }
 
-// HomeDir mengembalikan LANA_HOME atau ~/.lana.
+// HomeDir returns LANA_HOME or ~/.lana.
 func HomeDir(env func(name string) (string, bool)) (string, error) {
 	if env == nil {
 		env = os.LookupEnv

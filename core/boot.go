@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// BootInput adalah masukan Boot.
+// BootInput is the input to Boot.
 type BootInput struct {
 	Config  Config
 	Secrets Secrets
@@ -17,10 +17,10 @@ type BootInput struct {
 	Home    string
 }
 
-// ShutdownTimeout adalah batas total Shutdown.
+// ShutdownTimeout is the total budget for Shutdown.
 const ShutdownTimeout = 30 * time.Second
 
-// shutdownTimeout adalah variabel uji untuk budget shutdown.
+// shutdownTimeout is a test variable for the shutdown budget.
 var shutdownTimeout = ShutdownTimeout
 
 type plannedModule struct {
@@ -36,7 +36,7 @@ type installedModule struct {
 	releases []func()
 }
 
-// Boot membuat Context. Tidak ada modul yang di-install jika rencana boot gagal.
+// Boot creates a Context. No module is installed if the boot plan fails.
 func Boot(ctx context.Context, in BootInput) (*Context, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -63,10 +63,10 @@ func Boot(ctx context.Context, in BootInput) (*Context, error) {
 		err := pm.mod.Install(b, ModuleConfig{ID: pm.row.ID, Module: pm.row.Module, Values: pm.row.Config})
 		if err != nil {
 			rollback(installed, b)
-			return nil, fmt.Errorf("modul %s gagal dipasang: %w", pm.row.ID, err)
+			return nil, fmt.Errorf("module %s failed to install: %w", pm.row.ID, err)
 		}
 		installed = append(installed, &installedModule{row: pm.row, mod: pm.mod, releases: b.takeOwned(pm.row.ID)})
-		slog.Info("modul terpasang", "id", pm.row.ID, "module", pm.row.Module, "durasi", time.Since(start))
+		slog.Info("module installed", "id", pm.row.ID, "module", pm.row.Module, "durasi", time.Since(start))
 	}
 
 	services := b.serviceSnapshot()
@@ -95,31 +95,31 @@ func assignContext(c *Context, services map[ServiceKey]any) error {
 		case *LLMRegistry:
 			v, ok := svc.(LLMRegistry)
 			if !ok {
-				return fmt.Errorf("service '%s' bukan tipe LLMRegistry", key)
+				return fmt.Errorf("service '%s' is not of type LLMRegistry", key)
 			}
 			*dst = v
 		case *ToolRegistry:
 			v, ok := svc.(ToolRegistry)
 			if !ok {
-				return fmt.Errorf("service '%s' bukan tipe ToolRegistry", key)
+				return fmt.Errorf("service '%s' is not of type ToolRegistry", key)
 			}
 			*dst = v
 		case *SessionStore:
 			v, ok := svc.(SessionStore)
 			if !ok {
-				return fmt.Errorf("service '%s' bukan tipe SessionStore", key)
+				return fmt.Errorf("service '%s' is not of type SessionStore", key)
 			}
 			*dst = v
 		case *AgentRegistry:
 			v, ok := svc.(AgentRegistry)
 			if !ok {
-				return fmt.Errorf("service '%s' bukan tipe AgentRegistry", key)
+				return fmt.Errorf("service '%s' is not of type AgentRegistry", key)
 			}
 			*dst = v
 		case *ApprovalService:
 			v, ok := svc.(ApprovalService)
 			if !ok {
-				return fmt.Errorf("service '%s' bukan tipe ApprovalService", key)
+				return fmt.Errorf("service '%s' is not of type ApprovalService", key)
 			}
 			*dst = v
 		}
@@ -151,7 +151,7 @@ func planBoot(rows []ModuleRow) ([]plannedModule, error) {
 		}
 		factory, ok := moduleFactory(row.Module)
 		if !ok {
-			return nil, fmt.Errorf("modul '%s' (baris %s) tidak dikenal (tersedia: %s)", row.Module, row.ID, strings.Join(registered, ", "))
+			return nil, fmt.Errorf("module '%s' (row %s) is unknown (available: %s)", row.Module, row.ID, strings.Join(registered, ", "))
 		}
 		mod := factory()
 		plan = append(plan, plannedModule{row: row, mod: mod, prov: mod.Provides(), req: mod.Requires()})
@@ -160,7 +160,7 @@ func planBoot(rows []ModuleRow) ([]plannedModule, error) {
 	for i, pm := range plan {
 		for _, key := range pm.prov {
 			if j, ok := providers[key]; ok {
-				return nil, fmt.Errorf("service '%s' dipasang lebih dari satu modul: %s, %s", key, plan[j].row.ID, pm.row.ID)
+				return nil, fmt.Errorf("service '%s' is provided by more than one module: %s, %s", key, plan[j].row.ID, pm.row.ID)
 			}
 			providers[key] = i
 		}
@@ -168,7 +168,7 @@ func planBoot(rows []ModuleRow) ([]plannedModule, error) {
 	for _, pm := range plan {
 		for _, key := range pm.req {
 			if _, ok := providers[key]; !ok {
-				return nil, fmt.Errorf("modul %s membutuhkan service '%s' yang tidak dipasang modul aktif", pm.row.ID, key)
+				return nil, fmt.Errorf("module %s requires service '%s' which no active module provides", pm.row.ID, key)
 			}
 		}
 	}
@@ -188,11 +188,11 @@ func planBoot(rows []ModuleRow) ([]plannedModule, error) {
 		for i, idx := range cycle {
 			ids[i] = plan[idx].row.ID
 		}
-		return nil, fmt.Errorf("siklus dependency: %s", strings.Join(ids, " → "))
+		return nil, fmt.Errorf("dependency cycle: %s", strings.Join(ids, " → "))
 	}
 	order := topoOrder(deps)
 	if len(order) != len(plan) {
-		return nil, errors.New("siklus dependency terdeteksi")
+		return nil, errors.New("dependency cycle detected")
 	}
 	out := make([]plannedModule, 0, len(plan))
 	for _, idx := range order {
@@ -274,13 +274,13 @@ func rollback(installed []*installedModule, _ *Builder) {
 	for i := len(installed) - 1; i >= 0; i-- {
 		im := installed[i]
 		if err := im.mod.Stop(context.Background()); err != nil {
-			slog.Warn("modul gagal berhenti saat rollback", "id", im.row.ID, "error", err)
+			slog.Warn("module failed to stop during rollback", "id", im.row.ID, "error", err)
 		}
 		releaseAll(im.releases)
 	}
 }
 
-// Shutdown menghentikan modul dalam urutan kebalikan install.
+// Shutdown stops modules in the reverse of install order.
 func (c *Context) Shutdown(ctx context.Context) error {
 	if c == nil {
 		return nil
@@ -313,14 +313,14 @@ func (c *Context) doShutdown(ctx context.Context) error {
 		go func(m Module) {
 			defer close(done)
 			if err := m.Stop(sctx); err != nil {
-				slog.Warn("modul gagal berhenti", "id", im.row.ID, "error", err)
+				slog.Warn("module failed to stop", "id", im.row.ID, "error", err)
 			}
 		}(im.mod)
 		select {
 		case <-done:
-			slog.Info("modul berhenti", "id", im.row.ID)
+			slog.Info("module stopped", "id", im.row.ID)
 		case <-sctx.Done():
-			slog.Warn("modul melewati batas shutdown dan ditinggalkan", "id", im.row.ID)
+			slog.Warn("module exceeded the shutdown limit and was abandoned", "id", im.row.ID)
 		}
 		releases = append(releases, im.releases...)
 		im.releases = nil

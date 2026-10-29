@@ -16,7 +16,7 @@ import (
 
 func newTestRuntime(t *testing.T, baseURL string, mutate func(string) string) *Runtime {
 	t.Helper()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"asisten\"\n", baseURL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", baseURL)
 	if mutate != nil {
 		cfg = mutate(cfg)
 	}
@@ -33,7 +33,7 @@ func TestNewMinimal(t *testing.T) {
 	defer srv.Close()
 	rt := newTestRuntime(t, srv.URL, nil)
 	if rt.coreCtx.LLM == nil || rt.coreCtx.Tools == nil || rt.coreCtx.Sessions == nil || rt.coreCtx.Agents == nil {
-		t.Fatalf("service tidak lengkap: %+v", rt.coreCtx)
+		t.Fatalf("service incomplete: %+v", rt.coreCtx)
 	}
 	found := false
 	for _, row := range rt.result.Config.Modules {
@@ -45,7 +45,7 @@ func TestNewMinimal(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("baris store tidak ada")
+		t.Fatal("store row missing")
 	}
 }
 
@@ -62,7 +62,7 @@ func (d dummyTool) Call(context.Context, core.ToolCtx, json.RawMessage) (core.To
 func TestNewToolConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
 	_, err := New(context.Background(), Options{
 		Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}},
 		Tools:  []core.Tool{dummyTool{name: "read_file"}},
@@ -75,9 +75,9 @@ func TestNewToolConflict(t *testing.T) {
 func TestNewUnknownAgentTool(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"tidak_ada\"]\n", srv.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"missing_tool\"]\n", srv.URL)
 	_, err := New(context.Background(), Options{Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
-	if err == nil || !strings.Contains(err.Error(), "asisten") || !strings.Contains(err.Error(), "tidak_ada") {
+	if err == nil || !strings.Contains(err.Error(), "assistant") || !strings.Contains(err.Error(), "missing_tool") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestRunEmptyPrompt(t *testing.T) {
 func TestNoRoute(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
 	rt, err := New(context.Background(), Options{Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
 	if err != nil {
 		t.Fatal(err)

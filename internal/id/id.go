@@ -14,7 +14,7 @@ var (
 	last int64
 )
 
-// New mengembalikan ID 26 karakter yang terurut menurut waktu (mirip ULID).
+// New returns a 26-character, time-ordered ID (similar to a ULID).
 func New() string {
 	mu.Lock()
 	now := time.Now().UnixMilli()
@@ -32,7 +32,7 @@ func New() string {
 			raw[i] = byte(now >> (i * 3))
 		}
 	}
-	// 128 bit -> 26 karakter base32 (130 bit, dua bit pertama nol).
+	// 128 bits -> 26 base32 characters (130 bits, the first two being zero).
 	out := make([]byte, 26)
 	var acc uint32
 	bits := 0

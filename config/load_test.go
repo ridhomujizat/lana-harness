@@ -74,12 +74,12 @@ func TestMissingProfileSkipped(t *testing.T) {
 		if layer.Name == path {
 			found = true
 			if layer.Present {
-				t.Fatal("lapisan profile hilang ditandai present")
+				t.Fatal("missing profile layer marked as present")
 			}
 		}
 	}
 	if !found {
-		t.Fatal("lapisan profile hilang tidak dicatat")
+		t.Fatal("missing profile layer not recorded")
 	}
 }
 
@@ -99,7 +99,7 @@ func TestLanaHomeEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.Config.Agents["x"].Model != "home" {
-		t.Fatalf("config.toml tidak dibaca dari LANA_HOME")
+		t.Fatalf("config.toml was not read from LANA_HOME")
 	}
 }
 
@@ -119,7 +119,7 @@ func TestMemoryLayerNoFiles(t *testing.T) {
 	}
 	for _, layer := range res.Layers {
 		if layer.Path != "" {
-			t.Fatalf("lapisan file dibaca padahal Home kosong: %s", layer.Path)
+			t.Fatalf("file layer read although Home is empty: %s", layer.Path)
 		}
 	}
 }

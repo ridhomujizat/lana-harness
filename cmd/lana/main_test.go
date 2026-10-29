@@ -18,7 +18,7 @@ func TestHelpExit(t *testing.T) {
 }
 
 func TestUnknownCommand(t *testing.T) {
-	if code := run([]string{"tidak-ada"}); code != 2 {
+	if code := run([]string{"no-such-command"}); code != 2 {
 		t.Fatalf("exit=%d", code)
 	}
 }

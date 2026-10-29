@@ -10,7 +10,7 @@ import (
 
 func decodeInput(raw json.RawMessage, into any) error {
 	if len(raw) == 0 {
-		return fmt.Errorf("input kosong")
+		return fmt.Errorf("input is empty")
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -18,11 +18,11 @@ func decodeInput(raw json.RawMessage, into any) error {
 		return err
 	}
 	if dec.More() {
-		return fmt.Errorf("input berisi data tambahan")
+		return fmt.Errorf("input contains extra data")
 	}
 	return nil
 }
 
 func inputErrorOutput(err error) (core.ToolOutput, error) {
-	return core.ToolOutput{Status: core.ToolStatusError, Output: "input tidak valid: " + err.Error()}, nil
+	return core.ToolOutput{Status: core.ToolStatusError, Output: "invalid input: " + err.Error()}, nil
 }

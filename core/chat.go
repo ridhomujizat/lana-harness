@@ -13,7 +13,7 @@ const (
 	RoleAssistant Role = "assistant"
 )
 
-// Message adalah satu pesan. Hasil tool dikirim sebagai blok tool_result di pesan user.
+// Message is one message. Tool results are sent as tool_result blocks in a user message.
 type Message struct {
 	Role    Role           `json:"role"`
 	Content []ContentBlock `json:"content"`
@@ -28,7 +28,7 @@ const (
 	BlockImage      BlockKind = "image"
 )
 
-// ContentBlock adalah satu blok isi.
+// ContentBlock is one content block.
 type ContentBlock struct {
 	Kind      BlockKind       `json:"type"`
 	Text      string          `json:"text,omitempty"`
@@ -41,13 +41,13 @@ type ContentBlock struct {
 	Data      []byte          `json:"data,omitempty"`
 }
 
-// Usage adalah jumlah token.
+// Usage is the token count.
 type Usage struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 }
 
-// ChatRequest adalah permintaan ke provider.
+// ChatRequest is a request to the provider.
 type ChatRequest struct {
 	Model       string
 	System      string
@@ -66,7 +66,7 @@ const (
 	ChatStop      ChatEventKind = "stop"
 )
 
-// ChatEvent adalah satu potongan stream.
+// ChatEvent is one chunk of a stream.
 type ChatEvent struct {
 	Kind       ChatEventKind
 	Text       string
@@ -75,15 +75,15 @@ type ChatEvent struct {
 	StopReason string
 }
 
-// ChatStream adalah hasil stream provider.
+// ChatStream is the stream returned by a provider.
 type ChatStream = iter.Seq2[ChatEvent, error]
 
-// Provider adalah adapter model.
+// Provider is a model adapter.
 type Provider interface {
 	Stream(ctx context.Context, req ChatRequest) (ChatStream, error)
 }
 
-// LLMRegistry menyimpan provider berdasarkan nama di [providers.<nama>].
+// LLMRegistry stores providers by name from [providers.<name>].
 type LLMRegistry interface {
 	Provider(name string) (Provider, bool)
 	Names() []string

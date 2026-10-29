@@ -7,7 +7,7 @@ import (
 	"github.com/pelletier/go-toml/v2/unstable"
 )
 
-// layerData adalah hasil parse satu lapisan.
+// layerData is the parse result of a single layer.
 type layerData struct {
 	value     map[string]any
 	positions map[string]pos

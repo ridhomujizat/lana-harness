@@ -14,7 +14,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// setupTerminalLogging mengatur logger untuk subcommand non-chat.
+// setupTerminalLogging configures the logger for non-chat subcommands.
 func setupTerminalLogging() {
 	level := slog.LevelWarn
 	switch strings.ToLower(os.Getenv("LANA_LOG")) {
@@ -26,8 +26,8 @@ func setupTerminalLogging() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 }
 
-// setupChatLogging mengalihkan log chat ke berkas agar terminal bersih.
-// Nilai balik mengembalikan logger sebelumnya.
+// setupChatLogging redirects chat logs to a file to keep the terminal clean.
+// The returned function restores the previous logger.
 func setupChatLogging(home string) func() {
 	previous := slog.Default()
 	path := filepath.Join(home, "logs", "lana.log")
@@ -44,7 +44,7 @@ func setupChatLogging(home string) func() {
 	return func() { slog.SetDefault(previous) }
 }
 
-// loadAgent membaca config lalu memilih agent yang dipakai.
+// loadAgent reads the config and picks the agent to use.
 func loadAgent(ctx context.Context, home, requested string) (string, error) {
 	result, err := config.Load(ctx, config.Options{Home: home})
 	if err != nil {
@@ -53,7 +53,7 @@ func loadAgent(ctx context.Context, home, requested string) (string, error) {
 	return resolveAgent(result.Config, requested)
 }
 
-// resolveAgent memilih agent: flag, route cli, "default", atau satu-satunya agent.
+// resolveAgent picks the agent: the flag, a cli route, "default", or the only agent.
 func resolveAgent(cfg core.Config, requested string) (string, error) {
 	names := make([]string, 0, len(cfg.Agents))
 	for name := range cfg.Agents {
@@ -65,7 +65,7 @@ func resolveAgent(cfg core.Config, requested string) (string, error) {
 			if len(names) == 0 {
 				return "", errNoAgent()
 			}
-			return "", fmt.Errorf("agent %q tidak dikenal (tersedia: %s)", requested, strings.Join(names, ", "))
+			return "", fmt.Errorf("unknown agent %q (available: %s)", requested, strings.Join(names, ", "))
 		}
 		return requested, nil
 	}
@@ -86,9 +86,9 @@ func resolveAgent(cfg core.Config, requested string) (string, error) {
 	case 1:
 		return names[0], nil
 	}
-	return "", fmt.Errorf("tidak ada route cli; pilih agent dengan --agent (tersedia: %s)", strings.Join(names, ", "))
+	return "", fmt.Errorf("no cli route; choose an agent with --agent (available: %s)", strings.Join(names, ", "))
 }
 
 func errNoAgent() error {
-	return fmt.Errorf("belum ada agent di konfigurasi; jalankan 'lana init --yes' dulu")
+	return fmt.Errorf("no agent in the config yet; run 'lana init --yes' first")
 }

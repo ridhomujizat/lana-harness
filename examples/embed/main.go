@@ -14,7 +14,7 @@ import (
 type echoTool struct{}
 
 func (echoTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "echo", Description: "Mengembalikan teks.", InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`)}
+	return core.ToolSpec{Name: "echo", Description: "Returns the text.", InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`)}
 }
 func (echoTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 func (echoTool) Call(ctx context.Context, tc core.ToolCtx, input json.RawMessage) (core.ToolOutput, error) {
@@ -28,7 +28,7 @@ func (echoTool) Call(ctx context.Context, tc core.ToolCtx, input json.RawMessage
 }
 
 func main() {
-	text := "Halo dari embed."
+	text := "Hello from embed."
 	stop := "end_turn"
 	script := mock.Script{Responses: []mock.Response{{Events: []mock.Event{{Text: &text}, {Stop: &stop}}}}}
 	layer := []byte("[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.assistant]\nprovider = \"mock\"\nmodel = \"mock\"\ntools = [\"echo\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n")
@@ -41,7 +41,7 @@ func main() {
 		panic(err)
 	}
 	defer func() { _ = rt.Close() }()
-	result, err := rt.Run(context.Background(), lana.Request{Prompt: "halo"})
+	result, err := rt.Run(context.Background(), lana.Request{Prompt: "hello"})
 	if err != nil {
 		panic(err)
 	}

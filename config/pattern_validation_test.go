@@ -14,9 +14,9 @@ func TestConfigRejectsBadPattern(t *testing.T) {
 	_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
 	var errs Errors
 	if !errors.As(err, &errs) {
-		t.Fatalf("error bukan Errors: %v", err)
+		t.Fatalf("error is not Errors: %v", err)
 	}
 	if !strings.Contains(err.Error(), "agents.coder.rules.allow.0") {
-		t.Fatalf("error tidak menyebut key: %v", err)
+		t.Fatalf("error does not mention key: %v", err)
 	}
 }

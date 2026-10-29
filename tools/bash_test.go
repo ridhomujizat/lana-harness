@@ -29,22 +29,22 @@ func TestBashTimeoutKillsGroup(t *testing.T) {
 	ws := t.TempDir()
 	start := time.Now()
 	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"sleep 5","timeout_secs":1}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "timeout setelah 1 detik") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "timed out after 1 seconds") {
 		t.Fatalf("out=%+v", out)
 	}
 	if time.Since(start) > 3*time.Second {
-		t.Fatalf("timeout terlalu lama: %v", time.Since(start))
+		t.Fatalf("timeout took too long: %v", time.Since(start))
 	}
 }
 
 func TestBashTimeoutMax(t *testing.T) {
 	ws := t.TempDir()
-	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"touch harusnya-tidak-ada","timeout_secs":601}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "1 sampai 600") {
+	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"touch should-not-exist","timeout_secs":601}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "between 1 and 600") {
 		t.Fatalf("out=%+v", out)
 	}
-	if _, err := os.Stat(filepath.Join(ws, "harusnya-tidak-ada")); !os.IsNotExist(err) {
-		t.Fatalf("perintah dijalankan: %v", err)
+	if _, err := os.Stat(filepath.Join(ws, "should-not-exist")); !os.IsNotExist(err) {
+		t.Fatalf("command was executed: %v", err)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestBashExitCode(t *testing.T) {
 		t.Fatalf("out=%+v", out)
 	}
 	if !strings.Contains(out.Output, "out") || !strings.Contains(out.Output, "err") {
-		t.Fatalf("output tidak lengkap: %q", out.Output)
+		t.Fatalf("output incomplete: %q", out.Output)
 	}
 }
 
@@ -65,8 +65,8 @@ func TestBashOutputTruncated(t *testing.T) {
 	if out.Status != core.ToolStatusSuccess {
 		t.Fatalf("out=%+v", out)
 	}
-	if !strings.Contains(out.Output, "dipotong dari") {
-		t.Fatalf("catatan potong tidak ada")
+	if !strings.Contains(out.Output, "truncated from") {
+		t.Fatalf("truncation note missing")
 	}
 }
 
@@ -82,10 +82,10 @@ func TestBashCancel(t *testing.T) {
 	cancel()
 	select {
 	case out := <-done:
-		if out.Status != core.ToolStatusError || out.Output != "dibatalkan" {
+		if out.Status != core.ToolStatusError || out.Output != "cancelled" {
 			t.Fatalf("out=%+v", out)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("bash tidak berhenti saat dibatalkan")
+		t.Fatal("bash did not stop when cancelled")
 	}
 }

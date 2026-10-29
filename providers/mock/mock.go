@@ -1,4 +1,4 @@
-// Package mock menyediakan provider LLM palsu untuk test.
+// Package mock provides a fake LLM provider for tests.
 package mock
 
 import (
@@ -13,32 +13,32 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Script adalah daftar respons untuk setiap panggilan Stream.
+// Script is the list of responses for each Stream call.
 type Script struct {
 	Responses []Response `json:"responses"`
 }
 
-// Response adalah satu respons skrip.
+// Response is one scripted response.
 type Response struct {
 	Events []Event      `json:"events,omitempty"`
 	Error  *ScriptError `json:"error,omitempty"`
 }
 
-// ScriptError adalah error terminal di skrip.
+// ScriptError is a terminal error in the script.
 type ScriptError struct {
 	Class   string `json:"class"`
 	Message string `json:"message"`
 	Status  int    `json:"status,omitempty"`
 }
 
-// ToolUse adalah tool call di skrip.
+// ToolUse is a tool call in the script.
 type ToolUse struct {
 	ID    string          `json:"id"`
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input"`
 }
 
-// Event adalah satu event skrip; tepat satu field terisi.
+// Event is one scripted event; exactly one field is set.
 type Event struct {
 	Text    *string     `json:"text,omitempty"`
 	DelayMS *int        `json:"delay_ms,omitempty"`
@@ -52,17 +52,17 @@ var validClasses = map[string]bool{
 	"context_length": true, "client": true, "missing_secret": true,
 }
 
-// Llm adalah provider palsu.
+// Llm is a fake provider.
 type Llm struct {
 	mu     sync.Mutex
 	next   int
 	script Script
 }
 
-// New membuat Llm dari skrip.
+// New creates an Llm from a script.
 func New(script Script) *Llm { return &Llm{script: script} }
 
-// LoadScript membaca skrip JSON dan menolak key tidak dikenal.
+// LoadScript reads a JSON script and rejects unknown keys.
 func LoadScript(path string) (Script, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -95,25 +95,25 @@ func LoadScript(path string) (Script, error) {
 				count++
 			}
 			if count != 1 {
-				return Script{}, fmt.Errorf("events[%d] harus punya tepat satu key", j)
+				return Script{}, fmt.Errorf("events[%d] must have exactly one key", j)
 			}
 			if ev.DelayMS != nil && *ev.DelayMS < 0 {
-				return Script{}, fmt.Errorf("delay_ms tidak boleh negatif")
+				return Script{}, fmt.Errorf("delay_ms must not be negative")
 			}
 		}
 		if resp.Error != nil && !validClasses[resp.Error.Class] {
-			return Script{}, fmt.Errorf("class '%s' tidak dikenal", resp.Error.Class)
+			return Script{}, fmt.Errorf("class '%s' is unknown", resp.Error.Class)
 		}
 	}
 	return script, nil
 }
 
-// Stream memutar respons berikutnya.
+// Stream plays the next response.
 func (l *Llm) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	l.mu.Lock()
 	if l.next >= len(l.script.Responses) {
 		l.mu.Unlock()
-		return nil, fmt.Errorf("skrip habis")
+		return nil, fmt.Errorf("script exhausted")
 	}
 	resp := l.script.Responses[l.next]
 	l.next++

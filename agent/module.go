@@ -12,7 +12,7 @@ func init() {
 	core.RegisterModule("agent", func() core.Module { return &Module{} })
 }
 
-// Module memasang AgentRegistry.
+// Module installs the AgentRegistry.
 type Module struct {
 	registry *Registry
 }
@@ -26,38 +26,38 @@ func (m *Module) Provides() []core.ServiceKey { return []core.ServiceKey{core.Se
 func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	llmAny, ok := b.Lookup(core.ServiceLLM)
 	if !ok {
-		return fmt.Errorf("service llm tidak tersedia")
+		return fmt.Errorf("service llm is not available")
 	}
 	llm, ok := llmAny.(core.LLMRegistry)
 	if !ok {
-		return fmt.Errorf("service llm bukan LLMRegistry")
+		return fmt.Errorf("service llm is not an LLMRegistry")
 	}
 	toolsAny, ok := b.Lookup(core.ServiceTools)
 	if !ok {
-		return fmt.Errorf("service tools tidak tersedia")
+		return fmt.Errorf("service tools is not available")
 	}
 	toolReg, ok := toolsAny.(core.ToolRegistry)
 	if !ok {
-		return fmt.Errorf("service tools bukan ToolRegistry")
+		return fmt.Errorf("service tools is not a ToolRegistry")
 	}
 	storeAny, ok := b.Lookup(core.ServiceSessions)
 	if !ok {
-		return fmt.Errorf("service sessions tidak tersedia")
+		return fmt.Errorf("service sessions is not available")
 	}
 	store, ok := storeAny.(core.SessionStore)
 	if !ok {
-		return fmt.Errorf("service sessions bukan SessionStore")
+		return fmt.Errorf("service sessions is not a SessionStore")
 	}
 	config := b.Config()
 	for name, agentCfg := range config.Agents {
 		for _, toolName := range agentCfg.Tools {
 			if _, ok := toolReg.Get(toolName); !ok {
-				return fmt.Errorf("agent '%s' memakai tool '%s' yang tidak terdaftar", name, toolName)
+				return fmt.Errorf("agent '%s' uses tool '%s' which is not registered", name, toolName)
 			}
 		}
 		if agentCfg.Provider != "" {
 			if _, ok := config.Providers[agentCfg.Provider]; !ok {
-				return fmt.Errorf("agent '%s' memakai provider '%s' yang tidak terdaftar", name, agentCfg.Provider)
+				return fmt.Errorf("agent '%s' uses provider '%s' which is not registered", name, agentCfg.Provider)
 			}
 		}
 		for _, fallback := range agentCfg.Fallback {
@@ -66,10 +66,10 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 				provider = fallback[:idx]
 			}
 			if _, ok := config.Providers[provider]; !ok {
-				return fmt.Errorf("agent '%s' memakai provider fallback '%s' yang tidak terdaftar", name, provider)
+				return fmt.Errorf("agent '%s' uses fallback provider '%s' which is not registered", name, provider)
 			}
 			if _, ok := llm.Provider(provider); !ok {
-				return fmt.Errorf("agent '%s' memakai provider fallback '%s' yang tidak dikenal", name, provider)
+				return fmt.Errorf("agent '%s' uses fallback provider '%s' which is unknown", name, provider)
 			}
 		}
 	}

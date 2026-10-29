@@ -1,6 +1,6 @@
 package core
 
-// PreStepInput adalah masukan AgentPreStep.
+// PreStepInput is the input to AgentPreStep.
 type PreStepInput struct {
 	SessionID string
 	TurnID    string
@@ -9,26 +9,26 @@ type PreStepInput struct {
 	Input     Message
 }
 
-// PreStepDecision adalah hasil AgentPreStep.
+// PreStepDecision is the result of AgentPreStep.
 type PreStepDecision struct {
 	Input  Message
 	Reject bool
 	Reason string
 }
 
-// RequestControl adalah kontrol request yang bisa diubah AgentRequest.
+// RequestControl is the request control that AgentRequest can modify.
 type RequestControl struct {
 	MaxTokens   int
 	Temperature *float64
 }
 
-// LLMTarget adalah satu target provider.
+// LLMTarget is one provider target.
 type LLMTarget struct {
 	Provider string
 	Model    string
 }
 
-// LLMStreamInput adalah masukan LLMStream.
+// LLMStreamInput is the input to LLMStream.
 type LLMStreamInput struct {
 	SessionID string
 	TurnID    string
@@ -38,13 +38,13 @@ type LLMStreamInput struct {
 	Request   ChatRequest
 }
 
-// ToolsPreExecuteInput adalah masukan ToolsPreExecute.
+// ToolsPreExecuteInput is the input to ToolsPreExecute.
 type ToolsPreExecuteInput struct {
 	AgentName string
 	Call      ToolCall
 }
 
-// ToolDecision adalah keputusan ToolsPreExecute.
+// ToolDecision is the decision of ToolsPreExecute.
 type ToolDecision struct {
 	Allowed bool
 	Outcome ApprovalOutcome
@@ -52,20 +52,20 @@ type ToolDecision struct {
 	Reason  string
 }
 
-// ToolsExecuteInput adalah masukan ToolsExecute.
+// ToolsExecuteInput is the input to ToolsExecute.
 type ToolsExecuteInput struct {
 	Ctx  ToolCtx
 	Call ToolCall
 	Tool Tool
 }
 
-// ToolsPostExecuteInput adalah masukan ToolsPostExecute.
+// ToolsPostExecuteInput is the input to ToolsPostExecute.
 type ToolsPostExecuteInput struct {
 	Call   ToolCall
 	Output ToolOutput
 }
 
-// TurnStopInput adalah masukan AgentTurnStopping.
+// TurnStopInput is the input to AgentTurnStopping.
 type TurnStopInput struct {
 	SessionID  string
 	TurnID     string
@@ -74,7 +74,7 @@ type TurnStopInput struct {
 	StopReason string
 }
 
-// StopVote adalah suara satu listener AgentTurnStopping.
+// StopVote is the vote of one AgentTurnStopping listener.
 type StopVote struct {
 	Continue bool
 	Reason   string

@@ -8,7 +8,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// Module adalah unit fitur yang dikompilasi ke binary.
+// Module is a feature unit compiled into the binary.
 type Module interface {
 	ID() string
 	Requires() []ServiceKey
@@ -17,14 +17,14 @@ type Module interface {
 	Stop(ctx context.Context) error
 }
 
-// ModuleConfig adalah isi satu baris [[modules]] setelah merge.
+// ModuleConfig is the content of one [[modules]] row after merging.
 type ModuleConfig struct {
 	ID     string
 	Module string
 	Values map[string]any
 }
 
-// Decode menyalin Values ke struct tujuan lewat TOML.
+// Decode copies Values into the destination struct via TOML.
 func (c ModuleConfig) Decode(into any) error {
 	b, err := toml.Marshal(c.Values)
 	if err != nil {
@@ -38,20 +38,20 @@ var (
 	moduleRegistry = map[string]func() Module{}
 )
 
-// RegisterModule mendaftarkan factory modul. Nama duplikat memicu panic.
+// RegisterModule registers a module factory. A duplicate name panics.
 func RegisterModule(name string, factory func() Module) {
 	if name == "" || factory == nil {
-		panic("core: RegisterModule membutuhkan nama dan factory")
+		panic("core: RegisterModule requires a name and a factory")
 	}
 	moduleMu.Lock()
 	defer moduleMu.Unlock()
 	if _, ok := moduleRegistry[name]; ok {
-		panic("core: modul '" + name + "' sudah terdaftar")
+		panic("core: module '" + name + "' is already registered")
 	}
 	moduleRegistry[name] = factory
 }
 
-// ModuleNames mengembalikan nama modul terdaftar, diurutkan alfabet.
+// ModuleNames returns the registered module names, sorted alphabetically.
 func ModuleNames() []string {
 	moduleMu.Lock()
 	defer moduleMu.Unlock()

@@ -52,18 +52,18 @@ func run(args []string) int {
 	case "chat":
 		return cmdChat(args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "error: perintah tidak dikenal: %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "error: unknown command: %s\n", args[0])
 		return 2
 	}
 }
 
 func help() {
-	fmt.Print("lana - agen coding dan personal\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <nama>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <nama>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
 
-// providerPreset adalah nilai default wizard untuk satu provider.
+// providerPreset holds the wizard's default values for one provider.
 type providerPreset struct {
 	name    string
 	baseURL string
@@ -98,14 +98,14 @@ func providerNames() string {
 func cmdInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	force := fs.Bool("force", false, "timpa file")
-	yes := fs.Bool("yes", false, "default")
+	force := fs.Bool("force", false, "overwrite file")
+	yes := fs.Bool("yes", false, "accept defaults")
 	providerFlag := fs.String("provider", "openai", "provider: "+providerNames())
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if !*yes && !isTTY(os.Stdin) {
-		fmt.Fprintln(os.Stderr, "error: lana init butuh terminal; pakai --yes untuk nilai default")
+		fmt.Fprintln(os.Stderr, "error: lana init needs a terminal; use --yes for default values")
 		return 2
 	}
 	home, err := homeDir()
@@ -114,7 +114,7 @@ func cmdInit(args []string) int {
 	}
 	preset, ok := lookupProvider(*providerFlag)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "error: provider %q tidak dikenal (pilihan: %s)\n", *providerFlag, providerNames())
+		fmt.Fprintf(os.Stderr, "error: unknown provider %q (choices: %s)\n", *providerFlag, providerNames())
 		return 2
 	}
 	keyEnv, model, apiKey := preset.keyEnv, preset.model, ""
@@ -122,7 +122,7 @@ func cmdInit(args []string) int {
 		fmt.Printf("Provider: %s\n", providerNames())
 		selected, ok := lookupProvider(ask("Provider", preset.name))
 		if !ok {
-			fmt.Fprintf(os.Stderr, "error: provider tidak dikenal (pilihan: %s)\n", providerNames())
+			fmt.Fprintf(os.Stderr, "error: unknown provider (choices: %s)\n", providerNames())
 			return 2
 		}
 		preset = selected
@@ -135,7 +135,7 @@ func cmdInit(args []string) int {
 	secretsPath := filepath.Join(home, "secrets.env")
 	for _, path := range []string{cfgPath, promptPath, secretsPath} {
 		if _, err := os.Stat(path); err == nil && !*force {
-			fmt.Fprintf(os.Stderr, "error: file sudah ada: %s; pakai --force untuk menimpa\n", path)
+			fmt.Fprintf(os.Stderr, "error: file already exists: %s; use --force to overwrite\n", path)
 			return 2
 		}
 	}
@@ -144,7 +144,7 @@ func cmdInit(args []string) int {
 		mode os.FileMode
 	}{
 		cfgPath:     {initConfig(preset, keyEnv, model), 0o644},
-		promptPath:  {"Kamu adalah asisten coding dan personal yang ringkas dan teliti.\n", 0o644},
+		promptPath:  {"You are a concise, careful personal coding assistant.\n", 0o644},
 		secretsPath: {secretsText(keyEnv, apiKey), 0o600},
 	} {
 		if err := atomicWrite(path, []byte(data.text), data.mode); err != nil {
@@ -152,12 +152,12 @@ func cmdInit(args []string) int {
 		}
 	}
 	if apiKey != "" {
-		fmt.Printf("✓ dibuat %s\n✓ dibuat %s\n✓ dibuat %s (0600, API key tersimpan)\n", cfgPath, promptPath, secretsPath)
-		fmt.Println("· jalankan: lana chat")
+		fmt.Printf("✓ created %s\n✓ created %s\n✓ created %s (0600, API key saved)\n", cfgPath, promptPath, secretsPath)
+		fmt.Println("· run: lana chat")
 		return 0
 	}
-	fmt.Printf("✓ dibuat %s\n✓ dibuat %s\n✓ dibuat %s (0600)\n", cfgPath, promptPath, secretsPath)
-	fmt.Printf("· isi %s di %s atau env shell, lalu jalankan: lana chat\n", keyEnv, secretsPath)
+	fmt.Printf("✓ created %s\n✓ created %s\n✓ created %s (0600)\n", cfgPath, promptPath, secretsPath)
+	fmt.Printf("· set %s in %s or as a shell env var, then run: lana chat\n", keyEnv, secretsPath)
 	return 0
 }
 
@@ -167,9 +167,9 @@ func initConfig(preset providerPreset, keyEnv, model string) string {
 
 func secretsText(keyEnv, key string) string {
 	if key == "" {
-		return "# Isi API key di sini, atau set sebagai env di shell.\n# " + keyEnv + "=\n"
+		return "# Put the API key here, or set it as an env var in your shell.\n# " + keyEnv + "=\n"
 	}
-	return "# API key provider; jangan di-commit.\n" + keyEnv + "=" + key + "\n"
+	return "# Provider API key; do not commit.\n" + keyEnv + "=" + key + "\n"
 }
 
 func ask(label, def string) string {
@@ -182,7 +182,7 @@ func ask(label, def string) string {
 }
 
 func askKey(label string) string {
-	fmt.Printf("%s (opsional, kosongkan untuk nanti): ", label)
+	fmt.Printf("%s (optional, leave empty for later): ", label)
 	if isTTY(os.Stdin) {
 		data, err := term.ReadPassword(os.Stdin.Fd())
 		fmt.Println()
@@ -193,8 +193,8 @@ func askKey(label string) string {
 	return readLine()
 }
 
-// readLine membaca satu baris dari stdin tanpa buffering berlebih, sehingga
-// prompt berikutnya (misalnya ReadPassword) tidak kehilangan input.
+// readLine reads one line from stdin without over-buffering, so the next
+// prompt (e.g. ReadPassword) does not lose input.
 func readLine() string {
 	var buf []byte
 	one := make([]byte, 1)
@@ -241,7 +241,7 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 
 func cmdConfig(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "error: pakai lana config check|path|edit")
+		fmt.Fprintln(os.Stderr, "error: use lana config check|path|edit")
 		return 2
 	}
 	home, err := homeDir()
@@ -261,7 +261,7 @@ func cmdConfig(args []string) int {
 			}
 			return fail(err, 2)
 		}
-		fmt.Printf("✓ config valid (%d lapisan, %d agent, %d provider)\n", len(result.Layers), len(result.Config.Agents), len(result.Config.Providers))
+		fmt.Printf("✓ config valid (%d layers, %d agents, %d providers)\n", len(result.Layers), len(result.Config.Agents), len(result.Config.Providers))
 		names := make([]string, 0, len(result.Config.Providers))
 		for name := range result.Config.Providers {
 			names = append(names, name)
@@ -273,9 +273,9 @@ func cmdConfig(args []string) int {
 				continue
 			}
 			if secret, ok := result.Secrets.Lookup(env); ok && secret.Reveal() != "" {
-				fmt.Printf("· %s terisi (provider %s)\n", env, name)
+				fmt.Printf("· %s set (provider %s)\n", env, name)
 			} else {
-				fmt.Printf("· %s belum diisi (provider %s)\n", env, name)
+				fmt.Printf("· %s is not set (provider %s)\n", env, name)
 			}
 		}
 		return 0
@@ -286,7 +286,7 @@ func cmdConfig(args []string) int {
 			if _, err := os.Stat(path); err == nil {
 				fmt.Printf("✓ %s\n", path)
 			} else {
-				fmt.Printf("· %s (tidak ada)\n", path)
+				fmt.Printf("· %s (missing)\n", path)
 			}
 		}
 		return 0
@@ -296,12 +296,12 @@ func cmdConfig(args []string) int {
 			editor = os.Getenv("EDITOR")
 		}
 		if editor == "" {
-			fmt.Fprintln(os.Stderr, "error: set $EDITOR untuk memakai lana config edit")
+			fmt.Fprintln(os.Stderr, "error: set $EDITOR to use lana config edit")
 			return 2
 		}
 		path := filepath.Join(home, "config.toml")
 		if _, err := os.Stat(path); err != nil {
-			fmt.Fprintf(os.Stderr, "error: konfigurasi belum ada di %s; jalankan 'lana init'\n", path)
+			fmt.Fprintf(os.Stderr, "error: config does not exist yet at %s; run 'lana init'\n", path)
 			return 2
 		}
 		parts := strings.Fields(editor)
@@ -335,7 +335,7 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	if providerName != "" {
 		if provider, ok := result.Config.Providers[providerName]; ok && provider.APIKeyEnv != "" {
 			if os.Getenv(provider.APIKeyEnv) == "" && !secretInFile(home, provider.APIKeyEnv) {
-				text := "Halo dari MockLlm. Provider belum dikonfigurasi, jadi ini jawaban contoh. Isi API key provider untuk memakai model sungguhan."
+				text := "Hello from MockLlm. The provider is not configured, so this is a sample answer. Set the provider's API key to use a real model."
 				layer := fmt.Sprintf("[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.%s]\nprovider = \"mock\"\nmodel = \"mock\"\n\n[[routes]]\nchannel = \"cli\"\nagent = %q\n\n[[routes]]\nchannel = \"library\"\nagent = %q\n", agentName, agentName, agentName)
 				opts.Layers = []config.Layer{{Name: "mock", TOML: []byte(layer)}}
 				responses := make([]mock.Response, 200)
@@ -407,10 +407,10 @@ type runError struct {
 func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	agentFlag := fs.String("agent", "", "nama agent")
+	agentFlag := fs.String("agent", "", "agent name")
 	output := fs.String("output", "text", "text|json|stream-json")
 	fs.StringVar(output, "o", "text", "text|json|stream-json")
-	ask := fs.Bool("ask", false, "approval")
+	ask := fs.Bool("ask", false, "ask for approval")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -424,7 +424,7 @@ func cmdRun(args []string) int {
 		}
 	}
 	if strings.TrimSpace(prompt) == "" {
-		fmt.Fprintln(os.Stderr, "error: prompt kosong; berikan argumen atau pipe lewat stdin")
+		fmt.Fprintln(os.Stderr, "error: prompt is empty; pass arguments or pipe via stdin")
 		return 2
 	}
 	cwd, _ := os.Getwd()
@@ -463,7 +463,7 @@ func cmdRun(args []string) int {
 	}
 	defer func() { _ = rt.Close() }()
 	if missingEnv != "" {
-		fmt.Fprintf(os.Stderr, "· %s belum diisi; memakai MockLlm, bukan model nyata\n", missingEnv)
+		fmt.Fprintf(os.Stderr, "· %s is not set; using MockLlm, not a real model\n", missingEnv)
 	}
 	start := time.Now()
 	result, runErr := rt.Run(ctx, lana.Request{Agent: agentName, Prompt: prompt})
@@ -504,7 +504,7 @@ func cmdRun(args []string) int {
 		return 0
 	}
 	if result.StopReason == lana.StopMaxSteps {
-		fmt.Fprintln(os.Stderr, "error: turn berhenti karena max_steps")
+		fmt.Fprintln(os.Stderr, "error: turn stopped due to max_steps")
 	} else if runErr != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", runErr)
 	}

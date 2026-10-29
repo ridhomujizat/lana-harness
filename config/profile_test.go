@@ -58,13 +58,13 @@ func TestUnknownProfileError(t *testing.T) {
 	_, err := Load(context.Background(), Options{Home: t.TempDir(), Profile: "xyz", Env: envMap(nil)})
 	var errs Errors
 	if !errors.As(err, &errs) {
-		t.Fatalf("error bukan Errors: %v", err)
+		t.Fatalf("error is not Errors: %v", err)
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "xyz") || !strings.Contains(msg, "headless") || !strings.Contains(msg, "minimal") {
-		t.Fatalf("pesan profil salah: %s", msg)
+		t.Fatalf("wrong profile message: %s", msg)
 	}
 	if filepath.IsAbs(msg) {
-		t.Fatalf("pesan tidak seharusnya path: %s", msg)
+		t.Fatalf("message should not be a path: %s", msg)
 	}
 }

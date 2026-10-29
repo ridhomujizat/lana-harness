@@ -11,7 +11,7 @@ type serviceEntry struct {
 	value    any
 }
 
-// Builder dipakai modul saat Install. Tidak dipakai setelah Boot selesai.
+// Builder is used by modules during Install. It is not used after Boot completes.
 type Builder struct {
 	mu        sync.Mutex
 	cfg       Config
@@ -32,18 +32,18 @@ func newBuilder(cfg Config) *Builder {
 	}
 }
 
-// Provide memasang service. Error jika key sudah dipasang modul lain.
+// Provide installs a service. It returns an error if another module already provides the key.
 func (b *Builder) Provide(key ServiceKey, svc any) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if old, ok := b.services[key]; ok {
-		return fmt.Errorf("service '%s' sudah dipasang modul %s", key, old.provider)
+		return fmt.Errorf("service '%s' is already provided by module %s", key, old.provider)
 	}
 	b.services[key] = serviceEntry{provider: b.currentID, value: svc}
 	return nil
 }
 
-// Lookup mengambil service yang sudah dipasang modul sebelumnya.
+// Lookup returns a service already provided by an earlier module.
 func (b *Builder) Lookup(key ServiceKey) (any, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -51,7 +51,7 @@ func (b *Builder) Lookup(key ServiceKey) (any, bool) {
 	return entry.value, ok
 }
 
-// Own mendaftarkan fungsi release (dari Use hook). Dipanggil saat modul berhenti.
+// Own registers a release function (from a Use hook). It is called when the module stops.
 func (b *Builder) Own(release func()) {
 	if release == nil {
 		return
@@ -61,16 +61,16 @@ func (b *Builder) Own(release func()) {
 	b.mu.Unlock()
 }
 
-// Hooks mengembalikan hook yang dipakai bersama.
+// Hooks returns the shared hooks.
 func (b *Builder) Hooks() *Hooks { return b.hooks }
 
-// Secrets mengembalikan sumber secret proses (tidak diekspor di contract).
+// Secrets returns the process secret source (not exported in the contract).
 func (b *Builder) Secrets() Secrets { return b.secrets }
 
-// Home mengembalikan LANA_HOME yang dipakai runtime (kosong jika tidak ada).
+// Home returns the LANA_HOME used by the runtime (empty if none).
 func (b *Builder) Home() string { return b.home }
 
-// Config mengembalikan salinan config efektif (baca saja).
+// Config returns a copy of the effective config (read-only).
 func (b *Builder) Config() Config {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -95,7 +95,7 @@ func (b *Builder) serviceSnapshot() map[ServiceKey]any {
 	return out
 }
 
-// ModuleNamesSorted mengembalikan daftar modul terdaftar untuk pesan error.
+// ModuleNamesSorted returns the registered module names for error messages.
 func ModuleNamesSorted() []string {
 	names := ModuleNames()
 	sort.Strings(names)

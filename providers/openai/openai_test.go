@@ -92,7 +92,7 @@ func TestConfigOpenAICompat(t *testing.T) {
 			text.WriteString(ev.Text)
 		}
 	}
-	if text.String() != "Halo dunia!" {
+	if text.String() != "Hello world!" {
 		t.Fatalf("text=%q", text.String())
 	}
 }
@@ -115,7 +115,7 @@ func TestNoAuthHeaderWithoutEnv(t *testing.T) {
 	}
 	collect(t, stream)
 	if auth != "" {
-		t.Fatalf("Authorization terkirim: %q", auth)
+		t.Fatalf("Authorization was sent: %q", auth)
 	}
 }
 
@@ -141,7 +141,7 @@ func TestSSETextDeltas(t *testing.T) {
 			}
 		}
 	}
-	if len(deltas) != 3 || strings.Join(deltas, "") != "Halo dunia!" || !sawStop {
+	if len(deltas) != 3 || strings.Join(deltas, "") != "Hello world!" || !sawStop {
 		t.Fatalf("deltas=%v sawStop=%v", deltas, sawStop)
 	}
 }
@@ -197,14 +197,14 @@ func TestWireConvert(t *testing.T) {
 		Model:  "gpt",
 		System: "sys",
 		Messages: []core.Message{
-			{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "halo"}}},
+			{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}},
 			{Role: core.RoleAssistant, Content: []core.ContentBlock{
 				{Kind: core.BlockText, Text: "ok"},
 				{Kind: core.BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a"}`)},
 			}},
-			{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockToolResult, ID: "c1", Output: "isi"}}},
+			{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockToolResult, ID: "c1", Output: "content"}}},
 		},
-		Tools:       []core.ToolSpec{{Name: "read_file", Description: "baca", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+		Tools:       []core.ToolSpec{{Name: "read_file", Description: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 		MaxTokens:   100,
 		Temperature: &temp,
 	}
@@ -235,7 +235,7 @@ func TestWireConvert(t *testing.T) {
 		t.Fatalf("arguments=%v", fn["arguments"])
 	}
 	toolMsg := msgs[3].(map[string]any)
-	if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "c1" || toolMsg["content"] != "isi" {
+	if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "c1" || toolMsg["content"] != "content" {
 		t.Fatalf("tool=%v", toolMsg)
 	}
 }

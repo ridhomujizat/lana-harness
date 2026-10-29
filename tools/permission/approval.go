@@ -10,10 +10,10 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/id"
 )
 
-// ErrInvalidPolicy dikembalikan untuk nilai policy yang tidak dikenal.
-var ErrInvalidPolicy = errors.New("policy tidak valid")
+// ErrInvalidPolicy is returned for unknown policy values.
+var ErrInvalidPolicy = errors.New("invalid policy")
 
-// ApprovalService adalah implementasi core.ApprovalService.
+// ApprovalService is the implementation of core.ApprovalService.
 type ApprovalService struct {
 	Store   core.SessionStore
 	Hooks   *core.Hooks
@@ -21,7 +21,7 @@ type ApprovalService struct {
 	Timeout time.Duration
 }
 
-// NewApprovalService membuat service.
+// NewApprovalService creates the service.
 func NewApprovalService(store core.SessionStore, hooks *core.Hooks, config core.Config) *ApprovalService {
 	return &ApprovalService{Store: store, Hooks: hooks, Config: config, Timeout: 10 * time.Minute}
 }
@@ -31,7 +31,7 @@ func (s *ApprovalService) append(ctx context.Context, sessionID, kind, turnID st
 	return err
 }
 
-// Request meminta approval dan menulis audit.
+// Request asks for approval and writes an audit event.
 func (s *ApprovalService) Request(ctx context.Context, req core.ApprovalRequest) (core.ApprovalOutcome, error) {
 	requestID := id.New()
 	asked := core.ApprovalAsked{V: core.PayloadVersion, RequestID: requestID, CallID: req.CallID, Tool: req.ToolName, Risk: req.Risk, Label: req.Label}
@@ -59,7 +59,7 @@ func (s *ApprovalService) Request(ctx context.Context, req core.ApprovalRequest)
 	}
 	if !validOutcome(outcome) {
 		outcome = core.OutcomeUnavailable
-		reason = "outcome tidak valid"
+		reason = "invalid outcome"
 	}
 	decided := core.ApprovalDecided{V: core.PayloadVersion, RequestID: requestID, CallID: req.CallID, Outcome: outcome, Reason: reason}
 	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -74,7 +74,7 @@ func (s *ApprovalService) ask(ctx context.Context, req core.ApprovalRequest) (ou
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			outcome = core.OutcomeUnavailable
-			err = fmt.Errorf("penjawab panic: %v", recovered)
+			err = fmt.Errorf("approver panicked: %v", recovered)
 		}
 	}()
 	if s.Hooks == nil {
@@ -91,7 +91,7 @@ func validOutcome(outcome core.ApprovalOutcome) bool {
 	return false
 }
 
-// SetPolicy menulis approval/policy.
+// SetPolicy writes an approval/policy event.
 func (s *ApprovalService) SetPolicy(ctx context.Context, sessionID string, p core.Policy) error {
 	if !validPolicy(p) {
 		return ErrInvalidPolicy
@@ -102,7 +102,7 @@ func (s *ApprovalService) SetPolicy(ctx context.Context, sessionID string, p cor
 	return s.append(ctx, sessionID, core.KindApprovalPolicy, "", core.ApprovalPolicy{V: core.PayloadVersion, Policy: p})
 }
 
-// EffectivePolicy membaca policy terakhir.
+// EffectivePolicy reads the latest policy.
 func (s *ApprovalService) EffectivePolicy(ctx context.Context, sessionID string) (core.Policy, error) {
 	info, err := s.Store.Info(ctx, sessionID)
 	if err != nil {

@@ -8,25 +8,25 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Retry adalah listener llm.stream untuk retry dan fallback.
+// Retry is the llm.stream listener for retries and fallback.
 type Retry struct {
 	Store  core.SessionStore
 	Delays []time.Duration
 }
 
-// NewRetry membuat listener retry.
+// NewRetry creates a retry listener.
 func NewRetry(store core.SessionStore) *Retry {
 	return &Retry{Store: store, Delays: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}}
 }
 
-// Install memasang listener retry.
+// Install installs the retry listener.
 func (r *Retry) Install(hooks *core.Hooks) {
 	hooks.LLMStream.Use(r.handle)
 }
 
 func (r *Retry) handle(ctx context.Context, in core.LLMStreamInput, next core.Next[core.LLMStreamInput, core.ChatStream]) (core.ChatStream, error) {
 	if len(in.Targets) == 0 {
-		return nil, &core.ProviderError{Class: "client", Message: "target provider kosong"}
+		return nil, &core.ProviderError{Class: "client", Message: "provider target is empty"}
 	}
 	var lastErr error
 	for _, target := range in.Targets {
@@ -67,7 +67,7 @@ func (r *Retry) handle(ctx context.Context, in core.LLMStreamInput, next core.Ne
 		}
 	}
 	if lastErr == nil {
-		lastErr = &core.ProviderError{Class: "client", Message: "tidak ada target"}
+		lastErr = &core.ProviderError{Class: "client", Message: "no target available"}
 	}
 	return nil, lastErr
 }
@@ -125,7 +125,7 @@ func pumpStream(ctx context.Context, stream core.ChatStream) (core.ChatEvent, *s
 	case result, ok := <-pump.ch:
 		if !ok {
 			cancel()
-			return core.ChatEvent{}, nil, &core.ProviderError{Class: "network", Message: "stream kosong"}
+			return core.ChatEvent{}, nil, &core.ProviderError{Class: "network", Message: "stream is empty"}
 		}
 		if result.err != nil {
 			cancel()

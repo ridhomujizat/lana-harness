@@ -12,7 +12,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/id"
 )
 
-// TurnResult adalah hasil satu turn.
+// TurnResult is the result of one turn.
 type TurnResult struct {
 	SessionID  string
 	TurnID     string
@@ -27,7 +27,7 @@ type turnState struct {
 	result TurnResult
 }
 
-// Registry mengatur session hidup dan inbox.
+// Registry manages live sessions and their inboxes.
 type Registry struct {
 	root       context.Context
 	cancelRoot context.CancelFunc
@@ -49,7 +49,7 @@ type Registry struct {
 	pipeline *ToolRunner
 }
 
-// NewRegistry membuat registry.
+// NewRegistry creates a registry.
 func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.ToolRegistry, hooks *core.Hooks, cfg core.Config, secrets core.Secrets, home, defaultWorkspace string) *Registry {
 	root, cancel := context.WithCancel(context.Background())
 	if hooks == nil {
@@ -84,12 +84,12 @@ func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {
 	})
 	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
 		if len(in.Targets) == 0 {
-			return nil, &core.ProviderError{Class: "client", Message: "target provider kosong"}
+			return nil, &core.ProviderError{Class: "client", Message: "provider target is empty"}
 		}
 		target := in.Targets[0]
 		provider, ok := llm.Provider(target.Provider)
 		if !ok {
-			return nil, &core.ProviderError{Class: "client", Message: "provider tidak dikenal: " + target.Provider}
+			return nil, &core.ProviderError{Class: "client", Message: "unknown provider: " + target.Provider}
 		}
 		req := in.Request
 		req.Model = target.Model
@@ -116,7 +116,7 @@ func (r *Registry) finishTurn(turnID string, result TurnResult) {
 	r.mu.Unlock()
 }
 
-// Wait menunggu turn selesai.
+// Wait waits for the turn to finish.
 func (r *Registry) Wait(ctx context.Context, turnID string) (TurnResult, error) {
 	r.mu.Lock()
 	state := r.turns[turnID]
@@ -142,7 +142,7 @@ func (r *Registry) sessionExists(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// Start memulai turn baru.
+// Start starts a new turn.
 func (r *Registry) Start(ctx context.Context, sessionID, text string) (string, error) {
 	if strings.TrimSpace(text) == "" {
 		return "", ErrEmptyText
@@ -197,7 +197,7 @@ func (r *Registry) startTurnAsync(runner *Runner, text string) {
 	}()
 }
 
-// Send mengirim pesan; idle memulai turn, sibuk masuk inbox.
+// Send sends a message; if the session is idle it starts a turn, otherwise it goes to the inbox.
 func (r *Registry) Send(ctx context.Context, sessionID, text string) error {
 	if strings.TrimSpace(text) == "" {
 		return ErrEmptyText
@@ -224,7 +224,7 @@ func (r *Registry) Send(ctx context.Context, sessionID, text string) error {
 	return nil
 }
 
-// Cancel membatalkan turn berjalan.
+// Cancel cancels the running turn.
 func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
@@ -244,7 +244,7 @@ func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// SetAgent memilih agent untuk session.
+// SetAgent selects the agent for the session.
 func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
@@ -257,7 +257,7 @@ func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) er
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 }
 
-// SetModel memilih provider:model untuk session.
+// SetModel selects the provider:model for the session.
 func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
@@ -276,7 +276,7 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 }
 
-// SubscribeLive berlangganan frame hidup satu session.
+// SubscribeLive subscribes to the live frames of one session.
 func (r *Registry) SubscribeLive(sessionID string) (*core.Subscription[core.LiveFrame], error) {
 	return r.hub.Subscribe(sessionID), nil
 }
@@ -287,7 +287,7 @@ func (r *Registry) appendEvent(ctx context.Context, sessionID, kind, turnID stri
 	return err
 }
 
-// Close membatalkan semua turn dan menunggu selesai.
+// Close cancels all turns and waits for them to finish.
 func (r *Registry) Close(ctx context.Context) error {
 	r.mu.Lock()
 	if r.closed {
@@ -307,13 +307,13 @@ func (r *Registry) Close(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(30 * time.Second):
-		return fmt.Errorf("shutdown_timeout: turn tidak selesai")
+		return fmt.Errorf("shutdown_timeout: turn did not finish")
 	}
 	r.hub.Close()
 	return nil
 }
 
-// Names mengembalikan agent terdaftar, terurut.
+// AgentNames returns the registered agents, sorted.
 func (r *Registry) AgentNames() []string {
 	names := make([]string, 0, len(r.config.Agents))
 	for name := range r.config.Agents {

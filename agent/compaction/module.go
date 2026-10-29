@@ -11,7 +11,7 @@ func init() {
 	core.RegisterModule("compaction", func() core.Module { return &Module{} })
 }
 
-// Module memasang compaction service dan listener.
+// Module installs the compaction service and listeners.
 type Module struct {
 	service *Service
 }
@@ -24,19 +24,19 @@ func (m *Module) Provides() []core.ServiceKey { return []core.ServiceKey{core.Se
 func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	storeAny, ok := b.Lookup(core.ServiceSessions)
 	if !ok {
-		return fmt.Errorf("service sessions tidak tersedia")
+		return fmt.Errorf("service sessions is not available")
 	}
 	llmAny, ok := b.Lookup(core.ServiceLLM)
 	if !ok {
-		return fmt.Errorf("service llm tidak tersedia")
+		return fmt.Errorf("service llm is not available")
 	}
 	store, ok := storeAny.(core.SessionStore)
 	if !ok {
-		return fmt.Errorf("service sessions bukan SessionStore")
+		return fmt.Errorf("service sessions is not a SessionStore")
 	}
 	llm, ok := llmAny.(core.LLMRegistry)
 	if !ok {
-		return fmt.Errorf("service llm bukan LLMRegistry")
+		return fmt.Errorf("service llm is not an LLMRegistry")
 	}
 	m.service = NewService(store, llm, b.Config())
 	m.service.Install(b.Hooks())

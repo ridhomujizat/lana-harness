@@ -2,10 +2,10 @@ package core
 
 import "encoding/json"
 
-// PayloadVersion adalah nilai field v di setiap payload.
+// PayloadVersion is the value of the v field in every payload.
 const PayloadVersion = 1
 
-// SessionEvent adalah satu baris session_events.
+// SessionEvent is one session_events row.
 type SessionEvent struct {
 	SessionID string          `json:"session_id"`
 	Seq       int64           `json:"seq"`
@@ -15,7 +15,7 @@ type SessionEvent struct {
 	CreatedAt int64           `json:"created_at"`
 }
 
-// EventDraft adalah event sebelum ditulis.
+// EventDraft is an event before it is written.
 type EventDraft struct {
 	Kind    string
 	TurnID  string
@@ -41,7 +41,7 @@ const (
 	KindCompactionSummary = "compaction/summary"
 )
 
-// PayloadError adalah error di payload turn/end dan assistant/attempt.
+// PayloadError is the error in turn/end and assistant/attempt payloads.
 type PayloadError struct {
 	Class   string `json:"class"`
 	Status  int    `json:"status,omitempty"`

@@ -7,13 +7,13 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// ToolRunner mengeksekusi batch tool dalam satu step.
+// ToolRunner executes a batch of tools in one step.
 type ToolRunner struct {
 	hooks *core.Hooks
 	tools core.ToolRegistry
 }
 
-// NewToolRunner membuat ToolRunner.
+// NewToolRunner creates a ToolRunner.
 func NewToolRunner(hooks *core.Hooks, toolReg core.ToolRegistry) *ToolRunner {
 	return &ToolRunner{hooks: hooks, tools: toolReg}
 }
@@ -25,7 +25,7 @@ type callState struct {
 	ready  bool
 }
 
-// Run menjalankan pipeline tool untuk semua call dan mengembalikan output sesuai urutan call.
+// Run executes the tool pipeline for all calls and returns outputs in call order.
 func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []string, tc core.ToolCtx) []core.ToolOutput {
 	allowed := map[string]bool{}
 	for _, name := range enabled {
@@ -36,16 +36,16 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 		state := &callState{call: call}
 		states[i] = state
 		if !allowed[call.Name] {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool tidak diaktifkan untuk agent"}
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool is not enabled for agent"}
 			continue
 		}
 		tool, ok := tr.tools.Get(call.Name)
 		if !ok {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool tidak terdaftar"}
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool is not registered"}
 			continue
 		}
 		if err := validateInput(tool.Spec().InputSchema, call.Input); err != nil {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "input tidak valid: " + err.Error()}
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "invalid input: " + err.Error()}
 			continue
 		}
 		state.tool = tool
@@ -69,7 +69,7 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 	if ctx.Err() != nil {
 		for _, state := range states {
 			if state.ready {
-				state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+				state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
 				state.ready = false
 			}
 		}
@@ -100,7 +100,7 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 	for i, state := range states {
 		out[i] = state.output
 		if out[i].Status == "" {
-			out[i] = core.ToolOutput{Status: core.ToolStatusError, Output: "tool tidak menghasilkan output"}
+			out[i] = core.ToolOutput{Status: core.ToolStatusError, Output: "tool produced no output"}
 		}
 	}
 	return out
@@ -118,7 +118,7 @@ func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.
 				defer func() { <-sem }()
 				tr.executeOne(ctx, s, tc)
 			case <-ctx.Done():
-				s.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+				s.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
 			}
 		}(state)
 	}
@@ -127,7 +127,7 @@ func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.
 
 func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.ToolCtx) {
 	if ctx.Err() != nil {
-		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
 		return
 	}
 	input := core.ToolsExecuteInput{Ctx: tc, Call: state.call, Tool: state.tool}
@@ -142,7 +142,7 @@ func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.
 		return
 	}
 	if ctx.Err() != nil {
-		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
 		return
 	}
 	state.output = post

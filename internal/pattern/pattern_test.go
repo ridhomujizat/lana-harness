@@ -36,7 +36,7 @@ func TestPatternExamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.MatchBoth("read_file", Argument{Kind: ArgPath, Value: "a", Alt: "b"}) {
-		t.Fatal("MatchBoth harus salah untuk alt tidak cocok")
+		t.Fatal("MatchBoth must be false when alt does not match")
 	}
 }
 

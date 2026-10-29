@@ -10,15 +10,15 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// ErrOutsideWorkspace dikembalikan saat path keluar dari workspace.
-var ErrOutsideWorkspace = errors.New("di luar workspace")
+// ErrOutsideWorkspace is returned when a path is outside the workspace.
+var ErrOutsideWorkspace = errors.New("outside workspace")
 
-// Guard membatasi akses path ke satu workspace.
+// Guard restricts path access to a single workspace.
 type Guard struct {
 	Workspace string
 }
 
-// Resolve memakai workspace guard.
+// Resolve resolves a path using the guard's workspace.
 func (g *Guard) Resolve(path string) (string, error) {
 	ws := g.Workspace
 	if ws == "" {
@@ -27,7 +27,7 @@ func (g *Guard) Resolve(path string) (string, error) {
 	return ResolveInWorkspace(ws, path)
 }
 
-// ResolveInWorkspace mengembalikan path absolut yang sudah dievaluasi symlink.
+// ResolveInWorkspace returns the absolute path with symlinks evaluated.
 func ResolveInWorkspace(workspace, path string) (string, error) {
 	ws, err := filepath.Abs(workspace)
 	if err != nil {
@@ -78,7 +78,7 @@ func resolveToolPath(g *Guard, tcWorkspace, path string) (string, *core.ToolOutp
 		return resolved, nil
 	}
 	if errors.Is(err, ErrOutsideWorkspace) {
-		out := core.ToolOutput{Status: core.ToolStatusRejected, Output: "di luar workspace"}
+		out := core.ToolOutput{Status: core.ToolStatusRejected, Output: "outside workspace"}
 		return "", &out
 	}
 	out := core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
@@ -98,5 +98,5 @@ func truncateText(s string, limit int) string {
 	if len(runes) <= limit {
 		return s
 	}
-	return string(runes[:limit]) + fmt.Sprintf("\n...[dipotong dari %d karakter]", len(runes))
+	return string(runes[:limit]) + fmt.Sprintf("\n...[truncated from %d characters]", len(runes))
 }

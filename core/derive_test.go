@@ -19,15 +19,15 @@ func TestDeriveGolden(t *testing.T) {
 	events := []SessionEvent{
 		event(t, KindSessionCreated, SessionCreated{V: 1, Agent: "a"}),
 		event(t, KindSystemMessage, SystemMessage{V: 1, Text: "sys"}),
-		event(t, KindUserMessage, UserMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "halo"}}}),
+		event(t, KindUserMessage, UserMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "hello"}}}),
 		event(t, KindAssistantAttempt, AssistantAttempt{V: 1, Error: PayloadError{Class: "rate_limit"}}),
 		event(t, KindToolCall, ToolCallPayload{V: 1, CallID: "c1", Name: "read_file", Input: json.RawMessage(`{}`)}),
 		event(t, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{
 			{Kind: BlockText, Text: "ok"},
 			{Kind: BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a"}`)},
 		}}),
-		event(t, KindToolResult, ToolResultPayload{V: 1, CallID: "c1", Status: ToolStatusSuccess, Output: "isi"}),
-		event(t, KindToolResult, ToolResultPayload{V: 1, CallID: "c2", Status: ToolStatusError, Output: "gagal"}),
+		event(t, KindToolResult, ToolResultPayload{V: 1, CallID: "c1", Status: ToolStatusSuccess, Output: "content"}),
+		event(t, KindToolResult, ToolResultPayload{V: 1, CallID: "c2", Status: ToolStatusError, Output: "failed"}),
 	}
 	messages, err := DeriveMessages(events)
 	if err != nil {

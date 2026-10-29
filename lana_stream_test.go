@@ -43,7 +43,7 @@ func newSSEServer(t *testing.T, responses ...sseResponse) *sseServer {
 		s.mu.Lock()
 		if len(s.queue) == 0 {
 			s.mu.Unlock()
-			http.Error(w, "habis", http.StatusInternalServerError)
+			http.Error(w, "exhausted", http.StatusInternalServerError)
 			return
 		}
 		resp := s.queue[0]
@@ -78,7 +78,7 @@ data: [DONE]
 }
 
 func toolSSE(name, args string) string {
-	return fmt.Sprintf(`data: {"choices":[{"delta":{"content":"membaca"},"finish_reason":null}]}
+	return fmt.Sprintf(`data: {"choices":[{"delta":{"content":"reading"},"finish_reason":null}]}
 
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":%q,"arguments":%q}}]},"finish_reason":null}]}
 
@@ -91,7 +91,7 @@ data: [DONE]
 
 func runtimeWithServer(t *testing.T, srv *sseServer, mutate func(string) string, options ...Option) *Runtime {
 	t.Helper()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"asisten\"\n", srv.server.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL)
 	if mutate != nil {
 		cfg = mutate(cfg)
 	}
@@ -104,13 +104,13 @@ func runtimeWithServer(t *testing.T, srv *sseServer, mutate func(string) string,
 }
 
 func TestRunResult(t *testing.T) {
-	srv := newSSEServer(t, sseResponse{body: textSSE("halo")})
+	srv := newSSEServer(t, sseResponse{body: textSSE("hello")})
 	rt := runtimeWithServer(t, srv, nil)
 	result, err := rt.Run(context.Background(), Request{Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != "halo" || result.StopReason != StopEndTurn || result.SessionID == "" {
+	if result.Text != "hello" || result.StopReason != StopEndTurn || result.SessionID == "" {
 		t.Fatalf("result=%+v", result)
 	}
 }
@@ -118,7 +118,7 @@ func TestRunResult(t *testing.T) {
 func TestRunBusy(t *testing.T) {
 	srv := newSSEServer(t, sseResponse{body: textSSE("a"), delay: 250 * time.Millisecond}, sseResponse{body: textSSE("b")})
 	rt := runtimeWithServer(t, srv, nil)
-	info, err := rt.store.Create(context.Background(), core.NewSession{Agent: "asisten", Channel: "library", Workspace: t.TempDir()})
+	info, err := rt.store.Create(context.Background(), core.NewSession{Agent: "assistant", Channel: "library", Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestRunBusy(t *testing.T) {
 	select {
 	case <-srv.started:
 	case <-time.After(2 * time.Second):
-		t.Fatal("request tidak mulai")
+		t.Fatal("request did not start")
 	}
 	_, err = rt.Run(context.Background(), Request{Prompt: "second", SessionID: info.ID})
 	if !errors.Is(err, ErrSessionBusy) {
@@ -171,7 +171,7 @@ func TestRunProviderError(t *testing.T) {
 func TestStreamEvents(t *testing.T) {
 	srv := newSSEServer(t,
 		sseResponse{body: toolSSE("read_file", `{"path":"a.txt"}`)},
-		sseResponse{body: textSSE("selesai")},
+		sseResponse{body: textSSE("done")},
 	)
 	rt := runtimeWithServer(t, srv, func(cfg string) string {
 		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\ntools = [\"read_file\"]", 1)
@@ -180,7 +180,7 @@ func TestStreamEvents(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("isi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	info, err := rt.store.Create(context.Background(), core.NewSession{Agent: "asisten", Channel: "library", Workspace: ws})
+	info, err := rt.store.Create(context.Background(), core.NewSession{Agent: "assistant", Channel: "library", Workspace: ws})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestStreamEvents(t *testing.T) {
 }
 
 func TestStreamCancel(t *testing.T) {
-	srv := newSSEServer(t, sseResponse{body: textSSE("lambat"), delay: 2 * time.Second})
+	srv := newSSEServer(t, sseResponse{body: textSSE("slow"), delay: 2 * time.Second})
 	rt := runtimeWithServer(t, srv, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -237,7 +237,7 @@ func TestStreamCancel(t *testing.T) {
 }
 
 func TestCloseCancelsTurn(t *testing.T) {
-	srv := newSSEServer(t, sseResponse{body: textSSE("lambat"), delay: 2 * time.Second})
+	srv := newSSEServer(t, sseResponse{body: textSSE("slow"), delay: 2 * time.Second})
 	rt := runtimeWithServer(t, srv, nil)
 	done := make(chan error, 1)
 	go func() {
@@ -247,22 +247,22 @@ func TestCloseCancelsTurn(t *testing.T) {
 	select {
 	case <-srv.started:
 	case <-time.After(2 * time.Second):
-		t.Fatal("request tidak mulai")
+		t.Fatal("request did not start")
 	}
 	start := time.Now()
 	if err := rt.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
-		t.Fatalf("Close terlalu lama: %v", elapsed)
+		t.Fatalf("Close took too long: %v", elapsed)
 	}
 	select {
 	case err := <-done:
 		_ = err
 	case <-time.After(3 * time.Second):
-		t.Fatal("Run tidak selesai setelah Close")
+		t.Fatal("Run did not finish after Close")
 	}
-	if _, err := rt.Run(context.Background(), Request{Prompt: "lagi"}); !errors.Is(err, ErrClosed) {
+	if _, err := rt.Run(context.Background(), Request{Prompt: "again"}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -272,7 +272,7 @@ type customTool struct {
 }
 
 func (c *customTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "lookup_order", Description: "cari order", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
+	return core.ToolSpec{Name: "lookup_order", Description: "look up order", InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
 }
 func (c *customTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 func (c *customTool) Call(context.Context, core.ToolCtx, json.RawMessage) (core.ToolOutput, error) {
@@ -283,11 +283,11 @@ func (c *customTool) Call(context.Context, core.ToolCtx, json.RawMessage) (core.
 func TestCustomToolPipeline(t *testing.T) {
 	srv := newSSEServer(t,
 		sseResponse{body: toolSSE("lookup_order", `{}`)},
-		sseResponse{body: textSSE("selesai")},
+		sseResponse{body: textSSE("done")},
 	)
 	tool := &customTool{}
 	rt2, err := New(context.Background(), Options{
-		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"lookup_order\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"asisten\"\n", srv.server.URL))}},
+		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"lookup_order\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL))}},
 		Tools:  []core.Tool{tool},
 	})
 	if err != nil {
@@ -307,7 +307,7 @@ func TestApprovalNeverDefault(t *testing.T) {
 	ws := t.TempDir()
 	srv := newSSEServer(t,
 		sseResponse{body: toolSSE("write_file", `{"path":"x.txt","content":"x"}`)},
-		sseResponse{body: textSSE("selesai")},
+		sseResponse{body: textSSE("done")},
 	)
 	rt := runtimeWithServer(t, srv, func(cfg string) string {
 		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\nworkspace = \""+ws+"\"\ntools = [\"write_file\"]", 1)
@@ -320,7 +320,7 @@ func TestApprovalNeverDefault(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	if _, err := os.Stat(filepath.Join(ws, "x.txt")); !os.IsNotExist(err) {
-		t.Fatalf("file ditulis: %v", err)
+		t.Fatalf("file was written: %v", err)
 	}
 }
 
@@ -328,15 +328,15 @@ func TestApprovalTrust(t *testing.T) {
 	ws := t.TempDir()
 	srv := newSSEServer(t,
 		sseResponse{body: toolSSE("write_file", `{"path":"x.txt","content":"x"}`)},
-		sseResponse{body: textSSE("selesai")},
+		sseResponse{body: textSSE("done")},
 	)
 	rt := runtimeWithServer(t, srv, func(cfg string) string {
 		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\nworkspace = \""+ws+"\"\ntools = [\"write_file\"]", 1)
 	})
-	// runtimeWithServer tidak menerima opsi; buat ulang dengan PolicyTrust.
+	// runtimeWithServer does not accept options; recreate it with PolicyTrust.
 	_ = rt
 	rt2, err := New(context.Background(), Options{
-		Layers:   []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"asisten\"\n", srv.server.URL, ws))}},
+		Layers:   []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
 		Approval: PolicyTrust,
 	})
 	if err != nil {
@@ -354,7 +354,7 @@ func TestApprovalTrust(t *testing.T) {
 		for _, event := range eventsOf(t, rt2) {
 			t.Logf("event %s %s", event.Kind, event.Payload)
 		}
-		t.Fatalf("file tidak ditulis: %v", err)
+		t.Fatalf("file was not written: %v", err)
 	}
 }
 
@@ -381,10 +381,10 @@ func TestApproveWithLibraryChannel(t *testing.T) {
 	ws := t.TempDir()
 	srv := newSSEServer(t,
 		sseResponse{body: toolSSE("write_file", `{"path":"x.txt","content":"x"}`)},
-		sseResponse{body: textSSE("selesai")},
+		sseResponse{body: textSSE("done")},
 	)
 	rt, err := New(context.Background(), Options{
-		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"asisten\"\n", srv.server.URL, ws))}},
+		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
 	}, ApproveWith(func(context.Context, core.ApprovalRequest) core.ApprovalOutcome {
 		return core.OutcomeAllowedOnce
 	}))
@@ -400,6 +400,6 @@ func TestApproveWithLibraryChannel(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	if _, err := os.Stat(filepath.Join(ws, "x.txt")); err != nil {
-		t.Fatalf("file tidak ditulis: %v", err)
+		t.Fatalf("file was not written: %v", err)
 	}
 }

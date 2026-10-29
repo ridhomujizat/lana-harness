@@ -7,7 +7,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Hub mengirim frame hidup per session.
+// Hub sends live frames per session.
 type Hub struct {
 	mu     sync.Mutex
 	closed bool
@@ -15,12 +15,12 @@ type Hub struct {
 	stream map[string]*core.Observe[core.LiveFrame]
 }
 
-// NewHub membuat Hub.
+// NewHub creates a Hub.
 func NewHub() *Hub {
 	return &Hub{subs: map[string][]*core.Subscription[core.LiveFrame]{}, stream: map[string]*core.Observe[core.LiveFrame]{}}
 }
 
-// Subscribe membuat subscription untuk session.
+// Subscribe creates a subscription for the session.
 func (h *Hub) Subscribe(sessionID string) *core.Subscription[core.LiveFrame] {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -37,7 +37,7 @@ func (h *Hub) Subscribe(sessionID string) *core.Subscription[core.LiveFrame] {
 	return sub
 }
 
-// Publish mengirim frame tanpa memblokir.
+// Publish sends a frame without blocking.
 func (h *Hub) Publish(sessionID string, frame core.LiveFrame) {
 	h.mu.Lock()
 	obs := h.stream[sessionID]
@@ -48,13 +48,13 @@ func (h *Hub) Publish(sessionID string, frame core.LiveFrame) {
 	}
 	for _, sub := range subs {
 		if sub.Len() >= core.ObserveBuffer {
-			slog.Warn("frame hidup dibuang", "session_id", sessionID)
+			slog.Warn("live frame dropped", "session_id", sessionID)
 		}
 	}
 	obs.Publish(frame)
 }
 
-// Close menutup semua subscriber.
+// Close closes all subscribers.
 func (h *Hub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()

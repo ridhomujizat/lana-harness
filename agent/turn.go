@@ -15,7 +15,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/id"
 )
 
-// Runner adalah state satu session.
+// Runner holds the state of one session.
 type Runner struct {
 	reg       *Registry
 	sessionID string
@@ -128,7 +128,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		}
 	}
 	if provider == "" || model == "" {
-		return resolvedAgent{}, fmt.Errorf("agent %s belum punya provider atau model", agentName)
+		return resolvedAgent{}, fmt.Errorf("agent %s has no provider or model set", agentName)
 	}
 	workspace := info.Workspace
 	if workspace == "" {
@@ -166,7 +166,7 @@ func parseFallback(list []string) ([]core.LLMTarget, error) {
 	for _, item := range list {
 		provider, model, ok := strings.Cut(item, ":")
 		if !ok || provider == "" || model == "" {
-			return nil, fmt.Errorf("fallback tidak valid: %s", item)
+			return nil, fmt.Errorf("invalid fallback: %s", item)
 		}
 		out = append(out, core.LLMTarget{Provider: provider, Model: model})
 	}
@@ -254,7 +254,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnStart, TurnID: turnID, Payload: core.TurnStart{V: core.PayloadVersion, TurnID: turnID}}); err != nil {
-		slog.Error("gagal menulis turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
+		slog.Error("failed to write turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 		result.StopReason = "error"
 		result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
 		return result
@@ -301,7 +301,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 				goto finished
 			}
 			if decision.Reject {
-				slog.Info("agent.pre_step menolak pesan", "session_id", rn.sessionID, "turn_id", turnID, "reason", decision.Reason)
+				slog.Info("agent.pre_step rejected message", "session_id", rn.sessionID, "turn_id", turnID, "reason", decision.Reason)
 				goto finished
 			}
 			if len(decision.Input.Content) > 0 {
@@ -489,7 +489,7 @@ finished:
 	}
 	end := core.TurnEnd{V: core.PayloadVersion, TurnID: turnID, Reason: reason, Error: payloadErr}
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
-		slog.Error("gagal menulis turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
+		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 	}
 	result.StopReason = reason
 	result.Text = lastText
@@ -535,7 +535,7 @@ func (rn *Runner) writeAttempt(ctx context.Context, events *Events, step int, re
 }
 
 func (rn *Runner) writeCancelledAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string) {
-	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: "cancelled", Message: "dibatalkan"}}
+	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: "cancelled", Message: "cancelled"}}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
 }
 

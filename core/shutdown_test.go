@@ -50,11 +50,11 @@ func TestBootDisabledRowNotInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 	if installed {
-		t.Fatal("modul disabled tetap di-install")
+		t.Fatal("disabled module was still installed")
 	}
-	_, err = bootRows(t, []ModuleRow{{ID: "x", Module: "tidak.ada", Disabled: true}})
+	_, err = bootRows(t, []ModuleRow{{ID: "x", Module: "unknown.module", Disabled: true}})
 	if err != nil {
-		t.Fatalf("baris disabled dengan modul tak dikenal menggagalkan boot: %v", err)
+		t.Fatalf("disabled row with unknown module failed boot: %v", err)
 	}
 }
 
@@ -82,12 +82,12 @@ func TestShutdownStuckModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("shutdown terlalu lama: %v", elapsed)
+		t.Fatalf("shutdown took too long: %v", elapsed)
 	}
 	select {
 	case <-quickStopped:
 	case <-time.After(time.Second):
-		t.Fatal("modul lain tidak dihentikan")
+		t.Fatal("other module was not stopped")
 	}
 }
 
@@ -114,7 +114,7 @@ func TestModuleStopReleasesListeners(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !called {
-		t.Fatal("listener tidak berjalan sebelum shutdown")
+		t.Fatal("listener did not run before shutdown")
 	}
 	called = false
 	if err := ctx.Shutdown(context.Background()); err != nil {
@@ -124,6 +124,6 @@ func TestModuleStopReleasesListeners(t *testing.T) {
 		t.Fatal(err)
 	}
 	if called {
-		t.Fatal("listener modul berjalan setelah shutdown")
+		t.Fatal("module listener ran after shutdown")
 	}
 }

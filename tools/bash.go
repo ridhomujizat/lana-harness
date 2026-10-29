@@ -16,11 +16,11 @@ var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type"
 
 type bashTool struct{ guard *Guard }
 
-// NewBash membuat tool bash.
+// NewBash creates the bash tool.
 func NewBash(guard *Guard) core.Tool { return &bashTool{guard: guard} }
 
 func (t *bashTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "bash", Description: "Menjalankan perintah shell di workspace.", InputSchema: bashSpec}
+	return core.ToolSpec{Name: "bash", Description: "Runs a shell command in the workspace.", InputSchema: bashSpec}
 }
 func (t *bashTool) Risk(json.RawMessage) core.Risk { return core.RiskExec }
 
@@ -33,13 +33,13 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return inputErrorOutput(err)
 	}
 	if in.Command == "" {
-		return inputErrorOutput(fmt.Errorf("command wajib diisi"))
+		return inputErrorOutput(fmt.Errorf("command is required"))
 	}
 	if in.TimeoutSecs == 0 {
 		in.TimeoutSecs = 120
 	}
 	if in.TimeoutSecs < 1 || in.TimeoutSecs > 600 {
-		return errorOutput("timeout_secs harus 1 sampai 600")
+		return errorOutput("timeout_secs must be between 1 and 600")
 	}
 	ws := effectiveWorkspace(t.guard, tc.Workspace)
 	cmd := exec.Command("sh", "-c", in.Command)
@@ -70,12 +70,12 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		killGroup(cmd)
 		err := <-done
 		_ = err
-		return errorOutput("dibatalkan")
+		return errorOutput("cancelled")
 	case <-timer.C:
 		killGroup(cmd)
 		err := <-done
 		_ = err
-		return errorOutput(fmt.Sprintf("timeout setelah %d detik", in.TimeoutSecs))
+		return errorOutput(fmt.Sprintf("timed out after %d seconds", in.TimeoutSecs))
 	}
 }
 
@@ -113,7 +113,7 @@ func (w *limitedWriter) String() string {
 	defer w.mu.Unlock()
 	s := string(w.buf)
 	if w.total > w.limit {
-		s += fmt.Sprintf("\n...[dipotong dari %d karakter]", w.total)
+		s += fmt.Sprintf("\n...[truncated from %d characters]", w.total)
 	}
 	return s
 }

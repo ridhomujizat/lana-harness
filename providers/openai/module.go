@@ -13,7 +13,7 @@ func init() {
 	core.RegisterModule("llm", func() core.Module { return &Module{} })
 }
 
-// Module memasang LLMRegistry dari config providers.
+// Module installs the LLMRegistry from the providers config.
 type Module struct{}
 
 func (m *Module) ID() string                  { return "llm" }
@@ -38,7 +38,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		}
 		provider := config.Providers[name]
 		if provider.Kind != "openai_compat" {
-			return fmt.Errorf("provider '%s' kind '%s' belum didukung pada build ini", name, provider.Kind)
+			return fmt.Errorf("provider '%s' kind '%s' is not supported in this build", name, provider.Kind)
 		}
 		adapter, err := NewAdapter(name, Config{
 			BaseURL:   provider.BaseURL,
@@ -66,7 +66,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		if !ok || secret.Reveal() == "" {
 			return &core.ProviderError{
 				Class:   "missing_secret",
-				Message: fmt.Sprintf("env %s untuk provider %s kosong", provider.APIKeyEnv, name),
+				Message: fmt.Sprintf("env %s for provider %s is empty", provider.APIKeyEnv, name),
 			}
 		}
 	}

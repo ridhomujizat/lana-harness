@@ -1,4 +1,4 @@
-// Package pattern mengurai pola izin tool.
+// Package pattern parses tool permission patterns.
 package pattern
 
 import (
@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// ArgKind adalah jenis argumen pola.
+// ArgKind is the kind of a pattern argument.
 type ArgKind int
 
 const (
@@ -17,14 +17,14 @@ const (
 	ArgRaw
 )
 
-// Argument adalah nilai yang dicocokkan.
+// Argument is the value to match against.
 type Argument struct {
 	Kind  ArgKind
 	Value string
 	Alt   string
 }
 
-// Pattern adalah pola tool atau tool(arg).
+// Pattern is a tool pattern: tool or tool(arg).
 type Pattern struct {
 	Raw  string
 	Tool string
@@ -33,24 +33,24 @@ type Pattern struct {
 
 func (p Pattern) String() string { return p.Raw }
 
-// ParsePattern mengurai pola.
+// ParsePattern parses a pattern.
 func ParsePattern(s string) (Pattern, error) {
 	if s == "" {
-		return Pattern{}, fmt.Errorf("pola kosong")
+		return Pattern{}, fmt.Errorf("pattern is empty")
 	}
 	open := strings.IndexByte(s, '(')
 	if open < 0 {
 		if !validTool(s) {
-			return Pattern{}, fmt.Errorf("nama tool tidak valid: %s", s)
+			return Pattern{}, fmt.Errorf("invalid tool name: %s", s)
 		}
 		return Pattern{Raw: s, Tool: s}, nil
 	}
 	tool := s[:open]
 	if !validTool(tool) {
-		return Pattern{}, fmt.Errorf("nama tool tidak valid: %s", tool)
+		return Pattern{}, fmt.Errorf("invalid tool name: %s", tool)
 	}
 	if !strings.HasSuffix(s, ")") {
-		return Pattern{}, fmt.Errorf("tanda kurung tidak tertutup pada posisi %d", open)
+		return Pattern{}, fmt.Errorf("unclosed parenthesis at position %d", open)
 	}
 	arg := s[open+1 : len(s)-1]
 	if err := validateGlob(arg); err != nil {
@@ -85,7 +85,7 @@ func validateGlob(s string) error {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' {
 			if i+1 >= len(s) {
-				return fmt.Errorf("escape di akhir pola")
+				return fmt.Errorf("escape at end of pattern")
 			}
 			i++
 		}
@@ -93,7 +93,7 @@ func validateGlob(s string) error {
 	return nil
 }
 
-// Match mencocokkan tool dan nilai argumen.
+// Match reports whether the tool and argument value match.
 func (p Pattern) Match(tool string, arg Argument) bool {
 	if p.Tool != tool {
 		return false
@@ -110,7 +110,7 @@ func (p Pattern) Match(tool string, arg Argument) bool {
 	return arg.Alt != "" && globMatch(*p.Arg, arg.Alt, true)
 }
 
-// MatchBoth mencocokkan nilai path dan hasil symlink sekaligus.
+// MatchBoth matches both the path value and the symlink target at once.
 func (p Pattern) MatchBoth(tool string, arg Argument) bool {
 	if p.Tool != tool {
 		return false

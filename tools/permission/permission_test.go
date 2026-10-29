@@ -74,7 +74,7 @@ func TestWorkspaceDotDot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if WithinWorkspace(ws, arg.Value) {
-		t.Fatalf("path lolos: %+v", arg)
+		t.Fatalf("path not rejected: %+v", arg)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestWorkspaceSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	if WithinWorkspace(ws, arg.Alt) {
-		t.Fatalf("symlink tidak terdeteksi: %+v", arg)
+		t.Fatalf("symlink not detected: %+v", arg)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestWorkspaceNewFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !WithinWorkspace(ws, arg.Value) || !WithinWorkspace(ws, arg.Alt) {
-		t.Fatalf("path baru dianggap luar: %+v", arg)
+		t.Fatalf("new path treated as outside: %+v", arg)
 	}
 }
 
@@ -116,35 +116,35 @@ func TestEvaluateOrder(t *testing.T) {
 	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
 
 	if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"rm -rf /"}`), nil); got.Allowed {
-		t.Fatal("deny tidak menolak")
+		t.Fatal("deny did not reject")
 	}
 	if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git status"}`), nil); !got.Allowed {
-		t.Fatalf("allow tidak mengizinkan: %+v", got)
+		t.Fatalf("allow did not permit: %+v", got)
 	}
 	write := callInput(s.session.ID, "write_file", `{"path":"a.txt","content":"x"}`)
 	if got, _ := engine.Handle(context.Background(), write, nil); got.Allowed {
-		t.Fatal("write tanpa izin diizinkan")
+		t.Fatal("write without approval was allowed")
 	}
 	read := callInput(s.session.ID, "read_file", `{"path":"a.txt"}`)
 	if got, _ := engine.Handle(context.Background(), read, nil); !got.Allowed {
-		t.Fatalf("read harus diizinkan: %+v", got)
+		t.Fatalf("read must be allowed: %+v", got)
 	}
 	outside := callInput(s.session.ID, "read_file", `{"path":"../../etc/passwd"}`)
 	if got, _ := engine.Handle(context.Background(), outside, nil); got.Allowed {
-		t.Fatal("path luar diizinkan")
+		t.Fatal("outside path allowed")
 	}
 
 	s2 := setup(t, core.AgentConfig{Permission: "trust"}, false)
 	engine2 := &Engine{Store: s2.store, Config: s2.config}
 	w := callInput(s2.session.ID, "write_file", `{"path":"a.txt","content":"x"}`)
 	if got, _ := engine2.Handle(context.Background(), w, nil); !got.Allowed {
-		t.Fatalf("trust menolak: %+v", got)
+		t.Fatalf("trust rejected: %+v", got)
 	}
 	s3 := setup(t, core.AgentConfig{Permission: "never"}, false)
 	engine3 := &Engine{Store: s3.store, Config: s3.config}
 	w3 := callInput(s3.session.ID, "write_file", `{"path":"a.txt","content":"x"}`)
 	if got, _ := engine3.Handle(context.Background(), w3, nil); got.Allowed {
-		t.Fatal("never mengizinkan")
+		t.Fatal("never allowed")
 	}
 }
 
@@ -170,10 +170,10 @@ func TestGrantReused(t *testing.T) {
 	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
 	got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "write_file", input), nil)
 	if !got.Allowed || got.Outcome != core.OutcomeAllowedSession {
-		t.Fatalf("grant tidak dipakai: %+v", got)
+		t.Fatalf("grant not used: %+v", got)
 	}
 	if approval.calls.Load() != 0 {
-		t.Fatal("approval tetap dipanggil")
+		t.Fatal("approval still called")
 	}
 }
 
@@ -239,13 +239,13 @@ func TestPolicyChangeMidTurn(t *testing.T) {
 	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
 	input := `{"path":"a.txt","content":"x"}`
 	if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "write_file", input), nil); got.Allowed {
-		t.Fatal("ask awal diizinkan")
+		t.Fatal("initial ask allowed")
 	}
 	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{{Kind: core.KindApprovalPolicy, Payload: core.ApprovalPolicy{V: 1, Policy: core.PolicyTrust}}}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "write_file", input), nil); !got.Allowed {
-		t.Fatalf("policy baru tidak dipakai: %+v", got)
+		t.Fatalf("new policy not applied: %+v", got)
 	}
 }
 
@@ -277,7 +277,7 @@ func TestApprovalAuditPair(t *testing.T) {
 		}
 	}
 	if !asked || !decided || askedID == "" || askedID != decidedID {
-		t.Fatalf("audit tidak lengkap: %s %s", askedID, decidedID)
+		t.Fatalf("audit incomplete: %s %s", askedID, decidedID)
 	}
 }
 
@@ -390,10 +390,10 @@ func TestNoPermissionModuleFailsClosed(t *testing.T) {
 
 func TestChildPolicy(t *testing.T) {
 	if ChildPolicy(core.PolicyTrust, core.PolicyAsk) != core.PolicyAsk {
-		t.Fatal("child ask harus lebih ketat")
+		t.Fatal("child ask must be stricter")
 	}
 	if ChildPolicy(core.PolicyNever, core.PolicyTrust) != core.PolicyNever {
-		t.Fatal("never harus menang")
+		t.Fatal("never must win")
 	}
 }
 

@@ -1,50 +1,50 @@
-# Design: <Nama Fitur>
+# Design: <Feature Name>
 
-- **Issue**: `#<nomor>`
+- **Issue**: `#<number>`
 - **Requirements**: [requirements.md](requirements.md)
-- **Contract**: [api-contract.md](api-contract.md) — Diperlukan / Tidak diperlukan
-- **Revisi requirements**: <integer>
-- **Revisi contract**: <integer atau `Tidak diperlukan`>
-- **Status requirements**: Draft
-- **Status contract**: Draft / Tidak diperlukan
+- **Contract**: [api-contract.md](api-contract.md) — Required / Not required
+- **Requirements revision**: <integer>
+- **Contract revision**: <integer or `Not required`>
+- **Requirements status**: Draft
+- **Contract status**: Draft / Not required
 - **Status**: Draft
-- **Revisi design**: <integer, mulai 1>
+- **Design revision**: <integer, starting at 1>
 
-Jangan membuat design terhadap requirements atau contract yang belum di-approve.
+Do not write a design against requirements or a contract that are not yet approved.
 
-## Referensi arsitektur
+## Architecture references
 
-- **Index ADR**: [docs/adr](../../adr/README.md)
-- **Index diagram**: [docs/diagram](../../diagram/README.md)
-- **ADR**: <link atau `—`>
-- **Diagram lokal fitur**: <link bagian di bawah atau `Tidak diperlukan — <alasan>`>
-- **Diagram tahan lama**: <link atau `—`>
+- **ADR index**: [docs/adr](../../adr/README.md)
+- **Diagram index**: [docs/diagram](../../diagram/README.md)
+- **ADR**: <link or `—`>
+- **Feature-local diagram**: <link to the section below or `Not required — <reason>`>
+- **Durable diagram**: <link or `—`>
 
-## Scan keputusan arsitektur
+## Architecture decision scan
 
-| Topik | Otoritas yang ada | Lokasi keputusan | Aksi |
+| Topic | Existing authority | Decision location | Action |
 |---|---|---|---|
-| Antarmuka publik | <contract/ADR/tidak ada> | requirements atau ADR | pakai ulang/buat/tidak ada |
-| Persistence | <ADR/tidak ada> | ADR atau design | pakai ulang/buat/lokal |
-| State dan lifecycle | <diagram/tidak ada> | requirements atau diagram | pakai ulang/buat/tidak ada |
-| Konkurensi | <ADR/tidak ada> | ADR atau design | pakai ulang/buat/lokal |
-| Arah dependency | <ADR/tidak ada> | ADR | pakai ulang/buat/tidak ada |
+| Public interface | <contract/ADR/none> | requirements or ADR | reuse/create/none |
+| Persistence | <ADR/none> | ADR or design | reuse/create/local |
+| State and lifecycle | <diagram/none> | requirements or diagram | reuse/create/none |
+| Concurrency | <ADR/none> | ADR or design | reuse/create/local |
+| Dependency direction | <ADR/none> | ADR | reuse/create/none |
 
 ## Visual Architecture Check
 
-| Pemicu | Ada? | Tampilan yang dibutuhkan |
+| Trigger | Present? | Required view |
 |---|---:|---|
-| Batas modul atau crate | Ya/Tidak | boundary/context |
-| Interaksi dengan aktor atau sistem luar | Ya/Tidak | context/sequence |
-| Alur multi-komponen | Ya/Tidak | sequence/flowchart |
-| Lifecycle atau transisi state | Ya/Tidak | state/flowchart |
-| Relasi entity | Ya/Tidak | ERD |
-| Konkurensi, retry, atau alur gagal | Ya/Tidak | sequence/flowchart |
-| Arah dependency atau topologi runtime | Ya/Tidak | boundary/topology |
+| Module or crate boundary | Yes/No | boundary/context |
+| Interaction with an actor or external system | Yes/No | context/sequence |
+| Multi-component flow | Yes/No | sequence/flowchart |
+| Lifecycle or state transition | Yes/No | state/flowchart |
+| Entity relation | Yes/No | ERD |
+| Concurrency, retry, or failure flow | Yes/No | sequence/flowchart |
+| Dependency direction or runtime topology | Yes/No | boundary/topology |
 
-Jika ada pemicu `Ya`, sertakan tampilan Mermaid terkecil yang berguna di bawah.
+If any trigger is `Yes`, include the smallest useful Mermaid view below.
 
-## Tampilan lokal fitur
+## Feature-local view
 
 ```mermaid
 flowchart LR
@@ -52,81 +52,81 @@ flowchart LR
   Cli --> Agent["ctx.agents"]
 ```
 
-## Kesesuaian dengan repository
+## Repository fit
 
-Jelaskan bagaimana fitur mengikuti struktur crate, modul, service, hook, dan profile yang ada.
-Tautkan ADR, jangan ulangi isinya.
+Describe how the feature follows the existing crate, module, service, hook, and profile structure.
+Link the ADR, do not repeat its contents.
 
-## Design yang diusulkan
+## Proposed design
 
-### Komponen
+### Components
 
-- **<Komponen>** — <tanggung jawab dan invariant>.
+- **<Component>** — <responsibility and invariant>.
 
-### Pemetaan contract
+### Contract mapping
 
-| Operasi contract | Komponen | Input | Hasil | Requirements |
+| Contract operation | Component | Input | Result | Requirements |
 |---|---|---|---|---|
-| `API-...` | <komponen> | <input> | <hasil> | `REQ-...` |
+| `API-...` | <component> | <input> | <result> | `REQ-...` |
 
 ### Persistence
 
-- <event baru, tabel, migration, atau `Tidak berubah`>
+- <new event, table, migration, or `Unchanged`>
 
 ### Failure handling
 
-| Kegagalan | Error internal | Hasil yang terlihat |
+| Failure | Internal error | Observable result |
 |---|---|---|
-| <kegagalan> | <tipe error> | <exit code atau pesan> |
+| <failure> | <error type> | <exit code or message> |
 
-### Konkurensi
+### Concurrency
 
-- <task, cancel, lock, atau `Tidak berlaku`>
+- <task, cancel, lock, or `Not applicable`>
 
-### Keamanan
+### Security
 
-- <penegakan izin dan paparan data>
+- <permission enforcement and data exposure>
 
 ### Observability
 
-- <log, redaksi, atau `Tidak berubah`>
+- <log, redaction, or `Unchanged`>
 
-## Traceability requirement
+## Requirement traceability
 
-| Requirement | Operasi contract | Komponen design | Level verifikasi |
+| Requirement | Contract operation | Design component | Verification level |
 |---|---|---|---|
-| `REQ-...` | `API-...` atau `Tidak berlaku` | <komponen> | unit/integrasi/runtime |
+| `REQ-...` | `API-...` or `Not applicable` | <component> | unit/integration/runtime |
 
-## Peta verifikasi acceptance
+## Acceptance verification map
 
-| Acceptance criterion | Metode verifikasi | Bukti yang direncanakan |
+| Acceptance criterion | Verification method | Planned evidence |
 |---|---|---|
-| `AC-...` | unit/integrasi/runtime/manual | <nama test atau probe> |
+| `AC-...` | unit/integration/runtime/manual | <test name or probe> |
 
-## Strategi verifikasi
+## Verification strategy
 
-- **Unit**: <logika murni>
-- **Integrasi**: <SQLite, proses, terminal semu>
-- **Runtime**: <smoke test manual atau script>
+- **Unit**: <pure logic>
+- **Integration**: <SQLite, processes, pseudo-terminal>
+- **Runtime**: <manual smoke test or script>
 
-## Risiko dan tradeoff
+## Risks and tradeoffs
 
-- <biaya atau risiko lokal fitur>
+- <cost or risk local to the feature>
 
 ## Blocking Design Questions
 
-| ID | Pertanyaan | Mengendalikan | Referensi yang diminta | Pemilik | Status | Resolusi |
+| ID | Question | Controls | Requested reference | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|
-| `DQ-001` | <keputusan teknis> | <komponen> | <contoh atau arah> | <nama> | Open | — |
+| `DQ-001` | <technical decision> | <component> | <example or direction> | <name> | Open | — |
 
 ## Approval
 
-- [ ] Requirements sudah Approved dan revisinya dicatat.
-- [ ] Contract sudah Approved atau `Tidak diperlukan`.
-- [ ] Scan keputusan arsitektur dan Visual Architecture Check selesai.
-- [ ] ADR yang dibutuhkan sudah Accepted.
-- [ ] Setiap requirement terpetakan ke satu komponen design.
-- [ ] Setiap acceptance criterion punya metode verifikasi.
-- [ ] Blocking Design Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- [ ] Requirements are Approved and their revision is recorded.
+- [ ] Contract is Approved or `Not required`.
+- [ ] Architecture decision scan and Visual Architecture Check are complete.
+- [ ] Required ADRs are Accepted.
+- [ ] Every requirement maps to one design component.
+- [ ] Every acceptance criterion has a verification method.
+- [ ] Blocking Design Questions is `None`.
+- **Approved by**: —
+- **Approved on**: —

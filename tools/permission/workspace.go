@@ -9,7 +9,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-// ResolvePath menyelesaikan path terhadap workspace dan symlink.
+// ResolvePath resolves a path against the workspace and symlinks.
 func ResolvePath(workspace, input string) (pattern.Argument, error) {
 	if strings.HasPrefix(input, "~") {
 		home, err := os.UserHomeDir()
@@ -52,7 +52,7 @@ func resolveExistingAncestor(path string) string {
 	}
 }
 
-// WithinWorkspace memeriksa path hasil resolusi.
+// WithinWorkspace checks a resolved path.
 func WithinWorkspace(workspace, resolved string) bool {
 	ws, err := filepath.Abs(workspace)
 	if err != nil {

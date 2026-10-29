@@ -13,15 +13,15 @@ import (
 func TestResolveAgent(t *testing.T) {
 	cfg := core.Config{
 		Agents: map[string]core.AgentConfig{
-			"asisten": {Provider: "openai", Model: "m"},
-			"coder":   {Provider: "openai", Model: "m"},
+			"assistant": {Provider: "openai", Model: "m"},
+			"coder":     {Provider: "openai", Model: "m"},
 		},
 		Routes: []core.RouteConfig{{Channel: "library", Agent: "coder"}},
 	}
-	if got, err := resolveAgent(cfg, "asisten"); err != nil || got != "asisten" {
+	if got, err := resolveAgent(cfg, "assistant"); err != nil || got != "assistant" {
 		t.Fatalf("flag: %q %v", got, err)
 	}
-	if _, err := resolveAgent(cfg, "tidakada"); err == nil || !strings.Contains(err.Error(), "asisten") {
+	if _, err := resolveAgent(cfg, "missing"); err == nil || !strings.Contains(err.Error(), "assistant") {
 		t.Fatalf("unknown: %v", err)
 	}
 	cfg.Routes = append(cfg.Routes, core.RouteConfig{Channel: "cli", Agent: "coder"})
@@ -32,7 +32,7 @@ func TestResolveAgent(t *testing.T) {
 	if got, err := resolveAgent(one, ""); err != nil || got != "solo" {
 		t.Fatalf("single: %q %v", got, err)
 	}
-	withDefault := core.Config{Agents: map[string]core.AgentConfig{"default": {}, "lain": {}}}
+	withDefault := core.Config{Agents: map[string]core.AgentConfig{"default": {}, "other": {}}}
 	if got, err := resolveAgent(withDefault, ""); err != nil || got != "default" {
 		t.Fatalf("default: %q %v", got, err)
 	}
@@ -49,15 +49,15 @@ func TestResolveAgent(t *testing.T) {
 func TestSetupChatLoggingWritesFile(t *testing.T) {
 	home := t.TempDir()
 	restore := setupChatLogging(home)
-	slog.Info("halo-log")
+	slog.Info("hello-log")
 	restore()
 	path := filepath.Join(home, "logs", "lana.log")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "halo-log") {
-		t.Fatalf("log tidak tertulis: %q", string(data))
+	if !strings.Contains(string(data), "hello-log") {
+		t.Fatalf("log was not written: %q", string(data))
 	}
 	info, err := os.Stat(path)
 	if err != nil {

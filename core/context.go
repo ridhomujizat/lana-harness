@@ -2,7 +2,7 @@ package core
 
 import "sync"
 
-// ServiceKey adalah nama service di registry Builder.
+// ServiceKey is the name of a service in the Builder registry.
 type ServiceKey string
 
 const (
@@ -14,7 +14,7 @@ const (
 	ServiceCompaction ServiceKey = "compaction"
 )
 
-// Context adalah wiring hasil boot.
+// Context is the wiring produced by boot.
 type Context struct {
 	LLM      LLMRegistry
 	Tools    ToolRegistry
@@ -32,7 +32,7 @@ type Context struct {
 	shutdownErr  error
 }
 
-// Lookup mengambil service apa pun.
+// Lookup returns any service.
 func (c *Context) Lookup(key ServiceKey) (any, bool) {
 	if c == nil {
 		return nil, false

@@ -27,11 +27,11 @@ var webFetchSpec = json.RawMessage(`{"type":"object","properties":{"url":{"type"
 
 type webFetchTool struct{ guard *Guard }
 
-// NewWebFetch membuat tool web_fetch.
+// NewWebFetch creates the web_fetch tool.
 func NewWebFetch(guard *Guard) core.Tool { return &webFetchTool{guard: guard} }
 
 func (t *webFetchTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "web_fetch", Description: "Mengambil URL dan mengembalikan isi sebagai teks.", InputSchema: webFetchSpec}
+	return core.ToolSpec{Name: "web_fetch", Description: "Fetches a URL and returns its content as text.", InputSchema: webFetchSpec}
 }
 func (t *webFetchTool) Risk(json.RawMessage) core.Risk { return core.RiskNetwork }
 
@@ -44,13 +44,13 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	}
 	parsed, err := url.Parse(in.URL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return errorOutput("url harus http atau https")
+		return errorOutput("url must be http or https")
 	}
 	client := &http.Client{
 		Timeout: webFetchTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
-				return fmt.Errorf("terlalu banyak redirect")
+				return fmt.Errorf("too many redirects")
 			}
 			return nil
 		},
@@ -63,7 +63,7 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if err != nil {
 		var netErr net.Error
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return errorOutput("timeout setelah 30 detik")
+			return errorOutput("timed out after 30 seconds")
 		}
 		return errorOutput(err.Error())
 	}
@@ -76,7 +76,7 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 		return errorOutput(err.Error())
 	}
 	if len(body) > webFetchLimit {
-		return errorOutput("respons terlalu besar")
+		return errorOutput("response too large")
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
@@ -97,7 +97,7 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	case "text/plain", "application/json":
 		text = string(body)
 	default:
-		return errorOutput("tipe konten tidak didukung: " + mediaType)
+		return errorOutput("unsupported content type: " + mediaType)
 	}
 	return successOutput(truncateText(strings.TrimSpace(text), 30000))
 }

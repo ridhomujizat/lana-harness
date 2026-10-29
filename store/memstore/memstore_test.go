@@ -23,7 +23,7 @@ func TestMemstoreSeq(t *testing.T) {
 	s, info := newSession(t)
 	events, err := s.Append(context.Background(), info.ID, []core.EventDraft{
 		{Kind: core.KindTurnStart, TurnID: "t1", Payload: core.TurnStart{V: 1, TurnID: "t1"}},
-		{Kind: core.KindUserMessage, TurnID: "t1", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "halo"}}}},
+		{Kind: core.KindUserMessage, TurnID: "t1", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +82,6 @@ func TestMemstoreNotDurable(t *testing.T) {
 	}
 	other := New()
 	if _, err := other.Info(context.Background(), info.ID); !errors.Is(err, core.ErrNotFound) {
-		t.Fatalf("session lama ditemukan di store baru: %v", err)
+		t.Fatalf("old session found in new store: %v", err)
 	}
 }

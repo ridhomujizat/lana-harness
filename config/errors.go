@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-// Warning adalah peringatan yang tidak menggagalkan Load.
+// Warning is a notice that does not make Load fail.
 type Warning struct {
 	File string
 	Msg  string
 }
 
-// Error adalah satu kesalahan validasi.
+// Error is a single validation error.
 type Error struct {
 	File string
 	Line int
@@ -36,7 +36,7 @@ func (e Error) Error() string {
 	}
 }
 
-// Errors adalah kumpulan semua error dari semua lapisan.
+// Errors is the collection of all errors from all layers.
 type Errors []Error
 
 func (e Errors) Error() string {
@@ -47,10 +47,10 @@ func (e Errors) Error() string {
 	return strings.Join(parts, "\n")
 }
 
-// Origins memetakan path key ke nama lapisan.
+// Origins maps key paths to layer names.
 type Origins map[string]string
 
-// Of mengembalikan nama lapisan untuk path key.
+// Of returns the layer name for a key path.
 func (o Origins) Of(key string) (string, bool) {
 	v, ok := o[key]
 	return v, ok

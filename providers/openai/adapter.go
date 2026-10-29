@@ -13,7 +13,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Config adalah konfigurasi satu provider openai_compat.
+// Config is the configuration of one openai_compat provider.
 type Config struct {
 	BaseURL   string
 	APIKeyEnv string
@@ -21,7 +21,7 @@ type Config struct {
 	Timeout   string
 }
 
-// Adapter adalah core.Provider untuk satu provider.
+// Adapter is a core.Provider for one provider.
 type Adapter struct {
 	Name    string
 	cfg     Config
@@ -29,17 +29,17 @@ type Adapter struct {
 	client  *http.Client
 }
 
-// NewAdapter membuat adapter.
+// NewAdapter creates an adapter.
 func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error) {
 	u, err := url.Parse(cfg.BaseURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("base_url provider '%s' tidak valid", name)
+		return nil, fmt.Errorf("base_url of provider '%s' is invalid", name)
 	}
 	timeout := 300 * time.Second
 	if cfg.Timeout != "" {
 		parsed, err := time.ParseDuration(cfg.Timeout)
 		if err != nil {
-			return nil, fmt.Errorf("timeout provider '%s' tidak valid", name)
+			return nil, fmt.Errorf("timeout of provider '%s' is invalid", name)
 		}
 		timeout = parsed
 	}
@@ -47,10 +47,10 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 		Timeout: timeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
-				return fmt.Errorf("terlalu banyak redirect")
+				return fmt.Errorf("too many redirects")
 			}
 			if req.URL.Host != via[0].URL.Host {
-				return fmt.Errorf("redirect lintas host ditolak")
+				return fmt.Errorf("cross-host redirect rejected")
 			}
 			return nil
 		},
@@ -58,7 +58,7 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 	return &Adapter{Name: name, cfg: cfg, secrets: secrets, client: client}, nil
 }
 
-// Stream mengirim request dan mengembalikan iterator event.
+// Stream sends the request and returns an event iterator.
 func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	body, err := buildRequestBody(req)
 	if err != nil {

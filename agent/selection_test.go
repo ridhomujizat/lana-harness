@@ -13,11 +13,11 @@ import (
 )
 
 func TestSetAgentEvent(t *testing.T) {
-	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("dari asisten2")}}, map[string]core.AgentConfig{
-		"asisten":  {Provider: "mock", Model: "m1"},
-		"asisten2": {Provider: "mock", Model: "m2"},
+	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("from assistant2")}}, map[string]core.AgentConfig{
+		"assistant":  {Provider: "mock", Model: "m1"},
+		"assistant2": {Provider: "mock", Model: "m2"},
 	})
-	if err := h.reg.SetAgent(context.Background(), h.info.ID, "asisten2"); err != nil {
+	if err := h.reg.SetAgent(context.Background(), h.info.ID, "assistant2"); err != nil {
 		t.Fatal(err)
 	}
 	var payload core.ModelSelection
@@ -28,7 +28,7 @@ func TestSetAgentEvent(t *testing.T) {
 			}
 		}
 	}
-	if payload.Agent != "asisten2" || payload.Provider != "mock" || payload.Model != "m2" {
+	if payload.Agent != "assistant2" || payload.Provider != "mock" || payload.Model != "m2" {
 		t.Fatalf("payload=%+v", payload)
 	}
 	h.run(t, "hi")
@@ -51,8 +51,8 @@ func TestSetModelMidTurn(t *testing.T) {
 			{ToolUse: &mock.ToolUse{ID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"sleep 0.2"}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-		textResponse("selesai"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m1", Tools: []string{"bash"}}})
+		textResponse("done"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m1", Tools: []string{"bash"}}})
 	h.hooks.ToolsPreExecute.Use(func(ctx context.Context, in core.ToolsPreExecuteInput, next core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 		return core.ToolDecision{Allowed: true}, nil
 	})
@@ -83,12 +83,12 @@ func TestSetModelMidTurn(t *testing.T) {
 func TestSetModelUnknownProvider(t *testing.T) {
 	h := newHarness(t, mock.Script{}, nil)
 	before := len(h.events(t))
-	err := h.reg.SetModel(context.Background(), h.info.ID, "tidakada:m")
-	if err == nil || !strings.Contains(err.Error(), "tidakada") {
+	err := h.reg.SetModel(context.Background(), h.info.ID, "nosuch:m")
+	if err == nil || !strings.Contains(err.Error(), "nosuch") {
 		t.Fatalf("err=%v", err)
 	}
 	if after := len(h.events(t)); after != before {
-		t.Fatalf("event ditulis: %d -> %d", before, after)
+		t.Fatalf("event written: %d -> %d", before, after)
 	}
 }
 
@@ -98,9 +98,9 @@ func TestWorkspacePrecedence(t *testing.T) {
 			{ToolUse: &mock.ToolUse{ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"x.txt"}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-		textResponse("selesai"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file"}, Workspace: t.TempDir()}})
-	if err := os.WriteFile(filepath.Join(h.ws, "x.txt"), []byte("isi"), 0o644); err != nil {
+		textResponse("done"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}, Workspace: t.TempDir()}})
+	if err := os.WriteFile(filepath.Join(h.ws, "x.txt"), []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h.run(t, "hi")

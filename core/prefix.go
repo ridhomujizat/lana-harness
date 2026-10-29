@@ -2,7 +2,7 @@ package core
 
 import "sort"
 
-// ResolvePrefix memilih satu session dari hasil FindPrefix.
+// ResolvePrefix selects one session from FindPrefix results.
 func ResolvePrefix(matches []SessionInfo, prefix string) (SessionInfo, error) {
 	if len(prefix) < 6 {
 		return SessionInfo{}, ErrPrefixTooShort

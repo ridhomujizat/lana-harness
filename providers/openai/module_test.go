@@ -25,7 +25,7 @@ func TestAnthropicKindRejected(t *testing.T) {
 		Agents:    map[string]core.AgentConfig{"a": {Provider: "anthropic", Model: "m"}},
 	}
 	_, err := bootLLM(t, cfg, nil)
-	if err == nil || !strings.Contains(err.Error(), "anthropic") || !strings.Contains(err.Error(), "belum didukung") {
+	if err == nil || !strings.Contains(err.Error(), "anthropic") || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -41,7 +41,7 @@ func TestMissingSecretAtBoot(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	if !strings.Contains(pe.Message, "OPENAI_API_KEY") || !strings.Contains(pe.Message, "openai") {
-		t.Fatalf("pesan=%q", pe.Message)
+		t.Fatalf("message=%q", pe.Message)
 	}
 }
 

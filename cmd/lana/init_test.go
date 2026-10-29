@@ -13,22 +13,22 @@ import (
 func TestLookupProvider(t *testing.T) {
 	preset, ok := lookupProvider("DeepSeek")
 	if !ok {
-		t.Fatal("deepseek tidak ditemukan")
+		t.Fatal("deepseek not found")
 	}
 	if preset.baseURL != "https://api.deepseek.com/v1" || preset.keyEnv != "DEEPSEEK_API_KEY" || preset.model != "deepseek-chat" {
 		t.Fatalf("preset = %+v", preset)
 	}
 	if _, ok := lookupProvider("anthropic"); ok {
-		t.Fatal("anthropic belum didukung")
+		t.Fatal("anthropic not supported yet")
 	}
 }
 
 func TestSecretsText(t *testing.T) {
-	if got := secretsText("DEEPSEEK_API_KEY", "sk-abc"); got != "# API key provider; jangan di-commit.\nDEEPSEEK_API_KEY=sk-abc\n" {
-		t.Fatalf("dengan key = %q", got)
+	if got := secretsText("DEEPSEEK_API_KEY", "sk-abc"); got != "# Provider API key; do not commit.\nDEEPSEEK_API_KEY=sk-abc\n" {
+		t.Fatalf("with key = %q", got)
 	}
 	if got := secretsText("DEEPSEEK_API_KEY", ""); !strings.Contains(got, "# DEEPSEEK_API_KEY=") {
-		t.Fatalf("tanpa key = %q", got)
+		t.Fatalf("without key = %q", got)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestInitDeepSeekYes(t *testing.T) {
 	}
 	for _, want := range []string{"[providers.deepseek]", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "model = \"deepseek-chat\""} {
 		if !strings.Contains(string(cfg), want) {
-			t.Fatalf("config tidak memuat %q:\n%s", want, cfg)
+			t.Fatalf("config does not contain %q:\n%s", want, cfg)
 		}
 	}
 	secrets, err := os.ReadFile(filepath.Join(home, "secrets.env"))
@@ -58,7 +58,7 @@ func TestInitDeepSeekYes(t *testing.T) {
 		t.Fatalf("permission secrets: %v %v", info, err)
 	}
 	if _, err := config.Load(context.Background(), config.Options{Home: home}); err != nil {
-		t.Fatalf("config tidak valid: %v", err)
+		t.Fatalf("config is invalid: %v", err)
 	}
 }
 

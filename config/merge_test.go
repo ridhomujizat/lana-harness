@@ -20,7 +20,7 @@ func findModule(t *testing.T, res *Result, id string) int {
 			return i
 		}
 	}
-	t.Fatalf("modul %q tidak ditemukan", id)
+	t.Fatalf("module %q not found", id)
 	return -1
 }
 
@@ -41,7 +41,7 @@ func TestMergeModuleRowReplacesConfig(t *testing.T) {
 		t.Fatalf("path=%v", cfg["path"])
 	}
 	if _, ok := cfg["wal"]; ok {
-		t.Fatalf("config lama tidak diganti: %v", cfg)
+		t.Fatalf("old config not replaced: %v", cfg)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestMergeModuleAfter(t *testing.T) {
 	store := findModule(t, res, "store")
 	x := findModule(t, res, "x")
 	if x != store+1 {
-		t.Fatalf("x di indeks %d, store di %d", x, store)
+		t.Fatalf("x at index %d, store at %d", x, store)
 	}
 }
 
@@ -97,9 +97,9 @@ func TestMergeAfterUnknownID(t *testing.T) {
 	_, err := loadWith(t, home)
 	var errs Errors
 	if !errors.As(err, &errs) {
-		t.Fatalf("error bukan Errors: %v", err)
+		t.Fatalf("error is not Errors: %v", err)
 	}
-	if !strings.Contains(err.Error(), "id 'nope' tidak ada") {
-		t.Fatalf("pesan salah: %v", err)
+	if !strings.Contains(err.Error(), "id 'nope' does not exist") {
+		t.Fatalf("wrong message: %v", err)
 	}
 }

@@ -24,11 +24,11 @@ var grepSpec = json.RawMessage(`{"type":"object","properties":{"pattern":{"type"
 
 type globTool struct{ guard *Guard }
 
-// NewGlob membuat tool glob.
+// NewGlob creates the glob tool.
 func NewGlob(guard *Guard) core.Tool { return &globTool{guard: guard} }
 
 func (t *globTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "glob", Description: "Mencari path dengan pola glob di workspace.", InputSchema: globSpec}
+	return core.ToolSpec{Name: "glob", Description: "Finds paths matching a glob pattern in the workspace.", InputSchema: globSpec}
 }
 func (t *globTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 
@@ -41,7 +41,7 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return inputErrorOutput(err)
 	}
 	if in.Pattern == "" {
-		return inputErrorOutput(fmt.Errorf("pattern wajib diisi"))
+		return inputErrorOutput(fmt.Errorf("pattern is required"))
 	}
 	ws := effectiveWorkspace(t.guard, tc.Workspace)
 	base := ws
@@ -54,12 +54,12 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	}
 	info, err := os.Stat(base)
 	if err != nil || !info.IsDir() {
-		return errorOutput("path bukan direktori")
+		return errorOutput("path is not a directory")
 	}
 	ig := compileRootIgnore(ws)
 	matches, err := doublestar.Glob(os.DirFS(base), in.Pattern)
 	if err != nil {
-		return errorOutput("pola tidak valid: " + err.Error())
+		return errorOutput("invalid pattern: " + err.Error())
 	}
 	var paths []string
 	for _, match := range matches {
@@ -84,25 +84,25 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	sort.Strings(paths)
 	total := len(paths)
 	if total == 0 {
-		return successOutput("tidak ada hasil")
+		return successOutput("no results")
 	}
 	if total > 1000 {
 		paths = paths[:1000]
 	}
 	out := strings.Join(paths, "\n")
 	if total > 1000 {
-		out += fmt.Sprintf("\n(dari %d hasil)", total)
+		out += fmt.Sprintf("\n(of %d results)", total)
 	}
 	return successOutput(truncateText(out, 30000))
 }
 
 type grepTool struct{ guard *Guard }
 
-// NewGrep membuat tool grep.
+// NewGrep creates the grep tool.
 func NewGrep(guard *Guard) core.Tool { return &grepTool{guard: guard} }
 
 func (t *grepTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "grep", Description: "Mencari teks dengan regex RE2 di workspace.", InputSchema: grepSpec}
+	return core.ToolSpec{Name: "grep", Description: "Searches text with an RE2 regex in the workspace.", InputSchema: grepSpec}
 }
 func (t *grepTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 
@@ -116,11 +116,11 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return inputErrorOutput(err)
 	}
 	if in.Pattern == "" {
-		return inputErrorOutput(fmt.Errorf("pattern wajib diisi"))
+		return inputErrorOutput(fmt.Errorf("pattern is required"))
 	}
 	re, err := regexp.Compile(in.Pattern)
 	if err != nil {
-		return errorOutput("pola tidak valid: " + err.Error())
+		return errorOutput("invalid pattern: " + err.Error())
 	}
 	ws := effectiveWorkspace(t.guard, tc.Workspace)
 	base := ws
@@ -211,7 +211,7 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return errorOutput(err.Error())
 	}
 	if len(results) == 0 {
-		return successOutput("tidak ada kecocokan")
+		return successOutput("no matches")
 	}
 	return successOutput(truncateText(strings.Join(results, "\n"), 30000))
 }

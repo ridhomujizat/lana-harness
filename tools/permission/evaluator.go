@@ -11,22 +11,22 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-// Engine adalah listener tools.pre_execute.
+// Engine is the tools.pre_execute listener.
 type Engine struct {
 	Store    core.SessionStore
 	Config   core.Config
 	Approval core.ApprovalService
 }
 
-// Handle memutuskan satu pemanggilan tool.
+// Handle decides a single tool call.
 func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 	info, err := e.Store.Info(ctx, in.Call.SessionID)
 	if err != nil {
-		return reject("gagal membaca session: " + err.Error()), nil
+		return reject("failed to read session: " + err.Error()), nil
 	}
 	events, err := e.Store.ChainEvents(ctx, in.Call.SessionID)
 	if err != nil {
-		return reject("gagal membaca log: " + err.Error()), nil
+		return reject("failed to read log: " + err.Error()), nil
 	}
 	agentName := in.AgentName
 	if agentName == "" {
@@ -42,20 +42,20 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	}
 	arg, rawArg, ok := buildArgument(in.Call.Name, in.Call.Input, workspace)
 	if !ok {
-		return reject("input tidak valid"), nil
+		return reject("invalid input"), nil
 	}
 	if arg.Kind == pattern.ArgPath && !WithinWorkspace(workspace, arg.Value) {
-		return reject("di luar workspace"), nil
+		return reject("outside workspace"), nil
 	}
 	if arg.Kind == pattern.ArgPath && arg.Alt != "" && !WithinWorkspace(workspace, arg.Alt) {
-		return reject("di luar workspace"), nil
+		return reject("outside workspace"), nil
 	}
 
 	rules := agent.Rules
 	for _, raw := range rules.Deny {
 		p, err := pattern.ParsePattern(raw)
 		if err == nil && p.Match(in.Call.Name, arg) {
-			return reject(fmt.Sprintf("rule deny: %s", raw)), nil
+			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
 		}
 	}
 	for _, raw := range rules.Allow {
@@ -95,14 +95,14 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		return reject("policy never"), nil
 	}
 	if e.Approval == nil {
-		return reject("approval tidak tersedia"), nil
+		return reject("approval is not available"), nil
 	}
 	outcome, err := e.Approval.Request(ctx, core.ApprovalRequest{
 		SessionID: in.Call.SessionID, TurnID: in.Call.TurnID, CallID: in.Call.CallID,
 		AgentName: agentName, ToolName: in.Call.Name, Risk: in.Call.Risk,
 	})
 	if err != nil {
-		return reject("approval gagal: " + err.Error()), nil
+		return reject("approval failed: " + err.Error()), nil
 	}
 	switch outcome {
 	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession:
@@ -118,7 +118,7 @@ func allow(outcome core.ApprovalOutcome) core.ToolDecision {
 
 func reject(reason string) core.ToolDecision {
 	if reason == "" {
-		reason = "ditolak"
+		reason = "rejected"
 	}
 	return core.ToolDecision{Allowed: false, Status: core.ToolStatusRejected, Reason: reason}
 }
@@ -159,7 +159,7 @@ func buildArgument(tool string, raw json.RawMessage, workspace string) (pattern.
 	}
 }
 
-// ResolveArgument adalah helper untuk test.
+// ResolveArgument is a test helper.
 func ResolveArgument(tool string, raw json.RawMessage, workspace string) (pattern.Argument, bool) {
 	arg, _, ok := buildArgument(tool, raw, workspace)
 	return arg, ok

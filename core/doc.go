@@ -1,4 +1,4 @@
-// Package core menyediakan tipe publik, hook, registry modul, dan boot runtime.
+// Package core provides the public types, hooks, module registry, and runtime boot.
 //
-// Package ini tidak meng-import package lain di module ini (ADR 0013).
+// This package does not import other packages in this module (ADR 0013).
 package core

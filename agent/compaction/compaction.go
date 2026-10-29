@@ -1,4 +1,4 @@
-// Package compaction meringkas riwayat session.
+// Package compaction summarizes session history.
 package compaction
 
 import (
@@ -12,26 +12,26 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// ErrTurnActive dan ErrNothingToCompact berasal dari package store.
+// ErrTurnActive and ErrNothingToCompact originate from the store package.
 var (
-	ErrTurnActive       = errors.New("masih ada turn yang berjalan")
-	ErrNothingToCompact = errors.New("tidak ada yang bisa diringkas")
-	ErrSessionChanged   = errors.New("session berubah saat compaction")
+	ErrTurnActive       = errors.New("a turn is still running")
+	ErrNothingToCompact = errors.New("nothing to compact")
+	ErrSessionChanged   = errors.New("session changed during compaction")
 )
 
-// Service mengimplementasikan core.Compactor.
+// Service implements core.Compactor.
 type Service struct {
 	Store  core.SessionStore
 	LLM    core.LLMRegistry
 	Config core.Config
 }
 
-// NewService membuat Service.
+// NewService creates a Service.
 func NewService(s core.SessionStore, llm core.LLMRegistry, config core.Config) *Service {
 	return &Service{Store: s, LLM: llm, Config: config}
 }
 
-// CompactNow meringkas session.
+// CompactNow summarizes the session.
 func (s *Service) CompactNow(ctx context.Context, sessionID string) (core.CompactionResult, error) {
 	return s.compact(ctx, sessionID, false)
 }
@@ -57,15 +57,15 @@ func (s *Service) compact(ctx context.Context, sessionID string, allowActive boo
 	}
 	providerName, model := s.resolveModel(info.Agent, events)
 	if providerName == "" || model == "" {
-		return core.CompactionResult{}, fmt.Errorf("model untuk compaction tidak ditemukan")
+		return core.CompactionResult{}, fmt.Errorf("no model found for compaction")
 	}
 	provider, ok := s.LLM.Provider(providerName)
 	if !ok {
-		return core.CompactionResult{}, fmt.Errorf("provider tidak dikenal: %s", providerName)
+		return core.CompactionResult{}, fmt.Errorf("unknown provider: %s", providerName)
 	}
 	req := core.ChatRequest{
 		Model:    model,
-		System:   "Ringkas riwayat percakapan berikut secara padat, pertahankan keputusan dan fakta penting.",
+		System:   "Summarize the following conversation history concisely, keeping the key decisions and important facts.",
 		Messages: history,
 	}
 	stream, err := provider.Stream(ctx, req)
@@ -91,7 +91,7 @@ func (s *Service) compact(ctx context.Context, sessionID string, allowActive boo
 	}
 	text := strings.TrimSpace(summary.String())
 	if text == "" {
-		return core.CompactionResult{}, errors.New("ringkasan kosong")
+		return core.CompactionResult{}, errors.New("summary is empty")
 	}
 	before := info.LastSeq
 	if current, err := s.Store.Info(ctx, sessionID); err != nil {
@@ -152,7 +152,7 @@ func estimateTokens(messages []core.Message) int64 {
 	return count / 4
 }
 
-// Install memasang listener otomatis.
+// Install installs the automatic listeners.
 func (s *Service) Install(hooks *core.Hooks) {
 	hooks.AgentPreStep.Use(s.preStep)
 	hooks.LLMStream.Use(s.stream, core.WithPrepend())
@@ -179,7 +179,7 @@ func (s *Service) preStep(ctx context.Context, in core.PreStepInput, next core.N
 	}
 	if usage.InputTokens > 0 && usage.InputTokens*100 > window*70 {
 		if _, err := s.compact(ctx, in.SessionID, true); err != nil {
-			slog.Warn("compaction otomatis gagal", "session_id", in.SessionID, "error", err)
+			slog.Warn("automatic compaction failed", "session_id", in.SessionID, "error", err)
 		}
 	}
 	return next(ctx, in)
@@ -191,7 +191,7 @@ func (s *Service) stream(ctx context.Context, in core.LLMStreamInput, next core.
 		return stream, err
 	}
 	if _, compactErr := s.compact(ctx, in.SessionID, true); compactErr != nil {
-		slog.Warn("compaction retry gagal", "session_id", in.SessionID, "error", compactErr)
+		slog.Warn("compaction retry failed", "session_id", in.SessionID, "error", compactErr)
 		return nil, err
 	}
 	events, chainErr := s.Store.ChainEvents(ctx, in.SessionID)

@@ -18,11 +18,11 @@ var editFileSpec = json.RawMessage(`{"type":"object","properties":{"path":{"type
 
 type readFileTool struct{ guard *Guard }
 
-// NewReadFile membuat tool read_file.
+// NewReadFile creates the read_file tool.
 func NewReadFile(guard *Guard) core.Tool { return &readFileTool{guard: guard} }
 
 func (t *readFileTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "read_file", Description: "Membaca isi file teks di workspace.", InputSchema: readFileSpec}
+	return core.ToolSpec{Name: "read_file", Description: "Reads the contents of a text file in the workspace.", InputSchema: readFileSpec}
 }
 func (t *readFileTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 
@@ -36,19 +36,19 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 		return inputErrorOutput(err)
 	}
 	if in.Path == "" {
-		return inputErrorOutput(fmt.Errorf("path wajib diisi"))
+		return inputErrorOutput(fmt.Errorf("path is required"))
 	}
 	if in.Offset == 0 {
 		in.Offset = 1
 	}
 	if in.Offset < 1 {
-		return inputErrorOutput(fmt.Errorf("offset minimal 1"))
+		return inputErrorOutput(fmt.Errorf("offset must be at least 1"))
 	}
 	if in.Limit == 0 {
 		in.Limit = 2000
 	}
 	if in.Limit < 1 || in.Limit > 2000 {
-		return inputErrorOutput(fmt.Errorf("limit harus 1 sampai 2000"))
+		return inputErrorOutput(fmt.Errorf("limit must be between 1 and 2000"))
 	}
 	path, rejected := resolveToolPath(t.guard, tc.Workspace, in.Path)
 	if rejected != nil {
@@ -57,12 +57,12 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errorOutput("file tidak ditemukan")
+			return errorOutput("file not found")
 		}
 		return errorOutput(err.Error())
 	}
 	if bytes.IndexByte(data[:minInt(len(data), 8000)], 0) >= 0 {
-		return errorOutput("file biner")
+		return errorOutput("binary file")
 	}
 	lines := strings.Split(string(data), "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
@@ -81,11 +81,11 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 
 type writeFileTool struct{ guard *Guard }
 
-// NewWriteFile membuat tool write_file.
+// NewWriteFile creates the write_file tool.
 func NewWriteFile(guard *Guard) core.Tool { return &writeFileTool{guard: guard} }
 
 func (t *writeFileTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "write_file", Description: "Membuat atau mengganti file teks di workspace.", InputSchema: writeFileSpec}
+	return core.ToolSpec{Name: "write_file", Description: "Creates or overwrites a text file in the workspace.", InputSchema: writeFileSpec}
 }
 func (t *writeFileTool) Risk(json.RawMessage) core.Risk { return core.RiskWrite }
 
@@ -98,7 +98,7 @@ func (t *writeFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawM
 		return inputErrorOutput(err)
 	}
 	if in.Path == "" {
-		return inputErrorOutput(fmt.Errorf("path wajib diisi"))
+		return inputErrorOutput(fmt.Errorf("path is required"))
 	}
 	path, rejected := resolveToolPath(t.guard, tc.Workspace, in.Path)
 	if rejected != nil {
@@ -107,21 +107,21 @@ func (t *writeFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawM
 	parent := filepath.Dir(path)
 	info, err := os.Stat(parent)
 	if err != nil || !info.IsDir() {
-		return errorOutput("direktori induk tidak ada")
+		return errorOutput("parent directory does not exist")
 	}
 	if err := os.WriteFile(path, []byte(in.Content), 0o644); err != nil {
 		return errorOutput(err.Error())
 	}
-	return successOutput(fmt.Sprintf("ditulis %d byte", len(in.Content)))
+	return successOutput(fmt.Sprintf("wrote %d bytes", len(in.Content)))
 }
 
 type editFileTool struct{ guard *Guard }
 
-// NewEditFile membuat tool edit_file.
+// NewEditFile creates the edit_file tool.
 func NewEditFile(guard *Guard) core.Tool { return &editFileTool{guard: guard} }
 
 func (t *editFileTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "edit_file", Description: "Mengganti satu kemunculan teks persis dalam file.", InputSchema: editFileSpec}
+	return core.ToolSpec{Name: "edit_file", Description: "Replaces one exact occurrence of text in a file.", InputSchema: editFileSpec}
 }
 func (t *editFileTool) Risk(json.RawMessage) core.Risk { return core.RiskWrite }
 
@@ -135,10 +135,10 @@ func (t *editFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 		return inputErrorOutput(err)
 	}
 	if in.Path == "" {
-		return inputErrorOutput(fmt.Errorf("path wajib diisi"))
+		return inputErrorOutput(fmt.Errorf("path is required"))
 	}
 	if in.OldString == "" {
-		return inputErrorOutput(fmt.Errorf("old_string tidak boleh kosong"))
+		return inputErrorOutput(fmt.Errorf("old_string must not be empty"))
 	}
 	path, rejected := resolveToolPath(t.guard, tc.Workspace, in.Path)
 	if rejected != nil {
@@ -147,22 +147,22 @@ func (t *editFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return errorOutput("file tidak ditemukan")
+			return errorOutput("file not found")
 		}
 		return errorOutput(err.Error())
 	}
 	count := strings.Count(string(data), in.OldString)
 	switch {
 	case count == 0:
-		return errorOutput("tidak ditemukan")
+		return errorOutput("not found")
 	case count > 1:
-		return errorOutput(fmt.Sprintf("ditemukan %d kali; perbanyak konteks", count))
+		return errorOutput(fmt.Sprintf("found %d times; add more context", count))
 	}
 	out := strings.Replace(string(data), in.OldString, in.NewString, 1)
 	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
 		return errorOutput(err.Error())
 	}
-	return successOutput("diubah 1 kemunculan")
+	return successOutput("replaced 1 occurrence")
 }
 
 func minInt(a, b int) int {

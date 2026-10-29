@@ -19,12 +19,12 @@ func TestToolResultPerCall(t *testing.T) {
 		{Events: []mock.Event{
 			{ToolUse: &mock.ToolUse{ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)}},
 			{ToolUse: &mock.ToolUse{ID: "c2", Name: "write_file", Input: json.RawMessage(`{"path":"b.txt","content":"x"}`)}},
-			{ToolUse: &mock.ToolUse{ID: "c3", Name: "read_file", Input: json.RawMessage(`{"path":"tidak.txt"}`)}},
+			{ToolUse: &mock.ToolUse{ID: "c3", Name: "read_file", Input: json.RawMessage(`{"path":"missing.txt"}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-		textResponse("selesai"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file", "write_file"}}})
-	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("isi"), 0o644); err != nil {
+		textResponse("done"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file", "write_file"}}})
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if result := h.run(t, "hi"); result.StopReason != "end_turn" {
@@ -47,7 +47,7 @@ func TestToolResultPerCall(t *testing.T) {
 	if results["c2"].Status != core.ToolStatusRejected {
 		t.Fatalf("c2=%+v", results["c2"])
 	}
-	if results["c3"].Status != core.ToolStatusError || !strings.Contains(results["c3"].Output, "tidak ditemukan") {
+	if results["c3"].Status != core.ToolStatusError || !strings.Contains(results["c3"].Output, "not found") {
 		t.Fatalf("c3=%+v", results["c3"])
 	}
 }
@@ -55,21 +55,21 @@ func TestToolResultPerCall(t *testing.T) {
 func TestToolNotEnabled(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{
 		{Events: []mock.Event{{ToolUse: &mock.ToolUse{ID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"pwd"}`)}}, {Stop: strptr("tool_use")}}},
-		textResponse("selesai"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+		textResponse("done"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
 	h.run(t, "hi")
 	found := false
 	for _, event := range h.events(t) {
 		if event.Kind == core.KindToolResult {
 			var payload core.ToolResultPayload
 			_ = json.Unmarshal(event.Payload, &payload)
-			if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "tool tidak diaktifkan") {
+			if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "tool is not enabled") {
 				found = true
 			}
 		}
 	}
 	if !found {
-		t.Fatal("tool/result tidak diaktifkan tidak ditemukan")
+		t.Fatal("tool/result not-enabled error not found")
 	}
 }
 
@@ -112,13 +112,13 @@ func TestReadBatchParallel(t *testing.T) {
 			{ToolUse: &mock.ToolUse{ID: "c3", Name: "slow_read", Input: json.RawMessage(`{}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-		textResponse("selesai"),
+		textResponse("done"),
 	}})
-	h.reg.config.Agents["asisten"] = core.AgentConfig{Provider: "mock", Model: "m", Tools: []string{"slow_read"}}
+	h.reg.config.Agents["assistant"] = core.AgentConfig{Provider: "mock", Model: "m", Tools: []string{"slow_read"}}
 	start := time.Now()
 	h.run(t, "hi")
 	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
-		t.Fatalf("Read tidak paralel: %v", elapsed)
+		t.Fatalf("Read not parallel: %v", elapsed)
 	}
 	if max.Load() < 2 {
 		t.Fatalf("max concurrency=%d", max.Load())
@@ -139,16 +139,16 @@ func TestWriteSerial(t *testing.T) {
 			{ToolUse: &mock.ToolUse{ID: "c3", Name: "slow_write", Input: json.RawMessage(`{}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-		textResponse("selesai"),
+		textResponse("done"),
 	}})
-	h.reg.config.Agents["asisten"] = core.AgentConfig{Provider: "mock", Model: "m", Tools: []string{"slow_write"}}
+	h.reg.config.Agents["assistant"] = core.AgentConfig{Provider: "mock", Model: "m", Tools: []string{"slow_write"}}
 	h.hooks.ToolsPreExecute.SetDefault(func(context.Context, core.ToolsPreExecuteInput) (core.ToolDecision, error) {
 		return core.ToolDecision{Allowed: true}, nil
 	})
 	start := time.Now()
 	h.run(t, "hi")
 	if elapsed := time.Since(start); elapsed < 140*time.Millisecond {
-		t.Fatalf("Write berjalan paralel: %v", elapsed)
+		t.Fatalf("Write ran in parallel: %v", elapsed)
 	}
 	if max.Load() != 1 {
 		t.Fatalf("max concurrency=%d", max.Load())
@@ -158,8 +158,8 @@ func TestWriteSerial(t *testing.T) {
 func TestInvalidToolInput(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{
 		{Events: []mock.Event{{ToolUse: &mock.ToolUse{ID: "c1", Name: "read_file", Input: json.RawMessage(`{}`)}}, {Stop: strptr("tool_use")}}},
-		textResponse("selesai"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+		textResponse("done"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
 	h.run(t, "hi")
 	for _, event := range h.events(t) {
 		if event.Kind != core.KindToolResult {
@@ -167,20 +167,20 @@ func TestInvalidToolInput(t *testing.T) {
 		}
 		var payload core.ToolResultPayload
 		_ = json.Unmarshal(event.Payload, &payload)
-		if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "input tidak valid") {
+		if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "invalid input") {
 			return
 		}
 	}
-	t.Fatal("tool/result input tidak valid tidak ditemukan")
+	t.Fatal("tool/result invalid input error not found")
 }
 
 func TestSystemMessageOnChange(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("a"), textResponse("b"), textResponse("c")}}, nil)
 	prompt := filepath.Join(h.home, "prompt.md")
-	if err := os.WriteFile(prompt, []byte("satu"), 0o644); err != nil {
+	if err := os.WriteFile(prompt, []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h.reg.config.Agents["asisten"] = core.AgentConfig{Provider: "mock", Model: "m", PromptFile: "prompt.md"}
+	h.reg.config.Agents["assistant"] = core.AgentConfig{Provider: "mock", Model: "m", PromptFile: "prompt.md"}
 	countSystems := func() int {
 		count := 0
 		for _, event := range h.events(t) {
@@ -195,7 +195,7 @@ func TestSystemMessageOnChange(t *testing.T) {
 	if got := countSystems(); got != 1 {
 		t.Fatalf("system=%d want 1", got)
 	}
-	if err := os.WriteFile(prompt, []byte("dua"), 0o644); err != nil {
+	if err := os.WriteFile(prompt, []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h.run(t, "3")
@@ -210,16 +210,16 @@ func TestSessionsParallel(t *testing.T) {
 		{Events: []mock.Event{{DelayMS: &delay}, {Text: strptr("a")}, {Stop: strptr("end_turn")}}},
 		{Events: []mock.Event{{DelayMS: &delay}, {Text: strptr("b")}, {Stop: strptr("end_turn")}}},
 	}}, nil)
-	second, err := h.store.Create(context.Background(), core.NewSession{Agent: "asisten", Channel: "library", Workspace: h.ws})
+	second, err := h.store.Create(context.Background(), core.NewSession{Agent: "assistant", Channel: "library", Workspace: h.ws})
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	id1, err := h.reg.Start(context.Background(), h.info.ID, "satu")
+	id1, err := h.reg.Start(context.Background(), h.info.ID, "one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	id2, err := h.reg.Start(context.Background(), second.ID, "dua")
+	id2, err := h.reg.Start(context.Background(), second.ID, "two")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestSessionsParallel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
-		t.Fatalf("session tidak paralel: %v", elapsed)
+		t.Fatalf("session not parallel: %v", elapsed)
 	}
 }
 

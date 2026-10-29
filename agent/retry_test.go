@@ -20,7 +20,7 @@ type failingProvider struct {
 func (p *failingProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	n := p.calls.Add(1)
 	if n <= p.failures {
-		return nil, &core.ProviderError{Class: p.class, Message: "gagal"}
+		return nil, &core.ProviderError{Class: p.class, Message: "failed"}
 	}
 	return func(yield func(core.ChatEvent, error) bool) {
 		yield(core.ChatEvent{Kind: core.ChatTextDelta, Text: "ok"}, nil)
@@ -39,7 +39,7 @@ func retryHarness(t *testing.T, providers map[string]core.Provider, targets []co
 	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
 		provider := providers[in.Targets[0].Provider]
 		if provider == nil {
-			return nil, &core.ProviderError{Class: "client", Message: "provider tidak ada"}
+			return nil, &core.ProviderError{Class: "client", Message: "provider not found"}
 		}
 		return provider.Stream(ctx, in.Request)
 	})
@@ -74,7 +74,7 @@ func TestRetryBackoff(t *testing.T) {
 		t.Fatalf("calls=%d", provider.calls.Load())
 	}
 	if elapsed := time.Since(start); elapsed < 15*time.Millisecond {
-		t.Fatalf("backoff tidak terjadi: %v", elapsed)
+		t.Fatalf("backoff did not happen: %v", elapsed)
 	}
 	var attempts int
 	events, _ := store.ChainEvents(context.Background(), sessionID)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// DeriveMessages menyusun riwayat model dari rantai event.
+// DeriveMessages builds the model history from the event chain.
 func DeriveMessages(events []SessionEvent) ([]Message, error) {
 	var messages []Message
 	startSeq := int64(0)

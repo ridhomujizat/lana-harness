@@ -51,8 +51,8 @@ func seed(t *testing.T, store *memstore.Store, id string) {
 	t.Helper()
 	if _, err := store.Append(context.Background(), id, []core.EventDraft{
 		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
-		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "halo"}}}},
-		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hai"}}}},
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}}},
+		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hi"}}}},
 		{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func seed(t *testing.T, store *memstore.Store, id string) {
 }
 
 func TestCompactNowSummary(t *testing.T) {
-	provider := &summaryProvider{text: "ringkasan"}
+	provider := &summaryProvider{text: "summary"}
 	store, info, _, service := setup(t, provider)
 	seed(t, store, info.ID)
 	result, err := service.CompactNow(context.Background(), info.ID)
@@ -81,7 +81,7 @@ func TestCompactNowSummary(t *testing.T) {
 			}
 		}
 	}
-	if !found || payload.Summary != "ringkasan" || payload.UptoSeq != result.UptoSeq {
+	if !found || payload.Summary != "summary" || payload.UptoSeq != result.UptoSeq {
 		t.Fatalf("payload=%+v", payload)
 	}
 }
@@ -102,7 +102,7 @@ func TestCompactNowRejects(t *testing.T) {
 }
 
 func TestAutoCompactThreshold(t *testing.T) {
-	provider := &summaryProvider{text: "ringkasan"}
+	provider := &summaryProvider{text: "summary"}
 	store, info, cfg, service := setup(t, provider)
 	cfg.Agents["coder"] = core.AgentConfig{Provider: "mock", Model: "m", ContextWindow: 10000}
 	service.Config = cfg
@@ -130,12 +130,12 @@ func TestAutoCompactThreshold(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("summary tidak ditulis")
+		t.Fatal("summary not written")
 	}
 }
 
 func TestDefaultContextWindow(t *testing.T) {
-	provider := &summaryProvider{text: "ringkasan"}
+	provider := &summaryProvider{text: "summary"}
 	store, info, cfg, service := setup(t, provider)
 	seed(t, store, info.ID)
 	_ = store.Append
@@ -166,7 +166,7 @@ func TestDefaultContextWindow(t *testing.T) {
 }
 
 func TestContextTooLongRetryOnce(t *testing.T) {
-	provider := &summaryProvider{text: "ringkasan", failures: 1}
+	provider := &summaryProvider{text: "summary", failures: 1}
 	store, info, _, service := setup(t, provider)
 	seed(t, store, info.ID)
 	hooks := core.NewHooks()
@@ -187,13 +187,13 @@ func TestContextTooLongRetryOnce(t *testing.T) {
 			text.WriteString(event.Text)
 		}
 	}
-	if text.String() != "ringkasan" || provider.calls.Load() != 3 {
+	if text.String() != "summary" || provider.calls.Load() != 3 {
 		t.Fatalf("text=%q calls=%d", text.String(), provider.calls.Load())
 	}
 }
 
 func TestContextTooLongTwiceEndsTurn(t *testing.T) {
-	provider := &summaryProvider{text: "ringkasan", failures: 2}
+	provider := &summaryProvider{text: "summary", failures: 2}
 	store, info, _, service := setup(t, provider)
 	seed(t, store, info.ID)
 	hooks := core.NewHooks()

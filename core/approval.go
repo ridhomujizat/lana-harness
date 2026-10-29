@@ -2,7 +2,7 @@ package core
 
 import "context"
 
-// Policy adalah mode approval session.
+// Policy is the approval mode of a session.
 type Policy string
 
 const (
@@ -11,7 +11,7 @@ const (
 	PolicyNever Policy = "never"
 )
 
-// ApprovalOutcome adalah jawaban approval.
+// ApprovalOutcome is the answer to an approval.
 type ApprovalOutcome string
 
 const (
@@ -22,7 +22,7 @@ const (
 	OutcomeUnavailable    ApprovalOutcome = "unavailable"
 )
 
-// ApprovalRequest adalah permintaan approval untuk satu pemanggilan tool.
+// ApprovalRequest is a request for approval of one tool call.
 type ApprovalRequest struct {
 	SessionID string
 	TurnID    string
@@ -33,7 +33,7 @@ type ApprovalRequest struct {
 	Label     string
 }
 
-// ApprovalService menjalankan approval lewat hook ApprovalRequest.
+// ApprovalService runs approvals through the ApprovalRequest hook.
 type ApprovalService interface {
 	Request(ctx context.Context, req ApprovalRequest) (ApprovalOutcome, error)
 	SetPolicy(ctx context.Context, sessionID string, p Policy) error

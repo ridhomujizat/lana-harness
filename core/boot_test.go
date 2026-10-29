@@ -92,10 +92,10 @@ func TestBootMissingService(t *testing.T) {
 	registerBoot(t, b)
 	_, err := bootRows(t, []ModuleRow{{ID: "b", Module: b.id}})
 	if err == nil {
-		t.Fatal("boot berhasil padahal service hilang")
+		t.Fatal("boot succeeded although a service is missing")
 	}
 	if !strings.Contains(err.Error(), "b") || !strings.Contains(err.Error(), "llm") {
-		t.Fatalf("pesan salah: %v", err)
+		t.Fatalf("wrong message: %v", err)
 	}
 }
 
@@ -109,10 +109,10 @@ func TestBootCycleMessage(t *testing.T) {
 		{ID: "b", Module: b.id},
 	})
 	if err == nil {
-		t.Fatal("boot berhasil padahal siklus")
+		t.Fatal("boot succeeded although there is a cycle")
 	}
-	if !strings.Contains(err.Error(), "siklus dependency: a → b → a") {
-		t.Fatalf("pesan siklus salah: %v", err)
+	if !strings.Contains(err.Error(), "dependency cycle: a → b → a") {
+		t.Fatalf("wrong cycle message: %v", err)
 	}
 }
 
@@ -126,10 +126,10 @@ func TestBootDuplicateProvider(t *testing.T) {
 		{ID: "b", Module: b.id},
 	})
 	if err == nil {
-		t.Fatal("boot berhasil padahal provider ganda")
+		t.Fatal("boot succeeded although a provider is duplicated")
 	}
 	if !strings.Contains(err.Error(), "a") || !strings.Contains(err.Error(), "b") || !strings.Contains(err.Error(), "svc.x") {
-		t.Fatalf("pesan salah: %v", err)
+		t.Fatalf("wrong message: %v", err)
 	}
 }
 

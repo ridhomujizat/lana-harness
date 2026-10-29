@@ -10,8 +10,8 @@ import (
 
 const modulePath = "github.com/ridhomujizat/lana-harness"
 
-// checkRules memeriksa import langsung per package dalam module.
-// Input: path package relatif terhadap module ("" untuk root) ke daftar import.
+// checkRules checks direct imports for each package in the module.
+// Input: package paths relative to the module ("" for root) mapped to their import lists.
 func checkRules(imports map[string][]string) []string {
 	var violations []string
 	names := make([]string, 0, len(imports))
@@ -30,7 +30,7 @@ func checkRules(imports map[string][]string) []string {
 				rel = "."
 			}
 			if !allowed(pkg, rel) {
-				violations = append(violations, fmt.Sprintf("package %s tidak boleh meng-import %s", display(pkg), display(rel)))
+				violations = append(violations, fmt.Sprintf("package %s must not import %s", display(pkg), display(rel)))
 			}
 		}
 	}
@@ -62,7 +62,7 @@ func allowed(from, to string) bool {
 	if from == "config" || from == "internal" || strings.HasPrefix(from, "internal/") {
 		return isInternal(to)
 	}
-	// Package implementasi dan library hanya boleh core atau internal.
+	// Implementation and library packages may only import core or internal.
 	if !isInternal(to) {
 		return false
 	}
@@ -122,7 +122,7 @@ func moduleImports(t *testing.T) map[string][]string {
 func TestImportRules(t *testing.T) {
 	violations := checkRules(moduleImports(t))
 	if len(violations) > 0 {
-		t.Fatalf("aturan import dilanggar:\n%s", strings.Join(violations, "\n"))
+		t.Fatalf("import rules violated:\n%s", strings.Join(violations, "\n"))
 	}
 }
 
@@ -133,7 +133,7 @@ func TestCoreTransitive(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if strings.HasPrefix(line, modulePath) && line != modulePath+"/core" {
-			t.Fatalf("core meng-import package module lain: %s", line)
+			t.Fatalf("core imports a package from another module: %s", line)
 		}
 	}
 }
@@ -146,7 +146,7 @@ func TestRuleViolationMessage(t *testing.T) {
 	joined := strings.Join(got, "\n")
 	for _, want := range []string{"core", "config", "lana", "channels/cli"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("pesan pelanggaran tidak memuat %q: %s", want, joined)
+			t.Fatalf("violation message does not contain %q: %s", want, joined)
 		}
 	}
 }

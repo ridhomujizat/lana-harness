@@ -1,4 +1,4 @@
-// Package permission menyediakan evaluator izin dan approval.
+// Package permission provides the permission evaluator and approvals.
 package permission
 
 import (
@@ -23,11 +23,11 @@ func (m *approvalModule) Provides() []core.ServiceKey { return []core.ServiceKey
 func (m *approvalModule) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	storeAny, ok := b.Lookup(core.ServiceSessions)
 	if !ok {
-		return fmt.Errorf("service sessions tidak tersedia")
+		return fmt.Errorf("sessions service is not available")
 	}
 	store, ok := storeAny.(core.SessionStore)
 	if !ok {
-		return fmt.Errorf("service sessions bukan SessionStore")
+		return fmt.Errorf("sessions service is not a SessionStore")
 	}
 	m.service = NewApprovalService(store, b.Hooks(), b.Config())
 	return b.Provide(core.ServiceApproval, m.service)
@@ -44,12 +44,12 @@ func (m *permissionModule) Provides() []core.ServiceKey { return nil }
 func (m *permissionModule) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	storeAny, ok := b.Lookup(core.ServiceSessions)
 	if !ok {
-		return fmt.Errorf("service sessions tidak tersedia")
+		return fmt.Errorf("sessions service is not available")
 	}
 	store := storeAny.(core.SessionStore)
 	approvalAny, ok := b.Lookup(core.ServiceApproval)
 	if !ok {
-		return fmt.Errorf("service approval tidak tersedia")
+		return fmt.Errorf("approval service is not available")
 	}
 	approval := approvalAny.(core.ApprovalService)
 	engine := &Engine{Store: store, Config: b.Config(), Approval: approval}

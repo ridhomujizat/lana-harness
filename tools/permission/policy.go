@@ -7,7 +7,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-// EffectivePolicy mengembalikan approval/policy terakhir atau default.
+// EffectivePolicy returns the latest approval/policy, or the default.
 func EffectivePolicy(events []core.SessionEvent, def core.Policy) core.Policy {
 	policy := def
 	if policy == "" {
@@ -29,14 +29,14 @@ func validPolicy(p core.Policy) bool {
 	return p == core.PolicyTrust || p == core.PolicyAsk || p == core.PolicyNever
 }
 
-// Grant adalah izin sesi yang cocok dengan tool dan argumen literal.
+// Grant is a session permission matching a tool and a literal argument.
 type Grant struct {
 	Tool   string
 	Arg    string
 	HasArg bool
 }
 
-// Grants membaca approval/decided allowed_session yang merujuk tool/call.
+// Grants reads approval/decided events with allowed_session that refer to a tool call.
 func Grants(events []core.SessionEvent) []Grant {
 	calls := map[string]core.ToolCallPayload{}
 	for _, event := range events {
@@ -90,7 +90,7 @@ func primaryArg(input json.RawMessage) (string, bool) {
 	return string(raw), true
 }
 
-// ChildPolicy memilih policy paling ketat.
+// ChildPolicy picks the stricter policy.
 func ChildPolicy(parent, child core.Policy) core.Policy {
 	rank := func(p core.Policy) int {
 		switch p {
@@ -109,7 +109,7 @@ func ChildPolicy(parent, child core.Policy) core.Policy {
 	return parent
 }
 
-// MergeDeny menggabungkan daftar deny induk dan child.
+// MergeDeny merges the parent and child deny lists.
 func MergeDeny(parent, child []pattern.Pattern) []pattern.Pattern {
 	out := make([]pattern.Pattern, 0, len(parent)+len(child))
 	out = append(out, parent...)

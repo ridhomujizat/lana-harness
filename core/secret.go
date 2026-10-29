@@ -7,14 +7,14 @@ import (
 	"log/slog"
 )
 
-// Secret menyimpan nilai rahasia. Semua format dan encoder menulis "***".
+// Secret holds a secret value. All formats and encoders write "***".
 type Secret struct {
 	v string
 }
 
 func NewSecret(v string) Secret { return Secret{v: v} }
 
-// Reveal mengembalikan nilai asli.
+// Reveal returns the original value.
 func (s Secret) Reveal() string { return s.v }
 
 func (s Secret) String() string   { return "***" }
@@ -30,12 +30,12 @@ func (s Secret) MarshalJSON() ([]byte, error) { return json.Marshal("***") }
 
 func (s Secret) MarshalText() ([]byte, error) { return []byte("***"), nil }
 
-// Secrets mengambil nilai secret berdasarkan nama env.
+// Secrets looks up secret values by env var name.
 type Secrets interface {
 	Lookup(name string) (Secret, bool)
 }
 
-// UnmarshalText menerima nilai dari decoder TOML.
+// UnmarshalText accepts a value from the TOML decoder.
 func (s *Secret) UnmarshalText(b []byte) error {
 	s.v = string(b)
 	return nil

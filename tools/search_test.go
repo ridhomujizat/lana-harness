@@ -46,8 +46,8 @@ func TestGlobLimit(t *testing.T) {
 	if out.Status != core.ToolStatusSuccess {
 		t.Fatalf("out=%+v", out)
 	}
-	if !strings.Contains(out.Output, "dari 1001 hasil") {
-		t.Fatalf("catatan limit tidak ada: %s", out.Output)
+	if !strings.Contains(out.Output, "of 1001 results") {
+		t.Fatalf("limit note missing: %s", out.Output)
 	}
 	lines := strings.Split(out.Output, "\n")
 	if len(lines) != 1001 {
@@ -57,11 +57,11 @@ func TestGlobLimit(t *testing.T) {
 
 func TestGrepMatches(t *testing.T) {
 	ws := t.TempDir()
-	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("satu\ndua tiga\nempat"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("one\ntwo three\nfour"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := callTool(t, NewGrep(&Guard{Workspace: ws}), ws, `{"pattern":"dua"}`)
-	if out.Status != core.ToolStatusSuccess || out.Output != "a.txt:2: dua tiga" {
+	out := callTool(t, NewGrep(&Guard{Workspace: ws}), ws, `{"pattern":"two"}`)
+	if out.Status != core.ToolStatusSuccess || out.Output != "a.txt:2: two three" {
 		t.Fatalf("out=%+v", out)
 	}
 }
@@ -69,7 +69,7 @@ func TestGrepMatches(t *testing.T) {
 func TestGrepInvalidRegex(t *testing.T) {
 	ws := t.TempDir()
 	out := callTool(t, NewGrep(&Guard{Workspace: ws}), ws, `{"pattern":"["}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "pola tidak valid") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "invalid pattern") {
 		t.Fatalf("out=%+v", out)
 	}
 }

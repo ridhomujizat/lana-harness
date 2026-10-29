@@ -2,98 +2,98 @@
 
 - **Issue**: [`#3`](https://github.com/ridhomujizat/lana-harness/issues/3)
 - **Requirements**: [requirements.md](requirements.md)
-- **Revisi requirements**: 2
-- **Status requirements**: Approved
-- **Revisi contract**: 2 (rekonsiliasi lintas spec, lihat `CQ-011` sampai `CQ-019`)
-- **Berlaku untuk**: Go API (package `lana` dan `agent`), key config `[providers.<name>]` dan `[agents.<nama>]`, skema input tool, payload event session log, format skrip MockLlm, tipe event `rt.Stream`
+- **Requirements revision**: 2
+- **Requirements status**: Approved
+- **Contract revision**: 2 (cross-spec reconciliation, see `CQ-011` through `CQ-019`)
+- **Applies to**: Go API (packages `lana` and `agent`), config keys `[providers.<name>]` and `[agents.<name>]`, tool input schemas, session log event payloads, MockLlm script format, `rt.Stream` event types
 - **Status**: Approved
 
-File ini menetapkan bentuk persis antarmuka. Perilaku dimiliki oleh `requirements.md`.
-Package `core` (interface, hook, tipe pesan, dan tipe gabungan) dimiliki spec #2 (`API-CORE-015`).
-Spec ini tidak mendefinisikan tipe `core`. Tipe yang dipakai spec ini dirujuk dengan namanya.
+This file defines the exact shape of the interfaces. Behavior is owned by `requirements.md`.
+The `core` package (interfaces, hooks, message types, and composite types) is owned by spec #2 (`API-CORE-015`).
+This spec does not define `core` types. Types used by this spec are referenced by name.
 
-## Konvensi bersama
+## Shared conventions
 
-| Hal | Keputusan |
+| Topic | Decision |
 |---|---|
-| Exit code | Tidak berlaku di package ini. CLI (spec #1) memetakan error provider ke exit `3` (`REQ-EXIT-001` spec #1) |
-| Output stdout dan stderr | Tidak berlaku. Package ini tidak menulis ke stdout atau stderr |
-| Log | `log/slog`. Level `info` mencatat id session, id turn, jumlah step, provider, model, reason, dan durasi. Isi pesan, teks model, dan output tool tidak dicatat di level `info` |
-| Format config | TOML. Tabel `[providers.<name>]`, `[agents.<nama>]`, dan `[[routes]]` dibaca lewat loader spec #2 |
-| Secret | Dibaca lewat `api_key_env` dari env proses, lalu `secrets.env` (spec #2). Tidak pernah dicetak. Header `Authorization: Bearer <nilai>` hanya dikirim ke `base_url` provider |
-| Versi | Setiap payload event memakai field `v` bernilai `1`. Perubahan Go API sebelum `v1.0.0` dicatat di CHANGELOG (ADR 0014) |
-| Serialisasi | JSON UTF-8, field `snake_case`. ID session dan turn berupa ULID 26 karakter (konvensi spec #1). Waktu event diisi `core.SessionEvent.CreatedAt` oleh store |
-| Error Go | Sentinel error dengan `errors.Is`. Error provider berupa `*core.ProviderError` (alias `lana.ProviderError`) dengan field `Class` (`API-CORE-015`) |
-| Stop reason turn | `end_turn`, `max_steps`, `cancelled`, `error`. Nilai `interrupted` disediakan spec #4 (ADR 0009) |
-| Status tool | `success`, `error`, `rejected` (sama dengan spec #1 `API-CLI-007`) |
-| Format model | `<provider>:<model>`, misalnya `openai:gpt-5-mini` |
+| Exit code | Not applicable in this package. The CLI (spec #1) maps provider errors to exit `3` (`REQ-EXIT-001` of spec #1) |
+| stdout and stderr output | Not applicable. This package does not write to stdout or stderr |
+| Log | `log/slog`. Level `info` records session ID, turn ID, step count, provider, model, reason, and duration. Message content, model text, and tool output are not recorded at level `info` |
+| Config format | TOML. Tables `[providers.<name>]`, `[agents.<name>]`, and `[[routes]]` are read through the spec #2 loader |
+| Secret | Read through `api_key_env` from the process env, then `secrets.env` (spec #2). Never printed. The header `Authorization: Bearer <value>` is only sent to the provider's `base_url` |
+| Version | Every event payload uses field `v` with value `1`. Go API changes before `v1.0.0` are recorded in CHANGELOG (ADR 0014) |
+| Serialization | JSON UTF-8, `snake_case` fields. Session and turn IDs are 26-character ULIDs (spec #1 convention). Event time is filled by the store in `core.SessionEvent.CreatedAt` |
+| Go errors | Sentinel errors checked with `errors.Is`. Provider errors are `*core.ProviderError` (alias `lana.ProviderError`) with field `Class` (`API-CORE-015`) |
+| Turn stop reason | `end_turn`, `max_steps`, `cancelled`, `error`. The value `interrupted` is provided by spec #4 (ADR 0009) |
+| Tool status | `success`, `error`, `rejected` (same as spec #1 `API-CLI-007`) |
+| Model format | `<provider>:<model>`, for example `openai:gpt-5-mini` |
 
-## Index operasi
+## Operation index
 
-| ID operasi | Jenis | Nama | Requirements | Acceptance criteria |
+| Operation ID | Kind | Name | Requirements | Acceptance criteria |
 |---|---|---|---|---|
 | `API-LIB-001` | Go | `lana.New`, `lana.Options` | `REQ-LIB-001`, `REQ-LIB-006`, `REQ-LIB-008` | `AC-LIB-001`, `AC-LIB-002`, `AC-LIB-003`, `AC-LIB-013`, `AC-LIB-014` |
-| `API-LIB-002` | Go | `(*Runtime).Run` | `REQ-LIB-002`, `REQ-LIB-007` | `AC-LIB-004` sampai `AC-LIB-008`, `AC-LIB-015`, `AC-LIB-016` |
+| `API-LIB-002` | Go | `(*Runtime).Run` | `REQ-LIB-002`, `REQ-LIB-007` | `AC-LIB-004` through `AC-LIB-008`, `AC-LIB-015`, `AC-LIB-016` |
 | `API-LIB-003` | Go | `(*Runtime).Stream` | `REQ-LIB-003` | `AC-LIB-009`, `AC-LIB-010` |
 | `API-LIB-004` | Go | `(*Runtime).Close` | `REQ-LIB-004` | `AC-LIB-011` |
-| `API-LIB-005` | Config | Baris modul profile `minimal` dan `headless` | `REQ-LIB-008` | `AC-LIB-017` |
-| `API-AGENT-001` | Go | `(*Registry).Send` | `REQ-LOOP-001`, `REQ-LOOP-002` | `AC-LOOP-001` sampai `AC-LOOP-006` |
+| `API-LIB-005` | Config | Module rows of profiles `minimal` and `headless` | `REQ-LIB-008` | `AC-LIB-017` |
+| `API-AGENT-001` | Go | `(*Registry).Send` | `REQ-LOOP-001`, `REQ-LOOP-002` | `AC-LOOP-001` through `AC-LOOP-006` |
 | `API-AGENT-002` | Go | `(*Registry).Start` | `REQ-LOOP-002`, `REQ-LIB-002` | `AC-LIB-005` |
-| `API-AGENT-003` | Go | `(*Registry).Cancel` | `REQ-LOOP-007` | `AC-LOOP-019` sampai `AC-LOOP-021` |
+| `API-AGENT-003` | Go | `(*Registry).Cancel` | `REQ-LOOP-007` | `AC-LOOP-019` through `AC-LOOP-021` |
 | `API-AGENT-004` | Go | `(*Registry).SetAgent` | `REQ-LOOP-010` | `AC-LOOP-028` |
 | `API-AGENT-005` | Go | `(*Registry).SetModel` | `REQ-LOOP-010` | `AC-LOOP-029`, `AC-LOOP-030` |
 | `API-AGENT-006` | Go | `(*Registry).SubscribeLive` | `REQ-LOOP-009` | `AC-LOOP-026`, `AC-LOOP-027` |
-| `API-AGENT-007` | Config | `[agents.<nama>]` (key tambahan) | `REQ-LOOP-004`, `REQ-LOOP-005`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-011`, `AC-LOOP-015`, `AC-LOOP-016`, `AC-LOOP-023`, `AC-LOOP-031` |
-| `API-AGENT-008` | Event log | Payload event yang ditulis spec ini | `REQ-LOOP-001`, `REQ-LOOP-003`, `REQ-LOOP-004`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-001`, `AC-LOOP-009`, `AC-LOOP-010`, `AC-LOOP-022`, `AC-LOOP-024`, `AC-LOOP-028`, `AC-LIB-016` |
-| `API-AGENT-009` | Hook | Pipeline hook dan handler default | `REQ-TOOL-009`, `REQ-LOOP-003`, `REQ-LOOP-006`, `REQ-LIB-005` | `AC-TOOL-023`, `AC-TOOL-024`, `AC-LOOP-007`, `AC-LOOP-018`, `AC-LIB-012` |
-| `API-PROV-001` | Config | `[providers.<name>]` `kind = "openai_compat"` | `REQ-PROV-001` | `AC-PROV-001` sampai `AC-PROV-004` |
-| `API-PROV-002` | Wire | Pemetaan request dan stream OpenAI | `REQ-PROV-002`, `REQ-PROV-003` | `AC-PROV-005` sampai `AC-PROV-009` |
-| `API-PROV-003` | Kelas error | Kelas error provider | `REQ-PROV-004`, `REQ-LOOP-008` | `AC-PROV-010` sampai `AC-PROV-012`, `AC-LOOP-022` sampai `AC-LOOP-025` |
-| `API-PROV-004` | Test | Format skrip `MockLlm` | `REQ-MOCK-001` | `AC-MOCK-001`, `AC-MOCK-002` |
+| `API-AGENT-007` | Config | `[agents.<name>]` (additional keys) | `REQ-LOOP-004`, `REQ-LOOP-005`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-011`, `AC-LOOP-015`, `AC-LOOP-016`, `AC-LOOP-023`, `AC-LOOP-031` |
+| `API-AGENT-008` | Event log | Event payloads written by this spec | `REQ-LOOP-001`, `REQ-LOOP-003`, `REQ-LOOP-004`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-001`, `AC-LOOP-009`, `AC-LOOP-010`, `AC-LOOP-022`, `AC-LOOP-024`, `AC-LOOP-028`, `AC-LIB-016` |
+| `API-AGENT-009` | Hook | Tool hook pipeline and default handlers | `REQ-TOOL-009`, `REQ-LOOP-003`, `REQ-LOOP-006`, `REQ-LIB-005` | `AC-TOOL-023`, `AC-TOOL-024`, `AC-LOOP-007`, `AC-LOOP-018`, `AC-LIB-012` |
+| `API-PROV-001` | Config | `[providers.<name>]` `kind = "openai_compat"` | `REQ-PROV-001` | `AC-PROV-001` through `AC-PROV-004` |
+| `API-PROV-002` | Wire | OpenAI request and stream mapping | `REQ-PROV-002`, `REQ-PROV-003` | `AC-PROV-005` through `AC-PROV-009` |
+| `API-PROV-003` | Error class | Provider error classes | `REQ-PROV-004`, `REQ-LOOP-008` | `AC-PROV-010` through `AC-PROV-012`, `AC-LOOP-022` through `AC-LOOP-025` |
+| `API-PROV-004` | Test | `MockLlm` script format | `REQ-MOCK-001` | `AC-MOCK-001`, `AC-MOCK-002` |
 | `API-TOOL-001` | Tool | `read_file` | `REQ-TOOL-001` | `AC-TOOL-001`, `AC-TOOL-002` |
-| `API-TOOL-002` | Tool | `write_file` | `REQ-TOOL-002` | `AC-TOOL-003` sampai `AC-TOOL-005` |
-| `API-TOOL-003` | Tool | `edit_file` | `REQ-TOOL-003` | `AC-TOOL-006` sampai `AC-TOOL-008` |
+| `API-TOOL-002` | Tool | `write_file` | `REQ-TOOL-002` | `AC-TOOL-003` through `AC-TOOL-005` |
+| `API-TOOL-003` | Tool | `edit_file` | `REQ-TOOL-003` | `AC-TOOL-006` through `AC-TOOL-008` |
 | `API-TOOL-004` | Tool | `glob` | `REQ-TOOL-004` | `AC-TOOL-009`, `AC-TOOL-010` |
-| `API-TOOL-005` | Tool | `grep` | `REQ-TOOL-005` | `AC-TOOL-011` sampai `AC-TOOL-013` |
-| `API-TOOL-006` | Tool | `bash` | `REQ-TOOL-006` | `AC-TOOL-014` sampai `AC-TOOL-017` |
-| `API-TOOL-007` | Tool | `web_fetch` | `REQ-TOOL-007` | `AC-TOOL-018` sampai `AC-TOOL-020` |
+| `API-TOOL-005` | Tool | `grep` | `REQ-TOOL-005` | `AC-TOOL-011` through `AC-TOOL-013` |
+| `API-TOOL-006` | Tool | `bash` | `REQ-TOOL-006` | `AC-TOOL-014` through `AC-TOOL-017` |
+| `API-TOOL-007` | Tool | `web_fetch` | `REQ-TOOL-007` | `AC-TOOL-018` through `AC-TOOL-020` |
 
-## Tipe core yang dipakai (dimiliki spec #2)
+## Core types used (owned by spec #2)
 
-Semua tipe hook dan tipe pendukung ada di `API-CORE-015` (spec #2). Revisi 2 memindahkan tipe
-"tambahan" yang sebelumnya ada di sini ke sana (`CQ-011`). Nama yang berubah:
+All hook types and supporting types are in `API-CORE-015` (spec #2). Revision 2 moved the
+"additional" types that were previously here to there (`CQ-011`). Renamed items:
 
-| Nama lama (revisi 1) | Nama sekarang | Catatan |
+| Old name (revision 1) | Current name | Notes |
 |---|---|---|
-| `StepInput` | `PreStepInput` | Ditambah `Reject` lewat `PreStepDecision` |
-| `AgentTurnStopInput` | `TurnStopInput` | Field `AgentName`, `Steps`, `StopReason` |
-| `TurnStopVote` | `StopVote` | Field sama |
-| `ToolDecision.Allow` | `ToolDecision.Allowed` | Ditambah `Outcome` dan `Status` (`CQ-020` spec #2) |
-| `ToolOutput.Status` | sama, tipe `ToolStatus` | Konstanta `ToolStatusSuccess`, `ToolStatusError`, `ToolStatusRejected` |
-| `ChatEvent.Kind` `tool_use` | `ChatEvent` dengan `Kind = ChatBlock` dan `Block.Kind = tool_use` | Bentuk spec #2 (`CQ-019`) |
-| `ToolCall.CallID`, `Name`, `Input` | `ToolCall` spec #2 | Ditambah `SessionID`, `TurnID`, `Risk` |
-| `Agent` | `AgentName` | Di semua struct core |
+| `StepInput` | `PreStepInput` | Added `Reject` through `PreStepDecision` |
+| `AgentTurnStopInput` | `TurnStopInput` | Fields `AgentName`, `Steps`, `StopReason` |
+| `TurnStopVote` | `StopVote` | Same fields |
+| `ToolDecision.Allow` | `ToolDecision.Allowed` | Added `Outcome` and `Status` (`CQ-020` of spec #2) |
+| `ToolOutput.Status` | same, type `ToolStatus` | Constants `ToolStatusSuccess`, `ToolStatusError`, `ToolStatusRejected` |
+| `ChatEvent.Kind` `tool_use` | `ChatEvent` with `Kind = ChatBlock` and `Block.Kind = tool_use` | Shape from spec #2 (`CQ-019`) |
+| `ToolCall.CallID`, `Name`, `Input` | `ToolCall` of spec #2 | Added `SessionID`, `TurnID`, `Risk` |
+| `Agent` | `AgentName` | In all core structs |
 
-Tipe hook yang dipakai spec ini:
+Hook types used by this spec:
 
-| Hook | Mode | Input | Output | Handler default |
+| Hook | Mode | Input | Output | Default handler |
 |---|---|---|---|---|
-| `AgentPreStep` | waterfall | `PreStepInput` | `PreStepDecision` | Terima input apa adanya |
-| `AgentRequest` | waterfall | `RequestControl` | `RequestControl` | Terima apa adanya |
-| `LLMStream` | waterfall | `LLMStreamInput` | `ChatStream` | Panggil `Provider.Stream` untuk `Targets[0]`, isi `Request.Model` |
-| `ToolsPreExecute` | waterfall | `ToolsPreExecuteInput` | `ToolDecision` | `Risk = Read` → allow. Selain itu deny `default fail-closed` |
-| `ToolsExecute` | waterfall | `ToolsExecuteInput` | `ToolOutput` | Panggil `Tool.Call`. Error menjadi `ToolOutput{error, pesan}` |
-| `ToolsPostExecute` | waterfall | `ToolsPostExecuteInput` | `ToolOutput` | Terima apa adanya |
-| `AgentTurnStopping` | serial | `TurnStopInput` | `StopVote` | Tanpa listener, turn berhenti |
-| `SessionEvent` | observe | `core.SessionEvent` | — | Dipanggil oleh store setelah `Append` |
+| `AgentPreStep` | waterfall | `PreStepInput` | `PreStepDecision` | Accept input as-is |
+| `AgentRequest` | waterfall | `RequestControl` | `RequestControl` | Accept as-is |
+| `LLMStream` | waterfall | `LLMStreamInput` | `ChatStream` | Call `Provider.Stream` for `Targets[0]`, fill `Request.Model` |
+| `ToolsPreExecute` | waterfall | `ToolsPreExecuteInput` | `ToolDecision` | `Risk = Read` → allow. Otherwise deny `default fail-closed` |
+| `ToolsExecute` | waterfall | `ToolsExecuteInput` | `ToolOutput` | Call `Tool.Call`. Error becomes `ToolOutput{error, message}` |
+| `ToolsPostExecute` | waterfall | `ToolsPostExecuteInput` | `ToolOutput` | Accept as-is |
+| `AgentTurnStopping` | serial | `TurnStopInput` | `StopVote` | Without a listener, the turn stops |
+| `SessionEvent` | observe | `core.SessionEvent` | — | Called by the store after `Append` |
 
 ## API-LIB-001: `lana.New`
 
-- **Tujuan**: membangun runtime library dari opsi.
+- **Purpose**: builds the library runtime from options.
 - **Requirements**: `REQ-LIB-001`, `REQ-LIB-006`, `REQ-LIB-008`
 - **Acceptance criteria**: `AC-LIB-001`, `AC-LIB-002`, `AC-LIB-003`, `AC-LIB-013`, `AC-LIB-014`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku. Pemanggil adalah proses yang meng-import package
+- **Stability**: New
+- **Authorization**: Not applicable. The caller is the process that imports the package
 
 ```go
 package lana
@@ -101,26 +101,26 @@ package lana
 type ApprovalMode int
 
 const (
-    PolicyNever ApprovalMode = iota // default (nilai nol)
-    PolicyTrust                     // listener allow-all di tools.pre_execute
+    PolicyNever ApprovalMode = iota // default (zero value)
+    PolicyTrust                     // allow-all listener on tools.pre_execute
 )
 
 type Options struct {
-    Home     string            // "" = tidak membaca file config dari disk
-    Layers   []config.Layer    // lapisan config di memori (spec #2 REQ-CONF-009)
+    Home     string            // "" = do not read config files from disk
+    Layers   []config.Layer    // in-memory config layers (spec #2 REQ-CONF-009)
     Profile  string            // "" = "minimal"
-    Tools    []core.Tool       // tool milik service
+    Tools    []core.Tool       // tools owned by the service
     Approval ApprovalMode
-    Store    core.SessionStore // nil dan Home kosong = memstore. nil dan Home terisi = store dari profile (sqlite_store). Diisi = provided_store (DQ-016 spec #2)
+    Store    core.SessionStore // nil and Home empty = memstore. nil and Home set = store from profile (sqlite_store). Set = provided_store (DQ-016 of spec #2)
 }
 
-// Option adalah opsi tambahan New.
+// Option is an additional option for New.
 type Option func(*runtimeOptions)
 
-// ApproveFunc menjawab approval untuk session channel library (API-APPR-005 spec #4).
+// ApproveFunc answers approvals for the library session channel (API-APPR-005 of spec #4).
 type ApproveFunc = func(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome
 
-// ApproveWith memasang penjawab approval untuk channel library. Lihat API-APPR-005 (spec #4).
+// ApproveWith installs the approval responder for the library channel. See API-APPR-005 (spec #4).
 func ApproveWith(fn ApproveFunc) Option
 
 func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
@@ -128,57 +128,57 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Options | `Home` | string | Tidak | Lokasi `LANA_HOME`. Kosong = tidak ada file yang dibaca |
-| Options | `Layers` | `[]config.Layer` | Tidak | Lapisan di memori, diterapkan setelah profile |
-| Options | `Profile` | string | Tidak | Salah satu profile bawaan (`API-LIB-005`). Kosong = `minimal` |
-| Options | `Tools` | `[]core.Tool` | Tidak | Nama harus unik dan tidak boleh sama dengan tool bawaan |
-| Options | `Approval` | `ApprovalMode` | Tidak | `PolicyNever` (nilai nol) atau `PolicyTrust` |
-| Options | `Store` | `core.SessionStore` | Tidak | Nil dan `Home` kosong: `memstore`. Nil dan `Home` terisi: store dari profile. Diisi: `provided_store` |
-| Option | `ApproveWith(fn)` | `ApproveFunc` | Tidak | Penjawab approval untuk channel `library`. Lihat `API-APPR-005` spec #4 (`CQ-016`) |
+| Options | `Home` | string | No | Location of `LANA_HOME`. Empty = no files are read |
+| Options | `Layers` | `[]config.Layer` | No | In-memory layers, applied after the profile |
+| Options | `Profile` | string | No | One of the built-in profiles (`API-LIB-005`). Empty = `minimal` |
+| Options | `Tools` | `[]core.Tool` | No | Names must be unique and must not match built-in tools |
+| Options | `Approval` | `ApprovalMode` | No | `PolicyNever` (zero value) or `PolicyTrust` |
+| Options | `Store` | `core.SessionStore` | No | Nil and `Home` empty: `memstore`. Nil and `Home` set: store from profile. Set: `provided_store` |
+| Option | `ApproveWith(fn)` | `ApproveFunc` | No | Approval responder for the `library` channel. See `API-APPR-005` of spec #4 (`CQ-016`) |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---|---|
-| Boot selesai dan semua modul terpasang | — | `*Runtime` siap dipakai, error nil |
+| Boot completes and all modules are installed | — | `*Runtime` ready for use, error nil |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---|---|---:|---|
-| Tool kustom bernama sama dengan tool bawaan | — | error boot `tool_name_conflict` | Tidak | Error menyebut nama tool (`AC-LIB-002`) |
-| Agent memakai tool yang tidak terdaftar | — | error boot `unknown_tool` | Tidak | Error menyebut agent dan tool (`AC-LIB-003`) |
-| Provider `kind` bukan `openai_compat` | — | error boot `unsupported_kind` | Tidak | Error menyebut provider (`AC-PROV-003`) |
-| Env `api_key_env` kosong untuk provider yang dipakai agent | — | error class `missing_secret` | Tidak | Error menyebut env dan provider (`AC-PROV-004`) |
-| Profile tidak dikenal atau config tidak valid | — | error dari spec #2 | Tidak | Diteruskan dari loader |
+| Custom tool has the same name as a built-in tool | — | boot error `tool_name_conflict` | No | Error names the tool (`AC-LIB-002`) |
+| Agent uses a tool that is not registered | — | boot error `unknown_tool` | No | Error names the agent and tool (`AC-LIB-003`) |
+| Provider `kind` is not `openai_compat` | — | boot error `unsupported_kind` | No | Error names the provider (`AC-PROV-003`) |
+| Env `api_key_env` empty for a provider used by an agent | — | error class `missing_secret` | No | Error names the env and provider (`AC-PROV-004`) |
+| Unknown profile or invalid config | — | error from spec #2 | No | Passed through from the loader |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: runtime berpindah dari belum-boot ke siap. Tidak ada session yang dibuat.
-- **Idempotensi**: tidak berlaku. Setiap pemanggilan membuat runtime baru.
-- **Konkurensi**: aman dipakai dari banyak goroutine setelah `New` kembali.
-- **Paparan data**: API key tidak masuk error atau log.
+- **State transition**: the runtime moves from not-booted to ready. No session is created.
+- **Idempotency**: not applicable. Each call creates a new runtime.
+- **Concurrency**: safe to use from many goroutines after `New` returns.
+- **Data exposure**: API keys do not appear in errors or logs.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. API baru.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. New API.
+- **Deprecation**: Not applicable.
 
 ## API-LIB-002: `(*Runtime).Run`
 
-- **Tujuan**: menjalankan satu turn dan mengembalikan hasil final.
+- **Purpose**: runs one turn and returns the final result.
 - **Requirements**: `REQ-LIB-002`, `REQ-LIB-007`
-- **Acceptance criteria**: `AC-LIB-004` sampai `AC-LIB-008`, `AC-LIB-015`, `AC-LIB-016`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku
+- **Acceptance criteria**: `AC-LIB-004` through `AC-LIB-008`, `AC-LIB-015`, `AC-LIB-016`
+- **Stability**: New
+- **Authorization**: Not applicable
 
 ```go
 type Request struct {
-    Agent     string // kosong = route channel "library" pertama
-    Prompt    string // wajib, tidak kosong
-    SessionID string // kosong = session baru; isi = buka session itu
+    Agent     string // empty = first route with channel "library"
+    Prompt    string // required, not empty
+    SessionID string // empty = new session; set = open that session
 }
 
 type Usage struct {
@@ -190,7 +190,7 @@ type Result struct {
     Text       string
     SessionID  string
     StopReason string // StopEndTurn, StopMaxSteps, StopCancelled, StopError
-    Usage      Usage  // jumlah step/end usage satu turn
+    Usage      Usage  // sum of step/end usage for one turn
 }
 
 const (
@@ -205,36 +205,36 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error)
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `ctx` | `context.Context` | Ya | Pembatalan ctx membatalkan turn (`StopCancelled`) |
-| Request | `Agent` | string | Tidak | Harus terdaftar. Kosong = route `library` pertama |
-| Request | `Prompt` | string | Ya | Tidak boleh kosong atau spasi saja |
-| Request | `SessionID` | string | Tidak | ULID atau prefix unik minimal 6 karakter. Session harus ada |
+| Argument | `ctx` | `context.Context` | Yes | Cancelling ctx cancels the turn (`StopCancelled`) |
+| Request | `Agent` | string | No | Must be registered. Empty = first `library` route |
+| Request | `Prompt` | string | Yes | Must not be empty or whitespace only |
+| Request | `SessionID` | string | No | ULID or unique prefix of at least 6 characters. Session must exist |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Turn selesai `end_turn` | — | `Result` lengkap, error nil |
-| Turn selesai `max_steps` | — | `StopReason` `max_steps`, error nil |
-| Turn dibatalkan | — | `StopReason` `cancelled`, error nil |
+| Turn finishes with `end_turn` | — | Full `Result`, error nil |
+| Turn finishes with `max_steps` | — | `StopReason` `max_steps`, error nil |
+| Turn cancelled | — | `StopReason` `cancelled`, error nil |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `Prompt` kosong | — | `ErrEmptyPrompt` | Ya | Tidak ada session dibuat (`AC-LIB-008`) |
-| Tidak ada route `library` dan `Agent` kosong | — | `ErrNoRoute` | Tidak | (`AC-LIB-015`) |
-| Agent tidak terdaftar | — | `ErrUnknownAgent` | Tidak | Menyebut nama agent |
-| Session sedang berjalan | — | `ErrSessionBusy` | Ya | Pesan tidak masuk inbox (`AC-LIB-005`) |
-| Session tidak ditemukan | — | `ErrSessionNotFound` | Tidak | Menyebut ID |
-| Provider gagal setelah retry dan fallback | — | `*ProviderError{Class}` | Tergantung class | `StopReason` `error` (`AC-LIB-007`) |
-| Runtime sudah ditutup | — | `ErrClosed` | Tidak | (`AC-LIB-011`) |
+| `Prompt` empty | — | `ErrEmptyPrompt` | Yes | No session is created (`AC-LIB-008`) |
+| No `library` route and `Agent` empty | — | `ErrNoRoute` | No | (`AC-LIB-015`) |
+| Agent not registered | — | `ErrUnknownAgent` | No | Names the agent |
+| Session is running | — | `ErrSessionBusy` | Yes | Message does not enter the inbox (`AC-LIB-005`) |
+| Session not found | — | `ErrSessionNotFound` | No | Names the ID |
+| Provider fails after retry and fallback | — | `*ProviderError{Class}` | Depends on class | `StopReason` `error` (`AC-LIB-007`) |
+| Runtime closed | — | `ErrClosed` | No | (`AC-LIB-011`) |
 
-Tipe error provider:
+Provider error type:
 
-Tipe `*core.ProviderError` (`API-CORE-015`), alias `lana.ProviderError`:
+Type `*core.ProviderError` (`API-CORE-015`), alias `lana.ProviderError`:
 
 ```go
 type ProviderError struct {
@@ -242,28 +242,28 @@ type ProviderError struct {
     Status  int
     Message string
 }
-// errors.Is(err, core.ErrContextTooLong) benar untuk Class context_length.
+// errors.Is(err, core.ErrContextTooLong) is true for Class context_length.
 ```
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: membuat session baru jika `SessionID` kosong. Menulis event turn dan step.
-- **Idempotensi**: tidak berlaku. Setiap pemanggilan menambah satu turn.
-- **Konkurensi**: `Run` dan `Stream` untuk session yang sama tidak boleh berjalan bersamaan. Pemanggil kedua menerima `ErrSessionBusy`.
-- **Paparan data**: isi jawaban ada di `Result.Text`. Tidak ada secret.
+- **State transition**: creates a new session if `SessionID` is empty. Writes turn and step events.
+- **Idempotency**: not applicable. Each call adds one turn.
+- **Concurrency**: `Run` and `Stream` for the same session must not run at the same time. The second caller receives `ErrSessionBusy`.
+- **Data exposure**: the answer text is in `Result.Text`. No secrets.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. API baru.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. New API.
+- **Deprecation**: Not applicable.
 
 ## API-LIB-003: `(*Runtime).Stream`
 
-- **Tujuan**: mengirim event turn sebagai iterator agar service bisa menampilkan progres.
+- **Purpose**: emits turn events as an iterator so the service can display progress.
 - **Requirements**: `REQ-LIB-003`
 - **Acceptance criteria**: `AC-LIB-009`, `AC-LIB-010`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku
+- **Stability**: New
+- **Authorization**: Not applicable
 
 ```go
 func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, error]
@@ -291,41 +291,41 @@ type Done struct{ Result Result }
 
 ### Input
 
-Sama dengan `API-LIB-002`.
+Same as `API-LIB-002`.
 
-### Sukses
+### Success
 
-| Kondisi | Urutan event | Output |
+| Condition | Event order | Output |
 |---|---|---|
-| Turn selesai | `Session`, lalu `TextDelta`, `ToolCall`, `ToolResult` sesuai kejadian, lalu `Done` | `Done.Result` berisi hasil seperti `Run` |
+| Turn finishes | `Session`, then `TextDelta`, `ToolCall`, `ToolResult` as events occur, then `Done` | `Done.Result` contains the same result as `Run` |
 
-### Gagal
+### Failure
 
-| Kondisi | Event terakhir | Kode stabil |
+| Condition | Last event | Stable code |
 |---|---|---|
-| Error pra-turn (`ErrEmptyPrompt`, `ErrNoRoute`, `ErrUnknownAgent`, `ErrSessionBusy`, `ErrSessionNotFound`) | `(nil, err)` | Sama dengan `API-LIB-002` |
-| Provider gagal | `Done` dengan `StopReason` `error`, lalu `(nil, *ProviderError)` | `ProviderError.Class` |
-| `ctx` dibatalkan | `Done` dengan `StopReason` `cancelled` | — |
+| Pre-turn error (`ErrEmptyPrompt`, `ErrNoRoute`, `ErrUnknownAgent`, `ErrSessionBusy`, `ErrSessionNotFound`) | `(nil, err)` | Same as `API-LIB-002` |
+| Provider fails | `Done` with `StopReason` `error`, then `(nil, *ProviderError)` | `ProviderError.Class` |
+| `ctx` cancelled | `Done` with `StopReason` `cancelled` | — |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: sama dengan `Run`.
-- **Idempotensi**: tidak berlaku.
-- **Konkurensi**: sama dengan `Run`. Frame hidup dikirim tanpa menunggu iterator dibaca; event yang tidak dibaca dibuang dengan peringatan log (`REQ-LOOP-009`).
-- **Paparan data**: sama dengan `Run`.
+- **State transition**: same as `Run`.
+- **Idempotency**: not applicable.
+- **Concurrency**: same as `Run`. Live frames are sent without waiting for the iterator to be read; events that are not read are dropped with a log warning (`REQ-LOOP-009`).
+- **Data exposure**: same as `Run`.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. API baru.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. New API.
+- **Deprecation**: Not applicable.
 
 ## API-LIB-004: `(*Runtime).Close`
 
-- **Tujuan**: menghentikan semua turn dan melepas modul.
+- **Purpose**: stops all turns and releases modules.
 - **Requirements**: `REQ-LIB-004`
 - **Acceptance criteria**: `AC-LIB-011`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku
+- **Stability**: New
+- **Authorization**: Not applicable
 
 ```go
 func (rt *Runtime) Close() error
@@ -333,132 +333,132 @@ func (rt *Runtime) Close() error
 
 ### Input
 
-Tidak ada.
+None.
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Semua turn berhenti dan modul dihentikan dalam 30 detik | — | error nil |
+| All turns stop and modules shut down within 30 seconds | — | error nil |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Turn melewati 30 detik | — | error `shutdown_timeout` (berisi nama modul) | Tidak | Modul yang lewat dicatat dan dilewati (spec #2 `REQ-MOD-003`) |
-| Dipanggil dua kali | — | — | Ya | Pemanggilan kedua tidak melakukan apa-apa dan error nil |
+| A turn exceeds 30 seconds | — | error `shutdown_timeout` (contains the module name) | No | The module that timed out is logged and skipped (spec #2 `REQ-MOD-003`) |
+| Called twice | — | — | Yes | The second call does nothing and returns error nil |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: runtime berpindah ke `closed`. `Run`, `Stream`, `Send`, `Start` setelahnya gagal dengan `ErrClosed`.
-- **Idempotensi**: `Close` idempotent.
-- **Konkurensi**: aman dipanggil bersamaan dengan turn berjalan.
-- **Paparan data**: tidak berlaku.
+- **State transition**: runtime moves to `closed`. `Run`, `Stream`, `Send`, `Start` afterwards fail with `ErrClosed`.
+- **Idempotency**: `Close` is idempotent.
+- **Concurrency**: safe to call while turns are running.
+- **Data exposure**: not applicable.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. API baru.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. New API.
+- **Deprecation**: Not applicable.
 
-## API-LIB-005: Baris modul profile bawaan
+## API-LIB-005: Module rows of the built-in profiles
 
-- **Tujuan**: menetapkan baris modul yang dipakai `lana.New` untuk profile bawaan.
+- **Purpose**: defines the module rows that `lana.New` uses for the built-in profiles.
 - **Requirements**: `REQ-LIB-008`
 - **Acceptance criteria**: `AC-LIB-017`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku
+- **Stability**: New
+- **Authorization**: Not applicable
 
-Baris profile bawaan dimiliki spec #2 (`API-CONF-009`, `CQ-031`). Spec ini memakai baris `llm`, `tools`, `store`, dan `agent` dari base. `minimal` sama dengan base. `headless` sama dengan base ditambah `cli_runner` (spec #1). Dua modul milik spec ini:
+Built-in profile rows are owned by spec #2 (`API-CONF-009`, `CQ-031`). This spec uses the rows `llm`, `tools`, `store`, and `agent` from base. `minimal` is the same as base. `headless` is the same as base plus `cli_runner` (spec #1). Two modules belong to this spec:
 
-| `module` | Id | Kapan |
+| `module` | ID | When |
 |---|---|---|
-| `memstore` | `store` | `Home` kosong dan `Options.Store` nil (library) |
-| `provided_store` | `store` | `Options.Store` diisi. Memasang instance itu lewat `Provide` (DQ-016 spec #2) |
+| `memstore` | `store` | `Home` empty and `Options.Store` nil (library) |
+| `provided_store` | `store` | `Options.Store` set. Installs that instance through `Provide` (DQ-016 of spec #2) |
 
 ### Input
 
-Tidak ada. Baris ini adalah data profile bawaan (spec #2 `REQ-PROF-001`).
+None. These rows are built-in profile data (spec #2 `REQ-PROF-001`).
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Profile dimuat | — | Baris base sesuai `API-CONF-009`, dengan asal `profile:minimal` atau `profile:headless` |
+| Profile loaded | — | Base rows per `API-CONF-009`, with origin `profile:minimal` or `profile:headless` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Baris `store` diganti patch dengan `module` yang tidak dikenal | — | error spec #2 `REQ-CONF-003` | Tidak | Menyebut `module` |
+| `store` row is replaced by a patch with an unknown `module` | — | spec #2 error `REQ-CONF-003` | No | Names the `module` |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: tidak ada.
-- **Idempotensi**: tidak berlaku.
-- **Konkurensi**: tidak berlaku.
-- **Paparan data**: tidak berlaku.
+- **State transition**: none.
+- **Idempotency**: not applicable.
+- **Concurrency**: not applicable.
+- **Data exposure**: not applicable.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
-- **Catatan**: `store` memakai `sqlite_store` pada profile (spec #4). Library tanpa `Home` memakai `memstore` lewat baris di atas. Spec #1 menambah baris `runner` (`cli_runner`) untuk `headless`.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
+- **Note**: on the profile, `store` uses `sqlite_store` (spec #4). A library without `Home` uses `memstore` through the row above. Spec #1 adds the `runner` row (`cli_runner`) for `headless`.
 
 ## API-AGENT-001: `(*Registry).Send`
 
-- **Tujuan**: mengirim pesan ke session. Jika session idle, turn baru dimulai. Jika sibuk, pesan masuk inbox.
+- **Purpose**: sends a message to a session. If the session is idle, a new turn starts. If busy, the message enters the inbox.
 - **Requirements**: `REQ-LOOP-001`, `REQ-LOOP-002`
-- **Acceptance criteria**: `AC-LOOP-001` sampai `AC-LOOP-006`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku di package ini. Pemanggil (CLI atau library) sudah memilih session.
+- **Acceptance criteria**: `AC-LOOP-001` through `AC-LOOP-006`
+- **Stability**: New
+- **Authorization**: Not applicable in this package. The caller (CLI or library) has already selected the session.
 
 ```go
-// Implementasi core.AgentRegistry (signature menurut CQ-010).
+// Implementation of core.AgentRegistry (signature per CQ-010).
 func (r *Registry) Send(ctx context.Context, sessionID, text string) error
 ```
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `ctx` | `context.Context` | Ya | Hanya untuk validasi dan pembatalan pemanggilan. Tidak membatalkan turn |
-| Argumen | `sessionID` | string | Ya | Session harus ada |
-| Argumen | `text` | string | Ya | Tidak boleh kosong. Hanya teks (`CQ-005`) |
+| Argument | `ctx` | `context.Context` | Yes | Only for validation and cancelling the call. Does not cancel the turn |
+| Argument | `sessionID` | string | Yes | Session must exist |
+| Argument | `text` | string | Yes | Must not be empty. Text only (`CQ-005`) |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session idle | — | Turn baru dimulai. `turn/start` ditulis. Error nil |
-| Session sibuk | — | Pesan masuk inbox. Error nil. Pesan di-claim di step berikutnya |
+| Session idle | — | New turn starts. `turn/start` is written. Error nil |
+| Session busy | — | Message enters the inbox. Error nil. Message is claimed in the next step |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Session tidak ada | — | `ErrSessionNotFound` | Tidak | Tidak ada event |
-| Teks kosong | — | `ErrEmptyText` | Ya | Tidak ada event |
-| Runtime ditutup | — | `ErrClosed` | Tidak | Tidak ada event |
+| Session does not exist | — | `ErrSessionNotFound` | No | No event |
+| Text empty | — | `ErrEmptyText` | Yes | No event |
+| Runtime closed | — | `ErrClosed` | No | No event |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: idle ke turn berjalan, atau inbox bertambah satu.
-- **Idempotensi**: tidak berlaku. Setiap pemanggilan menambah satu pesan.
-- **Konkurensi**: pesan di inbox diambil satu per step. Urutan kirim dijaga per session (`AC-LOOP-004`).
-- **Paparan data**: teks pesan ditulis ke `user/message`.
+- **State transition**: idle to running turn, or inbox grows by one.
+- **Idempotency**: not applicable. Each call adds one message.
+- **Concurrency**: messages in the inbox are taken one per step. Send order is preserved per session (`AC-LOOP-004`).
+- **Data exposure**: message text is written to `user/message`.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. Sesuai kebutuhan spec #1 (`ctx.agents.Send`).
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. Matches the needs of spec #1 (`ctx.agents.Send`).
+- **Deprecation**: Not applicable.
 
 ## API-AGENT-002: `(*Registry).Start`
 
-- **Tujuan**: memulai turn baru untuk library dan mengembalikan id turn. Menolak session yang sedang berjalan.
+- **Purpose**: starts a new turn for the library and returns the turn ID. Rejects a session that is already running.
 - **Requirements**: `REQ-LOOP-002`, `REQ-LIB-002`
 - **Acceptance criteria**: `AC-LIB-005`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ```go
 func (r *Registry) Start(ctx context.Context, sessionID, text string) (turnID string, err error)
@@ -466,221 +466,221 @@ func (r *Registry) Start(ctx context.Context, sessionID, text string) (turnID st
 
 ### Input
 
-Sama dengan `API-AGENT-001`.
+Same as `API-AGENT-001`.
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session idle | — | `turnID` ULID, error nil. Turn dimulai |
+| Session idle | — | `turnID` ULID, error nil. Turn starts |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Session sedang berjalan | — | `ErrSessionBusy` | Ya | Tidak ada pesan masuk inbox |
-| Kondisi lain | — | Sama dengan `API-AGENT-001` | Lihat tabel di sana | — |
+| Session is running | — | `ErrSessionBusy` | Yes | No message enters the inbox |
+| Other conditions | — | Same as `API-AGENT-001` | See table there | — |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: idle ke turn berjalan.
-- **Idempotensi**: tidak berlaku.
-- **Konkurensi**: pemeriksaan idle dan mulai turn berada di satu kunci per session.
-- **Paparan data**: sama dengan `API-AGENT-001`.
+- **State transition**: idle to running turn.
+- **Idempotency**: not applicable.
+- **Concurrency**: the idle check and turn start happen under one lock per session.
+- **Data exposure**: same as `API-AGENT-001`.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. API baru.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. New API.
+- **Deprecation**: Not applicable.
 
 ## API-AGENT-003: `(*Registry).Cancel`
 
-- **Tujuan**: membatalkan turn yang sedang berjalan di session.
+- **Purpose**: cancels the running turn in a session.
 - **Requirements**: `REQ-LOOP-007`
 - **Acceptance criteria**: `AC-LOOP-019`, `AC-LOOP-020`, `AC-LOOP-021`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ```go
-// Implementasi core.AgentRegistry (API-CORE-010).
+// Implementation of core.AgentRegistry (API-CORE-010).
 func (r *Registry) Cancel(ctx context.Context, sessionID string) error
 ```
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `ctx` | `context.Context` | Ya | Hanya untuk pembatalan pemanggilan. Tidak membatalkan turn lewat `ctx` ini |
-| Argumen | `sessionID` | string | Ya | Session harus ada |
+| Argument | `ctx` | `context.Context` | Yes | Only for cancelling the call. Does not cancel the turn through this `ctx` |
+| Argument | `sessionID` | string | Yes | Session must exist |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Turn berjalan | — | Turn berakhir dengan `turn/end` reason `cancelled`. Error nil |
-| Session idle | — | Tidak ada event. Error nil (`AC-LOOP-020`) |
+| Turn running | — | Turn ends with `turn/end` reason `cancelled`. Error nil |
+| Session idle | — | No event. Error nil (`AC-LOOP-020`) |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Session tidak ada | — | `ErrSessionNotFound` | Tidak | Tidak ada event |
+| Session does not exist | — | `ErrSessionNotFound` | No | No event |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: turn berjalan ke `cancelled`. Inbox tidak berubah (`AC-LOOP-021`).
-- **Idempotensi**: `Cancel` kedua pada turn yang sama tidak menulis event tambahan.
-- **Konkurensi**: aman dipanggil dari goroutine lain.
-- **Paparan data**: tidak berlaku.
+- **State transition**: running turn to `cancelled`. Inbox unchanged (`AC-LOOP-021`).
+- **Idempotency**: a second `Cancel` on the same turn writes no additional event.
+- **Concurrency**: safe to call from other goroutines.
+- **Data exposure**: not applicable.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
 ## API-AGENT-004: `(*Registry).SetAgent`
 
-- **Tujuan**: memilih agent untuk session. Berlaku mulai turn atau step berikutnya.
+- **Purpose**: selects the agent for a session. Takes effect from the next turn or step.
 - **Requirements**: `REQ-LOOP-010`
 - **Acceptance criteria**: `AC-LOOP-028`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ```go
-// Implementasi core.AgentRegistry.
+// Implementation of core.AgentRegistry.
 func (r *Registry) SetAgent(ctx context.Context, sessionID, agent string) error
 ```
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada |
-| Argumen | `agent` | string | Ya | Harus terdaftar di config |
+| Argument | `sessionID` | string | Yes | Session must exist |
+| Argument | `agent` | string | Yes | Must be registered in the config |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Agent terdaftar | — | Event `model/selection` ditulis (payload di `API-AGENT-008`). Error nil |
+| Agent registered | — | `model/selection` event written (payload in `API-AGENT-008`). Error nil |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Agent tidak terdaftar | — | `ErrUnknownAgent` | Ya | Tidak ada event. Agent lama tetap (`AC-CMD-007` spec #1 berlaku untuk provider) |
-| Session tidak ada | — | `ErrSessionNotFound` | Tidak | Tidak ada event |
+| Agent not registered | — | `ErrUnknownAgent` | Yes | No event. Previous agent remains (`AC-CMD-007` of spec #1 applies to providers) |
+| Session does not exist | — | `ErrSessionNotFound` | No | No event |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: agent session berubah. Berlaku mulai step berikutnya.
-- **Idempotensi**: memilih agent yang sama dua kali menulis dua event. Tidak berbahaya.
-- **Konkurensi**: dibaca per step.
-- **Paparan data**: tidak berlaku.
+- **State transition**: session agent changes. Takes effect from the next step.
+- **Idempotency**: selecting the same agent twice writes two events. Harmless.
+- **Concurrency**: read per step.
+- **Data exposure**: not applicable.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
 ## API-AGENT-005: `(*Registry).SetModel`
 
-- **Tujuan**: memilih provider dan model untuk session. Berlaku mulai step berikutnya.
+- **Purpose**: selects the provider and model for a session. Takes effect from the next step.
 - **Requirements**: `REQ-LOOP-010`
 - **Acceptance criteria**: `AC-LOOP-029`, `AC-LOOP-030`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ```go
-// Implementasi core.AgentRegistry (API-CORE-010). model berbentuk "<provider>:<model>".
+// Implementation of core.AgentRegistry (API-CORE-010). model has the form "<provider>:<model>".
 func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error
 ```
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada |
-| Argumen | `model` | string | Ya | `<provider>:<model>`. Bagian provider harus terdaftar di `[providers.<name>]`. Bagian model tidak kosong. Tidak diverifikasi ke provider |
+| Argument | `sessionID` | string | Yes | Session must exist |
+| Argument | `model` | string | Yes | `<provider>:<model>`. The provider part must be registered in `[providers.<name>]`. The model part must not be empty. Not verified against the provider |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Provider terdaftar | — | Event `model/selection` ditulis. Error nil |
+| Provider registered | — | `model/selection` event written. Error nil |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Provider tidak terdaftar | — | `ErrUnknownProvider` | Ya | Pesan menyebut `provider tidak dikenal: <nama>`. Tidak ada event. Format tanpa `:` juga error ini |
-| Model kosong | — | `ErrEmptyModel` | Ya | Tidak ada event |
-| Session tidak ada | — | `ErrSessionNotFound` | Tidak | Tidak ada event |
+| Provider not registered | — | `ErrUnknownProvider` | Yes | Message says `unknown provider: <name>`. No event. A format without `:` also produces this error |
+| Model empty | — | `ErrEmptyModel` | Yes | No event |
+| Session does not exist | — | `ErrSessionNotFound` | No | No event |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: model session berubah mulai step berikutnya.
-- **Idempotensi**: sama dengan `SetAgent`.
-- **Konkurensi**: dibaca per step.
-- **Paparan data**: tidak berlaku.
+- **State transition**: session model changes from the next step.
+- **Idempotency**: same as `SetAgent`.
+- **Concurrency**: read per step.
+- **Data exposure**: not applicable.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
 ## API-AGENT-006: `(*Registry).SubscribeLive`
 
-- **Tujuan**: menerima frame teks sementara untuk satu session.
+- **Purpose**: receives temporary text frames for one session.
 - **Requirements**: `REQ-LOOP-009`
 - **Acceptance criteria**: `AC-LOOP-026`, `AC-LOOP-027`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ```go
-// Implementasi core.AgentRegistry (API-CORE-010). Subscription memakai buffer core.ObserveBuffer (1024).
+// Implementation of core.AgentRegistry (API-CORE-010). Subscription uses a core.ObserveBuffer buffer (1024).
 func (r *Registry) SubscribeLive(sessionID string) (*core.Subscription[core.LiveFrame], error)
 ```
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session boleh belum ada turn |
+| Argument | `sessionID` | string | Yes | The session may not have a turn yet |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Subscribe berhasil | — | `*core.Subscription` dengan buffer 1024. `Close` pada subscription melepas subscriber |
+| Subscribe succeeds | — | `*core.Subscription` with buffer 1024. `Close` on the subscription removes the subscriber |
 
-Frame `text_delta` menjadi `LiveFrame{SessionID, TurnID, Kind: "text_delta", Text}`.
+A `text_delta` frame becomes `LiveFrame{SessionID, TurnID, Kind: "text_delta", Text}`.
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Buffer penuh | — | — | — | Frame lama dibuang. `Received.Lagged` > 0 dan peringatan `frame hidup dibuang` ditulis ke log (`AC-LOOP-027`) |
+| Buffer full | — | — | — | Oldest frame is dropped. `Received.Lagged` > 0 and warning `live frame dropped` is written to the log (`AC-LOOP-027`) |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: tidak ada di log.
-- **Idempotensi**: tidak berlaku.
-- **Konkurensi**: satu channel per subscriber. Pengiriman tidak pernah memblokir turn.
-- **Paparan data**: teks model. Tidak masuk log.
+- **State transition**: none in the log.
+- **Idempotency**: not applicable.
+- **Concurrency**: one channel per subscriber. Delivery never blocks the turn.
+- **Data exposure**: model text. Not written to the log.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
-## API-AGENT-007: Key config agent tambahan
+## API-AGENT-007: Additional agent config keys
 
-- **Tujuan**: key `[agents.<nama>]` yang dipakai loop agent. Key lain di tabel yang sama (`permission`, `rules`, `subagents`, `mcp`, `skills`) dimiliki spec lain.
+- **Purpose**: the `[agents.<name>]` keys used by the agent loop. Other keys in the same table (`permission`, `rules`, `subagents`, `mcp`, `skills`) are owned by other specs.
 - **Requirements**: `REQ-LOOP-004`, `REQ-LOOP-005`, `REQ-LOOP-008`, `REQ-LOOP-010`
 - **Acceptance criteria**: `AC-LOOP-011`, `AC-LOOP-015`, `AC-LOOP-016`, `AC-LOOP-023`, `AC-LOOP-031`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ```toml
 [agents.coder]
@@ -695,100 +695,100 @@ max_steps = 25
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Config | `provider` | string | Ya | Harus ada di `[providers]` |
-| Config | `model` | string | Ya | Tidak kosong |
-| Config | `fallback` | array string `provider:model` | Tidak | Setiap provider harus ada. Default kosong |
-| Config | `prompt_file` | string | Tidak | Path relatif dari `LANA_HOME`. Kosong = system prompt kosong. Dibaca tiap step |
-| Config | `workspace` | string | Tidak | Path absolut atau `~/...`. Kosong = cwd saat `New` (`CQ-010`) |
-| Config | `tools` | array string | Tidak | Setiap nama harus tool bawaan (`API-TOOL-*`) atau tool kustom. Default kosong |
-| Config | `max_steps` | integer | Tidak | 1 sampai 200. Default 25 (`Q-002`) |
+| Config | `provider` | string | Yes | Must exist in `[providers]` |
+| Config | `model` | string | Yes | Not empty |
+| Config | `fallback` | array of strings `provider:model` | No | Each provider must exist. Default empty |
+| Config | `prompt_file` | string | No | Relative path from `LANA_HOME`. Empty = empty system prompt. Read every step |
+| Config | `workspace` | string | No | Absolute path or `~/...`. Empty = cwd at `New` (`CQ-010`) |
+| Config | `tools` | array of strings | No | Each name must be a built-in tool (`API-TOOL-*`) or a custom tool. Default empty |
+| Config | `max_steps` | integer | No | 1 to 200. Default 25 (`Q-002`) |
 
-Key `permission` (ditulis oleh `lana init` spec #1) dibaca oleh spec #2 sebagai key yang dikenal.
-Spec ini tidak memakainya. Spec #4 yang memakainya.
+The `permission` key (written by `lana init` in spec #1) is read by spec #2 as a known key.
+This spec does not use it. Spec #4 uses it.
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Semua key valid | — | Agent terdaftar |
+| All keys valid | — | Agent registered |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `max_steps` di luar 1 sampai 200 | — | error spec #2 `REQ-CONF-003` | Tidak | Menyebut key `agents.<nama>.max_steps` |
-| Tool tidak dikenal | — | `unknown_tool` | Tidak | Lihat `AC-LIB-003` |
-| Provider di `fallback` tidak terdaftar | — | error boot (rujukan config, ADR 0010) | Tidak | Boot gagal dan menyebut provider. Tidak ada fallback diam-diam |
+| `max_steps` outside 1 to 200 | — | spec #2 error `REQ-CONF-003` | No | Names the key `agents.<name>.max_steps` |
+| Unknown tool | — | `unknown_tool` | No | See `AC-LIB-003` |
+| Provider in `fallback` not registered | — | boot error (config reference, ADR 0010) | No | Boot fails and names the provider. No silent fallback |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: tidak ada.
-- **Idempotensi**: tidak berlaku.
-- **Konkurensi**: tidak berlaku.
-- **Paparan data**: tidak ada secret di key ini.
+- **State transition**: none.
+- **Idempotency**: not applicable.
+- **Concurrency**: not applicable.
+- **Data exposure**: no secrets in these keys.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
-## API-AGENT-008: Payload event session log
+## API-AGENT-008: Session log event payloads
 
-- **Tujuan**: kind dan payload yang ditulis spec ini ke `core.SessionEvent.Payload`.
+- **Purpose**: kinds and payloads this spec writes to `core.SessionEvent.Payload`.
 - **Requirements**: `REQ-LOOP-001`, `REQ-LOOP-003`, `REQ-LOOP-004`, `REQ-LOOP-008`, `REQ-LOOP-010`
 - **Acceptance criteria**: `AC-LOOP-001`, `AC-LOOP-009`, `AC-LOOP-010`, `AC-LOOP-022`, `AC-LOOP-024`, `AC-LOOP-028`, `AC-LIB-016`
-- **Stabilitas**: Baru.
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New.
+- **Authorization**: Not applicable.
 
-Field setiap payload dimiliki `API-CORE-008` (spec #2, `CQ-029`). Spec ini hanya menulis kind berikut:
+Fields of each payload are owned by `API-CORE-008` (spec #2, `CQ-029`). This spec only writes the following kinds:
 
-| Kind | Struct (`core`) | Keterangan |
+| Kind | Struct (`core`) | Description |
 |---|---|---|
-| `turn/start` | `TurnStart` | Id turn ada di `TurnID` dan payload |
-| `turn/end` | `TurnEnd` | `reason`. `error` (`PayloadError`) hanya jika reason `error` |
-| `step/start` | `StepStart` | Dicatat sebelum request ke model |
-| `step/end` | `StepEnd` | `usage` total step |
-| `system/message` | `SystemMessage` | `text`. Hanya jika prompt berubah dari event terakhir |
-| `user/message` | `UserMessage` | `content` berisi blok `text` dari pesan yang di-claim |
-| `assistant/message` | `AssistantMessage` | `content` berisi blok `text` dan `tool_use`. Revisi 1 memakai `blocks`, diganti `content` (`CQ-029`) |
-| `assistant/attempt` | `AssistantAttempt` | `provider`, `model`, `attempt`, `error` (`PayloadError`). Tidak masuk riwayat |
-| `tool/call` | `ToolCallPayload` | `call_id`, `name`, `input`. Ditulis sebelum pipeline |
-| `tool/result` | `ToolResultPayload` | `call_id`, `status`, `output`. Tepat satu per `tool/call` |
-| `model/selection` | `ModelSelection` | `provider`, `model`, `agent` (hanya dari `SetAgent`, `Q-022`) |
+| `turn/start` | `TurnStart` | Turn ID is in `TurnID` and the payload |
+| `turn/end` | `TurnEnd` | `reason`. `error` (`PayloadError`) only if reason is `error` |
+| `step/start` | `StepStart` | Recorded before the model request |
+| `step/end` | `StepEnd` | `usage` total for the step |
+| `system/message` | `SystemMessage` | `text`. Only if the prompt changed from the last event |
+| `user/message` | `UserMessage` | `content` contains the `text` block of the claimed message |
+| `assistant/message` | `AssistantMessage` | `content` contains `text` and `tool_use` blocks. Revision 1 used `blocks`, replaced by `content` (`CQ-029`) |
+| `assistant/attempt` | `AssistantAttempt` | `provider`, `model`, `attempt`, `error` (`PayloadError`). Not part of history |
+| `tool/call` | `ToolCallPayload` | `call_id`, `name`, `input`. Written before the pipeline |
+| `tool/result` | `ToolResultPayload` | `call_id`, `status`, `output`. Exactly one per `tool/call` |
+| `model/selection` | `ModelSelection` | `provider`, `model`, `agent` (only from `SetAgent`, `Q-022`) |
 
-Kind `session/created` ditulis spec #4 dengan `workspace` (`Q-017`). Spec ini hanya membacanya.
+Kind `session/created` is written by spec #4 with `workspace` (`Q-017`). This spec only reads it.
 
-Contoh `turn/end` dan `tool/result`:
+Examples of `turn/end` and `tool/result`:
 
 ```json
 {"v":1,"reason":"cancelled","error":null}
-{"v":1,"call_id":"call_1","status":"rejected","output":"default fail-closed: tool write_file butuh izin"}
+{"v":1,"call_id":"call_1","status":"rejected","output":"default fail-closed: tool write_file requires permission"}
 ```
 
-## API-AGENT-009: Pipeline hook tool
+## API-AGENT-009: Tool hook pipeline
 
-- **Tujuan**: urutan hook tool dan handler default. Listener spec #4 dan `PolicyTrust` ditambahkan ke rantai ini.
+- **Purpose**: order of tool hooks and default handlers. Listeners from spec #4 and `PolicyTrust` are added to this chain.
 - **Requirements**: `REQ-TOOL-009`, `REQ-LOOP-003`, `REQ-LOOP-006`, `REQ-LIB-005`
 - **Acceptance criteria**: `AC-TOOL-023`, `AC-TOOL-024`, `AC-LOOP-007`, `AC-LOOP-018`, `AC-LIB-012`
-- **Stabilitas**: Baru
-- **Otorisasi**: `tools.pre_execute` adalah titik izin. Spec ini hanya menyediakan default fail-closed.
+- **Stability**: New
+- **Authorization**: `tools.pre_execute` is the permission point. This spec only provides the default fail-closed behavior.
 
-Urutan per tool call: `tools.pre_execute` lalu `tools.execute` lalu `tools.post_execute`. Jika
-`tools.pre_execute` mengembalikan `Allowed = false`, dua hook berikutnya tidak berjalan dan
-`tool/result` berstatus `rejected` (`AC-TOOL-024`).
+Order per tool call: `tools.pre_execute`, then `tools.execute`, then `tools.post_execute`. If
+`tools.pre_execute` returns `Allowed = false`, the next two hooks do not run and the
+`tool/result` has status `rejected` (`AC-TOOL-024`).
 
-Listener `PolicyTrust` (`API-LIB-001`) dipasang di `tools.pre_execute` dengan mode waterfall dan
-selalu mengembalikan `ToolDecision{Allowed: true}` tanpa memanggil `next`.
+The `PolicyTrust` listener (`API-LIB-001`) is installed on `tools.pre_execute` in waterfall mode and
+always returns `ToolDecision{Allowed: true}` without calling `next`.
 
-## API-PROV-001: Config provider `openai_compat`
+## API-PROV-001: `openai_compat` provider config
 
-- **Tujuan**: key `[providers.<name>]` untuk adapter OpenAI-compatible (OpenAI, OpenRouter, Ollama).
+- **Purpose**: `[providers.<name>]` keys for the OpenAI-compatible adapter (OpenAI, OpenRouter, Ollama).
 - **Requirements**: `REQ-PROV-001`
 - **Acceptance criteria**: `AC-PROV-001`, `AC-PROV-002`, `AC-PROV-003`, `AC-PROV-004`
-- **Stabilitas**: Baru
-- **Otorisasi**: Key `api_key_env` menunjuk env. Nilainya tidak pernah ditulis di config.
+- **Stability**: New
+- **Authorization**: The `api_key_env` key points to an env. Its value is never written in the config.
 
 ```toml
 [providers.openai]
@@ -805,47 +805,47 @@ base_url = "http://localhost:11434/v1"
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Config | `kind` | string | Ya | Harus `openai_compat`. Nilai lain ditolak (`AC-PROV-003`) |
-| Config | `base_url` | string | Ya | URL absolut `http` atau `https`. Tanpa `/chat/completions` di ujungnya |
-| Config | `api_key_env` | string | Tidak | Nama env. Kosong = tidak ada header `Authorization` (`AC-PROV-002`) |
-| Config | `headers` | tabel string ke string | Tidak | Nilai literal, tidak diinterpolasi (`CQ-007`) |
-| Config | `timeout` | string durasi Go | Tidak | Batas total satu request. Default `300s` (`CQ-008`) |
+| Config | `kind` | string | Yes | Must be `openai_compat`. Other values are rejected (`AC-PROV-003`) |
+| Config | `base_url` | string | Yes | Absolute `http` or `https` URL. No `/chat/completions` at the end |
+| Config | `api_key_env` | string | No | Env name. Empty = no `Authorization` header (`AC-PROV-002`) |
+| Config | `headers` | table of string to string | No | Literal values, not interpolated (`CQ-007`) |
+| Config | `timeout` | Go duration string | No | Total limit for one request. Default `300s` (`CQ-008`) |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Config valid dan env terisi (jika dipakai) | — | Provider terdaftar di `LLMRegistry` |
+| Config valid and env set (if used) | — | Provider registered in `LLMRegistry` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `kind` bukan `openai_compat` | — | `unsupported_kind` | Tidak | Boot gagal (`AC-PROV-003`) |
-| `base_url` tidak absolut atau skema bukan http/https | — | error spec #2 `REQ-CONF-003` | Tidak | Menyebut key |
-| Env `api_key_env` kosong untuk provider yang dipakai | — | `missing_secret` | Tidak | Boot gagal (`AC-PROV-004`) |
+| `kind` is not `openai_compat` | — | `unsupported_kind` | No | Boot fails (`AC-PROV-003`) |
+| `base_url` not absolute or scheme not http/https | — | spec #2 error `REQ-CONF-003` | No | Names the key |
+| Env `api_key_env` empty for a provider in use | — | `missing_secret` | No | Boot fails (`AC-PROV-004`) |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: tidak ada.
-- **Idempotensi**: tidak berlaku.
-- **Konkurensi**: adapter aman dipakai dari banyak goroutine.
-- **Paparan data**: nilai secret tidak pernah masuk log, error, atau event.
+- **State transition**: none.
+- **Idempotency**: not applicable.
+- **Concurrency**: the adapter is safe to use from many goroutines.
+- **Data exposure**: secret values never enter logs, errors, or events.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
-## API-PROV-002: Pemetaan wire OpenAI
+## API-PROV-002: OpenAI wire mapping
 
-- **Tujuan**: bentuk request dan stream yang dikirim ke `POST {base_url}/chat/completions`.
+- **Purpose**: shape of the request and stream sent to `POST {base_url}/chat/completions`.
 - **Requirements**: `REQ-PROV-002`, `REQ-PROV-003`
-- **Acceptance criteria**: `AC-PROV-005` sampai `AC-PROV-009`
-- **Stabilitas**: Baru
-- **Otorisasi**: Header `Authorization: Bearer <secret>` jika `api_key_env` terisi.
+- **Acceptance criteria**: `AC-PROV-005` through `AC-PROV-009`
+- **Stability**: New
+- **Authorization**: Header `Authorization: Bearer <secret>` if `api_key_env` is set.
 
 Request body:
 
@@ -861,91 +861,91 @@ Request body:
 }
 ```
 
-`max_tokens` dan `temperature` hanya ada jika nilainya terisi di `ChatRequest`.
+`max_tokens` and `temperature` are only present if their values are set in `ChatRequest`.
 
-| `core` | Bentuk OpenAI |
+| `core` | OpenAI shape |
 |---|---|
-| `ChatRequest.System` | Pesan pertama dengan `role = "system"` |
-| Blok `text` pada pesan `user` | `role = "user"`, `content` string |
-| Blok `text` pada pesan `assistant` | `role = "assistant"`, `content` string |
-| Blok `tool_use` | `tool_calls: [{id, type: "function", function: {name, arguments: <JSON string>}}]` |
-| Blok `tool_result` | Pesan `role = "tool"`, `tool_call_id` = `call_id`, `content` = output |
-| Blok `image` | Gagal dengan `ErrUnsupported` (`AC-PROV-009`, `Q-023`) |
+| `ChatRequest.System` | First message with `role = "system"` |
+| `text` block in a `user` message | `role = "user"`, `content` string |
+| `text` block in an `assistant` message | `role = "assistant"`, `content` string |
+| `tool_use` block | `tool_calls: [{id, type: "function", function: {name, arguments: <JSON string>}}]` |
+| `tool_result` block | Message with `role = "tool"`, `tool_call_id` = `call_id`, `content` = output |
+| `image` block | Fails with `ErrUnsupported` (`AC-PROV-009`, `Q-023`) |
 
-Stream SSE:
+SSE stream:
 
-| Bagian stream | Arti |
+| Stream part | Meaning |
 |---|---|
-| `data: {...}` per baris | Satu chunk JSON |
+| `data: {...}` per line | One JSON chunk |
 | `choices[0].delta.content` | `text_delta` |
-| `choices[0].delta.tool_calls[i]` | Akumulasi per `index`: `id`, `function.name`, `function.arguments` |
-| `choices[0].finish_reason` | `stop` menjadi `end_turn`, `tool_calls` menjadi `tool_use`, `length` menjadi `max_tokens` |
-| `usage.prompt_tokens` dan `usage.completion_tokens` | `usage` dengan `input_tokens` dan `output_tokens` |
-| `data: [DONE]` | Akhir stream |
+| `choices[0].delta.tool_calls[i]` | Accumulated per `index`: `id`, `function.name`, `function.arguments` |
+| `choices[0].finish_reason` | `stop` becomes `end_turn`, `tool_calls` becomes `tool_use`, `length` becomes `max_tokens` |
+| `usage.prompt_tokens` and `usage.completion_tokens` | `usage` with `input_tokens` and `output_tokens` |
+| `data: [DONE]` | End of stream |
 
-Setiap `tool_use` terbit setelah `finish_reason` diterima, urut menurut `index`. Jika `id`
-kosong, adapter memakai ULID baru sebagai `CallID`.
+Each `tool_use` is emitted after `finish_reason` is received, ordered by `index`. If `id` is
+empty, the adapter uses a new ULID as `CallID`.
 
 ### Input
 
-Lihat tabel konversi di atas.
+See the conversion table above.
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Stream selesai dengan `[DONE]` atau `finish_reason` | — | Event `ChatTextDelta`, `ChatBlock` (`tool_use`), `ChatUsage`, dan `ChatStop` (`API-CORE-006`) |
+| Stream finishes with `[DONE]` or `finish_reason` | — | `ChatTextDelta`, `ChatBlock` (`tool_use`), `ChatUsage`, and `ChatStop` events (`API-CORE-006`) |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Stream terputus sebelum `finish_reason` | — | class `network` | Ya, jika belum ada delta | Lihat `API-PROV-003` |
-| Chunk JSON tidak valid | — | class `server` | Ya, jika belum ada delta | Error dengan pesan `respons tidak valid` |
-| Gambar dalam riwayat | — | `ErrUnsupported` | Tidak | Request tidak dikirim |
+| Stream cut before `finish_reason` | — | class `network` | Yes, if no delta yet | See `API-PROV-003` |
+| Invalid JSON chunk | — | class `server` | Yes, if no delta yet | Error with message `invalid response` |
+| Image in history | — | `ErrUnsupported` | No | Request not sent |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: tidak ada.
-- **Idempotensi**: tidak berlaku. Request dapat diulang oleh retry (`REQ-LOOP-008`).
-- **Konkurensi**: satu stream per panggilan `Stream`.
-- **Paparan data**: isi pesan dikirim ke `base_url`. Secret hanya di header.
+- **State transition**: none.
+- **Idempotency**: not applicable. The request can be repeated by retry (`REQ-LOOP-008`).
+- **Concurrency**: one stream per `Stream` call.
+- **Data exposure**: message content is sent to `base_url`. Secrets only in the header.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No.
+- **Deprecation**: Not applicable.
 
-## API-PROV-003: Kelas error provider
+## API-PROV-003: Provider error classes
 
-- **Tujuan**: pemetaan kegagalan ke class tetap untuk retry, fallback, dan error Go.
+- **Purpose**: mapping of failures to fixed classes for retry, fallback, and Go errors.
 - **Requirements**: `REQ-PROV-004`, `REQ-LOOP-008`
-- **Acceptance criteria**: `AC-PROV-010` sampai `AC-PROV-012`, `AC-LOOP-022` sampai `AC-LOOP-025`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Acceptance criteria**: `AC-PROV-010` through `AC-PROV-012`, `AC-LOOP-022` through `AC-LOOP-025`
+- **Stability**: New
+- **Authorization**: Not applicable.
 
-| Class | Asal | Retry | Fallback | Hasil turn |
+| Class | Source | Retry | Fallback | Turn result |
 |---|---|---:|---:|---|
-| `auth` | HTTP 401, 403 | Tidak | Tidak | `turn/end` `error` |
-| `rate_limit` | HTTP 429 | Ya (3 kali) | Ya | `turn/end` `error` jika habis |
-| `server` | HTTP 5xx, stream rusak | Ya (3 kali) | Ya | `turn/end` `error` jika habis |
-| `network` | Koneksi gagal, timeout, EOF sebelum `finish_reason` | Ya (3 kali) | Ya | `turn/end` `error` jika habis |
-| `context_length` | HTTP 400 dengan `error.code` `context_length_exceeded` | Tidak | Tidak | `turn/end` `error` |
-| `client` | HTTP 400, 404, 422 dan 4xx lain | Tidak | Tidak | `turn/end` `error` |
-| `missing_secret` | Env `api_key_env` kosong | — | — | Boot gagal (`API-PROV-001`) |
+| `auth` | HTTP 401, 403 | No | No | `turn/end` `error` |
+| `rate_limit` | HTTP 429 | Yes (3 times) | Yes | `turn/end` `error` when exhausted |
+| `server` | HTTP 5xx, broken stream | Yes (3 times) | Yes | `turn/end` `error` when exhausted |
+| `network` | Connection failure, timeout, EOF before `finish_reason` | Yes (3 times) | Yes | `turn/end` `error` when exhausted |
+| `context_length` | HTTP 400 with `error.code` `context_length_exceeded` | No | No | `turn/end` `error` |
+| `client` | HTTP 400, 404, 422 and other 4xx | No | No | `turn/end` `error` |
+| `missing_secret` | Env `api_key_env` empty | — | — | Boot fails (`API-PROV-001`) |
 
-Class `context_length` dikembalikan sebagai `*core.ProviderError` yang `errors.Is(err, core.ErrContextTooLong)` (`CQ-014`). Tanpa compaction, turn berakhir `error` (`Q-005`). Dengan modul compaction (spec #4), listener `llm.stream` meringkas dan mengulang sekali.
+Class `context_length` is returned as `*core.ProviderError` for which `errors.Is(err, core.ErrContextTooLong)` is true (`CQ-014`). Without compaction, the turn ends `error` (`Q-005`). With the compaction module (spec #4), the `llm.stream` listener summarizes and retries once.
 
-Jeda retry: 1 detik, 2 detik, 4 detik (`Q-003`). Gagal setelah delta pertama tidak di-retry
-(`Q-006`). Setiap percobaan gagal ditulis sebagai `assistant/attempt`.
+Retry delays: 1 second, 2 seconds, 4 seconds (`Q-003`). A failure after the first delta is not retried
+(`Q-006`). Each failed attempt is written as `assistant/attempt`.
 
-## API-PROV-004: Format skrip MockLlm
+## API-PROV-004: MockLlm script format
 
-- **Tujuan**: skrip respons untuk test tanpa jaringan.
+- **Purpose**: scripted responses for tests without network.
 - **Requirements**: `REQ-MOCK-001`
 - **Acceptance criteria**: `AC-MOCK-001`, `AC-MOCK-002`
-- **Stabilitas**: Baru. Hanya untuk test.
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New. Test only.
+- **Authorization**: Not applicable.
 
 ```go
 package mock
@@ -953,7 +953,7 @@ package mock
 type Llm struct{ /* ... */ }
 
 func New(script Script) *Llm
-func LoadScript(path string) (Script, error) // format JSON di bawah
+func LoadScript(path string) (Script, error) // JSON format below
 
 type Script struct {
     Responses []Response `json:"responses"`
@@ -961,47 +961,47 @@ type Script struct {
 
 type Response struct {
     Events []Event      `json:"events,omitempty"`
-    Error  *ScriptError `json:"error,omitempty"` // terminal untuk panggilan ini
+    Error  *ScriptError `json:"error,omitempty"` // terminal for this call
 }
 ```
 
-Format JSON:
+JSON format:
 
 ```json
 {
   "responses": [
     {"events": [
-      {"text": "Halo"},
+      {"text": "Hello"},
       {"delay_ms": 50},
-      {"text": " dunia"},
+      {"text": " world"},
       {"tool_use": {"id": "call_1", "name": "read_file", "input": {"path": "a.txt"}}},
       {"usage": {"input_tokens": 10, "output_tokens": 4}},
       {"stop": "tool_use"}
     ]},
-    {"error": {"class": "rate_limit", "message": "429 dari mock"}}
+    {"error": {"class": "rate_limit", "message": "429 from mock"}}
   ]
 }
 ```
 
-| Aturan | Nilai |
+| Rule | Value |
 |---|---|
-| Satu elemen `responses` | Satu panggilan `Stream` |
-| Satu objek `events` | Tepat satu key: `text`, `delay_ms`, `tool_use`, `usage`, atau `stop` |
-| `error` | Terminal. Boleh setelah event lain (error di tengah stream) |
-| `error.class` | Salah satu class di `API-PROV-003` |
-| Panggilan melebihi `responses` | Error `skrip habis` |
-| Key tidak dikenal | Error saat `LoadScript` (`AC-MOCK-001`) |
+| One element of `responses` | One `Stream` call |
+| One `events` object | Exactly one key: `text`, `delay_ms`, `tool_use`, `usage`, or `stop` |
+| `error` | Terminal. May come after other events (error in the middle of a stream) |
+| `error.class` | One of the classes in `API-PROV-003` |
+| Calls exceed `responses` | Error `script exhausted` |
+| Unknown key | Error during `LoadScript` (`AC-MOCK-001`) |
 
-Nilai `stop` memakai `ChatEvent.StopReason` (`end_turn`, `tool_use`, `max_tokens`). Key `tool_use` di skrip menghasilkan `ChatBlock` dengan `Block.Kind = tool_use`.
+The `stop` value uses `ChatEvent.StopReason` (`end_turn`, `tool_use`, `max_tokens`). The `tool_use` key in the script produces a `ChatBlock` with `Block.Kind = tool_use`.
 
 ## API-TOOL-001: `read_file`
 
-- **Tujuan**: membaca isi file teks di workspace.
+- **Purpose**: reads the contents of a text file in the workspace.
 - **Requirements**: `REQ-TOOL-001`, `REQ-TOOL-008`
 - **Acceptance criteria**: `AC-TOOL-001`, `AC-TOOL-002`, `AC-TOOL-021`, `AC-TOOL-022`
-- **Stabilitas**: Baru
+- **Stability**: New
 - **Risk**: `Read`
-- **Otorisasi**: Path harus di dalam workspace (`REQ-TOOL-008`).
+- **Authorization**: Path must be inside the workspace (`REQ-TOOL-008`).
 
 ```json
 {"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","minimum":1},"limit":{"type":"integer","minimum":1,"maximum":2000}},"required":["path"],"additionalProperties":false}
@@ -1009,35 +1009,35 @@ Nilai `stop` memakai `ChatEvent.StopReason` (`end_turn`, `tool_use`, `max_tokens
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `path` | string | Ya | Relatif terhadap workspace atau absolut di dalamnya |
-| Input | `offset` | integer | Tidak | Baris pertama, 1-based. Default 1 |
-| Input | `limit` | integer | Tidak | 1 sampai 2000. Default 2000 |
+| Input | `path` | string | Yes | Relative to the workspace or absolute inside it |
+| Input | `offset` | integer | No | First line, 1-based. Default 1 |
+| Input | `limit` | integer | No | 1 to 2000. Default 2000 |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| File teks terbaca | `success` | Isi baris `offset` sampai `offset + limit - 1`, dipotong 30000 karakter dengan catatan |
+| Text file read | `success` | Lines from `offset` to `offset + limit - 1`, truncated at 30000 characters with a note |
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Input tidak valid | `error` | Pesan input |
-| File tidak ada | `error` | `file tidak ditemukan` |
-| File biner (NUL dalam 8000 byte pertama) | `error` | `file biner` |
-| Path di luar workspace | `rejected` | `di luar workspace` |
+| Invalid input | `error` | Input message |
+| File does not exist | `error` | `file not found` |
+| Binary file (NUL within first 8000 bytes) | `error` | `binary file` |
+| Path outside workspace | `rejected` | `outside workspace` |
 
 ## API-TOOL-002: `write_file`
 
-- **Tujuan**: membuat atau mengganti file teks di workspace.
+- **Purpose**: creates or replaces a text file in the workspace.
 - **Requirements**: `REQ-TOOL-002`, `REQ-TOOL-008`
-- **Acceptance criteria**: `AC-TOOL-003` sampai `AC-TOOL-005`
-- **Stabilitas**: Baru
+- **Acceptance criteria**: `AC-TOOL-003` through `AC-TOOL-005`
+- **Stability**: New
 - **Risk**: `Write`
-- **Otorisasi**: Gerbang `tools.pre_execute` (`REQ-TOOL-009`). Path di dalam workspace.
+- **Authorization**: `tools.pre_execute` gate (`REQ-TOOL-009`). Path inside the workspace.
 
 ```json
 {"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}
@@ -1045,33 +1045,33 @@ Nilai `stop` memakai `ChatEvent.StopReason` (`end_turn`, `tool_use`, `max_tokens
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `path` | string | Ya | Path di dalam workspace |
-| Input | `content` | string | Ya | Boleh kosong. Mengganti seluruh isi file |
+| Input | `path` | string | Yes | Path inside the workspace |
+| Input | `content` | string | Yes | May be empty. Replaces the entire file contents |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| File dibuat atau diganti | `success` | `ditulis <n> byte` |
+| File created or replaced | `success` | `wrote <n> bytes` |
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Direktori induk tidak ada | `error` | `direktori induk tidak ada`. Tidak ada file dibuat |
-| Path di luar workspace | `rejected` | `di luar workspace` |
-| Tidak diizinkan gerbang | `rejected` | Alasan gerbang |
+| Parent directory does not exist | `error` | `parent directory does not exist`. No file created |
+| Path outside workspace | `rejected` | `outside workspace` |
+| Not allowed by gate | `rejected` | Gate reason |
 
 ## API-TOOL-003: `edit_file`
 
-- **Tujuan**: mengganti satu kemunculan teks persis dalam file.
+- **Purpose**: replaces one exact occurrence of text in a file.
 - **Requirements**: `REQ-TOOL-003`, `REQ-TOOL-008`
-- **Acceptance criteria**: `AC-TOOL-006` sampai `AC-TOOL-008`
-- **Stabilitas**: Baru
+- **Acceptance criteria**: `AC-TOOL-006` through `AC-TOOL-008`
+- **Stability**: New
 - **Risk**: `Write`
-- **Otorisasi**: Sama dengan `write_file`.
+- **Authorization**: Same as `write_file`.
 
 ```json
 {"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string","minLength":1},"new_string":{"type":"string"}},"required":["path","old_string","new_string"],"additionalProperties":false}
@@ -1079,34 +1079,34 @@ Nilai `stop` memakai `ChatEvent.StopReason` (`end_turn`, `tool_use`, `max_tokens
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `path` | string | Ya | Path di dalam workspace |
-| Input | `old_string` | string | Ya | Tidak boleh kosong |
-| Input | `new_string` | string | Ya | Boleh kosong (menghapus teks) |
+| Input | `path` | string | Yes | Path inside the workspace |
+| Input | `old_string` | string | Yes | Must not be empty |
+| Input | `new_string` | string | Yes | May be empty (deletes the text) |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| `old_string` tepat sekali | `success` | `diubah 1 kemunculan` |
+| `old_string` occurs exactly once | `success` | `replaced 1 occurrence` |
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| `old_string` tidak ada | `error` | `tidak ditemukan`. File tidak berubah |
-| `old_string` lebih dari sekali | `error` | `ditemukan <n> kali; perbanyak konteks`. File tidak berubah |
-| `old_string` kosong | `error` | Pesan input tidak valid |
+| `old_string` not found | `error` | `not found`. File unchanged |
+| `old_string` occurs more than once | `error` | `found <n> times; add more context`. File unchanged |
+| `old_string` empty | `error` | Invalid input message |
 
 ## API-TOOL-004: `glob`
 
-- **Tujuan**: mencari path dengan pola glob di workspace.
+- **Purpose**: searches for paths matching a glob pattern in the workspace.
 - **Requirements**: `REQ-TOOL-004`, `REQ-TOOL-008`
 - **Acceptance criteria**: `AC-TOOL-009`, `AC-TOOL-010`
-- **Stabilitas**: Baru
+- **Stability**: New
 - **Risk**: `Read`
-- **Otorisasi**: Path (jika diisi) di dalam workspace.
+- **Authorization**: Path (if set) inside the workspace.
 
 ```json
 {"type":"object","properties":{"pattern":{"type":"string","minLength":1},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}
@@ -1114,35 +1114,35 @@ Nilai `stop` memakai `ChatEvent.StopReason` (`end_turn`, `tool_use`, `max_tokens
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `pattern` | string | Ya | Glob dengan `**` (library `doublestar`) |
-| Input | `path` | string | Tidak | Direktori di dalam workspace. Default workspace |
+| Input | `pattern` | string | Yes | Glob with `**` (`doublestar` library) |
+| Input | `path` | string | No | Directory inside the workspace. Default is the workspace |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Ada hasil | `success` | Path relatif workspace, satu per baris, terurut. Maksimal 1000. Jika lebih, catatan `dari <n> hasil` |
-| Tidak ada hasil | `success` | `tidak ada hasil` |
+| Results found | `success` | Workspace-relative paths, one per line, sorted. Maximum 1000. If more, a note `of <n> results` |
+| No results | `success` | `no results` |
 
-Path di `.git/` dan path yang cocok dengan `.gitignore` root tidak muncul (`Q-013`).
+Paths under `.git/` and paths matching the root `.gitignore` do not appear (`Q-013`).
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Pola kosong atau tidak valid | `error` | Pesan pola tidak valid |
-| Path di luar workspace | `rejected` | `di luar workspace` |
+| Pattern empty or invalid | `error` | Invalid pattern message |
+| Path outside workspace | `rejected` | `outside workspace` |
 
 ## API-TOOL-005: `grep`
 
-- **Tujuan**: mencari teks dengan regex RE2 di file workspace.
+- **Purpose**: searches text with RE2 regex in workspace files.
 - **Requirements**: `REQ-TOOL-005`, `REQ-TOOL-008`
-- **Acceptance criteria**: `AC-TOOL-011` sampai `AC-TOOL-013`
-- **Stabilitas**: Baru
+- **Acceptance criteria**: `AC-TOOL-011` through `AC-TOOL-013`
+- **Stability**: New
 - **Risk**: `Read`
-- **Otorisasi**: Path (jika diisi) di dalam workspace.
+- **Authorization**: Path (if set) inside the workspace.
 
 ```json
 {"type":"object","properties":{"pattern":{"type":"string","minLength":1},"path":{"type":"string"},"glob":{"type":"string"}},"required":["pattern"],"additionalProperties":false}
@@ -1150,36 +1150,36 @@ Path di `.git/` dan path yang cocok dengan `.gitignore` root tidak muncul (`Q-01
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `pattern` | string | Ya | Sintaks `regexp` Go (RE2) |
-| Input | `path` | string | Tidak | Direktori di dalam workspace. Default workspace |
-| Input | `glob` | string | Tidak | Filter path file relatif (`doublestar`) |
+| Input | `pattern` | string | Yes | Go `regexp` syntax (RE2) |
+| Input | `path` | string | No | Directory inside the workspace. Default is the workspace |
+| Input | `glob` | string | No | Relative file path filter (`doublestar`) |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Ada kecocokan | `success` | Satu baris `path:baris: teks` per kecocokan. Maksimal 200. Teks baris dipotong 500 karakter |
-| Tidak ada kecocokan | `success` | `tidak ada kecocokan` |
+| Matches found | `success` | One `path:line: text` line per match. Maximum 200. Line text truncated at 500 characters |
+| No matches | `success` | `no matches` |
 
-File biner dan file lebih dari 1 MiB dilewati (`AC-TOOL-013`). `.git/` dan `.gitignore` root dilewati.
+Binary files and files larger than 1 MiB are skipped (`AC-TOOL-013`). `.git/` and the root `.gitignore` are skipped.
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Pola tidak valid | `error` | `pola tidak valid: <pesan>` |
-| Path di luar workspace | `rejected` | `di luar workspace` |
+| Invalid pattern | `error` | `invalid pattern: <message>` |
+| Path outside workspace | `rejected` | `outside workspace` |
 
 ## API-TOOL-006: `bash`
 
-- **Tujuan**: menjalankan perintah shell di workspace.
+- **Purpose**: runs a shell command in the workspace.
 - **Requirements**: `REQ-TOOL-006`
-- **Acceptance criteria**: `AC-TOOL-014` sampai `AC-TOOL-017`
-- **Stabilitas**: Baru
+- **Acceptance criteria**: `AC-TOOL-014` through `AC-TOOL-017`
+- **Stability**: New
 - **Risk**: `Exec`
-- **Otorisasi**: Gerbang `tools.pre_execute` (`REQ-TOOL-009`). Tidak ada sandbox (ADR 0004).
+- **Authorization**: `tools.pre_execute` gate (`REQ-TOOL-009`). No sandbox (ADR 0004).
 
 ```json
 {"type":"object","properties":{"command":{"type":"string","minLength":1},"timeout_secs":{"type":"integer","minimum":1,"maximum":600}},"required":["command"],"additionalProperties":false}
@@ -1187,35 +1187,35 @@ File biner dan file lebih dari 1 MiB dilewati (`AC-TOOL-013`). `.git/` dan `.git
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `command` | string | Ya | Dijalankan dengan `sh -c`. Cwd = workspace |
-| Input | `timeout_secs` | integer | Tidak | 1 sampai 600. Default 120 (`CQ-009`) |
+| Input | `command` | string | Yes | Run with `sh -c`. Cwd = workspace |
+| Input | `timeout_secs` | integer | No | 1 to 600. Default 120 (`CQ-009`) |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Exit code 0 | `success` | stdout dan stderr gabungan. Maksimal 30000 karakter, sisanya dipotong dengan catatan jumlah karakter asli |
+| Exit code 0 | `success` | Combined stdout and stderr. Maximum 30000 characters, the rest is truncated with a note of the original character count |
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| Exit code bukan 0 | `error` | Baris `exit code <n>` diikuti output |
-| Timeout | `error` | `timeout setelah <n> detik`. Grup proses dihentikan |
-| `timeout_secs` di luar 1 sampai 600 | `error` | `timeout_secs harus 1 sampai 600`. Perintah tidak dijalankan |
-| Dibatalkan turn | `error` | `dibatalkan` |
-| Tidak diizinkan gerbang | `rejected` | Alasan gerbang |
+| Exit code not 0 | `error` | Line `exit code <n>` followed by output |
+| Timeout | `error` | `timed out after <n> seconds`. Process group is stopped |
+| `timeout_secs` outside 1 to 600 | `error` | `timeout_secs must be 1 to 600`. Command not run |
+| Turn cancelled | `error` | `cancelled` |
+| Not allowed by gate | `rejected` | Gate reason |
 
 ## API-TOOL-007: `web_fetch`
 
-- **Tujuan**: mengambil URL dan mengembalikan isi sebagai teks.
+- **Purpose**: fetches a URL and returns its contents as text.
 - **Requirements**: `REQ-TOOL-007`
-- **Acceptance criteria**: `AC-TOOL-018` sampai `AC-TOOL-020`
-- **Stabilitas**: Baru
+- **Acceptance criteria**: `AC-TOOL-018` through `AC-TOOL-020`
+- **Stability**: New
 - **Risk**: `Network`
-- **Otorisasi**: Gerbang `tools.pre_execute` (`REQ-TOOL-009`). Host tidak dibatasi di spec ini (lihat risiko di design).
+- **Authorization**: `tools.pre_execute` gate (`REQ-TOOL-009`). Hosts are not restricted in this spec (see the risks in the design).
 
 ```json
 {"type":"object","properties":{"url":{"type":"string","format":"uri","pattern":"^https?://"}},"required":["url"],"additionalProperties":false}
@@ -1223,87 +1223,87 @@ File biner dan file lebih dari 1 MiB dilewati (`AC-TOOL-013`). `.git/` dan `.git
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Input | `url` | string | Ya | Harus `http` atau `https` |
+| Input | `url` | string | Yes | Must be `http` or `https` |
 
-### Sukses
+### Success
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| `text/html` | `success` | Markdown tanpa `script` dan `style`, dipotong 30000 karakter |
-| `text/plain` atau `application/json` | `success` | Isi apa adanya, dipotong 30000 karakter |
+| `text/html` | `success` | Markdown without `script` and `style`, truncated at 30000 characters |
+| `text/plain` or `application/json` | `success` | Contents as-is, truncated at 30000 characters |
 
-Batas: timeout 30 detik, body maksimal 5 MiB, maksimal 5 redirect (`Q-014`).
+Limits: timeout 30 seconds, body maximum 5 MiB, maximum 5 redirects (`Q-014`).
 
-### Gagal
+### Failure
 
-| Kondisi | Status | Output |
+| Condition | Status | Output |
 |---|---|---|
-| URL bukan `http` atau `https` | `error` | `url harus http atau https`. Tidak ada request |
-| Content-type lain | `error` | `tipe konten tidak didukung: <tipe>` |
-| Body lebih dari 5 MiB | `error` | `respons terlalu besar` |
-| Timeout 30 detik | `error` | `timeout setelah 30 detik` |
-| Status HTTP 4xx atau 5xx | `error` | `HTTP <kode>` |
-| Tidak diizinkan gerbang | `rejected` | Alasan gerbang |
+| URL not `http` or `https` | `error` | `url must be http or https`. No request |
+| Other content type | `error` | `unsupported content type: <type>` |
+| Body larger than 5 MiB | `error` | `response too large` |
+| Timeout after 30 seconds | `error` | `timed out after 30 seconds` |
+| HTTP status 4xx or 5xx | `error` | `HTTP <code>` |
+| Not allowed by gate | `rejected` | Gate reason |
 
-## Traceability contract
+## Contract traceability
 
-| Operasi | Requirements | Acceptance criteria | Komponen design | Verifikasi |
+| Operation | Requirements | Acceptance criteria | Design component | Verification |
 |---|---|---|---|---|
-| `API-LIB-001` | `REQ-LIB-001`, `REQ-LIB-006`, `REQ-LIB-008` | `AC-LIB-001`, `AC-LIB-002`, `AC-LIB-003`, `AC-LIB-013`, `AC-LIB-014` | `lana.go`, `config` loader, modul `agent` | Test `lana` dengan layer memori, `MockLlm` |
-| `API-LIB-002` | `REQ-LIB-002`, `REQ-LIB-007` | `AC-LIB-004` sampai `AC-LIB-008`, `AC-LIB-015`, `AC-LIB-016` | `lana.go`, `agent.Registry` | Test `lana` dengan `MockLlm` dan memstore |
-| `API-LIB-003` | `REQ-LIB-003` | `AC-LIB-009`, `AC-LIB-010` | `lana.go`, hub frame | Test iterator dan context |
-| `API-LIB-004` | `REQ-LIB-004` | `AC-LIB-011` | `lana.go`, `agent.Registry` | Test shutdown dengan turn tertahan |
-| `API-LIB-005` | `REQ-LIB-008` | `AC-LIB-017` | `config` (data profile) | Test profile |
-| `API-AGENT-001` | `REQ-LOOP-001`, `REQ-LOOP-002` | `AC-LOOP-001` sampai `AC-LOOP-006` | `agent.Registry`, `agent.Runner`, `agent.TurnLoop` | Test turn dengan `MockLlm` |
+| `API-LIB-001` | `REQ-LIB-001`, `REQ-LIB-006`, `REQ-LIB-008` | `AC-LIB-001`, `AC-LIB-002`, `AC-LIB-003`, `AC-LIB-013`, `AC-LIB-014` | `lana.go`, `config` loader, `agent` module | Test `lana` with in-memory layers, `MockLlm` |
+| `API-LIB-002` | `REQ-LIB-002`, `REQ-LIB-007` | `AC-LIB-004` through `AC-LIB-008`, `AC-LIB-015`, `AC-LIB-016` | `lana.go`, `agent.Registry` | Test `lana` with `MockLlm` and memstore |
+| `API-LIB-003` | `REQ-LIB-003` | `AC-LIB-009`, `AC-LIB-010` | `lana.go`, frame hub | Test iterator and context |
+| `API-LIB-004` | `REQ-LIB-004` | `AC-LIB-011` | `lana.go`, `agent.Registry` | Test shutdown with a stuck turn |
+| `API-LIB-005` | `REQ-LIB-008` | `AC-LIB-017` | `config` (profile data) | Test profiles |
+| `API-AGENT-001` | `REQ-LOOP-001`, `REQ-LOOP-002` | `AC-LOOP-001` through `AC-LOOP-006` | `agent.Registry`, `agent.Runner`, `agent.TurnLoop` | Test turns with `MockLlm` |
 | `API-AGENT-002` | `REQ-LOOP-002`, `REQ-LIB-002` | `AC-LIB-005` | `agent.Registry` | Test concurrency |
-| `API-AGENT-003` | `REQ-LOOP-007` | `AC-LOOP-019` sampai `AC-LOOP-021` | `agent.Runner` | Test cancel dengan `bash` tertahan |
+| `API-AGENT-003` | `REQ-LOOP-007` | `AC-LOOP-019` through `AC-LOOP-021` | `agent.Runner` | Test cancel with a stuck `bash` |
 | `API-AGENT-004` | `REQ-LOOP-010` | `AC-LOOP-028` | `agent.Registry` | Test selection |
 | `API-AGENT-005` | `REQ-LOOP-010` | `AC-LOOP-029`, `AC-LOOP-030` | `agent.Registry` | Test selection |
-| `API-AGENT-006` | `REQ-LOOP-009` | `AC-LOOP-026`, `AC-LOOP-027` | `agent.Hub` | Test frame |
-| `API-AGENT-007` | `REQ-LOOP-004`, `REQ-LOOP-005`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-011`, `AC-LOOP-015`, `AC-LOOP-016`, `AC-LOOP-023`, `AC-LOOP-031` | `config`, `agent` | Test config dan turn |
-| `API-AGENT-008` | `REQ-LOOP-001`, `REQ-LOOP-003`, `REQ-LOOP-004`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-001`, `AC-LOOP-009`, `AC-LOOP-010`, `AC-LOOP-022`, `AC-LOOP-024`, `AC-LOOP-028`, `AC-LIB-016` | `agent.Events` | Test payload golden |
-| `API-AGENT-009` | `REQ-TOOL-009`, `REQ-LOOP-003`, `REQ-LOOP-006`, `REQ-LIB-005` | `AC-TOOL-023`, `AC-TOOL-024`, `AC-LOOP-007`, `AC-LOOP-018`, `AC-LIB-012` | `tools.Pipeline`, `agent.Hooks` | Test hook |
-| `API-PROV-001` | `REQ-PROV-001` | `AC-PROV-001` sampai `AC-PROV-004` | `providers/openai` (config) | Test config |
-| `API-PROV-002` | `REQ-PROV-002`, `REQ-PROV-003` | `AC-PROV-005` sampai `AC-PROV-009` | `providers/openai` (konversi, SSE) | Test httptest dengan fixture SSE |
-| `API-PROV-003` | `REQ-PROV-004`, `REQ-LOOP-008` | `AC-PROV-010` sampai `AC-PROV-012`, `AC-LOOP-022` sampai `AC-LOOP-025` | `providers/openai` (classify), `agent.Retry` | Test tabel error |
-| `API-PROV-004` | `REQ-MOCK-001` | `AC-MOCK-001`, `AC-MOCK-002` | `providers/mock` | Test unit |
-| `API-TOOL-001` sampai `API-TOOL-007` | `REQ-TOOL-001` sampai `REQ-TOOL-008` | `AC-TOOL-001` sampai `AC-TOOL-022` | `tools/*`, `tools.Guard` | Test unit per tool |
+| `API-AGENT-006` | `REQ-LOOP-009` | `AC-LOOP-026`, `AC-LOOP-027` | `agent.Hub` | Test frames |
+| `API-AGENT-007` | `REQ-LOOP-004`, `REQ-LOOP-005`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-011`, `AC-LOOP-015`, `AC-LOOP-016`, `AC-LOOP-023`, `AC-LOOP-031` | `config`, `agent` | Test config and turns |
+| `API-AGENT-008` | `REQ-LOOP-001`, `REQ-LOOP-003`, `REQ-LOOP-004`, `REQ-LOOP-008`, `REQ-LOOP-010` | `AC-LOOP-001`, `AC-LOOP-009`, `AC-LOOP-010`, `AC-LOOP-022`, `AC-LOOP-024`, `AC-LOOP-028`, `AC-LIB-016` | `agent.Events` | Test payload golden files |
+| `API-AGENT-009` | `REQ-TOOL-009`, `REQ-LOOP-003`, `REQ-LOOP-006`, `REQ-LIB-005` | `AC-TOOL-023`, `AC-TOOL-024`, `AC-LOOP-007`, `AC-LOOP-018`, `AC-LIB-012` | `tools.Pipeline`, `agent.Hooks` | Test hooks |
+| `API-PROV-001` | `REQ-PROV-001` | `AC-PROV-001` through `AC-PROV-004` | `providers/openai` (config) | Test config |
+| `API-PROV-002` | `REQ-PROV-002`, `REQ-PROV-003` | `AC-PROV-005` through `AC-PROV-009` | `providers/openai` (conversion, SSE) | Test httptest with SSE fixtures |
+| `API-PROV-003` | `REQ-PROV-004`, `REQ-LOOP-008` | `AC-PROV-010` through `AC-PROV-012`, `AC-LOOP-022` through `AC-LOOP-025` | `providers/openai` (classify), `agent.Retry` | Test error table |
+| `API-PROV-004` | `REQ-MOCK-001` | `AC-MOCK-001`, `AC-MOCK-002` | `providers/mock` | Unit test |
+| `API-TOOL-001` through `API-TOOL-007` | `REQ-TOOL-001` through `REQ-TOOL-008` | `AC-TOOL-001` through `AC-TOOL-022` | `tools/*`, `tools.Guard` | Unit test per tool |
 
 ## Blocking Contract Questions
 
-| ID | Pertanyaan | Mengendalikan | Pemilik | Status | Resolusi |
+| ID | Question | Controls | Owner | Status | Resolution |
 |---|---|---|---|---|---|
-| `CQ-001` | Bentuk `rt.Stream`: iterator atau channel | `API-LIB-003` | Ridho | Resolved | Rekomendasi agent: `iter.Seq2[Event, error]`. Sesuai ADR 0014 ("iterator event") dan Go 1.23+. |
-| `CQ-002` | Nama error class provider | `API-PROV-003`, `API-LIB-002` | Ridho | Resolved | Rekomendasi agent: `auth`, `rate_limit`, `server`, `network`, `context_length`, `client`, `missing_secret`. |
-| `CQ-003` | Format skrip MockLlm | `API-PROV-004` | Ridho | Resolved | Rekomendasi agent: JSON, dibaca `LoadScript`, dan sama dengan struct Go. |
-| `CQ-004` | Field payload event, termasuk `v` dan field tambahan | `API-AGENT-008` | Ridho | Resolved | Rekomendasi agent: `v = 1`, `snake_case`. Tambahan: `model/selection.agent` (`Q-022`) dan `session/created.workspace` (`Q-017`). Disetujui spec #4. Dimasukkan di `API-CORE-008` (`CQ-017`, `CQ-029` spec #2). |
-| `CQ-005` | Argumen `Send`: hanya teks atau `ContentBlock` | `API-AGENT-001` | Ridho | Resolved | Rekomendasi agent: teks saja. Gambar ditunda (`Q-023`). |
-| `CQ-006` | Nilai status tool | `API-TOOL-*` | Ridho | Resolved | Rekomendasi agent: `success`, `error`, `rejected`, sama dengan spec #1. |
-| `CQ-007` | Nilai `headers` diinterpolasi atau literal | `API-PROV-001` | Ridho | Resolved | Rekomendasi agent: literal. Interpolasi `${VAR}` hanya di `mcp.*` (spec #2 `REQ-CONF-007`). |
-| `CQ-008` | Default `timeout` provider | `API-PROV-001` | Ridho | Resolved | Rekomendasi agent: `300s` untuk total satu request. |
-| `CQ-009` | Nama input timeout bash | `API-TOOL-006` | Ridho | Resolved | Rekomendasi agent: `timeout_secs`, bilangan bulat, default 120, maksimal 600. |
-| `CQ-010` | Signature `core.AgentRegistry` dan `core.Provider` | `API-AGENT-*`, `API-PROV-002` | Ridho | Resolved | Rekomendasi agent: signature di contract ini dipakai sampai spec #2 contract Approved. Spec #2 menyalin signature ini atau mengubahnya dengan catatan di `CQ` spec #2. Direvisi: lihat `CQ-012`. |
-| `CQ-011` | Nama dan bentuk tipe tambahan ke `core` | Bagian tipe core | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): seluruh tipe "tambahan" revisi 1 dipindah ke `API-CORE-015` (spec #2). Rename: `StepInput` menjadi `PreStepInput`, `AgentTurnStopInput` menjadi `TurnStopInput`, `TurnStopVote` menjadi `StopVote`, `ToolDecision.Allow` menjadi `Allowed`, `Agent` menjadi `AgentName`. Bentuk `ChatEvent` dan `ToolCall` memakai spec #2 (`CQ-019` spec #2). |
-| `CQ-012` | Signature `AgentRegistry`: `Cancel`, `SetModel`, `SubscribeLive` | `API-AGENT-003`, `API-AGENT-005`, `API-AGENT-006` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): signature spec #2 (`API-CORE-010`) menang. `Cancel(ctx, sessionID)`. `SetModel(ctx, sessionID, model)` dengan model `provider:model`. `SubscribeLive(sessionID)` mengembalikan `*core.Subscription[core.LiveFrame]`. |
-| `CQ-013` | Riwayat model dari log | `API-AGENT-008`, `Derive` di design | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `core.DeriveMessages` (`API-CORE-015`) dipakai. Store menyediakan `DeriveMessages(ctx, sessionID)`. Spec ini mengimplementasikan subset tanpa compaction (`CQ-028` spec #2). Lihat `Q-024`. |
-| `CQ-014` | Error konteks terlalu panjang | `API-PROV-003`, `API-LIB-002` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): adapter mengembalikan `*core.ProviderError` dengan class `context_length` yang `errors.Is(err, core.ErrContextTooLong)` (`CQ-026` spec #2). Turn berakhir `error` jika compaction spec #4 tidak aktif (`Q-005`). Dengan compaction, listener spec #4 meringkas lalu mengulang sekali. |
-| `CQ-015` | Profile bawaan, baris `store`, dan `headless` | `API-LIB-005`, `API-LIB-001` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): profile bawaan dimiliki spec #2 (`API-CONF-009`, `CQ-031`). `minimal` sama dengan base. `headless` sama dengan base ditambah `cli_runner`. `lana.New` memakai `memstore` jika `Home` dan `Options.Store` kosong (`DQ-016` spec #2). |
-| `CQ-016` | Opsi approval library `ApproveWith` | `API-LIB-001`, `REQ-LIB-006` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `lana.New(ctx, opts, ...Option)`. `ApproveWith(fn)` adalah `Option`. Implementasi, kontrak, dan AC di spec #4 (`REQ-APPR-007`, `AC-APPR-017`, `API-APPR-005`). |
-| `CQ-017` | Payload `session/created.workspace` dan `model/selection.agent` | `API-AGENT-008` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): disetujui spec #4. Field masuk `API-CORE-008` (spec #2). |
-| `CQ-018` | Kind `anthropic` pada build ini | `API-PROV-001` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): tetap ditolak sampai M4. `lana init` spec #1 hanya menawarkan kind yang didukung build (`CQ-009` spec #1). |
-| `CQ-019` | `CompactNow` di `AgentRegistry` | `API-AGENT-*` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `AgentRegistry` tidak punya `CompactNow`. `/compact` memakai `core.Compactor.CompactNow` dari spec #4 (`API-COMP-001`, `CQ-027` spec #2). |
+| `CQ-001` | Shape of `rt.Stream`: iterator or channel | `API-LIB-003` | Ridho | Resolved | Agent recommendation: `iter.Seq2[Event, error]`. Per ADR 0014 ("iterator event") and Go 1.23+. |
+| `CQ-002` | Provider error class names | `API-PROV-003`, `API-LIB-002` | Ridho | Resolved | Agent recommendation: `auth`, `rate_limit`, `server`, `network`, `context_length`, `client`, `missing_secret`. |
+| `CQ-003` | MockLlm script format | `API-PROV-004` | Ridho | Resolved | Agent recommendation: JSON, read by `LoadScript`, and matches the Go struct. |
+| `CQ-004` | Event payload fields, including `v` and additional fields | `API-AGENT-008` | Ridho | Resolved | Agent recommendation: `v = 1`, `snake_case`. Additional: `model/selection.agent` (`Q-022`) and `session/created.workspace` (`Q-017`). Approved by spec #4. Included in `API-CORE-008` (`CQ-017`, `CQ-029` of spec #2). |
+| `CQ-005` | Argument of `Send`: text only or `ContentBlock` | `API-AGENT-001` | Ridho | Resolved | Agent recommendation: text only. Images deferred (`Q-023`). |
+| `CQ-006` | Tool status values | `API-TOOL-*` | Ridho | Resolved | Agent recommendation: `success`, `error`, `rejected`, same as spec #1. |
+| `CQ-007` | Are `headers` values interpolated or literal | `API-PROV-001` | Ridho | Resolved | Agent recommendation: literal. `${VAR}` interpolation only in `mcp.*` (spec #2 `REQ-CONF-007`). |
+| `CQ-008` | Default provider `timeout` | `API-PROV-001` | Ridho | Resolved | Agent recommendation: `300s` total for one request. |
+| `CQ-009` | Input name for bash timeout | `API-TOOL-006` | Ridho | Resolved | Agent recommendation: `timeout_secs`, integer, default 120, maximum 600. |
+| `CQ-010` | Signature of `core.AgentRegistry` and `core.Provider` | `API-AGENT-*`, `API-PROV-002` | Ridho | Resolved | Agent recommendation: the signatures in this contract are used until the spec #2 contract is Approved. Spec #2 copies these signatures or changes them with a note in spec #2's `CQ`. Revised: see `CQ-012`. |
+| `CQ-011` | Names and shapes of additional types added to `core` | Core types section | Ridho | Resolved | Agent recommendation (reconciliation): all "additional" types from revision 1 moved to `API-CORE-015` (spec #2). Renames: `StepInput` to `PreStepInput`, `AgentTurnStopInput` to `TurnStopInput`, `TurnStopVote` to `StopVote`, `ToolDecision.Allow` to `Allowed`, `Agent` to `AgentName`. Shapes of `ChatEvent` and `ToolCall` follow spec #2 (`CQ-019` of spec #2). |
+| `CQ-012` | Signature of `AgentRegistry`: `Cancel`, `SetModel`, `SubscribeLive` | `API-AGENT-003`, `API-AGENT-005`, `API-AGENT-006` | Ridho | Resolved | Agent recommendation (reconciliation): signatures of spec #2 (`API-CORE-010`) prevail. `Cancel(ctx, sessionID)`. `SetModel(ctx, sessionID, model)` with model `provider:model`. `SubscribeLive(sessionID)` returns `*core.Subscription[core.LiveFrame]`. |
+| `CQ-013` | Model history from the log | `API-AGENT-008`, `Derive` in design | Ridho | Resolved | Agent recommendation (reconciliation): `core.DeriveMessages` (`API-CORE-015`) is used. The store provides `DeriveMessages(ctx, sessionID)`. This spec implements the subset without compaction (`CQ-028` of spec #2). See `Q-024`. |
+| `CQ-014` | Context too long error | `API-PROV-003`, `API-LIB-002` | Ridho | Resolved | Agent recommendation (reconciliation): the adapter returns `*core.ProviderError` with class `context_length` for which `errors.Is(err, core.ErrContextTooLong)` (`CQ-026` of spec #2). The turn ends `error` if the compaction of spec #4 is not active (`Q-005`). With compaction, the listener of spec #4 summarizes and retries once. |
+| `CQ-015` | Built-in profiles, `store` row, and `headless` | `API-LIB-005`, `API-LIB-001` | Ridho | Resolved | Agent recommendation (reconciliation): built-in profiles are owned by spec #2 (`API-CONF-009`, `CQ-031`). `minimal` is the same as base. `headless` is the same as base plus `cli_runner`. `lana.New` uses `memstore` if `Home` and `Options.Store` are empty (`DQ-016` of spec #2). |
+| `CQ-016` | Library approval option `ApproveWith` | `API-LIB-001`, `REQ-LIB-006` | Ridho | Resolved | Agent recommendation (reconciliation): `lana.New(ctx, opts, ...Option)`. `ApproveWith(fn)` is an `Option`. Implementation, contract, and AC are in spec #4 (`REQ-APPR-007`, `AC-APPR-017`, `API-APPR-005`). |
+| `CQ-017` | Payload `session/created.workspace` and `model/selection.agent` | `API-AGENT-008` | Ridho | Resolved | Agent recommendation (reconciliation): approved by spec #4. Fields are in `API-CORE-008` (spec #2). |
+| `CQ-018` | Kind `anthropic` in this build | `API-PROV-001` | Ridho | Resolved | Agent recommendation (reconciliation): still rejected until M4. `lana init` in spec #1 only offers kinds supported by the build (`CQ-009` of spec #1). |
+| `CQ-019` | `CompactNow` on `AgentRegistry` | `API-AGENT-*` | Ridho | Resolved | Agent recommendation (reconciliation): `AgentRegistry` has no `CompactNow`. `/compact` uses `core.Compactor.CompactNow` from spec #4 (`API-COMP-001`, `CQ-027` of spec #2). |
 
 None.
 
 ## Approval
 
-- [x] Requirements sudah Approved dan revisinya dicatat di atas.
-- [x] Keberlakuan contract sudah ditentukan.
-- [x] Setiap operasi punya ID stabil dan tertaut ke requirement dan acceptance criteria.
-- [x] Input, sukses, gagal, otorisasi, dan kompatibilitas eksplisit.
-- [x] Tidak ada perilaku yang hanya ada di file ini.
-- [x] Blocking Contract Questions bernilai `None`.
-- **Di-approve oleh**: Ridho (gate dilepas 2026-10-29)
-- **Di-approve pada**: 2026-10-29 (revisi 1). Revisi 2 rekonsiliasi oleh agent atas nama pemilik (gate dilepas 2026-10-29).
+- [x] Requirements are Approved and their revisions are recorded above.
+- [x] Applicability of the contract is determined.
+- [x] Every operation has a stable ID and is linked to requirements and acceptance criteria.
+- [x] Input, success, failure, authorization, and compatibility are explicit.
+- [x] No behavior exists only in this file.
+- [x] Blocking Contract Questions are set to `None`.
+- **Approved by**: Ridho (gate released 2026-10-29)
+- **Approved on**: 2026-10-29 (revision 1). Revision 2 reconciliation by the agent on behalf of the owner (gate released 2026-10-29).

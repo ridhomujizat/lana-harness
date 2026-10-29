@@ -31,13 +31,13 @@ func TestDenyListenerStopsChain(t *testing.T) {
 	hooks := core.NewHooks()
 	p := NewPipeline(hooks)
 	hooks.ToolsPreExecute.Use(func(ctx context.Context, in core.ToolsPreExecuteInput, next core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
-		return core.ToolDecision{Allowed: false, Status: core.ToolStatusRejected, Reason: "dilarang listener"}, nil
+		return core.ToolDecision{Allowed: false, Status: core.ToolStatusRejected, Reason: "blocked by listener"}, nil
 	})
 	got, err := p.PreExecute(context.Background(), core.ToolsPreExecuteInput{Call: core.ToolCall{Name: "read_file", Risk: core.RiskRead}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Allowed || got.Reason != "dilarang listener" {
+	if got.Allowed || got.Reason != "blocked by listener" {
 		t.Fatalf("got=%+v", got)
 	}
 }
@@ -62,10 +62,10 @@ func TestRegistryRejectsDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := r.Register(dummyTool{name: "x"}); err == nil {
-		t.Fatal("nama ganda diterima")
+		t.Fatal("duplicate name accepted")
 	}
 	if _, err := r.Specs([]string{"y"}); err == nil {
-		t.Fatal("tool tidak terdaftar tidak error")
+		t.Fatal("unregistered tool did not error")
 	}
 }
 

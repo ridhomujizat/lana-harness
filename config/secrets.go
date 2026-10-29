@@ -48,7 +48,7 @@ func loadSecretSource(home string, env func(string) (string, bool)) (secretSourc
 		return src, nil, []Error{{File: path, Msg: err.Error()}}
 	}
 	if info.Mode().Perm() != 0o600 {
-		msg := fmt.Sprintf("secrets.env punya permission %04o (seharusnya 0600); jalankan: chmod 600 %s", info.Mode().Perm(), path)
+		msg := fmt.Sprintf("secrets.env has permission %04o (should be 0600); run: chmod 600 %s", info.Mode().Perm(), path)
 		warnings = append(warnings, Warning{File: path, Msg: msg})
 	}
 	data, err := os.ReadFile(path)
@@ -63,12 +63,12 @@ func loadSecretSource(home string, env func(string) (string, bool)) (secretSourc
 		}
 		eq := strings.Index(line, "=")
 		if eq < 0 {
-			errs = append(errs, Error{File: path, Line: i + 1, Msg: "baris tidak valid: " + trimmed})
+			errs = append(errs, Error{File: path, Line: i + 1, Msg: "invalid line: " + trimmed})
 			continue
 		}
 		name := strings.TrimSpace(line[:eq])
 		if name == "" {
-			errs = append(errs, Error{File: path, Line: i + 1, Msg: "nama variabel kosong"})
+			errs = append(errs, Error{File: path, Line: i + 1, Msg: "variable name is empty"})
 			continue
 		}
 		value := strings.TrimSpace(line[eq+1:])
@@ -114,15 +114,15 @@ func expandVars(s string, secrets secretSource) (string, error) {
 		if i+1 < len(s) && s[i] == '$' && s[i+1] == '{' {
 			end := strings.IndexByte(s[i+2:], '}')
 			if end < 0 {
-				return "", fmt.Errorf("variabel ${%s tidak valid", s[i+2:])
+				return "", fmt.Errorf("invalid variable ${%s", s[i+2:])
 			}
 			name := s[i+2 : i+2+end]
 			if !validEnvName(name) {
-				return "", fmt.Errorf("variabel ${%s} tidak valid", name)
+				return "", fmt.Errorf("invalid variable ${%s}", name)
 			}
 			v, ok := secrets.lookupString(name)
 			if !ok {
-				return "", fmt.Errorf("variabel ${%s} tidak ditemukan", name)
+				return "", fmt.Errorf("variable ${%s} not found", name)
 			}
 			b.WriteString(v)
 			i += 2 + end + 1

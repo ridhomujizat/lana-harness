@@ -50,7 +50,7 @@ func newHarness(t *testing.T, script mock.Script, agents map[string]core.AgentCo
 	home := t.TempDir()
 	ws := t.TempDir()
 	store := memstore.New()
-	info, err := store.Create(context.Background(), core.NewSession{Agent: "asisten", Channel: "library", Workspace: ws})
+	info, err := store.Create(context.Background(), core.NewSession{Agent: "assistant", Channel: "library", Workspace: ws})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func newHarness(t *testing.T, script mock.Script, agents map[string]core.AgentCo
 	}
 	llm := &testLLM{providers: map[string]core.Provider{"mock": mock.New(script)}}
 	if agents == nil {
-		agents = map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m"}}
+		agents = map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m"}}
 	}
 	cfg := core.Config{
 		Providers: map[string]core.ProviderConfig{"mock": {Kind: "openai_compat"}},
@@ -122,9 +122,9 @@ func toolResponse(id, name, input string) mock.Response {
 func strptr(s string) *string { return &s }
 
 func TestTurnPlainAnswer(t *testing.T) {
-	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("halo")}}, nil)
+	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("hello")}}, nil)
 	result := h.run(t, "hi")
-	if result.StopReason != "end_turn" || result.Text != "halo" || result.Err != nil {
+	if result.StopReason != "end_turn" || result.Text != "hello" || result.Err != nil {
 		t.Fatalf("result=%+v", result)
 	}
 	got := kinds(h.events(t))
@@ -138,9 +138,9 @@ func TestTurnPlainAnswer(t *testing.T) {
 }
 
 func TestPreStepReject(t *testing.T) {
-	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("tidak dipakai")}}, nil)
+	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("unused")}}, nil)
 	h.hooks.AgentPreStep.Use(func(ctx context.Context, in core.PreStepInput, next core.Next[core.PreStepInput, core.PreStepDecision]) (core.PreStepDecision, error) {
-		return core.PreStepDecision{Reject: true, Reason: "tes"}, nil
+		return core.PreStepDecision{Reject: true, Reason: "test"}, nil
 	})
 	result := h.run(t, "hi")
 	if result.StopReason != "end_turn" {
@@ -195,7 +195,7 @@ func TestOneClaimPerStep(t *testing.T) {
 		if event.Kind == core.KindUserMessage {
 			users++
 			if i+1 >= len(events) || events[i+1].Kind != core.KindStepStart {
-				t.Fatalf("user/message tidak diikuti step/start di %d", i)
+				t.Fatalf("user/message not followed by step/start at %d", i)
 			}
 		}
 		if event.Kind == core.KindStepStart {
@@ -223,7 +223,7 @@ func TestSendWhileRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
-		t.Fatalf("Send memblokir: %v", elapsed)
+		t.Fatalf("Send blocked: %v", elapsed)
 	}
 	if _, err := h.reg.Wait(context.Background(), turnID); err != nil {
 		t.Fatal(err)
@@ -277,17 +277,17 @@ func (p *recordingProvider) Stream(ctx context.Context, req core.ChatRequest) (c
 
 func TestAssistantMessageBlocks(t *testing.T) {
 	ws := t.TempDir()
-	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("isi"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	h := newHarness(t, mock.Script{Responses: []mock.Response{
-		{Events: []mock.Event{{Text: strptr("membaca")}, {ToolUse: &mock.ToolUse{ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)}}, {Stop: strptr("tool_use")}}},
-		textResponse("selesai"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
-	h.info, _ = h.store.Create(context.Background(), core.NewSession{Agent: "asisten", Channel: "library", Workspace: ws})
-	// session baru perlu workspace yang sama
+		{Events: []mock.Event{{Text: strptr("reading")}, {ToolUse: &mock.ToolUse{ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)}}, {Stop: strptr("tool_use")}}},
+		textResponse("done"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+	h.info, _ = h.store.Create(context.Background(), core.NewSession{Agent: "assistant", Channel: "library", Workspace: ws})
+	// the new session needs the same workspace
 	result := h.run(t, "hi")
-	if result.StopReason != "end_turn" || result.Text != "selesai" {
+	if result.StopReason != "end_turn" || result.Text != "done" {
 		t.Fatalf("result=%+v", result)
 	}
 	var assistant []core.AssistantMessage
@@ -310,7 +310,7 @@ func TestMaxStepsDefault(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", `{"path":"a.txt"}`))
 	}
-	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
 	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestMaxStepsConfigured(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", `{"path":"a.txt"}`))
 	}
-	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"read_file"}, MaxSteps: 3}})
+	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}, MaxSteps: 3}})
 	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -75,7 +75,7 @@ func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStre
 			}
 			var c chunk
 			if err := json.Unmarshal([]byte(data), &c); err != nil {
-				yield(core.ChatEvent{}, &core.ProviderError{Class: "server", Message: "respons tidak valid"})
+				yield(core.ChatEvent{}, &core.ProviderError{Class: "server", Message: "invalid response"})
 				return
 			}
 			if c.Usage != nil {
@@ -115,7 +115,7 @@ func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStre
 			return
 		}
 		if !sawDone && finish == "" {
-			yield(core.ChatEvent{}, &core.ProviderError{Class: "network", Message: "stream terputus sebelum finish_reason"})
+			yield(core.ChatEvent{}, &core.ProviderError{Class: "network", Message: "stream disconnected before finish_reason"})
 			return
 		}
 		indexes := make([]int, 0, len(acc))

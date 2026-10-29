@@ -58,7 +58,7 @@ func TestReadFileBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := callTool(t, NewReadFile(&Guard{Workspace: ws}), ws, `{"path":"bin"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "file biner") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "binary file") {
 		t.Fatalf("out=%+v", out)
 	}
 }
@@ -78,15 +78,15 @@ func TestWriteFileCreate(t *testing.T) {
 func TestWriteFileOverwrite(t *testing.T) {
 	ws := t.TempDir()
 	path := filepath.Join(ws, "a.txt")
-	if err := os.WriteFile(path, []byte("lama"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := callTool(t, NewWriteFile(&Guard{Workspace: ws}), ws, `{"path":"a.txt","content":"baru"}`)
+	out := callTool(t, NewWriteFile(&Guard{Workspace: ws}), ws, `{"path":"a.txt","content":"new"}`)
 	if out.Status != core.ToolStatusSuccess {
 		t.Fatalf("out=%+v", out)
 	}
 	data, _ := os.ReadFile(path)
-	if string(data) != "baru" {
+	if string(data) != "new" {
 		t.Fatalf("data=%q", data)
 	}
 }
@@ -94,26 +94,26 @@ func TestWriteFileOverwrite(t *testing.T) {
 func TestWriteFileNoParent(t *testing.T) {
 	ws := t.TempDir()
 	out := callTool(t, NewWriteFile(&Guard{Workspace: ws}), ws, `{"path":"nope/a.txt","content":"x"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "direktori induk") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "parent directory") {
 		t.Fatalf("out=%+v", out)
 	}
 	if _, err := os.Stat(filepath.Join(ws, "nope", "a.txt")); !os.IsNotExist(err) {
-		t.Fatalf("file dibuat: %v", err)
+		t.Fatalf("file was created: %v", err)
 	}
 }
 
 func TestEditFileOnce(t *testing.T) {
 	ws := t.TempDir()
 	path := filepath.Join(ws, "a.txt")
-	if err := os.WriteFile(path, []byte("satu dua tiga"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("one two three"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out := callTool(t, NewEditFile(&Guard{Workspace: ws}), ws, `{"path":"a.txt","old_string":"dua","new_string":"D"}`)
+	out := callTool(t, NewEditFile(&Guard{Workspace: ws}), ws, `{"path":"a.txt","old_string":"two","new_string":"D"}`)
 	if out.Status != core.ToolStatusSuccess {
 		t.Fatalf("out=%+v", out)
 	}
 	data, _ := os.ReadFile(path)
-	if string(data) != "satu D tiga" {
+	if string(data) != "one D three" {
 		t.Fatalf("data=%q", data)
 	}
 }
@@ -126,23 +126,23 @@ func TestEditFileCount(t *testing.T) {
 	}
 	tool := NewEditFile(&Guard{Workspace: ws})
 	out := callTool(t, tool, ws, `{"path":"a.txt","old_string":"x","new_string":"y"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "2 kali") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "2 times") {
 		t.Fatalf("out=%+v", out)
 	}
 	out = callTool(t, tool, ws, `{"path":"a.txt","old_string":"z","new_string":"y"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "tidak ditemukan") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "not found") {
 		t.Fatalf("out=%+v", out)
 	}
 	data, _ := os.ReadFile(path)
 	if string(data) != "x x" {
-		t.Fatalf("file berubah: %q", data)
+		t.Fatalf("file changed: %q", data)
 	}
 }
 
 func TestEditFileEmpty(t *testing.T) {
 	ws := t.TempDir()
 	out := callTool(t, NewEditFile(&Guard{Workspace: ws}), ws, `{"path":"a.txt","old_string":"","new_string":"x"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "input tidak valid") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "invalid input") {
 		t.Fatalf("out=%+v", out)
 	}
 }
@@ -153,7 +153,7 @@ func TestGuardOutside(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	out := callTool(t, NewReadFile(&Guard{Workspace: ws}), ws, `{"path":"/etc/passwd"}`)
-	if out.Status != core.ToolStatusRejected || out.Output != "di luar workspace" {
+	if out.Status != core.ToolStatusRejected || out.Output != "outside workspace" {
 		t.Fatalf("out=%+v", out)
 	}
 }

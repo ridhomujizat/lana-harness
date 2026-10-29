@@ -1,127 +1,126 @@
-# Spesifikasi Fitur
+# Feature Specifications
 
-Folder ini berisi spesifikasi fitur yang siap diimplementasi. Satu spec adalah satu paket yang
-bisa di-review, berisi requirements, contract antarmuka (jika ada), design, dan task:
+This folder contains feature specifications that are ready to implement. One spec is one package that
+can be reviewed. It contains requirements, the interface contract (if any), design, and tasks:
 
 ```text
 docs/specs/<issue>-<slug-fitur>/
 ├── requirements.md
-├── api-contract.md       # wajib jika CLI, config, HTTP, JSON-RPC, atau event berubah
+├── api-contract.md       # required if the CLI, config, HTTP, JSON-RPC, or events change
 ├── design.md
 └── tasks.md
 ```
 
-`<issue>` adalah nomor GitHub issue tanpa `#`, misalnya `12-cli-tui`. GitHub issue adalah tracker
-untuk status dan diskusi. Spec di repository adalah source of truth yang ber-versi dan dibaca
-bersama kode.
+`<issue>` is the GitHub issue number without `#`, for example `12-cli-tui`. The GitHub issue is the tracker
+for status and discussion. The spec in the repository is the versioned source of truth that is read
+together with the code.
 
-## Mulai cepat
+## Quick start
 
-Mulai dari index di bawah, lalu baca hanya artefak yang dibutuhkan untuk keputusan saat ini:
+Start from the index below, then read only the artifacts needed for the current decision:
 
-| Tujuan | Baca |
+| Goal | Read |
 |---|---|
-| Memahami scope, aturan, atau acceptance | `requirements.md` |
-| Review perintah CLI, flag, config, endpoint, atau payload | `requirements.md` + operasi terkait di `api-contract.md` |
-| Implementasi | requirement yang ditugaskan + operasi contract + komponen terkait di `design.md` |
-| Mengerjakan atau memverifikasi pekerjaan | entri terkait di `tasks.md` |
-| Memahami keputusan atau alur yang tahan lama | [ADR](../adr/README.md) atau [diagram](../diagram/README.md) yang ditautkan dari `design.md` |
+| Understand scope, rules, or acceptance | `requirements.md` |
+| Review a CLI command, flag, config, endpoint, or payload | `requirements.md` + related operations in `api-contract.md` |
+| Implementation | assigned requirements + contract operations + related components in `design.md` |
+| Working on or verifying work | related entries in `tasks.md` |
+| Understanding a durable decision or flow | [ADR](../adr/README.md) or [diagram](../diagram/README.md) linked from `design.md` |
 
-Cara membuat paket baru:
+How to create a new package:
 
-1. Buat GitHub issue untuk fitur.
-2. Salin `0000-feature-name/` ke `<issue>-<slug-fitur>/` dan tambahkan baris di index.
-3. Tulis dan approve `requirements.md`. Pertanyaan yang belum terjawab tetap memblokir.
-4. Tulis dan approve `api-contract.md` jika antarmuka yang terlihat dari luar berubah. Jika tidak,
-   tandai `Tidak diperlukan` dan hapus bagian operasi.
-5. Tulis dan approve `design.md` berdasarkan requirements dan contract yang sudah di-approve.
-6. Tulis `tasks.md`, implementasi satu slice, lalu catat bukti verifikasi yang sebenarnya.
+1. Create a GitHub issue for the feature.
+2. Copy `0000-feature-name/` to `<issue>-<slug-fitur>/` and add a row to the index.
+3. Write and approve `requirements.md`. Open questions that are not yet answered still block.
+4. Write and approve `api-contract.md` if the externally visible interface changes. If not,
+   mark it `Not required` and delete the operations section.
+5. Write and approve `design.md` based on the approved requirements and contract.
+6. Write `tasks.md`, implement one slice, then record the actual verification evidence.
 
-Jangan baca semua artefak secara default. Ikuti link dan ID stabil untuk tugas saat ini:
-`REQ-*` → `AC-*` → `API-*` (jika ada) → komponen design → `T-*` → bukti.
+Do not read all artifacts by default. Follow the links and stable IDs for the current task:
+`REQ-*` → `AC-*` → `API-*` (if any) → design component → `T-*` → evidence.
 
-## Tanggung jawab artefak
+## Artifact responsibilities
 
-| Artefak | Memiliki | Tidak boleh memiliki |
+| Artifact | Owns | Must not own |
 |---|---|---|
-| `requirements.md` | perilaku yang terlihat, aturan, scope, acceptance criteria, open question | layout kode, langkah implementasi |
-| `api-contract.md` | bentuk persis perintah CLI, flag, exit code, key config, endpoint HTTP, method JSON-RPC, event | alasan bisnis, pemetaan internal |
-| `design.md` | solusi spesifik repository, pemetaan internal, data model, failure handling, strategi verifikasi | requirement produk, duplikasi schema contract, progres task |
-| `tasks.md` | slice implementasi berurutan, cakupan requirement, bukti penyelesaian | perilaku baru atau keputusan arsitektur |
-| [`docs/adr/`](../adr/README.md) | keputusan lintas fitur dan tradeoff | daftar task fitur |
-| [`docs/diagram/`](../diagram/README.md) | tampilan visual alur, batas, topologi, data model yang tahan lama | duplikasi prosa spec |
+| `requirements.md` | observable behavior, rules, scope, acceptance criteria, open questions | code layout, implementation steps |
+| `api-contract.md` | the exact form of CLI commands, flags, exit codes, config keys, HTTP endpoints, JSON-RPC methods, events | business reasons, internal mapping |
+| `design.md` | repository-specific solution, internal mapping, data model, failure handling, verification strategy | product requirements, duplicated contract schema, task progress |
+| `tasks.md` | ordered implementation slices, requirement coverage, completion evidence | new behavior or architecture decisions |
+| [`docs/adr/`](../adr/README.md) | cross-feature decisions and tradeoffs | feature task lists |
+| [`docs/diagram/`](../diagram/README.md) | durable visual views of flows, boundaries, topology, data models | duplicated spec prose |
 
 ## Lifecycle
 
-Setiap file punya gate approval sendiri:
+Each file has its own approval gate:
 
 ```text
 requirements: Draft → Approved
-api-contract: Draft → Approved (jika berlaku)
+api-contract: Draft → Approved (if applicable)
 design:       Draft → Approved
 tasks:        Draft → Approved → In Progress → Completed
 ```
 
-Urutan kerja: approve requirements, lalu contract (jika berlaku), lalu design, lalu tasks.
-Implementasi tidak boleh mulai selama masih ada open question yang memblokir atau artefak
-sebelumnya belum di-approve.
+Order of work: approve requirements, then the contract (if applicable), then design, then tasks.
+Implementation must not start while there are still blocking open questions or earlier artifacts
+have not been approved.
 
-> **Gate dilepas (2026-10-29).** Pemilik meminta agent memakai rekomendasinya sendiri untuk
-> pertanyaan terbuka dan menyusun semua artefak sekaligus. Keputusan seperti itu dicatat dengan
-> awalan `Rekomendasi agent:` di tabel resolusi, dan artefak ditandai Approved atas nama pemilik.
-> Pemilik bisa mengubahnya kapan saja lewat revisi baru. Untuk spec berikutnya, gate berlaku lagi
-> kecuali pemilik melepasnya.
+> **Gate lifted (2026-10-29).** The owner asked the agent to use its own recommendations for open
+> questions and to draft all artifacts at once. Such decisions are recorded with the prefix
+> `Rekomendasi agent:` (agent recommendation) in the resolution table, and the artifacts are marked
+> Approved on behalf of the owner. The owner can change them at any time through a new revision.
+> For the next spec, the gate applies again unless the owner lifts it.
 
-Agent wajib menanyakan setiap pertanyaan yang memblokir ke pemilik dan menunggu jawaban. Mencatat
-pertanyaan di file tidak berarti design atau implementasi boleh lanjut. Pertanyaan sebaiknya
-meminta referensi: issue, screenshot, contoh output, implementasi yang sudah ada, atau arah yang disukai.
+The agent must ask the owner every blocking question and wait for the answer. Recording a
+question in a file does not mean design or implementation may proceed. Questions should ask for
+references: an issue, a screenshot, an example output, an existing implementation, or a preferred direction.
 
-Artefak arsitektur diperiksa di antara requirements dan design:
+Architecture artifacts are checked between requirements and design:
 
 ```text
-Issue → requirements Approved → contract Approved → scan ADR/diagram → design Approved → tasks Approved → kode
+Issue → requirements Approved → contract Approved → scan ADR/diagram → design Approved → tasks Approved → code
 ```
 
-ADR berstatus Accepted dan diagram yang berlaku adalah input untuk requirements dan design. Setiap
-design wajib menyelesaikan Visual Architecture Check. ADR yang dibutuhkan harus Accepted sebelum
-design di-approve.
+ADRs with status Accepted and the applicable diagrams are inputs to requirements and design. Every
+design must complete the Visual Architecture Check. Required ADRs must be Accepted before
+the design is approved.
 
 ## Traceability
 
-- ID requirement: `REQ-<KAPABILITAS>-NNN`.
-- ID acceptance criteria: `AC-<KAPABILITAS>-NNN`.
-- ID task: `T-NNN`, dengan nomor GitHub issue atau PR jika ada.
-- ID operasi contract: `API-<KAPABILITAS>-NNN`, ditautkan ke `REQ-*` dan `AC-*`.
-- Setiap acceptance criterion punya tepat satu pemilik bukti.
-- Setiap task yang selesai mencatat bukti test atau runtime.
-- Requirements, contract (jika berlaku), dan design punya nomor revisi eksplisit sebelum tasks di-approve.
+- Requirement ID: `REQ-<KAPABILITAS>-NNN`.
+- Acceptance criteria ID: `AC-<KAPABILITAS>-NNN`.
+- Task ID: `T-NNN`, with the GitHub issue or PR number if available.
+- Contract operation ID: `API-<KAPABILITAS>-NNN`, linked to `REQ-*` and `AC-*`.
+- Every acceptance criterion has exactly one evidence owner.
+- Every completed task records test or runtime evidence.
+- Requirements, contract (if applicable), and design have explicit revision numbers before tasks are approved.
 
-## Aturan tidak mengarang
+## Rules against making things up
 
-Agent tidak boleh mengarang aturan perilaku, flag, field, default, permission, transisi state,
-exit code, error code, perilaku retry, atau jaminan kompatibilitas. Perilaku yang hilang atau
-bertentangan masuk ke `requirements.md` di bagian Blocking Open Questions dan menghentikan design
-atau implementasi.
+The agent must not invent behavior rules, flags, fields, defaults, permissions, state transitions,
+exit codes, error codes, retry behavior, or compatibility guarantees. Missing or conflicting behavior
+goes into the Blocking Open Questions section of `requirements.md` and stops design or implementation.
 
-Agent boleh memilih detail implementasi privat paling sederhana yang sesuai repository, selama
-bisa dibalik dan tidak mengubah perilaku yang terlihat.
+The agent may choose the simplest private implementation detail that fits the repository, as long as
+it is reversible and does not change observable behavior.
 
-## Hubungan dengan ADR dan diagram
+## Relationship with ADRs and diagrams
 
-- Buat ADR hanya untuk keputusan lintas fitur, kontraktual, atau sulit dibalik.
-- Diagram wajib untuk batas baru, aktor atau sistem luar, alur multi-komponen, lifecycle atau
-  transisi state, relasi entity, alur konkurensi/retry/gagal, arah dependency, atau topologi runtime.
-- Diagram tidak wajib untuk field, validasi, label, refactor lokal, atau perilaku satu langkah.
-- `design.md` menautkan ADR dan diagram, tidak menyalin isinya.
-- Diagram yang hanya menjelaskan satu fitur tetap di `design.md`. Pindahkan ke `docs/diagram/` jika dipakai ulang.
-- Tolak diagram dekoratif: diagram berguna punya minimal dua node/state/entity dan satu relasi.
+- Create an ADR only for decisions that span features, are contractual, or are hard to reverse.
+- A diagram is required for new boundaries, external actors or systems, multi-component flows, lifecycles or state
+  transitions, entity relations, concurrency/retry/failure flows, dependency direction, or runtime topology.
+- A diagram is not required for fields, validation, labels, local refactors, or single-step behavior.
+- `design.md` links to ADRs and diagrams, it does not copy their contents.
+- A diagram that only explains one feature stays in `design.md`. Move it to `docs/diagram/` if it is reused.
+- Reject decorative diagrams: a useful diagram has at least two nodes/states/entities and one relation.
 
 ## Index
 
-| Issue | Fitur | Requirements | Contract | Design | Tasks |
+| Issue | Feature | Requirements | Contract | Design | Tasks |
 |---|---|---|---|---|---|
-| — | Template paket | [Template](0000-feature-name/requirements.md) | [Template](0000-feature-name/api-contract.md) | [Template](0000-feature-name/design.md) | [Template](0000-feature-name/tasks.md) |
-| [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI dan TUI chat | [Approved r6](1-cli-tui/requirements.md) | [Approved r4](1-cli-tui/api-contract.md) | [Approved r3](1-cli-tui/design.md) | [Approved r2](1-cli-tui/tasks.md) |
-| [#2](https://github.com/ridhomujizat/lana-harness/issues/2) | Fondasi: Go module, config loader, Context/modul/hook | [Approved r4](2-fondasi/requirements.md) | [Approved r2](2-fondasi/api-contract.md) | [Approved r2](2-fondasi/design.md) | [Approved r2](2-fondasi/tasks.md) |
+| — | Package template | [Template](0000-feature-name/requirements.md) | [Template](0000-feature-name/api-contract.md) | [Template](0000-feature-name/design.md) | [Template](0000-feature-name/tasks.md) |
+| [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI and TUI chat | [Approved r6](1-cli-tui/requirements.md) | [Approved r4](1-cli-tui/api-contract.md) | [Approved r3](1-cli-tui/design.md) | [Approved r2](1-cli-tui/tasks.md) |
+| [#2](https://github.com/ridhomujizat/lana-harness/issues/2) | Foundation: Go module, config loader, Context/modules/hooks | [Approved r4](2-foundation/requirements.md) | [Approved r2](2-foundation/api-contract.md) | [Approved r2](2-foundation/design.md) | [Approved r2](2-foundation/tasks.md) |
 | [#3](https://github.com/ridhomujizat/lana-harness/issues/3) | Agent loop, provider, tools, Go library | [Approved r2](3-agent-loop/requirements.md) | [Approved r2](3-agent-loop/api-contract.md) | [Approved r2](3-agent-loop/design.md) | [Approved r2](3-agent-loop/tasks.md) |
 | [#4](https://github.com/ridhomujizat/lana-harness/issues/4) | Session event log, permission, approval | [Approved r2](4-session-permission/requirements.md) | [Approved r2](4-session-permission/api-contract.md) | [Approved r2](4-session-permission/design.md) | [Approved r2](4-session-permission/tasks.md) |

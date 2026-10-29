@@ -12,7 +12,7 @@ func init() {
 	core.RegisterModule("sqlite_store", func() core.Module { return &Module{} })
 }
 
-// Module adalah modul sqlite_store.
+// Module is the sqlite_store module.
 type Module struct{ store *Store }
 
 func (m *Module) ID() string                  { return "sqlite_store" }
@@ -30,7 +30,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	}
 	store, err := Open(context.Background(), path)
 	if err != nil {
-		return fmt.Errorf("membuka store %s: %w", path, err)
+		return fmt.Errorf("opening store %s: %w", path, err)
 	}
 	store.Hooks = b.Hooks()
 	m.store = store

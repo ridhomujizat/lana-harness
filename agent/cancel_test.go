@@ -19,7 +19,7 @@ func TestCancelBashProcess(t *testing.T) {
 			{ToolUse: &mock.ToolUse{ID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"sleep 5"}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"bash"}}})
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash"}}})
 	h.hooks.ToolsPreExecute.Use(func(ctx context.Context, in core.ToolsPreExecuteInput, next core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 		return core.ToolDecision{Allowed: true}, nil
 	})
@@ -37,7 +37,7 @@ func TestCancelBashProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	if elapsed := time.Since(start); elapsed > 3*time.Second {
-		t.Fatalf("cancel terlalu lama: %v", elapsed)
+		t.Fatalf("cancel took too long: %v", elapsed)
 	}
 	if result.StopReason != "cancelled" {
 		t.Fatalf("result=%+v", result)
@@ -47,13 +47,13 @@ func TestCancelBashProcess(t *testing.T) {
 		if event.Kind == core.KindToolResult {
 			var payload core.ToolResultPayload
 			_ = json.Unmarshal(event.Payload, &payload)
-			if payload.CallID == "c1" && payload.Status == core.ToolStatusError && payload.Output == "dibatalkan" {
+			if payload.CallID == "c1" && payload.Status == core.ToolStatusError && payload.Output == "cancelled" {
 				found = true
 			}
 		}
 	}
 	if !found {
-		t.Fatal("tool/result dibatalkan tidak ada")
+		t.Fatal("cancelled tool/result not found")
 	}
 }
 
@@ -79,7 +79,7 @@ func waitFor(t *testing.T, ok func() bool) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("kondisi tidak tercapai")
+	t.Fatal("condition not reached")
 }
 
 func TestCancelIdleNoop(t *testing.T) {
@@ -89,7 +89,7 @@ func TestCancelIdleNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	if after := len(h.events(t)); after != before {
-		t.Fatalf("events bertambah: %d -> %d", before, after)
+		t.Fatalf("events increased: %d -> %d", before, after)
 	}
 }
 
@@ -99,17 +99,17 @@ func TestCancelKeepsInbox(t *testing.T) {
 			{ToolUse: &mock.ToolUse{ID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"sleep 5"}`)}},
 			{Stop: strptr("tool_use")},
 		}},
-		textResponse("setelah batal"),
-	}}, map[string]core.AgentConfig{"asisten": {Provider: "mock", Model: "m", Tools: []string{"bash"}}})
+		textResponse("after cancel"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash"}}})
 	h.hooks.ToolsPreExecute.Use(func(ctx context.Context, in core.ToolsPreExecuteInput, next core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 		return core.ToolDecision{Allowed: true}, nil
 	})
-	turnID, err := h.reg.Start(context.Background(), h.info.ID, "pertama")
+	turnID, err := h.reg.Start(context.Background(), h.info.ID, "first")
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { return hasEvent(h, core.KindToolCall) })
-	if err := h.reg.Send(context.Background(), h.info.ID, "kedua"); err != nil {
+	if err := h.reg.Send(context.Background(), h.info.ID, "second"); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.reg.Cancel(context.Background(), h.info.ID); err != nil {
@@ -131,7 +131,7 @@ func TestCancelKeepsInbox(t *testing.T) {
 
 func TestLiveFrameOrder(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{{Events: []mock.Event{
-		{Text: strptr("satu")}, {Text: strptr("dua")}, {Text: strptr("tiga")}, {Stop: strptr("end_turn")},
+		{Text: strptr("one")}, {Text: strptr("two")}, {Text: strptr("three")}, {Stop: strptr("end_turn")},
 	}}}}, nil)
 	sub, err := h.reg.SubscribeLive(h.info.ID)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestLiveFrameOrder(t *testing.T) {
 		}
 		frames = append(frames, received.Value)
 	}
-	if len(frames) != 3 || frames[0].Text != "satu" || frames[2].Text != "tiga" {
+	if len(frames) != 3 || frames[0].Text != "one" || frames[2].Text != "three" {
 		t.Fatalf("frames=%+v", frames)
 	}
 	for _, frame := range frames {
@@ -168,7 +168,7 @@ func TestLiveFrameDropWarn(t *testing.T) {
 	for i := 0; i < 1500; i++ {
 		hub.Publish("s", core.LiveFrame{Kind: "text_delta", Text: "x"})
 	}
-	if !strings.Contains(buf.String(), "frame hidup dibuang") {
-		t.Fatalf("warning tidak ada: %s", buf.String())
+	if !strings.Contains(buf.String(), "live frame dropped") {
+		t.Fatalf("warning not found: %s", buf.String())
 	}
 }

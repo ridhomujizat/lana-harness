@@ -8,13 +8,13 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Events adalah satu-satunya penulis event turn, dengan payload v:1.
+// Events is the only writer of turn events, with payload v:1.
 type Events struct {
 	Store     core.SessionStore
 	SessionID string
 }
 
-// Append menulis draft dan memastikan setiap payload punya v = 1.
+// Append writes the drafts and ensures every payload has v = 1.
 func (e *Events) Append(ctx context.Context, drafts ...core.EventDraft) ([]core.SessionEvent, error) {
 	out := make([]core.EventDraft, 0, len(drafts))
 	for _, draft := range drafts {
@@ -38,7 +38,7 @@ func withVersion(payload any) (any, error) {
 	}
 	var value map[string]any
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, fmt.Errorf("payload event bukan object: %w", err)
+		return nil, fmt.Errorf("event payload is not an object: %w", err)
 	}
 	value["v"] = core.PayloadVersion
 	return value, nil

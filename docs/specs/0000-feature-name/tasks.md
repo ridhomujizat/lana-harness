@@ -1,73 +1,73 @@
-# Tasks: <Nama Fitur>
+# Tasks: <Feature Name>
 
-- **Issue**: `#<nomor>`
+- **Issue**: `#<number>`
 - **Requirements**: [requirements.md](requirements.md)
-- **Contract**: [api-contract.md](api-contract.md) — Diperlukan / Tidak diperlukan
+- **Contract**: [api-contract.md](api-contract.md) — Required / Not required
 - **Design**: [design.md](design.md)
-- **Revisi requirements**: <integer>
-- **Revisi contract**: <integer atau `Tidak diperlukan`>
-- **Revisi design**: <integer>
+- **Requirements revision**: <integer>
+- **Contract revision**: <integer or `Not required`>
+- **Design revision**: <integer>
 - **Status**: Draft
 
-Jangan membuat rencana task sebelum requirements, contract (jika berlaku), dan design di-approve.
+Do not create a task plan before requirements, contract (if applicable), and design are approved.
 
-## Aturan eksekusi
+## Execution rules
 
-- Implementasi hanya requirement dan acceptance criteria yang ditugaskan ke task.
-- Berhenti jika requirements, design, ADR, diagram, atau contract saling bertentangan.
-- Jangan menjawab pertanyaan produk atau arsitektur hanya di kode.
-- Satu acceptance criterion punya tepat satu pemilik bukti.
-- Verifikasi yang diwajibkan tidak pernah opsional.
-- Tandai task selesai hanya setelah bukti verifikasi dicatat.
+- Implement only the requirements and acceptance criteria assigned to the task.
+- Stop if requirements, design, ADR, diagrams, or contract conflict with each other.
+- Do not answer product or architecture questions only in code.
+- Every acceptance criterion has exactly one evidence owner.
+- Required verification is never optional.
+- Mark a task complete only after verification evidence has been recorded.
 
-## Cakupan
+## Coverage
 
-| Acceptance criterion | Operasi contract | Pemilik bukti | Issue/PR | Verifikasi | Bukti |
+| Acceptance criterion | Contract operation | Evidence owner | Issue/PR | Verification | Evidence |
 |---|---|---|---|---|---|
-| `AC-...` | `API-...` atau `Tidak berlaku` | `T-001` | `#<nomor>` atau `—` | <test atau probe> | Pending |
+| `AC-...` | `API-...` or `Not applicable` | `T-001` | `#<number>` or `—` | <test or probe> | Pending |
 
-## Graf task
+## Task graph
 
 ```mermaid
 flowchart LR
-  T1["T-001: Siapkan fondasi"] --> T2["T-002: Implementasi perilaku"]
-  T2 --> T3["T-003: Verifikasi acceptance criteria"]
+  T1["T-001: Prepare the foundation"] --> T2["T-002: Implement the behavior"]
+  T2 --> T3["T-003: Verify acceptance criteria"]
 ```
 
 ## Tasks
 
-- [ ] `T-001` <judul task dalam kalimat perintah>
+- [ ] `T-001` <task title as an imperative sentence>
   - Issue/PR: `—`
-  - Bergantung pada: `None`
+  - Depends on: `None`
   - Requirements: `REQ-...`
   - Acceptance criteria: `AC-...`
-  - Operasi contract: `API-...` atau `Tidak berlaku`
+  - Contract operations: `API-...` or `Not applicable`
   - Scope:
-    - <slice implementasi kecil>
-  - Verifikasi:
-    - `<perintah atau nama test>`
-  - Bukti penyelesaian:
+    - <small implementation slice>
+  - Verification:
+    - `<command or test name>`
+  - Completion evidence:
     - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
+    - Command/test: —
+    - Result: —
     - PR/commit: —
-    - Deviasi: Tidak ada
+    - Deviation: None
 
-## Verifikasi akhir
+## Final verification
 
-- [ ] Setiap acceptance criterion punya bukti lulus.
-- [ ] Tidak ada perilaku terlihat tanpa ID requirement.
-- [ ] Tidak ada perilaku di luar scope.
-- [ ] ADR dan diagram sesuai implementasi.
-- [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
-- [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
+- [ ] Every acceptance criterion has passing evidence.
+- [ ] No observable behavior exists without a requirement ID.
+- [ ] No behavior is outside scope.
+- [ ] ADRs and diagrams match the implementation.
+- [ ] `gofmt -l .` is empty, `golangci-lint run ./...`, `go test -race ./...`, and the release build pass.
+- [ ] Deviations are resolved in requirements or design, not only recorded here.
 
 ## Approval
 
-- [ ] Requirements dan design sudah Approved dan revisinya dicatat.
-- [ ] Contract sudah Approved atau `Tidak diperlukan`.
-- [ ] Setiap acceptance criterion punya tepat satu pemilik bukti.
-- [ ] Setiap task punya scope terbatas, dependency, dan verifikasi.
-- [ ] Tidak ada task yang memperkenalkan perilaku baru.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- [ ] Requirements and design are Approved and their revisions are recorded.
+- [ ] Contract is Approved or `Not required`.
+- [ ] Every acceptance criterion has exactly one evidence owner.
+- [ ] Every task has a limited scope, dependencies, and verification.
+- [ ] No task introduces new behavior.
+- **Approved by**: —
+- **Approved on**: —

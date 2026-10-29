@@ -1,2 +1,2 @@
-// Package config memuat, memvalidasi, dan menggabungkan config berlapis.
+// Package config loads, validates, and merges layered config.
 package config

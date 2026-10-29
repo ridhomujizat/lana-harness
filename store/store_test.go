@@ -45,13 +45,13 @@ func TestOpenCreatesWALDatabase(t *testing.T) {
 		t.Fatalf("mode=%o", info.Mode().Perm())
 	}
 	if _, err := os.Stat(path + "-wal"); err != nil {
-		t.Fatalf("wal tidak ada: %v", err)
+		t.Fatalf("wal file missing: %v", err)
 	}
 }
 
 func TestOpenRelativePath(t *testing.T) {
 	if _, err := Open(context.Background(), "relative.db"); err == nil {
-		t.Fatal("path relatif diterima")
+		t.Fatal("relative path accepted")
 	}
 }
 
@@ -91,10 +91,10 @@ func TestRawUpdateDeleteRejected(t *testing.T) {
 	s, _ := openTest(t)
 	info := createSession(t, s)
 	if _, err := s.db.Exec("UPDATE session_events SET kind = 'x' WHERE session_id = ?", info.ID); err == nil {
-		t.Fatal("update diterima")
+		t.Fatal("update accepted")
 	}
 	if _, err := s.db.Exec("DELETE FROM session_events WHERE session_id = ?", info.ID); err == nil {
-		t.Fatal("delete diterima")
+		t.Fatal("delete accepted")
 	}
 }
 
@@ -135,14 +135,14 @@ func TestAppendBatchAtomic(t *testing.T) {
 	info := createSession(t, s)
 	_, err := s.Append(context.Background(), info.ID, []core.EventDraft{
 		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
-		{Kind: "tidak/dikenal", Payload: core.TurnStart{V: 1}},
+		{Kind: "unknown/kind", Payload: core.TurnStart{V: 1}},
 	})
 	if err == nil {
-		t.Fatal("kind tidak dikenal diterima")
+		t.Fatal("unknown kind accepted")
 	}
 	events, _ := s.loadEvents(context.Background(), info.ID)
 	if len(events) != 1 {
-		t.Fatalf("batch tidak rollback: %+v", events)
+		t.Fatalf("batch was not rolled back: %+v", events)
 	}
 }
 
@@ -211,13 +211,13 @@ func TestLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.TryLease(context.Background(), info.ID); err == nil {
-		t.Fatal("lease kedua diterima")
+		t.Fatal("second lease accepted")
 	}
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Open(context.Background(), info.ID); !errors.Is(err, ErrLeaseNotHeld) {
-		t.Fatalf("open tanpa lease: %v", err)
+		t.Fatalf("open without lease: %v", err)
 	}
 }
 
@@ -257,7 +257,7 @@ func TestResumeRepairOrphanCall(t *testing.T) {
 	}
 	events, _ := s.loadEvents(context.Background(), info.ID)
 	if events[len(events)-1].Kind != core.KindTurnEnd {
-		t.Fatalf("event terakhir=%s", events[len(events)-1].Kind)
+		t.Fatalf("last event=%s", events[len(events)-1].Kind)
 	}
 	before := len(events)
 	if _, err := s.Open(context.Background(), info.ID); err != nil {
@@ -265,7 +265,7 @@ func TestResumeRepairOrphanCall(t *testing.T) {
 	}
 	events, _ = s.loadEvents(context.Background(), info.ID)
 	if len(events) != before {
-		t.Fatalf("repair tidak idempotent: %d -> %d", before, len(events))
+		t.Fatalf("repair is not idempotent: %d -> %d", before, len(events))
 	}
 }
 
@@ -323,7 +323,7 @@ func TestListOrderAndLimit(t *testing.T) {
 		t.Fatalf("list=%+v b=%s", list, b.ID)
 	}
 	if _, err := s.List(context.Background(), core.SessionFilter{Limit: -1}); err == nil {
-		t.Fatal("limit negatif diterima")
+		t.Fatal("negative limit accepted")
 	}
 }
 
@@ -411,7 +411,7 @@ func TestModuleStoreDefaultPath(t *testing.T) {
 	}
 	defer func() { _ = ctx.Shutdown(context.Background()) }()
 	if _, err := os.Stat(filepath.Join(home, "lana.db")); err != nil {
-		t.Fatalf("database default tidak dibuat: %v", err)
+		t.Fatalf("default database not created: %v", err)
 	}
 }
 func TestResumeRepairOrphanApproval(t *testing.T) {
@@ -440,7 +440,7 @@ func TestResumeRepairOrphanApproval(t *testing.T) {
 		}
 	}
 	if !decided || !turnEnd {
-		t.Fatalf("repair approval tidak lengkap")
+		t.Fatalf("approval repair incomplete")
 	}
 }
 
@@ -467,23 +467,23 @@ func TestNoBroadcastOnFailure(t *testing.T) {
 	s.Hooks = hooks
 	sub := hooks.SessionEvent.Subscribe()
 	defer sub.Close()
-	_, _ = s.Append(context.Background(), info.ID, []core.EventDraft{{Kind: "tidak/dikenal"}})
+	_, _ = s.Append(context.Background(), info.ID, []core.EventDraft{{Kind: "unknown/kind"}})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if _, err := sub.Recv(ctx); err == nil {
-		t.Fatal("event terkirim padahal append gagal")
+		t.Fatal("event sent even though append failed")
 	}
 }
 
 func TestLeaseOtherHost(t *testing.T) {
 	s, _ := openTest(t)
 	info := createSession(t, s)
-	if _, err := s.db.Exec("INSERT INTO session_leases (session_id, pid, host, acquired_at) VALUES (?, ?, 'host-lain', 1)", info.ID, os.Getpid()); err != nil {
+	if _, err := s.db.Exec("INSERT INTO session_leases (session_id, pid, host, acquired_at) VALUES (?, ?, 'other-host', 1)", info.ID, os.Getpid()); err != nil {
 		t.Fatal(err)
 	}
 	_, err := s.TryLease(context.Background(), info.ID)
 	var held *core.LeaseHeldError
-	if !errors.As(err, &held) || held.Host != "host-lain" {
+	if !errors.As(err, &held) || held.Host != "other-host" {
 		t.Fatalf("err=%v", err)
 	}
 }

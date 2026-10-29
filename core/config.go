@@ -1,6 +1,6 @@
 package core
 
-// Config adalah config efektif. Nilai secret bertipe Secret.
+// Config is the effective config. Secret values have type Secret.
 type Config struct {
 	Version   int                       `toml:"version"`
 	Providers map[string]ProviderConfig `toml:"providers"`
@@ -54,7 +54,7 @@ type MCPConfig struct {
 	Headers map[string]Secret `toml:"headers"`
 }
 
-// ModuleRow adalah baris [[modules]] efektif.
+// ModuleRow is the effective [[modules]] row.
 type ModuleRow struct {
 	ID       string         `toml:"id"`
 	Module   string         `toml:"module"`

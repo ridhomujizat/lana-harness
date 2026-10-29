@@ -14,20 +14,20 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// cmdChat menjalankan TUI chat interaktif.
+// cmdChat runs the interactive TUI chat.
 func cmdChat(args []string) int {
 	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	agentFlag := fs.String("agent", "", "agent")
-	yolo := fs.Bool("yolo", false, "policy trust")
-	cont := fs.Bool("continue", false, "lanjutkan session terakhir untuk direktori ini")
-	resume := fs.String("resume", "", "id atau prefix session")
-	verbose := fs.Bool("verbose", false, "mode verbose")
+	yolo := fs.Bool("yolo", false, "trust policy")
+	cont := fs.Bool("continue", false, "continue the last session for this directory")
+	resume := fs.String("resume", "", "session id or prefix")
+	verbose := fs.Bool("verbose", false, "verbose mode")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if !isTTY(os.Stdin) || !isTTY(os.Stdout) {
-		fmt.Fprintln(os.Stderr, "error: lana chat butuh terminal; pakai 'lana run' untuk non-interaktif")
+		fmt.Fprintln(os.Stderr, "error: lana chat needs a terminal; use 'lana run' for non-interactive use")
 		return 2
 	}
 	home, err := homeDir()
@@ -73,7 +73,7 @@ func cmdChat(args []string) int {
 		if notice != "" {
 			notice += " · "
 		}
-		notice += missingEnv + " belum diisi; memakai MockLlm. Isi key lalu jalankan ulang untuk model sungguhan."
+		notice += missingEnv + " is not set; using MockLlm. Set the key and run again to use a real model."
 	}
 	if *yolo {
 		if err := rt.SetPolicy(ctx, info.ID, core.PolicyTrust); err != nil {
@@ -107,7 +107,7 @@ func cmdChat(args []string) int {
 	return 0
 }
 
-// chatSession membuka atau membuat session chat.
+// chatSession opens or creates a chat session.
 func chatSession(ctx context.Context, rt *lana.Runtime, agentName string, cont bool, resume string) (core.SessionInfo, []core.SessionEvent, string, error) {
 	cwd, _ := os.Getwd()
 	if cwd != "" {
@@ -119,10 +119,10 @@ func chatSession(ctx context.Context, rt *lana.Runtime, agentName string, cont b
 	case resume != "":
 		info, err := rt.SessionInfo(ctx, resume)
 		if err != nil {
-			return core.SessionInfo{}, nil, "", fmt.Errorf("session %q tidak ditemukan: %w", resume, err)
+			return core.SessionInfo{}, nil, "", fmt.Errorf("session %q not found: %w", resume, err)
 		}
 		if cwd != "" && info.Address != "" && info.Address != cwd {
-			return core.SessionInfo{}, nil, "", fmt.Errorf("session %s dibuat di %s; jalankan chat dari direktori itu", info.ID, info.Address)
+			return core.SessionInfo{}, nil, "", fmt.Errorf("session %s was created in %s; run chat from that directory", info.ID, info.Address)
 		}
 		events, _ := rt.History(ctx, info.ID)
 		return info, restoreEvents(events), "", nil
@@ -142,12 +142,12 @@ func chatSession(ctx context.Context, rt *lana.Runtime, agentName string, cont b
 	}
 	notice := ""
 	if cont {
-		notice = "· tidak ada session sebelumnya; session baru dibuat"
+		notice = "· no previous session; created a new one"
 	}
 	return info, nil, notice, nil
 }
 
-// restoreEvents mengambil sebagian event terakhir untuk ditampilkan ulang.
+// restoreEvents takes the last few events to display again.
 func restoreEvents(events []core.SessionEvent) []core.SessionEvent {
 	const limit = 80
 	out := make([]core.SessionEvent, 0, limit)
@@ -163,7 +163,7 @@ func restoreEvents(events []core.SessionEvent) []core.SessionEvent {
 	return out
 }
 
-// chatBackend mengadaptasi *lana.Runtime ke port TUI.
+// chatBackend adapts *lana.Runtime to the TUI port.
 type chatBackend struct {
 	rt    *lana.Runtime
 	agent string

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-// Risk adalah kelas risiko tool.
+// Risk is the risk class of a tool.
 type Risk string
 
 const (
@@ -15,14 +15,14 @@ const (
 	RiskNetwork Risk = "network"
 )
 
-// ToolSpec adalah deskripsi tool untuk model.
+// ToolSpec is the tool description for the model.
 type ToolSpec struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"`
 }
 
-// ToolCtx adalah konteks satu pemanggilan tool.
+// ToolCtx is the context of one tool call.
 type ToolCtx struct {
 	SessionID string
 	TurnID    string
@@ -31,7 +31,7 @@ type ToolCtx struct {
 	Workspace string
 }
 
-// ToolStatus adalah status hasil tool.
+// ToolStatus is the status of a tool result.
 type ToolStatus string
 
 const (
@@ -40,13 +40,13 @@ const (
 	ToolStatusRejected ToolStatus = "rejected"
 )
 
-// ToolOutput adalah hasil tool.
+// ToolOutput is the result of a tool.
 type ToolOutput struct {
 	Status ToolStatus
 	Output string
 }
 
-// ToolCall adalah satu pemanggilan tool.
+// ToolCall is one tool call.
 type ToolCall struct {
 	SessionID string
 	TurnID    string
@@ -56,14 +56,14 @@ type ToolCall struct {
 	Risk      Risk
 }
 
-// Tool adalah tool yang bisa dipanggil model.
+// Tool is a tool the model can call.
 type Tool interface {
 	Spec() ToolSpec
 	Risk(input json.RawMessage) Risk
 	Call(ctx context.Context, tc ToolCtx, input json.RawMessage) (ToolOutput, error)
 }
 
-// ToolRegistry menyimpan tool berdasarkan nama.
+// ToolRegistry stores tools by name.
 type ToolRegistry interface {
 	Register(t Tool) error
 	Get(name string) (Tool, bool)

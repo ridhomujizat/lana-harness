@@ -5,21 +5,21 @@ import (
 	"sync"
 )
 
-// Next meneruskan ke listener berikutnya, atau ke handler default di ujung rantai.
+// Next forwards to the next listener, or to the default handler at the end of the chain.
 type Next[I, O any] func(ctx context.Context, in I) (O, error)
 
-// WaterfallListener menerima input dan next.
+// WaterfallListener receives the input and next.
 type WaterfallListener[I, O any] func(ctx context.Context, in I, next Next[I, O]) (O, error)
 
-// SerialListener menerima input dan mengembalikan satu hasil.
+// SerialListener receives the input and returns one result.
 type SerialListener[I, O any] func(ctx context.Context, in I) (O, error)
 
-// UseOption mengatur registrasi listener.
+// UseOption configures listener registration.
 type UseOption func(*useOptions)
 
 type useOptions struct{ prepend bool }
 
-// WithPrepend mendaftarkan listener sebelum listener biasa.
+// WithPrepend registers the listener before regular listeners.
 func WithPrepend() UseOption { return func(o *useOptions) { o.prepend = true } }
 
 type waterfallEntry[I, O any] struct {
@@ -27,7 +27,7 @@ type waterfallEntry[I, O any] struct {
 	listener WaterfallListener[I, O]
 }
 
-// Waterfall adalah middleware berurutan dengan handler default.
+// Waterfall is sequential middleware with a default handler.
 type Waterfall[I, O any] struct {
 	mu        sync.RWMutex
 	listeners []waterfallEntry[I, O]
@@ -37,14 +37,14 @@ type Waterfall[I, O any] struct {
 
 func NewWaterfall[I, O any]() *Waterfall[I, O] { return &Waterfall[I, O]{} }
 
-// SetDefault mengganti handler default.
+// SetDefault replaces the default handler.
 func (w *Waterfall[I, O]) SetDefault(h func(ctx context.Context, in I) (O, error)) {
 	w.mu.Lock()
 	w.def = h
 	w.mu.Unlock()
 }
 
-// Use mendaftarkan listener. Release menghapus listener itu.
+// Use registers a listener. Release removes that listener.
 func (w *Waterfall[I, O]) Use(l WaterfallListener[I, O], opts ...UseOption) (release func()) {
 	var o useOptions
 	for _, opt := range opts {
@@ -76,7 +76,7 @@ func (w *Waterfall[I, O]) Use(l WaterfallListener[I, O], opts ...UseOption) (rel
 	}
 }
 
-// Call menjalankan rantai. Hasil listener pertama yang tidak memanggil next dikembalikan.
+// Call runs the chain. The result of the first listener that does not call next is returned.
 func (w *Waterfall[I, O]) Call(ctx context.Context, in I) (O, error) {
 	w.mu.RLock()
 	listeners := w.listeners
@@ -105,7 +105,7 @@ type serialEntry[I, O any] struct {
 	listener SerialListener[I, O]
 }
 
-// Serial memanggil semua listener berurutan dan mengumpulkan hasilnya.
+// Serial calls all listeners in order and collects their results.
 type Serial[I, O any] struct {
 	mu        sync.RWMutex
 	listeners []serialEntry[I, O]
@@ -114,7 +114,7 @@ type Serial[I, O any] struct {
 
 func NewSerial[I, O any]() *Serial[I, O] { return &Serial[I, O]{} }
 
-// Use mendaftarkan listener. Release menghapus listener itu.
+// Use registers a listener. Release removes that listener.
 func (s *Serial[I, O]) Use(l SerialListener[I, O]) (release func()) {
 	s.mu.Lock()
 	s.nextID++
@@ -137,7 +137,7 @@ func (s *Serial[I, O]) Use(l SerialListener[I, O]) (release func()) {
 	}
 }
 
-// Call mengembalikan hasil per listener sesuai urutan. Error pertama menghentikan rantai.
+// Call returns the result of each listener in order. The first error stops the chain.
 func (s *Serial[I, O]) Call(ctx context.Context, in I) ([]O, error) {
 	s.mu.RLock()
 	listeners := s.listeners
@@ -153,16 +153,16 @@ func (s *Serial[I, O]) Call(ctx context.Context, in I) ([]O, error) {
 	return out, nil
 }
 
-// ObserveBuffer adalah jumlah event per subscriber.
+// ObserveBuffer is the number of events per subscriber.
 const ObserveBuffer = 1024
 
-// Received adalah hasil Recv. Lagged > 0 berarti Value belum terisi; panggil Recv lagi.
+// Received is the result of Recv. Lagged > 0 means Value is not set; call Recv again.
 type Received[T any] struct {
 	Lagged int
 	Value  T
 }
 
-// Observe mengirim event ke semua subscriber tanpa menunggu.
+// Observe sends events to all subscribers without waiting.
 type Observe[T any] struct {
 	mu     sync.Mutex
 	subs   map[*Subscription[T]]struct{}
@@ -173,7 +173,7 @@ func NewObserve[T any]() *Observe[T] {
 	return &Observe[T]{subs: make(map[*Subscription[T]]struct{})}
 }
 
-// Publish mengirim v ke setiap subscriber. Tidak pernah memblokir.
+// Publish sends v to every subscriber. It never blocks.
 func (o *Observe[T]) Publish(v T) {
 	o.mu.Lock()
 	subs := make([]*Subscription[T], 0, len(o.subs))
@@ -190,7 +190,7 @@ func (o *Observe[T]) Publish(v T) {
 	}
 }
 
-// Subscribe membuat subscriber dengan buffer ObserveBuffer.
+// Subscribe creates a subscriber with a buffer of ObserveBuffer events.
 func (o *Observe[T]) Subscribe() *Subscription[T] {
 	sub := &Subscription[T]{
 		observe:  o,
@@ -208,7 +208,7 @@ func (o *Observe[T]) Subscribe() *Subscription[T] {
 	return sub
 }
 
-// Close menutup semua subscriber.
+// Close closes all subscribers.
 func (o *Observe[T]) Close() {
 	o.mu.Lock()
 	if o.closed {
@@ -227,7 +227,7 @@ func (o *Observe[T]) Close() {
 	}
 }
 
-// Subscription adalah pembaca untuk satu subscriber.
+// Subscription is the reader for one subscriber.
 type Subscription[T any] struct {
 	mu       sync.Mutex
 	observe  *Observe[T]
@@ -262,7 +262,7 @@ func (s *Subscription[T]) push(v T) {
 	}
 }
 
-// Recv menunggu event berikutnya. Error ErrClosed setelah Close, atau ctx.Err().
+// Recv waits for the next event. It returns ErrClosed after Close, or ctx.Err().
 func (s *Subscription[T]) Recv(ctx context.Context) (Received[T], error) {
 	for {
 		s.mu.Lock()
@@ -295,14 +295,14 @@ func (s *Subscription[T]) Recv(ctx context.Context) (Received[T], error) {
 	}
 }
 
-// Len mengembalikan jumlah event yang belum dibaca.
+// Len returns the number of unread events.
 func (s *Subscription[T]) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.size
 }
 
-// Close melepas subscriber.
+// Close releases the subscriber.
 func (s *Subscription[T]) Close() { s.close() }
 
 func (s *Subscription[T]) close() {
@@ -321,7 +321,7 @@ func (s *Subscription[T]) close() {
 	}
 }
 
-// Hooks adalah kumpulan hook bertipe. Dibuat oleh Boot.
+// Hooks is the set of typed hooks. It is created by Boot.
 type Hooks struct {
 	AgentPreStep      *Waterfall[PreStepInput, PreStepDecision]
 	AgentRequest      *Waterfall[RequestControl, RequestControl]
@@ -334,7 +334,7 @@ type Hooks struct {
 	SessionEvent      *Observe[SessionEvent]
 }
 
-// NewHooks membuat kumpulan hook kosong siap dipakai.
+// NewHooks creates an empty set of hooks, ready to use.
 func NewHooks() *Hooks { return newHooks() }
 
 func newHooks() *Hooks {

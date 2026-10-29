@@ -13,18 +13,18 @@ import (
 func TestWebFetchHTML(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(`<html><head><style>body{color:red}</style><script>alert(1)</script></head><body><h1>Judul</h1><p>Isi</p></body></html>`))
+		_, _ = w.Write([]byte(`<html><head><style>body{color:red}</style><script>alert(1)</script></head><body><h1>Title</h1><p>Body</p></body></html>`))
 	}))
 	defer srv.Close()
 	out := callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+`"}`)
 	if out.Status != core.ToolStatusSuccess {
 		t.Fatalf("out=%+v", out)
 	}
-	if !strings.Contains(out.Output, "Judul") || !strings.Contains(out.Output, "Isi") {
+	if !strings.Contains(out.Output, "Title") || !strings.Contains(out.Output, "Body") {
 		t.Fatalf("markdown=%q", out.Output)
 	}
 	if strings.Contains(out.Output, "alert") || strings.Contains(out.Output, "color:red") {
-		t.Fatalf("script/style tidak dibuang: %q", out.Output)
+		t.Fatalf("script/style not removed: %q", out.Output)
 	}
 }
 
@@ -41,11 +41,11 @@ func TestWebFetchContentType(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain")
-		_, _ = w.Write([]byte("teks biasa"))
+		_, _ = w.Write([]byte("plain text"))
 	}))
 	defer srv.Close()
 	for _, tc := range []struct{ path, want string }{
-		{"/txt", "teks biasa"},
+		{"/txt", "plain text"},
 		{"/json", `{"a":1}`},
 	} {
 		out := callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+tc.path+`"}`)
@@ -54,7 +54,7 @@ func TestWebFetchContentType(t *testing.T) {
 		}
 	}
 	out := callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+`/img"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "tipe konten tidak didukung") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "unsupported content type") {
 		t.Fatalf("img out=%+v", out)
 	}
 }
@@ -77,7 +77,7 @@ func TestWebFetchLimits(t *testing.T) {
 		t.Fatalf("url non-http out=%+v hit=%v", out, hit)
 	}
 	out = callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+`/large"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "respons terlalu besar") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "response too large") {
 		t.Fatalf("large out=%+v", out)
 	}
 	out = callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+`/error"}`)
@@ -95,7 +95,7 @@ func TestWebFetchTimeout(t *testing.T) {
 	}))
 	defer srv.Close()
 	out := callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+`"}`)
-	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "timeout setelah 30 detik") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "timed out after 30 seconds") {
 		t.Fatalf("out=%+v", out)
 	}
 }

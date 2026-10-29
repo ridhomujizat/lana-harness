@@ -7,8 +7,8 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// ErrUnsupported dikembalikan untuk isi yang tidak bisa dipetakan ke OpenAI.
-var ErrUnsupported = fmt.Errorf("tidak didukung")
+// ErrUnsupported is returned for content that cannot be mapped to OpenAI.
+var ErrUnsupported = fmt.Errorf("unsupported")
 
 type wireRequest struct {
 	Model         string           `json:"model"`
@@ -100,7 +100,7 @@ func buildRequestBody(req core.ChatRequest) ([]byte, error) {
 			}
 			out.Messages = append(out.Messages, msg)
 		default:
-			return nil, fmt.Errorf("role tidak dikenal: %s", message.Role)
+			return nil, fmt.Errorf("unknown role: %s", message.Role)
 		}
 	}
 	for _, spec := range req.Tools {

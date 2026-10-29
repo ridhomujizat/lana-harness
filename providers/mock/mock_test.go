@@ -15,14 +15,14 @@ import (
 func TestMockScriptOrder(t *testing.T) {
 	script := Script{Responses: []Response{
 		{Events: []Event{
-			{Text: ptr("Halo")},
+			{Text: ptr("Hello")},
 			{DelayMS: ptr(5)},
-			{Text: ptr(" dunia")},
+			{Text: ptr(" world")},
 			{ToolUse: &ToolUse{ID: "call_1", Name: "read_file", Input: []byte(`{"path":"a.txt"}`)}},
 			{Usage: &core.Usage{InputTokens: 10, OutputTokens: 4}},
 			{Stop: ptr("tool_use")},
 		}},
-		{Error: &ScriptError{Class: "rate_limit", Message: "429 dari mock"}},
+		{Error: &ScriptError{Class: "rate_limit", Message: "429 from mock"}},
 	}}
 	llm := New(script)
 	var kinds []core.ChatEventKind
@@ -66,7 +66,7 @@ func TestMockScriptOrder(t *testing.T) {
 
 func TestMockScriptExhausted(t *testing.T) {
 	llm := New(Script{})
-	if _, err := llm.Stream(context.Background(), core.ChatRequest{}); err == nil || !strings.Contains(err.Error(), "skrip habis") {
+	if _, err := llm.Stream(context.Background(), core.ChatRequest{}); err == nil || !strings.Contains(err.Error(), "script exhausted") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -95,17 +95,17 @@ func TestMockDelayHonorsContext(t *testing.T) {
 			t.Fatalf("error=%v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("delay tidak berhenti saat ctx batal")
+		t.Fatal("delay did not stop when ctx was cancelled")
 	}
 }
 
 func TestLoadScriptRejectsUnknownKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.json")
-	if err := write(path, `{"responses":[{"events":[{"tekst":"x"}]}]}`); err != nil {
+	if err := write(path, `{"responses":[{"events":[{"txt":"x"}]}]}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadScript(path); err == nil {
-		t.Fatal("key tidak dikenal diterima")
+		t.Fatal("unknown key accepted")
 	}
 }
 

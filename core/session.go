@@ -6,7 +6,7 @@ import (
 	"iter"
 )
 
-// SessionInfo adalah proyeksi session.
+// SessionInfo is a projection of a session.
 type SessionInfo struct {
 	ID              string
 	Agent           string
@@ -23,7 +23,7 @@ type SessionInfo struct {
 	UpdatedAt       int64
 }
 
-// NewSession adalah input Create.
+// NewSession is the input to Create.
 type NewSession struct {
 	Agent           string
 	Channel         string
@@ -34,14 +34,14 @@ type NewSession struct {
 	InheritedSeq    int64
 }
 
-// SessionFilter membatasi List.
+// SessionFilter limits List.
 type SessionFilter struct {
 	Channel string
 	Address string
 	Limit   int
 }
 
-// SessionStore adalah event log append-only.
+// SessionStore is the append-only event log.
 type SessionStore interface {
 	Create(ctx context.Context, s NewSession) (SessionInfo, error)
 	Open(ctx context.Context, id string) (SessionInfo, error)
@@ -56,7 +56,7 @@ type SessionStore interface {
 	TryLease(ctx context.Context, id string) (release func() error, err error)
 }
 
-// LiveFrame adalah frame sementara (streaming), tidak ditulis ke log.
+// LiveFrame is a transient (streamed) frame that is not written to the log.
 type LiveFrame struct {
 	SessionID string
 	TurnID    string
@@ -69,7 +69,7 @@ type LiveFrame struct {
 	Output    string
 }
 
-// AgentRegistry mengatur agent hidup dan inbox-nya.
+// AgentRegistry manages live agents and their inboxes.
 type AgentRegistry interface {
 	Send(ctx context.Context, sessionID string, text string) error
 	Cancel(ctx context.Context, sessionID string) error

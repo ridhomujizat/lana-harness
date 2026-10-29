@@ -1,4 +1,4 @@
-// Package memstore menyediakan core.SessionStore di memori.
+// Package memstore provides an in-memory core.SessionStore.
 package memstore
 
 import (
@@ -17,8 +17,8 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/id"
 )
 
-// ErrNotSupported dikembalikan operasi yang tidak didukung memstore.
-var ErrNotSupported = errors.New("tidak didukung memstore")
+// ErrNotSupported is returned for operations memstore does not support.
+var ErrNotSupported = errors.New("not supported by memstore")
 
 type session struct {
 	info   core.SessionInfo
@@ -26,20 +26,20 @@ type session struct {
 	seq    int64
 }
 
-// Store adalah SessionStore di memori.
+// Store is an in-memory SessionStore.
 type Store struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 }
 
-// New membuat Store kosong.
+// New creates an empty Store.
 func New() *Store { return &Store{sessions: map[string]*session{}} }
 
 func nowMS() int64 { return time.Now().UnixMilli() }
 
 func resolveWorkspace(workspace string) (string, error) {
 	if strings.TrimSpace(workspace) == "" {
-		return "", errors.New("workspace wajib diisi")
+		return "", errors.New("workspace is required")
 	}
 	abs, err := filepath.Abs(workspace)
 	if err != nil {
@@ -51,7 +51,7 @@ func resolveWorkspace(workspace string) (string, error) {
 	return abs, nil
 }
 
-// Create membuat session baru dan menulis session/created.
+// Create creates a new session and writes session/created.
 func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return core.SessionInfo{}, err
@@ -94,12 +94,12 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 	return s.sessions[info.ID].info, nil
 }
 
-// Open membuka session (tanpa repair berarti sama dengan Info).
+// Open opens a session (without repair it is the same as Info).
 func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 	return s.Info(ctx, sessionID)
 }
 
-// Info membaca proyeksi session tanpa repair.
+// Info reads the session projection without repair.
 func (s *Store) Info(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return core.SessionInfo{}, err
@@ -113,7 +113,7 @@ func (s *Store) Info(ctx context.Context, sessionID string) (core.SessionInfo, e
 	return sess.info, nil
 }
 
-// Append menulis draft dalam satu transaksi.
+// Append writes drafts in one transaction.
 func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.EventDraft) ([]core.SessionEvent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (s *Store) appendLocked(sess *session, drafts []core.EventDraft) ([]core.Se
 	return out, nil
 }
 
-// Events mengembalikan event dengan seq >= fromSeq.
+// Events returns events with seq >= fromSeq.
 func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) iter.Seq2[core.SessionEvent, error] {
 	return func(yield func(core.SessionEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
@@ -194,7 +194,7 @@ func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) ite
 	}
 }
 
-// ChainEvents mengembalikan rantai induk dipotong di inherited_seq lalu event session.
+// ChainEvents returns the parent chain truncated at inherited_seq, followed by the session's events.
 func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	info, err := s.Info(ctx, sessionID)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.Sessi
 	return chain, nil
 }
 
-// DeriveMessages memakai core.DeriveMessages atas ChainEvents.
+// DeriveMessages applies core.DeriveMessages to ChainEvents.
 func (s *Store) DeriveMessages(ctx context.Context, sessionID string) ([]core.Message, error) {
 	events, err := s.ChainEvents(ctx, sessionID)
 	if err != nil {
@@ -232,7 +232,7 @@ func (s *Store) DeriveMessages(ctx context.Context, sessionID string) ([]core.Me
 	return core.DeriveMessages(events)
 }
 
-// List mengembalikan session terbaru lebih dulu.
+// List returns the most recent sessions first.
 func (s *Store) List(ctx context.Context, filter core.SessionFilter) ([]core.SessionInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -262,7 +262,7 @@ func (s *Store) List(ctx context.Context, filter core.SessionFilter) ([]core.Ses
 	return out, nil
 }
 
-// FindPrefix mencari session tanpa peka huruf besar-kecil.
+// FindPrefix finds sessions by case-insensitive prefix.
 func (s *Store) FindPrefix(ctx context.Context, prefix string) ([]core.SessionInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -280,12 +280,12 @@ func (s *Store) FindPrefix(ctx context.Context, prefix string) ([]core.SessionIn
 	return out, nil
 }
 
-// Fork tidak didukung memstore.
+// Fork is not supported by memstore.
 func (s *Store) Fork(ctx context.Context, parentID string, atSeq int64) (core.SessionInfo, error) {
 	return core.SessionInfo{}, ErrNotSupported
 }
 
-// TryLease selalu berhasil di proses yang sama.
+// TryLease always succeeds within the same process.
 func (s *Store) TryLease(ctx context.Context, sessionID string) (func() error, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -298,7 +298,7 @@ func (s *Store) TryLease(ctx context.Context, sessionID string) (func() error, e
 	return func() error { return nil }, nil
 }
 
-// Close tidak melakukan apa pun; disediakan untuk simetri.
+// Close does nothing; it is provided for symmetry.
 func (s *Store) Close() error { return nil }
 
 var _ core.SessionStore = (*Store)(nil)

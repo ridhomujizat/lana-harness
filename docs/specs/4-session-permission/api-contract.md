@@ -2,34 +2,34 @@
 
 - **Issue**: [`#4`](https://github.com/ridhomujizat/lana-harness/issues/4)
 - **Requirements**: [requirements.md](requirements.md)
-- **Revisi requirements**: 2 (REQ-APPR-007 dan AC-APPR-017 ditambah)
-- **Status requirements**: Approved
-- **Revisi contract**: 2 (rekonsiliasi, lihat `CQ-011` sampai `CQ-022`)
-- **Berlaku untuk**: config (`[agents.<nama>]`, `[agents.<nama>.rules]`, `[[modules]]` baris `store`), event log (`session_events`, kind dan payload), dan API Go package `store`, `core`, permission, approval, dan compaction (ADR 0014)
+- **Requirements revision**: 2 (REQ-APPR-007 and AC-APPR-017 added)
+- **Requirements status**: Approved
+- **Contract revision**: 2 (reconciliation, see `CQ-011` to `CQ-022`)
+- **Applies to**: config (`[agents.<name>]`, `[agents.<name>.rules]`, `[[modules]]` row `store`), event log (`session_events`, kinds and payloads), and the Go API of packages `store`, `core`, permission, approval, and compaction (ADR 0014)
 - **Status**: Approved
 
-File ini menetapkan bentuk persis penyimpanan, event, config, dan API Go. Perilaku dimiliki oleh
-`requirements.md`. Operasi di sini tidak punya perintah CLI. Perintah dimiliki spec #1.
+This file defines the exact shape of storage, events, config, and the Go API. Behavior is owned by
+`requirements.md`. Operations here have no CLI commands. Commands are owned by spec #1.
 
-## Konvensi bersama
+## Shared Conventions
 
-| Hal | Keputusan |
+| Item | Decision |
 |---|---|
-| Exit code CLI | Tidak berlaku. Spec #1 memetakan error ke exit code |
-| Output stdout dan stderr | Tidak berlaku. Tidak ada output langsung |
-| Format config | `$LANA_HOME/config.toml` dan profile. Lihat [Config](#config). Loader dan validasi dimiliki spec #2 |
-| Autentikasi | Tidak berlaku. Akses lewat proses user OS. File `lana.db` mode `0600` (`REQ-STORE-001`) |
-| Versi schema | `PRAGMA user_version`, nomor migrasi berurutan mulai 1. Migrasi hanya menambah, tidak menulis ulang data |
-| Versi payload | Field `v` integer di setiap payload event, mulai 1. Versi lama di-decode ke versi sekarang di memori (`REQ-STORE-013`) |
-| ID session | ULID 26 karakter, huruf besar (konvensi spec #1) |
-| Waktu | Milidetik Unix, integer. Kolom `created_at`, `updated_at`, `acquired_at` |
-| Serialisasi | JSON UTF-8. Field `snake_case`. Payload event berupa objek JSON |
-| Kompatibilitas seluruh file | Semua operasi baru. Tidak ada breaking change. Tidak ada deprecation |
+| CLI exit code | Not applicable. Spec #1 maps errors to exit codes |
+| stdout and stderr output | Not applicable. No direct output |
+| Config format | `$LANA_HOME/config.toml` and profiles. See [Config](#config). Loader and validation are owned by spec #2 |
+| Authentication | Not applicable. Access is through the OS user's process. File `lana.db` has mode `0600` (`REQ-STORE-001`) |
+| Schema version | `PRAGMA user_version`, sequential migration numbers starting from 1. Migrations only add, they do not rewrite data |
+| Payload version | Integer field `v` in every event payload, starting from 1. Older versions are decoded to the current version in memory (`REQ-STORE-013`) |
+| Session ID | 26-character ULID, uppercase (spec #1 convention) |
+| Time | Unix milliseconds, integer. Columns `created_at`, `updated_at`, `acquired_at` |
+| Serialization | UTF-8 JSON. `snake_case` fields. Event payloads are JSON objects |
+| Compatibility of the whole file | All operations are new. No breaking change. No deprecation |
 
-## Skema SQL
+## SQL Schema
 
-Migrasi dijalankan berurutan. Setiap file dijalankan dalam satu transaksi, lalu `user_version` diatur
-ke nomor migrasi. Berkas `store/migrations/0001_session_log.sql` dan `0002_session_leases.sql`.
+Migrations run in order. Each file runs in one transaction, then `user_version` is set
+to the migration number. Files `store/migrations/0001_session_log.sql` and `0002_session_leases.sql`.
 
 `store/migrations/0001_session_log.sql`:
 
@@ -96,57 +96,57 @@ CREATE TABLE session_leases (
 );
 ```
 
-Aturan pemakaian DDL:
+DDL usage rules:
 
-- `session_prune_allow` hanya diisi di dalam transaksi `Prune`, lalu dihapus di transaksi yang sama (`API-STORE-011`).
-- Kolom `sessions.parent_session_id` memakai `ON DELETE RESTRICT`. Prune session yang masih punya child gagal dengan `ErrSessionHasChildren`.
-- Tidak ada tabel `messages`. Tidak ada kolom `embedding`, `memories`, atau `cron_*` di spec ini (M5).
+- `session_prune_allow` is filled only inside the `Prune` transaction, then deleted in the same transaction (`API-STORE-011`).
+- Column `sessions.parent_session_id` uses `ON DELETE RESTRICT`. Pruning a session that still has children fails with `ErrSessionHasChildren`.
+- There is no `messages` table. There are no `embedding`, `memories`, or `cron_*` columns in this spec (M5).
 
-## Event kind dan payload
+## Event Kinds and Payloads
 
-Field dan tipe setiap payload dimiliki `API-CORE-008` (spec #2, `CQ-029`). Spec #4 hanya menulis
-kind dan field di tabel ini. Semua payload berisi `"v": 1`.
+The fields and type of each payload are owned by `API-CORE-008` (spec #2, `CQ-029`). Spec #4 only writes
+kinds and fields in this table. All payloads contain `"v": 1`.
 
-| Kind | Field payload (v = 1, lihat `API-CORE-008`) | Ditulis oleh | Masuk riwayat model |
+| Kind | Payload fields (v = 1, see `API-CORE-008`) | Written by | Enters model history |
 |---|---|---|---|
-| `session/created` | `agent`, `channel`, `address`, `workspace`, `parent_session_id` (opsional), `parent_call_id` (opsional), `inherited_seq` (opsional) | `Create`, `Fork` | Tidak |
-| `turn/start` | kosong, `turn_id` di kolom | Agent loop | Tidak |
-| `turn/end` | `reason`: `end_turn`, `max_steps`, `cancelled`, `interrupted`, `error`. `error` (`PayloadError`, opsional) | Agent loop, resume repair | Tidak |
-| `step/start` | `step` (integer), `provider`, `model` | Agent loop | Tidak |
-| `step/end` | `step`, `provider`, `model`, `usage` `{input_tokens, output_tokens}` | Agent loop | Tidak (dipakai ambang compaction) |
-| `system/message` | `text` (string) | Agent loop | Tidak. Pesan terakhir dipakai sebagai `ChatRequest.System` (`Q-028`) |
-| `user/message` | `content` (`[]core.ContentBlock`) | Agent loop | Ya |
-| `assistant/message` | `content` (`[]core.ContentBlock` berisi `text` dan `tool_use`), `stop_reason` | Agent loop | Ya |
-| `assistant/attempt` | `provider`, `model`, `attempt`, `error` (`PayloadError`) | Agent loop | Tidak |
-| `tool/call` | `call_id`, `name`, `input` | Agent loop | Tidak |
-| `tool/result` | `call_id`, `status` (`success`, `error`, `rejected`), `output` | Agent loop, resume repair | Ya |
-| `approval/asked` | `request_id`, `call_id`, `tool`, `risk`, `label` (opsional). Tanpa argumen | Approval service | Tidak |
-| `approval/decided` | `request_id`, `call_id`, `outcome`, `reason` (opsional) | Approval service, resume repair | Tidak |
-| `approval/policy` | `policy` (`trust`, `ask`, `never`) | `SetPolicy` | Tidak |
-| `model/selection` | `provider`, `model`, `agent` (opsional, hanya dari `SetAgent`) | `SetModel`, `SetAgent` (spec #3) | Tidak |
-| `compaction/summary` | `summary`, `upto_seq`, `tokens_before`, `tokens_after`, `model` | Compaction | Ya (sebagai pesan `user`, `Q-013`) |
+| `session/created` | `agent`, `channel`, `address`, `workspace`, `parent_session_id` (optional), `parent_call_id` (optional), `inherited_seq` (optional) | `Create`, `Fork` | No |
+| `turn/start` | empty, `turn_id` in column | Agent loop | No |
+| `turn/end` | `reason`: `end_turn`, `max_steps`, `cancelled`, `interrupted`, `error`. `error` (`PayloadError`, optional) | Agent loop, resume repair | No |
+| `step/start` | `step` (integer), `provider`, `model` | Agent loop | No |
+| `step/end` | `step`, `provider`, `model`, `usage` `{input_tokens, output_tokens}` | Agent loop | No (used for the compaction threshold) |
+| `system/message` | `text` (string) | Agent loop | No. Its last message is used as `ChatRequest.System` (`Q-028`) |
+| `user/message` | `content` (`[]core.ContentBlock`) | Agent loop | Yes |
+| `assistant/message` | `content` (`[]core.ContentBlock` containing `text` and `tool_use`), `stop_reason` | Agent loop | Yes |
+| `assistant/attempt` | `provider`, `model`, `attempt`, `error` (`PayloadError`) | Agent loop | No |
+| `tool/call` | `call_id`, `name`, `input` | Agent loop | No |
+| `tool/result` | `call_id`, `status` (`success`, `error`, `rejected`), `output` | Agent loop, resume repair | Yes |
+| `approval/asked` | `request_id`, `call_id`, `tool`, `risk`, `label` (optional). No arguments | Approval service | No |
+| `approval/decided` | `request_id`, `call_id`, `outcome`, `reason` (optional) | Approval service, resume repair | No |
+| `approval/policy` | `policy` (`trust`, `ask`, `never`) | `SetPolicy` | No |
+| `model/selection` | `provider`, `model`, `agent` (optional, only from `SetAgent`) | `SetModel`, `SetAgent` (spec #3) | No |
+| `compaction/summary` | `summary`, `upto_seq`, `tokens_before`, `tokens_after`, `model` | Compaction | Yes (as a `user` message, `Q-013`) |
 
-Aturan derive (detail di design, `API-STORE-010`):
+Derive rules (details in design, `API-STORE-010`):
 
-- `tool/call` tidak masuk riwayat. Blok `tool_use` sudah ada di `assistant/message`.
-- `system/message` tidak masuk riwayat `DeriveMessages`. Pesan terakhirnya dipakai sebagai `ChatRequest.System` (`Q-028`).
-- Grant `allowed_session` tidak punya kind sendiri. Grant adalah `approval/decided` dengan `outcome = allowed_session`. Pola grant dihitung dari `tool/call` yang dirujuk `call_id`.
+- `tool/call` does not enter history. The `tool_use` block already exists in `assistant/message`.
+- `system/message` does not enter `DeriveMessages` history. Its last message is used as `ChatRequest.System` (`Q-028`).
+- The `allowed_session` grant has no kind of its own. A grant is an `approval/decided` with `outcome = allowed_session`. The grant pattern is computed from the `tool/call` referenced by `call_id`.
 
 ## Config
 
-Baca oleh loader spec #2. Validasi di sini ikut aturan `REQ-CONF-003` spec #2.
+Read by the spec #2 loader. Validation here follows rule `REQ-CONF-003` of spec #2.
 
-| Key | Tipe | Default | Validasi |
+| Key | Type | Default | Validation |
 |---|---|---|---|
-| `[[modules]]` baris `id = "store"`, `module = "sqlite_store"`, `config.path` | string | `lana.db` | Tidak kosong. Relatif ke `LANA_HOME` jika tidak absolut |
-| `[agents.<nama>] permission` | enum | `ask` | `trust`, `ask`, atau `never`. Nilai lain adalah error validasi dengan saran terdekat |
-| `[agents.<nama>.rules] allow` | array string | kosong | Setiap item harus lolos `ParsePattern` (`API-PERM-002`) |
-| `[agents.<nama>.rules] deny` | array string | kosong | Sama seperti `allow` |
-| `[agents.<nama>] context_window` | integer | `128000` | Lebih dari 0 |
+| `[[modules]]` row `id = "store"`, `module = "sqlite_store"`, `config.path` | string | `lana.db` | Not empty. Relative to `LANA_HOME` if not absolute |
+| `[agents.<name>] permission` | enum | `ask` | `trust`, `ask`, or `never`. Any other value is a validation error with the closest suggestion |
+| `[agents.<name>.rules] allow` | string array | empty | Each item must pass `ParsePattern` (`API-PERM-002`) |
+| `[agents.<name>.rules] deny` | string array | empty | Same as `allow` |
+| `[agents.<name>] context_window` | integer | `128000` | Greater than 0 |
 
-Validasi pola `rules` memakai `internal/pattern.ParsePattern` (`API-PERM-001`, `CQ-017`). Key `permission` dan `context_window` tercatat di daftar key spec #2 (`API-CONF-004`).
+Validation of `rules` patterns uses `internal/pattern.ParsePattern` (`API-PERM-001`, `CQ-017`). Keys `permission` and `context_window` are listed in the spec #2 key list (`API-CONF-004`).
 
-Contoh (tidak menggantikan contoh di ADR 0004):
+Example (does not replace the example in ADR 0004):
 
 ```toml
 [agents.coder]
@@ -158,46 +158,46 @@ allow = ["read_file", "bash(git status*)"]
 deny  = ["write_file(~/.ssh/**)"]
 ```
 
-Modul baru di profile. Keempat modul ada di base (`API-CONF-009` spec #2, `CQ-031`, `Q-031`):
+New modules in the profile. All four modules are in base (`API-CONF-009` of spec #2, `CQ-031`, `Q-031`):
 
-| Modul (`module`) | Service yang dipasang | Requires | Hook |
+| Module (`module`) | Installed service | Requires | Hook |
 |---|---|---|---|
-| `sqlite_store` | `sessions` | — | `session.event` (observe, sebagai pengirim) |
+| `sqlite_store` | `sessions` | — | `session.event` (observe, as sender) |
 | `approval` | `approval` | `sessions` | `approval.request` (default: `unavailable`) |
-| `permission` | — | `sessions`, `approval` | listener `tools.pre_execute` |
-| `compaction` | `compaction` | `sessions`, `llm` | listener `agent.pre_step`, `llm.stream` |
+| `permission` | — | `sessions`, `approval` | listener on `tools.pre_execute` |
+| `compaction` | `compaction` | `sessions`, `llm` | listener on `agent.pre_step`, `llm.stream` |
 
-## Signature Go
+## Go Signatures
 
-Blok ini menetapkan bentuk API. Nama package mengikuti ADR 0013.
+This block defines the API shape. Package names follow ADR 0013.
 
-### Tipe core (dimiliki spec #2)
+### Core types (owned by spec #2)
 
-Tipe yang dipakai spec ini didefinisikan di spec #2. Tabel ini mencatat revisi dari revisi 1:
+The types used by this spec are defined in spec #2. This table records the revisions from revision 1:
 
-| Tipe | Ada di | Revisi di spec ini |
+| Type | Defined in | Revision in this spec |
 |---|---|---|
-| `core.NewSession` | `API-CORE-009` | Field `Workspace` dan `ParentCallID` masuk (`CQ-011`) |
-| `core.EventDraft` | `API-CORE-008` | Menggantikan `NewEvent` (`CQ-024` spec #2) |
-| `core.SessionInfo` | `API-CORE-009` | Gabungan field spec #2 dan spec #4 |
-| `core.SessionFilter` | `API-CORE-009` | `Limit` 0 = tanpa batas (`CQ-022` spec #2) |
-| `core.ApprovalRequest` | `API-CORE-011` | `ToolName`, `Label`. Tanpa `Input` dan `Summary` (`CQ-021` spec #2) |
-| `core.ToolDecision` | `API-CORE-015` | `Allowed`, `Outcome`, `Status` (`ToolStatus`), `Reason` (`CQ-020` spec #2) |
-| `core.ToolsPreExecuteInput` | `API-CORE-015` | Input listener permission (`CQ-017` spec #2) |
-| `core.CompactionResult`, `core.Compactor` | `API-CORE-015` | Tanpa perubahan |
-| `core.ProviderError`, `core.ErrContextTooLong` | `API-CORE-015`, `API-CORE-014` | Tanpa perubahan (`CQ-026` spec #2) |
-| `core.LeaseHeldError` | `API-CORE-014` | Menggantikan `ErrLeaseHeld` |
-| `core.ErrPrefixTooShort`, `core.ErrAmbiguousPrefix`, `core.ResolvePrefix` | `API-CORE-014`, `API-CORE-015` | Pindah dari package `store` (`CQ-023` spec #2) |
-| `core.Lease` | Dihapus | `TryLease` mengembalikan `release func() error` (`CQ-023` spec #2) |
+| `core.NewSession` | `API-CORE-009` | Fields `Workspace` and `ParentCallID` added (`CQ-011`) |
+| `core.EventDraft` | `API-CORE-008` | Replaces `NewEvent` (`CQ-024` of spec #2) |
+| `core.SessionInfo` | `API-CORE-009` | Combined fields of spec #2 and spec #4 |
+| `core.SessionFilter` | `API-CORE-009` | `Limit` 0 = no limit (`CQ-022` of spec #2) |
+| `core.ApprovalRequest` | `API-CORE-011` | `ToolName`, `Label`. No `Input` and `Summary` (`CQ-021` of spec #2) |
+| `core.ToolDecision` | `API-CORE-015` | `Allowed`, `Outcome`, `Status` (`ToolStatus`), `Reason` (`CQ-020` of spec #2) |
+| `core.ToolsPreExecuteInput` | `API-CORE-015` | Input for the permission listener (`CQ-017` of spec #2) |
+| `core.CompactionResult`, `core.Compactor` | `API-CORE-015` | No change |
+| `core.ProviderError`, `core.ErrContextTooLong` | `API-CORE-015`, `API-CORE-014` | No change (`CQ-026` of spec #2) |
+| `core.LeaseHeldError` | `API-CORE-014` | Replaces `ErrLeaseHeld` |
+| `core.ErrPrefixTooShort`, `core.ErrAmbiguousPrefix`, `core.ResolvePrefix` | `API-CORE-014`, `API-CORE-015` | Moved from package `store` (`CQ-023` of spec #2) |
+| `core.Lease` | Removed | `TryLease` returns `release func() error` (`CQ-023` of spec #2) |
 
-Interface `core.SessionStore` dan `core.ApprovalService` ada di `API-CORE-009` dan `API-CORE-011`.
-Method yang dipakai spec ini:
+The interfaces `core.SessionStore` and `core.ApprovalService` are in `API-CORE-009` and `API-CORE-011`.
+Methods used by this spec:
 
 ```go
-// core.SessionStore (API-CORE-009). Method Info, ChainEvents, DeriveMessages ditambah spec ini (CQ-022 spec #2).
+// core.SessionStore (API-CORE-009). Methods Info, ChainEvents, DeriveMessages added by this spec (CQ-022 of spec #2).
 Create(ctx context.Context, s NewSession) (SessionInfo, error)
-Open(ctx context.Context, id string) (SessionInfo, error) // dengan resume repair, butuh lease
-Info(ctx context.Context, id string) (SessionInfo, error) // baca saja, tanpa repair
+Open(ctx context.Context, id string) (SessionInfo, error) // with resume repair, requires lease
+Info(ctx context.Context, id string) (SessionInfo, error) // read only, without repair
 Append(ctx context.Context, id string, drafts []EventDraft) ([]SessionEvent, error)
 Events(ctx context.Context, id string, fromSeq int64) iter.Seq2[SessionEvent, error]
 ChainEvents(ctx context.Context, id string) ([]SessionEvent, error)
@@ -208,1015 +208,1015 @@ Fork(ctx context.Context, parentID string, atSeq int64) (SessionInfo, error)
 TryLease(ctx context.Context, id string) (release func() error, err error)
 ```
 
-Catatan untuk `Fork`: child mewarisi `Agent`, `Channel`, `Address`, dan `Workspace` dari induk. `ParentSessionID` dan `InheritedSeq` diisi store. Child dengan agent lain (subagent, M4) dibuat lewat `Create` dengan `ParentSessionID` dan `ParentCallID` (`CQ-011`).
+Note for `Fork`: the child inherits `Agent`, `Channel`, `Address`, and `Workspace` from the parent. `ParentSessionID` and `InheritedSeq` are filled by the store. A child with a different agent (subagent, M4) is created through `Create` with `ParentSessionID` and `ParentCallID` (`CQ-011`).
 
-### Package `store` (di luar interface core)
+### Package `store` (outside the core interface)
 
 ```go
-func Open(ctx context.Context, path string) (*Store, error) // path absolut
+func Open(ctx context.Context, path string) (*Store, error) // absolute path
 func (s *Store) Close() error
 func (s *Store) Prune(ctx context.Context, sessionID string) error
 func (s *Store) RebuildProjections(ctx context.Context) error
 func NormalizePayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 
 var (
-	ErrSessionNotFound       = errors.New("session tidak ditemukan")
-	ErrForkNotAtTurnBoundary = errors.New("fork hanya boleh di turn/end")
-	ErrTurnActive            = errors.New("masih ada turn yang berjalan")
-	ErrLeaseNotHeld          = errors.New("session tidak dipegang proses ini")
-	ErrSessionHasChildren    = errors.New("session masih punya child")
-	ErrSchemaTooNew          = errors.New("schema database lebih baru dari binary")
-	ErrStoreClosed           = errors.New("store sudah ditutup")
-	ErrSessionChanged        = errors.New("session berubah saat compaction")
-	ErrNothingToCompact      // sentinel store. Pesan ditentukan implementasi
-	ErrInvalidPolicy         // sentinel store. Pesan ditentukan implementasi
+	ErrSessionNotFound       = errors.New("session not found")
+	ErrForkNotAtTurnBoundary = errors.New("fork is only allowed at turn/end")
+	ErrTurnActive            = errors.New("a turn is still running")
+	ErrLeaseNotHeld          = errors.New("session is not held by this process")
+	ErrSessionHasChildren    = errors.New("session still has children")
+	ErrSchemaTooNew          = errors.New("database schema is newer than the binary")
+	ErrStoreClosed           = errors.New("store is closed")
+	ErrSessionChanged        = errors.New("session changed during compaction")
+	ErrNothingToCompact      // store sentinel. Message defined by implementation
+	ErrInvalidPolicy         // store sentinel. Message defined by implementation
 )
 
 // ErrUnknownPayloadVersion = core.ErrUnknownPayloadVersion (API-CORE-014).
-// ErrPrefixTooShort, ErrAmbiguousPrefix, dan LeaseHeldError ada di core (API-CORE-014).
+// ErrPrefixTooShort, ErrAmbiguousPrefix, and LeaseHeldError are in core (API-CORE-014).
 ```
 
-### Pola aturan (`internal/pattern`, dipakai `config` dan `tools/permission`)
+### Rule patterns (`internal/pattern`, used by `config` and `tools/permission`)
 
 ```go
 type Pattern struct {
 	Raw  string
 	Tool string
-	Arg  *string // nil jika pola tanpa argumen
+	Arg  *string // nil if the pattern has no argument
 }
 
-func ParsePattern(s string) (Pattern, error) // error memuat posisi dan alasan
+func ParsePattern(s string) (Pattern, error) // error includes position and reason
 func (p Pattern) Match(tool string, arg Argument) bool
 
 type ArgKind int // ArgCommand, ArgPath, ArgURL, ArgAgent, ArgRaw
 type Argument struct {
 	Kind  ArgKind
-	Value string // path sudah diselesaikan ke absolut dan dibersihkan
-	Alt   string // path sebenarnya setelah EvalSymlinks, kosong jika bukan path
+	Value string // path already resolved to absolute and cleaned
+	Alt   string // actual path after EvalSymlinks, empty if not a path
 }
 ```
 
-Pencocokan path (`REQ-PERM-001`): rule `deny` cocok jika `Value` atau `Alt` cocok. Rule `allow`
-cocok jika `Value` dan `Alt` keduanya cocok.
+Path matching (`REQ-PERM-001`): a `deny` rule matches if `Value` or `Alt` matches. An `allow` rule
+matches only if both `Value` and `Alt` match.
 
 ### Package permission (`tools/permission`)
 
-Listener `tools.pre_execute` dipasang sebagai `core.WaterfallListener[core.ToolsPreExecuteInput, core.ToolDecision]`.
-Input dimiliki spec #2 (`API-CORE-015`). Field yang dipakai: `AgentName`, dan dari `Call`:
-`SessionID`, `TurnID`, `CallID`, `Name`, `Input` (`json.RawMessage`), `Risk`. `Label` dihitung dari
-`AgentName` jika session punya induk (`ParentSessionID`), kosong jika tidak.
+The `tools.pre_execute` listener is installed as `core.WaterfallListener[core.ToolsPreExecuteInput, core.ToolDecision]`.
+Input is owned by spec #2 (`API-CORE-015`). Fields used: `AgentName`, and from `Call`:
+`SessionID`, `TurnID`, `CallID`, `Name`, `Input` (`json.RawMessage`), `Risk`. `Label` is computed from
+`AgentName` if the session has a parent (`ParentSessionID`), empty otherwise.
 
-### Package approval dan compaction
+### Packages approval and compaction
 
 ```go
 // package tools/permission (approval service)
-// Implementasi core.ApprovalService. Clock dan timeout dapat diganti untuk test.
-// Timeout default 10 menit.
+// Implementation of core.ApprovalService. Clock and timeout can be replaced for tests.
+// Default timeout 10 minutes.
 
 // package agent/compaction
 type Service struct{ /* ... */ }
 
-// Implementasi core.Compactor (API-CORE-015). Dipasang dengan key core.ServiceCompaction.
+// Implementation of core.Compactor (API-CORE-015). Installed with key core.ServiceCompaction.
 func (s *Service) CompactNow(ctx context.Context, sessionID string) (core.CompactionResult, error)
 ```
 
-### Penjawab library (package `lana`)
+### Library answerer (package `lana`)
 
 ```go
-// Lihat API-APPR-005.
+// See API-APPR-005.
 func ApproveWith(fn func(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome) lana.Option
 ```
 
-## Index operasi
+## Operation Index
 
-| ID operasi | Jenis | Nama | Requirements | Acceptance criteria |
+| Operation ID | Type | Name | Requirements | Acceptance criteria |
 |---|---|---|---|---|
-| `API-STORE-001` | Go | Buka store, migrasi, DDL, trigger | `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016` | `AC-STORE-001` sampai `AC-STORE-004`, `AC-STORE-007`, `AC-STORE-008`, `AC-STORE-038` |
+| `API-STORE-001` | Go | Open store, migrations, DDL, triggers | `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016` | `AC-STORE-001` to `AC-STORE-004`, `AC-STORE-007`, `AC-STORE-008`, `AC-STORE-038` |
 | `API-STORE-002` | Go | `Create` | `REQ-STORE-006` | `AC-STORE-012` |
-| `API-STORE-003` | Go | `Open` dengan resume repair, dan `Info` (baca saja) | `REQ-STORE-006` | `AC-STORE-013` sampai `AC-STORE-016` |
-| `API-STORE-004` | Go | `Append` | `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015` | `AC-STORE-005` sampai `AC-STORE-006`, `AC-STORE-009` sampai `AC-STORE-011`, `AC-STORE-036`, `AC-STORE-037` |
+| `API-STORE-003` | Go | `Open` with resume repair, and `Info` (read only) | `REQ-STORE-006` | `AC-STORE-013` to `AC-STORE-016` |
+| `API-STORE-004` | Go | `Append` | `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015` | `AC-STORE-005` to `AC-STORE-006`, `AC-STORE-009` to `AC-STORE-011`, `AC-STORE-036`, `AC-STORE-037` |
 | `API-STORE-005` | Go | `Events` | `REQ-STORE-008` | `AC-STORE-019` |
 | `API-STORE-006` | Go | `List` | `REQ-STORE-008` | `AC-STORE-020` |
-| `API-STORE-007` | Go | `FindPrefix` dan `core.ResolvePrefix` | `REQ-STORE-009` | `AC-STORE-021` sampai `AC-STORE-023` |
+| `API-STORE-007` | Go | `FindPrefix` and `core.ResolvePrefix` | `REQ-STORE-009` | `AC-STORE-021` to `AC-STORE-023` |
 | `API-STORE-008` | Go | `Fork` | `REQ-STORE-007` | `AC-STORE-017`, `AC-STORE-018` |
-| `API-STORE-009` | Go | `TryLease` (mengembalikan `release`) | `REQ-STORE-010` | `AC-STORE-024` sampai `AC-STORE-027` |
-| `API-STORE-010` | Go | `DeriveMessages` dan `ChainEvents` | `REQ-STORE-011` | `AC-STORE-028` sampai `AC-STORE-030` |
+| `API-STORE-009` | Go | `TryLease` (returns `release`) | `REQ-STORE-010` | `AC-STORE-024` to `AC-STORE-027` |
+| `API-STORE-010` | Go | `DeriveMessages` and `ChainEvents` | `REQ-STORE-011` | `AC-STORE-028` to `AC-STORE-030` |
 | `API-STORE-011` | Go | `Prune` | `REQ-STORE-014` | `AC-STORE-034`, `AC-STORE-035` |
 | `API-STORE-012` | Go | `RebuildProjections` | `REQ-STORE-012` | `AC-STORE-031` |
 | `API-STORE-013` | Go | `NormalizePayload` | `REQ-STORE-013` | `AC-STORE-032`, `AC-STORE-033` |
-| `API-PERM-001` | Go | `ParsePattern` dan `Match` | `REQ-PERM-001` | `AC-PERM-001` sampai `AC-PERM-003` |
-| `API-PERM-002` | Config | Validasi `permission` dan `rules` | `REQ-PERM-001` | `AC-PERM-004` |
-| `API-PERM-003` | Go | Listener `tools.pre_execute` | `REQ-PERM-002` sampai `REQ-PERM-006` | `AC-PERM-005` sampai `AC-PERM-019` |
-| `API-APPR-001` | Go | `SetPolicy` dan `EffectivePolicy` | `REQ-APPR-001` | `AC-APPR-001` sampai `AC-APPR-004` |
-| `API-APPR-002` | Go | `Request` (audit, timeout, cancel, fail-closed) | `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005` | `AC-APPR-005`, `AC-APPR-006`, `AC-APPR-011` sampai `AC-APPR-014` |
-| `API-APPR-003` | Go | Hook `approval.request` (penjawab) | `REQ-APPR-003` | `AC-APPR-007` sampai `AC-APPR-010` |
-| `API-APPR-004` | Go | Fungsi batas izin subagent | `REQ-APPR-006` | `AC-APPR-015`, `AC-APPR-016` |
-| `API-APPR-005` | Go | `lana.ApproveWith` (penjawab library) | `REQ-APPR-007` | `AC-APPR-017` |
+| `API-PERM-001` | Go | `ParsePattern` and `Match` | `REQ-PERM-001` | `AC-PERM-001` to `AC-PERM-003` |
+| `API-PERM-002` | Config | Validation of `permission` and `rules` | `REQ-PERM-001` | `AC-PERM-004` |
+| `API-PERM-003` | Go | Listener on `tools.pre_execute` | `REQ-PERM-002` to `REQ-PERM-006` | `AC-PERM-005` to `AC-PERM-019` |
+| `API-APPR-001` | Go | `SetPolicy` and `EffectivePolicy` | `REQ-APPR-001` | `AC-APPR-001` to `AC-APPR-004` |
+| `API-APPR-002` | Go | `Request` (audit, timeout, cancel, fail-closed) | `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005` | `AC-APPR-005`, `AC-APPR-006`, `AC-APPR-011` to `AC-APPR-014` |
+| `API-APPR-003` | Go | Hook `approval.request` (answerer) | `REQ-APPR-003` | `AC-APPR-007` to `AC-APPR-010` |
+| `API-APPR-004` | Go | Subagent permission bound function | `REQ-APPR-006` | `AC-APPR-015`, `AC-APPR-016` |
+| `API-APPR-005` | Go | `lana.ApproveWith` (library answerer) | `REQ-APPR-007` | `AC-APPR-017` |
 | `API-COMP-001` | Go | `CompactNow` | `REQ-COMP-002` | `AC-COMP-004`, `AC-COMP-005` |
-| `API-COMP-002` | Go | Compaction otomatis dan retry | `REQ-COMP-001`, `REQ-COMP-003` | `AC-COMP-001` sampai `AC-COMP-003`, `AC-COMP-006`, `AC-COMP-007` |
+| `API-COMP-002` | Go | Automatic compaction and retry | `REQ-COMP-001`, `REQ-COMP-003` | `AC-COMP-001` to `AC-COMP-003`, `AC-COMP-006`, `AC-COMP-007` |
 
-## API-STORE-001: Buka store, migrasi, DDL, trigger
+## API-STORE-001: Open store, migrations, DDL, triggers
 
-- **Tujuan**: membuka `lana.db`, menjalankan migrasi, dan memasang writer dan read pool.
+- **Purpose**: open `lana.db`, run migrations, and install the writer and read pool.
 - **Requirements**: `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016`
-- **Acceptance criteria**: `AC-STORE-001` sampai `AC-STORE-004`, `AC-STORE-007`, `AC-STORE-008`, `AC-STORE-038`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik `LANA_HOME`. Tidak ada autentikasi tambahan.
+- **Acceptance criteria**: `AC-STORE-001` to `AC-STORE-004`, `AC-STORE-007`, `AC-STORE-008`, `AC-STORE-038`
+- **Stability**: New
+- **Authorization**: Process that owns `LANA_HOME`. No additional authentication.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Config | `[[modules]]` `store` `config.path` | string | Tidak | Default `lana.db`. Relatif ke `LANA_HOME` |
+| Config | `[[modules]]` `store` `config.path` | string | No | Default `lana.db`. Relative to `LANA_HOME` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Database baru atau sudah ada, migrasi lengkap | Tanpa error | `*Store` siap. `user_version` = 2. Tidak ada event |
+| New database or existing one, migrations complete | Not applicable | `*Store` ready. `user_version` = 2. No events |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Path tidak bisa dibuka atau folder tidak ada | Tidak berlaku | error biasa | Ya | Boot gagal, pesan menyebut path |
-| `user_version` lebih tinggi dari migrasi tertinggi | Tidak berlaku | `ErrSchemaTooNew` | Tidak | Database tidak diubah |
-| Migrasi gagal di tengah | Tidak berlaku | error biasa | Ya | Transaksi migrasi di-rollback, `user_version` tidak naik |
+| Path cannot be opened or folder does not exist | Not applicable | plain error | Yes | Boot fails, message names the path |
+| `user_version` higher than the highest migration | Not applicable | `ErrSchemaTooNew` | No | Database not changed |
+| Migration fails midway | Not applicable | plain error | Yes | Migration transaction rolled back, `user_version` not increased |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada event. Membuat file `0600` jika belum ada, dan membuat `-wal` dan `-shm`.
-- **Idempotensi**: Membuka ulang tidak menjalankan migrasi lagi.
-- **Konkurensi**: Pragma `journal_mode = WAL`, `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5000`.
-- **Paparan data**: Tidak ada secret di database (ADR 0005).
+- **State transition**: No events. Creates the file with `0600` if it does not exist, and creates `-wal` and `-shm`.
+- **Idempotency**: Reopening does not run migrations again.
+- **Concurrency**: Pragmas `journal_mode = WAL`, `synchronous = NORMAL`, `foreign_keys = ON`, `busy_timeout = 5000`.
+- **Data exposure**: No secrets in the database (ADR 0005).
 
 ## API-STORE-002: `Create`
 
-- **Tujuan**: membuat session dan menulis `session/created`.
+- **Purpose**: create a session and write `session/created`.
 - **Requirements**: `REQ-STORE-006`
 - **Acceptance criteria**: `AC-STORE-012`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store.
+- **Stability**: New
+- **Authorization**: Process that owns the store.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `in` | `core.NewSession` | Ya | `Agent`, `Channel`, `Address`, `Workspace` wajib tidak kosong. Parent opsional |
+| Argument | `in` | `core.NewSession` | Yes | `Agent`, `Channel`, `Address`, `Workspace` are required and not empty. Parent is optional |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session dibuat | Tidak berlaku | `core.SessionInfo` dengan ID ULID baru. Event `session/created` seq 1. Status `idle` |
+| Session created | Not applicable | `core.SessionInfo` with a new ULID ID. Event `session/created` seq 1. Status `idle` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Field wajib kosong | Tidak berlaku | error biasa | Tidak | Session tidak dibuat |
-| `ParentSessionID` tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Session tidak dibuat |
-| Store ditutup | Tidak berlaku | `ErrStoreClosed` | Ya | Tidak ada event |
+| Required field empty | Not applicable | plain error | No | Session not created |
+| `ParentSessionID` does not exist | Not applicable | `ErrSessionNotFound` | No | Session not created |
+| Store closed | Not applicable | `ErrStoreClosed` | Yes | No events |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Baris `sessions` baru berstatus `idle`. Lease tidak diambil (`Q-015`).
-- **Idempotensi**: Tidak berlaku. Setiap panggilan membuat session baru.
-- **Konkurensi**: Lewat writer dan `BEGIN IMMEDIATE`.
-- **Paparan data**: Tidak ada.
+- **State transition**: New `sessions` row with status `idle`. Lease is not taken (`Q-015`).
+- **Idempotency**: Not applicable. Each call creates a new session.
+- **Concurrency**: Through the writer and `BEGIN IMMEDIATE`.
+- **Data exposure**: None.
 
-## API-STORE-003: `Open` dengan resume repair
+## API-STORE-003: `Open` with resume repair
 
-- **Tujuan**: membuka session untuk pemegang lease dan menutup turn yatim.
+- **Purpose**: open a session for the lease holder and close orphan turns.
 - **Requirements**: `REQ-STORE-006`
-- **Acceptance criteria**: `AC-STORE-013` sampai `AC-STORE-016`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemegang lease `session_id` (cek `pid` dan `host` di `session_leases`).
+- **Acceptance criteria**: `AC-STORE-013` to `AC-STORE-016`
+- **Stability**: New
+- **Authorization**: Process holding the lease for `session_id` (checks `pid` and `host` in `session_leases`).
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | ULID lengkap, bukan prefix |
+| Argument | `sessionID` | string | Yes | Full ULID, not a prefix |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session idle | Tidak berlaku | `SessionInfo`. Tidak ada event |
-| Turn yatim ditutup | Tidak berlaku | `SessionInfo` dengan status `idle`. Event repair sesuai urutan di design |
+| Session idle | Not applicable | `SessionInfo`. No events |
+| Orphan turn closed | Not applicable | `SessionInfo` with status `idle`. Repair events in the order defined in design |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Proses tidak memegang lease | Tidak berlaku | `ErrLeaseNotHeld` | Ya, setelah lease | Tidak ada event |
-| Session tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada event |
+| Process does not hold the lease | Not applicable | `ErrLeaseNotHeld` | Yes, after lease | No events |
+| Session does not exist | Not applicable | `ErrSessionNotFound` | No | No events |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Turn yatim menjadi `idle`. Urutan event: `approval/decided` untuk approval yatim, `tool/result` error untuk call yatim, lalu `turn/end` reason `interrupted`.
-- **Info**: sama dengan `Open` tanpa lease dan tanpa repair. Hanya membaca `SessionInfo`.
-- **Idempotensi**: Panggilan kedua tidak menulis event.
-- **Konkurensi**: Repair satu transaksi `BEGIN IMMEDIATE`. Lease wajib dipegang sebelum repair.
-- **Paparan data**: Output repair berisi teks tetap `interrupted`, tanpa isi tool.
+- **State transition**: Orphan turn becomes `idle`. Event order: `approval/decided` for orphan approvals, error `tool/result` for orphan calls, then `turn/end` reason `interrupted`.
+- **Info**: same as `Open` without a lease and without repair. Only reads `SessionInfo`.
+- **Idempotency**: A second call writes no events.
+- **Concurrency**: Repair is one `BEGIN IMMEDIATE` transaction. The lease must be held before repair.
+- **Data exposure**: Repair output contains fixed text `interrupted`, without tool content.
 
 ## API-STORE-004: `Append`
 
-- **Tujuan**: menulis batch event atomik ke session.
+- **Purpose**: write an atomic batch of events to a session.
 - **Requirements**: `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015`
-- **Acceptance criteria**: `AC-STORE-005`, `AC-STORE-006`, `AC-STORE-009` sampai `AC-STORE-011`, `AC-STORE-036`, `AC-STORE-037`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemegang lease. Append tanpa lease diizinkan hanya dari jalur internal (repair, `Create`).
+- **Acceptance criteria**: `AC-STORE-005`, `AC-STORE-006`, `AC-STORE-009` to `AC-STORE-011`, `AC-STORE-036`, `AC-STORE-037`
+- **Stability**: New
+- **Authorization**: Process holding the lease. Append without a lease is allowed only from internal paths (repair, `Create`).
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada |
-| Argumen | `drafts` | `[]core.EventDraft` | Ya | Tidak kosong. `Kind` harus dikenal. `turn/start` ditolak jika ada turn terbuka |
+| Argument | `sessionID` | string | Yes | Session must exist |
+| Argument | `drafts` | `[]core.EventDraft` | Yes | Not empty. `Kind` must be known. `turn/start` is rejected if a turn is open |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Batch tersimpan | Tidak berlaku | `[]core.SessionEvent` dengan seq berurutan. Projection diperbarui. Hook `session.event` dikirim setelah commit |
+| Batch stored | Not applicable | `[]core.SessionEvent` with contiguous seqs. Projection updated. Hook `session.event` sent after commit |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `turn/start` saat turn terbuka | Tidak berlaku | `ErrTurnActive` | Tidak | Tidak ada event |
-| Kind tidak dikenal atau payload tidak valid | Tidak berlaku | error biasa | Tidak | Tidak ada event |
-| `SQLITE_BUSY` lebih dari 5 detik | Tidak berlaku | error biasa | Ya | Tidak ada event |
-| Store ditutup | Tidak berlaku | `ErrStoreClosed` | Ya | Tidak ada event |
+| `turn/start` while a turn is open | Not applicable | `ErrTurnActive` | No | No events |
+| Unknown kind or invalid payload | Not applicable | plain error | No | No events |
+| `SQLITE_BUSY` for more than 5 seconds | Not applicable | plain error | Yes | No events |
+| Store closed | Not applicable | `ErrStoreClosed` | Yes | No events |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: `turn/start` membuat status `running`. `turn/end` untuk turn terbuka membuat status `idle`. `turn_count` bertambah saat `turn/start`.
-- **Idempotensi**: Tidak berlaku. Setiap panggilan menambah event.
-- **Konkurensi**: Writer tunggal per proses. `BEGIN IMMEDIATE` untuk lintas proses.
-- **Paparan data**: Payload disimpan apa adanya. Tidak ada secret yang ditambahkan store.
+- **State transition**: `turn/start` sets status `running`. `turn/end` for an open turn sets status `idle`. `turn_count` increases on `turn/start`.
+- **Idempotency**: Not applicable. Each call adds events.
+- **Concurrency**: Single writer per process. `BEGIN IMMEDIATE` across processes.
+- **Data exposure**: Payloads are stored as is. The store adds no secrets.
 
 ## API-STORE-005: `Events`
 
-- **Tujuan**: membaca event sendiri session mulai dari seq tertentu.
+- **Purpose**: read a session's own events starting from a given seq.
 - **Requirements**: `REQ-STORE-008`
 - **Acceptance criteria**: `AC-STORE-019`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store.
+- **Stability**: New
+- **Authorization**: Process that owns the store.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada |
-| Argumen | `fromSeq` | int64 | Ya | Seq minimal, inklusif. Nilai di bawah 1 dibaca sebagai 1 |
+| Argument | `sessionID` | string | Yes | Session must exist |
+| Argument | `fromSeq` | int64 | Yes | Minimum seq, inclusive. Values below 1 are read as 1 |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session ada | Tidak berlaku | `iter.Seq2[core.SessionEvent, error]` urut seq naik. Kosong jika tidak ada event |
+| Session exists | Not applicable | `iter.Seq2[core.SessionEvent, error]` in ascending seq. Empty if there are no events |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Session tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada hasil |
+| Session does not exist | Not applicable | `ErrSessionNotFound` | No | No results |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Berulang menghasilkan hasil sama.
-- **Konkurensi**: Baca di read pool dalam satu snapshot.
-- **Paparan data**: Payload dikembalikan apa adanya.
+- **State transition**: None.
+- **Idempotency**: Repeated calls produce the same result.
+- **Concurrency**: Read from the read pool in one snapshot.
+- **Data exposure**: Payloads are returned as is.
 
 ## API-STORE-006: `List`
 
-- **Tujuan**: daftar session per channel dan address untuk `--continue` dan `/sessions`.
+- **Purpose**: list sessions per channel and address for `--continue` and `/sessions`.
 - **Requirements**: `REQ-STORE-008`
 - **Acceptance criteria**: `AC-STORE-020`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store.
+- **Stability**: New
+- **Authorization**: Process that owns the store.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `f` | `core.SessionFilter` | Ya | `Channel` dan `Address` cocok persis. `Limit` 0 = tanpa batas (`CQ-022` spec #2). `Limit` negatif ditolak |
+| Argument | `f` | `core.SessionFilter` | Yes | `Channel` and `Address` match exactly. `Limit` 0 = no limit (`CQ-022` of spec #2). Negative `Limit` is rejected |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Ada hasil | Tidak berlaku | `[]core.SessionInfo` urut `updated_at` menurun, paling banyak `Limit` (0 = semua) |
+| Results found | Not applicable | `[]core.SessionInfo` in descending `updated_at`, at most `Limit` (0 = all) |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `Limit` negatif | Tidak berlaku | error biasa | Tidak | Tidak ada hasil |
+| Negative `Limit` | Not applicable | plain error | No | No results |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Berulang menghasilkan hasil sama jika tidak ada tulis.
-- **Konkurensi**: Read pool.
-- **Paparan data**: Tidak ada.
+- **State transition**: None.
+- **Idempotency**: Repeated calls produce the same result if there are no writes.
+- **Concurrency**: Read pool.
+- **Data exposure**: None.
 
 ## API-STORE-007: `FindPrefix`
 
-- **Tujuan**: mencari session dari prefix yang diketik user. Aturan pemilihan satu session ada di `core.ResolvePrefix`.
+- **Purpose**: find sessions from a prefix typed by the user. The rule for selecting a single session is in `core.ResolvePrefix`.
 - **Requirements**: `REQ-STORE-009`
-- **Acceptance criteria**: `AC-STORE-021` sampai `AC-STORE-023`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store.
+- **Acceptance criteria**: `AC-STORE-021` to `AC-STORE-023`
+- **Stability**: New
+- **Authorization**: Process that owns the store.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `prefix` | string | Ya | Dibandingkan dalam huruf besar. Panjang minimal dicek `core.ResolvePrefix` |
+| Argument | `prefix` | string | Yes | Compared case-insensitively. Minimum length checked by `core.ResolvePrefix` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Ada yang cocok | Tidak berlaku | `[]core.SessionInfo` (bisa berisi lebih dari satu). Caller memanggil `core.ResolvePrefix` |
+| Matches found | Not applicable | `[]core.SessionInfo` (may contain more than one). Caller calls `core.ResolvePrefix` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---|---|---:|---|
-| Prefix kurang dari 6 karakter (lewat `core.ResolvePrefix`) | Tidak berlaku | `core.ErrPrefixTooShort` | Tidak | Tidak ada hasil |
-| Tidak ada yang cocok (lewat `core.ResolvePrefix`) | Tidak berlaku | `core.ErrNotFound` | Tidak | Tidak ada hasil |
-| Lebih dari satu cocok (lewat `core.ResolvePrefix`) | Tidak berlaku | `*core.AmbiguousPrefixError` dengan `Candidates` urut naik, `Is(core.ErrAmbiguousPrefix)` | Tidak | Daftar kandidat dikembalikan ke pemanggil |
+| Prefix shorter than 6 characters (via `core.ResolvePrefix`) | Not applicable | `core.ErrPrefixTooShort` | No | No results |
+| No match (via `core.ResolvePrefix`) | Not applicable | `core.ErrNotFound` | No | No results |
+| More than one match (via `core.ResolvePrefix`) | Not applicable | `*core.AmbiguousPrefixError` with `Candidates` in ascending order, `Is(core.ErrAmbiguousPrefix)` | No | Candidate list returned to caller |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Berulang menghasilkan hasil sama.
-- **Konkurensi**: Read pool.
-- **Paparan data**: Tidak ada.
+- **State transition**: None.
+- **Idempotency**: Repeated calls produce the same result.
+- **Concurrency**: Read pool.
+- **Data exposure**: None.
 
 ## API-STORE-008: `Fork`
 
-- **Tujuan**: membuat session turunan dari `turn/end` induk tanpa menyalin event.
+- **Purpose**: create a derived session from the parent's `turn/end` without copying events.
 - **Requirements**: `REQ-STORE-007`
 - **Acceptance criteria**: `AC-STORE-017`, `AC-STORE-018`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store. Pemanggil di atas bertanggung jawab atas lease session baru. Fork tidak punya argumen agent (`CQ-022` spec #2).
+- **Stability**: New
+- **Authorization**: Process that owns the store. The caller above is responsible for the lease of the new session. `Fork` has no agent argument (`CQ-022` of spec #2).
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `parentID` | string | Ya | Session harus ada |
-| Argumen | `atSeq` | int64 | Ya | Harus seq event `turn/end` milik induk |
+| Argument | `parentID` | string | Yes | Session must exist |
+| Argument | `atSeq` | int64 | Yes | Must be the seq of the parent's `turn/end` event |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| `atSeq` valid | Tidak berlaku | `core.SessionInfo` session baru. Event `session/created` berisi `parent_session_id` dan `inherited_seq`. Agent, channel, address, dan workspace dari induk |
+| `atSeq` valid | Not applicable | New session `core.SessionInfo`. Event `session/created` contains `parent_session_id` and `inherited_seq`. Agent, channel, address, and workspace from the parent |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `atSeq` bukan `turn/end` | Tidak berlaku | `ErrForkNotAtTurnBoundary` | Tidak | Tidak ada session baru |
-| Induk tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada session baru |
+| `atSeq` is not `turn/end` | Not applicable | `ErrForkNotAtTurnBoundary` | No | No new session |
+| Parent does not exist | Not applicable | `ErrSessionNotFound` | No | No new session |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Session baru berstatus `idle`. Induk tidak berubah.
-- **Idempotensi**: Tidak berlaku. Setiap panggilan membuat session baru.
-- **Konkurensi**: Lewat writer.
-- **Paparan data**: Tidak ada.
+- **State transition**: New session is `idle`. Parent unchanged.
+- **Idempotency**: Not applicable. Each call creates a new session.
+- **Concurrency**: Through the writer.
+- **Data exposure**: None.
 
 ## API-STORE-009: `TryLease`
 
-- **Tujuan**: memberi satu session ke satu proses (`session_leases`).
+- **Purpose**: give one session to one process (`session_leases`).
 - **Requirements**: `REQ-STORE-010`
-- **Acceptance criteria**: `AC-STORE-024` sampai `AC-STORE-027`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemanggil. Lease diambil atas nama `os.Getpid()` dan `os.Hostname()`.
+- **Acceptance criteria**: `AC-STORE-024` to `AC-STORE-027`
+- **Stability**: New
+- **Authorization**: Calling process. The lease is taken on behalf of `os.Getpid()` and `os.Hostname()`.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `id` | string | Ya | Session harus ada |
+| Argument | `id` | string | Yes | Session must exist |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Lease kosong, atau pemegang mati di host sama | Tidak berlaku | `release func() error`. Baris `session_leases` berisi PID, host, waktu |
-| `release` dipanggil | Tidak berlaku | Baris lease dihapus jika masih milik proses ini |
+| Lease empty, or holder is dead on the same host | Not applicable | `release func() error`. `session_leases` row contains PID, host, time |
+| `release` called | Not applicable | Lease row deleted if it still belongs to this process |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Pemegang hidup di host sama, atau pemegang di host lain | Tidak berlaku | `*core.LeaseHeldError{PID, Host}` (`errors.As`) | Ya, setelah lepas | Lease tidak berubah |
-| Session tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada lease |
+| Holder alive on the same host, or holder on another host | Not applicable | `*core.LeaseHeldError{PID, Host}` (`errors.As`) | Yes, after release | Lease unchanged |
+| Session does not exist | Not applicable | `ErrSessionNotFound` | No | No lease |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Baris `session_leases` ditambah atau diganti. Tidak ada event.
-- **Idempotensi**: Panggilan kedua dari proses yang sama juga ditolak dengan `LeaseHeldError`, karena PID pemegang masih hidup. Ini sesuai design spec #1.
-- **Konkurensi**: `BEGIN IMMEDIATE`. Cek PID lewat `syscall.Kill(pid, 0)`: `nil` atau `EPERM` berarti hidup, `ESRCH` berarti mati.
-- **Paparan data**: PID dan host terlihat di pesan `LeaseHeldError`.
+- **State transition**: `session_leases` row is added or replaced. No events.
+- **Idempotency**: A second call from the same process is also rejected with `LeaseHeldError`, because the holder's PID is still alive. This matches the design of spec #1.
+- **Concurrency**: `BEGIN IMMEDIATE`. PID check via `syscall.Kill(pid, 0)`: `nil` or `EPERM` means alive, `ESRCH` means dead.
+- **Data exposure**: PID and host are visible in the `LeaseHeldError` message.
 
-## API-STORE-010: `DeriveMessages` dan `ChainEvents`
+## API-STORE-010: `DeriveMessages` and `ChainEvents`
 
-- **Tujuan**: menyusun riwayat model dan rantai event dari session (dipakai agent loop, permission, approval, dan compaction).
+- **Purpose**: build model history and the event chain from a session (used by the agent loop, permission, approval, and compaction).
 - **Requirements**: `REQ-STORE-011`
-- **Acceptance criteria**: `AC-STORE-028` sampai `AC-STORE-030`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store.
+- **Acceptance criteria**: `AC-STORE-028` to `AC-STORE-030`
+- **Stability**: New
+- **Authorization**: Process that owns the store.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada |
+| Argument | `sessionID` | string | Yes | Session must exist |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session ada | Tidak berlaku | `[]core.Message` dari `core.DeriveMessages` (`API-CORE-015`) atas `ChainEvents`, sesuai pemetaan di design (`Q-012`, `Q-013`) |
+| Session exists | Not applicable | `[]core.Message` from `core.DeriveMessages` (`API-CORE-015`) applied to `ChainEvents`, following the mapping in design (`Q-012`, `Q-013`) |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Session tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada hasil |
-| Payload versi tidak dikenal | Tidak berlaku | `core.ErrUnknownPayloadVersion` | Tidak | Derive gagal, tidak ada hasil parsial |
+| Session does not exist | Not applicable | `ErrSessionNotFound` | No | No results |
+| Unknown payload version | Not applicable | `core.ErrUnknownPayloadVersion` | No | Derive fails, no partial results |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Fungsi murni terhadap isi log. Hasil sama jika log sama.
-- **Konkurensi**: Satu read transaction untuk seluruh rantai.
-- **Paparan data**: Isi konten model. Tidak dicatat ke log.
+- **State transition**: None.
+- **Idempotency**: Pure function of the log contents. Same result if the log is the same.
+- **Concurrency**: One read transaction for the whole chain.
+- **Data exposure**: Model content. Not written to the log.
 
 ## API-STORE-011: `Prune`
 
-- **Tujuan**: menghapus satu session utuh dengan event, projection, dan lease.
+- **Purpose**: delete one whole session with its events, projection, and lease.
 - **Requirements**: `REQ-STORE-014`
 - **Acceptance criteria**: `AC-STORE-034`, `AC-STORE-035`
-- **Stabilitas**: Baru. Hanya fungsi store. Tidak ada perintah CLI (`Q-010`).
-- **Otorisasi**: Proses pemilik store. Pemanggil harus memegang lease session.
+- **Stability**: New. Store function only. No CLI command (`Q-010`).
+- **Authorization**: Process that owns the store. The caller must hold the session lease.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada dan tidak punya child |
+| Argument | `sessionID` | string | Yes | Session must exist and have no children |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session tanpa child | Tidak berlaku | Event, baris `sessions`, dan lease session hilang dalam satu transaksi |
+| Session without children | Not applicable | Events, `sessions` row, and session lease removed in one transaction |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Session punya child | Tidak berlaku | `ErrSessionHasChildren` | Tidak | Tidak ada yang terhapus |
-| Session tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada perubahan |
+| Session has children | Not applicable | `ErrSessionHasChildren` | No | Nothing deleted |
+| Session does not exist | Not applicable | `ErrSessionNotFound` | No | No change |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Session hilang. Ini satu-satunya pengecualian append-only.
-- **Idempotensi**: Panggilan kedua mengembalikan `ErrSessionNotFound`.
-- **Konkurensi**: Satu transaksi `BEGIN IMMEDIATE`. `session_prune_allow` diisi dan dihapus di transaksi itu.
-- **Paparan data**: Tidak ada.
+- **State transition**: Session removed. This is the only exception to append-only.
+- **Idempotency**: A second call returns `ErrSessionNotFound`.
+- **Concurrency**: One `BEGIN IMMEDIATE` transaction. `session_prune_allow` is filled and deleted within that transaction.
+- **Data exposure**: None.
 
 ## API-STORE-012: `RebuildProjections`
 
-- **Tujuan**: membangun ulang tabel `sessions` dari `session_events`.
+- **Purpose**: rebuild the `sessions` table from `session_events`.
 - **Requirements**: `REQ-STORE-012`
 - **Acceptance criteria**: `AC-STORE-031`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store.
+- **Stability**: New
+- **Authorization**: Process that owns the store.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | (tidak ada) | — | — | — |
+| Argument | (none) | — | — | — |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Rebuild selesai | Tidak berlaku | Tabel `sessions` berisi hasil dari event |
+| Rebuild complete | Not applicable | `sessions` table contains results derived from the events |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Payload tidak bisa di-decode | Tidak berlaku | `core.ErrUnknownPayloadVersion` | Tidak | Rebuild di-rollback |
+| Payload cannot be decoded | Not applicable | `core.ErrUnknownPayloadVersion` | No | Rebuild rolled back |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Hanya tabel `sessions`. Tidak ada event.
-- **Idempotensi**: Hasil sama untuk log sama.
-- **Konkurensi**: Satu transaksi `BEGIN IMMEDIATE`.
-- **Paparan data**: Tidak ada.
+- **State transition**: Only the `sessions` table. No events.
+- **Idempotency**: Same result for the same log.
+- **Concurrency**: One `BEGIN IMMEDIATE` transaction.
+- **Data exposure**: None.
 
 ## API-STORE-013: `NormalizePayload`
 
-- **Tujuan**: men-decode payload ke versi sekarang di memori.
+- **Purpose**: decode a payload to the current version in memory.
 - **Requirements**: `REQ-STORE-013`
 - **Acceptance criteria**: `AC-STORE-032`, `AC-STORE-033`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku. Fungsi murni.
+- **Stability**: New
+- **Authorization**: Not applicable. Pure function.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `kind` | string | Ya | Kind yang dikenal |
-| Argumen | `raw` | `json.RawMessage` | Ya | Harus berisi `v` integer |
+| Argument | `kind` | string | Yes | A known kind |
+| Argument | `raw` | `json.RawMessage` | Yes | Must contain integer `v` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| `v` dikenal | Tidak berlaku | Payload versi sekarang. Baris database tidak diubah |
+| `v` known | Not applicable | Payload at the current version. Database row not changed |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `v` tidak dikenal | Tidak berlaku | `core.ErrUnknownPayloadVersion` | Tidak | Tidak ada hasil |
-| `v` tidak ada atau bukan integer | Tidak berlaku | error biasa | Tidak | Tidak ada hasil |
+| `v` unknown | Not applicable | `core.ErrUnknownPayloadVersion` | No | No results |
+| `v` missing or not an integer | Not applicable | plain error | No | No results |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Berulang menghasilkan hasil sama.
-- **Konkurensi**: Tidak berlaku.
-- **Paparan data**: Tidak ada.
+- **State transition**: None.
+- **Idempotency**: Repeated calls produce the same result.
+- **Concurrency**: Not applicable.
+- **Data exposure**: None.
 
-## API-PERM-001: `ParsePattern` dan `Match`
+## API-PERM-001: `ParsePattern` and `Match`
 
-- **Tujuan**: mengurai dan mencocokkan pola `tool` atau `tool(arg-glob)`.
+- **Purpose**: parse and match a pattern `tool` or `tool(arg-glob)`.
 - **Requirements**: `REQ-PERM-001`
-- **Acceptance criteria**: `AC-PERM-001` sampai `AC-PERM-003`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku. Fungsi murni.
+- **Acceptance criteria**: `AC-PERM-001` to `AC-PERM-003`
+- **Stability**: New
+- **Authorization**: Not applicable. Pure function.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `s` | string | Ya | Format `tool` atau `tool(...)`. Nama tool `[a-z_][a-z0-9_]*` atau `mcp__<server>__<tool>` |
+| Argument | `s` | string | Yes | Format `tool` or `tool(...)`. Tool name `[a-z_][a-z0-9_]*` or `mcp__<server>__<tool>` |
 
-Grammar pola:
+Pattern grammar:
 
 ```text
-pola     := tool | tool "(" arg ")"
-tool     := nama tool, cocok persis
-arg      := sisa teks sampai ")" terakhir, boleh mengandung "(" dan ")"
-wildcard := "*" (urutan karakter) | "?" (satu karakter) | "**" (hanya argumen path)
-escape   := "\" diikuti "*", "?", "\", "(", atau ")" lalu karakter itu literal
+pattern  := tool | tool "(" arg ")"
+tool     := tool name, matches exactly
+arg      := remaining text up to the last ")", may contain "(" and ")"
+wildcard := "*" (sequence of characters) | "?" (one character) | "**" (path arguments only)
+escape   := "\" followed by "*", "?", "\", "(", or ")" then that character literally
 ```
 
-Aturan pencocokan (`REQ-PERM-001`):
+Matching rules (`REQ-PERM-001`):
 
-| Argumen | `*` dan `?` | `**` | Sumber nilai |
+| Argument | `*` and `?` | `**` | Value source |
 |---|---|---|---|
-| `command` | Melewati `/` | Tidak berlaku | Input `command` apa adanya |
-| `path` | Tidak melewati `/` | Melewati `/` | Path absolut hasil `filepath.Clean`, `~` diganti home |
-| `url`, `agent`, `raw` | Melewati karakter apa pun | Tidak berlaku | Input apa adanya, JSON compact untuk `raw` |
+| `command` | Crosses `/` | Not applicable | `command` input as is |
+| `path` | Does not cross `/` | Crosses `/` | Absolute path from `filepath.Clean`, `~` replaced with home |
+| `url`, `agent`, `raw` | Matches any character | Not applicable | Input as is, compact JSON for `raw` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Pola valid | Tidak berlaku | `Pattern` |
-| `Match` | Tidak berlaku | `true` jika tool sama dan argumen cocok |
+| Valid pattern | Not applicable | `Pattern` |
+| `Match` | Not applicable | `true` if the tool is the same and the argument matches |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Tanda kurung tidak tertutup | Tidak berlaku | error biasa (posisi dan alasan) | Tidak | Config ditolak |
-| Nama tool tidak valid | Tidak berlaku | error biasa | Tidak | Config ditolak |
+| Unclosed parenthesis | Not applicable | plain error (position and reason) | No | Config rejected |
+| Invalid tool name | Not applicable | plain error | No | Config rejected |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Fungsi murni.
-- **Konkurensi**: Tidak berlaku.
-- **Paparan data**: Tidak ada.
+- **State transition**: None.
+- **Idempotency**: Pure function.
+- **Concurrency**: Not applicable.
+- **Data exposure**: None.
 
-## API-PERM-002: Validasi `permission` dan `rules`
+## API-PERM-002: Validation of `permission` and `rules`
 
-- **Tujuan**: memastikan config permission valid saat dimuat.
+- **Purpose**: ensure permission config is valid when loaded.
 - **Requirements**: `REQ-PERM-001`
 - **Acceptance criteria**: `AC-PERM-004`
-- **Stabilitas**: Baru
-- **Otorisasi**: Tidak berlaku.
+- **Stability**: New
+- **Authorization**: Not applicable.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Config | `agents.<nama>.permission` | enum | Tidak | Default `ask` |
-| Config | `agents.<nama>.rules.allow`, `.deny` | array string | Tidak | Setiap item lolos `ParsePattern` |
-| Config | `agents.<nama>.context_window` | integer | Tidak | Default 128000, lebih dari 0 |
+| Config | `agents.<name>.permission` | enum | No | Default `ask` |
+| Config | `agents.<name>.rules.allow`, `.deny` | string array | No | Each item passes `ParsePattern` |
+| Config | `agents.<name>.context_window` | integer | No | Default 128000, greater than 0 |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Semua nilai valid | Tidak berlaku | Config diterima |
+| All values valid | Not applicable | Config accepted |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Pola tidak valid | Tidak berlaku | error validasi spec #2 | Tidak | Error menyebut key (contoh `agents.coder.rules.allow`), nilai pola, dan alasan |
-| `permission` di luar enum | Tidak berlaku | error validasi spec #2 | Tidak | Error menyebut key dan saran terdekat |
+| Invalid pattern | Not applicable | spec #2 validation error | No | Error names the key (for example `agents.coder.rules.allow`), the pattern value, and the reason |
+| `permission` outside the enum | Not applicable | spec #2 validation error | No | Error names the key and the closest suggestion |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Tidak berlaku.
-- **Konkurensi**: Tidak berlaku.
-- **Paparan data**: Tidak ada.
+- **State transition**: None.
+- **Idempotency**: Not applicable.
+- **Concurrency**: Not applicable.
+- **Data exposure**: None.
 
-## API-PERM-003: Listener `tools.pre_execute`
+## API-PERM-003: Listener on `tools.pre_execute`
 
-- **Tujuan**: memutuskan apakah tool boleh berjalan.
-- **Requirements**: `REQ-PERM-002` sampai `REQ-PERM-006`
-- **Acceptance criteria**: `AC-PERM-005` sampai `AC-PERM-019`
-- **Stabilitas**: Baru. Sensitif keamanan
-- **Otorisasi**: Keputusan hanya dibentuk di listener ini. Tidak ada jalur lain yang membuat `ToolDecision.Allowed = true` untuk tool yang lewat hook.
+- **Purpose**: decide whether a tool may run.
+- **Requirements**: `REQ-PERM-002` to `REQ-PERM-006`
+- **Acceptance criteria**: `AC-PERM-005` to `AC-PERM-019`
+- **Stability**: New. Security-sensitive
+- **Authorization**: Decisions are formed only in this listener. No other path creates `ToolDecision.Allowed = true` for a tool that passed through the hook.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Hook | `core.ToolsPreExecuteInput` | struct (spec #2, `API-CORE-015`) | Ya | `AgentName`, `Call.SessionID`, `Call.TurnID`, `Call.CallID`, `Call.Name`, `Call.Input`, `Call.Risk` |
+| Hook | `core.ToolsPreExecuteInput` | struct (spec #2, `API-CORE-015`) | Yes | `AgentName`, `Call.SessionID`, `Call.TurnID`, `Call.CallID`, `Call.Name`, `Call.Input`, `Call.Risk` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Deny tidak cocok, workspace aman, dan salah satu jalur izin cocok | Tidak berlaku | `ToolDecision{Allowed: true}`. Outcome kosong, atau `allowed_once` atau `allowed_session` jika lewat approval |
-| Ditolak oleh rule, workspace, policy, atau outcome approval | Tidak berlaku | `ToolDecision{Allowed: false, Status: ToolStatusRejected, Reason}` |
+| No deny match, workspace safe, and one allow path matches | Not applicable | `ToolDecision{Allowed: true}`. Outcome empty, or `allowed_once` or `allowed_session` if approval was used |
+| Rejected by rule, workspace, policy, or approval outcome | Not applicable | `ToolDecision{Allowed: false, Status: ToolStatusRejected, Reason}` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Store gagal dibaca (policy, grant, session) | Tidak berlaku | error biasa | Ya | `Allowed: false`, `Reason` menyebut kegagalan baca |
-| `EvalSymlinks` gagal selain path belum ada | Tidak berlaku | error biasa | Ya | `Allowed: false` |
-| Modul `permission` tidak aktif | Tidak berlaku | Default spec #3 (fail-closed) | Tidak | Tool ditolak |
+| Store read fails (policy, grant, session) | Not applicable | plain error | Yes | `Allowed: false`, `Reason` names the read failure |
+| `EvalSymlinks` fails for reasons other than a missing path | Not applicable | plain error | Yes | `Allowed: false` |
+| `permission` module not active | Not applicable | spec #3 default (fail-closed) | No | Tool rejected |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Bisa menulis `approval/asked` dan `approval/decided` lewat `API-APPR-002`.
-- **Idempotensi**: Tidak berlaku. Setiap `tool/call` diputuskan sekali.
-- **Konkurensi**: Membaca policy terbaru setiap kali (`Q-014`). Hasil satu call tidak mempengaruhi call lain di turn yang sama kecuali lewat log.
-- **Paparan data**: `Reason` menyebut nama tool dan pola yang cocok. Tidak menyalin argumen tool (ADR 0004).
+- **State transition**: May write `approval/asked` and `approval/decided` through `API-APPR-002`.
+- **Idempotency**: Not applicable. Each `tool/call` is decided once.
+- **Concurrency**: Reads the latest policy each time (`Q-014`). The result of one call does not affect other calls in the same turn except through the log.
+- **Data exposure**: `Reason` names the tool and the matched pattern. Does not copy tool arguments (ADR 0004).
 
-## API-APPR-001: `SetPolicy` dan `EffectivePolicy`
+## API-APPR-001: `SetPolicy` and `EffectivePolicy`
 
-- **Tujuan**: mengatur dan membaca policy session.
+- **Purpose**: set and read the session policy.
 - **Requirements**: `REQ-APPR-001`
-- **Acceptance criteria**: `AC-APPR-001` sampai `AC-APPR-004`
-- **Stabilitas**: Baru
-- **Otorisasi**: Proses pemilik store dan pemanggil dari channel pemilik session (CLI `/permission`, `/yolo`, `--yolo`). Tidak ada jalur lain.
+- **Acceptance criteria**: `AC-APPR-001` to `AC-APPR-004`
+- **Stability**: New
+- **Authorization**: Process that owns the store and callers from the session owner's channel (CLI `/permission`, `/yolo`, `--yolo`). No other path.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada |
-| Argumen | `policy` | `core.Policy` | Ya (`SetPolicy`) | `trust`, `ask`, atau `never` |
+| Argument | `sessionID` | string | Yes | Session must exist |
+| Argument | `policy` | `core.Policy` | Yes (`SetPolicy`) | `trust`, `ask`, or `never` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| `SetPolicy` | Tidak berlaku | Event `approval/policy` tertulis |
-| `EffectivePolicy` | Tidak berlaku | Nilai `approval/policy` terakhir di rantai. Jika tidak ada, `permission` agent |
+| `SetPolicy` | Not applicable | `approval/policy` event written |
+| `EffectivePolicy` | Not applicable | Last `approval/policy` value in the chain. If none, the agent's `permission` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Nilai policy tidak valid | Tidak berlaku | `ErrInvalidPolicy` | Tidak | Tidak ada event |
-| Session tidak ada | Tidak berlaku | `ErrSessionNotFound` | Tidak | Tidak ada event |
+| Invalid policy value | Not applicable | `ErrInvalidPolicy` | No | No event |
+| Session does not exist | Not applicable | `ErrSessionNotFound` | No | No event |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: `approval/policy` tercatat. Berlaku mulai evaluasi tool berikutnya.
-- **Idempotensi**: Tidak berlaku. Setiap `SetPolicy` menambah event.
-- **Konkurensi**: Lewat writer.
-- **Paparan data**: Tidak ada.
+- **State transition**: `approval/policy` recorded. Takes effect from the next tool evaluation.
+- **Idempotency**: Not applicable. Each `SetPolicy` adds an event.
+- **Concurrency**: Through the writer.
+- **Data exposure**: None.
 
 ## API-APPR-002: `Request` (audit, timeout, cancel, fail-closed)
 
-- **Tujuan**: meminta jawaban approval dan mencatat audit-nya.
+- **Purpose**: request an approval answer and record its audit trail.
 - **Requirements**: `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005`
-- **Acceptance criteria**: `AC-APPR-005`, `AC-APPR-006`, `AC-APPR-011` sampai `AC-APPR-014`
-- **Stabilitas**: Baru. Sensitif keamanan
-- **Otorisasi**: Dipanggil hanya oleh listener `tools.pre_execute` di API-PERM-003.
+- **Acceptance criteria**: `AC-APPR-005`, `AC-APPR-006`, `AC-APPR-011` to `AC-APPR-014`
+- **Stability**: New. Security-sensitive
+- **Authorization**: Called only by the `tools.pre_execute` listener in API-PERM-003.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `req` | `core.ApprovalRequest` | Ya | `CallID` harus merujuk `tool/call` yang ada di session |
+| Argument | `req` | `core.ApprovalRequest` | Yes | `CallID` must reference an existing `tool/call` in the session |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Penjawab menjawab dengan outcome valid | Tidak berlaku | Outcome dari penjawab. `approval/asked` dan `approval/decided` tersimpan |
+| Answerer answers with a valid outcome | Not applicable | Outcome from the answerer. `approval/asked` and `approval/decided` stored |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `approval/asked` gagal ditulis | Tidak berlaku | error biasa | Ya | Penjawab tidak dipanggil. Outcome `unavailable` |
-| Batas 10 menit lewat | Tidak berlaku | `unavailable` (reason `timeout`) | Tidak | `approval/decided` tertulis |
-| Context turn dibatalkan | Tidak berlaku | `cancelled` | Tidak | `approval/decided` tertulis |
-| `approval/decided` gagal ditulis | Tidak berlaku | error biasa | Ya | Outcome dianggap `unavailable`. Tool tidak berjalan |
+| `approval/asked` fails to write | Not applicable | plain error | Yes | Answerer not called. Outcome `unavailable` |
+| 10 minute deadline passed | Not applicable | `unavailable` (reason `timeout`) | No | `approval/decided` written |
+| Turn context cancelled | Not applicable | `cancelled` | No | `approval/decided` written |
+| `approval/decided` fails to write | Not applicable | plain error | Yes | Outcome treated as `unavailable`. Tool does not run |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: `approval/asked` lalu `approval/decided`. Tepat satu `approval/decided` per `request_id`.
-- **Idempotensi**: Tidak berlaku. Setiap permintaan punya `request_id` ULID baru.
-- **Konkurensi**: Penulisan `approval/decided` memakai context tanpa pembatalan dengan batas 5 detik agar audit tetap tersimpan saat turn dibatalkan.
-- **Paparan data**: Tidak ada argumen tool di `approval/asked`. Log level `info` mencatat `call_id` dan outcome saja.
+- **State transition**: `approval/asked` then `approval/decided`. Exactly one `approval/decided` per `request_id`.
+- **Idempotency**: Not applicable. Each request has a new ULID `request_id`.
+- **Concurrency**: `approval/decided` is written with a non-cancelling context with a 5 second limit, so the audit is stored even when the turn is cancelled.
+- **Data exposure**: No tool arguments in `approval/asked`. The `info` log level records only `call_id` and outcome.
 
-## API-APPR-003: Hook `approval.request` (penjawab)
+## API-APPR-003: Hook `approval.request` (answerer)
 
-- **Tujuan**: memberi kesempatan channel menjawab approval untuk session miliknya.
+- **Purpose**: give a channel the chance to answer approvals for sessions it owns.
 - **Requirements**: `REQ-APPR-003`
-- **Acceptance criteria**: `AC-APPR-007` sampai `AC-APPR-010`
-- **Stabilitas**: Baru
-- **Otorisasi**: Penjawab hanya menjawab session miliknya. Penjawab yang tidak memiliki session memanggil `next`.
+- **Acceptance criteria**: `AC-APPR-007` to `AC-APPR-010`
+- **Stability**: New
+- **Authorization**: An answerer only answers sessions it owns. An answerer that does not own the session calls `next`.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Hook | `core.ApprovalRequest` | struct (spec #2, `API-CORE-011`) | Ya | Tanpa argumen tool |
+| Hook | `core.ApprovalRequest` | struct (spec #2, `API-CORE-011`) | Yes | No tool arguments |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Penjawab memiliki session dan menjawab | Tidak berlaku | `core.ApprovalOutcome` dari set tertutup: `allowed_once`, `allowed_session`, `rejected`, `cancelled`, `unavailable` |
+| Answerer owns the session and answers | Not applicable | `core.ApprovalOutcome` from the closed set: `allowed_once`, `allowed_session`, `rejected`, `cancelled`, `unavailable` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Tidak ada penjawab | Tidak berlaku | `unavailable` (default handler) | Tidak | Tool ditolak |
-| Penjawab mengembalikan error | Tidak berlaku | `unavailable` | Tidak | Listener berikutnya tidak berjalan |
-| Outcome di luar set tertutup | Tidak berlaku | `unavailable` | Tidak | Tool ditolak |
+| No answerer | Not applicable | `unavailable` (default handler) | No | Tool rejected |
+| Answerer returns an error | Not applicable | `unavailable` | No | Next listener does not run |
+| Outcome outside the closed set | Not applicable | `unavailable` | No | Tool rejected |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada. Penulisan audit dimiliki API-APPR-002.
-- **Idempotensi**: Tidak berlaku.
-- **Konkurensi**: Waterfall sesuai spec #2 (`REQ-HOOK-001`).
-- **Paparan data**: Penjawab boleh membaca `tool/call` lewat `call_id`. Store tidak mengirim argumen lewat hook.
+- **State transition**: None. Audit writing is owned by API-APPR-002.
+- **Idempotency**: Not applicable.
+- **Concurrency**: Waterfall per spec #2 (`REQ-HOOK-001`).
+- **Data exposure**: The answerer may read `tool/call` through `call_id`. The store does not send arguments through the hook.
 
-## API-APPR-004: Fungsi batas izin subagent
+## API-APPR-004: Subagent permission bound function
 
-- **Tujuan**: menghitung policy child yang tidak melebihi induk.
+- **Purpose**: compute a child's policy that does not exceed the parent's.
 - **Requirements**: `REQ-APPR-006`
 - **Acceptance criteria**: `AC-APPR-015`, `AC-APPR-016`
-- **Stabilitas**: Baru. Dipakai tool `task` di spec subagent (M4).
-- **Otorisasi**: Tidak berlaku. Fungsi murni.
+- **Stability**: New. Used by the `task` tool in the subagent spec (M4).
+- **Authorization**: Not applicable. Pure function.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `parent`, `child` | `core.Policy` | Ya | Nilai valid |
-| Argumen | `parentDeny`, `childDeny` | `[]Pattern` | Ya | Hasil `ParsePattern` |
+| Argument | `parent`, `child` | `core.Policy` | Yes | Valid values |
+| Argument | `parentDeny`, `childDeny` | `[]Pattern` | Yes | Result of `ParsePattern` |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Hitung | Tidak berlaku | Policy paling ketat. Daftar deny gabungan |
+| Computed | Not applicable | Strictest policy. Merged deny list |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Policy tidak valid | Tidak berlaku | `ErrInvalidPolicy` | Tidak | Tidak ada hasil |
+| Invalid policy | Not applicable | `ErrInvalidPolicy` | No | No results |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada.
-- **Idempotensi**: Fungsi murni.
-- **Konkurensi**: Tidak berlaku.
-- **Paparan data**: Tidak ada.
+- **State transition**: None.
+- **Idempotency**: Pure function.
+- **Concurrency**: Not applicable.
+- **Data exposure**: None.
 
-## API-APPR-005: `lana.ApproveWith` (penjawab library)
+## API-APPR-005: `lana.ApproveWith` (library answerer)
 
-- **Tujuan**: memberi jawaban approval untuk session channel `library` lewat fungsi Go.
+- **Purpose**: give approval answers for `library` channel sessions through a Go function.
 - **Requirements**: `REQ-APPR-007`
 - **Acceptance criteria**: `AC-APPR-017`
-- **Stabilitas**: Baru. Sensitif keamanan
-- **Otorisasi**: Dipasang lewat opsi `lana.New` (spec #3 `API-LIB-001`). Hanya menjawab session dengan channel `library`. Session channel lain diteruskan dengan `next`.
+- **Stability**: New. Security-sensitive
+- **Authorization**: Installed through the `lana.New` option (spec #3 `API-LIB-001`). Answers only sessions with channel `library`. Sessions on other channels are passed on with `next`.
 
 ```go
 package lana
 
-// ApproveWith mendaftarkan penjawab untuk channel library di hook core.ApprovalRequest.
-// Opsi ini dipasang lewat New(ctx, opts, ApproveWith(fn)).
+// ApproveWith registers an answerer for the library channel on the core.ApprovalRequest hook.
+// This option is installed through New(ctx, opts, ApproveWith(fn)).
 func ApproveWith(fn func(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome) Option
 ```
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `fn` | func | Ya | Dipanggil untuk tiap permintaan approval di session channel `library`. `nil` berarti tidak ada penjawab, sehingga hasilnya `unavailable` (fail-closed) |
+| Argument | `fn` | func | Yes | Called for each approval request in a `library` channel session. `nil` means there is no answerer, so the result is `unavailable` (fail-closed) |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Session channel `library` | — | Outcome dari `fn` dipakai (`API-APPR-003`). Audit ditulis `API-APPR-002` |
-| Session channel lain | — | `fn` tidak dipanggil. Listener memanggil `next` |
+| Session on channel `library` | — | Outcome from `fn` is used (`API-APPR-003`). Audit written by `API-APPR-002` |
+| Session on another channel | — | `fn` is not called. Listener calls `next` |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| `fn` panik | — | `unavailable` | Tidak | Panic ditangkap dengan `recover`. Tool ditolak |
-| `fn` mengembalikan outcome di luar set tertutup | — | `unavailable` | Tidak | Tool ditolak (`API-APPR-003`) |
+| `fn` panics | — | `unavailable` | No | Panic caught with `recover`. Tool rejected |
+| `fn` returns an outcome outside the closed set | — | `unavailable` | No | Tool rejected (`API-APPR-003`) |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Tidak ada. Penulisan audit dimiliki `API-APPR-002`.
-- **Idempotensi**: Tidak berlaku.
-- **Konkurensi**: `fn` bisa dipanggil paralel untuk tool `Read`. `fn` harus aman dipakai banyak goroutine.
-- **Paparan data**: `fn` boleh membaca `tool/call` lewat `call_id`. Store tidak mengirim argumen lewat hook.
+- **State transition**: None. Audit writing is owned by `API-APPR-002`.
+- **Idempotency**: Not applicable.
+- **Concurrency**: `fn` may be called in parallel for `Read` tools. `fn` must be safe for use by many goroutines.
+- **Data exposure**: `fn` may read `tool/call` through `call_id`. The store does not send arguments through the hook.
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Tidak. API baru.
-- **Deprecation**: Tidak berlaku.
+- **Breaking change**: No. New API.
+- **Deprecation**: Not applicable.
 
 ## API-COMP-001: `CompactNow`
 
-- **Tujuan**: meringkas riwayat session saat pemilik meminta (`/compact`).
+- **Purpose**: summarize a session's history on the owner's request (`/compact`).
 - **Requirements**: `REQ-COMP-002`
 - **Acceptance criteria**: `AC-COMP-004`, `AC-COMP-005`
-- **Stabilitas**: Baru
-- **Otorisasi**: Dipanggil dari channel pemilik session (spec #1) lewat `core.Compactor` (`API-CORE-015`). Spec #3 tidak punya `CompactNow` (`CQ-019` spec #3).
+- **Stability**: New
+- **Authorization**: Called from the session owner's channel (spec #1) through `core.Compactor` (`API-CORE-015`). Spec #3 has no `CompactNow` (`CQ-019` of spec #3).
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen | `sessionID` | string | Ya | Session harus ada dan tanpa turn terbuka |
+| Argument | `sessionID` | string | Yes | Session must exist and have no open turn |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Summary tertulis | Tidak berlaku | `core.CompactionResult` dengan `UptoSeq`, `TokensBefore`, `TokensAfter`. Event `compaction/summary` tertulis |
+| Summary written | Not applicable | `core.CompactionResult` with `UptoSeq`, `TokensBefore`, `TokensAfter`. `compaction/summary` event written |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Turn sedang berjalan | Tidak berlaku | `ErrTurnActive` | Ya, setelah turn selesai | Tidak ada event |
-| Session tanpa event | Tidak berlaku | `ErrNothingToCompact` | Tidak | Tidak ada event |
-| Ringkasan gagal dari provider | Tidak berlaku | error provider | Ya | Tidak ada event |
-| `last_seq` berubah sejak dibaca | Tidak berlaku | `ErrSessionChanged` | Ya | Tidak ada event |
+| Turn is running | Not applicable | `ErrTurnActive` | Yes, after the turn ends | No events |
+| Session has no events | Not applicable | `ErrNothingToCompact` | No | No events |
+| Summary fails from the provider | Not applicable | provider error | Yes | No events |
+| `last_seq` changed since it was read | Not applicable | `ErrSessionChanged` | Yes | No events |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Event `compaction/summary` tertulis. Event lama tidak dihapus.
-- **Idempotensi**: Tidak berlaku. Setiap panggilan membuat summary baru.
-- **Konkurensi**: Optimistic: `last_seq` diverifikasi terhadap nilai saat ringkasan dibuat, di transaksi append yang sama. Ini menjaga invarian `REQ-STORE-005`.
-- **Paparan data**: Isi ringkasan tersimpan di log. Tidak dicatat ke log level `info`.
+- **State transition**: `compaction/summary` event written. Old events are not deleted.
+- **Idempotency**: Not applicable. Each call creates a new summary.
+- **Concurrency**: Optimistic: `last_seq` is verified against the value when the summary was created, in the same append transaction. This keeps the invariant of `REQ-STORE-005`.
+- **Data exposure**: Summary contents are stored in the log. Not written to the `info` log level.
 
-## API-COMP-002: Compaction otomatis dan retry
+## API-COMP-002: Automatic compaction and retry
 
-- **Tujuan**: menjaga konteks model di bawah batas dan mengulang sekali saat provider menolak karena terlalu panjang.
+- **Purpose**: keep the model context under the limit and retry once when the provider rejects it as too long.
 - **Requirements**: `REQ-COMP-001`, `REQ-COMP-003`
-- **Acceptance criteria**: `AC-COMP-001` sampai `AC-COMP-003`, `AC-COMP-006`, `AC-COMP-007`
-- **Stabilitas**: Baru
-- **Otorisasi**: Listener hook dari modul `compaction`.
+- **Acceptance criteria**: `AC-COMP-001` to `AC-COMP-003`, `AC-COMP-006`, `AC-COMP-007`
+- **Stability**: New
+- **Authorization**: Hook listener of the `compaction` module.
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Config | `agents.<nama>.context_window` | integer | Tidak | Default 128000 |
-| Hook | `agent.pre_step` | input spec #3 | Ya | Session dan turn aktif |
-| Hook | `llm.stream` error | `core.ErrContextTooLong` | Ya (retry) | Error dari provider |
+| Config | `agents.<name>.context_window` | integer | No | Default 128000 |
+| Hook | `agent.pre_step` | input from spec #3 | Yes | Active session and turn |
+| Hook | `llm.stream` error | `core.ErrContextTooLong` | Yes (retry) | Error from the provider |
 
-### Sukses
+### Success
 
-| Kondisi | Exit atau status | Output |
+| Condition | Exit or status | Output |
 |---|---:|---|
-| Token konteks lebih dari 70% | Tidak berlaku | `compaction/summary` tertulis sebelum `step/start` |
-| Retry berhasil setelah `ErrContextTooLong` | Tidak berlaku | Request kedua mengembalikan hasil. Turn lanjut |
+| Context tokens above 70% | Not applicable | `compaction/summary` written before `step/start` |
+| Retry succeeds after `ErrContextTooLong` | Not applicable | Second request returns a result. Turn continues |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit or status | Stable code | Retryable | Visible behavior |
 |---|---:|---|---:|---|
-| Ringkasan otomatis gagal | Tidak berlaku | Log level `warn` | Ya, step berikutnya | Turn lanjut tanpa compaction |
-| Retry juga `ErrContextTooLong` | Tidak berlaku | `core.ErrContextTooLong` | Tidak | Turn berakhir dengan `turn/end` reason `error` |
+| Automatic summary fails | Not applicable | Log level `warn` | Yes, next step | Turn continues without compaction |
+| Retry also returns `ErrContextTooLong` | Not applicable | `core.ErrContextTooLong` | No | Turn ends with `turn/end` reason `error` |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: Event `compaction/summary` tertulis di dalam turn. `upto_seq` = seq tepat sebelum `step/start` step aktif.
-- **Idempotensi**: Tidak berlaku. Retry hanya sekali per step.
-- **Konkurensi**: Berjalan di goroutine turn. Ringkasan memakai adapter provider langsung, tidak lewat hook `llm.stream` (`Q-009`).
-- **Paparan data**: Sama seperti API-COMP-001.
+- **State transition**: `compaction/summary` event written within the turn. `upto_seq` = seq exactly before the `step/start` of the active step.
+- **Idempotency**: Not applicable. Retry happens only once per step.
+- **Concurrency**: Runs in the turn goroutine. The summary uses the provider adapter directly, not the `llm.stream` hook (`Q-009`).
+- **Data exposure**: Same as API-COMP-001.
 
-## Traceability contract
+## Contract Traceability
 
-| Operasi | Requirements | Acceptance criteria | Komponen design | Verifikasi |
+| Operation | Requirements | Acceptance criteria | Design component | Verification |
 |---|---|---|---|---|
-| `API-STORE-001` | `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016` | `AC-STORE-001` sampai `AC-STORE-004`, `AC-STORE-007`, `AC-STORE-008`, `AC-STORE-038` | `store.Open`, migrator | Test `store` di `t.TempDir()` |
-| `API-STORE-002` | `REQ-STORE-006` | `AC-STORE-012` | `store.writer`, projection | Test `store` |
-| `API-STORE-003` | `REQ-STORE-006` | `AC-STORE-013` sampai `AC-STORE-016` | `repair`, `session_leases` | Test `store` dan simulasi crash |
-| `API-STORE-004` | `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015` | `AC-STORE-005`, `AC-STORE-006`, `AC-STORE-009` sampai `AC-STORE-011`, `AC-STORE-036`, `AC-STORE-037` | `store.writer`, hook observe | Test concurrency, test dua instance |
-| `API-STORE-005` | `REQ-STORE-008` | `AC-STORE-019` | read pool | Test `store` |
-| `API-STORE-006` | `REQ-STORE-008` | `AC-STORE-020` | read pool, index | Test `store` |
-| `API-STORE-007` | `REQ-STORE-009` | `AC-STORE-021` sampai `AC-STORE-023` | read pool | Test `store` |
-| `API-STORE-008` | `REQ-STORE-007` | `AC-STORE-017`, `AC-STORE-018` | `store.writer` | Test `store` |
-| `API-STORE-009` | `REQ-STORE-010` | `AC-STORE-024` sampai `AC-STORE-027` | lease | Test `store` dengan PID palsu |
-| `API-STORE-010` | `REQ-STORE-011` | `AC-STORE-028` sampai `AC-STORE-030` | derive, chain | Golden test |
-| `API-STORE-011` | `REQ-STORE-014` | `AC-STORE-034`, `AC-STORE-035` | prune | Test `store` |
-| `API-STORE-012` | `REQ-STORE-012` | `AC-STORE-031` | projection | Test `store` |
-| `API-STORE-013` | `REQ-STORE-013` | `AC-STORE-032`, `AC-STORE-033` | payload | Test fixture versi |
-| `API-PERM-001` | `REQ-PERM-001` | `AC-PERM-001` sampai `AC-PERM-003` | pattern | Test unit dan property test |
-| `API-PERM-002` | `REQ-PERM-001` | `AC-PERM-004` | config validation | Test config |
-| `API-PERM-003` | `REQ-PERM-002` sampai `REQ-PERM-006` | `AC-PERM-005` sampai `AC-PERM-019` | evaluator, workspace, grant | Test unit dan integrasi |
-| `API-APPR-001` | `REQ-APPR-001` | `AC-APPR-001` sampai `AC-APPR-004` | policy | Test `store` dan approval |
-| `API-APPR-002` | `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005` | `AC-APPR-005`, `AC-APPR-006`, `AC-APPR-011` sampai `AC-APPR-014` | approval service | Test dengan jam palsu |
-| `API-APPR-003` | `REQ-APPR-003` | `AC-APPR-007` sampai `AC-APPR-010` | waterfall | Test hook |
-| `API-APPR-004` | `REQ-APPR-006` | `AC-APPR-015`, `AC-APPR-016` | fungsi batas | Test unit dan integrasi |
-| `API-APPR-005` | `REQ-APPR-007` | `AC-APPR-017` | penjawab library (`lana`) | Test integrasi dengan `lana.New` dan MockLlm |
-| `API-COMP-001` | `REQ-COMP-002` | `AC-COMP-004`, `AC-COMP-005` | compaction service | Test dengan `llm` palsu |
-| `API-COMP-002` | `REQ-COMP-001`, `REQ-COMP-003` | `AC-COMP-001` sampai `AC-COMP-003`, `AC-COMP-006`, `AC-COMP-007` | compaction listener | Test dengan `llm` palsu |
+| `API-STORE-001` | `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016` | `AC-STORE-001` to `AC-STORE-004`, `AC-STORE-007`, `AC-STORE-008`, `AC-STORE-038` | `store.Open`, migrator | `store` test in `t.TempDir()` |
+| `API-STORE-002` | `REQ-STORE-006` | `AC-STORE-012` | `store.writer`, projection | `store` test |
+| `API-STORE-003` | `REQ-STORE-006` | `AC-STORE-013` to `AC-STORE-016` | `repair`, `session_leases` | `store` test and crash simulation |
+| `API-STORE-004` | `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015` | `AC-STORE-005`, `AC-STORE-006`, `AC-STORE-009` to `AC-STORE-011`, `AC-STORE-036`, `AC-STORE-037` | `store.writer`, observe hook | Concurrency test, two-instance test |
+| `API-STORE-005` | `REQ-STORE-008` | `AC-STORE-019` | read pool | `store` test |
+| `API-STORE-006` | `REQ-STORE-008` | `AC-STORE-020` | read pool, index | `store` test |
+| `API-STORE-007` | `REQ-STORE-009` | `AC-STORE-021` to `AC-STORE-023` | read pool | `store` test |
+| `API-STORE-008` | `REQ-STORE-007` | `AC-STORE-017`, `AC-STORE-018` | `store.writer` | `store` test |
+| `API-STORE-009` | `REQ-STORE-010` | `AC-STORE-024` to `AC-STORE-027` | lease | `store` test with fake PID |
+| `API-STORE-010` | `REQ-STORE-011` | `AC-STORE-028` to `AC-STORE-030` | derive, chain | Golden test |
+| `API-STORE-011` | `REQ-STORE-014` | `AC-STORE-034`, `AC-STORE-035` | prune | `store` test |
+| `API-STORE-012` | `REQ-STORE-012` | `AC-STORE-031` | projection | `store` test |
+| `API-STORE-013` | `REQ-STORE-013` | `AC-STORE-032`, `AC-STORE-033` | payload | Version fixture test |
+| `API-PERM-001` | `REQ-PERM-001` | `AC-PERM-001` to `AC-PERM-003` | pattern | Unit and property tests |
+| `API-PERM-002` | `REQ-PERM-001` | `AC-PERM-004` | config validation | Config test |
+| `API-PERM-003` | `REQ-PERM-002` to `REQ-PERM-006` | `AC-PERM-005` to `AC-PERM-019` | evaluator, workspace, grant | Unit and integration tests |
+| `API-APPR-001` | `REQ-APPR-001` | `AC-APPR-001` to `AC-APPR-004` | policy | `store` and approval tests |
+| `API-APPR-002` | `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005` | `AC-APPR-005`, `AC-APPR-006`, `AC-APPR-011` to `AC-APPR-014` | approval service | Test with fake clock |
+| `API-APPR-003` | `REQ-APPR-003` | `AC-APPR-007` to `AC-APPR-010` | waterfall | Hook test |
+| `API-APPR-004` | `REQ-APPR-006` | `AC-APPR-015`, `AC-APPR-016` | bound function | Unit and integration tests |
+| `API-APPR-005` | `REQ-APPR-007` | `AC-APPR-017` | library answerer (`lana`) | Integration test with `lana.New` and MockLlm |
+| `API-COMP-001` | `REQ-COMP-002` | `AC-COMP-004`, `AC-COMP-005` | compaction service | Test with fake `llm` |
+| `API-COMP-002` | `REQ-COMP-001`, `REQ-COMP-003` | `AC-COMP-001` to `AC-COMP-003`, `AC-COMP-006`, `AC-COMP-007` | compaction listener | Test with fake `llm` |
 
 ## Blocking Contract Questions
 
-| ID | Pertanyaan | Mengendalikan | Referensi yang diminta | Pemilik | Status | Resolusi |
+| ID | Question | Controls | Requested reference | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|
-| `CQ-001` | Bentuk `Lease`: fungsi `Release` atau token terpisah | `API-STORE-009` | Tidak ada | Ridho | Resolved | Rekomendasi agent: `core.Lease` dengan method `SessionID()` dan `Release(ctx)`. Paling sederhana dan cocok dengan spec #1 yang melepas lease saat pindah session. Direvisi: lihat `CQ-012`. |
-| `CQ-002` | Tanda tangan `Open` dan `Create` | `API-STORE-002`, `API-STORE-003` | Tidak ada | Ridho | Resolved | Rekomendasi agent: `Open` mengembalikan `SessionInfo`. `Create` mengembalikan ID saja. Tidak ada handle session di memori. Direvisi: lihat `CQ-012`. |
-| `CQ-003` | Output hook `tools.pre_execute` | `API-PERM-003` | Konfirmasi spec #3 | Ridho | Resolved | Rekomendasi agent: `core.ToolDecision`. Listener tidak memanggil `next`, sehingga default fail-closed tidak berjalan saat ada keputusan. |
-| `CQ-004` | Field `core.ApprovalRequest` | `API-APPR-002`, `API-APPR-003` | Tidak ada | Ridho | Resolved | Rekomendasi agent: `SessionID`, `TurnID`, `CallID`, `Tool`, `Label`, `Risk`. Tanpa argumen (ADR 0004). Direvisi: lihat `CQ-011` (`Tool` menjadi `ToolName`). |
-| `CQ-005` | Tanda tangan `Compactor` dan hasilnya | `API-COMP-001` | Tidak ada | Ridho | Resolved | Rekomendasi agent: `CompactNow(ctx, sessionID)` mengembalikan `core.CompactionResult`. Spec #1 memakai `core.Compactor.CompactNow(ctx, session)`. Usulan delegasi dari spec #3 dicabut (lihat `CQ-014`). |
-| `CQ-006` | Kelas error konteks terlalu panjang | `API-COMP-002` | Konfirmasi spec #3 | Ridho | Resolved | Rekomendasi agent: sentinel `core.ErrContextTooLong` yang dibungkus adapter provider dengan `errors.Is`. |
-| `CQ-007` | Field payload `approval/*` dan `compaction/summary` | Event contract | Konfirmasi spec #2 | Ridho | Resolved | Rekomendasi agent: field di tabel event contract. Jika struct belum ada di `core`, struct ditambahkan sebagai tambahan core dimiliki spec #4. Direvisi: field dimiliki spec #2 (`CQ-016`). |
-| `CQ-008` | Ukuran dan arti kolom projection `sessions` | `API-STORE-001` | Tidak ada | Ridho | Resolved | Rekomendasi agent: tambahan `workspace` dan `turn_count` dibanding ADR 0009. Keduanya dibutuhkan spec #1 (`/sessions`, `session/created` workspace). |
-| `CQ-009` | Default `context_window` | `API-PERM-002`, `API-COMP-002` | Tidak ada | Ridho | Resolved | Rekomendasi agent: 128000, per agent. Lihat `Q-006` di requirements. |
-| `CQ-010` | Profile yang memuat modul `permission` dan `approval` | Config modul | Konfirmasi spec #2 dan ARCHITECTURE §3 | Ridho | Resolved | Rekomendasi agent: base profile dan `chat` (`minimal` plus channel cli) wajib memuat `permission`, `approval`, dan `compaction`. Profile `minimal` di ARCHITECTURE §3 perlu direvisi. Tanpa ini, `chat` jatuh ke fail-closed. |
-| `CQ-011` | Tipe `core` yang dipakai spec #4 | Bagian Signature Go | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): tipe `NewSession`, `SessionInfo`, `ApprovalRequest`, `ToolDecision`, `CompactionResult`, `Compactor`, `ErrContextTooLong` dipindah ke `API-CORE-015`, `API-CORE-009`, dan `API-CORE-011` (spec #2). Perubahan: `NewEvent` menjadi `EventDraft`. `Lease` dihapus. `ApprovalRequest.Tool` menjadi `ToolName`, `Input` dan `Summary` dihapus, `Label` ditambah. Field `NewSession.Workspace` dan `ParentCallID` tetap. |
-| `CQ-012` | Signature `SessionStore` dan `TryLease` | `API-STORE-002`, `API-STORE-003`, `API-STORE-005`, `API-STORE-006`, `API-STORE-007`, `API-STORE-008`, `API-STORE-009` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): signature spec #2 menang (`CQ-022` spec #2). `Create` dan `Open` mengembalikan `SessionInfo` (merevisi `CQ-002`). `TryLease` mengembalikan `release func() error` (merevisi `CQ-001`). `Events` mengembalikan iterator. `List` memakai `SessionFilter`. `FindPrefix` mengembalikan daftar. `Fork` tanpa argumen `in`. |
-| `CQ-013` | Riwayat model dan `system/message` | `API-STORE-010`, Tabel event | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `DeriveMessages` (store) membungkus `core.DeriveMessages` (`API-CORE-015`, `CQ-028` spec #2). `system/message` tidak masuk riwayat. Pesan terakhirnya dipakai sebagai `ChatRequest.System` (`Q-028`). Compaction tetap sebagai pesan `user` (`Q-013`). |
-| `CQ-014` | `CompactNow` dan `/compact` | `API-COMP-001` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `core.Compactor.CompactNow` dari spec ini dipakai `/compact` di spec #1. Spec #3 tidak punya `CompactNow` (`CQ-019` spec #3). Usulan delegasi dari spec #3 dicabut. |
-| `CQ-015` | Konteks terlalu panjang dan retry | `API-COMP-002`, `API-PROV-003` spec #3 | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): adapter membuat `*core.ProviderError` class `context_length` yang `errors.Is(err, core.ErrContextTooLong)` (`CQ-026` spec #2). Listener `llm.stream` compaction mengulang sekali. Tanpa modul ini, turn berakhir `error` (`Q-005` spec #3). |
-| `CQ-016` | Pemilik field payload dan `workspace`, `agent` | `API-STORE-002`, Tabel event | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): tabel field di `API-CORE-008` (spec #2, `CQ-029`). `session/created.workspace` dan `model/selection.agent` disetujui. |
-| `CQ-017` | Lokasi grammar pola `rules` | `API-PERM-001`, `API-PERM-002` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): paket `internal/pattern` (`DQ-015` spec #2). Dipakai `config` untuk validasi `rules` dan `tools/permission` untuk evaluasi. Grammar tidak berubah. |
-| `CQ-018` | Isi profile base | `API-PERM-003`, `API-APPR-001`, `API-COMP-002` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `sqlite_store`, `permission`, `approval`, dan `compaction` ada di base (`API-CONF-009` spec #2, `CQ-031`). `minimal` sama dengan base. Merevisi `CQ-010`: `chat` dan `run` memuatnya lewat base. |
-| `CQ-019` | Penjawab library `lana.ApproveWith` | `API-APPR-005`, `REQ-APPR-007` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `lana.ApproveWith(fn)` adalah `Option` (spec #3 `API-LIB-001`). Penjawab khusus channel `library`. Ditambah sebagai `REQ-APPR-007`, `AC-APPR-017`, `API-APPR-005`, dan `T-021`. |
-| `CQ-020` | Input hook `tools.pre_execute` | `API-PERM-003` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): input `core.ToolsPreExecuteInput` (spec #2, `CQ-017`), output `core.ToolDecision`. `Label` dihitung dari `AgentName` jika session punya induk. |
-| `CQ-021` | Sentinel yang pindah ke `core` | `API-STORE-007`, `API-STORE-009` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `ErrPrefixTooShort` dan `ErrAmbiguousPrefix` pindah ke `core` (`core.ResolvePrefix`). `ErrLeaseHeld` menjadi `*core.LeaseHeldError` dengan `errors.As`. `ErrUnknownPayloadVersion` ada di `core`. Perilaku tidak berubah. |
-| `CQ-022` | Batas `limit` daftar session | `API-STORE-006` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `SessionFilter.Limit` 0 = tanpa batas (spec #2). Batas 1 sampai 200 di revisi 1 dihapus dari kontrak. Requirements tidak menyebut batas itu, sehingga tidak ada perubahan requirements. |
+| `CQ-001` | Shape of `Lease`: a `Release` function or a separate token | `API-STORE-009` | None | Ridho | Resolved | Agent recommendation: `core.Lease` with method `SessionID()` and `Release(ctx)`. Simplest, and consistent with spec #1, which releases the lease when switching sessions. Revised: see `CQ-012`. |
+| `CQ-002` | Signature of `Open` and `Create` | `API-STORE-002`, `API-STORE-003` | None | Ridho | Resolved | Agent recommendation: `Open` returns `SessionInfo`. `Create` returns the ID only. No in-memory session handle. Revised: see `CQ-012`. |
+| `CQ-003` | Output of hook `tools.pre_execute` | `API-PERM-003` | Confirmation from spec #3 | Ridho | Resolved | Agent recommendation: `core.ToolDecision`. The listener does not call `next`, so the fail-closed default does not run when a decision exists. |
+| `CQ-004` | Fields of `core.ApprovalRequest` | `API-APPR-002`, `API-APPR-003` | None | Ridho | Resolved | Agent recommendation: `SessionID`, `TurnID`, `CallID`, `Tool`, `Label`, `Risk`. No arguments (ADR 0004). Revised: see `CQ-011` (`Tool` becomes `ToolName`). |
+| `CQ-005` | Signature of `Compactor` and its result | `API-COMP-001` | None | Ridho | Resolved | Agent recommendation: `CompactNow(ctx, sessionID)` returns `core.CompactionResult`. Spec #1 uses `core.Compactor.CompactNow(ctx, session)`. The delegation proposal from spec #3 was withdrawn (see `CQ-014`). |
+| `CQ-006` | Error class for context too long | `API-COMP-002` | Confirmation from spec #3 | Ridho | Resolved | Agent recommendation: sentinel `core.ErrContextTooLong` wrapped by the provider adapter so that `errors.Is` matches. |
+| `CQ-007` | Fields of `approval/*` and `compaction/summary` payloads | Event contract | Confirmation from spec #2 | Ridho | Resolved | Agent recommendation: fields in the event contract table. If structs do not exist in `core`, they are added as core additions owned by spec #4. Revised: fields owned by spec #2 (`CQ-016`). |
+| `CQ-008` | Size and meaning of the `sessions` projection columns | `API-STORE-001` | None | Ridho | Resolved | Agent recommendation: `workspace` and `turn_count` added compared with ADR 0009. Both are needed by spec #1 (`/sessions`, `session/created` workspace). |
+| `CQ-009` | Default `context_window` | `API-PERM-002`, `API-COMP-002` | None | Ridho | Resolved | Agent recommendation: 128000, per agent. See `Q-006` in requirements. |
+| `CQ-010` | Profile that loads modules `permission` and `approval` | Module config | Confirmation from spec #2 and ARCHITECTURE §3 | Ridho | Resolved | Agent recommendation: base profile and `chat` (`minimal` plus channel cli) must load `permission`, `approval`, and `compaction`. The `minimal` profile in ARCHITECTURE §3 needs revision. Without this, `chat` falls back to fail-closed. |
+| `CQ-011` | `core` types used by spec #4 | Go Signatures section | Ridho | Resolved | Agent recommendation (reconciliation): types `NewSession`, `SessionInfo`, `ApprovalRequest`, `ToolDecision`, `CompactionResult`, `Compactor`, `ErrContextTooLong` moved to `API-CORE-015`, `API-CORE-009`, and `API-CORE-011` (spec #2). Changes: `NewEvent` becomes `EventDraft`. `Lease` removed. `ApprovalRequest.Tool` becomes `ToolName`, `Input` and `Summary` removed, `Label` added. Fields `NewSession.Workspace` and `ParentCallID` kept. |
+| `CQ-012` | Signature of `SessionStore` and `TryLease` | `API-STORE-002`, `API-STORE-003`, `API-STORE-005`, `API-STORE-006`, `API-STORE-007`, `API-STORE-008`, `API-STORE-009` | Ridho | Resolved | Agent recommendation (reconciliation): signature of spec #2 wins (`CQ-022` of spec #2). `Create` and `Open` return `SessionInfo` (revises `CQ-002`). `TryLease` returns `release func() error` (revises `CQ-001`). `Events` returns an iterator. `List` uses `SessionFilter`. `FindPrefix` returns a list. `Fork` without the `in` argument. |
+| `CQ-013` | Model history and `system/message` | `API-STORE-010`, event table | Ridho | Resolved | Agent recommendation (reconciliation): `DeriveMessages` (store) wraps `core.DeriveMessages` (`API-CORE-015`, `CQ-028` of spec #2). `system/message` does not enter history. Its last message is used as `ChatRequest.System` (`Q-028`). Compaction stays as a `user` message (`Q-013`). |
+| `CQ-014` | `CompactNow` and `/compact` | `API-COMP-001` | Ridho | Resolved | Agent recommendation (reconciliation): `core.Compactor.CompactNow` from this spec is used by `/compact` in spec #1. Spec #3 has no `CompactNow` (`CQ-019` of spec #3). The delegation proposal from spec #3 was withdrawn. |
+| `CQ-015` | Context too long and retry | `API-COMP-002`, `API-PROV-003` of spec #3 | Ridho | Resolved | Agent recommendation (reconciliation): the adapter creates `*core.ProviderError` of class `context_length` that matches `errors.Is(err, core.ErrContextTooLong)` (`CQ-026` of spec #2). The compaction `llm.stream` listener retries once. Without this module, the turn ends with `error` (`Q-005` of spec #3). |
+| `CQ-016` | Owner of payload fields and `workspace`, `agent` | `API-STORE-002`, event table | Ridho | Resolved | Agent recommendation (reconciliation): field table in `API-CORE-008` (spec #2, `CQ-029`). `session/created.workspace` and `model/selection.agent` are approved. |
+| `CQ-017` | Location of the `rules` pattern grammar | `API-PERM-001`, `API-PERM-002` | Ridho | Resolved | Agent recommendation (reconciliation): package `internal/pattern` (`DQ-015` of spec #2). Used by `config` for validating `rules` and by `tools/permission` for evaluation. Grammar unchanged. |
+| `CQ-018` | Contents of the base profile | `API-PERM-003`, `API-APPR-001`, `API-COMP-002` | Ridho | Resolved | Agent recommendation (reconciliation): `sqlite_store`, `permission`, `approval`, and `compaction` are in base (`API-CONF-009` of spec #2, `CQ-031`). `minimal` equals base. Revises `CQ-010`: `chat` and `run` load them through base. |
+| `CQ-019` | Library answerer `lana.ApproveWith` | `API-APPR-005`, `REQ-APPR-007` | Ridho | Resolved | Agent recommendation (reconciliation): `lana.ApproveWith(fn)` is an `Option` (spec #3 `API-LIB-001`). Answerer specific to the `library` channel. Added as `REQ-APPR-007`, `AC-APPR-017`, `API-APPR-005`, and `T-021`. |
+| `CQ-020` | Input of hook `tools.pre_execute` | `API-PERM-003` | Ridho | Resolved | Agent recommendation (reconciliation): input `core.ToolsPreExecuteInput` (spec #2, `CQ-017`), output `core.ToolDecision`. `Label` is computed from `AgentName` if the session has a parent. |
+| `CQ-021` | Sentinels that moved to `core` | `API-STORE-007`, `API-STORE-009` | Ridho | Resolved | Agent recommendation (reconciliation): `ErrPrefixTooShort` and `ErrAmbiguousPrefix` moved to `core` (`core.ResolvePrefix`). `ErrLeaseHeld` becomes `*core.LeaseHeldError` used with `errors.As`. `ErrUnknownPayloadVersion` is in `core`. Behavior unchanged. |
+| `CQ-022` | Limit on the session list | `API-STORE-006` | Ridho | Resolved | Agent recommendation (reconciliation): `SessionFilter.Limit` 0 = no limit (spec #2). The 1 to 200 limit from revision 1 is removed from the contract. Requirements do not mention that limit, so requirements are unchanged. |
 
 None.
 
 ## Approval
 
-- [x] Requirements sudah Approved dan revisinya dicatat di atas.
-- [x] Keberlakuan contract sudah ditentukan.
-- [x] Setiap operasi punya ID stabil dan tertaut ke requirement dan acceptance criteria.
-- [x] Input, sukses, gagal, otorisasi, dan kompatibilitas eksplisit.
-- [x] Tidak ada perilaku yang hanya ada di file ini.
-- [x] Blocking Contract Questions bernilai `None`.
-- **Di-approve oleh**: Ridho (gate dilepas 2026-10-29)
-- **Di-approve pada**: 2026-10-29 (revisi 1). Revisi 2 rekonsiliasi oleh agent atas nama pemilik (gate dilepas 2026-10-29).
+- [x] Requirements are Approved and their revisions are recorded above.
+- [x] Contract applicability is determined.
+- [x] Every operation has a stable ID and links to requirements and acceptance criteria.
+- [x] Input, success, failure, authorization, and compatibility are explicit.
+- [x] No behavior exists only in this file.
+- [x] Blocking Contract Questions is `None`.
+- **Approved by**: Ridho (gate released 2026-10-29)
+- **Approved on**: 2026-10-29 (revision 1). Revision 2 reconciled by the agent on behalf of the owner (gate released 2026-10-29).

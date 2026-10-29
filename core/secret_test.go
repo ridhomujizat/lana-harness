@@ -19,7 +19,7 @@ func TestSecretFormatting(t *testing.T) {
 		s.GoString(),
 	} {
 		if strings.Contains(got, "super-secret-value") {
-			t.Fatalf("format membocorkan nilai: %q", got)
+			t.Fatalf("format leaked value: %q", got)
 		}
 		if got != "***" {
 			t.Fatalf("format=%q want ***", got)
@@ -29,10 +29,10 @@ func TestSecretFormatting(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	logger.Info("secret", "value", s)
 	if strings.Contains(buf.String(), "super-secret-value") {
-		t.Fatalf("slog membocorkan nilai: %s", buf.String())
+		t.Fatalf("slog leaked value: %s", buf.String())
 	}
 	if !strings.Contains(buf.String(), "***") {
-		t.Fatalf("slog tidak meredaksi: %s", buf.String())
+		t.Fatalf("slog did not redact: %s", buf.String())
 	}
 	if s.Reveal() != "super-secret-value" {
 		t.Fatalf("Reveal=%q", s.Reveal())

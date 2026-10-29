@@ -2,7 +2,7 @@ package core
 
 import "fmt"
 
-// ProviderError adalah error provider.
+// ProviderError is a provider error.
 type ProviderError struct {
 	Class   string
 	Status  int
@@ -19,7 +19,7 @@ func (e *ProviderError) Error() string {
 	return fmt.Sprintf("provider error (%s): %s", e.Class, e.Message)
 }
 
-// Is membuat errors.Is(err, ErrContextTooLong) benar jika Class = context_length.
+// Is makes errors.Is(err, ErrContextTooLong) return true when Class = context_length.
 func (e *ProviderError) Is(target error) bool {
 	return e != nil && target == ErrContextTooLong && e.Class == "context_length"
 }

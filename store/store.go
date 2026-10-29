@@ -1,4 +1,4 @@
-// Package store menyediakan SessionStore SQLite.
+// Package store provides the SQLite SessionStore.
 package store
 
 import (
@@ -27,16 +27,16 @@ import (
 var migrationFS embed.FS
 
 var (
-	ErrSessionNotFound       = errors.New("session tidak ditemukan")
-	ErrForkNotAtTurnBoundary = errors.New("fork hanya boleh di turn/end")
-	ErrTurnActive            = errors.New("masih ada turn yang berjalan")
-	ErrLeaseNotHeld          = errors.New("session tidak dipegang proses ini")
-	ErrSessionHasChildren    = errors.New("session masih punya child")
-	ErrSchemaTooNew          = errors.New("schema database lebih baru dari binary")
-	ErrStoreClosed           = errors.New("store sudah ditutup")
-	ErrSessionChanged        = errors.New("session berubah saat compaction")
-	ErrNothingToCompact      = errors.New("tidak ada yang bisa diringkas")
-	ErrInvalidPolicy         = errors.New("policy tidak valid")
+	ErrSessionNotFound       = errors.New("session not found")
+	ErrForkNotAtTurnBoundary = errors.New("fork is only allowed at turn/end")
+	ErrTurnActive            = errors.New("a turn is still running")
+	ErrLeaseNotHeld          = errors.New("session is not held by this process")
+	ErrSessionHasChildren    = errors.New("session still has children")
+	ErrSchemaTooNew          = errors.New("database schema is newer than the binary")
+	ErrStoreClosed           = errors.New("store is closed")
+	ErrSessionChanged        = errors.New("session changed during compaction")
+	ErrNothingToCompact      = errors.New("nothing to compact")
+	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
 const schemaVersion = 2
@@ -50,7 +50,7 @@ var validKinds = map[string]bool{
 	core.KindCompactionSummary: true,
 }
 
-// Store adalah implementasi core.SessionStore dengan SQLite.
+// Store is the SQLite implementation of core.SessionStore.
 type Store struct {
 	mu     sync.Mutex
 	db     *sql.DB
@@ -59,10 +59,10 @@ type Store struct {
 	Hooks  *core.Hooks
 }
 
-// Open membuka database dan menjalankan migrasi.
+// Open opens the database and runs migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
 	if !filepath.IsAbs(path) {
-		return nil, fmt.Errorf("path database harus absolut: %s", path)
+		return nil, fmt.Errorf("database path must be absolute: %s", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-// Close menutup store.
+// Close closes the store.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,10 +180,10 @@ func marshalEvent(kind string, payload any) ([]byte, error) {
 	return NormalizePayload(kind, raw)
 }
 
-// NormalizePayload men-decode payload ke versi sekarang.
+// NormalizePayload decodes a payload to the current version.
 func NormalizePayload(kind string, raw json.RawMessage) (json.RawMessage, error) {
 	if !validKinds[kind] {
-		return nil, fmt.Errorf("kind tidak dikenal: %s", kind)
+		return nil, fmt.Errorf("unknown kind: %s", kind)
 	}
 	var value map[string]any
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -191,11 +191,11 @@ func NormalizePayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 	}
 	v, ok := value["v"]
 	if !ok {
-		return nil, fmt.Errorf("payload tanpa v")
+		return nil, fmt.Errorf("payload has no v")
 	}
 	version, ok := v.(float64)
 	if !ok {
-		return nil, fmt.Errorf("v bukan integer")
+		return nil, fmt.Errorf("v is not an integer")
 	}
 	switch int(version) {
 	case 0:
@@ -208,10 +208,10 @@ func NormalizePayload(kind string, raw json.RawMessage) (json.RawMessage, error)
 	}
 }
 
-// Create membuat session dan session/created.
+// Create creates a session and session/created.
 func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInfo, error) {
 	if in.Agent == "" || in.Channel == "" || in.Workspace == "" {
-		return core.SessionInfo{}, errors.New("agent, channel, dan workspace wajib")
+		return core.SessionInfo{}, errors.New("agent, channel, and workspace are required")
 	}
 	workspace := in.Workspace
 	if abs, err := filepath.Abs(workspace); err == nil {
@@ -253,7 +253,7 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 	return info, nil
 }
 
-// Info membaca proyeksi session.
+// Info reads the session projection.
 func (s *Store) Info(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 	if err := s.assertOpen(); err != nil {
 		return core.SessionInfo{}, err
@@ -278,10 +278,10 @@ func (s *Store) info(ctx context.Context, sessionID string) (core.SessionInfo, e
 	return info, nil
 }
 
-// Append menulis batch event atomik.
+// Append writes a batch of events atomically.
 func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.EventDraft) ([]core.SessionEvent, error) {
 	if len(drafts) == 0 {
-		return nil, errors.New("drafts kosong")
+		return nil, errors.New("drafts are empty")
 	}
 	var events []core.SessionEvent
 	err := s.withWrite(ctx, func(conn *sql.Conn) error {
@@ -298,7 +298,7 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 		seq := lastSeq
 		for _, draft := range drafts {
 			if !validKinds[draft.Kind] {
-				return fmt.Errorf("kind tidak dikenal: %s", draft.Kind)
+				return fmt.Errorf("unknown kind: %s", draft.Kind)
 			}
 			if draft.Kind == core.KindTurnStart && status == "running" {
 				return ErrTurnActive
@@ -341,7 +341,7 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 	return events, nil
 }
 
-// Events membaca event dari seq.
+// Events reads events from seq.
 func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) iter.Seq2[core.SessionEvent, error] {
 	return func(yield func(core.SessionEvent, error) bool) {
 		if err := s.assertOpen(); err != nil {
@@ -390,7 +390,7 @@ func (s *Store) loadEvents(ctx context.Context, sessionID string) ([]core.Sessio
 	return out, nil
 }
 
-// ChainEvents mengembalikan rantai induk dipotong inherited_seq.
+// ChainEvents returns the parent chain truncated at inherited_seq.
 func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	info, err := s.info(ctx, sessionID)
 	if err != nil {
@@ -416,7 +416,7 @@ func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.Sessi
 	return chain, nil
 }
 
-// DeriveMessages memakai core.DeriveMessages.
+// DeriveMessages uses core.DeriveMessages.
 func (s *Store) DeriveMessages(ctx context.Context, sessionID string) ([]core.Message, error) {
 	events, err := s.ChainEvents(ctx, sessionID)
 	if err != nil {
@@ -425,10 +425,10 @@ func (s *Store) DeriveMessages(ctx context.Context, sessionID string) ([]core.Me
 	return core.DeriveMessages(events)
 }
 
-// List mengembalikan session terbaru.
+// List returns the most recent sessions.
 func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionInfo, error) {
 	if f.Limit < 0 {
-		return nil, errors.New("limit negatif")
+		return nil, errors.New("negative limit")
 	}
 	query := "SELECT id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at FROM sessions WHERE 1=1"
 	args := []any{}
@@ -465,7 +465,7 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 	return out, rows.Err()
 }
 
-// FindPrefix mencari session dengan prefix tanpa peka huruf.
+// FindPrefix finds sessions by case-insensitive prefix.
 func (s *Store) FindPrefix(ctx context.Context, prefix string) ([]core.SessionInfo, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT id FROM sessions WHERE UPPER(id) LIKE UPPER(?) || '%' ORDER BY id", prefix)
 	if err != nil {
@@ -492,7 +492,7 @@ func (s *Store) FindPrefix(ctx context.Context, prefix string) ([]core.SessionIn
 	return out, rows.Err()
 }
 
-// Fork membuat child dari turn/end induk.
+// Fork creates a child from the parent's turn/end.
 func (s *Store) Fork(ctx context.Context, parentID string, atSeq int64) (core.SessionInfo, error) {
 	parent, err := s.info(ctx, parentID)
 	if err != nil {
@@ -525,7 +525,7 @@ func (s *Store) Fork(ctx context.Context, parentID string, atSeq int64) (core.Se
 	return s.info(ctx, childID)
 }
 
-// Open membuka session dengan repair dan syarat lease.
+// Open opens a session with repair and a lease requirement.
 func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 	info, err := s.info(ctx, sessionID)
 	if err != nil {
@@ -551,7 +551,7 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 		if err != nil {
 			return err
 		}
-		// Approval yatim.
+		// Orphaned approval.
 		asked := map[string]string{}
 		decided := map[string]bool{}
 		for _, event := range events {
@@ -578,7 +578,7 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 				return err
 			}
 		}
-		// Call yatim.
+		// Orphaned call.
 		calls := map[string]string{}
 		results := map[string]bool{}
 		for _, event := range events {
@@ -634,7 +634,7 @@ func currentHost() string {
 	return h
 }
 
-// TryLease mengambil lease session.
+// TryLease acquires the session lease.
 func (s *Store) TryLease(ctx context.Context, sessionID string) (func() error, error) {
 	if _, err := s.info(ctx, sessionID); err != nil {
 		return nil, err
@@ -666,7 +666,7 @@ func (s *Store) TryLease(ctx context.Context, sessionID string) (func() error, e
 	}, nil
 }
 
-// Prune menghapus session tanpa child.
+// Prune deletes a session that has no children.
 func (s *Store) Prune(ctx context.Context, sessionID string) error {
 	return s.withWrite(ctx, func(conn *sql.Conn) error {
 		var count int
@@ -700,7 +700,7 @@ func (s *Store) Prune(ctx context.Context, sessionID string) error {
 	})
 }
 
-// RebuildProjections membangun ulang tabel sessions dari event.
+// RebuildProjections rebuilds the sessions table from events.
 func (s *Store) RebuildProjections(ctx context.Context) error {
 	return s.withWrite(ctx, func(conn *sql.Conn) error {
 		rows, err := conn.QueryContext(ctx, "SELECT id FROM sessions")

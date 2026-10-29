@@ -20,17 +20,17 @@ func validateInput(schema json.RawMessage, input json.RawMessage) error {
 	}
 	var value map[string]any
 	if err := json.Unmarshal(input, &value); err != nil {
-		return fmt.Errorf("input bukan object")
+		return fmt.Errorf("input is not an object")
 	}
 	for _, key := range spec.Required {
 		if _, ok := value[key]; !ok {
-			return fmt.Errorf("field '%s' wajib diisi", key)
+			return fmt.Errorf("field '%s' is required", key)
 		}
 	}
 	if spec.Additional != nil && !*spec.Additional {
 		for key := range value {
 			if _, ok := spec.Properties[key]; !ok {
-				return fmt.Errorf("field '%s' tidak dikenal", key)
+				return fmt.Errorf("field '%s' is unknown", key)
 			}
 		}
 	}
@@ -46,7 +46,7 @@ func validateInput(schema json.RawMessage, input json.RawMessage) error {
 			continue
 		}
 		if prop.Type != "" && !jsonTypeMatches(prop.Type, item) {
-			return fmt.Errorf("field '%s' harus %s", key, prop.Type)
+			return fmt.Errorf("field '%s' must be %s", key, prop.Type)
 		}
 	}
 	return nil

@@ -1,4 +1,4 @@
-// Package lana adalah runtime embeddable lana-harness.
+// Package lana is the embeddable lana-harness runtime.
 package lana
 
 import (
@@ -26,7 +26,7 @@ import (
 	_ "github.com/ridhomujizat/lana-harness/tools/permission"
 )
 
-// ApprovalMode adalah opsi approval awal runtime.
+// ApprovalMode is the runtime's initial approval option.
 type ApprovalMode int
 
 const (
@@ -34,7 +34,7 @@ const (
 	PolicyTrust
 )
 
-// Options adalah opsi New.
+// Options is the input to New.
 type Options struct {
 	Home      string
 	Layers    []config.Layer
@@ -45,24 +45,24 @@ type Options struct {
 	Providers map[string]core.Provider
 }
 
-// Option adalah opsi tambahan New.
+// Option is an additional option for New.
 type Option func(*runtimeOptions)
 
 type runtimeOptions struct {
 	approve ApproveFunc
 }
 
-// ApproveFunc menjawab approval untuk channel library.
+// ApproveFunc answers approvals for the library channel.
 type ApproveFunc = func(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome
 
-// ApproveWith memasang penjawab approval.
+// ApproveWith installs an approval responder.
 func ApproveWith(fn ApproveFunc) Option {
 	return func(o *runtimeOptions) { o.approve = fn }
 }
 
 var (
-	ErrEmptyPrompt     = errors.New("prompt kosong")
-	ErrNoRoute         = errors.New("route library tidak ditemukan")
+	ErrEmptyPrompt     = errors.New("prompt is empty")
+	ErrNoRoute         = errors.New("library route not found")
 	ErrUnknownAgent    = agent.ErrUnknownAgent
 	ErrSessionBusy     = agent.ErrSessionBusy
 	ErrSessionNotFound = agent.ErrSessionNotFound
@@ -71,10 +71,10 @@ var (
 	ErrEmptyModel      = agent.ErrEmptyModel
 )
 
-// ProviderError adalah alias core.ProviderError.
+// ProviderError is an alias for core.ProviderError.
 type ProviderError = core.ProviderError
 
-// Runtime adalah runtime library.
+// Runtime is the library runtime.
 type Runtime struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -114,17 +114,17 @@ func (m *providedStoreModule) Provides() []core.ServiceKey {
 func (m *providedStoreModule) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	raw, ok := cfg.Values["_store"]
 	if !ok {
-		return fmt.Errorf("provided_store tanpa _store")
+		return fmt.Errorf("provided_store without _store")
 	}
 	store, ok := raw.(core.SessionStore)
 	if !ok || store == nil {
-		return fmt.Errorf("_store bukan SessionStore")
+		return fmt.Errorf("_store is not a SessionStore")
 	}
 	return b.Provide(core.ServiceSessions, store)
 }
 func (m *providedStoreModule) Stop(context.Context) error { return nil }
 
-// New membangun runtime library.
+// New builds the library runtime.
 func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -158,7 +158,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	registry, _ := coreCtx.Agents.(*agent.Registry)
 	if registry == nil {
 		_ = coreCtx.Shutdown(ctx)
-		return nil, fmt.Errorf("service agents tidak tersedia")
+		return nil, fmt.Errorf("service agents not available")
 	}
 	if opts.Approval == PolicyTrust {
 		coreCtx.Hooks.ToolsPreExecute.Use(func(context.Context, core.ToolsPreExecuteInput, core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
@@ -209,7 +209,7 @@ func replaceModule(rows []core.ModuleRow, id, module string, values map[string]a
 		}
 		return nil
 	}
-	return fmt.Errorf("baris modul '%s' tidak ditemukan", id)
+	return fmt.Errorf("module row '%s' not found", id)
 }
 
 func setProviders(rows []core.ModuleRow, providers map[string]core.Provider) {
@@ -308,20 +308,20 @@ func normalizeWorkspace(path string) (string, error) {
 	return abs, nil
 }
 
-// Request adalah permintaan Run atau Stream.
+// Request is the input to Run or Stream.
 type Request struct {
 	Agent     string
 	Prompt    string
 	SessionID string
 }
 
-// Usage adalah jumlah token hasil satu turn.
+// Usage is the token count of one turn.
 type Usage struct {
 	InputTokens  int
 	OutputTokens int
 }
 
-// Result adalah hasil satu turn.
+// Result is the outcome of one turn.
 type Result struct {
 	Text       string
 	SessionID  string
@@ -336,7 +336,7 @@ const (
 	StopError     = "error"
 )
 
-// Run menjalankan satu turn.
+// Run executes one turn.
 func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	if err := rt.closedError(); err != nil {
 		return Result{}, err
@@ -379,7 +379,7 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	return result, nil
 }
 
-// Event adalah event Stream.
+// Event is an event from Stream.
 type Event interface{ isEvent() }
 
 type Session struct {
@@ -406,7 +406,7 @@ func (ToolCall) isEvent()   {}
 func (ToolResult) isEvent() {}
 func (Done) isEvent()       {}
 
-// Stream mengirim event turn sebagai iterator.
+// Stream yields the turn's events as an iterator.
 func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		if err := rt.closedError(); err != nil {
@@ -509,7 +509,7 @@ func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, err
 	}
 }
 
-// Close menutup runtime.
+// Close shuts down the runtime.
 func (rt *Runtime) Close() error {
 	rt.closeMu.Lock()
 	defer rt.closeMu.Unlock()
@@ -529,7 +529,7 @@ func (rt *Runtime) Close() error {
 	return rt.closeErr
 }
 
-// CreateSession membuat session channel cli untuk direktori kerja saat ini.
+// CreateSession creates a cli-channel session for the current working directory.
 func (rt *Runtime) CreateSession(ctx context.Context, agentName string) (core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {
 		return core.SessionInfo{}, err
@@ -547,7 +547,7 @@ func (rt *Runtime) CreateSession(ctx context.Context, agentName string) (core.Se
 	return rt.store.Create(ctx, core.NewSession{Agent: agentName, Channel: "cli", Address: workspace, Workspace: workspace})
 }
 
-// channelAgent mengembalikan agent dari route pertama untuk channel, atau "".
+// channelAgent returns the agent of the first route for the channel, or "".
 func (rt *Runtime) channelAgent(channel string) string {
 	for _, route := range rt.result.Config.Routes {
 		if route.Channel == channel {
@@ -557,7 +557,7 @@ func (rt *Runtime) channelAgent(channel string) string {
 	return ""
 }
 
-// AgentNames mengembalikan nama agent yang terdaftar, terurut.
+// AgentNames returns the registered agent names, sorted.
 func (rt *Runtime) AgentNames() []string {
 	names := make([]string, 0, len(rt.result.Config.Agents))
 	for name := range rt.result.Config.Agents {
@@ -567,7 +567,7 @@ func (rt *Runtime) AgentNames() []string {
 	return names
 }
 
-// AgentModel mengembalikan "provider:model" agent.
+// AgentModel returns the agent's "provider:model".
 func (rt *Runtime) AgentModel(agentName string) string {
 	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
 		return agentCfg.Provider + ":" + agentCfg.Model
@@ -575,7 +575,7 @@ func (rt *Runtime) AgentModel(agentName string) string {
 	return ""
 }
 
-// AgentPolicy mengembalikan policy awal agent.
+// AgentPolicy returns the agent's initial policy.
 func (rt *Runtime) AgentPolicy(agentName string) string {
 	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
 		return string(agentCfg.Permission)
@@ -583,7 +583,7 @@ func (rt *Runtime) AgentPolicy(agentName string) string {
 	return ""
 }
 
-// SessionInfo membuka session berdasarkan id atau prefix.
+// SessionInfo opens a session by id or prefix.
 func (rt *Runtime) SessionInfo(ctx context.Context, id string) (core.SessionInfo, error) {
 	if id == "" {
 		return core.SessionInfo{}, ErrSessionNotFound
@@ -595,7 +595,7 @@ func (rt *Runtime) SessionInfo(ctx context.Context, id string) (core.SessionInfo
 	return core.ResolvePrefix(matches, id)
 }
 
-// SubscribeLive berlangganan frame hidup session.
+// SubscribeLive subscribes to the session's live frames.
 func (rt *Runtime) SubscribeLive(ctx context.Context, sessionID string) (*core.Subscription[core.LiveFrame], error) {
 	if err := rt.closedError(); err != nil {
 		return nil, err
@@ -603,7 +603,7 @@ func (rt *Runtime) SubscribeLive(ctx context.Context, sessionID string) (*core.S
 	return rt.coreCtx.Agents.SubscribeLive(sessionID)
 }
 
-// Send menaruh pesan ke inbox session.
+// Send puts a message into the session's inbox.
 func (rt *Runtime) Send(ctx context.Context, sessionID, text string) error {
 	if err := rt.closedError(); err != nil {
 		return err
@@ -611,7 +611,7 @@ func (rt *Runtime) Send(ctx context.Context, sessionID, text string) error {
 	return rt.coreCtx.Agents.Send(ctx, sessionID, text)
 }
 
-// Cancel membatalkan turn yang sedang berjalan.
+// Cancel cancels the turn that is currently running.
 func (rt *Runtime) Cancel(ctx context.Context, sessionID string) error {
 	if err := rt.closedError(); err != nil {
 		return err
@@ -619,7 +619,7 @@ func (rt *Runtime) Cancel(ctx context.Context, sessionID string) error {
 	return rt.coreCtx.Agents.Cancel(ctx, sessionID)
 }
 
-// Policy mengembalikan policy efektif session.
+// Policy returns the session's effective policy.
 func (rt *Runtime) Policy(ctx context.Context, sessionID string) (core.Policy, error) {
 	if err := rt.closedError(); err != nil {
 		return "", err
@@ -627,7 +627,7 @@ func (rt *Runtime) Policy(ctx context.Context, sessionID string) (core.Policy, e
 	return rt.coreCtx.Approval.EffectivePolicy(ctx, sessionID)
 }
 
-// SetPolicy mengubah policy efektif session.
+// SetPolicy changes the session's effective policy.
 func (rt *Runtime) SetPolicy(ctx context.Context, sessionID string, policy core.Policy) error {
 	if err := rt.closedError(); err != nil {
 		return err
@@ -635,7 +635,7 @@ func (rt *Runtime) SetPolicy(ctx context.Context, sessionID string, policy core.
 	return rt.coreCtx.Approval.SetPolicy(ctx, sessionID, policy)
 }
 
-// History mengembalikan seluruh event session.
+// History returns all events of the session.
 func (rt *Runtime) History(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	if err := rt.closedError(); err != nil {
 		return nil, err
@@ -643,7 +643,7 @@ func (rt *Runtime) History(ctx context.Context, sessionID string) ([]core.Sessio
 	return rt.store.ChainEvents(ctx, sessionID)
 }
 
-// LastSession mengembalikan session cli terakhir untuk workspace saat ini.
+// LastSession returns the last cli session for the current workspace.
 func (rt *Runtime) LastSession(ctx context.Context) (core.SessionInfo, error) {
 	workspace, err := normalizeWorkspace(".")
 	if err != nil {
@@ -659,7 +659,7 @@ func (rt *Runtime) LastSession(ctx context.Context) (core.SessionInfo, error) {
 	return list[0], nil
 }
 
-// ListSessions mengembalikan session cli untuk workspace saat ini.
+// ListSessions returns the cli sessions for the current workspace.
 func (rt *Runtime) ListSessions(ctx context.Context, limit int) ([]core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {
 		return nil, err
@@ -671,7 +671,7 @@ func (rt *Runtime) ListSessions(ctx context.Context, limit int) ([]core.SessionI
 	return rt.store.List(ctx, core.SessionFilter{Channel: "cli", Address: workspace, Limit: limit})
 }
 
-// ForkSession menyalin session pada batas turn terakhir.
+// ForkSession copies the session up to the end of its last turn.
 func (rt *Runtime) ForkSession(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {
 		return core.SessionInfo{}, err
@@ -687,12 +687,12 @@ func (rt *Runtime) ForkSession(ctx context.Context, sessionID string) (core.Sess
 		}
 	}
 	if at == 0 {
-		return core.SessionInfo{}, errors.New("belum ada turn selesai untuk fork")
+		return core.SessionInfo{}, errors.New("no completed turn to fork yet")
 	}
 	return rt.store.Fork(ctx, sessionID, at)
 }
 
-// SetAgent mengganti agent untuk session.
+// SetAgent changes the session's agent.
 func (rt *Runtime) SetAgent(ctx context.Context, sessionID, agentName string) error {
 	if err := rt.closedError(); err != nil {
 		return err
@@ -700,7 +700,7 @@ func (rt *Runtime) SetAgent(ctx context.Context, sessionID, agentName string) er
 	return rt.coreCtx.Agents.SetAgent(ctx, sessionID, agentName)
 }
 
-// SetModel mengganti model (provider:model) untuk session.
+// SetModel changes the session's model (provider:model).
 func (rt *Runtime) SetModel(ctx context.Context, sessionID, model string) error {
 	if err := rt.closedError(); err != nil {
 		return err
@@ -708,23 +708,23 @@ func (rt *Runtime) SetModel(ctx context.Context, sessionID, model string) error 
 	return rt.coreCtx.Agents.SetModel(ctx, sessionID, model)
 }
 
-// Compact meringkas riwayat session sekarang.
+// Compact compacts the session's history now.
 func (rt *Runtime) Compact(ctx context.Context, sessionID string) (core.CompactionResult, error) {
 	if err := rt.closedError(); err != nil {
 		return core.CompactionResult{}, err
 	}
 	service, ok := rt.coreCtx.Lookup(core.ServiceCompaction)
 	if !ok {
-		return core.CompactionResult{}, errors.New("layanan compaction tidak tersedia")
+		return core.CompactionResult{}, errors.New("compaction service not available")
 	}
 	compactor, ok := service.(core.Compactor)
 	if !ok {
-		return core.CompactionResult{}, errors.New("layanan compaction tidak kompatibel")
+		return core.CompactionResult{}, errors.New("compaction service is incompatible")
 	}
 	return compactor.CompactNow(ctx, sessionID)
 }
 
-// agentFor memilih agent dari request, session, atau route default.
+// agentFor picks the agent from the request, the session, or the default route.
 func (rt *Runtime) agentFor(ctx context.Context, req Request) (string, error) {
 	if req.Agent != "" {
 		return rt.routeAgent(req.Agent)

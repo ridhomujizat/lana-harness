@@ -71,17 +71,17 @@ func TestEffectiveConfigRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(tomlOut), "literal-value") {
-		t.Fatalf("TOML membocorkan secret: %s", tomlOut)
+		t.Fatalf("TOML leaked secret: %s", tomlOut)
 	}
 	jsonOut, err := json.Marshal(res.Config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(jsonOut), "literal-value") {
-		t.Fatalf("JSON membocorkan secret: %s", jsonOut)
+		t.Fatalf("JSON leaked secret: %s", jsonOut)
 	}
 	if !strings.Contains(string(tomlOut), "***") || !strings.Contains(string(jsonOut), "***") {
-		t.Fatalf("redaksi tidak muncul: toml=%s json=%s", tomlOut, jsonOut)
+		t.Fatalf("redaction missing: toml=%s json=%s", tomlOut, jsonOut)
 	}
 }
 
@@ -107,10 +107,10 @@ func TestSecretsPermWarning(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("warning tidak ada: %v", res.Warnings)
+		t.Fatalf("warning missing: %v", res.Warnings)
 	}
 	if !strings.Contains(buf.String(), "chmod 600") {
-		t.Fatalf("warning tidak dicatat di slog: %s", buf.String())
+		t.Fatalf("warning not logged to slog: %s", buf.String())
 	}
 }
 
@@ -122,17 +122,17 @@ func TestMCPEnvInterpolationSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := res.Config.MCP["github"].Env["GITHUB_TOKEN"].Reveal(); got != "abc" {
-		t.Fatalf("nilai=%q", got)
+		t.Fatalf("value=%q", got)
 	}
 	out, err := toml.Marshal(res.Config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(out), "abc") {
-		t.Fatalf("secret bocor: %s", out)
+		t.Fatalf("secret leaked: %s", out)
 	}
 	if !strings.Contains(string(out), "***") {
-		t.Fatalf("redaksi tidak ada: %s", out)
+		t.Fatalf("redaction missing: %s", out)
 	}
 }
 
@@ -144,19 +144,19 @@ func TestNonMCPFieldNotInterpolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := res.Config.Agents["x"].PromptFile; got != "${HOME}/p.md" {
-		t.Fatalf("prompt_file berubah: %q", got)
+		t.Fatalf("prompt_file changed: %q", got)
 	}
 }
 
 func TestMissingVarError(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, filepath.Join(home, "config.toml"), "[mcp.x]\ncommand = \"cmd\"\nenv = { TOKEN = \"${TIDAK_ADA}\" }\n")
+	writeFile(t, filepath.Join(home, "config.toml"), "[mcp.x]\ncommand = \"cmd\"\nenv = { TOKEN = \"${MISSING_VAR}\" }\n")
 	_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
 	var errs Errors
 	if !errors.As(err, &errs) {
-		t.Fatalf("error bukan Errors: %v", err)
+		t.Fatalf("error is not Errors: %v", err)
 	}
-	if !strings.Contains(err.Error(), "TIDAK_ADA") || !strings.Contains(err.Error(), "mcp.x.env.TOKEN") {
-		t.Fatalf("pesan salah: %v", err)
+	if !strings.Contains(err.Error(), "MISSING_VAR") || !strings.Contains(err.Error(), "mcp.x.env.TOKEN") {
+		t.Fatalf("wrong message: %v", err)
 	}
 }

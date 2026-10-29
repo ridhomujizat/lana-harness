@@ -21,18 +21,18 @@ func (probeTool) Spec() core.ToolSpec {
 func (probeTool) Risk(json.RawMessage) core.Risk { return core.RiskWrite }
 
 func (probeTool) Call(context.Context, core.ToolCtx, json.RawMessage) (core.ToolOutput, error) {
-	return core.ToolOutput{Status: core.ToolStatusSuccess, Output: "ditulis"}, nil
+	return core.ToolOutput{Status: core.ToolStatusSuccess, Output: "written"}, nil
 }
 
 func TestCliSessionLiveFramesAndApproval(t *testing.T) {
 	use := "tool_use"
 	end := "end_turn"
-	text := "selesai"
+	text := "done"
 	script := mock.Script{Responses: []mock.Response{
 		{Events: []mock.Event{{ToolUse: &mock.ToolUse{ID: "c1", Name: "write_probe", Input: json.RawMessage("{}")}}, {Stop: &use}}},
 		{Events: []mock.Event{{Text: &text}, {Stop: &end}}},
 	}}
-	base := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.asisten]\nprovider = \"mock\"\nmodel = \"m\"\npermission = \"ask\"\ntools = [\"write_probe\"]\n\n[[routes]]\nchannel = \"cli\"\nagent = \"asisten\"\n"
+	base := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.assistant]\nprovider = \"mock\"\nmodel = \"m\"\npermission = \"ask\"\ntools = [\"write_probe\"]\n\n[[routes]]\nchannel = \"cli\"\nagent = \"assistant\"\n"
 	approved := 0
 	rt, err := New(context.Background(), Options{
 		Home:      t.TempDir(),
@@ -48,7 +48,7 @@ func TestCliSessionLiveFramesAndApproval(t *testing.T) {
 	}
 	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
-	info, err := rt.CreateSession(ctx, "asisten")
+	info, err := rt.CreateSession(ctx, "assistant")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func TestCliSessionLiveFramesAndApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	result, err := rt.Run(ctx, Request{Agent: "asisten", Prompt: "tulis", SessionID: info.ID})
+	result, err := rt.Run(ctx, Request{Agent: "assistant", Prompt: "write", SessionID: info.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != "selesai" {
+	if result.Text != "done" {
 		t.Fatalf("text = %q", result.Text)
 	}
 	if approved != 1 {
@@ -93,7 +93,7 @@ func TestCliSessionLiveFramesAndApproval(t *testing.T) {
 	joined := strings.Join(kinds, ",")
 	for _, want := range []string{"text_delta", "tool_call", "tool_result"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("frame %q tidak ada: %s", want, joined)
+			t.Fatalf("frame %q missing: %s", want, joined)
 		}
 	}
 	sessions, err := rt.ListSessions(ctx, 10)

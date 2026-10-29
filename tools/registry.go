@@ -1,4 +1,4 @@
-// Package tools menyediakan registry tool dan pipeline hook tool.
+// Package tools provides the tool registry and the tool hook pipeline.
 package tools
 
 import (
@@ -9,50 +9,50 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Registry adalah implementasi core.ToolRegistry.
+// Registry is the implementation of core.ToolRegistry.
 type Registry struct {
 	tools map[string]core.Tool
 }
 
-// NewRegistry membuat registry kosong.
+// NewRegistry creates an empty registry.
 func NewRegistry() *Registry { return &Registry{tools: map[string]core.Tool{}} }
 
-// Register menolak nama ganda.
+// Register rejects duplicate names.
 func (r *Registry) Register(t core.Tool) error {
 	if t == nil {
 		return fmt.Errorf("tool nil")
 	}
 	name := t.Spec().Name
 	if name == "" {
-		return fmt.Errorf("nama tool kosong")
+		return fmt.Errorf("tool name is empty")
 	}
 	if _, ok := r.tools[name]; ok {
-		return fmt.Errorf("tool '%s' sudah terdaftar", name)
+		return fmt.Errorf("tool '%s' is already registered", name)
 	}
 	r.tools[name] = t
 	return nil
 }
 
-// Get mengambil tool.
+// Get returns the tool with the given name.
 func (r *Registry) Get(name string) (core.Tool, bool) {
 	t, ok := r.tools[name]
 	return t, ok
 }
 
-// Specs mengembalikan spesifikasi sesuai urutan nama yang diminta.
+// Specs returns the specs in the order of the requested names.
 func (r *Registry) Specs(names []string) ([]core.ToolSpec, error) {
 	out := make([]core.ToolSpec, 0, len(names))
 	for _, name := range names {
 		t, ok := r.tools[name]
 		if !ok {
-			return nil, fmt.Errorf("tool '%s' tidak terdaftar", name)
+			return nil, fmt.Errorf("tool '%s' is not registered", name)
 		}
 		out = append(out, t.Spec())
 	}
 	return out, nil
 }
 
-// Names mengembalikan nama tool terdaftar, terurut.
+// Names returns the registered tool names, sorted.
 func (r *Registry) Names() []string {
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
@@ -62,12 +62,12 @@ func (r *Registry) Names() []string {
 	return names
 }
 
-// Pipeline memasang handler default hook tool.
+// Pipeline installs the default handlers for the tool hooks.
 type Pipeline struct {
 	hooks *core.Hooks
 }
 
-// NewPipeline memasang handler default pada hook yang diberikan.
+// NewPipeline installs the default handlers on the given hooks.
 func NewPipeline(hooks *core.Hooks) *Pipeline {
 	if hooks == nil {
 		hooks = core.NewHooks()
@@ -85,7 +85,7 @@ func defaultPreExecute(_ context.Context, in core.ToolsPreExecuteInput) (core.To
 	return core.ToolDecision{
 		Allowed: false,
 		Status:  core.ToolStatusRejected,
-		Reason:  fmt.Sprintf("default fail-closed: tool %s butuh izin", in.Call.Name),
+		Reason:  fmt.Sprintf("default fail-closed: tool %s requires approval", in.Call.Name),
 	}, nil
 }
 
@@ -107,17 +107,17 @@ func defaultPostExecute(_ context.Context, in core.ToolsPostExecuteInput) (core.
 	return in.Output, nil
 }
 
-// PreExecute menjalankan gerbang tool.
+// PreExecute runs the tool gate.
 func (p *Pipeline) PreExecute(ctx context.Context, in core.ToolsPreExecuteInput) (core.ToolDecision, error) {
 	return p.hooks.ToolsPreExecute.Call(ctx, in)
 }
 
-// Execute menjalankan tool.
+// Execute runs the tool.
 func (p *Pipeline) Execute(ctx context.Context, in core.ToolsExecuteInput) (core.ToolOutput, error) {
 	return p.hooks.ToolsExecute.Call(ctx, in)
 }
 
-// PostExecute menjalankan hook setelah tool.
+// PostExecute runs the hook after the tool.
 func (p *Pipeline) PostExecute(ctx context.Context, in core.ToolsPostExecuteInput) (core.ToolOutput, error) {
 	return p.hooks.ToolsPostExecute.Call(ctx, in)
 }

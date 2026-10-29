@@ -35,7 +35,7 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 		if !ok {
 			add("version", typeMsg("integer", v))
 		} else if n > maxSupportedVersion {
-			add("version", fmt.Sprintf("versi config %d lebih tinggi dari yang didukung (%d)", n, maxSupportedVersion))
+			add("version", fmt.Sprintf("config version %d is higher than the supported version (%d)", n, maxSupportedVersion))
 		}
 	}
 	if raw, ok := m["providers"]; ok {
@@ -129,7 +129,7 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 				}
 				if id, ok := val["id"].(string); ok && id != "" {
 					if first, dup := seen[id]; dup {
-						add(path+".id", fmt.Sprintf("id '%s' sudah dipakai di baris %d", id, first))
+						add(path+".id", fmt.Sprintf("id '%s' is already used on line %d", id, first))
 					} else {
 						p := at(path)
 						seen[id] = p.Line
@@ -150,7 +150,7 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 	}
 	kind, ok := v["kind"]
 	if !ok {
-		add(path+".kind", "wajib diisi")
+		add(path+".kind", "is required")
 	} else if s, ok := kind.(string); !ok {
 		add(path+".kind", typeMsg("string", kind))
 	} else if !contains([]string{"openai_compat", "anthropic"}, s) {
@@ -180,7 +180,7 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 		if !ok {
 			add(path+".timeout", typeMsg("string", val))
 		} else if _, err := time.ParseDuration(s); err != nil {
-			add(path+".timeout", "durasi tidak valid: "+s)
+			add(path+".timeout", "invalid duration: "+s)
 		}
 	}
 }
@@ -213,10 +213,10 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 				continue
 			}
 			if key == "max_steps" && (n < 1 || n > 200) {
-				add(path+"."+key, "harus di antara 1 dan 200")
+				add(path+"."+key, "must be between 1 and 200")
 			}
 			if key == "context_window" && n <= 0 {
-				add(path+"."+key, "harus lebih dari 0")
+				add(path+"."+key, "must be greater than 0")
 			}
 		}
 	}
@@ -242,7 +242,7 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 				}
 				for i, item := range list {
 					if _, err := pattern.ParsePattern(item); err != nil {
-						add(fmt.Sprintf("%s.rules.%s.%d", path, key, i), fmt.Sprintf("pola '%s' tidak valid: %v", item, err))
+						add(fmt.Sprintf("%s.rules.%s.%d", path, key, i), fmt.Sprintf("invalid pattern '%s': %v", item, err))
 					}
 				}
 			}
@@ -259,7 +259,7 @@ func validateRoute(v map[string]any, path string, add func(string, string)) {
 	for _, key := range []string{"channel", "agent"} {
 		val, ok := v[key]
 		if !ok {
-			add(path+"."+key, "wajib diisi")
+			add(path+"."+key, "is required")
 		} else if _, ok := val.(string); !ok {
 			add(path+"."+key, typeMsg("string", val))
 		}
@@ -290,10 +290,10 @@ func validateMCP(v map[string]any, path string, add func(string, string)) {
 		}
 	}
 	if hasCommand && hasURL {
-		add(path+".url", "command dan url tidak boleh diisi bersamaan")
+		add(path+".url", "command and url cannot both be set")
 	}
 	if !hasCommand && !hasURL {
-		add(path, "command atau url wajib diisi")
+		add(path, "command or url is required")
 	}
 	if val, ok := v["args"]; ok {
 		if _, ok := asStringSlice(val); !ok {
@@ -323,11 +323,11 @@ func validateModuleRow(v map[string]any, path string, modules []string, add func
 		}
 	}
 	if idRaw, ok := v["id"]; !ok {
-		add(path+".id", "wajib diisi")
+		add(path+".id", "is required")
 	} else if id, ok := idRaw.(string); !ok {
 		add(path+".id", typeMsg("string", idRaw))
 	} else if id == "" {
-		add(path+".id", "wajib diisi")
+		add(path+".id", "is required")
 	}
 	module, hasModule := v["module"]
 	if hasModule {
@@ -335,7 +335,7 @@ func validateModuleRow(v map[string]any, path string, modules []string, add func
 		if !ok {
 			add(path+".module", typeMsg("string", module))
 		} else if name != "" && !contains(modules, name) {
-			add(path+".module", fmt.Sprintf("modul '%s' tidak dikenal (tersedia: %s)", name, strings.Join(modules, ", ")))
+			add(path+".module", fmt.Sprintf("unknown module '%s' (available: %s)", name, strings.Join(modules, ", ")))
 		}
 	}
 	if val, ok := v["disabled"]; ok {
@@ -353,7 +353,7 @@ func validateModuleRow(v map[string]any, path string, modules []string, add func
 		}
 	}
 	if hasAfter && hasBefore {
-		add(path+".before", "after dan before tidak boleh diisi bersamaan")
+		add(path+".before", "after and before cannot both be set")
 	}
 	if val, ok := v["config"]; ok {
 		if _, ok := asMap(val); !ok {
@@ -374,7 +374,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		path := "agents." + name
 		if raw, ok := agent["provider"]; ok {
 			if p, ok := raw.(string); ok && p != "" && !contains(providerNames, p) {
-				add(path+".provider", fmt.Sprintf("provider '%s' tidak terdaftar (tersedia: %s)", p, strings.Join(providerNames, ", ")))
+				add(path+".provider", fmt.Sprintf("provider '%s' is not registered (available: %s)", p, strings.Join(providerNames, ", ")))
 			}
 		}
 		for _, key := range []string{"subagents", "mcp"} {
@@ -383,11 +383,11 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 				switch key {
 				case "subagents":
 					if !contains(agentNames, item) {
-						add(fmt.Sprintf("%s.subagents.%d", path, i), fmt.Sprintf("subagent '%s' tidak terdaftar", item))
+						add(fmt.Sprintf("%s.subagents.%d", path, i), fmt.Sprintf("subagent '%s' is not registered", item))
 					}
 				case "mcp":
 					if !contains(mcpNames, item) {
-						add(fmt.Sprintf("%s.mcp.%d", path, i), fmt.Sprintf("server mcp '%s' tidak terdaftar", item))
+						add(fmt.Sprintf("%s.mcp.%d", path, i), fmt.Sprintf("mcp server '%s' is not registered", item))
 					}
 				}
 			}
@@ -398,7 +398,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			route, _ := asMap(item)
 			agent, _ := route["agent"].(string)
 			if agent != "" && !contains(agentNames, agent) {
-				add(fmt.Sprintf("routes.%d.agent", i), fmt.Sprintf("agent '%s' tidak terdaftar (tersedia: %s)", agent, strings.Join(agentNames, ", ")))
+				add(fmt.Sprintf("routes.%d.agent", i), fmt.Sprintf("agent '%s' is not registered (available: %s)", agent, strings.Join(agentNames, ", ")))
 			}
 		}
 	}
@@ -416,11 +416,11 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		disabled, _ := row["disabled"].(bool)
 		module, _ := row["module"].(string)
 		if module == "" && !disabled {
-			add("modules."+id+".module", "wajib diisi")
+			add("modules."+id+".module", "is required")
 		}
 		for _, key := range []string{"after", "before"} {
 			if target, ok := row[key].(string); ok && target != "" && !ids[target] {
-				add("modules."+id+"."+key, fmt.Sprintf("id '%s' tidak ada", target))
+				add("modules."+id+"."+key, fmt.Sprintf("id '%s' does not exist", target))
 			}
 		}
 	}
@@ -428,9 +428,9 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 }
 
 func unknownKeyMsg(key string, known []string) string {
-	msg := "key tidak dikenal"
+	msg := "unknown key"
 	if s := suggest(key, known); s != "" {
-		msg += " (maksud Anda: " + s + "?)"
+		msg += " (did you mean: " + s + "?)"
 	}
 	return msg
 }
@@ -557,11 +557,11 @@ func typeName(v any) string {
 }
 
 func typeMsg(want string, got any) string {
-	return "harus " + want + ", dapat " + typeName(got)
+	return "must be " + want + ", got " + typeName(got)
 }
 
 func enumMsg(value string, choices []string) string {
 	sorted := append([]string{}, choices...)
 	sort.Strings(sorted)
-	return fmt.Sprintf("nilai '%s' tidak valid (pilihan: %s)", value, strings.Join(sorted, ", "))
+	return fmt.Sprintf("invalid value '%s' (choices: %s)", value, strings.Join(sorted, ", "))
 }

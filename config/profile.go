@@ -2,7 +2,7 @@ package config
 
 import "sort"
 
-// maxSupportedVersion adalah versi format config yang didukung binary.
+// maxSupportedVersion is the config format version supported by the binary.
 const maxSupportedVersion = 1
 
 const baseTOML = `
@@ -54,7 +54,7 @@ var builtinProfiles = map[string]string{
 	"headless": headlessTOML,
 }
 
-// ProfileNames mengembalikan nama profile bawaan, diurutkan alfabet.
+// ProfileNames returns the built-in profile names, sorted alphabetically.
 func ProfileNames() []string {
 	names := make([]string, 0, len(builtinProfiles))
 	for name := range builtinProfiles {
