@@ -422,7 +422,7 @@ flowchart LR
     - PR/commit: commit T-016 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-017` Implementasi `SetAgent`, `SetModel`, dan resolusi workspace per session
+- [x] `T-017` Implementasi `SetAgent`, `SetModel`, dan resolusi workspace per session
   - Issue/PR: `—`
   - Bergantung pada: `T-013`, `T-012`
   - Requirements: `REQ-LOOP-010`
@@ -436,11 +436,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestSetAgentEvent`, `TestSetModelMidTurn`, `TestSetModelUnknownProvider`, `TestWorkspacePrecedence`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: `TestSetAgentEvent`, `TestSetModelMidTurn`, `TestSetModelUnknownProvider`, `TestWorkspacePrecedence` PASS; model step 1 tetap m1 dan step 2 memakai m2 setelah SetModel.
+    - PR/commit: commit T-017 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-018` Implementasi modul `agent`, modul `tools`, dan boot `lana.New` (opsi dan profile)
   - Issue/PR: `—`
