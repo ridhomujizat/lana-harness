@@ -50,7 +50,7 @@ func cmdChat(args []string) int {
 	}
 
 	approver := tui.NewApprover()
-	rt, providerName, _, err := runtimeFor(ctx, home, agentName, approver.Ask)
+	rt, _, _, fallback, err := runtimeFor(ctx, home, agentName, approver.Ask)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -69,7 +69,7 @@ func cmdChat(args []string) int {
 	}
 	agentName = info.Agent
 	model := rt.AgentModel(agentName)
-	if providerName == "mock" {
+	if fallback {
 		if notice != "" {
 			notice += " · "
 		}

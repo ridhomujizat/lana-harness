@@ -217,10 +217,10 @@ func cmdConfig(args []string) int {
 	}
 }
 
-func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc) (*lana.Runtime, string, string, error) {
+func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc) (*lana.Runtime, string, string, bool, error) {
 	result, err := config.Load(ctx, config.Options{Home: home})
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", false, err
 	}
 	providerName, model := "", ""
 	if agent, ok := result.Config.Agents[agentName]; ok {
@@ -231,6 +231,7 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	if approve != nil {
 		options = append(options, lana.ApproveWith(approve))
 	}
+	fallback := false
 	if providerName != "" {
 		if provider, ok := result.Config.Providers[providerName]; ok && provider.APIKeyEnv != "" {
 			if os.Getenv(provider.APIKeyEnv) == "" && !secretInFile(home, provider.APIKeyEnv) {
@@ -243,11 +244,12 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 				}
 				opts.Providers = map[string]core.Provider{"mock": mock.New(mock.Script{Responses: responses})}
 				providerName, model = "mock", "mock"
+				fallback = true
 			}
 		}
 	}
 	rt, err := lana.New(ctx, opts, options...)
-	return rt, providerName, model, err
+	return rt, providerName, model, fallback, err
 }
 
 func secretInFile(home, name string) bool {
@@ -348,7 +350,7 @@ func cmdRun(args []string) int {
 	if *ask {
 		approve = lineAnswerer
 	}
-	rt, providerName, model, err := runtimeFor(ctx, home, agentName, approve)
+	rt, providerName, model, fallback, err := runtimeFor(ctx, home, agentName, approve)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -360,6 +362,9 @@ func cmdRun(args []string) int {
 		return fail(err, 2)
 	}
 	defer func() { _ = rt.Close() }()
+	if fallback {
+		fmt.Fprintln(os.Stderr, "· API key provider belum diisi; memakai MockLlm, bukan model nyata")
+	}
 	start := time.Now()
 	result, runErr := rt.Run(ctx, lana.Request{Agent: agentName, Prompt: prompt})
 	duration := time.Since(start).Milliseconds()
