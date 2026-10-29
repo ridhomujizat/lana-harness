@@ -125,7 +125,7 @@ flowchart TD
     - PR/commit: commit T-001
     - Deviasi: Perintah Nix memakai `XDG_CACHE_HOME` lokal karena sandbox menolak tulisan ke `~/.cache/nix` (dicatat di docs/eval).
 
-- [ ] `T-002` Buat layout paket dan test aturan import
+- [x] `T-002` Buat layout paket dan test aturan import
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-BUILD-001`
@@ -138,11 +138,11 @@ flowchart TD
     - `nix develop -c go build ./...`
     - `nix develop -c go test ./internal/archtest/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache nix develop -c sh -c 'go build ./... && go test ./internal/archtest/...'`
+    - Hasil: `ok github.com/ridhomujizat/lana-harness/internal/archtest`; exit 0. `TestImportRules`, `TestCoreTransitive`, `TestRuleViolationMessage` lulus.
+    - PR/commit: commit T-002
+    - Deviasi: Perintah memakai cache Go lokal karena sandbox menolak tulisan ke cache pengguna (dicatat di docs/eval).
 
 - [ ] `T-003` Tulis tipe `core` dan schema `Config`
   - Issue/PR: `—`
