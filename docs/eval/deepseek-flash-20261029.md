@@ -40,10 +40,10 @@ Format keputusan: waktu | spec/task | situasi | keputusan | alasan.
 - gofmt -l pada file terlacak: kosong.
 - golangci-lint run ./...: 0 issues.
 - CGO_ENABLED=1 go test -race ./...: seluruh paket ok.
-- Build release tiga platform: darwin/arm64 1.742.514 byte; linux/amd64 1.671.330 byte; linux/arm64 1.638.562 byte; linux statically linked.
+- Build release tiga platform (setelah SQLite): darwin/arm64 11.288.770 byte; linux/amd64 11.747.490 byte; linux/arm64 11.010.210 byte; linux statically linked.
 - Smoke: LANA_HOME=.smoke-home lana init --yes -> tiga file dibuat; secrets 0600.
 - Smoke: LANA_HOME=.smoke-home lana run --output json \"sebutkan file di direktori ini\" -> exit 0, JSON valid, stop_reason end_turn, text MockLlm.
-- Smoke: go run ./examples/embed -> exit 0, mencetak Halo dari embed.
+- Smoke: `nix develop -c go run ./examples/embed` -> exit 0, mencetak Halo dari embed. (`go run` di luar dev shell gagal karena cache Go sandbox.)
 - Smoke provider nyata dilewati karena OPENAI_API_KEY tidak tersedia; MockLlm dipakai dan dicatat.
 
 ### Risiko paling besar
