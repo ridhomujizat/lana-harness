@@ -104,7 +104,7 @@ flowchart TD
 
 ## Tasks
 
-- [ ] `T-001` Siapkan dev shell Nix dan `go.mod`
+- [x] `T-001` Siapkan dev shell Nix dan `go.mod`
   - Issue/PR: `—`
   - Bergantung pada: `None`
   - Requirements: `REQ-DEV-001`
@@ -119,11 +119,11 @@ flowchart TD
     - `nix develop -c go version` (versi memenuhi `go.mod`)
     - `nix develop -c golangci-lint version`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache nix develop -c sh -c 'go version && golangci-lint version'`
+    - Hasil: `go version go1.26.10 darwin/arm64`; `golangci-lint has version 2.15.0 built with go1.27.3`; exit 0. `flake.lock` dibuat. `go.mod` memakai `go 1.24`, sehingga toolchain 1.26.10 memenuhi.
+    - PR/commit: commit T-001
+    - Deviasi: Perintah Nix memakai `XDG_CACHE_HOME` lokal karena sandbox menolak tulisan ke `~/.cache/nix` (dicatat di docs/eval).
 
 - [ ] `T-002` Buat layout paket dan test aturan import
   - Issue/PR: `—`

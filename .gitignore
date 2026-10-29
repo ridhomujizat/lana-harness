@@ -7,3 +7,4 @@ result
 *.db-shm
 .env
 secrets.env
+dist/.nix-cache/
