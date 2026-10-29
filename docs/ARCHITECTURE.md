@@ -42,6 +42,7 @@ Ringkasan teknologi:
 | Subagent | Child session lewat tool `task` | [0011](adr/0011-subagent-sebagai-child-session.md) |
 | Protokol | Server ACP dan SDK JSON-RPC | [0012](adr/0012-acp-dan-sdk-json-rpc.md) |
 | Integrasi agentic tool | Go library, MCP server, REST + SSE API, A2A | [0014](adr/0014-integrasi-sebagai-agentic-tool.md) |
+| Runtime embeddable | Store bisa diganti (SQLite, Postgres, memori), agent di kode, budget per run, OpenTelemetry | [0015](adr/0015-runtime-embeddable-untuk-service.md) |
 
 ```mermaid
 flowchart LR
@@ -104,18 +105,18 @@ Tempat perilaku baru:
 
 ## 3. Profile dan subcommand
 
-Satu binary, banyak peran. Profile memilih modul yang aktif. Konfigurasi efektif dibangun dari
+Satu binary, banyak peran. Profile memilih modul yang aktif. Isi base dan nama modul di `API-CONF-009` (spec #2). Konfigurasi efektif dibangun dari
 lapisan berurutan: base, profile bawaan, `~/.lana/profiles/<profile>.toml`, `~/.lana/config.toml`,
 lalu `--patch`. Baris `[[modules]]` digabung per `id`, dan baris yang sama mengganti seluruh `config`.
 
 | Profile | Subcommand | Isi |
 |---|---|---|
 | `daemon` | `lana daemon` | base + HTTP, web, Telegram, WhatsApp, scheduler, router |
-| `headless` | `lana run --agent X "prompt"` | base + runner one-shot. Policy `never` kecuali `--ask` |
+| `headless` | `lana run --agent X "prompt"` | base + runner one-shot (`cli_runner`, spec #1). Policy `never` kecuali `--ask` |
 | `acp` | `lana acp --agent X` | base + server ACP di stdio |
 | `sdk` | `lana sdk` | base + server JSON-RPC di stdio atau unix socket |
 | `mcp` | `lana mcp [--http <addr>]` | base + lana sebagai MCP server (stdio atau streamable HTTP) |
-| `minimal` | `lana --profile minimal` | provider, store, agent loop saja |
+| `minimal` | `lana --profile minimal` | base: provider (`llm`), tools, store, agent loop, permission, approval, compaction. Sama dengan base |
 
 Subcommand lain:
 
@@ -166,6 +167,18 @@ meng-import `core` dan tidak saling meng-import kecuali lewat interface di `core
 dan package `lana` yang merakit semuanya. Aturan ini diuji dengan `go list -deps`.
 
 API publik untuk embed: package `lana` dan `core`. Package lain tidak dijamin stabil sebelum `v1.0.0`.
+
+Package library (`lana`, `core`, `agent`, `providers/*`, `tools`, `store/*`, `observability/*`) tidak
+boleh meng-import `channels/`, `web/`, atau `protocol/`, supaya service yang meng-embed `lana` tidak
+ikut membawa TUI, Telegram, atau web (ADR 0015). Store tersedia di `store/sqlite`, `store/postgres`,
+dan `store/memstore`.
+
+Mode deploy:
+
+| Mode | Lokasi beban | Cocok untuk |
+|---|---|---|
+| Embed di service (`lana.New`) | Proses service, skala ikut replica | Service job dengan tool domain |
+| Daemon `lana` atau `lana mcp` | Satu proses lana | Pemakaian pribadi, Claude Code via MCP, tool bersama yang ringan |
 
 Build tag untuk modul besar:
 
@@ -417,6 +430,7 @@ Target dicatat di CI, tidak menggagalkan build. Build release:
 | M0 | Fondasi (spec #2): `flake.nix`, Go module, loader profile berlapis, `core` (Context, Module, hook), CI |
 | M1 | Agent loop (spec #3): turn/step, provider `openai_compat`, builtin tools, `MockLlm`, profile `headless`, **Go library** (`lana.New`, `Run`, `Stream`) |
 | M2 | Session dan permission (spec #4): event log, derive, resume, fork, lock, compaction, permission, approval |
+| M2.5 | Runtime embeddable (spec #5, belum dibuat): `store/postgres` dengan advisory lock, `lana.Agent` di kode, `Budget` per run, `MaxConcurrentRuns`, `observability/otel` |
 | M3 | CLI/TUI (spec #1): `lana chat`, `lana run`, `lana init`, `lana config` |
 | M4 | MCP client, skills, subagent, adapter Anthropic, **MCP server** (`lana mcp`) |
 | M5 | Daemon: **REST + SSE API**, Telegram, routing multi-agent, scheduler, memory FTS5 |

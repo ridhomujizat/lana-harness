@@ -28,6 +28,7 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0012](0012-acp-dan-sdk-json-rpc.md) | Sediakan server ACP dan SDK JSON-RPC | Accepted | 2026-10-29 |
 | [0013](0013-gunakan-go-sebagai-single-binary.md) | Gunakan Go sebagai single binary dan library | Accepted | 2026-10-29 |
 | [0014](0014-integrasi-sebagai-agentic-tool.md) | Sediakan lana sebagai agentic tool untuk service lain | Accepted | 2026-10-29 |
+| [0015](0015-runtime-embeddable-untuk-service.md) | Jadikan lana runtime yang bisa di-embed di service | Accepted | 2026-10-29 |
 
 ## How to add an ADR
 

@@ -4,10 +4,11 @@
 - **Requirements**: [requirements.md](requirements.md)
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan
 - **Design**: [design.md](design.md)
-- **Revisi requirements**: 5
-- **Revisi contract**: 3
-- **Revisi design**: 2
-- **Status**: Draft (revisi 2: pindah ke Go, ADR 0013)
+- **Revisi requirements**: 6
+- **Revisi contract**: 4
+- **Revisi design**: 3
+- **Revisi tasks**: 2 (rekonsiliasi: T-002 provider, T-009 `/compact` ke spec #4)
+- **Status**: Approved (revisi 2: pindah ke Go, ADR 0013)
 
 > **Diblokir oleh spec #2, #3, dan #4 (core).** Semua task di bawah memakai interface core yang tercantum di
 > [design: Interface core yang dibutuhkan](design.md#interface-core-yang-dibutuhkan-dari-spec-2-3-4).
@@ -91,7 +92,7 @@ flowchart LR
   - Acceptance criteria: `AC-INIT-001`, `AC-INIT-002`, `AC-INIT-003`, `AC-INIT-004`
   - Operasi contract: `API-CLI-008`
   - Scope:
-    - Wizard `huh` dengan tiga pertanyaan dan default per provider.
+    - Wizard `huh` dengan tiga pertanyaan dan default per provider. Provider hanya `openai` dan `openrouter` di M3 (`CQ-009`).
     - Penulisan atomik; cek semua path dulu tanpa `--force`.
     - `secrets.env` dengan mode `0600` sejak dibuat.
     - Isi `agents/default.md`.
@@ -229,7 +230,7 @@ flowchart LR
 
 - [ ] `T-009` Implementasi slash command
   - Issue/PR: `—`
-  - Bergantung pada: `T-008`
+  - Bergantung pada: `T-008`, spec #4 (`T-018`, `core.Compactor`)
   - Requirements: `REQ-CMD-001`
   - Acceptance criteria: `AC-CMD-001` sampai `AC-CMD-014`
   - Operasi contract: `API-CLI-006`
@@ -237,6 +238,8 @@ flowchart LR
     - `ParseSlash`, `//` sebagai escape, `AllowedWhileRunning()`.
     - Dispatcher ke service core untuk semua perintah di contract.
     - Picker `/sessions` di viewport.
+    - `/compact` memanggil `core.Compactor.CompactNow` dari spec #4 (`API-COMP-001`). Spec #3 tidak punya `CompactNow` (`CQ-010`).
+    - `/model` ditolak saat turn berjalan (pilihan UI, `CQ-011`).
   - Verifikasi:
     - `go test ./channels/cli/commands/...`
     - `go test ./channels/cli -run TestChatCommands`
@@ -303,5 +306,5 @@ flowchart LR
 - [x] Setiap acceptance criterion punya tepat satu pemilik bukti.
 - [x] Setiap task punya scope terbatas, dependency, dan verifikasi.
 - [x] Tidak ada task yang memperkenalkan perilaku baru.
-- **Di-approve oleh**: — (revisi 1 di-approve Ridho 2026-10-29; revisi 2 menunggu)
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29 (revisi 1 dan 2)

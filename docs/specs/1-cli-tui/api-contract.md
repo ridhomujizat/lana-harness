@@ -2,11 +2,11 @@
 
 - **Issue**: [`#1`](https://github.com/ridhomujizat/lana-harness/issues/1)
 - **Requirements**: [requirements.md](requirements.md)
-- **Revisi requirements**: 5
+- **Revisi requirements**: 6
 - **Status requirements**: Approved
-- **Revisi contract**: 3
+- **Revisi contract**: 4 (rekonsiliasi: `CQ-009` sampai `CQ-011`)
 - **Berlaku untuk**: CLI (subcommand, flag, env, exit code, stdout/stderr, format JSON, tombol, slash command, file yang dibuat)
-- **Status**: Draft
+- **Status**: Approved
 
 File ini menetapkan bentuk persis antarmuka terminal. Perilaku dimiliki oleh `requirements.md`.
 
@@ -250,6 +250,8 @@ Parsing: input yang diawali `/` di karakter pertama. `//teks` dikirim ke model s
 | `/help` | — | Boleh | Daftar perintah dan tombol |
 | `/exit` | — | Boleh, membatalkan turn dulu | Keluar `0` |
 
+Perintah `/compact` memanggil `core.Compactor.CompactNow` dari spec #4 (`API-COMP-001`) (`Q-021`). Perintah `/model` ditolak saat turn berjalan (`AC-CMD-013`). Ini pilihan UI (`CQ-011`).
+
 Picker `/sessions` di viewport:
 
 ```text
@@ -347,9 +349,9 @@ Pertanyaan wizard (urut):
 
 | Pertanyaan | Pilihan | Default |
 |---|---|---|
-| Provider | `openai`, `anthropic`, `openrouter` | `openai` |
-| Nama env API key | string | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` |
-| Model default | string | `gpt-5-mini` / `claude-sonnet-5-5` / `openai/gpt-5-mini` |
+| Provider | `openai`, `openrouter` (M3). `anthropic` ditambah saat adapter M4 ada (`CQ-009`) | `openai` |
+| Nama env API key | string | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
+| Model default | string | `gpt-5-mini` / `openai/gpt-5-mini` |
 
 `--yes` memakai semua default tanpa bertanya. File yang dibuat untuk default:
 
@@ -373,8 +375,7 @@ channel = "cli"
 agent = "default"
 ```
 
-Untuk `anthropic`: `kind = "anthropic"` tanpa `base_url`. Untuk `openrouter`:
-`base_url = "https://openrouter.ai/api/v1"`.
+Untuk `openrouter`: `base_url = "https://openrouter.ai/api/v1"`. Untuk `anthropic` (setelah M4): `kind = "anthropic"` tanpa `base_url`. Di M3 kind ini tidak ditawarkan (`CQ-009`).
 
 `$LANA_HOME/agents/default.md`: system prompt umum untuk asisten coding dan personal (isi ditentukan di design).
 
@@ -483,6 +484,9 @@ lana config edit
 | `CQ-006` | Log selama chat | Konvensi bersama | Ridho | Resolved | File log, `LANA_LOG`, `-v` |
 | `CQ-007` | Format `--dump-config` | `API-CLI-001` | Ridho | Resolved | TOML dengan komentar asal, opsi JSON |
 | `CQ-008` | Tampilan `/sessions` | `API-CLI-006` | Ridho | Resolved | Picker di viewport |
+| `CQ-009` | Provider yang ditawarkan `lana init` | `API-CLI-008` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): hanya kind yang didukung build. M3: `openai`, `openrouter`. `anthropic` setelah M4 (`CQ-018` spec #3). Menyelesaikan konflik `SC-003` dan `Q-021` spec #3. |
+| `CQ-010` | Layanan `/compact` | `API-CLI-006` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `/compact` memakai `core.Compactor.CompactNow` (`API-COMP-001` spec #4). Spec #3 tidak punya `CompactNow`. |
+| `CQ-011` | `/model` saat turn berjalan | `API-CLI-006` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): CLI menolak `/model` saat turn berjalan. Ini pilihan UI, bukan batasan kontrak. Spec #3 `SetModel` mengizinkan saat turn dan berlaku mulai step berikutnya. Tidak ada perubahan kontrak. |
 
 None yang masih Open.
 
@@ -498,5 +502,7 @@ info, ikon status, `//` untuk mengirim teks diawali `/`, label `(antre)`, alias 
 - [x] Input, sukses, gagal, otorisasi, dan kompatibilitas eksplisit.
 - [x] Tidak ada perilaku yang hanya ada di file ini.
 - [x] Blocking Contract Questions bernilai `None`.
-- **Di-approve oleh**: Ridho (revisi 2)
-- **Di-approve pada**: 2026-10-29 (revisi 1; revisi 2 menambah error lock session dari `DQ-002`). Revisi 3 (pindah ke Go, ADR 0013) menunggu approval: format `LANA_LOG` berubah ke level `slog`.
+- **Di-approve oleh**: Ridho (revisi 2 dan 3)
+- **Di-approve pada**: 2026-10-29 (revisi 1; revisi 2 menambah error lock session dari `DQ-002`). Revisi 3 (pindah ke Go, ADR 0013; format `LANA_LOG` ke level `slog`) di-approve 2026-10-29.
+
+Revisi 4 (rekonsiliasi oleh agent atas nama pemilik, gate dilepas 2026-10-29): `CQ-009` sampai `CQ-011`, provider `lana init` dibatasi kind yang didukung build, `/compact` lewat spec #4.

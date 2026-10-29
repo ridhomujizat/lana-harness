@@ -1,6 +1,6 @@
 # 0001. System Context Dan Roadmap
 
-- **ADR reference**: [0013. Gunakan Go](../adr/0013-gunakan-go-sebagai-single-binary.md), [0014. Integrasi agentic tool](../adr/0014-integrasi-sebagai-agentic-tool.md), [0002. Core dari modul, service, dan hook](../adr/0002-core-dari-modul-service-dan-hook.md), [0008. Interface](../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0012. ACP dan SDK](../adr/0012-acp-dan-sdk-json-rpc.md)
+- **ADR reference**: [0013. Gunakan Go](../adr/0013-gunakan-go-sebagai-single-binary.md), [0014. Integrasi agentic tool](../adr/0014-integrasi-sebagai-agentic-tool.md), [0015. Runtime embeddable](../adr/0015-runtime-embeddable-untuk-service.md), [0002. Core dari modul, service, dan hook](../adr/0002-core-dari-modul-service-dan-hook.md), [0008. Interface](../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0012. ACP dan SDK](../adr/0012-acp-dan-sdk-json-rpc.md)
 - **Related diagram**: [0002. Agent Loop Dan Approval](0002-agent-loop-dan-approval.md), [0003. Data Model Dan Scheduler](0003-data-model-dan-scheduler.md), [0004. Profile, Fork, Subagent, Dan Protokol](0004-profile-fork-subagent-dan-protokol.md), [0005. Integrasi Agentic Tool](0005-integrasi-agentic-tool.md)
 - **Purpose**: system context, peta service dan hook, dependency antar package, topologi runtime, dan roadmap implementasi.
 
@@ -200,7 +200,8 @@ KISS defaults:
 flowchart LR
   M0["M0 Fondasi"] --> M1["M1 Agent loop dan Go library"]
   M1 --> M2["M2 Session dan permission"]
-  M2 --> M3["M3 CLI dan TUI"]
+  M2 --> M25["M2.5 Runtime embeddable"]
+  M25 --> M3["M3 CLI dan TUI"]
   M3 --> M4["M4 MCP, skills, subagent, MCP server"]
   M4 --> M5["M5 Daemon dan REST API"]
   M5 --> M6["M6 ACP, SDK, web, A2A"]
@@ -212,10 +213,11 @@ flowchart LR
 1. **M0 Fondasi (spec #2)** — `flake.nix` dengan Go dari nixpkgs dan `GOTOOLCHAIN=local`, Go module, layout package, test aturan import, CI GitHub Actions (macOS arm64 dan Linux x86_64). Loader profile berlapis, `core` (Context, Module, hook generik).
 2. **M1 Agent loop dan Go library (spec #3)** — adapter `openai_compat` dengan streaming, agent loop turn dan step dengan inbox, builtin tools, `MockLlm`, profile `minimal` dan `headless`. Package `lana` publik: `New`, `Run`, `Stream`, tool kustom.
 3. **M2 Session dan permission (spec #4)** — `session_events` append-only di `modernc.org/sqlite`, projection, derive, resume, fork, lease, compaction otomatis dan manual. Permission di `tools.pre_execute`, `ctx.approval` fail-closed.
-4. **M3 CLI dan TUI (spec #1)** — `lana chat` (Bubble Tea inline), `lana run`, `lana init`, `lana config`.
-5. **M4 MCP, skills, subagent, MCP server** — MCP client `go-sdk` dengan lazy start, `skill_load`, tool `task`, adapter Anthropic, `lana mcp` (stdio dan streamable HTTP, elicitation untuk approval).
-6. **M5 Daemon dan REST API** — profile `daemon`, REST + SSE (`/v1/runs`, `/v1/sessions`, token per client, OpenAPI), Telegram, routing, scheduler, memory FTS5.
-7. **M6 ACP, SDK, web, A2A** — `lana acp`, `lana sdk`, dashboard (`embed.FS`), A2A server (agent card, task = session).
-8. **M7 WhatsApp dan rilis** — channel WhatsApp, `lana service install`, Docker image `distroless/static`. Ukur target: binary < 40 MB, RAM idle < 30 MB.
-9. **Test di setiap milestone** — `MockLlm`, golden `derive_messages`, resume dari log terpotong, permission matcher, kontrak format OpenAI, merge profile, `testscript` untuk CLI.
-10. **Observability** — `log/slog` dengan handler JSON opsional. Redaksi API key dan token di log dan payload event.
+4. **M2.5 Runtime embeddable (spec #5)** — `store/postgres` (append-only, `pg_try_advisory_lock`), `lana.Agent` di kode, `Budget` per run dengan `turn/end` reason `budget`, `MaxConcurrentRuns`, `observability/otel`. Test kontrak store yang sama untuk SQLite, Postgres, dan memori (ADR 0015).
+5. **M3 CLI dan TUI (spec #1)** — `lana chat` (Bubble Tea inline), `lana run`, `lana init`, `lana config`.
+6. **M4 MCP, skills, subagent, MCP server** — MCP client `go-sdk` dengan lazy start, `skill_load`, tool `task`, adapter Anthropic, `lana mcp` (stdio dan streamable HTTP, elicitation untuk approval).
+7. **M5 Daemon dan REST API** — profile `daemon`, REST + SSE (`/v1/runs`, `/v1/sessions`, token per client, OpenAPI), Telegram, routing, scheduler, memory FTS5.
+8. **M6 ACP, SDK, web, A2A** — `lana acp`, `lana sdk`, dashboard (`embed.FS`), A2A server (agent card, task = session).
+9. **M7 WhatsApp dan rilis** — channel WhatsApp, `lana service install`, Docker image `distroless/static`. Ukur target: binary < 40 MB, RAM idle < 30 MB.
+10. **Test di setiap milestone** — `MockLlm`, golden `derive_messages`, resume dari log terpotong, permission matcher, kontrak format OpenAI, merge profile, `testscript` untuk CLI.
+11. **Observability** — `log/slog` dengan handler JSON opsional. Redaksi API key dan token di log dan payload event.

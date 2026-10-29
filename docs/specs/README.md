@@ -66,6 +66,12 @@ Urutan kerja: approve requirements, lalu contract (jika berlaku), lalu design, l
 Implementasi tidak boleh mulai selama masih ada open question yang memblokir atau artefak
 sebelumnya belum di-approve.
 
+> **Gate dilepas (2026-10-29).** Pemilik meminta agent memakai rekomendasinya sendiri untuk
+> pertanyaan terbuka dan menyusun semua artefak sekaligus. Keputusan seperti itu dicatat dengan
+> awalan `Rekomendasi agent:` di tabel resolusi, dan artefak ditandai Approved atas nama pemilik.
+> Pemilik bisa mengubahnya kapan saja lewat revisi baru. Untuk spec berikutnya, gate berlaku lagi
+> kecuali pemilik melepasnya.
+
 Agent wajib menanyakan setiap pertanyaan yang memblokir ke pemilik dan menunggu jawaban. Mencatat
 pertanyaan di file tidak berarti design atau implementasi boleh lanjut. Pertanyaan sebaiknya
 meminta referensi: issue, screenshot, contoh output, implementasi yang sudah ada, atau arah yang disukai.
@@ -115,5 +121,7 @@ bisa dibalik dan tidak mengubah perilaku yang terlihat.
 | Issue | Fitur | Requirements | Contract | Design | Tasks |
 |---|---|---|---|---|---|
 | — | Template paket | [Template](0000-feature-name/requirements.md) | [Template](0000-feature-name/api-contract.md) | [Template](0000-feature-name/design.md) | [Template](0000-feature-name/tasks.md) |
-| [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI dan TUI chat | [Approved r5](1-cli-tui/requirements.md) | [Draft r3](1-cli-tui/api-contract.md) | [Draft r2](1-cli-tui/design.md) | [Draft r2](1-cli-tui/tasks.md) |
-| [#2](https://github.com/ridhomujizat/lana-harness/issues/2) | Fondasi: Go module, config loader, Context/modul/hook | [Draft r3](2-fondasi/requirements.md) | Belum dibuat | Belum dibuat | Belum dibuat |
+| [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI dan TUI chat | [Approved r6](1-cli-tui/requirements.md) | [Approved r4](1-cli-tui/api-contract.md) | [Approved r3](1-cli-tui/design.md) | [Approved r2](1-cli-tui/tasks.md) |
+| [#2](https://github.com/ridhomujizat/lana-harness/issues/2) | Fondasi: Go module, config loader, Context/modul/hook | [Approved r4](2-fondasi/requirements.md) | [Approved r2](2-fondasi/api-contract.md) | [Approved r2](2-fondasi/design.md) | [Approved r2](2-fondasi/tasks.md) |
+| [#3](https://github.com/ridhomujizat/lana-harness/issues/3) | Agent loop, provider, tools, Go library | [Approved r2](3-agent-loop/requirements.md) | [Approved r2](3-agent-loop/api-contract.md) | [Approved r2](3-agent-loop/design.md) | [Approved r2](3-agent-loop/tasks.md) |
+| [#4](https://github.com/ridhomujizat/lana-harness/issues/4) | Session event log, permission, approval | [Approved r2](4-session-permission/requirements.md) | [Approved r2](4-session-permission/api-contract.md) | [Approved r2](4-session-permission/design.md) | [Approved r2](4-session-permission/tasks.md) |

@@ -47,8 +47,13 @@ flowchart LR
   Daemon --> D1["http dan web"]
   Daemon --> D2["telegram dan whatsapp"]
   Daemon --> D3["scheduler dan router"]
-  Headless["headless"] --> Base
-  Headless --> H1["runner one-shot stdout"]
+  Headless["headless"] --> B1
+  Headless --> B2
+  Headless --> B3
+  Headless --> B4
+  Headless --> B5
+  Headless --> B6
+  Headless --> H1["cli_runner: runner one-shot stdout"]
   Acp["acp"] --> Base
   Acp --> A1["server ACP stdio"]
   Sdk["sdk"] --> Base
@@ -56,6 +61,9 @@ flowchart LR
   Minimal["minimal"] --> B1
   Minimal --> B2
   Minimal --> B3
+  Minimal --> B4
+  Minimal --> B5
+  Minimal --> B6
 ```
 
 ## Fork Session

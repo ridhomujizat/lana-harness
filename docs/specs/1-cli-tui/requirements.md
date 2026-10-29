@@ -2,7 +2,7 @@
 
 - **Issue**: [`#1`](https://github.com/ridhomujizat/lana-harness/issues/1)
 - **Status**: Approved
-- **Revisi**: 5
+- **Revisi**: 6
 - **Pemilik**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan (subcommand, flag, exit code, format output, slash command, tombol)
 - **ADR terkait**: [Index ADR](../../adr/README.md) — [0003](../../adr/0003-multi-agent-dengan-routing-channel.md), [0004](../../adr/0004-permission-mode-per-agent.md), [0008](../../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0009](../../adr/0009-session-sebagai-event-log-append-only.md), [0010](../../adr/0010-profile-dan-config-patch.md)
@@ -296,7 +296,7 @@ Semua subcommand di spec ini harus memakai exit code berikut:
 
 #### REQ-INIT-001: Wizard konfigurasi awal
 
-`lana init` harus menanyakan provider (Anthropic, OpenAI, OpenRouter), nama env API key, dan model
+`lana init` harus menanyakan provider (OpenAI dan OpenRouter di build M3; Anthropic muncul saat adapter-nya ada di M4), nama env API key, dan model
 default, lalu membuat `LANA_HOME` (default `~/.lana/`) berisi `config.toml`, `agents/default.md`,
 dan `secrets.env` dengan permission `0600`. File yang sudah ada tidak boleh ditimpa kecuali `--force`.
 `--yes` menjalankan wizard tanpa pertanyaan dengan nilai default.
@@ -390,7 +390,7 @@ Nilai default `--yes` ditetapkan di contract.
 ### SC-003: Instalasi pertama
 
 **Given** `~/.lana/` belum ada
-**When** user menjalankan `lana init`, memilih Anthropic, lalu `lana chat`
+**When** user menjalankan `lana init`, memilih OpenAI, lalu `lana chat`
 **Then** chat terbuka dengan agent `default`
 
 ### SC-004: Coba arah lain dengan fork
@@ -426,6 +426,9 @@ Nilai default `--yes` ditetapkan di contract.
 | `CQ-002` | Agent `lana run` tanpa `--agent` | Sama seperti chat (revisi 4) |
 | `DQ-002` | Dua proses membuka session yang sama | Tolak proses kedua; lock proses mati dilepas (revisi 5) |
 | `Q-019` | Tanpa TTY | `chat` butuh TTY (exit 2); `run --ask` lewat `/dev/tty`, tanpa TTY outcome `unavailable` |
+| `Q-020` | Provider yang ditawarkan `lana init` (rekonsiliasi revisi 6) | Rekomendasi agent (rekonsiliasi): hanya kind yang didukung build. M3: `openai` dan `openrouter`. `anthropic` muncul setelah adapter M4 ada (spec #3 `Q-021`, `CQ-018`). Ini menyelesaikan konflik `SC-003` dengan spec #3. |
+| `Q-021` | Layanan `/compact` (rekonsiliasi revisi 6) | Rekomendasi agent (rekonsiliasi): `/compact` memanggil `core.Compactor.CompactNow` dari spec #4 (`API-COMP-001`). Spec #3 tidak punya `CompactNow` (`CQ-019` spec #3). |
+| `Q-022` | Ganti model saat turn berjalan (rekonsiliasi revisi 6) | Rekomendasi agent (rekonsiliasi): CLI menolak `/model` saat turn berjalan (`AC-CMD-013`). Ini pilihan UI. Spec #3 tetap mengizinkan `SetModel` saat turn dan berlaku mulai step berikutnya. Tidak ada perubahan kontrak. |
 
 ## Blocking Open Questions
 
@@ -469,4 +472,4 @@ None.
 - [x] Keberlakuan contract eksplisit.
 - [x] Blocking Open Questions bernilai `None`.
 - **Di-approve oleh**: Ridho
-- **Di-approve pada**: 2026-10-29 (revisi 3; revisi 4 dari `CQ-001` dan `CQ-002`; revisi 5 dari `DQ-002`)
+- **Di-approve pada**: 2026-10-29 (revisi 3; revisi 4 dari `CQ-001` dan `CQ-002`; revisi 5 dari `DQ-002`; revisi 6 rekonsiliasi oleh agent atas nama pemilik, gate dilepas 2026-10-29)

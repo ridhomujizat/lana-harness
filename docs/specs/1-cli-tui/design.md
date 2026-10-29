@@ -3,12 +3,12 @@
 - **Issue**: [`#1`](https://github.com/ridhomujizat/lana-harness/issues/1)
 - **Requirements**: [requirements.md](requirements.md)
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan
-- **Revisi requirements**: 5
-- **Revisi contract**: 3
+- **Revisi requirements**: 6
+- **Revisi contract**: 4
 - **Status requirements**: Approved
-- **Status contract**: Draft
-- **Status**: Draft
-- **Revisi design**: 2 (pindah dari Rust ke Go, ADR 0013)
+- **Status contract**: Approved
+- **Status**: Approved
+- **Revisi design**: 3 (revisi 2: pindah dari Rust ke Go, ADR 0013; revisi 3: rekonsiliasi `DQ-004` sampai `DQ-006`)
 
 ## Referensi arsitektur
 
@@ -109,7 +109,7 @@ flowchart TD
 - **logging** — `log/slog`. Level dari `-v` atau `LANA_LOG` (flag menang). `chat` menulis ke
   `$LANA_HOME/logs/lana.log` lewat writer kecil di `internal/logfile` yang berganti file per hari.
   Subcommand lain menulis ke stderr dengan `slog.TextHandler`.
-- **init** — wizard `charmbracelet/huh`. File ditulis atomik (`os.CreateTemp` di folder tujuan lalu
+- **init** — wizard `charmbracelet/huh`. Pilihan provider hanya kind yang didukung build (M3: `openai`, `openrouter`; `anthropic` setelah M4, `DQ-004`). File ditulis atomik (`os.CreateTemp` di folder tujuan lalu
   `os.Rename`). Tanpa `--force`, semua path diperiksa dulu; jika satu sudah ada, tidak ada file yang
   ditulis. `secrets.env` dibuat dengan `os.OpenFile(..., 0o600)`.
 - **config** — memakai loader dari spec #2: config efektif, peta asal, dan error ber-posisi.
@@ -171,11 +171,12 @@ Nama final ditetapkan di spec tersebut; CLI hanya bergantung pada bentuknya.
 
 | Interface | Spec | Dipakai untuk |
 |---|---|---|
-| `config.Load(profile, patches) (Effective, Origins, []ConfigError)` | #2 | `config`, `--dump-config`, boot |
+| `config.Load(ctx, config.Options{Home, Profile, Patches}) (*config.Result, error)` dengan `Result.Origins`, `Result.Warnings`, dan error `config.Errors` | #2 | `config`, `--dump-config`, boot |
 | `core.Context`, `core.Module`, hook `approval.request` dan `session.event` | #2 | Wiring modul CLI |
-| `ctx.Agents.Send(ctx, session, content)`, `Cancel(session)`, `SetAgent`, `SetModel`, `CompactNow` | #3 | Input, batal, `/agent`, `/model`, `/compact` |
+| `ctx.Agents.Send(ctx, session, content)`, `Cancel(ctx, session)`, `SetAgent(ctx, session, agent)`, `SetModel(ctx, session, provider:model)` (`API-CORE-010`) | #3 | Input, batal, `/agent`, `/model` |
+| `core.Compactor.CompactNow(ctx, session)` | #4 | `/compact` |
 | Stream frame hidup per session (text delta) | #3 | Streaming |
-| `ctx.Sessions.Create`, `Open`, `List(channel, address, limit)`, `FindPrefix`, `Fork`, `TryLease` | #4 | Session CLI dan lock |
+| `ctx.Sessions.Create`, `Open`, `List(ctx, SessionFilter{Channel, Address, Limit})`, `FindPrefix` lalu `core.ResolvePrefix`, `Fork`, `TryLease` (mengembalikan `release`) (`API-CORE-009`, `API-CORE-015`) | #4 | Session CLI dan lock |
 | `ctx.Approval.SetPolicy(session, policy)` | #4 | `/permission`, `/yolo`, `--yolo`, `run` |
 
 ### Persistence
@@ -291,6 +292,7 @@ sequenceDiagram
 - Lock session lewat `session_leases` dalam transaksi `BEGIN IMMEDIATE`.
 - `/permission` saat turn berjalan memanggil `ctx.Approval.SetPolicy`; permission engine membaca
   policy terbaru di setiap evaluasi tool (`AC-CMD-014`).
+- `/model` ditolak saat turn berjalan di CLI. Ini pilihan UI (`DQ-006`). Spec #3 mengizinkan `SetModel` saat turn; perubahan berlaku mulai step berikutnya. Tidak perlu perubahan kontrak.
 
 ### Keamanan
 
@@ -405,17 +407,20 @@ Alat bantu test:
 | `DQ-001` | Core belum punya spec | Urutan kerja | Ridho | Resolved | Spec core terpisah (#2, #3, #4); tasks CLI menunggu |
 | `DQ-002` | Dua proses membuka session yang sama | `REQ-SESS-002` | Ridho | Resolved | Tolak proses kedua, lock proses mati dilepas |
 | `DQ-003` | ADR harus Accepted | Approval design | Ridho | Resolved | ADR 0002–0014 Accepted |
+| `DQ-004` | Provider di wizard `init` | `API-CLI-008`, `REQ-INIT-001`, `CQ-009` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): wizard hanya menawarkan kind yang didukung build. M3: `openai`, `openrouter`. `anthropic` setelah adapter M4 (spec #3). Requirements dan contract direvisi. |
+| `DQ-005` | `/compact` memanggil layanan mana | `API-CLI-006`, `CQ-010` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `core.Compactor.CompactNow` dari spec #4 (`API-COMP-001`). Spec #3 tidak punya `CompactNow`. |
+| `DQ-006` | `/model` saat turn berjalan | `API-CLI-006`, `AC-CMD-013`, `CQ-011` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): ditolak di CLI sebagai pilihan UI. Tidak ada perubahan kontrak spec #3 (`SetModel` boleh saat turn). |
 
 None yang masih Open.
 
 ## Approval
 
 - [x] Requirements sudah Approved dan revisinya dicatat.
-- [ ] Contract sudah Approved (revisi 3 menunggu approval).
+- [x] Contract sudah Approved.
 - [x] Scan keputusan arsitektur dan Visual Architecture Check selesai.
 - [x] ADR yang dibutuhkan sudah Accepted.
 - [x] Setiap requirement terpetakan ke satu komponen design.
 - [x] Setiap acceptance criterion punya metode verifikasi.
 - [x] Blocking Design Questions bernilai `None`.
-- **Di-approve oleh**: — (revisi 1 di-approve Ridho; revisi 2 menunggu)
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29 (revisi 1 dan 2; revisi 3 rekonsiliasi oleh agent atas nama pemilik, gate dilepas 2026-10-29)

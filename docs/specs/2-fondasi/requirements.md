@@ -1,8 +1,8 @@
 # Requirements: Fondasi (workspace, profile loader, Context/modul/hook)
 
 - **Issue**: [`#2`](https://github.com/ridhomujizat/lana-harness/issues/2)
-- **Status**: Draft
-- **Revisi**: 3 (pindah ke Go, ADR 0013)
+- **Status**: Approved
+- **Revisi**: 5 (revisi 3: pindah ke Go; revisi 4: koreksi dari design; revisi 5: aturan import library dari ADR 0015)
 - **Pemilik**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan (format config dan profile, API Go publik package `core` dan `config`)
 - **ADR terkait**: [Index ADR](../../adr/README.md) — [0013](../../adr/0013-gunakan-go-sebagai-single-binary.md), [0014](../../adr/0014-integrasi-sebagai-agentic-tool.md), [0002](../../adr/0002-core-dari-modul-service-dan-hook.md), [0010](../../adr/0010-profile-dan-config-patch.md)
@@ -17,7 +17,7 @@
 | ADR 0014 | Integrasi agentic tool | `core` publik, config tanpa file untuk embed |
 | ADR 0002 | Modul, service, hook | `Module`, `Context`, mode hook |
 | ADR 0010 | Profile dan patch | urutan lapisan, aturan merge, profile bawaan, `--dump-config` |
-| Spec #1 | [design: Interface core](../1-cli-tui/design.md#interface-core-yang-dibutuhkan-dari-spec-2) | `ProfileLoader` dengan peta asal dan error ber-span |
+| Spec #1 | [design: Interface core](../1-cli-tui/design.md#interface-core-yang-dibutuhkan-dari-spec-2-3-4) | `ProfileLoader` dengan peta asal dan error ber-span |
 | Instruksi mesin | Nix development | `nix develop`, tanpa install global |
 | Wawancara 2026-10-29 | Pembagian spec core menjadi #2, #3, #4 | scope |
 
@@ -76,7 +76,7 @@ lain (agent loop, channel, permission) dipasang.
 #### REQ-DEV-001: Dev shell Nix
 
 `nix develop` harus menyediakan Go, `gopls`, `golangci-lint`, dan `sqlite`. Versi Go dipin oleh
-`flake.lock` (nixpkgs). Dev shell men-set `GOTOOLCHAIN=local` dan `CGO_ENABLED=0`.
+`flake.lock` (nixpkgs). Dev shell men-set `GOTOOLCHAIN=local` dan `CGO_ENABLED=0`. Pengecualian: `go test -race` butuh cgo, sehingga perintah itu dijalankan dengan `CGO_ENABLED=1`.
 
 - `AC-DEV-001`: Given mesin dengan Nix flakes, when developer menjalankan `nix develop -c go version`, then versi yang tercetak memenuhi direktif `go` di `go.mod`.
 - `AC-DEV-002`: Given dev shell aktif, when developer menjalankan `golangci-lint version`, then perintah berhasil.
@@ -95,10 +95,13 @@ Ukuran binary release dicetak di ringkasan job.
 
 Module harus memakai layout package dari ADR 0013. `core` tidak boleh meng-import package lain di
 module ini. Package implementasi hanya boleh meng-import `core` dan `internal/...`, kecuali yang
-diizinkan ADR 0013 (`cmd/lana` dan package `lana` merakit semuanya).
+diizinkan ADR 0013 (`cmd/lana` dan package `lana` merakit semuanya). Package library (`lana`, `core`,
+`agent`, `providers/*`, `tools`, `store/*`, `observability/*`) tidak boleh meng-import `channels/`, `web/`,
+atau `protocol/` (ADR 0015).
 
 - `AC-BUILD-001`: Given module bersih, when developer menjalankan `go build ./...`, then build berhasil.
 - `AC-BUILD-002`: Given seseorang menambah import dari `core` ke package lain di module ini, when test aturan import dijalankan, then test gagal dan menyebut package yang dilanggar.
+- `AC-BUILD-005`: Given seseorang menambah import dari `lana` ke `channels/cli`, when test aturan import dijalankan, then test gagal dan menyebut kedua package.
 
 #### REQ-BUILD-002: Build release
 
@@ -115,7 +118,7 @@ untuk `darwin/arm64`, `linux/amd64`, dan `linux/arm64`, lalu ukuran binary `lana
 
 Loader harus membangun config efektif dari lapisan berurutan: base, profile bawaan,
 `$LANA_HOME/profiles/<profile>.toml`, `$LANA_HOME/config.toml`, lalu setiap `--patch` sesuai urutan.
-Lapisan yang filenya tidak ada dilewati.
+File profile user dan `config.toml` yang tidak ada dilewati. File `--patch` yang tidak ada adalah error (sesuai spec #1 `API-CLI-001`).
 
 - `AC-CONF-001`: Given `config.toml` dan `--patch a.toml` sama-sama menetapkan `agents.x.model`, when config dimuat, then nilai dari `a.toml` yang dipakai.
 - `AC-CONF-002`: Given `profiles/minimal.toml` tidak ada, when profile `minimal` dimuat, then loader berhasil dan lapisan itu ditandai tidak ada.
@@ -170,7 +173,7 @@ Nilai secret tidak boleh muncul lewat `fmt` (`%v`, `%+v`, `%#v`, `%s`), `slog`, 
 - `AC-CONF-012`: Given `OPENAI_API_KEY` ada di env dan di `secrets.env` dengan nilai berbeda, when secret dibaca, then nilai dari env yang dipakai.
 - `AC-CONF-013`: Given config efektif diserialisasi, when ada secret, then nilainya `"***"`.
 - `AC-CONF-014`: Given nilai secret, when diformat dengan `%#v` atau dicatat dengan `slog`, then hasilnya tidak mengandung nilai asli.
-- `AC-CONF-017`: Given `secrets.env` dengan permission `0644`, when config dimuat, then file tetap dibaca dan peringatan berisi permission sekarang dan `chmod 600 <path>` tampil di log dan stderr.
+- `AC-CONF-017`: Given `secrets.env` dengan permission `0644`, when config dimuat, then file tetap dibaca, loader mengembalikan peringatan berisi permission sekarang dan `chmod 600 <path>`, dan peringatan itu dicatat di log. CLI (spec #1) yang mencetaknya ke stderr.
 
 #### REQ-CONF-007: Interpolasi env di MCP
 
@@ -313,6 +316,9 @@ Tidak berlaku (tidak ada antarmuka user baru).
 
 | ID | Pertanyaan | Resolusi |
 |---|---|---|
+| `R4-001` | `--patch` yang tidak ada | Error, sesuai spec #1 (CQ-015 design spec #2) |
+| `R4-002` | Peringatan `secrets.env` di stderr | Library mengembalikan peringatan; CLI mencetak ke stderr (CQ-007) |
+| `R4-003` | `CGO_ENABLED=0` dan `go test -race` | `-race` dijalankan dengan `CGO_ENABLED=1` (DQ-010) |
 | `Q-001` | Pin versi toolchain | Rev 2: `rust-toolchain.toml`. Rev 3: diganti ADR 0013, Go dari nixpkgs dipin `flake.lock`, `GOTOOLCHAIN=local` |
 | `Q-002` | CI | GitHub Actions di macOS arm64 dan Linux x86_64 |
 | `Q-003` | Key tidak dikenal | Error dengan saran key terdekat |
@@ -331,7 +337,7 @@ None.
 | Requirement | Acceptance criteria | Sumber |
 |---|---|---|
 | `REQ-DEV-001` | `AC-DEV-001`, `AC-DEV-002`, `AC-DEV-003` | Instruksi mesin, ADR 0013 |
-| `REQ-BUILD-001` | `AC-BUILD-001`, `AC-BUILD-002` | ADR 0013 |
+| `REQ-BUILD-001` | `AC-BUILD-001`, `AC-BUILD-002`, `AC-BUILD-005` | ADR 0013, ADR 0015 |
 | `REQ-BUILD-002` | `AC-BUILD-003`, `AC-BUILD-004` | ADR 0013, `Q-005` |
 | `REQ-CI-001` | `AC-CI-001`, `AC-CI-002` | `Q-002` |
 | `REQ-CONF-001` | `AC-CONF-001`, `AC-CONF-002` | ADR 0010 |
@@ -363,5 +369,5 @@ None.
 - [x] Setiap requirement dan acceptance criterion punya ID stabil dan sumber.
 - [x] Keberlakuan contract eksplisit.
 - [x] Blocking Open Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29 (revisi 3)
