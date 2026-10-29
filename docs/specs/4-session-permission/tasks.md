@@ -597,7 +597,7 @@ flowchart LR
 - [x] Tidak ada perilaku terlihat tanpa ID requirement.
 - [x] Tidak ada perilaku di luar scope (tidak ada export JSONL, tidak ada tabel memory atau cron, tidak ada perintah CLI).
 - [x] ADR dan diagram sesuai implementasi.
-- [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
+- [x] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
 - [x] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 - [x] Revisi ARCHITECTURE §3 untuk profile `minimal` dibuat (`CQ-010`, direvisi rekonsiliasi spec #2 `CQ-031`).
 
