@@ -186,7 +186,7 @@ flowchart LR
     - PR/commit: commit T-004 spec #3
     - Deviasi: `core.NewHooks` ditambahkan sebagai konstruktor publik agar pipeline dapat diuji tanpa Boot; tidak mengubah perilaku.
 
-- [ ] `T-005` Implementasi `read_file`, `write_file`, `edit_file`, dan guard workspace
+- [x] `T-005` Implementasi `read_file`, `write_file`, `edit_file`, dan guard workspace
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-TOOL-001`, `REQ-TOOL-002`, `REQ-TOOL-003`, `REQ-TOOL-008`
@@ -201,11 +201,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. 11 test file/guard PASS, termasuk symlink keluar workspace dan binari.
+    - PR/commit: commit T-005 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-006` Implementasi `glob` dan `grep` dengan `.gitignore`
   - Issue/PR: `—`
