@@ -208,7 +208,7 @@ flowchart TD
     - PR/commit: commit T-005
     - Deviasi: Registry modul (`core.RegisterModule`/`core.ModuleNames`) ditambahkan lebih awal agar validasi `module` dapat berjalan; task T-010 tinggal menambah Builder/Boot/rencana boot. Registry palsu hanya didaftarkan di TestMain package config.
 
-- [ ] `T-006` Validasi per lapisan dengan posisi
+- [x] `T-006` Validasi per lapisan dengan posisi
   - Issue/PR: `—`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-CONF-003`, `REQ-CONF-008`
@@ -223,11 +223,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestErrorsCollectAllLayers|TestRefErrorLocation|TestUnknownKeySuggestion|TestVersionTooHigh|TestMemoryLayerRefError'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestErrorsCollectAllLayers|TestRefErrorLocation|TestUnknownKeySuggestion|TestVersionTooHigh|TestMemoryLayerRefError' -v`
+    - Hasil: 5 test PASS; exit 0. Posisi baris 12 untuk `agents.coder.provider` terbukti.
+    - PR/commit: commit T-006
+    - Deviasi: Validasi pola `rules` belum memanggil `internal/pattern` karena paket itu baru dibuat spec #4; saat ini hanya tipe array string (sesuai `CQ-030`).
 
 - [ ] `T-007` Merge sesuai aturan contract
   - Issue/PR: `—`
