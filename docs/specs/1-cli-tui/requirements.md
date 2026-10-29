@@ -1,8 +1,8 @@
 # Requirements: CLI dan TUI chat
 
 - **Issue**: [`#1`](https://github.com/ridhomujizat/lana-harness/issues/1)
-- **Status**: Draft
-- **Revisi**: 2
+- **Status**: Approved
+- **Revisi**: 4
 - **Pemilik**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan (subcommand, flag, exit code, format output, slash command, tombol)
 - **ADR terkait**: [Index ADR](../../adr/README.md) — [0003](../../adr/0003-multi-agent-dengan-routing-channel.md), [0004](../../adr/0004-permission-mode-per-agent.md), [0008](../../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0009](../../adr/0009-session-sebagai-event-log-append-only.md), [0010](../../adr/0010-profile-dan-config-patch.md)
@@ -103,14 +103,16 @@ Sistem harus menampilkan teks jawaban model secara bertahap saat diterima.
 
 - `AC-CHAT-009`: Given provider mengirim beberapa text delta, when turn berjalan, then setiap delta tampil sebelum turn selesai.
 
-#### REQ-CHAT-005: Tool call ringkas yang bisa dibuka
+#### REQ-CHAT-005: Tool call ringkas dan mode verbose
 
 Sistem harus menampilkan setiap tool call sebagai satu baris berisi nama tool, argumen utama, dan
-status (berjalan, sukses, ditolak, error). User harus bisa membuka tool call untuk melihat input
-dan output lengkap.
+status (berjalan, sukses, ditolak, error). User harus bisa menyalakan mode verbose: tool call
+terakhir dicetak ulang lengkap, dan tool call berikutnya tampil dengan input dan output lengkap
+sampai mode verbose dimatikan.
 
 - `AC-CHAT-010`: Given model memanggil `bash` dengan `cargo test`, when tool selesai, then satu baris menampilkan `bash`, `cargo test`, dan status.
-- `AC-CHAT-011`: Given tool call sudah tampil, when user menekan tombol buka, then input dan output lengkap tampil.
+- `AC-CHAT-011`: Given tool call sudah tampil dan mode verbose mati, when user menyalakan mode verbose, then input dan output lengkap tool call terakhir dicetak ke scrollback.
+- `AC-CHAT-024`: Given mode verbose menyala, when model memanggil tool lalu user mematikan mode verbose dan model memanggil tool lagi, then tool call pertama tampil lengkap dan tool call kedua tampil ringkas.
 
 #### REQ-CHAT-006: Input saat turn berjalan
 
@@ -229,18 +231,20 @@ Sistem harus menangani slash command berikut tanpa request ke model:
 - `AC-CMD-011`: Given user mengetik `/clear`, when perintah diproses, then layar bersih dan pesan berikutnya tetap memakai context session yang sama.
 - `AC-CMD-012`: Given user mengetik `/xyz`, when perintah diproses, then pesan "perintah tidak dikenal" dan saran `/help` tampil, dan tidak ada request ke model.
 - `AC-CMD-013`: Given turn sedang berjalan, when user mengetik `/new`, `/sessions`, `/fork`, `/agent <nama>`, `/model <...>`, atau `/compact`, then perintah ditolak dengan pesan untuk menunggu atau membatalkan turn.
+- `AC-CMD-014`: Given turn sedang berjalan, when user mengetik `/permission <trust|ask|never>` atau `/yolo`, then `approval/policy` ditulis dan policy baru berlaku mulai evaluasi tool berikutnya di turn yang sama.
 
 ### One-shot
 
 #### REQ-RUN-001: Menjalankan satu turn
 
-`lana run` harus menjalankan satu turn dengan profile `headless` di cwd, lalu keluar. Prompt diambil
+`lana run [--agent <nama>]` harus menjalankan satu turn dengan profile `headless` di cwd, lalu keluar. Prompt diambil
 dari argumen. Jika argumen tidak ada dan stdin bukan TTY, prompt diambil dari stdin. Jika
 keduanya ada, isi stdin ditambahkan setelah prompt argumen.
 
 - `AC-RUN-001`: Given `lana run --agent asisten "halo"`, when turn selesai, then jawaban final ada di stdout dan exit code 0.
 - `AC-RUN-002`: Given `cat notes.md | lana run --agent asisten`, when turn berjalan, then isi `notes.md` menjadi prompt.
 - `AC-RUN-003`: Given tidak ada argumen prompt dan stdin adalah TTY, when user menjalankan `lana run`, then proses keluar dengan exit code 2.
+- `AC-RUN-010`: Given tanpa `--agent`, when `lana run` dijalankan, then agent dipilih dengan aturan yang sama seperti `REQ-CHAT-001`; tanpa route `cli`, exit code 2.
 
 #### REQ-RUN-002: Format output
 
@@ -322,6 +326,7 @@ Nilai default `--yes` ditetapkan di contract.
 | Idle | Slash command | Perintah dijalankan | Ya |
 | Turn berjalan | Pesan | Masuk inbox | Ya |
 | Turn berjalan | `/help`, `/clear`, `/permission`, `/model`, `/agent` tanpa argumen | Perintah baca dijalankan | Ya |
+| Turn berjalan | `/permission <x>`, `/yolo` | Policy berubah mulai evaluasi tool berikutnya | Ya |
 | Turn berjalan | Perintah yang mengubah session (lihat `AC-CMD-013`) | Ditolak dengan pesan | Tidak |
 | Turn berjalan | `Ctrl+C` | Turn dibatalkan | Ya |
 | Menunggu approval | `y`, `a`, `n` | Outcome dikirim | Ya |
@@ -408,6 +413,9 @@ Nilai default `--yes` ditetapkan di contract.
 | `Q-016` | Cakupan `--continue` dan `/sessions` | Per direktori |
 | `Q-017` | Arti `/clear` | Bersihkan layar saja |
 | `Q-018` | Arti `/fork` | Fork di turn terakhir lalu pindah |
+| `Q-020` | `/permission` dan `/yolo` saat turn berjalan | Boleh; berlaku mulai evaluasi tool berikutnya (usulan agent, di-approve bersama revisi 3) |
+| `CQ-001` | Cara membuka detail tool call di TUI inline | Mode verbose dengan `Ctrl+O` (revisi 4) |
+| `CQ-002` | Agent `lana run` tanpa `--agent` | Sama seperti chat (revisi 4) |
 | `Q-019` | Tanpa TTY | `chat` butuh TTY (exit 2); `run --ask` lewat `/dev/tty`, tanpa TTY outcome `unavailable` |
 
 ## Blocking Open Questions
@@ -422,7 +430,7 @@ None.
 | `REQ-CHAT-002` | `AC-CHAT-005` | `Q-003` |
 | `REQ-CHAT-003` | `AC-CHAT-006`, `AC-CHAT-007`, `AC-CHAT-008` | `Q-004`, `Q-015` |
 | `REQ-CHAT-004` | `AC-CHAT-009` | ADR 0008 |
-| `REQ-CHAT-005` | `AC-CHAT-010`, `AC-CHAT-011` | `Q-008` |
+| `REQ-CHAT-005` | `AC-CHAT-010`, `AC-CHAT-011`, `AC-CHAT-024` | `Q-008`, `CQ-001` |
 | `REQ-CHAT-006` | `AC-CHAT-012` | ADR 0003 |
 | `REQ-CHAT-007` | `AC-CHAT-013`, `AC-CHAT-014`, `AC-CHAT-015` | `Q-009` |
 | `REQ-CHAT-008` | `AC-CHAT-016`, `AC-CHAT-017`, `AC-CHAT-018`, `AC-CHAT-019` | `Q-007` |
@@ -432,8 +440,8 @@ None.
 | `REQ-SESS-001` | `AC-SESS-001`, `AC-SESS-002`, `AC-SESS-003`, `AC-SESS-004`, `AC-SESS-005` | `Q-005`, `Q-016`, ADR 0009 |
 | `REQ-APPR-001` | `AC-APPR-001`, `AC-APPR-002`, `AC-APPR-003`, `AC-APPR-004`, `AC-APPR-005` | ADR 0004, ADR 0008 |
 | `REQ-APPR-002` | `AC-APPR-006`, `AC-APPR-007` | ADR 0004, `Q-006` |
-| `REQ-CMD-001` | `AC-CMD-001` sampai `AC-CMD-013` | `Q-006`, `Q-017`, `Q-018`, ADR 0003, ADR 0009 |
-| `REQ-RUN-001` | `AC-RUN-001`, `AC-RUN-002`, `AC-RUN-003` | `Q-010`, ADR 0010 |
+| `REQ-CMD-001` | `AC-CMD-001` sampai `AC-CMD-014` | `Q-006`, `Q-017`, `Q-018`, ADR 0003, ADR 0009 |
+| `REQ-RUN-001` | `AC-RUN-001`, `AC-RUN-002`, `AC-RUN-003`, `AC-RUN-010` | `Q-010`, ADR 0010, `CQ-002` |
 | `REQ-RUN-002` | `AC-RUN-004`, `AC-RUN-005`, `AC-RUN-006` | `Q-010` |
 | `REQ-RUN-003` | `AC-RUN-007`, `AC-RUN-008`, `AC-RUN-009` | ADR 0010, `Q-019` |
 | `REQ-EXIT-001` | `AC-EXIT-001`, `AC-EXIT-002`, `AC-EXIT-003` | `Q-010` |
@@ -450,5 +458,5 @@ None.
 - [x] Setiap requirement dan acceptance criterion punya ID stabil dan sumber.
 - [x] Keberlakuan contract eksplisit.
 - [x] Blocking Open Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29 (revisi 3; revisi 4 dari jawaban pemilik atas `CQ-001` dan `CQ-002`)
