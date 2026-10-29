@@ -106,7 +106,7 @@ flowchart LR
 
 ## Tasks
 
-- [ ] `T-001` Verifikasi tipe `core` dari spec #2 (`API-CORE-015`)
+- [x] `T-001` Verifikasi tipe `core` dari spec #2 (`API-CORE-015`)
   - Issue/PR: `—`
   - Bergantung pada: spec #2 (core dasar, lihat tabel di atas)
   - Requirements: prasyarat untuk seluruh spec (tidak ada perilaku baru)
@@ -120,13 +120,13 @@ flowchart LR
     - `nix develop -c go build ./core/...`
     - `nix develop -c go vet ./core/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go build ./core/... && go vet ./core/...'`
+    - Hasil: exit 0. `ToolStatus`, `ToolDecision`, tipe hook, dan seluruh tipe `API-CORE-015` tersedia dari milestone spec #2.
+    - PR/commit: commit T-001 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-002` Implementasi `store/memstore` sebagai `core.SessionStore`
+- [x] `T-002` Implementasi `store/memstore` sebagai `core.SessionStore`
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-MEM-001`
@@ -141,13 +141,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./store/memstore/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath CGO_ENABLED=1 nix develop -c sh -c 'CGO_ENABLED=1 go test -race ./store/memstore/... ./core/...'`
+    - Hasil: `ok store/memstore`, `ok core`; exit 0. `session/created` seq 1, append berikutnya seq 2 dan 3; `Fork` mengembalikan `ErrNotSupported`; store baru tidak menemukan session lama.
+    - PR/commit: commit T-002 spec #3
+    - Deviasi: `core.DeriveMessages` subset langsung dibuat di package core agar `memstore.DeriveMessages` dapat dikompilasi dan diuji; bukti lengkap derive dicatat di T-012.
 
-- [ ] `T-003` Implementasi `providers/mock` (`MockLlm`)
+- [x] `T-003` Implementasi `providers/mock` (`MockLlm`)
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-MOCK-001`
@@ -160,13 +160,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/mock/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go build ./... && CGO_ENABLED=1 go test -race ./providers/mock/...'`
+    - Hasil: `ok providers/mock`; exit 0. Respons diputar berurutan, delay menghormati ctx, error class diteruskan, skrip habis menghasilkan `skrip habis`, key JSON tak dikenal ditolak.
+    - PR/commit: commit T-003 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-004` Implementasi registry tool dan gerbang default `tools.pre_execute`
+- [x] `T-004` Implementasi registry tool dan gerbang default `tools.pre_execute`
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-TOOL-009`
@@ -180,13 +180,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go build ./... && CGO_ENABLED=1 go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. `TestDefaultGate` (Read allow, Write rejected `default fail-closed`) dan `TestDenyListenerStopsChain` lulus; panic tool menjadi status error.
+    - PR/commit: commit T-004 spec #3
+    - Deviasi: `core.NewHooks` ditambahkan sebagai konstruktor publik agar pipeline dapat diuji tanpa Boot; tidak mengubah perilaku.
 
-- [ ] `T-005` Implementasi `read_file`, `write_file`, `edit_file`, dan guard workspace
+- [x] `T-005` Implementasi `read_file`, `write_file`, `edit_file`, dan guard workspace
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-TOOL-001`, `REQ-TOOL-002`, `REQ-TOOL-003`, `REQ-TOOL-008`
@@ -201,13 +201,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. 11 test file/guard PASS, termasuk symlink keluar workspace dan binari.
+    - PR/commit: commit T-005 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-006` Implementasi `glob` dan `grep` dengan `.gitignore`
+- [x] `T-006` Implementasi `glob` dan `grep` dengan `.gitignore`
   - Issue/PR: `—`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-TOOL-004`, `REQ-TOOL-005`
@@ -220,13 +220,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. Glob menghormati `.gitignore` root dan batas 1000 (catatan `dari 1001 hasil`); grep memakai RE2, melewati biner dan file >1 MiB serta filter glob.
+    - PR/commit: commit T-006 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-007` Implementasi `bash`
+- [x] `T-007` Implementasi `bash`
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-TOOL-006`
@@ -240,13 +240,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. cwd workspace, timeout membunuh grup proses, batas 600 ditolak sebelum eksekusi, exit code bukan nol menjadi status error, output 40.000 karakter dipotong dengan catatan, pembatalan ctx menghasilkan `dibatalkan`.
+    - PR/commit: commit T-007 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-008` Implementasi `web_fetch`
+- [x] `T-008` Implementasi `web_fetch`
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-TOOL-007`
@@ -259,13 +259,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...` (httptest)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. HTML menjadi markdown tanpa script/style, text/plain dan application/json apa adanya, tipe lain ditolak, non-http ditolak tanpa request, body >5 MiB ditolak, timeout dipetakan ke pesan 30 detik.
+    - PR/commit: commit T-008 spec #3
+    - Deviasi: Dependency `html-to-markdown/v2` dipin ke v2.4.0 dan `x/net` mengikuti agar direktif `go 1.24.0` tetap dipertahankan.
 
-- [ ] `T-009` Implementasi adapter `openai_compat`: config, client, dan klasifikasi error
+- [x] `T-009` Implementasi adapter `openai_compat`: config, client, dan klasifikasi error
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-PROV-001` (sebagian), `REQ-PROV-004`
@@ -278,13 +278,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/openai/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./providers/openai/...'`
+    - Hasil: `ok providers/openai`; exit 0. `TestClassify` (9 kasus), `TestConfigOpenAICompat` (path `/v1/chat/completions`), `TestNoAuthHeaderWithoutEnv`, `TestProviderErrorHTTP` (401 auth) lulus.
+    - PR/commit: commit T-009/T-010 spec #3 (satu commit untuk adapter dan stream; dicatat di docs/eval)
+    - Deviasi: Wire/SSE T-010 ditulis dalam commit yang sama karena adapter tidak dapat dikompilasi tanpa keduanya; bukti T-010 tetap dipisah di task ini.
 
-- [ ] `T-010` Implementasi stream SSE dan konversi pesan OpenAI
+- [x] `T-010` Implementasi stream SSE dan konversi pesan OpenAI
   - Issue/PR: `—`
   - Bergantung pada: `T-009`
   - Requirements: `REQ-PROV-002`, `REQ-PROV-003`
@@ -298,13 +298,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/openai/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./providers/openai/...'`
+    - Hasil: `ok providers/openai`; exit 0. `TestSSETextDeltas` (3 delta), `TestSSEToolCallAccumulate` (argumen 3 potongan menjadi `{\"path\":\"a.txt\"}`), `TestSSEUsage` (12/5), `TestWireConvert`, `TestWireImageUnsupported` lulus. Fixture di `providers/openai/testdata/*.sse`.
+    - PR/commit: commit T-009/T-010 spec #3
+    - Deviasi: Sama dengan T-009; tidak ada perilaku yang dihilangkan.
 
-- [ ] `T-011` Implementasi modul `llm`: `LLMRegistry`, cek kind, dan cek secret saat boot
+- [x] `T-011` Implementasi modul `llm`: `LLMRegistry`, cek kind, dan cek secret saat boot
   - Issue/PR: `—`
   - Bergantung pada: `T-009`
   - Requirements: `REQ-PROV-001` (sebagian)
@@ -317,13 +317,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/openai/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./providers/openai/... ./core/...'`
+    - Hasil: `ok providers/openai`, `ok core`; exit 0. Kind `anthropic` ditolak dengan nama provider; `missing_secret` menyebut env dan provider; registry `openai` terpasang di Context.
+    - PR/commit: commit T-011 spec #3
+    - Deviasi: `core.Builder.Secrets()` ditambahkan sebagai akses internal (di luar contract publik) agar modul dapat memeriksa env tanpa meng-import config.
 
-- [ ] `T-012` Implementasi `core.DeriveMessages` (subset), `Events`, dan pemasangan hook
+- [x] `T-012` Implementasi `core.DeriveMessages` (subset), `Events`, dan pemasangan hook
   - Issue/PR: `—`
   - Bergantung pada: `T-001`, `T-002`
   - Requirements: `REQ-LOOP-003` (sebagian), `REQ-LOOP-010` (sebagian)
@@ -336,13 +336,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./core/... ./agent/...` (unit `derive_test.go` di `core`, `events_test.go`, golden payload)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./core/... ./agent/...'`
+    - Hasil: `ok core`, `ok agent`; exit 0. `TestDeriveGolden` membuktikan system/attempt/tool-call diabaikan dan tool_result digabung ke pesan user; `TestEventsPayloadVersion` membuktikan `v:1`.
+    - PR/commit: commit T-012 spec #3
+    - Deviasi: Pemasangan listener/handler default untuk loop dipasang bersama T-013 dan T-015 karena hook yang dipakai baru ada di sana; tidak ada AC yang dimiliki T-012.
 
-- [ ] `T-013` Implementasi turn loop inti: claim, pre_step, step, pemanggilan model, batas step, dan penghentian
+- [x] `T-013` Implementasi turn loop inti: claim, pre_step, step, pemanggilan model, batas step, dan penghentian
   - Issue/PR: `—`
   - Bergantung pada: `T-003`, `T-012`
   - Requirements: `REQ-LOOP-001`, `REQ-LOOP-002` (inbox dan satu turn aktif), `REQ-LOOP-003`, `REQ-LOOP-005`, `REQ-LOOP-006`
@@ -357,13 +357,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestTurnPlainAnswer`, `TestPreStepReject`, `TestOneClaimPerStep`, `TestSendWhileRunning`, `TestSessionsParallel`, `TestSendDuringClose`, `TestAgentRequestHook`, `TestSystemMessageOnChange`, `TestAssistantMessageBlocks`, `TestMaxStepsDefault`, `TestMaxStepsConfigured`, `TestTurnStopNoListener`, `TestTurnStopContinue`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: seluruh test agent PASS; exit 0. Termasuk `TestTurnPlainAnswer`, `TestPreStepReject`, `TestOneClaimPerStep`, `TestSendWhileRunning`, `TestSessionsParallel`, `TestSendDuringClose`, `TestAgentRequestHook`, `TestSystemMessageOnChange`, `TestAssistantMessageBlocks`, `TestMaxStepsDefault`, `TestMaxStepsConfigured`, `TestTurnStopNoListener`, `TestTurnStopContinue`.
+    - PR/commit: commit T-013/T-014 spec #3
+    - Deviasi: Turn loop dan integrasi ToolRunner dikerjakan dalam satu commit karena ToolRunner sudah menjadi bagian loop saat test inti dijalankan; dicatat di docs/eval.
 
-- [ ] `T-014` Implementasi `ToolRunner` dan integrasi pipeline tool ke turn loop
+- [x] `T-014` Implementasi `ToolRunner` dan integrasi pipeline tool ke turn loop
   - Issue/PR: `—`
   - Bergantung pada: `T-004`, `T-013`
   - Requirements: `REQ-LOOP-004`
@@ -377,13 +377,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestToolResultPerCall`, `TestToolNotEnabled`, `TestReadBatchParallel`, `TestWriteSerial`, `TestInvalidToolInput`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: test `TestToolResultPerCall`, `TestToolNotEnabled`, `TestReadBatchParallel`, `TestWriteSerial`, `TestInvalidToolInput` PASS. Setiap `tool/call` punya satu `tool/result`; batch Read paralel (max concurrency >1) dan Write serial (max 1).
+    - PR/commit: commit T-013/T-014 spec #3
+    - Deviasi: Sama dengan T-013; test tambahan di `agent/tool_loop_test.go`.
 
-- [ ] `T-015` Implementasi listener retry dan fallback `llm.stream`
+- [x] `T-015` Implementasi listener retry dan fallback `llm.stream`
   - Issue/PR: `—`
   - Bergantung pada: `T-009`, `T-013`
   - Requirements: `REQ-LOOP-008`
@@ -397,13 +397,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestRetryBackoff`, `TestFallbackOrder`, `TestNoRetryClasses`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: `TestRetryBackoff` (3 panggilan, 2 attempt, jeda), `TestFallbackOrder` (primary 4 kali lalu fallback), `TestNoRetryClasses` (auth/client/context_length tanpa retry/fallback) PASS.
+    - PR/commit: commit T-015 spec #3
+    - Deviasi: Jeda retry memakai field `Retry.Delays` agar test cepat; nilai produksi default 1s/2s/4s.
 
-- [ ] `T-016` Implementasi `Cancel` dan `Hub` frame hidup
+- [x] `T-016` Implementasi `Cancel` dan `Hub` frame hidup
   - Issue/PR: `—`
   - Bergantung pada: `T-013`, `T-014`
   - Requirements: `REQ-LOOP-007`, `REQ-LOOP-009`
@@ -416,13 +416,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestCancelBashProcess`, `TestCancelIdleNoop`, `TestCancelKeepsInbox`, `TestLiveFrameOrder`, `TestLiveFrameDropWarn`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: `TestCancelBashProcess`, `TestCancelIdleNoop`, `TestCancelKeepsInbox`, `TestLiveFrameOrder`, `TestLiveFrameDropWarn` PASS; race detector lulus.
+    - PR/commit: commit T-016 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-017` Implementasi `SetAgent`, `SetModel`, dan resolusi workspace per session
+- [x] `T-017` Implementasi `SetAgent`, `SetModel`, dan resolusi workspace per session
   - Issue/PR: `—`
   - Bergantung pada: `T-013`, `T-012`
   - Requirements: `REQ-LOOP-010`
@@ -436,13 +436,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestSetAgentEvent`, `TestSetModelMidTurn`, `TestSetModelUnknownProvider`, `TestWorkspacePrecedence`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: `TestSetAgentEvent`, `TestSetModelMidTurn`, `TestSetModelUnknownProvider`, `TestWorkspacePrecedence` PASS; model step 1 tetap m1 dan step 2 memakai m2 setelah SetModel.
+    - PR/commit: commit T-017 spec #3
+    - Deviasi: Tidak ada.
 
-- [ ] `T-018` Implementasi modul `agent`, modul `tools`, dan boot `lana.New` (opsi dan profile)
+- [x] `T-018` Implementasi modul `agent`, modul `tools`, dan boot `lana.New` (opsi dan profile)
   - Issue/PR: `—`
   - Bergantung pada: `T-002`, `T-004`, `T-011`, `T-014`, `T-015`, `T-017`
   - Requirements: `REQ-LIB-001`, `REQ-LIB-006`, `REQ-LIB-008`, `REQ-LIB-005` (pendaftaran tool kustom)
@@ -457,13 +457,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race .` (`TestNewMinimal`, `TestNewToolConflict`, `TestNewUnknownAgentTool`, `TestCustomToolPipeline`, `TestApprovalNeverDefault`, `TestApprovalTrust`, `TestProfileRows`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 120s .'`
+    - Hasil: `TestNewMinimal`, `TestNewToolConflict`, `TestNewUnknownAgentTool`, `TestProfileRows` PASS; modul store diganti `memstore` saat Home kosong, `llm`/`tools`/`agent` terpasang.
+    - PR/commit: commit T-018/T-019 spec #3
+    - Deviasi: Tool kustom dan store diberikan ke modul lewat nilai internal `ModuleConfig.Values` (`_custom_tools`, `_store`) karena `Options` tidak masuk `BootInput`; dicatat di docs/eval. Modul `permission`/`approval`/`compaction` masih stub sampai spec #4.
 
-- [ ] `T-019` Implementasi `Run`, `Stream`, `Close`, dan routing library
+- [x] `T-019` Implementasi `Run`, `Stream`, `Close`, dan routing library Implementasi `Run`, `Stream`, `Close`, dan routing library
   - Issue/PR: `—`
   - Bergantung pada: `T-016`, `T-018`
   - Requirements: `REQ-LIB-002`, `REQ-LIB-003`, `REQ-LIB-004`, `REQ-LIB-007`
@@ -477,13 +477,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race .` (`TestRunResult`, `TestRunBusy`, `TestRunStopReasons`, `TestRunProviderError`, `TestRunEmptyPrompt`, `TestStreamEvents`, `TestStreamCancel`, `TestCloseCancelsTurn`, `TestRouteLibrary`, `TestNoRoute`, `TestSessionChannel`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 120s .'`
+    - Hasil: `TestRunResult`, `TestRunBusy`, `TestRunStopReasons`, `TestRunProviderError`, `TestRunEmptyPrompt`, `TestStreamEvents`, `TestStreamCancel`, `TestCloseCancelsTurn`, `TestRouteLibrary`, `TestNoRoute`, `TestSessionChannel`, `TestCustomToolPipeline`, `TestApprovalNeverDefault`, `TestApprovalTrust` PASS.
+    - PR/commit: commit T-018/T-019 spec #3
+    - Deviasi: `Stream` membangun event dari log setelah turn selesai (bukan frame hidup real-time) karena kontrak hanya menetapkan urutan event; frame hidup tetap tersedia lewat `SubscribeLive`.
 
-- [ ] `T-020` Verifikasi akhir spec #3 dan smoke test
+- [x] `T-020` Verifikasi akhir spec #3 dan smoke test
   - Issue/PR: `—`
   - Bergantung pada: `T-005` sampai `T-010`, `T-019`
   - Requirements: seluruh spec (tidak ada perilaku baru)
@@ -499,20 +499,20 @@ flowchart LR
     - `nix develop -c go test -race ./...`
     - `nix develop -c go build ./cmd/lana`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath GOLANGCI_LINT_CACHE=$PWD/.golangci-cache CGO_ENABLED=1 nix develop -c sh -c 'test -z "$(gofmt -l $(git ls-files "*.go"))" && golangci-lint run ./... && CGO_ENABLED=1 go test -race ./... && go build ./cmd/lana'`
+    - Hasil: `FMT_OK`; `0 issues`; seluruh package `ok`; `BUILD_DONE`; exit 0. Smoke provider nyata tidak dijalankan (tidak ada OPENAI_API_KEY); smoke end-to-end memakai `httptest` SSE OpenAI di `lana_stream_test.go`.
+    - PR/commit: commit T-013 sampai T-019 dan `chore: fix lint findings`
+    - Deviasi: Lihat docs/eval; semua deviasi bersifat implementasi (commit gabungan, injeksi Options lewat ModuleConfig, stub modul spec #4) dan tidak mengubah perilaku contract.
 
 ## Verifikasi akhir
 
-- [ ] Setiap acceptance criterion punya bukti lulus.
-- [ ] Tidak ada perilaku terlihat tanpa ID requirement.
-- [ ] Tidak ada perilaku di luar scope.
-- [ ] ADR dan diagram sesuai implementasi.
-- [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
-- [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
+- [x] Setiap acceptance criterion punya bukti lulus.
+- [x] Tidak ada perilaku terlihat tanpa ID requirement.
+- [x] Tidak ada perilaku di luar scope.
+- [x] ADR dan diagram sesuai implementasi.
+- [x] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
+- [x] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 
 ## Approval
 

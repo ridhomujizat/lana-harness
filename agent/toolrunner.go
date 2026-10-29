@@ -1,0 +1,149 @@
+package agent
+
+import (
+	"context"
+	"sync"
+
+	"github.com/ridhomujizat/lana-harness/core"
+)
+
+// ToolRunner mengeksekusi batch tool dalam satu step.
+type ToolRunner struct {
+	hooks *core.Hooks
+	tools core.ToolRegistry
+}
+
+// NewToolRunner membuat ToolRunner.
+func NewToolRunner(hooks *core.Hooks, toolReg core.ToolRegistry) *ToolRunner {
+	return &ToolRunner{hooks: hooks, tools: toolReg}
+}
+
+type callState struct {
+	call   core.ToolCall
+	tool   core.Tool
+	output core.ToolOutput
+	ready  bool
+}
+
+// Run menjalankan pipeline tool untuk semua call dan mengembalikan output sesuai urutan call.
+func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []string, tc core.ToolCtx) []core.ToolOutput {
+	allowed := map[string]bool{}
+	for _, name := range enabled {
+		allowed[name] = true
+	}
+	states := make([]*callState, len(calls))
+	for i, call := range calls {
+		state := &callState{call: call}
+		states[i] = state
+		if !allowed[call.Name] {
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool tidak diaktifkan untuk agent"}
+			continue
+		}
+		tool, ok := tr.tools.Get(call.Name)
+		if !ok {
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool tidak terdaftar"}
+			continue
+		}
+		if err := validateInput(tool.Spec().InputSchema, call.Input); err != nil {
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "input tidak valid: " + err.Error()}
+			continue
+		}
+		state.tool = tool
+		state.call.Risk = tool.Risk(call.Input)
+		decision, err := tr.hooks.ToolsPreExecute.Call(ctx, core.ToolsPreExecuteInput{AgentName: tc.AgentName, Call: state.call})
+		if err != nil {
+			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
+			continue
+		}
+		if !decision.Allowed {
+			status := decision.Status
+			if status == "" {
+				status = core.ToolStatusRejected
+			}
+			state.output = core.ToolOutput{Status: status, Output: decision.Reason}
+			continue
+		}
+		state.ready = true
+	}
+
+	if ctx.Err() != nil {
+		for _, state := range states {
+			if state.ready {
+				state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+				state.ready = false
+			}
+		}
+	} else {
+		for i := 0; i < len(states); {
+			state := states[i]
+			if !state.ready {
+				i++
+				continue
+			}
+			if state.call.Risk == core.RiskRead {
+				j := i
+				var batch []*callState
+				for j < len(states) && states[j].ready && states[j].call.Risk == core.RiskRead {
+					batch = append(batch, states[j])
+					j++
+				}
+				tr.runBatch(ctx, batch, tc)
+				i = j
+				continue
+			}
+			tr.executeOne(ctx, state, tc)
+			i++
+		}
+	}
+
+	out := make([]core.ToolOutput, len(states))
+	for i, state := range states {
+		out[i] = state.output
+		if out[i].Status == "" {
+			out[i] = core.ToolOutput{Status: core.ToolStatusError, Output: "tool tidak menghasilkan output"}
+		}
+	}
+	return out
+}
+
+func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.ToolCtx) {
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for _, state := range batch {
+		wg.Add(1)
+		go func(s *callState) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+				tr.executeOne(ctx, s, tc)
+			case <-ctx.Done():
+				s.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+			}
+		}(state)
+	}
+	wg.Wait()
+}
+
+func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.ToolCtx) {
+	if ctx.Err() != nil {
+		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+		return
+	}
+	input := core.ToolsExecuteInput{Ctx: tc, Call: state.call, Tool: state.tool}
+	output, err := tr.hooks.ToolsExecute.Call(ctx, input)
+	if err != nil {
+		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
+		return
+	}
+	post, err := tr.hooks.ToolsPostExecute.Call(ctx, core.ToolsPostExecuteInput{Call: state.call, Output: output})
+	if err != nil {
+		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
+		return
+	}
+	if ctx.Err() != nil {
+		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "dibatalkan"}
+		return
+	}
+	state.output = post
+}

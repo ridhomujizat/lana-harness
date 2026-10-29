@@ -1,0 +1,53 @@
+package id
+
+import (
+	"crypto/rand"
+	"encoding/binary"
+	"sync"
+	"time"
+)
+
+const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+var (
+	mu   sync.Mutex
+	last int64
+)
+
+// New mengembalikan ID 26 karakter yang terurut menurut waktu (mirip ULID).
+func New() string {
+	mu.Lock()
+	now := time.Now().UnixMilli()
+	if now <= last {
+		now = last + 1
+	}
+	last = now
+	mu.Unlock()
+	var raw [16]byte
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], uint64(now))
+	copy(raw[:6], ts[2:])
+	if _, err := rand.Read(raw[6:]); err != nil {
+		for i := 6; i < 16; i++ {
+			raw[i] = byte(now >> (i * 3))
+		}
+	}
+	// 128 bit -> 26 karakter base32 (130 bit, dua bit pertama nol).
+	out := make([]byte, 26)
+	var acc uint32
+	bits := 0
+	pos := 0
+	for _, b := range raw {
+		acc = (acc << 8) | uint32(b)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			out[pos] = alphabet[(acc>>uint(bits))&31]
+			pos++
+		}
+	}
+	if bits > 0 {
+		out[pos] = alphabet[(acc<<uint(5-bits))&31]
+	}
+	return string(out)
+}
