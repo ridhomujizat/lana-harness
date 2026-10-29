@@ -147,7 +147,7 @@ flowchart LR
     - PR/commit: commit T-002 spec #3
     - Deviasi: `core.DeriveMessages` subset langsung dibuat di package core agar `memstore.DeriveMessages` dapat dikompilasi dan diuji; bukti lengkap derive dicatat di T-012.
 
-- [ ] `T-003` Implementasi `providers/mock` (`MockLlm`)
+- [x] `T-003` Implementasi `providers/mock` (`MockLlm`)
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-MOCK-001`
@@ -160,11 +160,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/mock/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go build ./... && CGO_ENABLED=1 go test -race ./providers/mock/...'`
+    - Hasil: `ok providers/mock`; exit 0. Respons diputar berurutan, delay menghormati ctx, error class diteruskan, skrip habis menghasilkan `skrip habis`, key JSON tak dikenal ditolak.
+    - PR/commit: commit T-003 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-004` Implementasi registry tool dan gerbang default `tools.pre_execute`
   - Issue/PR: `—`
