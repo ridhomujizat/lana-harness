@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -178,6 +179,22 @@ func cmdConfig(args []string) int {
 			return fail(err, 2)
 		}
 		fmt.Printf("✓ config valid (%d lapisan, %d agent, %d provider)\n", len(result.Layers), len(result.Config.Agents), len(result.Config.Providers))
+		names := make([]string, 0, len(result.Config.Providers))
+		for name := range result.Config.Providers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			env := result.Config.Providers[name].APIKeyEnv
+			if env == "" {
+				continue
+			}
+			if secret, ok := result.Secrets.Lookup(env); ok && secret.Reveal() != "" {
+				fmt.Printf("· %s terisi (provider %s)\n", env, name)
+			} else {
+				fmt.Printf("· %s belum diisi (provider %s)\n", env, name)
+			}
+		}
 		return 0
 	case "path":
 		fmt.Printf("LANA_HOME  %s\n", home)
@@ -217,10 +234,10 @@ func cmdConfig(args []string) int {
 	}
 }
 
-func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc) (*lana.Runtime, string, string, bool, error) {
+func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc) (*lana.Runtime, string, string, string, error) {
 	result, err := config.Load(ctx, config.Options{Home: home})
 	if err != nil {
-		return nil, "", "", false, err
+		return nil, "", "", "", err
 	}
 	providerName, model := "", ""
 	if agent, ok := result.Config.Agents[agentName]; ok {
@@ -231,11 +248,11 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	if approve != nil {
 		options = append(options, lana.ApproveWith(approve))
 	}
-	fallback := false
+	missingEnv := ""
 	if providerName != "" {
 		if provider, ok := result.Config.Providers[providerName]; ok && provider.APIKeyEnv != "" {
 			if os.Getenv(provider.APIKeyEnv) == "" && !secretInFile(home, provider.APIKeyEnv) {
-				text := "Halo dari MockLlm. Provider belum dikonfigurasi, jadi ini jawaban contoh. Isi OPENAI_API_KEY untuk memakai model sungguhan."
+				text := "Halo dari MockLlm. Provider belum dikonfigurasi, jadi ini jawaban contoh. Isi API key provider untuk memakai model sungguhan."
 				layer := fmt.Sprintf("[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.%s]\nprovider = \"mock\"\nmodel = \"mock\"\n\n[[routes]]\nchannel = \"cli\"\nagent = %q\n\n[[routes]]\nchannel = \"library\"\nagent = %q\n", agentName, agentName, agentName)
 				opts.Layers = []config.Layer{{Name: "mock", TOML: []byte(layer)}}
 				responses := make([]mock.Response, 200)
@@ -244,12 +261,12 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 				}
 				opts.Providers = map[string]core.Provider{"mock": mock.New(mock.Script{Responses: responses})}
 				providerName, model = "mock", "mock"
-				fallback = true
+				missingEnv = provider.APIKeyEnv
 			}
 		}
 	}
 	rt, err := lana.New(ctx, opts, options...)
-	return rt, providerName, model, fallback, err
+	return rt, providerName, model, missingEnv, err
 }
 
 func secretInFile(home, name string) bool {
@@ -350,7 +367,7 @@ func cmdRun(args []string) int {
 	if *ask {
 		approve = lineAnswerer
 	}
-	rt, providerName, model, fallback, err := runtimeFor(ctx, home, agentName, approve)
+	rt, providerName, model, missingEnv, err := runtimeFor(ctx, home, agentName, approve)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -362,8 +379,8 @@ func cmdRun(args []string) int {
 		return fail(err, 2)
 	}
 	defer func() { _ = rt.Close() }()
-	if fallback {
-		fmt.Fprintln(os.Stderr, "· API key provider belum diisi; memakai MockLlm, bukan model nyata")
+	if missingEnv != "" {
+		fmt.Fprintf(os.Stderr, "· %s belum diisi; memakai MockLlm, bukan model nyata\n", missingEnv)
 	}
 	start := time.Now()
 	result, runErr := rt.Run(ctx, lana.Request{Agent: agentName, Prompt: prompt})

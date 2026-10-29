@@ -50,7 +50,7 @@ func cmdChat(args []string) int {
 	}
 
 	approver := tui.NewApprover()
-	rt, _, _, fallback, err := runtimeFor(ctx, home, agentName, approver.Ask)
+	rt, _, _, missingEnv, err := runtimeFor(ctx, home, agentName, approver.Ask)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -69,11 +69,11 @@ func cmdChat(args []string) int {
 	}
 	agentName = info.Agent
 	model := rt.AgentModel(agentName)
-	if fallback {
+	if missingEnv != "" {
 		if notice != "" {
 			notice += " · "
 		}
-		notice += "provider belum siap; memakai MockLlm. Isi API key lalu jalankan ulang untuk model sungguhan."
+		notice += missingEnv + " belum diisi; memakai MockLlm. Isi key lalu jalankan ulang untuk model sungguhan."
 	}
 	if *yolo {
 		if err := rt.SetPolicy(ctx, info.ID, core.PolicyTrust); err != nil {
