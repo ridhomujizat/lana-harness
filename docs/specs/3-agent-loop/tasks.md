@@ -106,7 +106,7 @@ flowchart LR
 
 ## Tasks
 
-- [ ] `T-001` Verifikasi tipe `core` dari spec #2 (`API-CORE-015`)
+- [x] `T-001` Verifikasi tipe `core` dari spec #2 (`API-CORE-015`)
   - Issue/PR: `—`
   - Bergantung pada: spec #2 (core dasar, lihat tabel di atas)
   - Requirements: prasyarat untuk seluruh spec (tidak ada perilaku baru)
@@ -120,11 +120,11 @@ flowchart LR
     - `nix develop -c go build ./core/...`
     - `nix develop -c go vet ./core/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go build ./core/... && go vet ./core/...'`
+    - Hasil: exit 0. `ToolStatus`, `ToolDecision`, tipe hook, dan seluruh tipe `API-CORE-015` tersedia dari milestone spec #2.
+    - PR/commit: commit T-001 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-002` Implementasi `store/memstore` sebagai `core.SessionStore`
   - Issue/PR: `—`
