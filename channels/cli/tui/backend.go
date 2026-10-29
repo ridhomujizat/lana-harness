@@ -40,4 +40,6 @@ type Backend interface {
 	AgentNames() []string
 	AgentModel(agent string) string
 	AgentPolicy(agent string) string
+	// Memory returns the entries of the agent's user file and memory file.
+	Memory(agent string) (user, memory []string, err error)
 }

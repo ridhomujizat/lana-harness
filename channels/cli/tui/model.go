@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 // Options is the input to Run.
@@ -754,6 +755,8 @@ func (m *Model) slash(value string) tea.Cmd {
 		return m.agentCommand(args)
 	case "/model":
 		return m.modelCommand(args)
+	case "/memory":
+		return m.memoryCommand()
 	case "/verbose":
 		m.verbose = !m.verbose
 		return tea.Println(styleMuted.Render("· verbose " + onOff(m.verbose)))
@@ -767,6 +770,24 @@ func (m *Model) slash(value string) tea.Cmd {
 		return m.setPolicy(strings.ToLower(args[0]))
 	}
 	return tea.Println(styleMuted.Render("· unknown command: " + command))
+}
+
+func (m *Model) memoryCommand() tea.Cmd {
+	user, memory, err := m.backend.Memory(m.agent)
+	if err != nil {
+		return tea.Println(styleErr.Render("✗ memory: " + err.Error()))
+	}
+	lines := memoryLines("user", user, agenthome.UserLimit)
+	lines = append(lines, memoryLines("memory", memory, agenthome.MemoryLimit)...)
+	return tea.Println(strings.Join(lines, "\n"))
+}
+
+func memoryLines(target string, entries []string, limit int) []string {
+	lines := []string{styleMuted.Render(fmt.Sprintf("· %s %d/%d characters, %d entries", target, agenthome.Size(entries), limit, len(entries)))}
+	for i, entry := range entries {
+		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, strings.ReplaceAll(entry, "\n", "\n     ")))
+	}
+	return lines
 }
 
 func (m *Model) setPolicy(value string) tea.Cmd {

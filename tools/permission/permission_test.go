@@ -405,3 +405,32 @@ func TestChildInheritsDeny(t *testing.T) {
 		t.Fatalf("got=%v", got)
 	}
 }
+
+func TestMemoryRiskPolicies(t *testing.T) {
+	memoryCall := func(sessionID string) core.ToolsPreExecuteInput {
+		in := callInput(sessionID, "memory_write", `{"target":"memory","action":"add","content":"x"}`)
+		in.Call.Risk = core.RiskMemory
+		return in
+	}
+	for _, policy := range []string{"ask", "trust"} {
+		s := setup(t, core.AgentConfig{Permission: policy}, false)
+		approval := &fakeApproval{outcome: core.OutcomeRejected}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		if got, _ := engine.Handle(context.Background(), memoryCall(s.session.ID), nil); !got.Allowed {
+			t.Fatalf("%s: memory_write rejected: %+v", policy, got)
+		}
+		if approval.calls.Load() != 0 {
+			t.Fatalf("%s: approval was requested", policy)
+		}
+	}
+	s := setup(t, core.AgentConfig{Permission: "never"}, false)
+	engine := &Engine{Store: s.store, Config: s.config}
+	if got, _ := engine.Handle(context.Background(), memoryCall(s.session.ID), nil); got.Allowed || got.Status != core.ToolStatusRejected {
+		t.Fatalf("never: memory_write allowed: %+v", got)
+	}
+	s = setup(t, core.AgentConfig{Permission: "trust", Rules: core.AgentRules{Deny: []string{"memory_write"}}}, false)
+	engine = &Engine{Store: s.store, Config: s.config}
+	if got, _ := engine.Handle(context.Background(), memoryCall(s.session.ID), nil); got.Allowed {
+		t.Fatal("deny rule did not reject memory_write")
+	}
+}

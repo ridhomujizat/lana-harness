@@ -13,6 +13,8 @@ const (
 	RiskWrite   Risk = "write"
 	RiskExec    Risk = "exec"
 	RiskNetwork Risk = "network"
+	// RiskMemory writes the calling agent's memory files.
+	RiskMemory Risk = "memory"
 )
 
 // ToolSpec is the tool description for the model.
@@ -29,6 +31,8 @@ type ToolCtx struct {
 	CallID    string
 	AgentName string
 	Workspace string
+	// Home is $LANA_HOME. Empty when the runtime has no home folder.
+	Home string
 }
 
 // ToolStatus is the status of a tool result.

@@ -12,6 +12,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/channels/cli/tui"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 // cmdChat runs the interactive TUI chat.
@@ -86,7 +87,7 @@ func cmdChat(args []string) int {
 	}
 	cwd, _ := os.Getwd()
 	options := tui.Options{
-		Backend:   chatBackend{rt: rt, agent: agentName},
+		Backend:   chatBackend{rt: rt, agent: agentName, home: home},
 		Approver:  approver,
 		Agent:     agentName,
 		Model:     model,
@@ -167,6 +168,7 @@ func restoreEvents(events []core.SessionEvent) []core.SessionEvent {
 type chatBackend struct {
 	rt    *lana.Runtime
 	agent string
+	home  string
 }
 
 func (b chatBackend) CreateSession(ctx context.Context, agent string) (core.SessionInfo, error) {
@@ -244,5 +246,15 @@ func (b chatBackend) AgentNames() []string { return b.rt.AgentNames() }
 func (b chatBackend) AgentModel(agent string) string { return b.rt.AgentModel(agent) }
 
 func (b chatBackend) AgentPolicy(agent string) string { return b.rt.AgentPolicy(agent) }
+
+func (b chatBackend) Memory(agent string) ([]string, []string, error) {
+	paths := agenthome.Paths(b.home, agent)
+	user, err := agenthome.ReadEntries(paths.User)
+	if err != nil {
+		return nil, nil, err
+	}
+	memory, err := agenthome.ReadEntries(paths.Memory)
+	return user, memory, err
+}
 
 var _ tui.Backend = chatBackend{}

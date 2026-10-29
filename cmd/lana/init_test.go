@@ -99,3 +99,16 @@ func TestAskAndAskKey(t *testing.T) {
 		t.Fatalf("key = %q", got)
 	}
 }
+
+func TestSecretInFileLastWins(t *testing.T) {
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "secrets.env"), []byte("# comment\nDEEPSEEK_API_KEY=\nDEEPSEEK_API_KEY=sk-abc\nOPENAI_API_KEY=sk-x\nOPENAI_API_KEY=\"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !secretInFile(home, "DEEPSEEK_API_KEY") {
+		t.Fatal("a later non-empty assignment must count")
+	}
+	if secretInFile(home, "OPENAI_API_KEY") {
+		t.Fatal("a later empty assignment must win")
+	}
+}

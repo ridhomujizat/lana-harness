@@ -79,7 +79,7 @@ func NewPipeline(hooks *core.Hooks) *Pipeline {
 }
 
 func defaultPreExecute(_ context.Context, in core.ToolsPreExecuteInput) (core.ToolDecision, error) {
-	if in.Call.Risk == core.RiskRead {
+	if in.Call.Risk == core.RiskRead || in.Call.Risk == core.RiskMemory {
 		return core.ToolDecision{Allowed: true, Status: core.ToolStatusSuccess}, nil
 	}
 	return core.ToolDecision{

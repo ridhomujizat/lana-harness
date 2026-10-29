@@ -129,7 +129,7 @@ func TestTurnPlainAnswer(t *testing.T) {
 	}
 	got := kinds(h.events(t))
 	want := []string{
-		core.KindSessionCreated, core.KindTurnStart, core.KindUserMessage, core.KindStepStart,
+		core.KindSessionCreated, core.KindTurnStart, core.KindSystemMessage, core.KindUserMessage, core.KindStepStart,
 		core.KindAssistantMessage, core.KindStepEnd, core.KindTurnEnd,
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {

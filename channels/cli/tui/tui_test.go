@@ -152,6 +152,9 @@ func (f *fakeBackend) Compact(context.Context, string) (CompactionInfo, error) {
 func (f *fakeBackend) AgentNames() []string      { return []string{"default", "assistant"} }
 func (f *fakeBackend) AgentModel(string) string  { return "mock:mock" }
 func (f *fakeBackend) AgentPolicy(string) string { return "ask" }
+func (f *fakeBackend) Memory(string) ([]string, []string, error) {
+	return []string{"Name: Ridho"}, nil, nil
+}
 
 func TestProgramFlow(t *testing.T) {
 	observer := core.NewObserve[core.LiveFrame]()
@@ -277,6 +280,10 @@ func TestInteractiveSlashAndMenus(t *testing.T) {
 	send("\x1b[B")
 	send("\r")
 	waitFor(t, &out, "· agent: assistant")
+	send("/memory\r")
+	waitFor(t, &out, "· user 11/2000 characters, 1 entries")
+	waitFor(t, &out, "1. Name: Ridho")
+	waitFor(t, &out, "· memory 0/4000 characters, 0 entries")
 	send("/exit\r")
 	select {
 	case err := <-done:

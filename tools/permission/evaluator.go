@@ -94,6 +94,10 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if policy == core.PolicyNever {
 		return reject("policy never"), nil
 	}
+	// Memory writes stay inside the agent home and need no approval (spec #5 Q-002).
+	if in.Call.Risk == core.RiskMemory {
+		return allow(core.ApprovalOutcome("")), nil
+	}
 	if e.Approval == nil {
 		return reject("approval is not available"), nil
 	}

@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 )
 
@@ -82,6 +84,7 @@ type resolvedAgent struct {
 	provider   string
 	model      string
 	promptFile string
+	channel    string
 	workspace  string
 	tools      []string
 	fallback   []core.LLMTarget
@@ -154,6 +157,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		provider:   provider,
 		model:      model,
 		promptFile: cfg.PromptFile,
+		channel:    info.Channel,
 		workspace:  workspace,
 		tools:      cfg.Tools,
 		fallback:   fallback,
@@ -219,16 +223,40 @@ func (rn *Runner) promptPath(res resolvedAgent) (string, error) {
 	return path, nil
 }
 
-func (rn *Runner) readPrompt(res resolvedAgent) (string, error) {
+// buildPrompt assembles the system prompt from the persona, the agent home files, and the runtime context.
+func (rn *Runner) buildPrompt(res resolvedAgent) (string, error) {
+	in := agenthome.PromptInput{Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now()}
+	var home agenthome.Home
+	if rn.reg.home != "" {
+		home = agenthome.Paths(rn.reg.home, res.name)
+	}
 	path, err := rn.promptPath(res)
-	if err != nil || path == "" {
+	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("prompt_file: %w", err)
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("prompt_file: %w", err)
+		}
+		in.Persona = string(data)
+	} else if home.Agent != "" {
+		data, err := os.ReadFile(home.Agent)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("cannot read persona", "agent", res.name, "error", err)
+		}
+		in.Persona = string(data)
 	}
-	return string(data), nil
+	if home.Dir != "" {
+		if in.User, err = agenthome.ReadEntries(home.User); err != nil {
+			slog.Warn("cannot read user file", "agent", res.name, "error", err)
+		}
+		if in.Memory, err = agenthome.ReadEntries(home.Memory); err != nil {
+			slog.Warn("cannot read memory file", "agent", res.name, "error", err)
+		}
+	}
+	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
+	return agenthome.Build(in), nil
 }
 
 func (rn *Runner) lastSystemText(ctx context.Context) (string, error) {
@@ -266,6 +294,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 	pendingTools := false
 	continueNext := false
 	lastText := ""
+	prompt := ""
+	promptBuilt := false
 	var totalUsage core.Usage
 	for {
 		claimedText := ""
@@ -319,11 +349,14 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			reason = "max_steps"
 			goto finished
 		}
-		prompt, err := rn.readPrompt(resolved)
-		if err != nil {
-			runErr = runtimeError(err)
-			reason = "error"
-			goto finished
+		if !promptBuilt {
+			prompt, err = rn.buildPrompt(resolved)
+			if err != nil {
+				runErr = runtimeError(err)
+				reason = "error"
+				goto finished
+			}
+			promptBuilt = true
 		}
 		previousSystem, err := rn.lastSystemText(ctx)
 		if err != nil {
@@ -434,7 +467,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_call", CallID: block.ID, Name: block.Name, Input: block.Input})
 			}
 			outputs := rn.reg.pipeline.Run(ctx, calls, resolved.tools, core.ToolCtx{
-				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace,
+				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
 			})
 			for i, output := range outputs {
 				status := output.Status

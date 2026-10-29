@@ -51,6 +51,8 @@ func run(args []string) int {
 		return cmdConfig(args[1:])
 	case "chat":
 		return cmdChat(args[1:])
+	case "agent":
+		return cmdAgent(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command: %s\n", args[0])
 		return 2
@@ -58,7 +60,7 @@ func run(args []string) int {
 }
 
 func help() {
-	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
@@ -278,6 +280,9 @@ func cmdConfig(args []string) int {
 				fmt.Printf("· %s is not set (provider %s)\n", env, name)
 			}
 		}
+		for _, warning := range agentSizeWarnings(home, result.Config) {
+			fmt.Println(warning)
+		}
 		return 0
 	case "path":
 		fmt.Printf("LANA_HOME  %s\n", home)
@@ -357,12 +362,14 @@ func secretInFile(home, name string) bool {
 	if err != nil {
 		return false
 	}
+	// The last assignment wins, as in the config loader.
+	value := ""
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), name+"=") {
-			return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), name+"=")) != ""
+			value = strings.Trim(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), name+"=")), "\"'")
 		}
 	}
-	return false
+	return value != ""
 }
 
 func lineAnswerer(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome {
