@@ -327,6 +327,9 @@ type Hooks struct {
 	SessionEvent      *Observe[SessionEvent]
 }
 
+// NewHooks membuat kumpulan hook kosong siap dipakai.
+func NewHooks() *Hooks { return newHooks() }
+
 func newHooks() *Hooks {
 	return &Hooks{
 		AgentPreStep:      NewWaterfall[PreStepInput, PreStepDecision](),

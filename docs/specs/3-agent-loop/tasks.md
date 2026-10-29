@@ -166,7 +166,7 @@ flowchart LR
     - PR/commit: commit T-003 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-004` Implementasi registry tool dan gerbang default `tools.pre_execute`
+- [x] `T-004` Implementasi registry tool dan gerbang default `tools.pre_execute`
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-TOOL-009`
@@ -180,11 +180,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go build ./... && CGO_ENABLED=1 go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. `TestDefaultGate` (Read allow, Write rejected `default fail-closed`) dan `TestDenyListenerStopsChain` lulus; panic tool menjadi status error.
+    - PR/commit: commit T-004 spec #3
+    - Deviasi: `core.NewHooks` ditambahkan sebagai konstruktor publik agar pipeline dapat diuji tanpa Boot; tidak mengubah perilaku.
 
 - [ ] `T-005` Implementasi `read_file`, `write_file`, `edit_file`, dan guard workspace
   - Issue/PR: `—`
