@@ -226,7 +226,7 @@ flowchart LR
     - PR/commit: commit T-006 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-007` Implementasi `bash`
+- [x] `T-007` Implementasi `bash`
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-TOOL-006`
@@ -240,11 +240,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. cwd workspace, timeout membunuh grup proses, batas 600 ditolak sebelum eksekusi, exit code bukan nol menjadi status error, output 40.000 karakter dipotong dengan catatan, pembatalan ctx menghasilkan `dibatalkan`.
+    - PR/commit: commit T-007 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-008` Implementasi `web_fetch`
   - Issue/PR: `—`
