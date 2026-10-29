@@ -4,7 +4,7 @@
 - **Requirements**: [requirements.md](requirements.md)
 - **Revisi requirements**: 6
 - **Status requirements**: Approved
-- **Revisi contract**: 4 (rekonsiliasi: `CQ-009` sampai `CQ-011`)
+- **Revisi contract**: 5 (revisi 5: provider `deepseek` dan prompt API key di `lana init`)
 - **Berlaku untuk**: CLI (subcommand, flag, env, exit code, stdout/stderr, format JSON, tombol, slash command, file yang dibuat)
 - **Status**: Approved
 
@@ -342,18 +342,19 @@ Prompt approval dengan `--ask` memakai format `API-CLI-005` dalam mode baris (ta
 ## API-CLI-008: `lana init`
 
 ```text
-lana init [--force] [--yes]
+lana init [--force] [--yes] [--provider openai|openrouter|deepseek]
 ```
 
 Pertanyaan wizard (urut):
 
 | Pertanyaan | Pilihan | Default |
 |---|---|---|
-| Provider | `openai`, `openrouter` (M3). `anthropic` ditambah saat adapter M4 ada (`CQ-009`) | `openai` |
-| Nama env API key | string | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` |
-| Model default | string | `gpt-5-mini` / `openai/gpt-5-mini` |
+| Provider | `openai`, `openrouter`, `deepseek`. `anthropic` ditambah saat adapter M4 ada (`CQ-009`) | `openai` |
+| Nama env API key | string | `OPENAI_API_KEY` / `OPENROUTER_API_KEY` / `DEEPSEEK_API_KEY` |
+| Model default | string | `gpt-5-mini` / `openai/gpt-5-mini` / `deepseek-chat` |
+| API key | string, opsional; ditulis ke `secrets.env` tanpa echo | kosong (isi nanti) |
 
-`--yes` memakai semua default tanpa bertanya. File yang dibuat untuk default:
+`--yes` memakai semua default tanpa bertanya (provider dari `--provider`, API key tidak ditanyakan). File yang dibuat untuk default:
 
 `$LANA_HOME/config.toml`
 
@@ -375,11 +376,20 @@ channel = "cli"
 agent = "default"
 ```
 
-Untuk `openrouter`: `base_url = "https://openrouter.ai/api/v1"`. Untuk `anthropic` (setelah M4): `kind = "anthropic"` tanpa `base_url`. Di M3 kind ini tidak ditawarkan (`CQ-009`).
+Untuk `openrouter`: `base_url = "https://openrouter.ai/api/v1"`. Untuk `deepseek`: `base_url = "https://api.deepseek.com/v1"`. Untuk `anthropic` (setelah M4): `kind = "anthropic"` tanpa `base_url`. Di M3 kind ini tidak ditawarkan (`CQ-009`).
 
 `$LANA_HOME/agents/default.md`: system prompt umum untuk asisten coding dan personal (isi ditentukan di design).
 
 `$LANA_HOME/secrets.env` (permission `0600`):
+
+Jika API key diisi di wizard:
+
+```text
+# API key provider; jangan di-commit.
+OPENAI_API_KEY=sk-...
+```
+
+Jika dilewati:
 
 ```text
 # Isi API key di sini, atau set sebagai env di shell.
@@ -391,9 +401,12 @@ Output sukses (stdout):
 ```text
 ✓ dibuat ~/.lana/config.toml
 ✓ dibuat ~/.lana/agents/default.md
-✓ dibuat ~/.lana/secrets.env (0600)
-· isi OPENAI_API_KEY di ~/.lana/secrets.env atau env shell, lalu jalankan: lana chat
+✓ dibuat ~/.lana/secrets.env (0600, API key tersimpan)
+· jalankan: lana chat
 ```
+
+Jika API key dilewati, baris terakhir menjadi
+`· isi OPENAI_API_KEY di ~/.lana/secrets.env atau env shell, lalu jalankan: lana chat`.
 
 | Kondisi | Exit | Output |
 |---|---:|---|

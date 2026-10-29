@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/x/term"
 	lana "github.com/ridhomujizat/lana-harness"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
@@ -57,16 +58,49 @@ func run(args []string) int {
 }
 
 func help() {
-	fmt.Print("lana - agen coding dan personal\n\n  lana init [--force] [--yes]\n  lana run [--agent <nama>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <nama>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana --version\n")
+	fmt.Print("lana - agen coding dan personal\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <nama>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <nama>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
+
+// providerPreset adalah nilai default wizard untuk satu provider.
+type providerPreset struct {
+	name    string
+	baseURL string
+	keyEnv  string
+	model   string
+}
+
+var providerPresets = []providerPreset{
+	{name: "openai", baseURL: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY", model: "gpt-5-mini"},
+	{name: "openrouter", baseURL: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "openai/gpt-5-mini"},
+	{name: "deepseek", baseURL: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY", model: "deepseek-chat"},
+}
+
+func lookupProvider(name string) (providerPreset, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, preset := range providerPresets {
+		if preset.name == name {
+			return preset, true
+		}
+	}
+	return providerPreset{}, false
+}
+
+func providerNames() string {
+	names := make([]string, 0, len(providerPresets))
+	for _, preset := range providerPresets {
+		names = append(names, preset.name)
+	}
+	return strings.Join(names, ", ")
+}
 
 func cmdInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	force := fs.Bool("force", false, "timpa file")
 	yes := fs.Bool("yes", false, "default")
+	providerFlag := fs.String("provider", "openai", "provider: "+providerNames())
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -78,19 +112,23 @@ func cmdInit(args []string) int {
 	if err != nil {
 		return fail(err, 1)
 	}
-	provider, keyEnv, model := "openai", "OPENAI_API_KEY", "gpt-5-mini"
-	if !*yes {
-		r := bufio.NewReader(os.Stdin)
-		provider = ask(r, "Provider", "openai", "openai")
-		if provider == "openrouter" {
-			keyEnv, model = "OPENROUTER_API_KEY", "openai/gpt-5-mini"
-		}
-		keyEnv = ask(r, "Env API key", keyEnv, "OPENAI_API_KEY")
-		model = ask(r, "Model", model, "gpt-5-mini")
+	preset, ok := lookupProvider(*providerFlag)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "error: provider %q tidak dikenal (pilihan: %s)\n", *providerFlag, providerNames())
+		return 2
 	}
-	base := "https://api.openai.com/v1"
-	if provider == "openrouter" {
-		base = "https://openrouter.ai/api/v1"
+	keyEnv, model, apiKey := preset.keyEnv, preset.model, ""
+	if !*yes {
+		fmt.Printf("Provider: %s\n", providerNames())
+		selected, ok := lookupProvider(ask("Provider", preset.name))
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: provider tidak dikenal (pilihan: %s)\n", providerNames())
+			return 2
+		}
+		preset = selected
+		keyEnv = ask("Env API key", preset.keyEnv)
+		model = ask("Model", preset.model)
+		apiKey = askKey("API key " + keyEnv)
 	}
 	cfgPath := filepath.Join(home, "config.toml")
 	promptPath := filepath.Join(home, "agents", "default.md")
@@ -101,35 +139,80 @@ func cmdInit(args []string) int {
 			return 2
 		}
 	}
-	cfg := fmt.Sprintf("[providers.%s]\nkind = \"openai_compat\"\nbase_url = %q\napi_key_env = %q\n\n[agents.default]\nprovider = %q\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"cli\"\nagent = \"default\"\n", provider, base, keyEnv, provider, model)
 	for path, data := range map[string]struct {
 		text string
 		mode os.FileMode
 	}{
-		cfgPath:     {cfg, 0o644},
+		cfgPath:     {initConfig(preset, keyEnv, model), 0o644},
 		promptPath:  {"Kamu adalah asisten coding dan personal yang ringkas dan teliti.\n", 0o644},
-		secretsPath: {"# Isi API key di sini, atau set sebagai env di shell.\n# " + keyEnv + "=\n", 0o600},
+		secretsPath: {secretsText(keyEnv, apiKey), 0o600},
 	} {
 		if err := atomicWrite(path, []byte(data.text), data.mode); err != nil {
 			return fail(err, 1)
 		}
+	}
+	if apiKey != "" {
+		fmt.Printf("✓ dibuat %s\n✓ dibuat %s\n✓ dibuat %s (0600, API key tersimpan)\n", cfgPath, promptPath, secretsPath)
+		fmt.Println("· jalankan: lana chat")
+		return 0
 	}
 	fmt.Printf("✓ dibuat %s\n✓ dibuat %s\n✓ dibuat %s (0600)\n", cfgPath, promptPath, secretsPath)
 	fmt.Printf("· isi %s di %s atau env shell, lalu jalankan: lana chat\n", keyEnv, secretsPath)
 	return 0
 }
 
-func ask(r *bufio.Reader, label, def, fallback string) string {
+func initConfig(preset providerPreset, keyEnv, model string) string {
+	return fmt.Sprintf("[providers.%s]\nkind = \"openai_compat\"\nbase_url = %q\napi_key_env = %q\n\n[agents.default]\nprovider = %q\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"cli\"\nagent = \"default\"\n", preset.name, preset.baseURL, keyEnv, preset.name, model)
+}
+
+func secretsText(keyEnv, key string) string {
+	if key == "" {
+		return "# Isi API key di sini, atau set sebagai env di shell.\n# " + keyEnv + "=\n"
+	}
+	return "# API key provider; jangan di-commit.\n" + keyEnv + "=" + key + "\n"
+}
+
+func ask(label, def string) string {
 	fmt.Printf("%s [%s]: ", label, def)
-	line, _ := r.ReadString('\n')
-	line = strings.TrimSpace(line)
+	line := readLine()
 	if line == "" {
-		if def != "" {
-			return def
-		}
-		return fallback
+		return def
 	}
 	return line
+}
+
+func askKey(label string) string {
+	fmt.Printf("%s (opsional, kosongkan untuk nanti): ", label)
+	if isTTY(os.Stdin) {
+		data, err := term.ReadPassword(os.Stdin.Fd())
+		fmt.Println()
+		if err == nil {
+			return strings.Trim(strings.TrimSpace(string(data)), "\"'")
+		}
+	}
+	return readLine()
+}
+
+// readLine membaca satu baris dari stdin tanpa buffering berlebih, sehingga
+// prompt berikutnya (misalnya ReadPassword) tidak kehilangan input.
+func readLine() string {
+	var buf []byte
+	one := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(one)
+		if n > 0 {
+			if one[0] == '\n' {
+				break
+			}
+			if one[0] != '\r' {
+				buf = append(buf, one[0])
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return strings.TrimSpace(string(buf))
 }
 
 func atomicWrite(path string, data []byte, mode os.FileMode) error {

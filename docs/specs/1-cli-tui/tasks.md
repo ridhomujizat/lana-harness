@@ -92,7 +92,7 @@ flowchart LR
   - Acceptance criteria: `AC-INIT-001`, `AC-INIT-002`, `AC-INIT-003`, `AC-INIT-004`
   - Operasi contract: `API-CLI-008`
   - Scope:
-    - Wizard `huh` dengan tiga pertanyaan dan default per provider. Provider hanya `openai` dan `openrouter` di M3 (`CQ-009`).
+    - Wizard `huh` dengan tiga pertanyaan dan default per provider. Provider `openai` dan `openrouter` di M3 (`CQ-009`); `deepseek` ditambahkan 2026-10-29 atas permintaan owner, plus prompt API key opsional.
     - Penulisan atomik; cek semua path dulu tanpa `--force`.
     - `secrets.env` dengan mode `0600` sejak dibuat.
     - Isi `agents/default.md`.

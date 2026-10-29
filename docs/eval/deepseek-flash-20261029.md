@@ -67,9 +67,12 @@ Perubahan:
 - Slash command: /help, /new, /clear, /session, /agent, /model, /permission, /yolo, /verbose, /exit.
 - Runtime: core.LiveFrame diperluas; agent loop mem-publish frame tool_call/tool_result; lana.Runtime mendapat CreateSession, LastSession, SessionInfo, SubscribeLive, Send, Cancel, Policy, SetPolicy, History, AgentNames, AgentModel, AgentPolicy; hook approval menerima channel cli.
 - cmd/lana chat: flag --agent, --yolo, --continue, --resume, --verbose; sesi channel cli; fallback MockLlm memberi 200 respons plus notice.
+- lana init: pilihan provider openai/openrouter/deepseek (`--provider` untuk `--yes`), prompt API key opsional dengan `term.ReadPassword` yang ditulis ke `secrets.env` 0600; `lana config check` menampilkan status tiap `api_key_env`.
+- Fallback MockLlm menyebut variabel env yang belum diisi, mis. `DEEPSEEK_API_KEY belum diisi`.
 
 Gate pembaruan:
 - gofmt -l: kosong; go vet ./...: bersih; golangci-lint run ./...: 0 issues; CGO_ENABLED=1 go test -race ./...: semua paket ok.
 - Build `go build ./cmd/lana`: ok; release `make release`: darwin/arm64 12.596.242 byte, linux/amd64 13.082.786 byte, linux/arm64 12.255.394 byte (statically linked, di bawah batas 40 MB).
 - Smoke: `lana chat` dengan stdin bukan TTY -> exit 2 dan saran `lana run`; `lana run` dan `--output json` -> exit 0; `go run ./examples/embed` -> Halo dari embed.
-- Batasan: sandbox menolak openpty, jadi TUI diuji lewat program Bubble Tea in-process (io.Pipe + buffer) dan unit test renderer; smoke visual di terminal asli belum dilakukan.
+- Batasan sandbox: openpty ditolak, jadi TUI diuji lewat program Bubble Tea in-process (io.Pipe + buffer) dan unit test renderer. Owner kemudian menjalankan TUI di terminal asli dan model DeepSeek nyata (2026-10-29 22:44) dan berhasil.
+- Test lokal tambahan: `lana init --yes --provider deepseek` di home sementara menghasilkan config DeepSeek + `secrets.env` placeholder 0600, dan `resolveAgent` diuji untuk route/default/satu agent/config kosong.
