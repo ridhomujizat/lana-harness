@@ -24,7 +24,10 @@ import (
 
 var version = "dev"
 
-func main() { os.Exit(run(os.Args[1:])) }
+func main() {
+	setupTerminalLogging()
+	os.Exit(run(os.Args[1:]))
+}
 
 func run(args []string) int {
 	if len(args) == 0 {
@@ -329,19 +332,17 @@ func cmdRun(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	agentName := *agentFlag
-	if agentName == "" {
-		if result, err := config.Load(ctx, config.Options{Home: home}); err == nil {
-			for _, route := range result.Config.Routes {
-				if route.Channel == "cli" {
-					agentName = route.Agent
-					break
-				}
+	agentName, err := loadAgent(ctx, home, *agentFlag)
+	if err != nil {
+		var errs config.Errors
+		if errors.As(err, &errs) {
+			for _, item := range errs {
+				fmt.Fprintf(os.Stderr, "error: %s\n", item.Error())
 			}
+			return 2
 		}
-		if agentName == "" {
-			agentName = "default"
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
 	}
 	var approve lana.ApproveFunc
 	if *ask {

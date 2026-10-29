@@ -35,19 +35,18 @@ func cmdChat(args []string) int {
 		return fail(err, 1)
 	}
 	ctx := context.Background()
-	agentName := *agentFlag
-	if agentName == "" {
-		if result, loadErr := config.Load(ctx, config.Options{Home: home}); loadErr == nil {
-			for _, route := range result.Config.Routes {
-				if route.Channel == "cli" {
-					agentName = route.Agent
-					break
-				}
+	defer setupChatLogging(home)()
+	agentName, err := loadAgent(ctx, home, *agentFlag)
+	if err != nil {
+		var errs config.Errors
+		if errors.As(err, &errs) {
+			for _, item := range errs {
+				fmt.Fprintf(os.Stderr, "error: %s\n", item.Error())
 			}
+			return 2
 		}
-		if agentName == "" {
-			agentName = "default"
-		}
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
 	}
 
 	approver := tui.NewApprover()
