@@ -383,7 +383,7 @@ flowchart LR
     - PR/commit: commit T-013/T-014 spec #3
     - Deviasi: Sama dengan T-013; test tambahan di `agent/tool_loop_test.go`.
 
-- [ ] `T-015` Implementasi listener retry dan fallback `llm.stream`
+- [x] `T-015` Implementasi listener retry dan fallback `llm.stream`
   - Issue/PR: `—`
   - Bergantung pada: `T-009`, `T-013`
   - Requirements: `REQ-LOOP-008`
@@ -397,11 +397,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestRetryBackoff`, `TestFallbackOrder`, `TestNoRetryClasses`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: `TestRetryBackoff` (3 panggilan, 2 attempt, jeda), `TestFallbackOrder` (primary 4 kali lalu fallback), `TestNoRetryClasses` (auth/client/context_length tanpa retry/fallback) PASS.
+    - PR/commit: commit T-015 spec #3
+    - Deviasi: Jeda retry memakai field `Retry.Delays` agar test cepat; nilai produksi default 1s/2s/4s.
 
 - [ ] `T-016` Implementasi `Cancel` dan `Hub` frame hidup
   - Issue/PR: `—`
