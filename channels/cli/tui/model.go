@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -512,6 +513,8 @@ func (m *Model) finishTurn(outcome turnOutcome) tea.Cmd {
 	m.usageOut += outcome.result.OutputTokens
 	m.approval = nil
 	switch {
+	case outcome.err != nil && (errors.Is(outcome.err, context.Canceled) || errors.Is(outcome.err, context.DeadlineExceeded)):
+		cmds = append(cmds, tea.Println(styleMuted.Render("· turn dibatalkan")))
 	case outcome.err != nil:
 		cmds = append(cmds, tea.Println(styleErr.Render("✗ error: "+outcome.err.Error())))
 	case outcome.result.StopReason == "cancelled":
