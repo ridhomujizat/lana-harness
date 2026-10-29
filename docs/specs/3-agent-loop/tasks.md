@@ -246,7 +246,7 @@ flowchart LR
     - PR/commit: commit T-007 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-008` Implementasi `web_fetch`
+- [x] `T-008` Implementasi `web_fetch`
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-TOOL-007`
@@ -259,11 +259,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...` (httptest)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. HTML menjadi markdown tanpa script/style, text/plain dan application/json apa adanya, tipe lain ditolak, non-http ditolak tanpa request, body >5 MiB ditolak, timeout dipetakan ke pesan 30 detik.
+    - PR/commit: commit T-008 spec #3
+    - Deviasi: Dependency `html-to-markdown/v2` dipin ke v2.4.0 dan `x/net` mengikuti agar direktif `go 1.24.0` tetap dipertahankan.
 
 - [ ] `T-009` Implementasi adapter `openai_compat`: config, client, dan klasifikasi error
   - Issue/PR: `—`
