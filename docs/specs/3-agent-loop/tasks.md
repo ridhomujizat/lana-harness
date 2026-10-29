@@ -323,7 +323,7 @@ flowchart LR
     - PR/commit: commit T-011 spec #3
     - Deviasi: `core.Builder.Secrets()` ditambahkan sebagai akses internal (di luar contract publik) agar modul dapat memeriksa env tanpa meng-import config.
 
-- [ ] `T-012` Implementasi `core.DeriveMessages` (subset), `Events`, dan pemasangan hook
+- [x] `T-012` Implementasi `core.DeriveMessages` (subset), `Events`, dan pemasangan hook
   - Issue/PR: `—`
   - Bergantung pada: `T-001`, `T-002`
   - Requirements: `REQ-LOOP-003` (sebagian), `REQ-LOOP-010` (sebagian)
@@ -336,11 +336,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./core/... ./agent/...` (unit `derive_test.go` di `core`, `events_test.go`, golden payload)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./core/... ./agent/...'`
+    - Hasil: `ok core`, `ok agent`; exit 0. `TestDeriveGolden` membuktikan system/attempt/tool-call diabaikan dan tool_result digabung ke pesan user; `TestEventsPayloadVersion` membuktikan `v:1`.
+    - PR/commit: commit T-012 spec #3
+    - Deviasi: Pemasangan listener/handler default untuk loop dipasang bersama T-013 dan T-015 karena hook yang dipakai baru ada di sana; tidak ada AC yang dimiliki T-012.
 
 - [ ] `T-013` Implementasi turn loop inti: claim, pre_step, step, pemanggilan model, batas step, dan penghentian
   - Issue/PR: `—`
