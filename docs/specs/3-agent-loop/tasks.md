@@ -403,7 +403,7 @@ flowchart LR
     - PR/commit: commit T-015 spec #3
     - Deviasi: Jeda retry memakai field `Retry.Delays` agar test cepat; nilai produksi default 1s/2s/4s.
 
-- [ ] `T-016` Implementasi `Cancel` dan `Hub` frame hidup
+- [x] `T-016` Implementasi `Cancel` dan `Hub` frame hidup
   - Issue/PR: `—`
   - Bergantung pada: `T-013`, `T-014`
   - Requirements: `REQ-LOOP-007`, `REQ-LOOP-009`
@@ -416,11 +416,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestCancelBashProcess`, `TestCancelIdleNoop`, `TestCancelKeepsInbox`, `TestLiveFrameOrder`, `TestLiveFrameDropWarn`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: `TestCancelBashProcess`, `TestCancelIdleNoop`, `TestCancelKeepsInbox`, `TestLiveFrameOrder`, `TestLiveFrameDropWarn` PASS; race detector lulus.
+    - PR/commit: commit T-016 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-017` Implementasi `SetAgent`, `SetModel`, dan resolusi workspace per session
   - Issue/PR: `—`
