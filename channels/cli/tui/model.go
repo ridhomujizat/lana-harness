@@ -94,6 +94,7 @@ type Model struct {
 
 	lastCtrlC time.Time
 
+	queue       []string
 	searching   bool
 	searchQuery string
 
@@ -375,11 +376,7 @@ func (m *Model) submit() tea.Cmd {
 	m.history.Add(value)
 
 	if m.running {
-		go func() {
-			ctx, cancel := context.WithTimeout(m.ctx, 10*time.Second)
-			defer cancel()
-			_ = m.backend.Send(ctx, m.sessionID, value)
-		}()
+		m.queue = append(m.queue, value)
 		return tea.Println(strings.Join(append(renderUser(value), styleMuted.Render("  (antre)")), "\n"))
 	}
 	return tea.Batch(m.startTurn(value), tea.Println(strings.Join(renderUser(value), "\n")+"\n"))
@@ -513,6 +510,7 @@ func (m *Model) finishTurn(outcome turnOutcome) tea.Cmd {
 	m.stream.Reset()
 	m.usageIn += outcome.result.InputTokens
 	m.usageOut += outcome.result.OutputTokens
+	m.approval = nil
 	switch {
 	case outcome.err != nil:
 		cmds = append(cmds, tea.Println(styleErr.Render("✗ error: "+outcome.err.Error())))
@@ -520,6 +518,11 @@ func (m *Model) finishTurn(outcome turnOutcome) tea.Cmd {
 		cmds = append(cmds, tea.Println(styleMuted.Render("· turn dibatalkan")))
 	case outcome.result.StopReason == "max_steps":
 		cmds = append(cmds, tea.Println(styleWarn.Render("⚠ turn berhenti karena max_steps")))
+	}
+	if len(m.queue) > 0 {
+		next := m.queue[0]
+		m.queue = m.queue[1:]
+		cmds = append(cmds, m.startTurn(next))
 	}
 	return tea.Batch(cmds...)
 }
@@ -629,6 +632,7 @@ func (m *Model) slash(value string) tea.Cmd {
 		m.sessionID = info.ID
 		m.usageIn, m.usageOut = 0, 0
 		m.assistantStarted = false
+		m.queue = nil
 		return tea.Println(styleMuted.Render("· session baru " + info.ID))
 	case "/session":
 		return tea.Println(styleMuted.Render("· session " + m.sessionID + " · " + m.cwd))
