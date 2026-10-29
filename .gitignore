@@ -14,3 +14,4 @@ dist/
 .gopath/
 .golangci-cache/
 .smoke-home/
+.ghcache/

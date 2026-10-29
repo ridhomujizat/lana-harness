@@ -364,11 +364,11 @@ flowchart TD
     - Push branch uji dengan test sengaja gagal: job merah (`AC-CI-001`).
     - Push branch normal: ringkasan job memuat ukuran dua platform (`AC-CI-002`).
   - Bukti penyelesaian:
-    - Status: Completed with deviation
-    - Perintah/test: workflow `.github/workflows/ci.yml`; `python` YAML tidak tersedia, validasi dilakukan dengan inspeksi struktur dan eksekusi lokal semua langkah.
-    - Hasil: Workflow memuat matriks `macos-14` dan `ubuntu-24.04`, format, lint, test race, release, cek statis Linux, dan ringkasan ukuran. Eksekusi CI remote menunggu push branch eval (dilakukan di akhir sesuai aturan isolasi).
-    - PR/commit: commit T-013 spec #2
-    - Deviasi: AC-CI-001 dan AC-CI-002 belum dapat dibuktikan tanpa push remote; bukti lokal setara dicatat di docs/eval.
+    - Status: Completed
+    - Perintah/test: `gh run watch 40878244461 --exit-status`; `gh run view 40878244461 --log`.
+    - Hasil: Run normal https://github.com/ridhomujizat/lana-harness/actions/runs/40878244461 `completed success` pada macOS-14 dan ubuntu-24.04. Ringkasan ukuran tercetak: darwin/arm64 11.288.786 byte, linux/amd64 11.747.490 byte, linux/arm64 11.010.210 byte. AC-CI-001 dibuktikan run sengaja gagal https://github.com/ridhomujizat/lana-harness/actions/runs/40878578663 `failure`.
+    - PR/commit: commit T-013 spec #2 dan `fix: enforce library import rules...`
+    - Deviasi: Tidak ada (CI remote sudah dijalankan).
 
 ## Verifikasi akhir
 

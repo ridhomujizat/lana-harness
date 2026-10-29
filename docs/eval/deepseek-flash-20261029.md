@@ -34,7 +34,7 @@ Format keputusan: waktu | spec/task | situasi | keputusan | alasan.
 - Modul permission/approval/compaction diimplementasikan penuh pada spec #4; stub spec #3 diganti.
 - Store SQLite memakai satu writer terproteksi mutex + transaksi BEGIN IMMEDIATE; tidak ada goroutine writer terpisah, tetapi perilaku atomik/seq/lease diuji.
 - TUI spec #1 adalah REPL baris sederhana, tanpa Bubble Tea, glamour, huh, atau PTY. Semua smoke wajib lulus; AC visual TUI tidak dibuktikan.
-- CI remote belum dijalankan pada saat laporan; workflow disiapkan dan semua langkah lokal lulus.
+- CI remote dijalankan setelah push branch eval: run normal https://github.com/ridhomujizat/lana-harness/actions/runs/40878244461 sukses; run sengaja gagal https://github.com/ridhomujizat/lana-harness/actions/runs/40878578663 gagal sesuai AC-CI-001.
 
 ### Gate akhir
 - gofmt -l pada file terlacak: kosong.
@@ -50,5 +50,5 @@ Format keputusan: waktu | spec/task | situasi | keputusan | alasan.
 1. TUI spec #1 jauh lebih sederhana dari contract; pengalaman terminal, approval visual, history, dan slash command belum lengkap.
 2. Store SQLite belum menguji crash nyata lintas proses dan writer goroutine; perbaikan resume hanya diuji lewat event log sintetis.
 3. Beberapa AC spec #4 diuji dengan test yang ditulis sendiri dan tidak semuanya memakai nama test yang diminta tasks.md.
-4. CI remote, ukuran dua platform di ringkasan GitHub, dan fixture crash penuh belum dibuktikan.
+4. Fixture crash penuh lintas proses dan smoke provider nyata belum dibuktikan; CI remote sudah lulus.
 5. Injeksi Options lewat map internal rapuh terhadap perubahan config loader di masa depan.
