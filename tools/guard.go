@@ -89,10 +89,6 @@ func errorOutput(msg string) (core.ToolOutput, error) {
 	return core.ToolOutput{Status: core.ToolStatusError, Output: msg}, nil
 }
 
-func rejectOutput(msg string) (core.ToolOutput, error) {
-	return core.ToolOutput{Status: core.ToolStatusRejected, Output: msg}, nil
-}
-
 func successOutput(msg string) (core.ToolOutput, error) {
 	return core.ToolOutput{Status: core.ToolStatusSuccess, Output: msg}, nil
 }

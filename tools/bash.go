@@ -68,11 +68,13 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return successOutput(text)
 	case <-ctx.Done():
 		killGroup(cmd)
-		<-done
+		err := <-done
+		_ = err
 		return errorOutput("dibatalkan")
 	case <-timer.C:
 		killGroup(cmd)
-		<-done
+		err := <-done
+		_ = err
 		return errorOutput(fmt.Sprintf("timeout setelah %d detik", in.TimeoutSecs))
 	}
 }

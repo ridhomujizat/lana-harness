@@ -49,7 +49,7 @@ type toolAccumulator struct {
 
 func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStream {
 	return func(yield func(core.ChatEvent, error) bool) {
-		defer body.Close()
+		defer func() { _ = body.Close() }()
 		scanner := bufio.NewScanner(body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 		acc := map[int]*toolAccumulator{}

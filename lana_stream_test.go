@@ -257,7 +257,8 @@ func TestCloseCancelsTurn(t *testing.T) {
 		t.Fatalf("Close terlalu lama: %v", elapsed)
 	}
 	select {
-	case <-done:
+	case err := <-done:
+		_ = err
 	case <-time.After(3 * time.Second):
 		t.Fatal("Run tidak selesai setelah Close")
 	}
@@ -292,7 +293,7 @@ func TestCustomToolPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rt2.Close()
+	defer func() { _ = rt2.Close() }()
 	result, err := rt2.Run(context.Background(), Request{Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)
@@ -341,7 +342,7 @@ func TestApprovalTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rt2.Close()
+	defer func() { _ = rt2.Close() }()
 	result, err := rt2.Run(context.Background(), Request{Prompt: "hi"})
 	if err != nil {
 		t.Fatal(err)

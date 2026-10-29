@@ -115,7 +115,7 @@ func TestNoRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	if _, err := rt.Run(context.Background(), Request{Prompt: "hi"}); !errors.Is(err, ErrNoRoute) {
 		t.Fatalf("err=%v", err)
 	}

@@ -180,11 +180,11 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		}
 		head, _ := io.ReadAll(io.LimitReader(f, 8000))
 		if bytes.IndexByte(head, 0) >= 0 {
-			f.Close()
+			_ = f.Close()
 			return nil
 		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil
 		}
 		scanner := bufio.NewScanner(f)
@@ -200,11 +200,11 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 			}
 			results = append(results, fmt.Sprintf("%s:%d: %s", rel, lineNo, line))
 			if len(results) >= 200 {
-				f.Close()
+				_ = f.Close()
 				return io.EOF
 			}
 		}
-		f.Close()
+		_ = f.Close()
 		return nil
 	})
 	if err != nil && err != io.EOF {

@@ -67,7 +67,7 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 		}
 		return errorOutput(err.Error())
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return errorOutput(fmt.Sprintf("HTTP %d", resp.StatusCode))
 	}

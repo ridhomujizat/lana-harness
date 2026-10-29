@@ -84,7 +84,7 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatSt
 		return nil, classifyNetwork(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		return nil, classifyHTTP(resp.StatusCode, data)
 	}

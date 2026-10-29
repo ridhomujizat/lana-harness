@@ -528,7 +528,7 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 }
 
 func (rn *Runner) writeAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string, pe core.ProviderError) {
-	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
+	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError(pe)}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
 }
 

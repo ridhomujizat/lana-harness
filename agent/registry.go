@@ -97,12 +97,6 @@ func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {
 	})
 }
 
-func (r *Registry) runner(sessionID string) *Runner {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.runnerLocked(sessionID)
-}
-
 func (r *Registry) runnerLocked(sessionID string) *Runner {
 	if existing := r.runners[sessionID]; existing != nil {
 		return existing
@@ -110,14 +104,6 @@ func (r *Registry) runnerLocked(sessionID string) *Runner {
 	runner := &Runner{reg: r, sessionID: sessionID}
 	r.runners[sessionID] = runner
 	return runner
-}
-
-func (r *Registry) newTurn(turnID string) *turnState {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	state := &turnState{done: make(chan struct{})}
-	r.turns[turnID] = state
-	return state
 }
 
 func (r *Registry) finishTurn(turnID string, result TurnResult) {
@@ -335,12 +321,6 @@ func (r *Registry) AgentNames() []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func (r *Registry) isClosed() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.closed
 }
 
 var _ core.AgentRegistry = (*Registry)(nil)
