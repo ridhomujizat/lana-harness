@@ -249,7 +249,7 @@ flowchart TD
     - PR/commit: commit T-007
     - Deviasi: Bila lapisan atas menulis baris modul tanpa `config`, config lama dipertahankan; penggantian penuh hanya terjadi bila key `config` ditulis. Ini tafsiran paling sederhana dari aturan merge dan dicatat di docs/eval.
 
-- [ ] `T-008` Origins, secret, interpolasi, dan format `Secret`
+- [x] `T-008` Origins, secret, interpolasi, dan format `Secret`
   - Issue/PR: `—`
   - Bergantung pada: `T-007`
   - Requirements: `REQ-CONF-004`, `REQ-CONF-005`, `REQ-CONF-007`
@@ -266,11 +266,11 @@ flowchart TD
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestOriginsTableAndLeaf|TestSecretEnvWins|TestEffectiveConfigRedacted|TestSecretsPermWarning|TestMCPEnvInterpolationSecret|TestNonMCPFieldNotInterpolated|TestMissingVarError'`
     - `CGO_ENABLED=0 nix develop -c go test ./core -run TestSecretFormatting`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c "go test ./config -run 'TestOriginsTableAndLeaf|TestSecretEnvWins|TestEffectiveConfigRedacted|TestSecretsPermWarning|TestMCPEnvInterpolationSecret|TestNonMCPFieldNotInterpolated|TestMissingVarError' -v; go test ./core -run TestSecretFormatting -v"`
+    - Hasil: 8 test PASS (7 config, 1 core); exit 0. `Secret` tampil `***` di fmt, slog, TOML, dan JSON.
+    - PR/commit: commit T-008
+    - Deviasi: Tidak ada.
 
 - [ ] `T-009` Profile bawaan `minimal` dan `headless`
   - Issue/PR: `—`

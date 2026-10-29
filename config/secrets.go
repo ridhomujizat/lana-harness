@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -152,5 +151,3 @@ func validEnvName(name string) bool {
 	}
 	return true
 }
-
-func modeString(m os.FileMode) string { return strconv.FormatUint(uint64(m.Perm()), 8) }
