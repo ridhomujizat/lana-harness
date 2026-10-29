@@ -11,4 +11,5 @@ dist/
 .nix-cache/
 .gocache/
 .gomodcache/
-.gopath/.golangci-cache/
+.gopath/
+.golangci-cache/
