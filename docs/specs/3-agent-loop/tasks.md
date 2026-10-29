@@ -483,7 +483,7 @@ flowchart LR
     - PR/commit: commit T-018/T-019 spec #3
     - Deviasi: `Stream` membangun event dari log setelah turn selesai (bukan frame hidup real-time) karena kontrak hanya menetapkan urutan event; frame hidup tetap tersedia lewat `SubscribeLive`.
 
-- [ ] `T-020` Verifikasi akhir spec #3 dan smoke test
+- [x] `T-020` Verifikasi akhir spec #3 dan smoke test
   - Issue/PR: `—`
   - Bergantung pada: `T-005` sampai `T-010`, `T-019`
   - Requirements: seluruh spec (tidak ada perilaku baru)
@@ -499,20 +499,20 @@ flowchart LR
     - `nix develop -c go test -race ./...`
     - `nix develop -c go build ./cmd/lana`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath GOLANGCI_LINT_CACHE=$PWD/.golangci-cache CGO_ENABLED=1 nix develop -c sh -c 'test -z "$(gofmt -l $(git ls-files "*.go"))" && golangci-lint run ./... && CGO_ENABLED=1 go test -race ./... && go build ./cmd/lana'`
+    - Hasil: `FMT_OK`; `0 issues`; seluruh package `ok`; `BUILD_DONE`; exit 0. Smoke provider nyata tidak dijalankan (tidak ada OPENAI_API_KEY); smoke end-to-end memakai `httptest` SSE OpenAI di `lana_stream_test.go`.
+    - PR/commit: commit T-013 sampai T-019 dan `chore: fix lint findings`
+    - Deviasi: Lihat docs/eval; semua deviasi bersifat implementasi (commit gabungan, injeksi Options lewat ModuleConfig, stub modul spec #4) dan tidak mengubah perilaku contract.
 
 ## Verifikasi akhir
 
-- [ ] Setiap acceptance criterion punya bukti lulus.
-- [ ] Tidak ada perilaku terlihat tanpa ID requirement.
-- [ ] Tidak ada perilaku di luar scope.
-- [ ] ADR dan diagram sesuai implementasi.
-- [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
-- [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
+- [x] Setiap acceptance criterion punya bukti lulus.
+- [x] Tidak ada perilaku terlihat tanpa ID requirement.
+- [x] Tidak ada perilaku di luar scope.
+- [x] ADR dan diagram sesuai implementasi.
+- [x] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
+- [x] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 
 ## Approval
 
