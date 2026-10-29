@@ -342,7 +342,7 @@ flowchart LR
     - PR/commit: commit T-012 spec #3
     - Deviasi: Pemasangan listener/handler default untuk loop dipasang bersama T-013 dan T-015 karena hook yang dipakai baru ada di sana; tidak ada AC yang dimiliki T-012.
 
-- [ ] `T-013` Implementasi turn loop inti: claim, pre_step, step, pemanggilan model, batas step, dan penghentian
+- [x] `T-013` Implementasi turn loop inti: claim, pre_step, step, pemanggilan model, batas step, dan penghentian
   - Issue/PR: `—`
   - Bergantung pada: `T-003`, `T-012`
   - Requirements: `REQ-LOOP-001`, `REQ-LOOP-002` (inbox dan satu turn aktif), `REQ-LOOP-003`, `REQ-LOOP-005`, `REQ-LOOP-006`
@@ -357,13 +357,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestTurnPlainAnswer`, `TestPreStepReject`, `TestOneClaimPerStep`, `TestSendWhileRunning`, `TestSessionsParallel`, `TestSendDuringClose`, `TestAgentRequestHook`, `TestSystemMessageOnChange`, `TestAssistantMessageBlocks`, `TestMaxStepsDefault`, `TestMaxStepsConfigured`, `TestTurnStopNoListener`, `TestTurnStopContinue`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: seluruh test agent PASS; exit 0. Termasuk `TestTurnPlainAnswer`, `TestPreStepReject`, `TestOneClaimPerStep`, `TestSendWhileRunning`, `TestSessionsParallel`, `TestSendDuringClose`, `TestAgentRequestHook`, `TestSystemMessageOnChange`, `TestAssistantMessageBlocks`, `TestMaxStepsDefault`, `TestMaxStepsConfigured`, `TestTurnStopNoListener`, `TestTurnStopContinue`.
+    - PR/commit: commit T-013/T-014 spec #3
+    - Deviasi: Turn loop dan integrasi ToolRunner dikerjakan dalam satu commit karena ToolRunner sudah menjadi bagian loop saat test inti dijalankan; dicatat di docs/eval.
 
-- [ ] `T-014` Implementasi `ToolRunner` dan integrasi pipeline tool ke turn loop
+- [x] `T-014` Implementasi `ToolRunner` dan integrasi pipeline tool ke turn loop
   - Issue/PR: `—`
   - Bergantung pada: `T-004`, `T-013`
   - Requirements: `REQ-LOOP-004`
@@ -377,11 +377,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./agent/...` (`TestToolResultPerCall`, `TestToolNotEnabled`, `TestReadBatchParallel`, `TestWriteSerial`, `TestInvalidToolInput`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 60s ./agent/...'`
+    - Hasil: test `TestToolResultPerCall`, `TestToolNotEnabled`, `TestReadBatchParallel`, `TestWriteSerial`, `TestInvalidToolInput` PASS. Setiap `tool/call` punya satu `tool/result`; batch Read paralel (max concurrency >1) dan Write serial (max 1).
+    - PR/commit: commit T-013/T-014 spec #3
+    - Deviasi: Sama dengan T-013; test tambahan di `agent/tool_loop_test.go`.
 
 - [ ] `T-015` Implementasi listener retry dan fallback `llm.stream`
   - Issue/PR: `—`

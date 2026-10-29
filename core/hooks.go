@@ -295,6 +295,13 @@ func (s *Subscription[T]) Recv(ctx context.Context) (Received[T], error) {
 	}
 }
 
+// Len mengembalikan jumlah event yang belum dibaca.
+func (s *Subscription[T]) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.size
+}
+
 // Close melepas subscriber.
 func (s *Subscription[T]) Close() { s.close() }
 
