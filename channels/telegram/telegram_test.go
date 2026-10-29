@@ -33,7 +33,7 @@ func TestStartRegistersCommandsAndRejectsBadToken(t *testing.T) {
 	api := newFakeAPI(t)
 	startChannel(t, api, newFakeBackend())
 	call := api.waitCall("setMyCommands", nil)
-	if cmds, _ := call.Params["commands"].([]any); len(cmds) != 7 {
+	if cmds, _ := call.Params["commands"].([]any); len(cmds) != 9 {
 		t.Fatalf("commands = %v", call.Params["commands"])
 	}
 
@@ -134,7 +134,7 @@ func TestNonTextAndCommands(t *testing.T) {
 	api.waitCall("sendMessage", textIs(textOnlyReply))
 
 	api.text(ownerChat, "private", ownerID, "/help")
-	api.waitCall("sendMessage", textIs("I'm helper. Commands: /new /agent /memory /compact /cancel /status"))
+	api.waitCall("sendMessage", textIs("I'm helper. Commands: /new /agent /memory /mcp /skills /compact /cancel /status"))
 	api.text(ownerChat, "private", ownerID, "/agent")
 	kb := api.waitCall("sendMessage", textIs("Current agent: helper"))
 	if !strings.Contains(api.dump(), `"callback_data":"g:coder"`) {
@@ -148,6 +148,10 @@ func TestNonTextAndCommands(t *testing.T) {
 	api.waitCall("sendMessage", textIs(`✗ unknown agent "ghost" (available: coder, helper)`))
 	api.text(ownerChat, "private", ownerID, "/memory")
 	api.waitCall("sendMessage", textHas("· user 11/2000 characters, 1 entries\n  1. Name: Ridho\n· memory 0/4000 characters, 0 entries"))
+	api.text(ownerChat, "private", ownerID, "/mcp")
+	api.waitCall("sendMessage", textIs("· github running, 26 tools"))
+	api.text(ownerChat, "private", ownerID, "/skills")
+	api.waitCall("sendMessage", textIs("· demo (global): Demo skill"))
 	api.text(ownerChat, "private", ownerID, "/compact")
 	api.waitCall("sendMessage", textIs("· compaction 100 → 40 token"))
 	api.text(ownerChat, "private", ownerID, "/new")

@@ -93,9 +93,18 @@ func validateGlob(s string) error {
 	return nil
 }
 
+// matchTool reports whether the pattern's tool matches name. MCP tool patterns
+// may use globs, for example mcp__github__*.
+func (p Pattern) matchTool(name string) bool {
+	if p.Tool == name {
+		return true
+	}
+	return globMatch(p.Tool, name, false)
+}
+
 // Match reports whether the tool and argument value match.
 func (p Pattern) Match(tool string, arg Argument) bool {
-	if p.Tool != tool {
+	if !p.matchTool(tool) {
 		return false
 	}
 	if p.Arg == nil {
@@ -112,7 +121,7 @@ func (p Pattern) Match(tool string, arg Argument) bool {
 
 // MatchBoth matches both the path value and the symlink target at once.
 func (p Pattern) MatchBoth(tool string, arg Argument) bool {
-	if p.Tool != tool {
+	if !p.matchTool(tool) {
 		return false
 	}
 	if p.Arg == nil {

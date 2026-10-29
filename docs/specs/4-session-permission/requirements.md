@@ -2,7 +2,7 @@
 
 - **Issue**: [`#4`](https://github.com/ridhomujizat/lana-harness/issues/4)
 - **Status**: Approved
-- **Revision**: 2 (REQ-APPR-007 and AC-APPR-017 added; `Q-027` to `Q-032`; error names follow `core`)
+- **Revision**: 3 (revision 3: a session grant covers the whole tool, `Q-001` changed by the owner; revision 2: REQ-APPR-007 and AC-APPR-017 added; `Q-027` to `Q-032`; error names follow `core`)
 - **Owner**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Required (event kinds and payloads, DDL, Go API for packages `store`, `core`, permission, approval, compaction, key config)
 - **Related ADRs**: [ADR Index](../../adr/README.md) — [0004](../../adr/0004-permission-mode-per-agent.md), [0005](../../adr/0005-sqlite-as-single-storage.md), [0009](../../adr/0009-session-as-append-only-event-log.md), [0011](../../adr/0011-subagent-as-child-session.md), [0013](../../adr/0013-use-go-as-single-binary.md), [0014](../../adr/0014-integration-as-agentic-tool.md)
@@ -278,13 +278,13 @@ after `filepath.EvalSymlinks`. Paths outside the workspace are rejected, includi
 #### REQ-PERM-004: Session grant
 
 The system shall store an `allowed_session` answer as `approval/decided` referencing `call_id`.
-A grant has the literal pattern form `tool(main argument)`, or `tool` if the tool has no pattern argument.
-A grant is computed from the referenced `tool/call`. A grant applies to subsequent calls in that session
+A grant covers the whole tool: it is the tool name of the referenced `tool/call`, and it matches every later call of that tool whatever its arguments.
+Deny rules and the workspace boundary are evaluated before grants, so a grant never allows a call they reject. A grant applies to subsequent calls in that session
 and in forked child sessions that inherit that event. Grants are not written to config.
 
 - `AC-PERM-014`: Given an `allowed_session` answer for `bash` with `command` `cargo test`, when `bash` with `cargo test` is called again in the same session, then there is no new `approval/asked`.
 - `AC-PERM-015`: Given a grant created in `A` and `B` forked from `A` after that grant, when `cargo test` is called in `B`, then there is no `approval/asked`.
-- `AC-PERM-016`: Given grant `bash(cargo test)`, when `bash` with `command` `cargo build` is called, then approval is requested again.
+- `AC-PERM-016`: Given a grant from `bash` with `command` `cargo test`, when `bash` with `command` `cargo build` is called, then there is no new `approval/asked`; when `write_file` is called, approval is requested.
 
 #### REQ-PERM-005: Listener replaces the default
 
@@ -506,7 +506,7 @@ decision picks the simplest option consistent with the ADRs. The owner can rever
 
 | ID | Question | Resolution |
 |---|---|---|
-| `Q-001` | Content of the `allowed_session` grant: tool only or tool with arguments | Agent recommendation: tool with a literal main argument, for example `bash(cargo test)`, computed from the referenced `tool/call`. This is the narrowest and does not require copying arguments into `approval/asked`. |
+| `Q-001` | Content of the `allowed_session` grant: tool only or tool with arguments | Owner decision (revision 3, 2026-10-30): the whole tool. A literal argument asked again for every new command, which made approvals over Telegram unusable. Deny rules and the workspace boundary still apply. |
 | `Q-002` | Wildcard semantics on arguments | Agent recommendation: the `command` argument allows wildcards freely. Path arguments: `*` and `?` do not cross `/`, `**` does. |
 | `Q-003` | Which tools are bounded by the workspace | Agent recommendation: tools with a `path` argument. `bash` is not checked, consistent with ADR 0004 which has no sandbox in v1. |
 | `Q-004` | When resume repair runs | Agent recommendation: when there is a `turn/start` without a `turn/end`. An idle session does not receive new events. |

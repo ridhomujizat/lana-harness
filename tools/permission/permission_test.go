@@ -177,7 +177,26 @@ func TestGrantReused(t *testing.T) {
 	}
 }
 
-func TestGrantArgsMismatch(t *testing.T) {
+func TestGrantCoversWholeTool(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "ask"}, false)
+	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{
+		{Kind: core.KindToolCall, Payload: core.ToolCallPayload{V: 1, CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"cargo test"}`)}},
+		{Kind: core.KindApprovalDecided, Payload: core.ApprovalDecided{V: 1, RequestID: "r1", CallID: "c1", Outcome: core.OutcomeAllowedSession}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approval := &fakeApproval{outcome: core.OutcomeRejected}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"cargo build"}`), nil)
+	if !got.Allowed || got.Outcome != core.OutcomeAllowedSession {
+		t.Fatalf("grant does not cover whole tool: %+v", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("approval still called")
+	}
+}
+
+func TestGrantDoesNotBypassWorkspace(t *testing.T) {
 	s := setup(t, core.AgentConfig{Permission: "ask"}, false)
 	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{
 		{Kind: core.KindToolCall, Payload: core.ToolCallPayload{V: 1, CallID: "c1", Name: "write_file", Input: json.RawMessage(`{"path":"a.txt","content":"x"}`)}},
@@ -187,9 +206,31 @@ func TestGrantArgsMismatch(t *testing.T) {
 	}
 	approval := &fakeApproval{outcome: core.OutcomeRejected}
 	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
-	got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "write_file", `{"path":"b.txt","content":"x"}`), nil)
-	if got.Allowed || approval.calls.Load() != 1 {
-		t.Fatalf("got=%+v calls=%d", got, approval.calls.Load())
+	got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "write_file", `{"path":"../outside.txt","content":"x"}`), nil)
+	if got.Allowed {
+		t.Fatalf("grant bypassed workspace: %+v", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("approval still called")
+	}
+}
+
+func TestGrantDoesNotBypassDeny(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Deny: []string{"bash(rm*)"}}}, false)
+	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{
+		{Kind: core.KindToolCall, Payload: core.ToolCallPayload{V: 1, CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"cargo test"}`)}},
+		{Kind: core.KindApprovalDecided, Payload: core.ApprovalDecided{V: 1, RequestID: "r1", CallID: "c1", Outcome: core.OutcomeAllowedSession}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approval := &fakeApproval{outcome: core.OutcomeAllowedSession}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"rm -rf /"}`), nil)
+	if got.Allowed {
+		t.Fatalf("grant bypassed deny: %+v", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("approval still called")
 	}
 }
 
@@ -199,7 +240,7 @@ func TestGrantsInheritedFromFork(t *testing.T) {
 		{Kind: core.KindApprovalDecided, Payload: json.RawMessage(`{"v":1,"request_id":"r","call_id":"c1","outcome":"allowed_session"}`)},
 	}
 	grants := Grants(events)
-	if len(grants) != 1 || grants[0].Tool != "write_file" || grants[0].Arg != "a" {
+	if len(grants) != 1 || grants[0].Tool != "write_file" {
 		t.Fatalf("grants=%+v", grants)
 	}
 }
@@ -432,5 +473,43 @@ func TestMemoryRiskPolicies(t *testing.T) {
 	engine = &Engine{Store: s.store, Config: s.config}
 	if got, _ := engine.Handle(context.Background(), memoryCall(s.session.ID), nil); got.Allowed {
 		t.Fatal("deny rule did not reject memory_write")
+	}
+}
+
+func TestSkillWriteNeverPolicy(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "never"}, false)
+	engine := &Engine{Store: s.store, Config: s.config}
+	in := callInput(s.session.ID, "skill_write", `{"name":"x","description":"Use x.","body":"Step 1."}`)
+	in.Call.Risk = core.RiskWrite
+	if got, _ := engine.Handle(context.Background(), in, nil); got.Allowed || got.Status != core.ToolStatusRejected {
+		t.Fatalf("never: skill_write allowed: %+v", got)
+	}
+}
+
+func TestMCPAllowRuleUnderAsk(t *testing.T) {
+	mcpCall := func(sessionID string) core.ToolsPreExecuteInput {
+		in := callInput(sessionID, "mcp__github__create_issue", `{"title":"x"}`)
+		in.Call.Risk = core.RiskExec
+		return in
+	}
+
+	s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Allow: []string{"mcp__github__*"}}}, false)
+	approval := &fakeApproval{outcome: core.OutcomeRejected}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	if got, _ := engine.Handle(context.Background(), mcpCall(s.session.ID), nil); !got.Allowed {
+		t.Fatalf("allow rule did not permit MCP call: %+v", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("approval was requested despite allow rule")
+	}
+
+	s = setup(t, core.AgentConfig{Permission: "ask"}, false)
+	approval = &fakeApproval{outcome: core.OutcomeRejected}
+	engine = &Engine{Store: s.store, Config: s.config, Approval: approval}
+	if got, _ := engine.Handle(context.Background(), mcpCall(s.session.ID), nil); got.Allowed {
+		t.Fatalf("MCP call allowed without rule: %+v", got)
+	}
+	if got := approval.calls.Load(); got != 1 {
+		t.Fatalf("approval calls = %d, want 1", got)
 	}
 }

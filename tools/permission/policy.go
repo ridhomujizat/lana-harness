@@ -29,14 +29,13 @@ func validPolicy(p core.Policy) bool {
 	return p == core.PolicyTrust || p == core.PolicyAsk || p == core.PolicyNever
 }
 
-// Grant is a session permission matching a tool and a literal argument.
+// Grant is a session permission matching a whole tool.
 type Grant struct {
-	Tool   string
-	Arg    string
-	HasArg bool
+	Tool string
 }
 
 // Grants reads approval/decided events with allowed_session that refer to a tool call.
+// Each matching event grants the whole tool, regardless of its arguments.
 func Grants(events []core.SessionEvent) []Grant {
 	calls := map[string]core.ToolCallPayload{}
 	for _, event := range events {
@@ -61,33 +60,9 @@ func Grants(events []core.SessionEvent) []Grant {
 		if !ok {
 			continue
 		}
-		grant := Grant{Tool: call.Name}
-		if value, ok := primaryArg(call.Input); ok {
-			grant.Arg = value
-			grant.HasArg = true
-		}
-		grants = append(grants, grant)
+		grants = append(grants, Grant{Tool: call.Name})
 	}
 	return grants
-}
-
-func primaryArg(input json.RawMessage) (string, bool) {
-	var value map[string]any
-	if json.Unmarshal(input, &value) != nil {
-		return "", false
-	}
-	for _, key := range []string{"command", "path", "url", "agent"} {
-		if raw, ok := value[key]; ok {
-			if s, ok := raw.(string); ok {
-				return s, true
-			}
-		}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "", false
-	}
-	return string(raw), true
 }
 
 // ChildPolicy picks the stricter policy.

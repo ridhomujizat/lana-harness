@@ -34,6 +34,7 @@ type Registry struct {
 	store      core.SessionStore
 	llm        core.LLMRegistry
 	tools      core.ToolRegistry
+	mcp        core.MCPManager
 	hooks      *core.Hooks
 	config     core.Config
 	secrets    core.Secrets
@@ -73,6 +74,11 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 	r.pipeline = NewToolRunner(hooks, toolReg)
 	installDefaults(hooks, llm)
 	return r
+}
+
+// SetMCP installs the MCP manager used by turns.
+func (r *Registry) SetMCP(m core.MCPManager) {
+	r.mcp = m
 }
 
 func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {

@@ -132,6 +132,8 @@ var slashCommands = []slashCommand{
 	{"/permission", "[p]", "pick or change policy (ask|trust|never)"},
 	{"/yolo", "", "same as /permission trust"},
 	{"/memory", "", "show this agent's memory"},
+	{"/mcp", "", "show this agent's MCP servers"},
+	{"/skills", "", "show this agent's skills"},
 	{"/verbose", "", "turn verbose mode on or off"},
 	{"/exit", "", "exit"},
 }

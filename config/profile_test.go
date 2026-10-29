@@ -19,6 +19,7 @@ func TestBuiltinProfileRows(t *testing.T) {
 	want := []core.ModuleRow{
 		{ID: "llm", Module: "llm"},
 		{ID: "tools", Module: "tools"},
+		{ID: "mcp", Module: "mcp"},
 		{ID: "store", Module: "sqlite_store"},
 		{ID: "agent", Module: "agent"},
 		{ID: "permission", Module: "permission"},

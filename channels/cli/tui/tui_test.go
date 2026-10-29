@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 func TestSplitCompleteBlocks(t *testing.T) {
@@ -155,6 +156,12 @@ func (f *fakeBackend) AgentPolicy(string) string { return "ask" }
 func (f *fakeBackend) Memory(string) ([]string, []string, error) {
 	return []string{"Name: Ridho"}, nil, nil
 }
+func (f *fakeBackend) MCPStatus(string) []core.MCPServerStatus {
+	return []core.MCPServerStatus{{Name: "github", State: "running", Tools: 26}}
+}
+func (f *fakeBackend) Skills(string) []agenthome.Skill {
+	return []agenthome.Skill{{Name: "demo", Scope: "global", Description: "Demo skill"}}
+}
 
 func TestProgramFlow(t *testing.T) {
 	observer := core.NewObserve[core.LiveFrame]()
@@ -284,6 +291,10 @@ func TestInteractiveSlashAndMenus(t *testing.T) {
 	waitFor(t, &out, "· user 11/2000 characters, 1 entries")
 	waitFor(t, &out, "1. Name: Ridho")
 	waitFor(t, &out, "· memory 0/4000 characters, 0 entries")
+	send("/mcp\r")
+	waitFor(t, &out, "· github running, 26 tools")
+	send("/skills\r")
+	waitFor(t, &out, "· demo (global): Demo skill")
 	send("/exit\r")
 	select {
 	case err := <-done:

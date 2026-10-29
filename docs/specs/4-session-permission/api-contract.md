@@ -2,7 +2,7 @@
 
 - **Issue**: [`#4`](https://github.com/ridhomujizat/lana-harness/issues/4)
 - **Requirements**: [requirements.md](requirements.md)
-- **Requirements revision**: 2 (REQ-APPR-007 and AC-APPR-017 added)
+- **Requirements revision**: 3 (revision 3: session grant covers the whole tool; revision 2: REQ-APPR-007 and AC-APPR-017 added)
 - **Requirements status**: Approved
 - **Contract revision**: 2 (reconciliation, see `CQ-011` to `CQ-022`)
 - **Applies to**: config (`[agents.<name>]`, `[agents.<name>.rules]`, `[[modules]]` row `store`), event log (`session_events`, kinds and payloads), and the Go API of packages `store`, `core`, permission, approval, and compaction (ADR 0014)
@@ -130,7 +130,7 @@ Derive rules (details in design, `API-STORE-010`):
 
 - `tool/call` does not enter history. The `tool_use` block already exists in `assistant/message`.
 - `system/message` does not enter `DeriveMessages` history. Its last message is used as `ChatRequest.System` (`Q-028`).
-- The `allowed_session` grant has no kind of its own. A grant is an `approval/decided` with `outcome = allowed_session`. The grant pattern is computed from the `tool/call` referenced by `call_id`.
+- The `allowed_session` grant has no kind of its own. A grant is an `approval/decided` with `outcome = allowed_session`. The grant is the tool name of the `tool/call` referenced by `call_id` and covers every later call of that tool (requirements revision 3).
 
 ## Config
 

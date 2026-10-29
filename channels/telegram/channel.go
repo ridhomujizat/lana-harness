@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 // TurnResult is the outcome of one turn.
@@ -32,6 +33,8 @@ type Backend interface {
 	SubscribeLive(ctx context.Context, sessionID string) (*core.Subscription[core.LiveFrame], error)
 	Compact(ctx context.Context, sessionID string) (before, after int64, err error)
 	Memory(agent string) (user, memory []string, err error)
+	MCPStatus(agent string) []core.MCPServerStatus
+	Skills(agent string) []agenthome.Skill
 	Policy(ctx context.Context, sessionID string) (string, error)
 	AgentNames() []string
 	AgentModel(agent string) string
@@ -42,6 +45,8 @@ var Commands = []Command{
 	{"new", "Start a new session"},
 	{"agent", "Show or switch the agent"},
 	{"memory", "Show this agent's memory"},
+	{"mcp", "Show this agent's MCP servers"},
+	{"skills", "Show this agent's skills"},
 	{"compact", "Summarize the session history"},
 	{"cancel", "Stop the running turn"},
 	{"status", "Agent, model, and session"},

@@ -33,6 +33,8 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewWebFetch(guard),
 		NewMemoryRead(),
 		NewMemoryWrite(),
+		NewSkillLoad(),
+		NewSkillWrite(),
 	}
 	for _, tool := range builtins {
 		if err := registry.Register(tool); err != nil {

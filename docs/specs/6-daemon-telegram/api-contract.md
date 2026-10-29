@@ -143,6 +143,8 @@ Buttons in one row: `Allow once` (`a:<id>:once`), `Allow for session` (`a:<id>:s
 | `new` | Start a new session |
 | `agent` | Show or switch the agent |
 | `memory` | Show this agent's memory |
+| `mcp` | Show this agent's MCP servers |
+| `skills` | Show this agent's skills |
 | `compact` | Summarize the session history |
 | `cancel` | Stop the running turn |
 | `status` | Agent, model, and session |
@@ -152,11 +154,13 @@ Buttons in one row: `Allow once` (`a:<id>:once`), `Allow for session` (`a:<id>:s
 
 | Command | Reply |
 |---|---|
-| `/help` | `I'm <agent>. Commands: /new /agent /memory /compact /cancel /status` |
+| `/help` | `I'm <agent>. Commands: /new /agent /memory /mcp /skills /compact /cancel /status` |
 | `/new` | `· new session <id>` |
 | `/agent` | `Current agent: <agent>` plus one button per agent (`g:<name>`); pressing switches. In a group, a non-owner press is answered with the toast `only the owner can switch agents` |
 | `/agent <name>` or button | `· agent: <name>`; unknown: `✗ unknown agent "<name>" (available: …)` |
 | `/memory` | Same lines as TUI `/memory` (spec #5) |
+| `/mcp` | `· <name> running, <n> tools`, `· <name> stopped`, or `· <name> unavailable (<reason>)`; none: `· no MCP servers for <agent>` |
+| `/skills` | `· <name> (<scope>): <description>`; none: `· no skills for <agent>` |
 | `/compact` | `· compacting…`, then `· compaction <before> → <after> token` or `✗ compaction: <error>` |
 | `/cancel` | Running turn is cancelled; idle: `· nothing to cancel` |
 | `/status` | `agent <a> · model <p:m> · policy <p> · session <id> · <n> turns` |

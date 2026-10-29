@@ -3,7 +3,7 @@
 - **Issue**: [`#4`](https://github.com/ridhomujizat/lana-harness/issues/4)
 - **Requirements**: [requirements.md](requirements.md)
 - **Contract**: [api-contract.md](api-contract.md) — Required
-- **Requirements revision**: 2
+- **Requirements revision**: 3
 - **Contract revision**: 2
 - **Requirements status**: Approved
 - **Contract status**: Approved

@@ -241,6 +241,14 @@ func (b *daemonBackend) Policy(ctx context.Context, sessionID string) (string, e
 	return string(policy), err
 }
 
+func (b *daemonBackend) MCPStatus(agent string) []core.MCPServerStatus {
+	return b.rt.MCPStatus(agent)
+}
+
+func (b *daemonBackend) Skills(agent string) []agenthome.Skill {
+	return b.rt.Skills(agent)
+}
+
 func (b *daemonBackend) AgentNames() []string           { return b.rt.AgentNames() }
 func (b *daemonBackend) AgentModel(agent string) string { return b.rt.AgentModel(agent) }
 

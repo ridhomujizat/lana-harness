@@ -78,6 +78,11 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		return err
 	}
 	registry := NewRegistry(store, llm, toolReg, b.Hooks(), config, b.Secrets(), b.Home(), workspace)
+	if svc, ok := b.Lookup(core.ServiceMCP); ok {
+		if m, ok := svc.(core.MCPManager); ok {
+			registry.SetMCP(m)
+		}
+	}
 	retry := NewRetry(store)
 	retry.Install(b.Hooks())
 	m.registry = registry

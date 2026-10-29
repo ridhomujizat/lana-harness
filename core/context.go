@@ -12,6 +12,7 @@ const (
 	ServiceAgents     ServiceKey = "agents"
 	ServiceApproval   ServiceKey = "approval"
 	ServiceCompaction ServiceKey = "compaction"
+	ServiceMCP        ServiceKey = "mcp"
 )
 
 // Context is the wiring produced by boot.

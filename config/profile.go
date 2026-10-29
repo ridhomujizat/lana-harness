@@ -17,6 +17,11 @@ module = "tools"
 config = {}
 
 [[modules]]
+id = "mcp"
+module = "mcp"
+config = {}
+
+[[modules]]
 id = "store"
 module = "sqlite_store"
 config = { path = "lana.db" }

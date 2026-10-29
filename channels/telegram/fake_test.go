@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 type apiCall struct {
@@ -268,6 +269,12 @@ func (b *fakeBackend) SubscribeLive(context.Context, string) (*core.Subscription
 func (b *fakeBackend) Compact(context.Context, string) (int64, int64, error) { return 100, 40, nil }
 func (b *fakeBackend) Memory(string) ([]string, []string, error) {
 	return []string{"Name: Ridho"}, nil, nil
+}
+func (b *fakeBackend) MCPStatus(string) []core.MCPServerStatus {
+	return []core.MCPServerStatus{{Name: "github", State: "running", Tools: 26}}
+}
+func (b *fakeBackend) Skills(string) []agenthome.Skill {
+	return []agenthome.Skill{{Name: "demo", Scope: "global", Description: "Demo skill"}}
 }
 func (b *fakeBackend) Policy(context.Context, string) (string, error) { return "ask", nil }
 func (b *fakeBackend) AgentNames() []string                           { return []string{"coder", "helper"} }

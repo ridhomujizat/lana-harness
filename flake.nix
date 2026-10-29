@@ -19,6 +19,7 @@
             sqlite
             gnumake
             git
+            github-mcp-server
           ];
           GOTOOLCHAIN = "local";
           CGO_ENABLED = "0";

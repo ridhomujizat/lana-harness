@@ -4,7 +4,7 @@
 - **Requirements**: [requirements.md](requirements.md)
 - **Contract**: [api-contract.md](api-contract.md) — Required
 - **Design**: [design.md](design.md)
-- **Requirements revision**: 2
+- **Requirements revision**: 3
 - **Contract revision**: 2
 - **Design revision**: 2
 - **Tasks revision**: 2 (reconciliation: `core.DeriveMessages` in T-007, `internal/pattern` in T-009, `ResolvePrefix` in T-005, library answerer T-021)
@@ -395,7 +395,7 @@ flowchart LR
   - Contract operation: `API-PERM-003`
   - Scope:
     - `Grants(events)` pure function: grants from `approval/decided` with `allowed_session` that reference the `tool/call` `call_id`.
-    - Literal pattern `tool(main argument)` or `tool` without an argument. Matched literally (wildcard characters escaped).
+    - Grant = tool name; matches every later call of that tool (requirements revision 3; was a literal `tool(main argument)` pattern).
     - Evaluator reads grants from `ChainEvents` on every evaluation.
   - Verification:
     - `nix develop -c go test ./tools/permission/ -run 'TestGrant'`

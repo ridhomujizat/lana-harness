@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Run one implementation task through DeepSeek Harness (dsh) in headless mode.
+# Usage: .claude/bin/dsh-implement < task.txt
+# The task text comes from stdin so long prompts need no shell quoting.
+set -euo pipefail
+
+task="$(cat)"
+if [ -z "$task" ]; then
+  echo "dsh-implement: empty task on stdin" >&2
+  exit 2
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+# Claude Code snapshots the environment at session start, so a key added to
+# ~/.zshrc later is not visible yet. Read it from an interactive zsh instead.
+if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+  DEEPSEEK_API_KEY="$(zsh -ic 'printf "\n__DSH_KEY=%s\n" "$DEEPSEEK_API_KEY"' 2>/dev/null | sed -n 's/^__DSH_KEY=//p')"
+  export DEEPSEEK_API_KEY
+fi
+if [ -z "$DEEPSEEK_API_KEY" ]; then
+  echo "dsh-implement: DEEPSEEK_API_KEY is not set" >&2
+  exit 3
+fi
+
+dsh_bin="${DSH_BIN:-$(command -v dsh || true)}"
+dsh_bin="${dsh_bin:-/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh}"
+
+# dsh reads CLAUDE.md as project instructions. Its delegation rule targets
+# Claude Code, so tell dsh it is the implementer and must write code itself.
+preamble="You are the implementer for this task. The \"Code implementation\" section of CLAUDE.md is for the Claude Code orchestrator, not for you: ignore it, do not delegate, and write the code yourself."
+
+exec "$dsh_bin" --profile headless "$preamble
+
+$task"

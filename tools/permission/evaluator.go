@@ -40,7 +40,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if workspace == "" {
 		workspace = "."
 	}
-	arg, rawArg, ok := buildArgument(in.Call.Name, in.Call.Input, workspace)
+	arg, _, ok := buildArgument(in.Call.Name, in.Call.Input, workspace)
 	if !ok {
 		return reject("invalid input"), nil
 	}
@@ -72,10 +72,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		}
 	}
 	for _, grant := range Grants(events) {
-		if grant.Tool != in.Call.Name {
-			continue
-		}
-		if !grant.HasArg || grant.Arg == rawArg {
+		if grant.Tool == in.Call.Name {
 			return allow(core.OutcomeAllowedSession), nil
 		}
 	}

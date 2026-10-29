@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 // CompactionInfo summarizes the result of a compaction.
@@ -42,4 +43,8 @@ type Backend interface {
 	AgentPolicy(agent string) string
 	// Memory returns the entries of the agent's user file and memory file.
 	Memory(agent string) (user, memory []string, err error)
+	// MCPStatus returns the MCP servers of the agent.
+	MCPStatus(agent string) []core.MCPServerStatus
+	// Skills returns the skills visible to the agent.
+	Skills(agent string) []agenthome.Skill
 }

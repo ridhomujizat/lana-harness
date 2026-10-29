@@ -19,6 +19,8 @@ import (
 	_ "github.com/ridhomujizat/lana-harness/agent/compaction"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
@@ -597,6 +599,36 @@ func (rt *Runtime) AgentPolicy(agentName string) string {
 		return string(agentCfg.Permission)
 	}
 	return ""
+}
+
+// MCPStatus returns the MCP server status of an agent.
+func (rt *Runtime) MCPStatus(agentName string) []core.MCPServerStatus {
+	agentCfg, ok := rt.result.Config.Agents[agentName]
+	if !ok || len(agentCfg.MCP) == 0 {
+		return nil
+	}
+	service, ok := rt.coreCtx.Lookup(core.ServiceMCP)
+	if !ok {
+		return nil
+	}
+	manager, ok := service.(core.MCPManager)
+	if !ok {
+		return nil
+	}
+	return manager.Status(agentCfg.MCP)
+}
+
+// Skills returns the skills visible to an agent.
+func (rt *Runtime) Skills(agentName string) []agenthome.Skill {
+	if rt.home == "" {
+		return nil
+	}
+	agentCfg, ok := rt.result.Config.Agents[agentName]
+	if !ok {
+		return nil
+	}
+	skills, _ := agenthome.VisibleSkills(rt.home, agentName, agentCfg.Skills)
+	return skills
 }
 
 // SessionInfo opens a session by id or prefix.

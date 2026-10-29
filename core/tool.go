@@ -33,6 +33,8 @@ type ToolCtx struct {
 	Workspace string
 	// Home is $LANA_HOME. Empty when the runtime has no home folder.
 	Home string
+	// Skills are the global skills listed in the agent's config.
+	Skills []string
 }
 
 // ToolStatus is the status of a tool result.

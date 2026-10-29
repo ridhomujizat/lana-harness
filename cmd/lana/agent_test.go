@@ -58,7 +58,7 @@ func TestAgentNewYes(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent := result.Config.Agents["helper"]
-	if agent.Provider != "deepseek" || agent.Model != "deepseek-chat" || agent.Permission != "ask" || strings.Join(agent.Tools, ",") != "web_fetch,read_file,glob,grep,memory_read,memory_write" {
+	if agent.Provider != "deepseek" || agent.Model != "deepseek-chat" || agent.Permission != "ask" || strings.Join(agent.Tools, ",") != "web_fetch,read_file,glob,grep,memory_read,memory_write,skill_write" {
 		t.Fatalf("agent = %+v", agent)
 	}
 	if result.Config.Routes[0].Agent != "default" {
@@ -72,7 +72,7 @@ func TestAgentNewWorkerTemplate(t *testing.T) {
 		t.Fatalf("exit = %d", code)
 	}
 	result, _ := config.Load(context.Background(), config.Options{Home: home})
-	if got := strings.Join(result.Config.Agents["w1"].Tools, ","); got != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write" {
+	if got := strings.Join(result.Config.Agents["w1"].Tools, ","); got != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write" {
 		t.Fatalf("tools = %s", got)
 	}
 }

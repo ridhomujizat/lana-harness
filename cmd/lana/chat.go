@@ -268,4 +268,12 @@ func (b chatBackend) Memory(agent string) ([]string, []string, error) {
 	return user, memory, err
 }
 
+func (b chatBackend) MCPStatus(agent string) []core.MCPServerStatus {
+	return b.rt.MCPStatus(agent)
+}
+
+func (b chatBackend) Skills(agent string) []agenthome.Skill {
+	return b.rt.Skills(agent)
+}
+
 var _ tui.Backend = chatBackend{}

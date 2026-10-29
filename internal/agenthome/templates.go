@@ -18,9 +18,9 @@ type Template struct {
 }
 
 var templates = map[string]Template{
-	"assistant": {Name: "assistant", Permission: "ask", Tools: []string{"web_fetch", "read_file", "glob", "grep", "memory_read", "memory_write"}},
-	"worker":    {Name: "worker", Permission: "ask", Tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "web_fetch", "memory_read", "memory_write"}},
-	"coder":     {Name: "coder", Permission: "ask", Tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "memory_read", "memory_write"}},
+	"assistant": {Name: "assistant", Permission: "ask", Tools: []string{"web_fetch", "read_file", "glob", "grep", "memory_read", "memory_write", "skill_write"}},
+	"worker":    {Name: "worker", Permission: "ask", Tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "web_fetch", "memory_read", "memory_write", "skill_write"}},
+	"coder":     {Name: "coder", Permission: "ask", Tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "memory_read", "memory_write", "skill_write"}},
 }
 
 // TemplateNames returns the template names in sorted order.

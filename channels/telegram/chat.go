@@ -467,7 +467,7 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 	w.mu.Unlock()
 	switch name {
 	case "start", "help":
-		w.reply(ctx, m.MessageID, "I'm "+w.currentAgent(ctx)+". Commands: /new /agent /memory /compact /cancel /status")
+		w.reply(ctx, m.MessageID, "I'm "+w.currentAgent(ctx)+". Commands: /new /agent /memory /mcp /skills /compact /cancel /status")
 	case "new":
 		if running {
 			w.reply(ctx, m.MessageID, waitReply)
@@ -499,6 +499,12 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 		lines := memoryLines("user", user, agenthome.UserLimit)
 		lines = append(lines, memoryLines("memory", memory, agenthome.MemoryLimit)...)
 		w.reply(ctx, m.MessageID, strings.Join(lines, "\n"))
+	case "mcp":
+		agent := w.currentAgent(ctx)
+		w.reply(ctx, m.MessageID, strings.Join(mcpLines(w.ch.backend.MCPStatus(agent), agent), "\n"))
+	case "skills":
+		agent := w.currentAgent(ctx)
+		w.reply(ctx, m.MessageID, strings.Join(skillLines(w.ch.backend.Skills(agent), agent), "\n"))
 	case "compact":
 		if running {
 			w.reply(ctx, m.MessageID, waitReply)
@@ -570,6 +576,39 @@ func memoryLines(target string, entries []string, limit int) []string {
 	lines := []string{fmt.Sprintf("· %s %d/%d characters, %d entries", target, agenthome.Size(entries), limit, len(entries))}
 	for i, entry := range entries {
 		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, strings.ReplaceAll(entry, "\n", "\n     ")))
+	}
+	return lines
+}
+
+// mcpLines renders the MCP server status of an agent.
+func mcpLines(statuses []core.MCPServerStatus, agent string) []string {
+	if len(statuses) == 0 {
+		return []string{"· no MCP servers for " + agent}
+	}
+	lines := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		switch status.State {
+		case "running":
+			lines = append(lines, fmt.Sprintf("· %s running, %d tools", status.Name, status.Tools))
+		case "stopped":
+			lines = append(lines, "· "+status.Name+" stopped")
+		case "unavailable":
+			lines = append(lines, fmt.Sprintf("· %s unavailable (%s)", status.Name, status.Reason))
+		default:
+			lines = append(lines, "· "+status.Name+" "+status.State)
+		}
+	}
+	return lines
+}
+
+// skillLines renders the skills visible to an agent.
+func skillLines(skills []agenthome.Skill, agent string) []string {
+	if len(skills) == 0 {
+		return []string{"· no skills for " + agent}
+	}
+	lines := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		lines = append(lines, fmt.Sprintf("· %s (%s): %s", skill.Name, skill.Scope, skill.Description))
 	}
 	return lines
 }

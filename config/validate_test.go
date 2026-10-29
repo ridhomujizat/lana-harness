@@ -127,3 +127,16 @@ func TestMemoryLayerRefError(t *testing.T) {
 	}
 	t.Fatalf("memory layer reference error missing: %v", errs)
 }
+
+func TestAgentMCPNotRegistered(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\nmcp = [\"nope\"]\n")
+	_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
+	var errs Errors
+	if !errors.As(err, &errs) {
+		t.Fatalf("error is not Errors: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("error does not mention nope: %v", err)
+	}
+}

@@ -87,6 +87,8 @@ type resolvedAgent struct {
 	channel    string
 	workspace  string
 	tools      []string
+	mcp        []string
+	skills     []string
 	fallback   []core.LLMTarget
 	maxSteps   int
 }
@@ -160,6 +162,8 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		channel:    info.Channel,
 		workspace:  workspace,
 		tools:      cfg.Tools,
+		mcp:        cfg.MCP,
+		skills:     cfg.Skills,
 		fallback:   fallback,
 		maxSteps:   maxSteps,
 	}, nil
@@ -223,9 +227,12 @@ func (rn *Runner) promptPath(res resolvedAgent) (string, error) {
 	return path, nil
 }
 
-// buildPrompt assembles the system prompt from the persona, the agent home files, and the runtime context.
-func (rn *Runner) buildPrompt(res resolvedAgent) (string, error) {
-	in := agenthome.PromptInput{Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now()}
+// buildPrompt assembles the system prompt from the persona, the agent home files, the skills, and the runtime context.
+func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string) (string, error) {
+	in := agenthome.PromptInput{
+		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
+		Skills: skills, UnavailableMCP: unavailable,
+	}
 	var home agenthome.Home
 	if rn.reg.home != "" {
 		home = agenthome.Paths(rn.reg.home, res.name)
@@ -296,6 +303,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 	lastText := ""
 	prompt := ""
 	promptBuilt := false
+	turnTools := []string{}
 	var totalUsage core.Usage
 	for {
 		claimedText := ""
@@ -350,7 +358,21 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			goto finished
 		}
 		if !promptBuilt {
-			prompt, err = rn.buildPrompt(resolved)
+			turnTools = append(turnTools, resolved.tools...)
+			var unavailable map[string]string
+			if len(resolved.mcp) > 0 && rn.reg.mcp != nil {
+				names, unavail := rn.reg.mcp.Ensure(ctx, resolved.mcp)
+				turnTools = append(turnTools, names...)
+				unavailable = unavail
+			}
+			var skills []agenthome.Skill
+			if rn.reg.home != "" {
+				skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
+				if len(skills) > 0 && !containsString(turnTools, "skill_load") {
+					turnTools = append(turnTools, "skill_load")
+				}
+			}
+			prompt, err = rn.buildPrompt(resolved, skills, unavailable)
 			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"
@@ -392,7 +414,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			reason = "error"
 			goto finished
 		}
-		specs, err := rn.reg.tools.Specs(resolved.tools)
+		specs, err := rn.reg.tools.Specs(turnTools)
 		if err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
@@ -466,8 +488,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 				}
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_call", CallID: block.ID, Name: block.Name, Input: block.Input})
 			}
-			outputs := rn.reg.pipeline.Run(ctx, calls, resolved.tools, core.ToolCtx{
+			outputs := rn.reg.pipeline.Run(ctx, calls, turnTools, core.ToolCtx{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
+				Skills: resolved.skills,
 			})
 			for i, output := range outputs {
 				status := output.Status
@@ -570,6 +593,16 @@ func (rn *Runner) writeAttempt(ctx context.Context, events *Events, step int, re
 func (rn *Runner) writeCancelledAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string) {
 	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: "cancelled", Message: "cancelled"}}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
+}
+
+// containsString reports whether list holds name.
+func containsString(list []string, name string) bool {
+	for _, item := range list {
+		if item == name {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeError(err error) *core.ProviderError {

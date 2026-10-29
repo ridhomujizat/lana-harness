@@ -757,6 +757,10 @@ func (m *Model) slash(value string) tea.Cmd {
 		return m.modelCommand(args)
 	case "/memory":
 		return m.memoryCommand()
+	case "/mcp":
+		return m.mcpCommand()
+	case "/skills":
+		return m.skillsCommand()
 	case "/verbose":
 		m.verbose = !m.verbose
 		return tea.Println(styleMuted.Render("· verbose " + onOff(m.verbose)))
@@ -779,6 +783,43 @@ func (m *Model) memoryCommand() tea.Cmd {
 	}
 	lines := memoryLines("user", user, agenthome.UserLimit)
 	lines = append(lines, memoryLines("memory", memory, agenthome.MemoryLimit)...)
+	return tea.Println(strings.Join(lines, "\n"))
+}
+
+// mcpCommand lists the MCP servers of the current agent.
+func (m *Model) mcpCommand() tea.Cmd {
+	statuses := m.backend.MCPStatus(m.agent)
+	if len(statuses) == 0 {
+		return tea.Println(styleMuted.Render("· no MCP servers for " + m.agent))
+	}
+	lines := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		var line string
+		switch status.State {
+		case "running":
+			line = fmt.Sprintf("· %s running, %d tools", status.Name, status.Tools)
+		case "stopped":
+			line = "· " + status.Name + " stopped"
+		case "unavailable":
+			line = fmt.Sprintf("· %s unavailable (%s)", status.Name, status.Reason)
+		default:
+			line = "· " + status.Name + " " + status.State
+		}
+		lines = append(lines, styleMuted.Render(line))
+	}
+	return tea.Println(strings.Join(lines, "\n"))
+}
+
+// skillsCommand lists the skills visible to the current agent.
+func (m *Model) skillsCommand() tea.Cmd {
+	skills := m.backend.Skills(m.agent)
+	if len(skills) == 0 {
+		return tea.Println(styleMuted.Render("· no skills for " + m.agent))
+	}
+	lines := make([]string, 0, len(skills))
+	for _, skill := range skills {
+		lines = append(lines, styleMuted.Render(fmt.Sprintf("· %s (%s): %s", skill.Name, skill.Scope, skill.Description)))
+	}
 	return tea.Println(strings.Join(lines, "\n"))
 }
 
