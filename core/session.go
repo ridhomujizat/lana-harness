@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"iter"
 )
 
@@ -61,6 +62,11 @@ type LiveFrame struct {
 	TurnID    string
 	Kind      string
 	Text      string
+	CallID    string
+	Name      string
+	Input     json.RawMessage
+	Status    string
+	Output    string
 }
 
 // AgentRegistry mengatur agent hidup dan inbox-nya.

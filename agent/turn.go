@@ -431,6 +431,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 					reason = "error"
 					goto finished
 				}
+				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_call", CallID: block.ID, Name: block.Name, Input: block.Input})
 			}
 			outputs := rn.reg.pipeline.Run(ctx, calls, resolved.tools, core.ToolCtx{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace,
@@ -445,6 +446,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 					reason = "error"
 					goto finished
 				}
+				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_result", CallID: calls[i].CallID, Name: calls[i].Name, Status: string(status), Output: output.Output})
 			}
 		}
 		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Usage: usage}}); err != nil {

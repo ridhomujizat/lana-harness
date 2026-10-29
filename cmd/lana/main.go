@@ -53,7 +53,7 @@ func run(args []string) int {
 }
 
 func help() {
-	fmt.Print("lana - agen coding dan personal\n\n  lana init [--force] [--yes]\n  lana run [--agent <nama>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <nama>] [--yolo]\n  lana --version\n")
+	fmt.Print("lana - agen coding dan personal\n\n  lana init [--force] [--yes]\n  lana run [--agent <nama>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <nama>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
@@ -214,7 +214,7 @@ func cmdConfig(args []string) int {
 	}
 }
 
-func runtimeFor(ctx context.Context, home, agentName string, ask bool) (*lana.Runtime, string, string, error) {
+func runtimeFor(ctx context.Context, home, agentName string, approve lana.ApproveFunc) (*lana.Runtime, string, string, error) {
 	result, err := config.Load(ctx, config.Options{Home: home})
 	if err != nil {
 		return nil, "", "", err
@@ -225,16 +225,20 @@ func runtimeFor(ctx context.Context, home, agentName string, ask bool) (*lana.Ru
 	}
 	opts := lana.Options{Home: home}
 	var options []lana.Option
-	if ask {
-		options = append(options, lana.ApproveWith(lineAnswerer))
+	if approve != nil {
+		options = append(options, lana.ApproveWith(approve))
 	}
 	if providerName != "" {
 		if provider, ok := result.Config.Providers[providerName]; ok && provider.APIKeyEnv != "" {
 			if os.Getenv(provider.APIKeyEnv) == "" && !secretInFile(home, provider.APIKeyEnv) {
-				text := "Halo dari MockLlm."
+				text := "Halo dari MockLlm. Provider belum dikonfigurasi, jadi ini jawaban contoh. Isi OPENAI_API_KEY untuk memakai model sungguhan."
 				layer := fmt.Sprintf("[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.%s]\nprovider = \"mock\"\nmodel = \"mock\"\n\n[[routes]]\nchannel = \"cli\"\nagent = %q\n\n[[routes]]\nchannel = \"library\"\nagent = %q\n", agentName, agentName, agentName)
 				opts.Layers = []config.Layer{{Name: "mock", TOML: []byte(layer)}}
-				opts.Providers = map[string]core.Provider{"mock": mock.New(mock.Script{Responses: []mock.Response{{Events: []mock.Event{{Text: &text}, {Stop: ptr("end_turn")}}}}})}
+				responses := make([]mock.Response, 200)
+				for i := range responses {
+					responses[i] = mock.Response{Events: []mock.Event{{Text: &text}, {Stop: ptr("end_turn")}}}
+				}
+				opts.Providers = map[string]core.Provider{"mock": mock.New(mock.Script{Responses: responses})}
 				providerName, model = "mock", "mock"
 			}
 		}
@@ -339,7 +343,11 @@ func cmdRun(args []string) int {
 			agentName = "default"
 		}
 	}
-	rt, providerName, model, err := runtimeFor(ctx, home, agentName, *ask)
+	var approve lana.ApproveFunc
+	if *ask {
+		approve = lineAnswerer
+	}
+	rt, providerName, model, err := runtimeFor(ctx, home, agentName, approve)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -395,61 +403,6 @@ func cmdRun(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", runErr)
 	}
 	return exitCode
-}
-
-func cmdChat(args []string) int {
-	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	agentFlag := fs.String("agent", "", "agent")
-	yolo := fs.Bool("yolo", false, "trust")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if !isTTY(os.Stdin) || !isTTY(os.Stdout) {
-		fmt.Fprintln(os.Stderr, "error: lana chat butuh terminal")
-		return 2
-	}
-	home, err := homeDir()
-	if err != nil {
-		return fail(err, 1)
-	}
-	agentName := *agentFlag
-	if agentName == "" {
-		agentName = "default"
-	}
-	rt, _, _, err := runtimeFor(context.Background(), home, agentName, !*yolo)
-	if err != nil {
-		return fail(err, 2)
-	}
-	defer func() { _ = rt.Close() }()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if *yolo {
-		fmt.Println("YOLO: semua tool diizinkan.")
-	}
-	reader := bufio.NewReader(os.Stdin)
-	sessionID := ""
-	for {
-		fmt.Print("> ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return 0
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if line == "/exit" || line == "/quit" {
-			return 0
-		}
-		result, err := rt.Run(ctx, lana.Request{Agent: agentName, Prompt: line, SessionID: sessionID})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			continue
-		}
-		sessionID = result.SessionID
-		fmt.Println(result.Text)
-	}
 }
 
 func isTTY(f *os.File) bool {

@@ -15,3 +15,4 @@ dist/
 .golangci-cache/
 .smoke-home/
 .ghcache/
+/lana

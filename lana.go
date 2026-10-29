@@ -9,6 +9,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -168,7 +169,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		fn := runtimeOpts.approve
 		coreCtx.Hooks.ApprovalRequest.Use(func(ctx context.Context, req core.ApprovalRequest, next core.Next[core.ApprovalRequest, core.ApprovalOutcome]) (outcome core.ApprovalOutcome, err error) {
 			info, infoErr := coreCtx.Sessions.Info(ctx, req.SessionID)
-			if infoErr != nil || info.Channel != "library" {
+			if infoErr != nil || (info.Channel != "library" && info.Channel != "cli") {
 				return next(ctx, req)
 			}
 			defer func() {
@@ -527,6 +528,137 @@ func (rt *Runtime) Close() error {
 	}
 	return rt.closeErr
 }
+
+// CreateSession membuat session channel cli untuk direktori kerja saat ini.
+func (rt *Runtime) CreateSession(ctx context.Context, agentName string) (core.SessionInfo, error) {
+	if err := rt.closedError(); err != nil {
+		return core.SessionInfo{}, err
+	}
+	if agentName == "" {
+		agentName = rt.channelAgent("cli")
+	}
+	if _, err := rt.routeAgent(agentName); err != nil {
+		return core.SessionInfo{}, err
+	}
+	workspace, err := normalizeWorkspace(".")
+	if err != nil {
+		return core.SessionInfo{}, err
+	}
+	return rt.store.Create(ctx, core.NewSession{Agent: agentName, Channel: "cli", Address: workspace, Workspace: workspace})
+}
+
+// channelAgent mengembalikan agent dari route pertama untuk channel, atau "".
+func (rt *Runtime) channelAgent(channel string) string {
+	for _, route := range rt.result.Config.Routes {
+		if route.Channel == channel {
+			return route.Agent
+		}
+	}
+	return ""
+}
+
+// AgentNames mengembalikan nama agent yang terdaftar, terurut.
+func (rt *Runtime) AgentNames() []string {
+	names := make([]string, 0, len(rt.result.Config.Agents))
+	for name := range rt.result.Config.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// AgentModel mengembalikan "provider:model" agent.
+func (rt *Runtime) AgentModel(agentName string) string {
+	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
+		return agentCfg.Provider + ":" + agentCfg.Model
+	}
+	return ""
+}
+
+// AgentPolicy mengembalikan policy awal agent.
+func (rt *Runtime) AgentPolicy(agentName string) string {
+	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
+		return string(agentCfg.Permission)
+	}
+	return ""
+}
+
+// SessionInfo membuka session berdasarkan id atau prefix.
+func (rt *Runtime) SessionInfo(ctx context.Context, id string) (core.SessionInfo, error) {
+	if id == "" {
+		return core.SessionInfo{}, ErrSessionNotFound
+	}
+	matches, err := rt.store.FindPrefix(ctx, id)
+	if err != nil {
+		return core.SessionInfo{}, err
+	}
+	return core.ResolvePrefix(matches, id)
+}
+
+// SubscribeLive berlangganan frame hidup session.
+func (rt *Runtime) SubscribeLive(ctx context.Context, sessionID string) (*core.Subscription[core.LiveFrame], error) {
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	return rt.coreCtx.Agents.SubscribeLive(sessionID)
+}
+
+// Send menaruh pesan ke inbox session.
+func (rt *Runtime) Send(ctx context.Context, sessionID, text string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	return rt.coreCtx.Agents.Send(ctx, sessionID, text)
+}
+
+// Cancel membatalkan turn yang sedang berjalan.
+func (rt *Runtime) Cancel(ctx context.Context, sessionID string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	return rt.coreCtx.Agents.Cancel(ctx, sessionID)
+}
+
+// Policy mengembalikan policy efektif session.
+func (rt *Runtime) Policy(ctx context.Context, sessionID string) (core.Policy, error) {
+	if err := rt.closedError(); err != nil {
+		return "", err
+	}
+	return rt.coreCtx.Approval.EffectivePolicy(ctx, sessionID)
+}
+
+// SetPolicy mengubah policy efektif session.
+func (rt *Runtime) SetPolicy(ctx context.Context, sessionID string, policy core.Policy) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	return rt.coreCtx.Approval.SetPolicy(ctx, sessionID, policy)
+}
+
+// History mengembalikan seluruh event session.
+func (rt *Runtime) History(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	return rt.store.ChainEvents(ctx, sessionID)
+}
+
+// LastSession mengembalikan session cli terakhir untuk workspace saat ini.
+func (rt *Runtime) LastSession(ctx context.Context) (core.SessionInfo, error) {
+	workspace, err := normalizeWorkspace(".")
+	if err != nil {
+		return core.SessionInfo{}, err
+	}
+	list, err := rt.store.List(ctx, core.SessionFilter{Channel: "cli", Address: workspace, Limit: 1})
+	if err != nil {
+		return core.SessionInfo{}, err
+	}
+	if len(list) == 0 {
+		return core.SessionInfo{}, ErrSessionNotFound
+	}
+	return list[0], nil
+}
+
 func validApprovalOutcome(outcome core.ApprovalOutcome) bool {
 	switch outcome {
 	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeRejected, core.OutcomeCancelled, core.OutcomeUnavailable:
