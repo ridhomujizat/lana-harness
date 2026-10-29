@@ -2,7 +2,7 @@
 
 - **Issue**: —
 - **Status**: Approved
-- **Revision**: 1
+- **Revision**: 2 (revision 2: onboarding interview removed, owner decision 2026-10-30)
 - **Owner**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Required (subcommands `lana agent`, files in `$LANA_HOME`, tools `memory_read` and `memory_write`, slash command `/memory`)
 - **Related ADR**: [ADR Index](../../adr/README.md) — [0003](../../adr/0003-multi-agent-with-channel-routing.md), [0004](../../adr/0004-permission-mode-per-agent.md), [0010](../../adr/0010-profile-and-config-patch.md)
@@ -16,6 +16,7 @@
 | Owner decision 2026-10-29 | memory tools are part of this spec | `REQ-MEM-*` |
 | Owner decision 2026-10-29 | creating an agent uses a CLI wizard plus an onboarding chat | `REQ-AGCLI-001`, `REQ-ONB-*` |
 | Interview 2026-10-29 | Owner answers for `Q-001` through `Q-007` | Resolution column |
+| Owner feedback 2026-10-30 | "the bot always asks name and more on first contact; keep it plain" | `REQ-ONB-001` removed in revision 2 |
 | ADR 0003 | agents are configuration, several agents per install | agent name, `[agents.<name>]` |
 | ADR 0004 | permission per agent, approval | memory tool permission |
 | ADR 0010 | the word "profile" already means a config profile | the term **agent home** in this spec |
@@ -41,7 +42,7 @@ first chat, so the owner does not have to write prompt files by hand.
 - **Memory file** — `MEMORY.md` in the agent home. Durable notes the agent keeps for itself (environment facts, conventions, lessons learned).
 - **Memory entry** — one item in the user file or memory file. Entries are separated by a line containing only `§`.
 - **Template** — a built-in starting point for a new agent: `assistant`, `worker`, or `coder`.
-- **Onboarding** — the first conversation in which the agent interviews the owner and fills the user file.
+- **Onboarding** — (revision 1 only) an interview to fill the user file; removed in revision 2.
 - **Runtime context** — facts the runtime adds to the system prompt: agent name, local date and time with timezone, channel, and workspace.
 
 ## Scope
@@ -53,7 +54,7 @@ first chat, so the owner does not have to write prompt files by hand.
 - `lana agent new`, `lana agent list`, `lana agent edit`, `lana agent show`.
 - Built-in templates `assistant`, `worker`, `coder`.
 - Tools `memory_read` and `memory_write` with actions `add`, `replace`, `remove`.
-- Onboarding in the first chat when the user file has no entries.
+- No onboarding interview (revision 2): agents learn facts when the owner mentions them.
 - Slash command `/memory` in the TUI.
 - Compatibility with agents that only set `prompt_file`.
 
@@ -95,7 +96,7 @@ system shall use that file as the persona instead, following `Q-004`.
 #### REQ-PROMPT-001: Assembly order
 
 The system shall build the system prompt from these sections, in this order, skipping empty sections:
-persona, user file, memory file, onboarding instructions (only while onboarding is active), runtime context.
+persona, user file, memory file, runtime context.
 
 - `AC-PROMPT-001`: Given all three files have content, when `lana agent show <name> --prompt` runs, then the sections appear in the order persona, user, memory, runtime context, each under its own heading.
 
@@ -204,15 +205,13 @@ a tool list, and a permission, as listed in `Q-005`. All templates include `memo
 
 ### Onboarding
 
-#### REQ-ONB-001: Onboarding is active while the user file has no entries
+#### REQ-ONB-001: Removed in revision 2
 
-While the user file has no entries, the system shall add onboarding instructions to the system prompt.
-The instructions tell the agent to greet the owner, ask a short set of questions (name and form of address,
-language, timezone, work or role, preferences for answers), and save each answer with `memory_write`
-target `user`.
+The system shall not add onboarding instructions to the prompt. Agents answer normally from the first
+message and save facts about the owner only when the owner mentions them.
 
-- `AC-ONB-001`: Given an empty `USER.md`, when `lana agent show helper --prompt` runs, then the prompt contains the onboarding section.
-- `AC-ONB-002`: Given `USER.md` has at least one entry, when a turn starts, then the prompt contains no onboarding section.
+- `AC-ONB-001`: Given an empty `USER.md`, when `lana agent show helper --prompt` runs, then the prompt contains no onboarding or interview instructions.
+- `AC-ONB-002`: Withdrawn in revision 2.
 
 #### REQ-ONB-002: Wizard hands over to chat
 
@@ -265,11 +264,11 @@ active agent with their sizes against the limits.
 
 **Given** a configured provider
 **When** the owner runs `lana agent new lana --template assistant`, accepts the defaults, and starts the chat
-**Then** the agent greets the owner, asks the onboarding questions, saves the answers to `USER.md`, and the next session already knows the owner's name.
+**Then** the agent answers the first message normally; when the owner mentions their name, the agent saves it to `USER.md`, and the next session already knows it.
 
 ### SC-002: The agent remembers a fact
 
-**Given** agent `helper` with onboarding done
+**Given** agent `helper` that already knows the owner
 **When** the owner says "remember that my server is called kenari"
 **Then** the agent calls `memory_write` add on target `memory`, and a new session can answer "what is my server called?" without asking.
 
@@ -277,7 +276,7 @@ active agent with their sizes against the limits.
 
 | ID | Question | Controls | Agent recommendation | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|
-| `Q-001` | Is `USER.md` shared by all agents or one per agent? | `REQ-HOME-001`, `REQ-MEM-004` | Shared `$LANA_HOME/USER.md`, one `MEMORY.md` per agent | Ridho | Resolved | One `USER.md` per agent, in the agent home. Each agent runs its own onboarding |
+| `Q-001` | Is `USER.md` shared by all agents or one per agent? | `REQ-HOME-001`, `REQ-MEM-004` | Shared `$LANA_HOME/USER.md`, one `MEMORY.md` per agent | Ridho | Resolved | One `USER.md` per agent, in the agent home |
 | `Q-002` | Do memory tools need approval under policy `ask`? | `REQ-MEM-005` | No approval under `ask` and `trust`; rejected under `never` | Ridho | Resolved | Agent recommendation accepted: no approval under `ask` and `trust`; rejected under `never` |
 | `Q-003` | Size limits for the user file and the memory file | `REQ-PROMPT-003`, `REQ-MEM-003` | `USER.md` 2,000 characters, `MEMORY.md` 4,000 characters | Ridho | Resolved | Agent recommendation accepted: `USER.md` 2,000 and `MEMORY.md` 4,000 characters (Unicode code points) |
 | `Q-004` | If both `prompt_file` and `AGENT.md` exist, which wins? | `REQ-HOME-002` | `prompt_file` wins (explicit config); `lana agent list` shows the source | Ridho | Resolved | Agent recommendation accepted |

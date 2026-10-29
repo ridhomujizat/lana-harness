@@ -51,8 +51,8 @@ func TestPromptWithoutAgentHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(prompt, "# Onboarding\n") {
-		t.Fatalf("prompt should start with onboarding:\n%s", prompt)
+	if !strings.HasPrefix(prompt, "# Runtime context\n") {
+		t.Fatalf("prompt should hold only runtime context:\n%s", prompt)
 	}
 	for _, want := range []string{"- agent: assistant", "- channel: library", "- workspace: " + ws, "- date: " + time.Now().Format("2006-01-02")} {
 		if !strings.Contains(prompt, want) {
@@ -72,9 +72,6 @@ func TestPromptFromAgentHome(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
 		}
-	}
-	if strings.Contains(prompt, "# Onboarding") {
-		t.Fatal("onboarding present although USER.md has entries")
 	}
 	writeHomeFile(t, h.home, "assistant", "AGENT.md", "You are the edited persona.")
 	h.run(t, "again")

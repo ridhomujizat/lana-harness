@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-// Onboarding is the instruction added while the user file has no entries.
-const Onboarding = `You do not know the user yet. In this conversation, before other work unless the user asks for something urgent:
-1. Greet the user briefly and say you would like to learn a few things so you can help better.
-2. Ask, one or two at a time: their name and how to address them, the language they prefer, their timezone, what they do (work or role), and how they like answers (length, tone, format).
-3. Save each answer as a short entry with memory_write (target "user", action "add") as soon as you get it.
-4. When done, summarize what you saved and ask what they want to do first.`
-
 // PromptInput is the data for one system prompt.
 type PromptInput struct {
 	Persona   string
@@ -35,9 +28,6 @@ func Build(in PromptInput) string {
 	}
 	if len(in.Memory) > 0 {
 		sections = append(sections, "# Your memory\n"+section(in.Memory, MemoryLimit))
-	}
-	if len(in.User) == 0 {
-		sections = append(sections, "# Onboarding\n"+Onboarding)
 	}
 	sections = append(sections, "# Runtime context\n"+runtimeContext(in))
 	return strings.Join(sections, "\n\n")

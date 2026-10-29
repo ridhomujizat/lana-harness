@@ -8,7 +8,7 @@
 - **Requirements status**: Approved
 - **Contract status**: Approved
 - **Status**: Approved
-- **Design revision**: 2 (revision 2: package path `internal/agenthome`; `Backend.Memory` in `cmd/lana`)
+- **Design revision**: 3 (revision 2: package path `internal/agenthome`; `Backend.Memory` in `cmd/lana`; revision 3: no onboarding section)
 
 ## Architecture references
 
@@ -69,7 +69,7 @@ flowchart LR
   - `ReadEntries(path)` parses entries split on `§` lines; `Size(entries)` counts code points of the joined text.
   - `Apply(entries, action, content, oldText, limit)` returns new entries or a typed error (`ErrOverLimit`, `ErrNoMatch`, `ErrAmbiguous`, `ErrInvalid`).
   - `WriteEntries(path, entries)` writes atomically (temp file in the same folder, `fsync`, rename) with mode `0600` under an exclusive `flock` on `<file>.lock`.
-  - `Build(PromptInput) string` renders `API-HOME-002`, including truncation and the onboarding section.
+  - `Build(PromptInput) string` renders `API-HOME-002`, including truncation.
   - `Templates` holds the three templates (persona text with `{{name}}`, tools, permission) as `embed.FS` files under `agenthome/templates/`.
 - **`agent` package** — `Runner.readPrompt` becomes `Runner.buildPrompt(res, channel)`, called once in `runTurn` before the step loop. It resolves the persona source (`prompt_file` wins, `Q-004`), reads entries, and calls `agenthome.Build`. Read errors on `USER.md`/`MEMORY.md` log a warning and skip the section; a `prompt_file` read error keeps today's behavior (turn error).
 - **`core`** — add `RiskMemory Risk = "memory"` and `ToolCtx.Home string`. `agent/turn.go` fills `Home` from `Registry.home`.
@@ -146,7 +146,7 @@ flowchart LR
 
 - `nix develop -c go test -count=1 ./...` and `gofmt -l`.
 - Concurrency: a test that runs 20 goroutines adding entries and checks all 20 survive.
-- Manual smoke test: `lana agent new <name>` in a TTY, onboarding chat with a real provider, then `/memory` and a new session that uses the saved name.
+- Manual smoke test: `lana agent new <name>` in a TTY, first chat with a real provider, then `/memory` and a new session that uses the saved name.
 
 ## Risks and tradeoffs
 

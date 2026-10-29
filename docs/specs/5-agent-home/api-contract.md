@@ -2,7 +2,7 @@
 
 - **Issue**: —
 - **Requirements**: [requirements.md](requirements.md)
-- **Requirements revision**: 1
+- **Requirements revision**: 2
 - **Requirements status**: Approved
 - **Contract revision**: 1
 - **Applies to**: CLI (`lana agent`), files under `$LANA_HOME/agents/`, `config.toml` writes, tools `memory_read` and `memory_write`, slash command `/memory`, system prompt layout
@@ -64,9 +64,6 @@ The system prompt is the non-empty sections below, in order, separated by one bl
 
 # Your memory
 <MEMORY.md entries joined by "\n§\n">
-
-# Onboarding
-<fixed onboarding text; only while USER.md has no entries>
 
 # Runtime context
 - agent: <name>

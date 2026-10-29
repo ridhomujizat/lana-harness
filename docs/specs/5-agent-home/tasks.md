@@ -78,7 +78,7 @@ flowchart LR
     - Golden test of `Build` with a fixed clock and timezone.
   - Completion evidence:
     - Status: Completed
-    - Command/test: `go test ./internal/agenthome/` (TestBuild golden, TestBuildOnboardingAndTruncation, TestTemplates)
+    - Command/test: `go test ./internal/agenthome/` (TestBuild golden, TestBuildTruncationWithoutOnboarding, TestTemplates); revision 2 removed the onboarding section
     - Result: pass
     - PR/commit: —
     - Deviation: None

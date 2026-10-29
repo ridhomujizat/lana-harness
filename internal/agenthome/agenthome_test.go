@@ -140,20 +140,16 @@ Server kenari
 	}
 }
 
-func TestBuildOnboardingAndTruncation(t *testing.T) {
+func TestBuildTruncationWithoutOnboarding(t *testing.T) {
 	got := Build(PromptInput{Agent: "a", Memory: []string{strings.Repeat("m", MemoryLimit+10)}})
-	if !strings.Contains(got, "# Onboarding\n") {
-		t.Fatalf("onboarding missing:\n%s", got)
+	if strings.Contains(strings.ToLower(got), "onboarding") || strings.Contains(got, "# About the user") {
+		t.Fatalf("empty user file must add nothing:\n%s", got)
 	}
 	if !strings.Contains(got, fmt.Sprintf("[truncated: %d/%d characters; consolidate with memory_write]", MemoryLimit+10, MemoryLimit)) {
 		t.Fatal("truncation marker missing")
 	}
-	if strings.Index(got, "# Your memory") > strings.Index(got, "# Onboarding") {
+	if strings.Index(got, "# Your memory") > strings.Index(got, "# Runtime context") {
 		t.Fatal("section order wrong")
-	}
-	withUser := Build(PromptInput{Agent: "a", User: []string{"x"}})
-	if strings.Contains(withUser, "# Onboarding") {
-		t.Fatal("onboarding present with user entries")
 	}
 }
 
