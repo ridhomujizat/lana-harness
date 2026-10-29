@@ -331,7 +331,7 @@ flowchart TD
     - PR/commit: commit T-011
     - Deviasi: Tidak ada.
 
-- [ ] `T-012` Build release dan cross-compile
+- [x] `T-012` Build release dan cross-compile
   - Issue/PR: `—`
   - Bergantung pada: `T-001`, `T-002`
   - Requirements: `REQ-DEV-001`, `REQ-BUILD-002`
@@ -345,11 +345,11 @@ flowchart TD
     - `file dist/lana-linux-amd64` (memuat `statically linked`)
     - `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 nix develop -c go build ./cmd/lana`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'make release'`; `file dist/lana-linux-amd64`; `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 ... nix develop -c go build ./cmd/lana`
+    - Hasil: exit 0. `dist/lana-darwin-arm64` 1.742.514 byte; `dist/lana-linux-amd64` 1.671.330 byte; `dist/lana-linux-arm64` 1.638.562 byte. `file` Linux amd64: `ELF 64-bit LSB executable, x86-64 ... statically linked ... stripped`. Semua di bawah 40 MB.
+    - PR/commit: commit T-012
+    - Deviasi: Build awal sempat salah karena `GOOS`/`GOARCH` tidak diteruskan; Makefile diperbaiki sebelum bukti dicatat (3 percobaan build, berhasil).
 
 - [ ] `T-013` Workflow CI GitHub Actions
   - Issue/PR: `—`
