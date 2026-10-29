@@ -7,5 +7,8 @@ result
 *.db-shm
 .env
 secrets.env
-dist/.nix-cache/.gocache/
+dist/
+.nix-cache/
+.gocache/
 .gomodcache/
+.gopath/.golangci-cache/

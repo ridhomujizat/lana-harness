@@ -87,16 +87,6 @@ func (b *Builder) serviceSnapshot() map[ServiceKey]any {
 	return out
 }
 
-func (b *Builder) serviceProviders() map[ServiceKey]string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := make(map[ServiceKey]string, len(b.services))
-	for key, entry := range b.services {
-		out[key] = entry.provider
-	}
-	return out
-}
-
 // ModuleNamesSorted mengembalikan daftar modul terdaftar untuk pesan error.
 func ModuleNamesSorted() []string {
 	names := ModuleNames()

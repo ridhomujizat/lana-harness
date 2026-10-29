@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 )
@@ -268,7 +267,7 @@ func topoOrder(deps [][]int) []int {
 	return order
 }
 
-func rollback(installed []*installedModule, b *Builder) {
+func rollback(installed []*installedModule, _ *Builder) {
 	for i := len(installed) - 1; i >= 0; i-- {
 		im := installed[i]
 		if err := im.mod.Stop(context.Background()); err != nil {
@@ -276,8 +275,6 @@ func rollback(installed []*installedModule, b *Builder) {
 		}
 		releaseAll(im.releases)
 	}
-	installed = installed[:0]
-	_ = b
 }
 
 // Shutdown menghentikan modul dalam urutan kebalikan install.
@@ -343,14 +340,3 @@ func releaseAll(releases []func()) {
 		}
 	}
 }
-
-func sortedServiceNames(m map[ServiceKey]string) []string {
-	names := make([]string, 0, len(m))
-	for key := range m {
-		names = append(names, string(key))
-	}
-	sort.Strings(names)
-	return names
-}
-
-var _ = sortedServiceNames

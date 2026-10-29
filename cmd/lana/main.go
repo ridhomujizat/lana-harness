@@ -15,7 +15,7 @@ func main() {
 	flag.BoolVar(showVersion, "version", false, "cetak versi")
 	flag.Parse()
 	if *showVersion {
-		fmt.Fprintf(os.Stdout, "lana %s\n", version)
+		_, _ = fmt.Fprintf(os.Stdout, "lana %s\n", version)
 		return
 	}
 	flag.Usage()

@@ -52,10 +52,10 @@ func allowed(from, to string) bool {
 		return false
 	}
 	if from == "config" || from == "internal" || strings.HasPrefix(from, "internal/") {
-		return to == "core" || to == "internal" || strings.HasPrefix(to, "internal/")
+		return isInternal(to)
 	}
 	// Package implementasi dan library hanya boleh core atau internal.
-	if !(to == "core" || to == "internal" || strings.HasPrefix(to, "internal/")) {
+	if !isInternal(to) {
 		return false
 	}
 	if isLibrary(from) {
@@ -66,6 +66,10 @@ func allowed(from, to string) bool {
 		}
 	}
 	return true
+}
+
+func isInternal(pkg string) bool {
+	return pkg == "core" || pkg == "internal" || strings.HasPrefix(pkg, "internal/")
 }
 
 func isLibrary(pkg string) bool {
