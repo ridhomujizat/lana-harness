@@ -64,7 +64,7 @@ flowchart LR
 
 ## Tasks
 
-- [ ] `T-001` Buat kerangka CLI, error, dan logging
+- [x] `T-001` Buat kerangka CLI, error, dan logging
   - Issue/PR: `—`
   - Bergantung pada: spec #2 (Go module dan config loader)
   - Requirements: `REQ-EXIT-001` (sebagian)
@@ -79,13 +79,13 @@ flowchart LR
     - `go test ./cmd/lana/...` (unit pemetaan exit code dan parsing flag)
     - `lana --help` dan `lana --version` exit 0
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-002` Implementasi `lana init`
+- [x] `T-002` Implementasi `lana init`
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-INIT-001`
@@ -99,13 +99,13 @@ flowchart LR
   - Verifikasi:
     - `go test ./cmd/lana -run TestScript/init`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-003` Implementasi `lana config` dan `--dump-config`
+- [x] `T-003` Implementasi `lana config` dan `--dump-config`
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-CONF-001`
@@ -118,13 +118,13 @@ flowchart LR
   - Verifikasi:
     - `go test ./cmd/lana -run TestScript/config`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-004` Implementasi session CLI dan lock
+- [x] `T-004` Implementasi session CLI dan lock
   - Issue/PR: `—`
   - Bergantung pada: `T-001`, spec #4 (`ctx.Sessions`, `session_leases`)
   - Requirements: `REQ-SESS-001`, `REQ-SESS-002`, `REQ-CHAT-010`
@@ -138,13 +138,13 @@ flowchart LR
     - `go test ./channels/cli -run TestChatSessions`
     - Test dua proses dengan `SIGKILL` untuk `AC-SESS-007`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-005` Buat kerangka TUI inline
+- [x] `T-005` Buat kerangka TUI inline
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-CHAT-001`, `REQ-CHAT-002`, `REQ-CHAT-003`, `REQ-CHAT-011`
@@ -160,13 +160,13 @@ flowchart LR
     - `go test ./channels/cli -run 'TestChatAgentSelect|TestChatEmbedded'`
     - Golden status bar (`go test ./channels/cli/render -update` untuk memperbarui)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-006` Implementasi streaming Markdown dan tampilan tool call
+- [x] `T-006` Implementasi streaming Markdown dan tampilan tool call
   - Issue/PR: `—`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-CHAT-004`, `REQ-CHAT-005`
@@ -179,13 +179,13 @@ flowchart LR
   - Verifikasi:
     - `go test ./channels/cli/render/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-007` Implementasi input, tombol, dan riwayat
+- [x] `T-007` Implementasi input, tombol, dan riwayat
   - Issue/PR: `—`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-CHAT-006`, `REQ-CHAT-007`, `REQ-CHAT-008`, `REQ-CHAT-009`
@@ -201,13 +201,13 @@ flowchart LR
     - `go test ./channels/cli/input/... ./channels/cli/tui/...`
     - PTY: `TestChatInbox` untuk `AC-CHAT-012`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-008` Implementasi approval TUI dan mode yolo
+- [x] `T-008` Implementasi approval TUI dan mode yolo
   - Issue/PR: `—`
   - Bergantung pada: `T-006`, `T-007`, spec #2 (hook `approval.request`), spec #4 (`ctx.Approval`)
   - Requirements: `REQ-APPR-001`, `REQ-APPR-002`
@@ -222,13 +222,13 @@ flowchart LR
     - `go test ./channels/cli/approval/...`
     - `go test ./channels/cli -run TestChatPolicy`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-009` Implementasi slash command
+- [x] `T-009` Implementasi slash command
   - Issue/PR: `—`
   - Bergantung pada: `T-008`, spec #4 (`T-018`, `core.Compactor`)
   - Requirements: `REQ-CMD-001`
@@ -244,13 +244,13 @@ flowchart LR
     - `go test ./channels/cli/commands/...`
     - `go test ./channels/cli -run TestChatCommands`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-010` Implementasi `lana run`
+- [x] `T-010` Implementasi `lana run`
   - Issue/PR: `—`
   - Bergantung pada: `T-004`, spec #3 (profile `headless`, `MockLlm`)
   - Requirements: `REQ-RUN-001`, `REQ-RUN-002`, `REQ-RUN-003`, `REQ-EXIT-001`
@@ -264,13 +264,13 @@ flowchart LR
   - Verifikasi:
     - `go test ./cmd/lana -run 'TestScript/run'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
-- [ ] `T-011` Jalankan verifikasi akhir dan smoke manual
+- [x] `T-011` Jalankan verifikasi akhir dan smoke manual
   - Issue/PR: `—`
   - Bergantung pada: `T-002`, `T-003`, `T-009`, `T-010`
   - Requirements: semua (verifikasi)
@@ -284,20 +284,20 @@ flowchart LR
   - Verifikasi:
     - `test -z "$(gofmt -l .)" && golangci-lint run ./... && go test -race ./... && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" ./cmd/lana`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-1
     - Deviasi: Tidak ada
 
 ## Verifikasi akhir
 
-- [ ] Setiap acceptance criterion punya bukti lulus.
-- [ ] Tidak ada perilaku terlihat tanpa ID requirement.
-- [ ] Tidak ada perilaku di luar scope.
-- [ ] ADR dan diagram sesuai implementasi.
-- [ ] `gofmt`, `golangci-lint`, `go test -race`, dan build release lulus.
-- [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
+- [x] Setiap acceptance criterion punya bukti lulus.
+- [x] Tidak ada perilaku terlihat tanpa ID requirement.
+- [x] Tidak ada perilaku di luar scope.
+- [x] ADR dan diagram sesuai implementasi.
+- [x] `gofmt`, `golangci-lint`, `go test -race`, dan build release lulus.
+- [x] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 
 ## Approval
 

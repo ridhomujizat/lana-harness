@@ -377,3 +377,29 @@ func eventsOf(t *testing.T, rt *Runtime) []core.SessionEvent {
 	}
 	return events
 }
+func TestApproveWithLibraryChannel(t *testing.T) {
+	ws := t.TempDir()
+	srv := newSSEServer(t,
+		sseResponse{body: toolSSE("write_file", `{"path":"x.txt","content":"x"}`)},
+		sseResponse{body: textSSE("selesai")},
+	)
+	rt, err := New(context.Background(), Options{
+		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.asisten]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"asisten\"\n", srv.server.URL, ws))}},
+	}, ApproveWith(func(context.Context, core.ApprovalRequest) core.ApprovalOutcome {
+		return core.OutcomeAllowedOnce
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	result, err := rt.Run(context.Background(), Request{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StopReason != StopEndTurn {
+		t.Fatalf("result=%+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "x.txt")); err != nil {
+		t.Fatalf("file tidak ditulis: %v", err)
+	}
+}

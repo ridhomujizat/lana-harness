@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
 var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "version"}
@@ -233,8 +235,15 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 					add(path+".rules."+key, unknownKeyMsg(key, []string{"allow", "deny"}))
 					continue
 				}
-				if _, ok := asStringSlice(table[key]); !ok {
+				list, ok := asStringSlice(table[key])
+				if !ok {
 					add(path+".rules."+key, typeMsg("array string", table[key]))
+					continue
+				}
+				for i, item := range list {
+					if _, err := pattern.ParsePattern(item); err != nil {
+						add(fmt.Sprintf("%s.rules.%s.%d", path, key, i), fmt.Sprintf("pola '%s' tidak valid: %v", item, err))
+					}
 				}
 			}
 		}

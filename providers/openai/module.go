@@ -25,7 +25,17 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	config := b.Config()
 	used := usedProviders(config)
 	registry := &llmRegistry{providers: map[string]core.Provider{}}
+	if raw, ok := cfg.Values["_providers"]; ok {
+		if custom, ok := raw.(map[string]core.Provider); ok {
+			for name, provider := range custom {
+				registry.providers[name] = provider
+			}
+		}
+	}
 	for _, name := range sortedProviderNames(config.Providers) {
+		if _, exists := registry.providers[name]; exists {
+			continue
+		}
 		provider := config.Providers[name]
 		if provider.Kind != "openai_compat" {
 			return fmt.Errorf("provider '%s' kind '%s' belum didukung pada build ini", name, provider.Kind)

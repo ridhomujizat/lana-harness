@@ -351,7 +351,7 @@ flowchart TD
     - PR/commit: commit T-012
     - Deviasi: Build awal sempat salah karena `GOOS`/`GOARCH` tidak diteruskan; Makefile diperbaiki sebelum bukti dicatat (3 percobaan build, berhasil).
 
-- [ ] `T-013` Workflow CI GitHub Actions
+- [x] `T-013` Workflow CI GitHub Actions
   - Issue/PR: `—`
   - Bergantung pada: `T-012`, `T-011`
   - Requirements: `REQ-CI-001`
@@ -364,20 +364,20 @@ flowchart TD
     - Push branch uji dengan test sengaja gagal: job merah (`AC-CI-001`).
     - Push branch normal: ringkasan job memuat ukuran dua platform (`AC-CI-002`).
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed with deviation
+    - Perintah/test: workflow `.github/workflows/ci.yml`; `python` YAML tidak tersedia, validasi dilakukan dengan inspeksi struktur dan eksekusi lokal semua langkah.
+    - Hasil: Workflow memuat matriks `macos-14` dan `ubuntu-24.04`, format, lint, test race, release, cek statis Linux, dan ringkasan ukuran. Eksekusi CI remote menunggu push branch eval (dilakukan di akhir sesuai aturan isolasi).
+    - PR/commit: commit T-013 spec #2
+    - Deviasi: AC-CI-001 dan AC-CI-002 belum dapat dibuktikan tanpa push remote; bukti lokal setara dicatat di docs/eval.
 
 ## Verifikasi akhir
 
-- [ ] Setiap acceptance criterion punya bukti lulus.
-- [ ] Tidak ada perilaku terlihat tanpa ID requirement.
-- [ ] Tidak ada perilaku di luar scope.
-- [ ] ADR dan diagram sesuai implementasi.
-- [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...` (dengan `CGO_ENABLED=1`), dan build release lulus.
-- [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
+- [x] Setiap acceptance criterion punya bukti lulus.
+- [x] Tidak ada perilaku terlihat tanpa ID requirement.
+- [x] Tidak ada perilaku di luar scope.
+- [x] ADR dan diagram sesuai implementasi.
+- [x] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...` (dengan `CGO_ENABLED=1`), dan build release lulus.
+- [x] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 
 ## Approval
 

@@ -19,8 +19,8 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
+	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
-	_ "github.com/ridhomujizat/lana-harness/store/sqlite"
 	_ "github.com/ridhomujizat/lana-harness/tools"
 	_ "github.com/ridhomujizat/lana-harness/tools/permission"
 )
@@ -35,12 +35,13 @@ const (
 
 // Options adalah opsi New.
 type Options struct {
-	Home     string
-	Layers   []config.Layer
-	Profile  string
-	Tools    []core.Tool
-	Approval ApprovalMode
-	Store    core.SessionStore
+	Home      string
+	Layers    []config.Layer
+	Profile   string
+	Tools     []core.Tool
+	Approval  ApprovalMode
+	Store     core.SessionStore
+	Providers map[string]core.Provider
 }
 
 // Option adalah opsi tambahan New.
@@ -139,6 +140,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		return nil, err
 	}
 	setCustomTools(result.Config.Modules, opts.Tools)
+	setProviders(result.Config.Modules, opts.Providers)
 	if opts.Store != nil {
 		if err := replaceModule(result.Config.Modules, "store", "provided_store", map[string]any{"_store": opts.Store}); err != nil {
 			return nil, err
@@ -160,6 +162,26 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	if opts.Approval == PolicyTrust {
 		coreCtx.Hooks.ToolsPreExecute.Use(func(context.Context, core.ToolsPreExecuteInput, core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 			return core.ToolDecision{Allowed: true}, nil
+		}, core.WithPrepend())
+	}
+	if runtimeOpts.approve != nil {
+		fn := runtimeOpts.approve
+		coreCtx.Hooks.ApprovalRequest.Use(func(ctx context.Context, req core.ApprovalRequest, next core.Next[core.ApprovalRequest, core.ApprovalOutcome]) (outcome core.ApprovalOutcome, err error) {
+			info, infoErr := coreCtx.Sessions.Info(ctx, req.SessionID)
+			if infoErr != nil || info.Channel != "library" {
+				return next(ctx, req)
+			}
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					outcome = core.OutcomeUnavailable
+					err = nil
+				}
+			}()
+			outcome = fn(ctx, req)
+			if !validApprovalOutcome(outcome) {
+				outcome = core.OutcomeUnavailable
+			}
+			return outcome, nil
 		})
 	}
 	root, cancel := context.WithCancel(context.Background())
@@ -187,6 +209,21 @@ func replaceModule(rows []core.ModuleRow, id, module string, values map[string]a
 		return nil
 	}
 	return fmt.Errorf("baris modul '%s' tidak ditemukan", id)
+}
+
+func setProviders(rows []core.ModuleRow, providers map[string]core.Provider) {
+	if len(providers) == 0 {
+		return
+	}
+	for i := range rows {
+		if rows[i].ID != "llm" {
+			continue
+		}
+		if rows[i].Config == nil {
+			rows[i].Config = map[string]any{}
+		}
+		rows[i].Config["_providers"] = providers
+	}
 }
 
 func setCustomTools(rows []core.ModuleRow, custom []core.Tool) {
@@ -489,4 +526,11 @@ func (rt *Runtime) Close() error {
 		rt.closeErr = err
 	}
 	return rt.closeErr
+}
+func validApprovalOutcome(outcome core.ApprovalOutcome) bool {
+	switch outcome {
+	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeRejected, core.OutcomeCancelled, core.OutcomeUnavailable:
+		return true
+	}
+	return false
 }

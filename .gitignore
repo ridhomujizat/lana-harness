@@ -13,3 +13,4 @@ dist/
 .gomodcache/
 .gopath/
 .golangci-cache/
+.smoke-home/
