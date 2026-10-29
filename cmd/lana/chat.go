@@ -181,7 +181,7 @@ func (b chatBackend) LastSession(ctx context.Context) (core.SessionInfo, error) 
 }
 
 func (b chatBackend) RunTurn(ctx context.Context, sessionID, prompt string) (tui.TurnResult, error) {
-	result, err := b.rt.Run(ctx, lana.Request{Agent: b.agent, Prompt: prompt, SessionID: sessionID})
+	result, err := b.rt.Run(ctx, lana.Request{Prompt: prompt, SessionID: sessionID})
 	return tui.TurnResult{
 		Text:         result.Text,
 		StopReason:   result.StopReason,
@@ -212,6 +212,31 @@ func (b chatBackend) SetPolicy(ctx context.Context, sessionID string, policy cor
 
 func (b chatBackend) History(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	return b.rt.History(ctx, sessionID)
+}
+
+func (b chatBackend) SessionInfo(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+	return b.rt.SessionInfo(ctx, sessionID)
+}
+
+func (b chatBackend) ListSessions(ctx context.Context, limit int) ([]core.SessionInfo, error) {
+	return b.rt.ListSessions(ctx, limit)
+}
+
+func (b chatBackend) ForkSession(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+	return b.rt.ForkSession(ctx, sessionID)
+}
+
+func (b chatBackend) SetAgent(ctx context.Context, sessionID, agent string) error {
+	return b.rt.SetAgent(ctx, sessionID, agent)
+}
+
+func (b chatBackend) SetModel(ctx context.Context, sessionID, model string) error {
+	return b.rt.SetModel(ctx, sessionID, model)
+}
+
+func (b chatBackend) Compact(ctx context.Context, sessionID string) (tui.CompactionInfo, error) {
+	result, err := b.rt.Compact(ctx, sessionID)
+	return tui.CompactionInfo{TokensBefore: result.TokensBefore, TokensAfter: result.TokensAfter}, err
 }
 
 func (b chatBackend) AgentNames() []string { return b.rt.AgentNames() }

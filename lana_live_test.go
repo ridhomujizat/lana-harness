@@ -35,6 +35,7 @@ func TestCliSessionLiveFramesAndApproval(t *testing.T) {
 	base := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.asisten]\nprovider = \"mock\"\nmodel = \"m\"\npermission = \"ask\"\ntools = [\"write_probe\"]\n\n[[routes]]\nchannel = \"cli\"\nagent = \"asisten\"\n"
 	approved := 0
 	rt, err := New(context.Background(), Options{
+		Home:      t.TempDir(),
 		Layers:    []config.Layer{{Name: "test", TOML: []byte(base)}},
 		Tools:     []core.Tool{probeTool{}},
 		Providers: map[string]core.Provider{"mock": mock.New(script)},
@@ -94,5 +95,19 @@ func TestCliSessionLiveFramesAndApproval(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("frame %q tidak ada: %s", want, joined)
 		}
+	}
+	sessions, err := rt.ListSessions(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != info.ID {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	forked, err := rt.ForkSession(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forked.ParentSessionID != info.ID || forked.ID == info.ID {
+		t.Fatalf("fork = %+v", forked)
 	}
 }

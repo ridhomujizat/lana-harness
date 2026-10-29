@@ -6,6 +6,12 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
+// CompactionInfo adalah ringkasan hasil compaction.
+type CompactionInfo struct {
+	TokensBefore int64
+	TokensAfter  int64
+}
+
 // TurnResult adalah hasil satu turn.
 type TurnResult struct {
 	Text         string
@@ -25,6 +31,12 @@ type Backend interface {
 	Policy(ctx context.Context, sessionID string) (core.Policy, error)
 	SetPolicy(ctx context.Context, sessionID string, policy core.Policy) error
 	History(ctx context.Context, sessionID string) ([]core.SessionEvent, error)
+	SessionInfo(ctx context.Context, sessionID string) (core.SessionInfo, error)
+	ListSessions(ctx context.Context, limit int) ([]core.SessionInfo, error)
+	ForkSession(ctx context.Context, sessionID string) (core.SessionInfo, error)
+	SetAgent(ctx context.Context, sessionID, agent string) error
+	SetModel(ctx context.Context, sessionID, model string) error
+	Compact(ctx context.Context, sessionID string) (CompactionInfo, error)
 	AgentNames() []string
 	AgentModel(agent string) string
 	AgentPolicy(agent string) string

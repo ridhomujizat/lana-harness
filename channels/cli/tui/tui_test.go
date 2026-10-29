@@ -134,7 +134,21 @@ func (f *fakeBackend) SetPolicy(context.Context, string, core.Policy) error { re
 func (f *fakeBackend) History(context.Context, string) ([]core.SessionEvent, error) {
 	return nil, nil
 }
-func (f *fakeBackend) AgentNames() []string      { return []string{"default"} }
+func (f *fakeBackend) SessionInfo(_ context.Context, id string) (core.SessionInfo, error) {
+	return core.SessionInfo{ID: id, Agent: "default"}, nil
+}
+func (f *fakeBackend) ListSessions(context.Context, int) ([]core.SessionInfo, error) {
+	return []core.SessionInfo{{ID: "S1", Agent: "default"}, {ID: "S2", Agent: "asisten", TurnCount: 2}}, nil
+}
+func (f *fakeBackend) ForkSession(context.Context, string) (core.SessionInfo, error) {
+	return core.SessionInfo{ID: "S9", Agent: "default"}, nil
+}
+func (f *fakeBackend) SetAgent(context.Context, string, string) error { return nil }
+func (f *fakeBackend) SetModel(context.Context, string, string) error { return nil }
+func (f *fakeBackend) Compact(context.Context, string) (CompactionInfo, error) {
+	return CompactionInfo{TokensBefore: 100, TokensAfter: 40}, nil
+}
+func (f *fakeBackend) AgentNames() []string      { return []string{"default", "asisten"} }
 func (f *fakeBackend) AgentModel(string) string  { return "mock:mock" }
 func (f *fakeBackend) AgentPolicy(string) string { return "ask" }
 
@@ -164,6 +178,30 @@ func TestProgramFlow(t *testing.T) {
 	if !strings.Contains(full, "✓ sukses") {
 		t.Fatalf("status tool tidak tampil:\n%s", full)
 	}
+	if _, err := writer.Write([]byte("/agent asisten\r")); err != nil {
+		t.Fatalf("kirim /agent: %v", err)
+	}
+	waitFor(t, &out, "· agent: asisten")
+	if _, err := writer.Write([]byte("/model deepseek:deepseek-chat\r")); err != nil {
+		t.Fatalf("kirim /model: %v", err)
+	}
+	waitFor(t, &out, "· model: deepseek:deepseek-chat")
+	if _, err := writer.Write([]byte("/compact\r")); err != nil {
+		t.Fatalf("kirim /compact: %v", err)
+	}
+	waitFor(t, &out, "· compaction 100 → 40 token")
+	if _, err := writer.Write([]byte("/fork\r")); err != nil {
+		t.Fatalf("kirim /fork: %v", err)
+	}
+	waitFor(t, &out, "· fork S9")
+	if _, err := writer.Write([]byte("/sessions\r")); err != nil {
+		t.Fatalf("kirim /sessions: %v", err)
+	}
+	waitFor(t, &out, "? pilih session")
+	if _, err := writer.Write([]byte("\r")); err != nil {
+		t.Fatalf("pilih session: %v", err)
+	}
+	waitFor(t, &out, "· pindah ke session S1")
 	if _, err := writer.Write([]byte("/exit\r")); err != nil {
 		t.Fatalf("kirim exit: %v", err)
 	}

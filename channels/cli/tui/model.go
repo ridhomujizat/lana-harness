@@ -56,6 +56,16 @@ type approvalState struct {
 	reply chan core.ApprovalOutcome
 }
 
+type sessionPicker struct {
+	sessions []core.SessionInfo
+	index    int
+}
+
+type compactDoneMsg struct {
+	info CompactionInfo
+	err  error
+}
+
 // Model adalah state TUI chat.
 type Model struct {
 	backend  Backend
@@ -91,7 +101,9 @@ type Model struct {
 	lastTool         *ToolRecord
 	verbose          bool
 
-	approval *approvalState
+	approval   *approvalState
+	picker     *sessionPicker
+	compacting bool
 
 	lastCtrlC time.Time
 
@@ -221,6 +233,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Println(styleMuted.Render("· approval kedaluwarsa"))
 		}
 		return m, nil
+	case compactDoneMsg:
+		m.compacting = false
+		if msg.err != nil {
+			return m, tea.Println(styleErr.Render("✗ compaction: " + msg.err.Error()))
+		}
+		return m, tea.Println(styleMuted.Render(fmt.Sprintf("· compaction %d → %d token", msg.info.TokensBefore, msg.info.TokensAfter)))
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -247,6 +265,9 @@ func (m *Model) resizeInput() {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.picker != nil {
+		return m.handlePickerKey(msg)
+	}
 	if m.searching {
 		return m.handleSearchKey(msg)
 	}
@@ -612,16 +633,19 @@ func (m *Model) slash(value string) tea.Cmd {
 	case "/help":
 		return tea.Println(strings.Join([]string{
 			styleMuted.Render("· perintah:"),
-			"  /help            bantuan ini",
-			"  /new             session baru",
-			"  /clear           bersihkan layar",
-			"  /session         id session dan cwd",
-			"  /agent           agent aktif dan daftar agent",
-			"  /model           model aktif",
-			"  /permission [p]  tampilkan atau ubah policy (ask|trust|never)",
-			"  /yolo            sama dengan /permission trust",
-			"  /verbose         nyalakan atau matikan mode verbose",
-			"  /exit            keluar",
+			"  /help              bantuan ini",
+			"  /new               session baru",
+			"  /sessions [id]     daftar / pindah session",
+			"  /fork              fork session pada turn terakhir",
+			"  /compact           ringkas riwayat session",
+			"  /clear             bersihkan layar",
+			"  /session           id session dan cwd",
+			"  /agent [nama]      agent aktif atau ganti agent",
+			"  /model [p:m]       model aktif atau ganti model",
+			"  /permission [p]    tampilkan atau ubah policy (ask|trust|never)",
+			"  /yolo              sama dengan /permission trust",
+			"  /verbose           nyalakan atau matikan mode verbose",
+			"  /exit              keluar",
 		}, "\n"))
 	case "/exit", "/quit":
 		return tea.Quit
@@ -636,15 +660,20 @@ func (m *Model) slash(value string) tea.Cmd {
 		m.usageIn, m.usageOut = 0, 0
 		m.assistantStarted = false
 		m.queue = nil
+		m.picker = nil
 		return tea.Println(styleMuted.Render("· session baru " + info.ID))
 	case "/session":
 		return tea.Println(styleMuted.Render("· session " + m.sessionID + " · " + m.cwd))
+	case "/sessions":
+		return m.switchOrPick(args)
+	case "/fork":
+		return m.forkSession()
+	case "/compact":
+		return m.compactSession()
 	case "/agent":
-		lines := []string{styleMuted.Render("· agent " + m.agent + " · " + m.model + " · " + m.policy)}
-		lines = append(lines, styleMuted.Render("· tersedia: "+strings.Join(m.backend.AgentNames(), ", ")))
-		return tea.Println(strings.Join(lines, "\n"))
+		return m.agentCommand(args)
 	case "/model":
-		return tea.Println(styleMuted.Render("· model " + m.model))
+		return m.modelCommand(args)
 	case "/verbose":
 		m.verbose = !m.verbose
 		return tea.Println(styleMuted.Render("· verbose " + onOff(m.verbose)))
@@ -678,6 +707,148 @@ func (m *Model) setPolicy(value string) tea.Cmd {
 	return tea.Println(strings.Join(lines, "\n"))
 }
 
+func (m *Model) switchOrPick(args []string) tea.Cmd {
+	if m.running || m.compacting {
+		return tea.Println(styleMuted.Render("· tunggu turn selesai"))
+	}
+	if len(args) > 0 {
+		if _, err := m.backend.SessionInfo(m.ctx, args[0]); err != nil {
+			return tea.Println(styleErr.Render("✗ session tidak ditemukan: " + args[0]))
+		}
+		return m.switchSession(args[0])
+	}
+	sessions, err := m.backend.ListSessions(m.ctx, 20)
+	if err != nil {
+		return tea.Println(styleErr.Render("✗ error: " + err.Error()))
+	}
+	if len(sessions) == 0 {
+		return tea.Println(styleMuted.Render("· belum ada session lain"))
+	}
+	m.picker = &sessionPicker{sessions: sessions}
+	return nil
+}
+
+func (m *Model) switchSession(id string) tea.Cmd {
+	m.sessionID = id
+	m.usageIn, m.usageOut = 0, 0
+	m.assistantStarted = false
+	m.queue = nil
+	m.picker = nil
+	if info, err := m.backend.SessionInfo(m.ctx, id); err == nil {
+		m.agent = info.Agent
+		if model := m.backend.AgentModel(info.Agent); model != "" {
+			m.model = model
+		}
+	}
+	if policy, err := m.backend.Policy(m.ctx, id); err == nil {
+		m.policy = string(policy)
+	}
+	return tea.Println(styleMuted.Render("· pindah ke session " + id))
+}
+
+func (m *Model) forkSession() tea.Cmd {
+	if m.running || m.compacting {
+		return tea.Println(styleMuted.Render("· tunggu turn selesai"))
+	}
+	info, err := m.backend.ForkSession(m.ctx, m.sessionID)
+	if err != nil {
+		return tea.Println(styleErr.Render("✗ fork: " + err.Error()))
+	}
+	return tea.Batch(tea.Println(styleMuted.Render("· fork "+info.ID)), m.switchSession(info.ID))
+}
+
+func (m *Model) compactSession() tea.Cmd {
+	if m.running || m.compacting {
+		return tea.Println(styleMuted.Render("· tunggu turn selesai"))
+	}
+	m.compacting = true
+	sessionID := m.sessionID
+	go func() {
+		ctx, cancel := context.WithTimeout(m.ctx, 3*time.Minute)
+		defer cancel()
+		info, err := m.backend.Compact(ctx, sessionID)
+		if m.program != nil {
+			m.program.Send(compactDoneMsg{info: info, err: err})
+		}
+	}()
+	return tea.Println(styleMuted.Render("· meringkas session…"))
+}
+
+func (m *Model) agentCommand(args []string) tea.Cmd {
+	if len(args) == 0 {
+		lines := []string{styleMuted.Render("· agent " + m.agent + " · " + m.model + " · " + m.policy)}
+		lines = append(lines, styleMuted.Render("· tersedia: "+strings.Join(m.backend.AgentNames(), ", ")))
+		return tea.Println(strings.Join(lines, "\n"))
+	}
+	name := args[0]
+	if err := m.backend.SetAgent(m.ctx, m.sessionID, name); err != nil {
+		return tea.Println(styleErr.Render("✗ agent: " + err.Error()))
+	}
+	m.agent = name
+	if model := m.backend.AgentModel(name); model != "" {
+		m.model = model
+	}
+	return tea.Println(styleMuted.Render("· agent: " + name))
+}
+
+func (m *Model) modelCommand(args []string) tea.Cmd {
+	if len(args) == 0 {
+		return tea.Println(styleMuted.Render("· model " + m.model))
+	}
+	value := args[0]
+	if !strings.Contains(value, ":") {
+		return tea.Println(styleErr.Render("✗ model harus provider:model, mis. deepseek:deepseek-chat"))
+	}
+	if err := m.backend.SetModel(m.ctx, m.sessionID, value); err != nil {
+		return tea.Println(styleErr.Render("✗ model: " + err.Error()))
+	}
+	m.model = value
+	return tea.Println(styleMuted.Render("· model: " + value))
+}
+
+func (m *Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	picker := m.picker
+	switch msg.String() {
+	case "esc", "ctrl+c":
+		m.picker = nil
+	case "up", "k":
+		if picker.index > 0 {
+			picker.index--
+		}
+	case "down", "j":
+		if picker.index < len(picker.sessions)-1 {
+			picker.index++
+		}
+	case "enter":
+		session := picker.sessions[picker.index]
+		m.picker = nil
+		return m, m.switchSession(session.ID)
+	}
+	return m, nil
+}
+
+func (m *Model) renderPicker() string {
+	lines := []string{styleAccent.Render("? pilih session") + styleMuted.Render("  (↑/↓, enter, esc)")}
+	for i, session := range m.picker.sessions {
+		marker := "  "
+		style := styleMuted
+		if i == m.picker.index {
+			marker = "> "
+			style = styleBold
+		}
+		label := shortSessionID(session.ID) + " · " + session.Agent + " · " + fmt.Sprintf("%d turn", session.TurnCount) + " · " + time.UnixMilli(session.UpdatedAt).Format("15:04")
+		lines = append(lines, marker+style.Render(label))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func shortSessionID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12] + "…"
+}
+
 func (m *Model) contentWidth() int {
 	width := m.width
 	if width <= 0 {
@@ -709,6 +880,9 @@ func (m *Model) View() string {
 	}
 	if m.searching {
 		sections = append(sections, styleAccent.Render("cari riwayat: ")+m.searchQuery)
+	}
+	if m.picker != nil {
+		sections = append(sections, m.renderPicker())
 	}
 	if m.policy == string(core.PolicyTrust) {
 		sections = append(sections, styleWarn.Render("⚠ YOLO: semua tool diizinkan tanpa approval (rule deny tetap berlaku)"))
@@ -796,6 +970,9 @@ func (m *Model) renderStatus() string {
 	}
 	left := strings.Join(parts, " · ")
 	right := "/help"
+	if m.compacting {
+		right = "meringkas…"
+	}
 	if m.running {
 		right = "turn berjalan · ctrl+c batal"
 	}

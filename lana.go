@@ -344,7 +344,7 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	if strings.TrimSpace(req.Prompt) == "" {
 		return Result{}, ErrEmptyPrompt
 	}
-	agentName, err := rt.routeAgent(req.Agent)
+	agentName, err := rt.agentFor(ctx, req)
 	if err != nil {
 		return Result{}, err
 	}
@@ -417,7 +417,7 @@ func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, err
 			yield(nil, ErrEmptyPrompt)
 			return
 		}
-		agentName, err := rt.routeAgent(req.Agent)
+		agentName, err := rt.agentFor(ctx, req)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -657,6 +657,84 @@ func (rt *Runtime) LastSession(ctx context.Context) (core.SessionInfo, error) {
 		return core.SessionInfo{}, ErrSessionNotFound
 	}
 	return list[0], nil
+}
+
+// ListSessions mengembalikan session cli untuk workspace saat ini.
+func (rt *Runtime) ListSessions(ctx context.Context, limit int) ([]core.SessionInfo, error) {
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	workspace, err := normalizeWorkspace(".")
+	if err != nil {
+		return nil, err
+	}
+	return rt.store.List(ctx, core.SessionFilter{Channel: "cli", Address: workspace, Limit: limit})
+}
+
+// ForkSession menyalin session pada batas turn terakhir.
+func (rt *Runtime) ForkSession(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+	if err := rt.closedError(); err != nil {
+		return core.SessionInfo{}, err
+	}
+	events, err := rt.store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return core.SessionInfo{}, err
+	}
+	var at int64
+	for _, event := range events {
+		if event.Kind == core.KindTurnEnd {
+			at = event.Seq
+		}
+	}
+	if at == 0 {
+		return core.SessionInfo{}, errors.New("belum ada turn selesai untuk fork")
+	}
+	return rt.store.Fork(ctx, sessionID, at)
+}
+
+// SetAgent mengganti agent untuk session.
+func (rt *Runtime) SetAgent(ctx context.Context, sessionID, agentName string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	return rt.coreCtx.Agents.SetAgent(ctx, sessionID, agentName)
+}
+
+// SetModel mengganti model (provider:model) untuk session.
+func (rt *Runtime) SetModel(ctx context.Context, sessionID, model string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	return rt.coreCtx.Agents.SetModel(ctx, sessionID, model)
+}
+
+// Compact meringkas riwayat session sekarang.
+func (rt *Runtime) Compact(ctx context.Context, sessionID string) (core.CompactionResult, error) {
+	if err := rt.closedError(); err != nil {
+		return core.CompactionResult{}, err
+	}
+	service, ok := rt.coreCtx.Lookup(core.ServiceCompaction)
+	if !ok {
+		return core.CompactionResult{}, errors.New("layanan compaction tidak tersedia")
+	}
+	compactor, ok := service.(core.Compactor)
+	if !ok {
+		return core.CompactionResult{}, errors.New("layanan compaction tidak kompatibel")
+	}
+	return compactor.CompactNow(ctx, sessionID)
+}
+
+// agentFor memilih agent dari request, session, atau route default.
+func (rt *Runtime) agentFor(ctx context.Context, req Request) (string, error) {
+	if req.Agent != "" {
+		return rt.routeAgent(req.Agent)
+	}
+	if req.SessionID != "" {
+		if info, err := rt.SessionInfo(ctx, req.SessionID); err == nil && info.Agent != "" {
+			return info.Agent, nil
+		}
+	}
+	return rt.routeAgent("")
 }
 
 func validApprovalOutcome(outcome core.ApprovalOutcome) bool {

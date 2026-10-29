@@ -64,7 +64,8 @@ Perubahan:
 - Package baru `channels/cli/tui` memakai Bubble Tea v1.3.10, Bubbles v0.21.0, Lip Gloss v1.1.0, dan x/ansi v0.10.1.
 - TUI inline tanpa alt screen: banner sesi, streaming Markdown per blok, tool call ringkas/verbose, spinner, prompt approval di dalam aplikasi, status bar, input multi-baris, dan riwayat input.
 - Tombol: Enter kirim, Alt+Enter/Ctrl+J/Shift+Enter baris baru, backslash di akhir baris + Enter, Ctrl+C batal/kosongkan/keluar, Ctrl+D keluar, Ctrl+O verbose, Ctrl+R cari riwayat, panah atas/bawah riwayat, Esc batal.
-- Slash command: /help, /new, /clear, /session, /agent, /model, /permission, /yolo, /verbose, /exit.
+- Slash command: /help, /new, /sessions (picker ↑/↓/Enter), /fork, /compact, /clear, /session, /agent [nama], /model [provider:model], /permission, /yolo, /verbose, /exit.
+- Runtime: ListSessions, ForkSession (batas turn terakhir), SetAgent, SetModel, Compact; Run/Stream memakai agent session bila Request.Agent kosong.
 - Runtime: core.LiveFrame diperluas; agent loop mem-publish frame tool_call/tool_result; lana.Runtime mendapat CreateSession, LastSession, SessionInfo, SubscribeLive, Send, Cancel, Policy, SetPolicy, History, AgentNames, AgentModel, AgentPolicy; hook approval menerima channel cli.
 - cmd/lana chat: flag --agent, --yolo, --continue, --resume, --verbose; sesi channel cli; fallback MockLlm memberi 200 respons plus notice.
 - lana init: pilihan provider openai/openrouter/deepseek (`--provider` untuk `--yes`), prompt API key opsional dengan `term.ReadPassword` yang ditulis ke `secrets.env` 0600; `lana config check` menampilkan status tiap `api_key_env`.
