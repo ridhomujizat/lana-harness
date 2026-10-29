@@ -207,7 +207,7 @@ flowchart LR
     - PR/commit: commit T-005 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-006` Implementasi `glob` dan `grep` dengan `.gitignore`
+- [x] `T-006` Implementasi `glob` dan `grep` dengan `.gitignore`
   - Issue/PR: `—`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-TOOL-004`, `REQ-TOOL-005`
@@ -220,11 +220,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./tools/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./tools/...'`
+    - Hasil: `ok tools`; exit 0. Glob menghormati `.gitignore` root dan batas 1000 (catatan `dari 1001 hasil`); grep memakai RE2, melewati biner dan file >1 MiB serta filter glob.
+    - PR/commit: commit T-006 spec #3
+    - Deviasi: Tidak ada.
 
 - [ ] `T-007` Implementasi `bash`
   - Issue/PR: `—`
