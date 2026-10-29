@@ -104,7 +104,7 @@ flowchart TD
 
 ## Tasks
 
-- [ ] `T-001` Siapkan dev shell Nix dan `go.mod`
+- [x] `T-001` Siapkan dev shell Nix dan `go.mod`
   - Issue/PR: `—`
   - Bergantung pada: `None`
   - Requirements: `REQ-DEV-001`
@@ -119,13 +119,13 @@ flowchart TD
     - `nix develop -c go version` (versi memenuhi `go.mod`)
     - `nix develop -c golangci-lint version`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache nix develop -c sh -c 'go version && golangci-lint version'`
+    - Hasil: `go version go1.26.10 darwin/arm64`; `golangci-lint has version 2.15.0 built with go1.27.3`; exit 0. `flake.lock` dibuat. `go.mod` memakai `go 1.24`, sehingga toolchain 1.26.10 memenuhi.
+    - PR/commit: commit T-001
+    - Deviasi: Perintah Nix memakai `XDG_CACHE_HOME` lokal karena sandbox menolak tulisan ke `~/.cache/nix` (dicatat di docs/eval).
 
-- [ ] `T-002` Buat layout paket dan test aturan import
+- [x] `T-002` Buat layout paket dan test aturan import
   - Issue/PR: `—`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-BUILD-001`
@@ -138,13 +138,13 @@ flowchart TD
     - `nix develop -c go build ./...`
     - `nix develop -c go test ./internal/archtest/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache nix develop -c sh -c 'go build ./... && go test ./internal/archtest/...'`
+    - Hasil: `ok github.com/ridhomujizat/lana-harness/internal/archtest`; exit 0. `TestImportRules`, `TestCoreTransitive`, `TestRuleViolationMessage` lulus.
+    - PR/commit: commit T-002
+    - Deviasi: Perintah memakai cache Go lokal karena sandbox menolak tulisan ke cache pengguna (dicatat di docs/eval).
 
-- [ ] `T-003` Tulis tipe `core` dan schema `Config`
+- [x] `T-003` Tulis tipe `core` dan schema `Config`
   - Issue/PR: `—`
   - Bergantung pada: `T-002`
   - Requirements: `REQ-CONF-003`, `REQ-MOD-001`, `REQ-HOOK-001`
@@ -162,13 +162,13 @@ flowchart TD
     - `nix develop -c go build ./core/...`
     - `nix develop -c go vet ./core/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache nix develop -c sh -c 'go build ./core/... && go vet ./core/...'`
+    - Hasil: build dan vet exit 0. Semua tipe dari `API-CORE-006` sampai `API-CORE-015` tersedia; `DeriveMessages` dan `ResolvePrefix` sengaja belum diimplementasikan (owner spec #3/#4 sesuai scope).
+    - PR/commit: commit T-003
+    - Deviasi: `Subscription` dideklarasikan sebagai placeholder agar interface `AgentRegistry` dapat dikompilasi; implementasi penuh di T-004 (task berikutnya, bukan perilaku baru).
 
-- [ ] `T-004` Implementasi hook generik `Waterfall`, `Serial`, `Observe`
+- [x] `T-004` Implementasi hook generik `Waterfall`, `Serial`, `Observe`
   - Issue/PR: `—`
   - Bergantung pada: `T-003`
   - Requirements: `REQ-HOOK-001`, `REQ-HOOK-002`, `REQ-HOOK-003`, `REQ-HOOK-004`
@@ -182,13 +182,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=1 nix develop -c go test -race ./core -run 'TestWaterfall|TestSerial|TestObserve|TestReleaseHandle'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `CGO_ENABLED=1 ... nix develop -c sh -c "CGO_ENABLED=1 go test -race ./core -run 'TestWaterfall|TestSerial|TestObserve|TestReleaseHandle'"`
+    - Hasil: `ok github.com/ridhomujizat/lana-harness/core`; exit 0. Termasuk `TestWaterfallNoDefault` untuk `ErrNoDefault`.
+    - PR/commit: commit T-004
+    - Deviasi: Tidak ada.
 
-- [ ] `T-005` Loader lapisan dan lokasi file
+- [x] `T-005` Loader lapisan dan lokasi file
   - Issue/PR: `—`
   - Bergantung pada: `T-003`
   - Requirements: `REQ-CONF-001`, `REQ-CONF-006`, `REQ-CONF-009`
@@ -202,13 +202,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestLayerPatchWins|TestMissingProfileSkipped|TestLanaHomeEnv|TestMemoryLayerNoFiles'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestLayerPatchWins|TestMissingProfileSkipped|TestLanaHomeEnv|TestMemoryLayerNoFiles' -v`
+    - Hasil: 4 test PASS, `ok github.com/ridhomujizat/lana-harness/config`; exit 0.
+    - PR/commit: commit T-005
+    - Deviasi: Registry modul (`core.RegisterModule`/`core.ModuleNames`) ditambahkan lebih awal agar validasi `module` dapat berjalan; task T-010 tinggal menambah Builder/Boot/rencana boot. Registry palsu hanya didaftarkan di TestMain package config.
 
-- [ ] `T-006` Validasi per lapisan dengan posisi
+- [x] `T-006` Validasi per lapisan dengan posisi
   - Issue/PR: `—`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-CONF-003`, `REQ-CONF-008`
@@ -223,13 +223,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestErrorsCollectAllLayers|TestRefErrorLocation|TestUnknownKeySuggestion|TestVersionTooHigh|TestMemoryLayerRefError'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestErrorsCollectAllLayers|TestRefErrorLocation|TestUnknownKeySuggestion|TestVersionTooHigh|TestMemoryLayerRefError' -v`
+    - Hasil: 5 test PASS; exit 0. Posisi baris 12 untuk `agents.coder.provider` terbukti.
+    - PR/commit: commit T-006
+    - Deviasi: Validasi pola `rules` belum memanggil `internal/pattern` karena paket itu baru dibuat spec #4; saat ini hanya tipe array string (sesuai `CQ-030`).
 
-- [ ] `T-007` Merge sesuai aturan contract
+- [x] `T-007` Merge sesuai aturan contract
   - Issue/PR: `—`
   - Bergantung pada: `T-006`
   - Requirements: `REQ-CONF-002`
@@ -243,13 +243,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestMerge'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestMerge' -v`
+    - Hasil: 5 test PASS; exit 0. Origin baris modul dan leaf disimpan saat merge.
+    - PR/commit: commit T-007
+    - Deviasi: Bila lapisan atas menulis baris modul tanpa `config`, config lama dipertahankan; penggantian penuh hanya terjadi bila key `config` ditulis. Ini tafsiran paling sederhana dari aturan merge dan dicatat di docs/eval.
 
-- [ ] `T-008` Origins, secret, interpolasi, dan format `Secret`
+- [x] `T-008` Origins, secret, interpolasi, dan format `Secret`
   - Issue/PR: `—`
   - Bergantung pada: `T-007`
   - Requirements: `REQ-CONF-004`, `REQ-CONF-005`, `REQ-CONF-007`
@@ -266,13 +266,13 @@ flowchart TD
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestOriginsTableAndLeaf|TestSecretEnvWins|TestEffectiveConfigRedacted|TestSecretsPermWarning|TestMCPEnvInterpolationSecret|TestNonMCPFieldNotInterpolated|TestMissingVarError'`
     - `CGO_ENABLED=0 nix develop -c go test ./core -run TestSecretFormatting`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c "go test ./config -run 'TestOriginsTableAndLeaf|TestSecretEnvWins|TestEffectiveConfigRedacted|TestSecretsPermWarning|TestMCPEnvInterpolationSecret|TestNonMCPFieldNotInterpolated|TestMissingVarError' -v; go test ./core -run TestSecretFormatting -v"`
+    - Hasil: 8 test PASS (7 config, 1 core); exit 0. `Secret` tampil `***` di fmt, slog, TOML, dan JSON.
+    - PR/commit: commit T-008
+    - Deviasi: Tidak ada.
 
-- [ ] `T-009` Profile bawaan `minimal` dan `headless`
+- [x] `T-009` Profile bawaan `minimal` dan `headless`
   - Issue/PR: `—`
   - Bergantung pada: `T-007`
   - Requirements: `REQ-PROF-001`
@@ -285,13 +285,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestBuiltinProfileRows|TestUnknownProfileError'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestBuiltinProfileRows|TestUnknownProfileError' -v`
+    - Hasil: 2 test PASS; exit 0. `minimal` 7 baris base; `headless` 8 baris dengan `runner`/`cli_runner`; origin `profile:headless`.
+    - PR/commit: commit T-009
+    - Deviasi: Tidak ada.
 
-- [ ] `T-010` Registry modul, `Builder`, dan rencana boot
+- [x] `T-010` Registry modul, `Builder`, dan rencana boot
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-MOD-001`, `REQ-MOD-002`, `REQ-MOD-004`
@@ -306,13 +306,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./core -run 'TestBoot'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./core -run 'TestBoot' -v`
+    - Hasil: 6 test PASS (termasuk `TestBootApprovalDefaultUnavailable`); exit 0. Urutan topologi stabil, siklus dan provider ganda terdeteksi sebelum `Install`.
+    - PR/commit: commit T-010
+    - Deviasi: `core.Context` menyimpan map service internal agar `Lookup` bisa mengambil key di luar lima field typed (kontrak `API-CORE-003`). `Shutdown` masih minimal; perilaku penuh dikerjakan T-011.
 
-- [ ] `T-011` Install lengkap, shutdown berurutan, dan lepas listener
+- [x] `T-011` Install lengkap, shutdown berurutan, dan lepas listener
   - Issue/PR: `—`
   - Bergantung pada: `T-010`, `T-007`
   - Requirements: `REQ-MOD-003`, `REQ-HOOK-004`, `REQ-CONF-002`
@@ -325,13 +325,13 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=1 nix develop -c go test -race ./core -run 'TestShutdown|TestModuleStopReleasesListeners|TestBootDisabledRowNotInstalled'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath CGO_ENABLED=1 nix develop -c sh -c "CGO_ENABLED=1 go test -race ./core -run 'TestShutdown|TestModuleStopReleasesListeners|TestBootDisabledRowNotInstalled' -v"`
+    - Hasil: 4 test PASS; race detector lulus; exit 0. Budget uji 80ms membuktikan modul macet ditinggalkan dan modul lain tetap dihentikan.
+    - PR/commit: commit T-011
+    - Deviasi: Tidak ada.
 
-- [ ] `T-012` Build release dan cross-compile
+- [x] `T-012` Build release dan cross-compile
   - Issue/PR: `—`
   - Bergantung pada: `T-001`, `T-002`
   - Requirements: `REQ-DEV-001`, `REQ-BUILD-002`
@@ -345,11 +345,11 @@ flowchart TD
     - `file dist/lana-linux-amd64` (memuat `statically linked`)
     - `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 nix develop -c go build ./cmd/lana`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'make release'`; `file dist/lana-linux-amd64`; `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 ... nix develop -c go build ./cmd/lana`
+    - Hasil: exit 0. `dist/lana-darwin-arm64` 1.742.514 byte; `dist/lana-linux-amd64` 1.671.330 byte; `dist/lana-linux-arm64` 1.638.562 byte. `file` Linux amd64: `ELF 64-bit LSB executable, x86-64 ... statically linked ... stripped`. Semua di bawah 40 MB.
+    - PR/commit: commit T-012
+    - Deviasi: Build awal sempat salah karena `GOOS`/`GOARCH` tidak diteruskan; Makefile diperbaiki sebelum bukti dicatat (3 percobaan build, berhasil).
 
 - [ ] `T-013` Workflow CI GitHub Actions
   - Issue/PR: `—`

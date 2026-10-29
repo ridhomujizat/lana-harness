@@ -1,0 +1,73 @@
+package core
+
+import (
+	"context"
+	"iter"
+)
+
+// SessionInfo adalah proyeksi session.
+type SessionInfo struct {
+	ID              string
+	Agent           string
+	Channel         string
+	Address         string
+	Workspace       string
+	Title           string
+	Status          string
+	ParentSessionID string
+	InheritedSeq    int64
+	LastSeq         int64
+	TurnCount       int64
+	CreatedAt       int64
+	UpdatedAt       int64
+}
+
+// NewSession adalah input Create.
+type NewSession struct {
+	Agent           string
+	Channel         string
+	Address         string
+	Workspace       string
+	ParentSessionID string
+	ParentCallID    string
+	InheritedSeq    int64
+}
+
+// SessionFilter membatasi List.
+type SessionFilter struct {
+	Channel string
+	Address string
+	Limit   int
+}
+
+// SessionStore adalah event log append-only.
+type SessionStore interface {
+	Create(ctx context.Context, s NewSession) (SessionInfo, error)
+	Open(ctx context.Context, id string) (SessionInfo, error)
+	Info(ctx context.Context, id string) (SessionInfo, error)
+	Append(ctx context.Context, id string, drafts []EventDraft) ([]SessionEvent, error)
+	Events(ctx context.Context, id string, fromSeq int64) iter.Seq2[SessionEvent, error]
+	ChainEvents(ctx context.Context, id string) ([]SessionEvent, error)
+	DeriveMessages(ctx context.Context, id string) ([]Message, error)
+	List(ctx context.Context, f SessionFilter) ([]SessionInfo, error)
+	FindPrefix(ctx context.Context, prefix string) ([]SessionInfo, error)
+	Fork(ctx context.Context, parentID string, atSeq int64) (SessionInfo, error)
+	TryLease(ctx context.Context, id string) (release func() error, err error)
+}
+
+// LiveFrame adalah frame sementara (streaming), tidak ditulis ke log.
+type LiveFrame struct {
+	SessionID string
+	TurnID    string
+	Kind      string
+	Text      string
+}
+
+// AgentRegistry mengatur agent hidup dan inbox-nya.
+type AgentRegistry interface {
+	Send(ctx context.Context, sessionID string, text string) error
+	Cancel(ctx context.Context, sessionID string) error
+	SetAgent(ctx context.Context, sessionID string, agent string) error
+	SetModel(ctx context.Context, sessionID string, model string) error
+	SubscribeLive(sessionID string) (*Subscription[LiveFrame], error)
+}
