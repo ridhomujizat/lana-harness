@@ -79,6 +79,3 @@ type StopVote struct {
 	Continue bool
 	Reason   string
 }
-
-// Subscription didefinisikan lengkap bersama implementasi Observe di T-004.
-type Subscription[T any] struct{}

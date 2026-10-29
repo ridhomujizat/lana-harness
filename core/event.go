@@ -65,10 +65,10 @@ type TurnStart struct {
 }
 
 type TurnEnd struct {
-	V       int           `json:"v"`
-	TurnID  string        `json:"turn_id"`
-	Reason  string        `json:"reason"`
-	Error   *PayloadError `json:"error"`
+	V      int           `json:"v"`
+	TurnID string        `json:"turn_id"`
+	Reason string        `json:"reason"`
+	Error  *PayloadError `json:"error"`
 }
 
 type StepStart struct {

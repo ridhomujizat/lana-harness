@@ -168,7 +168,7 @@ flowchart TD
     - PR/commit: commit T-003
     - Deviasi: `Subscription` dideklarasikan sebagai placeholder agar interface `AgentRegistry` dapat dikompilasi; implementasi penuh di T-004 (task berikutnya, bukan perilaku baru).
 
-- [ ] `T-004` Implementasi hook generik `Waterfall`, `Serial`, `Observe`
+- [x] `T-004` Implementasi hook generik `Waterfall`, `Serial`, `Observe`
   - Issue/PR: `—`
   - Bergantung pada: `T-003`
   - Requirements: `REQ-HOOK-001`, `REQ-HOOK-002`, `REQ-HOOK-003`, `REQ-HOOK-004`
@@ -182,11 +182,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=1 nix develop -c go test -race ./core -run 'TestWaterfall|TestSerial|TestObserve|TestReleaseHandle'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `CGO_ENABLED=1 ... nix develop -c sh -c "CGO_ENABLED=1 go test -race ./core -run 'TestWaterfall|TestSerial|TestObserve|TestReleaseHandle'"`
+    - Hasil: `ok github.com/ridhomujizat/lana-harness/core`; exit 0. Termasuk `TestWaterfallNoDefault` untuk `ErrNoDefault`.
+    - PR/commit: commit T-004
+    - Deviasi: Tidak ada.
 
 - [ ] `T-005` Loader lapisan dan lokasi file
   - Issue/PR: `—`
