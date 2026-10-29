@@ -116,3 +116,4 @@ bisa dibalik dan tidak mengubah perilaku yang terlihat.
 |---|---|---|---|---|---|
 | — | Template paket | [Template](0000-feature-name/requirements.md) | [Template](0000-feature-name/api-contract.md) | [Template](0000-feature-name/design.md) | [Template](0000-feature-name/tasks.md) |
 | [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI dan TUI chat | [Approved r5](1-cli-tui/requirements.md) | [Approved r2](1-cli-tui/api-contract.md) | [Approved r1](1-cli-tui/design.md) | [Approved](1-cli-tui/tasks.md) |
+| [#2](https://github.com/ridhomujizat/lana-harness/issues/2) | Fondasi: workspace, profile loader, Context/modul/hook | [Draft](2-fondasi/requirements.md) | Belum dibuat | Belum dibuat | Belum dibuat |
