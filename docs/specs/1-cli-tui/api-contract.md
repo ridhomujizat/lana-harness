@@ -6,7 +6,7 @@
 - **Status requirements**: Approved
 - **Revisi contract**: 1
 - **Berlaku untuk**: CLI (subcommand, flag, env, exit code, stdout/stderr, format JSON, tombol, slash command, file yang dibuat)
-- **Status**: Draft
+- **Status**: Approved
 
 File ini menetapkan bentuk persis antarmuka terminal. Perilaku dimiliki oleh `requirements.md`.
 
@@ -497,5 +497,5 @@ info, ikon status, `//` untuk mengirim teks diawali `/`, label `(antre)`, alias 
 - [x] Input, sukses, gagal, otorisasi, dan kompatibilitas eksplisit.
 - [x] Tidak ada perilaku yang hanya ada di file ini.
 - [x] Blocking Contract Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29 (revisi 1)

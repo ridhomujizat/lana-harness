@@ -115,4 +115,4 @@ bisa dibalik dan tidak mengubah perilaku yang terlihat.
 | Issue | Fitur | Requirements | Contract | Design | Tasks |
 |---|---|---|---|---|---|
 | — | Template paket | [Template](0000-feature-name/requirements.md) | [Template](0000-feature-name/api-contract.md) | [Template](0000-feature-name/design.md) | [Template](0000-feature-name/tasks.md) |
-| [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI dan TUI chat | [Approved r4](1-cli-tui/requirements.md) | [Draft](1-cli-tui/api-contract.md) | Belum dibuat | Belum dibuat |
+| [#1](https://github.com/ridhomujizat/lana-harness/issues/1) | CLI dan TUI chat | [Approved r4](1-cli-tui/requirements.md) | [Approved r1](1-cli-tui/api-contract.md) | Belum dibuat | Belum dibuat |
