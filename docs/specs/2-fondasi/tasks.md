@@ -272,7 +272,7 @@ flowchart TD
     - PR/commit: commit T-008
     - Deviasi: Tidak ada.
 
-- [ ] `T-009` Profile bawaan `minimal` dan `headless`
+- [x] `T-009` Profile bawaan `minimal` dan `headless`
   - Issue/PR: `—`
   - Bergantung pada: `T-007`
   - Requirements: `REQ-PROF-001`
@@ -285,11 +285,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestBuiltinProfileRows|TestUnknownProfileError'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestBuiltinProfileRows|TestUnknownProfileError' -v`
+    - Hasil: 2 test PASS; exit 0. `minimal` 7 baris base; `headless` 8 baris dengan `runner`/`cli_runner`; origin `profile:headless`.
+    - PR/commit: commit T-009
+    - Deviasi: Tidak ada.
 
 - [ ] `T-010` Registry modul, `Builder`, dan rencana boot
   - Issue/PR: `—`
