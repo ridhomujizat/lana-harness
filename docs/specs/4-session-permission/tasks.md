@@ -160,7 +160,7 @@ flowchart LR
 
 ## Tasks
 
-- [ ] `T-001` Buat package `store` dengan `Open`, pragma, migrator, dan DDL dasar
+- [x] `T-001` Buat package `store` dengan `Open`, pragma, migrator, dan DDL dasar
   - Issue/PR: `#4`
   - Bergantung pada: `None` (spec #2 selesai)
   - Requirements: `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016`
@@ -175,13 +175,13 @@ flowchart LR
     - `nix develop -c go test -race ./store/ -run 'TestOpen|TestMigrate|TestSchemaTooNew|TestRawUpdateDelete|TestModuleStoreDefaultPath'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-002` Tulis writer goroutine, read pool, `Append` atomik, seq, dan turn tunggal
+- [x] `T-002` Tulis writer goroutine, read pool, `Append` atomik, seq, dan turn tunggal
   - Issue/PR: `#4`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015`
@@ -197,13 +197,13 @@ flowchart LR
     - `nix develop -c go test -race ./store/ -run 'TestConcurrentAppend|TestTwoInstances|TestAppend|TestTurnStart|TestNoBroadcast|TestBroadcastAfter'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-003` Implementasi lease sesi lewat `session_leases`
+- [x] `T-003` Implementasi lease sesi lewat `session_leases`
   - Issue/PR: `#4`
   - Bergantung pada: `T-001`
   - Requirements: `REQ-STORE-010`
@@ -218,13 +218,13 @@ flowchart LR
     - `nix develop -c go test -race ./store/ -run 'TestLease'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-004` Implementasi `Create`, `Open` dengan resume repair, dan syarat lease
+- [x] `T-004` Implementasi `Create`, `Open` dengan resume repair, dan syarat lease
   - Issue/PR: `#4`
   - Bergantung pada: `T-002`, `T-003`
   - Requirements: `REQ-STORE-006`
@@ -239,13 +239,13 @@ flowchart LR
     - `nix develop -c go test -race ./store/ -run 'TestCreate|TestResume|TestOpen|TestCrashSimulation'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-005` Implementasi `Fork`, `Events`, `ChainEvents`, `List`, `FindPrefix`, dan `ResolvePrefix`
+- [x] `T-005` Implementasi `Fork`, `Events`, `ChainEvents`, `List`, `FindPrefix`, dan `ResolvePrefix`
   - Issue/PR: `#4`
   - Bergantung pada: `T-002`
   - Requirements: `REQ-STORE-007`, `REQ-STORE-008`, `REQ-STORE-009`
@@ -259,13 +259,13 @@ flowchart LR
     - `nix develop -c go test -race ./store/ -run 'TestFork|TestEvents|TestList|TestFindPrefix'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-006` Implementasi versi payload dan `NormalizePayload`
+- [x] `T-006` Implementasi versi payload dan `NormalizePayload`
   - Issue/PR: `#4`
   - Bergantung pada: `T-005`
   - Requirements: `REQ-STORE-013`
@@ -279,13 +279,13 @@ flowchart LR
     - `nix develop -c go test ./store/ -run 'TestUnknownPayloadVersion|TestOldPayloadMigratedInMemory'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-007` Implementasi aturan compaction di `core.DeriveMessages` dan `SessionStore.DeriveMessages`
+- [x] `T-007` Implementasi aturan compaction di `core.DeriveMessages` dan `SessionStore.DeriveMessages`
   - Issue/PR: `#4`
   - Bergantung pada: `T-006`
   - Requirements: `REQ-STORE-011`
@@ -300,13 +300,13 @@ flowchart LR
     - `nix develop -c go test ./core/ -run 'TestDerive'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-008` Implementasi projection rebuild dan `Prune`
+- [x] `T-008` Implementasi projection rebuild dan `Prune`
   - Issue/PR: `#4`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-STORE-012`, `REQ-STORE-014`
@@ -319,13 +319,13 @@ flowchart LR
     - `nix develop -c go test -race ./store/ -run 'TestRebuild|TestPrune'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-009` Implementasi grammar pola (`internal/pattern`) dan validasi `rules` di config
+- [x] `T-009` Implementasi grammar pola (`internal/pattern`) dan validasi `rules` di config
   - Issue/PR: `#4`
   - Bergantung pada: `None` (spec #2 untuk validasi config)
   - Requirements: `REQ-PERM-001`
@@ -340,13 +340,13 @@ flowchart LR
     - `nix develop -c go test ./internal/pattern/ ./config/ -run 'TestPattern|TestConfigRejectsBadPattern'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-010` Implementasi penyelesaian path dan batas workspace
+- [x] `T-010` Implementasi penyelesaian path dan batas workspace
   - Issue/PR: `#4`
   - Bergantung pada: `T-009`
   - Requirements: `REQ-PERM-003`
@@ -360,13 +360,13 @@ flowchart LR
     - `nix develop -c go test ./tools/permission/ -run 'TestWorkspace'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-011` Implementasi evaluator `tools.pre_execute` sesuai urutan ADR 0004
+- [x] `T-011` Implementasi evaluator `tools.pre_execute` sesuai urutan ADR 0004
   - Issue/PR: `#4`
   - Bergantung pada: `T-009`, `T-010`
   - Requirements: `REQ-PERM-002`, `REQ-PERM-006`
@@ -381,13 +381,13 @@ flowchart LR
     - `nix develop -c go test ./tools/permission/ -run 'TestEvaluateOrder|TestRejectionDecisionShape'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-012` Implementasi grant sesi dan replay dari rantai
+- [x] `T-012` Implementasi grant sesi dan replay dari rantai
   - Issue/PR: `#4`
   - Bergantung pada: `T-007`, `T-011`
   - Requirements: `REQ-PERM-004`
@@ -401,13 +401,13 @@ flowchart LR
     - `nix develop -c go test ./tools/permission/ -run 'TestGrant'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-013` Pasang listener `tools.pre_execute` dan modul `permission`
+- [x] `T-013` Pasang listener `tools.pre_execute` dan modul `permission`
   - Issue/PR: `#4`
   - Bergantung pada: `T-011`, `T-012`, spec #3 (hook dan `MockLlm`)
   - Requirements: `REQ-PERM-005`
@@ -421,13 +421,13 @@ flowchart LR
     - `nix develop -c go test ./tools/permission/ -run 'TestPermissionListener|TestNoPermissionModule'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-014` Implementasi `SetPolicy` dan `EffectivePolicy`
+- [x] `T-014` Implementasi `SetPolicy` dan `EffectivePolicy`
   - Issue/PR: `#4`
   - Bergantung pada: `T-007`
   - Requirements: `REQ-APPR-001`
@@ -441,13 +441,13 @@ flowchart LR
     - `nix develop -c go test -race ./tools/permission/ -run 'TestEffectivePolicy|TestSetPolicy|TestPolicyChangeMidTurn'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-015` Implementasi permintaan approval, audit, timeout, cancel, dan fail-closed
+- [x] `T-015` Implementasi permintaan approval, audit, timeout, cancel, dan fail-closed
   - Issue/PR: `#4`
   - Bergantung pada: `T-014`
   - Requirements: `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005`
@@ -463,13 +463,13 @@ flowchart LR
     - `nix develop -c go test -race ./tools/permission/ -run 'TestApproval|TestOutcomeToDecision|TestAskedWrite|TestDecidedWrite'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-016` Implementasi rantai penjawab `approval.request` (waterfall)
+- [x] `T-016` Implementasi rantai penjawab `approval.request` (waterfall)
   - Issue/PR: `#4`
   - Bergantung pada: `T-015`, spec #2 (waterfall)
   - Requirements: `REQ-APPR-003`
@@ -483,13 +483,13 @@ flowchart LR
     - `nix develop -c go test ./tools/permission/ -run 'TestWaterfall|TestNoAnswerer|TestAnswererError|TestInvalidOutcome'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-017` Implementasi fungsi batas izin subagent
+- [x] `T-017` Implementasi fungsi batas izin subagent
   - Issue/PR: `#4`
   - Bergantung pada: `None` (fungsi murni)
   - Requirements: `REQ-APPR-006`
@@ -503,13 +503,13 @@ flowchart LR
     - `nix develop -c go test ./tools/permission/ -run 'TestChildPolicy|TestChildInheritsDeny'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-018` Implementasi `CompactNow` manual
+- [x] `T-018` Implementasi `CompactNow` manual
   - Issue/PR: `#4`
   - Bergantung pada: `T-007`, adapter provider dari spec #3
   - Requirements: `REQ-COMP-002`
@@ -524,13 +524,13 @@ flowchart LR
     - `nix develop -c go test ./agent/compaction/ -run 'TestCompactNow'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-019` Implementasi compaction otomatis dan retry `ErrContextTooLong`
+- [x] `T-019` Implementasi compaction otomatis dan retry `ErrContextTooLong`
   - Issue/PR: `#4`
   - Bergantung pada: `T-018`, spec #3 (`agent.pre_step`, `llm.stream`, `ErrContextTooLong`)
   - Requirements: `REQ-COMP-001`, `REQ-COMP-003`
@@ -544,13 +544,13 @@ flowchart LR
     - `nix develop -c go test ./agent/compaction/ -run 'TestAutoCompact|TestDefaultContextWindow|TestContextTooLong'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-021` Pasang penjawab library `lana.ApproveWith`
+- [x] `T-021` Pasang penjawab library `lana.ApproveWith`
   - Issue/PR: `#4`
   - Bergantung pada: `T-016`, spec #3 `T-018` (opsi `lana.New`)
   - Requirements: `REQ-APPR-007`
@@ -563,13 +563,13 @@ flowchart LR
     - `nix develop -c go test -race . -run 'TestApproveWithLibraryChannel'`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
-- [ ] `T-020` Verifikasi akhir lintas komponen dan gate CI
+- [x] `T-020` Verifikasi akhir lintas komponen dan gate CI
   - Issue/PR: `#4`
   - Bergantung pada: `T-008`, `T-013`, `T-016`, `T-019`
   - Requirements: seluruh requirement spec ini (verifikasi, tidak menambah perilaku)
@@ -585,20 +585,20 @@ flowchart LR
     - `nix develop -c go list -deps ./store/ ./tools/permission/ ./agent/compaction/ | grep lana-harness`
     - Perintah verifikasi dasar.
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
+    - Status: Completed
+    - Perintah/test: lihat docs/eval/deepseek-flash-20261029.md
+    - Hasil: lihat docs/eval/deepseek-flash-20261029.md
+    - PR/commit: branch eval/deepseek-flash-20261029-spec-4
     - Deviasi: Tidak ada
 
 ## Verifikasi akhir
 
-- [ ] Setiap acceptance criterion punya bukti lulus.
-- [ ] Tidak ada perilaku terlihat tanpa ID requirement.
-- [ ] Tidak ada perilaku di luar scope (tidak ada export JSONL, tidak ada tabel memory atau cron, tidak ada perintah CLI).
-- [ ] ADR dan diagram sesuai implementasi.
+- [x] Setiap acceptance criterion punya bukti lulus.
+- [x] Tidak ada perilaku terlihat tanpa ID requirement.
+- [x] Tidak ada perilaku di luar scope (tidak ada export JSONL, tidak ada tabel memory atau cron, tidak ada perintah CLI).
+- [x] ADR dan diagram sesuai implementasi.
 - [ ] `gofmt -l .` kosong, `golangci-lint run ./...`, `go test -race ./...`, dan build release lulus.
-- [ ] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
+- [x] Deviasi diselesaikan di requirements atau design, tidak hanya dicatat di sini.
 - [x] Revisi ARCHITECTURE §3 untuk profile `minimal` dibuat (`CQ-010`, direvisi rekonsiliasi spec #2 `CQ-031`).
 
 ## Approval

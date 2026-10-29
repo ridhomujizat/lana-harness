@@ -8,26 +8,36 @@ import (
 // DeriveMessages menyusun riwayat model dari rantai event.
 func DeriveMessages(events []SessionEvent) ([]Message, error) {
 	var messages []Message
-	var summary string
+	startSeq := int64(0)
+	summaryText := ""
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != KindCompactionSummary {
+			continue
+		}
+		var payload CompactionSummary
+		if err := decodePayload(events[i].Payload, &payload); err != nil {
+			return nil, err
+		}
+		startSeq = events[i].Seq
+		summaryText = payload.Summary
+		break
+	}
+	if summaryText != "" {
+		messages = append(messages, Message{Role: RoleUser, Content: []ContentBlock{{Kind: BlockText, Text: summaryText}}})
+	}
 	for _, event := range events {
+		if startSeq > 0 && event.Seq <= startSeq {
+			continue
+		}
 		switch event.Kind {
 		case KindCompactionSummary:
-			var payload CompactionSummary
-			if err := decodePayload(event.Payload, &payload); err != nil {
-				return nil, err
-			}
-			summary = payload.Summary
+			continue
 		case KindUserMessage:
 			var payload UserMessage
 			if err := decodePayload(event.Payload, &payload); err != nil {
 				return nil, err
 			}
-			content := append([]ContentBlock(nil), payload.Content...)
-			if summary != "" {
-				content = append([]ContentBlock{{Kind: BlockText, Text: summary}}, content...)
-				summary = ""
-			}
-			messages = append(messages, Message{Role: RoleUser, Content: content})
+			messages = append(messages, Message{Role: RoleUser, Content: append([]ContentBlock(nil), payload.Content...)})
 		case KindAssistantMessage:
 			var payload AssistantMessage
 			if err := decodePayload(event.Payload, &payload); err != nil {

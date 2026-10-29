@@ -1,0 +1,15 @@
+[providers.openai]
+kind = "openai_compat"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[agents.default]
+provider = "openai"
+model = "gpt-5-mini"
+prompt_file = "agents/default.md"
+tools = ["read_file", "write_file", "edit_file", "glob", "grep", "bash"]
+permission = "ask"
+
+[[routes]]
+channel = "cli"
+agent = "default"

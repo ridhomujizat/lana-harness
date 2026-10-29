@@ -1,0 +1,16 @@
+{
+  "type": "result",
+  "session_id": "06GRFEXCCHQZ34HE8MZP00Z34W",
+  "agent": "default",
+  "model": "mock:mock",
+  "cwd": "/Users/ridho/coding/project/self-tool/lana-harness",
+  "stop_reason": "end_turn",
+  "text": "Halo dari MockLlm.",
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "duration_ms": 1,
+  "exit_code": 0,
+  "error": null
+}
