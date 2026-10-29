@@ -9,19 +9,20 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
 func TestSplitCompleteBlocks(t *testing.T) {
-	blocks, rest := splitCompleteBlocks("satu\n\ndua\n\nkode:\n```go\nbaris\n\nbaris\n```\n")
+	blocks, rest := splitCompleteBlocks("one\n\ntwo\n\ncode:\n```go\nline\n\nline\n```\n")
 	if len(blocks) != 3 {
-		t.Fatalf("blok = %d, mau 3: %#v", len(blocks), blocks)
+		t.Fatalf("blocks = %d, want 3: %#v", len(blocks), blocks)
 	}
-	if blocks[0] != "satu" || blocks[1] != "dua" {
-		t.Fatalf("blok salah: %#v", blocks)
+	if blocks[0] != "one" || blocks[1] != "two" {
+		t.Fatalf("wrong blocks: %#v", blocks)
 	}
-	if !strings.Contains(blocks[2], "baris\n\nbaris") {
-		t.Fatalf("blok kode terpotong: %#v", blocks[2])
+	if !strings.Contains(blocks[2], "line\n\nline") {
+		t.Fatalf("code block truncated: %#v", blocks[2])
 	}
 	if rest != "" {
 		t.Fatalf("rest = %q", rest)
@@ -29,25 +30,25 @@ func TestSplitCompleteBlocks(t *testing.T) {
 }
 
 func TestSplitCompleteBlocksLeavesPartial(t *testing.T) {
-	blocks, rest := splitCompleteBlocks("satu\n\ndua")
-	if len(blocks) != 1 || blocks[0] != "satu" {
-		t.Fatalf("blok = %#v", blocks)
+	blocks, rest := splitCompleteBlocks("one\n\ntwo")
+	if len(blocks) != 1 || blocks[0] != "one" {
+		t.Fatalf("blocks = %#v", blocks)
 	}
-	if rest != "dua" {
+	if rest != "two" {
 		t.Fatalf("rest = %q", rest)
 	}
 }
 
 func TestRenderMarkdown(t *testing.T) {
-	lines := renderMarkdownLines("## Judul\n\n- satu **tebal**\n\n```go\nfmt.Println(\"x\")\n```", 60)
+	lines := renderMarkdownLines("## Title\n\n- one **bold**\n\n```go\nfmt.Println(\"x\")\n```", 60)
 	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"Judul", "• satu", "tebal", "│ fmt.Println"} {
+	for _, want := range []string{"Title", "• one", "bold", "│ fmt.Println"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("hasil tidak memuat %q:\n%s", want, joined)
+			t.Fatalf("output does not contain %q:\n%s", want, joined)
 		}
 	}
 	if strings.Contains(joined, "**") {
-		t.Fatalf("penanda bold masih tampil:\n%s", joined)
+		t.Fatalf("bold marker still shown:\n%s", joined)
 	}
 }
 
@@ -63,14 +64,14 @@ func TestToolBlock(t *testing.T) {
 	}
 	block := strings.Join(record.Block(false, 80), "\n")
 	if !strings.Contains(block, "bash  go test ./...") {
-		t.Fatalf("baris ringkas salah:\n%s", block)
+		t.Fatalf("compact line wrong:\n%s", block)
 	}
-	if !strings.Contains(block, "✓ sukses") {
-		t.Fatalf("status salah:\n%s", block)
+	if !strings.Contains(block, "✓ success") {
+		t.Fatalf("wrong status:\n%s", block)
 	}
 	verbose := strings.Join(record.Block(true, 80), "\n")
 	if !strings.Contains(verbose, "input:") || !strings.Contains(verbose, "output:") {
-		t.Fatalf("verbose kurang:\n%s", verbose)
+		t.Fatalf("verbose output incomplete:\n%s", verbose)
 	}
 }
 
@@ -81,7 +82,7 @@ func TestPrimaryArg(t *testing.T) {
 	if got := primaryArg("read_file", []byte("{\"path\":\"src/main.go\"}")); got != "src/main.go" {
 		t.Fatalf("read_file = %q", got)
 	}
-	if got := primaryArg("tidak_dikenal", []byte("{\"a\":1}")); got != "{\"a\":1}" {
+	if got := primaryArg("unknown_tool", []byte("{\"a\":1}")); got != "{\"a\":1}" {
 		t.Fatalf("default = %q", got)
 	}
 }
@@ -112,14 +113,14 @@ func (f *fakeBackend) CreateSession(context.Context, string) (core.SessionInfo, 
 }
 
 func (f *fakeBackend) LastSession(context.Context) (core.SessionInfo, error) {
-	return core.SessionInfo{}, errors.New("tidak ada")
+	return core.SessionInfo{}, errors.New("no session")
 }
 
 func (f *fakeBackend) RunTurn(_ context.Context, sessionID, _ string) (TurnResult, error) {
-	f.obs.Publish(core.LiveFrame{SessionID: sessionID, Kind: "text_delta", Text: "Halo dari fake."})
+	f.obs.Publish(core.LiveFrame{SessionID: sessionID, Kind: "text_delta", Text: "Hello from fake."})
 	f.obs.Publish(core.LiveFrame{SessionID: sessionID, Kind: "tool_call", CallID: "c1", Name: "bash", Input: []byte("{\"command\":\"echo hi\"}")})
 	f.obs.Publish(core.LiveFrame{SessionID: sessionID, Kind: "tool_result", CallID: "c1", Name: "bash", Status: "success", Output: "hi"})
-	return TurnResult{Text: "Halo dari fake.", StopReason: "end_turn", InputTokens: 12, OutputTokens: 7}, nil
+	return TurnResult{Text: "Hello from fake.", StopReason: "end_turn", InputTokens: 12, OutputTokens: 7}, nil
 }
 
 func (f *fakeBackend) Send(context.Context, string, string) error { return nil }
@@ -138,7 +139,7 @@ func (f *fakeBackend) SessionInfo(_ context.Context, id string) (core.SessionInf
 	return core.SessionInfo{ID: id, Agent: "default"}, nil
 }
 func (f *fakeBackend) ListSessions(context.Context, int) ([]core.SessionInfo, error) {
-	return []core.SessionInfo{{ID: "S1", Agent: "default"}, {ID: "S2", Agent: "asisten", TurnCount: 2}}, nil
+	return []core.SessionInfo{{ID: "S1", Agent: "default"}, {ID: "S2", Agent: "assistant", TurnCount: 2}}, nil
 }
 func (f *fakeBackend) ForkSession(context.Context, string) (core.SessionInfo, error) {
 	return core.SessionInfo{ID: "S9", Agent: "default"}, nil
@@ -148,7 +149,7 @@ func (f *fakeBackend) SetModel(context.Context, string, string) error { return n
 func (f *fakeBackend) Compact(context.Context, string) (CompactionInfo, error) {
 	return CompactionInfo{TokensBefore: 100, TokensAfter: 40}, nil
 }
-func (f *fakeBackend) AgentNames() []string      { return []string{"default", "asisten"} }
+func (f *fakeBackend) AgentNames() []string      { return []string{"default", "assistant"} }
 func (f *fakeBackend) AgentModel(string) string  { return "mock:mock" }
 func (f *fakeBackend) AgentPolicy(string) string { return "ask" }
 
@@ -167,43 +168,43 @@ func TestProgramFlow(t *testing.T) {
 			In: reader, Out: &out,
 		})
 	}()
-	if _, err := writer.Write([]byte("halo\r")); err != nil {
-		t.Fatalf("kirim input: %v", err)
+	if _, err := writer.Write([]byte("hello\r")); err != nil {
+		t.Fatalf("send input: %v", err)
 	}
-	waitFor(t, &out, "Halo dari fake.")
+	waitFor(t, &out, "Hello from fake.")
 	full := out.String()
 	if !strings.Contains(full, "⏺ bash  echo hi") {
-		t.Fatalf("tool call tidak tampil:\n%s", full)
+		t.Fatalf("tool call not shown:\n%s", full)
 	}
-	if !strings.Contains(full, "✓ sukses") {
-		t.Fatalf("status tool tidak tampil:\n%s", full)
+	if !strings.Contains(full, "✓ success") {
+		t.Fatalf("tool status not shown:\n%s", full)
 	}
-	if _, err := writer.Write([]byte("/agent asisten\r")); err != nil {
-		t.Fatalf("kirim /agent: %v", err)
+	if _, err := writer.Write([]byte("/agent assistant\r")); err != nil {
+		t.Fatalf("send /agent: %v", err)
 	}
-	waitFor(t, &out, "· agent: asisten")
+	waitFor(t, &out, "· agent: assistant")
 	if _, err := writer.Write([]byte("/model deepseek:deepseek-chat\r")); err != nil {
-		t.Fatalf("kirim /model: %v", err)
+		t.Fatalf("send /model: %v", err)
 	}
 	waitFor(t, &out, "· model: deepseek:deepseek-chat")
 	if _, err := writer.Write([]byte("/compact\r")); err != nil {
-		t.Fatalf("kirim /compact: %v", err)
+		t.Fatalf("send /compact: %v", err)
 	}
-	waitFor(t, &out, "· compaction 100 → 40 token")
+	waitFor(t, &out, "· compaction 100 → 40 tokens")
 	if _, err := writer.Write([]byte("/fork\r")); err != nil {
-		t.Fatalf("kirim /fork: %v", err)
+		t.Fatalf("send /fork: %v", err)
 	}
 	waitFor(t, &out, "· fork S9")
 	if _, err := writer.Write([]byte("/sessions\r")); err != nil {
-		t.Fatalf("kirim /sessions: %v", err)
+		t.Fatalf("send /sessions: %v", err)
 	}
-	waitFor(t, &out, "? pilih session")
+	waitFor(t, &out, "? pick session")
 	if _, err := writer.Write([]byte("\r")); err != nil {
-		t.Fatalf("pilih session: %v", err)
+		t.Fatalf("pick session: %v", err)
 	}
-	waitFor(t, &out, "· pindah ke session S1")
+	waitFor(t, &out, "· switched to session S1")
 	if _, err := writer.Write([]byte("/exit\r")); err != nil {
-		t.Fatalf("kirim exit: %v", err)
+		t.Fatalf("send exit: %v", err)
 	}
 	select {
 	case err := <-done:
@@ -211,10 +212,10 @@ func TestProgramFlow(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("program tidak selesai")
+		t.Fatal("program did not finish")
 	}
 	if !strings.Contains(out.String(), "lana") {
-		t.Fatalf("banner tidak tampil:\n%s", out.String())
+		t.Fatalf("banner not shown:\n%s", out.String())
 	}
 }
 
@@ -227,7 +228,7 @@ func waitFor(t *testing.T, buffer *syncBuffer, want string) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("tidak menemukan %q; keluaran:\n%s", want, buffer.String())
+	t.Fatalf("did not find %q; output:\n%s", want, buffer.String())
 }
 
 func TestApproverWithoutProgram(t *testing.T) {
@@ -235,5 +236,86 @@ func TestApproverWithoutProgram(t *testing.T) {
 	outcome := approver.Ask(context.Background(), core.ApprovalRequest{ToolName: "bash"})
 	if outcome != core.OutcomeUnavailable {
 		t.Fatalf("outcome = %q", outcome)
+	}
+}
+
+func TestInteractiveSlashAndMenus(t *testing.T) {
+	observer := core.NewObserve[core.LiveFrame]()
+	backend := &fakeBackend{obs: observer}
+	reader, writer := io.Pipe()
+	var out syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Backend: backend, Agent: "default", Model: "mock:mock", Policy: "ask",
+			SessionID: "S1", Cwd: "/tmp", Version: "test", Home: t.TempDir(),
+			In: reader, Out: &out,
+		})
+	}()
+	send := func(s string) {
+		t.Helper()
+		if _, err := writer.Write([]byte(s)); err != nil {
+			t.Fatalf("send %q: %v", s, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Prefix "/comp" is completed to /compact on enter.
+	send("/comp")
+	waitFor(t, &out, "compact session history")
+	send("\r")
+	waitFor(t, &out, "· compaction 100 → 40 tokens")
+	// /permission without arguments opens a menu; the number 2 selects trust.
+	send("/permission\r")
+	waitFor(t, &out, "? pick policy")
+	send("2")
+	waitFor(t, &out, "· policy trust")
+	// /agent without arguments opens a menu; down arrow then enter selects assistant.
+	send("/agent\r")
+	waitFor(t, &out, "? pick agent")
+	send("\x1b[B")
+	send("\r")
+	waitFor(t, &out, "· agent: assistant")
+	send("/exit\r")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("program did not finish")
+	}
+}
+
+func TestApprovalMenuKeys(t *testing.T) {
+	model := NewModel(context.Background(), Options{Backend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}})
+	reply := make(chan core.ApprovalOutcome, 1)
+	model.Update(approvalMsg{req: core.ApprovalRequest{CallID: "c1", ToolName: "bash"}, reply: reply})
+	if !strings.Contains(model.renderApproval(), "1. Yes, once") {
+		t.Fatalf("approval choices not shown:\n%s", model.renderApproval())
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := <-reply; got != core.OutcomeAllowedSession {
+		t.Fatalf("outcome = %q", got)
+	}
+	if model.approval != nil {
+		t.Fatal("approval was not closed")
+	}
+}
+
+func TestHistorySearchBefore(t *testing.T) {
+	history := LoadHistory(t.TempDir()+"/history", 10)
+	history.Add("go test ./...")
+	history.Add("hello")
+	history.Add("go build")
+	match, index, ok := history.SearchBefore("go", history.Len())
+	if !ok || match != "go build" || index != 2 {
+		t.Fatalf("first = %q %d %v", match, index, ok)
+	}
+	match, _, ok = history.SearchBefore("go", index)
+	if !ok || match != "go test ./..." {
+		t.Fatalf("second = %q %v", match, ok)
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// History menyimpan riwayat input di berkas JSON Lines.
+// History stores input history in a JSON Lines file.
 type History struct {
 	mu      sync.Mutex
 	path    string
@@ -21,7 +21,7 @@ type historyEntry struct {
 	Text string `json:"text"`
 }
 
-// LoadHistory membaca riwayat dari path. Path kosong berarti riwayat mati.
+// LoadHistory reads the history from path. An empty path disables history.
 func LoadHistory(path string, max int) *History {
 	h := &History{path: path, max: max}
 	if path == "" || max <= 0 {
@@ -47,7 +47,7 @@ func LoadHistory(path string, max int) *History {
 	return h
 }
 
-// Add menambahkan entri dan menyimpannya.
+// Add appends an entry and saves it.
 func (h *History) Add(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" || h.path == "" {
@@ -113,14 +113,14 @@ func (h *History) rewrite() {
 	_ = os.Rename(name, h.path)
 }
 
-// Len adalah jumlah entri.
+// Len returns the number of entries.
 func (h *History) Len() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.entries)
 }
 
-// At mengambil entri ke-i (0 paling lama).
+// At returns the i-th entry (0 is the oldest).
 func (h *History) At(i int) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -130,7 +130,7 @@ func (h *History) At(i int) string {
 	return h.entries[i]
 }
 
-// Search mencari entri terakhir yang memuat query.
+// Search finds the most recent entry that contains query.
 func (h *History) Search(query string) (string, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -141,4 +141,20 @@ func (h *History) Search(query string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// SearchBefore finds the most recent entry before index before that contains query.
+func (h *History) SearchBefore(query string, before int) (string, int, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	query = strings.ToLower(strings.TrimSpace(query))
+	if before > len(h.entries) {
+		before = len(h.entries)
+	}
+	for i := before - 1; i >= 0; i-- {
+		if query == "" || strings.Contains(strings.ToLower(h.entries[i]), query) {
+			return h.entries[i], i, true
+		}
+	}
+	return "", -1, false
 }

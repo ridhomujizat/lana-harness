@@ -16,7 +16,7 @@ var (
 	reHead   = regexp.MustCompile(`^(#{1,6})\s+(.*)$`)
 )
 
-// renderInline menerapkan gaya inline Markdown pada satu baris.
+// renderInline applies inline Markdown styling to one line.
 func renderInline(s string) string {
 	if s == "" {
 		return s
@@ -34,7 +34,7 @@ func renderInline(s string) string {
 	return s
 }
 
-// wrap mengubah satu baris bergaya menjadi beberapa baris selebar width.
+// wrap splits one styled line into several lines no wider than width.
 func wrap(s string, width int) []string {
 	if width < 8 {
 		width = 8
@@ -49,8 +49,8 @@ func wrap(s string, width int) []string {
 	return out
 }
 
-// wrapPrefixed membungkus teks dengan prefiks pada baris pertama dan indentasi
-// selebar prefiks pada baris berikutnya.
+// wrapPrefixed wraps text with a prefix on the first line and an indent as
+// wide as the prefix on the following lines.
 func wrapPrefixed(prefix, text string, width, indent int) []string {
 	lines := wrap(text, width-indent)
 	if len(lines) == 0 {
@@ -65,7 +65,7 @@ func wrapPrefixed(prefix, text string, width, indent int) []string {
 	return out
 }
 
-// renderMarkdownLines merender blok Markdown menjadi baris terminal bergaya.
+// renderMarkdownLines renders a Markdown block as styled terminal lines.
 func renderMarkdownLines(text string, width int) []string {
 	if width < 24 {
 		width = 24

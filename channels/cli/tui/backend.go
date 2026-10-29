@@ -6,13 +6,13 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// CompactionInfo adalah ringkasan hasil compaction.
+// CompactionInfo summarizes the result of a compaction.
 type CompactionInfo struct {
 	TokensBefore int64
 	TokensAfter  int64
 }
 
-// TurnResult adalah hasil satu turn.
+// TurnResult is the outcome of one turn.
 type TurnResult struct {
 	Text         string
 	StopReason   string
@@ -20,7 +20,7 @@ type TurnResult struct {
 	OutputTokens int64
 }
 
-// Backend adalah port runtime yang dipakai TUI.
+// Backend is the runtime port used by the TUI.
 type Backend interface {
 	CreateSession(ctx context.Context, agent string) (core.SessionInfo, error)
 	LastSession(ctx context.Context) (core.SessionInfo, error)

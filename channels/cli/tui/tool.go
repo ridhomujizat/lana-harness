@@ -11,7 +11,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// ToolRecord adalah satu tool call beserta hasilnya.
+// ToolRecord is one tool call together with its result.
 type ToolRecord struct {
 	CallID  string
 	Name    string
@@ -22,12 +22,12 @@ type ToolRecord struct {
 	Done    time.Time
 }
 
-// Running melaporkan apakah tool belum selesai.
+// Running reports whether the tool has not finished yet.
 func (t *ToolRecord) Running() bool {
 	return t.Status == ""
 }
 
-// Summary adalah baris ringkas "nama  argumen utama".
+// Summary is the short line "name  primary argument".
 func (t *ToolRecord) Summary() string {
 	arg := primaryArg(t.Name, t.Input)
 	if arg == "" {
@@ -36,7 +36,7 @@ func (t *ToolRecord) Summary() string {
 	return t.Name + "  " + arg
 }
 
-// Icon adalah ikon status.
+// Icon is the status icon.
 func (t *ToolRecord) Icon() string {
 	switch t.Status {
 	case core.ToolStatusSuccess:
@@ -50,21 +50,21 @@ func (t *ToolRecord) Icon() string {
 	}
 }
 
-// Label adalah teks status.
+// Label is the status text.
 func (t *ToolRecord) Label() string {
 	switch t.Status {
 	case core.ToolStatusSuccess:
-		return "sukses"
+		return "success"
 	case core.ToolStatusError:
 		return "error"
 	case core.ToolStatusRejected:
-		return "ditolak"
+		return "rejected"
 	default:
-		return "berjalan"
+		return "running"
 	}
 }
 
-// Duration adalah durasi tool.
+// Duration is the tool's duration.
 func (t *ToolRecord) Duration() time.Duration {
 	if t.Done.IsZero() {
 		return time.Since(t.Started)
@@ -72,12 +72,12 @@ func (t *ToolRecord) Duration() time.Duration {
 	return t.Done.Sub(t.Started)
 }
 
-// StatusLine adalah baris status di bawah tool call.
+// StatusLine is the status line below the tool call.
 func (t *ToolRecord) StatusLine() string {
 	return "  " + t.Icon() + " " + t.Label() + " · " + formatDuration(t.Duration())
 }
 
-// Block merender tool call ringkas atau verbose menjadi baris terminal.
+// Block renders the tool call, compact or verbose, as terminal lines.
 func (t *ToolRecord) Block(verbose bool, width int) []string {
 	lines := []string{styleTool.Render("⏺ " + t.Summary())}
 	if verbose {
@@ -102,7 +102,7 @@ func (t *ToolRecord) verboseLines(width int) []string {
 	limit := 40
 	for i, line := range rows {
 		if i == limit {
-			out = append(out, styleMuted.Render(fmt.Sprintf("    … (+%d baris)", len(rows)-limit)))
+			out = append(out, styleMuted.Render(fmt.Sprintf("    … (+%d lines)", len(rows)-limit)))
 			break
 		}
 		out = append(out, styleMuted.Render("    "+truncateLine(line, width-4)))
@@ -110,7 +110,7 @@ func (t *ToolRecord) verboseLines(width int) []string {
 	return out
 }
 
-// primaryArg mengambil argumen utama tool sesuai API-CLI-003.
+// primaryArg extracts the tool's primary argument per API-CLI-003.
 func primaryArg(name string, input json.RawMessage) string {
 	var value map[string]any
 	_ = json.Unmarshal(input, &value)

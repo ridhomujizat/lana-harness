@@ -17,7 +17,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Options adalah input Run.
+// Options is the input to Run.
 type Options struct {
 	Backend   Backend
 	Approver  *Approver
@@ -52,13 +52,17 @@ type approvalMsg struct {
 type approvalExpiredMsg struct{ callID string }
 
 type approvalState struct {
-	req   core.ApprovalRequest
-	reply chan core.ApprovalOutcome
+	req     core.ApprovalRequest
+	reply   chan core.ApprovalOutcome
+	choices *menu
 }
 
-type sessionPicker struct {
-	sessions []core.SessionInfo
-	index    int
+func newApprovalChoices() *menu {
+	return &menu{items: []menuItem{
+		{value: string(core.OutcomeAllowedOnce), label: "Yes, once", hint: "y"},
+		{value: string(core.OutcomeAllowedSession), label: "Yes, always for this session", hint: "a"},
+		{value: string(core.OutcomeRejected), label: "No, reject", hint: "n / esc"},
+	}}
 }
 
 type compactDoneMsg struct {
@@ -66,7 +70,7 @@ type compactDoneMsg struct {
 	err  error
 }
 
-// Model adalah state TUI chat.
+// Model is the state of the TUI chat.
 type Model struct {
 	backend  Backend
 	approver *Approver
@@ -102,7 +106,7 @@ type Model struct {
 	verbose          bool
 
 	approval   *approvalState
-	picker     *sessionPicker
+	picker     *menu
 	compacting bool
 
 	lastCtrlC time.Time
@@ -110,16 +114,21 @@ type Model struct {
 	queue       []string
 	searching   bool
 	searchQuery string
+	searchMatch string
+	searchIdx   int
+
+	suggestIdx int
+	suggestOff bool
 
 	histIdx   int
 	histDraft string
 }
 
-// NewModel membuat model TUI.
+// NewModel creates the TUI model.
 func NewModel(ctx context.Context, opts Options) *Model {
 	input := textarea.New()
 	input.Prompt = ""
-	input.Placeholder = "Tanya apa saja…  (/help)"
+	input.Placeholder = "Ask anything…  (/help)"
 	input.CharLimit = 0
 	input.ShowLineNumbers = false
 	input.KeyMap.InsertNewline.SetKeys("alt+enter", "ctrl+j", "shift+enter")
@@ -164,7 +173,7 @@ func historyPath(home string) string {
 	return home + string(os.PathSeparator) + "history"
 }
 
-// Run menjalankan TUI sampai user keluar.
+// Run runs the TUI until the user exits.
 func Run(ctx context.Context, opts Options) error {
 	model := NewModel(ctx, opts)
 	programOpts := []tea.ProgramOption{tea.WithContext(ctx)}
@@ -190,7 +199,7 @@ func Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// Init memulai program.
+// Init starts the program.
 func (m *Model) Init() tea.Cmd { return m.startBanner() }
 
 func (m *Model) startBanner() tea.Cmd {
@@ -204,7 +213,7 @@ func (m *Model) startBanner() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// Update menangani pesan.
+// Update handles messages.
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -223,14 +232,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		return m, m.finishTurn(msg.outcome)
 	case approvalMsg:
-		m.approval = &approvalState{req: msg.req, reply: msg.reply}
+		m.approval = &approvalState{req: msg.req, reply: msg.reply, choices: newApprovalChoices()}
 		return m, tea.Tick(10*time.Minute, func(time.Time) tea.Msg {
 			return approvalExpiredMsg{callID: msg.req.CallID}
 		})
 	case approvalExpiredMsg:
 		if m.approval != nil && m.approval.req.CallID == msg.callID {
 			m.approval = nil
-			return m, tea.Println(styleMuted.Render("· approval kedaluwarsa"))
+			return m, tea.Println(styleMuted.Render("· approval expired"))
 		}
 		return m, nil
 	case compactDoneMsg:
@@ -238,7 +247,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, tea.Println(styleErr.Render("✗ compaction: " + msg.err.Error()))
 		}
-		return m, tea.Println(styleMuted.Render(fmt.Sprintf("· compaction %d → %d token", msg.info.TokensBefore, msg.info.TokensAfter)))
+		return m, tea.Println(styleMuted.Render(fmt.Sprintf("· compaction %d → %d tokens", msg.info.TokensBefore, msg.info.TokensAfter)))
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -274,6 +283,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.approval != nil {
 		return m.handleApprovalKey(msg)
 	}
+	if suggestions := m.suggestions(); len(suggestions) > 0 {
+		if model, cmd, handled := m.handleSuggestKey(msg, suggestions); handled {
+			return model, cmd
+		}
+	}
 	switch msg.String() {
 	case "ctrl+c":
 		return m.handleCtrlC()
@@ -292,6 +306,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+r":
 		m.searching = true
 		m.searchQuery = ""
+		m.searchIdx = m.history.Len()
+		m.searchMatch = ""
 		return m, nil
 	case "esc":
 		if m.running {
@@ -309,34 +325,91 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.historyNext()
 		}
 	}
+	before := m.input.Value()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.resizeInput()
+	if m.input.Value() != before {
+		m.suggestIdx = 0
+		m.suggestOff = false
+	}
 	return m, cmd
 }
 
+// suggestions returns the slash commands that match the current input.
+func (m *Model) suggestions() []slashCommand {
+	if m.suggestOff {
+		return nil
+	}
+	value := m.input.Value()
+	if !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.ContainsAny(value, " \t\n") {
+		return nil
+	}
+	return matchCommands(value)
+}
+
+func (m *Model) handleSuggestKey(msg tea.KeyMsg, suggestions []slashCommand) (tea.Model, tea.Cmd, bool) {
+	if m.suggestIdx >= len(suggestions) {
+		m.suggestIdx = 0
+	}
+	selected := suggestions[m.suggestIdx]
+	switch msg.String() {
+	case "up", "shift+tab":
+		m.suggestIdx = (m.suggestIdx - 1 + len(suggestions)) % len(suggestions)
+		return m, nil, true
+	case "down":
+		m.suggestIdx = (m.suggestIdx + 1) % len(suggestions)
+		return m, nil, true
+	case "tab":
+		if selected.args != "" {
+			m.setInput(selected.name + " ")
+		} else {
+			m.setInput(selected.name)
+		}
+		return m, nil, true
+	case "esc":
+		m.suggestOff = true
+		return m, nil, true
+	case "enter":
+		if !isSlashCommand(strings.TrimSpace(m.input.Value())) {
+			m.setInput(selected.name)
+		}
+		return m, m.submit(), true
+	}
+	return m, nil, false
+}
+
 func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	approval := m.approval
 	switch strings.ToLower(msg.String()) {
 	case "y":
-		approval.reply <- core.OutcomeAllowedOnce
-		m.approval = nil
-		return m, tea.Println(styleOK.Render("  ✓ diizinkan sekali"))
+		return m, m.answerApproval(core.OutcomeAllowedOnce)
 	case "a":
-		approval.reply <- core.OutcomeAllowedSession
-		m.approval = nil
-		return m, tea.Println(styleOK.Render("  ✓ diizinkan untuk session"))
-	case "n":
-		approval.reply <- core.OutcomeRejected
-		m.approval = nil
-		return m, tea.Println(styleErr.Render("  ⊘ ditolak"))
+		return m, m.answerApproval(core.OutcomeAllowedSession)
+	case "n", "esc":
+		return m, m.answerApproval(core.OutcomeRejected)
 	case "ctrl+c":
-		approval.reply <- core.OutcomeCancelled
-		m.approval = nil
+		cmd := m.answerApproval(core.OutcomeCancelled)
 		m.cancelTurn()
-		return m, tea.Println(styleErr.Render("  ⊘ dibatalkan"))
+		return m, cmd
+	}
+	if picked, _ := m.approval.choices.key(msg); picked != nil {
+		return m, m.answerApproval(core.ApprovalOutcome(picked.value))
 	}
 	return m, nil
+}
+
+func (m *Model) answerApproval(outcome core.ApprovalOutcome) tea.Cmd {
+	m.approval.reply <- outcome
+	m.approval = nil
+	switch outcome {
+	case core.OutcomeAllowedOnce:
+		return tea.Println(styleOK.Render("  ✓ allowed once"))
+	case core.OutcomeAllowedSession:
+		return tea.Println(styleOK.Render("  ✓ allowed for session"))
+	case core.OutcomeRejected:
+		return tea.Println(styleErr.Render("  ⊘ rejected"))
+	}
+	return tea.Println(styleErr.Render("  ⊘ cancelled"))
 }
 
 func (m *Model) handleCtrlC() (tea.Model, tea.Cmd) {
@@ -353,7 +426,7 @@ func (m *Model) handleCtrlC() (tea.Model, tea.Cmd) {
 		return m.quit()
 	}
 	m.lastCtrlC = time.Now()
-	return m, tea.Println(styleMuted.Render("· tekan ctrl+c lagi untuk keluar"))
+	return m, tea.Println(styleMuted.Render("· press ctrl+c again to exit"))
 }
 
 func (m *Model) quit() (tea.Model, tea.Cmd) {
@@ -369,9 +442,9 @@ func (m *Model) cancelTurn() {
 
 func onOff(v bool) string {
 	if v {
-		return "menyala"
+		return "on"
 	}
-	return "mati"
+	return "off"
 }
 
 func (m *Model) submit() tea.Cmd {
@@ -399,7 +472,7 @@ func (m *Model) submit() tea.Cmd {
 
 	if m.running {
 		m.queue = append(m.queue, value)
-		return tea.Println(strings.Join(append(renderUser(value), styleMuted.Render("  (antre)")), "\n"))
+		return tea.Println(strings.Join(append(renderUser(value), styleMuted.Render("  (queued)")), "\n"))
 	}
 	return tea.Batch(m.startTurn(value), tea.Println(strings.Join(renderUser(value), "\n")+"\n"))
 }
@@ -535,13 +608,13 @@ func (m *Model) finishTurn(outcome turnOutcome) tea.Cmd {
 	m.approval = nil
 	switch {
 	case outcome.err != nil && (errors.Is(outcome.err, context.Canceled) || errors.Is(outcome.err, context.DeadlineExceeded)):
-		cmds = append(cmds, tea.Println(styleMuted.Render("· turn dibatalkan")))
+		cmds = append(cmds, tea.Println(styleMuted.Render("· turn cancelled")))
 	case outcome.err != nil:
 		cmds = append(cmds, tea.Println(styleErr.Render("✗ error: "+outcome.err.Error())))
 	case outcome.result.StopReason == "cancelled":
-		cmds = append(cmds, tea.Println(styleMuted.Render("· turn dibatalkan")))
+		cmds = append(cmds, tea.Println(styleMuted.Render("· turn cancelled")))
 	case outcome.result.StopReason == "max_steps":
-		cmds = append(cmds, tea.Println(styleWarn.Render("⚠ turn berhenti karena max_steps")))
+		cmds = append(cmds, tea.Println(styleWarn.Render("⚠ turn stopped due to max_steps")))
 	}
 	if len(m.queue) > 0 {
 		next := m.queue[0]
@@ -604,25 +677,47 @@ func (m *Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "ctrl+c":
 		m.searching = false
 		m.searchQuery = ""
+		m.searchMatch = ""
 		return m, nil
-	case "enter":
+	case "enter", "tab":
 		m.searching = false
-		if match, ok := m.history.Search(m.searchQuery); ok {
-			m.setInput(match)
+		if m.searchMatch != "" {
+			m.setInput(m.searchMatch)
 		}
 		m.searchQuery = ""
+		m.searchMatch = ""
+		return m, nil
+	case "ctrl+r":
+		if m.searchMatch != "" {
+			m.searchStep(m.searchIdx)
+		}
 		return m, nil
 	case "backspace":
 		if m.searchQuery != "" {
 			runes := []rune(m.searchQuery)
 			m.searchQuery = string(runes[:len(runes)-1])
 		}
+		m.searchStep(m.history.Len())
 		return m, nil
 	}
-	if msg.Type == tea.KeyRunes {
+	if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
 		m.searchQuery += string(msg.Runes)
+		m.searchStep(m.history.Len())
 	}
 	return m, nil
+}
+
+// searchStep finds a match for the query before index before. If there is
+// none, the previous match stays visible.
+func (m *Model) searchStep(before int) {
+	if match, index, ok := m.history.SearchBefore(m.searchQuery, before); ok {
+		m.searchMatch = match
+		m.searchIdx = index
+		return
+	}
+	if before >= m.history.Len() {
+		m.searchMatch = ""
+	}
 }
 
 func (m *Model) slash(value string) tea.Cmd {
@@ -631,22 +726,7 @@ func (m *Model) slash(value string) tea.Cmd {
 	args := fields[1:]
 	switch command {
 	case "/help":
-		return tea.Println(strings.Join([]string{
-			styleMuted.Render("· perintah:"),
-			"  /help              bantuan ini",
-			"  /new               session baru",
-			"  /sessions [id]     daftar / pindah session",
-			"  /fork              fork session pada turn terakhir",
-			"  /compact           ringkas riwayat session",
-			"  /clear             bersihkan layar",
-			"  /session           id session dan cwd",
-			"  /agent [nama]      agent aktif atau ganti agent",
-			"  /model [p:m]       model aktif atau ganti model",
-			"  /permission [p]    tampilkan atau ubah policy (ask|trust|never)",
-			"  /yolo              sama dengan /permission trust",
-			"  /verbose           nyalakan atau matikan mode verbose",
-			"  /exit              keluar",
-		}, "\n"))
+		return tea.Println(strings.Join(helpLines(), "\n"))
 	case "/exit", "/quit":
 		return tea.Quit
 	case "/clear":
@@ -661,7 +741,7 @@ func (m *Model) slash(value string) tea.Cmd {
 		m.assistantStarted = false
 		m.queue = nil
 		m.picker = nil
-		return tea.Println(styleMuted.Render("· session baru " + info.ID))
+		return tea.Println(styleMuted.Render("· new session " + info.ID))
 	case "/session":
 		return tea.Println(styleMuted.Render("· session " + m.sessionID + " · " + m.cwd))
 	case "/sessions":
@@ -681,11 +761,12 @@ func (m *Model) slash(value string) tea.Cmd {
 		return m.setPolicy(string(core.PolicyTrust))
 	case "/permission":
 		if len(args) == 0 {
-			return tea.Println(styleMuted.Render("· policy " + m.policy))
+			m.picker = m.policyMenu()
+			return nil
 		}
 		return m.setPolicy(strings.ToLower(args[0]))
 	}
-	return tea.Println(styleMuted.Render("· perintah tidak dikenal: " + command))
+	return tea.Println(styleMuted.Render("· unknown command: " + command))
 }
 
 func (m *Model) setPolicy(value string) tea.Cmd {
@@ -694,7 +775,7 @@ func (m *Model) setPolicy(value string) tea.Cmd {
 	case string(core.PolicyAsk), string(core.PolicyTrust), string(core.PolicyNever):
 		policy = core.Policy(value)
 	default:
-		return tea.Println(styleErr.Render("✗ policy tidak dikenal: " + value))
+		return tea.Println(styleErr.Render("✗ unknown policy: " + value))
 	}
 	if err := m.backend.SetPolicy(m.ctx, m.sessionID, policy); err != nil {
 		return tea.Println(styleErr.Render("✗ error: " + err.Error()))
@@ -702,18 +783,18 @@ func (m *Model) setPolicy(value string) tea.Cmd {
 	m.policy = value
 	lines := []string{styleMuted.Render("· policy " + value)}
 	if policy == core.PolicyTrust {
-		lines = append(lines, styleWarn.Render("⚠ YOLO: semua tool diizinkan tanpa approval (rule deny tetap berlaku)"))
+		lines = append(lines, styleWarn.Render("⚠ YOLO: all tools allowed without approval (deny rules still apply)"))
 	}
 	return tea.Println(strings.Join(lines, "\n"))
 }
 
 func (m *Model) switchOrPick(args []string) tea.Cmd {
 	if m.running || m.compacting {
-		return tea.Println(styleMuted.Render("· tunggu turn selesai"))
+		return tea.Println(styleMuted.Render("· wait for the turn to finish"))
 	}
 	if len(args) > 0 {
 		if _, err := m.backend.SessionInfo(m.ctx, args[0]); err != nil {
-			return tea.Println(styleErr.Render("✗ session tidak ditemukan: " + args[0]))
+			return tea.Println(styleErr.Render("✗ session not found: " + args[0]))
 		}
 		return m.switchSession(args[0])
 	}
@@ -722,10 +803,32 @@ func (m *Model) switchOrPick(args []string) tea.Cmd {
 		return tea.Println(styleErr.Render("✗ error: " + err.Error()))
 	}
 	if len(sessions) == 0 {
-		return tea.Println(styleMuted.Render("· belum ada session lain"))
+		return tea.Println(styleMuted.Render("· no other sessions yet"))
 	}
-	m.picker = &sessionPicker{sessions: sessions}
+	items := make([]menuItem, 0, len(sessions))
+	for _, session := range sessions {
+		hint := session.Agent + " · " + fmt.Sprintf("%d turns", session.TurnCount) + " · " + time.UnixMilli(session.UpdatedAt).Format("15:04")
+		if session.ID == m.sessionID {
+			hint += " · active"
+		}
+		items = append(items, menuItem{value: session.ID, label: shortSessionID(session.ID), hint: hint})
+	}
+	m.picker = &menu{title: "pick session", items: items, onPick: m.switchSession}
 	return nil
+}
+
+func (m *Model) policyMenu() *menu {
+	picker := &menu{
+		title: "pick policy",
+		items: []menuItem{
+			{value: string(core.PolicyAsk), label: "ask", hint: "ask approval for risky tools"},
+			{value: string(core.PolicyTrust), label: "trust", hint: "YOLO: allow all tools"},
+			{value: string(core.PolicyNever), label: "never", hint: "reject all tools that need approval"},
+		},
+		onPick: m.setPolicy,
+	}
+	picker.selectValue(m.policy)
+	return picker
 }
 
 func (m *Model) switchSession(id string) tea.Cmd {
@@ -743,12 +846,12 @@ func (m *Model) switchSession(id string) tea.Cmd {
 	if policy, err := m.backend.Policy(m.ctx, id); err == nil {
 		m.policy = string(policy)
 	}
-	return tea.Println(styleMuted.Render("· pindah ke session " + id))
+	return tea.Println(styleMuted.Render("· switched to session " + id))
 }
 
 func (m *Model) forkSession() tea.Cmd {
 	if m.running || m.compacting {
-		return tea.Println(styleMuted.Render("· tunggu turn selesai"))
+		return tea.Println(styleMuted.Render("· wait for the turn to finish"))
 	}
 	info, err := m.backend.ForkSession(m.ctx, m.sessionID)
 	if err != nil {
@@ -759,7 +862,7 @@ func (m *Model) forkSession() tea.Cmd {
 
 func (m *Model) compactSession() tea.Cmd {
 	if m.running || m.compacting {
-		return tea.Println(styleMuted.Render("· tunggu turn selesai"))
+		return tea.Println(styleMuted.Render("· wait for the turn to finish"))
 	}
 	m.compacting = true
 	sessionID := m.sessionID
@@ -771,14 +874,23 @@ func (m *Model) compactSession() tea.Cmd {
 			m.program.Send(compactDoneMsg{info: info, err: err})
 		}
 	}()
-	return tea.Println(styleMuted.Render("· meringkas session…"))
+	return tea.Println(styleMuted.Render("· compacting…"))
 }
 
 func (m *Model) agentCommand(args []string) tea.Cmd {
 	if len(args) == 0 {
-		lines := []string{styleMuted.Render("· agent " + m.agent + " · " + m.model + " · " + m.policy)}
-		lines = append(lines, styleMuted.Render("· tersedia: "+strings.Join(m.backend.AgentNames(), ", ")))
-		return tea.Println(strings.Join(lines, "\n"))
+		items := []menuItem{}
+		for _, name := range m.backend.AgentNames() {
+			items = append(items, menuItem{value: name, label: name, hint: shortModel(m.backend.AgentModel(name)) + " · " + m.backend.AgentPolicy(name)})
+		}
+		if len(items) == 0 {
+			return tea.Println(styleMuted.Render("· agent " + m.agent + " · " + m.model + " · " + m.policy))
+		}
+		m.picker = &menu{title: "pick agent", items: items, onPick: func(name string) tea.Cmd {
+			return m.agentCommand([]string{name})
+		}}
+		m.picker.selectValue(m.agent)
+		return nil
 	}
 	name := args[0]
 	if err := m.backend.SetAgent(m.ctx, m.sessionID, name); err != nil {
@@ -793,11 +905,27 @@ func (m *Model) agentCommand(args []string) tea.Cmd {
 
 func (m *Model) modelCommand(args []string) tea.Cmd {
 	if len(args) == 0 {
-		return tea.Println(styleMuted.Render("· model " + m.model))
+		items := []menuItem{}
+		seen := map[string]bool{}
+		add := func(model, hint string) {
+			if model == "" || seen[model] {
+				return
+			}
+			seen[model] = true
+			items = append(items, menuItem{value: model, label: model, hint: hint})
+		}
+		add(m.model, "active")
+		for _, name := range m.backend.AgentNames() {
+			add(m.backend.AgentModel(name), "agent "+name)
+		}
+		m.picker = &menu{title: "pick model", items: items, onPick: func(model string) tea.Cmd {
+			return m.modelCommand([]string{model})
+		}}
+		return tea.Println(styleMuted.Render("· other models: /model provider:model"))
 	}
 	value := args[0]
 	if !strings.Contains(value, ":") {
-		return tea.Println(styleErr.Render("✗ model harus provider:model, mis. deepseek:deepseek-chat"))
+		return tea.Println(styleErr.Render("✗ model must be provider:model, e.g. deepseek:deepseek-chat"))
 	}
 	if err := m.backend.SetModel(m.ctx, m.sessionID, value); err != nil {
 		return tea.Println(styleErr.Render("✗ model: " + err.Error()))
@@ -808,38 +936,16 @@ func (m *Model) modelCommand(args []string) tea.Cmd {
 
 func (m *Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	picker := m.picker
-	switch msg.String() {
-	case "esc", "ctrl+c":
+	picked, cancel := picker.key(msg)
+	if cancel {
 		m.picker = nil
-	case "up", "k":
-		if picker.index > 0 {
-			picker.index--
-		}
-	case "down", "j":
-		if picker.index < len(picker.sessions)-1 {
-			picker.index++
-		}
-	case "enter":
-		session := picker.sessions[picker.index]
-		m.picker = nil
-		return m, m.switchSession(session.ID)
+		return m, nil
 	}
-	return m, nil
-}
-
-func (m *Model) renderPicker() string {
-	lines := []string{styleAccent.Render("? pilih session") + styleMuted.Render("  (↑/↓, enter, esc)")}
-	for i, session := range m.picker.sessions {
-		marker := "  "
-		style := styleMuted
-		if i == m.picker.index {
-			marker = "> "
-			style = styleBold
-		}
-		label := shortSessionID(session.ID) + " · " + session.Agent + " · " + fmt.Sprintf("%d turn", session.TurnCount) + " · " + time.UnixMilli(session.UpdatedAt).Format("15:04")
-		lines = append(lines, marker+style.Render(label))
+	if picked == nil {
+		return m, nil
 	}
-	return strings.Join(lines, "\n")
+	m.picker = nil
+	return m, picker.onPick(picked.value)
 }
 
 func shortSessionID(id string) string {
@@ -860,7 +966,7 @@ func (m *Model) contentWidth() int {
 	return width
 }
 
-// View merender area dinamis di bawah scrollback.
+// View renders the dynamic area below the scrollback.
 func (m *Model) View() string {
 	if m.program == nil {
 		return ""
@@ -873,25 +979,56 @@ func (m *Model) View() string {
 		sections = append(sections, m.renderTools()...)
 	}
 	if m.running && strings.TrimSpace(m.stream.String()) == "" && len(m.tools) == 0 {
-		sections = append(sections, m.spinner.View()+" "+styleMuted.Render("Berpikir…"))
+		sections = append(sections, styleAccent.Render(m.spinner.View())+" "+styleMuted.Render("Thinking… "+formatDuration(time.Since(m.turnStart))+" · esc cancel"))
+	}
+	if len(m.queue) > 0 {
+		sections = append(sections, styleMuted.Render(fmt.Sprintf("  ⧗ %d messages queued", len(m.queue))))
 	}
 	if m.approval != nil {
 		sections = append(sections, m.renderApproval())
 	}
 	if m.searching {
-		sections = append(sections, styleAccent.Render("cari riwayat: ")+m.searchQuery)
+		sections = append(sections, m.renderSearch())
 	}
 	if m.picker != nil {
-		sections = append(sections, m.renderPicker())
+		sections = append(sections, m.picker.render(m.contentWidth()))
 	}
 	if m.policy == string(core.PolicyTrust) {
-		sections = append(sections, styleWarn.Render("⚠ YOLO: semua tool diizinkan tanpa approval (rule deny tetap berlaku)"))
+		sections = append(sections, styleWarn.Render("⚠ YOLO: all tools allowed without approval (deny rules still apply)"))
 	}
 	width := m.contentWidth()
 	sections = append(sections, styleDim.Render(strings.Repeat("─", width)))
 	sections = append(sections, m.renderInput())
+	if suggestions := m.suggestions(); len(suggestions) > 0 && m.picker == nil && m.approval == nil {
+		sections = append(sections, m.renderSuggestions(suggestions))
+	}
 	sections = append(sections, m.renderStatus())
 	return strings.Join(sections, "\n")
+}
+
+func (m *Model) renderSuggestions(suggestions []slashCommand) string {
+	items := make([]menuItem, 0, len(suggestions))
+	for _, command := range suggestions {
+		items = append(items, menuItem{label: padRight(strings.TrimSpace(command.name+" "+command.args), 18), hint: command.desc})
+	}
+	index := m.suggestIdx
+	if index >= len(items) {
+		index = 0
+	}
+	return strings.Join(renderList(items, index, m.contentWidth(), false), "\n")
+}
+
+func (m *Model) renderSearch() string {
+	line := styleAccent.Render("search history: ") + m.searchQuery + styleAccent.Render("▏")
+	switch {
+	case m.searchMatch != "":
+		match := strings.ReplaceAll(m.searchMatch, "\n", " ⏎ ")
+		line += "\n  " + truncateLine(styleBold.Render(match), m.contentWidth()-2)
+		line += "\n  " + styleMuted.Render("enter use · ctrl+r older · esc cancel")
+	case m.searchQuery != "":
+		line += "\n  " + styleMuted.Render("no matches")
+	}
+	return line
 }
 
 func (m *Model) renderStream(stream string) string {
@@ -910,7 +1047,7 @@ func (m *Model) renderTools() []string {
 	out := make([]string, 0, len(m.tools)*2)
 	for _, record := range m.tools {
 		out = append(out, styleAccent.Render("⏺ ")+record.Summary())
-		out = append(out, styleMuted.Render("  "+m.spinner.View()+" berjalan · "+formatDuration(record.Duration())))
+		out = append(out, styleMuted.Render("  "+m.spinner.View()+" running · "+formatDuration(record.Duration())))
 	}
 	return out
 }
@@ -924,15 +1061,13 @@ func (m *Model) renderApproval() string {
 			label += ": " + arg
 		}
 	}
-	lines := []string{styleAccent.Render("? ") + "Izinkan " + label}
+	lines := []string{styleAccent.Render("? ") + "Allow " + label}
 	if m.verbose {
 		if record := m.findTool(approval.req.CallID); record != nil {
 			lines = append(lines, record.verboseLines(m.contentWidth())...)
 		}
 	}
-	lines = append(lines, "  "+styleOK.Render("[y]")+" ya sekali   "+
-		styleOK.Render("[a]")+" selalu untuk session ini   "+
-		styleErr.Render("[n]")+" tolak")
+	lines = append(lines, renderList(approval.choices.items, approval.choices.index, m.contentWidth(), true)...)
 	return strings.Join(lines, "\n")
 }
 
@@ -969,12 +1104,15 @@ func (m *Model) renderStatus() string {
 		parts = append(parts, "verbose")
 	}
 	left := strings.Join(parts, " · ")
-	right := "/help"
+	right := "/ commands · ctrl+r history"
+	if m.approval != nil {
+		right = "↑/↓ enter · y/a/n"
+	}
 	if m.compacting {
-		right = "meringkas…"
+		right = "compacting…"
 	}
 	if m.running {
-		right = "turn berjalan · ctrl+c batal"
+		right = "turn running · ctrl+c cancel"
 	}
 	return statusLine(left, right, m.contentWidth())
 }
@@ -1006,7 +1144,7 @@ func (m *Model) banner() []string {
 		lines = append(lines, "  "+styleDim.Render("│ ")+padRight(row, inner)+" "+styleDim.Render("│"))
 	}
 	lines = append(lines, "  "+styleDim.Render("╰"+strings.Repeat("─", inner+2)+"╯"))
-	lines = append(lines, "  "+styleMuted.Render("/help untuk perintah · ctrl+c dua kali untuk keluar"))
+	lines = append(lines, "  "+styleMuted.Render("/help for commands · press ctrl+c twice to exit"))
 	return lines
 }
 
@@ -1014,7 +1152,7 @@ func (m *Model) restoreLines() []string {
 	if len(m.restore) == 0 {
 		return nil
 	}
-	out := []string{styleMuted.Render("· melanjutkan session " + m.sessionID)}
+	out := []string{styleMuted.Render("· continuing session " + m.sessionID)}
 	for _, event := range m.restore {
 		switch event.Kind {
 		case core.KindUserMessage:
@@ -1100,8 +1238,8 @@ func renderUser(value string) []string {
 	return out
 }
 
-// splitCompleteBlocks memotong buffer streaming menjadi blok Markdown yang
-// sudah selesai (dibatasi baris kosong di luar code fence).
+// splitCompleteBlocks splits the streaming buffer into completed Markdown
+// blocks (delimited by blank lines outside code fences).
 func splitCompleteBlocks(s string) ([]string, string) {
 	var blocks []string
 	inFence := false
