@@ -7,7 +7,7 @@
 - **Revisi contract**: 2
 - **Status requirements**: Approved
 - **Status contract**: Approved
-- **Status**: Draft
+- **Status**: Approved
 - **Revisi design**: 1
 
 ## Referensi arsitektur
@@ -422,5 +422,5 @@ None yang masih Open.
 - [x] Setiap requirement terpetakan ke satu komponen design.
 - [x] Setiap acceptance criterion punya metode verifikasi.
 - [x] Blocking Design Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- **Di-approve oleh**: Ridho
+- **Di-approve pada**: 2026-10-29 (revisi 1)
