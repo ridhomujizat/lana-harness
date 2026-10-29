@@ -16,6 +16,7 @@ type Builder struct {
 	mu        sync.Mutex
 	cfg       Config
 	secrets   Secrets
+	home      string
 	hooks     *Hooks
 	services  map[ServiceKey]serviceEntry
 	owned     map[string][]func()
@@ -65,6 +66,9 @@ func (b *Builder) Hooks() *Hooks { return b.hooks }
 
 // Secrets mengembalikan sumber secret proses (tidak diekspor di contract).
 func (b *Builder) Secrets() Secrets { return b.secrets }
+
+// Home mengembalikan LANA_HOME yang dipakai runtime (kosong jika tidak ada).
+func (b *Builder) Home() string { return b.home }
 
 // Config mengembalikan salinan config efektif (baca saja).
 func (b *Builder) Config() Config {

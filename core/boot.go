@@ -14,6 +14,7 @@ type BootInput struct {
 	Config  Config
 	Secrets Secrets
 	Profile string
+	Home    string
 }
 
 // ShutdownTimeout adalah batas total Shutdown.
@@ -45,6 +46,7 @@ func Boot(ctx context.Context, in BootInput) (*Context, error) {
 	}
 	b := newBuilder(in.Config)
 	b.secrets = in.Secrets
+	b.home = in.Home
 	b.hooks.ApprovalRequest.SetDefault(func(context.Context, ApprovalRequest) (ApprovalOutcome, error) {
 		return OutcomeUnavailable, nil
 	})

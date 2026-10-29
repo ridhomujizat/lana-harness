@@ -442,7 +442,7 @@ flowchart LR
     - PR/commit: commit T-017 spec #3
     - Deviasi: Tidak ada.
 
-- [ ] `T-018` Implementasi modul `agent`, modul `tools`, dan boot `lana.New` (opsi dan profile)
+- [x] `T-018` Implementasi modul `agent`, modul `tools`, dan boot `lana.New` (opsi dan profile)
   - Issue/PR: `—`
   - Bergantung pada: `T-002`, `T-004`, `T-011`, `T-014`, `T-015`, `T-017`
   - Requirements: `REQ-LIB-001`, `REQ-LIB-006`, `REQ-LIB-008`, `REQ-LIB-005` (pendaftaran tool kustom)
@@ -457,13 +457,13 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race .` (`TestNewMinimal`, `TestNewToolConflict`, `TestNewUnknownAgentTool`, `TestCustomToolPipeline`, `TestApprovalNeverDefault`, `TestApprovalTrust`, `TestProfileRows`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 120s .'`
+    - Hasil: `TestNewMinimal`, `TestNewToolConflict`, `TestNewUnknownAgentTool`, `TestProfileRows` PASS; modul store diganti `memstore` saat Home kosong, `llm`/`tools`/`agent` terpasang.
+    - PR/commit: commit T-018/T-019 spec #3
+    - Deviasi: Tool kustom dan store diberikan ke modul lewat nilai internal `ModuleConfig.Values` (`_custom_tools`, `_store`) karena `Options` tidak masuk `BootInput`; dicatat di docs/eval. Modul `permission`/`approval`/`compaction` masih stub sampai spec #4.
 
-- [ ] `T-019` Implementasi `Run`, `Stream`, `Close`, dan routing library
+- [x] `T-019` Implementasi `Run`, `Stream`, `Close`, dan routing library Implementasi `Run`, `Stream`, `Close`, dan routing library
   - Issue/PR: `—`
   - Bergantung pada: `T-016`, `T-018`
   - Requirements: `REQ-LIB-002`, `REQ-LIB-003`, `REQ-LIB-004`, `REQ-LIB-007`
@@ -477,11 +477,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race .` (`TestRunResult`, `TestRunBusy`, `TestRunStopReasons`, `TestRunProviderError`, `TestRunEmptyPrompt`, `TestStreamEvents`, `TestStreamCancel`, `TestCloseCancelsTurn`, `TestRouteLibrary`, `TestNoRoute`, `TestSessionChannel`)
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race -timeout 120s .'`
+    - Hasil: `TestRunResult`, `TestRunBusy`, `TestRunStopReasons`, `TestRunProviderError`, `TestRunEmptyPrompt`, `TestStreamEvents`, `TestStreamCancel`, `TestCloseCancelsTurn`, `TestRouteLibrary`, `TestNoRoute`, `TestSessionChannel`, `TestCustomToolPipeline`, `TestApprovalNeverDefault`, `TestApprovalTrust` PASS.
+    - PR/commit: commit T-018/T-019 spec #3
+    - Deviasi: `Stream` membangun event dari log setelah turn selesai (bukan frame hidup real-time) karena kontrak hanya menetapkan urutan event; frame hidup tetap tersedia lewat `SubscribeLive`.
 
 - [ ] `T-020` Verifikasi akhir spec #3 dan smoke test
   - Issue/PR: `—`
