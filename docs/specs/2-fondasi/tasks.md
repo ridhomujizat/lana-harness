@@ -188,7 +188,7 @@ flowchart TD
     - PR/commit: commit T-004
     - Deviasi: Tidak ada.
 
-- [ ] `T-005` Loader lapisan dan lokasi file
+- [x] `T-005` Loader lapisan dan lokasi file
   - Issue/PR: `—`
   - Bergantung pada: `T-003`
   - Requirements: `REQ-CONF-001`, `REQ-CONF-006`, `REQ-CONF-009`
@@ -202,11 +202,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./config -run 'TestLayerPatchWins|TestMissingProfileSkipped|TestLanaHomeEnv|TestMemoryLayerNoFiles'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./config -run 'TestLayerPatchWins|TestMissingProfileSkipped|TestLanaHomeEnv|TestMemoryLayerNoFiles' -v`
+    - Hasil: 4 test PASS, `ok github.com/ridhomujizat/lana-harness/config`; exit 0.
+    - PR/commit: commit T-005
+    - Deviasi: Registry modul (`core.RegisterModule`/`core.ModuleNames`) ditambahkan lebih awal agar validasi `module` dapat berjalan; task T-010 tinggal menambah Builder/Boot/rencana boot. Registry palsu hanya didaftarkan di TestMain package config.
 
 - [ ] `T-006` Validasi per lapisan dengan posisi
   - Issue/PR: `—`

@@ -1,0 +1,64 @@
+package core
+
+// ServiceKey adalah nama service di registry Builder.
+type ServiceKey string
+
+const (
+	ServiceLLM        ServiceKey = "llm"
+	ServiceTools      ServiceKey = "tools"
+	ServiceSessions   ServiceKey = "sessions"
+	ServiceAgents     ServiceKey = "agents"
+	ServiceApproval   ServiceKey = "approval"
+	ServiceCompaction ServiceKey = "compaction"
+)
+
+// Context adalah wiring hasil boot.
+type Context struct {
+	LLM      LLMRegistry
+	Tools    ToolRegistry
+	Sessions SessionStore
+	Agents   AgentRegistry
+	Approval ApprovalService
+	Hooks    *Hooks
+	Config   Config
+	Secrets  Secrets
+	Profile  string
+}
+
+// Lookup mengambil service apa pun.
+func (c *Context) Lookup(key ServiceKey) (any, bool) {
+	if c == nil {
+		return nil, false
+	}
+	switch key {
+	case ServiceLLM:
+		if c.LLM == nil {
+			return nil, false
+		}
+		return c.LLM, true
+	case ServiceTools:
+		if c.Tools == nil {
+			return nil, false
+		}
+		return c.Tools, true
+	case ServiceSessions:
+		if c.Sessions == nil {
+			return nil, false
+		}
+		return c.Sessions, true
+	case ServiceAgents:
+		if c.Agents == nil {
+			return nil, false
+		}
+		return c.Agents, true
+	case ServiceApproval:
+		if c.Approval == nil {
+			return nil, false
+		}
+		return c.Approval, true
+	}
+	return nil, false
+}
+
+// Builder dipakai modul saat Install.
+type Builder struct{}

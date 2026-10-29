@@ -30,6 +30,11 @@ func (s Secret) MarshalJSON() ([]byte, error) { return json.Marshal("***") }
 
 func (s Secret) MarshalText() ([]byte, error) { return []byte("***"), nil }
 
+// Secrets mengambil nilai secret berdasarkan nama env.
+type Secrets interface {
+	Lookup(name string) (Secret, bool)
+}
+
 // UnmarshalText menerima nilai dari decoder TOML.
 func (s *Secret) UnmarshalText(b []byte) error {
 	s.v = string(b)
