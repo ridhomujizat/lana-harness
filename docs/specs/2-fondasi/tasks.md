@@ -144,7 +144,7 @@ flowchart TD
     - PR/commit: commit T-002
     - Deviasi: Perintah memakai cache Go lokal karena sandbox menolak tulisan ke cache pengguna (dicatat di docs/eval).
 
-- [ ] `T-003` Tulis tipe `core` dan schema `Config`
+- [x] `T-003` Tulis tipe `core` dan schema `Config`
   - Issue/PR: `—`
   - Bergantung pada: `T-002`
   - Requirements: `REQ-CONF-003`, `REQ-MOD-001`, `REQ-HOOK-001`
@@ -162,11 +162,11 @@ flowchart TD
     - `nix develop -c go build ./core/...`
     - `nix develop -c go vet ./core/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache nix develop -c sh -c 'go build ./core/... && go vet ./core/...'`
+    - Hasil: build dan vet exit 0. Semua tipe dari `API-CORE-006` sampai `API-CORE-015` tersedia; `DeriveMessages` dan `ResolvePrefix` sengaja belum diimplementasikan (owner spec #3/#4 sesuai scope).
+    - PR/commit: commit T-003
+    - Deviasi: `Subscription` dideklarasikan sebagai placeholder agar interface `AgentRegistry` dapat dikompilasi; implementasi penuh di T-004 (task berikutnya, bukan perilaku baru).
 
 - [ ] `T-004` Implementasi hook generik `Waterfall`, `Serial`, `Observe`
   - Issue/PR: `—`
