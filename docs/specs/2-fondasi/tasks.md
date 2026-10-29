@@ -291,7 +291,7 @@ flowchart TD
     - PR/commit: commit T-009
     - Deviasi: Tidak ada.
 
-- [ ] `T-010` Registry modul, `Builder`, dan rencana boot
+- [x] `T-010` Registry modul, `Builder`, dan rencana boot
   - Issue/PR: `—`
   - Bergantung pada: `T-004`
   - Requirements: `REQ-MOD-001`, `REQ-MOD-002`, `REQ-MOD-004`
@@ -306,11 +306,11 @@ flowchart TD
   - Verifikasi:
     - `CGO_ENABLED=0 nix develop -c go test ./core -run 'TestBoot'`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c go test ./core -run 'TestBoot' -v`
+    - Hasil: 6 test PASS (termasuk `TestBootApprovalDefaultUnavailable`); exit 0. Urutan topologi stabil, siklus dan provider ganda terdeteksi sebelum `Install`.
+    - PR/commit: commit T-010
+    - Deviasi: `core.Context` menyimpan map service internal agar `Lookup` bisa mengambil key di luar lima field typed (kontrak `API-CORE-003`). `Shutdown` masih minimal; perilaku penuh dikerjakan T-011.
 
 - [ ] `T-011` Install lengkap, shutdown berurutan, dan lepas listener
   - Issue/PR: `—`

@@ -23,12 +23,21 @@ type Context struct {
 	Config   Config
 	Secrets  Secrets
 	Profile  string
+
+	services  map[ServiceKey]any
+	installed []*installedModule
+	closeOnce func()
 }
 
 // Lookup mengambil service apa pun.
 func (c *Context) Lookup(key ServiceKey) (any, bool) {
 	if c == nil {
 		return nil, false
+	}
+	if c.services != nil {
+		if v, ok := c.services[key]; ok {
+			return v, true
+		}
 	}
 	switch key {
 	case ServiceLLM:
@@ -59,6 +68,3 @@ func (c *Context) Lookup(key ServiceKey) (any, bool) {
 	}
 	return nil, false
 }
-
-// Builder dipakai modul saat Install.
-type Builder struct{}
