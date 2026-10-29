@@ -1,6 +1,6 @@
 # 0010. Susun runtime dengan profile dan config patch
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0012](0012-acp-dan-sdk-json-rpc.md)

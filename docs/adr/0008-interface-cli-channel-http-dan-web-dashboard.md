@@ -1,6 +1,6 @@
 # 0008. Sediakan interface CLI, channel chat, HTTP API, dan web dashboard
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0001](0001-gunakan-rust-single-binary-daemon.md), [0004](0004-permission-mode-per-agent.md), [0012](0012-acp-dan-sdk-json-rpc.md)
@@ -20,7 +20,7 @@ di hook `approval.request`. Interface HTTP berbagi satu `axum` server di `127.0.
 
 | Channel | Implementasi v1 | Streaming | Approval |
 |---|---|---|---|
-| CLI/TUI | `lana chat`: line editor `rustyline` + render Markdown sederhana. TUI penuh `ratatui` di belakang feature `tui`. Attach ke daemon lewat HTTP+SSE; jika daemon mati, jalan embedded. | Token per token | Prompt `[y]es / [a]lways / [n]o` |
+| CLI/TUI | `lana chat`: TUI inline dengan `ratatui` (`Viewport::Inline`) dan `crossterm`, seperti Claude Code. Riwayat masuk scrollback terminal; hanya input dan status bar yang digambar ulang. Selalu dikompilasi. v1 berjalan embedded; attach ke daemon lewat HTTP+SSE menyusul. Detail di [spec #1](../specs/1-cli-tui/requirements.md). | Token per token | Prompt `[y] / [a] / [n]` |
 | Telegram | Bot API langsung lewat `reqwest`, long polling `getUpdates` (tanpa webhook publik). | Edit pesan berkala (throttle 1 detik) | Inline keyboard |
 | WhatsApp | WhatsApp Cloud API resmi (webhook masuk + Graph API keluar), feature `whatsapp`. Butuh URL publik (tunnel/reverse proxy). | Pesan final saja | Interactive reply button |
 | HTTP API | `POST /v1/agents/{agent}/messages`, `GET /v1/sessions/{id}/events` (SSE), `POST /v1/webhooks/{hook}` untuk trigger dari sistem lain. Auth bearer token. | SSE | `POST /v1/approvals/{id}` |

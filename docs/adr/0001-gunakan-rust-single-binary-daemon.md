@@ -1,6 +1,6 @@
 # 0001. Gunakan Rust sebagai single binary daemon
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0008](0008-interface-cli-channel-http-dan-web-dashboard.md)
@@ -50,7 +50,7 @@ Dependency dipilih agar ringan:
 - Storage: `rusqlite` dengan fitur `bundled` (lihat [0005](0005-sqlite-sebagai-storage-tunggal.md)).
 - Serialisasi: `serde`, `serde_json`, `toml`.
 - Profil release: `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`.
-- Fitur besar (WhatsApp, TUI penuh, web dashboard) di belakang Cargo feature flag.
+- Fitur besar (WhatsApp, web dashboard) di belakang Cargo feature flag.
 
 ## Consequences
 

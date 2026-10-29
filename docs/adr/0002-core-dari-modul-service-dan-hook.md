@@ -1,6 +1,6 @@
 # 0002. Bangun core dari modul, service, dan hook dalam Cargo workspace
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0001](0001-gunakan-rust-single-binary-daemon.md), [0009](0009-session-sebagai-event-log-append-only.md), [0010](0010-profile-dan-config-patch.md)

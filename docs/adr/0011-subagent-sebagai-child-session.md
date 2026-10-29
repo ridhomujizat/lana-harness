@@ -1,6 +1,6 @@
 # 0011. Jalankan subagent sebagai child session
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0003](0003-multi-agent-dengan-routing-channel.md), [0004](0004-permission-mode-per-agent.md), [0009](0009-session-sebagai-event-log-append-only.md)

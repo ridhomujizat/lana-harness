@@ -1,6 +1,6 @@
 # 0006. Tambah kemampuan lewat MCP client dan Skills
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0004](0004-permission-mode-per-agent.md)

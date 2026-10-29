@@ -2,7 +2,7 @@
 
 - **Issue**: [`#1`](https://github.com/ridhomujizat/lana-harness/issues/1)
 - **Status**: Approved
-- **Revisi**: 4
+- **Revisi**: 5
 - **Pemilik**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Diperlukan (subcommand, flag, exit code, format output, slash command, tombol)
 - **ADR terkait**: [Index ADR](../../adr/README.md) — [0003](../../adr/0003-multi-agent-dengan-routing-channel.md), [0004](../../adr/0004-permission-mode-per-agent.md), [0008](../../adr/0008-interface-cli-channel-http-dan-web-dashboard.md), [0009](../../adr/0009-session-sebagai-event-log-append-only.md), [0010](../../adr/0010-profile-dan-config-patch.md)
@@ -173,6 +173,14 @@ terakhir untuk cwd yang sama. `--resume <id>` harus membuka session tersebut jik
 - `AC-SESS-003`: Given tidak ada session CLI di cwd ini, when user menjalankan `lana chat --continue`, then session baru dibuat dan pesan memberi tahu tidak ada session sebelumnya.
 - `AC-SESS-004`: Given session `S` dibuat di cwd lain, when user menjalankan `lana chat --resume S`, then proses keluar dengan exit code 2 dan pesan yang menyebut cwd asal `S`.
 - `AC-SESS-005`: Given session terakhir terputus di tengah turn, when session dibuka ulang, then session bisa menerima pesan baru (resume sesuai ADR 0009).
+
+#### REQ-SESS-002: Satu proses per session
+
+Session yang sedang dibuka oleh proses `lana` lain harus ditolak. Kunci dari proses yang sudah
+berhenti harus dilepas otomatis.
+
+- `AC-SESS-006`: Given proses A membuka session `S`, when proses B menjalankan `lana chat --resume S`, then proses B keluar dengan exit code 2 dan pesan menyebut PID proses A.
+- `AC-SESS-007`: Given proses A yang membuka `S` mati tanpa keluar normal, when proses B membuka `S`, then `S` terbuka.
 
 ### Approval
 
@@ -356,7 +364,7 @@ Nilai default `--yes` ditetapkan di contract.
 
 - Semua pesan, tool call, perubahan policy, perubahan model, dan approval dari CLI tercatat di session event log.
 - Satu session hanya punya satu turn aktif.
-- Dua proses `lana chat` yang membuka session yang sama tidak boleh menjalankan turn bersamaan. Perilaku persisnya ditetapkan di design.
+- Satu session hanya boleh dibuka oleh satu proses `lana chat` atau `lana run` pada satu waktu (`REQ-SESS-002`).
 
 ## Aksesibilitas
 
@@ -416,6 +424,7 @@ Nilai default `--yes` ditetapkan di contract.
 | `Q-020` | `/permission` dan `/yolo` saat turn berjalan | Boleh; berlaku mulai evaluasi tool berikutnya (usulan agent, di-approve bersama revisi 3) |
 | `CQ-001` | Cara membuka detail tool call di TUI inline | Mode verbose dengan `Ctrl+O` (revisi 4) |
 | `CQ-002` | Agent `lana run` tanpa `--agent` | Sama seperti chat (revisi 4) |
+| `DQ-002` | Dua proses membuka session yang sama | Tolak proses kedua; lock proses mati dilepas (revisi 5) |
 | `Q-019` | Tanpa TTY | `chat` butuh TTY (exit 2); `run --ask` lewat `/dev/tty`, tanpa TTY outcome `unavailable` |
 
 ## Blocking Open Questions
@@ -438,6 +447,7 @@ None.
 | `REQ-CHAT-010` | `AC-CHAT-022` | `Q-011` |
 | `REQ-CHAT-011` | `AC-CHAT-023` | `Q-019` |
 | `REQ-SESS-001` | `AC-SESS-001`, `AC-SESS-002`, `AC-SESS-003`, `AC-SESS-004`, `AC-SESS-005` | `Q-005`, `Q-016`, ADR 0009 |
+| `REQ-SESS-002` | `AC-SESS-006`, `AC-SESS-007` | `DQ-002` |
 | `REQ-APPR-001` | `AC-APPR-001`, `AC-APPR-002`, `AC-APPR-003`, `AC-APPR-004`, `AC-APPR-005` | ADR 0004, ADR 0008 |
 | `REQ-APPR-002` | `AC-APPR-006`, `AC-APPR-007` | ADR 0004, `Q-006` |
 | `REQ-CMD-001` | `AC-CMD-001` sampai `AC-CMD-014` | `Q-006`, `Q-017`, `Q-018`, ADR 0003, ADR 0009 |
@@ -459,4 +469,4 @@ None.
 - [x] Keberlakuan contract eksplisit.
 - [x] Blocking Open Questions bernilai `None`.
 - **Di-approve oleh**: Ridho
-- **Di-approve pada**: 2026-10-29 (revisi 3; revisi 4 dari jawaban pemilik atas `CQ-001` dan `CQ-002`)
+- **Di-approve pada**: 2026-10-29 (revisi 3; revisi 4 dari `CQ-001` dan `CQ-002`; revisi 5 dari `DQ-002`)

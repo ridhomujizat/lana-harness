@@ -1,6 +1,6 @@
 # 0009. Simpan session sebagai event log append-only di SQLite
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0005](0005-sqlite-sebagai-storage-tunggal.md), [0011](0011-subagent-sebagai-child-session.md)

@@ -14,18 +14,18 @@ If you are a new engineer, read the ADR index below before diving into code or a
 
 | #    | Title                                                                                     | Status   | Date       |
 |------|-------------------------------------------------------------------------------------------|----------|------------|
-| [0001](0001-gunakan-rust-single-binary-daemon.md) | Gunakan Rust sebagai single binary daemon | Proposed | 2026-10-29 |
-| [0002](0002-core-dari-modul-service-dan-hook.md) | Bangun core dari modul, service, dan hook dalam Cargo workspace | Proposed | 2026-10-29 |
-| [0003](0003-multi-agent-dengan-routing-channel.md) | Jalankan multi-agent ringan dengan routing dari channel | Proposed | 2026-10-29 |
-| [0004](0004-permission-mode-per-agent.md) | Atur permission per agent dan putuskan approval lewat hook | Proposed | 2026-10-29 |
-| [0005](0005-sqlite-sebagai-storage-tunggal.md) | Pakai SQLite sebagai storage tunggal | Proposed | 2026-10-29 |
-| [0006](0006-ekstensi-lewat-mcp-client-dan-skills.md) | Tambah kemampuan lewat MCP client dan Skills | Proposed | 2026-10-29 |
-| [0007](0007-scheduler-cron-di-dalam-daemon.md) | Jalankan scheduler cron di dalam daemon | Proposed | 2026-10-29 |
-| [0008](0008-interface-cli-channel-http-dan-web-dashboard.md) | Sediakan interface CLI, channel chat, HTTP API, dan web dashboard | Proposed | 2026-10-29 |
-| [0009](0009-session-sebagai-event-log-append-only.md) | Simpan session sebagai event log append-only di SQLite | Proposed | 2026-10-29 |
-| [0010](0010-profile-dan-config-patch.md) | Susun runtime dengan profile dan config patch | Proposed | 2026-10-29 |
-| [0011](0011-subagent-sebagai-child-session.md) | Jalankan subagent sebagai child session | Proposed | 2026-10-29 |
-| [0012](0012-acp-dan-sdk-json-rpc.md) | Sediakan server ACP dan SDK JSON-RPC | Proposed | 2026-10-29 |
+| [0001](0001-gunakan-rust-single-binary-daemon.md) | Gunakan Rust sebagai single binary daemon | Accepted | 2026-10-29 |
+| [0002](0002-core-dari-modul-service-dan-hook.md) | Bangun core dari modul, service, dan hook dalam Cargo workspace | Accepted | 2026-10-29 |
+| [0003](0003-multi-agent-dengan-routing-channel.md) | Jalankan multi-agent ringan dengan routing dari channel | Accepted | 2026-10-29 |
+| [0004](0004-permission-mode-per-agent.md) | Atur permission per agent dan putuskan approval lewat hook | Accepted | 2026-10-29 |
+| [0005](0005-sqlite-sebagai-storage-tunggal.md) | Pakai SQLite sebagai storage tunggal | Accepted | 2026-10-29 |
+| [0006](0006-ekstensi-lewat-mcp-client-dan-skills.md) | Tambah kemampuan lewat MCP client dan Skills | Accepted | 2026-10-29 |
+| [0007](0007-scheduler-cron-di-dalam-daemon.md) | Jalankan scheduler cron di dalam daemon | Accepted | 2026-10-29 |
+| [0008](0008-interface-cli-channel-http-dan-web-dashboard.md) | Sediakan interface CLI, channel chat, HTTP API, dan web dashboard | Accepted | 2026-10-29 |
+| [0009](0009-session-sebagai-event-log-append-only.md) | Simpan session sebagai event log append-only di SQLite | Accepted | 2026-10-29 |
+| [0010](0010-profile-dan-config-patch.md) | Susun runtime dengan profile dan config patch | Accepted | 2026-10-29 |
+| [0011](0011-subagent-sebagai-child-session.md) | Jalankan subagent sebagai child session | Accepted | 2026-10-29 |
+| [0012](0012-acp-dan-sdk-json-rpc.md) | Sediakan server ACP dan SDK JSON-RPC | Accepted | 2026-10-29 |
 
 ## How to add an ADR
 

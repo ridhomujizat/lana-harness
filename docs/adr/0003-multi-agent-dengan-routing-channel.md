@@ -1,6 +1,6 @@
 # 0003. Jalankan multi-agent ringan dengan routing dari channel
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0004](0004-permission-mode-per-agent.md), [0011](0011-subagent-sebagai-child-session.md)

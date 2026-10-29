@@ -1,6 +1,6 @@
 # 0007. Jalankan scheduler cron di dalam daemon
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0004](0004-permission-mode-per-agent.md), [0005](0005-sqlite-sebagai-storage-tunggal.md)

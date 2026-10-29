@@ -1,6 +1,6 @@
 # 0004. Atur permission per agent dan putuskan approval lewat hook
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0002](0002-core-dari-modul-service-dan-hook.md), [0009](0009-session-sebagai-event-log-append-only.md), [0011](0011-subagent-sebagai-child-session.md)

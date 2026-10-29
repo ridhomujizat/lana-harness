@@ -1,6 +1,6 @@
 # 0005. Pakai SQLite sebagai storage tunggal
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
 - **Related ADRs**: [0003](0003-multi-agent-dengan-routing-channel.md), [0007](0007-scheduler-cron-di-dalam-daemon.md), [0009](0009-session-sebagai-event-log-append-only.md)

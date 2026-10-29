@@ -2,9 +2,9 @@
 
 - **Issue**: [`#1`](https://github.com/ridhomujizat/lana-harness/issues/1)
 - **Requirements**: [requirements.md](requirements.md)
-- **Revisi requirements**: 4
+- **Revisi requirements**: 5
 - **Status requirements**: Approved
-- **Revisi contract**: 1
+- **Revisi contract**: 2
 - **Berlaku untuk**: CLI (subcommand, flag, env, exit code, stdout/stderr, format JSON, tombol, slash command, file yang dibuat)
 - **Status**: Approved
 
@@ -32,7 +32,7 @@ File ini menetapkan bentuk persis antarmuka terminal. Perilaku dimiliki oleh `re
 | ID operasi | Jenis | Perintah | Requirements | Acceptance criteria |
 |---|---|---|---|---|
 | `API-CLI-001` | CLI | Flag global | `REQ-CONF-001`, `REQ-EXIT-001` | `AC-CONF-003`, `AC-EXIT-001` |
-| `API-CLI-002` | CLI | `lana chat` | `REQ-CHAT-001`, `REQ-CHAT-002`, `REQ-CHAT-010`, `REQ-CHAT-011`, `REQ-SESS-001`, `REQ-APPR-002` | `AC-CHAT-001` sampai `AC-CHAT-005`, `AC-CHAT-022`, `AC-CHAT-023`, `AC-SESS-001` sampai `AC-SESS-005`, `AC-APPR-006` |
+| `API-CLI-002` | CLI | `lana chat` | `REQ-CHAT-001`, `REQ-CHAT-002`, `REQ-CHAT-010`, `REQ-CHAT-011`, `REQ-SESS-001`, `REQ-SESS-002`, `REQ-APPR-002` | `AC-CHAT-001` sampai `AC-CHAT-005`, `AC-CHAT-022`, `AC-CHAT-023`, `AC-SESS-001` sampai `AC-SESS-007`, `AC-APPR-006` |
 | `API-CLI-003` | TUI | Layout dan status bar | `REQ-CHAT-003`, `REQ-CHAT-004`, `REQ-CHAT-005` | `AC-CHAT-006` sampai `AC-CHAT-011`, `AC-CHAT-024` |
 | `API-CLI-004` | TUI | Tombol | `REQ-CHAT-006`, `REQ-CHAT-007`, `REQ-CHAT-008`, `REQ-CHAT-009` | `AC-CHAT-012` sampai `AC-CHAT-021` |
 | `API-CLI-005` | TUI | Prompt approval | `REQ-APPR-001` | `AC-APPR-001` sampai `AC-APPR-005` |
@@ -117,6 +117,7 @@ Aturan:
 | ID tidak ditemukan | 2 | `error: session tidak ditemukan: <id>` |
 | Prefix ID ambigu | 2 | `error: prefix <id> cocok dengan beberapa session:` lalu satu ID per baris |
 | Session dari cwd lain | 2 | `error: session <id> milik direktori <cwd asal>; jalankan dari direktori itu` |
+| Session sedang dibuka proses lain | 2 | `error: session <id> sedang dipakai proses <pid>` |
 | Config tidak valid | 2 | Sama dengan `API-CLI-009` |
 | Env API key provider tidak ada | 3 | `error: env <NAMA_ENV> belum diisi untuk provider <provider>` |
 
@@ -459,7 +460,7 @@ lana config edit
 | Operasi | Requirements | Komponen design | Verifikasi |
 |---|---|---|---|
 | `API-CLI-001` | `REQ-CONF-001`, `REQ-EXIT-001` | Ditetapkan di design | Test CLI (`assert_cmd`) |
-| `API-CLI-002` | `REQ-CHAT-001`, `REQ-CHAT-002`, `REQ-CHAT-010`, `REQ-CHAT-011`, `REQ-SESS-001`, `REQ-APPR-002` | Ditetapkan di design | Test CLI dan test terminal semu |
+| `API-CLI-002` | `REQ-CHAT-001`, `REQ-CHAT-002`, `REQ-CHAT-010`, `REQ-CHAT-011`, `REQ-SESS-001`, `REQ-SESS-002`, `REQ-APPR-002` | Ditetapkan di design | Test CLI dan test terminal semu |
 | `API-CLI-003` | `REQ-CHAT-003`, `REQ-CHAT-004`, `REQ-CHAT-005` | Ditetapkan di design | Snapshot render |
 | `API-CLI-004` | `REQ-CHAT-006` sampai `REQ-CHAT-009` | Ditetapkan di design | Test input handler |
 | `API-CLI-005` | `REQ-APPR-001` | Ditetapkan di design | Test penjawab approval |
@@ -498,4 +499,4 @@ info, ikon status, `//` untuk mengirim teks diawali `/`, label `(antre)`, alias 
 - [x] Tidak ada perilaku yang hanya ada di file ini.
 - [x] Blocking Contract Questions bernilai `None`.
 - **Di-approve oleh**: Ridho
-- **Di-approve pada**: 2026-10-29 (revisi 1)
+- **Di-approve pada**: 2026-10-29 (revisi 1; revisi 2 menambah error lock session dari `DQ-002`)

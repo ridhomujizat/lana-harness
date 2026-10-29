@@ -4,7 +4,7 @@ Dokumen ini menjelaskan arsitektur target `lana-harness`: modul, service, dan ho
 turn dan step; session event log; multi-agent dan subagent; permission; storage; ekstensi;
 scheduler; dan semua pintu masuk (channel, HTTP, ACP, SDK).
 
-> **Status**: rencana. Kode belum ada. Isi dokumen ini mengikuti ADR berstatus `Proposed`. Saat
+> **Status**: rencana. Kode belum ada. Isi dokumen ini mengikuti ADR berstatus `Accepted`. Saat
 > implementasi berbeda dari rencana, perbarui dokumen ini dan ADR terkait dalam satu perubahan.
 
 Keputusan arsitektur dicatat di [`docs/adr/`](adr/). Diagram detail ada di [`docs/diagram/`](diagram/).
@@ -160,7 +160,6 @@ Feature flag Cargo untuk modul besar:
 | `telegram` | Channel Telegram | ya |
 | `web` | Dashboard embedded | ya |
 | `acp` | Server ACP | ya |
-| `tui` | TUI penuh dengan `ratatui` | tidak |
 | `whatsapp` | Channel WhatsApp Cloud API | tidak |
 
 ## 5. Turn dan step
