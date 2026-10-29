@@ -44,6 +44,7 @@ func Boot(ctx context.Context, in BootInput) (*Context, error) {
 		return nil, err
 	}
 	b := newBuilder(in.Config)
+	b.secrets = in.Secrets
 	b.hooks.ApprovalRequest.SetDefault(func(context.Context, ApprovalRequest) (ApprovalOutcome, error) {
 		return OutcomeUnavailable, nil
 	})

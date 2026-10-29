@@ -304,7 +304,7 @@ flowchart LR
     - PR/commit: commit T-009/T-010 spec #3
     - Deviasi: Sama dengan T-009; tidak ada perilaku yang dihilangkan.
 
-- [ ] `T-011` Implementasi modul `llm`: `LLMRegistry`, cek kind, dan cek secret saat boot
+- [x] `T-011` Implementasi modul `llm`: `LLMRegistry`, cek kind, dan cek secret saat boot
   - Issue/PR: `—`
   - Bergantung pada: `T-009`
   - Requirements: `REQ-PROV-001` (sebagian)
@@ -317,11 +317,11 @@ flowchart LR
   - Verifikasi:
     - `nix develop -c go test -race ./providers/openai/...`
   - Bukti penyelesaian:
-    - Status: Pending
-    - Perintah/test: —
-    - Hasil: —
-    - PR/commit: —
-    - Deviasi: Tidak ada
+    - Status: Completed
+    - Perintah/test: `XDG_CACHE_HOME=$PWD/.nix-cache GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache GOPATH=$PWD/.gopath nix develop -c sh -c 'go test -race ./providers/openai/... ./core/...'`
+    - Hasil: `ok providers/openai`, `ok core`; exit 0. Kind `anthropic` ditolak dengan nama provider; `missing_secret` menyebut env dan provider; registry `openai` terpasang di Context.
+    - PR/commit: commit T-011 spec #3
+    - Deviasi: `core.Builder.Secrets()` ditambahkan sebagai akses internal (di luar contract publik) agar modul dapat memeriksa env tanpa meng-import config.
 
 - [ ] `T-012` Implementasi `core.DeriveMessages` (subset), `Events`, dan pemasangan hook
   - Issue/PR: `—`
