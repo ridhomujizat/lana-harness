@@ -6,11 +6,11 @@
 .mcp-detail-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-section);
   width: 100%;
   max-width: 76rem;
   margin: 0 auto;
-  padding: 32px;
+  padding: var(--space-page);
 }
 
 /* List header, toolbar, and table */
@@ -25,7 +25,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 42px;
+  min-height: var(--control-height);
   padding: 0 10px 0 12px;
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-md);
@@ -58,8 +58,8 @@
 .mcp-live {
   margin: 0;
   color: var(--text-success-primary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-live.is-error {
@@ -137,9 +137,9 @@
   display: inline;
   align-self: flex-start;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   text-decoration: none;
 }
 
@@ -153,7 +153,7 @@
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -195,15 +195,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 12px var(--space-compact);
   border-top: 1px solid var(--border-secondary);
 }
 
 .mcp-pagination-text {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-pagination-actions {
@@ -212,7 +212,7 @@
 }
 
 .mcp-pagination-actions .button-ui {
-  min-height: 38px;
+  min-height: var(--control-height);
 }
 
 /* Detail header and two-column body */
@@ -221,14 +221,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-compact);
 }
 
 .mcp-detail-identity {
   display: flex;
   flex: 1 1 420px;
   align-items: center;
-  gap: 16px;
+  gap: var(--space-compact);
   min-width: 0;
 }
 
@@ -261,17 +261,17 @@
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: var(--font-size-title);
   font-weight: 600;
-  line-height: 32px;
+  line-height: var(--line-height-title);
 }
 
 .mcp-detail-meta {
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--text-tertiary);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 
 .mcp-detail-actions {
@@ -312,20 +312,20 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: start;
-  gap: 48px;
+  gap: 40px;
 }
 
 .mcp-detail-side {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-section);
   min-width: 0;
 }
 
 .mcp-connection {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-compact);
   min-width: 0;
 }
 
@@ -358,8 +358,8 @@
 .mcp-section-meta {
   margin-left: auto;
   color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
 }
 
 /* Form controls shared by the detail page and the add dialog */
@@ -373,22 +373,22 @@
 
 .mcp-field-label {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .mcp-field input,
 .mcp-field textarea {
   width: 100%;
-  min-height: 42px;
-  padding: 10px 14px;
+  min-height: var(--control-height);
+  padding: 7px 12px;
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-md);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
 }
 
@@ -404,13 +404,13 @@
 
 .mcp-mono-input {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 14px;
+  font-size: var(--font-size-body);
 }
 
 .mcp-command-fields {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-compact);
   min-width: 0;
 }
 
@@ -435,9 +435,9 @@
   padding: 6px 12px;
   border-radius: var(--radius-sm);
   color: var(--text-quaternary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   text-align: center;
   cursor: pointer;
 }
@@ -470,8 +470,8 @@
   margin: 0;
   padding: 9px 12px;
   color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-key-row {
@@ -488,14 +488,14 @@
 .mcp-key-row input {
   width: 100%;
   min-width: 0;
-  min-height: 38px;
-  padding: 9px 12px;
+  min-height: var(--control-height);
+  padding: 7px 12px;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--text-primary);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   box-shadow: none;
 }
 
@@ -545,7 +545,7 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 38px;
+  min-height: var(--control-height);
   padding: 9px 12px;
   border: 0;
   border-radius: 0;
@@ -576,14 +576,14 @@
 .mcp-dialog-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .mcp-dialog-subtitle {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-test-row {
@@ -594,7 +594,7 @@
 }
 
 .mcp-test-row .button-ui {
-  min-height: 38px;
+  min-height: var(--control-height);
 }
 
 .mcp-test-line {
@@ -602,8 +602,8 @@
   min-height: 0;
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-test-line.is-testing,
@@ -635,7 +635,7 @@
   justify-content: space-between;
   gap: 12px;
   margin-top: 4px;
-  padding-top: 16px;
+  padding-top: var(--space-compact);
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -643,8 +643,8 @@
   flex: 1 1 14rem;
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-dialog-footer .dialog-actions {
@@ -664,8 +664,8 @@
   margin: 0;
   padding: 12px;
   color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-agent-row {
@@ -698,8 +698,8 @@
 .mcp-agent-model {
   overflow-wrap: anywhere;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-icon-button {
@@ -729,7 +729,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 44px;
+  min-height: var(--control-height-lg);
   padding: 8px 12px;
   border: 0;
   border-radius: 0;
@@ -790,8 +790,10 @@
 }
 
 .mcp-agent-picker .button-ui {
-  min-height: 32px;
-  padding: 4px 12px;
+  min-height: var(--control-height-sm);
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 /* Tools reported by the running client */
@@ -821,19 +823,19 @@
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .mcp-tool-description {
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-tool-more {
   display: block;
   width: 100%;
-  min-height: 38px;
+  min-height: var(--control-height);
   padding: 9px 12px;
   border: 0;
   border-top: 1px solid var(--border-secondary);
@@ -856,29 +858,29 @@
   margin: 0;
   padding: 12px;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .mcp-tool-hint {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 @media (max-width: 64rem) {
   .mcp-detail-grid {
     grid-template-columns: 1fr;
-    gap: 32px;
+    gap: var(--space-page);
   }
 }
 
 @media (max-width: 60rem) {
   .mcp-page,
   .mcp-detail-page {
-    gap: 20px;
-    padding: 24px 16px;
+    gap: var(--space-card);
+    padding: var(--space-section) var(--space-compact);
   }
 
   .mcp-detail-actions {
@@ -889,7 +891,7 @@
 @media (max-width: 40rem) {
   .mcp-page,
   .mcp-detail-page {
-    padding: 16px 12px 32px;
+    padding: var(--space-compact) 12px var(--space-page);
   }
 
   .mcp-page .agents-toolbar {

@@ -6,9 +6,9 @@
 .skills-editor-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-section);
   max-width: 76rem;
-  padding: 32px;
+  padding: var(--space-page);
 }
 
 /* List toolbar */
@@ -65,7 +65,7 @@
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 32px;
+  padding: var(--space-page);
   border: 1px dashed var(--border-primary);
   border-radius: var(--radius-xl);
   background: var(--bg-primary);
@@ -137,8 +137,8 @@
 }
 
 .skills-delete {
-  min-height: 30px;
-  padding: 4px 8px;
+  min-height: var(--control-height-sm);
+  padding: 6px 12px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -174,7 +174,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 12px var(--space-compact);
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -182,8 +182,8 @@
 .skills-pagination-page {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
 }
 
 .skills-pagination-page {
@@ -212,7 +212,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-compact);
 }
 
 .skills-editor-heading {
@@ -231,16 +231,16 @@
   overflow-wrap: anywhere;
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 24px;
+  font-size: var(--font-size-title);
   font-weight: 700;
-  line-height: 32px;
+  line-height: var(--line-height-title);
 }
 
 .skills-editor-subtitle {
   margin: 4px 0 0;
   color: var(--text-tertiary);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 
 .skills-editor-actions {
@@ -278,14 +278,14 @@
 .skills-editor-body {
   display: grid;
   grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
-  gap: 32px;
+  gap: var(--space-page);
   align-items: start;
 }
 
 .skills-editor-details {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-card);
   min-width: 0;
 }
 
@@ -316,8 +316,8 @@
 .skills-counter {
   flex: 0 0 auto;
   color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
   white-space: nowrap;
 }
 
@@ -341,8 +341,8 @@
 
 .skills-agents-count {
   color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
 }
 
 .skills-agent-list {
@@ -356,7 +356,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 44px;
+  min-height: var(--control-height-lg);
   padding: 8px 12px;
   border-bottom: 1px solid var(--border-secondary);
 }
@@ -372,9 +372,9 @@
 .skills-agent-name {
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -382,8 +382,8 @@
 .skills-agent-model {
   overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -420,7 +420,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 44px;
+  min-height: var(--control-height-lg);
   padding: 8px 12px;
   border: 0;
   background: transparent;
@@ -456,7 +456,7 @@
 .skills-folder {
   color: var(--text-tertiary);
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -487,14 +487,14 @@
 .skills-instructions {
   width: 100%;
   min-height: 560px;
-  padding: 14px 16px;
+  padding: 12px 12px;
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-xl);
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   resize: vertical;
 }
 
@@ -513,14 +513,14 @@
 .skills-dialog-subtitle {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .skills-dialog-search {
-  min-height: 46px;
+  min-height: var(--control-height);
   margin: 12px 0;
-  padding: 8px 12px;
+  padding: 7px 12px;
 }
 
 .skills-add-list {
@@ -585,9 +585,9 @@
 
 .skills-add-name {
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .skills-add-option.is-added .skills-add-name,
@@ -604,16 +604,16 @@
 
 .skills-add-meta {
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .skills-add-state {
   flex: 0 0 auto;
   color: var(--text-quaternary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .skills-add-team .agent-avatar-group {
@@ -623,19 +623,19 @@
 .skills-add-empty {
   margin: 12px 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 @media (max-width: 920px) {
   .skills-page,
   .skills-editor-page {
-    padding: 24px 16px 32px;
+    padding: var(--space-section) var(--space-compact) var(--space-page);
   }
 
   .skills-editor-body {
     grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
+    gap: var(--space-section);
   }
 }
 

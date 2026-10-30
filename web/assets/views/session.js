@@ -2,6 +2,7 @@ import {
   html,
   useState,
   useEffect,
+  useLayoutEffect,
   useRef,
   useMemo,
   useCallback,
@@ -28,6 +29,17 @@ const POLICY_OPTIONS = [
   { value: "trust", label: "Trust", hint: "Run tools without asking." },
   { value: "never", label: "Never", hint: "Never ask; block unapproved tools." },
 ];
+
+const COMPOSER_LINE_HEIGHT = 20;
+const COMPOSER_MIN_ROWS = 2;
+const COMPOSER_MAX_ROWS = 8;
+
+/* Count the textarea's rendered lines and clamp the rows attribute to 2..8.
+   The composer uses a 20px line height, so the content height gives the count. */
+function composerRowCount(node) {
+  const lines = Math.round(node.scrollHeight / COMPOSER_LINE_HEIGHT);
+  return Math.min(COMPOSER_MAX_ROWS, Math.max(COMPOSER_MIN_ROWS, lines));
+}
 
 function Icon({ name, className = "icon-20" }) {
   return html`<img
@@ -368,9 +380,24 @@ function Composer({
   const [menu, setMenu] = useState("");
   const [trustOpen, setTrustOpen] = useState(false);
   const [trustBusy, setTrustBusy] = useState(false);
+  const [rows, setRows] = useState(COMPOSER_MIN_ROWS);
   const plusRef = useRef(null);
   const modelRef = useRef(null);
   const policyRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const node = inputRef.current;
+    if (!node) {
+      return;
+    }
+    /* Collapse to one row first so scrollHeight reports the content height even
+       when the previous draft filled eight rows. */
+    node.rows = 1;
+    const next = composerRowCount(node);
+    node.rows = next;
+    setRows(next);
+  }, [draft]);
 
   const agentEntry = agents.find((entry) => entry.name === agent) || null;
   const agentModel = agentEntry ? agentEntry.model : "";
@@ -454,8 +481,9 @@ function Composer({
       : null}
     <div class="composer-box">
       <textarea
+        ref=${inputRef}
         class="composer-input"
-        rows="1"
+        rows=${rows}
         aria-label=${"Message " + messageTarget}
         aria-describedby=${questionOpen ? "composer-question-note" : undefined}
         placeholder=${questionOpen ? "Answer the question above" : "Message " + messageTarget + "…"}

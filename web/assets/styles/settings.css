@@ -3,17 +3,17 @@
 .settings-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-section);
   width: 100%;
   max-width: 76rem;
   margin: 0 auto;
-  padding: 32px;
+  padding: var(--space-page);
 }
 
 .settings-head {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-section);
 }
 
 .settings-header {
@@ -25,21 +25,21 @@
 .settings-title {
   margin: 0;
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: var(--font-size-title);
   font-weight: 600;
-  line-height: 32px;
+  line-height: var(--line-height-title);
 }
 
 .settings-subtitle {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 
 .settings-tabs {
   display: flex;
-  gap: 20px;
+  gap: var(--space-card);
   overflow-x: auto;
   border-bottom: 1px solid var(--border-secondary);
 }
@@ -69,7 +69,7 @@
 .settings-panel {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-section);
   min-width: 0;
 }
 
@@ -77,8 +77,8 @@
   min-height: 20px;
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-status:empty {
@@ -88,25 +88,25 @@
 .settings-row {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  gap: 32px;
-  padding: 20px 0;
+  gap: var(--space-page);
+  padding: var(--space-card) 0;
   border-bottom: 1px solid var(--border-secondary);
 }
 
 .settings-row-label h2 {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .settings-row-label p {
   max-width: 260px;
   margin: 4px 0 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-row-controls {
@@ -121,8 +121,8 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
+  gap: var(--space-compact);
+  padding: var(--space-compact);
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-xl);
   background: var(--bg-primary);
@@ -153,7 +153,7 @@
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -189,7 +189,7 @@
   margin: 8px 0 0;
   color: var(--text-warning-primary);
   font-size: 13px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .settings-address-form {
@@ -222,15 +222,15 @@
   gap: 6px;
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-web-saved {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -249,8 +249,8 @@
 .settings-browser-row p {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-appearance-tiles {
@@ -271,7 +271,7 @@
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -280,7 +280,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 12px var(--space-compact);
   border-radius: var(--radius-xl);
   background: var(--bg-warning-primary);
   color: var(--text-warning-primary);
@@ -304,7 +304,7 @@
 
 .settings-search {
   flex: 0 1 320px;
-  min-height: 42px;
+  min-height: var(--control-height);
 }
 
 .settings-toolbar-spacer {
@@ -327,23 +327,25 @@
 }
 
 .settings-table th {
+  height: 36px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-secondary);
   background: var(--bg-secondary);
   color: var(--text-quaternary);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
-  line-height: 18px;
+  line-height: var(--line-height-xs);
   text-align: left;
   white-space: nowrap;
 }
 
 .settings-table td {
-  padding: 14px 12px;
+  height: 44px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border-secondary);
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
   text-align: left;
   vertical-align: middle;
   overflow-wrap: anywhere;
@@ -431,9 +433,9 @@
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .settings-name-text {
@@ -445,9 +447,9 @@
 
 .settings-name {
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -455,7 +457,7 @@
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -470,7 +472,7 @@
   color: var(--text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -480,8 +482,8 @@
   align-items: center;
   gap: 6px;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-dot {
@@ -516,7 +518,7 @@
 .settings-used-paths {
   color: var(--text-tertiary);
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -524,12 +526,13 @@
   color: var(--text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
+  line-height: var(--line-height-sm);
 }
 
 .settings-muted {
   color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-row-action {
@@ -544,8 +547,10 @@
 }
 
 .settings-actions .button-ui {
-  min-height: 32px;
-  padding: 6px 8px;
+  min-height: var(--control-height-sm);
+  padding: 6px 12px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-secret-name {
@@ -566,7 +571,7 @@
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -581,7 +586,7 @@
   color: var(--text-quaternary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   letter-spacing: 1px;
 }
 
@@ -595,7 +600,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 12px var(--space-compact);
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-xl);
   background: var(--bg-secondary);
@@ -604,8 +609,8 @@
 .settings-write-note p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-empty {
@@ -613,7 +618,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  padding: 32px;
+  padding: var(--space-page);
   border: 1px dashed var(--border-primary);
   border-radius: var(--radius-xl);
   background: var(--bg-primary);
@@ -637,13 +642,14 @@
 .settings-footer-note {
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-footer-note code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
+  line-height: var(--line-height-sm);
 }
 
 .settings-footer-note a {
@@ -678,7 +684,7 @@
   margin: 0;
   color: var(--text-secondary);
   font-size: 13px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
   overflow-wrap: anywhere;
 }
 
@@ -688,7 +694,8 @@
 
 .settings-config-note {
   color: var(--text-tertiary);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-editor {
@@ -710,22 +717,22 @@
 .settings-gutter {
   flex: 0 0 52px;
   width: 52px;
-  padding: 14px 10px 14px 10px;
+  padding: 12px 10px 12px 10px;
   overflow: hidden;
   border-right: 1px solid var(--border-secondary);
   background: var(--bg-secondary);
   color: var(--text-quaternary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-body);
   text-align: right;
   user-select: none;
 }
 
 .settings-gutter-line {
   display: block;
-  height: 20px;
-  line-height: 20px;
+  height: var(--line-height-body);
+  line-height: var(--line-height-body);
 }
 
 .settings-editor-input {
@@ -733,14 +740,14 @@
   width: 100%;
   min-width: 0;
   height: 100%;
-  padding: 14px 16px;
+  padding: 12px 12px;
   border: 0;
   border-radius: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   white-space: pre;
   resize: none;
   tab-size: 2;
@@ -757,7 +764,7 @@
 .settings-dialog-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .settings-dialog-form .error-box {
@@ -768,7 +775,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 14px;
+  padding-top: 12px;
   border-top: 1px solid var(--border-secondary);
 }
 
@@ -788,8 +795,8 @@
   min-height: 20px;
   margin: 0;
   color: var(--text-tertiary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-test-result.is-ok {
@@ -876,8 +883,8 @@
 .settings-secret-target {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .settings-secret-target code,
@@ -888,15 +895,15 @@
 
 .settings-audit-time {
   color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-sm);
   white-space: nowrap;
 }
 
 .settings-audit-keys {
   color: var(--text-tertiary);
   font-size: 12px;
-  line-height: 20px;
+  line-height: var(--line-height-sm);
 }
 
 .settings-audit-keys code {
@@ -905,14 +912,14 @@
 
 @media (max-width: 60rem) {
   .settings-page {
-    gap: 20px;
-    padding: 24px 16px;
+    gap: var(--space-card);
+    padding: var(--space-section) var(--space-compact);
   }
 
   .settings-row {
     grid-template-columns: 1fr;
     gap: 12px;
-    padding: 16px 0;
+    padding: var(--space-compact) 0;
   }
 
   .settings-row-label p {
@@ -934,7 +941,7 @@
 
 @media (max-width: 40rem) {
   .settings-page {
-    padding: 16px 12px 32px;
+    padding: var(--space-compact) 12px var(--space-page);
   }
 
   .settings-tabs {

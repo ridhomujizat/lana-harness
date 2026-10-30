@@ -5,7 +5,7 @@
 
 .md {
   color: var(--text-primary);
-  line-height: 1.55;
+  line-height: 20px;
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -33,19 +33,19 @@
 }
 
 .md h1 {
-  font-size: 20px;
-}
-
-.md h2 {
   font-size: 18px;
 }
 
+.md h2 {
+  font-size: var(--font-size-section);
+}
+
 .md h3 {
-  font-size: 17px;
+  font-size: 15px;
 }
 
 .md h4 {
-  font-size: 16px;
+  font-size: var(--font-size-body);
 }
 
 .md ul,
@@ -157,7 +157,7 @@
 }
 
 .md hr {
-  margin: 16px 0;
+  margin: var(--space-compact) 0;
   border: 0;
   border-top: 1px solid var(--border-secondary);
 }
@@ -170,8 +170,8 @@
 .md-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
 }
 
 .md-table th,

@@ -236,26 +236,23 @@ function SessionItem({ session, selected, tabIndex }) {
       data-session-row
     >
       <span class="session-item-top">
-        ${showDot
-          ? html`<span
-              class=${"session-dot status-" + status}
-              aria-hidden="true"
-            ></span>`
-          : null}
-        <span class="session-item-title">${title}</span>
+        <span class="session-item-meta">
+          ${showDot
+            ? html`<span
+                class=${"session-dot status-" + status}
+                aria-hidden="true"
+              ></span>`
+            : null}
+          <span class="session-item-agent">${agent}</span>
+          <span class="session-item-channel">${channelLabel(channel)}</span>
+          ${holder
+            ? html`<span class="session-item-holder">${holder}</span>`
+            : null}
+        </span>
         <span class="session-item-time">${relativeTime(session.updated_at)}</span>
       </span>
+      <span class="session-item-title">${title}</span>
       <span class="session-item-preview">${preview}</span>
-      <span class="session-item-meta">
-        <span class=${"badge-ui" + (channel === "telegram" ? " badge-ui-brand" : "")}>
-          <span class="badge-ui-dot" aria-hidden="true"></span>
-          ${channelLabel(channel)}
-        </span>
-        <span class="session-item-agent">${"· " + agent}</span>
-        ${holder
-          ? html`<span class="session-item-holder">${holder}</span>`
-          : null}
-      </span>
     </a>
   </li>`;
 }
