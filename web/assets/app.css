@@ -4214,3 +4214,290 @@ pre.json {
     grid-template-columns: 1fr;
   }
 }
+
+/* Telegram connect wizard: three steps, the Connected summary, Advanced, and
+   the seen-chat list. Tokens come from /assets/tokens.css. */
+.channel-setup-steps {
+  counter-reset: channel-step;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-compact);
+  margin: 0 0 var(--space-section);
+  padding: 0;
+  list-style: none;
+}
+
+.channel-setup-step {
+  position: relative;
+  padding: var(--space-card) var(--space-card) var(--space-card)
+    calc(var(--space-card) + 2.5rem);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+}
+
+.channel-setup-step::before {
+  position: absolute;
+  top: var(--space-card);
+  left: var(--space-card);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand-secondary);
+  color: var(--text-brand-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1;
+  counter-increment: channel-step;
+  content: counter(channel-step);
+}
+
+.channel-step-title {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  line-height: var(--line-height-section);
+}
+
+.channel-step-help {
+  max-width: 60ch;
+  margin: 0 0 var(--spacing-sm);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+}
+
+.channel-step-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  max-width: 32rem;
+  margin-top: var(--spacing-md);
+}
+
+.channel-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.channel-step-status {
+  min-height: var(--line-height-sm);
+  margin: var(--spacing-sm) 0 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+}
+
+.channel-step-error {
+  margin: var(--spacing-sm) 0 0;
+  color: var(--text-error-primary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+}
+
+.channel-step-alert .error-box {
+  margin: var(--spacing-sm) 0 0;
+}
+
+.channel-step-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--bg-success-primary);
+}
+
+.channel-step-done-text {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: var(--line-height-sm);
+}
+
+.channel-step-link {
+  color: var(--text-brand-tertiary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.channel-step-link:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.channel-step-fallback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  background: var(--bg-warning-primary);
+}
+
+.channel-step-fallback-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: var(--line-height-sm);
+}
+
+.channel-seen-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+}
+
+.channel-agent-select {
+  max-width: 20rem;
+}
+
+.channel-table.channel-seen-table {
+  min-width: 30rem;
+}
+
+.channel-seen-table .channel-table-actions {
+  width: auto;
+  white-space: nowrap;
+}
+
+.channel-connected-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin: 0 0 var(--space-section);
+  padding: var(--space-card);
+  border: 1px solid var(--border-secondary);
+  border-left: 3px solid var(--fg-success-primary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+}
+
+.channel-connected-title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  line-height: var(--line-height-section);
+}
+
+.channel-connected-name {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  line-height: var(--line-height-body);
+}
+
+.channel-connected-text {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+}
+
+.channel-connected-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+}
+
+.channel-advanced {
+  margin: 0 0 var(--space-section);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+}
+
+.channel-advanced-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--space-card);
+  color: var(--text-secondary);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  line-height: var(--line-height-body);
+  list-style: none;
+  cursor: pointer;
+}
+
+.channel-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.channel-advanced-summary::before {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid currentColor;
+  content: "";
+  transition: transform 150ms ease;
+}
+
+.channel-advanced[open] .channel-advanced-summary::before {
+  transform: rotate(90deg);
+}
+
+.channel-advanced-summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-lg);
+}
+
+.channel-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  padding: 0 var(--space-card) var(--space-card);
+  border-top: 1px solid var(--border-secondary);
+}
+
+.channel-advanced-field {
+  max-width: 32rem;
+  margin-top: var(--space-card);
+}
+
+@media (max-width: 40rem) {
+  .channel-setup-step {
+    padding: var(--space-compact);
+  }
+
+  .channel-setup-step::before {
+    position: static;
+    display: inline-flex;
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .channel-step-done,
+  .channel-step-fallback {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-advanced-summary::before {
+    transition: none;
+  }
+}

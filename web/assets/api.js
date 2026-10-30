@@ -204,6 +204,26 @@ export const api = {
     });
   },
 
+  /* API-TGC-001: the token travels only in this request body. */
+  putTelegramToken(token) {
+    return request("PUT", "/v1/channels/telegram/token", { token });
+  },
+
+  /* API-TGC-002: read-only getUpdates; no offset confirmation. */
+  discoverTelegram() {
+    return request("POST", "/v1/channels/telegram/discover");
+  },
+
+  /* API-TGC-003: route the seen chat and turn the channel on. */
+  connectTelegram(version, chat) {
+    return request("POST", "/v1/channels/telegram/connect", {
+      version,
+      chat_id: chat.chat_id,
+      sender_id: chat.sender_id,
+      agent: chat.agent,
+    });
+  },
+
   listSecrets() {
     return request("GET", "/v1/secrets");
   },

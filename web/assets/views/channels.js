@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "/assets/vendor/preact-htm.js";
-import { errorMessage, ApiError } from "/assets/api.js";
+import { api, errorMessage, ApiError } from "/assets/api.js";
 import {
   Dialog,
   ErrorNotice,
@@ -25,6 +25,12 @@ import {
   saveTelegram,
   saveTelegramRoute,
 } from "/assets/api/channels.js";
+import {
+  getDaemon,
+  restartDaemon,
+  waitForDaemonRestart,
+} from "/assets/api/settings.js";
+import { SettingsRestartDialog } from "/assets/views/settings-pages.js";
 
 /* REQ-WEB-052: the channels list and the Telegram detail. REQ-WEB-053: the
    add-chat dialog with the chats that wrote to the bot without a route.
@@ -34,6 +40,23 @@ import {
 const RESTART_NOTE = "Saved. Restart the daemon for the change to apply.";
 const DEFAULT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN";
 const TOKEN_ENV_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const BOT_TOKEN_RE = /^[0-9]{5,}:[A-Za-z0-9_-]{30,}$/;
+const DISCOVER_POLL_MS = 3000;
+const DISCOVER_WINDOW_MS = 120000;
+const CHANNEL_POLL_MS = 1000;
+const CHANNEL_POLL_LIMIT_MS = 30000;
+
+const TELEGRAM_CONFLICT_TEXT =
+  "Telegram is already connected elsewhere. Stop the other bot program or remove its webhook, then try again.";
+const STALE_VERSION_TEXT =
+  "Settings changed in another tab. Check them and try again.";
+const BOT_TOKEN_MISPLACED_TEXT =
+  "This looks like the bot token itself. Paste it in Bot token above instead.";
+const TOKEN_ENV_INVALID_TEXT =
+  "The token variable must use letters, digits, and underscores, and must not start with a digit.";
+const TOKEN_EMPTY_TEXT = "Paste the token from @BotFather first.";
+const CONFIG_VERSION_MISSING_TEXT =
+  "The config version is unavailable. Reload the page and try again.";
 
 const COMING_SOON = [
   {
@@ -161,6 +184,43 @@ function parseChatId(value) {
     return null;
   }
   return number;
+}
+
+/* "not_configured" and "off" mean the channel cannot answer yet. */
+function telegramIsOn(status) {
+  return status !== "off" && status !== "not_configured";
+}
+
+function connectedText(bot, agent) {
+  const name = bot ? "@" + bot : "your bot";
+  if (agent) {
+    return "Telegram is on. Send a message to " + name + " to talk to " + agent + ".";
+  }
+  return "Telegram is on. Send a message to " + name + ".";
+}
+
+function routedAgent(telegram, chatId) {
+  if (!telegram || !Array.isArray(telegram.chats)) {
+    return "";
+  }
+  if (chatId !== null && chatId !== undefined) {
+    const match = telegram.chats.find(
+      (chat) => chat && Number(chat.chat_id) === Number(chatId)
+    );
+    if (match && match.agent) {
+      return match.agent;
+    }
+  }
+  const routed = telegram.chats.find((chat) => chat && chat.agent);
+  return routed ? routed.agent : "";
+}
+
+function discoverEmptyText(bot) {
+  return (
+    "No messages yet. Send any message to " +
+    (bot ? "@" + bot : "your bot") +
+    ", then try again."
+  );
 }
 
 export function ChannelsPage() {
@@ -356,6 +416,41 @@ export function TelegramPage() {
   const [ownerDraft, setOwnerDraft] = useState("");
   const [ownerError, setOwnerError] = useState("");
 
+  /* Step 1: the token field is local state and is cleared after a save. */
+  const [tokenInput, setTokenInput] = useState("");
+  const [savingToken, setSavingToken] = useState(false);
+  const [tokenError, setTokenError] = useState("");
+  const [tokenBot, setTokenBot] = useState("");
+  const [savedBotURL, setSavedBotURL] = useState("");
+  const [replaceToken, setReplaceToken] = useState(false);
+  const [tokenEnvError, setTokenEnvError] = useState("");
+
+  /* Step 2: seen chats and the 3 s re-check for up to 2 minutes. */
+  const [discoveredChats, setDiscoveredChats] = useState([]);
+  const [discoverPhase, setDiscoverPhase] = useState("idle");
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverError, setDiscoverError] = useState("");
+  const [discoverDetails, setDiscoverDetails] = useState([]);
+  const discoverTimerRef = useRef(null);
+  const discoverInFlightRef = useRef(false);
+  const discoverDeadlineRef = useRef(0);
+
+  /* Step 3: connect, restart, then poll the channel card. */
+  const [connectAgent, setConnectAgent] = useState("");
+  const [connectingChat, setConnectingChat] = useState(null);
+  const [connectStatus, setConnectStatus] = useState("");
+  const [connectError, setConnectError] = useState("");
+  const [connectDetails, setConnectDetails] = useState([]);
+  const [restartFallback, setRestartFallback] = useState(false);
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false);
+  const [lastConnectedAgent, setLastConnectedAgent] = useState("");
+  const [lastConnectedChatId, setLastConnectedChatId] = useState(null);
+  const [showSteps, setShowSteps] = useState(false);
+  const connectPollTimerRef = useRef(null);
+  const connectPollCancelRef = useRef(null);
+  const mountedRef = useRef(false);
+  const advancedRef = useRef(null);
+
   const load = useCallback(
     async (initial) => {
       if (initial) {
@@ -407,6 +502,23 @@ export function TelegramPage() {
     load(true);
   }, [load]);
 
+  /* Both timers must stop when the detail page unmounts. */
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (discoverTimerRef.current !== null) {
+        clearTimeout(discoverTimerRef.current);
+        discoverTimerRef.current = null;
+      }
+      if (connectPollCancelRef.current) {
+        const cancel = connectPollCancelRef.current;
+        connectPollCancelRef.current = null;
+        cancel();
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!telegram) {
       return;
@@ -423,11 +535,26 @@ export function TelegramPage() {
     setCheckResult(null);
   }, [telegram]);
 
+  useEffect(() => {
+    setConnectAgent((current) => {
+      if (current && agents.some((agent) => agent.name === current)) {
+        return current;
+      }
+      return agents.length > 0 ? agents[0].name : "";
+    });
+  }, [agents]);
+
   const owners = telegram && Array.isArray(telegram.owners) ? telegram.owners : [];
-  const chats = telegram && Array.isArray(telegram.chats) ? telegram.chats : [];  const ownerIds = owners
+  const chats = telegram && Array.isArray(telegram.chats) ? telegram.chats : [];
+  const ownerIds = owners
     .map((owner) => Number(owner.id))
     .filter((id) => Number.isFinite(id));
   const zeroChats = chats.length === 0;
+  const botUsername = (telegram && telegram.bot_username) || tokenBot;
+  const botURL = (telegram && telegram.bot_url) || savedBotURL;
+  const tokenDone = Boolean(telegram && telegram.token_present && botUsername);
+  const connected = Boolean(telegram && telegram.status === "connected");
+  const activeAgent = lastConnectedAgent || routedAgent(telegram, lastConnectedChatId);
 
   function writeErrorText(failure) {
     if (failure instanceof ApiError && failure.code === "stale_version") {
@@ -444,7 +571,7 @@ export function TelegramPage() {
     setSaveDetails([]);
     setNotice("");
     if (!version) {
-      setSaveError("The config version is unavailable. Reload the page and try again.");
+      setSaveError(CONFIG_VERSION_MISSING_TEXT);
       return false;
     }
     setSaving(true);
@@ -476,18 +603,30 @@ export function TelegramPage() {
   async function saveChanges(event) {
     event.preventDefault();
     setNotice("");
-    const token = tokenEnv.trim();
-    if (!TOKEN_ENV_RE.test(token)) {
-      setSaveError(
-        "The token variable must use letters, digits, and underscores, and must not start with a digit."
-      );
-      setSaveDetails([]);
+    setTokenEnvError("");
+    setSaveError("");
+    setSaveDetails([]);
+    const variable = tokenEnv.trim();
+    /* REQ-TGC-004: catch a pasted bot token before validation or any request. */
+    if (BOT_TOKEN_RE.test(variable)) {
+      if (advancedRef.current) {
+        advancedRef.current.open = true;
+      }
+      setTokenEnvError(BOT_TOKEN_MISPLACED_TEXT);
+      announce(BOT_TOKEN_MISPLACED_TEXT);
+      return;
+    }
+    if (!TOKEN_ENV_RE.test(variable)) {
+      if (advancedRef.current) {
+        advancedRef.current.open = true;
+      }
+      setTokenEnvError(TOKEN_ENV_INVALID_TEXT);
       return;
     }
     await putTelegram(
       {
         enabled,
-        token_env: token,
+        token_env: variable,
         owner_ids: ownerIds,
         api_base: apiBase.trim(),
       },
@@ -522,6 +661,344 @@ export function TelegramPage() {
     } finally {
       setChecking(false);
     }
+  }
+
+  async function saveToken() {
+    if (savingToken) {
+      return;
+    }
+    const token = tokenInput.trim();
+    if (!token) {
+      setTokenError(TOKEN_EMPTY_TEXT);
+      announce(TOKEN_EMPTY_TEXT);
+      return;
+    }
+    setSavingToken(true);
+    setTokenError("");
+    try {
+      /* API-TGC-001. The token stays in this request body only. */
+      const result = await api.putTelegramToken(token);
+      if (!mountedRef.current) {
+        return;
+      }
+      setTokenInput("");
+      setReplaceToken(false);
+      if (result && result.version) {
+        setVersion(result.version);
+      }
+      if (result && result.bot_username) {
+        setTokenBot(result.bot_username);
+        announce("Connected to @" + result.bot_username + ".");
+      }
+      if (result && result.bot_url) {
+        setSavedBotURL(result.bot_url);
+      }
+      stopDiscoverTimer();
+      setDiscoveredChats([]);
+      setDiscoverPhase("idle");
+      setDiscoverError("");
+      setDiscoverDetails([]);
+      await load(false);
+    } catch (failure) {
+      if (!mountedRef.current) {
+        return;
+      }
+      const message = errorMessage(failure);
+      setTokenError(message);
+      announce("Could not save the bot token. " + message);
+    } finally {
+      if (mountedRef.current) {
+        setSavingToken(false);
+      }
+    }
+  }
+
+  function stopDiscoverTimer() {
+    if (discoverTimerRef.current !== null) {
+      clearTimeout(discoverTimerRef.current);
+      discoverTimerRef.current = null;
+    }
+  }
+
+  function scheduleDiscover() {
+    stopDiscoverTimer();
+    const remaining = discoverDeadlineRef.current - Date.now();
+    if (remaining <= 0) {
+      return;
+    }
+    const delay = Math.min(DISCOVER_POLL_MS, remaining);
+    discoverTimerRef.current = setTimeout(() => {
+      discoverTimerRef.current = null;
+      if (!mountedRef.current) {
+        return;
+      }
+      /* Never stack a re-check on top of one that is still running. */
+      if (discoverInFlightRef.current) {
+        scheduleDiscover();
+        return;
+      }
+      runDiscover(false);
+    }, delay);
+  }
+
+  async function runDiscover(manual) {
+    if (discoverInFlightRef.current) {
+      return;
+    }
+    discoverInFlightRef.current = true;
+    setDiscovering(true);
+    if (manual) {
+      setDiscoverError("");
+      setDiscoverDetails([]);
+      setDiscoveredChats([]);
+      setDiscoverPhase("loading");
+    }
+    try {
+      /* API-TGC-002. It is read-only on Telegram. */
+      const result = await api.discoverTelegram();
+      if (!mountedRef.current) {
+        return;
+      }
+      const seen = Array.isArray(result && result.chats) ? result.chats : [];
+      if (result && result.bot_url) {
+        setSavedBotURL(result.bot_url);
+      }
+      if (seen.length > 0) {
+        stopDiscoverTimer();
+        setDiscoveredChats(seen);
+        setDiscoverPhase("found");
+        setDiscoverError("");
+        setDiscoverDetails([]);
+        announce("Chats found.");
+      } else {
+        setDiscoveredChats([]);
+        setDiscoverPhase("empty");
+        if (manual) {
+          announce(discoverEmptyText(botUsername));
+        }
+        scheduleDiscover();
+      }
+    } catch (failure) {
+      if (!mountedRef.current) {
+        return;
+      }
+      stopDiscoverTimer();
+      const message =
+        failure instanceof ApiError && failure.code === "telegram_conflict"
+          ? TELEGRAM_CONFLICT_TEXT
+          : errorMessage(failure);
+      setDiscoverPhase("error");
+      setDiscoverError(message);
+      setDiscoverDetails(failure instanceof ApiError ? failure.details : []);
+      announce("Could not find your chat. " + message);
+    } finally {
+      discoverInFlightRef.current = false;
+      if (mountedRef.current) {
+        setDiscovering(false);
+      }
+    }
+  }
+
+  function findChats() {
+    stopDiscoverTimer();
+    discoverDeadlineRef.current = Date.now() + DISCOVER_WINDOW_MS;
+    if (discoverInFlightRef.current) {
+      return;
+    }
+    runDiscover(true);
+  }
+
+  function stopConnectPoll() {
+    if (connectPollTimerRef.current !== null) {
+      clearTimeout(connectPollTimerRef.current);
+      connectPollTimerRef.current = null;
+    }
+  }
+
+  function pollChannelsUntilOn() {
+    return new Promise((resolve) => {
+      let finished = false;
+      const deadline = Date.now() + CHANNEL_POLL_LIMIT_MS;
+
+      function finish(result) {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        connectPollCancelRef.current = null;
+        stopConnectPoll();
+        resolve(result);
+      }
+
+      connectPollCancelRef.current = () => finish(false);
+
+      async function tick() {
+        if (finished || !mountedRef.current) {
+          finish(false);
+          return;
+        }
+        let on = false;
+        try {
+          const page = await listChannels();
+          if (finished || !mountedRef.current) {
+            return;
+          }
+          const card = page.channels.find(
+            (item) => item && item.name === "telegram"
+          );
+          on = Boolean(card) && telegramIsOn(card.status);
+        } catch (failure) {
+          if (failure instanceof ApiError && failure.status === 401) {
+            finish(false);
+            return;
+          }
+        }
+        if (on) {
+          finish(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          finish(false);
+          return;
+        }
+        connectPollTimerRef.current = setTimeout(tick, CHANNEL_POLL_MS);
+      }
+
+      tick();
+    });
+  }
+
+  async function finishConnected(agent) {
+    setConnectingChat((current) => (current === null ? -1 : current));
+    const on = await pollChannelsUntilOn();
+    if (!mountedRef.current) {
+      return;
+    }
+    if (!on) {
+      setConnectStatus("");
+      setRestartFallback(true);
+      setConnectingChat(null);
+      return;
+    }
+    const message = connectedText(botUsername, agent);
+    setConnectStatus(message);
+    setConnectError("");
+    setConnectDetails([]);
+    setRestartFallback(false);
+    setConnectingChat(null);
+    announce(message);
+    await load(false);
+  }
+
+  function showRestartFallback(failure) {
+    setConnectStatus("");
+    if (failure) {
+      setConnectError(errorMessage(failure));
+      setConnectDetails(failure instanceof ApiError ? failure.details : []);
+    } else {
+      setConnectError("");
+      setConnectDetails([]);
+    }
+    setRestartFallback(true);
+    setConnectingChat(null);
+  }
+
+  async function resumeAfterRestart() {
+    setRestartDialogOpen(false);
+    setRestartFallback(false);
+    setConnectError("");
+    setConnectDetails([]);
+    setConnectStatus("");
+    setConnectingChat(lastConnectedChatId === null ? -1 : lastConnectedChatId);
+    await finishConnected(lastConnectedAgent || connectAgent);
+  }
+
+  async function connectChat(chat) {
+    if (connectingChat !== null) {
+      return;
+    }
+    if (!connectAgent) {
+      setConnectError("Choose an agent for this chat.");
+      return;
+    }
+    if (!version) {
+      setConnectError(CONFIG_VERSION_MISSING_TEXT);
+      return;
+    }
+    setConnectError("");
+    setConnectDetails([]);
+    setRestartFallback(false);
+    setConnectStatus("Connecting…");
+    setConnectingChat(chat.chat_id);
+    try {
+      /* API-TGC-003. The version is the latest one this page wrote or read. */
+      const result = await api.connectTelegram(version, {
+        chat_id: chat.chat_id,
+        sender_id: chat.sender_id,
+        agent: connectAgent,
+      });
+      if (result && result.version) {
+        setVersion(result.version);
+      }
+    } catch (failure) {
+      if (!mountedRef.current) {
+        return;
+      }
+      setConnectStatus("");
+      if (failure instanceof ApiError && failure.code === "stale_version") {
+        setConnectError(STALE_VERSION_TEXT);
+        setConnectDetails([]);
+        announce(STALE_VERSION_TEXT);
+        await load(false);
+      } else {
+        const message = errorMessage(failure);
+        setConnectError(message);
+        setConnectDetails(failure instanceof ApiError ? failure.details : []);
+        announce("Could not connect the chat. " + message);
+      }
+      setConnectingChat(null);
+      return;
+    }
+    setLastConnectedAgent(connectAgent);
+    setLastConnectedChatId(chat.chat_id);
+
+    let info = null;
+    try {
+      info = await getDaemon();
+    } catch (failure) {
+      if (!mountedRef.current) {
+        return;
+      }
+      showRestartFallback(failure);
+      return;
+    }
+    if (info && info.restart_supported === false) {
+      showRestartFallback(null);
+      return;
+    }
+    try {
+      await restartDaemon();
+    } catch (failure) {
+      if (!mountedRef.current) {
+        return;
+      }
+      showRestartFallback(failure);
+      return;
+    }
+    try {
+      await waitForDaemonRestart(info && info.started_at, (text) => {
+        if (mountedRef.current) {
+          setConnectStatus(text);
+        }
+      });
+    } catch (failure) {
+      if (!mountedRef.current) {
+        return;
+      }
+      showRestartFallback(failure);
+      return;
+    }
+    await finishConnected(connectAgent);
   }
 
   async function addOwner() {
@@ -662,6 +1139,243 @@ export function TelegramPage() {
           </div>`
         : null}
 
+      ${connected && !showSteps
+        ? html`<section
+            class="channel-connected-summary"
+            aria-labelledby="channel-connected-title"
+          >
+            <h2 id="channel-connected-title" class="channel-connected-title">
+              Connected
+            </h2>
+            <p class="channel-connected-name">
+              Connected to ${botUsername ? "@" + botUsername : "your bot"}
+            </p>
+            <p
+              class="channel-connected-text"
+              role="status"
+              aria-live="polite"
+            >${connectedText(botUsername, activeAgent)}</p>
+            <div class="channel-connected-actions">
+              <button
+                type="button"
+                class="button-ui button-ui-secondary"
+                onClick=${() => setShowSteps(true)}
+              >Show steps</button>
+            </div>
+          </section>`
+        : html`<ol class="channel-setup-steps">
+            <li class="channel-setup-step">
+              <h2 class="channel-step-title">Paste your bot token</h2>
+              <p class="channel-step-help">
+                Create a bot with @BotFather in Telegram, then paste the token it
+                gives you.
+              </p>
+              ${tokenDone && !replaceToken
+                ? html`<div class="channel-step-done">
+                    <p class="channel-step-done-text">
+                      Connected to @${botUsername}
+                    </p>
+                    <button
+                      type="button"
+                      class="button-ui button-ui-secondary"
+                      onClick=${() => {
+                        setReplaceToken(true);
+                        setTokenError("");
+                      }}
+                    >Replace token</button>
+                  </div>`
+                : html`<div class="channel-step-form">
+                    <div class="agent-form-field">
+                      <label
+                        class="agent-form-field-label"
+                        for="telegram-bot-token"
+                      >Bot token</label>
+                      <input
+                        id="telegram-bot-token"
+                        class="agent-number-input"
+                        type="password"
+                        name="bot_token"
+                        value=${tokenInput}
+                        autocomplete="off"
+                        spellcheck="false"
+                        disabled=${savingToken}
+                        aria-describedby=${tokenError ? "telegram-bot-token-error" : null}
+                        onInput=${(event) => {
+                          setTokenInput(event.target.value);
+                          if (tokenError) {
+                            setTokenError("");
+                          }
+                        }}
+                        onKeyDown=${(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            saveToken();
+                          }
+                        }}
+                      />
+                    </div>
+                    ${tokenError
+                      ? html`<p
+                          id="telegram-bot-token-error"
+                          class="channel-step-error"
+                          role="alert"
+                        >${tokenError}</p>`
+                      : null}
+                    <div class="channel-step-actions">
+                      <button
+                        type="button"
+                        class="button-ui button-ui-primary"
+                        disabled=${savingToken}
+                        onClick=${saveToken}
+                      >${savingToken ? "Saving…" : "Save token"}</button>
+                      ${tokenDone
+                        ? html`<button
+                            type="button"
+                            class="button-ui button-ui-secondary"
+                            disabled=${savingToken}
+                            onClick=${() => {
+                              setReplaceToken(false);
+                              setTokenInput("");
+                              setTokenError("");
+                            }}
+                          >Cancel</button>`
+                        : null}
+                    </div>
+                  </div>`}
+            </li>
+
+            <li class="channel-setup-step">
+              <h2 class="channel-step-title">Send a message to your bot</h2>
+              <p class="channel-step-help">
+                Open ${tokenDone && botURL
+                  ? html`<a
+                      class="channel-step-link"
+                      href=${botURL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >@${botUsername}<span class="sr-only"> (opens in a new tab)</span></a>`
+                  : html`<span>${botUsername ? "@" + botUsername : "your bot"}</span>`}
+                in Telegram and send any message, then press Find my chat.
+              </p>
+              <div class="channel-step-actions">
+                <button
+                  type="button"
+                  class="button-ui button-ui-primary"
+                  disabled=${!tokenDone || discovering}
+                  onClick=${findChats}
+                >${discovering ? "Looking…" : "Find my chat"}</button>
+              </div>
+              <p class="channel-step-status" role="status" aria-live="polite">
+                ${discoverPhase === "empty" ? discoverEmptyText(botUsername) : ""}
+              </p>
+              ${discoverError
+                ? html`<div class="channel-step-alert" role="alert">
+                    <${ErrorNotice}
+                      message=${discoverError}
+                      details=${discoverDetails}
+                    />
+                  </div>`
+                : null}
+            </li>
+
+            <li class="channel-setup-step">
+              <h2 class="channel-step-title">Connect the chat</h2>
+              ${!tokenDone || discoveredChats.length === 0
+                ? html`<p class="channel-step-help">
+                    Find your chat first, then connect it here.
+                  </p>`
+                : html`<div class="channel-seen-list">
+                    <div class="agent-form-field channel-agent-select">
+                      <label
+                        class="agent-form-field-label"
+                        for="telegram-connect-agent"
+                      >Agent</label>
+                      <select
+                        id="telegram-connect-agent"
+                        value=${connectAgent}
+                        disabled=${connectingChat !== null}
+                        onChange=${(event) => setConnectAgent(event.target.value)}
+                      >
+                        ${agents.map(
+                          (agent) => html`<option key=${agent.name} value=${agent.name}>
+                            ${agent.name}
+                          </option>`
+                        )}
+                      </select>
+                    </div>
+                    ${agents.length === 0
+                      ? html`<p class="channel-hint">
+                          No agents are configured yet.
+                          <a href="#/agents">Create an agent</a> first.
+                        </p>`
+                      : null}
+                    <div class="channel-table-wrap">
+                      <table class="channel-table channel-seen-table">
+                        <caption class="sr-only">
+                          Chats that sent your bot a message
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Sender</th>
+                            <th scope="col" class="channel-table-actions">
+                              <span class="sr-only">Actions</span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${discoveredChats.map((chat) => {
+                            const name = chat.name || chat.sender_name || "";
+                            return html`<tr key=${String(chat.chat_id)}>
+                              <td>
+                                <span class="channel-chat-cell">
+                                  <${InitialAvatar} name=${name} small />
+                                  <span class="channel-chat-name">${name}</span>
+                                </span>
+                              </td>
+                              <td><${Badge} label=${chatTypeLabel(chat.type)} /></td>
+                              <td>${chat.sender_name || ""}</td>
+                              <td class="channel-table-actions">
+                                <button
+                                  type="button"
+                                  class="button-ui button-ui-primary"
+                                  disabled=${connectingChat !== null || !connectAgent}
+                                  onClick=${() => connectChat(chat)}
+                                >Connect</button>
+                              </td>
+                            </tr>`;
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>`}
+              <p class="channel-step-status" role="status" aria-live="polite">
+                ${connectStatus}
+              </p>
+              ${connectError
+                ? html`<div class="channel-step-alert" role="alert">
+                    <${ErrorNotice}
+                      message=${connectError}
+                      details=${connectDetails}
+                    />
+                  </div>`
+                : null}
+              ${restartFallback
+                ? html`<div class="channel-step-fallback">
+                    <p class="channel-step-fallback-text">
+                      Restart lana to finish
+                    </p>
+                    <button
+                      type="button"
+                      class="button-ui button-ui-secondary"
+                      onClick=${() => setRestartDialogOpen(true)}
+                    >Restart daemon</button>
+                  </div>`
+                : null}
+            </li>
+          </ol>`}
+
       <section class="agent-form-section" aria-labelledby="channel-status-title">
         <div class="agent-form-copy">
           <h2 id="channel-status-title">Status</h2>
@@ -690,24 +1404,55 @@ export function TelegramPage() {
         </div>
       </section>
 
-      <section class="agent-form-section" aria-labelledby="channel-token-title">
-        <div class="agent-form-copy">
-          <h2 id="channel-token-title">Bot token</h2>
-          <p>The env variable that holds the token from @BotFather.</p>
-        </div>
-        <div class="agent-form-controls">
-          <label class="agent-form-field">
-            <span class="agent-form-field-label">Token variable</span>
+      <details class="channel-advanced" ref=${advancedRef}>
+        <summary class="channel-advanced-summary">Advanced</summary>
+        <div class="channel-advanced-body">
+          <div class="agent-form-field channel-advanced-field">
+            <label
+              class="agent-form-field-label"
+              for="telegram-token-env"
+            >Token variable</label>
             <input
+              id="telegram-token-env"
               class="agent-number-input"
               type="text"
               name="token_env"
               value=${tokenEnv}
               autocomplete="off"
               spellcheck="false"
-              onInput=${(event) => setTokenEnv(event.target.value)}
+              aria-describedby=${tokenEnvError ? "telegram-token-env-error" : null}
+              onInput=${(event) => {
+                setTokenEnv(event.target.value);
+                if (tokenEnvError) {
+                  setTokenEnvError("");
+                }
+              }}
             />
-          </label>
+            ${tokenEnvError
+              ? html`<p
+                  id="telegram-token-env-error"
+                  class="channel-step-error"
+                  role="alert"
+                >${tokenEnvError}</p>`
+              : null}
+          </div>
+          <div class="agent-form-field channel-advanced-field">
+            <label
+              class="agent-form-field-label"
+              for="telegram-api-base"
+            >API base</label>
+            <input
+              id="telegram-api-base"
+              class="agent-number-input"
+              type="text"
+              name="api_base"
+              value=${apiBase}
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Default Bot API server"
+              onInput=${(event) => setApiBase(event.target.value)}
+            />
+          </div>
           <div class="channel-token-row">
             <p
               class=${"channel-token-status is-" + tokenState.tone}
@@ -725,7 +1470,7 @@ export function TelegramPage() {
             >${checking ? "Checking…" : "Check token"}</button>
           </div>
         </div>
-      </section>
+      </details>
 
       <section class="agent-form-section" aria-labelledby="channel-owners-title">
         <div class="agent-form-copy">
@@ -922,29 +1667,14 @@ export function TelegramPage() {
           </table>
         </div>
       </section>
-
-      <section class="agent-form-section" aria-labelledby="channel-advanced-title">
-        <div class="agent-form-copy">
-          <h2 id="channel-advanced-title">Advanced</h2>
-          <p>Change only for a local Bot API server.</p>
-        </div>
-        <div class="agent-form-controls">
-          <label class="agent-form-field">
-            <span class="agent-form-field-label">API base</span>
-            <input
-              class="agent-number-input"
-              type="text"
-              name="api_base"
-              value=${apiBase}
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Default Bot API server"
-              onInput=${(event) => setApiBase(event.target.value)}
-            />
-          </label>
-        </div>
-      </section>
     </form>
+
+    ${restartDialogOpen
+      ? html`<${SettingsRestartDialog}
+          onClose=${() => setRestartDialogOpen(false)}
+          onRestarted=${resumeAfterRestart}
+        />`
+      : null}
 
     ${showAddChat
       ? html`<${AddChatDialog}

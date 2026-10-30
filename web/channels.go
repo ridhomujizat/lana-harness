@@ -31,6 +31,10 @@ const (
 // channelEnvRE is the token_env rule of API-WEB-028.
 var channelEnvRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// telegramBotTokenRE is the token shape of API-TGC-001. It is checked before
+// any network call so an obvious typo never reaches Telegram.
+var telegramBotTokenRE = regexp.MustCompile(`^[0-9]{5,}:[A-Za-z0-9_-]{30,}$`)
+
 // TelegramCheckResult is the outcome of POST /v1/channels/telegram/check. When
 // OK is false, Message names the problem and never contains the token value.
 type TelegramCheckResult struct {
@@ -46,6 +50,40 @@ type TelegramChecker interface {
 	TelegramCheck(ctx context.Context) (TelegramCheckResult, error)
 }
 
+// TelegramSeenChat is one chat that wrote to the bot, as API-TGC-002 lists it.
+type TelegramSeenChat struct {
+	ChatID        int64  `json:"chat_id"`
+	Type          string `json:"type"`
+	Name          string `json:"name"`
+	SenderID      int64  `json:"sender_id"`
+	SenderName    string `json:"sender_name"`
+	LastMessageAt int64  `json:"last_message_at"`
+}
+
+// TelegramSetup is the daemon port for API-TGC-001 through API-TGC-003. The
+// adapter in cmd/lana implements it with channels/telegram Client calls.
+type TelegramSetup interface {
+	// TelegramTokenCheck calls getMe with token (not the stored one).
+	TelegramTokenCheck(ctx context.Context, token string) (TelegramCheckResult, error)
+	// TelegramDiscover lists chats that wrote to the bot with the stored token.
+	TelegramDiscover(ctx context.Context) ([]TelegramSeenChat, error)
+}
+
+// TelegramBotNamer is the optional companion TelegramSetup used to fill
+// bot_username in API-TGC-002. It stays separate so TelegramSetup keeps the two
+// methods of design.md and older fakes still satisfy it.
+type TelegramBotNamer interface {
+	TelegramBotUsername(ctx context.Context) (string, error)
+}
+
+// Errors the TelegramSetup adapter returns. Handlers map them to the contract
+// status codes without exposing the token.
+var (
+	ErrTelegramTokenMissing = errors.New("web: telegram bot token is missing")
+	ErrTelegramConflict     = errors.New("web: telegram getUpdates conflict")
+	ErrTelegramUnreachable  = errors.New("web: telegram is unreachable")
+)
+
 // registerChannelRoutes installs the channels routes. The backend and config
 // store are read at call time, so SetBackend installs them together with the
 // other ports.
@@ -53,6 +91,9 @@ func (s *Server) registerChannelRoutes() {
 	s.Handle("GET /v1/channels", http.HandlerFunc(s.handleListChannels))
 	s.Handle("PUT /v1/channels/telegram", http.HandlerFunc(s.handlePutTelegram))
 	s.Handle("POST /v1/channels/telegram/check", http.HandlerFunc(s.handleCheckTelegram))
+	s.Handle("PUT /v1/channels/telegram/token", http.HandlerFunc(s.handlePutTelegramToken))
+	s.Handle("POST /v1/channels/telegram/discover", http.HandlerFunc(s.handleDiscoverTelegram))
+	s.Handle("POST /v1/channels/telegram/connect", http.HandlerFunc(s.handleConnectTelegram))
 	s.Handle("GET /v1/channels/telegram/waiting", http.HandlerFunc(s.handleTelegramWaiting))
 	s.Handle("PUT /v1/channels/telegram/routes/{chat_id}", http.HandlerFunc(s.handlePutTelegramRoute))
 	s.Handle("DELETE /v1/channels/telegram/routes/{chat_id}", http.HandlerFunc(s.handleDeleteTelegramRoute))
@@ -70,6 +111,7 @@ type telegramCardJSON struct {
 	TokenEnv      string             `json:"token_env"`
 	TokenPresent  bool               `json:"token_present"`
 	BotUsername   string             `json:"bot_username"`
+	BotURL        string             `json:"bot_url"`
 	Chats         []channelChatJSON  `json:"chats"`
 	Owners        []channelOwnerJSON `json:"owners"`
 	ChatCount     int                `json:"chat_count"`
@@ -99,6 +141,27 @@ type channelOwnerJSON struct {
 type telegramSaveResponse struct {
 	Version         string `json:"version"`
 	RestartRequired bool   `json:"restart_required"`
+}
+
+type telegramTokenResponse struct {
+	BotUsername     string `json:"bot_username"`
+	BotURL          string `json:"bot_url"`
+	TokenEnv        string `json:"token_env"`
+	Version         string `json:"version"`
+	RestartRequired bool   `json:"restart_required"`
+}
+
+type telegramDiscoverResponse struct {
+	BotUsername string             `json:"bot_username"`
+	BotURL      string             `json:"bot_url"`
+	Chats       []TelegramSeenChat `json:"chats"`
+}
+
+type telegramConnectRequest struct {
+	Version  string `json:"version"`
+	ChatID   int64  `json:"chat_id"`
+	SenderID int64  `json:"sender_id"`
+	Agent    string `json:"agent"`
 }
 
 type telegramCheckOKResponse struct {
@@ -372,6 +435,7 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		TokenEnv:      table.TokenEnv,
 		TokenPresent:  present,
 		BotUsername:   status.BotUsername,
+		BotURL:        telegramBotURL(status.BotUsername),
 		Chats:         chats,
 		Owners:        owners,
 		ChatCount:     chatCount,
@@ -450,6 +514,353 @@ func (s *Server) telegramCheckerOrError(w http.ResponseWriter) TelegramChecker {
 	s.logger.Error("web: telegram checker is not configured")
 	writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	return nil
+}
+
+// handlePutTelegramToken implements API-TGC-001. The token shape is checked
+// before any network call; the value is written only after getMe accepts it and
+// never appears in the response, an error, or a log line.
+func (s *Server) handlePutTelegramToken(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if !decodeJSONObject(w, r, channelBodyLimit, &body) {
+		return
+	}
+	token := strings.TrimSpace(body.Token)
+	if !telegramBotTokenRE.MatchString(token) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "token must be a Telegram bot token")
+		return
+	}
+	store := s.configStoreOrError(w)
+	if store == nil {
+		return
+	}
+	secretStore := s.secretStoreOrError(w)
+	if secretStore == nil {
+		return
+	}
+	setup := s.telegramSetupOrError(w)
+	if setup == nil {
+		return
+	}
+	result, err := setup.TelegramTokenCheck(r.Context(), token)
+	if err != nil {
+		if errors.Is(err, ErrTelegramUnreachable) {
+			writeAPIError(w, http.StatusBadGateway, "telegram_unreachable", "telegram is unreachable")
+			return
+		}
+		s.logger.Error("web: telegram token check", "error", redactTelegramToken(err.Error(), token))
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if !result.OK {
+		writeAPIError(w, http.StatusUnprocessableEntity, "telegram_token_invalid", "This token was not accepted by Telegram. Copy it again from @BotFather.")
+		return
+	}
+
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	file, err := store.ConfigFile(r.Context())
+	if err != nil {
+		s.logger.Error("web: read config before telegram token save", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if !file.Exists {
+		writeAPIError(w, http.StatusConflict, "config_missing", "config.toml does not exist")
+		return
+	}
+	document, err := parseChannelDocument(file.Raw)
+	if err != nil {
+		s.logger.Error("web: parse config before telegram token save", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	table, configured := document.telegram()
+	tokenEnv := strings.TrimSpace(table.TokenEnv)
+	if tokenEnv == "" {
+		tokenEnv = defaultTelegramTokenEnv
+	}
+	table.TokenEnv = tokenEnv
+	if !configured {
+		// A token alone does not turn the channel on; connect does that.
+		table.Enabled = false
+	}
+	candidate, _, err := webfiles.RewriteTable(r.Context(), channelChecker(store), file.Raw, "[channels.telegram]", renderTelegramTable(table))
+	if err != nil {
+		s.writeChannelSaveError(w, "save telegram token", err)
+		return
+	}
+	if err := s.writeSecretValue(secretStore, tokenEnv, token); err != nil {
+		writeSecretWriteError(w, err)
+		return
+	}
+	if !bytes.Equal(candidate, file.Raw) {
+		if err := store.ConfigWrite(r.Context(), candidate); err != nil {
+			s.logger.Error("web: write config for telegram token save", "error", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, telegramTokenResponse{
+		BotUsername:     result.BotUsername,
+		BotURL:          telegramBotURL(result.BotUsername),
+		TokenEnv:        tokenEnv,
+		Version:         webfiles.ConfigVersion(candidate),
+		RestartRequired: true,
+	})
+}
+
+// handleDiscoverTelegram implements API-TGC-002. While the channel polls, the
+// in-memory pending list is used instead of getUpdates, because a second poller
+// would get a 409 from Telegram.
+func (s *Server) handleDiscoverTelegram(w http.ResponseWriter, r *http.Request) {
+	setup := s.telegramSetupOrError(w)
+	if setup == nil {
+		return
+	}
+	store := s.configStoreOrError(w)
+	if store == nil {
+		return
+	}
+	file, err := store.ConfigFile(r.Context())
+	if err != nil {
+		s.logger.Error("web: read config for telegram discover", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	document := channelDocument{}
+	if file.Exists {
+		document, err = parseChannelDocument(file.Raw)
+		if err != nil {
+			s.logger.Error("web: parse config for telegram discover", "error", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+			return
+		}
+	}
+	routed := map[int64]bool{}
+	for _, route := range document.telegramRoutes() {
+		routed[route.ChatID] = true
+	}
+
+	status := s.TelegramStatus()
+	var botUsername string
+	var chats []TelegramSeenChat
+	if status.PollingSince != nil {
+		botUsername = status.BotUsername
+		chats = telegramPendingChats(status.PendingChats)
+	} else {
+		botUsername, err = s.telegramBotUsername(r.Context(), status)
+		if err != nil {
+			s.writeTelegramSetupError(w, err)
+			return
+		}
+		chats, err = setup.TelegramDiscover(r.Context())
+		if err != nil {
+			s.writeTelegramSetupError(w, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, telegramDiscoverResponse{
+		BotUsername: botUsername,
+		BotURL:      telegramBotURL(botUsername),
+		Chats:       telegramSeenChatsPage(chats, routed),
+	})
+}
+
+// handleConnectTelegram implements API-TGC-003. The route, owner, and enabled
+// flag are built into one candidate, validated, and written in one atomic save.
+func (s *Server) handleConnectTelegram(w http.ResponseWriter, r *http.Request) {
+	store := s.configStoreOrError(w)
+	if store == nil {
+		return
+	}
+	var body telegramConnectRequest
+	if !decodeJSONObject(w, r, channelBodyLimit, &body) {
+		return
+	}
+	if body.ChatID == 0 {
+		writeChannelIssue(w, "chat_id", "chat_id must be a non-zero integer")
+		return
+	}
+	if body.SenderID <= 0 {
+		writeChannelIssue(w, "sender_id", "sender_id must be a positive integer")
+		return
+	}
+	agent := strings.TrimSpace(body.Agent)
+	if agent == "" {
+		writeChannelIssue(w, "agent", "agent is required")
+		return
+	}
+
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	file, err := store.ConfigFile(r.Context())
+	if err != nil {
+		s.logger.Error("web: read config before telegram connect", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if !file.Exists {
+		writeAPIError(w, http.StatusConflict, "config_missing", "config.toml does not exist")
+		return
+	}
+	if file.Version != body.Version {
+		writeAPIError(w, http.StatusConflict, "stale_version", "config.toml changed since it was loaded")
+		return
+	}
+	document, err := parseChannelDocument(file.Raw)
+	if err != nil {
+		s.logger.Error("web: parse config before telegram connect", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	table, _ := document.telegram()
+	table.Enabled = true
+	table.OwnerIDs = uniqueChannelIDs(append(table.OwnerIDs, body.SenderID))
+	name := ""
+	for _, route := range document.telegramRoutes() {
+		if route.ChatID == body.ChatID {
+			name = route.Name
+			break
+		}
+	}
+
+	// Rewrite both parts with a permissive checker, then validate the final
+	// candidate once so an intermediate state is never rejected.
+	allow := func(context.Context, []byte) error { return nil }
+	routeCandidate, routeChanged, err := webfiles.RewriteRoute(r.Context(), allow, file.Raw, body.ChatID, renderTelegramRoute(body.ChatID, agent, name))
+	if err != nil {
+		s.writeChannelSaveError(w, "save telegram connect", err)
+		return
+	}
+	candidate, tableChanged, err := webfiles.RewriteTable(r.Context(), allow, routeCandidate, "[channels.telegram]", renderTelegramTable(table))
+	if err != nil {
+		s.writeChannelSaveError(w, "save telegram connect", err)
+		return
+	}
+	if err := channelChecker(store)(r.Context(), candidate); err != nil {
+		s.writeChannelSaveError(w, "save telegram connect", err)
+		return
+	}
+	if !bytes.Equal(candidate, file.Raw) {
+		if err := store.ConfigWrite(r.Context(), candidate); err != nil {
+			s.logger.Error("web: write config for telegram connect", "error", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+			return
+		}
+		changed := append(append([]string{}, routeChanged...), tableChanged...)
+		sort.Strings(changed)
+		s.auditSave("channel.telegram.save", providerConfigPath(file, s.channelHome()), "telegram", changed)
+	}
+	writeJSON(w, http.StatusOK, telegramSaveResponse{
+		Version:         webfiles.ConfigVersion(candidate),
+		RestartRequired: true,
+	})
+}
+
+func (s *Server) telegramSetupOrError(w http.ResponseWriter) TelegramSetup {
+	if s.backend != nil {
+		if setup, ok := s.backend.(TelegramSetup); ok {
+			return setup
+		}
+	}
+	s.logger.Error("web: telegram setup is not configured")
+	writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+	return nil
+}
+
+func (s *Server) telegramBotUsername(ctx context.Context, status TelegramStatus) (string, error) {
+	if status.BotUsername != "" {
+		return status.BotUsername, nil
+	}
+	if namer, ok := s.backend.(TelegramBotNamer); ok {
+		return namer.TelegramBotUsername(ctx)
+	}
+	return "", nil
+}
+
+// telegramBotURL returns the public Telegram link for username, or the empty
+// string when the username is not known yet. Callers put it in bot_url so the
+// web assets never contain an external URL literal.
+func telegramBotURL(username string) string {
+	if username == "" {
+		return ""
+	}
+	return "https://t.me/" + username
+}
+
+func (s *Server) writeTelegramSetupError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrTelegramTokenMissing):
+		writeAPIError(w, http.StatusConflict, "telegram_token_missing", "telegram bot token is not set")
+	case errors.Is(err, ErrTelegramConflict):
+		writeAPIError(w, http.StatusConflict, "telegram_conflict", "Telegram is already connected elsewhere. Stop the other bot program or remove its webhook, then try again.")
+	case errors.Is(err, ErrTelegramUnreachable):
+		writeAPIError(w, http.StatusBadGateway, "telegram_unreachable", "telegram is unreachable")
+	default:
+		s.logger.Error("web: telegram setup", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+	}
+}
+
+// telegramPendingChats converts the polling channel's in-memory list into the
+// discover rows. For a private chat the sender is the chat itself.
+func telegramPendingChats(pending []TelegramPendingChat) []TelegramSeenChat {
+	chats := make([]TelegramSeenChat, 0, len(pending))
+	for _, chat := range pending {
+		senderID := chat.UserID
+		senderName := ""
+		if chat.Type == "private" {
+			senderID = chat.ChatID
+			senderName = chat.Name
+		}
+		if senderName == "" && chat.Username != "" {
+			senderName = "@" + chat.Username
+		}
+		chats = append(chats, TelegramSeenChat{
+			ChatID:        chat.ChatID,
+			Type:          chat.Type,
+			Name:          chat.Name,
+			SenderID:      senderID,
+			SenderName:    senderName,
+			LastMessageAt: chat.LastSeen,
+		})
+	}
+	return chats
+}
+
+// telegramSeenChatsPage removes routed chats, sorts newest first, and keeps at
+// most 20 rows. It always returns a non-nil slice for a JSON [].
+func telegramSeenChatsPage(chats []TelegramSeenChat, routed map[int64]bool) []TelegramSeenChat {
+	page := make([]TelegramSeenChat, 0, len(chats))
+	for _, chat := range chats {
+		if routed[chat.ChatID] {
+			continue
+		}
+		page = append(page, chat)
+	}
+	sort.SliceStable(page, func(i, j int) bool {
+		if page[i].LastMessageAt != page[j].LastMessageAt {
+			return page[i].LastMessageAt > page[j].LastMessageAt
+		}
+		return page[i].ChatID < page[j].ChatID
+	})
+	if len(page) > 20 {
+		page = page[:20]
+	}
+	return page
+}
+
+// redactTelegramToken keeps a token out of a log line even if an adapter error
+// was not scrubbed.
+func redactTelegramToken(text, token string) string {
+	if token == "" {
+		return text
+	}
+	return strings.ReplaceAll(text, token, "<token>")
 }
 
 func (s *Server) handleTelegramWaiting(w http.ResponseWriter, r *http.Request) {

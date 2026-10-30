@@ -229,6 +229,9 @@ func TestChannelsTelegramDisconnect(t *testing.T) {
 	if telegram["status"] != "off" || telegram["enabled"] != false {
 		t.Fatalf("telegram card = %v, want off and enabled false", telegram)
 	}
+	if telegram["bot_url"] != "https://t.me/lana_bot" {
+		t.Fatalf("telegram bot_url = %v, want https://t.me/lana_bot", telegram["bot_url"])
+	}
 	chats, _ := telegram["chats"].([]any)
 	if len(chats) != 1 {
 		t.Fatalf("telegram chats = %v, want the existing route", telegram["chats"])
@@ -295,6 +298,9 @@ func TestChannelsListNotConfigured(t *testing.T) {
 	telegram := telegramCardFrom(t, list)
 	if telegram["status"] != "not_configured" {
 		t.Fatalf("telegram status = %v, want not_configured", telegram["status"])
+	}
+	if url, ok := telegram["bot_url"]; !ok || url != "" {
+		t.Fatalf("telegram bot_url = %v (present %v), want an empty string", url, ok)
 	}
 }
 

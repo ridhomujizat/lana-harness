@@ -16,6 +16,11 @@ import (
 // ErrUnauthorized means Telegram rejected the bot token (HTTP 401).
 var ErrUnauthorized = errors.New("telegram: invalid bot token")
 
+// ErrConflict means another getUpdates call is active for the bot (HTTP 409).
+// GetUpdatesPeek maps a conflict to this sentinel; the other methods keep
+// returning *APIError for a 409.
+var ErrConflict = errors.New("telegram: getUpdates conflict")
+
 // APIError is an error response from the Bot API.
 type APIError struct {
 	Code        int
@@ -132,6 +137,7 @@ type User struct {
 	ID        int64  `json:"id"`
 	IsBot     bool   `json:"is_bot"`
 	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
 	Username  string `json:"username"`
 }
 
@@ -141,12 +147,14 @@ type Chat struct {
 	Type      string `json:"type"`
 	Title     string `json:"title"`
 	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
 	Username  string `json:"username"`
 }
 
 // Message is a Telegram message. Only the fields lana uses are decoded.
 type Message struct {
 	MessageID int64    `json:"message_id"`
+	Date      int64    `json:"date"`
 	From      *User    `json:"from"`
 	Chat      Chat     `json:"chat"`
 	Text      string   `json:"text"`
@@ -212,6 +220,22 @@ func (c *Client) GetUpdates(ctx context.Context, offset int64, timeout int) ([]U
 	err := c.call(ctx, "getUpdates", map[string]any{
 		"offset": offset, "timeout": timeout, "allowed_updates": []string{"message", "callback_query"},
 	}, &updates)
+	return updates, err
+}
+
+// GetUpdatesPeek reads the current updates without confirming them. It asks for
+// offset 0 and timeout 0 and never follows up with an offset > 0, so the
+// polling channel still receives the updates. A 409 means another poller or a
+// webhook owns the bot.
+func (c *Client) GetUpdatesPeek(ctx context.Context) ([]Update, error) {
+	var updates []Update
+	err := c.call(ctx, "getUpdates", map[string]any{
+		"offset": 0, "timeout": 0, "allowed_updates": []string{"message"},
+	}, &updates)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Code == http.StatusConflict {
+		return nil, ErrConflict
+	}
 	return updates, err
 }
 

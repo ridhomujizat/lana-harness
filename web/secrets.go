@@ -201,9 +201,24 @@ func (s *Server) handlePutSecret(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "stale_version", "secrets.env changed since it was loaded")
 		return
 	}
-	if err := webfiles.SetSecret(path, name, body.Value); err != nil {
+	if err := s.writeSecretValue(store, name, body.Value); err != nil {
 		writeSecretWriteError(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, secretWriteResponse{
+		Name:            name,
+		State:           "set",
+		RestartRequired: true,
+	})
+}
+
+// writeSecretValue writes one secret, records its update time, marks a restart
+// as required, and appends the secret audit line. Callers must hold
+// configWriteMu, as handlePutSecret does.
+func (s *Server) writeSecretValue(store SecretStore, name, value string) error {
+	path := secretsPath(store.SettingsHome())
+	if err := webfiles.SetSecret(path, name, value); err != nil {
+		return err
 	}
 	if err := webfiles.SetSecretMeta(secretsMetaPath(store.SettingsHome()), name, s.nowTime().UnixMilli()); err != nil {
 		// The secret itself is already written; a meta failure only loses the
@@ -212,11 +227,7 @@ func (s *Server) handlePutSecret(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setSecretsChanged()
 	s.auditSave("secret", "", name, nil)
-	writeJSON(w, http.StatusOK, secretWriteResponse{
-		Name:            name,
-		State:           "set",
-		RestartRequired: true,
-	})
+	return nil
 }
 
 func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
