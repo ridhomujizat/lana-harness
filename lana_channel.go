@@ -47,10 +47,15 @@ func (rt *Runtime) CreateChannelSession(ctx context.Context, channel, address, a
 	if err := rt.closedError(); err != nil {
 		return core.SessionInfo{}, err
 	}
+	// A new session is the first step of a turn; refuse it while draining
+	// (REQ-TFB-002, API-TFB-008).
+	if err := rt.drainError(); err != nil {
+		return core.SessionInfo{}, err
+	}
 	if _, err := rt.routeAgent(agentName); err != nil {
 		return core.SessionInfo{}, err
 	}
-	workspace := rt.result.Config.Agents[agentName].Workspace
+	workspace := rt.agents()[agentName].Workspace
 	if workspace == "" && rt.home != "" {
 		workspace = filepath.Join(rt.home, "workspaces", agentName)
 		if err := os.MkdirAll(workspace, 0o700); err != nil {

@@ -58,6 +58,9 @@ var (
 	// ErrInvalidState is returned by a Backend when a write is refused because
 	// a turn is running.
 	ErrInvalidState = errors.New("session is not in a valid state for this operation")
+	// ErrDraining is returned by a Backend while the daemon drains; the handler
+	// answers 503 daemon_draining (REQ-TFB-002, API-TFB-008).
+	ErrDraining = errors.New("daemon is draining")
 )
 
 // SendResult is the outcome of Backend.Send.
@@ -562,6 +565,9 @@ func (s *Server) writeBackendError(w http.ResponseWriter, operation string, err 
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "policy must be one of ask, never, trust")
 	case errors.Is(err, ErrInvalidState):
 		writeAPIError(w, http.StatusConflict, "invalid_state", "the operation is not allowed while a turn is running")
+	case errors.Is(err, ErrDraining):
+		// API-TFB-008: the daemon is shutting down and starts no turn.
+		writeAPIError(w, http.StatusServiceUnavailable, "daemon_draining", "lana is restarting. Try again in a moment.")
 	default:
 		s.logger.Error("web: "+operation, "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")

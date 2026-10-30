@@ -13,16 +13,18 @@ import (
 const Limit = 4096
 
 var (
-	codeSpanRE = regexp.MustCompile("`([^`\n]+)`")
-	linkRE     = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+)\)`)
-	boldRE     = regexp.MustCompile(`\*\*([^*\n]+?)\*\*|__([^_\n]+?)__`)
-	italicStar = regexp.MustCompile(`(^|[^\w*])\*([^*\s](?:[^*\n]*[^*\s])?)\*`)
-	italicLine = regexp.MustCompile(`(^|[^\w_])_([^_\s](?:[^_\n]*[^_\s])?)_($|[^\w_])`)
-	headingRE  = regexp.MustCompile(`^#{1,6}\s+(.*?)\s*#*\s*$`)
-	listRE     = regexp.MustCompile(`^(\s*)[-*]\s+(.*)$`)
-	fenceRE    = regexp.MustCompile("^\\s*```\\s*([\\w+#.-]*)\\s*$")
-	tagRE      = regexp.MustCompile(`<[^>]*>`)
-	preOpenRE  = regexp.MustCompile(`<pre><code(?: class="[^"]*")?>`)
+	codeSpanRE  = regexp.MustCompile("`([^`\n]+)`")
+	linkRE      = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+)\)`)
+	boldRE      = regexp.MustCompile(`\*\*([^*\n]+?)\*\*|__([^_\n]+?)__`)
+	italicStar  = regexp.MustCompile(`(^|[^\w*])\*([^*\s](?:[^*\n]*[^*\s])?)\*`)
+	italicLine  = regexp.MustCompile(`(^|[^\w_])_([^_\s](?:[^_\n]*[^_\s])?)_($|[^\w_])`)
+	headingRE   = regexp.MustCompile(`^#{1,6}\s+(.*?)\s*#*\s*$`)
+	listRE      = regexp.MustCompile(`^(\s*)[-*]\s+(.*)$`)
+	fenceRE     = regexp.MustCompile("^\\s*```\\s*([\\w+#.-]*)\\s*$")
+	tagRE       = regexp.MustCompile(`<[^>]*>`)
+	preOpenRE   = regexp.MustCompile(`<pre>(?:<code(?: class="[^"]*")?>)?`)
+	tableSepRE  = regexp.MustCompile(`^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$`)
+	plainLinkRE = regexp.MustCompile(`\[([^\]\n]+)\]\([^)\n]*\)`)
 )
 
 // ToHTML converts the Markdown subset of API-TG-003 to Telegram HTML.
@@ -32,7 +34,8 @@ func ToHTML(markdown string) string {
 	inFence := false
 	var code []string
 	lang := ""
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if m := fenceRE.FindStringSubmatch(line); m != nil {
 			if !inFence {
 				inFence, lang, code = true, m[1], nil
@@ -44,6 +47,18 @@ func ToHTML(markdown string) string {
 		}
 		if inFence {
 			code = append(code, line)
+			continue
+		}
+		if strings.Contains(line, "|") && i+1 < len(lines) && tableSepRE.MatchString(lines[i+1]) {
+			header := splitCells(line)
+			j := i + 2
+			var rows [][]string
+			for j < len(lines) && strings.Contains(lines[j], "|") {
+				rows = append(rows, splitCells(lines[j]))
+				j++
+			}
+			out = append(out, renderTable(header, rows))
+			i = j - 1
 			continue
 		}
 		if m := headingRE.FindStringSubmatch(line); m != nil {
@@ -68,6 +83,135 @@ func preBlock(lang string, code []string) string {
 		open = fmt.Sprintf(`<pre><code class="language-%s">`, html.EscapeString(lang))
 	}
 	return open + html.EscapeString(strings.Join(code, "\n")) + "</code></pre>"
+}
+
+// splitCells splits a Markdown table row on unescaped pipes and trims each cell.
+func splitCells(line string) []string {
+	s := strings.TrimPrefix(strings.TrimSpace(line), "|")
+	if n := len(s); n > 0 && s[n-1] == '|' && (n < 2 || s[n-2] != '\\') {
+		s = s[:n-1]
+	}
+	cells := make([]string, 0, strings.Count(s, "|")+1)
+	var cell strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '|' {
+			cell.WriteByte('|')
+			i++
+			continue
+		}
+		if s[i] == '|' {
+			cells = append(cells, strings.TrimSpace(cell.String()))
+			cell.Reset()
+			continue
+		}
+		cell.WriteByte(s[i])
+	}
+	return append(cells, strings.TrimSpace(cell.String()))
+}
+
+// renderTable converts a Markdown table to Telegram HTML. A table that fits in 40
+// runes is rendered as a <pre> block; otherwise each body row becomes its own block.
+func renderTable(header []string, rows [][]string) string {
+	n := len(header)
+	normHeader := normalizeRow(header, n)
+	normRows := make([][]string, len(rows))
+	for i, row := range rows {
+		normRows[i] = normalizeRow(row, n)
+	}
+	widths := make([]int, n)
+	for i := range widths {
+		widths[i] = utf8.RuneCountInString(plainCell(normHeader[i]))
+	}
+	for _, row := range normRows {
+		for i, cell := range row {
+			if w := utf8.RuneCountInString(plainCell(cell)); w > widths[i] {
+				widths[i] = w
+			}
+		}
+	}
+	if tableWidth(widths) <= 40 {
+		return narrowTable(normHeader, normRows, widths)
+	}
+	return wideTable(normHeader, normRows)
+}
+
+// normalizeRow pads a row with empty cells or drops extra cells to n columns.
+func normalizeRow(row []string, n int) []string {
+	out := make([]string, n)
+	copy(out, row)
+	return out
+}
+
+// tableWidth returns the aligned width: sum of column widths + 3 × (columns − 1).
+func tableWidth(widths []int) int {
+	total := 3 * (len(widths) - 1)
+	for _, w := range widths {
+		total += w
+	}
+	return total
+}
+
+// narrowTable renders an aligned table as a plain <pre> block.
+func narrowTable(header []string, rows [][]string, widths []int) string {
+	rowLine := func(cells []string) string {
+		parts := make([]string, len(widths))
+		for i, w := range widths {
+			parts[i] = escape(padRight(plainCell(cells[i]), w))
+		}
+		return strings.TrimRight(strings.Join(parts, " │ "), " ")
+	}
+	lines := make([]string, 0, len(rows)+2)
+	lines = append(lines, rowLine(header))
+	sep := make([]string, len(widths))
+	for i, w := range widths {
+		dashes := w + 1
+		if i > 0 && i < len(widths)-1 {
+			dashes = w + 2
+		}
+		sep[i] = strings.Repeat("─", dashes)
+	}
+	lines = append(lines, strings.Join(sep, "┼"))
+	for _, row := range rows {
+		lines = append(lines, rowLine(row))
+	}
+	return "<pre>" + strings.Join(lines, "\n") + "</pre>"
+}
+
+// wideTable renders one block per body row with the first cell in bold.
+func wideTable(header []string, rows [][]string) string {
+	blocks := make([]string, 0, len(rows))
+	for _, row := range rows {
+		lines := make([]string, 0, len(header))
+		if row[0] != "" {
+			lines = append(lines, "<b>"+inline(row[0])+"</b>")
+		}
+		for i := 1; i < len(header); i++ {
+			if row[i] != "" {
+				lines = append(lines, inline(header[i])+": "+inline(row[i]))
+			}
+		}
+		if len(lines) > 0 {
+			blocks = append(blocks, strings.Join(lines, "\n"))
+		}
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// plainCell strips the inline Markdown markers from a table cell for narrow output.
+func plainCell(s string) string {
+	s = codeSpanRE.ReplaceAllString(s, "$1")
+	s = plainLinkRE.ReplaceAllString(s, "$1")
+	s = boldRE.ReplaceAllStringFunc(s, func(m string) string { return m[2 : len(m)-2] })
+	s = italicStar.ReplaceAllString(s, "$1$2")
+	return italicLine.ReplaceAllString(s, "$1$2$3")
+}
+
+// padRight pads s with spaces to width runes.
+func padRight(s string, width int) string {
+	if n := utf8.RuneCountInString(s); n < width {
+		return s + strings.Repeat(" ", width-n)
+	}
+	return s
 }
 
 func inline(text string) string {
@@ -113,7 +257,11 @@ func Split(s string, limit int) []string {
 		}
 		part, rest := s[:cut], strings.TrimLeft(s[cut:], "\n")
 		if open := openPre(part); open != "" {
-			part += "</code></pre>"
+			close := "</code></pre>"
+			if open == "<pre>" {
+				close = "</pre>"
+			}
+			part += close
 			rest = open + rest
 		}
 		parts = append(parts, strings.TrimSpace(part))
@@ -137,11 +285,15 @@ func safeCut(head string) int {
 	return cut
 }
 
-// openPre returns the opening tag of a code block left open at the end of s, or "".
+// openPre returns the opening tag of a <pre> block left open at the end of s, or "".
 func openPre(s string) string {
-	opens := preOpenRE.FindAllString(s, -1)
-	if len(opens) > strings.Count(s, "</pre>") {
-		return opens[len(opens)-1]
+	opens := preOpenRE.FindAllStringIndex(s, -1)
+	if len(opens) == 0 {
+		return ""
 	}
-	return ""
+	last := opens[len(opens)-1]
+	if i := strings.LastIndex(s, "</pre>"); i > last[0] {
+		return ""
+	}
+	return s[last[0]:last[1]]
 }

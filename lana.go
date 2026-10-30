@@ -110,6 +110,9 @@ var (
 	ErrInvalidModel    = agent.ErrInvalidModel
 	ErrTeamModel       = agent.ErrTeamModel
 	ErrUnknownMCP      = errors.New("mcp server is not configured")
+	// ErrDraining refuses a new turn while the daemon shuts down
+	// (REQ-TFB-002, API-TFB-008). Its text is the user-facing message.
+	ErrDraining = errors.New("lana is restarting. Try again in a moment.") //nolint:staticcheck // ST1005: the contract fixes this user-facing text.
 )
 
 // ProviderError is an alias for core.ProviderError.
@@ -154,6 +157,12 @@ type Runtime struct {
 	registry *agent.Registry
 	store    core.SessionStore
 	closed   atomic.Bool
+	// cfgMu guards the live-applied sections of result.Config: Agents, Teams,
+	// and MCP. Providers, routes, channels, web, and secrets stay fixed.
+	cfgMu sync.RWMutex
+	// draining refuses new turns while the daemon waits for running turns
+	// (REQ-TFB-002).
+	draining atomic.Bool
 	closeMu  sync.Mutex
 	closeErr error
 	approve  ApproveFunc
@@ -327,6 +336,74 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	return rt, nil
 }
 
+// ApplyConfig replaces the live sections of the loaded config: agents, teams,
+// and MCP. Providers, routes, channels, web, and secrets are not applied
+// (REQ-TFB-006).
+func (rt *Runtime) ApplyConfig(cfg core.Config) {
+	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
+	for name, agentCfg := range cfg.Agents {
+		agents[name] = agentCfg
+	}
+	teams := make(map[string]core.TeamConfig, len(cfg.Teams))
+	for name, teamCfg := range cfg.Teams {
+		teams[name] = teamCfg
+	}
+	mcpCfg := make(map[string]core.MCPConfig, len(cfg.MCP))
+	for name, serverCfg := range cfg.MCP {
+		mcpCfg[name] = serverCfg
+	}
+	rt.cfgMu.Lock()
+	rt.result.Config.Agents = agents
+	rt.result.Config.Teams = teams
+	rt.result.Config.MCP = mcpCfg
+	rt.cfgMu.Unlock()
+	if rt.registry != nil {
+		rt.registry.ApplyConfig(cfg)
+	}
+}
+
+// NonLiveConfig returns the loaded config with the live-applied sections
+// cleared. The web backend compares a save against it to tell a live change
+// from a restart-only one (REQ-TFB-006).
+func (rt *Runtime) NonLiveConfig() core.Config {
+	rt.cfgMu.RLock()
+	defer rt.cfgMu.RUnlock()
+	cfg := rt.result.Config
+	cfg.Agents = nil
+	cfg.Teams = nil
+	cfg.MCP = nil
+	return cfg
+}
+
+// agents returns the loaded agent map. The map itself is never changed in
+// place, so the snapshot stays valid after the lock is released.
+func (rt *Runtime) agents() map[string]core.AgentConfig {
+	rt.cfgMu.RLock()
+	defer rt.cfgMu.RUnlock()
+	return rt.result.Config.Agents
+}
+
+// teams returns the loaded team map.
+func (rt *Runtime) teams() map[string]core.TeamConfig {
+	rt.cfgMu.RLock()
+	defer rt.cfgMu.RUnlock()
+	return rt.result.Config.Teams
+}
+
+// routes returns the loaded route list.
+func (rt *Runtime) routes() []core.RouteConfig {
+	rt.cfgMu.RLock()
+	defer rt.cfgMu.RUnlock()
+	return rt.result.Config.Routes
+}
+
+// mcpConfig returns the loaded MCP server map.
+func (rt *Runtime) mcpConfig() map[string]core.MCPConfig {
+	rt.cfgMu.RLock()
+	defer rt.cfgMu.RUnlock()
+	return rt.result.Config.MCP
+}
+
 func replaceModule(rows []core.ModuleRow, id, module string, values map[string]any) error {
 	for i := range rows {
 		if rows[i].ID != id {
@@ -383,17 +460,55 @@ func (rt *Runtime) closedError() error {
 	return nil
 }
 
+// SetDraining refuses new turns from now on. The daemon sets it at the start of
+// a drain and clears it again when a pending restart is cancelled
+// (REQ-TFB-002, API-TFB-008).
+func (rt *Runtime) SetDraining(draining bool) {
+	rt.draining.Store(draining)
+}
+
+// Draining reports whether the runtime refuses new turns.
+func (rt *Runtime) Draining() bool {
+	return rt.draining.Load()
+}
+
+// drainError returns ErrDraining while the runtime drains.
+func (rt *Runtime) drainError() error {
+	if rt.draining.Load() {
+		return ErrDraining
+	}
+	return nil
+}
+
+// RunningTurnCount reports the number of turns owned by this process.
+func (rt *Runtime) RunningTurnCount() int {
+	if rt.registry == nil {
+		return 0
+	}
+	return rt.registry.RunningTurnCount()
+}
+
+// InterruptAll cancels every turn running in this process with cause and
+// returns how many turns it interrupted (REQ-TFB-002). The cause selects the
+// turn/end message in agent/turn.go (API-TFB-001).
+func (rt *Runtime) InterruptAll(cause error) int {
+	if rt.registry == nil {
+		return 0
+	}
+	return rt.registry.InterruptAll(cause)
+}
+
 func (rt *Runtime) routeAgent(agentName string) (string, error) {
 	if agentName != "" {
 		if rt.IsTeam(agentName) {
 			return agentName, nil
 		}
-		if _, ok := rt.result.Config.Agents[agentName]; !ok {
+		if _, ok := rt.agents()[agentName]; !ok {
 			return "", fmt.Errorf("%w: %s", ErrUnknownAgent, agentName)
 		}
 		return agentName, nil
 	}
-	for _, route := range rt.result.Config.Routes {
+	for _, route := range rt.routes() {
 		if route.Channel == "library" {
 			return route.Agent, nil
 		}
@@ -478,6 +593,9 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	if err := rt.closedError(); err != nil {
 		return Result{}, err
 	}
+	if err := rt.drainError(); err != nil {
+		return Result{}, err
+	}
 	if strings.TrimSpace(req.Prompt) == "" {
 		return Result{}, ErrEmptyPrompt
 	}
@@ -547,6 +665,10 @@ func (Done) isEvent()       {}
 func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		if err := rt.closedError(); err != nil {
+			yield(nil, err)
+			return
+		}
+		if err := rt.drainError(); err != nil {
 			yield(nil, err)
 			return
 		}
@@ -683,7 +805,7 @@ func (rt *Runtime) CreateSession(ctx context.Context, agentName string) (core.Se
 
 // channelAgent returns the agent of the first route for the channel, or "".
 func (rt *Runtime) channelAgent(channel string) string {
-	for _, route := range rt.result.Config.Routes {
+	for _, route := range rt.routes() {
 		if route.Channel == channel {
 			return route.Agent
 		}
@@ -693,8 +815,9 @@ func (rt *Runtime) channelAgent(channel string) string {
 
 // AgentNames returns the registered agent names, sorted.
 func (rt *Runtime) AgentNames() []string {
-	names := make([]string, 0, len(rt.result.Config.Agents))
-	for name := range rt.result.Config.Agents {
+	agents := rt.agents()
+	names := make([]string, 0, len(agents))
+	for name := range agents {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -703,8 +826,9 @@ func (rt *Runtime) AgentNames() []string {
 
 // TeamNames returns the registered team names, sorted.
 func (rt *Runtime) TeamNames() []string {
-	names := make([]string, 0, len(rt.result.Config.Teams))
-	for name := range rt.result.Config.Teams {
+	teams := rt.teams()
+	names := make([]string, 0, len(teams))
+	for name := range teams {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -713,30 +837,30 @@ func (rt *Runtime) TeamNames() []string {
 
 // IsTeam reports whether name is a registered team.
 func (rt *Runtime) IsTeam(name string) bool {
-	_, ok := rt.result.Config.Teams[name]
+	_, ok := rt.teams()[name]
 	return ok
 }
 
 // Team returns the [teams.<name>] table. It is the public lookup the web
 // backend uses to fill team information (API-TEAM-005, API-TEAM-006).
 func (rt *Runtime) Team(name string) (core.TeamConfig, bool) {
-	team, ok := rt.result.Config.Teams[name]
+	team, ok := rt.teams()[name]
 	return team, ok
 }
 
 // teamLead returns the lead agent config of a team.
 func (rt *Runtime) teamLead(name string) (core.AgentConfig, bool) {
-	team, ok := rt.result.Config.Teams[name]
+	team, ok := rt.teams()[name]
 	if !ok {
 		return core.AgentConfig{}, false
 	}
-	lead, ok := rt.result.Config.Agents[team.Lead]
+	lead, ok := rt.agents()[team.Lead]
 	return lead, ok
 }
 
 // agentConfig returns the config of an agent, or of the lead for a team.
 func (rt *Runtime) agentConfig(name string) (core.AgentConfig, bool) {
-	if agentCfg, ok := rt.result.Config.Agents[name]; ok {
+	if agentCfg, ok := rt.agents()[name]; ok {
 		return agentCfg, true
 	}
 	return rt.teamLead(name)
@@ -760,7 +884,7 @@ func (rt *Runtime) AgentPolicy(agentName string) string {
 
 // MCPStatus returns the MCP server status of an agent.
 func (rt *Runtime) MCPStatus(agentName string) []core.MCPServerStatus {
-	agentCfg, ok := rt.result.Config.Agents[agentName]
+	agentCfg, ok := rt.agents()[agentName]
 	if !ok || len(agentCfg.MCP) == 0 {
 		return nil
 	}
@@ -796,7 +920,8 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 	}
 
 	registry := rt.coreCtx.Tools
-	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(rt.result.Config.MCP))
+	mcpCfg := rt.mcpConfig()
+	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
 	for _, group := range toolCatalogGroupOrder {
 		entries := make([]ToolEntry, 0, len(group.Names))
 		for _, name := range group.Names {
@@ -816,7 +941,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 
 	// MCP tools are grouped by server. The agent's own server list carries the
 	// config order; any other configured server follows in name order.
-	servers := rt.catalogMCPServers(agentCfg)
+	servers := rt.catalogMCPServers(agentCfg, mcpCfg)
 	for _, server := range servers {
 		entries := make([]ToolEntry, 0)
 		for _, name := range rt.catalogToolNames() {
@@ -843,9 +968,9 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 // catalogMCPServers returns the MCP server order of the catalog: the agent's
 // list first, then the remaining configured servers, then any server that has
 // tools in the registry but is not configured.
-func (rt *Runtime) catalogMCPServers(agentCfg core.AgentConfig) []string {
+func (rt *Runtime) catalogMCPServers(agentCfg core.AgentConfig, mcpCfg map[string]core.MCPConfig) []string {
 	seen := make(map[string]bool)
-	servers := make([]string, 0, len(agentCfg.MCP)+len(rt.result.Config.MCP))
+	servers := make([]string, 0, len(agentCfg.MCP)+len(mcpCfg))
 	add := func(name string) {
 		if name == "" || seen[name] {
 			return
@@ -856,8 +981,8 @@ func (rt *Runtime) catalogMCPServers(agentCfg core.AgentConfig) []string {
 	for _, name := range agentCfg.MCP {
 		add(name)
 	}
-	rest := make([]string, 0, len(rt.result.Config.MCP))
-	for name := range rt.result.Config.MCP {
+	rest := make([]string, 0, len(mcpCfg))
+	for name := range mcpCfg {
 		rest = append(rest, name)
 	}
 	sort.Strings(rest)
@@ -996,7 +1121,7 @@ func (rt *Runtime) Skills(agentName string) []agenthome.Skill {
 	if rt.home == "" {
 		return nil
 	}
-	agentCfg, ok := rt.result.Config.Agents[agentName]
+	agentCfg, ok := rt.agents()[agentName]
 	if !ok {
 		return nil
 	}
@@ -1033,9 +1158,13 @@ func (rt *Runtime) TurnActive(sessionID string) bool {
 	return rt.registry.TurnActive(sessionID)
 }
 
-// Send puts a message into the session's inbox.
+// Send puts a message into the session's inbox. While draining it refuses the
+// message before it starts or queues a turn (REQ-TFB-002, API-TFB-008).
 func (rt *Runtime) Send(ctx context.Context, sessionID, text string) error {
 	if err := rt.closedError(); err != nil {
+		return err
+	}
+	if err := rt.drainError(); err != nil {
 		return err
 	}
 	return rt.coreCtx.Agents.Send(ctx, sessionID, text)

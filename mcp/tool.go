@@ -57,7 +57,7 @@ func (t *toolWrapper) Risk(json.RawMessage) core.Risk {
 func (t *toolWrapper) Call(ctx context.Context, _ core.ToolCtx, input json.RawMessage) (core.ToolOutput, error) {
 	s, ok := t.manager.lookupServer(t.server)
 	if !ok {
-		return errorOutput("mcp: server " + t.server + " is not running"), nil
+		return unreachableOutput(t.server, "not running"), nil
 	}
 
 	args := map[string]any{}
@@ -73,7 +73,7 @@ func (t *toolWrapper) Call(ctx context.Context, _ core.ToolCtx, input json.RawMe
 	s.mu.Lock()
 	if s.state != stateRunning || s.session == nil {
 		s.mu.Unlock()
-		return errorOutput("mcp: server " + t.server + " is not running"), nil
+		return unreachableOutput(t.server, "not running"), nil
 	}
 	session := s.session
 	s.inflight++
@@ -98,7 +98,7 @@ func (t *toolWrapper) Call(ctx context.Context, _ core.ToolCtx, input json.RawMe
 			return core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}, nil
 		}
 		t.manager.markStopped(s, session)
-		return errorOutput("mcp: " + err.Error()), nil
+		return unreachableOutput(t.server, shortReason(err)), nil
 	}
 
 	if result == nil {
@@ -177,4 +177,9 @@ func truncateText(s string, limit int) string {
 
 func errorOutput(msg string) core.ToolOutput {
 	return core.ToolOutput{Status: core.ToolStatusError, Output: msg}
+}
+
+// unreachableOutput renders the error for a server that cannot be reached.
+func unreachableOutput(server, reason string) core.ToolOutput {
+	return errorOutput("MCP server " + server + " is not reachable: " + reason)
 }

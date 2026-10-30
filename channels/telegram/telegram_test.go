@@ -62,8 +62,9 @@ func TestPrivateChatTurn(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "check disk")
 	api.waitCall("sendMessage", textIs("…"))
 	api.waitCall("sendChatAction", nil)
-	final := api.waitCall("editMessageText", textHas("Disk is <b>fine</b>."))
-	if text := final.Params["text"].(string); !strings.Contains(text, "🔧 bash df -h ✓") || !strings.HasPrefix(text, "🔧") || final.Params["parse_mode"] != "HTML" {
+	final := api.waitCall("editMessageText", textHas("⚙️ 2 steps · 1 tool call"))
+	text := final.Params["text"].(string)
+	if !strings.Contains(text, "Disk is <b>fine</b>.") || strings.Contains(text, "🔧") || !strings.HasSuffix(text, "⚙️ 2 steps · 1 tool call") || final.Params["parse_mode"] != "HTML" {
 		t.Fatalf("final = %v", final.Params)
 	}
 	if got := backend.promptList(); len(got) != 1 || got[0] != "check disk" {
@@ -183,7 +184,7 @@ func TestApprovalFlow(t *testing.T) {
 	ch, _, _ = startChannel(t, api, backend)
 
 	api.text(groupChat, "supergroup", ownerID, "@lana_bot clean up")
-	ask := api.waitCall("sendMessage", textIs("Allow bash: rm -rf tmp?"))
+	ask := api.waitCall("sendMessage", textIs("🔐 Allow bash: rm -rf tmp?"))
 	data := ask.Params["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)[0].(map[string]any)["callback_data"].(string)
 	id := strings.Split(data, ":")[1]
 	api.callback(groupChat, "supergroup", memberID, "a:"+id+":once")
@@ -192,7 +193,8 @@ func TestApprovalFlow(t *testing.T) {
 	if got := <-outcomes; got != core.OutcomeAllowedOnce {
 		t.Fatalf("outcome = %q", got)
 	}
-	api.waitCall("editMessageText", textIs("Allow bash: rm -rf tmp?\n✓ allowed once"))
+	api.waitCall("editMessageText", textIs("✓ allowed once · bash"))
+	api.waitCall("editMessageText", textIs("🔐 1 approval: 1 allowed"))
 	api.callback(groupChat, "supergroup", ownerID, "a:"+id+":once")
 	api.waitCall("answerCallbackQuery", textIs("this request is no longer active"))
 
@@ -225,9 +227,9 @@ func TestAgentTeamTurnShowsLeadAnswerAndChildToolLine(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "write the report")
 	final := api.waitCall("editMessageText", func(p map[string]any) bool {
 		text, _ := p["text"].(string)
-		return strings.Contains(text, "Lead answer") && strings.Contains(text, "researcher · read_file notes.md ✓")
+		return strings.Contains(text, "Lead answer") && strings.Contains(text, "⚙️ 1 step · 1 tool call")
 	})
-	if !strings.Contains(final.Params["text"].(string), "Lead answer") {
+	if text := final.Params["text"].(string); strings.Contains(text, "read_file") || strings.Contains(text, "🔧") {
 		t.Fatalf("team reply = %v", final.Params)
 	}
 }

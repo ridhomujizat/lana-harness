@@ -103,7 +103,7 @@ func TestTeamSetAgentAndModel(t *testing.T) {
 		}
 		found = true
 	}
-	if !found || selection.Agent != "research-squad" || selection.Provider != "local" || selection.Model != "lead" {
+	if !found || selection.Agent != "research-squad" || selection.Provider != "" || selection.Model != "" {
 		t.Fatalf("selection=%+v", selection)
 	}
 	err = rt.SetModel(ctx, info.ID, "local:other")

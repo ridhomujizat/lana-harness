@@ -57,6 +57,7 @@ type fakeAgentServers struct {
 type fakeMCPAdmin struct {
 	tools    int
 	testErr  error
+	status   map[string]core.MCPServerStatus
 	tested   []core.MCPConfig
 	puts     []fakeMCPPut
 	removes  []string
@@ -78,6 +79,14 @@ func (f *fakeMCPAdmin) RemoveServer(name string) {
 
 func (f *fakeMCPAdmin) SetAgentServers(agent string, servers []string) {
 	f.agentSet = append(f.agentSet, fakeAgentServers{agent: agent, servers: append([]string(nil), servers...)})
+}
+
+func (f *fakeMCPAdmin) ServerStatus(name string) (string, int, string, bool) {
+	status, ok := f.status[name]
+	if !ok {
+		return "", 0, "", false
+	}
+	return status.State, status.Tools, status.Reason, true
 }
 
 func writeMCPManageConfig(t *testing.T, home, content string) {
@@ -179,6 +188,105 @@ mcp = ["github"]
 		if strings.Contains(out.Output, secret) {
 			t.Fatalf("list output leaks %q: %s", secret, out.Output)
 		}
+	}
+}
+
+// TestMCPManageListState covers AC-TFB-016 and AC-TFB-017: the state column
+// shows the runtime state of every configured server, including one the calling
+// agent has not attached.
+func TestMCPManageListState(t *testing.T) {
+	home := newMCPManageHome(t, `[providers.mock]
+kind = "openai_compat"
+base_url = "mock://local"
+
+[mcp.dbx]
+command = "dbx"
+
+[mcp.broken]
+command = "broken"
+
+[mcp.detached]
+command = "detached"
+
+[agents.lana]
+provider = "mock"
+model = "lana-model"
+mcp = ["dbx", "broken"]
+`)
+	admin := &fakeMCPAdmin{status: map[string]core.MCPServerStatus{
+		"dbx":      {Name: "dbx", State: "running", Tools: 25},
+		"broken":   {Name: "broken", State: "unavailable", Reason: "spawn ENOENT"},
+		"detached": {Name: "detached", State: "running", Tools: 3},
+	}}
+	tool := NewMCPManage()
+	out := callMCPManage(t, tool, core.ToolCtx{Home: home, AgentName: "lana", MCPAdmin: admin}, `{"action":"list"}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("list = %+v", out)
+	}
+	lines := strings.Split(out.Output, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("list lines = %q", out.Output)
+	}
+	byName := map[string]string{}
+	for _, line := range lines {
+		byName[strings.Fields(line)[0]] = line
+	}
+	if line := byName["dbx"]; !strings.Contains(line, "running (25 tools)") {
+		t.Fatalf("dbx line = %q", line)
+	}
+	if line := byName["broken"]; !strings.Contains(line, "unavailable: spawn ENOENT") {
+		t.Fatalf("broken line = %q", line)
+	}
+	if line := byName["detached"]; !strings.Contains(line, "running (3 tools)") {
+		t.Fatalf("detached line = %q", line)
+	}
+}
+
+// TestMCPManageListChildStatus covers the child case: the list action has no
+// MCPAdmin but still reads the runtime state from the read-only source.
+func TestMCPManageListChildStatus(t *testing.T) {
+	home := newMCPManageHome(t, `[providers.mock]
+kind = "openai_compat"
+base_url = "mock://local"
+
+[mcp.dbx]
+command = "dbx"
+
+[agents.lana]
+provider = "mock"
+model = "lana-model"
+mcp = ["dbx"]
+`)
+	status := func(name string) (string, int, string, bool) {
+		if name != "dbx" {
+			return "", 0, "", false
+		}
+		return "running", 25, "", true
+	}
+	tool := NewMCPManage()
+	out := callMCPManage(t, tool, core.ToolCtx{Home: home, AgentName: "lana", MCPStatus: status}, `{"action":"list"}`)
+	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "running (25 tools)") {
+		t.Fatalf("list = %+v", out)
+	}
+}
+
+// TestMCPManageListNotLoaded covers a server the runtime does not know.
+func TestMCPManageListNotLoaded(t *testing.T) {
+	home := newMCPManageHome(t, `[providers.mock]
+kind = "openai_compat"
+base_url = "mock://local"
+
+[mcp.dbx]
+command = "dbx"
+
+[agents.lana]
+provider = "mock"
+model = "lana-model"
+`)
+	tool := NewMCPManage()
+	out := callMCPManage(t, tool, core.ToolCtx{Home: home, AgentName: "lana", MCPAdmin: &fakeMCPAdmin{}}, `{"action":"list"}`)
+	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "not loaded") {
+		t.Fatalf("list = %+v", out)
 	}
 }
 

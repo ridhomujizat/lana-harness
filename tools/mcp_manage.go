@@ -160,12 +160,44 @@ func (t *mcpManageTool) list(tc core.ToolCtx) (core.ToolOutput, error) {
 			mcpTypeLabel(def),
 			mcpTarget(def),
 			mcpAttachLabel(attached[name]),
-			"-",
+			mcpStateLabel(tc, name),
 			mcpKeysLabel(def.Env),
 			mcpKeysLabel(def.Headers),
 		))
 	}
 	return successOutput(strings.Join(lines, "\n"))
+}
+
+// mcpStateLabel returns the runtime state column of one server. It is "-" when
+// no status source exists, and "not loaded" when the runtime does not know the
+// server (API-TFB-007).
+func mcpStateLabel(tc core.ToolCtx, name string) string {
+	status := tc.MCPStatus
+	if status == nil && tc.MCPAdmin != nil {
+		// The admin also exposes a read-only status method; keeping it as a
+		// fallback covers a caller that set only the admin.
+		status = tc.MCPAdmin.ServerStatus
+	}
+	if status == nil {
+		return "-"
+	}
+	state, tools, reason, known := status(name)
+	if !known {
+		return "not loaded"
+	}
+	switch state {
+	case "running":
+		return fmt.Sprintf("running (%d tools)", tools)
+	case "unavailable":
+		if reason == "" {
+			return "unavailable"
+		}
+		return "unavailable: " + reason
+	case "stopped", "":
+		return "stopped"
+	default:
+		return state
+	}
 }
 
 func (t *mcpManageTool) add(ctx context.Context, tc core.ToolCtx, in *mcpManageInput) (core.ToolOutput, error) {

@@ -20,6 +20,9 @@ import (
 const (
 	textOnlyReply = "Only text messages are supported for now."
 	waitReply     = "· wait for the turn to finish"
+	// drainingReply is the text a chat gets while the daemon drains
+	// (REQ-TFB-002, API-TFB-008).
+	drainingReply = "lana is restarting. Try again in a moment."
 )
 
 // chat is the worker of one Telegram chat. It handles the chat's updates in order and
@@ -30,16 +33,25 @@ type chat struct {
 	routeAgent string
 	updates    chan Update
 
-	mu         sync.Mutex
-	agent      string
-	session    string
-	running    bool
-	cancelTurn context.CancelFunc
-	liveID     int64
-	tools      []*toolLine
-	usageIn    int64
-	usageOut   int64
-	turnWG     sync.WaitGroup
+	mu          sync.Mutex
+	agent       string
+	session     string
+	running     bool
+	cancelTurn  context.CancelFunc
+	liveID      int64
+	tools       []*toolLine
+	step        int
+	afterResult bool
+	calls       int
+	// Permission bubble state of the running turn (REQ-TGL-002).
+	bubbleID         int64
+	approvalQueue    []*approval
+	approvalTotal    int
+	approvalAllowed  int
+	approvalRejected int
+	usageIn          int64
+	usageOut         int64
+	turnWG           sync.WaitGroup
 }
 
 type toolLine struct {
@@ -47,7 +59,7 @@ type toolLine struct {
 	agent  string
 	name   string
 	arg    string
-	mark   string
+	done   bool
 }
 
 func (w *chat) address() string { return strconv.FormatInt(w.id, 10) }
@@ -104,6 +116,11 @@ func (w *chat) handleMessage(ctx context.Context, m *Message) {
 }
 
 func (w *chat) handleText(ctx context.Context, m *Message, text string) {
+	// A drain starts no turn and queues nothing (REQ-TFB-002, API-TFB-008).
+	if w.ch.backend.Draining() {
+		w.reply(ctx, m.MessageID, drainingReply)
+		return
+	}
 	if w.captureQuestionText(ctx, m, text) {
 		return
 	}
@@ -220,7 +237,11 @@ func isParseError(err error) bool {
 func (w *chat) startTurn(ctx context.Context, trigger int64, session, text string) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	w.mu.Lock()
-	w.running, w.cancelTurn, w.tools, w.liveID = true, cancel, nil, 0
+	w.running, w.cancelTurn = true, cancel
+	w.liveID, w.tools = 0, nil
+	w.step, w.afterResult, w.calls = 1, false, 0
+	w.bubbleID, w.approvalQueue = 0, nil
+	w.approvalTotal, w.approvalAllowed, w.approvalRejected = 0, 0, 0
 	w.mu.Unlock()
 	w.turnWG.Add(1)
 	go func() {
@@ -299,35 +320,48 @@ func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) 
 	}()
 
 	var text strings.Builder
-	afterTool := false
+	afterCall := false
 	apply := func(frame core.LiveFrame) {
+		lead := frame.SessionID == session
 		// Child text deltas are not part of the lead's answer; child tool calls
-		// still appear, prefixed with the child agent name (REQ-TEAM-024).
-		if frame.SessionID != session && frame.Kind != "tool_call" && frame.Kind != "tool_result" {
+		// still update the status line (REQ-TEAM-024).
+		if !lead && frame.Kind != "tool_call" && frame.Kind != "tool_result" {
 			return
 		}
 		agent := ""
-		if frame.SessionID != session {
+		if !lead {
 			agent = frame.Agent
 		}
 		switch frame.Kind {
 		case "text_delta":
-			if afterTool && text.Len() > 0 && !strings.HasSuffix(text.String(), "\n") {
+			if afterCall && text.Len() > 0 && !strings.HasSuffix(text.String(), "\n") {
 				text.WriteString("\n\n")
 			}
-			afterTool = false
+			afterCall = false
 			text.WriteString(frame.Text)
+			w.mu.Lock()
+			if w.afterResult {
+				w.step, w.afterResult = w.step+1, false
+			}
+			w.mu.Unlock()
 		case "tool_call":
 			w.mu.Lock()
+			w.calls++
+			if lead && w.afterResult {
+				w.step, w.afterResult = w.step+1, false
+			}
 			w.tools = append(w.tools, &toolLine{callID: frame.CallID, agent: agent, name: frame.Name, arg: toolfmt.Cut(toolfmt.PrimaryArg(frame.Name, frame.Input), 60)})
 			w.mu.Unlock()
-			afterTool = true
+			afterCall = true
 		case "tool_result":
 			w.mu.Lock()
 			for _, line := range w.tools {
 				if line.callID == frame.CallID {
-					line.mark = statusMark(frame.Status)
+					line.done = true
 				}
+			}
+			if lead {
+				w.afterResult = true
 			}
 			w.mu.Unlock()
 		}
@@ -349,7 +383,7 @@ loop:
 				continue
 			}
 			dirty = false
-			body := tgfmt.Split(w.render(text.String(), ""), tgfmt.Limit)
+			body := tgfmt.Split(w.render(text.String(), "", true), tgfmt.Limit)
 			if len(body) > 0 && body[0] != lastSent {
 				lastSent = body[0]
 				w.ch.apiErr("editMessageText", w.editHTML(ctx, liveID, body[0]))
@@ -360,16 +394,21 @@ loop:
 			break loop
 		}
 	}
-	// Frames published before RunTurn returned may still be in flight.
+	// Frames published before RunTurn returned may still be in flight. Drain
+	// until the reader and the forwarding channel are quiet for a short grace
+	// period.
 	deadline := time.After(500 * time.Millisecond)
 drain:
-	for sub.Len() > 0 || len(frames) > 0 {
+	for {
 		select {
 		case frame := <-frames:
 			apply(frame)
 		case <-deadline:
 			break drain
 		case <-time.After(20 * time.Millisecond):
+			if sub.Len() == 0 && len(frames) == 0 {
+				break drain
+			}
 		}
 	}
 	answer := text.String()
@@ -384,14 +423,22 @@ drain:
 	slog.Info("telegram: turn finished", "chat_id", w.id, "session_id", session, "stop_reason", out.result.StopReason, "duration", time.Since(started).Round(time.Millisecond))
 }
 
-func statusMark(status string) string {
-	switch status {
-	case string(core.ToolStatusSuccess):
-		return "✓"
-	case string(core.ToolStatusError):
-		return "✗"
+// shortTool returns the display name of a tool: the part after the last "__"
+// for MCP tools.
+func shortTool(name string) string {
+	if i := strings.LastIndex(name, "__"); i >= 0 {
+		return name[i+2:]
 	}
-	return "⊘"
+	return name
+}
+
+// displayTool labels a tool with the child agent name when it is not the lead's.
+func displayTool(agent, name string) string {
+	name = shortTool(name)
+	if agent != "" {
+		return agent + " · " + name
+	}
+	return name
 }
 
 // endLine returns the closing status line of a turn, or "".
@@ -407,55 +454,121 @@ func endLine(out turnOutcome) string {
 	return ""
 }
 
-// render builds the live message HTML: tool lines, the answer, and an optional end line.
-func (w *chat) render(answer, end string) string {
+// statusLine returns the live status line: the running tool and step, or the
+// writing step when no tool runs (REQ-TGL-001).
+func (w *chat) statusLine() string {
 	w.mu.Lock()
-	lines := make([]string, 0, len(w.tools))
-	for _, line := range w.tools {
-		row := "🔧 "
-		if line.agent != "" {
-			row += line.agent + " · "
-		}
-		if line.name == "ask_user" {
-			row += strings.TrimSpace(line.name + " · " + line.arg)
-		} else {
-			row += strings.TrimSpace(line.name + " " + line.arg)
-		}
-		if line.mark != "" {
-			row += " " + line.mark
-		}
-		lines = append(lines, html.EscapeString(row))
+	defer w.mu.Unlock()
+	step := w.step
+	if step < 1 {
+		step = 1
 	}
-	w.mu.Unlock()
+	for i := len(w.tools) - 1; i >= 0; i-- {
+		if w.tools[i].done {
+			continue
+		}
+		return fmt.Sprintf("⏳ %s · step %d", displayTool(w.tools[i].agent, w.tools[i].name), step)
+	}
+	return fmt.Sprintf("✍️ step %d", step)
+}
+
+// render builds the message HTML. While running it is the status line and the
+// answer; when final it is the answer, the end line, and the footer.
+func (w *chat) render(answer, end string, running bool) string {
 	sections := []string{}
-	if len(lines) > 0 {
-		sections = append(sections, strings.Join(lines, "\n"))
+	if running {
+		sections = append(sections, html.EscapeString(w.statusLine()))
 	}
 	if body := tgfmt.ToHTML(answer); body != "" {
 		sections = append(sections, body)
 	}
-	if end != "" {
-		sections = append(sections, html.EscapeString(end))
-	}
-	if len(sections) == 0 {
-		return "…"
+	if !running {
+		if end != "" {
+			sections = append(sections, html.EscapeString(end))
+		}
+		if footer := w.footer(); footer != "" {
+			sections = append(sections, html.EscapeString(footer))
+		}
 	}
 	return strings.Join(sections, "\n\n")
 }
 
-// finish writes the final live message and any overflow messages.
+// footer returns the closing stats line, or "" when the turn made no tool call.
+func (w *chat) footer() string {
+	w.mu.Lock()
+	steps, calls := w.step, w.calls
+	w.mu.Unlock()
+	if calls == 0 {
+		return ""
+	}
+	if steps < 1 {
+		steps = 1
+	}
+	return fmt.Sprintf("⚙️ %s · %s", plural(steps, "step"), plural(calls, "tool call"))
+}
+
+// plural renders "<n> <unit>" with an English plural suffix.
+func plural(n int, unit string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, unit)
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
+}
+
+// summaryText is the final permission bubble text (REQ-TGL-003).
+func (w *chat) summaryText() string {
+	w.mu.Lock()
+	total, allowed, rejected := w.approvalTotal, w.approvalAllowed, w.approvalRejected
+	w.mu.Unlock()
+	parts := []string{}
+	if allowed > 0 {
+		parts = append(parts, fmt.Sprintf("%d allowed", allowed))
+	}
+	if rejected > 0 {
+		parts = append(parts, fmt.Sprintf("%d rejected", rejected))
+	}
+	summary := "🔐 " + plural(total, "approval")
+	if len(parts) > 0 {
+		summary += ": " + strings.Join(parts, ", ")
+	}
+	return summary
+}
+
+// finish writes the final answer. With a permission bubble it edits the bubble
+// to the summary, sends the answer as new messages, and deletes the live
+// message; otherwise it edits the live message in place (REQ-TGL-003).
 func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turnOutcome) {
+	defer w.resetTurn()
 	if ctx.Err() != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 	}
 	end := endLine(out)
-	body := w.render(answer, end)
+	body := w.render(answer, end, false)
 	if strings.TrimSpace(answer) == "" && end == "" && !w.hasTools() {
 		body = "(no answer)"
 	}
 	parts := tgfmt.Split(body, tgfmt.Limit)
+	if len(parts) == 0 {
+		parts = []string{"(no answer)"}
+	}
+	if !w.hasBubble() {
+		w.editLive(ctx, liveID, parts)
+		return
+	}
+	w.editBubble(ctx, w.summaryText())
+	if !w.sendParts(ctx, parts) {
+		w.editLive(ctx, liveID, parts)
+		return
+	}
+	if liveID != 0 {
+		w.ch.apiErr("deleteMessage", w.ch.api.DeleteMessage(ctx, w.id, liveID))
+	}
+}
+
+// editLive edits the live message with the first part and sends the rest.
+func (w *chat) editLive(ctx context.Context, liveID int64, parts []string) {
 	for i, part := range parts {
 		if i == 0 && liveID != 0 {
 			w.ch.apiErr("editMessageText", w.editHTML(ctx, liveID, part))
@@ -466,10 +579,56 @@ func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turn
 	}
 }
 
+// sendParts sends the final answer as new messages. It reports whether the
+// first part was sent, so finish can fall back to the live message when it was
+// not.
+func (w *chat) sendParts(ctx context.Context, parts []string) bool {
+	for i, part := range parts {
+		_, err := w.sendHTML(ctx, part, SendOptions{})
+		if err == nil {
+			continue
+		}
+		w.ch.apiErr("sendMessage", err)
+		if i == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (w *chat) hasTools() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return len(w.tools) > 0
+	return w.calls > 0
+}
+
+func (w *chat) hasBubble() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.bubbleID != 0
+}
+
+// editBubble edits the turn's permission bubble and removes its buttons.
+func (w *chat) editBubble(ctx context.Context, text string) {
+	w.mu.Lock()
+	messageID := w.bubbleID
+	w.mu.Unlock()
+	if messageID == 0 {
+		return
+	}
+	editCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	w.ch.apiErr("editMessageText", w.ch.api.EditMessageText(editCtx, w.id, messageID, text, SendOptions{}))
+}
+
+// resetTurn clears the per-turn layout state.
+func (w *chat) resetTurn() {
+	w.mu.Lock()
+	w.liveID, w.tools = 0, nil
+	w.step, w.afterResult, w.calls = 0, false, 0
+	w.bubbleID, w.approvalQueue = 0, nil
+	w.approvalTotal, w.approvalAllowed, w.approvalRejected = 0, 0, 0
+	w.mu.Unlock()
 }
 
 // toolArg returns the shown argument of a tool call of the running turn.

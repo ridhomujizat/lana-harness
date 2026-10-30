@@ -69,7 +69,7 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 	if ctx.Err() != nil {
 		for _, state := range states {
 			if state.ready {
-				state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
+				state.output = stopToolOutput(ctx)
 				state.ready = false
 			}
 		}
@@ -129,7 +129,7 @@ func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.
 				defer func() { <-sem }()
 				tr.executeOne(ctx, s, tc)
 			case <-ctx.Done():
-				s.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
+				s.output = stopToolOutput(ctx)
 			}
 		}(state)
 	}
@@ -138,7 +138,7 @@ func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.
 
 func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.ToolCtx) {
 	if ctx.Err() != nil {
-		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
+		state.output = stopToolOutput(ctx)
 		return
 	}
 	tc.CallID = state.call.CallID
@@ -154,7 +154,7 @@ func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.
 		return
 	}
 	if ctx.Err() != nil {
-		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
+		state.output = stopToolOutput(ctx)
 		return
 	}
 	state.output = post

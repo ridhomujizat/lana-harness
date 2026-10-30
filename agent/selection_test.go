@@ -28,7 +28,7 @@ func TestSetAgentEvent(t *testing.T) {
 			}
 		}
 	}
-	if payload.Agent != "assistant2" || payload.Provider != "mock" || payload.Model != "m2" {
+	if payload.Agent != "assistant2" || payload.Provider != "" || payload.Model != "" {
 		t.Fatalf("payload=%+v", payload)
 	}
 	h.run(t, "hi")

@@ -27,6 +27,13 @@ type PromptInput struct {
 	Now            time.Time
 }
 
+// blockingRules is the fixed section that tells the agent how to report a
+// blocker. It is runtime text, not part of the editable AGENT.md (REQ-TFB-008).
+const blockingRules = "# When something blocks you\n" +
+	"- If a tool or MCP server you need is unavailable, or a call to it fails, say so in your answer: name it, quote the error, say what you could not do, and say what the owner can do (for example: check the server in Settings → MCP, add a secret, or retry).\n" +
+	"- Do not work around a missing or failing MCP server by calling it or its API by hand (for example with bash).\n" +
+	"- If you cannot finish the request, say so plainly and say what is still needed. Never end a turn without telling the owner the result."
+
 // Build renders the system prompt. Empty sections are skipped.
 func Build(in PromptInput) string {
 	sections := []string{}
@@ -49,6 +56,7 @@ func Build(in PromptInput) string {
 		}
 		sections = append(sections, strings.Join(lines, "\n"))
 	}
+	sections = append(sections, blockingRules)
 	sections = append(sections, "# Runtime context\n"+runtimeContext(in))
 	return strings.Join(sections, "\n\n")
 }

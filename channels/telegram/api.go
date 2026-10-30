@@ -275,6 +275,11 @@ func (c *Client) EditMessageText(ctx context.Context, chatID, messageID int64, t
 	return c.call(ctx, "editMessageText", params, nil)
 }
 
+// DeleteMessage deletes a message.
+func (c *Client) DeleteMessage(ctx context.Context, chatID, messageID int64) error {
+	return c.call(ctx, "deleteMessage", map[string]any{"chat_id": chatID, "message_id": messageID}, nil)
+}
+
 // SendChatAction sends a chat action such as "typing".
 func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string) error {
 	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": action}, nil)

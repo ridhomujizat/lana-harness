@@ -60,8 +60,9 @@ func TestPromptWithoutAgentHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(prompt, "# Runtime context\n") {
-		t.Fatalf("prompt should hold only runtime context:\n%s", prompt)
+	// The prompt keeps the fixed blocking rules before the runtime context.
+	if !strings.Contains(prompt, "# Runtime context\n") {
+		t.Fatalf("prompt has no runtime context:\n%s", prompt)
 	}
 	for _, want := range []string{"- agent: assistant", "- channel: library", "- workspace: " + ws, "- date: " + time.Now().Format("2006-01-02")} {
 		if !strings.Contains(prompt, want) {

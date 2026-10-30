@@ -155,7 +155,7 @@ func TestTeamSetAgentEvent(t *testing.T) {
 	if !found {
 		t.Fatal("model/selection event missing")
 	}
-	if payload.Agent != "research-squad" || payload.Provider != "mock" || payload.Model != "lead-model" {
+	if payload.Agent != "research-squad" || payload.Provider != "" || payload.Model != "" {
 		t.Fatalf("payload=%+v", payload)
 	}
 }

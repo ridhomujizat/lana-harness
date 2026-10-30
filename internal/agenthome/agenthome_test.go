@@ -149,6 +149,11 @@ Uses fish
 §
 Server kenari
 
+# When something blocks you
+- If a tool or MCP server you need is unavailable, or a call to it fails, say so in your answer: name it, quote the error, say what you could not do, and say what the owner can do (for example: check the server in Settings → MCP, add a secret, or retry).
+- Do not work around a missing or failing MCP server by calling it or its API by hand (for example with bash).
+- If you cannot finish the request, say so plainly and say what is still needed. Never end a turn without telling the owner the result.
+
 # Runtime context
 - agent: helper
 - date: 2026-10-29 Thursday 21:05 WIB (UTC+07:00)

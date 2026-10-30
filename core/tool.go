@@ -44,6 +44,10 @@ type ToolCtx struct {
 	// MCPAdmin changes MCP servers for the mcp_manage tool. Nil when the
 	// runtime has no MCP registry.
 	MCPAdmin MCPAdmin
+	// MCPStatus is the read-only status source for the mcp_manage list
+	// action. It is set for every turn, including child turns without
+	// MCPAdmin. Nil when the runtime has no MCP registry.
+	MCPStatus func(name string) (state string, tools int, reason string, known bool)
 	// AllowedAgents is the delegation list of the calling agent.
 	AllowedAgents []string
 	// Depth is the session depth. A root session has depth 0.

@@ -507,11 +507,11 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-	version := webfiles.ConfigVersion(candidate)
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	s.auditSave("agent.create", agentConfigPath(file, home), name, changed)
 	writeJSON(w, http.StatusCreated, agentCreatedResponse{
 		Name:            name,
-		RestartRequired: version != store.ConfigLoadedVersion(),
+		RestartRequired: !applied,
 	})
 }
 
@@ -600,11 +600,12 @@ func (s *Server) handlePutAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		s.auditSave("agent.save", agentConfigPath(file, s.agentHome()), name, changed)
 	}
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	version := webfiles.ConfigVersion(candidate)
 	writeJSON(w, http.StatusOK, putAgentResponse{
 		Name:            name,
 		Version:         version,
-		RestartRequired: version != store.ConfigLoadedVersion(),
+		RestartRequired: !applied,
 	})
 }
 
@@ -707,11 +708,11 @@ func (s *Server) handleDuplicateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-	version := webfiles.ConfigVersion(candidate)
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	s.auditSave("agent.duplicate", agentConfigPath(file, home), name, changed)
 	writeJSON(w, http.StatusCreated, agentCreatedResponse{
 		Name:            name,
-		RestartRequired: version != store.ConfigLoadedVersion(),
+		RestartRequired: !applied,
 	})
 }
 

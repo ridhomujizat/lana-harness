@@ -41,13 +41,24 @@ func cmdDaemon(args []string) int {
 		level = slog.LevelError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return runDaemon(ctx, os.Stderr)
+	// The first SIGTERM/SIGINT starts a stop drain; the next forces it
+	// (REQ-TFB-002).
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	return runDaemonSignals(context.Background(), os.Stderr, signals)
 }
 
-// runDaemon runs the daemon until ctx ends and returns the exit code (API-DMN-001).
+// runDaemon runs the daemon until ctx ends and returns the exit code
+// (API-DMN-001). A caller that cancels ctx stops the daemon at once; the
+// signal-driven drain lives in cmdDaemon (REQ-TFB-002).
 func runDaemon(ctx context.Context, stderr io.Writer) int {
+	return runDaemonSignals(ctx, stderr, nil)
+}
+
+// runDaemonSignals runs the daemon. signals is the shutdown channel of
+// cmdDaemon; nil means the caller cancels ctx instead.
+func runDaemonSignals(ctx context.Context, stderr io.Writer, signals <-chan os.Signal) int {
 	errorf := func(code int, format string, args ...any) int {
 		_, _ = fmt.Fprintf(stderr, "error: "+format+"\n", args...)
 		return code
@@ -181,6 +192,8 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 	defer func() { _ = rt.Close() }()
 	leases := newLeaseSet(rt)
 	defer leases.releaseAll()
+	// The drain gate refuses new turns while the daemon waits (REQ-TFB-002).
+	drain := newDrainController(rt, daemonDrainTimeout)
 
 	if telegramActive {
 		channel = telegram.New(tgcfg, token, &daemonBackend{rt: rt, home: home, leases: leases})
@@ -200,6 +213,7 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 	if webServer != nil {
 		backend := newWebBackend(rt, home, leases, runCtx)
 		backend.SetRestartController(restart)
+		backend.SetDrainController(drain)
 		webServer.SetBackend(backend)
 		webServer.SetDaemonStore(backend)
 		webServer.SetSecretStore(backend)
@@ -242,24 +256,57 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 		return restartInPlace(lock, stderr)
 	}
 
-	if !telegramActive {
-		select {
-		case <-runCtx.Done():
-			return 0
-		case <-restart.requested():
-			return restartNow(nil)
+	// handleSignal starts a stop drain, forces a running one, and turns a
+	// pending restart into a stop (REQ-TFB-002).
+	handleSignal := func() {
+		status := drain.status()
+		switch {
+		case status.State == drainIdle:
+			drain.begin(drainStop)
+		case status.Reason == drainStop:
+			drain.force()
+		default:
+			// A restart drain is pending; a stop signal turns it into a stop.
+			if drain.cancel() {
+				drain.begin(drainStop)
+			}
+			drain.force()
 		}
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- channel.Run(runCtx) }()
-	select {
-	case err = <-done:
-	case <-restart.requested():
-		return restartNow(done)
-	case <-runCtx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
-		shutdownWeb(shutdownCtx)
+	var done chan error
+	if telegramActive {
+		done = make(chan error, 1)
+		go func() { done <- channel.Run(runCtx) }()
+	}
+
+	// The web server and the channel keep running during a drain so new
+	// messages get the draining reply; runCtx stops only after it completes.
+drainLoop:
+	for {
+		select {
+		case err = <-done:
+			break drainLoop
+		case <-ctx.Done():
+			// The caller canceled the daemon without a signal; keep the old
+			// immediate stop used by tests and embedders.
+			break drainLoop
+		case <-restart.requested():
+			return restartNow(done)
+		case <-drain.stoppingSignaled():
+			if drain.status().Reason == drainRestart {
+				return restartNow(done)
+			}
+			break drainLoop
+		case <-signals:
+			handleSignal()
+		}
+	}
+
+	cancelRun()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	shutdownWeb(shutdownCtx)
+	if telegramActive {
 		select {
 		case err = <-done:
 		case <-shutdownCtx.Done():
@@ -267,8 +314,8 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 			cancel()
 			return 0
 		}
-		cancel()
 	}
+	cancel()
 	if errors.Is(err, telegram.ErrUnauthorized) {
 		return errorf(2, "telegram: invalid bot token")
 	}
@@ -633,5 +680,9 @@ func (b *daemonBackend) Skills(agent string) []agenthome.Skill {
 
 func (b *daemonBackend) AgentNames() []string           { return b.rt.AgentNames() }
 func (b *daemonBackend) AgentModel(agent string) string { return b.rt.AgentModel(agent) }
+
+// Draining reports the runtime gate so the Telegram text path refuses new
+// turns while the daemon shuts down (REQ-TFB-002, API-TFB-008).
+func (b *daemonBackend) Draining() bool { return b.rt.Draining() }
 
 var _ telegram.Backend = (*daemonBackend)(nil)

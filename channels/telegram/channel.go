@@ -40,6 +40,9 @@ type Backend interface {
 	// TeamNames returns the registered teams. A team is a valid /agent choice.
 	TeamNames() []string
 	AgentModel(agent string) string
+	// Draining reports that the daemon is shutting down and starts no turn
+	// (REQ-TFB-002, API-TFB-008).
+	Draining() bool
 }
 
 // Commands is the list registered with setMyCommands (API-TG-005).

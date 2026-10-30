@@ -16,8 +16,9 @@ import (
 )
 
 type apiCall struct {
-	Method string
-	Params map[string]any
+	Method    string
+	Params    map[string]any
+	MessageID int64
 }
 
 type cannedResponse struct {
@@ -52,6 +53,7 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&params)
 	f.mu.Lock()
 	f.calls = append(f.calls, apiCall{Method: method, Params: params})
+	index := len(f.calls) - 1
 	if queue := f.fail[method]; len(queue) > 0 {
 		f.fail[method] = queue[1:]
 		f.mu.Unlock()
@@ -90,8 +92,11 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.msgID++
 		id := f.msgID
+		f.calls[index].MessageID = id
 		f.mu.Unlock()
 		result = Message{MessageID: id}
+	case "deleteMessage":
+		result = true
 	}
 	data, _ := json.Marshal(map[string]any{"ok": true, "result": result})
 	_, _ = w.Write(data)
@@ -188,6 +193,7 @@ type fakeBackend struct {
 	cancels  []string
 	turn     func(ctx context.Context, session, prompt string) (TurnResult, error)
 	cancelCh chan struct{}
+	draining bool
 }
 
 func newFakeBackend() *fakeBackend {
@@ -293,6 +299,12 @@ func (b *fakeBackend) TeamNames() []string {
 	return append([]string(nil), b.teams...)
 }
 func (b *fakeBackend) AgentModel(agent string) string { return "mock:" + agent }
+
+func (b *fakeBackend) Draining() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.draining
+}
 
 func (b *fakeBackend) promptList() []string {
 	b.mu.Lock()

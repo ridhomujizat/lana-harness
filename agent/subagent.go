@@ -30,7 +30,7 @@ var _ core.SubagentRunner = (*subagentRunner)(nil)
 // Spawn creates a child session, runs one turn there, and returns its answer.
 func (s *subagentRunner) Spawn(ctx context.Context, req core.SpawnRequest) (core.ToolOutput, error) {
 	if ctx.Err() != nil {
-		return toolError("cancelled"), nil
+		return stopToolOutput(ctx), nil
 	}
 	if len(s.allowed) == 0 {
 		return toolError(noSubagentsMessage), nil
@@ -67,7 +67,7 @@ func (s *subagentRunner) Spawn(ctx context.Context, req core.SpawnRequest) (core
 // Continue sends a follow-up to an existing child session.
 func (s *subagentRunner) Continue(ctx context.Context, req core.ContinueRequest) (core.ToolOutput, error) {
 	if ctx.Err() != nil {
-		return toolError("cancelled"), nil
+		return stopToolOutput(ctx), nil
 	}
 	if len(s.allowed) == 0 {
 		return toolError(noSubagentsMessage), nil
@@ -89,7 +89,7 @@ func (s *subagentRunner) Continue(ctx context.Context, req core.ContinueRequest)
 // runChildTurn starts a turn in the child, waits for it, and builds the result.
 func (s *subagentRunner) runChildTurn(ctx context.Context, child core.SessionInfo, prompt string, started time.Time) (core.ToolOutput, error) {
 	if ctx.Err() != nil {
-		return toolError("cancelled"), nil
+		return stopToolOutput(ctx), nil
 	}
 	turnID, err := s.reg.startChildTurn(ctx, child.ID, prompt)
 	if err != nil {
@@ -101,14 +101,18 @@ func (s *subagentRunner) runChildTurn(ctx context.Context, child core.SessionInf
 	result, err := s.reg.Wait(ctx, turnID)
 	if err != nil {
 		if ctx.Err() != nil {
-			return toolError("cancelled"), nil
+			return stopToolOutput(ctx), nil
 		}
 		return toolError(internalErrorMessage), nil
 	}
 	// The parent context ending cancels the child turn; a cancel of this child
-	// alone ends its turn as cancelled. Both surface as a cancelled task call.
-	if ctx.Err() != nil || result.StopReason == "cancelled" {
-		out := toolError("cancelled")
+	// alone ends its turn as cancelled. A shutdown interrupt surfaces as an
+	// interrupted task call (REQ-TFB-001).
+	if ctx.Err() != nil || result.StopReason == "cancelled" || result.StopReason == "interrupted" {
+		out := stopToolOutput(ctx)
+		if result.StopReason == "interrupted" {
+			out.Output = "interrupted"
+		}
 		// A cancelled child still reports the usage of the part of its turn
 		// that ran, so the parent step keeps that cost (REQ-TEAM-013).
 		out.Usage = &result.Usage

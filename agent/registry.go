@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -79,6 +80,16 @@ type Registry struct {
 	mcpMu       sync.Mutex
 	mcpCanAdmin bool
 	mcpServers  map[string][]string
+	// mcpApplied holds the MCP definitions the registry applied, seeded from
+	// the boot config. The diff in ApplyConfig reads it instead of the config
+	// snapshot, so a server mcp_manage already put is not applied twice.
+	mcpApplied map[string]core.MCPConfig
+
+	// cfgMu guards the agents and teams snapshot. ApplyConfig swaps both maps
+	// as a unit; reads copy the map header under the lock and use it unlocked.
+	cfgMu sync.RWMutex
+	// applyMu serializes ApplyConfig so two saves cannot race on the MCP diff.
+	applyMu sync.Mutex
 }
 
 // NewRegistry creates a registry.
@@ -102,7 +113,11 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 		turns:          map[string]*turnState{},
 		activeChildren: map[string]int{},
 		mcpServers:     map[string][]string{},
+		mcpApplied:     make(map[string]core.MCPConfig, len(cfg.MCP)),
 		hub:            NewHub(),
+	}
+	for name, serverCfg := range cfg.MCP {
+		r.mcpApplied[name] = serverCfg
 	}
 	r.pipeline = NewToolRunner(hooks, toolReg)
 	installDefaults(hooks, llm)
@@ -169,6 +184,67 @@ func (r *Registry) agentServers(agent string) ([]string, bool) {
 	return append([]string(nil), servers...), true
 }
 
+// configSnapshot returns the loaded agent and team maps. ApplyConfig replaces
+// the maps as a unit and never changes them in place, so the result stays valid
+// after the lock is released.
+func (r *Registry) configSnapshot() (map[string]core.AgentConfig, map[string]core.TeamConfig) {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
+	return r.config.Agents, r.config.Teams
+}
+
+// providersConfig returns the loaded provider map for validation lookups.
+func (r *Registry) providersConfig() map[string]core.ProviderConfig {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
+	return r.config.Providers
+}
+
+// ApplyConfig swaps the agent and team config and applies the [mcp.*] diff to
+// the running manager. Providers, routes, channels, web, and secrets are not
+// applied here (REQ-TFB-006).
+func (r *Registry) ApplyConfig(cfg core.Config) {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+
+	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
+	for name, agentCfg := range cfg.Agents {
+		agents[name] = agentCfg
+	}
+	teams := make(map[string]core.TeamConfig, len(cfg.Teams))
+	for name, teamCfg := range cfg.Teams {
+		teams[name] = teamCfg
+	}
+	r.cfgMu.Lock()
+	r.config.Agents = agents
+	r.config.Teams = teams
+	r.cfgMu.Unlock()
+
+	// The config now owns these agents, so its mcp list wins over the overlay
+	// that mcp_manage keeps for a running turn.
+	r.mcpMu.Lock()
+	for name := range agents {
+		delete(r.mcpServers, name)
+	}
+	applied := make(map[string]core.MCPConfig, len(r.mcpApplied))
+	for name, serverCfg := range r.mcpApplied {
+		applied[name] = serverCfg
+	}
+	r.mcpMu.Unlock()
+
+	for name, serverCfg := range cfg.MCP {
+		if prev, ok := applied[name]; ok && reflect.DeepEqual(prev, serverCfg) {
+			continue
+		}
+		r.PutServer(name, serverCfg)
+	}
+	for name := range applied {
+		if _, ok := cfg.MCP[name]; !ok {
+			r.RemoveServer(name)
+		}
+	}
+}
+
 // adminManager returns the installed admin-capable MCP manager.
 func (r *Registry) adminManager() (mcpAdmin, bool) {
 	r.mcpMu.Lock()
@@ -188,13 +264,17 @@ func (r *Registry) TestServer(ctx context.Context, cfg core.MCPConfig) (int, err
 	return admin.TestServer(ctx, cfg)
 }
 
-// PutServer adds or replaces an MCP server in the running manager.
+// PutServer adds or replaces an MCP server in the running manager and records
+// the applied definition.
 func (r *Registry) PutServer(name string, cfg core.MCPConfig) {
 	admin, ok := r.adminManager()
 	if !ok {
 		return
 	}
 	admin.Put(name, cfg)
+	r.mcpMu.Lock()
+	r.mcpApplied[name] = cfg
+	r.mcpMu.Unlock()
 }
 
 // RemoveServer stops and forgets an MCP server in the running manager.
@@ -204,6 +284,27 @@ func (r *Registry) RemoveServer(name string) {
 		return
 	}
 	admin.Remove(name)
+	r.mcpMu.Lock()
+	delete(r.mcpApplied, name)
+	r.mcpMu.Unlock()
+}
+
+// ServerStatus reports the runtime state of one MCP server. known is false when
+// the registry never applied the server (REQ-TFB-007, API-TFB-007).
+func (r *Registry) ServerStatus(name string) (state string, tools int, reason string, known bool) {
+	r.mcpMu.Lock()
+	_, known = r.mcpApplied[name]
+	manager := r.mcp
+	r.mcpMu.Unlock()
+	if !known || manager == nil {
+		return "", 0, "", false
+	}
+	statuses := manager.Status([]string{name})
+	if len(statuses) == 0 {
+		return "", 0, "", false
+	}
+	status := statuses[0]
+	return status.State, status.Tools, status.Reason, true
 }
 
 func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {
@@ -337,7 +438,7 @@ func (r *Registry) startTurnLocked(runner *Runner) (string, context.Context) {
 // holds r.mu and runner.mu.
 func (r *Registry) startTurnFrom(parent context.Context, runner *Runner) (string, context.Context) {
 	turnID := id.New()
-	turnCtx, cancel := context.WithCancel(parent)
+	turnCtx, cancel := context.WithCancelCause(parent)
 	runner.running = true
 	runner.turnID = turnID
 	runner.cancel = cancel
@@ -346,7 +447,7 @@ func (r *Registry) startTurnFrom(parent context.Context, runner *Runner) (string
 }
 
 func (r *Registry) startTurnAsync(runner *Runner, text string) {
-	turnCtx, cancel := context.WithCancel(r.root)
+	turnCtx, cancel := context.WithCancelCause(r.root)
 	turnID := id.New()
 	runner.running = true
 	runner.turnID = turnID
@@ -401,9 +502,74 @@ func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 	cancel := runner.cancel
 	runner.mu.Unlock()
 	if cancel != nil {
-		cancel()
+		// A nil cause keeps context.Cause at context.Canceled, so the turn
+		// stays "cancelled" and is not an interrupt (API-TFB-001).
+		cancel(nil)
 	}
 	return nil
+}
+
+// Interrupt cancels the running turn with cause. A shutdown cause becomes the
+// "interrupted" turn/end reason (REQ-TFB-001, API-TFB-001).
+func (r *Registry) Interrupt(ctx context.Context, sessionID string, cause error) error {
+	if err := r.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	runner := r.runners[sessionID]
+	r.mu.Unlock()
+	if runner == nil {
+		return nil
+	}
+	runner.mu.Lock()
+	cancel := runner.cancel
+	runner.mu.Unlock()
+	if cancel != nil {
+		cancel(cause)
+	}
+	return nil
+}
+
+// InterruptAll cancels every turn running in this process with cause and
+// returns how many turns it interrupted (REQ-TFB-002).
+func (r *Registry) InterruptAll(cause error) int {
+	r.mu.Lock()
+	runners := make([]*Runner, 0, len(r.runners))
+	for _, runner := range r.runners {
+		runners = append(runners, runner)
+	}
+	r.mu.Unlock()
+	count := 0
+	for _, runner := range runners {
+		runner.mu.Lock()
+		running, cancel := runner.running, runner.cancel
+		runner.mu.Unlock()
+		if !running || cancel == nil {
+			continue
+		}
+		cancel(cause)
+		count++
+	}
+	return count
+}
+
+// RunningTurnCount reports the number of turns running in this process.
+func (r *Registry) RunningTurnCount() int {
+	r.mu.Lock()
+	runners := make([]*Runner, 0, len(r.runners))
+	for _, runner := range r.runners {
+		runners = append(runners, runner)
+	}
+	r.mu.Unlock()
+	count := 0
+	for _, runner := range runners {
+		runner.mu.Lock()
+		if runner.running {
+			count++
+		}
+		runner.mu.Unlock()
+	}
+	return count
 }
 
 // SetAgent selects the agent or team for the session.
@@ -411,19 +577,20 @@ func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) er
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
 	}
-	if team, ok := r.config.Teams[agentName]; ok {
-		lead, ok := r.config.Agents[team.Lead]
-		if !ok {
+	agents, teams := r.configSnapshot()
+	if team, ok := teams[agentName]; ok {
+		if _, ok := agents[team.Lead]; !ok {
 			return fmt.Errorf("%w: %s", ErrUnknownAgent, team.Lead)
 		}
-		payload := core.ModelSelection{V: core.PayloadVersion, Provider: lead.Provider, Model: lead.Model, Agent: agentName}
+		// No provider or model: resolve uses the agent's config model, so a
+		// later web model change reaches an existing session (AC-TFB-014).
+		payload := core.ModelSelection{V: core.PayloadVersion, Agent: agentName}
 		return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 	}
-	agent, ok := r.config.Agents[agentName]
-	if !ok {
+	if _, ok := agents[agentName]; !ok {
 		return fmt.Errorf("%w: %s", ErrUnknownAgent, agentName)
 	}
-	payload := core.ModelSelection{V: core.PayloadVersion, Provider: agent.Provider, Model: agent.Model, Agent: agentName}
+	payload := core.ModelSelection{V: core.PayloadVersion, Agent: agentName}
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 }
 
@@ -436,7 +603,8 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	if err != nil {
 		return err
 	}
-	if _, ok := r.config.Teams[agentName]; ok {
+	_, teams := r.configSnapshot()
+	if _, ok := teams[agentName]; ok {
 		return ErrTeamModel
 	}
 	providerName, modelName, ok := strings.Cut(model, ":")
@@ -446,7 +614,7 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	if modelName == "" {
 		return ErrEmptyModel
 	}
-	if _, exists := r.config.Providers[providerName]; !exists {
+	if _, exists := r.providersConfig()[providerName]; !exists {
 		return fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
 	}
 	payload := core.ModelSelection{V: core.PayloadVersion, Provider: providerName, Model: modelName}
@@ -531,8 +699,9 @@ func (r *Registry) Close(ctx context.Context) error {
 
 // AgentNames returns the registered agents, sorted.
 func (r *Registry) AgentNames() []string {
-	names := make([]string, 0, len(r.config.Agents))
-	for name := range r.config.Agents {
+	agents, _ := r.configSnapshot()
+	names := make([]string, 0, len(agents))
+	for name := range agents {
 		names = append(names, name)
 	}
 	sort.Strings(names)

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -37,14 +38,23 @@ type webBackend struct {
 	home string
 	// leases is the daemon lease set shared with the Telegram channel.
 	leases *leaseSet
-	// loadedSHA256 is the sha256 of config.toml when the daemon started. A
-	// save never updates it; the running runtime keeps the loaded config.
+	// versionMu guards loadedSHA256. A live-applied save moves it forward; a
+	// save that still needs a restart leaves it at the startup value.
+	versionMu sync.Mutex
+	// loadedSHA256 is the sha256 of the config.toml the runtime has loaded. It
+	// starts at the startup version and moves only when a save applies live.
 	loadedSHA256 string
+	// nonLive is the startup config with Agents, Teams, and MCP cleared. A
+	// live apply compares the candidate against it to tell whether a
+	// restart-only change is still pending (REQ-TFB-006).
+	nonLive core.Config
 	// startedAt is the start time of this process image. An in-place restart
 	// builds a new backend, so GET /v1/daemon reports a new value.
 	startedAt time.Time
 	// restart schedules the in-place restart; nil means it is disabled.
 	restart *restartController
+	// drain waits for running turns before a restart (REQ-TFB-002).
+	drain *drainController
 
 	mu sync.Mutex
 	// root is the daemon root context. Turns run on it, never on a request
@@ -62,6 +72,7 @@ var _ web.SkillStore = (*webBackend)(nil)
 var _ web.ProviderTester = (*webBackend)(nil)
 var _ web.MCPBackend = (*webBackend)(nil)
 var _ web.ToolCatalog = (*webBackend)(nil)
+var _ web.LiveConfigStore = (*webBackend)(nil)
 
 const (
 	// providerTestTimeout is the 15-second limit of API-WEB-019.
@@ -211,6 +222,7 @@ func newWebBackend(rt *lana.Runtime, home string, leases *leaseSet, root context
 		home:         home,
 		leases:       leases,
 		loadedSHA256: configFileSHA(home),
+		nonLive:      startupNonLiveConfig(home, rt),
 		startedAt:    time.Now(),
 		active:       map[string]struct{}{},
 	}
@@ -218,9 +230,40 @@ func newWebBackend(rt *lana.Runtime, home string, leases *leaseSet, root context
 	return backend
 }
 
+// startupNonLiveConfig returns the non-live part of the config.toml the daemon
+// started with. It is read through config.Check so the comparison in ApplyLive
+// uses the same shape as a later save. The runtime config is the fallback when
+// the file cannot be read.
+func startupNonLiveConfig(home string, rt *lana.Runtime) core.Config {
+	data, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err == nil {
+		if result, err := config.Check(context.Background(), home, data); err == nil {
+			return nonLiveConfig(result.Config)
+		}
+	}
+	if rt != nil {
+		return nonLiveConfig(rt.NonLiveConfig())
+	}
+	return core.Config{}
+}
+
+// nonLiveConfig clears the sections a live apply replaces.
+func nonLiveConfig(cfg core.Config) core.Config {
+	cfg.Agents = nil
+	cfg.Teams = nil
+	cfg.MCP = nil
+	return cfg
+}
+
 // SetRestartController installs the in-place restart scheduler (API-WEB-023).
 func (b *webBackend) SetRestartController(controller *restartController) {
 	b.restart = controller
+}
+
+// SetDrainController installs the shutdown drain the restart API drives
+// (REQ-TFB-002, API-TFB-002).
+func (b *webBackend) SetDrainController(controller *drainController) {
+	b.drain = controller
 }
 
 // DaemonInfo implements web.DaemonStore (API-WEB-022).
@@ -235,6 +278,13 @@ func (b *webBackend) DaemonInfo() web.DaemonInfo {
 		Arch:             runtime.GOARCH,
 		RestartSupported: b.restart != nil && b.restart.supported(),
 		RunningTurns:     []web.DaemonTurn{},
+	}
+	// API-TFB-002: the restart field reports a pending restart drain.
+	if b.drain != nil {
+		if status := b.drain.status(); status.State != drainIdle {
+			deadline := status.Deadline.UnixMilli()
+			info.Restart = web.DaemonRestartInfo{State: web.DaemonRestartDraining, Deadline: &deadline}
+		}
 	}
 	if b.rt == nil {
 		return info
@@ -258,13 +308,65 @@ func (b *webBackend) DaemonInfo() web.DaemonInfo {
 	return info
 }
 
-// Restart implements web.DaemonStore. It preflights and schedules the restart;
-// the daemon replaces its process image after the handler writes 202.
-func (b *webBackend) Restart(context.Context) error {
+// Restart implements web.DaemonStore (API-TFB-002). No running turns or force
+// schedules the restart at once; running turns without force start a drain with
+// a deadline. The daemon replaces its process image when the drain completes.
+func (b *webBackend) Restart(ctx context.Context, force bool) (web.DaemonRestartOutcome, error) {
 	if b.restart == nil {
-		return errors.New("restart is not available")
+		return web.DaemonRestartOutcome{}, errors.New("restart is not available")
 	}
-	return b.restart.schedule()
+	running := b.rt.RunningTurnCount()
+	if b.drain != nil {
+		status := b.drain.status()
+		if status.State != drainIdle {
+			// A stop drain from SIGTERM/SIGINT wins: the daemon will not
+			// restart, so the web restart is invalid_state.
+			if status.Reason == drainStop {
+				return web.DaemonRestartOutcome{}, web.ErrRestartInvalidState
+			}
+			if !force {
+				// Keep the original deadline; do not reset it.
+				return web.DaemonRestartOutcome{
+					State: web.DaemonRestartDraining, RunningTurns: running, Deadline: status.Deadline.UnixMilli(),
+				}, nil
+			}
+			// Restart now: interrupt with the restart cause and let the
+			// completed drain drive the restart.
+			b.drain.force()
+			return web.DaemonRestartOutcome{State: web.DaemonRestartScheduled, RunningTurns: running}, nil
+		}
+	}
+	if force || running == 0 {
+		if err := b.restart.schedule(); err != nil {
+			return web.DaemonRestartOutcome{}, err
+		}
+		if force {
+			b.rt.InterruptAll(core.ErrInterruptedRestart)
+		}
+		return web.DaemonRestartOutcome{State: web.DaemonRestartScheduled, RunningTurns: running}, nil
+	}
+	if b.drain == nil {
+		return web.DaemonRestartOutcome{}, errors.New("restart drain is not available")
+	}
+	if err := b.restart.preflight(); err != nil {
+		return web.DaemonRestartOutcome{}, err
+	}
+	status := b.drain.begin(drainRestart)
+	if status.State != drainIdle && status.Reason == drainStop {
+		return web.DaemonRestartOutcome{}, web.ErrRestartInvalidState
+	}
+	return web.DaemonRestartOutcome{
+		State: web.DaemonRestartDraining, RunningTurns: b.rt.RunningTurnCount(), Deadline: status.Deadline.UnixMilli(),
+	}, nil
+}
+
+// CancelRestart implements web.DaemonStore: it lifts the gate of a pending
+// restart drain and leaves the running turn alone (API-TFB-002).
+func (b *webBackend) CancelRestart(context.Context) (bool, error) {
+	if b.drain == nil {
+		return false, nil
+	}
+	return b.drain.cancel(), nil
 }
 
 // configFileSHA returns the sha256 of $LANA_HOME/config.toml, or "" when the
@@ -374,7 +476,7 @@ func (b *webBackend) CreateSession(ctx context.Context, agent, model string) (we
 		if errors.Is(err, lana.ErrUnknownAgent) {
 			return web.Session{}, web.ErrUnknownAgent
 		}
-		return web.Session{}, err
+		return web.Session{}, turnError(err)
 	}
 	if model != "" {
 		if err := b.rt.SetModel(ctx, info.ID, model); err != nil {
@@ -590,9 +692,35 @@ func (b *webBackend) ConfigWrite(ctx context.Context, data []byte) error {
 	return webfiles.AtomicWrite(filepath.Join(b.home, "config.toml"), data)
 }
 
-// ConfigLoadedVersion implements web.ConfigStore.
+// ConfigLoadedVersion implements web.ConfigStore. It is the version the runtime
+// has loaded; a live-applied save moves it forward.
 func (b *webBackend) ConfigLoadedVersion() string {
+	b.versionMu.Lock()
+	defer b.versionMu.Unlock()
 	return b.loadedSHA256
+}
+
+// ApplyLive implements web.LiveConfigStore. It validates the written candidate
+// and applies the live sections to the running runtime. When the candidate
+// leaves no restart-only change pending, the loaded version moves to the
+// written file so the generic restart banner stays off (REQ-TFB-006).
+func (b *webBackend) ApplyLive(ctx context.Context, candidate []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	result, err := config.Check(ctx, b.home, candidate)
+	if err != nil {
+		return err
+	}
+	if b.rt != nil {
+		b.rt.ApplyConfig(result.Config)
+	}
+	if reflect.DeepEqual(nonLiveConfig(result.Config), b.nonLive) {
+		b.versionMu.Lock()
+		b.loadedSHA256 = webfiles.ConfigVersion(candidate)
+		b.versionMu.Unlock()
+	}
+	return nil
 }
 
 // SettingsHome implements web.SecretStore, web.AgentFileStore, and
@@ -834,6 +962,10 @@ func channelSettings(raw map[string]any) map[string]any {
 // Send starts a turn on the daemon root context, or queues the text in the
 // session inbox when a turn is already running.
 func (b *webBackend) Send(ctx context.Context, id, text string) (web.SendResult, error) {
+	// API-TFB-008: refuse before starting or queueing a turn.
+	if b.rt.Draining() {
+		return web.SendResult{}, web.ErrDraining
+	}
 	info, err := b.resolveSession(ctx, id)
 	if err != nil {
 		return web.SendResult{}, err
@@ -1186,6 +1318,8 @@ func turnError(err error) error {
 		return web.ErrUnknownAgent
 	case errors.Is(err, lana.ErrSessionBusy):
 		return web.ErrInvalidState
+	case errors.Is(err, lana.ErrDraining):
+		return web.ErrDraining
 	default:
 		return err
 	}
@@ -1268,7 +1402,14 @@ func (b *webBackend) sessionModel(ctx context.Context, info core.SessionInfo) (s
 		if err := json.Unmarshal(event.Payload, &selection); err != nil {
 			return "", err
 		}
-		model = selection.Provider + ":" + selection.Model
+		switch {
+		case selection.Provider != "" || selection.Model != "":
+			model = selection.Provider + ":" + selection.Model
+		case selection.Agent != "":
+			// SetAgent records only the agent; the model stays the agent's
+			// config model, so a web model change applies to the session.
+			model = b.rt.AgentModel(selection.Agent)
+		}
 	}
 	return model, nil
 }

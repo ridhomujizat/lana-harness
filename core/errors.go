@@ -13,6 +13,13 @@ var (
 	ErrPrefixTooShort        = errors.New("session prefix must be at least 6 characters")
 	ErrAmbiguousPrefix       = errors.New("session prefix matches more than one session")
 	ErrUnknownPayloadVersion = errors.New("unknown payload version")
+
+	// ErrInterruptedRestart and ErrInterruptedStop are the cancel causes of a
+	// running turn cut by lana shutting down (API-TFB-001). agent/turn.go maps
+	// either cause to the "interrupted" turn/end reason and its text to
+	// error.message. A plain user cancel carries no cause and stays "cancelled".
+	ErrInterruptedRestart = errors.New("lana restarted while this turn was running")
+	ErrInterruptedStop    = errors.New("lana stopped while this turn was running")
 )
 
 // LeaseHeldError is returned by TryLease when the session is held by another process.

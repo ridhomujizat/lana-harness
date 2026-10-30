@@ -25,7 +25,7 @@ type Runner struct {
 	mu      sync.Mutex
 	inbox   []string
 	running bool
-	cancel  context.CancelFunc
+	cancel  context.CancelCauseFunc
 	turnID  string
 }
 
@@ -67,7 +67,7 @@ func (rn *Runner) runChain(ctx context.Context, initial, turnID string) {
 		next := rn.inbox[0]
 		rn.inbox = rn.inbox[1:]
 		turnID = id.New()
-		nextCtx, cancel := context.WithCancel(rn.reg.root)
+		nextCtx, cancel := context.WithCancelCause(rn.reg.root)
 		rn.cancel = cancel
 		rn.turnID = turnID
 		rn.running = true
@@ -128,12 +128,13 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	cfgName := agentName
 	teamName := ""
 	var team core.TeamConfig
-	if teamCfg, ok := rn.reg.config.Teams[agentName]; ok {
+	agents, teams := rn.reg.configSnapshot()
+	if teamCfg, ok := teams[agentName]; ok {
 		team = teamCfg
 		teamName = agentName
 		cfgName = team.Lead
 	}
-	cfg, ok := rn.reg.config.Agents[cfgName]
+	cfg, ok := agents[cfgName]
 	if !ok {
 		return resolvedAgent{}, fmt.Errorf("%w: %s", ErrUnknownAgent, cfgName)
 	}
@@ -178,7 +179,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		roster = make([]agenthome.RosterEntry, 0, len(delegates))
 		for _, name := range delegates {
 			entry := agenthome.RosterEntry{Name: name}
-			if delegate, ok := rn.reg.config.Agents[name]; ok {
+			if delegate, ok := agents[name]; ok {
 				entry.Description = delegate.Description
 			}
 			roster = append(roster, entry)
@@ -522,8 +523,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 		})
 		if err != nil {
 			if ctx.Err() != nil {
-				rn.writeCancelledAttempt(writeCtx, events, step, resolved, turnID)
-				reason = "cancelled"
+				reason = rn.writeStoppedAttempt(writeCtx, events, step, resolved, turnID, ctx)
 				goto finished
 			}
 			runErr = providerError(err)
@@ -535,8 +535,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 		totalUsage.OutputTokens += usage.OutputTokens
 		if streamErr != nil {
 			if ctx.Err() != nil {
-				rn.writeCancelledAttempt(writeCtx, events, step, resolved, turnID)
-				reason = "cancelled"
+				reason = rn.writeStoppedAttempt(writeCtx, events, step, resolved, turnID, ctx)
 				goto finished
 			}
 			pe := providerError(streamErr)
@@ -584,6 +583,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 				Questions:     rn.reg.questions,
 				Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
 				MCPAdmin:      mcpAdmin,
+				MCPStatus:     rn.reg.ServerStatus,
 				AllowedAgents: resolved.delegates,
 				Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
 			})
@@ -640,10 +640,23 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 	}
 
 finished:
-	if ctx.Err() != nil && reason != "error" {
-		reason = "cancelled"
+	// A setup step can fail only because the turn context ended. That is a
+	// stop, not a runtime error, so the context mapping below applies
+	// (REQ-TFB-001).
+	if runErr != nil && ctx.Err() != nil && runErr.Class == "runtime" && runErr.Message == context.Canceled.Error() {
+		runErr = nil
+		reason = ""
 	}
 	var payloadErr *core.PayloadError
+	if ctx.Err() != nil && reason != "error" {
+		if message, ok := interruptedMessage(ctx); ok {
+			// API-TFB-001: a shutdown interrupt is not a user cancel.
+			reason = "interrupted"
+			payloadErr = &core.PayloadError{Message: message}
+		} else {
+			reason = "cancelled"
+		}
+	}
 	if runErr != nil {
 		reason = "error"
 		payloadErr = &core.PayloadError{Class: runErr.Class, Status: runErr.Status, Message: runErr.Message}
@@ -698,6 +711,39 @@ func (rn *Runner) writeAttempt(ctx context.Context, events *Events, step int, re
 func (rn *Runner) writeCancelledAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string) {
 	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: "cancelled", Message: "cancelled"}}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
+}
+
+// writeStoppedAttempt records the attempt of a turn cut by its context and
+// returns the turn/end reason. An interrupt cause yields "interrupted"; a user
+// cancel yields "cancelled" (REQ-TFB-001, API-TFB-001).
+func (rn *Runner) writeStoppedAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string, turnCtx context.Context) string {
+	if message, ok := interruptedMessage(turnCtx); ok {
+		payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: "interrupted", Message: message}}
+		_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
+		return "interrupted"
+	}
+	rn.writeCancelledAttempt(ctx, events, step, resolved, turnID)
+	return "cancelled"
+}
+
+// interruptedMessage reports the message of an interrupt cancel cause.
+func interruptedMessage(ctx context.Context) (string, bool) {
+	cause := context.Cause(ctx)
+	switch {
+	case errors.Is(cause, core.ErrInterruptedRestart), errors.Is(cause, core.ErrInterruptedStop):
+		return cause.Error(), true
+	default:
+		return "", false
+	}
+}
+
+// stopToolOutput is the result of a tool call cut by ctx ending. An interrupt
+// cause reports "interrupted"; a user cancel keeps "cancelled" (REQ-TFB-001).
+func stopToolOutput(ctx context.Context) core.ToolOutput {
+	if _, ok := interruptedMessage(ctx); ok {
+		return core.ToolOutput{Status: core.ToolStatusError, Output: "interrupted"}
+	}
+	return core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
 }
 
 // containsString reports whether list holds name.

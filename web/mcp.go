@@ -269,11 +269,12 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	version := webfiles.ConfigVersion(candidate)
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	s.auditSave("mcp.save", providerConfigPath(file, s.providerHome()), name, changed)
 	writeJSON(w, http.StatusOK, mcpSaveResponse{
 		Name:            name,
 		Version:         version,
-		RestartRequired: true,
+		RestartRequired: !applied,
 	})
 }
 
@@ -347,11 +348,12 @@ func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version := webfiles.ConfigVersion(candidate)
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	s.auditSave("mcp.delete", providerConfigPath(file, s.providerHome()), name, changed)
 	writeJSON(w, http.StatusOK, mcpSaveResponse{
 		Name:            name,
 		Version:         version,
-		RestartRequired: true,
+		RestartRequired: !applied,
 	})
 }
 

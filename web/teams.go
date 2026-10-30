@@ -158,12 +158,13 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version := webfiles.ConfigVersion(candidate)
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	s.auditSave("team.create", agentConfigPath(file, s.agentHome()), body.Name, changed)
 	writeJSON(w, http.StatusCreated, teamCreatedResponse{
 		Name:            body.Name,
 		Kind:            "team",
 		Version:         version,
-		RestartRequired: true,
+		RestartRequired: !applied,
 	})
 }
 
@@ -281,13 +282,14 @@ func (s *Server) handlePutTeam(w http.ResponseWriter, r *http.Request) {
 		}
 		s.auditSave("team.save", agentConfigPath(file, s.agentHome()), name, changed)
 	}
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	writeJSON(w, http.StatusOK, teamJSON{
 		Name:            name,
 		Lead:            record.Lead,
 		Members:         nonNilStrings(record.Members),
 		Description:     record.Description,
 		Version:         webfiles.ConfigVersion(candidate),
-		RestartRequired: true,
+		RestartRequired: !applied,
 	})
 }
 
@@ -350,12 +352,13 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version := webfiles.ConfigVersion(candidate)
+	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	s.auditSave("team.delete", agentConfigPath(file, s.agentHome()), name, changed)
 	writeJSON(w, http.StatusOK, teamDeletedResponse{
 		Name:            name,
 		Deleted:         true,
 		Version:         version,
-		RestartRequired: true,
+		RestartRequired: !applied,
 	})
 }
 

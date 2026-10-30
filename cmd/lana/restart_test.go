@@ -328,7 +328,7 @@ func TestDaemonStatusAdapter(t *testing.T) {
 	if info.RunningTurns == nil {
 		t.Fatal("running_turns is nil, want an empty list")
 	}
-	if err := backend.Restart(context.Background()); err == nil {
+	if _, err := backend.Restart(context.Background(), false); err == nil {
 		t.Fatal("Restart without a controller returned nil")
 	}
 

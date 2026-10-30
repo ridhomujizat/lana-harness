@@ -36,11 +36,19 @@ type ConfigStore interface {
 	ConfigCheck(ctx context.Context, candidate []byte) ([]ConfigIssue, error)
 	// ConfigWrite replaces config.toml atomically.
 	ConfigWrite(ctx context.Context, data []byte) error
-	// ConfigLoadedVersion is the sha256 recorded when the daemon started.
+	// ConfigLoadedVersion is the version the runtime has loaded. It starts at
+	// the startup version and a live apply advances it.
 	ConfigLoadedVersion() string
 	// ConfigSettings returns the effective settings read from the current
 	// file. Secret values are already masked.
 	ConfigSettings(ctx context.Context) (ConfigSettings, error)
+}
+
+// LiveConfigStore is an optional extension of ConfigStore. A store that
+// implements it can apply a written config.toml to the running daemon, so an
+// agent, team, or MCP save needs no restart (REQ-TFB-006).
+type LiveConfigStore interface {
+	ApplyLive(ctx context.Context, candidate []byte) error
 }
 
 // ConfigFile is the current config.toml and its content hash.
@@ -143,6 +151,22 @@ func (s *Server) configStoreOrError(w http.ResponseWriter) ConfigStore {
 		return nil
 	}
 	return s.configStore
+}
+
+// applyLiveConfig applies a written candidate to the running daemon. It reports
+// false when the store cannot apply live or the apply failed; the write stays
+// and the response then asks for a restart (API-TFB-006). Only an apply failure
+// is logged.
+func (s *Server) applyLiveConfig(ctx context.Context, store ConfigStore, candidate []byte) bool {
+	live, ok := store.(LiveConfigStore)
+	if !ok {
+		return false
+	}
+	if err := live.ApplyLive(ctx, candidate); err != nil {
+		s.logger.Error("web: apply live config", "error", err)
+		return false
+	}
+	return true
 }
 
 type configValidation struct {

@@ -27,4 +27,8 @@ type MCPAdmin interface {
 	PutServer(name string, cfg MCPConfig)
 	RemoveServer(name string)
 	SetAgentServers(agent string, servers []string)
+	// ServerStatus reports the runtime state of one server. known is false
+	// when the runtime never applied the server, so the caller can say
+	// "not loaded" instead of a state (REQ-TFB-007, API-TFB-007).
+	ServerStatus(name string) (state string, tools int, reason string, known bool)
 }

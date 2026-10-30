@@ -343,7 +343,9 @@ func (s *Server) handleSaveSetup(w http.ResponseWriter, r *http.Request) {
 	s.auditSave("setup.save", setupConfigPath(file, home), plan.agentName, changed)
 
 	info := daemon.DaemonInfo()
-	if err := daemon.Restart(r.Context()); err != nil {
+	// Setup saves restart immediately; no turn should be running in this flow
+	// (API-TFB-002).
+	if _, err := daemon.Restart(r.Context(), false); err != nil {
 		s.logger.Error("web: schedule setup restart", "error", err)
 		writeAPIErrorDetails(w, http.StatusInternalServerError, "restart_failed", "restart could not be prepared", []map[string]any{
 			{"step": "restart"},
