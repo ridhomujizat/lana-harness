@@ -3,45 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, errorMessage } from "../../api/client";
 import { isErrorCode, loadAgentTab, updateAgent } from "../../api/agents";
 import { getToolCatalog } from "../../api/tools";
-import type { ToolEntry, ToolGroup } from "../../api/tools";
+import type { ToolGroup, ToolSource } from "../../api/tools";
 import { ErrorNotice, Loading } from "../../ui/ui";
 import { Icon } from "../agent-common";
+import { computeToolsPayload, isMcpGroup } from "./tools-payload";
+import type { ToolConfigState } from "./tools-payload";
 
-/* REQ-WEB-047, API-WEB-026: tool groups with On switches. A switch writes
-   disabled_tools. MCP tool names are "<server>/<tool>" in the config. */
+/* REQ-WEB-047, API-WEB-026: tool groups with On switches. A switch writes the
+   tools, disabled_tools, and mcp fields that make the catalog state real. MCP
+   tool names are "<server>/<tool>" in the config. */
 
-function isMcpGroup(group: ToolGroup): boolean {
-  return group.id.indexOf("mcp:") === 0;
-}
-
-function qualifiedName(group: ToolGroup, tool: ToolEntry): string {
-  return isMcpGroup(group)
-    ? group.id.slice("mcp:".length) + "/" + tool.name
-    : tool.name;
-}
-
-function collectDisabled(
-  groups: ToolGroup[],
-  previousDisabled: string[]
-): string[] {
-  const names: string[] = [];
-  const known = new Set<string>();
-  for (const group of groups) {
-    for (const tool of group.tools) {
-      const name = qualifiedName(group, tool);
-      known.add(name);
-      if (!tool.enabled) {
-        names.push(name);
-      }
-    }
-  }
-  for (const name of previousDisabled) {
-    if (!known.has(name)) {
-      names.push(name);
-    }
-  }
-  return names;
-}
+export { computeToolsPayload };
 
 function domId(value: unknown): string {
   return "agent-tool-" + String(value).replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -53,6 +25,21 @@ function riskLabel(value: unknown): string {
     return "—";
   }
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function normalizeSource(value: unknown): ToolSource {
+  switch (String(value || "")) {
+    case "auto":
+      return "auto";
+    case "not_listed":
+      return "not_listed";
+    case "attached":
+      return "attached";
+    case "not_attached":
+      return "not_attached";
+    default:
+      return "listed";
+  }
 }
 
 function normalizeGroups(value: unknown): ToolGroup[] {
@@ -76,6 +63,7 @@ function normalizeGroups(value: unknown): ToolGroup[] {
           risk: String(item.risk ? item.risk : ""),
           asks_first: Boolean(item.asks_first),
           enabled: Boolean(item.enabled),
+          source: normalizeSource(item.source),
         };
       }),
     };
@@ -89,6 +77,8 @@ export interface ToolsTabProps {
 export function ToolsTab({ name }: ToolsTabProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [groups, setGroups] = useState<ToolGroup[]>([]);
+  const [toolsList, setToolsList] = useState<string[]>([]);
+  const [mcpList, setMcpList] = useState<string[]>([]);
   const [disabledList, setDisabledList] = useState<string[]>([]);
   const [version, setVersion] = useState("");
   const [query, setQuery] = useState("");
@@ -112,6 +102,14 @@ export function ToolsTab({ name }: ToolsTabProps) {
           return;
         }
         setVersion(config.version);
+        setToolsList(
+          Array.isArray(config.agent.tools)
+            ? config.agent.tools.map(String)
+            : []
+        );
+        setMcpList(
+          Array.isArray(config.agent.mcp) ? config.agent.mcp.map(String) : []
+        );
         setDisabledList(
           Array.isArray(config.row.disabled_tools)
             ? config.row.disabled_tools.map(String)
@@ -184,9 +182,9 @@ export function ToolsTab({ name }: ToolsTabProps) {
 
   async function persist(
     nextGroups: ToolGroup[],
-    nextDisabled: string[],
+    nextConfig: ToolConfigState,
     previousGroups: ToolGroup[],
-    previousDisabled: string[]
+    previousConfig: ToolConfigState
   ) {
     if (saving) {
       return;
@@ -203,11 +201,17 @@ export function ToolsTab({ name }: ToolsTabProps) {
     }
     setSaving(true);
     setGroups(nextGroups);
-    setDisabledList(nextDisabled);
+    setToolsList(nextConfig.tools);
+    setMcpList(nextConfig.mcp);
+    setDisabledList(nextConfig.disabled_tools);
     try {
       const result = await updateAgent(
         name,
-        { disabled_tools: nextDisabled },
+        {
+          tools: nextConfig.tools,
+          disabled_tools: nextConfig.disabled_tools,
+          mcp: nextConfig.mcp,
+        },
         version
       );
       if (result && result.version) {
@@ -216,7 +220,9 @@ export function ToolsTab({ name }: ToolsTabProps) {
       setNotice("Changes saved. Restart the daemon for them to take effect.");
     } catch (failure) {
       setGroups(previousGroups);
-      setDisabledList(previousDisabled);
+      setToolsList(previousConfig.tools);
+      setMcpList(previousConfig.mcp);
+      setDisabledList(previousConfig.disabled_tools);
       if (isErrorCode(failure, "stale_version")) {
         setStale(true);
         setError(
@@ -236,7 +242,11 @@ export function ToolsTab({ name }: ToolsTabProps) {
       return;
     }
     const previousGroups = groups;
-    const previousDisabled = disabledList;
+    const previousConfig: ToolConfigState = {
+      tools: toolsList,
+      disabled_tools: disabledList,
+      mcp: mcpList,
+    };
     const nextGroups = groups.map((group) => {
       if (group.id !== groupId) {
         return group;
@@ -249,9 +259,9 @@ export function ToolsTab({ name }: ToolsTabProps) {
     });
     void persist(
       nextGroups,
-      collectDisabled(nextGroups, previousDisabled),
+      computeToolsPayload(nextGroups, previousConfig),
       previousGroups,
-      previousDisabled
+      previousConfig
     );
   }
 
@@ -260,7 +270,11 @@ export function ToolsTab({ name }: ToolsTabProps) {
       return;
     }
     const previousGroups = groups;
-    const previousDisabled = disabledList;
+    const previousConfig: ToolConfigState = {
+      tools: toolsList,
+      disabled_tools: disabledList,
+      mcp: mcpList,
+    };
     const nextGroups = groups.map((group) => {
       if (group.id !== groupId) {
         return group;
@@ -273,9 +287,9 @@ export function ToolsTab({ name }: ToolsTabProps) {
     });
     void persist(
       nextGroups,
-      collectDisabled(nextGroups, previousDisabled),
+      computeToolsPayload(nextGroups, previousConfig),
       previousGroups,
-      previousDisabled
+      previousConfig
     );
   }
 
@@ -431,6 +445,11 @@ export function ToolsTab({ name }: ToolsTabProps) {
                             {tool.enabled ? "On" : "Off"}
                           </span>
                         </label>
+                        {tool.source === "auto" ? (
+                          <span className="agent-tabs-always-on">
+                            Always on
+                          </span>
+                        ) : null}
                       </td>
                     </tr>
                   );

@@ -236,6 +236,14 @@
   text-align: right;
 }
 
+.agent-tabs-always-on {
+  margin-left: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
 .agent-tabs-tile {
   display: inline-flex;
   align-items: center;

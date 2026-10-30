@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -124,6 +125,7 @@ type ToolEntry struct {
 	Risk      string `json:"risk"`
 	AsksFirst bool   `json:"asks_first"`
 	Enabled   bool   `json:"enabled"`
+	Source    string `json:"source"`
 }
 
 // ToolGroup is one group of the tool catalog of API-WEB-026.
@@ -921,6 +923,28 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 
 	registry := rt.coreCtx.Tools
 	mcpCfg := rt.mcpConfig()
+	// The catalog describes the root turn, so it builds the same auto-offer
+	// state as agent/turn.go. A team runs as its lead: the lead's skills and
+	// tool list are the ones the turn resolves.
+	inTeam := rt.IsTeam(agentName)
+	skillAgent := agentName
+	if inTeam {
+		if team, ok := rt.Team(agentName); ok {
+			skillAgent = team.Lead
+		}
+	}
+	visibleSkills := false
+	if rt.home != "" {
+		skills, _ := agenthome.VisibleSkills(rt.home, skillAgent, agentCfg.Skills)
+		visibleSkills = len(skills) > 0
+	}
+	_, mcpManageRegistered := registry.Get("mcp_manage")
+	autoOffered := agent.AutoOfferedTools(agent.AutoOfferState{
+		Root:                true,
+		MCPManageRegistered: mcpManageRegistered,
+		VisibleSkills:       visibleSkills,
+		Team:                inTeam,
+	})
 	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
 	for _, group := range toolCatalogGroupOrder {
 		entries := make([]ToolEntry, 0, len(group.Names))
@@ -929,11 +953,20 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 			if !ok {
 				continue
 			}
+			listed := slices.Contains(agentCfg.Tools, name)
+			auto := !listed && slices.Contains(autoOffered, name)
+			source := "not_listed"
+			if listed {
+				source = "listed"
+			} else if auto {
+				source = "auto"
+			}
 			entries = append(entries, ToolEntry{
 				Name:      name,
 				Risk:      string(tool.Risk(nil)),
 				AsksFirst: toolAsksFirst(tool, agentCfg),
-				Enabled:   !disabled[name],
+				Enabled:   (listed || auto) && !disabled[name],
+				Source:    source,
 			})
 		}
 		groups = append(groups, ToolGroup{ID: group.ID, Label: group.Label, Tools: entries})
@@ -953,11 +986,17 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 			if !ok {
 				continue
 			}
+			attached := slices.Contains(agentCfg.MCP, server)
+			source := "not_attached"
+			if attached {
+				source = "attached"
+			}
 			entries = append(entries, ToolEntry{
 				Name:      ref,
 				Risk:      string(tool.Risk(nil)),
 				AsksFirst: toolAsksFirst(tool, agentCfg),
-				Enabled:   !disabled[ref] && !disabled[name],
+				Enabled:   attached && !disabled[ref] && !disabled[name],
+				Source:    source,
 			})
 		}
 		groups = append(groups, ToolGroup{ID: "mcp:" + server, Label: server, Tools: entries})

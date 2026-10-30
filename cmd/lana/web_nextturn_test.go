@@ -224,6 +224,53 @@ command = "github-mcp"
 	}
 }
 
+// TestToolCatalogRealState covers AC-TTS-001..003: enabled is the state the
+// root turn really offers, and source names why.
+func TestToolCatalogRealState(t *testing.T) {
+	table := `[agents.coder]
+provider = "mock"
+model = "m"
+permission = "ask"
+tools = ["read_file"]
+
+[mcp.github]
+command = "github-mcp"
+`
+	rt, _ := newDisabledToolsRuntime(t, table, []core.Tool{
+		catalogTestTool{name: "mcp__github__create_issue", risk: core.RiskExec},
+	})
+	backend := &webBackend{rt: rt}
+
+	groups, err := backend.ToolCatalog("coder")
+	if err != nil {
+		t.Fatalf("ToolCatalog: %v", err)
+	}
+
+	ask, ok := findToolEntry(groups, "chat", "ask_user")
+	if !ok {
+		t.Fatal("ask_user is not in the chat group")
+	}
+	if ask.Enabled || ask.Source != "not_listed" {
+		t.Fatalf("ask_user = %+v, want enabled false source not_listed", ask)
+	}
+
+	manage, ok := findToolEntry(groups, "mcp-admin", "mcp_manage")
+	if !ok {
+		t.Fatal("mcp_manage is not in the mcp-admin group")
+	}
+	if !manage.Enabled || manage.Source != "auto" {
+		t.Fatalf("mcp_manage = %+v, want enabled true source auto", manage)
+	}
+
+	issue, ok := findToolEntry(groups, "mcp:github", "github/create_issue")
+	if !ok {
+		t.Fatal("github/create_issue is not in the mcp:github group")
+	}
+	if issue.Enabled || issue.Source != "not_attached" {
+		t.Fatalf("github/create_issue = %+v, want enabled false source not_attached", issue)
+	}
+}
+
 func toolSpecNames(specs []core.ToolSpec) []string {
 	names := make([]string, 0, len(specs))
 	for _, spec := range specs {

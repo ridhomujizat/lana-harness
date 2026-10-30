@@ -749,6 +749,7 @@ func (b *webBackend) ToolCatalog(agent string) ([]web.ToolGroup, error) {
 				Risk:      entry.Risk,
 				AsksFirst: entry.AsksFirst,
 				Enabled:   entry.Enabled,
+				Source:    entry.Source,
 			})
 		}
 		out = append(out, web.ToolGroup{ID: group.ID, Label: group.Label, Tools: tools})

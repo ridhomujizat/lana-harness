@@ -12,6 +12,7 @@ type ToolEntry struct {
 	Risk      string `json:"risk"`
 	AsksFirst bool   `json:"asks_first"`
 	Enabled   bool   `json:"enabled"`
+	Source    string `json:"source"`
 }
 
 // ToolGroup is one group of API-WEB-026.

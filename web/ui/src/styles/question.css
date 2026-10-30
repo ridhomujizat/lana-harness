@@ -161,9 +161,14 @@
   background: var(--bg-secondary);
 }
 
-.question-option:focus-within {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 2px;
+/* Keyboard focus shows as the hover background, not a ring: a ring around a
+   row looked broken next to the row dividers. A mouse click shows nothing. */
+.question-options-single .question-option:has(:focus-visible) {
+  background: var(--bg-secondary);
+}
+
+.question-options-multi .question-option:has(:focus-visible) {
+  background: var(--bg-secondary-hover);
 }
 
 .question-option-input {
@@ -331,10 +336,14 @@
   color: var(--text-placeholder);
 }
 
+/* The input sits in its own box; the caret is the focus cue. */
 .question-else-input:focus,
 .question-else-input:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+  outline: none;
+}
+
+.question-else:focus-within {
+  background: var(--bg-secondary-hover);
 }
 
 .question-buttons {

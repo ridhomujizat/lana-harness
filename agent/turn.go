@@ -436,23 +436,19 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			var skills []agenthome.Skill
 			if rn.reg.home != "" {
 				skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
-				if len(skills) > 0 && !containsString(turnTools, "skill_load") {
-					turnTools = append(turnTools, "skill_load")
-				}
 			}
-			// REQ-AMCP-001: every root session gets mcp_manage, like
-			// skill_load. T-005 registers the tool, so it is only offered once
-			// it exists in the registry.
-			if !resolved.child && !containsString(turnTools, "mcp_manage") {
-				if _, ok := rn.reg.tools.Get("mcp_manage"); ok {
-					turnTools = append(turnTools, "mcp_manage")
-				}
-			}
-			if resolved.team != "" {
-				for _, name := range []string{"task", "task_continue"} {
-					if !containsString(turnTools, name) {
-						turnTools = append(turnTools, name)
-					}
+			// REQ-AMCP-001: skill_load, mcp_manage, and the team tools are
+			// offered without being listed in tools. The dashboard catalog
+			// reads the same helper so the two cannot drift.
+			_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
+			for _, name := range AutoOfferedTools(AutoOfferState{
+				Root:                !resolved.child,
+				MCPManageRegistered: mcpManageRegistered,
+				VisibleSkills:       len(skills) > 0,
+				Team:                resolved.team != "",
+			}) {
+				if !containsString(turnTools, name) {
+					turnTools = append(turnTools, name)
 				}
 			}
 			// disabled_tools removes a name from the offered list. It is applied
