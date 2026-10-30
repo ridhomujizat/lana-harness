@@ -380,12 +380,22 @@ func (s *tomlScanState) scanLine(line string) {
 func findTableSpan(data []byte, target tableHeader) (sectionSpan, bool) {
 	lines := splitSourceLines(data)
 	headers := scanHeaders(data, lines)
+	index := tableHeaderIndex(headers, target)
+	if index < 0 {
+		return sectionSpan{}, false
+	}
+	return spanAt(data, lines, headers, index), true
+}
+
+// tableHeaderIndex returns the index of the first header equal to target, or -1
+// when the data has no such table.
+func tableHeaderIndex(headers []headerAt, target tableHeader) int {
 	for index, header := range headers {
 		if header.header == target {
-			return spanAt(data, lines, headers, index), true
+			return index
 		}
 	}
-	return sectionSpan{}, false
+	return -1
 }
 
 // spanAt returns the span of the header at index. The span includes dotted

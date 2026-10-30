@@ -55,7 +55,7 @@ func (t *toolWrapper) Risk(json.RawMessage) core.Risk {
 }
 
 func (t *toolWrapper) Call(ctx context.Context, _ core.ToolCtx, input json.RawMessage) (core.ToolOutput, error) {
-	s, ok := t.manager.servers[t.server]
+	s, ok := t.manager.lookupServer(t.server)
 	if !ok {
 		return errorOutput("mcp: server " + t.server + " is not running"), nil
 	}

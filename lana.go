@@ -141,6 +141,7 @@ var toolCatalogGroupOrder = []struct {
 	{ID: "web", Label: "Web", Names: []string{"web_fetch"}},
 	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write"}},
 	{ID: "skills", Label: "Skills", Names: []string{"skill_load", "skill_write"}},
+	{ID: "mcp-admin", Label: "MCP", Names: []string{"mcp_manage"}},
 	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
 }
 
@@ -904,10 +905,14 @@ func catalogMCPTool(name string) (server, ref string, ok bool) {
 }
 
 // toolAsksFirst reports whether the evaluator would ask the owner before this
-// tool runs under the agent's initial policy. Read and memory tools never ask;
-// a trust or never policy never asks; a matching argument-less allow rule skips
-// the prompt (see tools/permission/evaluator.go).
+// tool runs. Admin tools always ask; read and memory tools never ask; a trust
+// or never policy never asks; a matching argument-less allow rule skips the
+// prompt for the other risks (see tools/permission/evaluator.go).
 func toolAsksFirst(tool core.Tool, agentCfg core.AgentConfig) bool {
+	risk := tool.Risk(nil)
+	if risk == core.RiskAdmin {
+		return true
+	}
 	policy := core.PolicyAsk
 	if agentCfg.Permission != "" {
 		policy = core.Policy(agentCfg.Permission)
@@ -915,7 +920,7 @@ func toolAsksFirst(tool core.Tool, agentCfg core.AgentConfig) bool {
 	if policy != core.PolicyAsk {
 		return false
 	}
-	switch tool.Risk(nil) {
+	switch risk {
 	case core.RiskRead, core.RiskMemory:
 		return false
 	}

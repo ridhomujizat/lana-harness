@@ -50,6 +50,9 @@ type server struct {
 
 // Manager connects the configured MCP servers and registers their tools.
 type Manager struct {
+	// mu guards cfg and the servers map. A server's runtime state is guarded
+	// by server.mu instead.
+	mu       sync.RWMutex
 	cfg      map[string]core.MCPConfig
 	home     string
 	registry core.ToolRegistry
@@ -83,6 +86,9 @@ func NewManager(cfg map[string]core.MCPConfig, home string, registry core.ToolRe
 		now:            time.Now,
 		reaperInterval: defaultReaperInterval,
 	}
+	if m.cfg == nil {
+		m.cfg = make(map[string]core.MCPConfig)
+	}
 	for name, serverCfg := range cfg {
 		m.servers[name] = &server{
 			name:  name,
@@ -99,13 +105,24 @@ func (m *Manager) Ensure(ctx context.Context, servers []string) ([]string, map[s
 	unavailable := make(map[string]string)
 	names := make(map[string]struct{})
 	for _, name := range servers {
-		s, ok := m.servers[name]
+		s, ok := m.lookupServer(name)
 		if !ok {
 			unavailable[name] = "not configured"
 			continue
 		}
 
 		s.mu.Lock()
+		// Recheck the map after taking the server lock so a server removed
+		// while we waited is not started again. The locks are always taken in
+		// the order server.mu then mu.
+		m.mu.RLock()
+		current, exists := m.servers[name]
+		m.mu.RUnlock()
+		if !exists || current != s {
+			s.mu.Unlock()
+			unavailable[name] = "not configured"
+			continue
+		}
 		if s.state != stateRunning {
 			if err := m.connectLocked(ctx, s); err != nil {
 				reason := shortReason(err)
@@ -268,7 +285,7 @@ func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 func (m *Manager) Status(servers []string) []core.MCPServerStatus {
 	out := make([]core.MCPServerStatus, 0, len(servers))
 	for _, name := range servers {
-		s, ok := m.servers[name]
+		s, ok := m.lookupServer(name)
 		if !ok {
 			out = append(out, core.MCPServerStatus{Name: name, State: stateUnavailable, Reason: "not configured"})
 			continue
@@ -297,12 +314,19 @@ func (m *Manager) Status(servers []string) []core.MCPServerStatus {
 // The definition comes from the manager config, not from the file on disk
 // (API-WEB-027, Q-008).
 func (m *Manager) Restart(ctx context.Context, name string) (core.MCPServerStatus, bool) {
-	s, ok := m.servers[name]
+	s, ok := m.lookupServer(name)
 	if !ok {
 		return core.MCPServerStatus{Name: name, State: stateUnavailable, Reason: "not configured"}, false
 	}
 
 	s.mu.Lock()
+	m.mu.RLock()
+	current, exists := m.servers[name]
+	m.mu.RUnlock()
+	if !exists || current != s {
+		s.mu.Unlock()
+		return core.MCPServerStatus{Name: name, State: stateUnavailable, Reason: "not configured"}, false
+	}
 	if err := closeSession(s); err != nil {
 		slog.Debug("mcp: close before restart", "server", name, "error", err)
 	}
@@ -387,14 +411,10 @@ func (m *Manager) Start(ctx context.Context) {
 // ReapIdle closes running servers that have been idle for IdleTimeout.
 func (m *Manager) ReapIdle() {
 	now := m.now()
-	for _, s := range m.servers {
+	for _, s := range m.snapshotServers() {
 		s.mu.Lock()
 		if s.state == stateRunning && s.inflight == 0 && now.Sub(s.lastUsed) >= m.IdleTimeout {
-			_ = closeSession(s)
-			s.state = stateStopped
-			s.reason = ""
-			s.tools = nil
-			s.startedAt = time.Time{}
+			stopServer(s)
 			s.mu.Unlock()
 			slog.Info("mcp: server stopped (idle)", "server", s.name)
 			continue
@@ -413,7 +433,7 @@ func (m *Manager) Close() error {
 	m.cancelMu.Unlock()
 
 	var errs []error
-	for _, s := range m.servers {
+	for _, s := range m.snapshotServers() {
 		s.mu.Lock()
 		if err := closeSession(s); err != nil {
 			errs = append(errs, err)
@@ -427,6 +447,101 @@ func (m *Manager) Close() error {
 		s.mu.Unlock()
 	}
 	return errors.Join(errs...)
+}
+
+// Put adds a server or replaces its definition. A running session is stopped
+// first; the next Ensure starts the new definition lazily.
+func (m *Manager) Put(name string, cfg core.MCPConfig) {
+	s, ok := m.lookupServer(name)
+	if !ok {
+		m.mu.Lock()
+		if existing, exists := m.servers[name]; exists {
+			s = existing
+		} else {
+			m.servers[name] = &server{name: name, cfg: cfg, state: stateStopped}
+			m.cfg[name] = cfg
+			m.mu.Unlock()
+			slog.Info("mcp: server added", "server", name)
+			return
+		}
+		m.mu.Unlock()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// The map write happens under server.mu so Ensure cannot start the old
+	// definition after it sees the new one.
+	stopServer(s)
+	s.cfg = cfg
+	m.mu.Lock()
+	m.servers[name] = s
+	m.cfg[name] = cfg
+	m.mu.Unlock()
+	slog.Info("mcp: server definition updated", "server", name)
+}
+
+// Remove stops a server and forgets it. An unknown name is ignored.
+func (m *Manager) Remove(name string) {
+	for {
+		s, ok := m.lookupServer(name)
+		if !ok {
+			m.mu.Lock()
+			if _, exists := m.servers[name]; exists {
+				m.mu.Unlock()
+				continue
+			}
+			delete(m.cfg, name)
+			m.mu.Unlock()
+			return
+		}
+
+		s.mu.Lock()
+		stopServer(s)
+		m.mu.Lock()
+		if m.servers[name] == s {
+			delete(m.servers, name)
+			delete(m.cfg, name)
+		}
+		m.mu.Unlock()
+		s.mu.Unlock()
+		slog.Info("mcp: server removed", "server", name)
+		return
+	}
+}
+
+// TestServer is the core.MCPAdmin wrapper around Test.
+func (m *Manager) TestServer(ctx context.Context, cfg core.MCPConfig) (int, error) {
+	return m.Test(ctx, cfg)
+}
+
+// lookupServer returns one server under the map read lock.
+func (m *Manager) lookupServer(name string) (*server, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.servers[name]
+	return s, ok
+}
+
+// snapshotServers returns the configured servers under the map read lock. The
+// returned slice is safe to range without holding the map lock.
+func (m *Manager) snapshotServers() []*server {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*server, 0, len(m.servers))
+	for _, s := range m.servers {
+		out = append(out, s)
+	}
+	return out
+}
+
+// stopServer closes a session and resets its runtime state. The caller holds
+// s.mu.
+func stopServer(s *server) {
+	_ = closeSession(s)
+	s.state = stateStopped
+	s.reason = ""
+	s.tools = nil
+	s.startedAt = time.Time{}
 }
 
 // closeSession closes and clears a server session. The caller holds s.mu.

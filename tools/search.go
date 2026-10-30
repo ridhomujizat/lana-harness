@@ -44,6 +44,9 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return inputErrorOutput(fmt.Errorf("pattern is required"))
 	}
 	ws := effectiveWorkspace(t.guard, tc.Workspace)
+	if err := checkWorkspace(ws); err != nil {
+		return errorOutput(err.Error())
+	}
 	base := ws
 	if in.Path != "" {
 		resolved, rejected := resolveToolPath(t.guard, ws, in.Path)
@@ -123,6 +126,9 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return errorOutput("invalid pattern: " + err.Error())
 	}
 	ws := effectiveWorkspace(t.guard, tc.Workspace)
+	if err := checkWorkspace(ws); err != nil {
+		return errorOutput(err.Error())
+	}
 	base := ws
 	if in.Path != "" {
 		resolved, rejected := resolveToolPath(t.guard, ws, in.Path)

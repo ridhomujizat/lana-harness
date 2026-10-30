@@ -59,6 +59,10 @@ func allowed(from, to string) bool {
 	if from == "core" {
 		return false
 	}
+	// mcp_manage validates its candidate with config.Check (spec #12).
+	if from == "tools" && to == "config" {
+		return true
+	}
 	if from == "config" || from == "internal" || strings.HasPrefix(from, "internal/") {
 		return isInternal(to)
 	}

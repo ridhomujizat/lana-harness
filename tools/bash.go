@@ -42,6 +42,9 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		return errorOutput("timeout_secs must be between 1 and 600")
 	}
 	ws := effectiveWorkspace(t.guard, tc.Workspace)
+	if err := checkWorkspace(ws); err != nil {
+		return errorOutput(err.Error())
+	}
 	cmd := exec.Command("sh", "-c", in.Command)
 	cmd.Dir = ws
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

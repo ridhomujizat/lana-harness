@@ -15,6 +15,8 @@ const (
 	RiskNetwork Risk = "network"
 	// RiskMemory writes the calling agent's memory files.
 	RiskMemory Risk = "memory"
+	// RiskAdmin changes lana config or processes. It always needs a fresh owner approval.
+	RiskAdmin Risk = "admin"
 )
 
 // ToolSpec is the tool description for the model.
@@ -39,6 +41,9 @@ type ToolCtx struct {
 	Questions QuestionService
 	// Subagents runs child sessions for the task tools.
 	Subagents SubagentRunner
+	// MCPAdmin changes MCP servers for the mcp_manage tool. Nil when the
+	// runtime has no MCP registry.
+	MCPAdmin MCPAdmin
 	// AllowedAgents is the delegation list of the calling agent.
 	AllowedAgents []string
 	// Depth is the session depth. A root session has depth 0.

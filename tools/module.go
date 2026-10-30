@@ -35,6 +35,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewMemoryWrite(),
 		NewSkillLoad(),
 		NewSkillWrite(),
+		NewMCPManage(),
 		NewTask(),
 		NewTaskContinue(),
 		NewAskUser(),

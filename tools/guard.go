@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
@@ -60,6 +61,33 @@ func ResolveInWorkspace(workspace, path string) (string, error) {
 		return "", ErrOutsideWorkspace
 	}
 	return target, nil
+}
+
+// checkWorkspace checks that ws exists and is a directory. It returns a
+// message that names the workspace path, so bash, glob, and grep report a
+// clear error instead of the underlying operating system error.
+func checkWorkspace(ws string) error {
+	abs, err := filepath.Abs(ws)
+	if err != nil {
+		abs = ws
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		switch {
+		case os.IsNotExist(err):
+			return fmt.Errorf("workspace does not exist: %s", abs)
+		case errors.Is(err, syscall.ENOTDIR):
+			// A parent path component is a file, so the workspace cannot be
+			// reached as a directory.
+			return fmt.Errorf("workspace is not a directory: %s", abs)
+		default:
+			return fmt.Errorf("workspace is not accessible: %s: %v", abs, err)
+		}
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("workspace is not a directory: %s", abs)
+	}
+	return nil
 }
 
 func effectiveWorkspace(g *Guard, tcWorkspace string) string {

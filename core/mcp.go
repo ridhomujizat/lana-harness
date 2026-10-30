@@ -20,3 +20,11 @@ type MCPManager interface {
 	Ensure(ctx context.Context, servers []string) (tools []string, unavailable map[string]string)
 	Status(servers []string) []MCPServerStatus
 }
+
+// MCPAdmin changes MCP servers while the runtime runs.
+type MCPAdmin interface {
+	TestServer(ctx context.Context, cfg MCPConfig) (tools int, err error)
+	PutServer(name string, cfg MCPConfig)
+	RemoveServer(name string)
+	SetAgentServers(agent string, servers []string)
+}

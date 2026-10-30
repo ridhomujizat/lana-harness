@@ -109,3 +109,19 @@ func TestGrepGlobFilter(t *testing.T) {
 	}
 	_ = json.RawMessage(nil)
 }
+
+func TestGlobMissingWorkspace(t *testing.T) {
+	ws := filepath.Join(t.TempDir(), "missing", "workspace")
+	out := callTool(t, NewGlob(&Guard{Workspace: ws}), ws, `{"pattern":"**/*.go"}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "workspace does not exist:") {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
+func TestGrepMissingWorkspace(t *testing.T) {
+	ws := filepath.Join(t.TempDir(), "missing", "workspace")
+	out := callTool(t, NewGrep(&Guard{Workspace: ws}), ws, `{"pattern":"needle"}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "workspace does not exist:") {
+		t.Fatalf("out=%+v", out)
+	}
+}

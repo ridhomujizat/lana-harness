@@ -86,6 +86,30 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
 		}
 	}
+	// Admin calls change lana config or processes, so they always ask the
+	// owner: allow rules, session grants, and trust policy do not apply. Deny
+	// rules above still apply, and a child may never make an admin call.
+	if in.Call.Risk == core.RiskAdmin {
+		if info.ParentSessionID != "" {
+			return reject("child sessions may not use admin tools"), nil
+		}
+		if EffectivePolicy(events, fallbackPolicy(agent)) == core.PolicyNever {
+			return reject("policy never"), nil
+		}
+		if e.Approval == nil {
+			return reject("approval is not available"), nil
+		}
+		outcome, err := e.requestApproval(ctx, in, info, agentName)
+		if err != nil {
+			return reject("approval failed: " + err.Error()), nil
+		}
+		switch outcome {
+		case core.OutcomeAllowedOnce, core.OutcomeAllowedSession:
+			return allow(outcome), nil
+		default:
+			return reject("approval " + string(outcome)), nil
+		}
+	}
 	for _, raw := range rules.Allow {
 		p, err := pattern.ParsePattern(raw)
 		if err != nil {
@@ -105,11 +129,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		}
 	}
 
-	fallback := core.PolicyAsk
-	if agent.Permission != "" {
-		fallback = core.Policy(agent.Permission)
-	}
-	policy := EffectivePolicy(events, fallback)
+	policy := EffectivePolicy(events, fallbackPolicy(agent))
 	if info.ParentSessionID != "" {
 		policy = ChildPolicy(parentPolicy, policy)
 	}
@@ -129,17 +149,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if e.Approval == nil {
 		return reject("approval is not available"), nil
 	}
-	// A child approval is labelled with the child's agent name so the owner can
-	// tell it apart from the parent's approvals. Root approvals keep no label.
-	label := ""
-	if info.ParentSessionID != "" {
-		label = agentName
-	}
-	outcome, err := e.Approval.Request(ctx, core.ApprovalRequest{
-		SessionID: in.Call.SessionID, TurnID: in.Call.TurnID, CallID: in.Call.CallID,
-		AgentName: agentName, ToolName: in.Call.Name, Input: in.Call.Input, Risk: in.Call.Risk,
-		Label: label,
-	})
+	outcome, err := e.requestApproval(ctx, in, info, agentName)
 	if err != nil {
 		return reject("approval failed: " + err.Error()), nil
 	}
@@ -149,6 +159,28 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	default:
 		return reject("approval " + string(outcome)), nil
 	}
+}
+
+func fallbackPolicy(agent core.AgentConfig) core.Policy {
+	if agent.Permission != "" {
+		return core.Policy(agent.Permission)
+	}
+	return core.PolicyAsk
+}
+
+// requestApproval asks the owner about one tool call. A child approval is
+// labelled with the child's agent name so the owner can tell it apart from the
+// parent's approvals. Root approvals keep no label.
+func (e *Engine) requestApproval(ctx context.Context, in core.ToolsPreExecuteInput, info core.SessionInfo, agentName string) (core.ApprovalOutcome, error) {
+	label := ""
+	if info.ParentSessionID != "" {
+		label = agentName
+	}
+	return e.Approval.Request(ctx, core.ApprovalRequest{
+		SessionID: in.Call.SessionID, TurnID: in.Call.TurnID, CallID: in.Call.CallID,
+		AgentName: agentName, ToolName: in.Call.Name, Input: in.Call.Input, Risk: in.Call.Risk,
+		Label: label,
+	})
 }
 
 func allow(outcome core.ApprovalOutcome) core.ToolDecision {

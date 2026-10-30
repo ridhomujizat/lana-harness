@@ -31,6 +31,25 @@ type turnState struct {
 // maxActiveChildren is the number of child turns one parent may run at once.
 const maxActiveChildren = 3
 
+// mcpAdmin is core.MCPManager plus the hot-apply operations the registry
+// forwards to core.MCPAdmin.
+type mcpAdmin interface {
+	core.MCPManager
+	TestServer(ctx context.Context, cfg core.MCPConfig) (int, error)
+	Put(name string, cfg core.MCPConfig)
+	Remove(name string)
+}
+
+// mcpManagerOnly adapts a manager without hot apply. Its admin methods are
+// never reached because mcpAdminFor reports no admin service for it.
+type mcpManagerOnly struct{ core.MCPManager }
+
+func (mcpManagerOnly) TestServer(context.Context, core.MCPConfig) (int, error) {
+	return 0, fmt.Errorf("mcp admin is not available")
+}
+func (mcpManagerOnly) Put(string, core.MCPConfig) {}
+func (mcpManagerOnly) Remove(string)              {}
+
 // Registry manages live sessions and their inboxes.
 type Registry struct {
 	root       context.Context
@@ -38,7 +57,7 @@ type Registry struct {
 	store      core.SessionStore
 	llm        core.LLMRegistry
 	tools      core.ToolRegistry
-	mcp        core.MCPManager
+	mcp        mcpAdmin
 	hooks      *core.Hooks
 	questions  core.QuestionService
 	config     core.Config
@@ -54,6 +73,12 @@ type Registry struct {
 	wg             sync.WaitGroup
 	hub            *Hub
 	pipeline       *ToolRunner
+
+	// mcpMu guards the MCP manager, its admin flag, and the per-agent MCP
+	// overlay. The overlay replaces agents.<name>.mcp in memory until restart.
+	mcpMu       sync.Mutex
+	mcpCanAdmin bool
+	mcpServers  map[string][]string
 }
 
 // NewRegistry creates a registry.
@@ -76,6 +101,7 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 		runners:        map[string]*Runner{},
 		turns:          map[string]*turnState{},
 		activeChildren: map[string]int{},
+		mcpServers:     map[string][]string{},
 		hub:            NewHub(),
 	}
 	r.pipeline = NewToolRunner(hooks, toolReg)
@@ -83,9 +109,101 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 	return r
 }
 
-// SetMCP installs the MCP manager used by turns.
+// SetMCP installs the MCP manager used by turns. A manager that also implements
+// the hot-apply methods backs core.MCPAdmin as well; a plain core.MCPManager
+// keeps connecting servers but exposes no admin service.
 func (r *Registry) SetMCP(m core.MCPManager) {
-	r.mcp = m
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	if m == nil {
+		r.mcp = nil
+		r.mcpCanAdmin = false
+		return
+	}
+	if admin, ok := m.(mcpAdmin); ok {
+		r.mcp = admin
+		r.mcpCanAdmin = true
+		return
+	}
+	r.mcp = mcpManagerOnly{MCPManager: m}
+	r.mcpCanAdmin = false
+}
+
+// mcpManager returns the installed MCP manager, or nil when none is set.
+func (r *Registry) mcpManager() core.MCPManager {
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	if r.mcp == nil {
+		return nil
+	}
+	return r.mcp
+}
+
+// mcpAdminFor returns the registry as core.MCPAdmin only when the installed
+// manager supports hot apply.
+func (r *Registry) mcpAdminFor() core.MCPAdmin {
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	if r.mcp == nil || !r.mcpCanAdmin {
+		return nil
+	}
+	return r
+}
+
+// SetAgentServers replaces the in-memory MCP list of one agent. The copy keeps
+// the caller's slice from changing under a running turn.
+func (r *Registry) SetAgentServers(agent string, servers []string) {
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	r.mcpServers[agent] = append([]string(nil), servers...)
+}
+
+// agentServers returns the overlay list of one agent and whether it is set.
+func (r *Registry) agentServers(agent string) ([]string, bool) {
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	servers, ok := r.mcpServers[agent]
+	if !ok {
+		return nil, false
+	}
+	return append([]string(nil), servers...), true
+}
+
+// adminManager returns the installed admin-capable MCP manager.
+func (r *Registry) adminManager() (mcpAdmin, bool) {
+	r.mcpMu.Lock()
+	defer r.mcpMu.Unlock()
+	if r.mcp == nil || !r.mcpCanAdmin {
+		return nil, false
+	}
+	return r.mcp, true
+}
+
+// TestServer tests an MCP definition through the admin manager.
+func (r *Registry) TestServer(ctx context.Context, cfg core.MCPConfig) (int, error) {
+	admin, ok := r.adminManager()
+	if !ok {
+		return 0, fmt.Errorf("mcp admin is not available")
+	}
+	return admin.TestServer(ctx, cfg)
+}
+
+// PutServer adds or replaces an MCP server in the running manager.
+func (r *Registry) PutServer(name string, cfg core.MCPConfig) {
+	admin, ok := r.adminManager()
+	if !ok {
+		return
+	}
+	admin.Put(name, cfg)
+}
+
+// RemoveServer stops and forgets an MCP server in the running manager.
+func (r *Registry) RemoveServer(name string) {
+	admin, ok := r.adminManager()
+	if !ok {
+		return
+	}
+	admin.Remove(name)
 }
 
 func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {
@@ -422,3 +540,4 @@ func (r *Registry) AgentNames() []string {
 }
 
 var _ core.AgentRegistry = (*Registry)(nil)
+var _ core.MCPAdmin = (*Registry)(nil)

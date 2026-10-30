@@ -89,3 +89,32 @@ func TestBashCancel(t *testing.T) {
 		t.Fatal("bash did not stop when cancelled")
 	}
 }
+
+func TestBashMissingWorkspace(t *testing.T) {
+	ws := filepath.Join(t.TempDir(), "missing", "workspace")
+	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"pwd"}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "workspace does not exist:") {
+		t.Fatalf("out=%+v", out)
+	}
+	if strings.Contains(out.Output, "fork/exec") {
+		t.Fatalf("output contains the operating system exec error: %q", out.Output)
+	}
+}
+
+func TestBashWorkspaceNotCreatable(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := filepath.Join(file, "workspace")
+	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"pwd"}`)
+	if out.Status != core.ToolStatusError {
+		t.Fatalf("out=%+v", out)
+	}
+	if !strings.Contains(out.Output, "workspace is not a directory:") && !strings.Contains(out.Output, "workspace does not exist:") {
+		t.Fatalf("out=%+v", out)
+	}
+	if strings.Contains(out.Output, "fork/exec") {
+		t.Fatalf("output contains the operating system exec error: %q", out.Output)
+	}
+}

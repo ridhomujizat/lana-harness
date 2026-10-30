@@ -184,6 +184,10 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 			roster = append(roster, entry)
 		}
 	}
+	mcpServers := cfg.MCP
+	if overlay, ok := rn.reg.agentServers(cfgName); ok {
+		mcpServers = overlay
+	}
 	return resolvedAgent{
 		name:       cfgName,
 		team:       teamName,
@@ -196,7 +200,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		workspace:  workspace,
 		tools:      cfg.Tools,
 		disabled:   cfg.DisabledTools,
-		mcp:        cfg.MCP,
+		mcp:        mcpServers,
 		skills:     cfg.Skills,
 		fallback:   fallback,
 		maxSteps:   maxSteps,
@@ -404,6 +408,16 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			reason = "error"
 			goto finished
 		}
+		// REQ-WS-001: create a missing session workspace before any tool runs.
+		// A failure is logged and not fatal; bash, glob, and grep then report a
+		// clear workspace error instead of an operating system error.
+		if resolved.workspace != "" {
+			if _, statErr := os.Stat(resolved.workspace); statErr != nil {
+				if mkErr := os.MkdirAll(resolved.workspace, 0o700); mkErr != nil {
+					slog.Warn("workspace create failed", "workspace", resolved.workspace, "error", mkErr)
+				}
+			}
+		}
 		if steps >= resolved.maxSteps {
 			reason = "max_steps"
 			goto finished
@@ -411,16 +425,26 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 		if !promptBuilt {
 			turnTools = append(turnTools, resolved.tools...)
 			var unavailable map[string]string
-			if len(resolved.mcp) > 0 && rn.reg.mcp != nil {
-				names, unavail := rn.reg.mcp.Ensure(ctx, resolved.mcp)
-				turnTools = append(turnTools, names...)
-				unavailable = unavail
+			if len(resolved.mcp) > 0 {
+				if mcp := rn.reg.mcpManager(); mcp != nil {
+					names, unavail := mcp.Ensure(ctx, resolved.mcp)
+					turnTools = append(turnTools, names...)
+					unavailable = unavail
+				}
 			}
 			var skills []agenthome.Skill
 			if rn.reg.home != "" {
 				skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
 				if len(skills) > 0 && !containsString(turnTools, "skill_load") {
 					turnTools = append(turnTools, "skill_load")
+				}
+			}
+			// REQ-AMCP-001: every root session gets mcp_manage, like
+			// skill_load. T-005 registers the tool, so it is only offered once
+			// it exists in the registry.
+			if !resolved.child && !containsString(turnTools, "mcp_manage") {
+				if _, ok := rn.reg.tools.Get("mcp_manage"); ok {
+					turnTools = append(turnTools, "mcp_manage")
 				}
 			}
 			if resolved.team != "" {
@@ -550,11 +574,16 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 				}
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_call", CallID: block.ID, Name: block.Name, Input: block.Input})
 			}
+			var mcpAdmin core.MCPAdmin
+			if !resolved.child {
+				mcpAdmin = rn.reg.mcpAdminFor()
+			}
 			outputs := rn.reg.pipeline.Run(ctx, calls, turnTools, core.ToolCtx{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
 				Skills:        resolved.skills,
 				Questions:     rn.reg.questions,
 				Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+				MCPAdmin:      mcpAdmin,
 				AllowedAgents: resolved.delegates,
 				Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
 			})

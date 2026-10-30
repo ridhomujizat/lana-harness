@@ -5,23 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
-
+	"github.com/ridhomujizat/lana-harness/internal/mcpconfig"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
 // mcpBodyLimit is the largest accepted MCP form or test body.
 const mcpBodyLimit = 64 << 10
-
-// mcpNameRE is the MCP server name rule of API-WEB-027.
-var mcpNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // MCPServerRow is one server of GET /v1/mcp (API-WEB-027). EnvKeys and
 // HeaderKeys hold names only; values are never returned.
@@ -41,16 +35,10 @@ type MCPServerRow struct {
 	RunningForMS int64    `json:"running_for_ms"`
 }
 
-// MCPDefinition is the definition a form or a test sends. Env and Header
-// values are inline; the handler never writes or returns them.
-type MCPDefinition struct {
-	Type    string
-	Command string
-	Args    []string
-	URL     string
-	Env     map[string]string
-	Headers map[string]string
-}
+// MCPDefinition is the definition a form or a test sends. It is an alias of
+// the shared package type so the handler and mcpconfig never diverge. Env and
+// Header values are inline; the handler never writes or returns them.
+type MCPDefinition = mcpconfig.Definition
 
 // MCPTestResult is the outcome of POST /v1/mcp/test. Message is set when OK is
 // false and never contains an inline value.
@@ -107,12 +95,6 @@ type mcpTestFailResponse struct {
 	Message string `json:"message"`
 }
 
-// mcpDocument is the part of config.toml the MCP handlers read.
-type mcpDocument struct {
-	MCP    map[string]map[string]any `toml:"mcp"`
-	Agents map[string]map[string]any `toml:"agents"`
-}
-
 // mcpValidationError carries config.Check issues through the section writer.
 type mcpValidationError struct {
 	issues []ConfigIssue
@@ -147,7 +129,7 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	document, err := parseMCPDocument(file.Raw)
+	document, err := mcpconfig.Parse(file.Raw)
 	if err != nil {
 		s.logger.Error("web: parse config for MCP list", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -160,7 +142,7 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 			runtimeRows[row.Name] = row
 		}
 	}
-	usage := mcpServerUsage(document.Agents)
+	usage := mcpconfig.Usage(document)
 
 	names := make([]string, 0, len(document.MCP))
 	for name := range document.MCP {
@@ -168,15 +150,15 @@ func (s *Server) handleListMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		def := mcpDefinitionFromMap(document.MCP[name])
+		def := mcpconfig.FromMap(document.MCP[name])
 		row := MCPServerRow{
 			Name:       name,
-			Type:       mcpDefinitionType(def),
+			Type:       def.Type,
 			Command:    def.Command,
 			Args:       nonNilStrings(def.Args),
 			URL:        def.URL,
-			EnvKeys:    sortedMCPKeys(def.Env),
-			HeaderKeys: sortedMCPKeys(def.Headers),
+			EnvKeys:    mcpconfig.SortedKeys(def.Env),
+			HeaderKeys: mcpconfig.SortedKeys(def.Headers),
 			Agents:     nonNilStrings(usage[name]),
 		}
 		if runtimeRow, ok := runtimeRows[name]; ok {
@@ -200,7 +182,7 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if !mcpNameRE.MatchString(name) {
+	if !mcpconfig.NameRE.MatchString(name) {
 		writeMCPIssue(w, "name", "name must match [a-z0-9-]+")
 		return
 	}
@@ -246,13 +228,13 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "stale_version", "config.toml changed since it was loaded")
 		return
 	}
-	document, err := parseMCPDocument(file.Raw)
+	document, err := mcpconfig.Parse(file.Raw)
 	if err != nil {
 		s.logger.Error("web: parse config before MCP save", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-	stored := mcpDefinitionFromMap(document.MCP[name])
+	stored := mcpconfig.FromMap(document.MCP[name])
 	if !envPresent {
 		def.Env = stored.Env
 	} else {
@@ -271,9 +253,9 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	normalizeMCPDefinition(&def)
+	mcpconfig.Normalize(&def)
 
-	table := renderMCPTable(name, def)
+	table := mcpconfig.Render(name, def)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), mcpChecker(store), file.Raw, "[mcp."+name+"]", table)
 	if err != nil {
 		s.writeMCPSaveError(w, "save mcp server", err)
@@ -301,7 +283,7 @@ func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if !mcpNameRE.MatchString(name) {
+	if !mcpconfig.NameRE.MatchString(name) {
 		writeMCPIssue(w, "name", "name must match [a-z0-9-]+")
 		return
 	}
@@ -333,7 +315,7 @@ func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "stale_version", "config.toml changed since it was loaded")
 		return
 	}
-	document, err := parseMCPDocument(file.Raw)
+	document, err := mcpconfig.Parse(file.Raw)
 	if err != nil {
 		s.logger.Error("web: parse config before MCP delete", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -343,7 +325,7 @@ func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "MCP server is not configured")
 		return
 	}
-	if used := mcpServerUsage(document.Agents)[name]; len(used) > 0 {
+	if used := mcpconfig.Usage(document)[name]; len(used) > 0 {
 		issues := make([]ConfigIssue, 0, len(used))
 		for _, agent := range used {
 			issues = append(issues, ConfigIssue{
@@ -401,7 +383,7 @@ func (s *Server) handleTestMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, mcpTestFailResponse{
 		OK:      false,
-		Message: redactMCPValues(result.Message, def.Env, def.Headers),
+		Message: mcpconfig.RedactValues(result.Message, def.Env, def.Headers),
 	})
 }
 
@@ -411,7 +393,7 @@ func (s *Server) handleRestartMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
-	if !mcpNameRE.MatchString(name) {
+	if !mcpconfig.NameRE.MatchString(name) {
 		writeMCPIssue(w, "name", "name must match [a-z0-9-]+")
 		return
 	}
@@ -423,7 +405,7 @@ func (s *Server) handleRestartMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	configured := false
 	if file.Exists {
-		document, err := parseMCPDocument(file.Raw)
+		document, err := mcpconfig.Parse(file.Raw)
 		if err != nil {
 			s.logger.Error("web: parse config before MCP restart", "error", err)
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -444,70 +426,6 @@ func (s *Server) handleRestartMCP(w http.ResponseWriter, r *http.Request) {
 		state.Name = name
 	}
 	writeJSON(w, http.StatusOK, state)
-}
-
-func parseMCPDocument(raw []byte) (mcpDocument, error) {
-	document := mcpDocument{}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return document, nil
-	}
-	if err := toml.Unmarshal(raw, &document); err != nil {
-		return mcpDocument{}, err
-	}
-	return document, nil
-}
-
-func mcpDefinitionFromMap(table map[string]any) MCPDefinition {
-	def := MCPDefinition{
-		Command: mapProviderString(table, "command"),
-		Args:    mapMCPArgs(table["args"]),
-		URL:     mapProviderString(table, "url"),
-		Env:     mapMCPValues(table["env"]),
-		Headers: mapMCPValues(table["headers"]),
-	}
-	def.Type = mcpDefinitionType(def)
-	return def
-}
-
-func mapMCPArgs(value any) []string {
-	switch list := value.(type) {
-	case []string:
-		return append([]string(nil), list...)
-	case []any:
-		out := make([]string, 0, len(list))
-		for _, item := range list {
-			if text, ok := item.(string); ok {
-				out = append(out, text)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func mapMCPValues(value any) map[string]string {
-	table, ok := value.(map[string]any)
-	if !ok || len(table) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(table))
-	for key, item := range table {
-		if text, ok := item.(string); ok {
-			out[key] = text
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func mcpDefinitionType(def MCPDefinition) string {
-	if def.URL != "" {
-		return "url"
-	}
-	return "command"
 }
 
 func mcpDefinitionFromBody(body map[string]json.RawMessage, prefix string) (MCPDefinition, []ConfigIssue) {
@@ -588,17 +506,6 @@ func mcpDefinitionFromBody(body map[string]json.RawMessage, prefix string) (MCPD
 	return def, issues
 }
 
-func normalizeMCPDefinition(def *MCPDefinition) {
-	if def.Type == "command" {
-		def.URL = ""
-		def.Headers = nil
-		return
-	}
-	def.Command = ""
-	def.Args = nil
-	def.Env = nil
-}
-
 func validateMCPURL(value string) error {
 	parsed, err := url.Parse(value)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
@@ -633,75 +540,6 @@ func mergeMCPValues(stored, candidate map[string]string, prefix string) (map[str
 	return out, issues
 }
 
-func renderMCPTable(name string, def MCPDefinition) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[mcp.%s]\n", providerTOMLKey(name))
-	writeProviderString(&b, "command", def.Command)
-	if len(def.Args) > 0 {
-		fmt.Fprintf(&b, "args = %s\n", mcpTOMLArray(def.Args))
-	}
-	writeProviderString(&b, "url", def.URL)
-	writeMCPValueTable(&b, "env", def.Env)
-	writeMCPValueTable(&b, "headers", def.Headers)
-	return b.String()
-}
-
-func writeMCPValueTable(b *strings.Builder, name string, values map[string]string) {
-	if len(values) == 0 {
-		return
-	}
-	keys := sortedMCPKeys(values)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, providerTOMLKey(key)+" = "+providerTOMLString(values[key]))
-	}
-	fmt.Fprintf(b, "%s = { %s }\n", name, strings.Join(parts, ", "))
-}
-
-func mcpTOMLArray(values []string) string {
-	data, err := toml.Marshal(values)
-	if err != nil {
-		return "[]"
-	}
-	return strings.TrimSuffix(string(data), "\n")
-}
-
-func sortedMCPKeys(values map[string]string) []string {
-	if len(values) == 0 {
-		return []string{}
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// mcpServerUsage maps each server name to the sorted agents that list it.
-func mcpServerUsage(agents map[string]map[string]any) map[string][]string {
-	usage := map[string][]string{}
-	names := make([]string, 0, len(agents))
-	for name := range agents {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		list, ok := agents[name]["mcp"].([]any)
-		if !ok {
-			continue
-		}
-		for _, item := range list {
-			server, ok := item.(string)
-			if !ok {
-				continue
-			}
-			usage[server] = append(usage[server], name)
-		}
-	}
-	return usage
-}
-
 func mcpStatusForState(state string) string {
 	switch state {
 	case "running":
@@ -711,20 +549,6 @@ func mcpStatusForState(state string) string {
 	default:
 		return "idle"
 	}
-}
-
-// redactMCPValues is a last line of defense for a test error that echoes an
-// inline env or header value.
-func redactMCPValues(message string, values ...map[string]string) string {
-	for _, table := range values {
-		for _, value := range table {
-			if value == "" || value == "***" {
-				continue
-			}
-			message = strings.ReplaceAll(message, value, "***")
-		}
-	}
-	return message
 }
 
 func unknownMCPKeys(body map[string]json.RawMessage, test bool) []ConfigIssue {

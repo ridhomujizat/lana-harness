@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/pelletier/go-toml/v2/unstable"
@@ -21,9 +20,9 @@ import (
 // configBodyLimit is the largest accepted PUT /v1/config body.
 const configBodyLimit = 4 << 20
 
-// configWriteMu serializes config, secret, and file saves in this daemon.
-// T-007 only saves config.toml; T-008 shares the same lock.
-var configWriteMu sync.Mutex
+// configWriteMu serializes config, secret, and file saves in this daemon. It is
+// the same process-wide lock the agent config writer takes.
+var configWriteMu = &webfiles.ConfigWriteMu
 
 // ConfigStore is the file and settings port used by the config handlers. It
 // stays separate from Backend so the existing session fakes do not grow config
