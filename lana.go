@@ -114,6 +114,11 @@ var (
 	// ErrDraining refuses a new turn while the daemon shuts down
 	// (REQ-TFB-002, API-TFB-008). Its text is the user-facing message.
 	ErrDraining = errors.New("lana is restarting. Try again in a moment.") //nolint:staticcheck // ST1005: the contract fixes this user-facing text.
+	// ErrTurnRunning refuses Continue while a turn runs (API-TFB-003).
+	ErrTurnRunning = errors.New("a turn is running")
+	// ErrNothingToContinue refuses Continue when the last turn ended normally
+	// (API-TFB-003).
+	ErrNothingToContinue = errors.New("the last turn ended normally")
 )
 
 // ProviderError is an alias for core.ProviderError.
@@ -634,6 +639,134 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 		return result, turnResult.Err
 	}
 	return result, nil
+}
+
+// CanContinue reports why a continue turn may not start: ErrDraining while the
+// daemon drains, ErrTurnRunning while a turn runs, or ErrNothingToContinue when
+// the session's last turn ended normally (API-TFB-003, REQ-TFB-005).
+func (rt *Runtime) CanContinue(ctx context.Context, sessionID string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	if err := rt.drainError(); err != nil {
+		return err
+	}
+	info, err := rt.SessionInfo(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if rt.TurnActive(info.ID) {
+		return ErrTurnRunning
+	}
+	end, _, ok, err := rt.lastTurn(ctx, info.ID)
+	if err != nil {
+		return err
+	}
+	if !ok || end.Reason == StopEndTurn {
+		return ErrNothingToContinue
+	}
+	return nil
+}
+
+// Continue starts a turn that resumes the session's last turn. The new turn's
+// user message carries continue=true and continue_reason, and its text asks the
+// model to carry on from where the turn stopped (API-TFB-003, API-TFB-004,
+// REQ-TFB-005).
+func (rt *Runtime) Continue(ctx context.Context, sessionID string) (Result, error) {
+	if err := rt.CanContinue(ctx, sessionID); err != nil {
+		return Result{}, err
+	}
+	info, err := rt.SessionInfo(ctx, sessionID)
+	if err != nil {
+		return Result{}, err
+	}
+	end, steps, _, err := rt.lastTurn(ctx, info.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	text := "Continue the previous task from where it stopped. It ended because: " + continueReasonText(end, steps)
+	turnID, err := rt.registry.StartContinue(ctx, info.ID, text, end.Reason)
+	if err != nil {
+		return Result{}, err
+	}
+	stopWatch := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = rt.registry.Cancel(context.Background(), info.ID)
+		case <-stopWatch:
+		}
+	}()
+	turnResult, err := rt.registry.Wait(context.Background(), turnID)
+	close(stopWatch)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{
+		Text: turnResult.Text, SessionID: info.ID, StopReason: turnResult.StopReason,
+		Usage: Usage{InputTokens: int(turnResult.Usage.InputTokens), OutputTokens: int(turnResult.Usage.OutputTokens)},
+	}
+	if turnResult.Err != nil {
+		return result, turnResult.Err
+	}
+	return result, nil
+}
+
+// lastTurn returns the session's last turn/end, the number of steps that turn
+// ran, and whether a turn/end exists (API-TFB-003).
+func (rt *Runtime) lastTurn(ctx context.Context, sessionID string) (core.TurnEnd, int, bool, error) {
+	events, err := rt.store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return core.TurnEnd{}, 0, false, err
+	}
+	var end core.TurnEnd
+	turnID := ""
+	found := false
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != core.KindTurnEnd {
+			continue
+		}
+		if err := json.Unmarshal(events[i].Payload, &end); err != nil {
+			return core.TurnEnd{}, 0, false, err
+		}
+		turnID = events[i].TurnID
+		if turnID == "" {
+			turnID = end.TurnID
+		}
+		found = true
+		break
+	}
+	if !found {
+		return core.TurnEnd{}, 0, false, nil
+	}
+	steps := 0
+	for _, event := range events {
+		if event.Kind == core.KindStepStart && event.TurnID == turnID {
+			steps++
+		}
+	}
+	return end, steps, true, nil
+}
+
+// continueReasonText renders the plain reason line of a continue request
+// (REQ-TFB-004, REQ-TFB-005).
+func continueReasonText(end core.TurnEnd, steps int) string {
+	switch end.Reason {
+	case StopCancelled:
+		return "Stopped by you."
+	case "interrupted":
+		return "lana restarted while working."
+	case StopError:
+		message := ""
+		if end.Error != nil {
+			message = end.Error.Message
+		}
+		return "Stopped by an error: " + message
+	case StopMaxSteps:
+		return fmt.Sprintf("Stopped after the step limit (%d steps).", steps)
+	default:
+		return ""
+	}
 }
 
 // Event is an event from Stream.

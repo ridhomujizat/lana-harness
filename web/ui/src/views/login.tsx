@@ -1,31 +1,125 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { ApiError, errorMessage, setCSRF } from "../api/client";
-import { authSession, login } from "../api/auth";
-import { Loading, useAnnounce } from "../ui/ui";
+import { errorMessage, isErrorCode, setCSRF } from "../api/client";
+import { authState, login } from "../api/auth";
+import { Icon, Loading, useAnnounce } from "../ui/ui";
 import { SetupShell } from "./setup";
-import type { AuthSession } from "../api/auth";
 
-/* Step 1 of the setup wizard (REQ-WEB-032, REQ-WEB-005). The login rules are
-   unchanged: the owner token is posted once, the browser session is read back,
-   and its CSRF value is handed to the shared API client. */
+/* Daily login (REQ-WLG-003, mockup 2). The owner types the password they set
+   during setup; a wrong one answers invalid_password, too many tries answer
+   too_many_attempts. The legacy token field is gone (REQ-WLG-008). */
+
+const INVALID_PASSWORD_TEXT = "That password is not right.";
+const TOO_MANY_ATTEMPTS_TEXT =
+  "Too many tries. Wait 5 minutes or reset your password.";
+
+function loginErrorText(error: unknown): string {
+  if (isErrorCode(error, "too_many_attempts")) {
+    return TOO_MANY_ATTEMPTS_TEXT;
+  }
+  if (isErrorCode(error, "invalid_password")) {
+    return INVALID_PASSWORD_TEXT;
+  }
+  return errorMessage(error);
+}
+
+export interface PasswordFieldProps {
+  id: string;
+  label: string;
+  value: string;
+  autoComplete: string;
+  disabled?: boolean;
+  hint?: string;
+  error?: string;
+  onChange: (value: string) => void;
+}
+
+/* A labelled password input with the inline eye icon toggle. The forgot,
+   welcome, and code screens share it. */
+export function PasswordField({
+  id,
+  label,
+  value,
+  autoComplete,
+  disabled = false,
+  hint = "",
+  error = "",
+  onChange,
+}: PasswordFieldProps) {
+  const [shown, setShown] = useState(false);
+  const hintId = hint ? id + "-hint" : "";
+  const errorId = error ? id + "-error" : "";
+  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
+  return (
+    <div className="setup-field">
+      <label className="setup-label" htmlFor={id}>
+        {label}
+      </label>
+      <div className="pw-wrap">
+        <input
+          id={id}
+          type={shown ? "text" : "password"}
+          autoComplete={autoComplete}
+          spellCheck={false}
+          value={value}
+          disabled={disabled}
+          aria-invalid={error ? "true" : undefined}
+          aria-describedby={describedBy}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button
+          type="button"
+          className="pw-toggle"
+          aria-label={shown ? "Hide password" : "Show password"}
+          aria-pressed={shown}
+          disabled={disabled}
+          onClick={() => setShown((current) => !current)}
+        >
+          <Icon name={shown ? "eye-off" : "eye"} />
+        </button>
+      </div>
+      {hint ? (
+        <p id={hintId} className="setup-hint">
+          {hint}
+        </p>
+      ) : null}
+      {error ? (
+        <p id={errorId} className="setup-field-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export interface LoginPageProps {
-  onLoggedIn: (session: AuthSession) => void;
+  onLoggedIn: (csrf: string) => void;
 }
 
 export function LoginPage({ onLoggedIn }: LoginPageProps) {
   const announce = useAnnounce();
-  const tokenRef = useRef<HTMLInputElement>(null);
-  const [token, setToken] = useState("");
-  const [message, setMessage] = useState("");
+  const [passwordSet, setPasswordSet] = useState<boolean | null>(null);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
-    if (tokenRef.current) {
-      tokenRef.current.focus();
-    }
+    let alive = true;
+    authState()
+      .then((state) => {
+        if (alive) {
+          setPasswordSet(Boolean(state && state.password_set));
+        }
+      })
+      .catch(() => {
+        /* Keep the form: the login call itself reports the real failure. */
+        if (alive) {
+          setPasswordSet(true);
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -34,117 +128,68 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
       return;
     }
     setBusy(true);
-    setMessage("");
+    setError("");
     try {
-      await login(token);
-      const session = await authSession();
+      const session = await login({ password });
       setCSRF(session.csrf);
       announce("Signed in.");
-      onLoggedIn(session);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setMessage(
-          "The owner token is incorrect. Copy it from the daemon start output and try again."
-        );
-        announce("Log in failed: the owner token is incorrect.");
-      } else {
-        setMessage(errorMessage(error));
-        announce("Log in failed. " + errorMessage(error));
-      }
-      setToken("");
+      onLoggedIn(session.csrf);
+    } catch (failure) {
+      const message = loginErrorText(failure);
+      setError(message);
+      setPassword("");
+      announce("Log in failed. " + message);
     } finally {
       setBusy(false);
     }
   }
 
-  async function checkExisting() {
-    setChecking(true);
-    setMessage("");
-    try {
-      const session = await authSession();
-      setCSRF(session.csrf);
-      onLoggedIn(session);
-    } catch {
-      setMessage("No active browser session. Log in with the owner token.");
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  const describedBy = [
-    "unlock-token-hint",
-    message ? "unlock-token-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const noPassword = passwordSet === false;
 
   return (
-    <SetupShell step="unlock">
+    <SetupShell step="unlock" variant="door">
       <div className="setup-heading">
-        <span className="setup-eyebrow">Step 1 of 5</span>
-        <h1 className="setup-title">Welcome to lana</h1>
+        <h1 className="setup-title">
+          {noPassword ? "Set up your password" : "Log in"}
+        </h1>
         <p className="setup-lede">
-          The daemon is running. Paste the owner token it printed in the terminal
-          to unlock this dashboard.
+          {noPassword
+            ? "lana opened a sign-in link in a new browser tab when it started. Switch to that tab, or restart lana to open a new one."
+            : "Enter the password you made when you set up lana."}
         </p>
       </div>
 
-      <form className="setup-form" onSubmit={submit}>
-        <div className="setup-field">
-          <label className="setup-label" htmlFor="unlock-token">
-            Owner token
-          </label>
-          <input
-            ref={tokenRef}
-            id="unlock-token"
-            type="password"
-            name="token"
+      {noPassword ? null : (
+        <form className="setup-form" onSubmit={submit}>
+          <PasswordField
+            id="login-password"
+            label="Password"
+            value={password}
             autoComplete="current-password"
-            spellCheck={false}
-            required
-            value={token}
-            aria-required="true"
-            aria-invalid={message ? "true" : undefined}
-            aria-describedby={describedBy}
-            onChange={(event) => setToken(event.target.value)}
+            error={error}
+            disabled={busy}
+            onChange={(value) => {
+              setPassword(value);
+              setError("");
+            }}
           />
-          <p id="unlock-token-hint" className="setup-hint">
-            The token stays in this browser as a session cookie.
-          </p>
-          {message ? (
-            <p id="unlock-token-error" className="setup-field-error" role="alert">
-              {message}
-            </p>
-          ) : null}
-        </div>
+          <div className="setup-actions">
+            <button
+              type="submit"
+              className="button-ui button-ui-primary"
+              disabled={busy}
+            >
+              {busy ? "Logging in…" : "Log in"}
+            </button>
+          </div>
+        </form>
+      )}
 
-        <div className="setup-token-help">
-          <span className="setup-token-help-title">Where is the token?</span>
-          <p className="setup-token-help-text">
-            Run lana daemon. The first lines of the log show:
-          </p>
-          <code>owner token: lana_tok_7Q2k…</code>
-        </div>
-
-        <div className="setup-actions">
-          <button
-            type="submit"
-            className="button-ui button-ui-primary"
-            disabled={busy || checking}
-          >
-            {busy ? "Unlocking…" : "Unlock dashboard"}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          className="link-button setup-check-session"
-          disabled={busy || checking}
-          onClick={checkExisting}
-        >
-          {checking ? "Checking…" : "Check existing session"}
-        </button>
-      </form>
+      {noPassword ? null : (
+        <p className="after-form">
+          Forgot it? <a href="#/forgot">Reset your password</a>
+        </p>
+      )}
     </SetupShell>
   );
 }

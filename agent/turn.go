@@ -40,10 +40,13 @@ func (rn *Runner) popInbox() (string, bool) {
 	return text, true
 }
 
-func (rn *Runner) runChain(ctx context.Context, initial, turnID string) {
+func (rn *Runner) runChain(ctx context.Context, initial, turnID, continueReason string) {
 	for {
-		result := rn.runTurn(ctx, initial, turnID)
+		result := rn.runTurn(ctx, initial, turnID, continueReason)
 		rn.reg.finishTurn(turnID, result)
+		// Only the first turn of a chain is a continue; any message that
+		// arrives while it runs starts a plain turn.
+		continueReason = ""
 
 		rn.reg.mu.Lock()
 		if rn.reg.closed {
@@ -340,7 +343,7 @@ func (rn *Runner) lastSystemText(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result TurnResult) {
+func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason string) (result TurnResult) {
 	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
@@ -357,6 +360,10 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 	pendingTools := false
 	continueNext := false
 	lastText := ""
+	// The empty-answer guard state (REQ-TFB-008 item 4).
+	toolCalls := 0
+	lastAssistantText := ""
+	guarded := false
 	prompt := ""
 	promptBuilt := false
 	turnTools := []string{}
@@ -364,11 +371,14 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 	for {
 		claimedText := ""
 		claimed := false
+		// continueMsg marks the claimed message as a continue payload.
+		continueMsg := false
 		switch {
 		case hasInitial:
 			claimedText = initial
 			claimed = true
 			hasInitial = false
+			continueMsg = continueReason != ""
 		case pendingTools:
 			claimedText, claimed = rn.popInbox()
 		case continueNext:
@@ -378,7 +388,15 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			var ok bool
 			claimedText, ok = rn.popInbox()
 			if !ok {
-				goto finished
+				// REQ-TFB-008 item 4: a turn that would end with end_turn
+				// after a tool call but with no text in its last assistant
+				// message runs exactly one more step asking for a report.
+				if !guarded && toolCalls > 0 && lastAssistantText == "" {
+					guarded = true
+					claimedText = emptyAnswerNote
+				} else {
+					goto finished
+				}
 			}
 			claimed = true
 		}
@@ -432,6 +450,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 					turnTools = append(turnTools, names...)
 					unavailable = unavail
 				}
+				// REQ-TFB-008 item 2: every server the runtime does not know
+				// is listed as "not loaded".
+				unavailable = unknownMCP(resolved.mcp, turnTools, unavailable)
 			}
 			var skills []agenthome.Skill
 			if rn.reg.home != "" {
@@ -477,7 +498,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			}
 		}
 		if claimed {
-			if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindUserMessage, TurnID: turnID, Payload: core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content}}); err != nil {
+			payload := core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content}
+			if continueMsg {
+				payload.Continue = true
+				payload.ContinueReason = continueReason
+			}
+			if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindUserMessage, TurnID: turnID, Payload: payload}); err != nil {
 				runErr = runtimeError(err)
 				reason = "error"
 				goto finished
@@ -556,6 +582,10 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 		if text != "" {
 			lastText = text
 		}
+		// The empty-answer guard tracks the text of the last assistant message
+		// and the tool calls of the whole turn (REQ-TFB-008 item 4).
+		lastAssistantText = text
+		toolCalls += len(toolBlocks)
 
 		if len(toolBlocks) > 0 {
 			calls := make([]core.ToolCall, 0, len(toolBlocks))
@@ -746,6 +776,52 @@ func stopToolOutput(ctx context.Context) core.ToolOutput {
 func containsString(list []string, name string) bool {
 	for _, item := range list {
 		if item == name {
+			return true
+		}
+	}
+	return false
+}
+
+// emptyAnswerNote is the runtime note of the empty-answer guard (REQ-TFB-008
+// item 4). It is the user-role message of the one extra step.
+const emptyAnswerNote = "Tell the owner what you did, what failed, and what is still needed."
+
+// The prompt reasons of the unavailable MCP list (REQ-TFB-008 item 2).
+const (
+	notLoadedReason     = "not loaded"
+	notConfiguredReason = "not configured"
+)
+
+// unknownMCP returns the prompt's unavailable MCP list. A listed server the
+// runtime does not know is "not loaded"; a listed server that offered no tool
+// and has no reason is unknown as well (REQ-TFB-008 item 2, AC-TFB-019).
+func unknownMCP(servers, tools []string, unavailable map[string]string) map[string]string {
+	out := make(map[string]string, len(servers))
+	for _, name := range servers {
+		reason, ok := unavailable[name]
+		if ok && reason == notConfiguredReason {
+			reason = notLoadedReason
+		}
+		if !ok {
+			if mcpServerOffered(tools, name) {
+				continue
+			}
+			reason = notLoadedReason
+		}
+		out[name] = reason
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// mcpServerOffered reports whether the offered tools include one of an MCP
+// server.
+func mcpServerOffered(tools []string, server string) bool {
+	prefix := "mcp__" + server + "__"
+	for _, name := range tools {
+		if strings.HasPrefix(name, prefix) {
 			return true
 		}
 	}

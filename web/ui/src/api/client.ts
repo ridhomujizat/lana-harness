@@ -63,6 +63,13 @@ export function isErrorCode(error: unknown, code: string): boolean {
   return error instanceof ApiError && error.code === code;
 }
 
+/* API-TFB-008: the daemon refuses a new turn while it drains. */
+export const DAEMON_DRAINING_TEXT = "lana is restarting. Try again in a moment.";
+
+export function isDaemonDraining(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 503 && error.code === "daemon_draining";
+}
+
 export function queryString(params?: object): string {
   const search = new URLSearchParams();
   const source = (params || {}) as Record<string, unknown>;

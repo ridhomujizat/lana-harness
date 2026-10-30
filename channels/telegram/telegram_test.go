@@ -124,7 +124,7 @@ func TestInboxDuringTurnAndCancel(t *testing.T) {
 		t.Fatalf("inbox = %v", sent)
 	}
 	api.text(ownerChat, "private", ownerID, "/cancel")
-	api.waitCall("editMessageText", textHas("⊘ cancelled"))
+	api.waitCall("editMessageText", textHas("⊘ Stopped by you."))
 	api.text(ownerChat, "private", ownerID, "/cancel")
 	api.waitCall("sendMessage", textIs("· nothing to cancel"))
 }
@@ -351,7 +351,7 @@ func TestErrorAndParseFallback(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "hi")
 	api.waitCall("editMessageText", func(p map[string]any) bool {
 		_, html := p["parse_mode"]
-		return p["text"] == "✗ provider down" && !html
+		return p["text"] == "✗ Stopped by an error: provider down" && !html
 	})
 }
 

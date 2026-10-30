@@ -200,7 +200,7 @@ func (r *Registry) startChildTurn(parent context.Context, sessionID, text string
 	r.mu.Unlock()
 	go func() {
 		defer r.wg.Done()
-		runner.runChain(turnCtx, text, turnID)
+		runner.runChain(turnCtx, text, turnID, "")
 	}()
 	return turnID, nil
 }

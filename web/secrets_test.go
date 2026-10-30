@@ -1,9 +1,9 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,12 +31,12 @@ func (s *testSettingsStore) ConfigSecretNames(context.Context) ([]string, error)
 
 func newSettingsTestServer(t *testing.T, store *testSettingsStore) (*Server, *http.Cookie, string) {
 	t.Helper()
-	var stderr bytes.Buffer
-	s := newAuthServer(t, store.home, &stderr)
+	token := authTokenFor(t, store.home)
+	s := newAuthServer(t, store.home, io.Discard)
 	s.SetSecretStore(store)
 	s.SetAgentFileStore(store)
 	s.SetSkillStore(store)
-	cookie, csrf := loginAndSession(t, s, tokenFromStderr(t, stderr.String()))
+	cookie, csrf := loginAndSession(t, s, token)
 	return s, cookie, csrf
 }
 

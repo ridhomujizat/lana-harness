@@ -101,12 +101,7 @@ func TestDaemonSetupSaveRestartsInPlace(t *testing.T) {
 	provider, fake := newSetupFakeProvider(t)
 
 	child := startRestartChild(t, home)
-	tokenLine := child.waitLine(t, "web: owner token created at ", 10*time.Second)
-	i := strings.Index(tokenLine, restartTokenMark)
-	if i < 0 {
-		t.Fatalf("token line has no marker: %q", tokenLine)
-	}
-	token := tokenLine[i+len(restartTokenMark):]
+	token := webTestToken
 	if listening := child.waitLine(t, "web: listening on http://", 10*time.Second); listening != addr {
 		t.Fatalf("listening address = %q, want %q", listening, addr)
 	}

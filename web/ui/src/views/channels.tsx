@@ -28,11 +28,7 @@ import type {
   WaitingChat,
 } from "../api/channels";
 import type { Agent } from "../api/agents";
-import {
-  getDaemon,
-  restartDaemon,
-  waitForDaemonRestart,
-} from "../api/settings";
+import { getDaemon } from "../api/settings";
 import {
   Dialog,
   ErrorNotice,
@@ -42,7 +38,7 @@ import {
   useAnnounce,
 } from "../ui/ui";
 import { AgentAvatar, agoLabel } from "./agent-common";
-import { SettingsRestartDialog } from "./settings-pages";
+import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
 
 /* REQ-WEB-052: the channels list and the Telegram detail. REQ-WEB-053: the
    add-chat dialog with the chats that wrote to the bot without a route.
@@ -531,7 +527,6 @@ export function TelegramPage() {
   const [connectError, setConnectError] = useState("");
   const [connectDetails, setConnectDetails] = useState<unknown[]>([]);
   const [restartFallback, setRestartFallback] = useState(false);
-  const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [lastConnectedAgent, setLastConnectedAgent] = useState("");
   const [lastConnectedChatId, setLastConnectedChatId] = useState<number | null>(
     null
@@ -541,6 +536,17 @@ export function TelegramPage() {
   const connectPollCancelRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(false);
   const advancedRef = useRef<HTMLDetailsElement>(null);
+
+  /* Step 3 shares the restart flow of Settings > General (REQ-TFB-003): a
+     draining daemon shows the waiting dialog with Restart now and Cancel. */
+  const restart = useDaemonRestart({
+    onRestarted: () => {
+      void resumeAfterRestart();
+    },
+    onError: (failure) => {
+      showRestartFallback(failure);
+    },
+  });
 
   const load = useCallback(
     async (initial: boolean) => {
@@ -1001,13 +1007,31 @@ export function TelegramPage() {
   }
 
   async function resumeAfterRestart() {
-    setRestartDialogOpen(false);
     setRestartFallback(false);
     setConnectError("");
     setConnectDetails([]);
     setConnectStatus("");
     setConnectingChat(lastConnectedChatId === null ? -1 : lastConnectedChatId);
     await finishConnected(lastConnectedAgent || connectAgent);
+  }
+
+  /* The fallback button restarts again with the shared flow (REQ-TFB-003). */
+  async function retryRestart() {
+    setConnectError("");
+    setConnectDetails([]);
+    try {
+      const info = await getDaemon();
+      if (info && info.restart_supported === false) {
+        setConnectError(
+          "Restarting from the browser is not supported on this platform."
+        );
+        return;
+      }
+      await restart.start(info ? info.started_at : 0);
+    } catch (failure: unknown) {
+      setConnectError(errorMessage(failure));
+      setConnectDetails(failure instanceof ApiError ? failure.details : []);
+    }
   }
 
   async function connectChat(chat: TelegramSeenChat) {
@@ -1073,29 +1097,13 @@ export function TelegramPage() {
       showRestartFallback(null);
       return;
     }
-    try {
-      await restartDaemon();
-    } catch (failure: unknown) {
-      if (!mountedRef.current) {
-        return;
-      }
-      showRestartFallback(failure);
+    if (!mountedRef.current) {
       return;
     }
-    try {
-      await waitForDaemonRestart(info ? info.started_at : 0, (text) => {
-        if (mountedRef.current) {
-          setConnectStatus(text);
-        }
-      });
-    } catch (failure: unknown) {
-      if (!mountedRef.current) {
-        return;
-      }
-      showRestartFallback(failure);
-      return;
-    }
-    await finishConnected(connectAgent);
+    setConnectStatus("Restarting…");
+    /* The shared restart flow calls resumeAfterRestart when the daemon is back
+       (REQ-TFB-003); a draining daemon keeps the waiting dialog open. */
+    await restart.start(info ? info.started_at : 0);
   }
 
   async function addOwner() {
@@ -1519,7 +1527,9 @@ export function TelegramPage() {
                   <button
                     type="button"
                     className="button-ui button-ui-secondary"
-                    onClick={() => setRestartDialogOpen(true)}
+                    onClick={() => {
+                      void retryRestart();
+                    }}
                   >
                     Restart daemon
                   </button>
@@ -1866,10 +1876,13 @@ export function TelegramPage() {
         </section>
       </form>
 
-      {restartDialogOpen ? (
-        <SettingsRestartDialog
-          onClose={() => setRestartDialogOpen(false)}
-          onRestarted={resumeAfterRestart}
+      {restart.phase !== "idle" ? (
+        <RestartDaemonDialog
+          controller={restart}
+          confirmFirst={false}
+          onClose={() => {
+            void restart.cancel();
+          }}
         />
       ) : null}
 

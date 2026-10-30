@@ -1,0 +1,18 @@
+/* Mockup-only additions for spec #18 screens. */
+.setup-rail { position: relative; overflow: hidden; }
+.door-mark { position: absolute; left: -64px; bottom: -120px; width: 560px; height: auto; pointer-events: none; }
+.door-mark path { fill: var(--bg-tertiary); }
+.door-mark .door-right { fill: #1A1F2B; }
+.rail-place { position: relative; z-index: 1; color: var(--text-tertiary); font-size: 14px; line-height: 20px; max-width: 260px; }
+.rail-place strong { display: block; color: var(--text-secondary); font-weight: 600; }
+.setup-rail-top, .setup-rail-footer { position: relative; z-index: 1; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 72px !important; width: 100%; }
+.pw-toggle { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: 0; color: var(--text-tertiary); font: inherit; font-size: 14px; font-weight: 600; padding: 6px 8px; border-radius: 6px; }
+.after-form { margin-top: 20px; font-size: 14px; color: var(--text-tertiary); }
+.after-form a { color: var(--text-secondary); font-weight: 600; text-decoration: none; border-bottom: 1px solid var(--border-primary); }
+.reset-list { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--border-secondary); }
+.reset-list li { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--border-secondary); }
+.reset-list h2 { margin: 0 0 4px; font-size: 16px; line-height: 24px; color: var(--text-primary); font-weight: 600; }
+.reset-list p { margin: 0; font-size: 14px; line-height: 20px; color: var(--text-tertiary); max-width: 46ch; }
+.code-field input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 24px !important; letter-spacing: 0.5em; padding: 12px 16px !important; width: 9.5em !important; }

@@ -1080,6 +1080,52 @@ func (b *webBackend) Cancel(ctx context.Context, id string) (bool, error) {
 	return running, nil
 }
 
+// Continue resumes the session's last turn (API-TFB-003). The contract checks
+// run before any turn starts so the handler can answer with the refusal code;
+// the turn itself then runs in the background.
+func (b *webBackend) Continue(ctx context.Context, id string) (web.SendResult, error) {
+	if b.rt.Draining() {
+		return web.SendResult{}, web.ErrDraining
+	}
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return web.SendResult{}, err
+	}
+	id = info.ID
+	if err := b.ensureLease(ctx, id); err != nil {
+		return web.SendResult{}, err
+	}
+	if b.TurnActive(id) {
+		return web.SendResult{}, web.ErrTurnRunning
+	}
+	if err := b.rt.CanContinue(ctx, id); err != nil {
+		return web.SendResult{}, continueError(err)
+	}
+
+	b.mu.Lock()
+	if b.active == nil {
+		b.active = map[string]struct{}{}
+	}
+	b.active[id] = struct{}{}
+	root := b.root
+	if root == nil {
+		root = context.Background()
+	}
+	beforeSeq := info.LastSeq
+	b.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer b.finishTurn(id)
+		if _, err := b.rt.Continue(root, id); err != nil {
+			slog.Error("web: continue failed", "session", id, "error", err)
+		}
+	}()
+	turnID := b.waitTurnID(id, beforeSeq, done, time.Second)
+	return web.SendResult{Turn: "started", TurnID: turnID}, nil
+}
+
 // Compact summarizes the session now.
 func (b *webBackend) Compact(ctx context.Context, id string) (web.CompactResult, error) {
 	info, err := b.resolveSession(ctx, id)
@@ -1323,6 +1369,19 @@ func turnError(err error) error {
 		return web.ErrDraining
 	default:
 		return err
+	}
+}
+
+// continueError maps the runtime's Continue refusals to the port
+// (API-TFB-003).
+func continueError(err error) error {
+	switch {
+	case errors.Is(err, lana.ErrTurnRunning):
+		return web.ErrTurnRunning
+	case errors.Is(err, lana.ErrNothingToContinue):
+		return web.ErrNothingToContinue
+	default:
+		return turnError(err)
 	}
 }
 

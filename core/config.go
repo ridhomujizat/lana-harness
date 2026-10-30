@@ -18,8 +18,9 @@ type Config struct {
 
 // WebConfig is the [web] table.
 type WebConfig struct {
-	Enabled bool   `toml:"enabled"`
-	Addr    string `toml:"addr"`
+	Enabled     bool   `toml:"enabled"`
+	Addr        string `toml:"addr"`
+	OpenBrowser bool   `toml:"open_browser"`
 }
 
 type ProviderConfig struct {

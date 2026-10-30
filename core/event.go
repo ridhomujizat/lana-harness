@@ -96,6 +96,11 @@ type SystemMessage struct {
 type UserMessage struct {
 	V       int            `json:"v"`
 	Content []ContentBlock `json:"content"`
+	// Continue marks a message that resumes an abnormally ended turn
+	// (API-TFB-004, REQ-TFB-005). ContinueReason is the previous turn/end
+	// reason.
+	Continue       bool   `json:"continue,omitempty"`
+	ContinueReason string `json:"continue_reason,omitempty"`
 }
 
 type AssistantMessage struct {

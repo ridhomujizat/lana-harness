@@ -20,11 +20,16 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/browser"
 	"github.com/ridhomujizat/lana-harness/web"
 )
 
 // shutdownGrace is how long the daemon waits for channels after a stop signal.
 const shutdownGrace = 10 * time.Second
+
+// openBrowser opens the sign-in link on start (REQ-WLG-001). It is a variable
+// so tests can replace it and never start a real browser.
+var openBrowser = browser.Open
 
 func cmdDaemon(args []string) int {
 	if len(args) > 0 {
@@ -91,7 +96,13 @@ func runDaemonSignals(ctx context.Context, stderr io.Writer, signals <-chan os.S
 	}
 	var webServer *web.Server
 	if result.Config.Web.Enabled {
-		webServer, err = web.New(web.Config{Addr: result.Config.Web.Addr, Enabled: true, Home: home, Stderr: stderr})
+		webServer, err = web.New(web.Config{
+			Addr:        result.Config.Web.Addr,
+			Enabled:     true,
+			Home:        home,
+			Stderr:      stderr,
+			OpenBrowser: result.Config.Web.OpenBrowser,
+		})
 		if err != nil {
 			return errorf(2, "%v", err)
 		}
@@ -221,13 +232,32 @@ func runDaemonSignals(ctx context.Context, stderr io.Writer, signals <-chan os.S
 		webServer.SetSkillStore(backend)
 		if telegramActive {
 			webServer.SetTelegramStatus(telegramStatusFunc(tgcfg, true, channel))
+			webServer.SetTelegramResetSender(newTelegramResetSender(channel, tgcfg))
 		} else {
 			webServer.SetTelegramStatus(telegramStatusFunc(tgcfg, false, nil))
 		}
 		if code := startWeb(runCtx, webServer, stderr); code != 0 {
 			return code
 		}
+		// The local control secret lets `lana web reset-login` reach this
+		// daemon without a browser session (API-WLG-008, REQ-WLG-006).
+		localSecret, err := newLocalSecret()
+		if err != nil {
+			return errorf(1, "web: %v", err)
+		}
+		webServer.SetLocalSecret(localSecret)
+		if err := writeDaemonSecret(home, webServer.Addr(), localSecret); err != nil {
+			return errorf(1, "web: %v", err)
+		}
+		// REQ-WLG-001: open a sign-in link when no password is set or a reset
+		// was requested. A plain restart-in-place satisfies neither and stays
+		// quiet.
+		webServer.OpenOnStart(openBrowser)
 		webStarted = true
+		// The secret file is removed on a stop. A restart in place replaces the
+		// process image with syscall.Exec, so this defer does not run and the
+		// new image rewrites the file.
+		defer removeDaemonSecret(home)
 		defer func() {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 			defer cancel()
@@ -640,6 +670,33 @@ func (b *daemonBackend) RunTurn(ctx context.Context, sessionID, prompt string) (
 
 func (b *daemonBackend) Send(ctx context.Context, sessionID, text string) error {
 	return b.rt.Send(ctx, sessionID, text)
+}
+
+// CanContinue reports why a continue turn may not start (API-TFB-003). The
+// Telegram callback answers a press with the returned message.
+func (b *daemonBackend) CanContinue(ctx context.Context, sessionID string) error {
+	return b.rt.CanContinue(ctx, sessionID)
+}
+
+// ContinueTurn runs a continue turn for the session and blocks until it ends
+// (API-TFB-005).
+func (b *daemonBackend) ContinueTurn(ctx context.Context, sessionID string) (telegram.TurnResult, error) {
+	// The runtime turn does not follow ctx; cancel it explicitly when ctx ends
+	// (shutdown or a /cancel press).
+	finished := make(chan struct{})
+	defer close(finished)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = b.rt.Cancel(context.Background(), sessionID)
+		case <-finished:
+		}
+	}()
+	result, err := b.rt.Continue(ctx, sessionID)
+	return telegram.TurnResult{
+		Text: result.Text, StopReason: result.StopReason,
+		InputTokens: int64(result.Usage.InputTokens), OutputTokens: int64(result.Usage.OutputTokens),
+	}, err
 }
 
 func (b *daemonBackend) Cancel(ctx context.Context, sessionID string) error {

@@ -45,11 +45,15 @@ export interface TurnStep {
   status: string;
   output: unknown;
   approval: TurnApproval | null;
+  /* The model step the call ran in, from the turn's step/start events. */
+  step?: number;
 }
 
 export interface TurnUserText {
   key: string;
   text: string;
+  /* API-TFB-004: a continue message renders as a chip, not an owner bubble. */
+  continue?: boolean;
 }
 
 export type TurnSegment =
@@ -80,6 +84,8 @@ export interface Turn {
   steps?: TurnStep[];
   approvals?: Map<string, TurnApproval>;
   groups?: TurnGroup[];
+  stepCount?: number;
+  currentStep?: number;
   [key: string]: unknown;
 }
 
@@ -97,10 +103,12 @@ export interface ChatTurn extends Turn {
   steps: TurnStep[];
   approvals: Map<string, TurnApproval>;
   groups: TurnGroup[];
+  stepCount: number;
+  currentStep: number;
 }
 
 export type ThreadItem =
-  | { kind: "user"; key: string; text: string }
+  | { kind: "user"; key: string; text: string; continue?: boolean }
   | { kind: "turn"; key: string; turn: ChatTurn };
 
 export interface LiveTurnState {
@@ -160,6 +168,54 @@ export function formatClock(ms: number): string {
     return "";
   }
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function errorTextOf(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string") {
+      return record.message;
+    }
+  }
+  return "";
+}
+
+/* The plain reason line and the last step of an abnormally ended turn
+   (REQ-TFB-004, AC-TFB-007..009). A normal end_turn returns null: a tool
+   failure inside a turn is the agent's story, not a card. */
+export interface TurnEndCard {
+  text: string;
+  lastStep: string;
+}
+
+export function turnEndCard(turn: Turn): TurnEndCard | null {
+  const reason = String(turn.stopReason || "");
+  let text = "";
+  if (reason === "cancelled") {
+    text = "Stopped by you.";
+  } else if (reason === "interrupted") {
+    text = "lana restarted while working.";
+  } else if (reason === "error") {
+    const message = errorTextOf(turn.error);
+    text = "Stopped by an error:" + (message ? " " + message : "");
+  } else if (reason === "max_steps") {
+    const count = Number(turn.stepCount) || 0;
+    text = "Stopped after the step limit (" + count + " steps).";
+  } else {
+    return null;
+  }
+
+  const steps = Array.isArray(turn.steps) ? turn.steps : [];
+  const last = steps.length > 0 ? steps[steps.length - 1] : null;
+  const stepNumber = last ? Number(last.step) || 0 : 0;
+  const lastStep =
+    last && last.name && stepNumber > 0
+      ? "Last step: " + last.name + " (step " + stepNumber + ")"
+      : "";
+  return { text, lastStep };
 }
 
 function toolCategory(name: string | null | undefined): string {
@@ -410,6 +466,12 @@ export interface TurnBlockProps {
   childEvents?: Record<string, SessionEvent[]>;
   childLive?: Record<string, Turn>;
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
+  /* REQ-TFB-004: the status card shows under the session's last turn only. */
+  showStatusCard?: boolean;
+  onContinue?: (() => void) | null;
+  continueBusy?: boolean;
+  /* API-TFB-003: the refusal text of a failed Continue, shown in the card. */
+  continueError?: string;
 }
 
 export function TurnBlock({
@@ -422,8 +484,13 @@ export function TurnBlock({
   childEvents = {},
   childLive = {},
   onLoadChildren = null,
+  showStatusCard = false,
+  onContinue = null,
+  continueBusy = false,
+  continueError = "",
 }: TurnBlockProps) {
   const [now, setNow] = useState(() => Date.now());
+  const [cardDismissed, setCardDismissed] = useState(false);
 
   useEffect(() => {
     if (!turn.running) {
@@ -474,6 +541,8 @@ export function TurnBlock({
     statusText = "failed after " + (duration || "0s");
   }
 
+  const statusCard = showStatusCard ? turnEndCard(turn) : null;
+
   return (
     <article className="turn">
       <div className="turn-head">
@@ -502,15 +571,57 @@ export function TurnBlock({
           <Markdown text={streamingText} />
         </div>
       ) : null}
+      {statusCard && !cardDismissed ? (
+        <div className="card" role="status" aria-live="polite">
+          <p>{statusCard.text}</p>
+          {statusCard.lastStep ? <p>{statusCard.lastStep}</p> : null}
+          {continueError ? (
+            <p className="card-error">{continueError}</p>
+          ) : null}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              className="button-ui button-ui-secondary"
+              disabled={continueBusy}
+              onClick={() => {
+                if (onContinue) {
+                  onContinue();
+                }
+              }}
+            >
+              {continueBusy ? "Continuing…" : "Continue"}
+            </button>
+            <button
+              type="button"
+              className="button-ui button-ui-tertiary"
+              onClick={() => setCardDismissed(true)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
 
 export interface UserBubbleProps {
   text: string;
+  continue?: boolean;
 }
 
-export function UserBubble({ text }: UserBubbleProps) {
+export function UserBubble({
+  text,
+  continue: isContinue = false,
+}: UserBubbleProps) {
+  if (isContinue) {
+    /* API-TFB-004: a continue request is a chip, not owner text. */
+    return (
+      <div className="chat-user-row">
+        <span className="chip">↻ Continued</span>
+      </div>
+    );
+  }
   return (
     <div className="chat-user-row">
       <div className="chat-bubble">{text}</div>
@@ -533,6 +644,8 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     approvals: new Map(),
     groups: [],
     running: false,
+    stepCount: 0,
+    currentStep: 0,
   };
 }
 
@@ -623,8 +736,22 @@ export function buildTurns(
           break;
         }
         const turn = turnFor(event, payload);
-        turn.userTexts.push({ key: "user-" + event.seq, text });
+        turn.userTexts.push({
+          key: "user-" + event.seq,
+          text,
+          continue: payload.continue === true,
+        });
         turn.lastAt = Math.max(turn.lastAt, createdAt);
+        break;
+      }
+      case "step/start": {
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        turn.stepCount += 1;
+        const step = Number(payload.step);
+        if (Number.isFinite(step) && step > 0) {
+          turn.currentStep = step;
+        }
         break;
       }
       case "assistant/message": {
@@ -653,6 +780,7 @@ export function buildTurns(
           status: result ? result.status : "running",
           output: result ? result.output : "",
           approval: null,
+          step: turn.currentStep,
         };
         pushStep(turn, step);
         if (step.callId) {
@@ -786,7 +914,12 @@ export function buildTurns(
       continue;
     }
     for (const message of turn.userTexts) {
-      items.push({ kind: "user", key: message.key, text: message.text });
+      items.push({
+        kind: "user",
+        key: message.key,
+        text: message.text,
+        continue: message.continue === true,
+      });
     }
     items.push({ kind: "turn", key: turn.key, turn });
   }

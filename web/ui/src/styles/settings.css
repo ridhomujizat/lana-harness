@@ -216,6 +216,21 @@
   flex: 0 0 auto;
 }
 
+.settings-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 360px;
+}
+
+.settings-password-actions {
+  display: flex;
+}
+
+.settings-password-actions .button-ui {
+  align-self: flex-start;
+}
+
 .settings-web-note {
   display: flex;
   align-items: center;

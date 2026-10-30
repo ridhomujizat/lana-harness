@@ -219,11 +219,12 @@ func (w *chat) sendHTML(ctx context.Context, text string, opts SendOptions) (int
 	return id, err
 }
 
-// editHTML edits a message with HTML, falling back to plain text when Telegram cannot parse it.
-func (w *chat) editHTML(ctx context.Context, messageID int64, text string) error {
-	err := w.ch.api.EditMessageText(ctx, w.id, messageID, text, SendOptions{ParseMode: "HTML"})
+// editHTML edits a message with HTML, falling back to plain text when Telegram
+// cannot parse it. A non-nil keyboard is attached.
+func (w *chat) editHTML(ctx context.Context, messageID int64, text string, keyboard *Keyboard) error {
+	err := w.ch.api.EditMessageText(ctx, w.id, messageID, text, SendOptions{ParseMode: "HTML", Keyboard: keyboard})
 	if isParseError(err) {
-		err = w.ch.api.EditMessageText(ctx, w.id, messageID, tgfmt.Plain(text), SendOptions{})
+		err = w.ch.api.EditMessageText(ctx, w.id, messageID, tgfmt.Plain(text), SendOptions{Keyboard: keyboard})
 	}
 	return err
 }
@@ -235,6 +236,20 @@ func isParseError(err error) bool {
 
 // startTurn runs one turn in a child goroutine.
 func (w *chat) startTurn(ctx context.Context, trigger int64, session, text string) {
+	w.launchTurn(ctx, trigger, session, func(ctx context.Context) (TurnResult, error) {
+		return w.ch.backend.RunTurn(ctx, session, text)
+	})
+}
+
+// startContinueTurn runs a continue turn in a child goroutine (API-TFB-005).
+func (w *chat) startContinueTurn(ctx context.Context, trigger int64, session string) {
+	w.launchTurn(ctx, trigger, session, func(ctx context.Context) (TurnResult, error) {
+		return w.ch.backend.ContinueTurn(ctx, session)
+	})
+}
+
+// launchTurn resets the per-turn layout state and runs run in a child goroutine.
+func (w *chat) launchTurn(ctx context.Context, trigger int64, session string, run func(context.Context) (TurnResult, error)) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	w.mu.Lock()
 	w.running, w.cancelTurn = true, cancel
@@ -247,7 +262,7 @@ func (w *chat) startTurn(ctx context.Context, trigger int64, session, text strin
 	go func() {
 		defer w.turnWG.Done()
 		defer cancel()
-		w.turn(turnCtx, trigger, session, text)
+		w.turn(turnCtx, trigger, session, run)
 		w.mu.Lock()
 		w.running, w.cancelTurn = false, nil
 		w.mu.Unlock()
@@ -274,7 +289,7 @@ func (w *chat) resolveFrameAgent(ctx context.Context, frame *core.LiveFrame, roo
 	}
 }
 
-func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) {
+func (w *chat) turn(ctx context.Context, trigger int64, session string, run func(context.Context) (TurnResult, error)) {
 	started := time.Now()
 	api := w.ch.api
 	_ = api.SendChatAction(ctx, w.id, "typing")
@@ -288,7 +303,7 @@ func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) 
 
 	sub, err := w.ch.backend.SubscribeLive(ctx, session)
 	if err != nil {
-		w.finish(ctx, liveID, "", turnOutcome{err: err})
+		w.finish(ctx, liveID, "", turnOutcome{err: err}, session)
 		return
 	}
 	defer sub.Close()
@@ -315,7 +330,7 @@ func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) 
 	}()
 	done := make(chan turnOutcome, 1)
 	go func() {
-		result, err := w.ch.backend.RunTurn(ctx, session, prompt)
+		result, err := run(ctx)
 		done <- turnOutcome{result: result, err: err}
 	}()
 
@@ -386,7 +401,7 @@ loop:
 			body := tgfmt.Split(w.render(text.String(), "", true), tgfmt.Limit)
 			if len(body) > 0 && body[0] != lastSent {
 				lastSent = body[0]
-				w.ch.apiErr("editMessageText", w.editHTML(ctx, liveID, body[0]))
+				w.ch.apiErr("editMessageText", w.editHTML(ctx, liveID, body[0], nil))
 			}
 		case <-typing.C:
 			_ = api.SendChatAction(ctx, w.id, "typing")
@@ -419,7 +434,7 @@ drain:
 	w.usageIn += out.result.InputTokens
 	w.usageOut += out.result.OutputTokens
 	w.mu.Unlock()
-	w.finish(ctx, liveID, answer, out)
+	w.finish(ctx, liveID, answer, out, session)
 	slog.Info("telegram: turn finished", "chat_id", w.id, "session_id", session, "stop_reason", out.result.StopReason, "duration", time.Since(started).Round(time.Millisecond))
 }
 
@@ -441,17 +456,40 @@ func displayTool(agent, name string) string {
 	return name
 }
 
-// endLine returns the closing status line of a turn, or "".
-func endLine(out turnOutcome) string {
+// endLine returns the closing status line of an abnormal turn, or "" for a
+// normal end (API-TFB-005).
+func (w *chat) endLine(out turnOutcome) string {
 	switch {
 	case out.err != nil && errors.Is(out.err, context.Canceled), out.result.StopReason == "cancelled":
-		return "⊘ cancelled"
-	case out.err != nil:
-		return "✗ " + out.err.Error()
+		return "⊘ Stopped by you."
+	case out.result.StopReason == "interrupted":
+		return "⚠ lana restarted while working."
+	case out.err != nil, out.result.StopReason == "error":
+		message := ""
+		if out.err != nil {
+			message = out.err.Error()
+		}
+		return "✗ Stopped by an error: " + message
 	case out.result.StopReason == "max_steps":
-		return "⚠ stopped at max_steps"
+		return fmt.Sprintf("⚠ Stopped after the step limit (%d steps).", w.stepCount())
 	}
 	return ""
+}
+
+// stepCount returns the number of steps the turn ran, at least 1.
+func (w *chat) stepCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.step < 1 {
+		return 1
+	}
+	return w.step
+}
+
+// continueKeyboard is the inline keyboard of an abnormal end message
+// (API-TFB-005).
+func continueKeyboard(sessionID string) *Keyboard {
+	return &Keyboard{Rows: [][]Button{{{Text: "Continue", Data: "c:" + sessionID}}}}
 }
 
 // statusLine returns the live status line: the running tool and step, or the
@@ -536,15 +574,16 @@ func (w *chat) summaryText() string {
 
 // finish writes the final answer. With a permission bubble it edits the bubble
 // to the summary, sends the answer as new messages, and deletes the live
-// message; otherwise it edits the live message in place (REQ-TGL-003).
-func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turnOutcome) {
+// message; otherwise it edits the live message in place (REQ-TGL-003). An
+// abnormal end attaches a Continue button to the final message (API-TFB-005).
+func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turnOutcome, session string) {
 	defer w.resetTurn()
 	if ctx.Err() != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 	}
-	end := endLine(out)
+	end := w.endLine(out)
 	body := w.render(answer, end, false)
 	if strings.TrimSpace(answer) == "" && end == "" && !w.hasTools() {
 		body = "(no answer)"
@@ -553,13 +592,17 @@ func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turn
 	if len(parts) == 0 {
 		parts = []string{"(no answer)"}
 	}
+	var keyboard *Keyboard
+	if end != "" && session != "" {
+		keyboard = continueKeyboard(session)
+	}
 	if !w.hasBubble() {
-		w.editLive(ctx, liveID, parts)
+		w.editLive(ctx, liveID, parts, keyboard)
 		return
 	}
 	w.editBubble(ctx, w.summaryText())
-	if !w.sendParts(ctx, parts) {
-		w.editLive(ctx, liveID, parts)
+	if !w.sendParts(ctx, parts, keyboard) {
+		w.editLive(ctx, liveID, parts, keyboard)
 		return
 	}
 	if liveID != 0 {
@@ -567,24 +610,33 @@ func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turn
 	}
 }
 
-// editLive edits the live message with the first part and sends the rest.
-func (w *chat) editLive(ctx context.Context, liveID int64, parts []string) {
+// editLive edits the live message with the first part and sends the rest. The
+// keyboard, when set, goes on the last part.
+func (w *chat) editLive(ctx context.Context, liveID int64, parts []string, keyboard *Keyboard) {
 	for i, part := range parts {
+		var keys *Keyboard
+		if i == len(parts)-1 {
+			keys = keyboard
+		}
 		if i == 0 && liveID != 0 {
-			w.ch.apiErr("editMessageText", w.editHTML(ctx, liveID, part))
+			w.ch.apiErr("editMessageText", w.editHTML(ctx, liveID, part, keys))
 			continue
 		}
-		_, err := w.sendHTML(ctx, part, SendOptions{})
+		_, err := w.sendHTML(ctx, part, SendOptions{Keyboard: keys})
 		w.ch.apiErr("sendMessage", err)
 	}
 }
 
 // sendParts sends the final answer as new messages. It reports whether the
 // first part was sent, so finish can fall back to the live message when it was
-// not.
-func (w *chat) sendParts(ctx context.Context, parts []string) bool {
+// not. The keyboard, when set, goes on the last part.
+func (w *chat) sendParts(ctx context.Context, parts []string, keyboard *Keyboard) bool {
 	for i, part := range parts {
-		_, err := w.sendHTML(ctx, part, SendOptions{})
+		var keys *Keyboard
+		if i == len(parts)-1 {
+			keys = keyboard
+		}
+		_, err := w.sendHTML(ctx, part, SendOptions{Keyboard: keys})
 		if err == nil {
 			continue
 		}
@@ -835,9 +887,35 @@ func (w *chat) handleCallback(ctx context.Context, q *CallbackQuery) {
 			replyTo = q.Message.MessageID
 		}
 		w.switchAgent(ctx, replyTo, rest)
+	case "c":
+		w.answerContinue(ctx, q, rest, owner)
 	default:
 		w.ch.apiErr("answerCallbackQuery", w.ch.api.AnswerCallbackQuery(ctx, q.ID, ""))
 	}
+}
+
+// answerContinue handles a press on the Continue button of an abnormal end
+// message (data "c:<session id>"). Only the owner may press it; the press
+// removes the button and starts the continue turn, or answers with the refusal
+// text (API-TFB-005).
+func (w *chat) answerContinue(ctx context.Context, q *CallbackQuery, sessionID string, owner bool) {
+	if !owner {
+		w.ch.apiErr("answerCallbackQuery", w.ch.api.AnswerCallbackQuery(ctx, q.ID, "only the owner can continue"))
+		return
+	}
+	var messageID int64
+	if q.Message != nil {
+		messageID = q.Message.MessageID
+	}
+	if messageID != 0 {
+		w.ch.apiErr("editMessageReplyMarkup", w.ch.api.EditMessageReplyMarkup(ctx, w.id, messageID, nil))
+	}
+	if err := w.ch.backend.CanContinue(ctx, sessionID); err != nil {
+		w.ch.apiErr("answerCallbackQuery", w.ch.api.AnswerCallbackQuery(ctx, q.ID, err.Error()))
+		return
+	}
+	w.ch.apiErr("answerCallbackQuery", w.ch.api.AnswerCallbackQuery(ctx, q.ID, ""))
+	w.startContinueTurn(ctx, messageID, sessionID)
 }
 
 func containsFold(s, sub string) bool {

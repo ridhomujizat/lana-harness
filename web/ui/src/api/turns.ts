@@ -35,6 +35,15 @@ export function cancelTurn(id: string): Promise<CancelTurnResponse> {
   );
 }
 
+/* API-TFB-003: resume the session's last turn. The answer has the same shape
+   as sendMessage. A 409 {turn_running | nothing_to_continue} says it cannot. */
+export function continueSession(id: string): Promise<SendMessageResponse> {
+  return request<SendMessageResponse>(
+    "POST",
+    "/v1/sessions/" + encodeURIComponent(id) + "/continue"
+  );
+}
+
 export function compactSession(id: string): Promise<CompactSessionResponse> {
   return request<CompactSessionResponse>(
     "POST",

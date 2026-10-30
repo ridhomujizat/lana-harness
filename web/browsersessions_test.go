@@ -31,7 +31,7 @@ func doLoginAs(t *testing.T, s *Server, token, userAgent string) *http.Cookie {
 		req.Header.Set("User-Agent", userAgent)
 	}
 	rr := serveAuth(s, req)
-	if rr.Code != http.StatusNoContent {
+	if rr.Code != http.StatusOK {
 		t.Fatalf("login status = %d, body = %q", rr.Code, rr.Body.String())
 	}
 	return authCookie(t, rr)
@@ -100,9 +100,8 @@ func readSessionsFileForTest(t *testing.T, home string) webfiles.SessionsFile {
 // 0600.
 func TestBrowserSessionsCoversACWEB039(t *testing.T) {
 	home := t.TempDir()
-	var stderr bytes.Buffer
-	s := newAuthServer(t, home, &stderr)
-	token := tokenFromStderr(t, stderr.String())
+	token := authTokenFor(t, home)
+	s := newAuthServer(t, home, io.Discard)
 
 	cookieA := doLoginAs(t, s, token, "Browser A")
 	cookieB := doLoginAs(t, s, token, "Browser B")
@@ -243,9 +242,8 @@ func TestBrowserSessionsLastUsedThrottledToOneMinute(t *testing.T) {
 
 func TestBrowserSessionsIdleExpiryPrunesFile(t *testing.T) {
 	home := t.TempDir()
-	var stderr bytes.Buffer
-	s := newAuthServer(t, home, &stderr)
-	token := tokenFromStderr(t, stderr.String())
+	token := authTokenFor(t, home)
+	s := newAuthServer(t, home, io.Discard)
 	now := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 

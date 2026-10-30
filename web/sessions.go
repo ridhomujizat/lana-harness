@@ -61,6 +61,13 @@ var (
 	// ErrDraining is returned by a Backend while the daemon drains; the handler
 	// answers 503 daemon_draining (REQ-TFB-002, API-TFB-008).
 	ErrDraining = errors.New("daemon is draining")
+	// ErrTurnRunning is returned by a Backend when Continue is requested while a
+	// turn runs; the handler answers 409 turn_running (API-TFB-003).
+	ErrTurnRunning = errors.New("turn is running")
+	// ErrNothingToContinue is returned by a Backend when Continue is requested
+	// after a normal end; the handler answers 409 nothing_to_continue
+	// (API-TFB-003).
+	ErrNothingToContinue = errors.New("nothing to continue")
 )
 
 // SendResult is the outcome of Backend.Send.
@@ -174,6 +181,8 @@ type Backend interface {
 	Agents() []Agent
 
 	Send(ctx context.Context, id, text string) (SendResult, error)
+	// Continue starts a continue turn for the session (API-TFB-003).
+	Continue(ctx context.Context, id string) (SendResult, error)
 	Cancel(ctx context.Context, id string) (bool, error)
 	Compact(ctx context.Context, id string) (CompactResult, error)
 	Fork(ctx context.Context, id string) (Session, error)
@@ -568,6 +577,12 @@ func (s *Server) writeBackendError(w http.ResponseWriter, operation string, err 
 	case errors.Is(err, ErrDraining):
 		// API-TFB-008: the daemon is shutting down and starts no turn.
 		writeAPIError(w, http.StatusServiceUnavailable, "daemon_draining", "lana is restarting. Try again in a moment.")
+	case errors.Is(err, ErrTurnRunning):
+		// API-TFB-003: Continue is refused while a turn runs.
+		writeAPIError(w, http.StatusConflict, "turn_running", "a turn is already running")
+	case errors.Is(err, ErrNothingToContinue):
+		// API-TFB-003: the last turn ended normally.
+		writeAPIError(w, http.StatusConflict, "nothing_to_continue", "the last turn ended normally")
 	default:
 		s.logger.Error("web: "+operation, "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")

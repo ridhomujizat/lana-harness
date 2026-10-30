@@ -1,9 +1,9 @@
 package web
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 )
@@ -22,12 +22,13 @@ func (b *testToolCatalogBackend) ToolCatalog(agent string) ([]ToolGroup, error) 
 // New mounts the catalog route (registerToolRoutes).
 func newToolCatalogTestServer(t *testing.T, backend Backend) (*Server, *http.Cookie) {
 	t.Helper()
-	var stderr bytes.Buffer
-	s := newAuthServer(t, t.TempDir(), &stderr)
+	home := t.TempDir()
+	token := authTokenFor(t, home)
+	s := newAuthServer(t, home, io.Discard)
 	if backend != nil {
 		s.SetBackend(backend)
 	}
-	cookie, _ := loginAndSession(t, s, tokenFromStderr(t, stderr.String()))
+	cookie, _ := loginAndSession(t, s, token)
 	return s, cookie
 }
 

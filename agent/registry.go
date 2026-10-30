@@ -401,6 +401,18 @@ func (r *Registry) sessionExists(ctx context.Context, sessionID string) error {
 
 // Start starts a new turn.
 func (r *Registry) Start(ctx context.Context, sessionID, text string) (string, error) {
+	return r.start(ctx, sessionID, text, "")
+}
+
+// StartContinue starts a new turn whose first user message is marked as a
+// continue; reason is the previous turn/end reason (API-TFB-004, REQ-TFB-005).
+func (r *Registry) StartContinue(ctx context.Context, sessionID, text, reason string) (string, error) {
+	return r.start(ctx, sessionID, text, reason)
+}
+
+// start starts a new turn. continueReason is non-empty only for a continue turn
+// and marks the turn's first user message.
+func (r *Registry) start(ctx context.Context, sessionID, text, continueReason string) (string, error) {
 	if strings.TrimSpace(text) == "" {
 		return "", ErrEmptyText
 	}
@@ -425,7 +437,7 @@ func (r *Registry) Start(ctx context.Context, sessionID, text string) (string, e
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		runner.runChain(turnCtx, text, turnID)
+		runner.runChain(turnCtx, text, turnID, continueReason)
 	}()
 	return turnID, nil
 }
@@ -456,7 +468,7 @@ func (r *Registry) startTurnAsync(runner *Runner, text string) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		runner.runChain(turnCtx, text, turnID)
+		runner.runChain(turnCtx, text, turnID, "")
 	}()
 }
 

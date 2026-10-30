@@ -23,7 +23,6 @@ const (
 	restartHelperEnv  = "LANA_RESTART_TEST_HELPER"
 	restartHelperTest = "TestDaemonRestartHelperProcess"
 	restartSecondTest = "TestDaemonRestartSecondStart"
-	restartTokenMark  = "; copy it now, it is shown only once: "
 )
 
 // TestDaemonRestartHelperProcess is the daemon side of the restart test. It
@@ -129,10 +128,13 @@ func freeLoopbackAddr(t *testing.T) string {
 
 func writeRestartConfig(t *testing.T, home, addr string) {
 	t.Helper()
-	cfg := fmt.Sprintf("[web]\naddr = %q\n", addr)
+	cfg := fmt.Sprintf("[web]\naddr = %q\nopen_browser = false\n", addr)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// Seed the legacy owner token so the tests can sign in without the
+	// sign-in link of spec #18.
+	writeWebToken(t, home)
 }
 
 type restartDaemonInfo struct {
@@ -184,7 +186,7 @@ func restartLogin(t *testing.T, addr, token string) (*http.Cookie, string) {
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status = %d, body = %q", resp.StatusCode, body)
 	}
 	var cookie *http.Cookie
@@ -249,12 +251,7 @@ func TestDaemonRestartInPlace(t *testing.T) {
 	writeRestartConfig(t, home, addr)
 
 	child := startRestartChild(t, home)
-	tokenLine := child.waitLine(t, "web: owner token created at ", 10*time.Second)
-	i := strings.Index(tokenLine, restartTokenMark)
-	if i < 0 {
-		t.Fatalf("token line has no marker: %q", tokenLine)
-	}
-	token := tokenLine[i+len(restartTokenMark):]
+	token := webTestToken
 	if listening := child.waitLine(t, "web: listening on http://", 10*time.Second); listening != addr {
 		t.Fatalf("listening address = %q, want %q", listening, addr)
 	}

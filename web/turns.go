@@ -12,10 +12,11 @@ const (
 	maxMessageBody  = 1 << 20
 )
 
-// registerTurnRoutes registers API-WEB-007 and API-WEB-009.
+// registerTurnRoutes registers API-WEB-007, API-WEB-009, and API-TFB-003.
 func (s *Server) registerTurnRoutes() {
 	s.Handle("POST /v1/sessions/{id}/messages", http.HandlerFunc(s.handleSendMessage))
 	s.Handle("POST /v1/sessions/{id}/cancel", http.HandlerFunc(s.handleCancelTurn))
+	s.Handle("POST /v1/sessions/{id}/continue", http.HandlerFunc(s.handleContinueTurn))
 }
 
 type sendMessageResponse struct {
@@ -74,4 +75,18 @@ func (s *Server) handleCancelTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, cancelTurnResponse{Turn: "cancelling"})
+}
+
+// handleContinueTurn resumes the session's last turn (API-TFB-003).
+func (s *Server) handleContinueTurn(w http.ResponseWriter, r *http.Request) {
+	backend := s.backendOrError(w)
+	if backend == nil {
+		return
+	}
+	result, err := backend.Continue(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeBackendError(w, "continue turn", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, sendMessageResponse(result))
 }

@@ -4,12 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { THEME_CHOICES, themeLabel } from "../app/theme";
 import type { ThemeChoice } from "../app/theme";
-import { ApiError, errorMessage } from "../api/client";
+import { ApiError, errorMessage, isErrorCode } from "../api/client";
 import * as settingsApi from "../api/settings";
+import { changePassword } from "../api/auth";
 import type { BrowserSessionInfo } from "../api/auth";
 import type { DaemonInfo } from "../api/daemon";
 import type { GetConfigResponse } from "../api/settings";
 import { ErrorNotice, Loading } from "../ui/ui";
+import { PasswordField } from "./login";
 import {
   SettingsPanel,
   SettingsRestartBanner,
@@ -20,7 +22,22 @@ import {
 
 /* Settings > General (REQ-WEB-054). The theme tiles of REQ-WEB-031 stay here;
    the daemon, web dashboard, and about sections come from API-WEB-022,
-   API-WEB-024, API-WEB-029, and API-WEB-013. */
+   API-WEB-024, API-WEB-029, and API-WEB-013. "Change password" (REQ-WLG-007,
+   API-WLG-007) sets a new password and signs out the other browsers. */
+
+const MIN_PASSWORD = 8;
+const SHORT_PASSWORD_TEXT = "Use at least 8 characters.";
+const MISMATCH_TEXT = "The two passwords do not match.";
+const INVALID_PASSWORD_TEXT = "That password is not right.";
+const PASSWORD_CHANGED_TEXT =
+  "Password changed. Other browsers were signed out.";
+
+function changePasswordErrorText(error: unknown): string {
+  if (isErrorCode(error, "invalid_password")) {
+    return INVALID_PASSWORD_TEXT;
+  }
+  return errorMessage(error);
+}
 
 function failureInfo(failure: unknown): {
   message: string;
@@ -85,6 +102,10 @@ export function SettingsGeneralPage({
   const [savedUrl, setSavedUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [showRestart, setShowRestart] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
 
   const load = useCallback(async (announceFailure: boolean) => {
     setState("loading");
@@ -228,6 +249,36 @@ export function SettingsGeneralPage({
       setError(failureState.message);
       setDetails(failureState.details);
       setMessage("Could not sign out the other browsers.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changePasswordSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) {
+      return;
+    }
+    if (newPassword.length < MIN_PASSWORD) {
+      setPasswordError(SHORT_PASSWORD_TEXT);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError(MISMATCH_TEXT);
+      return;
+    }
+    setPasswordError("");
+    setBusy(true);
+    setMessage("Changing the password…");
+    try {
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage(PASSWORD_CHANGED_TEXT);
+    } catch (failure: unknown) {
+      setPasswordError(changePasswordErrorText(failure));
+      setMessage("The password was not changed.");
     } finally {
       setBusy(false);
     }
@@ -390,6 +441,71 @@ export function SettingsGeneralPage({
                 Sign out other browsers
               </button>
             </div>
+          </div>
+        </section>
+
+        <section
+          className="settings-row"
+          aria-labelledby="settings-password-title"
+        >
+          <div className="settings-row-label">
+            <h2 id="settings-password-title">Change password</h2>
+            <p>Set a new password to open lana on this computer.</p>
+          </div>
+          <div className="settings-row-controls">
+            <form
+              className="settings-password-form"
+              onSubmit={changePasswordSubmit}
+            >
+              <PasswordField
+                id="settings-current-password"
+                label="Current password"
+                value={currentPassword}
+                autoComplete="current-password"
+                disabled={busy}
+                onChange={(value) => {
+                  setCurrentPassword(value);
+                  setPasswordError("");
+                }}
+              />
+              <PasswordField
+                id="settings-new-password"
+                label="New password"
+                value={newPassword}
+                autoComplete="new-password"
+                disabled={busy}
+                hint="At least 8 characters."
+                onChange={(value) => {
+                  setNewPassword(value);
+                  setPasswordError("");
+                }}
+              />
+              <PasswordField
+                id="settings-confirm-password"
+                label="Type it again"
+                value={confirmPassword}
+                autoComplete="new-password"
+                disabled={busy}
+                onChange={(value) => {
+                  setConfirmPassword(value);
+                  setPasswordError("");
+                }}
+              />
+              {passwordError ? (
+                <p className="setup-field-error" role="alert">
+                  {passwordError}
+                </p>
+              ) : null}
+              <div className="settings-password-actions">
+                <button
+                  type="submit"
+                  className="button-ui button-ui-primary"
+                  disabled={busy}
+                >
+                  {busy ? "Changing…" : "Change password"}
+                </button>
+              </div>
+            </form>
           </div>
         </section>
 

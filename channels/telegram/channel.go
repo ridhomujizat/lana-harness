@@ -30,6 +30,11 @@ type Backend interface {
 	RunTurn(ctx context.Context, sessionID, prompt string) (TurnResult, error)
 	Send(ctx context.Context, sessionID, text string) error
 	Cancel(ctx context.Context, sessionID string) error
+	// CanContinue reports why a continue turn may not start (API-TFB-003); a
+	// nil result means it may.
+	CanContinue(ctx context.Context, sessionID string) error
+	// ContinueTurn runs a continue turn for the session (API-TFB-005).
+	ContinueTurn(ctx context.Context, sessionID string) (TurnResult, error)
 	SubscribeLive(ctx context.Context, sessionID string) (*core.Subscription[core.LiveFrame], error)
 	Compact(ctx context.Context, sessionID string) (before, after int64, err error)
 	Memory(agent string) (user, memory []string, err error)
@@ -255,6 +260,13 @@ func (c *Channel) chatForSession(sessionID string) *chat {
 // isOwner applies the owner rule of API-TG-001.
 func (c *Channel) isOwner(chatType string, userID int64) bool {
 	return chatType == "private" || c.cfg.OwnerIDs[userID]
+}
+
+// SendOwnerMessage sends text as plain text to a chat. The web reset port uses
+// it to deliver a reset code to an owner's private chat (REQ-WLG-004).
+func (c *Channel) SendOwnerMessage(ctx context.Context, chatID int64, text string) error {
+	_, err := c.api.SendMessage(ctx, chatID, text, SendOptions{})
+	return err
 }
 
 // apiErr handles a Bot API error from a send or edit: 401 stops the daemon, the rest is logged.

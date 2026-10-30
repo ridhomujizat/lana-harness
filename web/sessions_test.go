@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -30,12 +29,13 @@ type fakeWebBackend struct {
 	createdAgent string
 	createdModel string
 
-	turnActive map[string]bool
-	leaseHeld  map[string]int
-	inbox      map[string][]string
-	cancelled  []string
-	compacted  []string
-	forked     []string
+	turnActive  map[string]bool
+	leaseHeld   map[string]int
+	inbox       map[string][]string
+	continueErr map[string]error
+	cancelled   []string
+	compacted   []string
+	forked      []string
 
 	frames     *core.Observe[core.LiveFrame]
 	subscribed chan struct{}
@@ -43,15 +43,16 @@ type fakeWebBackend struct {
 
 func newFakeWebBackend() *fakeWebBackend {
 	return &fakeWebBackend{
-		events:     map[string][]core.SessionEvent{},
-		models:     map[string]string{},
-		policies:   map[string]string{},
-		agentNames: map[string]bool{},
-		turnActive: map[string]bool{},
-		leaseHeld:  map[string]int{},
-		inbox:      map[string][]string{},
-		frames:     core.NewObserve[core.LiveFrame](),
-		subscribed: make(chan struct{}, 8),
+		events:      map[string][]core.SessionEvent{},
+		models:      map[string]string{},
+		policies:    map[string]string{},
+		agentNames:  map[string]bool{},
+		turnActive:  map[string]bool{},
+		leaseHeld:   map[string]int{},
+		inbox:       map[string][]string{},
+		continueErr: map[string]error{},
+		frames:      core.NewObserve[core.LiveFrame](),
+		subscribed:  make(chan struct{}, 8),
 	}
 }
 
@@ -308,6 +309,25 @@ func (f *fakeWebBackend) Cancel(_ context.Context, sessionID string) (bool, erro
 	return running, nil
 }
 
+func (f *fakeWebBackend) Continue(_ context.Context, sessionID string) (SendResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.find(sessionID); !ok {
+		return SendResult{}, ErrSessionNotFound
+	}
+	if err := f.leaseError(sessionID); err != nil {
+		return SendResult{}, err
+	}
+	if f.turnActive[sessionID] {
+		return SendResult{}, ErrTurnRunning
+	}
+	if err := f.continueErr[sessionID]; err != nil {
+		return SendResult{}, err
+	}
+	f.turnActive[sessionID] = true
+	return SendResult{Turn: "started", TurnID: "turn-fake"}, nil
+}
+
 func (f *fakeWebBackend) Compact(_ context.Context, sessionID string) (CompactResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -490,13 +510,14 @@ func (f *fakeWebBackend) detail(info core.SessionInfo) Session {
 
 func newSessionTestServer(t *testing.T, backend Backend) (*Server, string) {
 	t.Helper()
-	var stderr bytes.Buffer
-	s, err := New(Config{Addr: authTestAddr, Enabled: true, Home: t.TempDir(), Stderr: &stderr})
+	home := t.TempDir()
+	token := authTokenFor(t, home)
+	s, err := New(Config{Addr: authTestAddr, Enabled: true, Home: home})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	s.SetBackend(backend)
-	return s, tokenFromStderr(t, stderr.String())
+	return s, token
 }
 
 func newLoggedInSessionServer(t *testing.T, backend Backend) (*Server, *http.Cookie, string) {

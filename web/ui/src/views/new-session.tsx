@@ -8,7 +8,7 @@ import type {
 } from "react";
 import type { Agent } from "../api/agents";
 import { listAgents } from "../api/agents";
-import { ApiError, errorMessage } from "../api/client";
+import { ApiError, DAEMON_DRAINING_TEXT, errorMessage, isDaemonDraining } from "../api/client";
 import { listSessions } from "../api/sessions";
 import { createSession } from "../api/sessions";
 import { sendMessage } from "../api/turns";
@@ -686,9 +686,12 @@ export function NewSessionPage() {
     try {
       await sendMessage(sessionId, task);
     } catch (failure) {
-      const message =
-        "The session was created, but the first message did not send. " +
-        errorMessage(failure);
+      /* API-TFB-008: the daemon refuses new turns while it drains. Keep the
+         typed task so the owner can start it again after the restart. */
+      const message = isDaemonDraining(failure)
+        ? DAEMON_DRAINING_TEXT
+        : "The session was created, but the first message did not send. " +
+          errorMessage(failure);
       setError(message);
       setDetails(failure instanceof ApiError ? failure.details : []);
       announce(message);

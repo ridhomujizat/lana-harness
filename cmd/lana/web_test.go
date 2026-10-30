@@ -2,8 +2,9 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -196,6 +197,7 @@ func readHTTPBody(t *testing.T, resp *http.Response) string {
 
 const (
 	webTestAddr  = "127.0.0.1:18300"
+	webTestToken = "cmd-lana-web-test-token-value"
 	webTestLayer = `[providers.mock]
 kind = "openai_compat"
 base_url = "mock://local"
@@ -212,21 +214,17 @@ agent = "assistant"
 `
 )
 
-func webTokenFromStderr(t *testing.T, out string) string {
+// writeWebToken writes a version 1 web.json holding webTestToken into home and
+// returns the token. Spec #18 no longer prints an owner token, so tests seed
+// the legacy token file directly.
+func writeWebToken(t *testing.T, home string) string {
 	t.Helper()
-	const marker = "; copy it now, it is shown only once: "
-	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "web: owner token created at ") {
-			continue
-		}
-		i := strings.Index(line, marker)
-		if i < 0 {
-			t.Fatalf("token line has no marker: %q", line)
-		}
-		return line[i+len(marker):]
+	sum := sha256.Sum256([]byte(webTestToken))
+	body := `{"version":1,"token_sha256":"` + hex.EncodeToString(sum[:]) + `"}` + "\n"
+	if err := os.WriteFile(filepath.Join(home, "web.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("no token creation line in stderr: %q", out)
-	return ""
+	return webTestToken
 }
 
 func webRuntime(t *testing.T, script mock.Script, opts ...lana.Option) (*lana.Runtime, string) {
@@ -253,15 +251,14 @@ func webServer(t *testing.T, rt *lana.Runtime, home string) (*web.Server, *httpt
 
 func webServerWithLeases(t *testing.T, rt *lana.Runtime, home string, leases *leaseSet) (*web.Server, *httptest.Server, *http.Cookie, string) {
 	t.Helper()
-	var stderr bytes.Buffer
-	srv, err := web.New(web.Config{Addr: webTestAddr, Enabled: true, Home: home, Stderr: &stderr})
+	token := writeWebToken(t, home)
+	srv, err := web.New(web.Config{Addr: webTestAddr, Enabled: true, Home: home})
 	if err != nil {
 		t.Fatalf("web.New: %v", err)
 	}
 	srv.SetBackend(newWebBackend(rt, home, leases, context.Background()))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	token := webTokenFromStderr(t, stderr.String())
 	cookie, csrf := webLogin(t, ts, token)
 	return srv, ts, cookie, csrf
 }
@@ -298,7 +295,7 @@ func webLogin(t *testing.T, ts *httptest.Server, token string) (*http.Cookie, st
 		t.Fatal(err)
 	}
 	resp, data := webDo(t, http.MethodPost, ts.URL+"/v1/auth/login", string(body), nil, "")
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status = %d, body = %q", resp.StatusCode, data)
 	}
 	var cookie *http.Cookie
@@ -1104,7 +1101,7 @@ func webLoginAt(t *testing.T, addr, token string) (*http.Cookie, string) {
 		t.Fatal(err)
 	}
 	resp, data := webDoAt(t, addr, http.MethodPost, "/v1/auth/login", string(body), nil, "")
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status = %d, body = %q", resp.StatusCode, data)
 	}
 	var cookie *http.Cookie
@@ -1183,6 +1180,7 @@ permission = "never"
 
 [web]
 addr = "127.0.0.1:0"
+open_browser = false
 
 [[routes]]
 channel = "web"
@@ -1191,6 +1189,7 @@ agent = "helper"
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	token := writeWebToken(t, home)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1198,7 +1197,6 @@ agent = "helper"
 	done := make(chan int, 1)
 	go func() { done <- runDaemon(ctx, &stderr) }()
 	addr := webAddressFromStderr(t, &stderr)
-	token := webTokenFromStderr(t, stderr.String())
 	cookie, csrf := webLoginAt(t, addr, token)
 
 	resp, body := webDoAt(t, addr, http.MethodPost, "/v1/sessions", `{"agent":"helper"}`, cookie, csrf)

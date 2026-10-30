@@ -280,6 +280,18 @@ func (c *Client) DeleteMessage(ctx context.Context, chatID, messageID int64) err
 	return c.call(ctx, "deleteMessage", map[string]any{"chat_id": chatID, "message_id": messageID}, nil)
 }
 
+// EditMessageReplyMarkup replaces the inline keyboard of a message. A nil
+// keyboard removes the buttons.
+func (c *Client) EditMessageReplyMarkup(ctx context.Context, chatID, messageID int64, keyboard *Keyboard) error {
+	markup := keyboard
+	if markup == nil {
+		markup = &Keyboard{Rows: [][]Button{}}
+	}
+	return c.call(ctx, "editMessageReplyMarkup", map[string]any{
+		"chat_id": chatID, "message_id": messageID, "reply_markup": markup,
+	}, nil)
+}
+
 // SendChatAction sends a chat action such as "typing".
 func (c *Client) SendChatAction(ctx context.Context, chatID int64, action string) error {
 	return c.call(ctx, "sendChatAction", map[string]any{"chat_id": chatID, "action": action}, nil)

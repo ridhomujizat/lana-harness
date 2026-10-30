@@ -36,7 +36,13 @@ func (m *fakeMCPManager) Ensure(context.Context, []string) ([]string, map[string
 	if m.registry != nil && m.toolName != "" {
 		_ = m.registry.Register(fakeMCPTool{name: m.toolName})
 	}
-	return []string{m.toolName}, m.unavailable
+	// Only report a tool when one was configured: a manager never names an
+	// empty server as loaded.
+	var names []string
+	if m.toolName != "" {
+		names = []string{m.toolName}
+	}
+	return names, m.unavailable
 }
 
 func (m *fakeMCPManager) Status([]string) []core.MCPServerStatus { return nil }
@@ -88,6 +94,34 @@ func TestTurnMCPToolsAndUnavailable(t *testing.T) {
 	out := toolResultPayload(t, h, "c1")
 	if out.Status != core.ToolStatusSuccess || out.Output != "pong" {
 		t.Fatalf("mcp tool result=%+v", out)
+	}
+}
+
+// AC-TFB-019: a server of the agent that the MCP manager does not know is
+// listed as "not loaded" in the prompt (REQ-TFB-008 item 2).
+func TestTurnMCPUnknownServerIsNotLoaded(t *testing.T) {
+	cases := []struct {
+		name        string
+		unavailable map[string]string
+	}{
+		{name: "manager reports not configured", unavailable: map[string]string{"ghost": "not configured"}},
+		{name: "manager reports nothing", unavailable: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}},
+				map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", MCP: []string{"ghost"}}})
+			h.reg.SetMCP(&fakeMCPManager{unavailable: tc.unavailable})
+
+			result := h.run(t, "hi")
+			if result.StopReason != "end_turn" || result.Err != nil {
+				t.Fatalf("result=%+v", result)
+			}
+			prompt := h.systemPrompts(t)[0]
+			if !strings.Contains(prompt, "- unavailable MCP servers: ghost (not loaded)") {
+				t.Fatalf("prompt lacks the not-loaded line:\n%s", prompt)
+			}
+		})
 	}
 }
 

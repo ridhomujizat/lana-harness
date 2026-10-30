@@ -20,7 +20,7 @@ var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
-var webKeys = []string{"addr", "enabled"}
+var webKeys = []string{"addr", "enabled", "open_browser"}
 
 // maxAgentDescription is the longest accepted agents.<name>.description, in
 // characters (runes).
@@ -512,6 +512,11 @@ func validateWeb(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["enabled"]; ok {
 		if _, ok := val.(bool); !ok {
 			add(path+".enabled", typeMsg("boolean", val))
+		}
+	}
+	if val, ok := v["open_browser"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".open_browser", typeMsg("boolean", val))
 		}
 	}
 	if val, ok := v["addr"]; ok {

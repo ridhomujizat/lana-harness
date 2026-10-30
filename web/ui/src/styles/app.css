@@ -750,6 +750,10 @@ textarea {
   background: var(--panel);
 }
 
+.card-error {
+  color: var(--text-error-primary);
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"reflect"
@@ -38,10 +39,10 @@ agent = "coder"
 func newT016AgentsServer(t *testing.T, raw string) (*Server, *testConfigStore, *http.Cookie, string) {
 	t.Helper()
 	store := newTestConfigStore(t, raw, 0o600, ConfigSettings{})
-	var stderr bytes.Buffer
-	s := newAuthServer(t, store.home, &stderr)
+	token := authTokenFor(t, store.home)
+	s := newAuthServer(t, store.home, io.Discard)
 	s.SetConfigStore(store)
-	cookie, csrf := loginAndSession(t, s, tokenFromStderr(t, stderr.String()))
+	cookie, csrf := loginAndSession(t, s, token)
 	return s, store, cookie, csrf
 }
 

@@ -183,17 +183,20 @@ func textHas(want string) func(map[string]any) bool {
 
 // fakeBackend implements Backend in memory.
 type fakeBackend struct {
-	mu       sync.Mutex
-	obs      *core.Observe[core.LiveFrame]
-	sessions []core.SessionInfo
-	teams    []string
-	nextID   int
-	sent     []string
-	prompts  []string
-	cancels  []string
-	turn     func(ctx context.Context, session, prompt string) (TurnResult, error)
-	cancelCh chan struct{}
-	draining bool
+	mu        sync.Mutex
+	obs       *core.Observe[core.LiveFrame]
+	sessions  []core.SessionInfo
+	teams     []string
+	nextID    int
+	sent      []string
+	prompts   []string
+	cancels   []string
+	continued []string
+	turn      func(ctx context.Context, session, prompt string) (TurnResult, error)
+	contTurn  func(ctx context.Context, session string) (TurnResult, error)
+	contErr   error
+	cancelCh  chan struct{}
+	draining  bool
 }
 
 func newFakeBackend() *fakeBackend {
@@ -264,6 +267,24 @@ func (b *fakeBackend) Send(_ context.Context, _ string, text string) error {
 	defer b.mu.Unlock()
 	b.sent = append(b.sent, text)
 	return nil
+}
+
+func (b *fakeBackend) CanContinue(_ context.Context, _ string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.contErr
+}
+
+func (b *fakeBackend) ContinueTurn(ctx context.Context, session string) (TurnResult, error) {
+	b.mu.Lock()
+	b.continued = append(b.continued, session)
+	cont := b.contTurn
+	b.mu.Unlock()
+	if cont == nil {
+		b.obs.Publish(core.LiveFrame{SessionID: session, Kind: "text_delta", Text: "continued"})
+		return TurnResult{Text: "continued", StopReason: "end_turn"}, nil
+	}
+	return cont(ctx, session)
 }
 
 func (b *fakeBackend) Cancel(_ context.Context, session string) error {

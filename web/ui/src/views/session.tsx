@@ -19,7 +19,9 @@ import type { ApprovalEvent } from "../api/approvals";
 import { authSession } from "../api/auth";
 import {
   ApiError,
+  DAEMON_DRAINING_TEXT,
   errorMessage,
+  isDaemonDraining,
   openStream,
 } from "../api/client";
 import type { SSEStream, StreamFrame, StreamState } from "../api/client";
@@ -35,6 +37,7 @@ import type {
 import {
   cancelTurn as cancelTurnRequest,
   compactSession as compactSessionRequest,
+  continueSession as continueSessionRequest,
   forkSession as forkSessionRequest,
   sendMessage as sendMessageRequest,
 } from "../api/turns";
@@ -169,6 +172,22 @@ function turnEndAnnouncement(reason: string, error: unknown): string {
     return "Turn stopped: maximum steps reached.";
   }
   return "Turn finished: " + stopReasonWords(reason) + ".";
+}
+
+/* API-TFB-003: the refusal text of a failed Continue. */
+function continueErrorMessage(failure: unknown): string {
+  if (failure instanceof ApiError) {
+    if (failure.status === 409 && failure.code === "turn_running") {
+      return "A turn is already running.";
+    }
+    if (failure.status === 409 && failure.code === "nothing_to_continue") {
+      return "Nothing to continue. The last turn ended normally.";
+    }
+  }
+  if (isDaemonDraining(failure)) {
+    return DAEMON_DRAINING_TEXT;
+  }
+  return errorMessage(failure);
 }
 
 function approvalAnnouncement(outcome: string): string {
@@ -886,6 +905,8 @@ export function SessionPage({ id }: SessionPageProps) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [continueBusy, setContinueBusy] = useState(false);
+  const [continueError, setContinueError] = useState("");
   const [pendingText, setPendingText] = useState("");
   const [queued, setQueued] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: string } | null>(
@@ -1233,6 +1254,8 @@ export function SessionPage({ id }: SessionPageProps) {
     setActionError("");
     setActionDetails([]);
     setCancelling(false);
+    setContinueBusy(false);
+    setContinueError("");
     setChildEvents({});
     setChildLive({});
     setQuestionBusy(false);
@@ -1669,7 +1692,14 @@ export function SessionPage({ id }: SessionPageProps) {
       pendingRef.current = "";
       setPendingText("");
       setDraft((current) => current || text);
-      reportError(failure, "Could not send the message.");
+      /* API-TFB-008: the daemon refuses new turns while it drains. Keep the
+         typed text so the owner can send it again. */
+      if (isDaemonDraining(failure)) {
+        showNotice(DAEMON_DRAINING_TEXT, "warn");
+        announce(DAEMON_DRAINING_TEXT);
+      } else {
+        reportError(failure, "Could not send the message.");
+      }
     } finally {
       setSending(false);
     }
@@ -1727,6 +1757,45 @@ export function SessionPage({ id }: SessionPageProps) {
       window.location.hash = "#/sessions/" + encodeURIComponent(created.id);
     } catch (failure) {
       reportError(failure, "Could not fork the session.");
+    }
+  }
+
+  /* REQ-TFB-005: Continue resumes the abnormally ended last turn. It follows
+     the same live path as a sent message (API-TFB-003). */
+  async function continueLastTurn() {
+    if (continueBusy || readOnly || turnRunning) {
+      return;
+    }
+    setContinueBusy(true);
+    clearError();
+    setContinueError("");
+    try {
+      const result = await continueSessionRequest(id);
+      if (result.turn === "queued") {
+        setQueued(true);
+        announce("Message queued. It will be claimed at the next step.");
+      } else {
+        if (!lastRunningRef.current) {
+          announce("Turn running.");
+        }
+        if (result.turn_id) {
+          setLiveTurnId(result.turn_id);
+          setLiveStartedAt(Date.now());
+        }
+        setStreamText("");
+      }
+      lastRunningRef.current = true;
+      setTurnRunning(true);
+    } catch (failure) {
+      /* API-TFB-003: a refused Continue shows its reason in the status card. */
+      const message = continueErrorMessage(failure);
+      setContinueError(message);
+      announce(message);
+      if (refreshRef.current) {
+        refreshRef.current();
+      }
+    } finally {
+      setContinueBusy(false);
     }
   }
 
@@ -1888,6 +1957,11 @@ export function SessionPage({ id }: SessionPageProps) {
     Boolean(activeQuestion) || detail.status === "waiting_input";
   const turnCount = Number(detail.turn_count) || 0;
   const hasThread = thread.length > 0 || pendingText !== "";
+  /* REQ-TFB-004: the end card shows under the session's last turn only. */
+  const lastTurnKey = thread.reduce(
+    (found: string, item) => (item.kind === "turn" ? item.key : found),
+    ""
+  );
 
   return (
     <main id="main" className="chat-view">
@@ -1971,7 +2045,11 @@ export function SessionPage({ id }: SessionPageProps) {
         <div className="chat-thread">
           {thread.map((item) =>
             item.kind === "user" ? (
-              <UserBubble key={item.key} text={item.text} />
+              <UserBubble
+                key={item.key}
+                text={item.text}
+                continue={item.continue === true}
+              />
             ) : (
               <TurnBlock
                 key={item.key}
@@ -1983,6 +2061,10 @@ export function SessionPage({ id }: SessionPageProps) {
                 childLive={childLive}
                 onLoadChildren={loadChildEvents}
                 waitingForInput={waitingForInput}
+                showStatusCard={item.key === lastTurnKey && !turnRunning}
+                onContinue={continueLastTurn}
+                continueBusy={continueBusy}
+                continueError={continueError}
                 streamingText={
                   item.turn.running &&
                   (liveTurnId ? item.turn.id === liveTurnId : true)

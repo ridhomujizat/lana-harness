@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -29,13 +30,13 @@ func (s *testLiveConfigStore) ApplyLive(ctx context.Context, candidate []byte) e
 	return nil
 }
 
-func newLiveConfigTestServer(t *testing.T, store *testLiveConfigStore) (*Server, *http.Cookie, string, *bytes.Buffer) {
+func newLiveConfigTestServer(t *testing.T, store *testLiveConfigStore) (*Server, *http.Cookie, string) {
 	t.Helper()
-	var stderr bytes.Buffer
-	s := newAuthServer(t, store.home, &stderr)
+	token := authTokenFor(t, store.home)
+	s := newAuthServer(t, store.home, io.Discard)
 	s.SetConfigStore(store)
-	cookie, csrf := loginAndSession(t, s, tokenFromStderr(t, stderr.String()))
-	return s, cookie, csrf, &stderr
+	cookie, csrf := loginAndSession(t, s, token)
+	return s, cookie, csrf
 }
 
 const liveAgentConfig = `[providers.mock]
@@ -52,7 +53,7 @@ model = "old-model"
 func TestAgentSaveRestartRequiredLive(t *testing.T) {
 	raw := liveAgentConfig
 	store := &testLiveConfigStore{testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{})}
-	s, cookie, csrf, _ := newLiveConfigTestServer(t, store)
+	s, cookie, csrf := newLiveConfigTestServer(t, store)
 
 	body := `{"model":"new-model","expected_version":"` + shaHex([]byte(raw)) + `"}`
 	response := serveMCP(t, s, http.MethodPut, "/v1/agents/coder", body, cookie, csrf)
@@ -84,7 +85,7 @@ func TestAgentSaveApplyFailure(t *testing.T) {
 		testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{}),
 		applyErr:        errors.New("apply failed"),
 	}
-	s, cookie, csrf, _ := newLiveConfigTestServer(t, store)
+	s, cookie, csrf := newLiveConfigTestServer(t, store)
 	var logs bytes.Buffer
 	s.logger = slog.New(slog.NewTextHandler(&logs, nil))
 
@@ -122,7 +123,7 @@ command = "docs-server"
 func TestMCPSaveRestartRequiredLive(t *testing.T) {
 	raw := liveMCPConfig
 	store := &testLiveConfigStore{testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{})}
-	s, cookie, csrf, _ := newLiveConfigTestServer(t, store)
+	s, cookie, csrf := newLiveConfigTestServer(t, store)
 
 	body := `{"type":"command","command":"docs-server","args":["--v"],"expected_version":"` + shaHex([]byte(raw)) + `"}`
 	response := serveMCP(t, s, http.MethodPut, "/v1/mcp/docs", body, cookie, csrf)
@@ -156,7 +157,7 @@ model = "m"
 func TestTeamSaveRestartRequiredLive(t *testing.T) {
 	raw := liveTeamConfig
 	store := &testLiveConfigStore{testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{})}
-	s, cookie, csrf, _ := newLiveConfigTestServer(t, store)
+	s, cookie, csrf := newLiveConfigTestServer(t, store)
 
 	body := `{"name":"squad","lead":"coder","members":["writer"],"expected_version":"` + shaHex([]byte(raw)) + `"}`
 	response := serveMCP(t, s, http.MethodPost, "/v1/teams", body, cookie, csrf)
@@ -178,7 +179,7 @@ func TestTeamSaveRestartRequiredLive(t *testing.T) {
 func TestProviderSaveStaysRestartRequired(t *testing.T) {
 	raw := liveAgentConfig
 	store := &testLiveConfigStore{testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{})}
-	s, cookie, csrf, _ := newLiveConfigTestServer(t, store)
+	s, cookie, csrf := newLiveConfigTestServer(t, store)
 
 	body := `{"kind":"openai_compat","base_url":"https://example.com/v2","expected_version":"` + shaHex([]byte(raw)) + `"}`
 	response := serveMCP(t, s, http.MethodPut, "/v1/providers/mock", body, cookie, csrf)

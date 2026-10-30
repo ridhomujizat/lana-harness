@@ -251,13 +251,16 @@ func decodeConfig(value map[string]any) (core.Config, error) {
 // applyWebDefaults fills [web] defaults: enabled when the table is absent, and
 // the loopback address when addr is not set.
 func applyWebDefaults(cfg *core.Config, value map[string]any) {
-	cfg.Web = core.WebConfig{Enabled: true, Addr: core.DefaultWebAddr}
+	cfg.Web = core.WebConfig{Enabled: true, Addr: core.DefaultWebAddr, OpenBrowser: true}
 	table, ok := asMap(value["web"])
 	if !ok {
 		return
 	}
 	if v, ok := table["enabled"].(bool); ok {
 		cfg.Web.Enabled = v
+	}
+	if v, ok := table["open_browser"].(bool); ok {
+		cfg.Web.OpenBrowser = v
 	}
 	if v, ok := table["addr"].(string); ok && v != "" {
 		cfg.Web.Addr = v

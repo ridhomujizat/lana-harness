@@ -387,3 +387,98 @@ func TestTurnStopContinue(t *testing.T) {
 		t.Fatalf("steps=%d users=%d", steps, users)
 	}
 }
+
+// countSteps returns the number of step/start events of the session.
+func countSteps(t *testing.T, h *harness) int {
+	t.Helper()
+	steps := 0
+	for _, event := range h.events(t) {
+		if event.Kind == core.KindStepStart {
+			steps++
+		}
+	}
+	return steps
+}
+
+// lastUserText returns the text of the session's last user/message.
+func lastUserText(t *testing.T, h *harness) string {
+	t.Helper()
+	text := ""
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindUserMessage {
+			continue
+		}
+		var payload core.UserMessage
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		parts := make([]string, 0, len(payload.Content))
+		for _, block := range payload.Content {
+			if block.Text != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+		text = strings.Join(parts, "")
+	}
+	return text
+}
+
+// AC-TFB-021: a tool call followed by an empty final answer runs exactly one
+// extra step with the runtime note (REQ-TFB-008 item 4).
+func TestEmptyAnswerGuardRunsOneExtraStep(t *testing.T) {
+	h := newHarness(t, mock.Script{Responses: []mock.Response{
+		toolResponse("c1", "read_file", `{"path":"a.txt"}`),
+		textResponse(""),
+		textResponse("here is the report"),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := h.run(t, "hi")
+	if result.StopReason != "end_turn" || result.Text != "here is the report" {
+		t.Fatalf("result=%+v", result)
+	}
+	if steps := countSteps(t, h); steps != 3 {
+		t.Fatalf("steps=%d want 3", steps)
+	}
+	if got := lastUserText(t, h); got != emptyAnswerNote {
+		t.Fatalf("last user message=%q want %q", got, emptyAnswerNote)
+	}
+}
+
+// The guard runs at most once per turn (REQ-TFB-008 item 4).
+func TestEmptyAnswerGuardRunsAtMostOnce(t *testing.T) {
+	h := newHarness(t, mock.Script{Responses: []mock.Response{
+		toolResponse("c1", "read_file", `{"path":"a.txt"}`),
+		textResponse(""),
+		textResponse(""),
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := h.run(t, "hi")
+	if result.StopReason != "end_turn" {
+		t.Fatalf("result=%+v", result)
+	}
+	if steps := countSteps(t, h); steps != 3 {
+		t.Fatalf("steps=%d want 3", steps)
+	}
+}
+
+// The guard never runs after an abnormal end (REQ-TFB-008 item 4).
+func TestEmptyAnswerGuardSkippedAfterError(t *testing.T) {
+	h := newHarness(t, mock.Script{Responses: []mock.Response{
+		toolResponse("c1", "read_file", `{"path":"a.txt"}`),
+		{Error: &mock.ScriptError{Class: "server", Message: "boom"}},
+	}}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := h.run(t, "hi")
+	if result.StopReason != "error" {
+		t.Fatalf("result=%+v", result)
+	}
+	if steps := countSteps(t, h); steps != 2 {
+		t.Fatalf("steps=%d want 2", steps)
+	}
+}

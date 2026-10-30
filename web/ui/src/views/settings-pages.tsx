@@ -24,6 +24,7 @@ import type { DaemonInfo } from "../api/daemon";
 import type { AuditEntry } from "../api/audit";
 import { Dialog, ErrorDetails, ErrorNotice, Icon, Loading } from "../ui/ui";
 import { AgentAvatar, agoLabel } from "./agent-common";
+import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
 
 /* Settings rev 2 (T-034): the shared shell plus Providers, Secrets, Config file,
    and Audit log. General lives in settings-general.js and imports the shell from
@@ -308,144 +309,23 @@ export interface SettingsRestartDialogProps {
   onRestarted?: () => void;
 }
 
+/* The restart flow lives in one shared component so Settings > General and the
+   Telegram connect step behave the same (REQ-TFB-003, API-TFB-002). */
 export function SettingsRestartDialog({
   onClose,
   onRestarted,
 }: SettingsRestartDialogProps) {
-  const [info, setInfo] = useState<DaemonInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [details, setDetails] = useState<unknown[]>([]);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    let alive = true;
-    settingsApi
-      .getDaemon()
-      .then((value) => {
-        if (!alive) {
-          return;
-        }
-        setInfo(value);
-        setLoading(false);
-      })
-      .catch((failure: unknown) => {
-        if (!alive) {
-          return;
-        }
-        const failureState = failureInfo(failure);
-        setError(failureState.message);
-        setDetails(failureState.details);
-        setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  async function confirmRestart() {
-    if (busy || !info) {
-      return;
-    }
-    setBusy(true);
-    setError("");
-    setDetails([]);
-    setMessage("Restart scheduled. Waiting for the daemon to come back.");
-    try {
-      await settingsApi.restartDaemon();
-      await settingsApi.waitForDaemonRestart(info.started_at, (text) =>
-        setMessage(text)
-      );
+  const controller = useDaemonRestart({
+    onRestarted: () => {
       clearSettingsSaved();
-      setMessage("The daemon is back.");
       if (onRestarted) {
         onRestarted();
       }
       onClose();
-    } catch (failure: unknown) {
-      const failureState = failureInfo(failure);
-      setError(failureState.message);
-      setDetails(failureState.details);
-      setMessage("The restart did not finish.");
-      setBusy(false);
-    }
-  }
+    },
+  });
 
-  const turns =
-    info && Array.isArray(info.running_turns) ? info.running_turns : [];
-  const supported = !info || info.restart_supported;
-
-  return (
-    <Dialog title="Restart daemon?" dismissible={!busy} onClose={onClose}>
-      <div className="settings-dialog-form">
-        <p className="hint">
-          The daemon restarts in place. Every running turn ends and this page
-          reconnects when the daemon is back.
-        </p>
-        {loading ? <Loading label="Checking the daemon…" /> : null}
-        {error ? <ErrorNotice message={error} details={details} /> : null}
-        {info ? (
-          <section
-            className="settings-running-turns"
-            aria-labelledby="settings-running-turns-title"
-          >
-            <h3 id="settings-running-turns-title">Running turns</h3>
-            {turns.length > 0 ? (
-              <ul className="settings-turn-list">
-                {turns.map((turn, index) => (
-                  <li
-                    key={(turn && turn.session_id) || index}
-                    className="settings-turn-item"
-                  >
-                    <span className="settings-turn-title">
-                      {(turn && turn.title) || "Untitled session"}
-                    </span>
-                    <span className="settings-turn-agent">
-                      {(turn && turn.agent) || "unknown agent"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="hint">No turns are running.</p>
-            )}
-          </section>
-        ) : null}
-        {info && !supported ? (
-          <p className="settings-warning-text">
-            Restarting from the browser is not supported on this platform.
-          </p>
-        ) : null}
-        <p
-          className="settings-status"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {message}
-        </p>
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
-            disabled={busy || loading || !info || !supported}
-            onClick={confirmRestart}
-          >
-            {busy ? "Restarting…" : "Restart daemon"}
-          </button>
-        </div>
-      </div>
-    </Dialog>
-  );
+  return <RestartDaemonDialog controller={controller} onClose={onClose} />;
 }
 
 export interface SettingsRestartBannerProps {

@@ -115,6 +115,44 @@ func TestCancelTurn(t *testing.T) {
 	}
 }
 
+// AC-TFB-012: POST /v1/sessions/{id}/continue maps the contract refusals
+// (API-TFB-003).
+func TestContinueTurn(t *testing.T) {
+	backend, info := newTurnTestBackend()
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/continue", "", cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body sendMessageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if body.Turn != "started" || body.TurnID != "turn-fake" {
+		t.Fatalf("response = %+v", body)
+	}
+
+	backend.setTurnActive(info.ID, true)
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/continue", "", cookie, csrf))
+	assertAuthError(t, rr, http.StatusConflict, "turn_running")
+
+	backend.setTurnActive(info.ID, false)
+	backend.mu.Lock()
+	backend.continueErr[info.ID] = ErrNothingToContinue
+	backend.mu.Unlock()
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/continue", "", cookie, csrf))
+	assertAuthError(t, rr, http.StatusConflict, "nothing_to_continue")
+
+	backend.mu.Lock()
+	backend.continueErr[info.ID] = ErrDraining
+	backend.mu.Unlock()
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/continue", "", cookie, csrf))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "daemon_draining")
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/missing/continue", "", cookie, csrf))
+	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+}
 func TestTurnEndpointsMapBackendErrors(t *testing.T) {
 	backend, info := newTurnTestBackend()
 	s, cookie, csrf := newLoggedInSessionServer(t, backend)

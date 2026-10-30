@@ -11,6 +11,7 @@ import {
   markSettingsSaved,
 } from "./settings-pages";
 import * as settingsApi from "../api/settings";
+import * as daemonApi from "../api/daemon";
 import type { GetConfigResponse, ProviderRow } from "../api/settings";
 import type { SecretRow } from "../api/secrets";
 import type { AuditEntry } from "../api/audit";
@@ -36,6 +37,19 @@ vi.mock("../api/settings", async (importOriginal) => {
   };
 });
 
+/* The restart dialog reads the daemon through api/daemon directly, so that
+   module is mocked too (REQ-TFB-003, API-TFB-002). */
+vi.mock("../api/daemon", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/daemon")>();
+  return {
+    ...actual,
+    daemonInfo: vi.fn(),
+    restartDaemon: vi.fn(),
+    cancelDaemonRestart: vi.fn(),
+    waitForDaemonRestart: vi.fn(),
+  };
+});
+
 const daemon: DaemonInfo = {
   pid: 1234,
   started_at: 1,
@@ -47,6 +61,7 @@ const daemon: DaemonInfo = {
   os: "linux",
   arch: "amd64",
   restart_supported: true,
+  restart: { state: "idle", deadline: null },
   running_turns: [],
   browsers_signed_in: 1,
 };
@@ -135,6 +150,7 @@ describe("settings pages", () => {
     vi.clearAllMocks();
     vi.mocked(settingsApi.getConfig).mockResolvedValue(config);
     vi.mocked(settingsApi.getDaemon).mockResolvedValue(daemon);
+    vi.mocked(daemonApi.daemonInfo).mockResolvedValue(daemon);
     vi.mocked(settingsApi.listProviders).mockResolvedValue({
       version: "v1",
       providers: [provider],
@@ -187,12 +203,12 @@ describe("settings pages", () => {
   it("reports a finished restart and closes the dialog", async () => {
     const onClose = vi.fn();
     const onRestarted = vi.fn();
-    vi.mocked(settingsApi.getDaemon).mockResolvedValue(daemon);
-    vi.mocked(settingsApi.restartDaemon).mockResolvedValue({
+    vi.mocked(daemonApi.daemonInfo).mockResolvedValue(daemon);
+    vi.mocked(daemonApi.restartDaemon).mockResolvedValue({
       restart: "scheduled",
       running_turns: 0,
     });
-    vi.mocked(settingsApi.waitForDaemonRestart).mockResolvedValue(daemon);
+    vi.mocked(daemonApi.waitForDaemonRestart).mockResolvedValue(daemon);
 
     render(
       <SettingsRestartDialog onClose={onClose} onRestarted={onRestarted} />
@@ -207,9 +223,8 @@ describe("settings pages", () => {
       expect(onRestarted).toHaveBeenCalledTimes(1);
     });
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(settingsApi.waitForDaemonRestart)).toHaveBeenCalledWith(
-      daemon.started_at,
-      expect.any(Function)
+    expect(vi.mocked(daemonApi.waitForDaemonRestart)).toHaveBeenCalledWith(
+      daemon.started_at
     );
   });
 });

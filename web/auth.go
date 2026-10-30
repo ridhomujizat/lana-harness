@@ -6,155 +6,40 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
-	tokenFileName     = "web.json"
-	tokenVersion      = 1
 	sessionCookieName = "lana_session"
 	csrfHeaderName    = "X-Lana-CSRF"
 	sessionIdleTTL    = 12 * time.Hour
-	loginMaxBody      = 4 << 10
+	authMaxBody       = 4 << 10
 	randomBytesLen    = 32
+
+	// The UI messages of the contract (api-contract.md, "Error messages for
+	// the UI").
+	invalidPasswordMessage     = "That password is not right."
+	tooManyAttemptsMessage     = "Too many tries. Wait 5 minutes or reset your password."
+	linkExpiredMessage         = "This link has expired. Restart lana to get a new one."
+	codeExpiredMessage         = "Ask for a new code."
+	invalidCodeMessage         = "That code is not right."
+	telegramUnavailableMessage = "Telegram reset is not available."
 )
 
-// tokenFile is the on-disk form of $LANA_HOME/web.json.
-type tokenFile struct {
-	Version     int    `json:"version"`
-	TokenSHA256 string `json:"token_sha256"`
-}
-
-// tokenStore holds the SHA-256 of the owner token.
-type tokenStore struct {
-	hash [sha256.Size]byte
-}
-
-// loadOrCreateToken reads $LANA_HOME/web.json, creating it when missing.
-// An empty home means the token store is absent; login then always fails.
-func loadOrCreateToken(home string, stderr io.Writer) (*tokenStore, error) {
-	if home == "" {
-		return nil, nil
-	}
-	path, err := filepath.Abs(filepath.Join(home, tokenFileName))
-	if err != nil {
-		return nil, tokenFileError(filepath.Join(home, tokenFileName), err.Error())
-	}
-	plain, err := createTokenFile(path)
-	if err == nil {
-		if stderr == nil {
-			stderr = io.Discard
-		}
-		_, _ = fmt.Fprintf(stderr, "web: owner token created at %s; copy it now, it is shown only once: %s\n", path, plain)
-		return &tokenStore{hash: sha256.Sum256([]byte(plain))}, nil
-	}
-	if !errors.Is(err, os.ErrExist) {
-		return nil, tokenFileError(path, err.Error())
-	}
-	return readTokenFile(path)
-}
-
-// createTokenFile creates path with mode 0600 and returns the plain token.
-// It returns os.ErrExist when the file already exists.
-func createTokenFile(path string) (string, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return "", err
-	}
-	fail := func(err error) (string, error) {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return "", err
-	}
-
-	plain, err := randomToken()
-	if err != nil {
-		return fail(err)
-	}
-	sum := sha256.Sum256([]byte(plain))
-	data, err := json.Marshal(tokenFile{Version: tokenVersion, TokenSHA256: hex.EncodeToString(sum[:])})
-	if err != nil {
-		return fail(err)
-	}
-	if err := file.Chmod(0o600); err != nil {
-		return fail(err)
-	}
-	if _, err := file.Write(data); err != nil {
-		return fail(err)
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(path)
-		return "", err
-	}
-	return plain, nil
-}
-
-// readTokenFile parses an existing token file and validates its contents.
-func readTokenFile(path string) (*tokenStore, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, tokenFileError(path, "cannot read the file")
-	}
-	var stored tokenFile
-	if err := json.Unmarshal(data, &stored); err != nil {
-		return nil, tokenFileError(path, "not valid JSON")
-	}
-	if stored.Version != tokenVersion {
-		return nil, tokenFileError(path, fmt.Sprintf("unsupported version %d", stored.Version))
-	}
-	if !isLowerHexSHA256(stored.TokenSHA256) {
-		return nil, tokenFileError(path, "token_sha256 must be 64 lowercase hex characters")
-	}
-	hash, err := hex.DecodeString(stored.TokenSHA256)
-	if err != nil {
-		return nil, tokenFileError(path, "token_sha256 must be 64 lowercase hex characters")
-	}
-	var store tokenStore
-	copy(store.hash[:], hash)
-	return &store, nil
-}
-
-func tokenFileError(path, reason string) error {
-	return fmt.Errorf("web: token file %s cannot be used: %s; delete it and restart the daemon to create a new token", path, reason)
-}
-
-func isLowerHexSHA256(value string) bool {
-	if len(value) != 2*sha256.Size {
-		return false
-	}
-	for i := 0; i < len(value); i++ {
-		c := value[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func randomToken() (string, error) {
-	buf := make([]byte, randomBytesLen)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-// valid reports whether token matches the stored hash in constant time.
-func (t *tokenStore) valid(token string) bool {
-	if t == nil || token == "" {
-		return false
-	}
-	sum := sha256.Sum256([]byte(token))
-	return subtle.ConstantTimeCompare(sum[:], t.hash[:]) == 1
+// TelegramResetSender is the daemon port that delivers a reset code to the
+// owners' Telegram chats (REQ-WLG-004). cmd/lana implements it with the running
+// Telegram channel.
+type TelegramResetSender interface {
+	// ResetAvailable reports that a Telegram reset code can be sent: the
+	// channel is polling and at least one owner has a private-chat route.
+	ResetAvailable() bool
+	// SendOwnerCode sends code to every owner private chat and returns the
+	// number of messages sent.
+	SendOwnerCode(ctx context.Context, code string) (int, error)
 }
 
 // session is the session data put in an authenticated request context.
@@ -180,6 +65,63 @@ func (s *Server) nowTime() time.Time {
 		return s.now()
 	}
 	return time.Now()
+}
+
+// SetTelegramResetSender installs the Telegram reset port. The daemon calls it
+// before the server starts serving.
+func (s *Server) SetTelegramResetSender(sender TelegramResetSender) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.telegramReset = sender
+}
+
+func (s *Server) telegramResetSender() TelegramResetSender {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.telegramReset
+}
+
+func (s *Server) telegramResetAvailable() bool {
+	if sender := s.telegramResetSender(); sender != nil {
+		return sender.ResetAvailable()
+	}
+	return false
+}
+
+// SignInLink creates a one-time sign-in link for the server address. The code
+// lives in memory only and is valid for 15 minutes (REQ-WLG-002).
+func (s *Server) SignInLink() (string, error) {
+	code, err := s.signInCodes.create()
+	if err != nil {
+		return "", err
+	}
+	return "http://" + s.Addr() + "/#/welcome?code=" + code, nil
+}
+
+// OpenOnStart runs REQ-WLG-001: when no password is set or a reset was
+// requested, it creates a sign-in link, writes it once to stderr, and opens it
+// with open when [web] open_browser is on. The daemon calls it after the
+// listener is up. reset_requested is cleared by SetPassword, so the flag
+// survives until the owner sets a password through the link.
+func (s *Server) OpenOnStart(open func(string) error) {
+	if s.credentials == nil {
+		return
+	}
+	if s.credentials.PasswordSet() && !s.credentials.ResetRequested() {
+		return
+	}
+	link, err := s.SignInLink()
+	if err != nil {
+		s.logger.Error("web: create sign-in link", "error", err)
+		return
+	}
+	_, _ = fmt.Fprintf(s.cfg.Stderr, "web: open this link to set your password: %s\n", link)
+	if !s.cfg.OpenBrowser || open == nil {
+		return
+	}
+	if err := open(link); err != nil {
+		s.logger.Warn("web: open browser", "error", err)
+	}
 }
 
 // authenticate applies the Host, Origin, cookie, and CSRF checks in order.
@@ -252,38 +194,227 @@ func isStateChanging(method string) bool {
 	}
 }
 
+// handleAuthState answers GET /v1/auth/state (API-WLG-001).
+func (s *Server) handleAuthState(w http.ResponseWriter, _ *http.Request) {
+	response := struct {
+		PasswordSet   bool   `json:"password_set"`
+		TelegramReset bool   `json:"telegram_reset"`
+		LockedUntil   *int64 `json:"locked_until"`
+	}{
+		PasswordSet:   s.credentials.PasswordSet(),
+		TelegramReset: s.telegramResetAvailable(),
+	}
+	if until := s.loginLock.lockedUntilTime(); !until.IsZero() {
+		ms := until.UnixMilli()
+		response.LockedUntil = &ms
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// handleClaim answers POST /v1/auth/claim (API-WLG-002): a valid sign-in code
+// plus a new password sets the password, consumes the code, and signs in.
+func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Code     string `json:"code"`
+		Password string `json:"password"`
+	}
+	if !decodeJSONObject(w, r, authMaxBody, &body) {
+		return
+	}
+	if len([]rune(body.Password)) < minPasswordChars {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "password must be at least 8 characters")
+		return
+	}
+	if s.credentials == nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if !s.signInCodes.consume(body.Code) {
+		writeAPIError(w, http.StatusGone, "link_expired", linkExpiredMessage)
+		return
+	}
+	if err := s.applyPassword(body.Password, nil); err != nil {
+		s.logger.Error("web: claim: set password", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	s.issueSession(w, r)
+}
+
+// handleLogin answers POST /v1/auth/login (API-WLG-003). A password works once
+// one is set; the legacy owner token works only while no password is set.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Token *string `json:"token"`
+		Password *string `json:"password"`
+		Token    *string `json:"token"`
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, loginMaxBody)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body); err != nil || body.Token == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must be a JSON object with a token string")
+	if !decodeJSONObject(w, r, authMaxBody, &body) {
 		return
 	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
+	if (body.Password == nil) == (body.Token == nil) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "request body must name exactly one of password or token")
 		return
 	}
-
-	now := s.nowTime()
-	if !s.token.valid(*body.Token) {
+	if body.Password != nil {
+		if s.credentials == nil || !s.credentials.PasswordSet() {
+			writeAPIError(w, http.StatusUnauthorized, "invalid_password", invalidPasswordMessage)
+			return
+		}
+		if s.loginLock.lockedUntilTime() != (time.Time{}) {
+			writeAPIError(w, http.StatusTooManyRequests, "too_many_attempts", tooManyAttemptsMessage)
+			return
+		}
+		if !s.credentials.VerifyPassword(*body.Password) {
+			s.loginLock.fail()
+			s.logger.Info("web: login failed")
+			writeAPIError(w, http.StatusUnauthorized, "invalid_password", invalidPasswordMessage)
+			return
+		}
+		s.loginLock.success()
+	} else if s.credentials == nil || !s.credentials.VerifyToken(*body.Token) {
 		s.logger.Info("web: login failed")
-		writeAPIError(w, http.StatusUnauthorized, "unauthenticated", "invalid owner token")
+		writeAPIError(w, http.StatusUnauthorized, "invalid_password", invalidPasswordMessage)
 		return
 	}
+	s.logger.Info("web: login succeeded")
+	s.issueSession(w, r)
+}
+
+// handleResetTelegram answers POST /v1/auth/reset/telegram (API-WLG-004).
+func (s *Server) handleResetTelegram(w http.ResponseWriter, r *http.Request) {
+	var body struct{}
+	if !decodeJSONObject(w, r, authMaxBody, &body) {
+		return
+	}
+	sender := s.telegramResetSender()
+	if sender == nil || !sender.ResetAvailable() {
+		writeAPIError(w, http.StatusConflict, "telegram_unavailable", telegramUnavailableMessage)
+		return
+	}
+	code, err := newResetCode()
+	if err != nil {
+		s.logger.Error("web: reset: generate code", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if !s.resetCodes.start(code) {
+		writeAPIError(w, http.StatusTooManyRequests, "too_many_attempts", tooManyAttemptsMessage)
+		return
+	}
+	sent, err := sender.SendOwnerCode(r.Context(), code)
+	if err != nil {
+		s.logger.Error("web: reset: send code", "error", err)
+		writeAPIError(w, http.StatusConflict, "telegram_unavailable", telegramUnavailableMessage)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, struct {
+		SentTo int `json:"sent_to"`
+	}{SentTo: sent})
+}
+
+// handleResetVerify answers POST /v1/auth/reset/verify (API-WLG-005).
+func (s *Server) handleResetVerify(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Code     string `json:"code"`
+		Password string `json:"password"`
+	}
+	if !decodeJSONObject(w, r, authMaxBody, &body) {
+		return
+	}
+	if len([]rune(body.Password)) < minPasswordChars {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "password must be at least 8 characters")
+		return
+	}
+	ok, expired := s.resetCodes.verify(body.Code)
+	if expired {
+		writeAPIError(w, http.StatusGone, "code_expired", codeExpiredMessage)
+		return
+	}
+	if !ok {
+		writeAPIError(w, http.StatusUnauthorized, "invalid_code", invalidCodeMessage)
+		return
+	}
+	if err := s.applyPassword(body.Password, nil); err != nil {
+		s.logger.Error("web: reset verify: set password", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	s.issueSession(w, r)
+}
+
+// handleResetRestart answers POST /v1/auth/reset/restart (API-WLG-006): it
+// marks reset_requested so the next daemon start opens a sign-in link.
+func (s *Server) handleResetRestart(w http.ResponseWriter, r *http.Request) {
+	var body struct{}
+	if !decodeJSONObject(w, r, authMaxBody, &body) {
+		return
+	}
+	if err := s.credentials.SetResetRequested(true); err != nil {
+		s.logger.Error("web: reset restart: set flag", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, struct{}{})
+}
+
+// handleChangePassword answers POST /v1/auth/password (API-WLG-007). It ends
+// every other browser session.
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	sess, ok := sessionFromContext(r.Context())
+	if !ok {
+		writeAPIError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+		return
+	}
+	var body struct {
+		Current  string `json:"current"`
+		Password string `json:"password"`
+	}
+	if !decodeJSONObject(w, r, authMaxBody, &body) {
+		return
+	}
+	if len([]rune(body.Password)) < minPasswordChars {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "password must be at least 8 characters")
+		return
+	}
+	if s.credentials == nil || !s.credentials.VerifyPassword(body.Current) {
+		writeAPIError(w, http.StatusUnauthorized, "invalid_password", invalidPasswordMessage)
+		return
+	}
+	if err := s.applyPassword(body.Password, &sess.key); err != nil {
+		s.logger.Error("web: change password", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// applyPassword stores the new password and ends the other browser sessions.
+// keep names the caller's session, or nil to end all of them.
+func (s *Server) applyPassword(password string, keep *[sha256.Size]byte) error {
+	if err := s.credentials.SetPassword(password, s.nowTime()); err != nil {
+		return err
+	}
+	var key [sha256.Size]byte
+	if keep != nil {
+		key = *keep
+	}
+	if _, err := s.sessions.revokeOthers(key); err != nil {
+		s.logger.Warn("web: save browser sessions after password change", "error", err)
+	}
+	return nil
+}
+
+// issueSession creates a browser session and answers with its CSRF value.
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
 	cookie, err := randomToken()
 	if err != nil {
-		s.logger.Error("web: login: generate session cookie", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		s.logger.Error("web: generate session cookie", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-
-	if _, err := s.sessions.add(cookie, r.UserAgent(), now); err != nil {
-		s.logger.Error("web: login: save browser session", "error", err)
+	sess, err := s.sessions.add(cookie, r.UserAgent(), s.nowTime())
+	if err != nil {
+		s.logger.Error("web: save browser session", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
@@ -294,8 +425,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	s.logger.Info("web: login succeeded")
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, struct {
+		CSRF string `json:"csrf"`
+	}{CSRF: sess.csrf})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +461,29 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		CSRF:      sess.csrf,
 		ExpiresAt: sess.expiresAt.UnixMilli(),
 	})
+}
+
+// randomToken returns 32 random bytes as base64url without padding.
+func randomToken() (string, error) {
+	buf := make([]byte, randomBytesLen)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// isLowerHexSHA256 reports whether value is 64 lowercase hex characters.
+func isLowerHexSHA256(value string) bool {
+	if len(value) != 2*sha256.Size {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 type apiError struct {

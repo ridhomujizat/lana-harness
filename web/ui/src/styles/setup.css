@@ -365,48 +365,6 @@
   line-height: var(--line-height-sm);
 }
 
-.setup-check-session {
-  align-self: center;
-  color: var(--text-brand-secondary);
-}
-
-/* ------------------------------------------------------------------ */
-/* Unlock                                                              */
-/* ------------------------------------------------------------------ */
-
-.setup-token-help {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: var(--space-compact);
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
-}
-
-.setup-token-help-title {
-  color: var(--text-secondary);
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  line-height: var(--line-height-body);
-}
-
-.setup-token-help-text {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
-}
-
-.setup-token-help code {
-  color: var(--text-brand-secondary);
-  font-family: inherit;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  line-height: var(--line-height-sm);
-  overflow-wrap: anywhere;
-}
-
 /* ------------------------------------------------------------------ */
 /* Provider cards                                                      */
 /* ------------------------------------------------------------------ */
@@ -834,4 +792,162 @@
     animation: none;
     border-color: var(--bg-brand-solid);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Friendly login, welcome, and forgot screens (spec #18)              */
+/* Ported from docs/specs/18-friendly-web-login/mockups/mock.css.      */
+/* The rail keeps the logo, the door mark, and the place note; the     */
+/* login, forgot, and code screens do not show the setup steps.        */
+/* ------------------------------------------------------------------ */
+
+.setup-rail {
+  position: relative;
+  overflow: hidden;
+}
+
+.door-mark {
+  position: absolute;
+  left: -64px;
+  bottom: -120px;
+  width: 560px;
+  height: auto;
+  pointer-events: none;
+}
+
+.door-mark path {
+  fill: var(--bg-tertiary);
+}
+
+/* mock.css hard-codes #1A1F2B for the right half. Mix the two rail tokens
+   instead so the mark follows the theme. */
+.door-mark .door-right {
+  fill: color-mix(in srgb, var(--bg-tertiary) 70%, var(--bg-secondary));
+}
+
+.rail-place {
+  position: relative;
+  z-index: 1;
+  max-width: 260px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.rail-place strong {
+  display: block;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.setup-rail-top,
+.setup-rail-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.pw-wrap {
+  position: relative;
+}
+
+.setup-field .pw-wrap input {
+  width: 100%;
+  padding-right: 48px;
+}
+
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-tertiary);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.pw-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.pw-toggle:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Hide the native reveal buttons so only the icon toggle shows (Edge/IE). */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
+.after-form {
+  margin-top: 20px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.after-form a,
+.after-form .link-button {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-primary);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.after-form a:hover,
+.after-form .link-button:hover {
+  color: var(--text-primary);
+}
+
+.reset-list {
+  margin: 8px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--border-secondary);
+  list-style: none;
+}
+
+.reset-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
+  align-items: center;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+.reset-list h2 {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.reset-list p {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.setup-field.code-field input {
+  width: 9.5em;
+  padding: 12px 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 24px;
+  letter-spacing: 0.5em;
 }

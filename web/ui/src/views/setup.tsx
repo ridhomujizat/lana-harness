@@ -152,8 +152,8 @@ interface RailStep {
 
 const RAIL_STEPS: readonly RailStep[] = [
   {
-    title: "Unlock the dashboard",
-    note: "Paste the owner token from the daemon",
+    title: "Create your password",
+    note: "Only you can open lana",
   },
   {
     title: "Choose a provider",
@@ -487,14 +487,39 @@ function ProgressStep({ state, title, note, connector }: ProgressStepProps) {
   );
 }
 
+/* The decorative door mark of the login, forgot, and code screens (design.md):
+   the two shapes of the logo Λ drawn large and cut off by the rail edges. */
+function DoorMark() {
+  return (
+    <svg className="door-mark" viewBox="0 0 34 32" aria-hidden="true">
+      <path
+        transform="matrix(1 0 0 1 1.264 4.75)"
+        d="M0.39 18.028L9.681 1.528C10.213 0.584 11.212 0 12.295 0L15.843 0C18.138 0 19.583 2.472 18.457 4.472L9.166 20.972C8.635 21.916 7.636 22.5 6.552 22.5L3.004 22.5C0.709 22.5 -0.736 20.028 0.39 18.028Z"
+      />
+      <path
+        className="door-right"
+        transform="matrix(1 0 0 1 11.889 4.75)"
+        d="M3.004 0L6.552 0C7.636 0 8.635 0.584 9.166 1.528L18.457 18.028C19.583 20.028 18.138 22.5 15.843 22.5L12.295 22.5C11.212 22.5 10.213 21.916 9.681 20.972L0.39 4.472C-0.736 2.472 0.709 0 3.004 0Z"
+      />
+    </svg>
+  );
+}
+
 export interface SetupShellProps {
   step: string;
   size?: string;
+  variant?: "steps" | "door";
   children?: ReactNode;
 }
 
-export function SetupShell({ step, size = "regular", children }: SetupShellProps) {
+export function SetupShell({
+  step,
+  size = "regular",
+  variant = "steps",
+  children,
+}: SetupShellProps) {
   const current = RAIL_INDEX[step] || 0;
+  const door = variant === "door";
   const contentClass =
     size === "wide"
       ? " setup-content-wide"
@@ -503,12 +528,13 @@ export function SetupShell({ step, size = "regular", children }: SetupShellProps
         : "";
   return (
     <div className="setup-shell">
-      <aside className="setup-rail" aria-label="Setup progress">
+      <aside className="setup-rail" aria-label={door ? "lana" : "Setup progress"}>
+        {door ? <DoorMark /> : null}
         <div className="setup-rail-top">
           <a
             className="logo-lockup setup-logo"
-            href="#/setup/unlock"
-            aria-label="lana setup"
+            href={door ? "#/login" : "#/setup/unlock"}
+            aria-label={door ? "lana" : "lana setup"}
           >
             <img
               className="logo-mark"
@@ -518,34 +544,43 @@ export function SetupShell({ step, size = "regular", children }: SetupShellProps
             />
             <span className="logo-word">LΛNΛ</span>
           </a>
-          <ol className="setup-steps">
-            {RAIL_STEPS.map((entry, index) => {
-              const state =
-                index < current
-                  ? "complete"
-                  : index === current
-                    ? "current"
-                    : "incomplete";
-              const note =
-                step === "persona" && index === 3
-                  ? "Persona and your profile"
-                  : entry.note;
-              return (
-                <ProgressStep
-                  key={entry.title}
-                  state={state}
-                  title={entry.title}
-                  note={note}
-                  connector={index < RAIL_STEPS.length - 1}
-                />
-              );
-            })}
-          </ol>
+          {door ? null : (
+            <ol className="setup-steps">
+              {RAIL_STEPS.map((entry, index) => {
+                const state =
+                  index < current
+                    ? "complete"
+                    : index === current
+                      ? "current"
+                      : "incomplete";
+                const note =
+                  step === "persona" && index === 3
+                    ? "Persona and your profile"
+                    : entry.note;
+                return (
+                  <ProgressStep
+                    key={entry.title}
+                    state={state}
+                    title={entry.title}
+                    note={note}
+                    connector={index < RAIL_STEPS.length - 1}
+                  />
+                );
+              })}
+            </ol>
+          )}
         </div>
-        <div className="setup-rail-footer">
-          <span className="setup-local">Local only · {setupAddress()}</span>
-          <span className="setup-help">Help</span>
-        </div>
+        {door ? (
+          <p className="rail-place">
+            <strong>lana on this computer</strong>
+            Only this computer can open this page.
+          </p>
+        ) : (
+          <div className="setup-rail-footer">
+            <span className="setup-local">Local only · {setupAddress()}</span>
+            <span className="setup-help">Help</span>
+          </div>
+        )}
       </aside>
       <main id="main" className="setup-main">
         <div className={"setup-content" + contentClass}>{children}</div>

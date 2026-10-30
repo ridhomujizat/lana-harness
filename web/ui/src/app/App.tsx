@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { authSession, logout as apiLogout } from "../api/auth";
-import type { AuthSession } from "../api/auth";
 import { setCSRF, setUnauthorizedHandler } from "../api/client";
 import { daemonInfo as fetchDaemonInfo } from "../api/daemon";
 import type { DaemonInfo } from "../api/daemon";
@@ -19,6 +18,8 @@ import { Sidebar, readCollapsed, saveCollapsed } from "./Sidebar";
 import type { DaemonCard } from "./Sidebar";
 import { useAnnounce } from "../ui/ui";
 import { LoginLoading, LoginPage } from "../views/login";
+import { WelcomePage } from "../views/welcome";
+import { ForgotPage } from "../views/forgot";
 import { HomePage } from "../views/home";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
@@ -66,6 +67,8 @@ function routeContent(
   const params = route.params || {};
   switch (route.view) {
     case "login":
+    case "welcome":
+    case "forgot":
       return (
         <main id="main" className="page">
           <p className="muted">Opening sessions.</p>
@@ -221,7 +224,12 @@ export function App() {
   }, [announce]);
 
   useEffect(() => {
-    if (auth === "loggedIn" && route.view === "login") {
+    if (
+      auth === "loggedIn" &&
+      (route.view === "login" ||
+        route.view === "welcome" ||
+        route.view === "forgot")
+    ) {
       window.location.hash = DEFAULT_ROUTE;
     }
   }, [auth, route.view]);
@@ -290,8 +298,8 @@ export function App() {
     announce(next ? "Sidebar collapsed." : "Sidebar expanded.");
   }
 
-  function loggedIn(session: AuthSession) {
-    setCSRF(session.csrf);
+  function authenticated(csrf: string) {
+    setCSRF(csrf);
     setAuth("loggedIn");
     if (window.location.hash !== DEFAULT_ROUTE) {
       window.location.hash = DEFAULT_ROUTE;
@@ -306,7 +314,7 @@ export function App() {
     }
     setCSRF("");
     setAuth("loggedOut");
-    window.location.hash = "#/setup/unlock";
+    window.location.hash = "#/login";
     announce("Signed out.");
   }
 
@@ -315,7 +323,15 @@ export function App() {
   }
 
   if (auth !== "loggedIn") {
-    return <LoginPage onLoggedIn={loggedIn} />;
+    if (route.view === "welcome") {
+      return (
+        <WelcomePage code={route.params.code} onLoggedIn={authenticated} />
+      );
+    }
+    if (route.view === "forgot") {
+      return <ForgotPage onLoggedIn={authenticated} />;
+    }
+    return <LoginPage onLoggedIn={authenticated} />;
   }
 
   if (route.view === "setup" && route.params.step === "unlock") {

@@ -60,6 +60,8 @@ func run(args []string) int {
 		return cmdSkill(args[1:])
 	case "daemon":
 		return cmdDaemon(args[1:])
+	case "web":
+		return cmdWeb(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command: %s\n", args[0])
 		return 2
@@ -67,7 +69,7 @@ func run(args []string) int {
 }
 
 func help() {
-	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }

@@ -1,12 +1,12 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -90,10 +90,10 @@ func shaHex(data []byte) string {
 
 func newConfigTestServer(t *testing.T, store *testConfigStore) (*Server, *http.Cookie, string) {
 	t.Helper()
-	var stderr bytes.Buffer
-	s := newAuthServer(t, store.home, &stderr)
+	token := authTokenFor(t, store.home)
+	s := newAuthServer(t, store.home, io.Discard)
 	s.SetConfigStore(store)
-	cookie, csrf := loginAndSession(t, s, tokenFromStderr(t, stderr.String()))
+	cookie, csrf := loginAndSession(t, s, token)
 	return s, cookie, csrf
 }
 

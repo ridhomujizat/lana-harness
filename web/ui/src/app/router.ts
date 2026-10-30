@@ -46,6 +46,8 @@ export type RouteView =
   | "settings"
   | "setup"
   | "login"
+  | "welcome"
+  | "forgot"
   | "not-found";
 
 export interface RouteEntry {
@@ -89,6 +91,8 @@ export const ROUTE_TABLE: RouteEntry[] = [
     tabs: [...SETTINGS_TABS, ...LEGACY_SETTINGS_TABS],
   },
   { path: "#/setup/{step}", view: "setup", section: "", steps: SETUP_STEPS },
+  { path: "#/welcome", view: "welcome", section: "" },
+  { path: "#/forgot", view: "forgot", section: "" },
 ];
 
 function safeDecode(part: string): string {
@@ -97,6 +101,19 @@ function safeDecode(part: string): string {
   } catch {
     return part;
   }
+}
+
+/* The sign-in link puts its one-time code in the hash query
+   (#/welcome?code=…). Read it next to the path params. */
+function parseQuery(query: string): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (!query) {
+    return params;
+  }
+  new URLSearchParams(query).forEach((value, key) => {
+    params[key] = value;
+  });
+  return params;
 }
 
 export function matchRoute(
@@ -131,25 +148,34 @@ export function matchRoute(
 
 export function parseRoute(hash: string): Route {
   const raw = String(hash || "").replace(/^#/, "");
-  const parts = raw.split("/").filter(Boolean).map(safeDecode);
+  const queryIndex = raw.indexOf("?");
+  const rawPath = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
+  const query = queryIndex >= 0 ? raw.slice(queryIndex + 1) : "";
+  const queryParams = parseQuery(query);
+  const parts = rawPath.split("/").filter(Boolean).map(safeDecode);
   if (parts.length === 0) {
     return {
       view: "sessions",
       section: "sessions",
-      params: {},
+      params: queryParams,
       path: DEFAULT_ROUTE,
     };
   }
   if (parts.length === 1 && parts[0] === "login") {
     /* Rev 1 login alias; the setup wizard owns #/setup/unlock. */
-    return { view: "login", section: "", params: {}, path: "#/login" };
+    return {
+      view: "login",
+      section: "",
+      params: queryParams,
+      path: "#/login",
+    };
   }
   if (parts.length === 1 && parts[0] === "new") {
     /* Rev 1 new-session alias kept so the sessions list keeps working. */
     return {
       view: "new-session",
       section: "sessions",
-      params: {},
+      params: queryParams,
       path: "#/sessions/new",
     };
   }
@@ -159,7 +185,7 @@ export function parseRoute(hash: string): Route {
       return {
         view: entry.view,
         section: entry.section,
-        params,
+        params: { ...params, ...queryParams },
         path: "#/" + parts.join("/"),
       };
     }
@@ -167,7 +193,7 @@ export function parseRoute(hash: string): Route {
   return {
     view: "not-found",
     section: "",
-    params: {},
+    params: queryParams,
     path: "#/" + parts.join("/"),
   };
 }

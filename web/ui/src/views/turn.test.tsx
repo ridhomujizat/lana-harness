@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildTurns, turnSummary } from "./turn";
+import { buildTurns, turnEndCard, turnSummary } from "./turn";
+import type { TurnStep } from "./turn";
 import type { SessionEvent, EventPayload } from "../api/sessions";
 
 function event(
@@ -44,7 +45,12 @@ describe("buildTurns", () => {
     );
 
     expect(items).toHaveLength(2);
-    expect(items[0]).toEqual({ kind: "user", key: "user-1", text: "hello" });
+    expect(items[0]).toEqual({
+      kind: "user",
+      key: "user-1",
+      text: "hello",
+      continue: false,
+    });
     const turnItem = items[1];
     expect(turnItem?.kind).toBe("turn");
     if (!turnItem || turnItem.kind !== "turn") {
@@ -93,5 +99,61 @@ describe("turnSummary", () => {
       },
     ]);
     expect(summary).toBe("Read 1 file · Running 1 command");
+  });
+});
+
+function step(name: string, stepNumber: number): TurnStep {
+  return {
+    key: "c-" + name,
+    callId: "c-" + name,
+    name,
+    input: null,
+    status: "error",
+    output: "boom",
+    approval: null,
+    step: stepNumber,
+  };
+}
+
+describe("turnEndCard", () => {
+  /* REQ-TFB-004: the plain reason line for each abnormal end. */
+  it("renders the plain reason for cancelled and interrupted", () => {
+    expect(turnEndCard({ stopReason: "cancelled" })?.text).toBe(
+      "Stopped by you."
+    );
+    expect(turnEndCard({ stopReason: "interrupted" })?.text).toBe(
+      "lana restarted while working."
+    );
+  });
+
+  it("renders the error message for an error end", () => {
+    expect(
+      turnEndCard({ stopReason: "error", error: { message: "provider down" } })
+        ?.text
+    ).toBe("Stopped by an error: provider down");
+  });
+
+  it("renders the step limit for a max_steps end", () => {
+    expect(
+      turnEndCard({ stopReason: "max_steps", stepCount: 25 })?.text
+    ).toBe("Stopped after the step limit (25 steps).");
+  });
+
+  it("adds the last step and its number when the turn ran a tool", () => {
+    const card = turnEndCard({
+      stopReason: "interrupted",
+      steps: [step("dbx_list_tables", 4)],
+    });
+    expect(card?.text).toBe("lana restarted while working.");
+    expect(card?.lastStep).toBe("Last step: dbx_list_tables (step 4)");
+  });
+
+  /* AC-TFB-009: a tool failure inside a normal end is the agent's story. */
+  it("returns no card for a normal end even with a failed tool", () => {
+    const card = turnEndCard({
+      stopReason: "end_turn",
+      steps: [step("dbx_list_tables", 1)],
+    });
+    expect(card).toBeNull();
   });
 });

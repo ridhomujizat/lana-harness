@@ -39,12 +39,15 @@ var distFS embed.FS
 type Config struct {
 	Addr    string
 	Enabled bool
-	// Home is the LANA_HOME directory. When it is empty the owner token
-	// store is absent and login always fails.
+	// Home is the LANA_HOME directory. When it is empty the credential store
+	// is absent and login always fails.
 	Home string
-	// Stderr receives the one-time token creation line. A nil writer
-	// discards it.
+	// Stderr receives the one-time sign-in link line. A nil writer discards
+	// it.
 	Stderr io.Writer
+	// OpenBrowser opens the sign-in link on start when no password is set or
+	// a reset was requested ([web] open_browser, default true).
+	OpenBrowser bool
 }
 
 // Server serves the dashboard and the /v1 API from embedded assets.
@@ -55,7 +58,10 @@ type Server struct {
 	mux            *http.ServeMux
 	assets         fs.FS
 	index          []byte
-	token          *tokenStore
+	credentials    *credentialStore
+	signInCodes    *signInCodeStore
+	resetCodes     *resetCodeStore
+	loginLock      *loginLock
 	sessions       *browserSessions
 	backend        Backend
 	configStore    ConfigStore
@@ -64,8 +70,14 @@ type Server struct {
 	skillStore     SkillStore
 	daemon         DaemonStore
 	telegramStatus func() TelegramStatus
+	telegramReset  TelegramResetSender
 	approvals      *Approvals
 	questions      *Questions
+
+	// localSecret authenticates the daemon-only local control endpoint of
+	// API-WLG-008 (lana web reset-login, REQ-WLG-006). It is empty until the
+	// daemon calls SetLocalSecret, and an empty secret rejects every request.
+	localSecret string
 
 	// secretsChanged is set after a successful write to secrets.env and stays
 	// set until the daemon restarts.
@@ -123,17 +135,20 @@ func New(cfg Config) (*Server, error) {
 		stop:      make(chan struct{}),
 		done:      make(chan struct{}),
 	}
+	s.signInCodes = newSignInCodeStore(s.nowTime)
+	s.resetCodes = newResetCodeStore(s.nowTime)
+	s.loginLock = newLoginLock(s.nowTime)
 	if cfg.Enabled {
 		sessions, err := loadBrowserSessions(cfg.Home, s.nowTime())
 		if err != nil {
 			return nil, err
 		}
 		s.sessions = sessions
-		token, err := loadOrCreateToken(cfg.Home, cfg.Stderr)
+		credentials, err := loadCredentials(cfg.Home)
 		if err != nil {
 			return nil, err
 		}
-		s.token = token
+		s.credentials = credentials
 	}
 	s.mux = http.NewServeMux()
 	s.routes()
@@ -156,6 +171,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerToolRoutes()
 	s.registerWebRoutes()
 	s.registerAuditRoutes()
+	s.registerLocalRoutes()
 	s.handler = securityHeaders(s.mux)
 	return s, nil
 }
@@ -320,7 +336,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.serveIndex)
 	s.mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.HandlerFunc(s.serveAsset)))
 	s.mux.HandleFunc("/", http.NotFound)
+	// The auth endpoints of spec #18. state, claim, login, and the reset calls
+	// are unauthenticated (an owner has no session yet); they keep the Host and
+	// Origin checks.
+	s.mux.Handle("GET /v1/auth/state", s.checkHost(http.HandlerFunc(s.handleAuthState)))
+	s.mux.Handle("POST /v1/auth/claim", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleClaim))))
 	s.mux.Handle("POST /v1/auth/login", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleLogin))))
+	s.mux.Handle("POST /v1/auth/reset/telegram", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetTelegram))))
+	s.mux.Handle("POST /v1/auth/reset/verify", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetVerify))))
+	s.mux.Handle("POST /v1/auth/reset/restart", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetRestart))))
+	s.mux.Handle("POST /v1/auth/password", s.authenticate(http.HandlerFunc(s.handleChangePassword)))
 	s.mux.Handle("POST /v1/auth/logout", s.authenticate(http.HandlerFunc(s.handleLogout)))
 	s.mux.Handle("GET /v1/auth/session", s.checkHost(s.requireSession(http.HandlerFunc(s.handleSession))))
 	s.mux.Handle("GET /v1/auth/sessions", s.authenticate(http.HandlerFunc(s.handleBrowserSessions)))

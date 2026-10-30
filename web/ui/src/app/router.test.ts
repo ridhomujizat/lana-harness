@@ -24,6 +24,8 @@ const ROUTES = [
   "#/channels/telegram",
   "#/settings/{tab}",
   "#/setup/{step}",
+  "#/welcome",
+  "#/forgot",
 ];
 
 const SEGMENTS = [
@@ -84,6 +86,15 @@ describe("route table", () => {
     const skill = parseRoute("#/skills/global/review");
     expect(skill.view).toBe("skill");
     expect(skill.params).toEqual({ scope: "global", name: "review" });
+  });
+
+  it("parses the sign-in code from the hash query", () => {
+    const welcome = parseRoute("#/welcome?code=abc123");
+    expect(welcome.view).toBe("welcome");
+    expect(welcome.params).toEqual({ code: "abc123" });
+
+    expect(parseRoute("#/welcome").view).toBe("welcome");
+    expect(parseRoute("#/forgot").view).toBe("forgot");
   });
 
   it("maps unknown routes to not-found", () => {

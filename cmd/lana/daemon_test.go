@@ -539,7 +539,7 @@ func TestDaemonCancelsRunningTurn(t *testing.T) {
 	case <-time.After(shutdownGrace + time.Second):
 		t.Fatal("daemon did not stop")
 	}
-	tg.waitText(t, "⊘ cancelled")
+	tg.waitText(t, "⊘ Stopped by you.")
 	if _, err := os.Stat(filepath.Join(home, "daemon.lock")); !os.IsNotExist(err) {
 		t.Fatalf("lock file left: %v", err)
 	}
