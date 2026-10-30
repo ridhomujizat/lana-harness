@@ -100,6 +100,10 @@ Each row is one route, the screen file that shows it, and the API operations the
 | 6 | Sessions channel facet: Web, CLI, Telegram | Same. Library sessions have no chip | `Q-023` |
 | 7 | Telegram card "Connected" with "N chats" | A Telegram config needs at least one route (G-21). Zero chats shows "Token found, add a chat" | Existing config rule (`channels/telegram/config.go`) |
 | 8 | ADR 0008 lists cron and approvals pages (see ADR) | Not in the mockup; not built | Owner brief IA. Cron is spec #8 (not written) |
+| 9 | Sidebar 280 px with 40 px nav items; session list 360 px with three-line rows and pill badges | Sidebar 240 px with 32 px nav items and 20 px icons; session list 280 px with 72 px rows (meta line "agent · channel", title, one-line preview) | Owner testing feedback, 2026-10-30 (`REQ-WEB-030`) |
+| 10 | Type scale: nav 16 px, body 14–16 px, page titles up to 30 px | Compact scale: body and nav 14 px, labels and tables 13 px, meta 12 px, page titles 20 px; paddings about 15–20% smaller | Owner testing feedback, 2026-10-30: the mockup scale felt too large on a laptop screen |
+| 11 | Composer with a fixed tall text area | Text area starts at 2 lines and grows to 8; chat column 760 px | Owner testing feedback, 2026-10-30 |
+| 12 | Assistant text shown as plain text | Markdown rendered (`REQ-WEB-057`) | Owner testing feedback, 2026-10-30 |
 
 
 ## Architecture decision scan
