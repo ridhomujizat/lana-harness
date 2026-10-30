@@ -29,6 +29,39 @@ func acceptedAssetContentTypes(name string) []string {
 	}
 }
 
+// assetURL maps a file in the embedded dist tree to the URL the server
+// exposes for it. The dashboard is served at "/" and its files under the
+// "/assets/" prefix, as before the React build.
+func assetURL(name string) string {
+	rel := strings.TrimPrefix(name, "dist/")
+	if rel == "index.html" {
+		return "/"
+	}
+	return "/assets/" + rel
+}
+
+// indexAssetRefs returns every /assets/ URL referenced by an index.html src
+// or href attribute.
+func indexAssetRefs(index []byte) []string {
+	re := regexp.MustCompile(`(?i)(?:src|href)\s*=\s*"(/assets/[^"]*)"`)
+	var refs []string
+	for _, match := range re.FindAllStringSubmatch(string(index), -1) {
+		refs = append(refs, match[1])
+	}
+	return refs
+}
+
+// indexAssetRef returns the first /assets/ URL in index whose path ends with
+// ext, or the empty string.
+func indexAssetRef(index []byte, ext string) string {
+	for _, ref := range indexAssetRefs(index) {
+		if strings.HasSuffix(strings.ToLower(ref), ext) {
+			return ref
+		}
+	}
+	return ""
+}
+
 func TestEmbeddedAssetsLoad(t *testing.T) {
 	s, err := New(Config{Addr: "127.0.0.1:0", Enabled: true})
 	if err != nil {
@@ -38,7 +71,7 @@ func TestEmbeddedAssetsLoad(t *testing.T) {
 	defer ts.Close()
 
 	var files []string
-	err = fs.WalkDir(assetsFS, "assets", func(name string, entry fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(distFS, "dist", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -53,23 +86,32 @@ func TestEmbeddedAssetsLoad(t *testing.T) {
 	}
 	sort.Strings(files)
 	if len(files) == 0 {
-		t.Fatal("no embedded assets found")
+		t.Fatal("no embedded dist files found")
 	}
-	hasTokens := false
-	iconCount := 0
+	hasIndex := false
+	jsCount := 0
+	cssCount := 0
 	for _, name := range files {
-		if name == "assets/tokens.css" {
-			hasTokens = true
+		if name == "dist/index.html" {
+			hasIndex = true
 		}
-		if strings.HasPrefix(name, "assets/icons/") && strings.HasSuffix(name, ".svg") {
-			iconCount++
+		if strings.HasPrefix(name, "dist/assets/") {
+			switch strings.ToLower(path.Ext(name)) {
+			case ".js":
+				jsCount++
+			case ".css":
+				cssCount++
+			}
 		}
 	}
-	if !hasTokens {
-		t.Fatal("assets/tokens.css is not embedded")
+	if !hasIndex {
+		t.Fatal("dist/index.html is not embedded")
 	}
-	if iconCount != 27 {
-		t.Fatalf("embedded icons = %d, want the 27 files of design/export/icons", iconCount)
+	if jsCount == 0 {
+		t.Fatal("dist/assets has no .js file")
+	}
+	if cssCount == 0 {
+		t.Fatal("dist/assets has no .css file")
 	}
 
 	for _, name := range files {
@@ -77,17 +119,18 @@ func TestEmbeddedAssetsLoad(t *testing.T) {
 		if len(wantTypes) == 0 {
 			t.Fatalf("%s has no expected Content-Type mapping", name)
 		}
-		resp, err := http.Get(ts.URL + "/" + name)
+		url := assetURL(name)
+		resp, err := http.Get(ts.URL + url)
 		if err != nil {
-			t.Fatalf("GET /%s: %v", name, err)
+			t.Fatalf("GET %s: %v", url, err)
 		}
 		body := readBody(t, resp)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("GET /%s status = %d", name, resp.StatusCode)
+			t.Fatalf("GET %s status = %d", url, resp.StatusCode)
 		}
 		if body == "" {
-			t.Fatalf("GET /%s returned an empty body", name)
+			t.Fatalf("GET %s returned an empty body", url)
 		}
 		got := resp.Header.Get("Content-Type")
 		matched := false
@@ -98,11 +141,11 @@ func TestEmbeddedAssetsLoad(t *testing.T) {
 			}
 		}
 		if !matched {
-			t.Fatalf("GET /%s Content-Type = %q, want one of %v", name, got, wantTypes)
+			t.Fatalf("GET %s Content-Type = %q, want one of %v", url, got, wantTypes)
 		}
 	}
 
-	indexAsset, err := fs.ReadFile(assetsFS, "assets/index.html")
+	indexAsset, err := fs.ReadFile(distFS, "dist/index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +159,7 @@ func TestEmbeddedAssetsLoad(t *testing.T) {
 		t.Fatalf("GET / status = %d", resp.StatusCode)
 	}
 	if body != string(indexAsset) {
-		t.Fatal("GET / does not serve assets/index.html")
+		t.Fatal("GET / does not serve dist/index.html")
 	}
 	assertCSPAllowsShell(t, resp.Header.Get("Content-Security-Policy"))
 }
@@ -153,7 +196,7 @@ func assertCSPAllowsShell(t *testing.T, csp string) {
 	for _, name := range []string{"script-src", "style-src", "img-src", "connect-src", "font-src"} {
 		directive, present := cspDirective(csp, name)
 		if present && !strings.Contains(directive, "'self'") {
-			t.Fatalf("Content-Security-Policy %s does not permit same-origin shell resources: %q", name, csp)
+			t.Fatalf("Content-Security-Policy %s does not permit same-origin shell resources: %q", name, directive)
 		}
 	}
 }
@@ -167,28 +210,20 @@ func attrValue(attrs, name string) string {
 	return ""
 }
 
+// TestIndexHTMLReferencesOnlyAssets checks the built index.html: every
+// resource it loads is under /assets/ and no script carries an inline body
+// (the CSP is default-src 'self').
 func TestIndexHTMLReferencesOnlyAssets(t *testing.T) {
-	s, err := New(Config{Addr: "127.0.0.1:0", Enabled: true})
+	data, err := fs.ReadFile(distFS, "dist/index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(s.Handler())
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := readBody(t, resp)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET / status = %d", resp.StatusCode)
-	}
+	body := string(data)
 
 	scriptRE := regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script>`)
 	scripts := scriptRE.FindAllStringSubmatch(body, -1)
-	if len(scripts) != 1 {
-		t.Fatalf("index has %d scripts, want 1", len(scripts))
+	if len(scripts) == 0 {
+		t.Fatal("index has no scripts")
 	}
 	for _, script := range scripts {
 		attrs := script[1]
@@ -207,179 +242,79 @@ func TestIndexHTMLReferencesOnlyAssets(t *testing.T) {
 		}
 	}
 
-	linkRE := regexp.MustCompile(`(?is)<link\b([^>]*)>`)
-	var hrefs []string
-	for _, link := range linkRE.FindAllStringSubmatch(body, -1) {
-		attrs := link[1]
-		href := attrValue(attrs, "href")
-		if href == "" {
-			t.Fatalf("index link has no href: %q", attrs)
+	// Every element that loads a resource (stylesheet, image, media, frame)
+	// must point at the /assets/ prefix.
+	resourceRE := regexp.MustCompile(`(?is)<(?:link|img|source|video|audio|iframe|object|embed)\b([^>]*)>`)
+	for _, element := range resourceRE.FindAllStringSubmatch(body, -1) {
+		attrs := element[1]
+		found := false
+		for _, name := range []string{"href", "src", "poster", "data"} {
+			value := attrValue(attrs, name)
+			if value == "" {
+				continue
+			}
+			found = true
+			if !strings.HasPrefix(value, "/assets/") {
+				t.Fatalf("index %s = %q, want an /assets/ path", name, value)
+			}
 		}
-		if !strings.HasPrefix(href, "/assets/") {
-			t.Fatalf("index stylesheet href = %q, want an /assets/ path", href)
+		if !found {
+			t.Fatalf("index element loads no resource: %q", attrs)
 		}
-		if strings.Contains(strings.ToLower(attrs), "style=") {
-			t.Fatal("index link has an inline style attribute")
-		}
-		hrefs = append(hrefs, href)
-	}
-	if len(hrefs) == 0 || hrefs[0] != "/assets/tokens.css" {
-		t.Fatalf("index stylesheets = %v, want /assets/tokens.css first", hrefs)
-	}
-	foundAppCSS := false
-	for _, href := range hrefs {
-		if href == "/assets/app.css" {
-			foundAppCSS = true
-			break
-		}
-	}
-	if !foundAppCSS {
-		t.Fatalf("index stylesheets = %v, want /assets/app.css", hrefs)
 	}
 
 	if strings.Contains(strings.ToLower(body), `style="`) {
 		t.Fatal("index contains an inline style attribute")
 	}
-	if got := strings.Count(strings.ToLower(body), "aria-live"); got != 1 {
-		t.Fatalf("index has %d aria-live regions, want exactly 1", got)
-	}
 }
 
-func isShellAsset(name string) bool {
-	if strings.HasPrefix(name, "assets/vendor/") || strings.HasPrefix(name, "assets/icons/") {
-		return false
-	}
-	if name == "assets/index.html" {
-		return true
-	}
-	return strings.HasSuffix(name, ".js") || strings.HasSuffix(name, ".css")
-}
-
-func TestOwnAssetsHaveNoExternalURLs(t *testing.T) {
-	externalURL := regexp.MustCompile(`(?i)https?://`)
-	protocolRelative := regexp.MustCompile(`(?i)(?:src|href)\s*=\s*["']//|["']//[a-z0-9]`)
-	err := fs.WalkDir(assetsFS, "assets", func(name string, entry fs.DirEntry, walkErr error) error {
+func assertAssetsHaveNoMatches(t *testing.T, dir, ext string, patterns map[string]*regexp.Regexp) {
+	t.Helper()
+	seen := 0
+	err := fs.WalkDir(distFS, dir, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !isShellAsset(name) {
+		if entry.IsDir() || !strings.EqualFold(path.Ext(name), ext) {
 			return nil
 		}
-		data, err := fs.ReadFile(assetsFS, name)
+		seen++
+		data, err := fs.ReadFile(distFS, name)
 		if err != nil {
 			return err
 		}
 		text := string(data)
-		if loc := externalURL.FindString(text); loc != "" {
-			t.Fatalf("%s contains an external URL: %q", name, loc)
-		}
-		if loc := protocolRelative.FindString(text); loc != "" {
-			t.Fatalf("%s contains a protocol-relative URL: %q", name, loc)
+		for form, re := range patterns {
+			if loc := re.FindString(text); loc != "" {
+				t.Fatalf("%s contains an external %s target: %q", name, form, loc)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestShellRoutesMatchRequirement(t *testing.T) {
-	data, err := fs.ReadFile(assetsFS, "assets/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(data)
-	routes := []string{
-		"#/home",
-		"#/sessions",
-		"#/sessions/new",
-		"#/sessions/{id}",
-		"#/agents",
-		"#/agents/{name}/{tab}",
-		"#/skills",
-		"#/skills/{scope}/{name}",
-		"#/skills/new",
-		"#/mcp",
-		"#/mcp/{name}",
-		"#/channels",
-		"#/channels/telegram",
-		"#/settings/{tab}",
-		"#/setup/{step}",
-	}
-	for _, route := range routes {
-		if !strings.Contains(source, `"`+route+`"`) {
-			t.Fatalf("app.js route table is missing %s", route)
-		}
-	}
-	segments := []string{
-		"general", "persona", "tools", "skills", "mcp", "rules", "workspace",
-		"providers", "secrets", "config", "audit",
-		"unlock", "provider", "connect", "agent", "ready",
-	}
-	for _, segment := range segments {
-		if !strings.Contains(source, `"`+segment+`"`) {
-			t.Fatalf("app.js route table is missing the %q segment", segment)
-		}
-	}
-	if !strings.Contains(source, "not-found") {
-		t.Fatal("app.js has no not-found route state")
+	if seen == 0 {
+		t.Fatalf("%s has no %s files to check", dir, ext)
 	}
 }
 
-func TestHomeViewIsTheEmptyState(t *testing.T) {
-	data, err := fs.ReadFile(assetsFS, "assets/views/home.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := string(data)
-	for _, want := range []string{"Home is coming soon", "Go to sessions", "#/sessions"} {
-		if !strings.Contains(source, want) {
-			t.Fatalf("views/home.js does not contain %q", want)
-		}
-	}
+// TestCSSAssetsHaveNoExternalURLs checks that the extracted CSS loads no
+// external resource through url() or @import.
+func TestCSSAssetsHaveNoExternalURLs(t *testing.T) {
+	assertAssetsHaveNoMatches(t, "dist/assets", ".css", map[string]*regexp.Regexp{
+		"url()":   regexp.MustCompile(`(?i)url\(\s*["']?\s*(?:https?:)?//`),
+		"@import": regexp.MustCompile(`(?i)@import\s+(?:url\(\s*)?["']?\s*(?:https?:)?//`),
+	})
 }
 
-func TestShellPersistsThemeAndSidebarState(t *testing.T) {
-	app, err := fs.ReadFile(assetsFS, "assets/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	theme, err := fs.ReadFile(assetsFS, "assets/theme.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	appSource := string(app)
-	themeSource := string(theme)
-	for _, want := range []string{"localStorage", "lana.sidebar", "readCollapsed", "saveCollapsed"} {
-		if !strings.Contains(appSource, want) {
-			t.Fatalf("app.js does not persist the sidebar state with %q", want)
-		}
-	}
-	for _, want := range []string{"localStorage", "lana.theme", "prefers-color-scheme", "data-theme"} {
-		if !strings.Contains(themeSource, want) {
-			t.Fatalf("theme.js does not apply the stored theme with %q", want)
-		}
-	}
-}
-
-func TestVendoredPreactOnlyHasTheSVGNamespaceURL(t *testing.T) {
-	data, err := fs.ReadFile(assetsFS, "assets/vendor/preact-htm.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	const svgNamespace = "http://www.w3.org/2000/svg"
-	text := string(data)
-	if !strings.Contains(text, svgNamespace) {
-		t.Fatal("vendored preact-htm.js does not contain the expected SVG namespace")
-	}
-	lines := strings.Split(text, "\n")
-	if len(lines) > 1 {
-		// The first line is the upstream attribution comment. It names the
-		// npm package URL and is part of the unmodified vendored file.
-		text = strings.Join(lines[1:], "\n")
-	}
-	text = strings.ReplaceAll(text, svgNamespace, "")
-	if loc := regexp.MustCompile(`(?i)https?://`).FindString(text); loc != "" {
-		t.Fatalf("vendored preact-htm.js has an unexpected external URL: %q", loc)
-	}
+// TestJSAssetsHaveNoExternalTargets checks the three call forms that load a
+// resource at runtime: dynamic import(), src= assignment, and fetch().
+// Plain string literals such as the React error-doc links are allowed.
+func TestJSAssetsHaveNoExternalTargets(t *testing.T) {
+	assertAssetsHaveNoMatches(t, "dist/assets", ".js", map[string]*regexp.Regexp{
+		"import()": regexp.MustCompile("(?i)\\bimport\\(\\s*[\"'`]\\s*(?:https?:)?//"),
+		"src=":     regexp.MustCompile("(?i)\\bsrc\\s*=\\s*[\"'`]\\s*(?:https?:)?//"),
+		"fetch()":  regexp.MustCompile("(?i)\\bfetch\\(\\s*[\"'`]\\s*(?:https?:)?//"),
+	})
 }

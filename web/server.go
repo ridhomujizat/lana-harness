@@ -32,8 +32,8 @@ const (
 	defaultStreamPoll        = time.Second
 )
 
-//go:embed assets
-var assetsFS embed.FS
+//go:embed dist
+var distFS embed.FS
 
 // Config is the [web] table of the effective config.
 type Config struct {
@@ -102,18 +102,18 @@ func New(cfg Config) (*Server, error) {
 		cfg.Stderr = io.Discard
 	}
 
-	assets, err := fs.Sub(assetsFS, "assets")
+	dist, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, fmt.Errorf("web: open assets: %w", err)
 	}
-	index, err := fs.ReadFile(assets, "index.html")
+	index, err := fs.ReadFile(dist, "index.html")
 	if err != nil {
 		return nil, fmt.Errorf("web: read index.html: %w", err)
 	}
 	s := &Server{
 		cfg:       cfg,
 		logger:    slog.Default(),
-		assets:    assets,
+		assets:    dist,
 		index:     index,
 		sessions:  newBrowserSessions(""),
 		approvals: newApprovals(),

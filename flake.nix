@@ -17,6 +17,7 @@
             gopls
             golangci-lint
             sqlite
+            nodejs_22
             gnumake
             git
             github-mcp-server

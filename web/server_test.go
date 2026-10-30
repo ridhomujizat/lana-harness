@@ -5,12 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"regexp"
+	"path"
 	"strings"
 	"syscall"
 	"testing"
@@ -48,13 +47,17 @@ func TestWebServerSecurityHeaders(t *testing.T) {
 		t.Fatalf("dashboard Cache-Control = %q", got)
 	}
 
-	asset, err := http.Get(ts.URL + "/assets/app.css")
+	css := indexAssetRef(s.index, ".css")
+	if css == "" {
+		t.Fatal("index references no stylesheet")
+	}
+	asset, err := http.Get(ts.URL + css)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = asset.Body.Close() }()
 	if asset.StatusCode != http.StatusOK {
-		t.Fatalf("GET /assets/app.css status = %d", asset.StatusCode)
+		t.Fatalf("GET %s status = %d", css, asset.StatusCode)
 	}
 	if got := asset.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/css") {
 		t.Fatalf("asset Content-Type = %q", got)
@@ -93,68 +96,56 @@ func TestWebServerAssets(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body := readBody(t, resp)
-	for _, want := range []string{"<title>lana</title>", `href="/assets/app.css"`, `src="/assets/app.js"`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("index does not contain %q:\n%s", want, body)
+	if !strings.Contains(body, "<title>lana</title>") {
+		t.Fatalf("index does not contain the title:\n%s", body)
+	}
+	refs := indexAssetRefs([]byte(body))
+	var scripts, styles []string
+	for _, ref := range refs {
+		switch strings.ToLower(path.Ext(ref)) {
+		case ".js":
+			scripts = append(scripts, ref)
+		case ".css":
+			styles = append(styles, ref)
 		}
 	}
+	if len(scripts) == 0 || len(styles) == 0 {
+		t.Fatalf("index asset refs = %v, want at least one script and stylesheet", refs)
+	}
 
-	for _, path := range []string{"/assets/app.css", "/assets/app.js"} {
-		resp, err := http.Get(ts.URL + path)
+	for _, assetPath := range refs {
+		resp, err := http.Get(ts.URL + assetPath)
 		if err != nil {
 			t.Fatal(err)
 		}
 		body := readBody(t, resp)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK || body == "" {
-			t.Fatalf("GET %s status = %d, body = %q", path, resp.StatusCode, body)
+			t.Fatalf("GET %s status = %d, body = %q", assetPath, resp.StatusCode, body)
+		}
+		wantTypes := acceptedAssetContentTypes(assetPath)
+		got := resp.Header.Get("Content-Type")
+		matched := false
+		for _, want := range wantTypes {
+			if strings.HasPrefix(strings.ToLower(got), want) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("GET %s Content-Type = %q, want one of %v", assetPath, got, wantTypes)
 		}
 	}
 
-	for _, path := range []string{"/assets/missing.js", "/assets/"} {
-		resp, err := http.Get(ts.URL + path)
+	for _, assetPath := range []string{"/assets/missing.js", "/assets/"} {
+		resp, err := http.Get(ts.URL + assetPath)
 		if err != nil {
 			t.Fatal(err)
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusNotFound {
-			t.Fatalf("GET %s status = %d", path, resp.StatusCode)
+			t.Fatalf("GET %s status = %d", assetPath, resp.StatusCode)
 		}
-	}
-}
-
-func TestWebAssetsSelfContained(t *testing.T) {
-	external := regexp.MustCompile(`(?i)https?://|//`)
-	inlineScript := regexp.MustCompile(`(?is)<script(?:\s[^>]*)?>(.+?)</script>`)
-
-	err := fs.WalkDir(assetsFS, "assets", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() {
-			return err
-		}
-		// Vendored upstream files keep their own attribution and license
-		// URLs. The test below only scans the assets this repository owns.
-		if strings.HasPrefix(path, "assets/vendor/") {
-			return nil
-		}
-		data, err := fs.ReadFile(assetsFS, path)
-		if err != nil {
-			return err
-		}
-		text := string(data)
-		if loc := external.FindString(text); loc != "" {
-			t.Fatalf("%s contains an external or protocol-relative URL: %q", path, loc)
-		}
-		if strings.HasSuffix(path, ".html") {
-			for _, match := range inlineScript.FindAllStringSubmatch(text, -1) {
-				if strings.TrimSpace(match[1]) != "" {
-					t.Fatalf("%s contains an inline script", path)
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 

@@ -1,0 +1,429 @@
+import type { SessionEvent } from "../api/sessions";
+
+export interface HistoryItem {
+  key: string;
+  type: string;
+  label?: string;
+  text?: string;
+  name?: string;
+  input?: unknown;
+  status?: string;
+  detail?: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function stringOf(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+export function prettyJSON(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function asObject(input: unknown): Record<string, unknown> {
+  if (!input) {
+    return {};
+  }
+  if (typeof input === "string") {
+    try {
+      const parsed: unknown = JSON.parse(input);
+      return parsed && typeof parsed === "object"
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof input === "object") {
+    return input as Record<string, unknown>;
+  }
+  return {};
+}
+
+function firstString(
+  source: Record<string, unknown>,
+  keys: string[]
+): string {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "string" && value !== "") {
+      return value;
+    }
+  }
+  return "";
+}
+
+function collapse(text: string): string {
+  return String(text || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function primaryArg(name: string, input: unknown): string {
+  const value = asObject(input);
+  let raw = "";
+  switch (name) {
+    case "bash":
+      raw = firstString(value, ["command"]);
+      break;
+    case "read_file":
+    case "write_file":
+    case "edit_file":
+      raw = firstString(value, ["path", "file_path"]);
+      break;
+    case "glob":
+    case "grep":
+      raw = firstString(value, ["pattern"]);
+      break;
+    case "web_fetch":
+      raw = firstString(value, ["url"]);
+      break;
+    case "task": {
+      const agent = firstString(value, ["agent"]);
+      const title = firstString(value, ["title"]);
+      raw = (agent + " · " + title).trim();
+      break;
+    }
+    case "memory_read":
+      raw = firstString(value, ["target"]);
+      break;
+    case "memory_write": {
+      const action = firstString(value, ["action"]);
+      const target = firstString(value, ["target"]);
+      raw = (action + " " + target).trim();
+      break;
+    }
+    default:
+      if (input) {
+        raw = typeof input === "string" ? input : JSON.stringify(input) || "";
+      }
+      break;
+  }
+  return collapse(raw);
+}
+
+export function cut(text: unknown, limit: number): string {
+  const runes = Array.from(String(text || ""));
+  if (runes.length <= limit) {
+    return String(text || "");
+  }
+  if (limit < 1) {
+    return "";
+  }
+  return runes.slice(0, limit - 1).join("") + "…";
+}
+
+export function toolStatusWord(status: unknown): string {
+  const value = String(status || "").toLowerCase();
+  switch (value) {
+    case "":
+      return "running";
+    case "success":
+    case "ok":
+      return "ok";
+    case "canceled":
+    case "cancelled":
+      return "cancelled";
+    case "error":
+      return "error";
+    case "rejected":
+      return "rejected";
+    case "running":
+      return "running";
+    default:
+      return value;
+  }
+}
+
+export function toolLine(
+  name: string,
+  input: unknown,
+  status: unknown
+): string {
+  const parts = [name || "tool"];
+  const arg = cut(primaryArg(name, input), 60);
+  if (arg) {
+    parts.push(arg);
+  }
+  parts.push("· " + toolStatusWord(status));
+  return parts.join(" ");
+}
+
+export function contentText(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  const pieces: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const value = block as Record<string, unknown>;
+    if (
+      value.type === "text" &&
+      typeof value.text === "string" &&
+      value.text !== ""
+    ) {
+      pieces.push(value.text);
+    }
+  }
+  return pieces.join("\n");
+}
+
+export function outcomeWords(outcome: unknown): string {
+  switch (outcome) {
+    case "allowed_once":
+      return "Allowed once";
+    case "allowed_session":
+      return "Allowed for session";
+    case "rejected":
+      return "Rejected";
+    case "cancelled":
+      return "Cancelled";
+    case "unavailable":
+      return "Unavailable";
+    default:
+      return outcome ? String(outcome) : "Unknown";
+  }
+}
+
+export function stopReasonWords(reason: unknown): string {
+  switch (reason) {
+    case "end_turn":
+      return "end of turn";
+    case "max_steps":
+      return "maximum steps reached";
+    case "cancelled":
+      return "cancelled";
+    case "error":
+      return "error";
+    default:
+      return reason ? String(reason) : "unknown";
+  }
+}
+
+export function formatTime(ms: unknown): string {
+  if (!ms) {
+    return "unknown";
+  }
+  const date = new Date(Number(ms));
+  if (Number.isNaN(date.getTime())) {
+    return "unknown";
+  }
+  return date.toLocaleString();
+}
+
+export function sessionStatusText(status: unknown): string {
+  const value = String(status || "");
+  if (value === "idle") {
+    return "Idle";
+  }
+  if (value === "running") {
+    return "Running";
+  }
+  if (!value) {
+    return "Unknown";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+export function inUseText(row: {
+  in_use?: string;
+  holder_pid?: number | null;
+} | null): string {
+  if (!row) {
+    return "Not in use";
+  }
+  if (row.in_use === "other") {
+    const pid = Number(row.holder_pid);
+    return Number.isInteger(pid) && pid > 0
+      ? "In use by another process (PID " + pid + ")"
+      : "In use by another process";
+  }
+  if (row.in_use === "self") {
+    return "In use by this daemon";
+  }
+  return "Not in use";
+}
+
+export function holderText(holder: unknown, pid: unknown): string {
+  if (holder === "other") {
+    return Number.isInteger(pid) && Number(pid) > 0
+      ? "another process (PID " + pid + ")"
+      : "another process";
+  }
+  if (holder === "self") {
+    return "this daemon";
+  }
+  return "no process";
+}
+
+export function buildHistory(
+  events: SessionEvent[] | null | undefined
+): HistoryItem[] {
+  const items: HistoryItem[] = [];
+  const results = new Map<string, unknown>();
+  const callIds = new Set<string>();
+
+  for (const event of events || []) {
+    const payload = asRecord(event.payload);
+    const callId = stringOf(payload.call_id);
+    if (event.kind === "tool/call" && callId) {
+      callIds.add(callId);
+    }
+    if (event.kind === "tool/result" && callId) {
+      results.set(callId, payload.status);
+    }
+  }
+
+  for (const event of events || []) {
+    const payload = asRecord(event.payload);
+    const key = String(event.seq);
+    switch (event.kind) {
+      case "session/created":
+        items.push({
+          key,
+          type: "decision",
+          label: "Session created",
+          text:
+            "Agent: " +
+            (stringOf(payload.agent) || "unknown") +
+            " · Channel: " +
+            (stringOf(payload.channel) || "unknown"),
+        });
+        break;
+      case "user/message": {
+        const text = contentText(payload.content);
+        if (text) {
+          items.push({ key, type: "user", label: "You", text });
+        }
+        break;
+      }
+      case "assistant/message": {
+        const text = contentText(payload.content);
+        if (text) {
+          items.push({ key, type: "assistant", label: "Assistant", text });
+        }
+        break;
+      }
+      case "tool/call":
+        items.push({
+          key,
+          type: "tool",
+          name: stringOf(payload.name) || "tool",
+          input: payload.input,
+          status: results.has(stringOf(payload.call_id))
+            ? String(results.get(stringOf(payload.call_id)))
+            : "running",
+        });
+        break;
+      case "tool/result":
+        if (!payload.call_id || !callIds.has(stringOf(payload.call_id))) {
+          items.push({
+            key,
+            type: "tool",
+            name: "Tool result",
+            input: null,
+            status: stringOf(payload.status),
+          });
+        }
+        break;
+      case "approval/asked":
+        items.push({
+          key,
+          type: "decision",
+          label: "Approval requested",
+          text:
+            (stringOf(payload.tool) || "tool") +
+            " · risk: " +
+            (stringOf(payload.risk) || "unknown") +
+            (payload.label ? " · " + stringOf(payload.label) : ""),
+        });
+        break;
+      case "approval/decided":
+        items.push({
+          key,
+          type: "decision",
+          label: "Approval decided",
+          text:
+            outcomeWords(payload.outcome) +
+            (payload.reason ? " · reason: " + stringOf(payload.reason) : ""),
+        });
+        break;
+      case "approval/policy":
+        items.push({
+          key,
+          type: "decision",
+          label: "Policy changed",
+          text: "Policy: " + (stringOf(payload.policy) || "unknown"),
+        });
+        break;
+      case "model/selection":
+        items.push({
+          key,
+          type: "decision",
+          label: "Model changed",
+          text:
+            (stringOf(payload.provider) || "unknown") +
+            ":" +
+            (stringOf(payload.model) || "unknown") +
+            (payload.agent ? " · agent: " + stringOf(payload.agent) : ""),
+        });
+        break;
+      case "compaction/summary":
+        items.push({
+          key,
+          type: "summary",
+          label: "Compaction",
+          text: stringOf(payload.summary) || "Compaction summary",
+          detail:
+            "Tokens " +
+            (payload.tokens_before === undefined
+              ? "?"
+              : String(payload.tokens_before)) +
+            " to " +
+            (payload.tokens_after === undefined
+              ? "?"
+              : String(payload.tokens_after)),
+        });
+        break;
+      case "turn/end":
+        items.push({
+          key,
+          type: "turn",
+          label: "Turn",
+          text:
+            "Ended: " +
+            stopReasonWords(payload.reason) +
+            (asRecord(payload.error).message
+              ? " · " + stringOf(asRecord(payload.error).message)
+              : ""),
+        });
+        break;
+      case "system/message":
+        if (payload.text) {
+          items.push({
+            key,
+            type: "system",
+            label: "System",
+            text: stringOf(payload.text),
+          });
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return items;
+}
