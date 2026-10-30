@@ -1,0 +1,142 @@
+# Settings / Settings – Config file (frame 12494)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Settings – Config file" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-primary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Title" col gap=4 f1096xh60
+        text "Settings" 24/32 Semibold color=--text-primary
+        text "Providers, secrets and the daemon. Agents, skills, MCP and channels have their own pages." 16/24 Regular color=--text-tertiary
+    frame "Tabs" row gap=20 f1096xh35 border=--border-secondary
+      frame "General" row gap=0 pad=0,4,12,4 h61xh32
+        text "General" 14/20 Semibold color=--text-quaternary
+      frame "Providers" row gap=0 pad=0,4,12,4 h73xh32
+        text "Providers" 14/20 Semibold color=--text-quaternary
+      frame "Secrets" row gap=0 pad=0,4,12,4 h60xh32
+        text "Secrets" 14/20 Semibold color=--text-quaternary
+      frame "Config file" row gap=0 pad=0,4,12,4 h79xh34 border=--border-brand-solid
+        text "Config file" 14/20 Semibold color=--text-brand-secondary
+      frame "Audit log" row gap=0 pad=0,4,12,4 h69xh32
+        text "Audit log" 14/20 Semibold color=--text-quaternary
+    frame "Banner" row gap=12 pad=12,16,12,16 cross=center f1096xh62 bg=--bg-warning-primary radius=12
+      ellipse 8x8 bg=--fg-warning-primary
+      text "Saved 2 min ago. Restart the daemon for the saved changes to take effect." 14/20 Medium color=--text-warning-primary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Restart daemon"} row gap=6 pad=8,12,8,12 main=center cross=center h134xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Restart daemon" 14/20 Semibold color=--text-secondary
+    frame "Editor header" row gap=8 cross=center f1096xh36
+      text "~/.lana/config.toml" 13/20 Regular Menlo color=--text-secondary
+      text "· validated on save · comments kept · secret values show as ***" 14/20 Regular color=--text-tertiary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Save config.toml"} row gap=6 pad=8,12,8,12 main=center cross=center h138xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Save config.toml" 14/20 Semibold color=--text-white
+    frame "Editor" row gap=0 f1096xf671 bg=--bg-primary border=--border-primary radius=12 shadow
+      frame "Gutter" col gap=0 pad=14,10,14,14 cross=max f52xf669 bg=--bg-secondary
+        text "1" 12/20 Regular Menlo color=--text-quaternary
+        text "2" 12/20 Regular Menlo color=--text-quaternary
+        text "3" 12/20 Regular Menlo color=--text-quaternary
+        text "4" 12/20 Regular Menlo color=--text-quaternary
+        text "5" 12/20 Regular Menlo color=--text-quaternary
+        text "6" 12/20 Regular Menlo color=--text-quaternary
+        text "7" 12/20 Regular Menlo color=--text-quaternary
+        text "8" 12/20 Regular Menlo color=--text-quaternary
+        text "9" 12/20 Regular Menlo color=--text-quaternary
+        text "10" 12/20 Regular Menlo color=--text-quaternary
+        text "11" 12/20 Regular Menlo color=--text-quaternary
+        text "12" 12/20 Regular Menlo color=--text-quaternary
+        text "13" 12/20 Regular Menlo color=--text-quaternary
+        text "14" 12/20 Regular Menlo color=--text-quaternary
+        text "15" 12/20 Regular Menlo color=--text-quaternary
+        text "16" 12/20 Regular Menlo color=--text-quaternary
+        text "17" 12/20 Regular Menlo color=--text-quaternary
+        text "18" 12/20 Regular Menlo color=--text-quaternary
+        text "19" 12/20 Regular Menlo color=--text-quaternary
+        text "20" 12/20 Regular Menlo color=--text-quaternary
+        text "21" 12/20 Regular Menlo color=--text-quaternary
+        text "22" 12/20 Regular Menlo color=--text-quaternary
+        text "23" 12/20 Regular Menlo color=--text-quaternary
+        text "24" 12/20 Regular Menlo color=--text-quaternary
+        text "25" 12/20 Regular Menlo color=--text-quaternary
+        text "26" 12/20 Regular Menlo color=--text-quaternary
+        text "27" 12/20 Regular Menlo color=--text-quaternary
+        text "28" 12/20 Regular Menlo color=--text-quaternary
+        text "29" 12/20 Regular Menlo color=--text-quaternary
+        text "30" 12/20 Regular Menlo color=--text-quaternary
+        text "31" 12/20 Regular Menlo color=--text-quaternary
+        text "32" 12/20 Regular Menlo color=--text-quaternary
+      frame "Code" col gap=0 pad=14,16,14,16 f1042xf669
+        text "version = 1" 13/20 Regular Menlo color=--text-primary
+        frame "Blank" f10xf20
+        text "[providers.openai]" 13/20 Regular Menlo color=--text-brand-secondary
+        text "kind = "openai_compat"" 13/20 Regular Menlo color=--text-primary
+        text "base_url = "https://api.openai.com/v1"" 13/20 Regular Menlo color=--text-primary
+        text "api_key_env = "OPENAI_API_KEY"" 13/20 Regular Menlo color=--text-primary
+        frame "Blank" f10xf20
+        text "[agents.default]" 13/20 Regular Menlo color=--text-brand-secondary
+        text "provider = "openai"" 13/20 Regular Menlo color=--text-primary
+        text "model = "gpt-5-mini"" 13/20 Regular Menlo color=--text-primary
+        text "tools = ["read_file", "write_file", "edit_file", "glob", "grep", "bash"]" 13/20 Regular Menlo color=--text-primary
+        text "permission = "ask"" 13/20 Regular Menlo color=--text-primary
+        frame "Blank" f10xf20
+        text "[agents.coder]" 13/20 Regular Menlo color=--text-brand-secondary
+        text "provider = "anthropic"" 13/20 Regular Menlo color=--text-primary
+        text "model = "claude-sonnet-5-5"" 13/20 Regular Menlo color=--text-primary
+        text "skills = ["go-testing", "release-notes"]" 13/20 Regular Menlo color=--text-primary
+        text "mcp = ["github"]" 13/20 Regular Menlo color=--text-primary
+        frame "Blank" f10xf20
+        text "[mcp.github]" 13/20 Regular Menlo color=--text-brand-secondary
+        text "command = "npx"" 13/20 Regular Menlo color=--text-primary
+        text "args = ["-y", "@modelcontextprotocol/server-github"]" 13/20 Regular Menlo color=--text-primary
+        text "env = { GITHUB_TOKEN = "***" }" 13/20 Regular Menlo color=--text-primary
+        frame "Blank" f10xf20
+        text "[channels.telegram]" 13/20 Regular Menlo color=--text-brand-secondary
+        text "token_env = "TELEGRAM_BOT_TOKEN"" 13/20 Regular Menlo color=--text-primary
+        text "owner_ids = [483920117]" 13/20 Regular Menlo color=--text-primary
+        frame "Blank" f10xf20
+        text "[[routes]]" 13/20 Regular Menlo color=--text-brand-secondary
+        text "channel = "telegram"" 13/20 Regular Menlo color=--text-primary
+        text "agent = "default"" 13/20 Regular Menlo color=--text-primary
+        text "match = { chat_id = 483920117 }" 13/20 Regular Menlo color=--text-primary

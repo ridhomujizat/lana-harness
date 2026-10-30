@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,6 +21,8 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/pattern"
+	"github.com/ridhomujizat/lana-harness/internal/question"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	_ "github.com/ridhomujizat/lana-harness/store"
@@ -53,6 +56,8 @@ type Option func(*runtimeOptions)
 type runtimeOptions struct {
 	approve         ApproveFunc
 	approveChannels map[string]bool
+	ask             AskFunc
+	askChannels     map[string]bool
 }
 
 // ApproveFunc answers approvals for the library channel.
@@ -74,6 +79,25 @@ func ApproveChannels(channels ...string) Option {
 	}
 }
 
+// AskFunc answers questions for a session channel.
+type AskFunc = func(ctx context.Context, req core.QuestionRequest) core.QuestionOutcome
+
+// AskWith installs a question responder.
+func AskWith(fn AskFunc) Option {
+	return func(o *runtimeOptions) { o.ask = fn }
+}
+
+// AskChannels sets the session channels the AskWith responder answers.
+// The default is "library" and "cli"; other channels go to the next answerer.
+func AskChannels(channels ...string) Option {
+	return func(o *runtimeOptions) {
+		o.askChannels = map[string]bool{}
+		for _, channel := range channels {
+			o.askChannels[channel] = true
+		}
+	}
+}
+
 var (
 	ErrEmptyPrompt     = errors.New("prompt is empty")
 	ErrNoRoute         = errors.New("library route not found")
@@ -83,10 +107,42 @@ var (
 	ErrClosed          = agent.ErrClosed
 	ErrUnknownProvider = agent.ErrUnknownProvider
 	ErrEmptyModel      = agent.ErrEmptyModel
+	ErrInvalidModel    = agent.ErrInvalidModel
+	ErrTeamModel       = agent.ErrTeamModel
+	ErrUnknownMCP      = errors.New("mcp server is not configured")
 )
 
 // ProviderError is an alias for core.ProviderError.
 type ProviderError = core.ProviderError
+
+// ToolEntry is one tool row of API-WEB-026.
+type ToolEntry struct {
+	Name      string `json:"name"`
+	Risk      string `json:"risk"`
+	AsksFirst bool   `json:"asks_first"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// ToolGroup is one group of the tool catalog of API-WEB-026.
+type ToolGroup struct {
+	ID    string      `json:"id"`
+	Label string      `json:"label"`
+	Tools []ToolEntry `json:"tools"`
+}
+
+// toolCatalogGroupOrder is the built-in group order of API-WEB-026.
+var toolCatalogGroupOrder = []struct {
+	ID    string
+	Label string
+	Names []string
+}{
+	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep"}},
+	{ID: "shell", Label: "Shell", Names: []string{"bash"}},
+	{ID: "web", Label: "Web", Names: []string{"web_fetch"}},
+	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write"}},
+	{ID: "skills", Label: "Skills", Names: []string{"skill_load", "skill_write"}},
+	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
+}
 
 // Runtime is the library runtime.
 type Runtime struct {
@@ -138,6 +194,37 @@ func (m *providedStoreModule) Install(b *core.Builder, cfg core.ModuleConfig) er
 }
 func (m *providedStoreModule) Stop(context.Context) error { return nil }
 
+// migrateUser runs the API-HOME-003 migration for a runtime open.
+func migrateUser(home string, cfg core.Config) {
+	if home == "" {
+		return
+	}
+	candidates := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		candidates = append(candidates, name)
+	}
+	sort.Strings(candidates)
+	defaultAgent := ""
+	for _, route := range cfg.Routes {
+		if route.Channel == "cli" {
+			defaultAgent = route.Agent
+			break
+		}
+	}
+	migration, err := agenthome.MigrateUser(home, candidates, defaultAgent)
+	if err != nil {
+		slog.Warn("cannot migrate user file", "error", err)
+		return
+	}
+	if migration.Source != "" {
+		slog.Info("migrated user file from agent " + migration.Source)
+		return
+	}
+	if warning := migration.Warning(home); warning != "" {
+		slog.Warn(warning)
+	}
+}
+
 // New builds the library runtime.
 func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error) {
 	if ctx == nil {
@@ -154,6 +241,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	if err != nil {
 		return nil, err
 	}
+	migrateUser(opts.Home, result.Config)
 	setCustomTools(result.Config.Modules, opts.Tools)
 	setProviders(result.Config.Modules, opts.Providers)
 	if opts.Store != nil {
@@ -174,6 +262,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		_ = coreCtx.Shutdown(ctx)
 		return nil, fmt.Errorf("service agents not available")
 	}
+	questionService := question.New(coreCtx.Sessions, coreCtx.Hooks)
+	coreCtx.Questions = questionService
+	registry.SetQuestions(questionService)
 	if opts.Approval == PolicyTrust {
 		coreCtx.Hooks.ToolsPreExecute.Use(func(context.Context, core.ToolsPreExecuteInput, core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 			return core.ToolDecision{Allowed: true}, nil
@@ -199,6 +290,30 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 			outcome = fn(ctx, req)
 			if !validApprovalOutcome(outcome) {
 				outcome = core.OutcomeUnavailable
+			}
+			return outcome, nil
+		})
+	}
+	if runtimeOpts.ask != nil {
+		fn := runtimeOpts.ask
+		channels := runtimeOpts.askChannels
+		if channels == nil {
+			channels = map[string]bool{"library": true, "cli": true}
+		}
+		coreCtx.Hooks.QuestionAsk.Use(func(ctx context.Context, req core.QuestionRequest, next core.Next[core.QuestionRequest, core.QuestionOutcome]) (outcome core.QuestionOutcome, err error) {
+			info, infoErr := coreCtx.Sessions.Info(ctx, req.SessionID)
+			if infoErr != nil || !channels[info.Channel] {
+				return next(ctx, req)
+			}
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					outcome = questionNoResponder()
+					err = nil
+				}
+			}()
+			outcome = fn(ctx, req)
+			if !validQuestionOutcome(outcome) {
+				outcome = questionNoResponder()
 			}
 			return outcome, nil
 		})
@@ -269,6 +384,9 @@ func (rt *Runtime) closedError() error {
 
 func (rt *Runtime) routeAgent(agentName string) (string, error) {
 	if agentName != "" {
+		if rt.IsTeam(agentName) {
+			return agentName, nil
+		}
 		if _, ok := rt.result.Config.Agents[agentName]; !ok {
 			return "", fmt.Errorf("%w: %s", ErrUnknownAgent, agentName)
 		}
@@ -298,7 +416,7 @@ func (rt *Runtime) openSession(ctx context.Context, req Request, agentName strin
 	if err != nil {
 		return core.SessionInfo{}, err
 	}
-	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok && agentCfg.Workspace != "" {
+	if agentCfg, ok := rt.agentConfig(agentName); ok && agentCfg.Workspace != "" {
 		workspace = agentCfg.Workspace
 	}
 	workspace, err = normalizeWorkspace(workspace)
@@ -464,10 +582,7 @@ func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, err
 			yield(nil, err)
 			return
 		}
-		model := ""
-		if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
-			model = agentCfg.Provider + ":" + agentCfg.Model
-		}
+		model := rt.AgentModel(agentName)
 		if !yield(Session{SessionID: info.ID, Agent: agentName, Model: model}, nil) {
 			return
 		}
@@ -585,17 +700,58 @@ func (rt *Runtime) AgentNames() []string {
 	return names
 }
 
+// TeamNames returns the registered team names, sorted.
+func (rt *Runtime) TeamNames() []string {
+	names := make([]string, 0, len(rt.result.Config.Teams))
+	for name := range rt.result.Config.Teams {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// IsTeam reports whether name is a registered team.
+func (rt *Runtime) IsTeam(name string) bool {
+	_, ok := rt.result.Config.Teams[name]
+	return ok
+}
+
+// Team returns the [teams.<name>] table. It is the public lookup the web
+// backend uses to fill team information (API-TEAM-005, API-TEAM-006).
+func (rt *Runtime) Team(name string) (core.TeamConfig, bool) {
+	team, ok := rt.result.Config.Teams[name]
+	return team, ok
+}
+
+// teamLead returns the lead agent config of a team.
+func (rt *Runtime) teamLead(name string) (core.AgentConfig, bool) {
+	team, ok := rt.result.Config.Teams[name]
+	if !ok {
+		return core.AgentConfig{}, false
+	}
+	lead, ok := rt.result.Config.Agents[team.Lead]
+	return lead, ok
+}
+
+// agentConfig returns the config of an agent, or of the lead for a team.
+func (rt *Runtime) agentConfig(name string) (core.AgentConfig, bool) {
+	if agentCfg, ok := rt.result.Config.Agents[name]; ok {
+		return agentCfg, true
+	}
+	return rt.teamLead(name)
+}
+
 // AgentModel returns the agent's "provider:model".
 func (rt *Runtime) AgentModel(agentName string) string {
-	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
+	if agentCfg, ok := rt.agentConfig(agentName); ok {
 		return agentCfg.Provider + ":" + agentCfg.Model
 	}
 	return ""
 }
 
-// AgentPolicy returns the agent's initial policy.
+// AgentPolicy returns the agent's initial policy; for a team it is the lead's.
 func (rt *Runtime) AgentPolicy(agentName string) string {
-	if agentCfg, ok := rt.result.Config.Agents[agentName]; ok {
+	if agentCfg, ok := rt.agentConfig(agentName); ok {
 		return string(agentCfg.Permission)
 	}
 	return ""
@@ -616,6 +772,218 @@ func (rt *Runtime) MCPStatus(agentName string) []core.MCPServerStatus {
 		return nil
 	}
 	return manager.Status(agentCfg.MCP)
+}
+
+// ToolCatalog returns the tools grouped for API-WEB-026. It reads the loaded
+// config and the tool registry; it never starts an MCP server. The built-in
+// groups always come first in contract order, then one group per configured MCP
+// server. An unknown agent (or team) returns ErrUnknownAgent. It is additive
+// (G-29).
+func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	agentCfg, ok := rt.agentConfig(agentName)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownAgent, agentName)
+	}
+	disabled := make(map[string]bool, len(agentCfg.DisabledTools))
+	for _, name := range agentCfg.DisabledTools {
+		if name != "" {
+			disabled[name] = true
+		}
+	}
+
+	registry := rt.coreCtx.Tools
+	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(rt.result.Config.MCP))
+	for _, group := range toolCatalogGroupOrder {
+		entries := make([]ToolEntry, 0, len(group.Names))
+		for _, name := range group.Names {
+			tool, ok := registry.Get(name)
+			if !ok {
+				continue
+			}
+			entries = append(entries, ToolEntry{
+				Name:      name,
+				Risk:      string(tool.Risk(nil)),
+				AsksFirst: toolAsksFirst(tool, agentCfg),
+				Enabled:   !disabled[name],
+			})
+		}
+		groups = append(groups, ToolGroup{ID: group.ID, Label: group.Label, Tools: entries})
+	}
+
+	// MCP tools are grouped by server. The agent's own server list carries the
+	// config order; any other configured server follows in name order.
+	servers := rt.catalogMCPServers(agentCfg)
+	for _, server := range servers {
+		entries := make([]ToolEntry, 0)
+		for _, name := range rt.catalogToolNames() {
+			toolServer, ref, ok := catalogMCPTool(name)
+			if !ok || toolServer != server {
+				continue
+			}
+			tool, ok := registry.Get(name)
+			if !ok {
+				continue
+			}
+			entries = append(entries, ToolEntry{
+				Name:      ref,
+				Risk:      string(tool.Risk(nil)),
+				AsksFirst: toolAsksFirst(tool, agentCfg),
+				Enabled:   !disabled[ref] && !disabled[name],
+			})
+		}
+		groups = append(groups, ToolGroup{ID: "mcp:" + server, Label: server, Tools: entries})
+	}
+	return groups, nil
+}
+
+// catalogMCPServers returns the MCP server order of the catalog: the agent's
+// list first, then the remaining configured servers, then any server that has
+// tools in the registry but is not configured.
+func (rt *Runtime) catalogMCPServers(agentCfg core.AgentConfig) []string {
+	seen := make(map[string]bool)
+	servers := make([]string, 0, len(agentCfg.MCP)+len(rt.result.Config.MCP))
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		servers = append(servers, name)
+	}
+	for _, name := range agentCfg.MCP {
+		add(name)
+	}
+	rest := make([]string, 0, len(rt.result.Config.MCP))
+	for name := range rt.result.Config.MCP {
+		rest = append(rest, name)
+	}
+	sort.Strings(rest)
+	for _, name := range rest {
+		add(name)
+	}
+	var extra []string
+	for _, name := range rt.catalogToolNames() {
+		if server, _, ok := catalogMCPTool(name); ok && !seen[server] {
+			extra = append(extra, server)
+		}
+	}
+	sort.Strings(extra)
+	for _, name := range extra {
+		add(name)
+	}
+	return servers
+}
+
+// catalogToolNames returns the registered tool names when the registry can
+// enumerate them. A registry without Names has no MCP tools in the catalog.
+func (rt *Runtime) catalogToolNames() []string {
+	if namer, ok := rt.coreCtx.Tools.(interface{ Names() []string }); ok {
+		return namer.Names()
+	}
+	return nil
+}
+
+// catalogMCPTool splits a registry tool name into its server and the
+// config-facing "<server>/<tool>" reference. Both the model-facing
+// "mcp__<server>__<tool>" form and an explicit "<server>/<tool>" name are
+// accepted.
+func catalogMCPTool(name string) (server, ref string, ok bool) {
+	if rest, found := strings.CutPrefix(name, "mcp__"); found {
+		i := strings.Index(rest, "__")
+		if i <= 0 || i+2 >= len(rest) {
+			return "", "", false
+		}
+		return rest[:i], rest[:i] + "/" + rest[i+2:], true
+	}
+	if i := strings.IndexByte(name, '/'); i > 0 && i < len(name)-1 && !strings.Contains(name[i+1:], "/") {
+		return name[:i], name, true
+	}
+	return "", "", false
+}
+
+// toolAsksFirst reports whether the evaluator would ask the owner before this
+// tool runs under the agent's initial policy. Read and memory tools never ask;
+// a trust or never policy never asks; a matching argument-less allow rule skips
+// the prompt (see tools/permission/evaluator.go).
+func toolAsksFirst(tool core.Tool, agentCfg core.AgentConfig) bool {
+	policy := core.PolicyAsk
+	if agentCfg.Permission != "" {
+		policy = core.Policy(agentCfg.Permission)
+	}
+	if policy != core.PolicyAsk {
+		return false
+	}
+	switch tool.Risk(nil) {
+	case core.RiskRead, core.RiskMemory:
+		return false
+	}
+	name := tool.Spec().Name
+	for _, raw := range agentCfg.Rules.Allow {
+		p, err := pattern.ParsePattern(raw)
+		if err != nil || p.Arg != nil {
+			continue
+		}
+		if p.Match(name, pattern.Argument{}) {
+			return false
+		}
+	}
+	return true
+}
+
+// mcpTestTimeout is the limit of TestMCP (API-WEB-027).
+const mcpTestTimeout = 15 * time.Second
+
+// mcpOperations is the additive MCP operation set implemented by the MCP
+// module's manager. It is separate from core.MCPManager so existing fakes do
+// not grow methods.
+type mcpOperations interface {
+	Restart(ctx context.Context, name string) (core.MCPServerStatus, bool)
+	Test(ctx context.Context, def core.MCPConfig) (int, error)
+}
+
+func (rt *Runtime) mcpOperations() (mcpOperations, bool) {
+	service, ok := rt.coreCtx.Lookup(core.ServiceMCP)
+	if !ok {
+		return nil, false
+	}
+	manager, ok := service.(mcpOperations)
+	return manager, ok
+}
+
+// RestartMCP stops and starts one MCP client from the loaded definition. It
+// returns ErrUnknownMCP when the server is not part of the loaded config. It is
+// additive (G-22, API-WEB-027).
+func (rt *Runtime) RestartMCP(name string) (core.MCPServerStatus, error) {
+	if err := rt.closedError(); err != nil {
+		return core.MCPServerStatus{}, err
+	}
+	manager, ok := rt.mcpOperations()
+	if !ok {
+		return core.MCPServerStatus{}, errors.New("mcp: manager is not available")
+	}
+	status, found := manager.Restart(rt.ctx, name)
+	if !found {
+		return status, fmt.Errorf("%w: %s", ErrUnknownMCP, name)
+	}
+	return status, nil
+}
+
+// TestMCP starts a temporary MCP client from def, lists its tools, and stops it
+// with a 15-second limit. The client is never added to the runtime. It is
+// additive (G-22, API-WEB-027).
+func (rt *Runtime) TestMCP(def core.MCPConfig) (int, error) {
+	if err := rt.closedError(); err != nil {
+		return 0, err
+	}
+	manager, ok := rt.mcpOperations()
+	if !ok {
+		return 0, errors.New("mcp: manager is not available")
+	}
+	ctx, cancel := context.WithTimeout(rt.ctx, mcpTestTimeout)
+	defer cancel()
+	return manager.Test(ctx, def)
 }
 
 // Skills returns the skills visible to an agent.
@@ -649,6 +1017,15 @@ func (rt *Runtime) SubscribeLive(ctx context.Context, sessionID string) (*core.S
 		return nil, err
 	}
 	return rt.coreCtx.Agents.SubscribeLive(sessionID)
+}
+
+// TurnActive reports whether a turn is running for the session in this process.
+// It reads the in-process registry runners and never touches the store.
+func (rt *Runtime) TurnActive(sessionID string) bool {
+	if rt.registry == nil {
+		return false
+	}
+	return rt.registry.TurnActive(sessionID)
 }
 
 // Send puts a message into the session's inbox.
@@ -717,6 +1094,15 @@ func (rt *Runtime) ListSessions(ctx context.Context, limit int) ([]core.SessionI
 		return nil, err
 	}
 	return rt.store.List(ctx, core.SessionFilter{Channel: "cli", Address: workspace, Limit: limit})
+}
+
+// ListAllSessions returns sessions of every channel that match filter. An
+// empty Channel means all channels; other fields follow core.SessionFilter.
+func (rt *Runtime) ListAllSessions(ctx context.Context, filter core.SessionFilter) ([]core.SessionInfo, error) {
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	return rt.store.List(ctx, filter)
 }
 
 // ForkSession copies the session up to the end of its last turn.
@@ -791,4 +1177,21 @@ func validApprovalOutcome(outcome core.ApprovalOutcome) bool {
 		return true
 	}
 	return false
+}
+
+func validQuestionOutcome(outcome core.QuestionOutcome) bool {
+	switch outcome.Status {
+	case core.QuestionStatusAnswered:
+		return outcome.Reason == ""
+	case core.QuestionStatusUnavailable:
+		switch outcome.Reason {
+		case core.QuestionReasonNoResponder, core.QuestionReasonTimeout, core.QuestionReasonCancelled, core.QuestionReasonInterrupted:
+			return true
+		}
+	}
+	return false
+}
+
+func questionNoResponder() core.QuestionOutcome {
+	return core.QuestionOutcome{Status: core.QuestionStatusUnavailable, Reason: core.QuestionReasonNoResponder}
 }

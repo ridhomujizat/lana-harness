@@ -8,6 +8,9 @@ type MCPServerStatus struct {
 	State  string // State: "running", "stopped", "unavailable"
 	Reason string
 	Tools  int
+	// RunningForMS is how long the running client has been connected. It is
+	// zero unless State is "running".
+	RunningForMS int64
 }
 
 // MCPManager connects MCP servers and exposes their tools.

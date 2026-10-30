@@ -56,6 +56,7 @@ func TestParseSkillErrors(t *testing.T) {
 		{"name mismatch", "folder", "---\nname: other\ndescription: d\n---\n", `name "other" does not match folder "folder"`},
 		{"invalid name", "Bad_Name", "---\nname: Bad_Name\ndescription: d\n---\n", `invalid name "Bad_Name"`},
 		{"description too long", "plain", "---\nname: plain\ndescription: " + strings.Repeat("x", 301) + "\n---\n", "description is longer than 300 characters"},
+		{"body too long", "plain", "---\nname: plain\ndescription: d\n---\n" + strings.Repeat("x", 20001), "body is longer than 20000 characters"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -113,6 +114,22 @@ func TestVisibleSkills(t *testing.T) {
 	skills, _ = VisibleSkills(home, "dev", []string{"a"})
 	if len(skills) != 2 || skills[0].Name != "a" || skills[0].Scope != "agent" || skills[0].Description != "Agent a." || skills[1].Name != "c" {
 		t.Fatalf("shadowed skills = %#v", skills)
+	}
+}
+
+// TestVisibleSkillsSkipsMissingListed covers Q-026: a listed name with no
+// folder is skipped without an error and is not visible.
+func TestVisibleSkillsSkipsMissingListed(t *testing.T) {
+	home := t.TempDir()
+	writeNamedSkill(t, GlobalSkillsDir(home), "kept", "Kept skill.")
+	writeNamedSkill(t, AgentSkillsDir(home, "dev"), "own", "Agent skill.")
+
+	skills, invalid := VisibleSkills(home, "dev", []string{"kept", "deleted"})
+	if len(invalid) != 0 {
+		t.Fatalf("invalid = %#v", invalid)
+	}
+	if len(skills) != 2 || skills[0].Name != "kept" || skills[1].Name != "own" {
+		t.Fatalf("skills = %#v, want kept and own only", skills)
 	}
 }
 

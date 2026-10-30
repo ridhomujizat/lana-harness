@@ -75,3 +75,17 @@ func (rt *Runtime) LeaseSession(ctx context.Context, sessionID string) (func() e
 	}
 	return rt.store.TryLease(ctx, sessionID)
 }
+
+// LeaseHolder reports the PID of the process holding the session lease without
+// taking it. held is false when no process holds the lease. A store without a
+// lease probe is treated as having no cross-process lease.
+func (rt *Runtime) LeaseHolder(ctx context.Context, sessionID string) (pid int, held bool, err error) {
+	if err := rt.closedError(); err != nil {
+		return 0, false, err
+	}
+	probe, ok := rt.store.(core.LeaseProbe)
+	if !ok {
+		return 0, false, nil
+	}
+	return probe.LeaseHolder(ctx, sessionID)
+}

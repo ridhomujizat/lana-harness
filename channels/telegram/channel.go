@@ -37,6 +37,8 @@ type Backend interface {
 	Skills(agent string) []agenthome.Skill
 	Policy(ctx context.Context, sessionID string) (string, error)
 	AgentNames() []string
+	// TeamNames returns the registered teams. A team is a valid /agent choice.
+	TeamNames() []string
 	AgentModel(agent string) string
 }
 
@@ -63,17 +65,26 @@ type Channel struct {
 	EditInterval    time.Duration
 	TypingInterval  time.Duration
 	ApprovalTimeout time.Duration
+	QuestionTimeout time.Duration
 	PollTimeout     int
 	MaxBackoff      time.Duration
 
-	bot User
+	// Now is the clock used for the status snapshot. Tests replace it; nil
+	// means time.Now.
+	Now func() time.Time
 
-	mu        sync.Mutex
-	chats     map[int64]*chat
-	sessions  map[string]*chat
-	approvals map[string]*approval
-	wg        sync.WaitGroup
-	fatal     chan error
+	bot     User
+	pending *pendingChats
+
+	mu            sync.Mutex
+	pollingSince  time.Time
+	lastMessageAt time.Time
+	chats         map[int64]*chat
+	sessions      map[string]*chat
+	approvals     map[string]*approval
+	questions     map[string]*question
+	wg            sync.WaitGroup
+	fatal         chan error
 }
 
 // New creates a channel. token is the bot token value.
@@ -81,10 +92,21 @@ func New(cfg Config, token string, backend Backend) *Channel {
 	return &Channel{
 		api: NewClient(cfg.APIBase, token), cfg: cfg, backend: backend,
 		EditInterval: time.Second, TypingInterval: 5 * time.Second, ApprovalTimeout: 10 * time.Minute,
-		PollTimeout: 30, MaxBackoff: 30 * time.Second,
-		chats: map[int64]*chat{}, sessions: map[string]*chat{}, approvals: map[string]*approval{},
-		fatal: make(chan error, 1),
+		QuestionTimeout: 30 * time.Minute,
+		PollTimeout:     30, MaxBackoff: 30 * time.Second, Now: time.Now,
+		pending: newPendingChats(),
+		chats:   map[int64]*chat{}, sessions: map[string]*chat{}, approvals: map[string]*approval{},
+		questions: map[string]*question{},
+		fatal:     make(chan error, 1),
 	}
+}
+
+// now returns the current time from the injected clock.
+func (c *Channel) now() time.Time {
+	if c.Now == nil {
+		return time.Now()
+	}
+	return c.Now()
 }
 
 // Start checks the token and registers commands. It returns the bot user.
@@ -93,7 +115,9 @@ func (c *Channel) Start(ctx context.Context) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	c.mu.Lock()
 	c.bot = bot
+	c.mu.Unlock()
 	if err := c.api.SetMyCommands(ctx, Commands); err != nil {
 		if errors.Is(err, ErrUnauthorized) {
 			return User{}, err
@@ -108,6 +132,10 @@ func (c *Channel) Run(ctx context.Context) error {
 	defer c.wg.Wait()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	started := c.now()
+	c.mu.Lock()
+	c.pollingSince = started
+	c.mu.Unlock()
 	var offset int64
 	backoff := min(time.Second, c.MaxBackoff)
 	for {
@@ -157,17 +185,27 @@ func (c *Channel) failFatal(err error) {
 
 func (c *Channel) dispatch(ctx context.Context, update Update) {
 	var chatID int64
+	var chat Chat
 	var from *User
+	var at time.Time
 	switch {
 	case update.Message != nil:
-		chatID, from = update.Message.Chat.ID, update.Message.From
+		chat, from = update.Message.Chat, update.Message.From
+		chatID = chat.ID
+		at = c.now()
+		c.mu.Lock()
+		c.lastMessageAt = at
+		c.mu.Unlock()
 	case update.CallbackQuery != nil && update.CallbackQuery.Message != nil:
-		chatID, from = update.CallbackQuery.Message.Chat.ID, &update.CallbackQuery.From
+		chat = update.CallbackQuery.Message.Chat
+		chatID, from = chat.ID, &update.CallbackQuery.From
+		at = c.now()
 	default:
 		return
 	}
 	agent, ok := c.cfg.Routes[chatID]
 	if !ok {
+		c.pending.record(chat, from, at)
 		args := []any{"chat_id", chatID}
 		if from != nil {
 			args = append(args, "user_id", from.ID, "username", from.Username)

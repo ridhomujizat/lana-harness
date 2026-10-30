@@ -3,6 +3,7 @@ package agenthome
 import (
 	"embed"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -10,17 +11,29 @@ import (
 //go:embed templates/*.md
 var templateFS embed.FS
 
-// Template is a built-in starting point for a new agent.
+// Template is a built-in starting point for a new agent. Built-in templates
+// share the full built-in tool set and differ only by persona text.
 type Template struct {
 	Name       string
 	Tools      []string
 	Permission string
 }
 
+// allTools is the full built-in tool set shared by every template.
+var allTools = []string{
+	"read_file", "write_file", "edit_file", "glob", "grep",
+	"bash", "web_fetch", "memory_read", "memory_write", "skill_write", "ask_user",
+}
+
+// newTemplate returns the built-in template with the given name.
+func newTemplate(name string) Template {
+	return Template{Name: name, Permission: "ask", Tools: slices.Clone(allTools)}
+}
+
 var templates = map[string]Template{
-	"assistant": {Name: "assistant", Permission: "ask", Tools: []string{"web_fetch", "read_file", "glob", "grep", "memory_read", "memory_write", "skill_write"}},
-	"worker":    {Name: "worker", Permission: "ask", Tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "web_fetch", "memory_read", "memory_write", "skill_write"}},
-	"coder":     {Name: "coder", Permission: "ask", Tools: []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "memory_read", "memory_write", "skill_write"}},
+	"assistant": newTemplate("assistant"),
+	"worker":    newTemplate("worker"),
+	"coder":     newTemplate("coder"),
 }
 
 // TemplateNames returns the template names in sorted order.

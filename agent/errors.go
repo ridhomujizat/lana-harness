@@ -1,6 +1,9 @@
 package agent
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	ErrClosed          = errors.New("runtime is closed")
@@ -10,4 +13,8 @@ var (
 	ErrUnknownAgent    = errors.New("unknown agent")
 	ErrUnknownProvider = errors.New("unknown provider")
 	ErrEmptyModel      = errors.New("model is empty")
+	ErrInvalidModel    = errors.New("invalid model")
+	// ErrTeamModel refuses a model change on a team session: each agent of the
+	// team keeps its own model.
+	ErrTeamModel = fmt.Errorf("%w: teams use each agent's model", ErrInvalidModel)
 )

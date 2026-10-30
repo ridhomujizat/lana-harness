@@ -51,7 +51,8 @@ func cmdChat(args []string) int {
 	}
 
 	approver := tui.NewApprover()
-	rt, _, _, missingEnv, err := runtimeFor(ctx, home, agentName, approver.Ask)
+	asker := tui.NewAsker()
+	rt, _, _, missingEnv, err := runtimeFor(ctx, home, agentName, approver.Ask, lana.AskWith(asker.Ask), lana.AskChannels("cli"))
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -94,6 +95,7 @@ func cmdChat(args []string) int {
 	options := tui.Options{
 		Backend:   chatBackend{rt: rt, agent: agentName, home: home, leases: leases},
 		Approver:  approver,
+		Asker:     asker,
 		Agent:     agentName,
 		Model:     model,
 		Policy:    policy,
@@ -252,7 +254,10 @@ func (b chatBackend) Compact(ctx context.Context, sessionID string) (tui.Compact
 	return tui.CompactionInfo{TokensBefore: result.TokensBefore, TokensAfter: result.TokensAfter}, err
 }
 
-func (b chatBackend) AgentNames() []string { return b.rt.AgentNames() }
+// AgentNames returns the agents and teams that /agent accepts.
+func (b chatBackend) AgentNames() []string {
+	return append(b.rt.AgentNames(), b.rt.TeamNames()...)
+}
 
 func (b chatBackend) AgentModel(agent string) string { return b.rt.AgentModel(agent) }
 
@@ -260,7 +265,7 @@ func (b chatBackend) AgentPolicy(agent string) string { return b.rt.AgentPolicy(
 
 func (b chatBackend) Memory(agent string) ([]string, []string, error) {
 	paths := agenthome.Paths(b.home, agent)
-	user, err := agenthome.ReadEntries(paths.User)
+	user, err := agenthome.ReadEntries(agenthome.SharedUser(b.home))
 	if err != nil {
 		return nil, nil, err
 	}

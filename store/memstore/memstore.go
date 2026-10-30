@@ -20,6 +20,9 @@ import (
 // ErrNotSupported is returned for operations memstore does not support.
 var ErrNotSupported = errors.New("not supported by memstore")
 
+// ErrTurnActive is returned when a turn/start arrives while a turn is open.
+var ErrTurnActive = errors.New("a turn is still running")
+
 type session struct {
 	info   core.SessionInfo
 	events []core.SessionEvent
@@ -135,6 +138,9 @@ func (s *Store) appendLocked(sess *session, drafts []core.EventDraft) ([]core.Se
 	var out []core.SessionEvent
 	now := nowMS()
 	for _, draft := range drafts {
+		if draft.Kind == core.KindTurnStart && (sess.info.Status == "running" || sess.info.Status == "waiting_input") {
+			return nil, ErrTurnActive
+		}
 		payload, err := json.Marshal(draft.Payload)
 		if err != nil {
 			return nil, err
@@ -156,6 +162,10 @@ func (s *Store) appendLocked(sess *session, drafts []core.EventDraft) ([]core.Se
 			sess.info.TurnCount++
 		case core.KindTurnEnd:
 			sess.info.Status = "idle"
+		case core.KindQuestionAsked:
+			sess.info.Status = "waiting_input"
+		case core.KindQuestionAnswered:
+			sess.info.Status = "running"
 		}
 	}
 	sess.info.LastSeq = sess.seq

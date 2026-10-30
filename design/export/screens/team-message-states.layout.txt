@@ -1,0 +1,114 @@
+# Session / Team message states (frame 3058)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Team message states" col gap=32 pad=40,40,40,40 f880xh991 bg=--bg-primary radius=16
+  text "Team message states" 18/28 Semibold color=--text-primary
+  text "Collapsed after the turn ends (default for older turns), and live while agents work. The same block renders a single agent: one avatar, no Team badge, no work p" 14/20 Regular color=--text-tertiary
+  text "COLLAPSED" 12/18 Semibold color=--text-quaternary
+  frame "Team message" row gap=12 f800xh182
+    frame "Avatar" col gap=0 f72xh32
+      frame "Avatar group" row gap=-8 h80xh32
+        <Agent avatar/Color=Brand> {"Initials": "L"} row gap=0 main=center cross=center f32xf32 bg=--bg-brand-primary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-brand-secondary
+        <Agent avatar/Color=Success> {"Initials": "R"} row gap=0 main=center cross=center f32xf32 bg=--bg-success-primary border=--bg-primary radius=16
+          text "R" 12/18 Semibold color=--text-success-primary
+        <Agent avatar/Color=Warning> {"Initials": "W"} row gap=0 main=center cross=center f32xf32 bg=--bg-warning-primary border=--bg-primary radius=16
+          text "W" 12/18 Semibold color=--text-warning-primary
+    frame "Content" col gap=8 f680xh182
+      frame "Meta" row gap=8 cross=center f680xh24
+        text "research-squad" 14/20 Medium color=--text-secondary
+        <Badge/Color=Brand> {"Label": "Team"} row gap=6 pad=2,8,2,8 cross=center h62xh24 bg=--bg-brand-primary border=--border-brand radius=16
+          ellipse 6x6 bg=--fg-brand-primary
+          text "Team" 12/18 Medium color=--text-brand-secondary
+        text "3 agents" 12/18 Regular color=--text-tertiary
+        text "09:12" 12/18 Regular color=--text-tertiary
+      frame "Work" col gap=0 f680xh44 bg=--bg-secondary border=--border-secondary radius=12
+        frame "Work header" row gap=8 pad=10,14,10,14 cross=center f678xh42
+          text "Team work" 14/20 Semibold color=--text-secondary
+          <Badge/Color=Success> {"Label": "Done · 4 steps · 38 s"} row gap=6 pad=2,8,2,8 cross=center h145xh22 bg=--bg-success-primary radius=16
+            ellipse 6x6 bg=--fg-success-primary
+            text "Done · 4 steps · 38 s" 12/18 Medium color=--text-success-primary
+          frame "Spacer" f320xf1
+          text "Show work ▾" 14/20 Semibold color=--text-brand-secondary
+      frame "Final answer" col gap=6 pad=10,14,12,14 f680xh98 bg=--bg-primary border=--border-secondary radius=0,8,8,8
+        frame "Author" row gap=6 cross=center f650xh20
+          <Agent avatar/Color=Brand> {"Initials": "L"} row gap=0 main=center cross=center f20xf20 bg=--bg-brand-primary border=--bg-primary radius=16
+            text "L" 12/18 Semibold color=--text-brand-secondary
+          text "lead · answer" 12/18 Semibold color=--text-tertiary
+        text "Open issues this week: 4 bugs in the daemon, 2 in the web view. The lease bug blocks the Telegram channel." 16/24 Regular color=--text-primary
+  text "WORKING (LIVE)" 12/18 Semibold color=--text-quaternary
+  frame "Team message" row gap=12 f800xh465
+    frame "Avatar" col gap=0 f72xh32
+      frame "Avatar group" row gap=-8 h80xh32
+        <Agent avatar/Color=Brand> {"Initials": "L"} row gap=0 main=center cross=center f32xf32 bg=--bg-brand-primary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-brand-secondary
+        <Agent avatar/Color=Success> {"Initials": "R"} row gap=0 main=center cross=center f32xf32 bg=--bg-success-primary border=--bg-primary radius=16
+          text "R" 12/18 Semibold color=--text-success-primary
+        <Agent avatar/Color=Warning> {"Initials": "W"} row gap=0 main=center cross=center f32xf32 bg=--bg-warning-primary border=--bg-primary radius=16
+          text "W" 12/18 Semibold color=--text-warning-primary
+    frame "Content" col gap=8 f680xh465
+      frame "Meta" row gap=8 cross=center f680xh24
+        text "research-squad" 14/20 Medium color=--text-secondary
+        <Badge/Color=Brand> {"Label": "Team"} row gap=6 pad=2,8,2,8 cross=center h62xh24 bg=--bg-brand-primary border=--border-brand radius=16
+          ellipse 6x6 bg=--fg-brand-primary
+          text "Team" 12/18 Medium color=--text-brand-secondary
+        text "3 agents" 12/18 Regular color=--text-tertiary
+        text "10:03" 12/18 Regular color=--text-tertiary
+      frame "Work" col gap=0 f680xh433 bg=--bg-secondary border=--border-secondary radius=12
+        frame "Work header" row gap=8 pad=10,14,10,14 cross=center f678xh42
+          text "Team work" 14/20 Semibold color=--text-secondary
+          <Badge/Color=Warning> {"Label": "Working · step 3"} row gap=6 pad=2,8,2,8 cross=center h121xh22 bg=--bg-warning-primary radius=16
+            ellipse 6x6 bg=--fg-warning-primary
+            text "Working · step 3" 12/18 Medium color=--text-warning-primary
+          frame "Spacer" f345xf1
+          text "Hide work ▴" 14/20 Semibold color=--text-brand-secondary
+        frame "Thread" col gap=0 pad=4,14,14,14 f678xh389 border=--border-secondary
+          frame "Step" row gap=10 f650xh66
+            frame "Rail" col gap=4 pad=10,0,0,0 cross=center f24xh34
+              <Agent avatar/Color=Brand> {"Initials": "L"} row gap=0 main=center cross=center f24xf24 bg=--bg-brand-primary border=--bg-primary radius=16
+                text "L" 12/18 Semibold color=--text-brand-secondary
+            frame "Body" col gap=6 pad=10,0,10,0 f616xh66
+              frame "Head" row gap=6 cross=center f616xh20
+                text "lead" 14/20 Semibold color=--text-primary
+                text "→ researcher" 14/20 Regular color=--text-tertiary
+              text "Read this week's notes in research/ and list the main findings." 14/20 Regular color=--text-secondary
+          frame "Step" row gap=10 f650xh170
+            frame "Rail" col gap=4 pad=10,0,0,0 cross=center f24xh34
+              <Agent avatar/Color=Success> {"Initials": "R"} row gap=0 main=center cross=center f24xf24 bg=--bg-success-primary border=--bg-primary radius=16
+                text "R" 12/18 Semibold color=--text-success-primary
+            frame "Body" col gap=6 pad=10,0,10,0 f616xh170
+              frame "Head" row gap=6 cross=center f616xh20
+                text "researcher" 14/20 Semibold color=--text-primary
+                text "→ lead" 14/20 Regular color=--text-tertiary
+              text "Read 5 notes. Three findings: agents need approval context, Telegram users want shorter replies, and memory limits are hit after about 40 turns." 14/20 Regular color=--text-secondary
+              frame "Tool call" row gap=10 pad=6,10,6,10 cross=center f616xh36 bg=--bg-primary border=--border-secondary radius=8
+                text "glob" 12/18 Semibold color=--text-secondary
+                text "research/2026-10-*.md" 12/18 Regular color=--text-tertiary
+                <Badge/Color=Success> {"Label": "Done"} row gap=6 pad=2,8,2,8 cross=center h58xh22 bg=--bg-success-primary radius=16
+                  ellipse 6x6 bg=--fg-success-primary
+                  text "Done" 12/18 Medium color=--text-success-primary
+              frame "Tool call" row gap=10 pad=6,10,6,10 cross=center f616xh36 bg=--bg-primary border=--border-secondary radius=8
+                text "read_file" 12/18 Semibold color=--text-secondary
+                text "research/2026-10-27-agents.md · 4 more" 12/18 Regular color=--text-tertiary
+                <Badge/Color=Success> {"Label": "Done"} row gap=6 pad=2,8,2,8 cross=center h58xh22 bg=--bg-success-primary radius=16
+                  ellipse 6x6 bg=--fg-success-primary
+                  text "Done" 12/18 Medium color=--text-success-primary
+          frame "Step" row gap=10 f650xh66
+            frame "Rail" col gap=4 pad=10,0,0,0 cross=center f24xh34
+              <Agent avatar/Color=Brand> {"Initials": "L"} row gap=0 main=center cross=center f24xf24 bg=--bg-brand-primary border=--bg-primary radius=16
+                text "L" 12/18 Semibold color=--text-brand-secondary
+            frame "Body" col gap=6 pad=10,0,10,0 f616xh66
+              frame "Head" row gap=6 cross=center f616xh20
+                text "lead" 14/20 Semibold color=--text-primary
+                text "→ writer" 14/20 Regular color=--text-tertiary
+              text "Turn the findings into a digest of about 150 words." 14/20 Regular color=--text-secondary
+          frame "Step" row gap=10 f650xh68
+            frame "Rail" col gap=4 pad=10,0,0,0 cross=center f24xh34
+              <Agent avatar/Color=Warning> {"Initials": "W"} row gap=0 main=center cross=center f24xf24 bg=--bg-warning-primary border=--bg-primary radius=16
+                text "W" 12/18 Semibold color=--text-warning-primary
+            frame "Body" col gap=6 pad=10,0,10,0 f616xh68
+              frame "Head" row gap=6 cross=center f616xh22
+                text "writer" 14/20 Semibold color=--text-primary
+                <Badge/Color=Warning> {"Label": "Running"} row gap=6 pad=2,8,2,8 cross=center h75xh22 bg=--bg-warning-primary radius=16
+                  ellipse 6x6 bg=--fg-warning-primary
+                  text "Running" 12/18 Medium color=--text-warning-primary
+              text "Writing the digest…" 14/20 Regular color=--text-secondary

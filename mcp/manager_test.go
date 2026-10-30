@@ -427,3 +427,62 @@ func TestCallCancelKeepsServerRunning(t *testing.T) {
 		t.Fatalf("state=%q, want running", status.State)
 	}
 }
+
+func TestRestartStopsAndStartsClient(t *testing.T) {
+	server := newInMemoryServer()
+	manager, _, connects := newTestManager(t, server, map[string]core.MCPConfig{"test": {}})
+
+	if _, unavailable := manager.Ensure(context.Background(), []string{"test"}); len(unavailable) != 0 {
+		t.Fatalf("unavailable=%v", unavailable)
+	}
+	status, found := manager.Restart(context.Background(), "test")
+	if !found {
+		t.Fatal("configured server was reported as missing")
+	}
+	if status.State != stateRunning || status.Tools != 4 {
+		t.Fatalf("status=%+v", status)
+	}
+	if got := connects.Load(); got != 2 {
+		t.Fatalf("connects=%d want 2", got)
+	}
+
+	// Each restart stops and starts the client again.
+	if _, found := manager.Restart(context.Background(), "test"); !found {
+		t.Fatal("second restart lost the server")
+	}
+	if got := connects.Load(); got != 3 {
+		t.Fatalf("connects=%d want 3", got)
+	}
+
+	status, found = manager.Restart(context.Background(), "missing")
+	if found {
+		t.Fatalf("unknown server reported as configured: %+v", status)
+	}
+	if status.State != stateUnavailable || status.Reason != "not configured" {
+		t.Fatalf("unknown status=%+v", status)
+	}
+}
+
+func TestTestTemporaryClient(t *testing.T) {
+	server := newInMemoryServer()
+	manager, _, _ := newTestManager(t, server, map[string]core.MCPConfig{})
+
+	count, err := manager.Test(context.Background(), core.MCPConfig{Command: "fake"})
+	if err != nil {
+		t.Fatalf("Test: %v", err)
+	}
+	if count != 4 {
+		t.Fatalf("tool count=%d want 4", count)
+	}
+	// The temporary client is not added to the manager.
+	if status := manager.Status([]string{"test"})[0]; status.State != stateUnavailable || status.Reason != "not configured" {
+		t.Fatalf("temporary client changed status: %+v", status)
+	}
+
+	manager.connect = func(context.Context, string, core.MCPConfig) (sdk.Transport, error) {
+		return nil, fmt.Errorf("connect failed")
+	}
+	if _, err := manager.Test(context.Background(), core.MCPConfig{Command: "fake"}); err == nil || !strings.Contains(err.Error(), "connect failed") {
+		t.Fatalf("Test error=%v", err)
+	}
+}

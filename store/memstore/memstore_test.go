@@ -61,6 +61,45 @@ func TestMemstoreSeq(t *testing.T) {
 	}
 }
 
+func TestMemstoreQuestionWaitingProjection(t *testing.T) {
+	s, info := newSession(t)
+	ctx := context.Background()
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindQuestionAsked, TurnID: "t", Payload: core.QuestionAsked{V: 1, RequestID: "q1", CallID: "c1"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := s.Info(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting.Status != "waiting_input" {
+		t.Fatalf("status after ask=%q", waiting.Status)
+	}
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}},
+	}); !errors.Is(err, ErrTurnActive) {
+		t.Fatalf("turn start while waiting err=%v", err)
+	}
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindQuestionAnswered, TurnID: "t", Payload: core.QuestionAnswered{V: 1, RequestID: "q1", CallID: "c1", Outcome: core.QuestionStatusAnswered, Responder: "web"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	running, err := s.Info(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.Status != "running" {
+		t.Fatalf("status after answer=%q", running.Status)
+	}
+}
+
 func TestMemstoreForkUnsupported(t *testing.T) {
 	s, info := newSession(t)
 	if _, err := s.Fork(context.Background(), info.ID, 1); !errors.Is(err, ErrNotSupported) {

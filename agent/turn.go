@@ -81,16 +81,21 @@ func (rn *Runner) runChain(ctx context.Context, initial, turnID string) {
 
 type resolvedAgent struct {
 	name       string
+	team       string
+	delegates  []string
+	roster     []agenthome.RosterEntry
 	provider   string
 	model      string
 	promptFile string
 	channel    string
 	workspace  string
 	tools      []string
+	disabled   []string
 	mcp        []string
 	skills     []string
 	fallback   []core.LLMTarget
 	maxSteps   int
+	child      bool
 }
 
 func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
@@ -103,6 +108,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		return resolvedAgent{}, err
 	}
 	agentName := info.Agent
+	child := info.ParentSessionID != ""
 	var selection core.ModelSelection
 	hasSelection := false
 	for _, event := range chain {
@@ -119,12 +125,20 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		selection = payload
 		hasSelection = true
 	}
-	cfg, ok := rn.reg.config.Agents[agentName]
+	cfgName := agentName
+	teamName := ""
+	var team core.TeamConfig
+	if teamCfg, ok := rn.reg.config.Teams[agentName]; ok {
+		team = teamCfg
+		teamName = agentName
+		cfgName = team.Lead
+	}
+	cfg, ok := rn.reg.config.Agents[cfgName]
 	if !ok {
-		return resolvedAgent{}, fmt.Errorf("%w: %s", ErrUnknownAgent, agentName)
+		return resolvedAgent{}, fmt.Errorf("%w: %s", ErrUnknownAgent, cfgName)
 	}
 	provider, model := cfg.Provider, cfg.Model
-	if hasSelection {
+	if hasSelection && teamName == "" {
 		if selection.Provider != "" {
 			provider = selection.Provider
 		}
@@ -133,7 +147,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		}
 	}
 	if provider == "" || model == "" {
-		return resolvedAgent{}, fmt.Errorf("agent %s has no provider or model set", agentName)
+		return resolvedAgent{}, fmt.Errorf("agent %s has no provider or model set", cfgName)
 	}
 	workspace := info.Workspace
 	if workspace == "" {
@@ -149,24 +163,61 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	maxSteps := cfg.MaxSteps
 	if maxSteps == 0 {
 		maxSteps = 25
+		if child {
+			maxSteps = 15
+		}
 	}
 	fallback, err := parseFallback(cfg.Fallback)
 	if err != nil {
 		return resolvedAgent{}, err
 	}
+	delegates := append([]string{}, cfg.Subagents...)
+	var roster []agenthome.RosterEntry
+	if teamName != "" {
+		delegates = mergeDelegates(team.Members, cfg.Subagents)
+		roster = make([]agenthome.RosterEntry, 0, len(delegates))
+		for _, name := range delegates {
+			entry := agenthome.RosterEntry{Name: name}
+			if delegate, ok := rn.reg.config.Agents[name]; ok {
+				entry.Description = delegate.Description
+			}
+			roster = append(roster, entry)
+		}
+	}
 	return resolvedAgent{
-		name:       agentName,
+		name:       cfgName,
+		team:       teamName,
+		delegates:  delegates,
+		roster:     roster,
 		provider:   provider,
 		model:      model,
 		promptFile: cfg.PromptFile,
 		channel:    info.Channel,
 		workspace:  workspace,
 		tools:      cfg.Tools,
+		disabled:   cfg.DisabledTools,
 		mcp:        cfg.MCP,
 		skills:     cfg.Skills,
 		fallback:   fallback,
 		maxSteps:   maxSteps,
+		child:      info.ParentSessionID != "",
 	}, nil
+}
+
+// mergeDelegates joins groups in order and drops duplicates.
+func mergeDelegates(groups ...[]string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, group := range groups {
+		for _, name := range group {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func parseFallback(list []string) ([]core.LLMTarget, error) {
@@ -231,7 +282,7 @@ func (rn *Runner) promptPath(res resolvedAgent) (string, error) {
 func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string) (string, error) {
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
-		Skills: skills, UnavailableMCP: unavailable,
+		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable,
 	}
 	var home agenthome.Home
 	if rn.reg.home != "" {
@@ -255,7 +306,7 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		in.Persona = string(data)
 	}
 	if home.Dir != "" {
-		if in.User, err = agenthome.ReadEntries(home.User); err != nil {
+		if in.User, err = agenthome.ReadEntries(agenthome.SharedUser(rn.reg.home)); err != nil {
 			slog.Warn("cannot read user file", "agent", res.name, "error", err)
 		}
 		if in.Memory, err = agenthome.ReadEntries(home.Memory); err != nil {
@@ -372,6 +423,17 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 					turnTools = append(turnTools, "skill_load")
 				}
 			}
+			if resolved.team != "" {
+				for _, name := range []string{"task", "task_continue"} {
+					if !containsString(turnTools, name) {
+						turnTools = append(turnTools, name)
+					}
+				}
+			}
+			// disabled_tools removes a name from the offered list. It is applied
+			// after the built-in, MCP, skill, and team tools are collected so a
+			// disabled team or skill tool is removed as well (AC-WEB-049, Q-024).
+			turnTools = filterDisabledTools(turnTools, resolved.disabled)
 			prompt, err = rn.buildPrompt(resolved, skills, unavailable)
 			if err != nil {
 				runErr = runtimeError(err)
@@ -490,8 +552,22 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID string) (result T
 			}
 			outputs := rn.reg.pipeline.Run(ctx, calls, turnTools, core.ToolCtx{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
-				Skills: resolved.skills,
+				Skills:        resolved.skills,
+				Questions:     rn.reg.questions,
+				Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+				AllowedAgents: resolved.delegates,
+				Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
 			})
+			// Child usage from task and task_continue belongs to this step's
+			// usage (REQ-TEAM-013, AC-TEAM-031). Nil usage is ignored and the
+			// child's own step/end keeps the child's model usage.
+			for _, output := range outputs {
+				if output.Usage == nil {
+					continue
+				}
+				usage.InputTokens += output.Usage.InputTokens
+				usage.OutputTokens += output.Usage.OutputTokens
+			}
 			for i, output := range outputs {
 				status := output.Status
 				if status == "" {
@@ -603,6 +679,47 @@ func containsString(list []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// filterDisabledTools drops every name in disabled from tools. An entry is a
+// plain tool name ("bash") or an MCP reference ("github/create_issue"). The
+// MCP reference matches the model-facing "mcp__github__create_issue" name.
+// Unknown names are ignored and the input order is kept (Q-024).
+func filterDisabledTools(tools, disabled []string) []string {
+	if len(disabled) == 0 {
+		return tools
+	}
+	blocked := make(map[string]bool, len(disabled))
+	for _, name := range disabled {
+		if name != "" {
+			blocked[name] = true
+		}
+	}
+	out := make([]string, 0, len(tools))
+	for _, name := range tools {
+		if blocked[name] {
+			continue
+		}
+		if ref, ok := mcpToolRef(name); ok && blocked[ref] {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// mcpToolRef turns a model-facing MCP tool name into the config-facing
+// "<server>/<tool>" reference. Names that are not MCP tools return false.
+func mcpToolRef(name string) (string, bool) {
+	rest, ok := strings.CutPrefix(name, "mcp__")
+	if !ok {
+		return "", false
+	}
+	i := strings.Index(rest, "__")
+	if i <= 0 || i+2 >= len(rest) {
+		return "", false
+	}
+	return rest[:i] + "/" + rest[i+2:], true
 }
 
 func runtimeError(err error) *core.ProviderError {

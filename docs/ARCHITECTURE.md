@@ -212,7 +212,7 @@ Invariants:
 - A session has one active turn and one inbox. New messages are claimed at the start of the next step,
   so the user can correct the agent in the middle of a turn.
 - `max_steps` defaults to 25 per turn.
-- Independent `Read` tools may run in parallel. `Write` and `Exec` tools run sequentially.
+- Independent `Read` tools may run in parallel. `Write` and `Exec` tools run sequentially. Exception: `task` calls in one step run in parallel (see section 8).
 
 Diagram: [0002. Agent Loop and Approval](diagram/0002-agent-loop-and-approval.md).
 
@@ -314,6 +314,13 @@ The tool `task(agent, prompt, title)` creates a **child session** with `parent_s
 - Approvals from a child are sent through the parent's channel, labeled with the child's name.
 - Maximum depth 2, at most 3 concurrent children, child `max_steps` 15.
 - Cancelling the parent cancels all children.
+- `task` calls in one step run in parallel. This is the one exception to the sequential `Exec` rule in section 5. Approvals still run one at a time.
+- Child sessions are hidden from the top-level session list. Their approvals are labelled with the child agent and go to the parent's channel.
+
+**Teams** ([ADR 0017](adr/0017-agent-teams-as-roster-over-subagents.md)). `[teams.<name>]` declares a `lead` agent and
+`members`. A session whose agent is a team runs the lead, with the members (plus the lead's own `subagents`) as its
+subagents. The lead's prompt gets a roster section, and `task` and `task_continue` are enabled for the lead
+automatically. Teams do not nest, and there is no peer messaging or shared task board in v1.
 
 ## 9. Permissions and approval
 

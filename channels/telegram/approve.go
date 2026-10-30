@@ -25,17 +25,18 @@ func newApprovalID() string {
 // Approve asks the owner through an inline keyboard (API-TG-004). It is the runtime's
 // approval answerer; requests for sessions without a chat are unavailable (fail-closed).
 func (c *Channel) Approve(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome {
-	w := c.chatForSession(req.SessionID)
+	w := c.chatForApproval(ctx, req.SessionID)
 	if w == nil {
 		return core.OutcomeUnavailable
 	}
 	arg, liveID := w.toolArg(req.CallID)
-	if arg == "" {
-		arg = req.Label
-	}
 	label := req.ToolName
 	if arg != "" {
 		label += ": " + arg
+	}
+	// A child approval carries the child agent name in Label (API-TEAM-004).
+	if req.Label != "" {
+		label = req.Label + " · " + label
 	}
 	a := &approval{id: newApprovalID(), chat: w, reply: make(chan core.ApprovalOutcome, 1)}
 	keyboard := &Keyboard{Rows: [][]Button{{
@@ -64,7 +65,7 @@ func (c *Channel) Approve(ctx context.Context, req core.ApprovalRequest) core.Ap
 	select {
 	case outcome = <-a.reply:
 	case <-timer.C:
-		outcome, status = core.OutcomeRejected, "⊘ approval expired"
+		outcome, status = core.OutcomeUnavailable, "⊘ approval expired"
 	case <-ctx.Done():
 		outcome = core.OutcomeCancelled
 	}
@@ -75,6 +76,23 @@ func (c *Channel) Approve(ctx context.Context, req core.ApprovalRequest) core.Ap
 	defer cancel()
 	c.apiErr("editMessageText", c.api.EditMessageText(editCtx, w.id, msgID, "Allow "+label+"?\n"+status, SendOptions{}))
 	return outcome
+}
+
+// chatForApproval finds the chat of a session or of its nearest bound ancestor.
+// A child session inherits the root channel, so its approval is shown in the
+// root chat (REQ-TEAM-010).
+func (c *Channel) chatForApproval(ctx context.Context, sessionID string) *chat {
+	for depth := 0; depth < 3 && sessionID != ""; depth++ {
+		if w := c.chatForSession(sessionID); w != nil {
+			return w
+		}
+		info, err := c.backend.SessionInfo(ctx, sessionID)
+		if err != nil {
+			return nil
+		}
+		sessionID = info.ParentSessionID
+	}
+	return nil
 }
 
 func outcomeText(outcome core.ApprovalOutcome) string {

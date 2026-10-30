@@ -3,10 +3,13 @@ package toolfmt
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
-// PrimaryArg returns the main argument of a tool call on one line (API-CLI-003), or "".
+// PrimaryArg returns the main argument of a tool call on one line (API-CLI-003),
+// or "". An ask_user call returns its question count, for example
+// "2 questions", instead of its first question (REQ-ASK-020).
 func PrimaryArg(name string, input json.RawMessage) string {
 	var value map[string]any
 	_ = json.Unmarshal(input, &value)
@@ -37,12 +40,25 @@ func PrimaryArg(name string, input json.RawMessage) string {
 		raw = get("target")
 	case "memory_write":
 		raw = strings.TrimSpace(get("action") + " " + get("target"))
+	case "ask_user":
+		if count := questionCount(value); count == 1 {
+			raw = "1 question"
+		} else if count > 1 {
+			raw = strconv.Itoa(count) + " questions"
+		}
 	default:
 		if len(input) > 0 {
 			raw = string(input)
 		}
 	}
 	return strings.Join(strings.Fields(raw), " ")
+}
+
+// questionCount returns the number of questions in an ask_user input. An
+// unparseable input or one without a questions array has 0 questions.
+func questionCount(value map[string]any) int {
+	questions, _ := value["questions"].([]any)
+	return len(questions)
 }
 
 // Cut shortens s to at most n runes, ending with "…" when cut.

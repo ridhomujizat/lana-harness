@@ -122,6 +122,12 @@ func assignContext(c *Context, services map[ServiceKey]any) error {
 				return fmt.Errorf("service '%s' is not of type ApprovalService", key)
 			}
 			*dst = v
+		case *QuestionService:
+			v, ok := svc.(QuestionService)
+			if !ok {
+				return fmt.Errorf("service '%s' is not of type QuestionService", key)
+			}
+			*dst = v
 		}
 		return nil
 	}
@@ -134,6 +140,7 @@ func assignContext(c *Context, services map[ServiceKey]any) error {
 		{ServiceSessions, &c.Sessions},
 		{ServiceAgents, &c.Agents},
 		{ServiceApproval, &c.Approval},
+		{ServiceQuestion, &c.Questions},
 	} {
 		if err := assign(item.key, item.into); err != nil {
 			return err

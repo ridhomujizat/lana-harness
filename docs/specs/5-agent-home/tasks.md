@@ -4,10 +4,10 @@
 - **Requirements**: [requirements.md](requirements.md)
 - **Contract**: [api-contract.md](api-contract.md) — Required
 - **Design**: [design.md](design.md)
-- **Requirements revision**: 1
-- **Contract revision**: 1
-- **Design revision**: 1
-- **Status**: Completed
+- **Requirements revision**: 4
+- **Contract revision**: 3
+- **Design revision**: 4
+- **Status**: In Progress (revision 2 slices `T-009` to `T-013`; `T-001` to `T-008` completed in revision 1)
 
 ## Execution rules
 
@@ -28,6 +28,11 @@
 | `AC-MEM-007`, `AC-MEM-008` | `API-MEM-002` | `T-005` | — | `tools/permission` tests | Pass |
 | `AC-AGCLI-001` through `AC-AGCLI-006`, `AC-TPL-001`, `AC-ONB-003` | `API-AGENT-001` through `004` | `T-006` | — | `cmd/lana/agent_test.go` | Pass |
 | `AC-TUI-001` | `API-TUI-001` | `T-007` | — | TUI program test | Pass |
+| `AC-HOME-004`, `AC-HOME-005` | `API-HOME-003` | `T-010` | — | `agent` turn tests | Pending |
+| `AC-HOME-006` | `API-HOME-003` | `T-011` | — | `cmd/lana` `agent show` test | Pass |
+| `AC-HOME-007` through `AC-HOME-009` | `API-HOME-003` | `T-009` | — | `agenthome` migration tests | Pending |
+| `AC-HOME-010` | `API-HOME-003` | `T-011` | — | `config` check test | Pass |
+| `AC-MEM-009` | `API-MEM-002` | `T-010` | — | `tools/memory_test.go` | Pass |
 
 ## Task graph
 
@@ -43,6 +48,13 @@ flowchart LR
   T5 --> T8
   T6 --> T8
   T7 --> T8
+  T1 --> T9["T-009: shared path and migration"]
+  T9 --> T10["T-010: prompt and memory tools read the shared file"]
+  T9 --> T11["T-011: runtime open, CLI, config check"]
+  T9 --> T12["T-012: web user file target"]
+  T10 --> T13["T-013: revision 2 verification"]
+  T11 --> T13
+  T12 --> T13
 ```
 
 ## Tasks
@@ -186,6 +198,79 @@ flowchart LR
     - PR/commit: —
     - Deviation: Smoke test found that `secretInFile` used the first `KEY=` line while the config loader uses the last; fixed in `cmd/lana/main.go` with TestSecretInFileLastWins
 
+- [x] `T-009` Add the shared `USER.md` path and the migration to package `agenthome` (revision 2)
+  - Issue/PR: `—`
+  - Depends on: `T-001`
+  - Requirements: `REQ-HOME-003`, `REQ-HOME-004`
+  - Acceptance criteria: `AC-HOME-007` through `AC-HOME-009`
+  - Contract operations: `API-HOME-003`
+  - Scope:
+    - Remove the `User` field from `Home`; add `SharedUser(lanaHome)` returning `$LANA_HOME/USER.md`.
+    - `MigrateUser(lanaHome, candidates, defaultAgent)` implements the copy rule of `API-HOME-003` with a byte copy through the existing atomic write, mode `0600`.
+  - Target files: `internal/agenthome/agenthome.go`, `internal/agenthome/migrate.go` (new), `internal/agenthome/agenthome_test.go`, `internal/agenthome/migrate_test.go` (new).
+  - Verification: `nix develop -c go test -count=1 ./internal/agenthome/`
+  - Completion evidence:
+    - Status: Completed
+
+- [x] `T-010` Read the shared file in the prompt and in the memory tools (revision 2)
+  - Issue/PR: `—`
+  - Depends on: `T-009`
+  - Requirements: `REQ-HOME-003`, `REQ-MEM-006`
+  - Acceptance criteria: `AC-HOME-004`, `AC-HOME-005`, `AC-MEM-009`
+  - Contract operations: `API-HOME-002`, `API-HOME-003`, `API-MEM-002`
+  - Scope:
+    - `agent/turn.go` `buildPrompt` reads the user entries from `agenthome.SharedUser`.
+    - `tools/memory.go` target `user` reads and writes the shared file for `memory_read` and `memory_write`.
+    - Update fixtures in `agent/home_test.go` that wrote a per-agent `USER.md`.
+  - Target files: `agent/turn.go`, `agent/home_test.go`, `tools/memory.go`, `tools/memory_test.go`.
+  - Verification: `nix develop -c go test -count=1 ./agent/ ./tools/`
+  - Completion evidence:
+    - Status: Completed
+
+- [x] `T-011` Run the migration at runtime open; move the CLI and `config check` to the shared file (revision 2)
+  - Issue/PR: `—`
+  - Depends on: `T-009`
+  - Requirements: `REQ-HOME-004`, `REQ-AGCLI-001`, `REQ-AGCLI-002`, `REQ-AGCLI-003`
+  - Acceptance criteria: `AC-HOME-006`, `AC-HOME-010`, `AC-AGCLI-005`
+  - Contract operations: `API-HOME-003`, `API-AGENT-001` through `API-AGENT-003`
+  - Scope:
+    - `lana.go`: the runtime open path calls `MigrateUser` once per process with the config's agents and the `cli` route agent.
+    - `cmd/lana/agent.go`: `new` writes no `USER.md`; `edit <name> user` opens the shared file; `list` and `show` read the shared size.
+    - `cmd/lana/chat.go` (`Memory`) and `cmd/lana/daemon.go` (`Memory`) read `SharedUser`.
+    - `config/check.go`: warning per per-agent `USER.md` that still has entries.
+  - Target files: `lana.go`, `cmd/lana/agent.go`, `cmd/lana/agent_test.go`, `cmd/lana/chat.go`, `cmd/lana/daemon.go`, `config/check.go`, `config/check_test.go`.
+  - Verification: `nix develop -c go test -count=1 . ./cmd/lana/ ./config/`
+  - Completion evidence:
+    - Status: Completed
+
+- [x] `T-012` Point the web agent-file `user` target at the shared file (revision 2)
+  - Issue/PR: `—`
+  - Depends on: `T-009`
+  - Requirements: `REQ-HOME-003`
+  - Acceptance criteria: `AC-HOME-004` (web side of the shared read)
+  - Contract operations: `API-HOME-003`
+  - Scope:
+    - `web/agentfiles.go` `agentFileTarget` case `user` uses `agenthome.SharedUser(store.SettingsHome())`.
+    - Only the path changes here. The endpoint shape belongs to spec #9 rev 2.
+  - Target files: `web/agentfiles.go`, `web/agentfiles_test.go`.
+  - Verification: `nix develop -c go test -count=1 ./web/`
+  - Completion evidence:
+    - Status: Completed
+
+- [ ] `T-013` Revision 2 final verification and smoke test (revision 2)
+  - Issue/PR: `—`
+  - Depends on: `T-010`, `T-011`, `T-012`
+  - Requirements: `REQ-HOME-003`, `REQ-HOME-004`, `REQ-MEM-006`
+  - Acceptance criteria: all revision 2 criteria
+  - Contract operations: `API-HOME-003`
+  - Scope:
+    - Full suite and lint; manual smoke in a temp `LANA_HOME` with two agents, one of them holding `agents/<name>/USER.md`.
+  - Verification:
+    - `nix develop -c go test -count=1 ./...`
+    - `nix develop -c golangci-lint run ./...`
+  - Completion evidence:
+    - Status: In progress
+
 ## Final verification
 
 - [x] Every acceptance criterion has passing evidence.
@@ -195,6 +280,11 @@ flowchart LR
 - [x] `gofmt -l .` is empty, `golangci-lint run ./...`, `go test -race` (changed packages), and the release build pass.
 - [x] Deviations are resolved in requirements or design, not only recorded here.
 
+## Final verification (revision 2)
+
+- [ ] Every revision 2 acceptance criterion (`AC-HOME-004` to `AC-HOME-010`, `AC-MEM-009`) has passing evidence.
+- [ ] `nix develop -c go test -count=1 ./...` and `golangci-lint` pass.
+
 ## Approval
 
 - [x] Requirements and design are Approved and their revisions are recorded.
@@ -202,5 +292,5 @@ flowchart LR
 - [x] Every acceptance criterion has exactly one evidence owner.
 - [x] Every task has a limited scope, dependencies, and verification.
 - [x] No task introduces new behavior.
-- **Approved by**: Ridho ("oke sekarang implement", 2026-10-29)
-- **Approved on**: 2026-10-29
+- **Approved by**: Ridho ("oke sekarang implement", 2026-10-29) for revision 1; Ridho, lifted gate 2026-10-30 for the revision 2 slices (agent recommendations `Q-008`, `Q-009`)
+- **Approved on**: 2026-10-29 (revision 1); 2026-10-30 (revision 2)

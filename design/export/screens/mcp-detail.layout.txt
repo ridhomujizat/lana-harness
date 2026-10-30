@@ -1,0 +1,164 @@
+# MCP / MCP – Detail (frame 9421)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "MCP – Detail" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    text "MCP  /  github" 14/20 Medium color=--text-tertiary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Tile" row gap=0 main=center cross=center f56xf56 bg=--bg-secondary border=--border-secondary radius=12
+        <Icon/MCP> f20xf20
+      frame "Title" col gap=4 f798xh60
+        frame "Name row" row gap=8 cross=center h174xh32
+          text "github" 24/32 Semibold color=--text-primary
+          <Badge/Color=Success> {"Label": "Connected"} row gap=6 pad=2,8,2,8 cross=center h91xh22 bg=--bg-success-primary radius=16
+            ellipse 6x6 bg=--fg-success-primary
+            text "Connected" 12/18 Medium color=--text-success-primary
+        text "Running for 2 h · 26 tools · used by 2 agents" 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Restart"} row gap=6 pad=8,12,8,12 main=center cross=center h75xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Restart" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Save changes"} row gap=6 pad=8,12,8,12 main=center cross=center h119xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Save changes" 14/20 Semibold color=--text-white
+    frame "Body" row gap=32 f1096xh554
+      frame "Connection" col gap=20 f520xh554
+        text "Connection" 16/24 Semibold color=--text-secondary
+        frame "Type" col gap=6 f520xh68
+          text "Type" 14/20 Medium color=--text-secondary
+          frame "Segmented" row gap=4 pad=4,4,4,4 f520xh42 bg=--bg-secondary border=--border-secondary radius=10
+            frame "Command" row gap=0 pad=6,12,6,12 main=center f253xh32 bg=--bg-primary radius=6 shadow
+              text "Command" 14/20 Semibold color=--text-secondary
+            frame "URL" row gap=0 pad=6,12,6,12 main=center f253xh32 radius=6
+              text "URL" 14/20 Semibold color=--text-quaternary
+        frame "Command" col gap=6 f520xh68
+          text "Command" 14/20 Medium color=--text-secondary
+          frame "Field" row gap=8 pad=10,14,10,14 cross=center f520xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "npx" 14/20 Regular Menlo color=--text-primary
+        frame "Arguments" col gap=6 f520xh144
+          text "Arguments" 14/20 Medium color=--text-secondary
+          frame "List" col gap=0 f520xh118 bg=--bg-primary border=--border-secondary radius=10
+            frame "-y" row gap=12 pad=9,12,9,12 cross=center f518xh39 border=--border-secondary
+              text "-y" 13/20 Regular Menlo color=--text-primary
+              <Icon/Close> f20xf20
+            frame "@modelcontextprotocol/server-github" row gap=12 pad=9,12,9,12 cross=center f518xh39 border=--border-secondary
+              text "@modelcontextprotocol/server-github" 13/20 Regular Menlo color=--text-primary
+              <Icon/Close> f20xf20
+            frame "Add" row gap=8 pad=9,12,9,12 cross=center f518xh38
+              <Icon/Plus> f20xf20
+              text "Add argument" 14/20 Semibold color=--text-brand-secondary
+        frame "Environment" col gap=6 f520xh170
+          text "Environment" 14/20 Medium color=--text-secondary
+          frame "List" col gap=0 f520xh118 bg=--bg-primary border=--border-secondary radius=10
+            frame "GITHUB_TOKEN" row gap=12 pad=9,12,9,12 cross=center f518xh39 border=--border-secondary
+              frame "Key" row gap=0 f180xh20
+                text "GITHUB_TOKEN" 13/20 Regular Menlo color=--text-primary
+              text "••••••••••••" 13/20 Regular Menlo color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "GITHUB_API_URL" row gap=12 pad=9,12,9,12 cross=center f518xh39 border=--border-secondary
+              frame "Key" row gap=0 f180xh20
+                text "GITHUB_API_URL" 13/20 Regular Menlo color=--text-primary
+              text "••••••••••••" 13/20 Regular Menlo color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "Add" row gap=8 pad=9,12,9,12 cross=center f518xh38
+              <Icon/Plus> f20xf20
+              text "Add variable" 14/20 Semibold color=--text-brand-secondary
+          text "Values are hidden after you save. Use secrets for tokens." 14/20 Regular color=--text-tertiary
+      frame "Usage" col gap=24 f544xh520
+        frame "Agents" col gap=6 f544xh166
+          frame "Label row" row gap=0 f544xh24
+            text "Agents" 16/24 Semibold color=--text-secondary
+            text "2 of 6" 14/20 Regular color=--text-quaternary
+          frame "List" col gap=0 f544xh136 bg=--bg-primary border=--border-secondary radius=10
+            frame "default" row gap=10 pad=8,12,8,12 cross=center f542xh45 border=--border-secondary
+              <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f28xf28 bg=--bg-brand-primary border=--bg-primary radius=16
+                text "D" 12/18 Semibold color=--text-brand-secondary
+              frame "Text" row gap=6 cross=center f450xh20
+                text "default" 14/20 Semibold color=--text-primary
+                text "gpt-5-mini" 14/20 Regular color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "coder" row gap=10 pad=8,12,8,12 cross=center f542xh45 border=--border-secondary
+              <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f28xf28 bg=--bg-warning-primary border=--bg-primary radius=16
+                text "C" 12/18 Semibold color=--text-warning-primary
+              frame "Text" row gap=6 cross=center f450xh20
+                text "coder" 14/20 Semibold color=--text-primary
+                text "claude-sonnet-5-5" 14/20 Regular color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "Add agent" row gap=10 pad=8,12,8,12 cross=center f542xh44
+              frame "Tile" row gap=0 main=center cross=center f28xf28 border=--border-primary radius=14
+                <Icon/Plus> f20xf20
+              text "Add agent" 14/20 Semibold color=--text-brand-secondary
+        frame "Tools" col gap=6 f544xh330
+          frame "Label row" row gap=0 cross=center f544xh24
+            text "Tools" 16/24 Semibold color=--text-secondary
+            text "26 from this server" 14/20 Regular color=--text-quaternary
+          frame "List" col gap=0 f544xh274 bg=--bg-primary border=--border-secondary radius=10
+            frame "create_issue" row gap=12 pad=9,12,9,12 cross=center f542xh39 border=--border-secondary
+              frame "Name" row gap=0 f190xh20
+                text "create_issue" 13/20 Regular Menlo color=--text-primary
+              text "Open an issue in a repository." 14/20 Regular color=--text-tertiary
+            frame "get_pull_request" row gap=12 pad=9,12,9,12 cross=center f542xh39 border=--border-secondary
+              frame "Name" row gap=0 f190xh20
+                text "get_pull_request" 13/20 Regular Menlo color=--text-primary
+              text "Read a pull request and its diff." 14/20 Regular color=--text-tertiary
+            frame "list_commits" row gap=12 pad=9,12,9,12 cross=center f542xh39 border=--border-secondary
+              frame "Name" row gap=0 f190xh20
+                text "list_commits" 13/20 Regular Menlo color=--text-primary
+              text "List commits on a branch." 14/20 Regular color=--text-tertiary
+            frame "search_code" row gap=12 pad=9,12,9,12 cross=center f542xh39 border=--border-secondary
+              frame "Name" row gap=0 f190xh20
+                text "search_code" 13/20 Regular Menlo color=--text-primary
+              text "Search code across repositories." 14/20 Regular color=--text-tertiary
+            frame "create_pull_request" row gap=12 pad=9,12,9,12 cross=center f542xh39 border=--border-secondary
+              frame "Name" row gap=0 f190xh20
+                text "create_pull_request" 13/20 Regular Menlo color=--text-primary
+              text "Open a pull request from a branch." 14/20 Regular color=--text-tertiary
+            frame "add_issue_comment" row gap=12 pad=9,12,9,12 cross=center f542xh39 border=--border-secondary
+              frame "Name" row gap=0 f190xh20
+                text "add_issue_comment" 13/20 Regular Menlo color=--text-primary
+              text "Comment on an issue or pull request." 14/20 Regular color=--text-tertiary
+            frame "More" row gap=0 pad=9,12,9,12 cross=center f542xh38
+              text "Show all 26 tools" 14/20 Semibold color=--text-brand-secondary
+          text "Turn tools on or off per agent in the agent's Tools tab." 14/20 Regular color=--text-tertiary

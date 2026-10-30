@@ -55,6 +55,12 @@ type pendingLayer struct {
 
 // Load builds the effective config.
 func Load(ctx context.Context, opts Options) (*Result, error) {
+	return load(ctx, opts, nil)
+}
+
+// load builds the effective config. When candidate is not nil it replaces the
+// home config.toml layer, which lets Check validate text that is not on disk.
+func load(ctx context.Context, opts Options, candidate *[]byte) (*Result, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -84,7 +90,19 @@ func Load(ctx context.Context, opts Options) (*Result, error) {
 	if home != "" {
 		profilePath := filepath.Join(home, "profiles", profile+".toml")
 		pending = append(pending, fileLayer(profilePath))
-		pending = append(pending, fileLayer(filepath.Join(home, "config.toml")))
+	}
+	configPath := "config.toml"
+	if home != "" {
+		configPath = filepath.Join(home, "config.toml")
+	}
+	switch {
+	case candidate != nil:
+		pending = append(pending, pendingLayer{
+			info: LayerInfo{Name: configPath, Path: configPath, Present: true},
+			raw:  *candidate,
+		})
+	case home != "":
+		pending = append(pending, fileLayer(configPath))
 	}
 	for _, patch := range opts.Patches {
 		path := patch
@@ -184,6 +202,7 @@ func Load(ctx context.Context, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, Errors{{Msg: err.Error()}}
 	}
+	applyWebDefaults(&cfg, st.value)
 	return &Result{
 		Profile:  profile,
 		Home:     home,
@@ -227,6 +246,22 @@ func decodeConfig(value map[string]any) (core.Config, error) {
 		cfg.Version = maxSupportedVersion
 	}
 	return cfg, nil
+}
+
+// applyWebDefaults fills [web] defaults: enabled when the table is absent, and
+// the loopback address when addr is not set.
+func applyWebDefaults(cfg *core.Config, value map[string]any) {
+	cfg.Web = core.WebConfig{Enabled: true, Addr: core.DefaultWebAddr}
+	table, ok := asMap(value["web"])
+	if !ok {
+		return
+	}
+	if v, ok := table["enabled"].(bool); ok {
+		cfg.Web.Enabled = v
+	}
+	if v, ok := table["addr"].(string); ok && v != "" {
+		cfg.Web.Addr = v
+	}
 }
 
 // HomeDir returns LANA_HOME or ~/.lana.

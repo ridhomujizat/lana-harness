@@ -80,10 +80,10 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 				i++
 				continue
 			}
-			if state.call.Risk == core.RiskRead {
+			if batchable(state) {
 				j := i
 				var batch []*callState
-				for j < len(states) && states[j].ready && states[j].call.Risk == core.RiskRead {
+				for j < len(states) && states[j].ready && batchable(states[j]) {
 					batch = append(batch, states[j])
 					j++
 				}
@@ -104,6 +104,17 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 		}
 	}
 	return out
+}
+
+// batchable reports whether a ready call may run in a parallel batch with
+// the other ready calls of the step. RiskRead calls are batched as before;
+// every other tool opts in through core.ParallelTool.
+func batchable(state *callState) bool {
+	if state.call.Risk == core.RiskRead {
+		return true
+	}
+	tool, ok := state.tool.(core.ParallelTool)
+	return ok && tool.ParallelSafe()
 }
 
 func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.ToolCtx) {
@@ -130,6 +141,7 @@ func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.
 		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "cancelled"}
 		return
 	}
+	tc.CallID = state.call.CallID
 	input := core.ToolsExecuteInput{Ctx: tc, Call: state.call, Tool: state.tool}
 	output, err := tr.hooks.ToolsExecute.Call(ctx, input)
 	if err != nil {

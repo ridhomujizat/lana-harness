@@ -7,12 +7,19 @@ import (
 	"time"
 )
 
+// RosterEntry is one teammate in the team roster section of a prompt.
+type RosterEntry struct {
+	Name        string
+	Description string
+}
+
 // PromptInput is the data for one system prompt.
 type PromptInput struct {
 	Persona        string
 	User           []string
 	Memory         []string
 	Skills         []Skill
+	Roster         []RosterEntry
 	Agent          string
 	Channel        string
 	Workspace      string
@@ -25,6 +32,9 @@ func Build(in PromptInput) string {
 	sections := []string{}
 	if persona := strings.TrimSpace(in.Persona); persona != "" {
 		sections = append(sections, persona)
+	}
+	if len(in.Roster) > 0 {
+		sections = append(sections, "# Your team\n"+roster(in.Roster))
 	}
 	if len(in.User) > 0 {
 		sections = append(sections, "# About the user\n"+section(in.User, UserLimit))
@@ -41,6 +51,19 @@ func Build(in PromptInput) string {
 	}
 	sections = append(sections, "# Runtime context\n"+runtimeContext(in))
 	return strings.Join(sections, "\n\n")
+}
+
+func roster(entries []RosterEntry) string {
+	lines := make([]string, 0, len(entries)+1)
+	for _, entry := range entries {
+		line := "- " + entry.Name
+		if entry.Description != "" {
+			line += ": " + entry.Description
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, "Use the task tool to delegate work to a teammate, and task_continue to follow up.")
+	return strings.Join(lines, "\n")
 }
 
 func section(entries []string, limit int) string {

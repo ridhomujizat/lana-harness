@@ -44,13 +44,29 @@ func setup(t *testing.T, agent core.AgentConfig, withPipeline bool) *testSetup {
 }
 
 func callInput(sessionID, toolName, input string) core.ToolsPreExecuteInput {
+	return callInputFor(sessionID, "coder", toolName, input)
+}
+
+func callInputFor(sessionID, agentName, toolName, input string) core.ToolsPreExecuteInput {
 	risk := core.RiskWrite
 	if toolName == "read_file" || toolName == "glob" || toolName == "grep" {
 		risk = core.RiskRead
 	}
-	return core.ToolsPreExecuteInput{AgentName: "coder", Call: core.ToolCall{
+	return core.ToolsPreExecuteInput{AgentName: agentName, Call: core.ToolCall{
 		SessionID: sessionID, TurnID: "t", CallID: "c", Name: toolName, Input: json.RawMessage(input), Risk: risk,
 	}}
+}
+
+func newChildSession(t *testing.T, s *testSetup, agent string) core.SessionInfo {
+	t.Helper()
+	info, err := s.store.Create(context.Background(), core.NewSession{
+		Agent: agent, Channel: s.session.Channel, Address: s.session.Address,
+		Workspace: s.session.Workspace, ParentSessionID: s.session.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
 }
 
 type fakeApproval struct {
@@ -511,5 +527,91 @@ func TestMCPAllowRuleUnderAsk(t *testing.T) {
 	}
 	if got := approval.calls.Load(); got != 1 {
 		t.Fatalf("approval calls = %d, want 1", got)
+	}
+}
+
+func TestChildPermissionIntersection(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		parent, child string
+	}{
+		{"parent trust child ask", "trust", "ask"},
+		{"parent ask child trust", "ask", "trust"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := setup(t, core.AgentConfig{Permission: tc.parent}, false)
+			s.config.Agents["researcher"] = core.AgentConfig{Permission: tc.child}
+			child := newChildSession(t, s, "researcher")
+			approval := &fakeApproval{outcome: core.OutcomeRejected}
+			engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+			got, _ := engine.Handle(context.Background(), callInputFor(child.ID, "researcher", "bash", `{"command":"ls"}`), nil)
+			if got.Allowed || approval.calls.Load() != 1 {
+				t.Fatalf("got=%+v approval calls=%d, want an approval request", got, approval.calls.Load())
+			}
+		})
+	}
+}
+
+func TestChildDenyUnionAndAllowNotInherited(t *testing.T) {
+	t.Run("parent deny applies", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "trust", Rules: core.AgentRules{Deny: []string{"bash(rm -rf*)"}}}, false)
+		s.config.Agents["researcher"] = core.AgentConfig{Permission: "trust"}
+		child := newChildSession(t, s, "researcher")
+		engine := &Engine{Store: s.store, Config: s.config}
+		got, _ := engine.Handle(context.Background(), callInputFor(child.ID, "researcher", "bash", `{"command":"rm -rf build"}`), nil)
+		if got.Allowed || !strings.Contains(got.Reason, "deny rule") {
+			t.Fatalf("got=%+v, want a deny rule rejection", got)
+		}
+	})
+
+	t.Run("parent allow does not apply", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Allow: []string{"bash(go test*)"}}}, false)
+		s.config.Agents["researcher"] = core.AgentConfig{Permission: "ask"}
+		child := newChildSession(t, s, "researcher")
+		approval := &fakeApproval{outcome: core.OutcomeRejected}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		got, _ := engine.Handle(context.Background(), callInputFor(child.ID, "researcher", "bash", `{"command":"go test ./..."}`), nil)
+		if got.Allowed || approval.calls.Load() != 1 {
+			t.Fatalf("got=%+v approval calls=%d, want an approval request", got, approval.calls.Load())
+		}
+	})
+}
+
+func TestChildPolicyTracksLiveParent(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "trust"}, false)
+	s.config.Agents["researcher"] = core.AgentConfig{Permission: "trust"}
+	child := newChildSession(t, s, "researcher")
+	approval := &fakeApproval{outcome: core.OutcomeAllowedOnce}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	in := callInputFor(child.ID, "researcher", "bash", `{"command":"echo hi"}`)
+	if got, _ := engine.Handle(context.Background(), in, nil); !got.Allowed {
+		t.Fatalf("before parent change: got=%+v, want allowed", got)
+	}
+	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{
+		{Kind: core.KindApprovalPolicy, Payload: core.ApprovalPolicy{V: 1, Policy: core.PolicyNever}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := engine.Handle(context.Background(), in, nil)
+	if got.Allowed || !strings.Contains(got.Reason, "policy never") {
+		t.Fatalf("after parent change: got=%+v, want policy never", got)
+	}
+}
+
+func TestChildDoesNotInheritParentGrant(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "ask"}, false)
+	s.config.Agents["researcher"] = core.AgentConfig{Permission: "ask"}
+	child := newChildSession(t, s, "researcher")
+	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{
+		{Kind: core.KindToolCall, Payload: core.ToolCallPayload{V: 1, CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"git status"}`)}},
+		{Kind: core.KindApprovalDecided, Payload: core.ApprovalDecided{V: 1, RequestID: "r1", CallID: "c1", Outcome: core.OutcomeAllowedSession}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	approval := &fakeApproval{outcome: core.OutcomeRejected}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	got, _ := engine.Handle(context.Background(), callInputFor(child.ID, "researcher", "bash", `{"command":"git status"}`), nil)
+	if got.Allowed || approval.calls.Load() != 1 {
+		t.Fatalf("got=%+v approval calls=%d, want an approval request", got, approval.calls.Load())
 	}
 }

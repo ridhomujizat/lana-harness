@@ -51,8 +51,36 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		return reject("outside workspace"), nil
 	}
 
+	var parentPolicy core.Policy
+	var parentDeny []string
+	if info.ParentSessionID != "" {
+		parentInfo, err := e.Store.Info(ctx, info.ParentSessionID)
+		if err != nil {
+			return reject("failed to read parent session: " + err.Error()), nil
+		}
+		parentEvents, err := e.Store.ChainEvents(ctx, info.ParentSessionID)
+		if err != nil {
+			return reject("failed to read parent log: " + err.Error()), nil
+		}
+		parentAgent := e.Config.Agents[parentInfo.Agent]
+		parentFallback := core.PolicyAsk
+		if parentAgent.Permission != "" {
+			parentFallback = core.Policy(parentAgent.Permission)
+		}
+		parentPolicy = EffectivePolicy(parentEvents, parentFallback)
+		parentDeny = parentAgent.Rules.Deny
+	}
+
 	rules := agent.Rules
 	for _, raw := range rules.Deny {
+		p, err := pattern.ParsePattern(raw)
+		if err == nil && p.Match(in.Call.Name, arg) {
+			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
+		}
+	}
+	// The parent's deny rules apply in addition to the child's. Parent allow
+	// rules and grants are intentionally not read; they do not carry over.
+	for _, raw := range parentDeny {
 		p, err := pattern.ParsePattern(raw)
 		if err == nil && p.Match(in.Call.Name, arg) {
 			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
@@ -82,6 +110,9 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		fallback = core.Policy(agent.Permission)
 	}
 	policy := EffectivePolicy(events, fallback)
+	if info.ParentSessionID != "" {
+		policy = ChildPolicy(parentPolicy, policy)
+	}
 	if policy == core.PolicyTrust {
 		return allow(core.ApprovalOutcome("")), nil
 	}
@@ -98,9 +129,16 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if e.Approval == nil {
 		return reject("approval is not available"), nil
 	}
+	// A child approval is labelled with the child's agent name so the owner can
+	// tell it apart from the parent's approvals. Root approvals keep no label.
+	label := ""
+	if info.ParentSessionID != "" {
+		label = agentName
+	}
 	outcome, err := e.Approval.Request(ctx, core.ApprovalRequest{
 		SessionID: in.Call.SessionID, TurnID: in.Call.TurnID, CallID: in.Call.CallID,
-		AgentName: agentName, ToolName: in.Call.Name, Risk: in.Call.Risk,
+		AgentName: agentName, ToolName: in.Call.Name, Input: in.Call.Input, Risk: in.Call.Risk,
+		Label: label,
 	})
 	if err != nil {
 		return reject("approval failed: " + err.Error()), nil

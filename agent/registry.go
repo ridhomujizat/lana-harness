@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,9 @@ type turnState struct {
 	result TurnResult
 }
 
+// maxActiveChildren is the number of child turns one parent may run at once.
+const maxActiveChildren = 3
+
 // Registry manages live sessions and their inboxes.
 type Registry struct {
 	root       context.Context
@@ -36,18 +40,20 @@ type Registry struct {
 	tools      core.ToolRegistry
 	mcp        core.MCPManager
 	hooks      *core.Hooks
+	questions  core.QuestionService
 	config     core.Config
 	secrets    core.Secrets
 	home       string
 	defaultWS  string
 
-	mu       sync.Mutex
-	runners  map[string]*Runner
-	turns    map[string]*turnState
-	closed   bool
-	wg       sync.WaitGroup
-	hub      *Hub
-	pipeline *ToolRunner
+	mu             sync.Mutex
+	runners        map[string]*Runner
+	turns          map[string]*turnState
+	activeChildren map[string]int
+	closed         bool
+	wg             sync.WaitGroup
+	hub            *Hub
+	pipeline       *ToolRunner
 }
 
 // NewRegistry creates a registry.
@@ -57,19 +63,20 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 		hooks = core.NewHooks()
 	}
 	r := &Registry{
-		root:       root,
-		cancelRoot: cancel,
-		store:      store,
-		llm:        llm,
-		tools:      toolReg,
-		hooks:      hooks,
-		config:     cfg,
-		secrets:    secrets,
-		home:       home,
-		defaultWS:  defaultWorkspace,
-		runners:    map[string]*Runner{},
-		turns:      map[string]*turnState{},
-		hub:        NewHub(),
+		root:           root,
+		cancelRoot:     cancel,
+		store:          store,
+		llm:            llm,
+		tools:          toolReg,
+		hooks:          hooks,
+		config:         cfg,
+		secrets:        secrets,
+		home:           home,
+		defaultWS:      defaultWorkspace,
+		runners:        map[string]*Runner{},
+		turns:          map[string]*turnState{},
+		activeChildren: map[string]int{},
+		hub:            NewHub(),
 	}
 	r.pipeline = NewToolRunner(hooks, toolReg)
 	installDefaults(hooks, llm)
@@ -110,6 +117,31 @@ func (r *Registry) runnerLocked(sessionID string) *Runner {
 	runner := &Runner{reg: r, sessionID: sessionID}
 	r.runners[sessionID] = runner
 	return runner
+}
+
+// acquireChild reserves a running child slot for parentID. It returns the
+// number of active children and false when the limit is already reached.
+func (r *Registry) acquireChild(parentID string) (int, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := r.activeChildren[parentID]
+	if count >= maxActiveChildren {
+		return count, false
+	}
+	r.activeChildren[parentID] = count + 1
+	return count + 1, true
+}
+
+// releaseChild frees a running child slot for parentID.
+func (r *Registry) releaseChild(parentID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	count := r.activeChildren[parentID] - 1
+	if count <= 0 {
+		delete(r.activeChildren, parentID)
+		return
+	}
+	r.activeChildren[parentID] = count
 }
 
 func (r *Registry) finishTurn(turnID string, result TurnResult) {
@@ -180,8 +212,14 @@ func (r *Registry) Start(ctx context.Context, sessionID, text string) (string, e
 }
 
 func (r *Registry) startTurnLocked(runner *Runner) (string, context.Context) {
+	return r.startTurnFrom(r.root, runner)
+}
+
+// startTurnFrom starts a turn whose context derives from parent. The caller
+// holds r.mu and runner.mu.
+func (r *Registry) startTurnFrom(parent context.Context, runner *Runner) (string, context.Context) {
 	turnID := id.New()
-	turnCtx, cancel := context.WithCancel(r.root)
+	turnCtx, cancel := context.WithCancel(parent)
 	runner.running = true
 	runner.turnID = turnID
 	runner.cancel = cancel
@@ -250,10 +288,18 @@ func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// SetAgent selects the agent for the session.
+// SetAgent selects the agent or team for the session.
 func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
+	}
+	if team, ok := r.config.Teams[agentName]; ok {
+		lead, ok := r.config.Agents[team.Lead]
+		if !ok {
+			return fmt.Errorf("%w: %s", ErrUnknownAgent, team.Lead)
+		}
+		payload := core.ModelSelection{V: core.PayloadVersion, Provider: lead.Provider, Model: lead.Model, Agent: agentName}
+		return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 	}
 	agent, ok := r.config.Agents[agentName]
 	if !ok {
@@ -267,6 +313,13 @@ func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) er
 func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
+	}
+	agentName, err := r.sessionAgent(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if _, ok := r.config.Teams[agentName]; ok {
+		return ErrTeamModel
 	}
 	providerName, modelName, ok := strings.Cut(model, ":")
 	if !ok || providerName == "" {
@@ -282,9 +335,48 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 }
 
+// sessionAgent returns the agent or team currently selected by the session.
+func (r *Registry) sessionAgent(ctx context.Context, sessionID string) (string, error) {
+	info, err := r.store.Info(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	name := info.Agent
+	chain, err := r.store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	for _, event := range chain {
+		if event.Kind != core.KindModelSelection {
+			continue
+		}
+		var payload core.ModelSelection
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return "", err
+		}
+		if payload.Agent != "" {
+			name = payload.Agent
+		}
+	}
+	return name, nil
+}
+
 // SubscribeLive subscribes to the live frames of one session.
 func (r *Registry) SubscribeLive(sessionID string) (*core.Subscription[core.LiveFrame], error) {
 	return r.hub.Subscribe(sessionID), nil
+}
+
+// TurnActive reports whether a turn is running for the session in this process.
+func (r *Registry) TurnActive(sessionID string) bool {
+	r.mu.Lock()
+	runner := r.runners[sessionID]
+	r.mu.Unlock()
+	if runner == nil {
+		return false
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return runner.running
 }
 
 func (r *Registry) appendEvent(ctx context.Context, sessionID, kind, turnID string, payload any) error {

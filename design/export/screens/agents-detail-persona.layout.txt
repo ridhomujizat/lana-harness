@@ -1,0 +1,118 @@
+# Agents / Agents – Detail · Persona (frame 5745)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Agents – Detail · Persona" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    text "Agents  /  coder" 14/20 Medium color=--text-tertiary
+    frame "Header" row gap=16 cross=center f1096xh60
+      <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f56xf56 bg=--bg-warning-primary border=--bg-primary radius=16
+        text "C" 12/18 Semibold color=--text-warning-primary
+      frame "Title" col gap=4 f788xh60
+        frame "Name row" row gap=8 cross=center h68xh32
+          text "coder" 24/32 Semibold color=--text-primary
+        text "Writes and fixes code in your workspace. 6 sessions, last active 1 h ago." 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Duplicate"} row gap=6 pad=8,12,8,12 main=center cross=center h91xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Duplicate" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Start session"} row gap=6 pad=8,12,8,12 main=center cross=center h113xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Start session" 14/20 Semibold color=--text-white
+    frame "Tabs" row gap=20 f1096xh35 border=--border-secondary
+      frame "General" row gap=8 pad=0,4,12,4 cross=center h61xh32
+        text "General" 14/20 Semibold color=--text-quaternary
+      frame "Persona & memory" row gap=8 pad=0,4,12,4 cross=center h137xh34 border=--border-brand-solid
+        text "Persona & memory" 14/20 Semibold color=--text-brand-secondary
+      frame "Tools" row gap=8 pad=0,4,12,4 cross=center h45xh32
+        text "Tools" 14/20 Semibold color=--text-quaternary
+      frame "Skills" row gap=8 pad=0,4,12,4 cross=center h44xh32
+        text "Skills" 14/20 Semibold color=--text-quaternary
+      frame "MCP" row gap=8 pad=0,4,12,4 cross=center h41xh32
+        text "MCP" 14/20 Semibold color=--text-quaternary
+      frame "Rules" row gap=8 pad=0,4,12,4 cross=center h46xh32
+        text "Rules" 14/20 Semibold color=--text-quaternary
+      frame "Workspace" row gap=8 pad=0,4,12,4 cross=center h85xh32
+        text "Workspace" 14/20 Semibold color=--text-quaternary
+    frame "Body" row gap=32 f1096xh532
+      frame "Files" col gap=4 f260xh214
+        frame "AGENT.md" col gap=2 pad=10,12,10,12 f260xh82 bg=--bg-active radius=8
+          frame "Row" row gap=8 cross=center f236xh20
+            text "AGENT.md" 13/20 Regular Menlo color=--text-primary
+            text "612" 12/18 Regular color=--text-quaternary
+          text "Persona. How this agent talks and works." 14/20 Regular color=--text-tertiary
+        frame "USER.md" col gap=2 pad=10,12,10,12 f260xh62 radius=8
+          frame "Row" row gap=8 cross=center f236xh20
+            text "USER.md" 13/20 Regular Menlo color=--text-secondary
+            text "340 / 2000" 12/18 Regular color=--text-quaternary
+          text "About you. Shared by every agent." 14/20 Regular color=--text-tertiary
+        frame "MEMORY.md" col gap=2 pad=10,12,10,12 f260xh62 radius=8
+          frame "Row" row gap=8 cross=center f236xh20
+            text "MEMORY.md" 13/20 Regular Menlo color=--text-secondary
+            text "1,284 / 4000" 12/18 Regular color=--text-quaternary
+          text "Memory. Notes the agent keeps." 14/20 Regular color=--text-tertiary
+      frame "Editor" col gap=12 f804xh532
+        frame "Editor header" row gap=8 cross=center f804xh50
+          frame "Title" col gap=2 f804xh50
+            text "Persona" 18/28 Semibold color=--text-primary
+            text "Written in Markdown. {{name}} becomes the agent name." 14/20 Regular color=--text-tertiary
+        frame "Textarea" col gap=6 pad=14,16,14,16 f804xf420 bg=--bg-primary border=--border-brand radius=12 shadow
+          text "You are {{name}}, a coding assistant working in the user's repository." 13/20 Regular Menlo color=--text-primary
+          frame "Blank" f10xf8
+          text "- Read the relevant code before changing it, and match the" 13/20 Regular Menlo color=--text-primary
+          text "  surrounding style." 13/20 Regular Menlo color=--text-primary
+          text "- Make the smallest change that solves the task, then run the" 13/20 Regular Menlo color=--text-primary
+          text "  tests or build and report the result." 13/20 Regular Menlo color=--text-primary
+          text "- Explain what you changed and why in a few lines. Quote errors" 13/20 Regular Menlo color=--text-primary
+          text "  exactly." 13/20 Regular Menlo color=--text-primary
+          text "- Ask before destructive commands (deleting files, rewriting" 13/20 Regular Menlo color=--text-primary
+          text "  history, force pushes)." 13/20 Regular Menlo color=--text-primary
+          text "- Save project conventions and commands that work with" 13/20 Regular Menlo color=--text-primary
+          text "  memory_write." 13/20 Regular Menlo color=--text-primary
+        frame "Editor footer" row gap=12 cross=center f804xh38
+          text "612 characters · edited 2 days ago" 14/20 Regular color=--text-tertiary
+          <Button/Hierarchy=Secondary, Size=sm> {"Label": "Revert"} row gap=6 pad=8,12,8,12 main=center cross=center h70xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "Revert" 14/20 Semibold color=--text-secondary
+          <Button/Hierarchy=Primary, Size=sm> {"Label": "Save"} row gap=6 pad=8,12,8,12 main=center cross=center h58xh36 bg=--bg-brand-solid radius=8 shadow
+            text "Save" 14/20 Semibold color=--text-white

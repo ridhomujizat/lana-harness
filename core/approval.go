@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Policy is the approval mode of a session.
 type Policy string
@@ -29,6 +32,7 @@ type ApprovalRequest struct {
 	CallID    string
 	AgentName string
 	ToolName  string
+	Input     json.RawMessage
 	Risk      Risk
 	Label     string
 }

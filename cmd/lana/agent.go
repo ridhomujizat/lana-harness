@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,10 +198,8 @@ func createHome(paths agenthome.Home, persona string) error {
 	if err := agenthome.WriteFile(paths.Agent, persona); err != nil {
 		return err
 	}
-	for _, path := range []string{paths.User, paths.Memory} {
-		if err := agenthome.WriteFile(path, ""); err != nil {
-			return err
-		}
+	if err := agenthome.WriteFile(paths.Memory, ""); err != nil {
+		return err
 	}
 	return nil
 }
@@ -304,8 +303,8 @@ func resolveHomePath(home, path string) string {
 	return filepath.Join(home, path)
 }
 
-// memorySizes returns the size lines of the user and memory files.
-func memorySizes(paths agenthome.Home) (user, memory string) {
+// memorySizes returns the size lines of the shared user file and the agent's memory file.
+func memorySizes(home string, paths agenthome.Home) (user, memory string) {
 	format := func(path string, limit int) string {
 		entries, _ := agenthome.ReadEntries(path)
 		size := agenthome.Size(entries)
@@ -315,7 +314,30 @@ func memorySizes(paths agenthome.Home) (user, memory string) {
 		}
 		return text
 	}
-	return format(paths.User, agenthome.UserLimit), format(paths.Memory, agenthome.MemoryLimit)
+	return format(agenthome.SharedUser(home), agenthome.UserLimit), format(paths.Memory, agenthome.MemoryLimit)
+}
+
+// migrateUserFile runs the API-HOME-003 migration for the effective config.
+func migrateUserFile(home string, cfg core.Config) {
+	defaultAgent := ""
+	for _, route := range cfg.Routes {
+		if route.Channel == "cli" {
+			defaultAgent = route.Agent
+			break
+		}
+	}
+	migration, err := agenthome.MigrateUser(home, agentNames(cfg), defaultAgent)
+	if err != nil {
+		slog.Warn("cannot migrate user file", "error", err)
+		return
+	}
+	if migration.Source != "" {
+		slog.Info("migrated user file from agent " + migration.Source)
+		return
+	}
+	if warning := migration.Warning(home); warning != "" {
+		slog.Warn(warning)
+	}
 }
 
 func loadConfigForAgent() (string, core.Config, int) {
@@ -327,6 +349,7 @@ func loadConfigForAgent() (string, core.Config, int) {
 	if err != nil {
 		return "", core.Config{}, fail(err, 2)
 	}
+	migrateUserFile(home, result.Config)
 	return home, result.Config, 0
 }
 
@@ -347,7 +370,7 @@ func agentList() int {
 	for _, name := range agentNames(cfg) {
 		agent := cfg.Agents[name]
 		_, source := personaSource(home, name, agent)
-		user, memory := memorySizes(agenthome.Paths(home, name))
+		user, memory := memorySizes(home, agenthome.Paths(home, name))
 		permission := agent.Permission
 		if permission == "" {
 			permission = "ask"
@@ -389,7 +412,7 @@ func agentEdit(args []string) int {
 	case "persona":
 		path, _ = personaSource(home, name, agent)
 	case "user":
-		path = paths.User
+		path = agenthome.SharedUser(home)
 	case "memory":
 		path = paths.Memory
 	default:
@@ -450,12 +473,12 @@ func agentShow(args []string) int {
 		if data, err := os.ReadFile(personaPath); err == nil {
 			in.Persona = string(data)
 		}
-		in.User, _ = agenthome.ReadEntries(paths.User)
+		in.User, _ = agenthome.ReadEntries(agenthome.SharedUser(home))
 		in.Memory, _ = agenthome.ReadEntries(paths.Memory)
 		fmt.Println(agenthome.Build(in))
 		return 0
 	}
-	user, memory := memorySizes(paths)
+	user, memory := memorySizes(home, paths)
 	permission := agent.Permission
 	if permission == "" {
 		permission = "ask"
@@ -465,23 +488,23 @@ func agentShow(args []string) int {
 	return 0
 }
 
-// agentSizeWarnings returns config check warnings for memory files over their limit.
+// agentSizeWarnings returns config check warnings for over-limit memory files
+// and for per-agent USER.md files that the migration no longer reads.
 func agentSizeWarnings(home string, cfg core.Config) []string {
-	var out []string
+	out := config.LegacyUserWarnings(home, cfg)
+	if entries, err := agenthome.ReadEntries(agenthome.SharedUser(home)); err == nil {
+		if size := agenthome.Size(entries); size > agenthome.UserLimit {
+			out = append(out, fmt.Sprintf("· warning: user file %s is %d/%d characters (over limit; the prompt is truncated)", agenthome.SharedUser(home), size, agenthome.UserLimit))
+		}
+	}
 	for _, name := range agentNames(cfg) {
 		paths := agenthome.Paths(home, name)
-		for _, file := range []struct {
-			label string
-			path  string
-			limit int
-		}{{"USER.md", paths.User, agenthome.UserLimit}, {"MEMORY.md", paths.Memory, agenthome.MemoryLimit}} {
-			entries, err := agenthome.ReadEntries(file.path)
-			if err != nil {
-				continue
-			}
-			if size := agenthome.Size(entries); size > file.limit {
-				out = append(out, fmt.Sprintf("· warning: agent %s %s is %d/%d characters (over limit; the prompt is truncated)", name, file.label, size, file.limit))
-			}
+		entries, err := agenthome.ReadEntries(paths.Memory)
+		if err != nil {
+			continue
+		}
+		if size := agenthome.Size(entries); size > agenthome.MemoryLimit {
+			out = append(out, fmt.Sprintf("· warning: agent %s MEMORY.md is %d/%d characters (over limit; the prompt is truncated)", name, size, agenthome.MemoryLimit))
 		}
 	}
 	return out

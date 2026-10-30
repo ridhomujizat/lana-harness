@@ -98,10 +98,14 @@ func ParseSkill(dir string) (Skill, error) {
 	for len(body) > 0 && strings.TrimSpace(body[len(body)-1]) == "" {
 		body = body[:len(body)-1]
 	}
+	bodyText := strings.Join(body, "\n")
+	if utf8.RuneCountInString(bodyText) > skillBodyLimit {
+		return Skill{}, fmt.Errorf("body is longer than %d characters", skillBodyLimit)
+	}
 	return Skill{
 		Name:        name,
 		Description: description,
-		Body:        strings.Join(body, "\n"),
+		Body:        bodyText,
 		Dir:         dir,
 	}, nil
 }

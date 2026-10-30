@@ -1,5 +1,6 @@
 // Package agenthome manages the per-agent folder under $LANA_HOME/agents/<name>/:
-// the persona file, the user file, the memory file, and the entry format they share.
+// the persona file, the memory file, the shared user file under $LANA_HOME, and
+// the entry format they share.
 package agenthome
 
 import (
@@ -59,7 +60,6 @@ func (e *ApplyError) Unwrap() error { return e.Kind }
 type Home struct {
 	Dir    string
 	Agent  string
-	User   string
 	Memory string
 }
 
@@ -69,10 +69,13 @@ func Paths(lanaHome, name string) Home {
 	return Home{
 		Dir:    dir,
 		Agent:  filepath.Join(dir, "AGENT.md"),
-		User:   filepath.Join(dir, "USER.md"),
 		Memory: filepath.Join(dir, "MEMORY.md"),
 	}
 }
+
+// SharedUser returns the path of the install-wide user file under lanaHome.
+// Every agent reads the same file.
+func SharedUser(lanaHome string) string { return filepath.Join(lanaHome, "USER.md") }
 
 // ValidName reports whether name is a valid agent name.
 func ValidName(name string) bool { return nameRE.MatchString(name) }
@@ -192,8 +195,17 @@ func Update(path string, fn func([]string) ([]string, error)) ([]string, error) 
 	return next, nil
 }
 
-// WriteFile writes text to path atomically with mode 0600.
+// WriteFile writes text to path atomically with mode 0600. A non-empty text
+// without a trailing newline gets one.
 func WriteFile(path, text string) error {
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return writeBytes(path, []byte(text))
+}
+
+// writeBytes writes data to path atomically with mode 0600.
+func writeBytes(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -203,10 +215,7 @@ func WriteFile(path, text string) error {
 	}
 	name := tmp.Name()
 	defer func() { _ = os.Remove(name) }()
-	if text != "" && !strings.HasSuffix(text, "\n") {
-		text += "\n"
-	}
-	if _, err := tmp.WriteString(text); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}

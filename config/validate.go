@@ -6,16 +6,32 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "version"}
+var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "timeout"}
-var agentKeys = []string{"context_window", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
+var agentKeys = []string{"context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
+var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
+var webKeys = []string{"addr", "enabled"}
+
+// maxAgentDescription is the longest accepted agents.<name>.description, in
+// characters (runes).
+const maxAgentDescription = 120
+
+// maxTeamDescription is the longest accepted teams.<name>.description, in
+// characters (runes).
+const maxTeamDescription = 120
+
+// maxTeamMembers is the largest accepted teams.<name>.members list.
+const maxTeamMembers = 8
 
 func validateLayer(ld layerData, file string, modules []string) []Error {
 	var errs []Error
@@ -67,6 +83,25 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 					continue
 				}
 				validateAgent(val, path, add)
+			}
+		}
+	}
+	if raw, ok := m["teams"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add("teams", typeMsg("table", raw))
+		} else {
+			for _, name := range sortedKeys(table) {
+				path := "teams." + name
+				if !agenthome.ValidName(name) {
+					add(path, "name must match [a-z][a-z0-9_-]{0,31}")
+				}
+				val, ok := asMap(table[name])
+				if !ok {
+					add(path, typeMsg("table", table[name]))
+					continue
+				}
+				validateTeam(val, path, add)
 			}
 		}
 	}
@@ -139,6 +174,14 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 			}
 		}
 	}
+	if raw, ok := m["web"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add("web", typeMsg("table", raw))
+		} else {
+			validateWeb(table, "web", add)
+		}
+	}
 	return errs
 }
 
@@ -205,6 +248,31 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			}
 		}
 	}
+	if val, ok := v["description"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".description", typeMsg("string", val))
+		} else {
+			if strings.ContainsAny(s, "\n\r") {
+				add(path+".description", "must be one line")
+			}
+			if n := utf8.RuneCountInString(s); n > maxAgentDescription {
+				add(path+".description", fmt.Sprintf("must be at most %d characters (got %d)", maxAgentDescription, n))
+			}
+		}
+	}
+	if val, ok := v["disabled_tools"]; ok {
+		list, ok := asStringSlice(val)
+		if !ok {
+			add(path+".disabled_tools", typeMsg("array string", val))
+		} else {
+			for _, item := range list {
+				if !validToolRef(item) {
+					add(path+".disabled_tools", fmt.Sprintf("invalid tool '%s': want <tool> or <mcp_server>/<tool>", item))
+				}
+			}
+		}
+	}
 	for _, key := range []string{"max_steps", "context_window"} {
 		if val, ok := v[key]; ok {
 			n, isInt := asInt(val)
@@ -248,6 +316,79 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			}
 		}
 	}
+}
+
+// validateTeam checks the keys of one [teams.<name>] table. References to
+// agents and teams are checked in validateEffective, where the merged config is
+// known.
+func validateTeam(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(teamKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, teamKeys))
+		}
+	}
+	lead, hasLead := v["lead"]
+	leadName, leadIsString := lead.(string)
+	switch {
+	case !hasLead:
+		add(path+".lead", "is required")
+	case !leadIsString:
+		add(path+".lead", typeMsg("string", lead))
+	}
+	members, hasMembers := v["members"]
+	list, membersAreStrings := asStringSlice(members)
+	switch {
+	case !hasMembers:
+		add(path+".members", "is required")
+	case !membersAreStrings:
+		add(path+".members", typeMsg("array string", members))
+	default:
+		if len(list) == 0 {
+			add(path+".members", "must list at least one agent")
+		}
+		if len(list) > maxTeamMembers {
+			add(path+".members", fmt.Sprintf("must list at most %d agents", maxTeamMembers))
+		}
+		seen := map[string]bool{}
+		for i, member := range list {
+			itemPath := fmt.Sprintf("%s.members.%d", path, i)
+			if leadIsString && member == leadName {
+				add(itemPath, "is the lead; the lead is not listed in members")
+			}
+			if seen[member] {
+				add(itemPath, fmt.Sprintf("agent '%s' is listed twice", member))
+				continue
+			}
+			seen[member] = true
+		}
+	}
+	if raw, ok := v["description"]; ok {
+		s, ok := raw.(string)
+		if !ok {
+			add(path+".description", typeMsg("string", raw))
+		} else if n := utf8.RuneCountInString(s); n > maxTeamDescription {
+			add(path+".description", fmt.Sprintf("must be at most %d characters", maxTeamDescription))
+		}
+	}
+}
+
+// validToolRef reports whether s is a tool reference of the form <tool> or
+// <mcp_server>/<tool>. The names are not checked against the tool registry:
+// an unknown name is kept and has no effect (Q-024).
+func validToolRef(s string) bool {
+	if s == "" || strings.IndexFunc(s, unicode.IsSpace) >= 0 {
+		return false
+	}
+	parts := strings.Split(s, "/")
+	if len(parts) > 2 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRoute(v map[string]any, path string, add func(string, string)) {
@@ -362,12 +503,32 @@ func validateModuleRow(v map[string]any, path string, modules []string, add func
 	}
 }
 
+func validateWeb(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(webKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, webKeys))
+		}
+	}
+	if val, ok := v["enabled"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".enabled", typeMsg("boolean", val))
+		}
+	}
+	if val, ok := v["addr"]; ok {
+		if _, ok := val.(string); !ok {
+			add(path+".addr", typeMsg("string", val))
+		}
+	}
+}
+
 func validateEffective(m map[string]any, positions map[string]pos, add func(string, string)) {
 	agents, _ := asMap(m["agents"])
+	teams, _ := asMap(m["teams"])
 	providers, _ := asMap(m["providers"])
 	mcps, _ := asMap(m["mcp"])
 	providerNames := sortedKeys(providers)
 	agentNames := sortedKeys(agents)
+	teamNames := sortedKeys(teams)
 	mcpNames := sortedKeys(mcps)
 	for _, name := range agentNames {
 		agent, _ := asMap(agents[name])
@@ -382,7 +543,9 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			for i, item := range list {
 				switch key {
 				case "subagents":
-					if !contains(agentNames, item) {
+					if contains(teamNames, item) {
+						add(fmt.Sprintf("%s.subagents.%d", path, i), "is a team; subagents must be agents")
+					} else if !contains(agentNames, item) {
 						add(fmt.Sprintf("%s.subagents.%d", path, i), fmt.Sprintf("subagent '%s' is not registered", item))
 					}
 				case "mcp":
@@ -393,12 +556,44 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			}
 		}
 	}
+	for _, name := range teamNames {
+		team, _ := asMap(teams[name])
+		path := "teams." + name
+		if contains(agentNames, name) {
+			add(path, "name is already used by an agent")
+		}
+		if lead, ok := team["lead"].(string); ok {
+			switch {
+			case contains(teamNames, lead):
+				add(path+".lead", "is a team; a team lead must be an agent")
+			case !contains(agentNames, lead):
+				add(path+".lead", fmt.Sprintf("agent '%s' is not registered (available: %s)", lead, strings.Join(agentNames, ", ")))
+			}
+		}
+		members, _ := asStringSlice(team["members"])
+		for i, member := range members {
+			itemPath := fmt.Sprintf("%s.members.%d", path, i)
+			switch {
+			case contains(teamNames, member):
+				add(itemPath, "is a team; teams cannot contain teams")
+			case !contains(agentNames, member):
+				add(itemPath, fmt.Sprintf("agent '%s' is not registered (available: %s)", member, strings.Join(agentNames, ", ")))
+			}
+		}
+	}
 	if routes, ok := asSlice(m["routes"]); ok {
+		routable := append([]string{}, agentNames...)
+		for _, name := range teamNames {
+			if !contains(routable, name) {
+				routable = append(routable, name)
+			}
+		}
+		sort.Strings(routable)
 		for i, item := range routes {
 			route, _ := asMap(item)
 			agent, _ := route["agent"].(string)
-			if agent != "" && !contains(agentNames, agent) {
-				add(fmt.Sprintf("routes.%d.agent", i), fmt.Sprintf("agent '%s' is not registered (available: %s)", agent, strings.Join(agentNames, ", ")))
+			if agent != "" && !contains(routable, agent) {
+				add(fmt.Sprintf("routes.%d.agent", i), fmt.Sprintf("agent '%s' is not registered (available: %s)", agent, strings.Join(routable, ", ")))
 			}
 		}
 	}

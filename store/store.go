@@ -39,7 +39,7 @@ var (
 	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 var validKinds = map[string]bool{
 	core.KindSessionCreated: true, core.KindTurnStart: true, core.KindTurnEnd: true,
@@ -47,6 +47,7 @@ var validKinds = map[string]bool{
 	core.KindUserMessage: true, core.KindAssistantMessage: true, core.KindAssistantAttempt: true,
 	core.KindToolCall: true, core.KindToolResult: true, core.KindApprovalAsked: true,
 	core.KindApprovalDecided: true, core.KindApprovalPolicy: true, core.KindModelSelection: true,
+	core.KindQuestionAsked: true, core.KindQuestionAnswered: true,
 	core.KindCompactionSummary: true,
 }
 
@@ -102,21 +103,24 @@ func (s *Store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return ErrSchemaTooNew
 	}
+	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input"}
 	for v := version + 1; v <= schemaVersion; v++ {
-		name := fmt.Sprintf("migrations/%04d_%s.sql", v, map[int]string{1: "session_log", 2: "session_leases"}[v])
+		name := fmt.Sprintf("migrations/%04d_%s.sql", v, names[v])
 		data, err := migrationFS.ReadFile(name)
 		if err != nil {
 			return err
+		}
+		if v == 3 {
+			if err := s.migrateSessionsRebuild(ctx, v, string(data)); err != nil {
+				return err
+			}
+			continue
 		}
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, string(data)); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", v)); err != nil {
+		if err := execMigration(ctx, tx, v, string(data)); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -125,6 +129,70 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func execMigration(ctx context.Context, tx *sql.Tx, version int, stmt string) error {
+	if _, err := tx.ExecContext(ctx, stmt); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version))
+	return err
+}
+
+// migrateSessionsRebuild applies a table rebuild that drops and recreates the
+// sessions parent table. PRAGMA foreign_keys must be turned off on the
+// connection before the transaction starts, since it is a no-op inside a
+// transaction and DROP TABLE sessions would otherwise fail while child rows
+// reference it. A dedicated connection keeps the pragma and the transaction
+// together. foreign_key_check before COMMIT replaces the disabled enforcement.
+func (s *Store) migrateSessionsRebuild(ctx context.Context, version int, stmt string) (err error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
+		return err
+	}
+	// The pragma is per-connection, so restore it before the connection returns
+	// to the pool, even when the migration rolls back.
+	defer func() {
+		if _, restoreErr := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); restoreErr != nil && err == nil {
+			err = fmt.Errorf("restore foreign_keys: %w", restoreErr)
+		}
+	}()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := execMigration(ctx, tx, version, stmt); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := checkForeignKeys(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var table string
+		var rowid sql.NullInt64
+		var parent string
+		var fkid sql.NullInt64
+		if err := rows.Scan(&table, &rowid, &parent, &fkid); err != nil {
+			return err
+		}
+		return fmt.Errorf("foreign key violation in table %s referencing %s", table, parent)
+	}
+	return rows.Err()
 }
 
 // Close closes the store.
@@ -300,7 +368,7 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 			if !validKinds[draft.Kind] {
 				return fmt.Errorf("unknown kind: %s", draft.Kind)
 			}
-			if draft.Kind == core.KindTurnStart && status == "running" {
+			if draft.Kind == core.KindTurnStart && (status == "running" || status == "waiting_input") {
 				return ErrTurnActive
 			}
 			payload, err := marshalEvent(draft.Kind, draft.Payload)
@@ -317,6 +385,10 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 				status = "running"
 			case core.KindTurnEnd:
 				status = "idle"
+			case core.KindQuestionAsked:
+				status = "waiting_input"
+			case core.KindQuestionAnswered:
+				status = "running"
 			}
 		}
 		turnCount := 0
@@ -440,6 +512,13 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 		query += " AND address = ?"
 		args = append(args, f.Address)
 	}
+	if f.ParentSessionID != "" {
+		query += " AND parent_session_id = ?"
+		args = append(args, f.ParentSessionID)
+	}
+	if f.TopLevelOnly {
+		query += " AND (parent_session_id IS NULL OR parent_session_id = '')"
+	}
 	query += " ORDER BY updated_at DESC"
 	if f.Limit > 0 {
 		query += " LIMIT ?"
@@ -544,7 +623,7 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 		if err := conn.QueryRowContext(ctx, "SELECT status FROM sessions WHERE id = ?", sessionID).Scan(&status); err != nil {
 			return err
 		}
-		if status != "running" {
+		if status != "running" && status != "waiting_input" {
 			return nil
 		}
 		events, err := s.loadEvents(ctx, sessionID)
@@ -575,6 +654,31 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 			seq++
 			payload, _ := json.Marshal(core.ApprovalDecided{V: 1, RequestID: requestID, CallID: callID, Outcome: core.OutcomeUnavailable, Reason: "interrupted"})
 			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, seq, core.KindApprovalDecided, string(payload), now); err != nil {
+				return err
+			}
+		}
+		// Orphaned question.
+		questions := map[string]string{}
+		questionAnswers := map[string]bool{}
+		for _, event := range events {
+			if event.Kind == core.KindQuestionAsked {
+				var p core.QuestionAsked
+				_ = json.Unmarshal(event.Payload, &p)
+				questions[p.RequestID] = p.CallID
+			}
+			if event.Kind == core.KindQuestionAnswered {
+				var p core.QuestionAnswered
+				_ = json.Unmarshal(event.Payload, &p)
+				questionAnswers[p.RequestID] = true
+			}
+		}
+		for requestID, callID := range questions {
+			if questionAnswers[requestID] {
+				continue
+			}
+			seq++
+			payload, _ := json.Marshal(core.QuestionAnswered{V: 1, RequestID: requestID, CallID: callID, Outcome: core.QuestionStatusUnavailable, Responder: "none", Reason: core.QuestionReasonInterrupted})
+			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, seq, core.KindQuestionAnswered, string(payload), now); err != nil {
 				return err
 			}
 		}
@@ -632,6 +736,29 @@ func currentHost() string {
 		return "unknown"
 	}
 	return h
+}
+
+// LeaseHolder reports the PID of the process holding the session lease without
+// acquiring it. It applies the same liveness rule as TryLease, so a stale row
+// left by a dead process on this host is not reported as held.
+func (s *Store) LeaseHolder(ctx context.Context, sessionID string) (int, bool, error) {
+	if err := s.assertOpen(); err != nil {
+		return 0, false, err
+	}
+	var heldPID int
+	var heldHost string
+	err := s.db.QueryRowContext(ctx, "SELECT pid, host FROM session_leases WHERE session_id = ?", sessionID).Scan(&heldPID, &heldHost)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	pid, host := os.Getpid(), currentHost()
+	if heldHost != host || heldPID == pid || pidAlive(heldPID) {
+		return heldPID, true, nil
+	}
+	return 0, false, nil
 }
 
 // TryLease acquires the session lease.
@@ -734,6 +861,12 @@ func (s *Store) RebuildProjections(ctx context.Context) error {
 				if event.Kind == core.KindTurnEnd {
 					status = "idle"
 				}
+				if event.Kind == core.KindQuestionAsked {
+					status = "waiting_input"
+				}
+				if event.Kind == core.KindQuestionAnswered {
+					status = "running"
+				}
 			}
 			if _, err := conn.ExecContext(ctx, "UPDATE sessions SET status = ?, last_seq = ?, turn_count = ? WHERE id = ?", status, lastSeq, turns, sessionID); err != nil {
 				return err
@@ -744,4 +877,5 @@ func (s *Store) RebuildProjections(ctx context.Context) error {
 }
 
 var _ core.SessionStore = (*Store)(nil)
+var _ core.LeaseProbe = (*Store)(nil)
 var _ = strings.TrimSpace

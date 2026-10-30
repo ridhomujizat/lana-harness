@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/web"
 )
 
 // shutdownGrace is how long the daemon waits for channels after a stop signal.
@@ -54,13 +56,18 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 	if err != nil {
 		return errorf(1, "%v", err)
 	}
-	unlock, err := lockDaemon(home)
+	lock, err := openDaemonLock(home)
 	if err != nil {
 		return errorf(1, "%v", err)
 	}
-	defer unlock()
+	defer lock.release()
+	restart := newRestartController(lock)
 
-	result, err := config.Load(ctx, config.Options{Home: home})
+	// runCtx cancels turns and channels when the daemon stops or restarts.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	result, err := config.Load(runCtx, config.Options{Home: home})
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -71,30 +78,103 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 		}
 		return errorf(2, "%v", err)
 	}
-	raw, ok := result.Config.Channels["telegram"]
-	if !ok {
-		return errorf(2, "no channel configured; add [channels.telegram] to config.toml")
+	var webServer *web.Server
+	if result.Config.Web.Enabled {
+		webServer, err = web.New(web.Config{Addr: result.Config.Web.Addr, Enabled: true, Home: home, Stderr: stderr})
+		if err != nil {
+			return errorf(2, "%v", err)
+		}
 	}
-	tgcfg, err := telegram.ParseConfig(raw, result.Config.Routes)
-	if err != nil {
-		return errorf(2, "%v", err)
-	}
-	token := ""
-	if secret, ok := result.Secrets.Lookup(tgcfg.TokenEnv); ok {
-		token = strings.TrimSpace(secret.Reveal())
-	}
-	if token == "" {
-		return errorf(2, "telegram: %s is not set", tgcfg.TokenEnv)
+	webStarted := false
+	var webOnce sync.Once
+	shutdownWeb := func(shutdownCtx context.Context) {
+		if webServer == nil || !webStarted {
+			return
+		}
+		webOnce.Do(func() {
+			if err := webServer.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("daemon: web server did not stop in time", "error", err)
+			}
+		})
 	}
 
-	var channel *telegram.Channel
-	approve := func(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome {
-		if channel == nil {
-			return core.OutcomeUnavailable
+	raw, hasTelegram := result.Config.Channels["telegram"]
+	var tgcfg telegram.Config
+	if hasTelegram {
+		tgcfg, err = telegram.ParseConfig(raw, result.Config.Routes)
+		if err != nil {
+			return errorf(2, "%v", err)
 		}
-		return channel.Approve(ctx, req)
 	}
-	rt, _, _, _, err := runtimeFor(ctx, home, "", approve, lana.ApproveChannels("telegram"))
+	// A disabled channel counts as no channel (REQ-DMN-003, REQ-DMN-005).
+	telegramEnabled := hasTelegram && tgcfg.Enabled
+	if !telegramEnabled && webServer == nil {
+		if hasTelegram {
+			return errorf(2, "no channel enabled; set [channels.telegram] enabled = true or enable [web]")
+		}
+		return errorf(2, "no channel configured; add [channels.telegram] to config.toml")
+	}
+
+	// The token is checked only when the channel is enabled (REQ-DMN-005). A
+	// missing token keeps the web view running unless the web view is off
+	// (REQ-DMN-006).
+	token := ""
+	tokenMissing := false
+	if telegramEnabled {
+		if secret, ok := result.Secrets.Lookup(tgcfg.TokenEnv); ok {
+			token = strings.TrimSpace(secret.Reveal())
+		}
+		if token == "" {
+			if webServer == nil {
+				return errorf(2, "telegram: %s is not set", tgcfg.TokenEnv)
+			}
+			tokenMissing = true
+			_, _ = fmt.Fprintf(stderr, "telegram: %s is not set; channel stays off until the daemon restarts with the token\n", tgcfg.TokenEnv)
+		}
+	}
+	telegramActive := telegramEnabled && !tokenMissing
+
+	var channel *telegram.Channel
+	var rt *lana.Runtime
+	router := &ApprovalRouter{
+		sessionInfo: func(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+			if rt == nil {
+				return core.SessionInfo{}, errors.New("runtime is not ready")
+			}
+			return rt.SessionInfo(ctx, sessionID)
+		},
+	}
+	if telegramActive {
+		router.telegram = func(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome {
+			if channel == nil {
+				return core.OutcomeUnavailable
+			}
+			return channel.Approve(ctx, req)
+		}
+	}
+	if webServer != nil {
+		router.web = webServer.Approvals().Ask
+	}
+	questionRouter := &QuestionRouter{
+		sessionInfo: func(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+			if rt == nil {
+				return core.SessionInfo{}, errors.New("runtime is not ready")
+			}
+			return rt.SessionInfo(ctx, sessionID)
+		},
+	}
+	if telegramActive {
+		questionRouter.telegram = func(ctx context.Context, req core.QuestionRequest) core.QuestionOutcome {
+			if channel == nil {
+				return noQuestionResponder()
+			}
+			return channel.Ask(ctx, req)
+		}
+	}
+	if webServer != nil {
+		questionRouter.web = webQuestionResponder(webServer.Questions())
+	}
+	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web"))
 	if err != nil {
 		return errorf(2, "%v", err)
 	}
@@ -102,30 +182,92 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 	leases := newLeaseSet(rt)
 	defer leases.releaseAll()
 
-	channel = telegram.New(tgcfg, token, &daemonBackend{rt: rt, home: home, leases: leases})
-	bot, err := channel.Start(ctx)
-	if errors.Is(err, telegram.ErrUnauthorized) {
-		return errorf(2, "telegram: invalid bot token")
-	}
-	if err != nil {
-		if ctx.Err() != nil {
-			return 0
+	if telegramActive {
+		channel = telegram.New(tgcfg, token, &daemonBackend{rt: rt, home: home, leases: leases})
+		bot, err := channel.Start(runCtx)
+		if errors.Is(err, telegram.ErrUnauthorized) {
+			return errorf(2, "telegram: invalid bot token")
 		}
-		return errorf(1, "telegram: %v", err)
+		if err != nil {
+			if runCtx.Err() != nil {
+				return 0
+			}
+			return errorf(1, "telegram: %v", err)
+		}
+		_, _ = fmt.Fprintf(stderr, "telegram: polling as @%s\n", bot.Username)
 	}
-	_, _ = fmt.Fprintf(stderr, "telegram: polling as @%s\n", bot.Username)
+
+	if webServer != nil {
+		backend := newWebBackend(rt, home, leases, runCtx)
+		backend.SetRestartController(restart)
+		webServer.SetBackend(backend)
+		webServer.SetDaemonStore(backend)
+		webServer.SetSecretStore(backend)
+		webServer.SetAgentFileStore(backend)
+		webServer.SetSkillStore(backend)
+		if telegramActive {
+			webServer.SetTelegramStatus(telegramStatusFunc(tgcfg, true, channel))
+		} else {
+			webServer.SetTelegramStatus(telegramStatusFunc(tgcfg, false, nil))
+		}
+		if code := startWeb(runCtx, webServer, stderr); code != 0 {
+			return code
+		}
+		webStarted = true
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+			defer cancel()
+			shutdownWeb(shutdownCtx)
+		}()
+	}
+
+	// restartNow runs the same shutdown as SIGTERM and then replaces the
+	// process image. The daemon lock stays held (REQ-WEB-035).
+	restartNow := func(done <-chan error) int {
+		cancelRun()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		shutdownWeb(shutdownCtx)
+		if done != nil {
+			select {
+			case err = <-done:
+			case <-shutdownCtx.Done():
+				slog.Warn("daemon: channels did not stop in time")
+			}
+		}
+		cancel()
+		leases.releaseAll()
+		if err := rt.Close(); err != nil {
+			slog.Warn("daemon: runtime did not stop cleanly", "error", err)
+		}
+		return restartInPlace(lock, stderr)
+	}
+
+	if !telegramActive {
+		select {
+		case <-runCtx.Done():
+			return 0
+		case <-restart.requested():
+			return restartNow(nil)
+		}
+	}
 
 	done := make(chan error, 1)
-	go func() { done <- channel.Run(ctx) }()
+	go func() { done <- channel.Run(runCtx) }()
 	select {
 	case err = <-done:
-	case <-ctx.Done():
+	case <-restart.requested():
+		return restartNow(done)
+	case <-runCtx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		shutdownWeb(shutdownCtx)
 		select {
 		case err = <-done:
-		case <-time.After(shutdownGrace):
+		case <-shutdownCtx.Done():
 			slog.Warn("daemon: channels did not stop in time")
+			cancel()
 			return 0
 		}
+		cancel()
 	}
 	if errors.Is(err, telegram.ErrUnauthorized) {
 		return errorf(2, "telegram: invalid bot token")
@@ -136,8 +278,94 @@ func runDaemon(ctx context.Context, stderr io.Writer) int {
 	return 0
 }
 
-// lockDaemon takes $LANA_HOME/daemon.lock and writes the PID into it.
+// telegramStatusFunc builds the reader the daemon gives the web view
+// (API-TG-007). A running channel reports its live snapshot; otherwise the
+// state comes from the config and whether the token is present.
+func telegramStatusFunc(cfg telegram.Config, tokenPresent bool, channel *telegram.Channel) func() web.TelegramStatus {
+	return func() web.TelegramStatus {
+		if channel != nil {
+			return webTelegramStatus(channel.Status())
+		}
+		return webTelegramStatus(telegram.StatusFor(cfg, tokenPresent))
+	}
+}
+
+// webTelegramStatus converts the channel snapshot into the web view model.
+func webTelegramStatus(status telegram.Status) web.TelegramStatus {
+	converted := web.TelegramStatus{
+		State:         status.State,
+		BotUsername:   status.BotUsername,
+		ChatCount:     status.ChatCount,
+		OwnerCount:    status.OwnerCount,
+		PollingSince:  status.PollingSince,
+		LastMessageAt: status.LastMessageAt,
+		PendingChats:  make([]web.TelegramPendingChat, 0, len(status.PendingChats)),
+	}
+	for _, chat := range status.PendingChats {
+		converted.PendingChats = append(converted.PendingChats, web.TelegramPendingChat{
+			ChatID:    chat.ChatID,
+			Type:      chat.Type,
+			Name:      chat.Name,
+			UserID:    chat.UserID,
+			Username:  chat.Username,
+			FirstSeen: chat.FirstSeen,
+			LastSeen:  chat.LastSeen,
+			Messages:  chat.Messages,
+		})
+	}
+	return converted
+}
+
+// startWeb binds the web listener and prints the contract start line.
+func startWeb(ctx context.Context, server *web.Server, stderr io.Writer) int {
+	if err := server.Start(ctx); err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			_, _ = fmt.Fprintln(stderr, "error: web: address already in use")
+		} else {
+			_, _ = fmt.Fprintf(stderr, "error: web: %v\n", err)
+		}
+		return 1
+	}
+	_, _ = fmt.Fprintf(stderr, "web: listening on http://%s\n", server.Addr())
+	return 0
+}
+
+// daemonLock is the open $LANA_HOME/daemon.lock. Its flock keeps one daemon per
+// home, and the descriptor survives an in-place restart (REQ-WEB-035).
+type daemonLock struct {
+	file *os.File
+	path string
+}
+
+// lockDaemon takes $LANA_HOME/daemon.lock and writes the PID into it. It is the
+// acquire-only form used by tests; the daemon uses openDaemonLock.
 func lockDaemon(home string) (func(), error) {
+	lock, err := acquireDaemonLock(home)
+	if err != nil {
+		return nil, err
+	}
+	return lock.release, nil
+}
+
+// openDaemonLock adopts the descriptor inherited across an in-place restart
+// when LANA_RESTART_LOCK_FD is set, or takes daemon.lock otherwise.
+func openDaemonLock(home string) (*daemonLock, error) {
+	raw := os.Getenv(restartLockFDEnv)
+	if raw == "" {
+		return acquireDaemonLock(home)
+	}
+	// The new image owns the descriptor. Unset the variable so child processes
+	// do not inherit it (design.md, Restart in place).
+	_ = os.Unsetenv(restartLockFDEnv)
+	fd, err := strconv.Atoi(raw)
+	if err != nil || fd < 3 {
+		return nil, fmt.Errorf("invalid %s %q", restartLockFDEnv, raw)
+	}
+	return adoptDaemonLock(home, fd)
+}
+
+// acquireDaemonLock opens and flocks daemon.lock.
+func acquireDaemonLock(home string) (*daemonLock, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, err
 	}
@@ -155,13 +383,167 @@ func lockDaemon(home string) (func(), error) {
 		}
 		return nil, fmt.Errorf("daemon already running (pid %s)", pid)
 	}
-	_ = file.Truncate(0)
-	_, _ = file.WriteAt([]byte(strconv.Itoa(os.Getpid())+"\n"), 0)
-	return func() {
-		_ = os.Remove(path)
+	lock := &daemonLock{file: file, path: path}
+	if err := lock.writePID(); err != nil {
 		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		_ = file.Close()
-	}, nil
+		return nil, err
+	}
+	return lock, nil
+}
+
+// adoptDaemonLock wraps the inherited flock descriptor without taking the lock
+// again. It restores close-on-exec so tool processes do not inherit the lock.
+func adoptDaemonLock(home string, fd int) (*daemonLock, error) {
+	path := filepath.Join(home, "daemon.lock")
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		return nil, fmt.Errorf("invalid %s %d", restartLockFDEnv, fd)
+	}
+	lock := &daemonLock{file: file, path: path}
+	if err := lock.check(); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("inherited daemon lock: %w", err)
+	}
+	if err := lock.writePID(); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if err := lock.setCloseOnExec(true); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("inherited daemon lock: %w", err)
+	}
+	return lock, nil
+}
+
+// check reports whether the lock descriptor is still open.
+func (l *daemonLock) check() error {
+	if l == nil || l.file == nil {
+		return errors.New("daemon lock is not held")
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, l.file.Fd(), syscall.F_GETFD, 0); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+// setCloseOnExec toggles FD_CLOEXEC on the lock descriptor.
+func (l *daemonLock) setCloseOnExec(on bool) error {
+	return setCloseOnExec(l.fd(), on)
+}
+
+func setCloseOnExec(fd int, on bool) error {
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_GETFD, 0)
+	if errno != 0 {
+		return errno
+	}
+	if on {
+		flags |= syscall.FD_CLOEXEC
+	} else {
+		flags &^= syscall.FD_CLOEXEC
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, flags); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func (l *daemonLock) fd() int { return int(l.file.Fd()) }
+
+func (l *daemonLock) writePID() error {
+	_ = l.file.Truncate(0)
+	_, err := l.file.WriteAt([]byte(strconv.Itoa(os.Getpid())+"\n"), 0)
+	return err
+}
+
+func (l *daemonLock) release() {
+	if l == nil || l.file == nil {
+		return
+	}
+	_ = os.Remove(l.path)
+	_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
+	_ = l.file.Close()
+}
+
+// ApprovalRouter routes approval requests by the session's channel (G-2). It
+// is the single responder passed to the runtime; a channel that is not
+// configured, or whose lookup fails, is unavailable and fails closed.
+type ApprovalRouter struct {
+	sessionInfo func(context.Context, string) (core.SessionInfo, error)
+	telegram    func(context.Context, core.ApprovalRequest) core.ApprovalOutcome
+	web         func(context.Context, core.ApprovalRequest) core.ApprovalOutcome
+}
+
+// Approve routes req to the responder of the session's channel.
+func (r *ApprovalRouter) Approve(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome {
+	if r == nil || r.sessionInfo == nil {
+		return core.OutcomeUnavailable
+	}
+	info, err := r.sessionInfo(ctx, req.SessionID)
+	if err != nil {
+		return core.OutcomeUnavailable
+	}
+	req.SessionID = info.ID
+	switch info.Channel {
+	case "telegram":
+		if r.telegram != nil {
+			return r.telegram(ctx, req)
+		}
+	case "web":
+		if r.web != nil {
+			return r.web(ctx, req)
+		}
+	}
+	return core.OutcomeUnavailable
+}
+
+// QuestionRouter routes question requests by the session's channel. It is the
+// single responder passed to the runtime; a channel that is not configured, or
+// whose lookup fails, is unavailable and fails closed.
+type QuestionRouter struct {
+	sessionInfo func(context.Context, string) (core.SessionInfo, error)
+	telegram    func(context.Context, core.QuestionRequest) core.QuestionOutcome
+	web         func(context.Context, core.QuestionRequest) core.QuestionOutcome
+}
+
+// Ask routes req to the responder of the session's channel.
+func (r *QuestionRouter) Ask(ctx context.Context, req core.QuestionRequest) core.QuestionOutcome {
+	if r == nil || r.sessionInfo == nil {
+		return noQuestionResponder()
+	}
+	info, err := r.sessionInfo(ctx, req.SessionID)
+	if err != nil {
+		return noQuestionResponder()
+	}
+	req.SessionID = info.ID
+	switch info.Channel {
+	case "telegram":
+		if r.telegram != nil {
+			return r.telegram(ctx, req)
+		}
+	case "web":
+		if r.web != nil {
+			return r.web(ctx, req)
+		}
+	}
+	return noQuestionResponder()
+}
+
+// questionBroker is the web question broker as the router sees it.
+type questionBroker interface {
+	Ask(context.Context, core.QuestionRequest) (core.QuestionOutcome, error)
+}
+
+// webQuestionResponder adapts the web broker to the router's outcome-only
+// signature. A broker error, like a missing responder, is no_responder.
+func webQuestionResponder(broker questionBroker) func(context.Context, core.QuestionRequest) core.QuestionOutcome {
+	return func(ctx context.Context, req core.QuestionRequest) core.QuestionOutcome {
+		outcome, err := broker.Ask(ctx, req)
+		if err != nil {
+			return noQuestionResponder()
+		}
+		return outcome
+	}
 }
 
 // daemonBackend adapts *lana.Runtime to the Telegram channel port.
@@ -228,7 +610,7 @@ func (b *daemonBackend) Compact(ctx context.Context, sessionID string) (int64, i
 
 func (b *daemonBackend) Memory(agent string) ([]string, []string, error) {
 	paths := agenthome.Paths(b.home, agent)
-	user, err := agenthome.ReadEntries(paths.User)
+	user, err := agenthome.ReadEntries(agenthome.SharedUser(b.home))
 	if err != nil {
 		return nil, nil, err
 	}

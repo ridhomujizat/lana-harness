@@ -14,7 +14,11 @@ import (
 
 // ToolRecord is one tool call together with its result.
 type ToolRecord struct {
-	CallID  string
+	CallID    string
+	SessionID string
+	// Agent is the child agent name of a delegated call; it is empty for the
+	// lead's own calls.
+	Agent   string
 	Name    string
 	Input   json.RawMessage
 	Status  core.ToolStatus
@@ -28,13 +32,22 @@ func (t *ToolRecord) Running() bool {
 	return t.Status == ""
 }
 
-// Summary is the short line "name  primary argument".
+// Summary is the short line "name  primary argument", prefixed with the child
+// agent name when the call came from a delegated turn. An ask_user call joins
+// its question count with " · " instead, for example "ask_user · 2 questions".
 func (t *ToolRecord) Summary() string {
+	prefix := ""
+	if t.Agent != "" {
+		prefix = t.Agent + " · "
+	}
 	arg := primaryArg(t.Name, t.Input)
 	if arg == "" {
-		return t.Name
+		return prefix + t.Name
 	}
-	return t.Name + "  " + arg
+	if t.Name == "ask_user" {
+		return prefix + t.Name + " · " + arg
+	}
+	return prefix + t.Name + "  " + arg
 }
 
 // Icon is the status icon.

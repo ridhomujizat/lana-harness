@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -84,6 +85,177 @@ func TestSchemaTooNew(t *testing.T) {
 	_ = db.Close()
 	if _, err := Open(context.Background(), path); !errors.Is(err, ErrSchemaTooNew) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+type sessionRow struct {
+	id, agent, channel, address, workspace, title, status string
+	parent                                                sql.NullString
+	inherited                                             sql.NullInt64
+	lastSeq, turnCount, createdAt, updatedAt              int64
+}
+
+func readSessionRow(t *testing.T, db *sql.DB, sessionID string) sessionRow {
+	t.Helper()
+	var row sessionRow
+	err := db.QueryRow("SELECT id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at FROM sessions WHERE id = ?", sessionID).
+		Scan(&row.id, &row.agent, &row.channel, &row.address, &row.workspace, &row.title, &row.status, &row.parent, &row.inherited, &row.lastSeq, &row.turnCount, &row.createdAt, &row.updatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return row
+}
+
+type eventRow struct {
+	sessionID string
+	seq       int64
+	kind      string
+	payload   string
+	turnID    string
+	createdAt int64
+}
+
+func readEventRows(t *testing.T, db *sql.DB) []eventRow {
+	t.Helper()
+	rows, err := db.Query("SELECT session_id, seq, kind, payload, COALESCE(turn_id, ''), created_at FROM session_events ORDER BY session_id, seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []eventRow
+	for rows.Next() {
+		var row eventRow
+		if err := rows.Scan(&row.sessionID, &row.seq, &row.kind, &row.payload, &row.turnID, &row.createdAt); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestMigrateV2ToV3SessionsWaitingInput(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "lana.db")
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, name := range []string{"migrations/0001_session_log.sql", "migrations/0002_session_leases.sql"} {
+		data, err := migrationFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatal(err)
+	}
+	var oldCreateSQL string
+	if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").Scan(&oldCreateSQL); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(oldCreateSQL, "waiting_input") {
+		t.Fatalf("v2 fixture is not the old schema: %s", oldCreateSQL)
+	}
+
+	const parentID, childID = "session-parent", "session-child"
+	const insertSession = `INSERT INTO sessions (id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if _, err := db.Exec(insertSession, parentID, "agent", "library", "addr", "/work", "Parent", "idle", nil, nil, 2, 1, 1000, 1100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(insertSession, childID, "agent", "library", "addr", "/work", "Child", "running", parentID, 2, 3, 1, 1200, 1300); err != nil {
+		t.Fatal(err)
+	}
+	events := []eventRow{
+		{parentID, 1, core.KindSessionCreated, `{"v":1,"agent":"agent"}`, "", 1000},
+		{parentID, 2, core.KindTurnEnd, `{"v":1,"turn_id":"t1","reason":"end_turn"}`, "t1", 1100},
+		{childID, 1, core.KindSessionCreated, `{"v":1,"agent":"agent"}`, "", 1200},
+		{childID, 2, core.KindTurnStart, `{"v":1,"turn_id":"t2"}`, "t2", 1250},
+		{childID, 3, core.KindUserMessage, `{"v":1,"content":[]}`, "t2", 1300},
+	}
+	for _, event := range events {
+		if _, err := db.Exec("INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)", event.sessionID, event.seq, event.kind, event.payload, event.turnID, event.createdAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec("UPDATE sessions SET status = 'waiting_input' WHERE id = ?", childID); err == nil {
+		t.Fatal("v2 fixture unexpectedly accepts waiting_input")
+	}
+
+	parentBefore := readSessionRow(t, db, parentID)
+	childBefore := readSessionRow(t, db, childID)
+	eventsBefore := readEventRows(t, db)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 3 {
+		t.Fatalf("version=%d, want 3", version)
+	}
+
+	parentAfter := readSessionRow(t, s.db, parentID)
+	childAfter := readSessionRow(t, s.db, childID)
+	if parentAfter != parentBefore {
+		t.Fatalf("parent changed during migration: before=%+v after=%+v", parentBefore, parentAfter)
+	}
+	if childAfter != childBefore {
+		t.Fatalf("child changed during migration: before=%+v after=%+v", childBefore, childAfter)
+	}
+	if childAfter.parent.String != parentID || !childAfter.parent.Valid {
+		t.Fatalf("child parent=%+v, want %s", childAfter.parent, parentID)
+	}
+	if eventsAfter := readEventRows(t, s.db); !reflect.DeepEqual(eventsAfter, eventsBefore) {
+		t.Fatalf("events changed during migration: before=%+v after=%+v", eventsBefore, eventsAfter)
+	}
+
+	var indexCount int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sessions_channel_address_updated'").Scan(&indexCount); err != nil {
+		t.Fatal(err)
+	}
+	if indexCount != 1 {
+		t.Fatalf("idx_sessions_channel_address_updated count=%d", indexCount)
+	}
+	var createSQL string
+	if err := s.db.QueryRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'").Scan(&createSQL); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(createSQL, "'waiting_input'") {
+		t.Fatalf("sessions CREATE lacks waiting_input: %s", createSQL)
+	}
+	if !strings.Contains(createSQL, "REFERENCES sessions (id) ON DELETE RESTRICT") {
+		t.Fatalf("sessions self-reference was not preserved: %s", createSQL)
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET status = 'waiting_input' WHERE id = ?", childID); err != nil {
+		t.Fatalf("waiting_input rejected after migration: %v", err)
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET status = 'bogus' WHERE id = ?", childID); err == nil {
+		t.Fatal("invalid status accepted after migration")
+	}
+
+	// The append-only triggers and the self-referencing foreign key must survive
+	// the table rebuild.
+	if _, err := s.db.Exec("UPDATE session_events SET kind = 'x' WHERE session_id = ?", childID); err == nil {
+		t.Fatal("append-only trigger lost during migration")
+	}
+	if _, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", parentID); err == nil {
+		t.Fatal("parent with child deleted: foreign key lost during migration")
 	}
 }
 
@@ -327,6 +499,51 @@ func TestListOrderAndLimit(t *testing.T) {
 	}
 }
 
+func TestListFiltersByParentSessionID(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	parent := createSession(t, s)
+	other := createSession(t, s)
+	child, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: other.ID}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.List(ctx, core.SessionFilter{ParentSessionID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != child.ID {
+		t.Fatalf("list=%+v child=%s", list, child.ID)
+	}
+}
+
+func TestListTopLevelOnly(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	root := createSession(t, s)
+	child, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.List(ctx, core.SessionFilter{TopLevelOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != root.ID {
+		t.Fatalf("list=%+v root=%s child=%s", list, root.ID, child.ID)
+	}
+	all, err := s.List(ctx, core.SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("zero-value filter returned %d sessions, want 2", len(all))
+	}
+}
+
 func TestFindPrefixCaseInsensitive(t *testing.T) {
 	s, _ := openTest(t)
 	info := createSession(t, s)
@@ -441,6 +658,140 @@ func TestResumeRepairOrphanApproval(t *testing.T) {
 	}
 	if !decided || !turnEnd {
 		t.Fatalf("approval repair incomplete")
+	}
+}
+
+func TestResumeRepairOrphanQuestion(t *testing.T) {
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	release, _ := s.TryLease(context.Background(), info.ID)
+	defer func() { _ = release() }()
+	if _, err := s.Append(context.Background(), info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		{Kind: core.KindQuestionAsked, TurnID: "t", Payload: core.QuestionAsked{V: 1, RequestID: "q1", CallID: "c1", ExpiresAt: time.Now().Add(30 * time.Minute).UnixMilli()}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	open, err := s.Info(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open.Status != "waiting_input" {
+		t.Fatalf("status before open=%q", open.Status)
+	}
+	repaired, err := s.Open(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repaired.Status != "idle" {
+		t.Fatalf("status after open=%q", repaired.Status)
+	}
+	events, _ := s.loadEvents(context.Background(), info.ID)
+	var answered *core.SessionEvent
+	var turnEndSeq int64
+	for i := range events {
+		if events[i].Kind == core.KindQuestionAnswered {
+			answered = &events[i]
+		}
+		if events[i].Kind == core.KindTurnEnd {
+			turnEndSeq = events[i].Seq
+		}
+	}
+	if answered == nil {
+		t.Fatal("orphaned question was not closed")
+	}
+	if answered.Seq >= turnEndSeq {
+		t.Fatalf("question/answered seq=%d is not before turn/end seq=%d", answered.Seq, turnEndSeq)
+	}
+	var payload core.QuestionAnswered
+	if err := json.Unmarshal(answered.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.RequestID != "q1" || payload.CallID != "c1" || payload.Outcome != core.QuestionStatusUnavailable || payload.Reason != core.QuestionReasonInterrupted || payload.Responder != "none" {
+		t.Fatalf("payload=%+v", payload)
+	}
+	before := len(events)
+	if _, err := s.Open(context.Background(), info.ID); err != nil {
+		t.Fatal(err)
+	}
+	events, _ = s.loadEvents(context.Background(), info.ID)
+	if len(events) != before {
+		t.Fatalf("repair is not idempotent: %d -> %d", before, len(events))
+	}
+}
+
+func TestProjectionQuestionWaitingThenRunning(t *testing.T) {
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	if _, err := s.Append(context.Background(), info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(context.Background(), info.ID, []core.EventDraft{
+		{Kind: core.KindQuestionAsked, TurnID: "t", Payload: core.QuestionAsked{V: 1, RequestID: "q1", CallID: "c1"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := s.Info(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting.Status != "waiting_input" {
+		t.Fatalf("status after ask=%q", waiting.Status)
+	}
+	if err := s.RebuildProjections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waiting, err = s.Info(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting.Status != "waiting_input" {
+		t.Fatalf("projection after ask=%q", waiting.Status)
+	}
+	if _, err := s.Append(context.Background(), info.ID, []core.EventDraft{
+		{Kind: core.KindQuestionAnswered, TurnID: "t", Payload: core.QuestionAnswered{V: 1, RequestID: "q1", CallID: "c1", Outcome: core.QuestionStatusAnswered, Responder: "web"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	running, err := s.Info(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.Status != "running" {
+		t.Fatalf("status after answer=%q", running.Status)
+	}
+	if err := s.RebuildProjections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	running, err = s.Info(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.Status != "running" {
+		t.Fatalf("projection after answer=%q", running.Status)
+	}
+}
+
+func TestTurnStartRejectedWhileWaitingInput(t *testing.T) {
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	if _, err := s.Append(context.Background(), info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t1", Payload: core.TurnStart{V: 1, TurnID: "t1"}},
+		{Kind: core.KindQuestionAsked, TurnID: "t1", Payload: core.QuestionAsked{V: 1, RequestID: "q1", CallID: "c1"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(context.Background(), info.ID, []core.EventDraft{{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}}}); !errors.Is(err, ErrTurnActive) {
+		t.Fatalf("err=%v", err)
+	}
+	still, err := s.Info(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if still.Status != "waiting_input" {
+		t.Fatalf("status after refused turn=%q", still.Status)
 	}
 }
 

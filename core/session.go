@@ -36,9 +36,12 @@ type NewSession struct {
 
 // SessionFilter limits List.
 type SessionFilter struct {
-	Channel string
-	Address string
-	Limit   int
+	Channel         string
+	Address         string
+	ParentSessionID string
+	// TopLevelOnly excludes child sessions.
+	TopLevelOnly bool
+	Limit        int
 }
 
 // SessionStore is the append-only event log.
@@ -56,9 +59,16 @@ type SessionStore interface {
 	TryLease(ctx context.Context, id string) (release func() error, err error)
 }
 
+// LeaseProbe is an optional SessionStore extension. LeaseHolder reports the
+// process holding the session lease without taking the lease.
+type LeaseProbe interface {
+	LeaseHolder(ctx context.Context, id string) (pid int, held bool, err error)
+}
+
 // LiveFrame is a transient (streamed) frame that is not written to the log.
 type LiveFrame struct {
 	SessionID string
+	Agent     string
 	TurnID    string
 	Kind      string
 	Text      string

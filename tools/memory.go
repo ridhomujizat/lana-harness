@@ -41,7 +41,7 @@ func memoryFile(tc core.ToolCtx, target string) (string, int, error) {
 	home := agenthome.Paths(tc.Home, tc.AgentName)
 	switch target {
 	case "user":
-		return home.User, agenthome.UserLimit, nil
+		return agenthome.SharedUser(tc.Home), agenthome.UserLimit, nil
 	case "memory":
 		return home.Memory, agenthome.MemoryLimit, nil
 	}

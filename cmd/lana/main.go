@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -399,6 +400,154 @@ func lineAnswerer(ctx context.Context, req core.ApprovalRequest) core.ApprovalOu
 	return core.OutcomeRejected
 }
 
+// lineQuestioner answers questions on /dev/tty with the API-ASK-007 line
+// prompt. It is used by lana run --ask.
+func lineQuestioner(_ context.Context, req core.QuestionRequest) core.QuestionOutcome {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return noQuestionResponder()
+	}
+	defer func() { _ = tty.Close() }()
+	reader := bufio.NewReader(tty)
+	answers := make([]core.QuestionAnswer, 0, len(req.Questions))
+	for i, question := range req.Questions {
+		answer, ok := lineQuestion(tty, reader, question, i+1, len(req.Questions))
+		if !ok {
+			return noQuestionResponder()
+		}
+		answers = append(answers, answer)
+	}
+	return core.QuestionOutcome{Status: core.QuestionStatusAnswered, Answers: answers}
+}
+
+func noQuestionResponder() core.QuestionOutcome {
+	return core.QuestionOutcome{Status: core.QuestionStatusUnavailable, Reason: core.QuestionReasonNoResponder}
+}
+
+func lineQuestion(tty *os.File, reader *bufio.Reader, question core.Question, index, total int) (core.QuestionAnswer, bool) {
+	renderLineQuestion(tty, question, index, total)
+	if question.MultiSelect {
+		return lineMultiSelect(tty, reader, question)
+	}
+	return lineSingleSelect(tty, reader, question)
+}
+
+func renderLineQuestion(tty *os.File, question core.Question, index, total int) {
+	_, _ = fmt.Fprint(tty, "? ")
+	if question.Header != "" {
+		_, _ = fmt.Fprintf(tty, "[%s] ", question.Header)
+	}
+	_, _ = fmt.Fprintf(tty, "%s  (%d of %d", question.Text, index, total)
+	if question.MultiSelect {
+		_, _ = fmt.Fprint(tty, ", select all that apply")
+	}
+	_, _ = fmt.Fprintln(tty, ")")
+	for i, option := range question.Options {
+		if question.MultiSelect {
+			_, _ = fmt.Fprint(tty, "  [ ] ")
+		} else {
+			_, _ = fmt.Fprint(tty, "  ")
+		}
+		if option.Description != "" {
+			_, _ = fmt.Fprintf(tty, "%d) %s — %s\n", i+1, option.Label, option.Description)
+		} else {
+			_, _ = fmt.Fprintf(tty, "%d) %s\n", i+1, option.Label)
+		}
+	}
+	_, _ = fmt.Fprintf(tty, "  %d) Something else\n", len(question.Options)+1)
+	_, _ = fmt.Fprintln(tty, "  s) Skip")
+}
+
+func lineSingleSelect(tty *os.File, reader *bufio.Reader, question core.Question) (core.QuestionAnswer, bool) {
+	other := len(question.Options) + 1
+	for {
+		_, _ = fmt.Fprintf(tty, "Choose 1-%d, or s to skip: ", other)
+		line, ok := readQuestionLine(reader)
+		if !ok {
+			return core.QuestionAnswer{}, false
+		}
+		if strings.EqualFold(line, "s") {
+			return core.QuestionAnswer{Question: question.Text, Skipped: true}, true
+		}
+		n, err := strconv.Atoi(line)
+		if err != nil || n < 1 || n > other {
+			_, _ = fmt.Fprintln(tty, "Choose one of the numbers shown.")
+			continue
+		}
+		if n == other {
+			text, ok := lineOther(tty, reader)
+			if !ok {
+				return core.QuestionAnswer{}, false
+			}
+			return core.QuestionAnswer{Question: question.Text, Other: text}, true
+		}
+		return core.QuestionAnswer{Question: question.Text, Selected: []string{question.Options[n-1].Label}}, true
+	}
+}
+
+func lineMultiSelect(tty *os.File, reader *bufio.Reader, question core.Question) (core.QuestionAnswer, bool) {
+	other := len(question.Options) + 1
+	for {
+		_, _ = fmt.Fprint(tty, "Choose numbers, e.g. 1 3, or s to skip: ")
+		line, ok := readQuestionLine(reader)
+		if !ok {
+			return core.QuestionAnswer{}, false
+		}
+		if line == "" || strings.EqualFold(line, "s") {
+			return core.QuestionAnswer{Question: question.Text, Skipped: true}, true
+		}
+		picked := map[int]bool{}
+		valid := true
+		for _, field := range strings.Fields(line) {
+			n, err := strconv.Atoi(field)
+			if err != nil || n < 1 || n > other {
+				valid = false
+				break
+			}
+			picked[n] = true
+		}
+		if !valid {
+			_, _ = fmt.Fprintln(tty, "Choose one of the numbers shown.")
+			continue
+		}
+		answer := core.QuestionAnswer{Question: question.Text}
+		for i, option := range question.Options {
+			if picked[i+1] {
+				answer.Selected = append(answer.Selected, option.Label)
+			}
+		}
+		if picked[other] {
+			text, ok := lineOther(tty, reader)
+			if !ok {
+				return core.QuestionAnswer{}, false
+			}
+			answer.Other = text
+		}
+		return answer, true
+	}
+}
+
+func lineOther(tty *os.File, reader *bufio.Reader) (string, bool) {
+	for {
+		_, _ = fmt.Fprint(tty, "Your answer: ")
+		line, ok := readQuestionLine(reader)
+		if !ok {
+			return "", false
+		}
+		if line != "" {
+			return line, true
+		}
+	}
+}
+
+func readQuestionLine(reader *bufio.Reader) (string, bool) {
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return "", false
+	}
+	return strings.TrimSpace(line), true
+}
+
 type runOutput struct {
 	Type       string      `json:"type"`
 	SessionID  string      `json:"session_id"`
@@ -464,10 +613,12 @@ func cmdRun(args []string) int {
 		return 2
 	}
 	var approve lana.ApproveFunc
+	var questionOpts []lana.Option
 	if *ask {
 		approve = lineAnswerer
+		questionOpts = append(questionOpts, lana.AskWith(lineQuestioner), lana.AskChannels("cli"))
 	}
-	rt, providerName, model, missingEnv, err := runtimeFor(ctx, home, agentName, approve)
+	rt, providerName, model, missingEnv, err := runtimeFor(ctx, home, agentName, approve, questionOpts...)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {

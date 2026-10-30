@@ -35,6 +35,9 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewMemoryWrite(),
 		NewSkillLoad(),
 		NewSkillWrite(),
+		NewTask(),
+		NewTaskContinue(),
+		NewAskUser(),
 	}
 	for _, tool := range builtins {
 		if err := registry.Register(tool); err != nil {

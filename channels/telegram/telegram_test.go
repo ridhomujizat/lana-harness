@@ -3,7 +3,9 @@ package telegram
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -195,10 +197,80 @@ func TestApprovalFlow(t *testing.T) {
 	api.waitCall("answerCallbackQuery", textIs("this request is no longer active"))
 
 	api.text(ownerChat, "private", ownerID, "again")
-	if got := <-outcomes; got != core.OutcomeRejected {
+	if got := <-outcomes; got != core.OutcomeUnavailable {
 		t.Fatalf("timeout outcome = %q", got)
 	}
 	api.waitCall("editMessageText", textHas("⊘ approval expired"))
+}
+
+func TestAgentTeamTurnShowsLeadAnswerAndChildToolLine(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	backend.teams = []string{"research-squad"}
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		backend.mu.Lock()
+		backend.sessions = append(backend.sessions, core.SessionInfo{
+			ID: "C1", Agent: "researcher", ParentSessionID: session, Channel: "telegram", Address: strconv.FormatInt(ownerChat, 10),
+		})
+		backend.mu.Unlock()
+		backend.obs.Publish(core.LiveFrame{SessionID: "C1", Kind: "tool_call", CallID: "cc1", Name: "read_file", Input: []byte(`{"path":"notes.md"}`)})
+		backend.obs.Publish(core.LiveFrame{SessionID: "C1", Kind: "tool_result", CallID: "cc1", Status: "success"})
+		backend.obs.Publish(core.LiveFrame{SessionID: session, Kind: "text_delta", Text: "Lead answer"})
+		return TurnResult{Text: "Lead answer", StopReason: "end_turn"}, nil
+	}
+	startChannel(t, api, backend)
+
+	api.text(ownerChat, "private", ownerID, "/agent research-squad")
+	api.waitCall("sendMessage", textIs("· agent: research-squad"))
+	api.text(ownerChat, "private", ownerID, "write the report")
+	final := api.waitCall("editMessageText", func(p map[string]any) bool {
+		text, _ := p["text"].(string)
+		return strings.Contains(text, "Lead answer") && strings.Contains(text, "researcher · read_file notes.md ✓")
+	})
+	if !strings.Contains(final.Params["text"].(string), "Lead answer") {
+		t.Fatalf("team reply = %v", final.Params)
+	}
+}
+
+func TestApproveChildShowsAgentName(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	var ch *Channel
+	outcomes := make(chan core.ApprovalOutcome, 1)
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		backend.mu.Lock()
+		backend.sessions = append(backend.sessions, core.SessionInfo{
+			ID: "CHILD", Agent: "researcher", ParentSessionID: session, Channel: "telegram", Address: strconv.FormatInt(ownerChat, 10),
+		})
+		backend.mu.Unlock()
+		backend.obs.Publish(core.LiveFrame{SessionID: "CHILD", Kind: "tool_call", CallID: "ac1", Name: "bash", Input: []byte(`{"command":"cat notes"}`)})
+		// Wait until the child tool line is part of the chat's live message.
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if w := ch.chatForSession(session); w != nil {
+				if arg, _ := w.toolArg("ac1"); arg != "" {
+					break
+				}
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		outcomes <- ch.Approve(ctx, core.ApprovalRequest{SessionID: "CHILD", CallID: "ac1", ToolName: "bash", Label: "researcher"})
+		return TurnResult{Text: "done", StopReason: "end_turn"}, nil
+	}
+	ch, _, _ = startChannel(t, api, backend)
+
+	api.text(ownerChat, "private", ownerID, "summarize")
+	ask := api.waitCall("sendMessage", func(p map[string]any) bool {
+		text, _ := p["text"].(string)
+		return strings.Contains(text, "researcher") && strings.Contains(text, "bash: cat notes")
+	})
+	data := ask.Params["reply_markup"].(map[string]any)["inline_keyboard"].([]any)[0].([]any)[0].(map[string]any)["callback_data"].(string)
+	id := strings.Split(data, ":")[1]
+	api.callback(ownerChat, "private", ownerID, "a:"+id+":once")
+	if got := <-outcomes; got != core.OutcomeAllowedOnce {
+		t.Fatalf("outcome = %q", got)
+	}
+	api.waitCall("editMessageText", textHas("✓ allowed once"))
 }
 
 func TestApproveUnknownSession(t *testing.T) {
@@ -297,5 +369,114 @@ func TestStreamingEditsAreThrottled(t *testing.T) {
 	// 150 ms of streaming with a 20 ms interval allows at most ~8 edits plus the final one.
 	if n := api.count("editMessageText", nil); n > 10 {
 		t.Fatalf("edits = %d", n)
+	}
+}
+
+// startStatusChannel starts a channel with an injected clock for status tests.
+func startStatusChannel(t *testing.T, api *fakeAPI, backend *fakeBackend, now func() time.Time) *Channel {
+	t.Helper()
+	cfg, err := ParseConfig(map[string]any{"api_base": api.srv.URL, "owner_ids": []any{ownerID}},
+		[]core.RouteConfig{{Channel: "telegram", Agent: "helper", Match: map[string]any{"chat_id": ownerChat}},
+			{Channel: "telegram", Agent: "helper", Match: map[string]any{"chat_id": groupChat}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := New(cfg, "TOKEN123", backend)
+	ch.Now = now
+	ch.EditInterval = 20 * time.Millisecond
+	ch.TypingInterval = time.Hour
+	ch.ApprovalTimeout = time.Second
+	ch.PollTimeout = 0
+	ch.MaxBackoff = 40 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	if _, err := ch.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		_ = ch.Run(ctx)
+		close(stopped)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-stopped:
+		case <-time.After(3 * time.Second):
+			t.Error("channel did not stop")
+		}
+	})
+	return ch
+}
+
+func TestStatusAC024BotUsername(t *testing.T) {
+	api := newFakeAPI(t)
+	ch, _, _ := startChannel(t, api, newFakeBackend())
+	status := ch.Status()
+	if status.State != StateConnected {
+		t.Fatalf("state = %q, want %q", status.State, StateConnected)
+	}
+	if status.BotUsername != "lana_bot" {
+		t.Fatalf("bot_username = %q, want %q", status.BotUsername, "lana_bot")
+	}
+}
+
+func TestStatusAC025PollingSnapshot(t *testing.T) {
+	api := newFakeAPI(t)
+	pollingStart := time.Date(2026, 10, 30, 8, 0, 0, 0, time.UTC)
+	lastMessage := pollingStart.Add(56 * time.Minute)
+	var calls atomic.Int32
+	ch := startStatusChannel(t, api, newFakeBackend(), func() time.Time {
+		if calls.Add(1) == 1 {
+			return pollingStart
+		}
+		return lastMessage
+	})
+
+	api.text(ownerChat, "private", ownerID, "hello")
+	api.waitCall("editMessageText", nil)
+	status := ch.Status()
+
+	if status.State != StateConnected {
+		t.Fatalf("state = %q, want %q", status.State, StateConnected)
+	}
+	if status.PollingSince == nil || *status.PollingSince != pollingStart.UnixMilli() {
+		t.Fatalf("polling_since = %v, want %d", status.PollingSince, pollingStart.UnixMilli())
+	}
+	if status.LastMessageAt == nil || *status.LastMessageAt != lastMessage.UnixMilli() {
+		t.Fatalf("last_message_at = %v, want %d", status.LastMessageAt, lastMessage.UnixMilli())
+	}
+	if status.ChatCount != 2 {
+		t.Fatalf("chat_count = %d, want 2", status.ChatCount)
+	}
+	if status.OwnerCount != 1 {
+		t.Fatalf("owner_count = %d, want 1", status.OwnerCount)
+	}
+}
+
+func TestStatusAC026Disabled(t *testing.T) {
+	cfg := Config{Enabled: false, Routes: map[int64]string{1: "a"}, OwnerIDs: map[int64]bool{2: true}}
+	status := StatusFor(cfg, false)
+	if status.State != StateOff {
+		t.Fatalf("state = %q, want %q", status.State, StateOff)
+	}
+	if status.BotUsername != "" {
+		t.Fatalf("bot_username = %q, want empty", status.BotUsername)
+	}
+	if status.PollingSince != nil {
+		t.Fatalf("polling_since = %v, want nil", *status.PollingSince)
+	}
+}
+
+func TestStatusForTokenMissing(t *testing.T) {
+	cfg := Config{Enabled: true, Routes: map[int64]string{1: "a"}, OwnerIDs: map[int64]bool{2: true}}
+	status := StatusFor(cfg, false)
+	if status.State != StateTokenMissing {
+		t.Fatalf("state = %q, want %q", status.State, StateTokenMissing)
+	}
+	if status.BotUsername != "" {
+		t.Fatalf("bot_username = %q, want empty", status.BotUsername)
+	}
+	if status.PollingSince != nil {
+		t.Fatalf("polling_since = %v, want nil", *status.PollingSince)
 	}
 }

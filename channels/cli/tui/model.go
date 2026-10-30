@@ -22,6 +22,7 @@ import (
 type Options struct {
 	Backend   Backend
 	Approver  *Approver
+	Asker     *Asker
 	Agent     string
 	Model     string
 	Policy    string
@@ -56,6 +57,33 @@ type approvalState struct {
 	req     core.ApprovalRequest
 	reply   chan core.ApprovalOutcome
 	choices *menu
+}
+
+type questionMsg struct {
+	req   core.QuestionRequest
+	reply chan core.QuestionOutcome
+}
+
+type questionExpiredMsg struct{ requestID string }
+
+// questionState is the open question request shown in the transcript area.
+type questionState struct {
+	req       core.QuestionRequest
+	reply     chan core.QuestionOutcome
+	index     int
+	answers   []core.QuestionAnswer
+	highlight int
+	other     bool
+	input     string
+	notice    string
+}
+
+func newQuestionState(req core.QuestionRequest, reply chan core.QuestionOutcome) *questionState {
+	answers := make([]core.QuestionAnswer, len(req.Questions))
+	for i, question := range req.Questions {
+		answers[i].Question = question.Text
+	}
+	return &questionState{req: req, reply: reply, answers: answers}
 }
 
 func newApprovalChoices() *menu {
@@ -107,6 +135,7 @@ type Model struct {
 	verbose          bool
 
 	approval   *approvalState
+	question   *questionState
 	picker     *menu
 	compacting bool
 
@@ -189,6 +218,9 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.Approver != nil {
 		opts.Approver.SetProgram(program)
 	}
+	if opts.Asker != nil {
+		opts.Asker.SetProgram(program)
+	}
 	if _, err := program.Run(); err != nil {
 		return err
 	}
@@ -243,6 +275,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Println(styleMuted.Render("· approval expired"))
 		}
 		return m, nil
+	case questionMsg:
+		m.question = newQuestionState(msg.req, msg.reply)
+		expiresAt := msg.req.ExpiresAt
+		if expiresAt <= 0 {
+			return m, nil
+		}
+		wait := time.Until(time.UnixMilli(expiresAt))
+		if wait < 0 {
+			wait = 0
+		}
+		return m, tea.Tick(wait, func(time.Time) tea.Msg {
+			return questionExpiredMsg{requestID: msg.req.RequestID}
+		})
+	case questionExpiredMsg:
+		if m.question != nil && m.question.req.RequestID == msg.requestID {
+			return m, m.resolveQuestion(questionOutcomeUnavailable(core.QuestionReasonTimeout))
+		}
+		return m, nil
 	case compactDoneMsg:
 		m.compacting = false
 		if msg.err != nil {
@@ -283,6 +333,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.approval != nil {
 		return m.handleApprovalKey(msg)
+	}
+	if m.question != nil {
+		return m.handleQuestionKey(msg)
 	}
 	if suggestions := m.suggestions(); len(suggestions) > 0 {
 		if model, cmd, handled := m.handleSuggestKey(msg, suggestions); handled {
@@ -413,6 +466,211 @@ func (m *Model) answerApproval(outcome core.ApprovalOutcome) tea.Cmd {
 	return tea.Println(styleErr.Render("  ⊘ cancelled"))
 }
 
+// questionNothingPicked is the multi-select hint of API-ASK-007.
+const questionNothingPicked = "Pick at least one option, or s to skip."
+
+// handleQuestionKey handles the keys of API-ASK-007 while a request is open.
+func (m *Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		cmd := m.resolveQuestion(questionOutcomeUnavailable(core.QuestionReasonCancelled))
+		m.cancelTurn()
+		return m, cmd
+	}
+	q := m.question
+	if q.other {
+		return m.handleQuestionInputKey(msg)
+	}
+	q.notice = ""
+	question := q.req.Questions[q.index]
+	rows := len(question.Options) + 1 // options then Something else
+	switch msg.String() {
+	case "up":
+		q.highlight = (q.highlight - 1 + rows) % rows
+		return m, nil
+	case "down":
+		q.highlight = (q.highlight + 1) % rows
+		return m, nil
+	case "enter":
+		if question.MultiSelect {
+			answer := q.answers[q.index]
+			if len(answer.Selected) == 0 && answer.Other == "" {
+				q.notice = questionNothingPicked
+				return m, nil
+			}
+			return m, m.advanceQuestion()
+		}
+		if q.highlight == len(question.Options) {
+			q.openOther()
+			return m, nil
+		}
+		q.pickOption(question.Options[q.highlight].Label)
+		return m, m.advanceQuestion()
+	case "s":
+		q.skip()
+		return m, m.advanceQuestion()
+	}
+	if msg.Type != tea.KeyRunes || len(msg.Runes) != 1 {
+		return m, nil
+	}
+	digit := msg.Runes[0]
+	if digit < '1' || digit > '9' {
+		return m, nil
+	}
+	number := int(digit - '0')
+	switch {
+	case number == len(question.Options)+1:
+		q.openOther()
+	case number <= len(question.Options):
+		if question.MultiSelect {
+			q.toggle(question.Options[number-1].Label)
+			return m, nil
+		}
+		q.pickOption(question.Options[number-1].Label)
+		return m, m.advanceQuestion()
+	}
+	return m, nil
+}
+
+// handleQuestionInputKey types into the Something else line.
+func (m *Model) handleQuestionInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	q := m.question
+	switch msg.String() {
+	case "esc":
+		q.other = false
+		q.input = ""
+		return m, nil
+	case "enter":
+		text := strings.TrimSpace(q.input)
+		if text == "" {
+			return m, nil
+		}
+		answer := &q.answers[q.index]
+		answer.Other = text
+		if !q.req.Questions[q.index].MultiSelect {
+			answer.Selected = nil
+		}
+		q.other = false
+		q.input = ""
+		return m, m.advanceQuestion()
+	case "backspace":
+		runes := []rune(q.input)
+		if len(runes) > 0 {
+			q.input = string(runes[:len(runes)-1])
+		}
+		return m, nil
+	default:
+		switch msg.Type {
+		case tea.KeyRunes:
+			q.input += string(msg.Runes)
+		case tea.KeySpace:
+			q.input += " "
+		}
+		return m, nil
+	}
+}
+
+func (q *questionState) pickOption(label string) {
+	answer := &q.answers[q.index]
+	answer.Selected = []string{label}
+	answer.Other = ""
+	answer.Skipped = false
+}
+
+func (q *questionState) toggle(label string) {
+	answer := &q.answers[q.index]
+	picked := make(map[string]bool, len(answer.Selected))
+	for _, selected := range answer.Selected {
+		picked[selected] = true
+	}
+	picked[label] = !picked[label]
+	answer.Selected = answer.Selected[:0]
+	for _, option := range q.req.Questions[q.index].Options {
+		if picked[option.Label] {
+			answer.Selected = append(answer.Selected, option.Label)
+		}
+	}
+	q.notice = ""
+}
+
+func (q *questionState) selected(label string) bool {
+	for _, selected := range q.answers[q.index].Selected {
+		if selected == label {
+			return true
+		}
+	}
+	return false
+}
+
+func (q *questionState) skip() {
+	q.answers[q.index] = core.QuestionAnswer{Question: q.req.Questions[q.index].Text, Skipped: true}
+	q.notice = ""
+}
+
+func (q *questionState) openOther() {
+	q.other = true
+	q.input = ""
+	q.highlight = len(q.req.Questions[q.index].Options)
+}
+
+// advanceQuestion moves to the next question or closes the request.
+func (m *Model) advanceQuestion() tea.Cmd {
+	q := m.question
+	if q == nil {
+		return nil
+	}
+	if q.index+1 < len(q.req.Questions) {
+		q.index++
+		q.highlight = 0
+		q.notice = ""
+		return nil
+	}
+	return m.resolveQuestion(core.QuestionOutcome{Status: core.QuestionStatusAnswered, Answers: q.answers})
+}
+
+// resolveQuestion closes the open request and leaves one transcript line.
+func (m *Model) resolveQuestion(outcome core.QuestionOutcome) tea.Cmd {
+	q := m.question
+	if q == nil {
+		return nil
+	}
+	m.question = nil
+	q.reply <- outcome
+	return tea.Println(questionOutcomeLine(outcome))
+}
+
+// questionOutcomeLine is the transcript line for a closed request (API-ASK-007).
+func questionOutcomeLine(outcome core.QuestionOutcome) string {
+	if outcome.Status == core.QuestionStatusAnswered {
+		if text := questionAnswerText(outcome.Answers); text != "" {
+			return styleOK.Render("✓ answered: " + text)
+		}
+		return styleMuted.Render("· question skipped")
+	}
+	switch outcome.Reason {
+	case core.QuestionReasonTimeout:
+		return styleMuted.Render("· question expired")
+	case core.QuestionReasonCancelled, core.QuestionReasonInterrupted:
+		return styleMuted.Render("· question cancelled")
+	}
+	return styleMuted.Render("· answered elsewhere")
+}
+
+// questionAnswerText lists the answers that were not skipped.
+func questionAnswerText(answers []core.QuestionAnswer) string {
+	parts := make([]string, 0, len(answers))
+	for _, answer := range answers {
+		if answer.Skipped {
+			continue
+		}
+		if answer.Other != "" {
+			parts = append(parts, answer.Other)
+			continue
+		}
+		parts = append(parts, answer.Selected...)
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (m *Model) handleCtrlC() (tea.Model, tea.Cmd) {
 	if m.running {
 		m.cancelTurn()
@@ -507,6 +765,17 @@ func (m *Model) pump(ctx context.Context, sub *core.Subscription[core.LiveFrame]
 	if m.program == nil {
 		return
 	}
+	send := func(frame core.LiveFrame) {
+		// Child frames carry the root turn's fans-in. Resolve the child agent
+		// here, off the UI goroutine, so its tool line can be prefixed. Child
+		// text is not shown, so only tool frames need the lookup.
+		if frame.SessionID != m.sessionID && frame.Agent == "" && (frame.Kind == "tool_call" || frame.Kind == "tool_result") {
+			if info, err := m.backend.SessionInfo(ctx, frame.SessionID); err == nil {
+				frame.Agent = info.Agent
+			}
+		}
+		m.program.Send(liveFrameMsg{frame: frame})
+	}
 	for {
 		select {
 		case out := <-finish:
@@ -520,7 +789,7 @@ func (m *Model) pump(ctx context.Context, sub *core.Subscription[core.LiveFrame]
 				if received.Lagged > 0 {
 					continue
 				}
-				m.program.Send(liveFrameMsg{frame: received.Value})
+				send(received.Value)
 			}
 			m.program.Send(turnDoneMsg{outcome: out})
 			return
@@ -538,12 +807,15 @@ func (m *Model) pump(ctx context.Context, sub *core.Subscription[core.LiveFrame]
 		if received.Lagged > 0 {
 			continue
 		}
-		m.program.Send(liveFrameMsg{frame: received.Value})
+		send(received.Value)
 	}
 }
 
 func (m *Model) handleFrame(frame core.LiveFrame) tea.Cmd {
-	if frame.SessionID != m.sessionID {
+	root := frame.SessionID == m.sessionID
+	// Child text belongs to the child turn; only its tool calls are shown in
+	// the chat, prefixed with the child agent name (REQ-TEAM-024).
+	if !root && frame.Kind != "tool_call" && frame.Kind != "tool_result" {
 		return nil
 	}
 	switch frame.Kind {
@@ -555,10 +827,15 @@ func (m *Model) handleFrame(frame core.LiveFrame) tea.Cmd {
 			cmds = append(cmds, tea.Println(strings.Join(m.renderAssistant(text), "\n")+"\n"))
 			m.stream.Reset()
 		}
-		record := &ToolRecord{CallID: frame.CallID, Name: frame.Name, Input: frame.Input, Started: time.Now()}
+		agent := ""
+		if !root {
+			agent = frame.Agent
+		}
+		record := &ToolRecord{CallID: frame.CallID, SessionID: frame.SessionID, Agent: agent, Name: frame.Name, Input: frame.Input, Started: time.Now()}
 		m.tools = append(m.tools, record)
 		return tea.Batch(cmds...)
 	case "tool_result":
+		questionCmd := m.questionClosedByTool(frame)
 		for i, record := range m.tools {
 			if record.CallID != frame.CallID {
 				continue
@@ -569,10 +846,38 @@ func (m *Model) handleFrame(frame core.LiveFrame) tea.Cmd {
 			m.tools = append(m.tools[:i], m.tools[i+1:]...)
 			m.lastTool = record
 			m.assistantStarted = false
-			return tea.Println(strings.Join(record.Block(m.verbose, m.contentWidth()), "\n") + "\n")
+			line := tea.Println(strings.Join(record.Block(m.verbose, m.contentWidth()), "\n") + "\n")
+			if questionCmd != nil {
+				return tea.Batch(questionCmd, line)
+			}
+			return line
 		}
+		return questionCmd
 	}
 	return nil
+}
+
+// questionClosedByTool closes the prompt when the ask_user tool result says the
+// request ended without the terminal, for example after the service timeout.
+func (m *Model) questionClosedByTool(frame core.LiveFrame) tea.Cmd {
+	q := m.question
+	if q == nil || frame.Name != "ask_user" || q.req.CallID != frame.CallID {
+		return nil
+	}
+	m.question = nil
+	var payload struct {
+		Reason string `json:"reason"`
+	}
+	line := styleMuted.Render("· answered elsewhere")
+	if json.Unmarshal([]byte(frame.Output), &payload) == nil {
+		switch payload.Reason {
+		case core.QuestionReasonTimeout:
+			line = styleMuted.Render("· question expired")
+		case core.QuestionReasonCancelled, core.QuestionReasonInterrupted:
+			line = styleMuted.Render("· question cancelled")
+		}
+	}
+	return tea.Println(line)
 }
 
 func (m *Model) appendDelta(text string) tea.Cmd {
@@ -607,6 +912,15 @@ func (m *Model) finishTurn(outcome turnOutcome) tea.Cmd {
 	m.usageIn += outcome.result.InputTokens
 	m.usageOut += outcome.result.OutputTokens
 	m.approval = nil
+	if m.question != nil {
+		cancelled := (outcome.err != nil && (errors.Is(outcome.err, context.Canceled) || errors.Is(outcome.err, context.DeadlineExceeded))) || outcome.result.StopReason == "cancelled"
+		if cancelled {
+			cmds = append(cmds, m.resolveQuestion(questionOutcomeUnavailable(core.QuestionReasonCancelled)))
+		} else {
+			m.question = nil
+			cmds = append(cmds, tea.Println(styleMuted.Render("· answered elsewhere")))
+		}
+	}
 	switch {
 	case outcome.err != nil && (errors.Is(outcome.err, context.Canceled) || errors.Is(outcome.err, context.DeadlineExceeded)):
 		cmds = append(cmds, tea.Println(styleMuted.Render("· turn cancelled")))
@@ -1049,6 +1363,9 @@ func (m *Model) View() string {
 	if m.approval != nil {
 		sections = append(sections, m.renderApproval())
 	}
+	if m.question != nil {
+		sections = append(sections, m.renderQuestion())
+	}
 	if m.searching {
 		sections = append(sections, m.renderSearch())
 	}
@@ -1061,7 +1378,7 @@ func (m *Model) View() string {
 	width := m.contentWidth()
 	sections = append(sections, styleDim.Render(strings.Repeat("─", width)))
 	sections = append(sections, m.renderInput())
-	if suggestions := m.suggestions(); len(suggestions) > 0 && m.picker == nil && m.approval == nil {
+	if suggestions := m.suggestions(); len(suggestions) > 0 && m.picker == nil && m.approval == nil && m.question == nil {
 		sections = append(sections, m.renderSuggestions(suggestions))
 	}
 	sections = append(sections, m.renderStatus())
@@ -1133,6 +1450,62 @@ func (m *Model) renderApproval() string {
 	return strings.Join(lines, "\n")
 }
 
+// renderQuestion renders the open request in the transcript area (API-ASK-007).
+func (m *Model) renderQuestion() string {
+	q := m.question
+	question := q.req.Questions[q.index]
+	lines := []string{styleAccent.Render("? ") + questionTitle(question, q.index, len(q.req.Questions))}
+	for i, option := range question.Options {
+		prefix := "  "
+		if question.MultiSelect {
+			if q.selected(option.Label) {
+				prefix += "[x] "
+			} else {
+				prefix += "[ ] "
+			}
+		}
+		line := fmt.Sprintf("%s%d) %s", prefix, i+1, option.Label)
+		if option.Description != "" {
+			line += " — " + option.Description
+		}
+		if i == q.highlight {
+			line = styleBold.Render(line)
+		}
+		lines = append(lines, truncateLine(line, m.contentWidth()))
+	}
+	something := fmt.Sprintf("  %d) Something else", len(question.Options)+1)
+	if q.highlight == len(question.Options) {
+		something = styleBold.Render(something)
+	}
+	lines = append(lines, something)
+	skip := "  s) Skip"
+	if question.MultiSelect {
+		skip += "      Enter) next"
+	}
+	lines = append(lines, skip)
+	if q.other {
+		lines = append(lines, "  "+styleAccent.Render("Your answer: ")+q.input+styleAccent.Render("▏"))
+	}
+	if q.notice != "" {
+		lines = append(lines, "  "+styleWarn.Render(q.notice))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func questionTitle(question core.Question, index, total int) string {
+	title := ""
+	if question.Header != "" {
+		title = "[" + question.Header + "] "
+	}
+	title += question.Text
+	counter := fmt.Sprintf("  (%d of %d", index+1, total)
+	if question.MultiSelect {
+		counter += ", select all that apply"
+	}
+	counter += ")"
+	return title + styleMuted.Render(counter)
+}
+
 func (m *Model) findTool(callID string) *ToolRecord {
 	for _, record := range m.tools {
 		if record.CallID == callID {
@@ -1175,6 +1548,9 @@ func (m *Model) renderStatus() string {
 	}
 	if m.running {
 		right = "turn running · ctrl+c cancel"
+	}
+	if m.question != nil {
+		right = "1-9 pick · ↑/↓ · enter · s skip"
 	}
 	return statusLine(left, right, m.contentWidth())
 }

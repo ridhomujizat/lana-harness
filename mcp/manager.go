@@ -38,13 +38,14 @@ type server struct {
 	name string
 	cfg  core.MCPConfig
 
-	mu       sync.Mutex
-	state    string
-	reason   string
-	session  *sdk.ClientSession
-	tools    []*sdk.Tool
-	lastUsed time.Time
-	inflight int
+	mu        sync.Mutex
+	state     string
+	reason    string
+	session   *sdk.ClientSession
+	tools     []*sdk.Tool
+	lastUsed  time.Time
+	startedAt time.Time
+	inflight  int
 }
 
 // Manager connects the configured MCP servers and registers their tools.
@@ -112,6 +113,7 @@ func (m *Manager) Ensure(ctx context.Context, servers []string) ([]string, map[s
 				s.reason = reason
 				s.session = nil
 				s.tools = nil
+				s.startedAt = time.Time{}
 				s.mu.Unlock()
 				unavailable[name] = reason
 				slog.Info("mcp: server unavailable", "server", name, "reason", reason)
@@ -170,6 +172,7 @@ func (m *Manager) connectLocked(ctx context.Context, s *server) error {
 	s.reason = ""
 	s.tools = tools
 	s.lastUsed = m.now()
+	s.startedAt = s.lastUsed
 	return nil
 }
 
@@ -271,15 +274,86 @@ func (m *Manager) Status(servers []string) []core.MCPServerStatus {
 			continue
 		}
 		s.mu.Lock()
-		out = append(out, core.MCPServerStatus{
+		status := core.MCPServerStatus{
 			Name:   name,
 			State:  s.state,
 			Reason: s.reason,
 			Tools:  len(s.tools),
-		})
+		}
+		if s.state == stateRunning && !s.startedAt.IsZero() {
+			status.RunningForMS = m.now().Sub(s.startedAt).Milliseconds()
+			if status.RunningForMS < 0 {
+				status.RunningForMS = 0
+			}
+		}
+		out = append(out, status)
 		s.mu.Unlock()
 	}
 	return out
+}
+
+// Restart stops one configured server and starts it again from the loaded
+// definition. It returns the new status and whether the server is configured.
+// The definition comes from the manager config, not from the file on disk
+// (API-WEB-027, Q-008).
+func (m *Manager) Restart(ctx context.Context, name string) (core.MCPServerStatus, bool) {
+	s, ok := m.servers[name]
+	if !ok {
+		return core.MCPServerStatus{Name: name, State: stateUnavailable, Reason: "not configured"}, false
+	}
+
+	s.mu.Lock()
+	if err := closeSession(s); err != nil {
+		slog.Debug("mcp: close before restart", "server", name, "error", err)
+	}
+	s.state = stateStopped
+	s.reason = ""
+	s.tools = nil
+	s.startedAt = time.Time{}
+	if err := m.connectLocked(ctx, s); err != nil {
+		reason := shortReason(err)
+		s.state = stateUnavailable
+		s.reason = reason
+		s.session = nil
+		s.tools = nil
+		s.startedAt = time.Time{}
+		s.mu.Unlock()
+		slog.Info("mcp: server restart failed", "server", name, "reason", reason)
+		return core.MCPServerStatus{Name: name, State: stateUnavailable, Reason: reason}, true
+	}
+	status := core.MCPServerStatus{
+		Name:   name,
+		State:  s.state,
+		Reason: s.reason,
+		Tools:  len(s.tools),
+	}
+	s.mu.Unlock()
+	slog.Info("mcp: server restarted", "server", name, "tools", status.Tools)
+	return status, true
+}
+
+// Test starts a temporary client from def, lists its tools, and stops it. The
+// client is never added to the manager, so it cannot show up in Status.
+func (m *Manager) Test(ctx context.Context, def core.MCPConfig) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, m.ConnectTimeout)
+	defer cancel()
+
+	transport, err := m.transport(ctx, "test", def)
+	if err != nil {
+		return 0, err
+	}
+	client := sdk.NewClient(&sdk.Implementation{Name: "lana", Version: "dev"}, nil)
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = session.Close() }()
+
+	tools, err := listTools(ctx, session)
+	if err != nil {
+		return 0, err
+	}
+	return len(tools), nil
 }
 
 // Start launches the idle reaper until ctx is cancelled or Close is called.
@@ -320,6 +394,7 @@ func (m *Manager) ReapIdle() {
 			s.state = stateStopped
 			s.reason = ""
 			s.tools = nil
+			s.startedAt = time.Time{}
 			s.mu.Unlock()
 			slog.Info("mcp: server stopped (idle)", "server", s.name)
 			continue
@@ -348,6 +423,7 @@ func (m *Manager) Close() error {
 			s.reason = ""
 		}
 		s.tools = nil
+		s.startedAt = time.Time{}
 		s.mu.Unlock()
 	}
 	return errors.Join(errs...)
@@ -373,6 +449,7 @@ func (m *Manager) markStopped(s *server, session *sdk.ClientSession) {
 	s.state = stateStopped
 	s.reason = ""
 	s.tools = nil
+	s.startedAt = time.Time{}
 }
 
 // shortReason turns an error into the reason shown by the runtime context.

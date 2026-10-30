@@ -66,6 +66,9 @@ Order of work: approve requirements, then the contract (if applicable), then des
 Implementation must not start while there are still blocking open questions or earlier artifacts
 have not been approved.
 
+> **Gate lifted again (2026-10-30)** for the revisions of specs #5, #6, and #9, and for the new specs #10 and #11.
+> The same rules apply: agent recommendations in the resolution tables, marked Approved on behalf of the owner.
+>
 > **Gate lifted (2026-10-29).** The owner asked the agent to use its own recommendations for open
 > questions and to draft all artifacts at once. Such decisions are recorded with the prefix
 > `Rekomendasi agent:` (agent recommendation) in the resolution table, and the artifacts are marked
@@ -124,7 +127,9 @@ it is reversible and does not change observable behavior.
 | [#2](https://github.com/ridhomujizat/lana-harness/issues/2) | Foundation: Go module, config loader, Context/modules/hooks | [Approved r4](2-foundation/requirements.md) | [Approved r2](2-foundation/api-contract.md) | [Approved r2](2-foundation/design.md) | [Approved r2](2-foundation/tasks.md) |
 | [#3](https://github.com/ridhomujizat/lana-harness/issues/3) | Agent loop, provider, tools, Go library | [Approved r2](3-agent-loop/requirements.md) | [Approved r2](3-agent-loop/api-contract.md) | [Approved r2](3-agent-loop/design.md) | [Approved r2](3-agent-loop/tasks.md) |
 | [#4](https://github.com/ridhomujizat/lana-harness/issues/4) | Session event log, permission, approval | [Approved r3](4-session-permission/requirements.md) | [Approved r2](4-session-permission/api-contract.md) | [Approved r2](4-session-permission/design.md) | [Approved r2](4-session-permission/tasks.md) |
-| — | Agent home, memory, and onboarding | [Approved r2](5-agent-home/requirements.md) | [Approved r1](5-agent-home/api-contract.md) | [Approved r3](5-agent-home/design.md) | [Completed r1](5-agent-home/tasks.md) |
-| — | Daemon and Telegram channel | [Approved r1](6-daemon-telegram/requirements.md) | [Approved r1](6-daemon-telegram/api-contract.md) | [Approved r3](6-daemon-telegram/design.md) | [Completed r1](6-daemon-telegram/tasks.md) |
+| — | Agent home, memory, and onboarding | [Approved r4](5-agent-home/requirements.md) | [Approved r3](5-agent-home/api-contract.md) | [Approved r4](5-agent-home/design.md) | [In Progress r2](5-agent-home/tasks.md) |
+| — | Daemon and Telegram channel | [Approved r3](6-daemon-telegram/requirements.md) | [Approved r3](6-daemon-telegram/api-contract.md) | [Approved r4](6-daemon-telegram/design.md) | [In Progress r2](6-daemon-telegram/tasks.md) |
 | — | MCP client and Skills | [Approved r1](7-mcp-skills/requirements.md) | [Approved r1](7-mcp-skills/api-contract.md) | [Approved r1](7-mcp-skills/design.md) | [Approved r1](7-mcp-skills/tasks.md) |
-| — | Web view: settings and chat sessions | [Draft r1](9-web-settings-chat/requirements.md) | [Draft r1](9-web-settings-chat/api-contract.md) | [Draft r1](9-web-settings-chat/design.md) | [Draft r1](9-web-settings-chat/tasks.md) |
+| — | Web dashboard: home, sessions, agents, skills, MCP, channels, settings | [Approved r2](9-web-settings-chat/requirements.md) | [Approved r2](9-web-settings-chat/api-contract.md) | [Approved r2](9-web-settings-chat/design.md) | [In Progress r2](9-web-settings-chat/tasks.md) |
+| — | Agent teams | [Approved r1](10-agent-teams/requirements.md) | [Approved r1](10-agent-teams/api-contract.md) | [Approved r1](10-agent-teams/design.md) | [Approved r1](10-agent-teams/tasks.md) |
+| — | Ask-user questions | [Approved r1](11-ask-user-question/requirements.md) | [Approved r1](11-ask-user-question/api-contract.md) | [Approved r1](11-ask-user-question/design.md) | [Approved r1](11-ask-user-question/tasks.md) |

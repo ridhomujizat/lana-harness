@@ -13,6 +13,8 @@ const DefaultAPIBase = "https://api.telegram.org"
 
 // Config is the parsed [channels.telegram] table plus the telegram routes.
 type Config struct {
+	// Enabled is the [channels.telegram] enabled switch; it defaults to true.
+	Enabled  bool
 	TokenEnv string
 	OwnerIDs map[int64]bool
 	APIBase  string
@@ -30,9 +32,15 @@ func (e *FieldError) Error() string { return "channels.telegram." + e.Key + ": "
 
 // ParseConfig validates [channels.telegram] and the routes with channel "telegram".
 func ParseConfig(raw map[string]any, routes []core.RouteConfig) (Config, error) {
-	cfg := Config{TokenEnv: "TELEGRAM_BOT_TOKEN", APIBase: DefaultAPIBase, OwnerIDs: map[int64]bool{}, Routes: map[int64]string{}}
+	cfg := Config{Enabled: true, TokenEnv: "TELEGRAM_BOT_TOKEN", APIBase: DefaultAPIBase, OwnerIDs: map[int64]bool{}, Routes: map[int64]string{}}
 	for key, value := range raw {
 		switch key {
+		case "enabled":
+			enabled, ok := value.(bool)
+			if !ok {
+				return cfg, &FieldError{key, "must be a boolean"}
+			}
+			cfg.Enabled = enabled
 		case "token_env":
 			text, ok := value.(string)
 			if !ok || text == "" {
@@ -74,7 +82,9 @@ func ParseConfig(raw map[string]any, routes []core.RouteConfig) (Config, error) 
 			cfg.Routes[id] = route.Agent
 		}
 	}
-	if len(cfg.Routes) == 0 {
+	// A disabled channel needs no route (REQ-DMN-005, Q-011). The route
+	// entries themselves are still validated above.
+	if cfg.Enabled && len(cfg.Routes) == 0 {
 		return cfg, fmt.Errorf(`no [[routes]] entry for channel "telegram"`)
 	}
 	return cfg, nil

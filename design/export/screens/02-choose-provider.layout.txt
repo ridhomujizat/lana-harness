@@ -1,0 +1,88 @@
+# Onboarding / 02 Choose provider (frame 1001)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "02 Choose provider" row gap=0 f1440xf960 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,32,32,32 main=spaceBetween f400xf960 bg=--bg-secondary
+    frame "Top" col gap=64 f336xh436
+      frame "Logo" row gap=10 cross=center h114xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+      frame "Steps" col gap=0 f336xh340
+        <Progress step/State=Complete> {"Connector": true, "Description": "Paste the owner token from the daemon", "Title": "Unlock the dashboard"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Unlock the dashboard" 14/20 Semibold color=--text-secondary
+            text "Paste the owner token from the daemon" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Current> {"Connector": true, "Description": "OpenAI, Anthropic, or OpenRouter", "Title": "Choose a provider"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12 shadow
+              ellipse 8x8 bg=--fg-white
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Choose a provider" 14/20 Semibold color=--text-brand-secondary
+            text "OpenAI, Anthropic, or OpenRouter" 14/20 Regular color=--text-brand-tertiary
+        <Progress step/State=Incomplete> {"Connector": true, "Description": "API key, base URL, and model", "Title": "Connect your model"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-primary border=--border-secondary radius=12
+              ellipse 8x8 bg=--fg-quaternary
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Connect your model" 14/20 Semibold color=--text-secondary
+            text "API key, base URL, and model" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Incomplete> {"Connector": true, "Description": "Name, template, and tool access", "Title": "Set up your agent"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-primary border=--border-secondary radius=12
+              ellipse 8x8 bg=--fg-quaternary
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Set up your agent" 14/20 Semibold color=--text-secondary
+            text "Name, template, and tool access" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Incomplete> {"Connector": false, "Description": "Open your first session", "Title": "Start chatting"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh28
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-primary border=--border-secondary radius=12
+              ellipse 8x8 bg=--fg-quaternary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Start chatting" 14/20 Semibold color=--text-secondary
+            text "Open your first session" 14/20 Regular color=--text-tertiary
+    frame "Footer" row gap=0 main=spaceBetween f336xh20
+      text "Local only · 127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      text "Help" 14/20 Semibold color=--text-brand-secondary
+  frame "Main" col gap=0 pad=32,32,32,32 main=center cross=center f1040xf960
+    frame "Content" col gap=32 f440xh494
+      frame "Heading" col gap=12 f440xh130
+        text "Step 2 of 5" 14/20 Semibold color=--text-brand-secondary
+        text "Choose a model provider" 30/38 Semibold color=--text-primary
+        text "Pick where lana sends model requests. Each provider has a default base URL that you can change in the next step." 16/24 Regular color=--text-tertiary
+      frame "Providers" col gap=12 f440xh254
+        <Provider card/State=Selected> {"Description": "GPT models through api.openai.com.", "Initials": "AI", "Name": "OpenAI"} row gap=12 pad=16,16,16,16 f440xh78 bg=--bg-primary border=--border-brand-solid radius=12
+          frame "Logo" row gap=0 main=center cross=center f40xf40 bg=--bg-brand-primary border=--border-secondary radius=8
+            text "AI" 14/20 Semibold color=--text-brand-secondary
+          frame "Content" col gap=2 f324xh42
+            text "OpenAI" 14/20 Semibold color=--text-brand-secondary
+            text "GPT models through api.openai.com." 14/20 Regular color=--text-brand-tertiary
+          frame "Radio" row gap=0 main=center cross=center f16xf16 bg=--bg-brand-solid radius=8
+            ellipse 6x6 bg=--fg-white
+        <Provider card/State=Default> {"Description": "Claude models through api.anthropic.com.", "Initials": "AN", "Name": "Anthropic"} row gap=12 pad=16,16,16,16 f440xh76 bg=--bg-primary border=--border-secondary radius=12
+          frame "Logo" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=8
+            text "AN" 14/20 Semibold color=--text-secondary
+          frame "Content" col gap=2 f326xh42
+            text "Anthropic" 14/20 Semibold color=--text-secondary
+            text "Claude models through api.anthropic.com." 14/20 Regular color=--text-tertiary
+          frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+        <Provider card/State=Default> {"Description": "Models from many vendors with one key.", "Initials": "OR", "Name": "OpenRouter"} row gap=12 pad=16,16,16,16 f440xh76 bg=--bg-primary border=--border-secondary radius=12
+          frame "Logo" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=8
+            text "OR" 14/20 Semibold color=--text-secondary
+          frame "Content" col gap=2 f326xh42
+            text "OpenRouter" 14/20 Semibold color=--text-secondary
+            text "Models from many vendors with one key." 14/20 Regular color=--text-tertiary
+          frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+      frame "Actions" row gap=12 f440xh46
+        <Button/Hierarchy=Secondary, Size=lg> {"Label": "Back"} row gap=6 pad=10,16,10,16 main=center cross=center f214xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Back" 16/24 Semibold color=--text-secondary
+        <Button/Hierarchy=Primary, Size=lg> {"Label": "Continue"} row gap=6 pad=10,16,10,16 main=center cross=center f214xh44 bg=--bg-brand-solid radius=8 shadow
+          text "Continue" 16/24 Semibold color=--text-white

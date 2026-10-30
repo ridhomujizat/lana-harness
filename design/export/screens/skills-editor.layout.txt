@@ -1,0 +1,144 @@
+# Skills / Skills – Editor (frame 7549)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Skills – Editor" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    text "Skills  /  go-testing" 14/20 Medium color=--text-tertiary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Title" col gap=4 f902xh60
+        frame "Name row" row gap=10 cross=center h222xh32
+          text "go-testing" 24/32 Bold Menlo color=--text-primary
+          <Badge/Color=Brand> {"Label": "Global"} row gap=6 pad=2,8,2,8 cross=center h67xh24 bg=--bg-brand-primary border=--border-brand radius=16
+            ellipse 6x6 bg=--fg-brand-primary
+            text "Global" 12/18 Medium color=--text-brand-secondary
+        text "Written by coder with skill_write · edited 2 days ago" 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Cancel"} row gap=6 pad=8,12,8,12 main=center cross=center h74xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Cancel" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Save skill"} row gap=6 pad=8,12,8,12 main=center cross=center h88xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Save skill" 14/20 Semibold color=--text-white
+    frame "Body" row gap=32 f1096xh743
+      frame "Details" col gap=20 f340xh743
+        frame "Name" col gap=6 f340xh94
+          text "Name" 14/20 Medium color=--text-secondary
+          frame "Field" row gap=8 pad=10,14,10,14 cross=center f340xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "go-testing" 14/20 Regular Menlo color=--text-primary
+          frame "Hint" row gap=0 f340xh20
+            text "Lowercase letters, digits, - and _." 14/20 Regular color=--text-tertiary
+        frame "Scope" col gap=6 f340xh98
+          text "Scope" 14/20 Medium color=--text-secondary
+          frame "Field" row gap=8 pad=10,14,10,14 cross=center f340xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "Global" 16/24 Regular color=--text-primary
+            <Icon/Chevron down> f20xf20
+          frame "Hint" row gap=0 f340xh20
+            text "Shared library. Or pick one agent to keep it private." 14/20 Regular color=--text-tertiary
+        frame "Description" col gap=6 f340xh192
+          text "Description" 14/20 Medium color=--text-secondary
+          frame "Field" row gap=8 pad=10,14,10,14 f340xf120 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "Run go test, read the failures and fix the code until the suite passes. Use when the user asks to fix tests or a CI run fails." 16/24 Regular color=--text-primary
+          frame "Hint" row gap=0 f340xh40
+            text "Agents read this to decide when to load the skill." 14/20 Regular color=--text-tertiary
+            text "142 / 300" 14/20 Regular color=--text-quaternary
+        frame "Agents" col gap=6 f340xh233
+          frame "Label row" row gap=0 f340xh20
+            text "Agents" 14/20 Medium color=--text-secondary
+            text "3 of 6" 14/20 Regular color=--text-quaternary
+          frame "List" col gap=0 f340xh181 bg=--bg-primary border=--border-secondary radius=10
+            frame "default" row gap=10 pad=8,12,8,12 cross=center f338xh45 border=--border-secondary
+              <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f28xf28 bg=--bg-brand-primary border=--bg-primary radius=16
+                text "D" 12/18 Semibold color=--text-brand-secondary
+              frame "Text" row gap=6 cross=center f246xh20
+                text "default" 14/20 Semibold color=--text-primary
+                text "gpt-5-mini" 14/20 Regular color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "coder" row gap=10 pad=8,12,8,12 cross=center f338xh45 border=--border-secondary
+              <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f28xf28 bg=--bg-warning-primary border=--bg-primary radius=16
+                text "C" 12/18 Semibold color=--text-warning-primary
+              frame "Text" row gap=6 cross=center f246xh20
+                text "coder" 14/20 Semibold color=--text-primary
+                text "claude-sonnet-5-5" 14/20 Regular color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "docs-writer" row gap=10 pad=8,12,8,12 cross=center f338xh45 border=--border-secondary
+              <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f28xf28 bg=--bg-brand-primary border=--bg-primary radius=16
+                text "D" 12/18 Semibold color=--text-brand-secondary
+              frame "Text" row gap=6 cross=center f246xh20
+                text "docs-writer" 14/20 Semibold color=--text-primary
+                text "gpt-5-mini" 14/20 Regular color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "Add agent" row gap=10 pad=8,12,8,12 cross=center f338xh44
+              frame "Tile" row gap=0 main=center cross=center f28xf28 border=--border-primary radius=14
+                <Icon/Plus> f20xf20
+              text "Add agent" 14/20 Semibold color=--text-brand-secondary
+          text "Only agents in this list load the skill." 14/20 Regular color=--text-tertiary
+        frame "Files" col gap=6 f340xh46
+          text "Folder" 14/20 Medium color=--text-secondary
+          text "~/.lana/skills/go-testing/SKILL.md" 12/20 Regular Menlo color=--text-tertiary
+      frame "Editor" col gap=8 f724xh616
+        frame "Editor header" row gap=0 cross=center f724xh20
+          text "Instructions" 14/20 Medium color=--text-secondary
+          text "Markdown" 12/18 Medium color=--text-quaternary
+        frame "Textarea" col gap=4 pad=14,16,14,16 f724xf560 bg=--bg-primary border=--border-brand radius=12 shadow
+          text "# Go testing" 13/20 Regular Menlo color=--text-brand-secondary
+          frame "Blank" f10xf6
+          text "1. Run `go test ./...` from the module root." 13/20 Regular Menlo color=--text-primary
+          text "2. Read the first failure. Open the test and the code it calls." 13/20 Regular Menlo color=--text-primary
+          text "3. Fix the code, not the test, unless the test is wrong." 13/20 Regular Menlo color=--text-primary
+          text "4. Run the failing package again with `-run <TestName> -v`." 13/20 Regular Menlo color=--text-primary
+          text "5. When it passes, run the whole suite once more." 13/20 Regular Menlo color=--text-primary
+          frame "Blank" f10xf6
+          text "## Rules" 13/20 Regular Menlo color=--text-brand-secondary
+          frame "Blank" f10xf6
+          text "- Never skip or delete a failing test to make the suite pass." 13/20 Regular Menlo color=--text-primary
+          text "- Quote the failing assertion exactly in your reply." 13/20 Regular Menlo color=--text-primary
+          text "- If a fix needs a new dependency, ask first." 13/20 Regular Menlo color=--text-primary
+          frame "Blank" f10xf6
+          text "## Report" 13/20 Regular Menlo color=--text-brand-secondary
+          frame "Blank" f10xf6
+          text "End with: tests run, tests fixed, anything still failing." 13/20 Regular Menlo color=--text-primary
+        frame "Editor footer" row gap=0 f724xh20
+          text "Loaded on demand with skill_load. Keep it short and specific." 14/20 Regular color=--text-tertiary
+          text "1,284 / 20,000" 14/20 Regular color=--text-quaternary

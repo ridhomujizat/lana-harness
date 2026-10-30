@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,24 @@ func TestValidName(t *testing.T) {
 		if ValidName(name) {
 			t.Fatalf("%q should be invalid", name)
 		}
+	}
+}
+
+func TestPathsAndSharedUser(t *testing.T) {
+	lanaHome := t.TempDir()
+	dir := filepath.Join(lanaHome, "agents", "helper")
+	home := Paths(lanaHome, "helper")
+	if home.Dir != dir {
+		t.Fatalf("dir = %q, want %q", home.Dir, dir)
+	}
+	if home.Agent != filepath.Join(dir, "AGENT.md") {
+		t.Fatalf("agent = %q", home.Agent)
+	}
+	if home.Memory != filepath.Join(dir, "MEMORY.md") {
+		t.Fatalf("memory = %q", home.Memory)
+	}
+	if got, want := SharedUser(lanaHome), filepath.Join(lanaHome, "USER.md"); got != want {
+		t.Fatalf("shared user = %q, want %q", got, want)
 	}
 }
 
@@ -166,6 +185,33 @@ func TestTemplates(t *testing.T) {
 		if !contains(tpl.Tools, "memory_read") || !contains(tpl.Tools, "memory_write") {
 			t.Fatalf("%s lacks memory tools", name)
 		}
+	}
+}
+
+func TestTemplateToolsFullSet(t *testing.T) {
+	wantTools := []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "web_fetch", "memory_read", "memory_write", "skill_write", "ask_user"}
+	for _, name := range TemplateNames() {
+		tpl, ok := LookupTemplate(name)
+		if !ok {
+			t.Fatalf("%s not found", name)
+		}
+		if !slices.Equal(tpl.Tools, wantTools) {
+			t.Fatalf("%s tools = %v", name, tpl.Tools)
+		}
+		if tpl.Permission != "ask" {
+			t.Fatalf("%s permission = %q", name, tpl.Permission)
+		}
+	}
+
+	// Each template owns its Tools slice: mutating one must not leak into
+	// another template or a fresh lookup of one.
+	first, _ := LookupTemplate("assistant")
+	second, _ := LookupTemplate("worker")
+	fresh, _ := LookupTemplate("coder")
+	first.Tools[0] = "mutated"
+	defer func() { first.Tools[0] = "read_file" }()
+	if slices.Contains(second.Tools, "mutated") || slices.Contains(fresh.Tools, "mutated") {
+		t.Fatalf("templates share a tools slice: worker=%v coder=%v", second.Tools, fresh.Tools)
 	}
 }
 

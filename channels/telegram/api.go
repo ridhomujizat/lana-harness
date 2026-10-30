@@ -137,8 +137,11 @@ type User struct {
 
 // Chat is a Telegram chat.
 type Chat struct {
-	ID   int64  `json:"id"`
-	Type string `json:"type"`
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
 }
 
 // Message is a Telegram message. Only the fields lana uses are decoded.

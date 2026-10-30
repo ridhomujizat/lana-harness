@@ -44,6 +44,7 @@ type chat struct {
 
 type toolLine struct {
 	callID string
+	agent  string
 	name   string
 	arg    string
 	mark   string
@@ -103,6 +104,9 @@ func (w *chat) handleMessage(ctx context.Context, m *Message) {
 }
 
 func (w *chat) handleText(ctx context.Context, m *Message, text string) {
+	if w.captureQuestionText(ctx, m, text) {
+		return
+	}
 	w.mu.Lock()
 	running, session := w.running, w.session
 	w.mu.Unlock()
@@ -128,6 +132,11 @@ func sessionErrText(err error) string {
 		return "✗ session is in use by another process"
 	}
 	return "✗ " + err.Error()
+}
+
+// agentNames returns the agents and teams that /agent accepts.
+func (w *chat) agentNames() []string {
+	return append(w.ch.backend.AgentNames(), w.ch.backend.TeamNames()...)
 }
 
 // currentAgent returns the active agent of the chat (API-TG-002).
@@ -229,6 +238,21 @@ type turnOutcome struct {
 	err    error
 }
 
+// resolveFrameAgent fills the agent name of a child frame so its tool lines can
+// be labelled. The root turn's frames keep the lead's plain line style.
+func (w *chat) resolveFrameAgent(ctx context.Context, frame *core.LiveFrame, root string) {
+	if frame.SessionID == root || frame.Agent != "" {
+		return
+	}
+	// Only tool frames are shown for a child; its text is not part of the reply.
+	if frame.Kind != "tool_call" && frame.Kind != "tool_result" {
+		return
+	}
+	if info, err := w.ch.backend.SessionInfo(ctx, frame.SessionID); err == nil {
+		frame.Agent = info.Agent
+	}
+}
+
 func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) {
 	started := time.Now()
 	api := w.ch.api
@@ -259,8 +283,10 @@ func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) 
 			if received.Lagged > 0 {
 				continue
 			}
+			frame := received.Value
+			w.resolveFrameAgent(readCtx, &frame, session)
 			select {
-			case frames <- received.Value:
+			case frames <- frame:
 			case <-readCtx.Done():
 				return
 			}
@@ -275,8 +301,14 @@ func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) 
 	var text strings.Builder
 	afterTool := false
 	apply := func(frame core.LiveFrame) {
-		if frame.SessionID != session {
+		// Child text deltas are not part of the lead's answer; child tool calls
+		// still appear, prefixed with the child agent name (REQ-TEAM-024).
+		if frame.SessionID != session && frame.Kind != "tool_call" && frame.Kind != "tool_result" {
 			return
+		}
+		agent := ""
+		if frame.SessionID != session {
+			agent = frame.Agent
 		}
 		switch frame.Kind {
 		case "text_delta":
@@ -287,7 +319,7 @@ func (w *chat) turn(ctx context.Context, trigger int64, session, prompt string) 
 			text.WriteString(frame.Text)
 		case "tool_call":
 			w.mu.Lock()
-			w.tools = append(w.tools, &toolLine{callID: frame.CallID, name: frame.Name, arg: toolfmt.Cut(toolfmt.PrimaryArg(frame.Name, frame.Input), 60)})
+			w.tools = append(w.tools, &toolLine{callID: frame.CallID, agent: agent, name: frame.Name, arg: toolfmt.Cut(toolfmt.PrimaryArg(frame.Name, frame.Input), 60)})
 			w.mu.Unlock()
 			afterTool = true
 		case "tool_result":
@@ -380,7 +412,15 @@ func (w *chat) render(answer, end string) string {
 	w.mu.Lock()
 	lines := make([]string, 0, len(w.tools))
 	for _, line := range w.tools {
-		row := "🔧 " + strings.TrimSpace(line.name+" "+line.arg)
+		row := "🔧 "
+		if line.agent != "" {
+			row += line.agent + " · "
+		}
+		if line.name == "ask_user" {
+			row += strings.TrimSpace(line.name + " · " + line.arg)
+		} else {
+			row += strings.TrimSpace(line.name + " " + line.arg)
+		}
 		if line.mark != "" {
 			row += " " + line.mark
 		}
@@ -485,7 +525,7 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 			return
 		}
 		rows := [][]Button{}
-		for _, agent := range w.ch.backend.AgentNames() {
+		for _, agent := range w.agentNames() {
 			rows = append(rows, []Button{{Text: agent, Data: "g:" + agent}})
 		}
 		_, err := w.ch.api.SendMessage(ctx, w.id, "Current agent: "+w.currentAgent(ctx), SendOptions{ReplyTo: m.MessageID, Keyboard: &Keyboard{Rows: rows}})
@@ -556,7 +596,7 @@ func (w *chat) switchAgent(ctx context.Context, replyTo int64, agent string) {
 		w.reply(ctx, replyTo, waitReply)
 		return
 	}
-	names := w.ch.backend.AgentNames()
+	names := w.agentNames()
 	known := false
 	for _, name := range names {
 		known = known || name == agent
@@ -623,6 +663,8 @@ func (w *chat) handleCallback(ctx context.Context, q *CallbackQuery) {
 	switch kind {
 	case "a":
 		w.ch.answerApproval(ctx, q, rest, owner)
+	case "q":
+		w.ch.answerQuestion(ctx, q, rest, owner)
 	case "g":
 		if !owner {
 			w.ch.apiErr("answerCallbackQuery", w.ch.api.AnswerCallbackQuery(ctx, q.ID, "only the owner can switch agents"))

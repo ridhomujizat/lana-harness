@@ -1,0 +1,116 @@
+# Onboarding / 04 Set up agent (frame 1482)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "04 Set up agent" row gap=0 f1440xf960 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,32,32,32 main=spaceBetween f400xf960 bg=--bg-secondary
+    frame "Top" col gap=64 f336xh436
+      frame "Logo" row gap=0 h114xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+      frame "Steps" col gap=0 f336xh340
+        <Progress step/State=Complete> {"Connector": true, "Description": "Paste the owner token from the daemon", "Title": "Unlock the dashboard"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Unlock the dashboard" 14/20 Semibold color=--text-secondary
+            text "Paste the owner token from the daemon" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Complete> {"Connector": true, "Description": "OpenAI, Anthropic, or OpenRouter", "Title": "Choose a provider"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Choose a provider" 14/20 Semibold color=--text-secondary
+            text "OpenAI, Anthropic, or OpenRouter" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Complete> {"Connector": true, "Description": "API key, base URL, and model", "Title": "Connect your model"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Connect your model" 14/20 Semibold color=--text-secondary
+            text "API key, base URL, and model" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Current> {"Connector": true, "Description": "Name, template, and tool access", "Title": "Set up your agent"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12 shadow
+              ellipse 8x8 bg=--fg-white
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Set up your agent" 14/20 Semibold color=--text-brand-secondary
+            text "Name, template, and tool access" 14/20 Regular color=--text-brand-tertiary
+        <Progress step/State=Incomplete> {"Connector": false, "Description": "Open your first session", "Title": "Start chatting"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh28
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-primary border=--border-secondary radius=12
+              ellipse 8x8 bg=--fg-quaternary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Start chatting" 14/20 Semibold color=--text-secondary
+            text "Open your first session" 14/20 Regular color=--text-tertiary
+    frame "Footer" row gap=0 main=spaceBetween f336xh20
+      text "Local only · 127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      text "Help" 14/20 Semibold color=--text-brand-secondary
+  frame "Main" col gap=0 pad=32,32,32,32 main=center cross=center f1040xf960
+    frame "Content" col gap=32 f480xh820
+      frame "Heading" col gap=12 f480xh130
+        text "Step 4 of 5" 14/20 Semibold color=--text-brand-secondary
+        text "Set up your agent" 30/38 Semibold color=--text-primary
+        text "This agent answers every new session. You can add more agents and change these choices later in Settings." 16/24 Regular color=--text-tertiary
+      frame "Form" col gap=24 f480xh580
+        <Input field/State=Default> {"Hint": "Lowercase letters, numbers, and dashes. Routes and the CLI use this name.", "Label": "Agent name", "Value": "default"} col gap=6 f480xh118
+          text "Agent name" 14/20 Medium color=--text-secondary
+          frame "Input" row gap=8 pad=10,14,10,14 cross=center f480xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "default" 16/24 Regular color=--text-primary
+          text "Lowercase letters, numbers, and dashes. Routes and the CLI use this name." 14/20 Regular color=--text-tertiary
+        frame "Template" col gap=8 f480xh146
+          text "Template" 14/20 Medium color=--text-secondary
+          frame "Options" row gap=12 cross=max f480xf90
+            <Radio tile/State=Selected> {"Description": "Everyday help and research.", "Title": "Assistant"} col gap=4 pad=12,14,14,14 f152xf90 bg=--bg-brand-primary border=--border-brand-solid radius=12
+              frame "Top" row gap=8 main=spaceBetween cross=center f120xh20
+                text "Assistant" 14/20 Semibold color=--text-brand-primary
+                frame "Radio" row gap=0 main=center cross=center f16xf16 bg=--bg-brand-solid radius=8
+                  ellipse 6x6 bg=--fg-white
+              text "Everyday help and research." 12/18 Regular color=--text-brand-tertiary
+            <Radio tile/State=Default> {"Description": "Works in a code repository.", "Title": "Coder"} col gap=4 pad=12,14,14,14 f152xf90 bg=--bg-primary border=--border-secondary radius=12
+              frame "Top" row gap=8 main=spaceBetween cross=center f122xh20
+                text "Coder" 14/20 Semibold color=--text-secondary
+                frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+              text "Works in a code repository." 12/18 Regular color=--text-tertiary
+            <Radio tile/State=Default> {"Description": "Runs tasks, checks results.", "Title": "Worker"} col gap=4 pad=12,14,14,14 f152xf90 bg=--bg-primary border=--border-secondary radius=12
+              frame "Top" row gap=8 main=spaceBetween cross=center f122xh20
+                text "Worker" 14/20 Semibold color=--text-secondary
+                frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+              text "Runs tasks, checks results." 12/18 Regular color=--text-tertiary
+          text "A starting point. You can rewrite the whole persona on the next screen." 14/20 Regular color=--text-tertiary
+        <Input field/State=Default> {"Hint": "File and bash tools work inside this folder.", "Label": "Workspace", "Value": "~/lana/workspace"} col gap=6 f480xh98
+          text "Workspace" 14/20 Medium color=--text-secondary
+          frame "Input" row gap=8 pad=10,14,10,14 cross=center f480xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "~/lana/workspace" 16/24 Regular color=--text-primary
+          text "File and bash tools work inside this folder." 14/20 Regular color=--text-tertiary
+        frame "Tool permission" col gap=8 f480xh146
+          text "Tool permission" 14/20 Medium color=--text-secondary
+          frame "Options" row gap=12 cross=max f480xf90
+            <Radio tile/State=Selected> {"Description": "Approve risky tool calls.", "Title": "Ask"} col gap=4 pad=12,14,14,14 f152xf90 bg=--bg-brand-primary border=--border-brand-solid radius=12
+              frame "Top" row gap=8 main=spaceBetween cross=center f120xh20
+                text "Ask" 14/20 Semibold color=--text-brand-primary
+                frame "Radio" row gap=0 main=center cross=center f16xf16 bg=--bg-brand-solid radius=8
+                  ellipse 6x6 bg=--fg-white
+              text "Approve risky tool calls." 12/18 Regular color=--text-brand-tertiary
+            <Radio tile/State=Default> {"Description": "Run tools without asking.", "Title": "Trust"} col gap=4 pad=12,14,14,14 f152xf90 bg=--bg-primary border=--border-secondary radius=12
+              frame "Top" row gap=8 main=spaceBetween cross=center f122xh20
+                text "Trust" 14/20 Semibold color=--text-secondary
+                frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+              text "Run tools without asking." 12/18 Regular color=--text-tertiary
+            <Radio tile/State=Default> {"Description": "Block risky tool calls.", "Title": "Never"} col gap=4 pad=12,14,14,14 f152xf90 bg=--bg-primary border=--border-secondary radius=12
+              frame "Top" row gap=8 main=spaceBetween cross=center f122xh20
+                text "Never" 14/20 Semibold color=--text-secondary
+                frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+              text "Block risky tool calls." 12/18 Regular color=--text-tertiary
+          text "Ask is recommended. Memory tools never ask for approval." 14/20 Regular color=--text-tertiary
+      frame "Actions" row gap=12 f480xh46
+        <Button/Hierarchy=Secondary, Size=lg> {"Label": "Back"} row gap=6 pad=10,16,10,16 main=center cross=center f234xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Back" 16/24 Semibold color=--text-secondary
+        <Button/Hierarchy=Primary, Size=lg> {"Label": "Continue"} row gap=6 pad=10,16,10,16 main=center cross=center f234xh44 bg=--bg-brand-solid radius=8 shadow
+          text "Continue" 16/24 Semibold color=--text-white

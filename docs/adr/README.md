@@ -29,6 +29,8 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0013](0013-use-go-as-single-binary.md) | Use Go as a single binary and library | Accepted | 2026-10-29 |
 | [0014](0014-integration-as-agentic-tool.md) | Provide lana as an agentic tool for other services | Accepted | 2026-10-29 |
 | [0015](0015-embeddable-runtime-for-services.md) | Make lana an embeddable runtime for services | Accepted | 2026-10-29 |
+| [0016](0016-owner-auth-for-browser.md) | Authenticate the browser with an owner token and a session cookie | Accepted | 2026-10-30 |
+| [0017](0017-agent-teams-as-roster-over-subagents.md) | Model agent teams as a roster of agents over subagent child sessions | Accepted | 2026-10-30 |
 
 ## How to add an ADR
 

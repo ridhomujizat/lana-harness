@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
 )
 
@@ -39,6 +41,13 @@ func writeHomeFile(t *testing.T, home, agent, name, text string) {
 	}
 }
 
+func writeSharedFile(t *testing.T, home, text string) {
+	t.Helper()
+	if err := os.WriteFile(agenthome.SharedUser(home), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPromptWithoutAgentHome(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, nil)
 	h.run(t, "hi")
@@ -64,7 +73,7 @@ func TestPromptWithoutAgentHome(t *testing.T) {
 func TestPromptFromAgentHome(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("one"), textResponse("two")}}, nil)
 	writeHomeFile(t, h.home, "assistant", "AGENT.md", "You are the home persona.")
-	writeHomeFile(t, h.home, "assistant", "USER.md", "Name: Ridho")
+	writeSharedFile(t, h.home, "Name: Ridho")
 	writeHomeFile(t, h.home, "assistant", "MEMORY.md", "Server kenari")
 	h.run(t, "hi")
 	prompt := h.systemPrompts(t)[0]
@@ -78,6 +87,44 @@ func TestPromptFromAgentHome(t *testing.T) {
 	prompts := h.systemPrompts(t)
 	if !strings.Contains(prompts[len(prompts)-1], "You are the edited persona.") {
 		t.Fatalf("edit not applied on next turn:\n%s", prompts[len(prompts)-1])
+	}
+}
+
+// TestPromptSharedUserCoversACHOME004 covers AC-HOME-004: every agent reads the
+// same $LANA_HOME/USER.md.
+func TestPromptSharedUserCoversACHOME004(t *testing.T) {
+	agents := map[string]core.AgentConfig{
+		"helper": {Provider: "mock", Model: "m"},
+		"worker": {Provider: "mock", Model: "m"},
+	}
+	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("one"), textResponse("two")}}, agents)
+	writeSharedFile(t, h.home, "Name: Ridho")
+	for i, name := range []string{"helper", "worker"} {
+		if err := h.reg.SetAgent(context.Background(), h.info.ID, name); err != nil {
+			t.Fatal(err)
+		}
+		h.run(t, "hi")
+		prompt := h.systemPrompts(t)[i]
+		if !strings.Contains(prompt, "# About the user\nName: Ridho") {
+			t.Fatalf("%s prompt lacks the shared user entry:\n%s", name, prompt)
+		}
+	}
+}
+
+// TestPromptIgnoresPerAgentUserCoversACHOME005 covers AC-HOME-005: a legacy
+// per-agent USER.md is not read once the shared file exists.
+func TestPromptIgnoresPerAgentUserCoversACHOME005(t *testing.T) {
+	agents := map[string]core.AgentConfig{"helper": {Provider: "mock", Model: "m"}}
+	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, agents)
+	writeHomeFile(t, h.home, "helper", "USER.md", "Name: Old")
+	writeSharedFile(t, h.home, "Name: Ridho")
+	if err := h.reg.SetAgent(context.Background(), h.info.ID, "helper"); err != nil {
+		t.Fatal(err)
+	}
+	h.run(t, "hi")
+	prompt := h.systemPrompts(t)[0]
+	if !strings.Contains(prompt, "Name: Ridho") || strings.Contains(prompt, "Name: Old") {
+		t.Fatalf("prompt should hold only the shared user entry:\n%s", prompt)
 	}
 }
 

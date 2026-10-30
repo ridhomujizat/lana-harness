@@ -1,0 +1,233 @@
+# Agents / Agents – List (frame 5251)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Agents – List" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Title" col gap=4 f951xh60
+        text "Agents" 24/32 Semibold color=--text-primary
+        text "Each agent has its own model, tools, persona and memory." 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Primary, Size=md> {"Label": "+ Create agent"} row gap=6 pad=10,14,10,14 main=center cross=center h129xh40 bg=--bg-brand-solid radius=8 shadow
+        text "+ Create agent" 14/20 Semibold color=--text-white
+    frame "Toolbar" row gap=12 cross=center f1096xh46
+      frame "Search" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+        <Icon/Search> f20xf20
+        text "Search agents" 16/24 Regular color=--text-placeholder
+      frame "Spacer" f640xf1
+      text "6 agents · 1 team" 14/20 Regular color=--text-tertiary
+    frame "Table" col gap=0 f1096xh478 bg=--bg-primary border=--border-secondary radius=12 shadow
+      frame "Head" row gap=0 pad=12,12,12,12 cross=center f1094xh43 bg=--bg-secondary border=--border-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f394xh18
+          text "Name" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh18
+          text "Model" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh18
+          text "Permission" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh18
+          text "Tools" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh18
+          text "Sessions" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh18
+          text "Last active" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh18
+          text "" 12/18 Medium color=--text-quaternary
+      frame "default" row gap=0 pad=14,12,14,12 cross=center f1094xh75 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f394xh46
+          <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f36xf36 bg=--bg-brand-primary border=--bg-primary radius=16
+            text "D" 12/18 Semibold color=--text-brand-secondary
+          frame "Text" col gap=2 f322xh46
+            frame "Name row" row gap=8 cross=center h127xh24
+              text "default" 14/20 Semibold color=--text-primary
+              <Badge/Color=Brand> {"Label": "Default"} row gap=6 pad=2,8,2,8 cross=center h71xh24 bg=--bg-brand-primary border=--border-brand radius=16
+                ellipse 6x6 bg=--fg-brand-primary
+                text "Default" 12/18 Medium color=--text-brand-secondary
+            text "General help and notes" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh38
+          frame "Model" col gap=0 h70xh38
+            text "gpt-5-mini" 14/20 Medium color=--text-secondary
+            text "OpenAI" 12/18 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh24
+          <Badge/Color=Gray> {"Label": "Ask"} row gap=6 pad=2,8,2,8 cross=center h52xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Ask" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "9" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "14" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh20
+          text "2 min ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh20
+          <Icon/Chevron right> f20xf20
+      frame "coder" row gap=0 pad=14,12,14,12 cross=center f1094xh71 bg=--bg-primary-hover border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f394xh42
+          <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f36xf36 bg=--bg-warning-primary border=--bg-primary radius=16
+            text "C" 12/18 Semibold color=--text-warning-primary
+          frame "Text" col gap=2 f322xh42
+            frame "Name row" row gap=8 cross=center h40xh20
+              text "coder" 14/20 Semibold color=--text-primary
+            text "Writes and fixes code" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh38
+          frame "Model" col gap=0 h126xh38
+            text "claude-sonnet-5-5" 14/20 Medium color=--text-secondary
+            text "Anthropic" 12/18 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh24
+          <Badge/Color=Gray> {"Label": "Ask"} row gap=6 pad=2,8,2,8 cross=center h52xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Ask" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "11" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "6" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh20
+          text "1 h ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh20
+          <Icon/Chevron right> f20xf20
+      frame "analyst" row gap=0 pad=14,12,14,12 cross=center f1094xh71 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f394xh42
+          <Agent avatar/Color=Error> {"Initials": "A"} row gap=0 main=center cross=center f36xf36 bg=--bg-error-primary border=--bg-primary radius=16
+            text "A" 12/18 Semibold color=--text-error-primary
+          frame "Text" col gap=2 f322xh42
+            frame "Name row" row gap=8 cross=center h50xh20
+              text "analyst" 14/20 Semibold color=--text-primary
+            text "Reads data, writes reports" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh38
+          frame "Model" col gap=0 h43xh38
+            text "gpt-5" 14/20 Medium color=--text-secondary
+            text "OpenAI" 12/18 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh22
+          <Badge/Color=Error> {"Label": "Never"} row gap=6 pad=2,8,2,8 cross=center h62xh22 bg=--bg-error-primary radius=16
+            ellipse 6x6 bg=--fg-error-primary
+            text "Never" 12/18 Medium color=--text-error-primary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "5" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "4" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh20
+          text "Yesterday" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh20
+          <Icon/Chevron right> f20xf20
+      frame "docs-writer" row gap=0 pad=14,12,14,12 cross=center f1094xh71 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f394xh42
+          <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f36xf36 bg=--bg-brand-primary border=--bg-primary radius=16
+            text "D" 12/18 Semibold color=--text-brand-secondary
+          frame "Text" col gap=2 f322xh42
+            frame "Name row" row gap=8 cross=center h80xh20
+              text "docs-writer" 14/20 Semibold color=--text-primary
+            text "Drafts and edits docs" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh38
+          frame "Model" col gap=0 h70xh38
+            text "gpt-5-mini" 14/20 Medium color=--text-secondary
+            text "OpenAI" 12/18 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh24
+          <Badge/Color=Gray> {"Label": "Ask"} row gap=6 pad=2,8,2,8 cross=center h52xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Ask" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "7" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "3" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh20
+          text "Yesterday" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh20
+          <Icon/Chevron right> f20xf20
+      frame "ops" row gap=0 pad=14,12,14,12 cross=center f1094xh71 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f394xh42
+          <Agent avatar/Color=Success> {"Initials": "O"} row gap=0 main=center cross=center f36xf36 bg=--bg-success-primary border=--bg-primary radius=16
+            text "O" 12/18 Semibold color=--text-success-primary
+          frame "Text" col gap=2 f322xh42
+            frame "Name row" row gap=8 cross=center h25xh20
+              text "ops" 14/20 Semibold color=--text-primary
+            text "Runs scripts on a schedule" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh38
+          frame "Model" col gap=0 h100xh38
+            text "deepseek-chat" 14/20 Medium color=--text-secondary
+            text "OpenRouter" 12/18 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh22
+          <Badge/Color=Warning> {"Label": "Trust"} row gap=6 pad=2,8,2,8 cross=center h57xh22 bg=--bg-warning-primary radius=16
+            ellipse 6x6 bg=--fg-warning-primary
+            text "Trust" 12/18 Medium color=--text-warning-primary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "4" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "2" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh20
+          text "3 days ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh20
+          <Icon/Chevron right> f20xf20
+      frame "research-squad" row gap=0 pad=14,12,14,12 cross=center f1094xh74
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f394xh46
+          frame "Avatar group" row gap=2 cross=center h76xh24
+            <Agent avatar/Color=Brand> {"Initials": "L"} row gap=0 main=center cross=center f24xf24 bg=--bg-brand-primary border=--bg-primary radius=16
+              text "L" 12/18 Semibold color=--text-brand-secondary
+            <Agent avatar/Color=Success> {"Initials": "R"} row gap=0 main=center cross=center f24xf24 bg=--bg-success-primary border=--bg-primary radius=16
+              text "R" 12/18 Semibold color=--text-success-primary
+            <Agent avatar/Color=Warning> {"Initials": "W"} row gap=0 main=center cross=center f24xf24 bg=--bg-warning-primary border=--bg-primary radius=16
+              text "W" 12/18 Semibold color=--text-warning-primary
+          frame "Text" col gap=2 f282xh46
+            frame "Name row" row gap=8 cross=center h178xh24
+              text "research-squad" 14/20 Semibold color=--text-primary
+              <Badge/Color=Brand> {"Label": "Team"} row gap=6 pad=2,8,2,8 cross=center h62xh24 bg=--bg-brand-primary border=--border-brand radius=16
+                ellipse 6x6 bg=--fg-brand-primary
+                text "Team" 12/18 Medium color=--text-brand-secondary
+            text "Team · lead, researcher, writer" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh38
+          frame "Model" col gap=0 h64xh38
+            text "per agent" 14/20 Medium color=--text-secondary
+            text "3 agents" 12/18 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh24
+          <Badge/Color=Gray> {"Label": "Ask"} row gap=6 pad=2,8,2,8 cross=center h52xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Ask" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "–" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f90xh20
+          text "1" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f120xh20
+          text "10 min ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f56xh20
+          <Icon/Chevron right> f20xf20

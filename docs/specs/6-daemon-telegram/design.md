@@ -3,12 +3,12 @@
 - **Issue**: —
 - **Requirements**: [requirements.md](requirements.md)
 - **Contract**: [api-contract.md](api-contract.md) — Required
-- **Requirements revision**: 1
-- **Contract revision**: 1
+- **Requirements revision**: 3
+- **Contract revision**: 3
 - **Requirements status**: Approved
 - **Contract status**: Approved
 - **Status**: Approved
-- **Design revision**: 3 (revision 2: daemon backend cancels the runtime turn on shutdown; revision 3: `lana.ApproveChannels`)
+- **Design revision**: 4 (revision 2: daemon backend cancels the runtime turn on shutdown; revision 3: `lana.ApproveChannels`; revision 4: pending chats, `enabled` key, status snapshot)
 
 ## Architecture references
 
@@ -88,6 +88,12 @@ sequenceDiagram
 
 - **`internal/toolfmt` (new)** — `PrimaryArg(name, input)` moved from the TUI; the TUI calls it.
 - **`internal/tgfmt` (new)** — `ToHTML(markdown) string` and `Split(html, limit) []string` per `API-TG-003`. Pure, table-tested.
+- **`channels/telegram/pending.go` (new, rev 4)** — `pendingChats`: a mutex-guarded map keyed by chat ID. `dispatch` calls `record(chat, from, now)` for every update from a chat without a route. `list(now)` drops records older than 24 hours and returns copies, most recent first. Above 50 records the oldest `last_seen` is removed. The clock is `Channel.Now`, injectable, default `time.Now`.
+- **`channels/telegram/status.go` (new, rev 4)** — the `Status` value of `API-TG-007`. `Channel.Status()` reads `bot`, the polling start, the last message time, and the pending list under `c.mu`. `StatusFor(cfg Config, tokenPresent bool)` returns `off` or `token_missing` for a channel that does not run.
+- **`channels/telegram/config.go` (rev 4)** — `Config.Enabled` (default `true`). `ParseConfig` accepts `enabled` as a boolean. When `Enabled` is false, the "no `[[routes]]`" error does not apply.
+- **`channels/telegram/api.go` (rev 4)** — `Chat` gains `title`, `first_name`, and `username`. The Bot API already sends these fields, so no request is added.
+- **`channels/telegram/channel.go` (rev 4)** — `Run` sets the polling start after `Start` succeeds. `dispatch` sets the last message time for message updates and calls `pending.record` for chats without a route. The `info` log line stays.
+- **`cmd/lana/daemon.go` (rev 4)** — checks `enabled` before the token and the routes. With the token missing and the web view on, it logs a warning, continues with `StatusFor(cfg, false)`, and gives the web view a status function. The type of that function is set in `T-010`.
 - **`channels/telegram` (new)**:
   - `api.go` — minimal Bot API client over `net/http` with JSON bodies; typed errors `ErrUnauthorized`, `*RetryAfterError`, `*APIError`. Base URL from `api_base`.
   - `config.go` — parse and validate `[channels.telegram]` and telegram routes into `Config{TokenEnv, OwnerIDs, APIBase, Routes map[int64]string}`.
@@ -121,6 +127,7 @@ sequenceDiagram
 
 - No schema change. Chat sessions are rows in `sessions` with channel `telegram` and address `<chat_id>`.
 - The update offset is kept in memory; Telegram drops confirmed updates and keeps unconfirmed ones for 24 hours, so a restart sees at most the last unconfirmed batch again.
+- Pending chat records and the status snapshot are in memory only. A restart empties them (rev 4).
 
 ### Failure handling
 
@@ -133,6 +140,9 @@ sequenceDiagram
 | `message is not modified` | Ignore |
 | Lease held | Reply `✗ session is in use by another process` |
 | Approval for a session not owned by a chat | `OutcomeUnavailable` (fail-closed) |
+| Token missing, web view on | Warning, Telegram off, daemon runs (`REQ-DMN-006`, rev 4) |
+| `enabled = false` | Telegram not started (`REQ-DMN-005`, rev 4) |
+| Pending chats above 50 | Oldest `last_seen` removed (`REQ-TG-016`, rev 4) |
 
 ### Concurrency
 
@@ -165,6 +175,9 @@ sequenceDiagram
 | `REQ-TG-011` | `approve.go` |
 | `REQ-TG-012`, `REQ-TG-013` | `chat.go` |
 | `REQ-TG-014`, `REQ-TG-015` | `api.go`, `channel.go` |
+| `REQ-DMN-005`, `REQ-DMN-006` (rev 4) | `config.go`, `cmd/lana/daemon.go` |
+| `REQ-TG-016` (rev 4) | `pending.go`, `channel.go` (`dispatch`) |
+| `REQ-TG-017`, `REQ-TG-018`, `REQ-TG-019` (rev 4) | `channel.go` (`Run`, `Status`), `status.go`, `cmd/lana/daemon.go` |
 
 ## Acceptance verification map
 
@@ -176,6 +189,9 @@ sequenceDiagram
 | `AC-TG-008` | `internal/tgfmt` table tests |
 | `AC-TG-012` through `AC-TG-014` | approval tests with the fake Bot API and a short timeout |
 | spec #1 lock | `cmd/lana` test: two runtimes, second `LeaseSession` fails |
+| `AC-DMN-005` through `AC-DMN-007`, `AC-TG-027` (rev 4) | `channels/telegram` config tests; `cmd/lana/daemon_test.go` with no token and with `enabled = false` |
+| `AC-TG-022`, `AC-TG-023` (rev 4) | `pending_test.go` with a fake clock and 51 chats |
+| `AC-TG-024` through `AC-TG-026` (rev 4) | `telegram_test.go` status tests with the fake Bot API |
 
 ## Verification strategy
 
@@ -193,3 +209,7 @@ sequenceDiagram
 ## Blocking Design Questions
 
 None.
+
+## Change log
+
+- Revision 4 (2026-10-30): pending chats kept in memory for 24 hours (`pending.go`); `enabled` key and token-missing rule in `config.go` and `cmd/lana/daemon.go`; status snapshot in `status.go`. Owner decision, spec #9 rev 2 decision 12. Requirements `REQ-DMN-005`, `REQ-DMN-006`, `REQ-TG-016` to `REQ-TG-019`; contract `API-TG-007`.

@@ -1,0 +1,338 @@
+/* Team message block and Team work panel (REQ-TEAM-019 to REQ-TEAM-021).
+   Tokens come from /assets/tokens.css; shared classes come from app.css. */
+
+.team-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* A team session shows a read-only "per agent" pill: each agent uses its own
+   model, so the control never opens the model menu (REQ-TEAM-022). */
+.composer-pill.is-team-model {
+  opacity: 1;
+  cursor: default;
+}
+
+.composer-pill.is-team-model:hover {
+  background: var(--bg-secondary);
+}
+
+/* Team rows in the agent picker, the agents list, and the skills dialog keep
+   the stacked avatars (lead first) at their natural width. */
+.agent-option-team .agent-avatar-group,
+.agents-row.is-team .agent-avatar-group,
+.skills-add-team .agent-avatar-group {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.team-turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+}
+
+.team-avatar-group {
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.team-avatar-group .agent-avatar {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.team-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-badge {
+  flex: 0 0 auto;
+}
+
+.team-agents {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+/* Status badges. The base badge-ui class supplies the shape, dot, and size. */
+.team-badge-warning {
+  border-color: transparent;
+  background: var(--bg-warning-primary);
+  color: var(--text-warning-primary);
+}
+
+.team-badge-warning .badge-ui-dot {
+  background: var(--fg-warning-primary);
+}
+
+.team-badge-success {
+  border-color: transparent;
+  background: var(--bg-success-primary);
+  color: var(--text-success-primary);
+}
+
+.team-badge-success .badge-ui-dot {
+  background: var(--fg-success-primary);
+}
+
+.team-badge-error {
+  border-color: transparent;
+  background: var(--bg-error-primary);
+  color: var(--text-error-primary);
+}
+
+.team-badge-error .badge-ui-dot {
+  background: var(--fg-error-primary);
+}
+
+.team-badge-neutral {
+  border-color: var(--border-secondary);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.team-badge-neutral .badge-ui-dot {
+  background: var(--fg-quaternary);
+}
+
+.team-work {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-secondary);
+}
+
+.team-work-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 14px;
+}
+
+.team-work-title {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.team-work-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.team-work-toggle {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-brand-secondary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.team-work-toggle:hover {
+  background: var(--bg-secondary-hover);
+}
+
+.team-work-toggle:focus-visible {
+  outline: 2px solid var(--border-brand-solid);
+  outline-offset: 2px;
+}
+
+.team-work-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 14px 14px;
+}
+
+.team-work-thread[hidden] {
+  display: none;
+}
+
+.team-work-empty {
+  margin: 0;
+  padding: 10px 0;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.team-call {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-step {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.team-step-rail {
+  display: flex;
+  flex: 0 0 24px;
+  justify-content: center;
+  width: 24px;
+  padding-top: 10px;
+}
+
+.team-step-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.team-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+}
+
+.team-step-from {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.team-step-to {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.team-step-text {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.team-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px 34px;
+}
+
+.team-tool {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+}
+
+.team-tool-name {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.team-tool-arg {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-tool-spacer {
+  flex: 1 1 auto;
+  min-width: 8px;
+}
+
+.team-answer {
+  margin: 0 12px 12px;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
+  background: var(--bg-primary);
+}
+
+.team-answer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.team-answer-label {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.team-answer-text {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 24px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .team-turn-head,
+  .team-work-head {
+    flex-wrap: wrap;
+  }
+
+  .team-work-spacer {
+    display: none;
+  }
+
+  .team-work-toggle {
+    margin-left: auto;
+  }
+
+  .team-tools {
+    margin-left: 0;
+  }
+}

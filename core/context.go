@@ -11,21 +11,23 @@ const (
 	ServiceSessions   ServiceKey = "sessions"
 	ServiceAgents     ServiceKey = "agents"
 	ServiceApproval   ServiceKey = "approval"
+	ServiceQuestion   ServiceKey = "question"
 	ServiceCompaction ServiceKey = "compaction"
 	ServiceMCP        ServiceKey = "mcp"
 )
 
 // Context is the wiring produced by boot.
 type Context struct {
-	LLM      LLMRegistry
-	Tools    ToolRegistry
-	Sessions SessionStore
-	Agents   AgentRegistry
-	Approval ApprovalService
-	Hooks    *Hooks
-	Config   Config
-	Secrets  Secrets
-	Profile  string
+	LLM       LLMRegistry
+	Tools     ToolRegistry
+	Sessions  SessionStore
+	Agents    AgentRegistry
+	Approval  ApprovalService
+	Questions QuestionService
+	Hooks     *Hooks
+	Config    Config
+	Secrets   Secrets
+	Profile   string
 
 	services     map[ServiceKey]any
 	installed    []*installedModule

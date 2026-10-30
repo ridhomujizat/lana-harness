@@ -24,7 +24,7 @@ Every interface is a module (see [0002](0002-core-from-modules-services-and-hook
 | Telegram | Bot API directly through `reqwest`, long polling `getUpdates` (no public webhook). | Periodic message edits (throttled to 1 second) | Inline keyboard |
 | WhatsApp | Official WhatsApp Cloud API (incoming webhook + outgoing Graph API), `whatsapp` feature. Requires a public URL (tunnel/reverse proxy). | Final message only | Interactive reply button |
 | HTTP API | `POST /v1/agents/{agent}/messages`, `GET /v1/sessions/{id}/events` (SSE), `POST /v1/webhooks/{hook}` for triggers from other systems. Bearer token auth. | SSE | `POST /v1/approvals/{id}` |
-| Web dashboard | Static assets (Preact + `htm`, no build step) embedded via `rust-embed`, using the same HTTP API. Pages: chat, sessions, agents, cron, approvals, audit. | SSE | Modal |
+| Web dashboard | Static assets (Preact + `htm`, no build step) embedded via `rust-embed`, using the same HTTP API. Pages (spec #9 rev 2, hash routes): Home (`#/home`), Sessions (`#/sessions`, `#/sessions/new`, `#/sessions/{id}`), Agents (`#/agents`), Skills (`#/skills`), MCP (`#/mcp`), Channels (`#/channels`), Settings (`#/settings/{general,providers,secrets,config,audit}`), and the first-run setup wizard (`#/setup/{step}`). | SSE | Inline card above the composer |
 
 Interface security rules:
 

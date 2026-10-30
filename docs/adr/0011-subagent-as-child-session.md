@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-29
 - **Deciders**: Ridho
-- **Related ADRs**: [0003](0003-multi-agent-with-channel-routing.md), [0004](0004-permission-mode-per-agent.md), [0009](0009-session-as-append-only-event-log.md)
+- **Related ADRs**: [0003](0003-multi-agent-with-channel-routing.md), [0004](0004-permission-mode-per-agent.md), [0009](0009-session-as-append-only-event-log.md), [0017](0017-agent-teams-as-roster-over-subagents.md)
 
 ## Context
 
@@ -49,7 +49,7 @@ Rules:
 - Approvals from several children at the same time can be confusing in chat.
 
 **Neutral**
-- Coordination of an agent team (roster, task board) like `dsh` Agent Teams is not part of v1.
+- Coordination of an agent team (roster over child sessions) is decided in [ADR 0017](0017-agent-teams-as-roster-over-subagents.md). A shared task board and peer messaging are not part of v1.
 
 ## Alternatives considered
 

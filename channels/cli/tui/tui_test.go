@@ -76,6 +76,25 @@ func TestToolBlock(t *testing.T) {
 	}
 }
 
+func TestToolSummaryAskUser(t *testing.T) {
+	record := &ToolRecord{
+		Name:  "ask_user",
+		Input: []byte(`{"questions":[{"question":"One?"},{"question":"Two?"}]}`),
+	}
+	if got := record.Summary(); got != "ask_user · 2 questions" {
+		t.Fatalf("summary = %q", got)
+	}
+	record.Agent = "researcher"
+	if got := record.Summary(); got != "researcher · ask_user · 2 questions" {
+		t.Fatalf("agent summary = %q", got)
+	}
+	record.Agent = ""
+	record.Input = []byte(`{"questions":[]}`)
+	if got := record.Summary(); got != "ask_user" {
+		t.Fatalf("summary without questions = %q", got)
+	}
+}
+
 func TestPrimaryArg(t *testing.T) {
 	if got := primaryArg("bash", []byte("{\"command\":\"cargo test\"}")); got != "cargo test" {
 		t.Fatalf("bash = %q", got)
@@ -335,5 +354,220 @@ func TestHistorySearchBefore(t *testing.T) {
 	match, _, ok = history.SearchBefore("go", index)
 	if !ok || match != "go test ./..." {
 		t.Fatalf("second = %q %v", match, ok)
+	}
+}
+
+// questionBackend runs a turn that asks one question through the TUI asker.
+type questionBackend struct {
+	*fakeBackend
+	asker *Asker
+	req   core.QuestionRequest
+}
+
+func (b *questionBackend) RunTurn(ctx context.Context, _, _ string) (TurnResult, error) {
+	b.asker.Ask(ctx, b.req)
+	return TurnResult{Text: "answered", StopReason: "end_turn"}, nil
+}
+
+func newQuestionModel(t *testing.T, questions ...core.Question) (*Model, chan core.QuestionOutcome) {
+	t.Helper()
+	model := NewModel(context.Background(), Options{Backend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}})
+	reply := make(chan core.QuestionOutcome, 1)
+	model.Update(questionMsg{req: core.QuestionRequest{RequestID: "q1", CallID: "c1", Questions: questions}, reply: reply})
+	return model, reply
+}
+
+func questionKey(value string) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
+}
+
+// AC-ASK-031: pressing 2 records option 2 and the transcript shows the answer.
+func TestQuestionAnsweredInTranscript(t *testing.T) {
+	asker := NewAsker()
+	backend := &questionBackend{
+		fakeBackend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()},
+		asker:       asker,
+		req: core.QuestionRequest{RequestID: "q1", CallID: "c1", Questions: []core.Question{{
+			Text:    "Where should I save the weekly digest?",
+			Header:  "Digest",
+			Options: []core.QuestionOption{{Label: "option 1"}, {Label: "option 2"}},
+		}}},
+	}
+	reader, writer := io.Pipe()
+	var out syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Backend: backend, Asker: asker, Agent: "default", Model: "mock:mock", Policy: "ask",
+			SessionID: "S1", Cwd: "/tmp", Version: "test", Home: t.TempDir(),
+			In: reader, Out: &out,
+		})
+	}()
+	if _, err := writer.Write([]byte("hello\r")); err != nil {
+		t.Fatalf("send prompt: %v", err)
+	}
+	waitFor(t, &out, "? [Digest] Where should I save the weekly digest?  (1 of 1)")
+	if _, err := writer.Write([]byte("2")); err != nil {
+		t.Fatalf("send option: %v", err)
+	}
+	waitFor(t, &out, "✓ answered: option 2")
+	if _, err := writer.Write([]byte("/exit\r")); err != nil {
+		t.Fatalf("send exit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("program did not finish")
+	}
+}
+
+func TestQuestionSomethingElseInput(t *testing.T) {
+	model, reply := newQuestionModel(t, core.Question{
+		Text:    "Where?",
+		Options: []core.QuestionOption{{Label: "option 1"}, {Label: "option 2"}},
+	})
+	model.Update(questionKey("3"))
+	if model.question == nil || !model.question.other {
+		t.Fatal("Something else did not open the input line")
+	}
+	model.Update(questionKey("draft"))
+	model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.question.other || model.question.input != "" {
+		t.Fatalf("esc did not close the input: %+v", model.question)
+	}
+	model.Update(questionKey("3"))
+	for _, r := range "custom wording" {
+		model.Update(questionKey(string(r)))
+	}
+	if !strings.Contains(model.renderQuestion(), "Your answer: custom wording") {
+		t.Fatalf("input not shown:\n%s", model.renderQuestion())
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	out := <-reply
+	if out.Status != core.QuestionStatusAnswered || len(out.Answers) != 1 || out.Answers[0].Other != "custom wording" {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if !strings.Contains(questionOutcomeLine(out), "✓ answered: custom wording") {
+		t.Fatalf("transcript line = %q", questionOutcomeLine(out))
+	}
+}
+
+func TestQuestionSkip(t *testing.T) {
+	model, reply := newQuestionModel(t, core.Question{
+		Text:    "Where?",
+		Options: []core.QuestionOption{{Label: "option 1"}, {Label: "option 2"}},
+	})
+	model.Update(questionKey("s"))
+	out := <-reply
+	if out.Status != core.QuestionStatusAnswered || len(out.Answers) != 1 || !out.Answers[0].Skipped {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if model.question != nil {
+		t.Fatal("question was not closed")
+	}
+	if line := questionOutcomeLine(out); !strings.Contains(line, "· question skipped") {
+		t.Fatalf("transcript line = %q", line)
+	}
+}
+
+func TestQuestionMultiSelectToggleAndSubmit(t *testing.T) {
+	model, reply := newQuestionModel(t, core.Question{
+		Text:        "Which sections?",
+		MultiSelect: true,
+		Options: []core.QuestionOption{
+			{Label: "Key findings"},
+			{Label: "Open questions"},
+			{Label: "Action items"},
+		},
+	})
+	model.Update(questionKey("1"))
+	model.Update(questionKey("3"))
+	rendered := model.renderQuestion()
+	for _, want := range []string{"[x] 1) Key findings", "[ ] 2) Open questions", "[x] 3) Action items", "s) Skip      Enter) next"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("render does not contain %q:\n%s", want, rendered)
+		}
+	}
+	model.Update(questionKey("3"))
+	if got := model.renderQuestion(); !strings.Contains(got, "[ ] 3) Action items") {
+		t.Fatalf("second press did not untoggle:\n%s", got)
+	}
+	model.Update(questionKey("3"))
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	out := <-reply
+	want := []string{"Key findings", "Action items"}
+	if len(out.Answers) != 1 || strings.Join(out.Answers[0].Selected, ",") != strings.Join(want, ",") {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if line := questionOutcomeLine(out); !strings.Contains(line, "✓ answered: Key findings, Action items") {
+		t.Fatalf("transcript line = %q", line)
+	}
+}
+
+func TestQuestionMultiSelectRequiresPick(t *testing.T) {
+	model, reply := newQuestionModel(t, core.Question{
+		Text:        "Which sections?",
+		MultiSelect: true,
+		Options:     []core.QuestionOption{{Label: "one"}, {Label: "two"}},
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !strings.Contains(model.renderQuestion(), "Pick at least one option, or s to skip.") {
+		t.Fatalf("hint not shown:\n%s", model.renderQuestion())
+	}
+	select {
+	case out := <-reply:
+		t.Fatalf("empty multi-select submitted: %+v", out)
+	default:
+	}
+	if model.question == nil {
+		t.Fatal("question closed on an empty multi-select")
+	}
+}
+
+func TestQuestionCtrlCCancels(t *testing.T) {
+	model, reply := newQuestionModel(t, core.Question{
+		Text:    "Where?",
+		Options: []core.QuestionOption{{Label: "option 1"}, {Label: "option 2"}},
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	out := <-reply
+	if out.Status != core.QuestionStatusUnavailable || out.Reason != core.QuestionReasonCancelled {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if model.question != nil {
+		t.Fatal("question was not closed")
+	}
+	if line := questionOutcomeLine(out); !strings.Contains(line, "· question cancelled") {
+		t.Fatalf("transcript line = %q", line)
+	}
+}
+
+func TestQuestionNumberOutOfRange(t *testing.T) {
+	model, reply := newQuestionModel(t, core.Question{
+		Text:    "Where?",
+		Options: []core.QuestionOption{{Label: "option 1"}, {Label: "option 2"}},
+	})
+	model.Update(questionKey("9"))
+	select {
+	case out := <-reply:
+		t.Fatalf("out-of-range number answered: %+v", out)
+	default:
+	}
+	if model.question == nil {
+		t.Fatal("question closed on an out-of-range number")
+	}
+}
+
+func TestQuestionAskerWithoutProgram(t *testing.T) {
+	outcome := NewAsker().Ask(context.Background(), core.QuestionRequest{
+		Questions: []core.Question{{Text: "Where?"}},
+	})
+	if outcome.Status != core.QuestionStatusUnavailable || outcome.Reason != core.QuestionReasonNoResponder {
+		t.Fatalf("outcome = %+v", outcome)
 	}
 }

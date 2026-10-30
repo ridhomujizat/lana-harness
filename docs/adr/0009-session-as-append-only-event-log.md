@@ -47,6 +47,7 @@ Durable events in v1:
 | `assistant/attempt` | a failed or retried attempt. Not part of the model history |
 | `tool/call`, `tool/result` | call id, tool name, input, output or error |
 | `approval/asked`, `approval/decided` | approval audit pair (see [0004](0004-permission-mode-per-agent.md)) |
+| `question/asked`, `question/answered` | questions from the `ask_user` tool and their answers (see [spec #11](../specs/11-ask-user-question/api-contract.md)) |
 | `approval/policy` | session policy change |
 | `model/selection` | change of provider or model in the middle of a session |
 | `compaction/summary` | summary that replaces events up to `upto_seq` |

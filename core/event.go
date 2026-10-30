@@ -37,6 +37,8 @@ const (
 	KindApprovalAsked     = "approval/asked"
 	KindApprovalDecided   = "approval/decided"
 	KindApprovalPolicy    = "approval/policy"
+	KindQuestionAsked     = "question/asked"
+	KindQuestionAnswered  = "question/answered"
 	KindModelSelection    = "model/selection"
 	KindCompactionSummary = "compaction/summary"
 )
@@ -145,6 +147,25 @@ type ApprovalDecided struct {
 type ApprovalPolicy struct {
 	V      int    `json:"v"`
 	Policy Policy `json:"policy"`
+}
+
+// QuestionAsked is the payload of a question/asked event.
+type QuestionAsked struct {
+	V         int    `json:"v"`
+	RequestID string `json:"request_id"`
+	CallID    string `json:"call_id"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+// QuestionAnswered is the payload of a question/answered event.
+type QuestionAnswered struct {
+	V         int              `json:"v"`
+	RequestID string           `json:"request_id"`
+	CallID    string           `json:"call_id"`
+	Outcome   string           `json:"outcome"`
+	Responder string           `json:"responder"`
+	Reason    string           `json:"reason,omitempty"`
+	Answers   []QuestionAnswer `json:"answers,omitempty"`
 }
 
 type ModelSelection struct {

@@ -181,6 +181,7 @@ type fakeBackend struct {
 	mu       sync.Mutex
 	obs      *core.Observe[core.LiveFrame]
 	sessions []core.SessionInfo
+	teams    []string
 	nextID   int
 	sent     []string
 	prompts  []string
@@ -229,6 +230,14 @@ func (b *fakeBackend) NewSession(_ context.Context, address, agent string) (core
 func (b *fakeBackend) Lease(context.Context, string) error { return nil }
 
 func (b *fakeBackend) SessionInfo(_ context.Context, id string) (core.SessionInfo, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, info := range b.sessions {
+		if info.ID == id {
+			info.TurnCount = 3
+			return info, nil
+		}
+	}
 	return core.SessionInfo{ID: id, TurnCount: 3}, nil
 }
 
@@ -278,7 +287,12 @@ func (b *fakeBackend) Skills(string) []agenthome.Skill {
 }
 func (b *fakeBackend) Policy(context.Context, string) (string, error) { return "ask", nil }
 func (b *fakeBackend) AgentNames() []string                           { return []string{"coder", "helper"} }
-func (b *fakeBackend) AgentModel(agent string) string                 { return "mock:" + agent }
+func (b *fakeBackend) TeamNames() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.teams...)
+}
+func (b *fakeBackend) AgentModel(agent string) string { return "mock:" + agent }
 
 func (b *fakeBackend) promptList() []string {
 	b.mu.Lock()

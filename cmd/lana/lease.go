@@ -33,6 +33,14 @@ func (l *leaseSet) ensure(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// holds reports whether this process holds the session lease.
+func (l *leaseSet) holds(sessionID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, ok := l.held[sessionID]
+	return ok
+}
+
 // releaseAll releases every held lease.
 func (l *leaseSet) releaseAll() {
 	l.mu.Lock()
