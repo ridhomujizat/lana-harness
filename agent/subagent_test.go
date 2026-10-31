@@ -562,17 +562,21 @@ func TestSubagentMaxStepsLimit(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			responses := make([]mock.Response, 0, test.tools+1)
 			for i := 0; i < test.tools; i++ {
-				// A distinct limit makes each call its own signature, so the
-				// loop guard does not stop this child turn; the test is about
-				// the step cap, not about a looping model.
-				responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
+				// Each call reads a distinct line, so its result digest differs
+				// and the loop guard's read-only detectors stay quiet; the test
+				// is about the step cap, not about a looping model.
+				responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","offset":%d,"limit":1}`, i+1)))
 			}
 			responses = append(responses, textResponse("done"))
 			h := newSubagentHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
 				"coder":  {Provider: "mock", Model: "m", Tools: []string{"task"}, Subagents: []string{"worker"}},
 				"worker": {Provider: "mock", Model: "child-model", Tools: []string{"read_file"}, MaxSteps: test.maxSteps},
 			})
-			if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+			var content strings.Builder
+			for i := 1; i <= test.tools; i++ {
+				fmt.Fprintf(&content, "line %d\n", i)
+			}
+			if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte(content.String()), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			parent := newSubagentParent(t, h, "coder")

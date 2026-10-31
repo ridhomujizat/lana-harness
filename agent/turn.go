@@ -548,13 +548,15 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	// toolCallTextNudges counts the malformed tool-call nudges done this turn
 	// (REQ-MEM-020); at most maxToolCallTextNudges per turn.
 	toolCallTextNudges := 0
-	// budgetReport marks the final, tool-free report step that a configured
-	// step cap adds before the turn ends (REQ-LTC-040).
+	// budgetReport marks the final report step a configured step cap adds
+	// before the turn ends (REQ-LTC-040). It sends the same tools as the other
+	// steps, and a tool call it returns is not run (REQ-LPG-015).
 	budgetReport := false
-	// halted marks a loop guard halt (REQ-LPG-009) whose final, tool-free
-	// report step is still to run; pendingHaltNote is that step's runtime note
-	// and loopReport marks that the report step ran, so a normal end is reason
-	// loop rather than max_steps or end_turn.
+	// halted marks a loop guard halt (REQ-LPG-009) whose final report step is
+	// still to run; pendingHaltNote is that step's runtime note and loopReport
+	// marks that the report step ran, so a normal end is reason loop rather
+	// than max_steps or end_turn. The report step keeps the offered tools and
+	// does not run a tool call it returns (REQ-LPG-015).
 	halted := false
 	pendingHaltNote := ""
 	loopReport := false
@@ -682,8 +684,10 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 			}
 		}
-		// REQ-LTC-040: a positive cap runs one final step without tools that
-		// asks for a status report, then the turn ends with reason max_steps.
+		// REQ-LTC-040: a positive cap runs one final step that asks for a
+		// status report, then the turn ends with reason max_steps. The report
+		// step sends the same tools as the earlier steps and does not run a
+		// tool call it returns (REQ-LPG-015).
 		if resolved.maxSteps > 0 && steps >= resolved.maxSteps {
 			// A message popInbox already claimed stays for the next turn; the
 			// cap replaces the model input, not the owner's queued message.
@@ -700,10 +704,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			claimedText = stepLimitNote
 			inputMsg = core.Message{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: stepLimitNote}}}
 		}
-		// REQ-LPG-009: a loop guard halt runs one final step without tools,
-		// like the step cap. The halt note is delivered as a runtime note and a
-		// message popInbox already claimed stays for the next turn. When the
-		// cap is reached as well, the cap wins (first condition reached).
+		// REQ-LPG-009: a loop guard halt runs one final step, like the step
+		// cap. The halt note is delivered as a runtime note and a message
+		// popInbox already claimed stays for the next turn. When the cap is
+		// reached as well, the cap wins (first condition reached). The report
+		// step keeps the offered tools; a tool call it returns is not run
+		// (REQ-LPG-015).
 		if halted && !budgetReport && !loopReport {
 			if inboxClaim {
 				rn.pushFrontInbox(claimedText)
@@ -840,17 +846,16 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		}
 		steps = step
 
-		// The report step of REQ-LTC-040 offers no tools.
-		var specs []core.ToolSpec
-		if !budgetReport {
-			specs, err = rn.reg.tools.Specs(turnTools)
-			if err != nil {
-				runErr = runtimeError(err)
-				reason = "error"
-				goto finished
-			}
-			lastSpecs = specs
+		// REQ-LPG-015: the report step sends the same tools as the earlier steps
+		// so the provider prefix cache stays valid; only the runtime note asks
+		// the model for text.
+		specs, err := rn.reg.tools.Specs(turnTools)
+		if err != nil {
+			runErr = runtimeError(err)
+			reason = "error"
+			goto finished
 		}
+		lastSpecs = specs
 		control, err := rn.reg.hooks.AgentRequest.Call(ctx, core.RequestControl{})
 		if err != nil {
 			runErr = runtimeError(err)
@@ -975,42 +980,51 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_call", CallID: block.ID, Name: block.Name, Input: block.Input})
 			}
-			var mcpAdmin core.MCPAdmin
-			if !resolved.child {
-				mcpAdmin = rn.reg.mcpAdminFor()
-			}
-			toolCtx := core.ToolCtx{
-				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
-				Skills:        resolved.skills,
-				Questions:     rn.reg.questions,
-				Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
-				MCPAdmin:      mcpAdmin,
-				MCPStatus:     rn.reg.ServerStatus,
-				AllowedAgents: resolved.delegates,
-				Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
-				Jobs:          rn.reg.jobs,
-			}
-			// REQ-LPG-008: a call that matches a block rule is not run; its
-			// synthetic error result takes its place. The other calls run as
-			// usual and every result is stored in call order.
 			outputs := make([]core.ToolOutput, len(calls))
-			var runnable []core.ToolCall
-			var runnableIndex []int
-			for i, call := range calls {
-				out, blocked := guard.before(call)
-				if blocked {
-					outputs[i] = out
-					slog.Info("loop guard block", "session_id", rn.sessionID, "turn_id", turnID,
-						"kind", guard.lastBlock.kind, "tool", guard.lastBlock.tool, "count", guard.lastBlock.count)
-					continue
+			if budgetReport {
+				// REQ-LPG-015: the report step keeps the offered tools for the
+				// provider prefix cache, but a tool call it returns is not run.
+				// Each gets an error result and the turn ends after this step.
+				for i := range outputs {
+					outputs[i] = core.ToolOutput{Status: core.ToolStatusError, Output: reportToolsDisabledText}
 				}
-				runnable = append(runnable, call)
-				runnableIndex = append(runnableIndex, i)
-			}
-			if len(runnable) > 0 {
-				ran := rn.reg.pipeline.Run(ctx, runnable, turnTools, toolCtx)
-				for j, out := range ran {
-					outputs[runnableIndex[j]] = out
+			} else {
+				var mcpAdmin core.MCPAdmin
+				if !resolved.child {
+					mcpAdmin = rn.reg.mcpAdminFor()
+				}
+				toolCtx := core.ToolCtx{
+					SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
+					Skills:        resolved.skills,
+					Questions:     rn.reg.questions,
+					Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+					MCPAdmin:      mcpAdmin,
+					MCPStatus:     rn.reg.ServerStatus,
+					AllowedAgents: resolved.delegates,
+					Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
+					Jobs:          rn.reg.jobs,
+				}
+				// REQ-LPG-008: a call that matches a block rule is not run; its
+				// synthetic error result takes its place. The other calls run as
+				// usual and every result is stored in call order.
+				var runnable []core.ToolCall
+				var runnableIndex []int
+				for i, call := range calls {
+					out, blocked := guard.before(call)
+					if blocked {
+						outputs[i] = out
+						slog.Info("loop guard block", "session_id", rn.sessionID, "turn_id", turnID,
+							"kind", guard.lastBlock.kind, "tool", guard.lastBlock.tool, "count", guard.lastBlock.count)
+						continue
+					}
+					runnable = append(runnable, call)
+					runnableIndex = append(runnableIndex, i)
+				}
+				if len(runnable) > 0 {
+					ran := rn.reg.pipeline.Run(ctx, runnable, turnTools, toolCtx)
+					for j, out := range ran {
+						outputs[runnableIndex[j]] = out
+					}
 				}
 			}
 			// Child usage from task and task_continue belongs to this step's
@@ -1036,24 +1050,27 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_result", CallID: calls[i].CallID, Name: calls[i].Name, Status: string(status), Output: output.Output})
 			}
-			// REQ-TRL-010..014, REQ-LPG-002..007: advance the loop guard over
-			// this step's calls and results. The reminder rides the next
-			// request, which is claimed in the pendingTools branch or dropped
-			// for an owner message.
-			pendingReminder = guard.observe(calls, outputs)
-			for _, hit := range guard.hits {
-				slog.Info("loop guard reminder", "session_id", rn.sessionID, "turn_id", turnID, "kind", hit.kind, "count", hit.count)
-			}
-			guard.strike(allUnknownNames(outputs))
-			if guard.halt != nil {
-				// REQ-LPG-009: a block or a detected loop halts the turn. The
-				// halt note replaces the reminder and the next step offers no
-				// tools.
-				slog.Info("loop guard halt", "session_id", rn.sessionID, "turn_id", turnID,
-					"kind", guard.halt.kind, "tool", guard.halt.tool, "count", guard.halt.count)
-				pendingReminder = loopGuardHaltNote(*guard.halt)
-				pendingHaltNote = pendingReminder
-				halted = true
+			if !budgetReport {
+				// REQ-TRL-010..014, REQ-LPG-002..007: advance the loop guard
+				// over this step's calls and results. The reminder rides the
+				// next request, which is claimed in the pendingTools branch or
+				// dropped for an owner message. The report step is skipped: its
+				// calls were not run (REQ-LPG-015).
+				pendingReminder = guard.observe(calls, outputs)
+				for _, hit := range guard.hits {
+					slog.Info("loop guard reminder", "session_id", rn.sessionID, "turn_id", turnID, "kind", hit.kind, "count", hit.count)
+				}
+				guard.strike(allUnknownNames(outputs))
+				if guard.halt != nil {
+					// REQ-LPG-009: a block or a detected loop halts the turn. The
+					// halt note replaces the reminder and the next step is the
+					// report step.
+					slog.Info("loop guard halt", "session_id", rn.sessionID, "turn_id", turnID,
+						"kind", guard.halt.kind, "tool", guard.halt.tool, "count", guard.halt.count)
+					pendingReminder = loopGuardHaltNote(*guard.halt)
+					pendingHaltNote = pendingReminder
+					halted = true
+				}
 			}
 		}
 		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Usage: usage}}); err != nil {
@@ -1069,6 +1086,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			"cache_hit_pct", cacheHitPct(usage.InputTokens, usage.CachedInputTokens))
 		if ctx.Err() != nil {
 			reason = "cancelled"
+			goto finished
+		}
+		if budgetReport && len(toolBlocks) > 0 {
+			// REQ-LPG-015: a tool call in the final report step is not run; the
+			// step's text is kept and the turn ends with its usual reason (loop
+			// or max_steps).
 			goto finished
 		}
 		pendingTools = len(toolBlocks) > 0
@@ -1285,9 +1308,15 @@ const toolCallTextNote = "Your last reply wrote a tool call as plain text, so no
 // (REQ-MEM-020).
 const maxToolCallTextNudges = 2
 
-// stepLimitNote is the user text of the final, tool-free report step a
-// configured step cap runs before the turn ends (REQ-LTC-040).
+// stepLimitNote is the user text of the final report step a configured step cap
+// runs before the turn ends (REQ-LTC-040). The step keeps the offered tools and
+// does not run a tool call it returns (REQ-LPG-015).
 const stepLimitNote = "You reached the step limit for this turn. Stop working and report: what is done, what remains, and the next step."
+
+// reportToolsDisabledText is the error result of a call made in the final
+// report step, which keeps the offered tools but does not run them
+// (REQ-LPG-015).
+const reportToolsDisabledText = "Tools are disabled for this final report; answer in text."
 
 // maxStepRetries is the number of extra attempts after a mid-stream failure
 // (REQ-LTC-032); the first failed stream plus two retries is three calls.

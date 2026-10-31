@@ -154,9 +154,27 @@ func storedBlockedResult(t *testing.T, h *harness, prefix string) bool {
 	return false
 }
 
+// assertReportKeepsTools checks REQ-LPG-015 (AC-LPG-016): the last recorded
+// request is the report step and it offers the same tool names as the request
+// before it.
+func assertReportKeepsTools(t *testing.T, rec *requestRecorder) {
+	t.Helper()
+	if len(rec.requests) < 2 {
+		t.Fatalf("recorded %d requests, want at least 2", len(rec.requests))
+	}
+	report := toolSpecNames(rec.requests[len(rec.requests)-1].Tools)
+	previous := toolSpecNames(rec.requests[len(rec.requests)-2].Tools)
+	if len(report) == 0 {
+		t.Fatal("report step offered no tools, want the same tools as the step before")
+	}
+	if strings.Join(report, ",") != strings.Join(previous, ",") {
+		t.Fatalf("report step tools %v, previous %v", report, previous)
+	}
+}
+
 // AC-LPG-002, AC-LPG-012: a failing call repeated until the guard blocks it is
-// not executed; the next step offers no tools, the report text is stored, and
-// the turn ends with reason loop.
+// not executed; the next step is the report step, the report text is stored,
+// and the turn ends with reason loop.
 func TestTurnLoopGuardBlockHaltsTurn(t *testing.T) {
 	responses := repeatedToolResponses(loopGuardFailBlock+1, "bash", `{"command":"false"}`)
 	responses = append(responses, textResponse("here is the report"))
@@ -174,9 +192,7 @@ func TestTurnLoopGuardBlockHaltsTurn(t *testing.T) {
 	if result.Text != "here is the report" {
 		t.Fatalf("report text = %q, want the stored report", result.Text)
 	}
-	if last := rec.last(); len(last.Tools) != 0 {
-		t.Fatalf("report step offered %d tools, want none", len(last.Tools))
-	}
+	assertReportKeepsTools(t, rec)
 	if !storedBlockedResult(t, h, "Blocked bash") {
 		t.Fatal("the blocked call result was not stored")
 	}
@@ -221,13 +237,48 @@ func TestTurnLoopGuardIdenticalStreakHalts(t *testing.T) {
 	if result.StopReason != "loop" {
 		t.Fatalf("result=%+v", result)
 	}
-	if last := rec.last(); len(last.Tools) != 0 {
-		t.Fatalf("report step offered %d tools, want none", len(last.Tools))
-	}
+	assertReportKeepsTools(t, rec)
 	if !storedBlockedResult(t, h, "Blocked bash") {
 		t.Fatal("the blocked call result was not stored")
 	}
 	if reason := turnEndReason(t, h, h.info.ID); reason != "loop" {
 		t.Fatalf("turn/end reason = %q, want loop", reason)
+	}
+}
+
+// AC-LPG-017: a tool call returned by the halt report step is not run; its
+// result is the REQ-LPG-015 error, the turn ends with reason loop, and no
+// further step runs.
+func TestTurnLoopGuardReportDoesNotRunTools(t *testing.T) {
+	counted := &countingTool{}
+	responses := repeatedToolResponses(loopGuardFailBlock+1, "bash", `{"command":"false"}`)
+	responses = append(responses, toolResponse("call_report", "count_call", `{}`))
+	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
+		"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash", "count_call"}},
+	})
+	allowAllTools(h)
+	if err := h.tools.Register(counted); err != nil {
+		t.Fatal(err)
+	}
+	rec := &requestRecorder{inner: h.llm.providers["mock"]}
+	h.llm.providers["mock"] = rec
+
+	result := h.run(t, "hi")
+	if result.StopReason != "loop" {
+		t.Fatalf("result=%+v", result)
+	}
+	if got := counted.calls.Load(); got != 0 {
+		t.Fatalf("report tool ran %d times, want 0", got)
+	}
+	payload := toolResultPayload(t, h, "call_report")
+	if payload.Status != core.ToolStatusError || payload.Output != reportToolsDisabledText {
+		t.Fatalf("report tool result=%+v", payload)
+	}
+	if reason := turnEndReason(t, h, h.info.ID); reason != "loop" {
+		t.Fatalf("turn/end reason = %q, want loop", reason)
+	}
+	// The halt step (5) and the one report step: no request follows the report.
+	if got, want := len(rec.requests), loopGuardFailBlock+2; got != want {
+		t.Fatalf("requests=%d want %d", got, want)
 	}
 }

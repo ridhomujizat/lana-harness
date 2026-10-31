@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"strings"
 	"unicode/utf8"
 
@@ -29,6 +30,11 @@ type loopGuard struct {
 	// sameBySig tracks the last result digest and the current same-result run
 	// of each read-only signature (REQ-LPG-003).
 	sameBySig map[string]sameResult
+	// anyArgs counts the successful read-only results of each tool and digest in
+	// the turn, whatever the arguments. The key is the tool name and the digest,
+	// with the cleaned path of a read_file between them; see readOnlyAnyArgsKey
+	// (REQ-LPG-014).
+	anyArgs map[string]int
 	// chainDigests are the result digests of the current repeat chain, aligned
 	// with repeat (REQ-LPG-004).
 	chainDigests []string
@@ -89,6 +95,7 @@ const (
 	loopGuardKindFailure         = "failure"
 	loopGuardKindSameArgs        = "same_args_failure"
 	loopGuardKindReadOnly        = "read_only"
+	loopGuardKindReadOnlyAnyArgs = "read_only_any_args"
 	loopGuardKindIdenticalStreak = "identical_streak"
 	loopGuardKindCycle           = "cycle"
 	loopGuardKindFailureStreak   = "failure_streak"
@@ -105,6 +112,11 @@ const (
 	// counts of the read-only no-progress detector (REQ-LPG-003).
 	loopGuardSameWarn  = 2
 	loopGuardSameBlock = 4
+	// loopGuardAnyArgsWarn and loopGuardAnyArgsHalt are the reminder and halt
+	// counts of the read-only same-result-across-arguments detector
+	// (REQ-LPG-014).
+	loopGuardAnyArgsWarn = 3
+	loopGuardAnyArgsHalt = 8
 	// loopGuardStreakLen is the exact-repeat chain length whose results must
 	// all match before the next call is blocked (REQ-LPG-004).
 	loopGuardStreakLen = 8
@@ -135,6 +147,7 @@ func (g *loopGuard) reset() {
 	g.hits = nil
 	g.failBySig = nil
 	g.sameBySig = nil
+	g.anyArgs = nil
 	g.chainDigests = nil
 	g.history = nil
 	g.strikes = 0
@@ -263,16 +276,21 @@ func (g *loopGuard) observeResult(call core.ToolCall, key string, out core.ToolO
 	}
 	g.chainDigests = append(g.chainDigests, out.Digest)
 
-	// A progress write resets every signature (REQ-LPG-002, REQ-LPG-003).
+	// A progress write resets every signature (REQ-LPG-002, REQ-LPG-003) and
+	// the same-result-across-arguments counts (REQ-LPG-014).
 	if isProgressWrite(call, out) {
 		g.failBySig = nil
 		g.sameBySig = nil
+		g.anyArgs = nil
 	}
 
 	// REQ-LPG-003: the read-only no-progress run.
 	if loopGuardReadOnly[call.Name] {
 		reminders = g.observeReadOnly(call, key, out, reminders)
 	}
+
+	// REQ-LPG-014: the read-only same result across different arguments.
+	reminders = g.observeAnyArgs(call, out, reminders)
 
 	// REQ-LPG-002: the same-arguments failure count. The new detectors only
 	// track results that carry a digest, that is, results produced by the tool
@@ -339,6 +357,68 @@ func (g *loopGuard) observeReadOnly(call core.ToolCall, key string, out core.Too
 		reminders = appendReminder(reminders, loopGuardReadOnlyReminder(call.Name, prev.count))
 	}
 	return reminders
+}
+
+// observeAnyArgs advances the read-only same-result-across-arguments detector:
+// a read-only tool whose successful result digest repeats whatever the
+// arguments. It reminds at loopGuardAnyArgsWarn (once per key) and records the
+// halt at loopGuardAnyArgsHalt. Error results, empty search results, and empty
+// results (output "") do not count (REQ-LPG-014).
+func (g *loopGuard) observeAnyArgs(call core.ToolCall, out core.ToolOutput, reminders []string) []string {
+	if !loopGuardReadOnly[call.Name] || out.Status != core.ToolStatusSuccess ||
+		out.Digest == "" || out.Output == "" || loopGuardEmptySearchResult(call, out) {
+		return reminders
+	}
+	if g.anyArgs == nil {
+		g.anyArgs = map[string]int{}
+	}
+	key := readOnlyAnyArgsKey(call, out.Digest)
+	g.anyArgs[key]++
+	count := g.anyArgs[key]
+	switch {
+	case count == loopGuardAnyArgsWarn:
+		g.addHit(loopGuardKindReadOnlyAnyArgs, count)
+		reminders = appendReminder(reminders, loopGuardAnyArgsReminder(call.Name, count))
+	case count >= loopGuardAnyArgsHalt:
+		g.setHalt(loopGuardKindReadOnlyAnyArgs, call.Name, count)
+	}
+	return reminders
+}
+
+// readOnlyAnyArgsKey returns the counting key of a successful read-only result
+// for REQ-LPG-014: the tool name and the result digest, with the cleaned path
+// between them for read_file, so different files with the same text are not
+// counted together. A read_file call whose input is not a JSON object, or whose
+// "path" is missing or not a JSON string, falls back to the short
+// tool-and-digest key.
+func readOnlyAnyArgsKey(call core.ToolCall, digest string) string {
+	short := call.Name + "\x00" + digest
+	if call.Name != "read_file" {
+		return short
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(call.Input, &fields); err != nil {
+		return short
+	}
+	p, ok := fields["path"].(string)
+	if !ok {
+		return short
+	}
+	return call.Name + "\x00" + path.Clean(p) + "\x00" + digest
+}
+
+// loopGuardEmptySearchResult reports whether a result is an empty search: a
+// "grep" result of exactly "no matches" or a "glob" result of exactly
+// "no results". It is never counted by REQ-LPG-014.
+func loopGuardEmptySearchResult(call core.ToolCall, out core.ToolOutput) bool {
+	switch call.Name {
+	case "grep":
+		return out.Output == "no matches"
+	case "glob":
+		return out.Output == "no results"
+	default:
+		return false
+	}
 }
 
 // observeCycle fires the cycle reminder and records the cycle halt at the end
@@ -490,6 +570,14 @@ func loopGuardReadOnlyReminder(toolName string, count int) string {
 		"change the query instead of repeating it unchanged.", toolName, count)
 }
 
+// loopGuardAnyArgsReminder is the read-only same-result-across-arguments
+// reminder (REQ-LPG-014).
+func loopGuardAnyArgsReminder(toolName string, count int) string {
+	return fmt.Sprintf("%s returned the same result %d times with different arguments. Changing the "+
+		"arguments does not give new information; use the result already provided or try a "+
+		"different approach.", toolName, count)
+}
+
 // loopGuardCycleReminder is the cycle reminder (REQ-LPG-005).
 func loopGuardCycleReminder(laps, period int, toolName string) string {
 	return fmt.Sprintf("The last %d rounds repeated the same cycle of %d tool calls (ending with %s) "+
@@ -519,6 +607,8 @@ func (h loopHalt) detail() string {
 		return fmt.Sprintf("%s failed %d times with identical arguments", h.tool, h.count)
 	case loopGuardKindReadOnly:
 		return fmt.Sprintf("%s returned the same result %d times", h.tool, h.count)
+	case loopGuardKindReadOnlyAnyArgs:
+		return fmt.Sprintf("%s returned the same result %d times with different arguments", h.tool, h.count)
 	case loopGuardKindIdenticalStreak:
 		return fmt.Sprintf("%s repeated the same call and result %d times in a row", h.tool, h.count)
 	case loopGuardKindCycle:

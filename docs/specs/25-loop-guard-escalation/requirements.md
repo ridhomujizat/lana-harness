@@ -2,7 +2,7 @@
 
 - **Issue**: —
 - **Status**: Implemented
-- **Revision**: 1
+- **Revision**: 2
 - **Owner**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Required
 - **Related ADR**: 0009 (session as append-only event log)
@@ -14,6 +14,8 @@
 |---|---|---|
 | Owner request 2026-10-31 | "gmn caranya harness bisa deteksi/negur LLM ketika dia stuck ngeloop, gimana harness ngehandle LLM halu dalam tool calling", then "boleh" to a spec for the gaps | goal |
 | Owner answers 2026-10-31 | Escalation: "ikuti evonic dan hermes". Extra detection: cycle A-B-A-B and unchanged result. Wrong tool name: nearest name plus the list of tools | `Q-001`–`Q-003` |
+| Real-model run 2026-11-01 | `deepseek-flash`, polling scenario: after the first reminder the model varied `limit` (10, 100, 50, 2, 3, …) and `status.txt` / `./status.txt`, so every signature was new; 42 reads returned the same text before the block. The halt report step, sent without tools, got 128 cached of 3 738 input tokens (the step before: 9 344 of 9 605) | problem (revision 2) |
+| Owner request 2026-11-01 | "oke fix itu" to: count read-only results by tool and digest across arguments (reminder 3, stop 8, reset by a progress write, empty search results excluded) | `REQ-LPG-014` |
 | Spec #23 | REQ-TRL-010–014 (repeat reminders 3/5/8, failure reminders 4/8, runtime-note delivery, "a reminder never ends the turn and never blocks a call") | revised by this spec |
 | Spec #19 | REQ-LTC-040 (one final step without tools that asks for a status report) | reuse |
 | Spec #16 | REQ-TFB-004/005 (end card and Continue for an abnormal end) | reuse |
@@ -35,7 +37,8 @@ obvious cases and otherwise tells the model the nearest correct name.
 - **Read-only tool** — `read_file`, `glob`, `grep`, `web_fetch`, `memory_read`, `skill_load`.
 - **Progress write** — a successful `write_file` or `edit_file` call.
 - **Block** — lana does not run the call and returns an error result in its place.
-- **Halt** — lana ends the turn through one report step without tools (REQ-LPG-009).
+- **Halt** — lana ends the turn through one report step in which tool calls are not run (REQ-LPG-009, REQ-LPG-015).
+- **Empty search result** — a successful `grep` result `no matches` or `glob` result `no results`.
 - **Offered tools** — the tool names of this turn's request (`turnTools`).
 
 ## Scope
@@ -134,13 +137,13 @@ Other calls of the same step run normally. A blocked call counts as a tracked ca
 ### REQ-LPG-009: Halt
 
 After the step's results are stored, lana appends a runtime note (REQ-TRL-013) and runs one more
-step without tools, as REQ-LTC-040 does. The note is:
+report step (REQ-LPG-015), as REQ-LTC-040 does. The note is:
 `lana stopped this turn because the same work repeated without progress (<detail>). Do not call tools. Tell the owner in their language what you tried, what blocked you, and what you need from them to continue.`
 `<detail>` names the detector, the tool, and the count. The turn then ends with reason `loop`.
 An owner message already queued stays for the next turn. If the turn also reaches `max_steps`, the
 first condition reached decides the reason.
 
-- `AC-LPG-012`: After a halt the last step has no tools, its text is shown, and `turn/end` has
+- `AC-LPG-012`: After a halt the last step runs no tool, its text is shown, and `turn/end` has
   reason `loop`.
 
 ### REQ-LPG-010: End surfaces
@@ -163,6 +166,42 @@ appended tool result.
 
 Each block and halt writes one `slog.Info` line (`loop guard block` / `loop guard halt`) with
 session, turn, detector, tool, and count.
+
+### Revision 2
+
+### REQ-LPG-014: Read-only same result across arguments
+
+For a read-only tool, lana counts the results of that tool per digest in the turn, whatever the
+other arguments, consecutive or not. For `read_file` the count key also holds the cleaned path
+(`path.Clean`, so `./status.txt` and `status.txt` are one file), so different files with the same
+text are not counted together. Error results, empty search results, and empty results (output
+`""`) are not counted. A progress
+write clears all counts. When a count reaches 3, lana sends:
+`<tool> returned the same result <n> times with different arguments. Changing the arguments does not give new information; use the result already provided or try a different approach.`
+When a count reaches 8, the turn halts after that step (REQ-LPG-009). The call is not blocked
+before it runs, because its result is not known yet. The detector kind in logs and in the halt
+`<detail>` is `read_only_any_args`.
+
+- `AC-LPG-013`: `read_file` of `status.txt` with `limit` 10, 100, 50, … and `./status.txt`, all
+  returning the same text: reminder at the 3rd result, halt after the 8th.
+- `AC-LPG-014`: 8 `grep` calls with different patterns, all `no matches`: no reminder, no halt.
+- `AC-LPG-015`: 5 reads of the same text, an `edit_file` success, then 5 more reads of the (now
+  same) new text: no halt.
+- `AC-LPG-018`: `read_file` of 8 different files with identical text, and of 8 empty files: no
+  reminder, no halt.
+
+### REQ-LPG-015: The report step keeps the tools
+
+The report step of a halt (REQ-LPG-009) and of a step cap (REQ-LTC-040, revised here) sends the
+same offered tools as the steps before it, so the provider prefix cache stays valid; only the
+runtime note asks the model not to call tools. When the model still returns tool calls in that
+step, lana does not run them: each gets an error result
+`Tools are disabled for this final report; answer in text.` and the turn ends after that step
+with the step's text and the same reason (`loop` or `max_steps`).
+
+- `AC-LPG-016`: The report step's request carries the same tool list as the previous step.
+- `AC-LPG-017`: A report step that returns a tool call does not run it; the turn ends with reason
+  `loop` (or `max_steps`), and no further step runs.
 
 ### Tool names
 
@@ -201,5 +240,6 @@ None. Agent recommendations, approved by the owner on 2026-10-31:
 |---|---|---|
 | `Q-004` | Rekomendasi agent: halt is on for every channel, including web and TUI | evonic always ends; Hermes ends on non-interactive channels; lana runs mostly from Telegram and the daemon |
 | `Q-005` | Rekomendasi agent: a halt ends with a model-written report, not a fixed text | REQ-LTC-040 precedent; Hermes uses the same pattern on its iteration limit; owners are non-technical and need their own language |
-| `Q-006` | Rekomendasi agent: "unchanged result" follows Hermes (same arguments, same result, read-only tools), not "different arguments, same result" | neither reference detects the latter, and it flags normal searches |
+| `Q-006` | Rekomendasi agent: "unchanged result" follows Hermes (same arguments, same result, read-only tools), not "different arguments, same result". **Revision 2:** extended by REQ-LPG-014 after the real-model run showed argument variation evading the guard | neither reference detects the latter, and it flags normal searches; empty search results are excluded for that reason |
 | `Q-007` | Rekomendasi agent: name repair runs only exact normalized matches; fuzzy matches are only suggested | running a fuzzy match (Hermes, cutoff 0.7) can run the wrong tool, for example a write instead of a read |
+| `Q-008` | Rekomendasi agent (revision 2): the report step keeps the offered tools and does not run calls made in it (REQ-LPG-015) | Hermes sends tools on its summary call; the real-model run showed a full prefix-cache miss on the tool-less report step; owner asked to fix cache misses on 2026-11-01 |

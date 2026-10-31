@@ -1,6 +1,6 @@
 # Design: Loop guard escalation and tool-name recovery
 
-- **Requirements**: revision 1 · **Contract**: revision 1
+- **Requirements**: revision 2 · **Contract**: revision 1
 - **Status**: Approved
 
 ## 1. Result digest (REQ-LPG-003–005)
@@ -114,3 +114,35 @@ Continue path; Telegram `endLine` adds the `loop` case, which already gets Conti
 - `agent/toolname_test.go`: AC-LPG-020–023.
 - Web: `turn.test.tsx` case for `loop`. Telegram and TUI: existing end-line tests extended.
 - `nix develop -c go vet ./... && nix develop -c go test -count=1 ./...`; web `npm test` in the Nix shell.
+
+## 5. Revision 2 (REQ-LPG-014, -015)
+
+`agent/loopguard.go`:
+
+```go
+anyArgs map[string]int // key: tool + "\x00" + digest; read-only tools only (REQ-LPG-014)
+```
+
+- In `observeResult`, for a read-only tool with a success result that is not an empty search
+  result (`grep` `no matches`, `glob` `no results`) and not empty (`""`): `anyArgs[key]++`, where
+  key = tool + digest, plus `path.Clean(path)` from the arguments for `read_file`. At 3 send the
+  REQ-LPG-014 reminder (once per key); at 8 `setHalt("read_only_any_args", tool, n)`.
+- A progress write clears `anyArgs`; `reset()` clears it.
+- Several reminders for one call stay deduplicated. When REQ-LPG-003 and REQ-LPG-014 fire for the
+  same call, both texts may be sent (they differ).
+
+`agent/turn.go` report step (REQ-LPG-015, also used by REQ-LTC-040):
+
+- Remove the `if !budgetReport` guard around `rn.reg.tools.Specs(turnTools)`: the report step
+  sends the same `specs` as earlier steps.
+- In the tool branch, when `budgetReport` is true, do not call `guard.before` or the pipeline:
+  every call gets `ToolOutput{Status: error, Output: "Tools are disabled for this final report; answer in text."}`
+  (results stored and published as usual), then `goto finished` after the step end is written,
+  keeping the step's text as the turn text. The reason stays `loop` or `max_steps` per the existing
+  finalization.
+- Update the comment "The report step of REQ-LTC-040 offers no tools".
+
+Tests: `agent/loopguard_test.go` AC-LPG-013–015; `agent/turn_loopguard_test.go` AC-LPG-016 (the
+mock provider records requests: the report request has the same tool names as the step before) and
+AC-LPG-017; update existing tests that assert the report step has no tools (search
+`agent/turn_retry_test.go`, `agent/turn_loopguard_test.go`, `agent/subagent_test.go` for it).

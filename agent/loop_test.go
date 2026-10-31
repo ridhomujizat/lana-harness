@@ -313,14 +313,18 @@ func TestAssistantMessageBlocks(t *testing.T) {
 func TestNoStepCapRunsUntilModelStops(t *testing.T) {
 	var responses []mock.Response
 	for i := 0; i < 30; i++ {
-		// A distinct limit makes each call its own signature, so the loop
-		// guard does not stop this turn; the test is about the missing step
-		// cap, not about a looping model.
-		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
+		// Each call reads a distinct line, so its result digest differs and the
+		// loop guard's read-only detectors stay quiet; the test is about the
+		// missing step cap, not about a looping model.
+		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","offset":%d,"limit":1}`, i+1)))
 	}
 	responses = append(responses, textResponse("done"))
 	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
-	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+	var content strings.Builder
+	for i := 1; i <= 30; i++ {
+		fmt.Fprintf(&content, "line %d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte(content.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	result := h.run(t, "hi")
@@ -332,8 +336,8 @@ func TestNoStepCapRunsUntilModelStops(t *testing.T) {
 	}
 }
 
-// REQ-LTC-040: a configured cap runs one final, tool-free report step before the
-// reason becomes max_steps.
+// REQ-LTC-040: a configured cap runs one final report step that keeps the
+// offered tools before the reason becomes max_steps (REQ-LPG-015).
 func TestMaxStepsConfigured(t *testing.T) {
 	var responses []mock.Response
 	for i := 0; i < 3; i++ {

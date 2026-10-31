@@ -119,16 +119,20 @@ func TestTurnNoLimitRunsPastCap(t *testing.T) {
 	const toolSteps = 205
 	responses := make([]mock.Response, 0, toolSteps+1)
 	for i := 0; i < toolSteps; i++ {
-		// A distinct limit makes each call its own signature, so the loop
-		// guard does not stop this turn; the test is about the missing step
-		// cap, not about a looping model.
-		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
+		// Each call reads a distinct line, so its result digest differs and the
+		// loop guard's read-only detectors stay quiet; the test is about the
+		// missing step cap, not about a looping model.
+		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","offset":%d,"limit":1}`, i+1)))
 	}
 	responses = append(responses, textResponse("done"))
 	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
 		"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}},
 	})
-	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+	var content strings.Builder
+	for i := 1; i <= toolSteps; i++ {
+		fmt.Fprintf(&content, "line %d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte(content.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	result := h.run(t, "hi")
@@ -145,17 +149,21 @@ func TestChildTurnNoLimitRunsPastCap(t *testing.T) {
 	const toolSteps = 205
 	responses := make([]mock.Response, 0, toolSteps+2)
 	for i := 0; i < toolSteps; i++ {
-		// A distinct limit makes each call its own signature, so the loop
-		// guard does not stop this child turn; the test is about the missing
-		// step cap, not about a looping model.
-		responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
+		// Each call reads a distinct line, so its result digest differs and the
+		// loop guard's read-only detectors stay quiet; the test is about the
+		// missing step cap, not about a looping model.
+		responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","offset":%d,"limit":1}`, i+1)))
 	}
 	responses = append(responses, textResponse("child done"))
 	h := newSubagentHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
 		"coder":  {Provider: "mock", Model: "m", Tools: []string{"task"}, Subagents: []string{"worker"}},
 		"worker": {Provider: "mock", Model: "child-model", Tools: []string{"read_file"}},
 	})
-	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
+	var content strings.Builder
+	for i := 1; i <= toolSteps; i++ {
+		fmt.Fprintf(&content, "line %d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte(content.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	parent := newSubagentParent(t, h, "coder")
@@ -237,9 +245,10 @@ func waitForIdle(t *testing.T, h *harness) {
 	}
 }
 
-// TestStepCapRunsToolFreeReport covers REQ-LTC-040: reaching a configured cap
-// runs one final step that offers no tools and asks for a status report.
-func TestStepCapRunsToolFreeReport(t *testing.T) {
+// TestStepCapReportKeepsTools covers REQ-LTC-040 and REQ-LPG-015: reaching a
+// configured cap runs one final report step that keeps the same offered tools
+// and asks for a status report.
+func TestStepCapReportKeepsTools(t *testing.T) {
 	script := mock.Script{Responses: []mock.Response{
 		toolResponse("c1", "read_file", `{"path":"a.txt"}`),
 		toolResponse("c2", "read_file", `{"path":"a.txt"}`),
@@ -264,9 +273,7 @@ func TestStepCapRunsToolFreeReport(t *testing.T) {
 	if got := lastUserText(t, h); got != stepLimitNote {
 		t.Fatalf("last user message=%q want %q", got, stepLimitNote)
 	}
-	if last := rec.last(); len(last.Tools) != 0 {
-		t.Fatalf("report step offered %d tools, want none", len(last.Tools))
-	}
+	assertReportKeepsTools(t, rec)
 	if got := countEvents(t, h, core.KindAssistantMessage); got != 4 {
 		t.Fatalf("assistant messages=%d want 4", got)
 	}
@@ -306,7 +313,7 @@ func TestStepCapKeepsQueuedMessage(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	waitForIdle(t, h)
-	// The capped turn ran its two capped steps plus the tool-free report step.
+	// The capped turn ran its two capped steps plus the report step.
 	turnSteps := 0
 	for _, event := range h.events(t) {
 		if event.Kind == core.KindStepStart && event.TurnID == turnID {

@@ -508,3 +508,133 @@ func TestLoopGuardCapsArguments(t *testing.T) {
 		t.Fatal("detailed reminder quoted the uncapped arguments")
 	}
 }
+
+// AC-LPG-013: a read-only tool whose result digest repeats whatever the
+// arguments reminds at the third result and halts after the eighth.
+func TestLoopGuardReadOnlyAnyArgs(t *testing.T) {
+	var g loopGuard
+	args := []string{
+		`{"path":"status.txt","limit":10}`,
+		`{"path":"status.txt","limit":100}`,
+		`{"path":"status.txt","limit":50}`,
+		`{"path":"status.txt","limit":2}`,
+		`{"path":"status.txt","limit":3}`,
+		`{"path":"status.txt","limit":4}`,
+		`{"path":"status.txt","limit":5}`,
+		`{"path":"./status.txt","limit":10}`,
+	}
+	same := guardOutput(core.ToolStatusSuccess, "idle")
+	got := make([]string, len(args))
+	for i, arg := range args {
+		got[i] = g.observe([]core.ToolCall{loopGuardTestCall("read_file", arg)}, []core.ToolOutput{same})
+	}
+	for i := 0; i < 2; i++ {
+		if got[i] != "" {
+			t.Fatalf("result %d = %q, want no reminder before the third", i+1, got[i])
+		}
+	}
+	if want := loopGuardAnyArgsReminder("read_file", loopGuardAnyArgsWarn); got[2] != want {
+		t.Fatalf("third result = %q, want %q", got[2], want)
+	}
+	for i := 3; i < len(got); i++ {
+		if got[i] != "" {
+			t.Fatalf("result %d = %q, want no further reminder", i+1, got[i])
+		}
+	}
+	if g.halt == nil || g.halt.kind != loopGuardKindReadOnlyAnyArgs || g.halt.count != loopGuardAnyArgsHalt {
+		t.Fatalf("halt = %+v, want the read-only-any-args halt at %d", g.halt, loopGuardAnyArgsHalt)
+	}
+}
+
+// AC-LPG-014: empty search results are excluded, so a repeated grep "no
+// matches" never reminds or halts, whatever the pattern.
+func TestLoopGuardAnyArgsEmptySearchExcluded(t *testing.T) {
+	var g loopGuard
+	empty := guardOutput(core.ToolStatusSuccess, "no matches")
+	for i := 0; i < loopGuardAnyArgsHalt; i++ {
+		call := loopGuardTestCall("grep", fmt.Sprintf(`{"pattern":"p%d"}`, i))
+		if got := g.observe([]core.ToolCall{call}, []core.ToolOutput{empty}); got != "" {
+			t.Fatalf("grep %d = %q, want no reminder", i+1, got)
+		}
+	}
+	if g.halt != nil {
+		t.Fatalf("halt = %+v, want no halt", g.halt)
+	}
+}
+
+// AC-LPG-015: a progress write clears the read-only counts, so reads before and
+// after it never reach the halt.
+func TestLoopGuardAnyArgsResetByProgressWrite(t *testing.T) {
+	var g loopGuard
+	before := guardOutput(core.ToolStatusSuccess, "old contents")
+	for i := 0; i < 5; i++ {
+		call := loopGuardTestCall("read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1))
+		g.observe([]core.ToolCall{call}, []core.ToolOutput{before})
+	}
+	edit := loopGuardTestCall("edit_file", `{"path":"a.txt","old_string":"a","new_string":"b"}`)
+	g.observe([]core.ToolCall{edit}, []core.ToolOutput{guardOutput(core.ToolStatusSuccess, "Edited a.txt")})
+	after := guardOutput(core.ToolStatusSuccess, "new contents")
+	for i := 0; i < 5; i++ {
+		call := loopGuardTestCall("read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1))
+		g.observe([]core.ToolCall{call}, []core.ToolOutput{after})
+	}
+	if g.halt != nil {
+		t.Fatalf("halt = %+v, want no halt after a progress write cleared the counts", g.halt)
+	}
+}
+
+// AC-LPG-018: 8 reads of 8 different files with the same non-empty text are 8
+// different files, not a repeat, so there is no reminder and no halt.
+func TestLoopGuardAnyArgsDifferentPathsSameText(t *testing.T) {
+	var g loopGuard
+	same := guardOutput(core.ToolStatusSuccess, "shared text")
+	for i := 0; i < loopGuardAnyArgsHalt; i++ {
+		call := loopGuardTestCall("read_file", fmt.Sprintf(`{"path":"f%d.txt"}`, i))
+		if got := g.observe([]core.ToolCall{call}, []core.ToolOutput{same}); got != "" {
+			t.Fatalf("file %d = %q, want no reminder", i+1, got)
+		}
+	}
+	if g.halt != nil {
+		t.Fatalf("halt = %+v, want no halt", g.halt)
+	}
+}
+
+// AC-LPG-018: an empty read_file result (output "") is not counted, so 8 reads
+// of 8 empty files never remind or halt.
+func TestLoopGuardAnyArgsEmptyResultExcluded(t *testing.T) {
+	var g loopGuard
+	empty := guardOutput(core.ToolStatusSuccess, "")
+	for i := 0; i < loopGuardAnyArgsHalt; i++ {
+		call := loopGuardTestCall("read_file", fmt.Sprintf(`{"path":"e%d.txt"}`, i))
+		if got := g.observe([]core.ToolCall{call}, []core.ToolOutput{empty}); got != "" {
+			t.Fatalf("empty file %d = %q, want no reminder", i+1, got)
+		}
+	}
+	if g.halt != nil {
+		t.Fatalf("halt = %+v, want no halt", g.halt)
+	}
+}
+
+// REQ-LPG-014: the read_file count key holds the cleaned path, so ./status.txt
+// and status.txt are one file; a missing or non-string path falls back to the
+// short tool-and-digest key.
+func TestReadOnlyAnyArgsKey(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"cleaned path", `{"path":"./status.txt"}`, "read_file\x00status.txt\x00digest"},
+		{"same path", `{"path":"status.txt"}`, "read_file\x00status.txt\x00digest"},
+		{"missing path", `{"limit":10}`, "read_file\x00digest"},
+		{"non-string path", `{"path":7}`, "read_file\x00digest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := readOnlyAnyArgsKey(loopGuardTestCall("read_file", tc.input), "digest")
+			if got != tc.want {
+				t.Fatalf("key = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -32,3 +32,14 @@ T-001 and T-003 run in parallel in the main tree (disjoint files). T-002 starts 
 - Files: `agent/loopguard.go`, `agent/loopguard_test.go`, `agent/turn.go`,
   `agent/turn_loopguard_test.go`.
 - Covers: REQ-LPG-001–009, -011–013. Design §2.
+
+## Wave 3 (revision 2)
+
+### T-004 Read-only same result across arguments; report step keeps the tools
+
+- Status: Done 2026-11-01. Evidence: go vet clean, gofmt clean, go test ./... exit 0. Real model
+  (`deepseek-flash`): polling run stopped after 5 reads (17 446 input tokens, was 277 338); a
+  `max_steps = 3` report step kept the tools and got 2 432 of 2 627 tokens cached (was 128 of 3 738).
+- Files: `agent/loopguard.go`, `agent/loopguard_test.go`, `agent/turn.go`,
+  `agent/turn_loopguard_test.go`, and existing agent tests that assert a tool-less report step.
+- Covers: REQ-LPG-014, -015. Design §5.
