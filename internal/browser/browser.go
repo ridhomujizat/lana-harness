@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"testing"
 )
 
 // ErrUnsupported reports that this system has no way to open a browser.
@@ -40,6 +41,11 @@ func defaultOpen(url string) error {
 
 // start launches command with url and reaps it in the background.
 func start(command, url string) error {
+	// A test binary never launches a real browser: daemon tests start the web
+	// server with a fresh home, which would open a sign-in tab on every run.
+	if testing.Testing() {
+		return nil
+	}
 	cmd := exec.Command(command, url)
 	if err := cmd.Start(); err != nil {
 		return err

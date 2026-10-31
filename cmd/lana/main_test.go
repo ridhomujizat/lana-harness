@@ -22,6 +22,9 @@ func TestMain(m *testing.M) {
 		runMCPTestServer()
 		os.Exit(0)
 	}
+	// Daemon tests start the web server with a fresh home; never open a real
+	// browser tab from a test run. Tests that check the call replace it again.
+	openBrowser = func(string) error { return nil }
 	os.Exit(m.Run())
 }
 
