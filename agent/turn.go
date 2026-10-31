@@ -499,6 +499,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	// declarations to the finished label for the capture pass (REQ-MEM-011).
 	var lastResolved resolvedAgent
 	var lastSpecs []core.ToolSpec
+	// pendingReminder is the loop guard's reminder for the next request; it is
+	// set after a step's tool results and claimed as the next step input
+	// (REQ-TRL-010..014).
+	pendingReminder := ""
+	// guard tracks this turn's exact-repeat chain and failure streak.
+	var guard loopGuard
 	for {
 		claimedText := ""
 		claimed := false
@@ -520,10 +526,25 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		case pendingTools:
 			claimedText, claimed = rn.popInbox()
 			inboxClaim = claimed
+			if claimed {
+				// An owner message replaces the guard's reminder and resets both
+				// chains: repetition across an interjection is not a loop
+				// (REQ-TRL-013, REQ-TRL-014).
+				guard.reset()
+				pendingReminder = ""
+			} else if pendingReminder != "" {
+				claimedText = pendingReminder
+				claimed = true
+				runtimeNote = true
+				pendingReminder = ""
+			}
 		case continueNext:
 			continueNext = false
 			claimedText, claimed = rn.popInbox()
 			inboxClaim = claimed
+			if claimed {
+				guard.reset()
+			}
 		default:
 			var ok bool
 			claimedText, ok = rn.popInbox()
@@ -547,6 +568,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 			} else {
 				inboxClaim = true
+				// A mid-turn owner message resets both guard chains
+				// (REQ-TRL-014).
+				guard.reset()
 			}
 			claimed = true
 		}
@@ -888,6 +912,14 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 					goto finished
 				}
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_result", CallID: calls[i].CallID, Name: calls[i].Name, Status: string(status), Output: output.Output})
+			}
+			// REQ-TRL-010..014: advance the loop guard over this step's calls
+			// and results. The reminder rides the next request, which is
+			// claimed in the pendingTools branch or dropped for an owner
+			// message.
+			pendingReminder = guard.observe(calls, outputs)
+			for _, hit := range guard.hits {
+				slog.Info("loop guard reminder", "session_id", rn.sessionID, "turn_id", turnID, "kind", hit.kind, "count", hit.count)
 			}
 		}
 		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Usage: usage}}); err != nil {
