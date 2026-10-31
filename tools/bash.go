@@ -25,6 +25,11 @@ const bashDescription = "Runs a shell command (`sh -c`) in the workspace and ret
 	"For servers, watchers, and anything that does not exit, set run_in_background: true; never use &, nohup, setsid, or disown for that. " +
 	"The default timeout is 120 seconds; set timeout_secs (max 600) for longer commands."
 
+// bashGuidance is the head-prompt note shown when bash is offered
+// (REQ-ECX-011).
+const bashGuidance = "When a command will not exit on its own (a server, watcher, or dev process), start it with run_in_background and read its output with job_output, so the call does not block until the timeout. " +
+	"When a server reports ready, check it with a request before relying on it, since the ready line alone does not prove the port answers."
+
 // bashWaitDelay bounds how long a foreground call waits for the output pipe
 // after the shell exits (REQ-JOB-001).
 const bashWaitDelay = 2 * time.Second
@@ -45,6 +50,8 @@ func (t *bashTool) Spec() core.ToolSpec {
 	return core.ToolSpec{Name: "bash", Description: bashDescription, InputSchema: bashSpec}
 }
 func (t *bashTool) Risk(json.RawMessage) core.Risk { return core.RiskExec }
+
+func (t *bashTool) PromptGuidance() string { return bashGuidance }
 
 func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {

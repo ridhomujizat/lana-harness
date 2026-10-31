@@ -138,6 +138,10 @@ type ParallelTool interface {
 	ParallelSafe() bool
 }
 
+// ToolGuidance is implemented by a tool that adds a short usage note to the
+// head prompt when it is offered (REQ-ECX-010).
+type ToolGuidance interface{ PromptGuidance() string }
+
 // SpawnRequest is one task delegation to a child agent.
 type SpawnRequest struct {
 	// ParentSessionID is the calling session.

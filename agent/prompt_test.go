@@ -9,6 +9,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
+	"github.com/ridhomujizat/lana-harness/tools"
 )
 
 // captureRequests records every ChatRequest the turn loop sends.
@@ -30,6 +31,48 @@ func specNames(specs []core.ToolSpec) []string {
 		names = append(names, spec.Name)
 	}
 	return names
+}
+
+// REQ-ECX-010: Tool notes carries the guidance of offered tools only, in
+// tool-name order, and no section appears when no offered tool has guidance.
+func TestTurnToolNotesOnlyForOfferedTools(t *testing.T) {
+	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}},
+		map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash", "edit_file"}}})
+	if err := h.tools.Register(tools.NewEditFile(&tools.Guard{Workspace: h.ws})); err != nil {
+		t.Fatal(err)
+	}
+	h.run(t, "hi")
+	prompt := h.systemPrompts(t)[0]
+	bash := strings.Index(prompt, "## bash")
+	edit := strings.Index(prompt, "## edit_file")
+	if bash < 0 || edit < 0 || bash > edit {
+		t.Fatalf("tool notes are missing or out of order:\n%s", prompt)
+	}
+	for _, want := range []string{
+		"run_in_background and read its output with job_output",
+		"Read the file, or the relevant range, before editing it",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+
+	// edit_file is registered here but not offered, so its note stays out.
+	only := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}},
+		map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash"}}})
+	if err := only.tools.Register(tools.NewEditFile(&tools.Guard{Workspace: only.ws})); err != nil {
+		t.Fatal(err)
+	}
+	only.run(t, "hi")
+	if got := only.systemPrompts(t)[0]; strings.Contains(got, "## edit_file") {
+		t.Fatalf("guidance of an unoffered tool appeared:\n%s", got)
+	}
+
+	none := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, nil)
+	none.run(t, "hi")
+	if got := none.systemPrompts(t)[0]; strings.Contains(got, "# Tool notes") {
+		t.Fatalf("prompt without guidance carries a Tool notes section:\n%s", got)
+	}
 }
 
 // REQ-LTC-001: two turns of one session with unchanged config send a
@@ -95,7 +138,7 @@ func TestTurnMemoryChangeSendsMemoryUpdateOnly(t *testing.T) {
 	if !strings.Contains(update, "# Your memory") || !strings.Contains(update, "Server bandung") {
 		t.Fatalf("<system-update> lacks the new memory section:\n%s", update)
 	}
-	for _, other := range []string{"# Runtime context", "# When something blocks you", "# About the user", "# Skills", "# Your team"} {
+	for _, other := range []string{"# Runtime context", "# When something blocks you", "# Tool notes", "# About the user", "# Skills", "# Your team"} {
 		if strings.Contains(update, other) {
 			t.Fatalf("<system-update> must hold only the memory section, found %q:\n%s", other, update)
 		}

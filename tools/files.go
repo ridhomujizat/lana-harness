@@ -23,6 +23,11 @@ const (
 		"Read the file first and copy `old_string` exactly, including indentation, without the line-number prefix. " +
 		"`old_string` must occur once unless `replace_all` is true; add surrounding lines to make it unique. " +
 		"Use this, not `sed` in bash."
+	// editFileGuidance is the head-prompt note shown when edit_file is offered
+	// (REQ-ECX-011).
+	editFileGuidance = "Read the file, or the relevant range, before editing it; a matching old_string is easier to get right from the current text. " +
+		"When an edit fails, read the file again instead of guessing at the difference. " +
+		"Prefer one edit per logical change so a failure is easy to isolate."
 )
 
 var readFileSpec = json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path, relative to the workspace."},"offset":{"type":"integer","minimum":1,"description":"1-based line number to start reading at. Defaults to 1."},"limit":{"type":"integer","minimum":1,"maximum":2000,"description":"Maximum number of lines to return (1-2000). Defaults to 2000."}},"required":["path"],"additionalProperties":false}`)
@@ -149,6 +154,8 @@ func (t *editFileTool) Spec() core.ToolSpec {
 	return core.ToolSpec{Name: "edit_file", Description: editFileDescription, InputSchema: editFileSpec}
 }
 func (t *editFileTool) Risk(json.RawMessage) core.Risk { return core.RiskWrite }
+
+func (t *editFileTool) PromptGuidance() string { return editFileGuidance }
 
 func (t *editFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {

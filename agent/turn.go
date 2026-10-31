@@ -316,11 +316,11 @@ type promptBuild struct {
 	context  string
 }
 
-// buildPrompt assembles the system prompt from the persona, the agent home files, the skills, and the runtime context.
-func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, memoryCapture bool) (promptBuild, error) {
+// buildPrompt assembles the system prompt from the persona, the agent home files, the skills, the tool guidance, and the runtime context.
+func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, notes []agenthome.ToolNote, hasMCP bool) (promptBuild, error) {
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
-		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, MemoryCapture: memoryCapture,
+		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, ToolNotes: notes, HasMCP: hasMCP,
 	}
 	// REQ-JOB-017: the session's jobs go into the turn <context> block. Ended
 	// jobs are marked announced so they appear in one turn only.
@@ -358,6 +358,27 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	}
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
 	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
+}
+
+// toolNotes collects the prompt guidance of the offered tools in name order.
+// A tool that does not implement core.ToolGuidance, or returns an empty text,
+// adds no note (REQ-ECX-010).
+func (rn *Runner) toolNotes(names []string) []agenthome.ToolNote {
+	notes := make([]agenthome.ToolNote, 0, len(names))
+	for _, name := range names {
+		tool, ok := rn.reg.tools.Get(name)
+		if !ok {
+			continue
+		}
+		guidance, ok := tool.(core.ToolGuidance)
+		if !ok {
+			continue
+		}
+		if text := strings.TrimSpace(guidance.PromptGuidance()); text != "" {
+			notes = append(notes, agenthome.ToolNote{Name: name, Text: text})
+		}
+	}
+	return notes
 }
 
 // promptSections converts the agenthome sections to their core form.
@@ -679,7 +700,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			turnTools = filterDisabledTools(turnTools, resolved.disabled)
 			// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
 			sort.Strings(turnTools)
-			built, err := rn.buildPrompt(resolved, skills, unavailable, containsString(turnTools, "memory_write"))
+			built, err := rn.buildPrompt(resolved, skills, unavailable, rn.toolNotes(turnTools), len(resolved.mcp) > 0)
 			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"

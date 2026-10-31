@@ -168,7 +168,9 @@ func TestTurnSkillsPromptAndTool(t *testing.T) {
 	prompt := h.systemPrompts(t)[0]
 	for _, want := range []string{
 		"# Skills",
-		"Call skill_load with the skill name before following a skill.",
+		"# Tool notes",
+		"## skill_load",
+		"Call skill_load with a skill's name before following that skill",
 		"- demo: Demo skill for tests.",
 	} {
 		if !strings.Contains(prompt, want) {
