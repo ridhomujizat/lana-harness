@@ -534,7 +534,8 @@ func (w *chat) statusLine() string {
 }
 
 // render builds the message HTML. While running it is the status line and the
-// answer; when final it is the answer, the end line, and the footer.
+// answer; when final it is the answer and the end line. The footer is sent as a
+// separate message (sendFooter), never part of the answer.
 func (w *chat) render(answer, end string, running bool) string {
 	sections := []string{}
 	if running {
@@ -543,13 +544,8 @@ func (w *chat) render(answer, end string, running bool) string {
 	if body := tgfmt.ToHTML(answer); body != "" {
 		sections = append(sections, body)
 	}
-	if !running {
-		if end != "" {
-			sections = append(sections, html.EscapeString(end))
-		}
-		if footer := w.footer(); footer != "" {
-			sections = append(sections, html.EscapeString(footer))
-		}
+	if !running && end != "" {
+		sections = append(sections, html.EscapeString(end))
 	}
 	return strings.Join(sections, "\n\n")
 }
@@ -597,8 +593,9 @@ func (w *chat) summaryText() string {
 
 // finish writes the final answer. With a permission bubble it edits the bubble
 // to the summary, sends the answer as new messages, and deletes the live
-// message; otherwise it edits the live message in place (REQ-TGL-003). An
-// abnormal end attaches a Continue button to the final message (API-TFB-005).
+// message; otherwise it edits the live message in place (REQ-TGL-003). The
+// footer, when the turn made a tool call, follows the answer as its own message.
+// An abnormal end attaches a Continue button to the final message (API-TFB-005).
 func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turnOutcome, session string) {
 	defer w.resetTurn()
 	if ctx.Err() != nil {
@@ -621,16 +618,28 @@ func (w *chat) finish(ctx context.Context, liveID int64, answer string, out turn
 	}
 	if !w.hasBubble() {
 		w.editLive(ctx, liveID, parts, keyboard)
+	} else {
+		w.editBubble(ctx, w.summaryText())
+		if !w.sendParts(ctx, parts, keyboard) {
+			w.editLive(ctx, liveID, parts, keyboard)
+		} else if liveID != 0 {
+			w.ch.apiErr("deleteMessage", w.ch.api.DeleteMessage(ctx, w.id, liveID))
+		}
+	}
+	w.sendFooter(ctx)
+}
+
+// sendFooter sends the closing stats footer as its own plain message after the
+// final answer, in the same chat, thread, and reply target as the answer. It
+// sends nothing when the turn made no tool call. A failed send is logged and
+// does not fail the turn (REQ-TGL-003).
+func (w *chat) sendFooter(ctx context.Context) {
+	footer := w.footer()
+	if footer == "" {
 		return
 	}
-	w.editBubble(ctx, w.summaryText())
-	if !w.sendParts(ctx, parts, keyboard) {
-		w.editLive(ctx, liveID, parts, keyboard)
-		return
-	}
-	if liveID != 0 {
-		w.ch.apiErr("deleteMessage", w.ch.api.DeleteMessage(ctx, w.id, liveID))
-	}
+	_, err := w.ch.api.SendMessage(ctx, w.id, footer, SendOptions{})
+	w.ch.apiErr("sendMessage", err)
 }
 
 // editLive edits the live message with the first part and sends the rest. The

@@ -5,7 +5,7 @@
 
 ## Design notes
 
-- `channels/telegram/chat.go`: replace the per-tool `toolLine` rendering with turn state: current tool, step counter (rule in requirements "Step"), tool-call counter. `render` builds status line + answer while running, and answer + end line + footer when final. `toolArg` keeps working for approvals (it reads the call's argument).
+- `channels/telegram/chat.go`: replace the per-tool `toolLine` rendering with turn state: current tool, step counter (rule in requirements "Step"), tool-call counter. `render` builds status line + answer while running, and answer + end line when final; `finish` sends the footer as a separate message after the whole answer. `toolArg` keeps working for approvals (it reads the call's argument).
 - `channels/telegram/approve.go`: per-turn bubble on `chat` (message ID, FIFO of waiting requests, outcome tallies). `Approve` enqueues and waits for its turn at the head; the head is rendered into the bubble (send on first use, edit afterwards). Timeouts and cancellation start when a request reaches the head, as today per request.
 - `finish`: summary edit, then send the final answer and `deleteMessage` the live message when a bubble exists; else edit in place. Reset bubble state for the next turn.
 - `channels/telegram/api.go`: add `DeleteMessage(ctx, chatID, messageID)`; add it to the API interface used by the fake in tests.

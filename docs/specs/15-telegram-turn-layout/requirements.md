@@ -67,13 +67,13 @@ When the turn ends:
 1. If a permission bubble exists, it is edited to the summary `🔐 <n> approval(s): <a> allowed, <r> rejected` (omit zero parts; `expired`/`cancelled` counted as rejected) with no buttons; then the final answer is sent as a new message and the live message is deleted.
 2. Otherwise the live message is edited into the final answer.
 
-The final answer is: the answer HTML, the end line if any (`⊘ cancelled`, `✗ …`, `⚠ stopped at max_steps`), and, when the turn made at least one tool call, the footer `⚙️ <s> step(s) · <t> tool call(s)` on its own last line. Overflow splitting is unchanged; the footer goes on the last part.
+The final answer is: the answer HTML and the end line if any (`⊘ cancelled`, `✗ …`, `⚠ stopped at max_steps`). When the turn made at least one tool call, the footer `⚙️ <s> step(s) · <t> tool call(s)` is sent as its own plain message after the whole final answer (after the last part when it is split), in the same chat, thread, and reply target as the answer. A footer send that fails is logged and does not fail the turn. Overflow splitting is otherwise unchanged.
 
 #### Acceptance criteria
 
-- `AC-TGL-006`: Given a turn with 12 steps, 4 tool calls, and 3 allowed approvals, when it ends, then the chat shows, in order, the summary bubble `🔐 3 approvals: 3 allowed` and a new message with the answer ending in `⚙️ 12 steps · 4 tool calls`, and the live message is deleted.
-- `AC-TGL-007`: Given a turn with 1 step and no tool calls, when it ends, then the live message is edited to the answer with no footer and no new message is sent.
-- `AC-TGL-008`: Given 1 step and 1 tool call, then the footer reads `⚙️ 1 step · 1 tool call`.
+- `AC-TGL-006`: Given a turn with 12 steps, 4 tool calls, and 3 allowed approvals, when it ends, then the chat shows, in order, the summary bubble `🔐 3 approvals: 3 allowed`, a new message with the answer containing no footer, the footer `⚙️ 12 steps · 4 tool calls` as a separate message, and the live message is deleted.
+- `AC-TGL-007`: Given a turn with 1 step and no tool calls, when it ends, then the live message is edited to the answer with no footer and no footer message is sent.
+- `AC-TGL-008`: Given 1 step and 1 tool call, then the footer message reads `⚙️ 1 step · 1 tool call`.
 - `AC-TGL-009`: Given `deleteMessage` fails, then the final answer is still sent and the failure is logged, not shown.
 
 ### REQ-TGL-004: Markdown tables

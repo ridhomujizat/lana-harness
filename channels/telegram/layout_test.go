@@ -323,22 +323,37 @@ func TestLayoutAC006SummaryAndFooter(t *testing.T) {
 	pressApproval(t, api, third, "once")
 
 	api.waitCall("editMessageText", textIs("🔐 3 approvals: 3 allowed"))
-	final := api.waitCall("sendMessage", textHas("⚙️ 12 steps · 4 tool calls"))
-	if text := final.Params["text"].(string); !strings.HasSuffix(text, "⚙️ 12 steps · 4 tool calls") {
-		t.Fatalf("final text = %q", text)
+	answer := api.waitCall("sendMessage", textHas("answer 1"))
+	if text := answer.Params["text"].(string); strings.Contains(text, "⚙️") {
+		t.Fatalf("final answer has footer: %q", text)
+	}
+	if reply := answer.Params["reply_parameters"]; reply != nil {
+		t.Fatalf("answer has reply target: %v", reply)
+	}
+	footer := api.waitCall("sendMessage", textIs("⚙️ 12 steps · 4 tool calls"))
+	if chat := footer.Params["chat_id"].(float64); chat != float64(ownerChat) {
+		t.Fatalf("footer chat = %v", chat)
+	}
+	if footer.Params["reply_parameters"] != nil || footer.Params["reply_markup"] != nil {
+		t.Fatalf("footer mismatch vs answer: %v", footer.Params)
 	}
 	del := api.waitCall("deleteMessage", nil)
 	live := api.waitCall("sendMessage", textIs("…"))
 	if del.Params["message_id"].(float64) != float64(live.MessageID) {
 		t.Fatalf("deleted message %v, live message %d", del.Params["message_id"], live.MessageID)
 	}
+	if n := api.count("editMessageText", textHas("⚙️")); n != 0 {
+		t.Fatalf("footer in an edit = %d\n%s", n, api.dump())
+	}
 
 	calls := api.snapshot()
 	summaryIndex := callIndex(calls, "editMessageText", textIs("🔐 3 approvals: 3 allowed"))
-	finalIndex := callIndex(calls, "sendMessage", textHas("⚙️ 12 steps · 4 tool calls"))
+	answerIndex := callIndex(calls, "sendMessage", textHas("answer 1"))
+	footerIndex := callIndex(calls, "sendMessage", textIs("⚙️ 12 steps · 4 tool calls"))
 	deleteIndex := callIndex(calls, "deleteMessage", nil)
-	if summaryIndex < 0 || finalIndex < 0 || deleteIndex < 0 || summaryIndex >= finalIndex || finalIndex >= deleteIndex {
-		t.Fatalf("summary=%d final=%d delete=%d\n%s", summaryIndex, finalIndex, deleteIndex, api.dump())
+	if summaryIndex < 0 || answerIndex < 0 || footerIndex < 0 || deleteIndex < 0 ||
+		summaryIndex >= answerIndex || answerIndex >= footerIndex {
+		t.Fatalf("summary=%d answer=%d footer=%d delete=%d\n%s", summaryIndex, answerIndex, footerIndex, deleteIndex, api.dump())
 	}
 }
 
@@ -360,6 +375,12 @@ func TestLayoutAC007NoBubbleEditsLive(t *testing.T) {
 	if n := api.count("deleteMessage", nil); n != 0 {
 		t.Fatalf("deletes = %d\n%s", n, api.dump())
 	}
+	if n := api.count("sendMessage", textHas("⚙️")); n != 0 {
+		t.Fatalf("footer sends = %d\n%s", n, api.dump())
+	}
+	if n := api.count("editMessageText", textHas("⚙️")); n != 0 {
+		t.Fatalf("footer in an edit = %d\n%s", n, api.dump())
+	}
 }
 
 // TestLayoutAC008SingularFooter checks the one-step one-call footer.
@@ -373,9 +394,56 @@ func TestLayoutAC008SingularFooter(t *testing.T) {
 	startChannel(t, api, backend)
 
 	api.text(ownerChat, "private", ownerID, "hi")
-	final := api.waitCall("editMessageText", textHas("⚙️ 1 step · 1 tool call"))
-	if text := final.Params["text"].(string); !strings.HasSuffix(text, "⚙️ 1 step · 1 tool call") {
-		t.Fatalf("final text = %q", text)
+	final := api.waitCall("editMessageText", textIs("done"))
+	if text := final.Params["text"].(string); strings.Contains(text, "⚙️") {
+		t.Fatalf("final answer has footer: %q", text)
+	}
+	footer := api.waitCall("sendMessage", textIs("⚙️ 1 step · 1 tool call"))
+	if footer.Params["reply_parameters"] != nil || footer.Params["reply_markup"] != nil {
+		t.Fatalf("footer mismatch vs answer: %v", footer.Params)
+	}
+	if n := api.count("editMessageText", textHas("⚙️")); n != 0 {
+		t.Fatalf("footer in an edit = %d\n%s", n, api.dump())
+	}
+}
+
+// TestLayoutFooterAfterSplitAnswer checks that the footer follows the last chunk
+// of an answer split over several messages (REQ-TGL-003).
+func TestLayoutFooterAfterSplitAnswer(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	long := strings.Repeat("word ", 1000)
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		publishToolCall(backend, session, "c1", "bash", `{"command":"ls"}`)
+		publishToolResult(backend, session, "c1")
+		publishText(backend, session, long)
+		return TurnResult{Text: long, StopReason: "end_turn"}, nil
+	}
+	startChannel(t, api, backend)
+
+	api.text(ownerChat, "private", ownerID, "hi")
+	api.waitCall("sendMessage", textIs("⚙️ 2 steps · 1 tool call"))
+
+	calls := api.snapshot()
+	lastAnswer := -1
+	for i, call := range calls {
+		if call.Method != "sendMessage" {
+			continue
+		}
+		text, _ := call.Params["text"].(string)
+		if strings.Contains(text, "word") && !strings.Contains(text, "⚙️") {
+			lastAnswer = i
+		}
+	}
+	footerIndex := callIndex(calls, "sendMessage", textIs("⚙️ 2 steps · 1 tool call"))
+	if lastAnswer < 0 || footerIndex < lastAnswer {
+		t.Fatalf("last answer=%d footer=%d\n%s", lastAnswer, footerIndex, api.dump())
+	}
+	if n := api.count("editMessageText", textHas("⚙️")); n != 0 {
+		t.Fatalf("footer in an edit = %d\n%s", n, api.dump())
+	}
+	if n := api.count("sendMessage", textIs("⚙️ 2 steps · 1 tool call")); n != 1 {
+		t.Fatalf("footer sends = %d\n%s", n, api.dump())
 	}
 }
 
@@ -397,9 +465,13 @@ func TestLayoutAC009DeleteFailure(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "run")
 	bubble := api.waitCall("sendMessage", textHas("🔐 Allow bash"))
 	pressApproval(t, api, bubble, "once")
-	final := api.waitCall("sendMessage", textHas("⚙️ 1 step · 1 tool call"))
-	if text := final.Params["text"].(string); !strings.HasSuffix(text, "⚙️ 1 step · 1 tool call") {
-		t.Fatalf("final text = %q", text)
+	answer := api.waitCall("sendMessage", textHas("done"))
+	if text := answer.Params["text"].(string); strings.Contains(text, "⚙️") {
+		t.Fatalf("final answer has footer: %q", text)
+	}
+	footer := api.waitCall("sendMessage", textIs("⚙️ 1 step · 1 tool call"))
+	if footer.Params["reply_parameters"] != nil || footer.Params["reply_markup"] != nil {
+		t.Fatalf("footer mismatch vs answer: %v", footer.Params)
 	}
 	if n := api.count("deleteMessage", nil); n != 1 {
 		t.Fatalf("deletes = %d\n%s", n, api.dump())
@@ -433,9 +505,16 @@ func TestLayoutFinalSendFallsBackToLive(t *testing.T) {
 
 	api.waitCall("editMessageText", textIs("🔐 1 approval: 1 allowed"))
 	live := api.waitCall("sendMessage", textIs("…"))
-	final := api.waitCall("editMessageText", textHas("⚙️ 1 step · 1 tool call"))
+	final := api.waitCall("editMessageText", textIs("done"))
 	if final.Params["message_id"].(float64) != float64(live.MessageID) {
 		t.Fatalf("fallback edited message %v, live message %d", final.Params["message_id"], live.MessageID)
+	}
+	if text := final.Params["text"].(string); strings.Contains(text, "⚙️") {
+		t.Fatalf("fallback answer has footer: %q", text)
+	}
+	footer := api.waitCall("sendMessage", textIs("⚙️ 1 step · 1 tool call"))
+	if footer.Params["reply_parameters"] != nil || footer.Params["reply_markup"] != nil {
+		t.Fatalf("footer mismatch vs answer: %v", footer.Params)
 	}
 	if n := api.count("deleteMessage", nil); n != 0 {
 		t.Fatalf("deletes = %d\n%s", n, api.dump())

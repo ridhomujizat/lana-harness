@@ -62,10 +62,14 @@ func TestPrivateChatTurn(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "check disk")
 	api.waitCall("sendMessage", textIs("…"))
 	api.waitCall("sendChatAction", nil)
-	final := api.waitCall("editMessageText", textHas("⚙️ 2 steps · 1 tool call"))
+	final := api.waitCall("editMessageText", textHas("Disk is <b>fine</b>."))
 	text := final.Params["text"].(string)
-	if !strings.Contains(text, "Disk is <b>fine</b>.") || strings.Contains(text, "🔧") || !strings.HasSuffix(text, "⚙️ 2 steps · 1 tool call") || final.Params["parse_mode"] != "HTML" {
+	if strings.Contains(text, "🔧") || strings.Contains(text, "⚙️") || final.Params["parse_mode"] != "HTML" {
 		t.Fatalf("final = %v", final.Params)
+	}
+	footer := api.waitCall("sendMessage", textIs("⚙️ 2 steps · 1 tool call"))
+	if footer.Params["reply_parameters"] != nil || footer.Params["reply_markup"] != nil {
+		t.Fatalf("footer mismatch: %v", footer.Params)
 	}
 	if got := backend.promptList(); len(got) != 1 || got[0] != "check disk" {
 		t.Fatalf("prompts = %v", got)
@@ -246,12 +250,13 @@ func TestAgentTeamTurnShowsLeadAnswerAndChildToolLine(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "/agent research-squad")
 	api.waitCall("sendMessage", textIs("· agent: research-squad"))
 	api.text(ownerChat, "private", ownerID, "write the report")
-	final := api.waitCall("editMessageText", func(p map[string]any) bool {
-		text, _ := p["text"].(string)
-		return strings.Contains(text, "Lead answer") && strings.Contains(text, "⚙️ 1 step · 1 tool call")
-	})
-	if text := final.Params["text"].(string); strings.Contains(text, "read_file") || strings.Contains(text, "🔧") {
+	final := api.waitCall("editMessageText", textHas("Lead answer"))
+	if text := final.Params["text"].(string); strings.Contains(text, "read_file") || strings.Contains(text, "🔧") || strings.Contains(text, "⚙️") {
 		t.Fatalf("team reply = %v", final.Params)
+	}
+	footer := api.waitCall("sendMessage", textIs("⚙️ 1 step · 1 tool call"))
+	if footer.Params["reply_parameters"] != nil || footer.Params["reply_markup"] != nil {
+		t.Fatalf("footer mismatch: %v", footer.Params)
 	}
 }
 
