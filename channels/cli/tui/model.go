@@ -1577,6 +1577,22 @@ func (m *Model) banner() []string {
 		"embedded · " + m.policy + " · " + m.model,
 		styleMuted.Render(shortCwd(m.cwd)),
 	}
+	// The logo sits left of the details when the box has room for both; a
+	// narrow terminal keeps the text-only box.
+	const logoGap = 3
+	if inner >= logoWidth+logoGap+32 {
+		text := inner - logoWidth - logoGap
+		details := append([]string{styleLogoFront.Bold(true).Render(logoWord)}, rows...)
+		mark := Logo()
+		rows = make([]string, len(mark))
+		for i, row := range mark {
+			detail := ""
+			if i < len(details) {
+				detail = details[i]
+			}
+			rows[i] = row + strings.Repeat(" ", logoGap) + padRight(detail, text)
+		}
+	}
 	lines := []string{"  " + styleDim.Render("╭"+strings.Repeat("─", inner+2)+"╮")}
 	for _, row := range rows {
 		lines = append(lines, "  "+styleDim.Render("│ ")+padRight(row, inner)+" "+styleDim.Render("│"))

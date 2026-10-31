@@ -20,6 +20,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 	lana "github.com/ridhomujizat/lana-harness"
+	"github.com/ridhomujizat/lana-harness/channels/cli/tui"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
@@ -69,6 +70,10 @@ func run(args []string) int {
 }
 
 func help() {
+	// The logo is for people at a terminal; piped help stays plain text.
+	if term.IsTerminal(os.Stdout.Fd()) {
+		fmt.Print("\n" + tui.LogoText() + "\n")
+	}
 	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana --version\n")
 }
 
