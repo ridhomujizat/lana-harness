@@ -1,7 +1,7 @@
 # Requirements: Loop guard escalation and tool-name recovery
 
 - **Issue**: —
-- **Status**: Approved
+- **Status**: Implemented
 - **Revision**: 1
 - **Owner**: Ridho
 - **Contract**: [api-contract.md](api-contract.md) — Required

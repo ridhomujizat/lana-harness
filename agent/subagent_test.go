@@ -562,7 +562,10 @@ func TestSubagentMaxStepsLimit(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			responses := make([]mock.Response, 0, test.tools+1)
 			for i := 0; i < test.tools; i++ {
-				responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", `{"path":"a.txt"}`))
+				// A distinct limit makes each call its own signature, so the
+				// loop guard does not stop this child turn; the test is about
+				// the step cap, not about a looping model.
+				responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
 			}
 			responses = append(responses, textResponse("done"))
 			h := newSubagentHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{

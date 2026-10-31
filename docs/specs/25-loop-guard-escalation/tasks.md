@@ -1,6 +1,6 @@
 # Tasks: Loop guard escalation and tool-name recovery
 
-- **Status**: Approved
+- **Status**: Completed
 
 Test command: `nix develop -c go vet ./... && nix develop -c go test -count=1 ./...`.
 
@@ -28,7 +28,7 @@ T-001 and T-003 run in parallel in the main tree (disjoint files). T-002 starts 
 
 ### T-002 Detectors, block, halt
 
-- Status: Not started.
+- Status: Done 2026-11-01. Evidence: go vet clean, gofmt clean, go test ./... all ok (30 packages).
 - Files: `agent/loopguard.go`, `agent/loopguard_test.go`, `agent/turn.go`,
   `agent/turn_loopguard_test.go`.
 - Covers: REQ-LPG-001–009, -011–013. Design §2.

@@ -551,6 +551,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	// budgetReport marks the final, tool-free report step that a configured
 	// step cap adds before the turn ends (REQ-LTC-040).
 	budgetReport := false
+	// halted marks a loop guard halt (REQ-LPG-009) whose final, tool-free
+	// report step is still to run; pendingHaltNote is that step's runtime note
+	// and loopReport marks that the report step ran, so a normal end is reason
+	// loop rather than max_steps or end_turn.
+	halted := false
+	pendingHaltNote := ""
+	loopReport := false
 	prompt := ""
 	promptBuilt := false
 	turnTools := []string{}
@@ -692,6 +699,30 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			runtimeNote = true
 			claimedText = stepLimitNote
 			inputMsg = core.Message{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: stepLimitNote}}}
+		}
+		// REQ-LPG-009: a loop guard halt runs one final step without tools,
+		// like the step cap. The halt note is delivered as a runtime note and a
+		// message popInbox already claimed stays for the next turn. When the
+		// cap is reached as well, the cap wins (first condition reached).
+		if halted && !budgetReport && !loopReport {
+			if inboxClaim {
+				rn.pushFrontInbox(claimedText)
+			}
+			budgetReport = true
+			loopReport = true
+			claimed = true
+			runtimeNote = true
+			claimedText = pendingHaltNote
+			pendingReminder = ""
+			inputMsg = core.Message{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: pendingHaltNote}}}
+		}
+		// REQ-LPG-009: after the halt report step the turn ends, and an owner
+		// message that arrived meanwhile stays for the next turn.
+		if loopReport && !pendingTools {
+			if inboxClaim {
+				rn.pushFrontInbox(claimedText)
+			}
+			goto finished
 		}
 		var storedSections []core.PromptSection
 		// contextBlocks is the number of leading content blocks lana injects
@@ -948,7 +979,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			if !resolved.child {
 				mcpAdmin = rn.reg.mcpAdminFor()
 			}
-			outputs := rn.reg.pipeline.Run(ctx, calls, turnTools, core.ToolCtx{
+			toolCtx := core.ToolCtx{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
 				Skills:        resolved.skills,
 				Questions:     rn.reg.questions,
@@ -958,7 +989,30 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				AllowedAgents: resolved.delegates,
 				Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
 				Jobs:          rn.reg.jobs,
-			})
+			}
+			// REQ-LPG-008: a call that matches a block rule is not run; its
+			// synthetic error result takes its place. The other calls run as
+			// usual and every result is stored in call order.
+			outputs := make([]core.ToolOutput, len(calls))
+			var runnable []core.ToolCall
+			var runnableIndex []int
+			for i, call := range calls {
+				out, blocked := guard.before(call)
+				if blocked {
+					outputs[i] = out
+					slog.Info("loop guard block", "session_id", rn.sessionID, "turn_id", turnID,
+						"kind", guard.lastBlock.kind, "tool", guard.lastBlock.tool, "count", guard.lastBlock.count)
+					continue
+				}
+				runnable = append(runnable, call)
+				runnableIndex = append(runnableIndex, i)
+			}
+			if len(runnable) > 0 {
+				ran := rn.reg.pipeline.Run(ctx, runnable, turnTools, toolCtx)
+				for j, out := range ran {
+					outputs[runnableIndex[j]] = out
+				}
+			}
 			// Child usage from task and task_continue belongs to this step's
 			// usage (REQ-TEAM-013, AC-TEAM-031). Nil usage is ignored and the
 			// child's own step/end keeps the child's model usage.
@@ -982,13 +1036,24 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_result", CallID: calls[i].CallID, Name: calls[i].Name, Status: string(status), Output: output.Output})
 			}
-			// REQ-TRL-010..014: advance the loop guard over this step's calls
-			// and results. The reminder rides the next request, which is
-			// claimed in the pendingTools branch or dropped for an owner
-			// message.
+			// REQ-TRL-010..014, REQ-LPG-002..007: advance the loop guard over
+			// this step's calls and results. The reminder rides the next
+			// request, which is claimed in the pendingTools branch or dropped
+			// for an owner message.
 			pendingReminder = guard.observe(calls, outputs)
 			for _, hit := range guard.hits {
 				slog.Info("loop guard reminder", "session_id", rn.sessionID, "turn_id", turnID, "kind", hit.kind, "count", hit.count)
+			}
+			guard.strike(allUnknownNames(outputs))
+			if guard.halt != nil {
+				// REQ-LPG-009: a block or a detected loop halts the turn. The
+				// halt note replaces the reminder and the next step offers no
+				// tools.
+				slog.Info("loop guard halt", "session_id", rn.sessionID, "turn_id", turnID,
+					"kind", guard.halt.kind, "tool", guard.halt.tool, "count", guard.halt.count)
+				pendingReminder = loopGuardHaltNote(*guard.halt)
+				pendingHaltNote = pendingReminder
+				halted = true
 			}
 		}
 		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Usage: usage}}); err != nil {
@@ -1050,7 +1115,12 @@ finished:
 	} else if budgetReport && reason == "end_turn" {
 		// A turn that ran its configured step cap ends as max_steps, not
 		// end_turn, even though the report step ended normally (REQ-LTC-040).
-		reason = "max_steps"
+		// A loop-guard halt ends as loop instead (REQ-LPG-009).
+		if loopReport {
+			reason = "loop"
+		} else {
+			reason = "max_steps"
+		}
 	}
 	end := core.TurnEnd{V: core.PayloadVersion, TurnID: turnID, Reason: reason, Error: payloadErr}
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {

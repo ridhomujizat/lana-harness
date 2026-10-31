@@ -61,8 +61,11 @@ func (p *turnProvider) Stream(ctx context.Context, req core.ChatRequest) (core.C
 		return textStream("done"), nil
 	}
 	call := fmt.Sprintf("c%d", n)
+	// A distinct input makes each call its own signature, so the loop guard
+	// does not stop this turn; the test is about compaction, not looping.
+	input := json.RawMessage(fmt.Sprintf(`{"i":%d}`, n))
 	return func(yield func(core.ChatEvent, error) bool) {
-		yield(core.ChatEvent{Kind: core.ChatBlock, Block: core.ContentBlock{Kind: core.BlockToolUse, ID: call, Name: "big", Input: json.RawMessage(`{}`)}}, nil)
+		yield(core.ChatEvent{Kind: core.ChatBlock, Block: core.ContentBlock{Kind: core.BlockToolUse, ID: call, Name: "big", Input: input}}, nil)
 		yield(core.ChatEvent{Kind: core.ChatStop, StopReason: "tool_use"}, nil)
 	}, nil
 }

@@ -313,7 +313,10 @@ func TestAssistantMessageBlocks(t *testing.T) {
 func TestNoStepCapRunsUntilModelStops(t *testing.T) {
 	var responses []mock.Response
 	for i := 0; i < 30; i++ {
-		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", `{"path":"a.txt"}`))
+		// A distinct limit makes each call its own signature, so the loop
+		// guard does not stop this turn; the test is about the missing step
+		// cap, not about a looping model.
+		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
 	}
 	responses = append(responses, textResponse("done"))
 	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})

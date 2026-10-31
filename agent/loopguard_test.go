@@ -215,6 +215,280 @@ func TestLoopGuardJoinsStepReminders(t *testing.T) {
 	}
 }
 
+// guardOutput builds a tool output with its pre-spill digest, as the pipeline
+// does, so the digest-based detectors have something to compare.
+func guardOutput(status core.ToolStatus, text string) core.ToolOutput {
+	out := core.ToolOutput{Status: status, Output: text}
+	out.Digest = outputDigest(out)
+	return out
+}
+
+// TestLoopGuardEscalationACs covers one acceptance case of REQ-LPG-002..007
+// per row (AC-LPG-001..011).
+func TestLoopGuardEscalationACs(t *testing.T) {
+	cases := []struct {
+		id    string
+		name  string
+		check func(t *testing.T, g *loopGuard)
+	}{
+		{
+			id:   "AC-LPG-001",
+			name: "same-args failure reminder at two",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("bash", `{"command":"make"}`)
+				failure := guardOutput(core.ToolStatusError, "exit code 1")
+				if got := g.observe([]core.ToolCall{call}, []core.ToolOutput{failure}); got != "" {
+					t.Fatalf("first failure = %q, want no reminder", got)
+				}
+				got := g.observe([]core.ToolCall{call}, []core.ToolOutput{failure})
+				if want := loopGuardSameArgsReminder("bash", 2); got != want {
+					t.Fatalf("second failure = %q, want %q", got, want)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-002",
+			name: "same-args block at five with other calls between",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("bash", `{"command":"make"}`)
+				other := loopGuardTestCall("bash", `{"command":"echo hi"}`)
+				failure := guardOutput(core.ToolStatusError, "exit code 1")
+				success := guardOutput(core.ToolStatusSuccess, "hi")
+				for i := 0; i < 4; i++ {
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{failure})
+					g.observe([]core.ToolCall{other}, []core.ToolOutput{success})
+				}
+				out, blocked := g.before(call)
+				if !blocked {
+					t.Fatal("the fifth call of a failing signature was not blocked")
+				}
+				if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "Blocked bash") ||
+					!strings.Contains(out.Output, "failed 4 times") {
+					t.Fatalf("blocked output = %q", out.Output)
+				}
+				if out.Digest == "" || out.Digest != outputDigest(out) {
+					t.Fatalf("blocked output digest = %q", out.Digest)
+				}
+				if g.halt == nil || g.halt.kind != loopGuardKindSameArgs {
+					t.Fatalf("halt = %+v, want the same-args halt", g.halt)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-003",
+			name: "progress write resets every signature count",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("bash", `{"command":"make"}`)
+				failure := guardOutput(core.ToolStatusError, "exit code 1")
+				edit := loopGuardTestCall("edit_file", `{"path":"a.txt","old_string":"a","new_string":"b"}`)
+				editOK := guardOutput(core.ToolStatusSuccess, "Edited a.txt: replaced 1 occurrence(s).")
+				for i := 0; i < 3; i++ {
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{failure})
+				}
+				g.observe([]core.ToolCall{edit}, []core.ToolOutput{editOK})
+				g.observe([]core.ToolCall{call}, []core.ToolOutput{failure})
+				g.observe([]core.ToolCall{call}, []core.ToolOutput{failure})
+				if _, blocked := g.before(call); blocked {
+					t.Fatal("blocked after a progress write reset the failure count")
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-004",
+			name: "read-only no-progress block at five",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("read_file", `{"path":"a.txt"}`)
+				same := guardOutput(core.ToolStatusSuccess, "unchanged")
+				for i := 0; i < 4; i++ {
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{same})
+				}
+				out, blocked := g.before(call)
+				if !blocked {
+					t.Fatal("the fifth identical read was not blocked")
+				}
+				if !strings.Contains(out.Output, "Blocked read_file") || !strings.Contains(out.Output, "4 times") {
+					t.Fatalf("blocked output = %q", out.Output)
+				}
+				if g.halt == nil || g.halt.kind != loopGuardKindReadOnly {
+					t.Fatalf("halt = %+v, want the read-only halt", g.halt)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-005",
+			name: "progress write restarts the read-only run",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("read_file", `{"path":"a.txt"}`)
+				same := guardOutput(core.ToolStatusSuccess, "unchanged")
+				edit := loopGuardTestCall("edit_file", `{"path":"a.txt","old_string":"a","new_string":"b"}`)
+				editOK := guardOutput(core.ToolStatusSuccess, "Edited a.txt: replaced 1 occurrence(s).")
+				for i := 0; i < 4; i++ {
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{same})
+				}
+				g.observe([]core.ToolCall{edit}, []core.ToolOutput{editOK})
+				if _, blocked := g.before(call); blocked {
+					t.Fatal("blocked after a progress write restarted the read-only run")
+				}
+				g.observe([]core.ToolCall{call}, []core.ToolOutput{same})
+				if _, blocked := g.before(call); blocked {
+					t.Fatal("blocked at a run of two")
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-006",
+			name: "identical repeat chain blocks the ninth call",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("bash", `{"command":"true"}`)
+				same := guardOutput(core.ToolStatusSuccess, "")
+				for i := 0; i < loopGuardStreakLen; i++ {
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{same})
+				}
+				out, blocked := g.before(call)
+				if !blocked {
+					t.Fatal("the ninth identical call was not blocked")
+				}
+				if !strings.Contains(out.Output, "Blocked bash") || !strings.Contains(out.Output, "8 times in a row") {
+					t.Fatalf("blocked output = %q", out.Output)
+				}
+				if g.halt == nil || g.halt.kind != loopGuardKindIdenticalStreak {
+					t.Fatalf("halt = %+v, want the identical-streak halt", g.halt)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-007",
+			name: "a chain whose results differ is not blocked",
+			check: func(t *testing.T, g *loopGuard) {
+				call := loopGuardTestCall("bash", `{"command":"date"}`)
+				for i := 0; i < loopGuardStreakLen; i++ {
+					out := guardOutput(core.ToolStatusSuccess, fmt.Sprintf("out-%d", i))
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{out})
+				}
+				if _, blocked := g.before(call); blocked {
+					t.Fatal("blocked a repeat chain whose results differ")
+				}
+				g.observe([]core.ToolCall{call}, []core.ToolOutput{guardOutput(core.ToolStatusSuccess, "out-9")})
+				if _, blocked := g.before(call); blocked {
+					t.Fatal("blocked the ninth call of a chain whose results differ")
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-008",
+			name: "cycle reminds at three laps and halts at five",
+			check: func(t *testing.T, g *loopGuard) {
+				a := loopGuardTestCall("bash", `{"command":"step-a"}`)
+				b := loopGuardTestCall("bash", `{"command":"step-b"}`)
+				outA := guardOutput(core.ToolStatusSuccess, "A")
+				outB := guardOutput(core.ToolStatusSuccess, "B")
+				last := ""
+				for i := 0; i < 3; i++ {
+					g.observe([]core.ToolCall{a}, []core.ToolOutput{outA})
+					last = g.observe([]core.ToolCall{b}, []core.ToolOutput{outB})
+				}
+				if !strings.Contains(last, "same cycle of 2 tool calls") {
+					t.Fatalf("A-B-A-B-A-B = %q, want the cycle reminder", last)
+				}
+				g.reset()
+				for i := 0; i < 5; i++ {
+					g.observe([]core.ToolCall{a}, []core.ToolOutput{outA})
+					g.observe([]core.ToolCall{b}, []core.ToolOutput{outB})
+				}
+				if g.halt == nil || g.halt.kind != loopGuardKindCycle {
+					t.Fatalf("A-B x5 halt = %+v, want the cycle halt", g.halt)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-009",
+			name: "a cycle whose results change never fires",
+			check: func(t *testing.T, g *loopGuard) {
+				a := loopGuardTestCall("bash", `{"command":"step-a"}`)
+				b := loopGuardTestCall("bash", `{"command":"step-b"}`)
+				outA := guardOutput(core.ToolStatusSuccess, "A")
+				var got strings.Builder
+				for i := 0; i < 5; i++ {
+					got.WriteString(g.observe([]core.ToolCall{a}, []core.ToolOutput{outA}))
+					got.WriteString(g.observe([]core.ToolCall{b}, []core.ToolOutput{guardOutput(core.ToolStatusSuccess, fmt.Sprintf("B-%d", i))}))
+				}
+				if strings.Contains(got.String(), "same cycle") {
+					t.Fatalf("reminders = %q, want no cycle reminder", got.String())
+				}
+				if g.halt != nil {
+					t.Fatalf("halt = %+v, want no halt", g.halt)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-010",
+			name: "twelve consecutive errors halt",
+			check: func(t *testing.T, g *loopGuard) {
+				for i := 0; i < loopGuardFailureHalt; i++ {
+					call := loopGuardTestCall("bash", fmt.Sprintf(`{"command":"fail-%d"}`, i))
+					g.observe([]core.ToolCall{call}, []core.ToolOutput{guardOutput(core.ToolStatusError, "boom")})
+				}
+				if g.halt == nil || g.halt.kind != loopGuardKindFailureStreak {
+					t.Fatalf("halt = %+v, want the failure-streak halt", g.halt)
+				}
+			},
+		},
+		{
+			id:   "AC-LPG-011",
+			name: "three unknown-name steps halt and a valid step resets",
+			check: func(t *testing.T, g *loopGuard) {
+				for i := 0; i < 3; i++ {
+					g.strike(true)
+				}
+				if g.halt == nil || g.halt.kind != loopGuardKindStrikes {
+					t.Fatalf("halt = %+v, want the strikes halt", g.halt)
+				}
+				g.reset()
+				g.strike(true)
+				g.strike(true)
+				g.strike(false)
+				g.strike(true)
+				g.strike(true)
+				if g.halt != nil {
+					t.Fatalf("halt = %+v, want no halt after a valid step", g.halt)
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id+" "+tc.name, func(t *testing.T) {
+			var g loopGuard
+			tc.check(t, &g)
+		})
+	}
+}
+
+// REQ-LPG-002: the new detectors only count results that carry a digest, that
+// is, results produced by the tool pipeline; a read-only failure with a digest
+// is counted like any other. This keeps synthetic, digest-less outputs (the
+// older chain tests) transparent to the escalation detectors.
+func TestLoopGuardSameArgsNeedsDigest(t *testing.T) {
+	call := loopGuardTestCall("read_file", `{"path":"a.txt"}`)
+
+	var withoutDigest loopGuard
+	noDigest := loopGuardTestOutput(core.ToolStatusError)
+	for i := 0; i < 4; i++ {
+		withoutDigest.observe([]core.ToolCall{call}, []core.ToolOutput{noDigest})
+	}
+	if _, blocked := withoutDigest.before(call); blocked {
+		t.Fatal("a digest-less error result was counted by the same-arguments detector")
+	}
+
+	var withDigest loopGuard
+	digest := guardOutput(core.ToolStatusError, "file not found")
+	for i := 0; i < 4; i++ {
+		withDigest.observe([]core.ToolCall{call}, []core.ToolOutput{digest})
+	}
+	if _, blocked := withDigest.before(call); !blocked {
+		t.Fatal("a read-only failure with a digest was not counted by the same-arguments detector")
+	}
+}
+
 // REQ-TRL-010: the detailed reminder caps the quoted arguments at 500
 // characters and marks the omitted remainder.
 func TestLoopGuardCapsArguments(t *testing.T) {

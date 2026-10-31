@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -112,5 +114,120 @@ func TestTurnLoopGuardDroppedForOwnerMessage(t *testing.T) {
 	}
 	if got := userText(h.lastUserMessage(t)); got != "owner interjection" {
 		t.Fatalf("last user message = %q, want the owner interjection", got)
+	}
+}
+
+// allowAllTools replaces the harness's fail-closed gate so the loop guard tests
+// can run bash.
+func allowAllTools(h *harness) {
+	h.hooks.ToolsPreExecute.Use(func(ctx context.Context, in core.ToolsPreExecuteInput, next core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
+		return core.ToolDecision{Allowed: true}, nil
+	})
+}
+
+// repeatedToolResponses builds n tool responses that call the same tool with
+// the same input.
+func repeatedToolResponses(n int, name, input string) []mock.Response {
+	out := make([]mock.Response, n)
+	for i := range out {
+		out[i] = toolResponse(fmt.Sprintf("c%d", i), name, input)
+	}
+	return out
+}
+
+// storedBlockedResult reports whether the session stored a tool result whose
+// output starts with prefix.
+func storedBlockedResult(t *testing.T, h *harness, prefix string) bool {
+	t.Helper()
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindToolResult {
+			continue
+		}
+		var payload core.ToolResultPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(payload.Output, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// AC-LPG-002, AC-LPG-012: a failing call repeated until the guard blocks it is
+// not executed; the next step offers no tools, the report text is stored, and
+// the turn ends with reason loop.
+func TestTurnLoopGuardBlockHaltsTurn(t *testing.T) {
+	responses := repeatedToolResponses(loopGuardFailBlock+1, "bash", `{"command":"false"}`)
+	responses = append(responses, textResponse("here is the report"))
+	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
+		"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash"}},
+	})
+	allowAllTools(h)
+	rec := &requestRecorder{inner: h.llm.providers["mock"]}
+	h.llm.providers["mock"] = rec
+
+	result := h.run(t, "hi")
+	if result.StopReason != "loop" {
+		t.Fatalf("result=%+v", result)
+	}
+	if result.Text != "here is the report" {
+		t.Fatalf("report text = %q, want the stored report", result.Text)
+	}
+	if last := rec.last(); len(last.Tools) != 0 {
+		t.Fatalf("report step offered %d tools, want none", len(last.Tools))
+	}
+	if !storedBlockedResult(t, h, "Blocked bash") {
+		t.Fatal("the blocked call result was not stored")
+	}
+	haltNote := false
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindUserMessage {
+			continue
+		}
+		var payload core.UserMessage
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(userText(payload), "lana stopped this turn") {
+			continue
+		}
+		haltNote = true
+		if !payload.Runtime {
+			t.Fatal("halt note stored without runtime: true")
+		}
+	}
+	if !haltNote {
+		t.Fatal("the halt note was not stored")
+	}
+	if reason := turnEndReason(t, h, h.info.ID); reason != "loop" {
+		t.Fatalf("turn/end reason = %q, want loop", reason)
+	}
+}
+
+// AC-LPG-006: eight identical successful calls with the same output are
+// followed by a blocked ninth call; the turn halts with reason loop.
+func TestTurnLoopGuardIdenticalStreakHalts(t *testing.T) {
+	responses := repeatedToolResponses(loopGuardStreakLen+1, "bash", `{"command":"true"}`)
+	responses = append(responses, textResponse("report"))
+	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
+		"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash"}},
+	})
+	allowAllTools(h)
+	rec := &requestRecorder{inner: h.llm.providers["mock"]}
+	h.llm.providers["mock"] = rec
+
+	result := h.run(t, "hi")
+	if result.StopReason != "loop" {
+		t.Fatalf("result=%+v", result)
+	}
+	if last := rec.last(); len(last.Tools) != 0 {
+		t.Fatalf("report step offered %d tools, want none", len(last.Tools))
+	}
+	if !storedBlockedResult(t, h, "Blocked bash") {
+		t.Fatal("the blocked call result was not stored")
+	}
+	if reason := turnEndReason(t, h, h.info.ID); reason != "loop" {
+		t.Fatalf("turn/end reason = %q, want loop", reason)
 	}
 }

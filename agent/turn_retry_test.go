@@ -119,7 +119,10 @@ func TestTurnNoLimitRunsPastCap(t *testing.T) {
 	const toolSteps = 205
 	responses := make([]mock.Response, 0, toolSteps+1)
 	for i := 0; i < toolSteps; i++ {
-		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", `{"path":"a.txt"}`))
+		// A distinct limit makes each call its own signature, so the loop
+		// guard does not stop this turn; the test is about the missing step
+		// cap, not about a looping model.
+		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
 	}
 	responses = append(responses, textResponse("done"))
 	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
@@ -142,7 +145,10 @@ func TestChildTurnNoLimitRunsPastCap(t *testing.T) {
 	const toolSteps = 205
 	responses := make([]mock.Response, 0, toolSteps+2)
 	for i := 0; i < toolSteps; i++ {
-		responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", `{"path":"a.txt"}`))
+		// A distinct limit makes each call its own signature, so the loop
+		// guard does not stop this child turn; the test is about the missing
+		// step cap, not about a looping model.
+		responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", fmt.Sprintf(`{"path":"a.txt","limit":%d}`, i+1)))
 	}
 	responses = append(responses, textResponse("child done"))
 	h := newSubagentHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
