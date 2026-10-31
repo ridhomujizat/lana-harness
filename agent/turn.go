@@ -30,6 +30,9 @@ type Runner struct {
 	running bool
 	cancel  context.CancelCauseFunc
 	turnID  string
+	// memoryShown holds the memory ids already put in a turn <context> block
+	// this session (REQ-ECX-024). It is in memory, so a restart forgets it.
+	memoryShown map[int]bool
 }
 
 func (rn *Runner) popInbox() (string, bool) {
@@ -316,8 +319,11 @@ type promptBuild struct {
 	context  string
 }
 
-// buildPrompt assembles the system prompt from the persona, the agent home files, the skills, the tool guidance, and the runtime context.
-func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, notes []agenthome.ToolNote, hasMCP bool) (promptBuild, error) {
+// buildPrompt assembles the system prompt from the persona, the agent home
+// files, the skills, the tool guidance, and the runtime context. ownerText is
+// the first user message of the turn: when the memory is indexed it picks the
+// relevant entries for the <context> block (REQ-ECX-024).
+func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, notes []agenthome.ToolNote, hasMCP bool, ownerText string) (promptBuild, error) {
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
 		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, ToolNotes: notes, HasMCP: hasMCP,
@@ -355,9 +361,45 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		if in.Memory, err = agenthome.ReadEntries(home.Memory); err != nil {
 			slog.Warn("cannot read memory file", "agent", res.name, "error", err)
 		}
+		in.RelevantMemory = rn.relevantMemory(ownerText, in.Memory)
 	}
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
 	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
+}
+
+// memoryRelevantMax is the most entries put in one turn <context> block
+// (REQ-ECX-024).
+const memoryRelevantMax = 3
+
+// relevantMemory ranks the indexed memory against the owner's message and
+// returns up to memoryRelevantMax entries not shown earlier in this session,
+// as formatted "m<n>: <entry>" lines. It records the ids it returns; ids are
+// 1-based file positions (REQ-ECX-024).
+func (rn *Runner) relevantMemory(ownerText string, entries []string) []string {
+	if strings.TrimSpace(ownerText) == "" || len(entries) == 0 {
+		return nil
+	}
+	if _, indexed := agenthome.MemoryView(entries); !indexed {
+		return nil
+	}
+	ranked := agenthome.Rank(ownerText, entries)
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	if rn.memoryShown == nil {
+		rn.memoryShown = make(map[int]bool, len(ranked))
+	}
+	out := make([]string, 0, memoryRelevantMax)
+	for _, item := range ranked {
+		if len(out) == memoryRelevantMax {
+			break
+		}
+		if rn.memoryShown[item.ID] {
+			continue
+		}
+		rn.memoryShown[item.ID] = true
+		out = append(out, fmt.Sprintf("m%d: %s", item.ID, entries[item.ID-1]))
+	}
+	return out
 }
 
 // toolNotes collects the prompt guidance of the offered tools in name order.
@@ -700,7 +742,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			turnTools = filterDisabledTools(turnTools, resolved.disabled)
 			// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
 			sort.Strings(turnTools)
-			built, err := rn.buildPrompt(resolved, skills, unavailable, rn.toolNotes(turnTools), len(resolved.mcp) > 0)
+			// REQ-ECX-024: only an owner message can pick relevant memory, and
+			// only the first user message of the turn carries it.
+			ownerText := ""
+			if claimed && !runtimeNote {
+				ownerText = claimedText
+			}
+			built, err := rn.buildPrompt(resolved, skills, unavailable, rn.toolNotes(turnTools), len(resolved.mcp) > 0, ownerText)
 			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"

@@ -175,7 +175,7 @@ func TestNonTextAndCommands(t *testing.T) {
 	api.text(ownerChat, "private", ownerID, "/agent ghost")
 	api.waitCall("sendMessage", textIs(`✗ unknown agent "ghost" (available: coder, helper)`))
 	api.text(ownerChat, "private", ownerID, "/memory")
-	api.waitCall("sendMessage", textHas("· user 11/2000 characters, 1 entries\n  1. Name: Ridho\n· memory 0/4000 characters, 0 entries"))
+	api.waitCall("sendMessage", textHas("· user 11/2000 characters, 1 entries\n  1. Name: Ridho\n· memory 0/32000 characters, 0 entries"))
 	api.text(ownerChat, "private", ownerID, "/mcp")
 	api.waitCall("sendMessage", textIs("· github running, 26 tools"))
 	api.text(ownerChat, "private", ownerID, "/skills")

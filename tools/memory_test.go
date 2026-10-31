@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,12 +28,12 @@ func TestMemoryTools(t *testing.T) {
 	read, write := NewMemoryRead(), NewMemoryWrite()
 
 	out := callMemory(t, write, tc, `{"target":"memory","action":"add","content":"Owner uses fish shell"}`)
-	if out.Status != core.ToolStatusSuccess || out.Output != "added to memory (21/4000 characters)" {
+	if out.Status != core.ToolStatusSuccess || out.Output != "added to memory (21/32000 characters)" {
 		t.Fatalf("add = %+v", out)
 	}
 	callMemory(t, write, tc, `{"target":"memory","action":"add","content":"Server kenari runs Debian"}`)
 	out = callMemory(t, read, tc, `{"target":"memory"}`)
-	if !strings.HasPrefix(out.Output, "memory 49/4000 characters, 2 entries\n1. Owner uses fish shell\n2. Server kenari") {
+	if !strings.HasPrefix(out.Output, "memory 49/32000 characters, 2 entries\nm1: Owner uses fish shell\nm2: Server kenari") {
 		t.Fatalf("read = %q", out.Output)
 	}
 	out = callMemory(t, write, tc, `{"target":"memory","action":"replace","content":"x","old_text":"s"}`)
@@ -83,11 +84,117 @@ func TestMemoryUserWritesSharedFileCoversACMEM009(t *testing.T) {
 		t.Fatalf("shared USER.md = %q", data)
 	}
 	out = callMemory(t, NewMemoryRead(), tc, `{"target":"user"}`)
-	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "1. Name: Ridho") {
+	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "m1: Name: Ridho") {
 		t.Fatalf("read user = %+v", out)
 	}
 	if _, err := os.Stat(filepath.Join(home, "agents", "worker", "USER.md")); !os.IsNotExist(err) {
 		t.Fatalf("per-agent USER.md must not be created: %v", err)
+	}
+}
+
+// REQ-ECX-023: memory_read returns every entry by default, those asked by ids
+// in full, and up to 10 ranked entries for a query. REQ-ECX-021: every entry
+// carries its m<n> id.
+func TestMemoryReadQueryIDsAndDefault(t *testing.T) {
+	home := t.TempDir()
+	tc := core.ToolCtx{AgentName: "worker", Home: home}
+	entries := []string{
+		"Kenari alpha", "Beta gamma", "Delta epsilon", "Zeta theta", "Iota kappa",
+		"Lambda mu", "Nu xi", "Omicron pi", "Rho sigma", "Tau upsilon",
+	}
+	if err := agenthome.WriteFile(filepath.Join(home, "agents", "worker", "MEMORY.md"), agenthome.Join(entries)); err != nil {
+		t.Fatal(err)
+	}
+	read := NewMemoryRead()
+
+	out := callMemory(t, read, tc, `{"target":"memory"}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("default read = %+v", out)
+	}
+	for i, entry := range entries {
+		if !strings.Contains(out.Output, fmt.Sprintf("\nm%d: %s", i+1, entry)) {
+			t.Fatalf("default read lacks m%d (%q):\n%s", i+1, entry, out.Output)
+		}
+	}
+
+	out = callMemory(t, read, tc, `{"target":"memory","query":"kenari beta"}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("query = %+v", out)
+	}
+	if !strings.Contains(out.Output, "m1: Kenari alpha") || !strings.Contains(out.Output, "m2: Beta gamma") {
+		t.Fatalf("query result lacks the matching ids:\n%s", out.Output)
+	}
+	if strings.Index(out.Output, "m1:") > strings.Index(out.Output, "m2:") {
+		t.Fatalf("query result is not best first:\n%s", out.Output)
+	}
+	if strings.Contains(out.Output, "m3:") {
+		t.Fatalf("query returned an entry below the minimum:\n%s", out.Output)
+	}
+
+	out = callMemory(t, read, tc, `{"target":"memory","ids":["m4",2]}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("ids = %+v", out)
+	}
+	if !strings.Contains(out.Output, "m4: Zeta theta") || !strings.Contains(out.Output, "m2: Beta gamma") {
+		t.Fatalf("ids result lacks requested entries:\n%s", out.Output)
+	}
+	if strings.Contains(out.Output, "m1:") || strings.Contains(out.Output, "m3:") {
+		t.Fatalf("ids result returned unrequested entries:\n%s", out.Output)
+	}
+
+	out = callMemory(t, read, tc, `{"target":"memory","ids":["m99"]}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "m99") {
+		t.Fatalf("out-of-range id = %+v", out)
+	}
+	out = callMemory(t, read, tc, `{"target":"memory","ids":["nope"]}`)
+	if out.Status != core.ToolStatusError || !strings.HasPrefix(out.Output, "invalid input:") {
+		t.Fatalf("bad id = %+v", out)
+	}
+}
+
+func TestMemoryReadQueryCapsAtTen(t *testing.T) {
+	home := t.TempDir()
+	tc := core.ToolCtx{AgentName: "worker", Home: home}
+	entries := make([]string, 12)
+	query := make([]string, 0, 11)
+	for i := range entries {
+		entries[i] = fmt.Sprintf("needle%02d first", i+1)
+		if i < 11 {
+			query = append(query, fmt.Sprintf("needle%02d", i+1))
+		}
+	}
+	if err := agenthome.WriteFile(filepath.Join(home, "agents", "worker", "MEMORY.md"), agenthome.Join(entries)); err != nil {
+		t.Fatal(err)
+	}
+	out := callMemory(t, NewMemoryRead(), tc, `{"target":"memory","query":"`+strings.Join(query, " ")+`"}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("query = %+v", out)
+	}
+	matches := 0
+	for _, line := range strings.Split(out.Output, "\n") {
+		if strings.HasPrefix(line, "m") && !strings.HasPrefix(line, "memory ") {
+			matches++
+		}
+	}
+	if matches != 10 {
+		t.Fatalf("query returned %d entries, want 10:\n%s", matches, out.Output)
+	}
+}
+
+// Every memory_read input carries a property description.
+func TestMemoryReadSpecDescribesInputs(t *testing.T) {
+	var schema struct {
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(NewMemoryRead().Spec().InputSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"target", "query", "ids"} {
+		if strings.TrimSpace(schema.Properties[name].Description) == "" {
+			t.Fatalf("%s has no property description", name)
+		}
 	}
 }
 

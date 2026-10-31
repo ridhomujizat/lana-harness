@@ -17,7 +17,7 @@ import (
 // Size limits in Unicode code points.
 const (
 	UserLimit   = 2000
-	MemoryLimit = 4000
+	MemoryLimit = 32000
 )
 
 // Separator is the line that separates entries.

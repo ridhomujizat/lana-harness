@@ -34,6 +34,9 @@ type PromptInput struct {
 	Channel        string
 	Workspace      string
 	UnavailableMCP map[string]string
+	// RelevantMemory holds the formatted "m<n>: <entry>" lines of the entries
+	// picked for this turn's first user message (REQ-ECX-024).
+	RelevantMemory []string
 	// Jobs is the background-jobs context line, empty when the session has no
 	// jobs (REQ-JOB-017).
 	Jobs string
@@ -86,7 +89,8 @@ func BuildSections(in PromptInput) []Section {
 		sections = append(sections, Section{Name: SectionUser, Text: "# About the user\n" + section(in.User, UserLimit)})
 	}
 	if len(in.Memory) > 0 {
-		sections = append(sections, Section{Name: SectionMemory, Text: "# Your memory\n" + section(in.Memory, MemoryLimit)})
+		text, _ := MemoryView(in.Memory)
+		sections = append(sections, Section{Name: SectionMemory, Text: "# Your memory\n" + text})
 	}
 	if len(in.Skills) > 0 {
 		lines := []string{"# Skills"}
@@ -146,12 +150,18 @@ func Build(in PromptInput) string {
 	return strings.Join(texts, "\n\n")
 }
 
-// ContextBlock renders the volatile per-turn context: the date, the
-// unavailable MCP servers, and the background jobs (REQ-LTC-001, REQ-JOB-017).
-// It is added to the first user message of a turn so the head prompt stays
-// byte-stable.
+// ContextBlock renders the volatile per-turn context: the date, the relevant
+// memory, the unavailable MCP servers, and the background jobs (REQ-LTC-001,
+// REQ-ECX-024, REQ-JOB-017). It is added to the first user message of a turn so
+// the head prompt stays byte-stable.
 func ContextBlock(in PromptInput) string {
 	lines := []string{"<context>", "date: " + stamp(in)}
+	if len(in.RelevantMemory) > 0 {
+		lines = append(lines, "relevant memory:")
+		for _, entry := range in.RelevantMemory {
+			lines = append(lines, "- "+entry)
+		}
+	}
 	if line := unavailableMCPLine(in.UnavailableMCP); line != "" {
 		lines = append(lines, line)
 	}
