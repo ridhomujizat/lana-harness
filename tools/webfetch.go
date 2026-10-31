@@ -23,7 +23,11 @@ const webFetchLimit = 5 << 20
 
 var webFetchTimeout = 30 * time.Second
 
-var webFetchSpec = json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","format":"uri","pattern":"^https?://"}},"required":["url"],"additionalProperties":false}`)
+var webFetchSpec = json.RawMessage(`{"type":"object","properties":{"url":{"type":"string","format":"uri","pattern":"^https?://","description":"HTTP or HTTPS URL to fetch."}},"required":["url"],"additionalProperties":false}`)
+
+// webFetchDescription explains what web_fetch returns and its main limits.
+const webFetchDescription = "Fetches an HTTP or HTTPS URL and returns its content as text: HTML is converted to Markdown, and text/plain or application/json is returned raw. " +
+	"Times out after 30 seconds, rejects responses over 5 MiB and non-text content types, and follows at most 5 redirects."
 
 type webFetchTool struct{ guard *Guard }
 
@@ -31,7 +35,7 @@ type webFetchTool struct{ guard *Guard }
 func NewWebFetch(guard *Guard) core.Tool { return &webFetchTool{guard: guard} }
 
 func (t *webFetchTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "web_fetch", Description: "Fetches a URL and returns its content as text.", InputSchema: webFetchSpec}
+	return core.ToolSpec{Name: "web_fetch", Description: webFetchDescription, InputSchema: webFetchSpec}
 }
 func (t *webFetchTool) Risk(json.RawMessage) core.Risk { return core.RiskNetwork }
 

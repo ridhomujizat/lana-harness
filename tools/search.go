@@ -19,8 +19,15 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-var globSpec = json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","minLength":1},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)
-var grepSpec = json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","minLength":1},"path":{"type":"string"},"glob":{"type":"string"}},"required":["pattern"],"additionalProperties":false}`)
+const (
+	globDescription = "Finds files whose workspace-relative paths match a glob pattern. This replaces `find` and `ls -R` in bash. " +
+		"Returns at most 1000 paths; refine the pattern or `path` when there are more."
+	grepDescription = "Searches file contents with an RE2 regular expression and returns `path:line: text`. This replaces `grep` and `rg` in bash. " +
+		"Skips binary files and files over 1 MiB, ignores `.gitignore` matches, and returns at most 200 matches."
+)
+
+var globSpec = json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","minLength":1,"description":"Glob pattern, for example **/*.go."},"path":{"type":"string","description":"Directory to search, relative to the workspace. Defaults to the workspace root."}},"required":["pattern"],"additionalProperties":false}`)
+var grepSpec = json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","minLength":1,"description":"RE2 regular expression to search for."},"path":{"type":"string","description":"File or directory to search. Defaults to the workspace root."},"glob":{"type":"string","description":"Only search files whose workspace-relative path matches this glob."}},"required":["pattern"],"additionalProperties":false}`)
 
 type globTool struct{ guard *Guard }
 
@@ -28,7 +35,7 @@ type globTool struct{ guard *Guard }
 func NewGlob(guard *Guard) core.Tool { return &globTool{guard: guard} }
 
 func (t *globTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "glob", Description: "Finds paths matching a glob pattern in the workspace.", InputSchema: globSpec}
+	return core.ToolSpec{Name: "glob", Description: globDescription, InputSchema: globSpec}
 }
 func (t *globTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 
@@ -112,7 +119,7 @@ type grepTool struct{ guard *Guard }
 func NewGrep(guard *Guard) core.Tool { return &grepTool{guard: guard} }
 
 func (t *grepTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "grep", Description: "Searches text with an RE2 regex in the workspace.", InputSchema: grepSpec}
+	return core.ToolSpec{Name: "grep", Description: grepDescription, InputSchema: grepSpec}
 }
 func (t *grepTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 
