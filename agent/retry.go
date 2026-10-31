@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -12,11 +13,27 @@ import (
 type Retry struct {
 	Store  core.SessionStore
 	Delays []time.Duration
+	// Jitter scales each computed delay; it returns a value in [0.8, 1.2].
+	// Defaults to a random factor and is set to a constant in tests.
+	Jitter func() float64
+	// Sleep performs one backoff wait. Tests replace it to record delays
+	// instead of spending wall-clock time.
+	Sleep func(context.Context, time.Duration) error
 }
+
+// maxRetries is the number of retries per target.
+const maxRetries = 5
+
+// maxRetryAfter caps a provider-requested wait.
+const maxRetryAfter = 120 * time.Second
 
 // NewRetry creates a retry listener.
 func NewRetry(store core.SessionStore) *Retry {
-	return &Retry{Store: store, Delays: []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}}
+	return &Retry{
+		Store:  store,
+		Delays: []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second},
+		Jitter: randomJitter,
+	}
 }
 
 // Install installs the retry listener.
@@ -53,16 +70,16 @@ func (r *Retry) handle(ctx context.Context, in core.LLMStreamInput, next core.Ne
 			if !retryable(pe.Class) {
 				return nil, lastErr
 			}
-			if attempt > 3 {
+			if attempt > maxRetries {
 				break
 			}
 			delay := r.Delays[min(len(r.Delays), attempt)-1]
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, ctx.Err()
-			case <-timer.C:
+			delay = jitteredDelay(delay, r.Jitter)
+			if pe.RetryAfter > 0 {
+				delay = min(pe.RetryAfter, maxRetryAfter)
+			}
+			if err := r.sleep(ctx, delay); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -74,6 +91,34 @@ func (r *Retry) handle(ctx context.Context, in core.LLMStreamInput, next core.Ne
 
 func retryable(class string) bool {
 	return class == "rate_limit" || class == "server" || class == "network"
+}
+
+// randomJitter returns a factor in [0.8, 1.2].
+func randomJitter() float64 {
+	return 0.8 + rand.Float64()*0.4 //nolint:gosec // backoff jitter is not security sensitive
+}
+
+// jitteredDelay scales a delay by the jitter factor.
+func jitteredDelay(delay time.Duration, jitter func() float64) time.Duration {
+	factor := 1.0
+	if jitter != nil {
+		factor = jitter()
+	}
+	return time.Duration(float64(delay) * factor)
+}
+
+func (r *Retry) sleep(ctx context.Context, delay time.Duration) error {
+	if r.Sleep != nil {
+		return r.Sleep(ctx, delay)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func asProviderError(err error) *core.ProviderError {

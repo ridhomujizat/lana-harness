@@ -61,6 +61,7 @@ type Registry struct {
 	mcp        mcpAdmin
 	hooks      *core.Hooks
 	questions  core.QuestionService
+	compaction core.Compactor
 	config     core.Config
 	secrets    core.Secrets
 	home       string
@@ -144,6 +145,13 @@ func (r *Registry) SetMCP(m core.MCPManager) {
 	r.mcpCanAdmin = false
 }
 
+// SetCompactor installs the compaction service used by turns. It is set at
+// boot, before any turn starts; a nil service disables compaction.
+func (r *Registry) SetCompactor(c core.Compactor) { r.compaction = c }
+
+// compactor returns the compaction service, or nil when none is installed.
+func (r *Registry) compactor() core.Compactor { return r.compaction }
+
 // mcpManager returns the installed MCP manager, or nil when none is set.
 func (r *Registry) mcpManager() core.MCPManager {
 	r.mcpMu.Lock()
@@ -191,6 +199,17 @@ func (r *Registry) configSnapshot() (map[string]core.AgentConfig, map[string]cor
 	r.cfgMu.RLock()
 	defer r.cfgMu.RUnlock()
 	return r.config.Agents, r.config.Teams
+}
+
+// AgentConfig returns the live config of one agent and whether it exists.
+// ApplyConfig replaces the map, so this reads the current snapshot; the
+// compaction service uses it so context_window and compaction_* edits apply
+// without a restart (REQ-LTC-011).
+func (r *Registry) AgentConfig(name string) (core.AgentConfig, bool) {
+	r.cfgMu.RLock()
+	defer r.cfgMu.RUnlock()
+	agent, ok := r.config.Agents[name]
+	return agent, ok
 }
 
 // providersConfig returns the loaded provider map for validation lookups.

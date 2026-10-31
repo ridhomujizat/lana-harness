@@ -3,12 +3,18 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/spill"
 	"github.com/ridhomujizat/lana-harness/tools"
 )
 
@@ -207,5 +213,140 @@ func TestTaskApprovalsSequential(t *testing.T) {
 	}
 	if got := runner.unapproved.Load(); got != 0 {
 		t.Fatalf("%d task calls started before their approval", got)
+	}
+}
+
+// newSpillToolRunner builds a ToolRunner with the real bash and read_file tools
+// and allows every call, so a test can drive the spill policy.
+func newSpillToolRunner(t *testing.T) *ToolRunner {
+	t.Helper()
+	hooks := core.NewHooks()
+	tools.NewPipeline(hooks)
+	registry := tools.NewRegistry()
+	for _, tool := range []core.Tool{tools.NewBash(&tools.Guard{}), tools.NewReadFile(&tools.Guard{})} {
+		if err := registry.Register(tool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hooks.ToolsPreExecute.SetDefault(func(context.Context, core.ToolsPreExecuteInput) (core.ToolDecision, error) {
+		return core.ToolDecision{Allowed: true}, nil
+	})
+	return NewToolRunner(hooks, registry)
+}
+
+// spillPathFromNotice extracts the saved-file path from a spill notice.
+func spillPathFromNotice(t *testing.T, out string) string {
+	t.Helper()
+	const marker = "Full output stored at: "
+	i := strings.Index(out, marker)
+	if i < 0 {
+		t.Fatalf("notice missing: %q", out)
+	}
+	rest := out[i+len(marker):]
+	j := strings.Index(rest, ". Use read_file")
+	if j < 0 {
+		t.Fatalf("notice path terminator missing: %q", out)
+	}
+	return rest[:j]
+}
+
+func TestBashOutputSpilled(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	home := t.TempDir()
+	ws := t.TempDir()
+	calls := []core.ToolCall{{CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"yes a | head -c 100000"}`)}}
+
+	out := tr.Run(context.Background(), calls, []string{"bash"}, core.ToolCtx{SessionID: "s1", Home: home, Workspace: ws})[0]
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("out=%+v", out)
+	}
+	if got := utf8.RuneCountInString(out.Output); got > 16000 {
+		t.Fatalf("inline runes=%d want <= 16000", got)
+	}
+	if !strings.Contains(out.Output, "(Omitted ") || !strings.Contains(out.Output, "Full output stored at: ") {
+		t.Fatalf("notice missing: %q", out.Output)
+	}
+
+	path := spillPathFromNotice(t, out.Output)
+	wantDir := spill.SessionDir(filepath.Join(home, "spill"), "s1")
+	if filepath.Dir(path) != wantDir {
+		t.Fatalf("path=%q want dir %q", path, wantDir)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 100000 {
+		t.Fatalf("spilled bytes=%d want 100000", len(data))
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fileInfo.Mode().Perm(); got != 0o600 {
+		t.Fatalf("file mode=%o want 600", got)
+	}
+	dirInfo, err := os.Stat(wantDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("dir mode=%o want 700", got)
+	}
+}
+
+// failingStore makes the save path report a storage failure.
+type failingStore struct{}
+
+func (failingStore) Save(string, string, string, string) (string, error) {
+	return "", errors.New("disk full")
+}
+
+func TestSpillSaveFailureKeepsOutput(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	tr.store = failingStore{}
+	ws := t.TempDir()
+	calls := []core.ToolCall{{CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"yes a | head -c 100000"}`)}}
+
+	out := tr.Run(context.Background(), calls, []string{"bash"}, core.ToolCtx{SessionID: "s1", Home: t.TempDir(), Workspace: ws})[0]
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("out=%+v", out)
+	}
+	if strings.Contains(out.Output, "Full output stored at:") {
+		t.Fatalf("output was spilled despite the save failure")
+	}
+	if got := utf8.RuneCountInString(out.Output); got != 100000 {
+		t.Fatalf("inline runes=%d want the original 100000", got)
+	}
+}
+
+func TestReadFileOutputNotSpilled(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "big.txt"), []byte(strings.Repeat("z", 20000)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls := []core.ToolCall{{CallID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"big.txt"}`)}}
+
+	out := tr.Run(context.Background(), calls, []string{"read_file"}, core.ToolCtx{SessionID: "s1", Home: t.TempDir(), Workspace: ws})[0]
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("out=%+v", out)
+	}
+	if strings.Contains(out.Output, "Full output stored at:") {
+		t.Fatalf("read_file output was spilled")
+	}
+	if got := utf8.RuneCountInString(out.Output); got != 20000 {
+		t.Fatalf("inline runes=%d want 20000", got)
+	}
+}
+
+func TestSpillPreviewKeepsRunes(t *testing.T) {
+	text := strings.Repeat("é", 20000)
+	got := spillPreview(text, "/tmp/spill/example.txt")
+	if count := utf8.RuneCountInString(got); count > inlineRunes {
+		t.Fatalf("runes=%d want <= %d", count, inlineRunes)
+	}
+	if strings.ContainsRune(got, '\uFFFD') {
+		t.Fatalf("preview split a rune")
 	}
 }

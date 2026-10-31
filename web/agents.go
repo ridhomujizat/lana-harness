@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -33,21 +34,24 @@ var agentNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 // agentKeys are the keys a PUT /v1/agents/{name} body may carry. They match
 // the [agents.<name>] table of core.AgentConfig.
 var agentKeys = map[string]bool{
-	"provider":       true,
-	"model":          true,
-	"fallback":       true,
-	"prompt_file":    true,
-	"workspace":      true,
-	"tools":          true,
-	"disabled_tools": true,
-	"subagents":      true,
-	"mcp":            true,
-	"skills":         true,
-	"permission":     true,
-	"max_steps":      true,
-	"context_window": true,
-	"description":    true,
-	"rules":          true,
+	"provider":             true,
+	"model":                true,
+	"fallback":             true,
+	"prompt_file":          true,
+	"workspace":            true,
+	"tools":                true,
+	"disabled_tools":       true,
+	"subagents":            true,
+	"mcp":                  true,
+	"skills":               true,
+	"permission":           true,
+	"max_steps":            true,
+	"context_window":       true,
+	"compaction_headroom":  true,
+	"compaction_threshold": true,
+	"compaction_retain":    true,
+	"description":          true,
+	"rules":                true,
 }
 
 // putAgentKeys are the fields accepted by PUT /v1/agents/{name}.
@@ -126,21 +130,24 @@ type putAgentResponse struct {
 // agentRecord is the [agents.<name>] table as a form can edit it. Empty values
 // are omitted when the table is rendered.
 type agentRecord struct {
-	Provider      string
-	Model         string
-	Fallback      []string
-	PromptFile    string
-	Workspace     string
-	Tools         []string
-	DisabledTools []string
-	Subagents     []string
-	MCP           []string
-	Skills        []string
-	Permission    string
-	MaxSteps      int
-	ContextWindow int
-	Description   string
-	Rules         agentRules
+	Provider            string
+	Model               string
+	Fallback            []string
+	PromptFile          string
+	Workspace           string
+	Tools               []string
+	DisabledTools       []string
+	Subagents           []string
+	MCP                 []string
+	Skills              []string
+	Permission          string
+	MaxSteps            int
+	ContextWindow       int
+	CompactionHeadroom  int
+	CompactionThreshold float64
+	CompactionRetain    float64
+	Description         string
+	Rules               agentRules
 }
 
 type agentRules struct {
@@ -814,8 +821,10 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return err
 		}
-		if value < 1 || value > 200 {
-			return errors.New("max_steps must be between 1 and 200")
+		// REQ-LTC-040: max_steps is opt-in; 0 means no limit and there is no
+		// upper bound.
+		if value < 0 {
+			return errors.New("max_steps must be 0 or greater")
 		}
 		record.MaxSteps = value
 		return nil
@@ -828,6 +837,30 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 			return errors.New("context_window must be greater than 0")
 		}
 		record.ContextWindow = value
+		return nil
+	case "compaction_headroom":
+		var value int
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if value <= 0 {
+			return errors.New("compaction_headroom must be greater than 0")
+		}
+		record.CompactionHeadroom = value
+		return nil
+	case "compaction_threshold", "compaction_retain":
+		var value float64
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if value <= 0 || value >= 1 {
+			return errors.New(key + " must be between 0 and 1")
+		}
+		if key == "compaction_threshold" {
+			record.CompactionThreshold = value
+		} else {
+			record.CompactionRetain = value
+		}
 		return nil
 	case "description":
 		var value string
@@ -966,20 +999,23 @@ func defaultAgentRecord(tables map[string]map[string]any) agentRecord {
 
 func agentRecordFromMap(table map[string]any) agentRecord {
 	record := agentRecord{
-		Provider:      mapAgentString(table, "provider"),
-		Model:         mapAgentString(table, "model"),
-		Fallback:      mapAgentStrings(table, "fallback"),
-		PromptFile:    mapAgentString(table, "prompt_file"),
-		Workspace:     mapAgentString(table, "workspace"),
-		Tools:         mapAgentStrings(table, "tools"),
-		DisabledTools: mapAgentStrings(table, "disabled_tools"),
-		Subagents:     mapAgentStrings(table, "subagents"),
-		MCP:           mapAgentStrings(table, "mcp"),
-		Skills:        mapAgentStrings(table, "skills"),
-		Permission:    mapAgentString(table, "permission"),
-		MaxSteps:      mapAgentInt(table, "max_steps"),
-		ContextWindow: mapAgentInt(table, "context_window"),
-		Description:   mapAgentString(table, "description"),
+		Provider:            mapAgentString(table, "provider"),
+		Model:               mapAgentString(table, "model"),
+		Fallback:            mapAgentStrings(table, "fallback"),
+		PromptFile:          mapAgentString(table, "prompt_file"),
+		Workspace:           mapAgentString(table, "workspace"),
+		Tools:               mapAgentStrings(table, "tools"),
+		DisabledTools:       mapAgentStrings(table, "disabled_tools"),
+		Subagents:           mapAgentStrings(table, "subagents"),
+		MCP:                 mapAgentStrings(table, "mcp"),
+		Skills:              mapAgentStrings(table, "skills"),
+		Permission:          mapAgentString(table, "permission"),
+		MaxSteps:            mapAgentInt(table, "max_steps"),
+		ContextWindow:       mapAgentInt(table, "context_window"),
+		CompactionHeadroom:  mapAgentInt(table, "compaction_headroom"),
+		CompactionThreshold: mapAgentFloat(table, "compaction_threshold"),
+		CompactionRetain:    mapAgentFloat(table, "compaction_retain"),
+		Description:         mapAgentString(table, "description"),
 	}
 	if rules, ok := table["rules"].(map[string]any); ok {
 		record.Rules = agentRules{
@@ -1020,6 +1056,19 @@ func mapAgentInt(table map[string]any, key string) int {
 	}
 }
 
+func mapAgentFloat(table map[string]any, key string) float64 {
+	switch value := table[key].(type) {
+	case float64:
+		return value
+	case int64:
+		return float64(value)
+	case int:
+		return float64(value)
+	default:
+		return 0
+	}
+}
+
 func renderAgentTable(name string, record agentRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[agents.%s]\n", name)
@@ -1036,6 +1085,9 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentString(&b, "permission", record.Permission)
 	writeAgentInt(&b, "max_steps", record.MaxSteps)
 	writeAgentInt(&b, "context_window", record.ContextWindow)
+	writeAgentInt(&b, "compaction_headroom", record.CompactionHeadroom)
+	writeAgentFloat(&b, "compaction_threshold", record.CompactionThreshold)
+	writeAgentFloat(&b, "compaction_retain", record.CompactionRetain)
 	writeAgentString(&b, "description", record.Description)
 	if len(record.Rules.Allow) > 0 || len(record.Rules.Deny) > 0 {
 		parts := make([]string, 0, 2)
@@ -1069,6 +1121,13 @@ func writeAgentInt(b *strings.Builder, key string, value int) {
 		return
 	}
 	fmt.Fprintf(b, "%s = %d\n", key, value)
+}
+
+func writeAgentFloat(b *strings.Builder, key string, value float64) {
+	if value == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s = %s\n", key, strconv.FormatFloat(value, 'g', -1, 64))
 }
 
 func agentStringArray(values []string) string {

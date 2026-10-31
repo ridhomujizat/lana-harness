@@ -218,15 +218,13 @@ function dirtyKeys(
 }
 
 function validateForm(form: AgentForm, baseline: AgentValues): string {
+  /* REQ-LTC-040: an empty max_steps means no limit; any whole number of 0 or
+     more caps the turn. */
   const stepsText = String(form.max_steps || "").trim();
-  if (stepsText === "") {
-    if (baseline.max_steps > 0) {
-      return "Enter max steps per turn, between 1 and 200.";
-    }
-  } else {
+  if (stepsText !== "") {
     const steps = Number(stepsText);
-    if (!Number.isInteger(steps) || steps < 1 || steps > 200) {
-      return "Max steps per turn must be a whole number from 1 to 200.";
+    if (!Number.isInteger(steps) || steps < 0) {
+      return "Max steps per turn must be a whole number of 0 or more, or empty for no limit.";
     }
   }
 
@@ -1162,7 +1160,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
             >
               <div className="agent-form-copy">
                 <h2 id="agent-limits-title">Limits</h2>
-                <p>How long one turn can run.</p>
+                <p>How long one turn can run. Leave max steps empty for no limit.</p>
               </div>
               <div className="agent-form-controls">
                 <div className="agent-form-row">
@@ -1177,12 +1175,11 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                       id="agent-max-steps"
                       className="agent-number-input"
                       type="number"
-                      min="1"
-                      max="200"
+                      min="0"
                       step="1"
                       inputMode="numeric"
                       value={form.max_steps}
-                      placeholder="Default"
+                      placeholder="No limit"
                       disabled={saving}
                       onChange={(event) =>
                         updateField("max_steps", event.target.value)

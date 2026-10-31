@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +40,14 @@ func (rn *Runner) popInbox() (string, bool) {
 	text := rn.inbox[0]
 	rn.inbox = rn.inbox[1:]
 	return text, true
+}
+
+// pushFrontInbox returns text to the front of the inbox, so a message the step
+// cap took but did not use still starts the next turn.
+func (rn *Runner) pushFrontInbox(text string) {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	rn.inbox = append([]string{text}, rn.inbox...)
 }
 
 func (rn *Runner) runChain(ctx context.Context, initial, turnID, continueReason string) {
@@ -111,7 +121,6 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		return resolvedAgent{}, err
 	}
 	agentName := info.Agent
-	child := info.ParentSessionID != ""
 	var selection core.ModelSelection
 	hasSelection := false
 	for _, event := range chain {
@@ -164,13 +173,9 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if err != nil {
 		return resolvedAgent{}, err
 	}
+	// REQ-LTC-040: max_steps is opt-in; 0 means no limit for root and child
+	// sessions alike.
 	maxSteps := cfg.MaxSteps
-	if maxSteps == 0 {
-		maxSteps = 25
-		if child {
-			maxSteps = 15
-		}
-	}
 	fallback, err := parseFallback(cfg.Fallback)
 	if err != nil {
 		return resolvedAgent{}, err
@@ -286,11 +291,20 @@ func (rn *Runner) promptPath(res resolvedAgent) (string, error) {
 	return path, nil
 }
 
+// promptBuild is the result of building one turn's prompt: the full head text,
+// its named sections for diffing, and the <context> block for the first user
+// message.
+type promptBuild struct {
+	text     string
+	sections []core.PromptSection
+	context  string
+}
+
 // buildPrompt assembles the system prompt from the persona, the agent home files, the skills, and the runtime context.
-func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string) (string, error) {
+func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, memoryCapture bool) (promptBuild, error) {
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
-		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable,
+		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, MemoryCapture: memoryCapture,
 	}
 	var home agenthome.Home
 	if rn.reg.home != "" {
@@ -298,12 +312,12 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	}
 	path, err := rn.promptPath(res)
 	if err != nil {
-		return "", err
+		return promptBuild{}, err
 	}
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return "", fmt.Errorf("prompt_file: %w", err)
+			return promptBuild{}, fmt.Errorf("prompt_file: %w", err)
 		}
 		in.Persona = string(data)
 	} else if home.Agent != "" {
@@ -322,25 +336,108 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		}
 	}
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
-	return agenthome.Build(in), nil
+	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
 }
 
-func (rn *Runner) lastSystemText(ctx context.Context) (string, error) {
+// promptSections converts the agenthome sections to their core form.
+func promptSections(in agenthome.PromptInput) []core.PromptSection {
+	built := agenthome.BuildSections(in)
+	out := make([]core.PromptSection, 0, len(built))
+	for _, section := range built {
+		out = append(out, core.PromptSection{Name: section.Name, Text: section.Text})
+	}
+	return out
+}
+
+// promptHead is the stable prefix of a session's requests: the latest
+// system/message, its section set, and whether a compaction landed after it
+// (REQ-LTC-002).
+type promptHead struct {
+	exists    bool
+	text      string
+	compacted bool
+	effective []core.PromptSection
+}
+
+// promptHead reads the head and the effective sections (the head sections
+// overlaid with every PromptSections stored on a later user/message).
+func (rn *Runner) promptHead(ctx context.Context) (promptHead, error) {
 	chain, err := rn.reg.store.ChainEvents(ctx, rn.sessionID)
 	if err != nil {
-		return "", err
+		return promptHead{}, err
 	}
-	for i := len(chain) - 1; i >= 0; i-- {
-		if chain[i].Kind != core.KindSystemMessage {
+	head := promptHead{}
+	for _, event := range chain {
+		switch event.Kind {
+		case core.KindSystemMessage:
+			var payload core.SystemMessage
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return promptHead{}, err
+			}
+			head.exists = true
+			head.text = payload.Text
+			head.compacted = false
+			head.effective = append([]core.PromptSection(nil), payload.Sections...)
+		case core.KindCompactionSummary:
+			head.compacted = true
+		case core.KindUserMessage:
+			var payload core.UserMessage
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return promptHead{}, err
+			}
+			if len(payload.PromptSections) > 0 {
+				head.effective = append([]core.PromptSection(nil), payload.PromptSections...)
+			}
+		}
+	}
+	return head, nil
+}
+
+// systemUpdate renders the <system-update> block for the sections that changed
+// or were removed since the head. It returns "" when nothing changed
+// (REQ-LTC-002).
+func systemUpdate(next, prev []core.PromptSection) string {
+	prevByName := make(map[string]string, len(prev))
+	order := make([]string, 0, len(prev))
+	for _, section := range prev {
+		if _, ok := prevByName[section.Name]; !ok {
+			order = append(order, section.Name)
+		}
+		prevByName[section.Name] = section.Text
+	}
+	nextSeen := make(map[string]bool, len(next))
+	changed := []string{}
+	for _, section := range next {
+		nextSeen[section.Name] = true
+		if prevByName[section.Name] != section.Text {
+			changed = append(changed, section.Text)
+		}
+	}
+	for _, name := range order {
+		if nextSeen[name] {
 			continue
 		}
-		var payload core.SystemMessage
-		if err := json.Unmarshal(chain[i].Payload, &payload); err != nil {
-			return "", err
-		}
-		return payload.Text, nil
+		changed = append(changed, removedHeading(prevByName[name]))
 	}
-	return "", nil
+	if len(changed) == 0 {
+		return ""
+	}
+	lines := []string{
+		"<system-update>",
+		"The following sections of your instructions changed. They replace the earlier versions.",
+	}
+	lines = append(lines, changed...)
+	lines = append(lines, "</system-update>")
+	return strings.Join(lines, "\n")
+}
+
+// removedHeading names a section that is no longer present: its heading when it
+// has one, else its first line.
+func removedHeading(text string) string {
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = text[:i]
+	}
+	return text
 }
 
 func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason string) (result TurnResult) {
@@ -364,6 +461,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	toolCalls := 0
 	lastAssistantText := ""
 	guarded := false
+	// toolCallTextNudges counts the malformed tool-call nudges done this turn
+	// (REQ-MEM-020); at most maxToolCallTextNudges per turn.
+	toolCallTextNudges := 0
+	// budgetReport marks the final, tool-free report step that a configured
+	// step cap adds before the turn ends (REQ-LTC-040).
+	budgetReport := false
 	prompt := ""
 	promptBuilt := false
 	turnTools := []string{}
@@ -371,6 +474,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	for {
 		claimedText := ""
 		claimed := false
+		// runtimeNote marks the claimed text as a note lana wrote itself, not
+		// an owner message (REQ-MEM-021). It is reset every step.
+		runtimeNote := false
+		// inboxClaim marks the claimed text as a message popInbox took from the
+		// inbox, so the step cap can hand it to the next turn instead of losing
+		// it (REQ-LTC-040).
+		inboxClaim := false
 		// continueMsg marks the claimed message as a continue payload.
 		continueMsg := false
 		switch {
@@ -381,22 +491,34 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			continueMsg = continueReason != ""
 		case pendingTools:
 			claimedText, claimed = rn.popInbox()
+			inboxClaim = claimed
 		case continueNext:
 			continueNext = false
 			claimedText, claimed = rn.popInbox()
+			inboxClaim = claimed
 		default:
 			var ok bool
 			claimedText, ok = rn.popInbox()
 			if !ok {
-				// REQ-TFB-008 item 4: a turn that would end with end_turn
-				// after a tool call but with no text in its last assistant
-				// message runs exactly one more step asking for a report.
-				if !guarded && toolCalls > 0 && lastAssistantText == "" {
+				// REQ-MEM-020: a reply that wrote a tool call as plain text
+				// ran nothing. Nudge it to use the native interface, at most
+				// maxToolCallTextNudges times per turn.
+				if toolCallTextNudges < maxToolCallTextNudges && looksLikeToolCallText(lastAssistantText) {
+					toolCallTextNudges++
+					claimedText = toolCallTextNote
+					runtimeNote = true
+				} else if !guarded && toolCalls > 0 && lastAssistantText == "" {
+					// REQ-TFB-008 item 4: a turn that would end with end_turn
+					// after a tool call but with no text in its last assistant
+					// message runs exactly one more step asking for a report.
 					guarded = true
 					claimedText = emptyAnswerNote
+					runtimeNote = true
 				} else {
 					goto finished
 				}
+			} else {
+				inboxClaim = true
 			}
 			claimed = true
 		}
@@ -437,10 +559,29 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 			}
 		}
-		if steps >= resolved.maxSteps {
-			reason = "max_steps"
-			goto finished
+		// REQ-LTC-040: a positive cap runs one final step without tools that
+		// asks for a status report, then the turn ends with reason max_steps.
+		if resolved.maxSteps > 0 && steps >= resolved.maxSteps {
+			// A message popInbox already claimed stays for the next turn; the
+			// cap replaces the model input, not the owner's queued message.
+			if inboxClaim {
+				rn.pushFrontInbox(claimedText)
+			}
+			if budgetReport {
+				reason = "max_steps"
+				goto finished
+			}
+			budgetReport = true
+			claimed = true
+			runtimeNote = true
+			claimedText = stepLimitNote
+			inputMsg = core.Message{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: stepLimitNote}}}
 		}
+		var storedSections []core.PromptSection
+		// contextBlocks is the number of leading content blocks lana injects
+		// into the turn's first user message; it is recorded on the stored
+		// payload so display surfaces can hide them (REQ-LTC-001).
+		contextBlocks := 0
 		if !promptBuilt {
 			turnTools = append(turnTools, resolved.tools...)
 			var unavailable map[string]string
@@ -476,29 +617,48 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			// after the built-in, MCP, skill, and team tools are collected so a
 			// disabled team or skill tool is removed as well (AC-WEB-049, Q-024).
 			turnTools = filterDisabledTools(turnTools, resolved.disabled)
-			prompt, err = rn.buildPrompt(resolved, skills, unavailable)
+			// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
+			sort.Strings(turnTools)
+			built, err := rn.buildPrompt(resolved, skills, unavailable, containsString(turnTools, "memory_write"))
 			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"
 				goto finished
 			}
-			promptBuilt = true
-		}
-		previousSystem, err := rn.lastSystemText(ctx)
-		if err != nil {
-			runErr = runtimeError(err)
-			reason = "error"
-			goto finished
-		}
-		if prompt != previousSystem {
-			if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindSystemMessage, TurnID: turnID, Payload: core.SystemMessage{V: core.PayloadVersion, Text: prompt}}); err != nil {
+			head, err := rn.promptHead(ctx)
+			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"
 				goto finished
 			}
+			// REQ-LTC-002: rewrite the head only without a head or after a
+			// compaction; every other change goes out as a <system-update>.
+			prompt = head.text
+			update := ""
+			if !head.exists || head.compacted || len(head.effective) == 0 { // no sections: a head from before REQ-LTC-002
+				if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindSystemMessage, TurnID: turnID, Payload: core.SystemMessage{V: core.PayloadVersion, Text: built.text, Sections: built.sections}}); err != nil {
+					runErr = runtimeError(err)
+					reason = "error"
+					goto finished
+				}
+				prompt = built.text
+			} else if update = systemUpdate(built.sections, head.effective); update != "" {
+				storedSections = built.sections
+			}
+			// REQ-LTC-001: the first user message of the turn carries the
+			// <context> block, and a <system-update> when sections changed.
+			if claimed {
+				prefix := []core.ContentBlock{{Kind: core.BlockText, Text: built.context}}
+				if update != "" {
+					prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: update})
+				}
+				inputMsg.Content = append(prefix, inputMsg.Content...)
+				contextBlocks = len(prefix)
+			}
+			promptBuilt = true
 		}
 		if claimed {
-			payload := core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content}
+			payload := core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content, PromptSections: storedSections, ContextBlocks: contextBlocks, Runtime: runtimeNote}
 			if continueMsg {
 				payload.Continue = true
 				payload.ContinueReason = continueReason
@@ -517,55 +677,99 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		}
 		steps = step
 
-		history, err := rn.reg.store.DeriveMessages(writeCtx, rn.sessionID)
-		if err != nil {
-			runErr = runtimeError(err)
-			reason = "error"
-			goto finished
+		// The report step of REQ-LTC-040 offers no tools.
+		var specs []core.ToolSpec
+		if !budgetReport {
+			specs, err = rn.reg.tools.Specs(turnTools)
+			if err != nil {
+				runErr = runtimeError(err)
+				reason = "error"
+				goto finished
+			}
 		}
-		specs, err := rn.reg.tools.Specs(turnTools)
-		if err != nil {
-			runErr = runtimeError(err)
-			reason = "error"
-			goto finished
-		}
-		req := core.ChatRequest{Model: resolved.model, System: prompt, Messages: history, Tools: specs}
 		control, err := rn.reg.hooks.AgentRequest.Call(ctx, core.RequestControl{})
 		if err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished
 		}
+		// REQ-LTC-010: check for context pressure before every model call,
+		// including steps that only carry tool results. A failure is logged
+		// and the step continues.
+		if c := rn.reg.compactor(); c != nil {
+			if _, cerr := c.CompactIfNeeded(ctx, core.CompactRequest{
+				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name,
+				Provider: resolved.provider, Model: resolved.model, System: prompt,
+				Tools: specs, MaxTokens: control.MaxTokens, Trigger: "pressure",
+			}); cerr != nil {
+				slog.Warn("compaction failed", "session_id", rn.sessionID, "turn_id", turnID, "error", cerr)
+			}
+		}
+		history, err := rn.reg.store.DeriveMessages(writeCtx, rn.sessionID)
+		if err != nil {
+			runErr = runtimeError(err)
+			reason = "error"
+			goto finished
+		}
+		req := core.ChatRequest{Model: resolved.model, System: prompt, Messages: history, Tools: specs}
 		req.MaxTokens = control.MaxTokens
 		req.Temperature = control.Temperature
 
 		targets := append([]core.LLMTarget{{Provider: resolved.provider, Model: resolved.model}}, resolved.fallback...)
-		stream, err := rn.reg.hooks.LLMStream.Call(ctx, core.LLMStreamInput{
-			SessionID: rn.sessionID, TurnID: turnID, Step: step, AgentName: resolved.name, Targets: targets, Request: req,
-		})
-		if err != nil {
-			if ctx.Err() != nil {
-				reason = rn.writeStoppedAttempt(writeCtx, events, step, resolved, turnID, ctx)
+		var (
+			text       string
+			toolBlocks []core.ContentBlock
+			usage      core.Usage
+			stop       string
+		)
+		// REQ-LTC-032: a retryable failure after the first stream event, but
+		// before the assistant message is stored, repeats the step. The partial
+		// stream is dropped: consumers reset on the step_retry frame.
+		for attempt := 1; ; attempt++ {
+			stream, err := rn.reg.hooks.LLMStream.Call(ctx, core.LLMStreamInput{
+				SessionID: rn.sessionID, TurnID: turnID, Step: step, AgentName: resolved.name, Targets: targets, Request: req,
+			})
+			if err != nil {
+				if ctx.Err() != nil {
+					reason = rn.writeStoppedAttempt(writeCtx, events, step, resolved, turnID, ctx)
+					goto finished
+				}
+				runErr = providerError(err)
+				reason = "error"
 				goto finished
 			}
-			runErr = providerError(err)
-			reason = "error"
-			goto finished
-		}
-		text, toolBlocks, usage, stop, streamErr := rn.consumeStream(ctx, stream, turnID)
-		totalUsage.InputTokens += usage.InputTokens
-		totalUsage.OutputTokens += usage.OutputTokens
-		if streamErr != nil {
+			var (
+				seen      int
+				streamErr error
+			)
+			text, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID)
+			if streamErr == nil {
+				break
+			}
 			if ctx.Err() != nil {
 				reason = rn.writeStoppedAttempt(writeCtx, events, step, resolved, turnID, ctx)
 				goto finished
 			}
 			pe := providerError(streamErr)
-			rn.writeAttempt(writeCtx, events, step, resolved, turnID, *pe)
-			runErr = pe
-			reason = "error"
-			goto finished
+			rn.writeStepAttempt(writeCtx, events, step, resolved, turnID, attempt, *pe)
+			// Only a mid-stream failure is repeated here; a failure before the
+			// first event is the llm.stream retry hook's job (REQ-LTC-031).
+			if seen == 0 || !retryable(pe.Class) || attempt > maxStepRetries {
+				runErr = pe
+				reason = "error"
+				goto finished
+			}
+			// LiveFrame has no step field, so the step number rides in Text for
+			// diagnostics; consumers only act on the kind.
+			rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "step_retry", Text: strconv.Itoa(step)})
+			if werr := stepRetryWait(ctx, stepRetryDelay(attempt)); werr != nil {
+				reason = rn.writeStoppedAttempt(writeCtx, events, step, resolved, turnID, ctx)
+				goto finished
+			}
 		}
+		totalUsage.InputTokens += usage.InputTokens
+		totalUsage.OutputTokens += usage.OutputTokens
+		totalUsage.CachedInputTokens += usage.CachedInputTokens
 		content := make([]core.ContentBlock, 0, 1+len(toolBlocks))
 		if text != "" {
 			content = append(content, core.ContentBlock{Kind: core.BlockText, Text: text})
@@ -622,6 +826,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				}
 				usage.InputTokens += output.Usage.InputTokens
 				usage.OutputTokens += output.Usage.OutputTokens
+				usage.CachedInputTokens += output.Usage.CachedInputTokens
 			}
 			for i, output := range outputs {
 				status := output.Status
@@ -641,6 +846,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			reason = "error"
 			goto finished
 		}
+		// REQ-LTC-005: the step log line reports the cache hit share.
+		slog.Info("step finished", "session_id", rn.sessionID, "turn_id", turnID, "step", step,
+			"provider", resolved.provider, "model", resolved.model,
+			"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens,
+			"cached_input_tokens", usage.CachedInputTokens,
+			"cache_hit_pct", cacheHitPct(usage.InputTokens, usage.CachedInputTokens))
 		if ctx.Err() != nil {
 			reason = "cancelled"
 			goto finished
@@ -686,6 +897,10 @@ finished:
 	if runErr != nil {
 		reason = "error"
 		payloadErr = &core.PayloadError{Class: runErr.Class, Status: runErr.Status, Message: runErr.Message}
+	} else if budgetReport && reason == "end_turn" {
+		// A turn that ran its configured step cap ends as max_steps, not
+		// end_turn, even though the report step ended normally (REQ-LTC-040).
+		reason = "max_steps"
 	}
 	end := core.TurnEnd{V: core.PayloadVersion, TurnID: turnID, Reason: reason, Error: payloadErr}
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
@@ -698,15 +913,20 @@ finished:
 	return result
 }
 
-func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string) (string, []core.ContentBlock, core.Usage, string, error) {
+// consumeStream drains one step's stream. seen is the number of events read
+// before a failure, which tells a pre-first-event failure from a mid-stream one
+// (REQ-LTC-032).
+func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string) (string, []core.ContentBlock, core.Usage, string, int, error) {
 	var text strings.Builder
 	var blocks []core.ContentBlock
 	var usage core.Usage
 	stop := "end_turn"
+	seen := 0
 	for event, err := range stream {
 		if err != nil {
-			return text.String(), blocks, usage, stop, err
+			return text.String(), blocks, usage, stop, seen, err
 		}
+		seen++
 		switch event.Kind {
 		case core.ChatTextDelta:
 			text.WriteString(event.Text)
@@ -724,13 +944,15 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return text.String(), blocks, usage, stop, err
+		return text.String(), blocks, usage, stop, seen, err
 	}
-	return text.String(), blocks, usage, stop, nil
+	return text.String(), blocks, usage, stop, seen, nil
 }
 
-func (rn *Runner) writeAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string, pe core.ProviderError) {
-	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: 1, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError(pe)}
+// writeStepAttempt records one failed stream attempt of a step. attempt counts
+// from 1 (REQ-LTC-032).
+func (rn *Runner) writeStepAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string, attempt int, pe core.ProviderError) {
+	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: attempt, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
 }
 
@@ -785,6 +1007,58 @@ func containsString(list []string, name string) bool {
 // emptyAnswerNote is the runtime note of the empty-answer guard (REQ-TFB-008
 // item 4). It is the user-role message of the one extra step.
 const emptyAnswerNote = "Tell the owner what you did, what failed, and what is still needed."
+
+// toolCallTextNote is the runtime note of the malformed tool-call nudge
+// (REQ-MEM-020). It is the user-role message of one extra step.
+const toolCallTextNote = "Your last reply wrote a tool call as plain text, so nothing ran. Call the tool again through the tool-calling interface, or answer without tools."
+
+// maxToolCallTextNudges caps the malformed tool-call nudges per turn
+// (REQ-MEM-020).
+const maxToolCallTextNudges = 2
+
+// stepLimitNote is the user text of the final, tool-free report step a
+// configured step cap runs before the turn ends (REQ-LTC-040).
+const stepLimitNote = "You reached the step limit for this turn. Stop working and report: what is done, what remains, and the next step."
+
+// maxStepRetries is the number of extra attempts after a mid-stream failure
+// (REQ-LTC-032); the first failed stream plus two retries is three calls.
+const maxStepRetries = 2
+
+// stepRetryDelays is the backoff between mid-stream step retries. It mirrors
+// the first delays of NewRetry (agent/retry.go) and is a variable so tests can
+// replace it and run fast.
+var stepRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
+
+// stepRetryWait performs one step-retry backoff wait with the retry jitter. It
+// is a variable so tests can replace it and avoid wall-clock time.
+var stepRetryWait = func(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(jitteredDelay(delay, randomJitter))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// stepRetryDelay returns the backoff before retry attempt (1-based).
+func stepRetryDelay(attempt int) time.Duration {
+	if len(stepRetryDelays) == 0 {
+		return 0
+	}
+	index := min(len(stepRetryDelays), attempt) - 1
+	return stepRetryDelays[index]
+}
+
+// cacheHitPct is the percentage of prompt tokens served from the provider cache
+// (REQ-LTC-005). It is 0 when the request counted no input tokens.
+func cacheHitPct(input, cached int64) int64 {
+	if input <= 0 {
+		return 0
+	}
+	return cached * 100 / input
+}
 
 // The prompt reasons of the unavailable MCP list (REQ-TFB-008 item 2).
 const (

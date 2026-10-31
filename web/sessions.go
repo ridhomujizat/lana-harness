@@ -225,6 +225,7 @@ func (s *Server) registerSessionRoutes() {
 	s.Handle("GET /v1/sessions/{id}", http.HandlerFunc(s.handleGetSession))
 	s.Handle("PATCH /v1/sessions/{id}", http.HandlerFunc(s.handlePatchSession))
 	s.Handle("GET /v1/sessions/{id}/events", http.HandlerFunc(s.handleSessionEvents))
+	s.Handle("GET /v1/sessions/{id}/usage", http.HandlerFunc(s.handleSessionUsage))
 	s.Handle("POST /v1/sessions/{id}/compact", http.HandlerFunc(s.handleCompactSession))
 	s.Handle("POST /v1/sessions/{id}/fork", http.HandlerFunc(s.handleForkSession))
 }
@@ -388,6 +389,45 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+// sessionUsageResponse is the aggregated token usage of a session's log. The
+// cached_input_tokens field is the part served from the provider prefix cache
+// (REQ-LTC-005).
+type sessionUsageResponse struct {
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
+}
+
+func (s *Server) handleSessionUsage(w http.ResponseWriter, r *http.Request) {
+	backend := s.backendOrError(w)
+	if backend == nil {
+		return
+	}
+	page, err := backend.Events(r.Context(), r.PathValue("id"), 0)
+	if err != nil {
+		s.writeBackendError(w, "session usage", err)
+		return
+	}
+	var usage core.Usage
+	for _, event := range page.Events {
+		if event.Kind != core.KindStepEnd {
+			continue
+		}
+		var payload core.StepEnd
+		if json.Unmarshal(event.Payload, &payload) != nil {
+			continue
+		}
+		usage.InputTokens += payload.Usage.InputTokens
+		usage.OutputTokens += payload.Usage.OutputTokens
+		usage.CachedInputTokens += payload.Usage.CachedInputTokens
+	}
+	writeJSON(w, http.StatusOK, sessionUsageResponse{
+		InputTokens:       usage.InputTokens,
+		OutputTokens:      usage.OutputTokens,
+		CachedInputTokens: usage.CachedInputTokens,
+	})
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {

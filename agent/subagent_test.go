@@ -172,7 +172,7 @@ func TestSubagentChildSessionFields(t *testing.T) {
 			if err := json.Unmarshal(event.Payload, &message); err != nil {
 				t.Fatal(err)
 			}
-			if len(message.Content) != 1 || message.Content[0].Text != "List the notes" {
+			if !strings.Contains(userText(message), "List the notes") {
 				t.Fatalf("user message=%+v", message)
 			}
 		}
@@ -316,7 +316,7 @@ func TestSubagentContinueKeepsHistory(t *testing.T) {
 			if err := json.Unmarshal(event.Payload, &message); err != nil {
 				t.Fatal(err)
 			}
-			if len(message.Content) > 0 && message.Content[0].Text == "Also check X" {
+			if strings.Contains(userText(message), "Also check X") {
 				hasFollowUp = true
 			}
 		}
@@ -545,21 +545,26 @@ func TestSubagentActiveChildLimit(t *testing.T) {
 	}
 }
 
+// REQ-LTC-040: a child with a configured cap stops at cap+1 steps (the cap plus
+// one report step); a child with no cap runs until the model stops.
 func TestSubagentMaxStepsLimit(t *testing.T) {
 	tests := []struct {
 		name     string
 		maxSteps int
+		tools    int
 		want     int
+		wantStop string
 	}{
-		{"default", 0, 15},
-		{"configured", 5, 5},
+		{"capped", 5, 5, 6, "max_steps"},
+		{"unset", 0, 20, 21, "end_turn"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			responses := make([]mock.Response, test.want)
-			for i := range responses {
-				responses[i] = toolResponse(fmt.Sprintf("call_%d", i), "read_file", `{"path":"a.txt"}`)
+			responses := make([]mock.Response, 0, test.tools+1)
+			for i := 0; i < test.tools; i++ {
+				responses = append(responses, toolResponse(fmt.Sprintf("call_%d", i), "read_file", `{"path":"a.txt"}`))
 			}
+			responses = append(responses, textResponse("done"))
 			h := newSubagentHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{
 				"coder":  {Provider: "mock", Model: "m", Tools: []string{"task"}, Subagents: []string{"worker"}},
 				"worker": {Provider: "mock", Model: "child-model", Tools: []string{"read_file"}, MaxSteps: test.maxSteps},
@@ -575,8 +580,8 @@ func TestSubagentMaxStepsLimit(t *testing.T) {
 				t.Fatal(err)
 			}
 			result := decodeTaskOutput(t, out)
-			if result.Status != "max_steps" || result.Steps != test.want {
-				t.Fatalf("output=%+v want max_steps with %d steps", result, test.want)
+			if result.Status != test.wantStop || result.Steps != test.want {
+				t.Fatalf("output=%+v want %s with %d steps", result, test.wantStop, test.want)
 			}
 		})
 	}

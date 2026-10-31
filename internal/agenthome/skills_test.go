@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func writeSkillFile(t *testing.T, dir, text string) {
@@ -178,7 +177,6 @@ func TestWriteSkill(t *testing.T) {
 }
 
 func TestBuildSkills(t *testing.T) {
-	now := time.Date(2026, 10, 29, 21, 5, 0, 0, time.FixedZone("WIB", 7*3600))
 	got := Build(PromptInput{
 		Persona: "You are helper.",
 		Memory:  []string{"Uses fish"},
@@ -186,9 +184,7 @@ func TestBuildSkills(t *testing.T) {
 			{Name: "git-workflow", Description: "Create a branch.", Body: "1. secret body"},
 			{Name: "disk-cleanup", Description: "Free disk space."},
 		},
-		Agent:          "helper",
-		UnavailableMCP: map[string]string{"github": "command not found", "docs": "unauthorized"},
-		Now:            now,
+		Agent: "helper",
 	})
 	memory := strings.Index(got, "# Your memory")
 	skills := strings.Index(got, "# Skills")
@@ -202,9 +198,8 @@ func TestBuildSkills(t *testing.T) {
 	if strings.Contains(got, "secret body") {
 		t.Fatalf("skill body must not be in prompt:\n%s", got)
 	}
-	lines := strings.Split(got, "\n")
-	if last := lines[len(lines)-1]; last != "- unavailable MCP servers: docs (unauthorized), github (command not found)" {
-		t.Fatalf("last line = %q", last)
+	if lines := strings.Split(got, "\n"); lines[len(lines)-1] != "- agent: helper" {
+		t.Fatalf("last line = %q", lines[len(lines)-1])
 	}
 
 	if strings.Contains(Build(PromptInput{Agent: "a"}), "# Skills") {
@@ -212,10 +207,10 @@ func TestBuildSkills(t *testing.T) {
 	}
 }
 
-func TestBuildUnavailableMCPTruncatesReason(t *testing.T) {
+func TestContextBlockTruncatesReason(t *testing.T) {
 	reason := strings.Repeat("é", 100)
-	got := Build(PromptInput{Agent: "a", UnavailableMCP: map[string]string{"x": reason}})
-	if want := "- unavailable MCP servers: x (" + strings.Repeat("é", 80) + ")"; !strings.HasSuffix(got, want) {
-		t.Fatalf("prompt = %q, want suffix %q", got, want)
+	got := ContextBlock(PromptInput{Agent: "a", UnavailableMCP: map[string]string{"x": reason}})
+	if want := "unavailable MCP servers: x (" + strings.Repeat("é", 80) + ")"; !strings.Contains(got, want) {
+		t.Fatalf("context = %q, want %q", got, want)
 	}
 }

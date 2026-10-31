@@ -668,6 +668,33 @@ func TestSessionEventsEqualHistory(t *testing.T) {
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")
 }
 
+// REQ-LTC-005: the session usage endpoint sums step/end usage and reports the
+// cached input tokens.
+func TestSessionUsageIncludesCachedTokens(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Agent: "coder", LastSeq: 2, CreatedAt: 1000, UpdatedAt: 2000})
+	backend.events[info.ID] = []core.SessionEvent{
+		{SessionID: info.ID, Seq: 1, Kind: core.KindStepEnd, TurnID: "t1", CreatedAt: 1500, Payload: json.RawMessage(`{"v":1,"step":1,"usage":{"input_tokens":100,"output_tokens":5,"cached_input_tokens":80}}`)},
+		{SessionID: info.ID, Seq: 2, Kind: core.KindStepEnd, TurnID: "t1", CreatedAt: 1600, Payload: json.RawMessage(`{"v":1,"step":2,"usage":{"input_tokens":50,"output_tokens":3,"cached_input_tokens":10}}`)},
+	}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/"+info.ID+"/usage", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var usage sessionUsageResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &usage); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if usage.InputTokens != 150 || usage.OutputTokens != 8 || usage.CachedInputTokens != 90 {
+		t.Fatalf("usage = %+v", usage)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/missing/usage", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+}
+
 func TestCreateWebSessionWithModel(t *testing.T) {
 	backend := newFakeWebBackend()
 	backend.agentNames["coder"] = true

@@ -1497,6 +1497,11 @@ export function SessionPage({ id }: SessionPageProps) {
         if (frame.kind === "tool_call" || frame.kind === "tool_result") {
           setStreamText("");
         }
+        /* REQ-LTC-032: a step_retry drops the partial text of the failed step;
+           streamText only ever holds the current step's streamed answer. */
+        if (frame.kind === "step_retry") {
+          setStreamText("");
+        }
       },
       onStatus: (status: StreamFrame) => {
         const next = stringOf(status.holder) || "none";

@@ -14,8 +14,8 @@ import (
 )
 
 var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
-var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "timeout"}
-var agentKeys = []string{"context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
+var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "timeout"}
+var agentKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
@@ -218,12 +218,16 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 			}
 		}
 	}
-	if val, ok := v["timeout"]; ok {
-		s, ok := val.(string)
-		if !ok {
-			add(path+".timeout", typeMsg("string", val))
-		} else if _, err := time.ParseDuration(s); err != nil {
-			add(path+".timeout", "invalid duration: "+s)
+	for _, key := range []string{"timeout", "stream_idle_timeout"} {
+		if val, ok := v[key]; ok {
+			s, ok := val.(string)
+			if !ok {
+				add(path+"."+key, typeMsg("string", val))
+			} else if d, err := time.ParseDuration(s); err != nil {
+				add(path+"."+key, "invalid duration: "+s)
+			} else if d <= 0 {
+				add(path+"."+key, "must be greater than 0, got "+s)
+			}
 		}
 	}
 }
@@ -280,12 +284,34 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 				add(path+"."+key, typeMsg("integer", val))
 				continue
 			}
-			if key == "max_steps" && (n < 1 || n > 200) {
-				add(path+"."+key, "must be between 1 and 200")
+			// REQ-LTC-040: max_steps is opt-in; 0 means no limit and there is
+			// no upper bound.
+			if key == "max_steps" && n < 0 {
+				add(path+"."+key, "must be 0 (no limit) or greater")
 			}
 			if key == "context_window" && n <= 0 {
 				add(path+"."+key, "must be greater than 0")
 			}
+		}
+	}
+	if val, ok := v["compaction_headroom"]; ok {
+		n, isInt := asInt(val)
+		if !isInt {
+			add(path+".compaction_headroom", typeMsg("integer", val))
+		} else if n <= 0 {
+			add(path+".compaction_headroom", "must be greater than 0")
+		}
+	}
+	for _, key := range []string{"compaction_threshold", "compaction_retain"} {
+		val, ok := v[key]
+		if !ok {
+			continue
+		}
+		f, isNum := asFloat(val)
+		if !isNum {
+			add(path+"."+key, typeMsg("float", val))
+		} else if f <= 0 || f >= 1 {
+			add(path+"."+key, "must be between 0 and 1")
 		}
 	}
 	if val, ok := v["permission"]; ok {
@@ -731,6 +757,21 @@ func asInt(v any) (int64, bool) {
 		return int64(n), true
 	case int32:
 		return int64(n), true
+	}
+	return 0, false
+}
+
+// asFloat reads a TOML float, accepting an integer value as a float too.
+func asFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int32:
+		return float64(n), true
 	}
 	return 0, false
 }

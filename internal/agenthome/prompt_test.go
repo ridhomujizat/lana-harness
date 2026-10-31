@@ -3,6 +3,7 @@ package agenthome
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildRosterAfterPersona(t *testing.T) {
@@ -73,12 +74,92 @@ func TestBuildReportsBlockers(t *testing.T) {
 	}
 }
 
-func TestBuildListsUnavailableMCPServer(t *testing.T) {
+// The head prompt must not carry the unavailable MCP list; it moves to the
+// <context> block (REQ-LTC-001).
+func TestBuildOmitsUnavailableMCPServer(t *testing.T) {
 	got := Build(PromptInput{
 		Agent:          "lead",
 		UnavailableMCP: map[string]string{"dbx": "spawn ENOENT"},
 	})
-	if !strings.Contains(got, "- unavailable MCP servers: dbx (spawn ENOENT)") {
-		t.Fatalf("prompt lacks the unavailable MCP server line:\n%s", got)
+	if strings.Contains(got, "unavailable MCP servers") {
+		t.Fatalf("head prompt must not carry the unavailable MCP list:\n%s", got)
+	}
+}
+
+func TestContextBlock(t *testing.T) {
+	got := ContextBlock(PromptInput{
+		Agent: "lead",
+		Now:   time.Date(2026, 10, 31, 14, 5, 0, 0, time.FixedZone("WIB", 7*3600)),
+		UnavailableMCP: map[string]string{
+			"b": "down", "a": "spawn ENOENT",
+		},
+	})
+	want := "<context>\n" +
+		"date: 2026-10-31 Saturday 14:05 WIB (UTC+07:00)\n" +
+		"unavailable MCP servers: a (spawn ENOENT), b (down)\n" +
+		"</context>"
+	if got != want {
+		t.Fatalf("context:\n%s\n--- want:\n%s", got, want)
+	}
+}
+
+func TestContextBlockWithoutMCP(t *testing.T) {
+	got := ContextBlock(PromptInput{Agent: "lead"})
+	if strings.Contains(got, "unavailable MCP servers") || !strings.HasPrefix(got, "<context>\ndate: ") || !strings.HasSuffix(got, "\n</context>") {
+		t.Fatalf("context without MCP:\n%s", got)
+	}
+}
+
+// REQ-MEM-001: the memory capture section is present only when MemoryCapture is
+// set, and it sits between the memory section and skills.
+func TestBuildMemoryCaptureSection(t *testing.T) {
+	on := BuildSections(PromptInput{
+		Agent: "lead", Memory: []string{"Server kenari"},
+		Skills:        []Skill{{Name: "deploy", Description: "Ship it"}},
+		MemoryCapture: true,
+	})
+	var names []string
+	for _, section := range on {
+		names = append(names, section.Name)
+	}
+	joined := strings.Join(names, ",")
+	if !strings.Contains(joined, SectionMemory+","+SectionMemoryCapture+","+SectionSkills) {
+		t.Fatalf("section order=%s want memory,memory_capture,skills", joined)
+	}
+	var capture Section
+	for _, section := range on {
+		if section.Name == SectionMemoryCapture {
+			capture = section
+		}
+	}
+	if capture.Text != memoryCaptureRules || !strings.HasPrefix(capture.Text, "# Memory capture\n") {
+		t.Fatalf("memory capture text:\n%s", capture.Text)
+	}
+
+	off := BuildSections(PromptInput{Agent: "lead"})
+	for _, section := range off {
+		if section.Name == SectionMemoryCapture {
+			t.Fatalf("section present without MemoryCapture: %+v", off)
+		}
+	}
+
+	// The section does not depend on the agent having memory entries yet.
+	fresh := BuildSections(PromptInput{Agent: "lead", MemoryCapture: true})
+	found := false
+	for _, section := range fresh {
+		if section.Name == SectionMemoryCapture {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("section missing without memory entries: %+v", fresh)
+	}
+}
+
+// The fixed section keeps the prompt byte-identical between two turns.
+func TestBuildMemoryCaptureStable(t *testing.T) {
+	in := PromptInput{Agent: "lead", Memory: []string{"Server kenari"}, MemoryCapture: true}
+	if first, second := Build(in), Build(in); first != second {
+		t.Fatalf("prompt changed between builds:\n%s\n---\n%s", first, second)
 	}
 }

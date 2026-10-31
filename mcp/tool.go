@@ -15,7 +15,7 @@ import (
 const (
 	maxToolNameLength = 64
 	maxDescription    = 1024
-	maxOutputLength   = 30000
+	maxOutputLength   = 4 << 20
 )
 
 // toolWrapper exposes one MCP tool through core.Tool.

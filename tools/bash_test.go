@@ -61,7 +61,7 @@ func TestBashExitCode(t *testing.T) {
 
 func TestBashOutputTruncated(t *testing.T) {
 	ws := t.TempDir()
-	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"yes x | head -c 40000"}`)
+	out := callTool(t, NewBash(&Guard{Workspace: ws}), ws, `{"command":"yes x | head -c 5000000"}`)
 	if out.Status != core.ToolStatusSuccess {
 		t.Fatalf("out=%+v", out)
 	}

@@ -41,10 +41,13 @@ type ContentBlock struct {
 	Data      []byte          `json:"data,omitempty"`
 }
 
-// Usage is the token count.
+// Usage is the token count. InputTokens counts all prompt tokens
+// (cache hit + miss); CachedInputTokens is the part served from the
+// provider prefix cache.
 type Usage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens,omitempty"`
 }
 
 // ChatRequest is a request to the provider.

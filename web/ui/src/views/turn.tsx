@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SessionEvent } from "../api/sessions";
-import { contentText, cut, primaryArg, toolStatusWord } from "../lib/format";
+import { contentText, cut, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { TeamBlock } from "./team";
 import type { TeamChildRequest } from "./team";
@@ -731,7 +731,7 @@ export function buildTurns(
         break;
       }
       case "user/message": {
-        const text = contentText(payload.content);
+        const text = userMessageText(payload);
         if (!text) {
           break;
         }

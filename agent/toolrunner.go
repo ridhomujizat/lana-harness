@@ -2,15 +2,31 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"path/filepath"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
+
+// inlineRunes is the largest tool result kept inline before the rest is spilled.
+const inlineRunes = 16000
+
+// spiller saves a full tool output and returns the path of the saved file.
+type spiller interface {
+	Save(sessionID, tool, callID, text string) (string, error)
+}
 
 // ToolRunner executes a batch of tools in one step.
 type ToolRunner struct {
 	hooks *core.Hooks
 	tools core.ToolRegistry
+	// store saves large tool outputs. Nil means a store under <home>/spill;
+	// tests replace it to exercise the save-failure path.
+	store spiller
 }
 
 // NewToolRunner creates a ToolRunner.
@@ -158,4 +174,76 @@ func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.
 		return
 	}
 	state.output = post
+	tr.spillOutput(state, tc)
+}
+
+// spillOutput replaces a large tool result with a head/tail preview and a
+// notice that points at the full text saved on disk. read_file results are
+// never spilled, and a save failure keeps the original result.
+func (tr *ToolRunner) spillOutput(state *callState, tc core.ToolCtx) {
+	if state.call.Name == "read_file" {
+		return
+	}
+	text := state.output.Output
+	if utf8.RuneCountInString(text) <= inlineRunes {
+		return
+	}
+	store := tr.store
+	if store == nil {
+		if tc.Home == "" {
+			return
+		}
+		store = spill.Store{Root: filepath.Join(tc.Home, "spill")}
+	}
+	path, err := store.Save(tc.SessionID, state.call.Name, state.call.CallID, text)
+	if err != nil {
+		slog.Warn("tool output spill failed", "tool", state.call.Name, "session_id", tc.SessionID, "error", err)
+		return
+	}
+	state.output.Output = spillPreview(text, path)
+}
+
+// spillPreview returns a head/tail preview of text plus a notice naming the
+// saved file. The result is at most inlineRunes runes, and a rune is never cut
+// in half.
+func spillPreview(text, path string) string {
+	total := len(text)
+	var notice, head, tail string
+	kept := 0
+	for i := 0; i < 4; i++ {
+		omitted := total - kept
+		if omitted < 0 {
+			omitted = 0
+		}
+		notice = fmt.Sprintf("(Omitted %d bytes. Full output stored at: %s. Use read_file with offset/limit, or grep this path.)", omitted, path)
+		left := inlineRunes - utf8.RuneCountInString(notice) - 2
+		if left < 0 {
+			left = 0
+		}
+		headN := left * 2 / 3
+		head, tail = cutRunes(text, headN, left-headN)
+		size := len(head) + len(tail)
+		if i > 0 && size == kept {
+			break
+		}
+		kept = size
+	}
+	return head + "\n" + notice + "\n" + tail
+}
+
+// cutRunes returns the first headN runes and the last tailN runes of s. The
+// two pieces never overlap.
+func cutRunes(s string, headN, tailN int) (string, string) {
+	runes := []rune(s)
+	if headN > len(runes) {
+		headN = len(runes)
+	}
+	if tailN > len(runes)-headN {
+		tailN = len(runes) - headN
+	}
+	head := string(runes[:headN])
+	if tailN == 0 {
+		return head, ""
+	}
+	return head, string(runes[len(runes)-tailN:])
 }

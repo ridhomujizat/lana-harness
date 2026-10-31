@@ -74,6 +74,42 @@ describe("buildTurns", () => {
     expect(turnItem.turn.id).toBe("live");
     expect(turnItem.turn.running).toBe(true);
   });
+
+  /* REQ-LTC-001: the dashboard hides the injected <context> block. */
+  it("hides the injected context block using context_blocks", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        context_blocks: 1,
+        content: [
+          { type: "text", text: "<context>\ndate: now\n</context>" },
+          { type: "text", text: "Cihuyy" },
+        ],
+      }),
+    ]);
+    const user = items[0];
+    if (!user || user.kind !== "user") {
+      throw new Error("expected a user item");
+    }
+    expect(user.text).toBe("Cihuyy");
+    expect(user.text).not.toContain("<context>");
+  });
+
+  it("hides the injected context block without context_blocks", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        content: [
+          { type: "text", text: "<context>\ndate: now\n</context>" },
+          { type: "text", text: "Cihuyy" },
+        ],
+      }),
+    ]);
+    const user = items[0];
+    if (!user || user.kind !== "user") {
+      throw new Error("expected a user item");
+    }
+    expect(user.text).toBe("Cihuyy");
+    expect(user.text).not.toContain("<context>");
+  });
 });
 
 describe("turnSummary", () => {

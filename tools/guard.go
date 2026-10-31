@@ -9,7 +9,13 @@ import (
 	"syscall"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
+
+// maxToolOutput is the largest tool output read into memory before the spill
+// policy in the tool runner trims it. It is large enough that the full text
+// still reaches spill.
+const maxToolOutput = 4 << 20
 
 // ErrOutsideWorkspace is returned when a path is outside the workspace.
 var ErrOutsideWorkspace = errors.New("outside workspace")
@@ -111,6 +117,61 @@ func resolveToolPath(g *Guard, tcWorkspace, path string) (string, *core.ToolOutp
 	}
 	out := core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
 	return "", &out
+}
+
+// resolveReadToolPath resolves a path for the read-only tools. A path inside
+// the spill directory of the session in tc is accepted even when it is outside
+// the workspace (REQ-LTC-021); every other path resolves against the workspace.
+func resolveReadToolPath(g *Guard, tc core.ToolCtx, workspace, path string) (string, *core.ToolOutput) {
+	dir, ok := spillSessionDir(tc)
+	if !ok {
+		return resolveToolPath(g, workspace, path)
+	}
+	if target, inside := pathWithin(dir, path); inside {
+		return target, nil
+	}
+	return resolveToolPath(g, workspace, path)
+}
+
+// spillSessionDir returns the canonical spill directory of the session in tc.
+// ok is false when tc carries no home or session.
+func spillSessionDir(tc core.ToolCtx) (string, bool) {
+	if tc.Home == "" || tc.SessionID == "" {
+		return "", false
+	}
+	return canonicalPath(spill.SessionDir(filepath.Join(tc.Home, "spill"), tc.SessionID)), true
+}
+
+// pathWithin returns the canonical target when it lies inside dir.
+func pathWithin(dir, path string) (string, bool) {
+	if path == "" {
+		return "", false
+	}
+	target := canonicalPath(path)
+	rel, err := filepath.Rel(dir, target)
+	if err != nil {
+		return "", false
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return target, true
+}
+
+// canonicalPath returns the absolute path with symlinks resolved as far as the
+// path exists.
+func canonicalPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	if resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		return filepath.Join(resolvedParent, filepath.Base(abs))
+	}
+	return abs
 }
 
 func errorOutput(msg string) (core.ToolOutput, error) {

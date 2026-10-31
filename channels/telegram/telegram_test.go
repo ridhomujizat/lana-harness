@@ -72,6 +72,27 @@ func TestPrivateChatTurn(t *testing.T) {
 	}
 }
 
+// REQ-LTC-032: a step_retry frame drops the partial text a failed step
+// streamed, so the final answer keeps only the retried step's text.
+func TestStepRetryDropsPartialText(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		backend.obs.Publish(core.LiveFrame{SessionID: session, Kind: "text_delta", Text: "partial answer"})
+		backend.obs.Publish(core.LiveFrame{SessionID: session, Kind: "step_retry", Text: "1"})
+		backend.obs.Publish(core.LiveFrame{SessionID: session, Kind: "text_delta", Text: "final answer"})
+		return TurnResult{Text: "final answer", StopReason: "end_turn"}, nil
+	}
+	startChannel(t, api, backend)
+	api.text(ownerChat, "private", ownerID, "go")
+	api.waitCall("sendMessage", textIs("…"))
+	final := api.waitCall("editMessageText", textHas("final answer"))
+	text := final.Params["text"].(string)
+	if strings.Contains(text, "partial") {
+		t.Fatalf("partial text kept: %q", text)
+	}
+}
+
 func TestStrangerIgnored(t *testing.T) {
 	api := newFakeAPI(t)
 	backend := newFakeBackend()

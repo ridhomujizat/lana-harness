@@ -75,6 +75,9 @@ func newHarness(t *testing.T, script mock.Script, agents map[string]core.AgentCo
 	}
 	reg := NewRegistry(store, llm, toolReg, hooks, cfg, nil, home, ws)
 	tools.NewPipeline(hooks)
+	// A mid-stream step retry sleeps for real backoff in production; the tests
+	// skip the wait so they stay fast (REQ-LTC-032).
+	stepRetryWait = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 	return &harness{reg: reg, store: store, info: info, hooks: hooks, tools: toolReg, llm: llm, home: home, ws: ws}
 }
 
@@ -305,35 +308,35 @@ func TestAssistantMessageBlocks(t *testing.T) {
 	}
 }
 
-func TestMaxStepsDefault(t *testing.T) {
+// REQ-LTC-040: an unset max_steps is no limit; the turn runs until the model
+// stops calling tools, not to a fixed default.
+func TestNoStepCapRunsUntilModelStops(t *testing.T) {
 	var responses []mock.Response
 	for i := 0; i < 30; i++ {
 		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", `{"path":"a.txt"}`))
 	}
+	responses = append(responses, textResponse("done"))
 	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}}})
 	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	result := h.run(t, "hi")
-	if result.StopReason != "max_steps" {
+	if result.StopReason != "end_turn" || result.Text != "done" {
 		t.Fatalf("result=%+v", result)
 	}
-	var steps int
-	for _, event := range h.events(t) {
-		if event.Kind == core.KindStepStart {
-			steps++
-		}
-	}
-	if steps != 25 {
-		t.Fatalf("steps=%d", steps)
+	if steps := countSteps(t, h); steps != 31 {
+		t.Fatalf("steps=%d want 31", steps)
 	}
 }
 
+// REQ-LTC-040: a configured cap runs one final, tool-free report step before the
+// reason becomes max_steps.
 func TestMaxStepsConfigured(t *testing.T) {
 	var responses []mock.Response
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		responses = append(responses, toolResponse(fmt.Sprintf("c%d", i), "read_file", `{"path":"a.txt"}`))
 	}
+	responses = append(responses, textResponse("report"))
 	h := newHarness(t, mock.Script{Responses: responses}, map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}, MaxSteps: 3}})
 	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -342,14 +345,11 @@ func TestMaxStepsConfigured(t *testing.T) {
 	if result.StopReason != "max_steps" {
 		t.Fatalf("result=%+v", result)
 	}
-	var steps int
-	for _, event := range h.events(t) {
-		if event.Kind == core.KindStepStart {
-			steps++
-		}
+	if steps := countSteps(t, h); steps != 4 {
+		t.Fatalf("steps=%d want 4", steps)
 	}
-	if steps != 3 {
-		t.Fatalf("steps=%d", steps)
+	if got := lastUserText(t, h); got != stepLimitNote {
+		t.Fatalf("last user message=%q want %q", got, stepLimitNote)
 	}
 }
 

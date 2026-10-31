@@ -1,12 +1,18 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // ProviderError is a provider error.
 type ProviderError struct {
 	Class   string
 	Status  int
 	Message string
+	// RetryAfter is the wait requested by the provider (Retry-After
+	// header), zero when the header is absent.
+	RetryAfter time.Duration
 }
 
 func (e *ProviderError) Error() string {

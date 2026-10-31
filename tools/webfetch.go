@@ -99,7 +99,7 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	default:
 		return errorOutput("unsupported content type: " + mediaType)
 	}
-	return successOutput(truncateText(strings.TrimSpace(text), 30000))
+	return successOutput(truncateText(strings.TrimSpace(text), maxToolOutput))
 }
 
 func stripHTML(body []byte) (string, error) {

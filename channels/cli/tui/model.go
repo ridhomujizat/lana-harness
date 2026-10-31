@@ -1598,7 +1598,7 @@ func (m *Model) restoreLines() []string {
 			if json.Unmarshal(event.Payload, &payload) != nil {
 				continue
 			}
-			if text := textOf(payload.Content); text != "" {
+			if text := textOf(payload.DisplayContent()); text != "" {
 				out = append(out, "")
 				out = append(out, renderUser(text)...)
 			}

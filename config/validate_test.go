@@ -10,7 +10,7 @@ import (
 
 func TestErrorsCollectAllLayers(t *testing.T) {
 	home := t.TempDir()
-	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\npermision = \"ask\"\nmax_steps = 0\n")
+	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\npermision = \"ask\"\nmax_steps = -1\n")
 	patch := filepath.Join(t.TempDir(), "p.toml")
 	writeFile(t, patch, "[[modules]]\nid = \"x\"\nmodule = \"missing_mod\"\n")
 	_, err := Load(context.Background(), Options{Home: home, Patches: []string{patch}, Env: envMap(nil)})
@@ -126,6 +126,52 @@ func TestMemoryLayerRefError(t *testing.T) {
 		}
 	}
 	t.Fatalf("memory layer reference error missing: %v", errs)
+}
+
+// REQ-LTC-040: max_steps accepts 0 (no limit) and any positive value with no
+// upper bound, and rejects a negative value.
+func TestMaxStepsRange(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\nmax_steps = 300\n")
+	if _, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)}); err != nil {
+		t.Fatalf("max_steps = 300 rejected: %v", err)
+	}
+
+	home = t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\nmax_steps = -1\n")
+	_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
+	var errs Errors
+	if !errors.As(err, &errs) {
+		t.Fatalf("error is not Errors: %v", err)
+	}
+	found := false
+	for _, e := range errs {
+		if e.Key == "agents.x.max_steps" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("negative max_steps not rejected: %v", errs)
+	}
+}
+
+// REQ-LTC-030: a provider timeout that parses to <= 0 is rejected.
+func TestProviderTimeoutsRejectNonPositive(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"),
+		"[providers.p]\nkind = \"openai_compat\"\nstream_idle_timeout = \"0s\"\ntimeout = \"-1s\"\n")
+	_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
+	var errs Errors
+	if !errors.As(err, &errs) {
+		t.Fatalf("error is not Errors: %v", err)
+	}
+	keys := map[string]bool{}
+	for _, e := range errs {
+		keys[e.Key] = true
+	}
+	if !keys["providers.p.stream_idle_timeout"] || !keys["providers.p.timeout"] {
+		t.Fatalf("non-positive timeouts not rejected: %v", errs)
+	}
 }
 
 func TestAgentMCPNotRegistered(t *testing.T) {

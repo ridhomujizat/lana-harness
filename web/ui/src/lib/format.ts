@@ -181,6 +181,38 @@ export function contentText(content: unknown): string {
   return pieces.join("\n");
 }
 
+function isInjectedContextBlock(block: unknown): boolean {
+  if (!block || typeof block !== "object") {
+    return false;
+  }
+  const value = block as Record<string, unknown>;
+  if (value.type !== "text" || typeof value.text !== "string") {
+    return false;
+  }
+  const text = value.text.trim();
+  return text.startsWith("<context>") || text.startsWith("<system-update>");
+}
+
+/* REQ-LTC-001: the turn loop prepends <context> and, when sections changed,
+   <system-update> blocks to the first user message of a turn. Display surfaces
+   hide them. context_blocks counts the injected leading blocks; events written
+   before the field existed fall back to matching the tags. */
+export function userMessageText(payload: Record<string, unknown>): string {
+  const content = payload.content;
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  const count = payload.context_blocks;
+  if (typeof count === "number" && count > 0) {
+    return contentText(content.slice(count));
+  }
+  let index = 0;
+  while (index < content.length && isInjectedContextBlock(content[index])) {
+    index += 1;
+  }
+  return contentText(content.slice(index));
+}
+
 export function outcomeWords(outcome: unknown): string {
   switch (outcome) {
     case "allowed_once":
@@ -304,7 +336,7 @@ export function buildHistory(
         });
         break;
       case "user/message": {
-        const text = contentText(payload.content);
+        const text = userMessageText(payload);
         if (text) {
           items.push({ key, type: "user", label: "You", text });
         }

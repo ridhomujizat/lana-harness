@@ -50,7 +50,7 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if in.Limit < 1 || in.Limit > 2000 {
 		return inputErrorOutput(fmt.Errorf("limit must be between 1 and 2000"))
 	}
-	path, rejected := resolveToolPath(t.guard, tc.Workspace, in.Path)
+	path, rejected := resolveReadToolPath(t.guard, tc, tc.Workspace, in.Path)
 	if rejected != nil {
 		return *rejected, nil
 	}

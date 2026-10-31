@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestValidName(t *testing.T) {
@@ -134,10 +133,9 @@ func TestUpdateKeepsFileOnError(t *testing.T) {
 }
 
 func TestBuild(t *testing.T) {
-	now := time.Date(2026, 10, 29, 21, 5, 0, 0, time.FixedZone("WIB", 7*3600))
 	got := Build(PromptInput{
 		Persona: "You are helper.\n", User: []string{"Name: Ridho"}, Memory: []string{"Uses fish", "Server kenari"},
-		Agent: "helper", Channel: "cli", Workspace: "/tmp/x", Now: now,
+		Agent: "helper", Channel: "cli", Workspace: "/tmp/x",
 	})
 	want := `You are helper.
 
@@ -156,11 +154,13 @@ Server kenari
 
 # Runtime context
 - agent: helper
-- date: 2026-10-29 Thursday 21:05 WIB (UTC+07:00)
 - channel: cli
 - workspace: /tmp/x`
 	if got != want {
 		t.Fatalf("prompt:\n%s\n--- want:\n%s", got, want)
+	}
+	if strings.Contains(got, "- date:") {
+		t.Fatalf("head prompt must not carry the date:\n%s", got)
 	}
 }
 

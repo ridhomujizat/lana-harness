@@ -145,7 +145,8 @@ func TestContinueStartsMarkedTurn(t *testing.T) {
 		if payload.ContinueReason != StopError {
 			t.Fatalf("continue_reason = %q want %q", payload.ContinueReason, StopError)
 		}
-		if len(payload.Content) == 0 || payload.Content[0].Text != want {
+		// The first block is the turn's <context> block (REQ-LTC-001).
+		if len(payload.Content) == 0 || payload.Content[len(payload.Content)-1].Text != want {
 			t.Fatalf("continue content = %+v want %q", payload.Content, want)
 		}
 	}

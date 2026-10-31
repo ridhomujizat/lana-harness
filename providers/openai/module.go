@@ -41,10 +41,11 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 			return fmt.Errorf("provider '%s' kind '%s' is not supported in this build", name, provider.Kind)
 		}
 		adapter, err := NewAdapter(name, Config{
-			BaseURL:   provider.BaseURL,
-			APIKeyEnv: provider.APIKeyEnv,
-			Headers:   provider.Headers,
-			Timeout:   provider.Timeout,
+			BaseURL:           provider.BaseURL,
+			APIKeyEnv:         provider.APIKeyEnv,
+			Headers:           provider.Headers,
+			Timeout:           provider.Timeout,
+			StreamIdleTimeout: provider.StreamIdleTimeout,
 		}, b.Secrets())
 		if err != nil {
 			return err

@@ -48,7 +48,7 @@ var validKinds = map[string]bool{
 	core.KindToolCall: true, core.KindToolResult: true, core.KindApprovalAsked: true,
 	core.KindApprovalDecided: true, core.KindApprovalPolicy: true, core.KindModelSelection: true,
 	core.KindQuestionAsked: true, core.KindQuestionAnswered: true,
-	core.KindCompactionSummary: true,
+	core.KindCompactionSummary: true, core.KindToolResultPruned: true,
 }
 
 // Store is the SQLite implementation of core.SessionStore.

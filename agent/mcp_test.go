@@ -84,12 +84,12 @@ func TestTurnMCPToolsAndUnavailable(t *testing.T) {
 	if got := manager.calls.Load(); got != 1 {
 		t.Fatalf("Ensure calls = %d, want 1", got)
 	}
-	prompts := h.systemPrompts(t)
-	if len(prompts) != 1 {
+	if prompts := h.systemPrompts(t); len(prompts) != 1 {
 		t.Fatalf("prompts = %d, want 1", len(prompts))
 	}
-	if !strings.Contains(prompts[0], "- unavailable MCP servers: down (command not found)") {
-		t.Fatalf("prompt lacks unavailable line:\n%s", prompts[0])
+	// REQ-LTC-001: the unavailable list moves to the first user message.
+	if user := userText(h.firstUserMessage(t)); !strings.Contains(user, "unavailable MCP servers: down (command not found)") {
+		t.Fatalf("context lacks the unavailable line:\n%s", user)
 	}
 	out := toolResultPayload(t, h, "c1")
 	if out.Status != core.ToolStatusSuccess || out.Output != "pong" {
@@ -117,9 +117,8 @@ func TestTurnMCPUnknownServerIsNotLoaded(t *testing.T) {
 			if result.StopReason != "end_turn" || result.Err != nil {
 				t.Fatalf("result=%+v", result)
 			}
-			prompt := h.systemPrompts(t)[0]
-			if !strings.Contains(prompt, "- unavailable MCP servers: ghost (not loaded)") {
-				t.Fatalf("prompt lacks the not-loaded line:\n%s", prompt)
+			if user := userText(h.firstUserMessage(t)); !strings.Contains(user, "unavailable MCP servers: ghost (not loaded)") {
+				t.Fatalf("context lacks the not-loaded line:\n%s", user)
 			}
 		})
 	}
@@ -139,6 +138,9 @@ func TestTurnWithoutMCPDoesNotEnsure(t *testing.T) {
 	}
 	if prompt := h.systemPrompts(t)[0]; strings.Contains(prompt, "unavailable MCP servers") {
 		t.Fatalf("prompt has unavailable line without mcp:\n%s", prompt)
+	}
+	if user := userText(h.firstUserMessage(t)); !strings.Contains(user, "<context>") || strings.Contains(user, "unavailable MCP servers") {
+		t.Fatalf("context without mcp must hold no unavailable line:\n%s", user)
 	}
 }
 

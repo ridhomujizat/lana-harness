@@ -199,8 +199,12 @@ func TestSystemMessageOnChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.run(t, "3")
-	if got := countSystems(); got != 2 {
-		t.Fatalf("system=%d want 2", got)
+	// REQ-LTC-002: the head stays stable; a later change is a <system-update>.
+	if got := countSystems(); got != 1 {
+		t.Fatalf("system=%d want 1", got)
+	}
+	if update := userText(h.lastUserMessage(t)); !strings.Contains(update, "<system-update>") || !strings.Contains(update, "two") {
+		t.Fatalf("prompt change must go out as a <system-update>:\n%s", update)
 	}
 }
 

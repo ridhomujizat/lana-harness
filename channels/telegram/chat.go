@@ -43,6 +43,11 @@ type chat struct {
 	step        int
 	afterResult bool
 	calls       int
+	// stepTextLen and stepTools mark the answer length and tool count at the
+	// start of the current step. A step_retry frame drops what a failed step
+	// streamed (REQ-LTC-032).
+	stepTextLen int
+	stepTools   int
 	// Permission bubble state of the running turn (REQ-TGL-002).
 	bubbleID         int64
 	approvalQueue    []*approval
@@ -255,6 +260,7 @@ func (w *chat) launchTurn(ctx context.Context, trigger int64, session string, ru
 	w.running, w.cancelTurn = true, cancel
 	w.liveID, w.tools = 0, nil
 	w.step, w.afterResult, w.calls = 1, false, 0
+	w.stepTextLen, w.stepTools = 0, 0
 	w.bubbleID, w.approvalQueue = 0, nil
 	w.approvalTotal, w.approvalAllowed, w.approvalRejected = 0, 0, 0
 	w.mu.Unlock()
@@ -377,8 +383,25 @@ func (w *chat) turn(ctx context.Context, trigger int64, session string, run func
 			}
 			if lead {
 				w.afterResult = true
+				// The next step starts here; a step_retry rewinds to this mark.
+				w.stepTextLen = text.Len()
+				w.stepTools = len(w.tools)
 			}
 			w.mu.Unlock()
+		case "step_retry":
+			// REQ-LTC-032: drop the partial text and tool lines of the failed
+			// step; the retried step streams them again.
+			w.mu.Lock()
+			if text.Len() > w.stepTextLen {
+				trimmed := text.String()[:w.stepTextLen]
+				text.Reset()
+				text.WriteString(trimmed)
+			}
+			if len(w.tools) > w.stepTools {
+				w.tools = w.tools[:w.stepTools]
+			}
+			w.mu.Unlock()
+			afterCall = false
 		}
 	}
 	edit := time.NewTicker(w.ch.EditInterval)
@@ -678,6 +701,7 @@ func (w *chat) resetTurn() {
 	w.mu.Lock()
 	w.liveID, w.tools = 0, nil
 	w.step, w.afterResult, w.calls = 0, false, 0
+	w.stepTextLen, w.stepTools = 0, 0
 	w.bubbleID, w.approvalQueue = 0, nil
 	w.approvalTotal, w.approvalAllowed, w.approvalRejected = 0, 0, 0
 	w.mu.Unlock()

@@ -48,7 +48,7 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	cmd := exec.Command("sh", "-c", in.Command)
 	cmd.Dir = ws
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	out := &limitedWriter{limit: 30000}
+	out := &limitedWriter{limit: maxToolOutput}
 	cmd.Stdout = out
 	cmd.Stderr = out
 	if err := cmd.Start(); err != nil {

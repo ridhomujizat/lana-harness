@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
@@ -48,6 +47,52 @@ func writeSharedFile(t *testing.T, home, text string) {
 	}
 }
 
+// firstUserMessage returns the session's first user/message.
+func (h *harness) firstUserMessage(t *testing.T) core.UserMessage {
+	t.Helper()
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindUserMessage {
+			continue
+		}
+		var payload core.UserMessage
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	t.Fatal("no user/message")
+	return core.UserMessage{}
+}
+
+// lastUserMessage returns the session's last user/message.
+func (h *harness) lastUserMessage(t *testing.T) core.UserMessage {
+	t.Helper()
+	found := core.UserMessage{}
+	have := false
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindUserMessage {
+			continue
+		}
+		if err := json.Unmarshal(event.Payload, &found); err != nil {
+			t.Fatal(err)
+		}
+		have = true
+	}
+	if !have {
+		t.Fatal("no user/message")
+	}
+	return found
+}
+
+// userText joins the text blocks of a user message.
+func userText(msg core.UserMessage) string {
+	parts := make([]string, 0, len(msg.Content))
+	for _, block := range msg.Content {
+		parts = append(parts, block.Text)
+	}
+	return strings.Join(parts, "\n")
+}
+
 func TestPromptWithoutAgentHome(t *testing.T) {
 	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, nil)
 	h.run(t, "hi")
@@ -64,10 +109,17 @@ func TestPromptWithoutAgentHome(t *testing.T) {
 	if !strings.Contains(prompt, "# Runtime context\n") {
 		t.Fatalf("prompt has no runtime context:\n%s", prompt)
 	}
-	for _, want := range []string{"- agent: assistant", "- channel: library", "- workspace: " + ws, "- date: " + time.Now().Format("2006-01-02")} {
+	for _, want := range []string{"- agent: assistant", "- channel: library", "- workspace: " + ws} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
 		}
+	}
+	// REQ-LTC-001: the date line moved to the first user message.
+	if strings.Contains(prompt, "- date:") {
+		t.Fatalf("head prompt must not carry the date:\n%s", prompt)
+	}
+	if user := userText(h.firstUserMessage(t)); !strings.Contains(user, "<context>\ndate: ") {
+		t.Fatalf("first user message lacks the <context> block:\n%s", user)
 	}
 }
 
@@ -85,9 +137,14 @@ func TestPromptFromAgentHome(t *testing.T) {
 	}
 	writeHomeFile(t, h.home, "assistant", "AGENT.md", "You are the edited persona.")
 	h.run(t, "again")
-	prompts := h.systemPrompts(t)
-	if !strings.Contains(prompts[len(prompts)-1], "You are the edited persona.") {
-		t.Fatalf("edit not applied on next turn:\n%s", prompts[len(prompts)-1])
+	// REQ-LTC-002: the head stays stable; the persona change goes out as a
+	// <system-update> on the next turn's first user message.
+	if got := len(h.systemPrompts(t)); got != 1 {
+		t.Fatalf("system messages = %d, want 1", got)
+	}
+	update := userText(h.lastUserMessage(t))
+	if !strings.Contains(update, "<system-update>") || !strings.Contains(update, "You are the edited persona.") {
+		t.Fatalf("the persona change must go out as a <system-update>:\n%s", update)
 	}
 }
 
@@ -98,14 +155,15 @@ func TestPromptSharedUserCoversACHOME004(t *testing.T) {
 		"helper": {Provider: "mock", Model: "m"},
 		"worker": {Provider: "mock", Model: "m"},
 	}
-	h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("one"), textResponse("two")}}, agents)
-	writeSharedFile(t, h.home, "Name: Ridho")
-	for i, name := range []string{"helper", "worker"} {
+	// A fresh session per agent so each writes its own head prompt.
+	for _, name := range []string{"helper", "worker"} {
+		h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, agents)
+		writeSharedFile(t, h.home, "Name: Ridho")
 		if err := h.reg.SetAgent(context.Background(), h.info.ID, name); err != nil {
 			t.Fatal(err)
 		}
 		h.run(t, "hi")
-		prompt := h.systemPrompts(t)[i]
+		prompt := h.systemPrompts(t)[0]
 		if !strings.Contains(prompt, "# About the user\nName: Ridho") {
 			t.Fatalf("%s prompt lacks the shared user entry:\n%s", name, prompt)
 		}

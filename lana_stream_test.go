@@ -142,7 +142,12 @@ func TestRunBusy(t *testing.T) {
 }
 
 func TestRunStopReasons(t *testing.T) {
-	srv := newSSEServer(t, sseResponse{body: toolSSE("read_file", `{"path":"lana.go"}`)})
+	// REQ-LTC-040: the cap runs one extra tool-free report step, so the server
+	// serves a second (text) response for it.
+	srv := newSSEServer(t,
+		sseResponse{body: toolSSE("read_file", `{"path":"lana.go"}`)},
+		sseResponse{body: textSSE("report")},
+	)
 	rt := runtimeWithServer(t, srv, func(cfg string) string {
 		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\nmax_steps = 1\ntools = [\"read_file\"]", 1)
 	})

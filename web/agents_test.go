@@ -558,3 +558,50 @@ tools = ["read_file", "bash"]
 		})
 	}
 }
+
+// TestAgentsMaxStepsRange covers REQ-LTC-040: the agent save accepts any
+// max_steps >= 0 (0 or absent means no limit) with no upper bound, and rejects
+// a negative value.
+func TestAgentsMaxStepsRange(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	save := func(t *testing.T, steps int) (int, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_version": webfiles.ConfigVersion(raw),
+			"max_steps":        steps,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		return rr.Code, rr.Body.Bytes()
+	}
+
+	for _, steps := range []int{0, 1, 300} {
+		code, body := save(t, steps)
+		if code != http.StatusOK {
+			t.Fatalf("max_steps=%d status = %d, body = %q", steps, code, body)
+		}
+		tables := t016ReadAgentTables(t, store.path)
+		if got := agentRecordFromMap(tables["coder"]).MaxSteps; got != steps {
+			t.Fatalf("saved max_steps = %d, want %d", got, steps)
+		}
+	}
+
+	code, body := save(t, -1)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("max_steps=-1 status = %d, body = %q", code, body)
+	}
+	envelope := decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("max_steps=-1 error = %+v", envelope.Error)
+	}
+	if message, _ := envelope.Error.Details[0]["message"].(string); message != "max_steps must be 0 or greater" {
+		t.Fatalf("max_steps=-1 detail = %+v", envelope.Error.Details[0])
+	}
+}

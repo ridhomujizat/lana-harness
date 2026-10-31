@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,20 +14,30 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
+// defaultResponseHeaderTimeout is the provider [timeout] default: the wait
+// for the response headers, not a total request limit.
+const defaultResponseHeaderTimeout = 300 * time.Second
+
+// defaultStreamIdleTimeout is the [stream_idle_timeout] default: the longest
+// gap between two body reads before the stream is cut.
+const defaultStreamIdleTimeout = 120 * time.Second
+
 // Config is the configuration of one openai_compat provider.
 type Config struct {
-	BaseURL   string
-	APIKeyEnv string
-	Headers   map[string]string
-	Timeout   string
+	BaseURL           string
+	APIKeyEnv         string
+	Headers           map[string]string
+	Timeout           string
+	StreamIdleTimeout string
 }
 
 // Adapter is a core.Provider for one provider.
 type Adapter struct {
-	Name    string
-	cfg     Config
-	secrets core.Secrets
-	client  *http.Client
+	Name       string
+	cfg        Config
+	secrets    core.Secrets
+	client     *http.Client
+	streamIdle time.Duration
 }
 
 // NewAdapter creates an adapter.
@@ -35,7 +46,7 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("base_url of provider '%s' is invalid", name)
 	}
-	timeout := 300 * time.Second
+	timeout := defaultResponseHeaderTimeout
 	if cfg.Timeout != "" {
 		parsed, err := time.ParseDuration(cfg.Timeout)
 		if err != nil {
@@ -43,8 +54,23 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 		}
 		timeout = parsed
 	}
+	streamIdle := defaultStreamIdleTimeout
+	if cfg.StreamIdleTimeout != "" {
+		parsed, err := time.ParseDuration(cfg.StreamIdleTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("stream_idle_timeout of provider '%s' is invalid", name)
+		}
+		streamIdle = parsed
+	}
 	client := &http.Client{
-		Timeout: timeout,
+		// No total timeout: a long stream must only be cut by the idle timer.
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: timeout,
+			ForceAttemptHTTP2:     true,
+		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
@@ -55,7 +81,7 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 			return nil
 		},
 	}
-	return &Adapter{Name: name, cfg: cfg, secrets: secrets, client: client}, nil
+	return &Adapter{Name: name, cfg: cfg, secrets: secrets, client: client, streamIdle: streamIdle}, nil
 }
 
 // Stream sends the request and returns an event iterator.
@@ -86,7 +112,9 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatSt
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return nil, classifyHTTP(resp.StatusCode, data)
+		pe := classifyHTTP(resp.StatusCode, data)
+		pe.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
+		return nil, pe
 	}
 	return a.readSSE(ctx, resp.Body), nil
 }

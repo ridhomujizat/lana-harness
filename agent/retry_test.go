@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,15 +13,16 @@ import (
 )
 
 type failingProvider struct {
-	failures int32
-	class    string
-	calls    atomic.Int32
+	failures   int32
+	class      string
+	retryAfter time.Duration
+	calls      atomic.Int32
 }
 
 func (p *failingProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	n := p.calls.Add(1)
 	if n <= p.failures {
-		return nil, &core.ProviderError{Class: p.class, Message: "failed"}
+		return nil, &core.ProviderError{Class: p.class, Message: "failed", RetryAfter: p.retryAfter}
 	}
 	return func(yield func(core.ChatEvent, error) bool) {
 		yield(core.ChatEvent{Kind: core.ChatTextDelta, Text: "ok"}, nil)
@@ -45,6 +47,7 @@ func retryHarness(t *testing.T, providers map[string]core.Provider, targets []co
 	})
 	retry := NewRetry(store)
 	retry.Delays = []time.Duration{5 * time.Millisecond, 10 * time.Millisecond, 15 * time.Millisecond}
+	retry.Jitter = func() float64 { return 1 }
 	retry.Install(hooks)
 	return hooks, store, info.ID
 }
@@ -95,7 +98,7 @@ func TestFallbackOrder(t *testing.T) {
 	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "primary", Model: "m"}, {Provider: "fallback", Model: "m"}}); err != nil {
 		t.Fatal(err)
 	}
-	if primary.calls.Load() != 4 {
+	if primary.calls.Load() != 6 {
 		t.Fatalf("primary calls=%d", primary.calls.Load())
 	}
 	if fallback.calls.Load() != 1 {
@@ -115,6 +118,85 @@ func TestNoRetryClasses(t *testing.T) {
 		}
 		if primary.calls.Load() != 1 || fallback.calls.Load() != 0 {
 			t.Fatalf("class %s primary=%d fallback=%d", class, primary.calls.Load(), fallback.calls.Load())
+		}
+	}
+}
+
+func TestNewRetryDefaultDelays(t *testing.T) {
+	retry := NewRetry(nil)
+	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second}
+	if !reflect.DeepEqual(retry.Delays, want) {
+		t.Fatalf("delays=%v", retry.Delays)
+	}
+}
+
+// newRecordingHarness builds a harness whose Retry records the delays it waits
+// through Sleep, so tests never spend wall-clock time.
+func newRecordingHarness(t *testing.T, provider core.Provider, jitter func() float64) (*core.Hooks, *Retry, *[]time.Duration, string) {
+	t.Helper()
+	store := memstore.New()
+	info, err := store.Create(context.Background(), core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks := core.NewHooks()
+	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
+		return provider.Stream(ctx, in.Request)
+	})
+	slept := &[]time.Duration{}
+	retry := NewRetry(store)
+	if jitter != nil {
+		retry.Jitter = jitter
+	}
+	retry.Sleep = func(ctx context.Context, d time.Duration) error {
+		*slept = append(*slept, d)
+		return nil
+	}
+	retry.Install(hooks)
+	return hooks, retry, slept, info.ID
+}
+
+func TestRetryHonorsRetryAfter(t *testing.T) {
+	provider := &failingProvider{failures: 1, class: "rate_limit", retryAfter: 3 * time.Second}
+	hooks, _, slept, sessionID := newRecordingHarness(t, provider, func() float64 { return 1 })
+	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls.Load() != 2 {
+		t.Fatalf("calls=%d", provider.calls.Load())
+	}
+	if len(*slept) != 1 || (*slept)[0] != 3*time.Second {
+		t.Fatalf("slept=%v", *slept)
+	}
+}
+
+func TestRetryAfterCapped(t *testing.T) {
+	provider := &failingProvider{failures: 1, class: "rate_limit", retryAfter: 200 * time.Second}
+	hooks, _, slept, sessionID := newRecordingHarness(t, provider, func() float64 { return 1 })
+	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*slept) != 1 || (*slept)[0] != 120*time.Second {
+		t.Fatalf("slept=%v", *slept)
+	}
+}
+
+func TestRetryJitterRange(t *testing.T) {
+	provider := &failingProvider{failures: 2, class: "server"}
+	hooks, retry, slept, sessionID := newRecordingHarness(t, provider, nil)
+	retry.Delays = []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 300 * time.Millisecond}
+	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*slept) != 2 {
+		t.Fatalf("slept=%v", *slept)
+	}
+	for i, d := range *slept {
+		base := retry.Delays[i]
+		lo := time.Duration(float64(base) * 0.8)
+		hi := time.Duration(float64(base) * 1.2)
+		if d < lo || d > hi {
+			t.Fatalf("delay %d = %v not in [%v,%v]", i, d, lo, hi)
 		}
 	}
 }

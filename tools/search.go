@@ -49,7 +49,7 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	}
 	base := ws
 	if in.Path != "" {
-		resolved, rejected := resolveToolPath(t.guard, ws, in.Path)
+		resolved, rejected := resolveReadToolPath(t.guard, tc, ws, in.Path)
 		if rejected != nil {
 			return *rejected, nil
 		}
@@ -78,6 +78,13 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		if err != nil {
 			continue
 		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			// base is outside the workspace (a spill directory); report
+			// matches relative to it.
+			if fromBase, baseErr := filepath.Rel(base, abs); baseErr == nil {
+				rel = fromBase
+			}
+		}
 		rel = filepath.ToSlash(rel)
 		if ignoredPath(ig, rel) {
 			continue
@@ -96,7 +103,7 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	if total > 1000 {
 		out += fmt.Sprintf("\n(of %d results)", total)
 	}
-	return successOutput(truncateText(out, 30000))
+	return successOutput(truncateText(out, maxToolOutput))
 }
 
 type grepTool struct{ guard *Guard }
@@ -131,13 +138,17 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	}
 	base := ws
 	if in.Path != "" {
-		resolved, rejected := resolveToolPath(t.guard, ws, in.Path)
+		resolved, rejected := resolveReadToolPath(t.guard, tc, ws, in.Path)
 		if rejected != nil {
 			return *rejected, nil
 		}
 		base = resolved
 	}
 	ig := compileRootIgnore(ws)
+	roots := []string{ws}
+	if dir, ok := spillSessionDir(tc); ok {
+		roots = append(roots, dir)
+	}
 	var results []string
 	err = filepath.WalkDir(base, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -155,6 +166,13 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		rel, err := filepath.Rel(ws, path)
 		if err != nil {
 			return nil
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			// base is outside the workspace (a spill directory); report
+			// matches relative to it.
+			if fromBase, baseErr := filepath.Rel(base, path); baseErr == nil {
+				rel = fromBase
+			}
 		}
 		rel = filepath.ToSlash(rel)
 		if ignoredPath(ig, rel) {
@@ -177,7 +195,7 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		if err != nil {
 			return nil
 		}
-		if !within(ws, resolved) {
+		if !withinAny(roots, resolved) {
 			return nil
 		}
 		f, err := os.Open(path)
@@ -219,7 +237,7 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	if len(results) == 0 {
 		return successOutput("no matches")
 	}
-	return successOutput(truncateText(strings.Join(results, "\n"), 30000))
+	return successOutput(truncateText(strings.Join(results, "\n"), maxToolOutput))
 }
 
 func compileRootIgnore(ws string) *ignore.GitIgnore {
@@ -249,4 +267,14 @@ func within(ws, path string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
+// withinAny reports whether path lies inside any of the roots.
+func withinAny(roots []string, path string) bool {
+	for _, root := range roots {
+		if within(root, path) {
+			return true
+		}
+	}
+	return false
 }

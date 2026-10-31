@@ -41,6 +41,7 @@ const (
 	KindQuestionAnswered  = "question/answered"
 	KindModelSelection    = "model/selection"
 	KindCompactionSummary = "compaction/summary"
+	KindToolResultPruned  = "tool_result_pruned"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -88,9 +89,17 @@ type StepEnd struct {
 	Usage    Usage  `json:"usage"`
 }
 
-type SystemMessage struct {
-	V    int    `json:"v"`
+// PromptSection is one named part of a system prompt, kept so a later turn can
+// diff without re-parsing the head (REQ-LTC-002).
+type PromptSection struct {
+	Name string `json:"name"`
 	Text string `json:"text"`
+}
+
+type SystemMessage struct {
+	V        int             `json:"v"`
+	Text     string          `json:"text"`
+	Sections []PromptSection `json:"sections,omitempty"`
 }
 
 type UserMessage struct {
@@ -101,6 +110,18 @@ type UserMessage struct {
 	// reason.
 	Continue       bool   `json:"continue,omitempty"`
 	ContinueReason string `json:"continue_reason,omitempty"`
+	// PromptSections is the full section set in effect when the turn's first
+	// user message carried a <system-update>. It is omitted when nothing
+	// changed (REQ-LTC-002).
+	PromptSections []PromptSection `json:"prompt_sections,omitempty"`
+	// ContextBlocks is the number of leading content blocks lana injected
+	// (<context> and, when it changed, <system-update>). They are hidden from
+	// display surfaces but still sent to the model (REQ-LTC-001).
+	ContextBlocks int `json:"context_blocks,omitempty"`
+	// Runtime marks a note lana wrote itself (the empty-answer, step-limit, or
+	// tool-call-text note), not a message from the owner. Display surfaces hide
+	// it and it is not an owner message (REQ-MEM-021).
+	Runtime bool `json:"runtime,omitempty"`
 }
 
 type AssistantMessage struct {
@@ -181,10 +202,27 @@ type ModelSelection struct {
 }
 
 type CompactionSummary struct {
-	V            int    `json:"v"`
-	Summary      string `json:"summary"`
-	UptoSeq      int64  `json:"upto_seq"`
-	TokensBefore int64  `json:"tokens_before"`
-	TokensAfter  int64  `json:"tokens_after"`
-	Model        string `json:"model"`
+	V       int    `json:"v"`
+	Summary string `json:"summary"`
+	// FromSeq is the first event seq of the summarized span; UptoSeq is its
+	// last. RetainedFromSeq is the first event seq kept verbatim after the
+	// span. A summary written before REQ-LTC-010 has RetainedFromSeq 0 and
+	// keeps the older "drop everything up to the summary" behavior.
+	FromSeq         int64  `json:"from_seq"`
+	UptoSeq         int64  `json:"upto_seq"`
+	RetainedFromSeq int64  `json:"retained_from_seq"`
+	TokensBefore    int64  `json:"tokens_before"`
+	TokensAfter     int64  `json:"tokens_after"`
+	Model           string `json:"model"`
+	Usage           Usage  `json:"usage"`
+}
+
+// ToolResultPruned replaces the output of a tool result in the model view. The
+// original tool/result event stays in the log and is cited through SourceSeq
+// (REQ-LTC-012).
+type ToolResultPruned struct {
+	V         int    `json:"v"`
+	CallID    string `json:"call_id"`
+	SourceSeq int64  `json:"source_seq"`
+	Output    string `json:"output"`
 }

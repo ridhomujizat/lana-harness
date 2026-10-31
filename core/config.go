@@ -24,29 +24,35 @@ type WebConfig struct {
 }
 
 type ProviderConfig struct {
-	Kind      string            `toml:"kind"`
-	BaseURL   string            `toml:"base_url"`
-	APIKeyEnv string            `toml:"api_key_env"`
-	Headers   map[string]string `toml:"headers"`
-	Timeout   string            `toml:"timeout"`
+	Kind              string            `toml:"kind"`
+	BaseURL           string            `toml:"base_url"`
+	APIKeyEnv         string            `toml:"api_key_env"`
+	Headers           map[string]string `toml:"headers"`
+	Timeout           string            `toml:"timeout"`
+	StreamIdleTimeout string            `toml:"stream_idle_timeout"`
 }
 
 type AgentConfig struct {
-	Provider      string     `toml:"provider"`
-	Model         string     `toml:"model"`
-	Fallback      []string   `toml:"fallback"`
-	PromptFile    string     `toml:"prompt_file"`
-	Workspace     string     `toml:"workspace"`
-	Tools         []string   `toml:"tools"`
-	DisabledTools []string   `toml:"disabled_tools"`
-	Subagents     []string   `toml:"subagents"`
-	MCP           []string   `toml:"mcp"`
-	Skills        []string   `toml:"skills"`
-	Permission    string     `toml:"permission"`
-	MaxSteps      int        `toml:"max_steps"`
-	ContextWindow int        `toml:"context_window"`
-	Description   string     `toml:"description"`
-	Rules         AgentRules `toml:"rules"`
+	Provider      string   `toml:"provider"`
+	Model         string   `toml:"model"`
+	Fallback      []string `toml:"fallback"`
+	PromptFile    string   `toml:"prompt_file"`
+	Workspace     string   `toml:"workspace"`
+	Tools         []string `toml:"tools"`
+	DisabledTools []string `toml:"disabled_tools"`
+	Subagents     []string `toml:"subagents"`
+	MCP           []string `toml:"mcp"`
+	Skills        []string `toml:"skills"`
+	Permission    string   `toml:"permission"`
+	MaxSteps      int      `toml:"max_steps"`
+	ContextWindow int      `toml:"context_window"`
+	// CompactionHeadroom, CompactionThreshold, and CompactionRetain tune the
+	// context pressure policy (REQ-LTC-011). Zero means the default is used.
+	CompactionHeadroom  int        `toml:"compaction_headroom"`
+	CompactionThreshold float64    `toml:"compaction_threshold"`
+	CompactionRetain    float64    `toml:"compaction_retain"`
+	Description         string     `toml:"description"`
+	Rules               AgentRules `toml:"rules"`
 }
 
 type AgentRules struct {

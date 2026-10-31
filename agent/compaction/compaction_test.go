@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -17,164 +19,351 @@ type fakeLLM struct{ provider core.Provider }
 func (f fakeLLM) Provider(string) (core.Provider, bool) { return f.provider, true }
 func (f fakeLLM) Names() []string                       { return []string{"mock"} }
 
-type summaryProvider struct {
-	failures int32
-	calls    atomic.Int32
+// recordProvider records every request and returns a short summary text. The
+// first failures calls return ErrContextTooLong.
+type recordProvider struct {
+	mu       sync.Mutex
+	requests []core.ChatRequest
 	text     string
+	usage    core.Usage
+	failures int
+	calls    int
 }
 
-func (p *summaryProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
-	n := p.calls.Add(1)
+func (p *recordProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
+	p.mu.Lock()
+	p.calls++
+	n := p.calls
+	p.requests = append(p.requests, req)
+	text, usage := p.text, p.usage
+	p.mu.Unlock()
 	if n <= p.failures {
 		return nil, core.ErrContextTooLong
 	}
 	return func(yield func(core.ChatEvent, error) bool) {
-		yield(core.ChatEvent{Kind: core.ChatTextDelta, Text: p.text}, nil)
-		yield(core.ChatEvent{Kind: core.ChatUsage, Usage: core.Usage{InputTokens: 100, OutputTokens: 10}}, nil)
+		yield(core.ChatEvent{Kind: core.ChatTextDelta, Text: text}, nil)
+		yield(core.ChatEvent{Kind: core.ChatUsage, Usage: usage}, nil)
 		yield(core.ChatEvent{Kind: core.ChatStop, StopReason: "end_turn"}, nil)
 	}, nil
 }
 
-func setup(t *testing.T, provider *summaryProvider) (*memstore.Store, core.SessionInfo, core.Config, *Service) {
+func (p *recordProvider) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
+func (p *recordProvider) last() core.ChatRequest {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.requests[len(p.requests)-1]
+}
+
+func newService(t *testing.T, provider core.Provider, cfg core.Config) (*memstore.Store, core.SessionInfo, *Service) {
 	t.Helper()
 	store := memstore.New()
 	info, err := store.Create(context.Background(), core.NewSession{Agent: "coder", Channel: "library", Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := core.Config{Agents: map[string]core.AgentConfig{"coder": {Provider: "mock", Model: "m"}}}
-	service := NewService(store, fakeLLM{provider: provider}, cfg)
-	return store, info, cfg, service
+	if cfg.Agents == nil {
+		cfg.Agents = map[string]core.AgentConfig{}
+	}
+	if _, ok := cfg.Agents["coder"]; !ok {
+		cfg.Agents["coder"] = core.AgentConfig{Provider: "mock", Model: "m"}
+	}
+	return store, info, NewService(store, fakeLLM{provider}, cfg)
 }
 
-func seed(t *testing.T, store *memstore.Store, id string) {
+func appendEvents(t *testing.T, store *memstore.Store, id string, drafts ...core.EventDraft) {
 	t.Helper()
-	if _, err := store.Append(context.Background(), id, []core.EventDraft{
-		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
-		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}}},
-		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hi"}}}},
-		{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
-	}); err != nil {
+	if _, err := store.Append(context.Background(), id, drafts); err != nil {
 		t.Fatal(err)
 	}
 }
 
+func seedTurn(t *testing.T, store *memstore.Store, id string) {
+	t.Helper()
+	appendEvents(t, store, id,
+		core.EventDraft{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}}},
+		core.EventDraft{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hi"}}}},
+		core.EventDraft{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
+	)
+}
+
+// toolStep is one step that answers a tool call with a result of the given
+// size.
+func toolStep(i, chars int) []core.EventDraft {
+	call := fmt.Sprintf("c%d", i)
+	return []core.EventDraft{
+		{Kind: core.KindStepStart, TurnID: "t", Payload: core.StepStart{V: 1, Step: i, Provider: "mock", Model: "m"}},
+		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockText, Text: "step"},
+			{Kind: core.BlockToolUse, ID: call, Name: "big", Input: json.RawMessage(`{}`)},
+		}}},
+		{Kind: core.KindToolResult, TurnID: "t", Payload: core.ToolResultPayload{V: 1, CallID: call, Status: core.ToolStatusSuccess, Output: strings.Repeat("x", chars)}},
+		{Kind: core.KindStepEnd, TurnID: "t", Payload: core.StepEnd{V: 1, Step: i, Provider: "mock", Model: "m"}},
+	}
+}
+
+// seedLargeTurn is a two-unit session whose user message is sized so the span
+// of an overflow compaction is larger than a short summary.
+func seedLargeTurn(t *testing.T, store *memstore.Store, id string, chars int) {
+	t.Helper()
+	appendEvents(t, store, id,
+		core.EventDraft{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: strings.Repeat("u", chars)}}}},
+		core.EventDraft{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hi"}}}},
+		core.EventDraft{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
+	)
+}
+
+func seedToolSteps(t *testing.T, store *memstore.Store, id string, steps, chars int) {
+	t.Helper()
+	appendEvents(t, store, id, core.EventDraft{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}})
+	appendEvents(t, store, id, core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "go"}}}})
+	for i := 1; i <= steps; i++ {
+		appendEvents(t, store, id, toolStep(i, chars)...)
+	}
+	appendEvents(t, store, id, core.EventDraft{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}})
+}
+
+func summaryCount(t *testing.T, store *memstore.Store, id string) (int, core.CompactionSummary) {
+	t.Helper()
+	events, err := store.ChainEvents(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	var payload core.CompactionSummary
+	for _, event := range events {
+		if event.Kind != core.KindCompactionSummary {
+			continue
+		}
+		count++
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return count, payload
+}
+
 func TestCompactNowSummary(t *testing.T) {
-	provider := &summaryProvider{text: "summary"}
-	store, info, _, service := setup(t, provider)
-	seed(t, store, info.ID)
+	provider := &recordProvider{text: "short"}
+	store, info, service := newService(t, provider, core.Config{})
+	seedTurn(t, store, info.ID)
 	result, err := service.CompactNow(context.Background(), info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.UptoSeq != 5 || result.TokensAfter == 0 {
-		t.Fatalf("result=%+v", result)
+	count, payload := summaryCount(t, store, info.ID)
+	if count != 1 || payload.Summary != "short" {
+		t.Fatalf("summaries=%d payload=%+v", count, payload)
 	}
-	events, _ := store.ChainEvents(context.Background(), info.ID)
-	var payload core.CompactionSummary
-	found := false
-	for _, event := range events {
-		if event.Kind == core.KindCompactionSummary {
-			found = true
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if !found || payload.Summary != "summary" || payload.UptoSeq != result.UptoSeq {
-		t.Fatalf("payload=%+v", payload)
+	if payload.UptoSeq != result.UptoSeq || payload.FromSeq != 3 || payload.RetainedFromSeq != 4 {
+		t.Fatalf("payload=%+v result=%+v", payload, result)
 	}
 }
 
 func TestCompactNowRejects(t *testing.T) {
-	provider := &summaryProvider{text: "x"}
-	store, info, _, service := setup(t, provider)
+	provider := &recordProvider{text: "x"}
+	store, info, service := newService(t, provider, core.Config{})
 	if _, err := service.CompactNow(context.Background(), info.ID); !errors.Is(err, ErrNothingToCompact) {
 		t.Fatalf("err=%v", err)
 	}
-	seed(t, store, info.ID)
-	if _, err := store.Append(context.Background(), info.ID, []core.EventDraft{{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}}}); err != nil {
-		t.Fatal(err)
-	}
+	seedTurn(t, store, info.ID)
+	appendEvents(t, store, info.ID, core.EventDraft{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}})
 	if _, err := service.CompactNow(context.Background(), info.ID); !errors.Is(err, ErrTurnActive) {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-func TestAutoCompactThreshold(t *testing.T) {
-	provider := &summaryProvider{text: "summary"}
-	store, info, cfg, service := setup(t, provider)
-	cfg.Agents["coder"] = core.AgentConfig{Provider: "mock", Model: "m", ContextWindow: 10000}
-	service.Config = cfg
-	seed(t, store, info.ID)
-	if _, err := store.Append(context.Background(), info.ID, []core.EventDraft{
-		{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}},
-		{Kind: core.KindStepStart, TurnID: "t2", Payload: core.StepStart{V: 1, Step: 1, Provider: "mock", Model: "m"}},
-		{Kind: core.KindStepEnd, TurnID: "t2", Payload: core.StepEnd{V: 1, Step: 1, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 7001}}},
+// (a) sixty tool steps of 6000 characters each under a 32000 window compact
+// into a framed summary plus a retained tail that starts at a unit boundary.
+func TestCompactUnderPressureKeepsTail(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 32000},
+	}})
+	seedToolSteps(t, store, info.ID, 60, 6000)
+
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m",
+		System: "head", Trigger: "pressure",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	hooks := core.NewHooks()
-	hooks.AgentPreStep.SetDefault(func(_ context.Context, in core.PreStepInput) (core.PreStepDecision, error) {
-		return core.PreStepDecision{Input: in.Input}, nil
-	})
-	service.Install(hooks)
-	if _, err := hooks.AgentPreStep.Call(context.Background(), core.PreStepInput{SessionID: info.ID, AgentName: "coder", Input: core.Message{Role: core.RoleUser}}); err != nil {
+	count, payload := summaryCount(t, store, info.ID)
+	if count != 1 || payload.Summary != "condensed" {
+		t.Fatalf("summaries=%d payload=%+v", count, payload)
+	}
+	if payload.RetainedFromSeq != 0 && payload.RetainedFromSeq <= payload.UptoSeq {
+		t.Fatalf("retained_from_seq %d must follow upto_seq %d", payload.RetainedFromSeq, payload.UptoSeq)
+	}
+	messages, err := store.DeriveMessages(context.Background(), info.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	events, _ := store.ChainEvents(context.Background(), info.ID)
-	found := false
-	for _, event := range events {
-		if event.Kind == core.KindCompactionSummary {
-			found = true
-		}
+	if len(messages) < 3 {
+		t.Fatalf("messages=%d", len(messages))
 	}
-	if !found {
-		t.Fatal("summary not written")
+	if messages[0].Role != core.RoleUser || !strings.Contains(messages[0].Content[0].Text, "<compacted-summary>") {
+		t.Fatalf("first message = %+v", messages[0])
+	}
+	// The retained tail is a whole unit: an assistant message (its tool result
+	// follows in the next message). It never starts with a bare tool result.
+	if messages[1].Role != core.RoleAssistant {
+		t.Fatalf("tail starts with %s, want assistant (a unit boundary)", messages[1].Role)
 	}
 }
 
-func TestDefaultContextWindow(t *testing.T) {
-	provider := &summaryProvider{text: "summary"}
-	store, info, cfg, service := setup(t, provider)
-	seed(t, store, info.ID)
-	_ = store.Append
-	if _, err := store.Append(context.Background(), info.ID, []core.EventDraft{
-		{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}},
-		{Kind: core.KindStepStart, TurnID: "t2", Payload: core.StepStart{V: 1, Step: 1, Provider: "mock", Model: "m"}},
-		{Kind: core.KindStepEnd, TurnID: "t2", Payload: core.StepEnd{V: 1, Step: 1, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 89600}}},
+// (b) pruning alone relieves pressure when large tool results dominate; no
+// summary call is made.
+func TestPruneRelievesPressure(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 40000},
+	}})
+	seedToolSteps(t, store, info.ID, 5, 20000)
+
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m",
+		System: "head", Trigger: "pressure",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	hooks := core.NewHooks()
-	hooks.AgentPreStep.SetDefault(func(_ context.Context, in core.PreStepInput) (core.PreStepDecision, error) {
-		return core.PreStepDecision{Input: in.Input}, nil
-	})
-	service.Install(hooks)
-	if _, err := hooks.AgentPreStep.Call(context.Background(), core.PreStepInput{SessionID: info.ID, AgentName: "coder", Input: core.Message{Role: core.RoleUser}}); err != nil {
-		t.Fatal(err)
+	if provider.count() != 0 {
+		t.Fatalf("summary calls = %d, want 0", provider.count())
+	}
+	count, _ := summaryCount(t, store, info.ID)
+	if count != 0 {
+		t.Fatalf("summaries = %d, want 0", count)
 	}
 	events, _ := store.ChainEvents(context.Background(), info.ID)
+	pruned := 0
 	for _, event := range events {
-		if event.Kind == core.KindCompactionSummary {
-			t.Fatal("should not compact at exactly 70%")
+		if event.Kind == core.KindToolResultPruned {
+			pruned++
 		}
 	}
-	if cfg.Agents["coder"].ContextWindow != 0 {
-		t.Fatal("unexpected")
+	if pruned == 0 {
+		t.Fatal("no tool_result_pruned event")
+	}
+	messages, _ := store.DeriveMessages(context.Background(), info.ID)
+	prunedOutput := false
+	for _, message := range messages {
+		for _, block := range message.Content {
+			if block.Kind == core.BlockToolResult && strings.Contains(block.Output, "middle pruned") {
+				prunedOutput = true
+			}
+		}
+	}
+	if !prunedOutput {
+		t.Fatal("no derived tool result was pruned")
 	}
 }
 
+// When pruning does not relieve the pressure, the summary is written over the
+// pruned span and the session-changed guard does not trip on our own writes.
+func TestPruneThenSummarize(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 40000},
+	}})
+	seedToolSteps(t, store, info.ID, 4, 60000)
+
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	count, _ := summaryCount(t, store, info.ID)
+	if count != 1 {
+		t.Fatalf("summaries = %d, want 1", count)
+	}
+	if provider.count() != 1 {
+		t.Fatalf("summary calls = %d, want 1", provider.count())
+	}
+	// The summary request reads the pruned surface.
+	replayed := provider.last().Messages
+	pruned := false
+	for _, message := range replayed {
+		for _, block := range message.Content {
+			if block.Kind == core.BlockToolResult && strings.Contains(block.Output, "middle pruned") {
+				pruned = true
+			}
+		}
+	}
+	if !pruned {
+		t.Fatal("summary did not read the pruned surface")
+	}
+}
+
+// (c) the summary request reuses the System, Tools, and leading messages of the
+// conversation, plus one final user message with the 8-section instruction.
+func TestSummaryRequestShape(t *testing.T) {
+	provider := &recordProvider{text: "condensed summary"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 32000},
+	}})
+	seedToolSteps(t, store, info.ID, 20, 4000)
+	before, err := store.DeriveMessages(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tools := []core.ToolSpec{{Name: "big", Description: "d", InputSchema: json.RawMessage(`{"type":"object"}`)}}
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m",
+		System: "the head", Tools: tools, Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 1 {
+		t.Fatalf("summary calls = %d, want 1", provider.count())
+	}
+	req := provider.last()
+	if req.System != "the head" || !reflect.DeepEqual(req.Tools, tools) {
+		t.Fatalf("summary request prefix changed: system=%q tools=%v", req.System, req.Tools)
+	}
+	if req.MaxTokens != summaryMaxTokens {
+		t.Fatalf("summary MaxTokens = %d", req.MaxTokens)
+	}
+	last := req.Messages[len(req.Messages)-1]
+	if last.Role != core.RoleUser || !strings.HasPrefix(last.Content[0].Text, "You are now acting as a compaction engine for this AI assistant") {
+		t.Fatalf("final message = %+v", last)
+	}
+	if !strings.Contains(last.Content[0].Text, "## Primary Request and Intent") {
+		t.Fatalf("instruction is missing the 8-section structure")
+	}
+	if strings.Contains(last.Content[0].Text, "AI coding assistant") {
+		t.Fatal("instruction still says \"AI coding assistant\"")
+	}
+	// The replayed messages are a prefix of the conversation, without the
+	// trailing instruction and without the retained tail.
+	leading := req.Messages[:len(req.Messages)-1]
+	if len(leading) >= len(before) {
+		t.Fatalf("summary replayed the tail: leading=%d conversation=%d", len(leading), len(before))
+	}
+	if !reflect.DeepEqual(leading, before[:len(leading)]) {
+		t.Fatalf("summary messages are not the conversation prefix")
+	}
+}
+
+// (d) a context-length error triggers one forced compaction and one retry.
 func TestContextTooLongRetryOnce(t *testing.T) {
-	provider := &summaryProvider{text: "summary", failures: 1}
-	store, info, _, service := setup(t, provider)
-	seed(t, store, info.ID)
+	provider := &recordProvider{text: "condensed", failures: 1}
+	store, info, service := newService(t, provider, core.Config{})
+	seedLargeTurn(t, store, info.ID, 200)
 	hooks := core.NewHooks()
 	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
 		return provider.Stream(ctx, in.Request)
 	})
 	service.Install(hooks)
-	stream, err := hooks.LLMStream.Call(context.Background(), core.LLMStreamInput{SessionID: info.ID, TurnID: "t", Step: 1, Targets: []core.LLMTarget{{Provider: "mock", Model: "m"}}})
+
+	req := core.ChatRequest{Model: "m", System: "head", Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}}}}
+	stream, err := hooks.LLMStream.Call(context.Background(), core.LLMStreamInput{SessionID: info.ID, TurnID: "t", Step: 1, Targets: []core.LLMTarget{{Provider: "mock", Model: "m"}}, Request: req})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,15 +376,18 @@ func TestContextTooLongRetryOnce(t *testing.T) {
 			text.WriteString(event.Text)
 		}
 	}
-	if text.String() != "summary" || provider.calls.Load() != 3 {
-		t.Fatalf("text=%q calls=%d", text.String(), provider.calls.Load())
+	if text.String() != "condensed" || provider.count() != 3 {
+		t.Fatalf("text=%q calls=%d, want condensed/3", text.String(), provider.count())
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 1 {
+		t.Fatalf("summaries = %d, want 1", count)
 	}
 }
 
 func TestContextTooLongTwiceEndsTurn(t *testing.T) {
-	provider := &summaryProvider{text: "summary", failures: 2}
-	store, info, _, service := setup(t, provider)
-	seed(t, store, info.ID)
+	provider := &recordProvider{text: "condensed", failures: 2}
+	store, info, service := newService(t, provider, core.Config{})
+	seedTurn(t, store, info.ID)
 	hooks := core.NewHooks()
 	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
 		return provider.Stream(ctx, in.Request)
@@ -204,5 +396,224 @@ func TestContextTooLongTwiceEndsTurn(t *testing.T) {
 	_, err := hooks.LLMStream.Call(context.Background(), core.LLMStreamInput{SessionID: info.ID, TurnID: "t", Step: 1, Targets: []core.LLMTarget{{Provider: "mock", Model: "m"}}})
 	if !errors.Is(err, core.ErrContextTooLong) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// (f) the agent's context_window reaches the engine: a small window compacts,
+// a large one does not.
+func TestAgentContextWindowHonored(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"small": {Provider: "mock", Model: "m", ContextWindow: 32000},
+		"big":   {Provider: "mock", Model: "m", ContextWindow: 4000000},
+	}})
+	seedToolSteps(t, store, info.ID, 60, 6000)
+
+	// The large window is under threshold: nothing happens and no model call.
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "big", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 0 {
+		t.Fatalf("big window compacted (calls=%d)", provider.count())
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 0 {
+		t.Fatalf("big window wrote %d summaries", count)
+	}
+
+	// The small window is over threshold: it compacts.
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "small", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 1 {
+		t.Fatalf("small window wrote %d summaries, want 1", count)
+	}
+}
+
+// An overflow trigger ignores the threshold and keeps only the newest unit.
+func TestOverflowCompactsBelowThreshold(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 4000000},
+	}})
+	seedLargeTurn(t, store, info.ID, 200)
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "overflow",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 1 {
+		t.Fatalf("summaries = %d, want 1", count)
+	}
+}
+
+// A step/end with real usage counts the tool outputs as they were sent. Pruning
+// that content must relieve the pressure on its own: the estimate drops and no
+// summary request is made.
+func TestPruneRelievesUsagePressure(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 40000},
+	}})
+	seedToolSteps(t, store, info.ID, 5, 12000)
+	appendEvents(t, store, info.ID, core.EventDraft{Kind: core.KindStepEnd, TurnID: "t", Payload: core.StepEnd{
+		V: 1, Step: 99, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 15500, OutputTokens: 500},
+	}})
+
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 0 {
+		t.Fatalf("summary calls = %d, want 0", provider.count())
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 0 {
+		t.Fatalf("summaries = %d, want 0", count)
+	}
+	events, _ := store.ChainEvents(context.Background(), info.ID)
+	pruned := 0
+	for _, event := range events {
+		if event.Kind == core.KindToolResultPruned {
+			pruned++
+		}
+	}
+	if pruned == 0 {
+		t.Fatal("no tool_result_pruned event")
+	}
+}
+
+// A span that is only the prior summary unit is not summarized again.
+func TestOnlySummarySpanIsSkipped(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 32000},
+	}})
+	appendEvents(t, store, info.ID,
+		core.EventDraft{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "old"}}}},
+		core.EventDraft{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "old reply"}}}},
+	)
+	events, err := store.ChainEvents(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upto := events[len(events)-1].Seq
+	appendEvents(t, store, info.ID,
+		core.EventDraft{Kind: core.KindCompactionSummary, TurnID: "t", Payload: core.CompactionSummary{
+			V: 1, Summary: strings.Repeat("s", 40000), FromSeq: 1, UptoSeq: upto, RetainedFromSeq: upto + 1,
+		}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "new"}}}},
+		core.EventDraft{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "new reply"}}}},
+		core.EventDraft{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
+	)
+
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 0 {
+		t.Fatalf("summary calls = %d, want 0", provider.count())
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 1 {
+		t.Fatalf("summaries = %d, want the seeded 1", count)
+	}
+}
+
+// A failed pressure attempt is not repeated until the session gains enough
+// message-producing events or a new turn starts. "overflow" and "manual" always
+// try.
+func TestPressureAttemptThrottled(t *testing.T) {
+	provider := &recordProvider{text: strings.Repeat("z", 20000)}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m", ContextWindow: 32000},
+	}})
+	seedToolSteps(t, store, info.ID, 5, 3000)
+	appendEvents(t, store, info.ID, core.EventDraft{Kind: core.KindStepEnd, TurnID: "t", Payload: core.StepEnd{
+		V: 1, Step: 99, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 100000, OutputTokens: 1000},
+	}})
+
+	attempt := func(trigger, turn string) {
+		t.Helper()
+		if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+			SessionID: info.ID, TurnID: turn, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: trigger,
+		}); err != nil && trigger == "manual" {
+			t.Fatal(err)
+		}
+	}
+
+	// The first pressure attempt runs the summarizer and is rejected.
+	attempt("pressure", "t")
+	if provider.count() != 1 {
+		t.Fatalf("calls = %d, want 1", provider.count())
+	}
+	// Without growth the next step is throttled: no second call.
+	attempt("pressure", "t")
+	if provider.count() != 1 {
+		t.Fatalf("throttled call = %d, want 1", provider.count())
+	}
+	// Eight more message-producing events lift the throttle.
+	for i := 0; i < pressureRetryEvents; i++ {
+		appendEvents(t, store, info.ID, core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "g"}}}})
+	}
+	attempt("pressure", "t")
+	if provider.count() != 2 {
+		t.Fatalf("retry call = %d, want 2", provider.count())
+	}
+	// The retry failed too, so the throttle is back.
+	attempt("pressure", "t")
+	if provider.count() != 2 {
+		t.Fatalf("re-throttled call = %d, want 2", provider.count())
+	}
+	// A new turn tries regardless of growth.
+	attempt("pressure", "t2")
+	if provider.count() != 3 {
+		t.Fatalf("new-turn call = %d, want 3", provider.count())
+	}
+	// "overflow" and "manual" ignore the throttle.
+	attempt("overflow", "t2")
+	if provider.count() != 4 {
+		t.Fatalf("overflow call = %d, want 4", provider.count())
+	}
+	attempt("manual", "t2")
+	if provider.count() != 5 {
+		t.Fatalf("manual call = %d, want 5", provider.count())
+	}
+}
+
+// The live agent lookup replaces the boot snapshot: a smaller context_window
+// taken from the lookup makes the threshold trigger where it did not before.
+func TestLiveAgentConfigLookup(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	big := core.AgentConfig{Provider: "mock", Model: "m", ContextWindow: 4000000}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{"coder": big}})
+	seedToolSteps(t, store, info.ID, 60, 6000)
+	live := map[string]core.AgentConfig{"coder": big}
+	service.LookupAgent = func(name string) (core.AgentConfig, bool) {
+		agent, ok := live[name]
+		return agent, ok
+	}
+
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 0 {
+		t.Fatalf("big window wrote %d summaries", count)
+	}
+
+	live["coder"] = core.AgentConfig{Provider: "mock", Model: "m", ContextWindow: 32000}
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 1 {
+		t.Fatalf("small live window wrote %d summaries, want 1", count)
 	}
 }
