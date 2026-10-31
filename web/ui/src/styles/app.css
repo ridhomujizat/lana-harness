@@ -234,7 +234,9 @@ textarea {
 }
 
 .sidebar-top {
-  gap: var(--space-section);
+  /* Two nav-row paddings (2 × 6px) between the logo row and the first item:
+     close enough to read as one column, with room to separate the brand. */
+  gap: 12px;
 }
 
 .sidebar-bottom {
@@ -256,6 +258,14 @@ textarea {
   min-width: 0;
   color: var(--text-primary);
   text-decoration: none;
+}
+
+/* The nav rows inset their 20px icon by 10px, so the icon center sits 20px
+   from the row edge. The 32px mark needs 4px of leading inset to share that
+   center, and a 6px lockup gap puts the wordmark on the nav-label x. */
+.sidebar .logo-lockup {
+  gap: 6px;
+  padding-left: 4px;
 }
 
 .logo-mark {
@@ -331,13 +341,23 @@ textarea {
 }
 
 .nav-item:hover {
-  background: var(--bg-primary-hover);
+  background: var(--bg-secondary-hover);
 }
 
 .nav-item[aria-current="page"] {
-  background: var(--bg-active);
-  color: var(--text-primary);
+  background: var(--bg-brand-secondary);
+  color: var(--text-brand-primary);
   font-weight: 600;
+}
+
+/* Nav icons are static SVGs, so tint the active one to match the active
+   label without replacing the asset. */
+.nav-item[aria-current="page"] .icon-20 {
+  filter: brightness(0);
+}
+
+[data-theme="dark"] .nav-item[aria-current="page"] .icon-20 {
+  filter: brightness(0) invert(1);
 }
 
 .nav-label {
@@ -482,6 +502,12 @@ textarea {
 
 .sidebar-collapsed .sidebar-logo {
   justify-content: center;
+}
+
+/* Center the 32px mark in the collapsed rail; the expanded 4px inset would
+   push it off the axis of the 20px nav icons. */
+.sidebar-collapsed .logo-lockup {
+  padding-left: 0;
 }
 
 .sidebar-collapsed .logo-word,

@@ -487,8 +487,9 @@ function ProgressStep({ state, title, note, connector }: ProgressStepProps) {
   );
 }
 
-/* The decorative door mark of the login, forgot, and code screens (design.md):
-   the two shapes of the logo Λ drawn large and cut off by the rail edges. */
+/* The decorative door mark of the setup rail (login, forgot, code, and
+   onboarding): the two shapes of the logo Λ drawn large and cut off by the
+   rail edges. */
 function DoorMark() {
   return (
     <svg className="door-mark" viewBox="0 0 34 32" aria-hidden="true">
@@ -529,7 +530,7 @@ export function SetupShell({
   return (
     <div className="setup-shell">
       <aside className="setup-rail" aria-label={door ? "lana" : "Setup progress"}>
-        {door ? <DoorMark /> : null}
+        <DoorMark />
         <div className="setup-rail-top">
           <a
             className="logo-lockup setup-logo"
