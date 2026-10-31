@@ -45,7 +45,9 @@ func display(pkg string) string {
 }
 
 func allowed(from, to string) bool {
-	if from == "cmd/lana" || strings.HasPrefix(from, "examples/") {
+	// cmd/lana-eval is a developer command like cmd/lana: it drives the public
+	// library runtime directly.
+	if from == "cmd/lana" || from == "cmd/lana-eval" || strings.HasPrefix(from, "examples/") {
 		return true
 	}
 	if from == "" {
