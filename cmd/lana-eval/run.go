@@ -15,6 +15,7 @@ import (
 	"time"
 
 	lana "github.com/ridhomujizat/lana-harness"
+	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
 // commandTimeout bounds one setup or check command.
@@ -55,6 +56,7 @@ func renderConfig(providerURL, keyEnv, model, workspace string, overrides map[st
 	}
 
 	b.WriteString("\n[agents.eval]\n")
+	_, toolsOverridden := overrides["tools"]
 	for _, field := range []struct {
 		key   string
 		value any
@@ -67,6 +69,10 @@ func renderConfig(providerURL, keyEnv, model, workspace string, overrides map[st
 		}},
 		{key: "permission", value: "trust"},
 	} {
+		// A task tool list is written once, through the overrides below.
+		if field.key == "tools" && toolsOverridden {
+			continue
+		}
 		text, err := tomlValue(field.value)
 		if err != nil {
 			return "", fmt.Errorf("agent %s: %w", field.key, err)
@@ -175,12 +181,15 @@ func runTask(ctx context.Context, task evalTask, cfg runConfig) (result taskResu
 		}
 	}
 
-	configText, err := renderConfig(cfg.providerURL, cfg.keyEnv, cfg.model, workspace, task.Agent)
+	configText, err := renderConfig(cfg.providerURL, cfg.keyEnv, cfg.model, workspace, taskOverrides(task))
 	if err != nil {
 		return result, fmt.Errorf("render config: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(configText), 0o600); err != nil {
 		return result, fmt.Errorf("write config: %w", err)
+	}
+	if err := seedHome(home, task); err != nil {
+		return result, err
 	}
 
 	rt, err := lana.New(ctx, lana.Options{Home: home})
@@ -209,10 +218,11 @@ func runTask(ctx context.Context, task evalTask, cfg runConfig) (result taskResu
 	result.DurationMS = time.Since(turnStart).Milliseconds()
 	cancel()
 
-	// The check runs before rt.Close so background jobs are still alive
-	// (REQ-TRL-021).
-	checkOutput, checkErr := runShell(ctx, workspace, check, commandTimeout)
-	result.CheckOutput = tailText(checkOutput, 2000)
+	// The answer file is written before the check so every check can inspect
+	// the turn's final text (REQ-ECX-040).
+	if err := writeAnswer(workspace, turn.Text); err != nil {
+		return result, fmt.Errorf("write answer file: %w", err)
+	}
 
 	metricsFailed := false
 	if turn.SessionID != "" {
@@ -237,6 +247,13 @@ func runTask(ctx context.Context, task evalTask, cfg runConfig) (result taskResu
 		result.TurnEnd = turn.StopReason
 	}
 	result.CostUSD = cfg.prices.cost(result.InputTokens, result.CachedTokens, result.OutputTokens)
+
+	// The check runs before rt.Close so background jobs are still alive
+	// (REQ-TRL-021). It reads the turn metrics through environment variables
+	// (REQ-ECX-041).
+	checkOutput, checkErr := runShellEnv(ctx, workspace, check, commandTimeout,
+		checkEnv(result.Compactions, totalToolCalls(result.ToolCalls)))
+	result.CheckOutput = tailText(checkOutput, 2000)
 
 	switch {
 	case runErr != nil || metricsFailed:
@@ -290,8 +307,63 @@ func writeTaskFiles(workspace string, files map[string]string) error {
 	return nil
 }
 
+// answerFileName holds the turn's final answer in the workspace.
+const answerFileName = ".lana-eval-answer.txt"
+
+// answerPath returns the answer file path inside workspace.
+func answerPath(workspace string) string { return filepath.Join(workspace, answerFileName) }
+
+// writeAnswer writes the turn's final answer to the workspace (REQ-ECX-040).
+func writeAnswer(workspace, text string) error {
+	return os.WriteFile(answerPath(workspace), []byte(text), 0o644)
+}
+
+// checkEnv is the environment passed to a task check (REQ-ECX-041).
+func checkEnv(compactions, toolCalls int) map[string]string {
+	return map[string]string{
+		"LANA_EVAL_COMPACTIONS": strconv.Itoa(compactions),
+		"LANA_EVAL_TOOL_CALLS":  strconv.Itoa(toolCalls),
+	}
+}
+
+// taskOverrides returns the agent config overrides of a task. A non-nil task
+// tool list replaces the default list.
+func taskOverrides(task evalTask) map[string]any {
+	overrides := make(map[string]any, len(task.Agent)+1)
+	for key, value := range task.Agent {
+		overrides[key] = value
+	}
+	if task.Tools != nil {
+		overrides["tools"] = task.Tools
+	}
+	return overrides
+}
+
+// seedHome writes the task's seeded memory and user files before the runtime
+// starts (REQ-ECX-040). The entry format is agenthome's.
+func seedHome(home string, task evalTask) error {
+	if len(task.User) > 0 {
+		if err := agenthome.WriteFile(agenthome.SharedUser(home), agenthome.Join(task.User)); err != nil {
+			return fmt.Errorf("seed USER.md: %w", err)
+		}
+	}
+	if len(task.Memory) > 0 {
+		paths := agenthome.Paths(home, "eval")
+		if err := agenthome.WriteFile(paths.Memory, agenthome.Join(task.Memory)); err != nil {
+			return fmt.Errorf("seed MEMORY.md: %w", err)
+		}
+	}
+	return nil
+}
+
 // runShell runs command with sh -c in dir.
 func runShell(ctx context.Context, dir, command string, timeout time.Duration) (string, error) {
+	return runShellEnv(ctx, dir, command, timeout, nil)
+}
+
+// runShellEnv runs command with sh -c in dir and adds env to the inherited
+// environment.
+func runShellEnv(ctx context.Context, dir, command string, timeout time.Duration, env map[string]string) (string, error) {
 	if strings.TrimSpace(command) == "" {
 		return "", nil
 	}
@@ -299,11 +371,38 @@ func runShell(ctx context.Context, dir, command string, timeout time.Duration) (
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, "sh", "-c", command)
 	cmd.Dir = dir
+	cmd.Env = mergedEnv(env)
 	output, err := cmd.CombinedOutput()
 	if err != nil && runCtx.Err() == context.DeadlineExceeded {
 		err = fmt.Errorf("timed out after %s", timeout)
 	}
 	return string(output), err
+}
+
+// mergedEnv returns the process environment with env applied on top.
+func mergedEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	values := map[string]string{}
+	for _, pair := range os.Environ() {
+		if key, value, ok := strings.Cut(pair, "="); ok {
+			values[key] = value
+		}
+	}
+	for key, value := range env {
+		values[key] = value
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	merged := make([]string, 0, len(keys))
+	for _, key := range keys {
+		merged = append(merged, key+"="+values[key])
+	}
+	return merged
 }
 
 // commandError adds the output tail to a setup error.

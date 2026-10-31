@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
@@ -234,5 +237,150 @@ func TestPrintTableCompare(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Errorf("table does not contain %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestLoadOldSingleModelReport(t *testing.T) {
+	const old = `{
+  "model": "old-model",
+  "started": "2026-10-31T00:00:00Z",
+  "tasks": [
+    {
+      "name": "edit-small",
+      "status": "pass",
+      "check_output": "",
+      "duration_ms": 1000,
+      "steps": 1,
+      "tool_calls": {"bash": 1},
+      "tool_errors": 0,
+      "bash_file_ops": 0,
+      "reminders": 0,
+      "compactions": 0,
+      "input_tokens": 100,
+      "cached_tokens": 50,
+      "output_tokens": 10,
+      "cache_hit_pct": 50,
+      "turn_end": "end_turn"
+    }
+  ],
+  "total": {
+    "name": "total",
+    "status": "1 pass, 0 fail, 0 error",
+    "check_output": "",
+    "duration_ms": 1000,
+    "steps": 1,
+    "tool_calls": {"bash": 1},
+    "tool_errors": 0,
+    "bash_file_ops": 0,
+    "reminders": 0,
+    "compactions": 0,
+    "input_tokens": 100,
+    "cached_tokens": 50,
+    "output_tokens": 10,
+    "cache_hit_pct": 50
+  }
+}`
+	path := filepath.Join(t.TempDir(), "old.json")
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous, err := loadReport(path)
+	if err != nil {
+		t.Fatalf("loadReport: %v", err)
+	}
+	if got := previous.modelReports(); len(got) != 1 || got[0].Model != "old-model" {
+		t.Fatalf("modelReports = %+v, want the old single model", got)
+	}
+	matching := previousForModel(previous, "old-model")
+	if matching == nil {
+		t.Fatal("previousForModel did not find the old model")
+	}
+	if len(matching.Tasks) != 1 || matching.Tasks[0].Name != "edit-small" {
+		t.Fatalf("matching tasks = %+v", matching.Tasks)
+	}
+	if matching.Total == nil || matching.Total.Name != "total" {
+		t.Fatalf("matching total = %+v", matching.Total)
+	}
+	if other := previousForModel(previous, "new-model"); other != nil {
+		t.Fatalf("previousForModel matched a different model: %+v", other)
+	}
+
+	// The delta still comes from the matching old model and task.
+	runs := []modelReport{{
+		Model: "old-model",
+		Tasks: []taskResult{{
+			Name: "edit-small", Status: statusPass, Steps: 2,
+			ToolCalls: map[string]int{"bash": 1},
+		}},
+		Total: buildTotal([]taskResult{{
+			Name: "edit-small", Status: statusPass, Steps: 2,
+			ToolCalls: map[string]int{"bash": 1},
+		}}, priceTable{}),
+	}}
+	var buffer bytes.Buffer
+	printReports(&buffer, runs, previous, false)
+	if !strings.Contains(buffer.String(), "2 (+1)") {
+		t.Fatalf("table has no old-report delta:\n%s", buffer.String())
+	}
+}
+
+func TestPreviousForModelMulti(t *testing.T) {
+	previous := &report{Models: []modelReport{
+		{Model: "one", Tasks: []taskResult{{Name: "task-one"}}},
+		{Model: "two", Tasks: []taskResult{{Name: "task-two"}}},
+	}}
+	got := previousForModel(previous, "two")
+	if got == nil || len(got.Tasks) != 1 || got.Tasks[0].Name != "task-two" {
+		t.Fatalf("previousForModel(two) = %+v", got)
+	}
+	if previousForModel(previous, "three") != nil {
+		t.Fatal("previousForModel matched a missing model")
+	}
+
+	runs := []modelReport{
+		{Model: "one", Total: buildTotal(nil, priceTable{})},
+		{Model: "two", Total: buildTotal(nil, priceTable{})},
+	}
+	var buffer bytes.Buffer
+	printReports(&buffer, runs, previous, false)
+	output := buffer.String()
+	for _, want := range []string{"model: one", "model: two"} {
+		if !strings.Contains(output, want) {
+			t.Errorf("multi-model table does not contain %q:\n%s", want, output)
+		}
+	}
+	if count := strings.Count(output, "total"); count != 2 {
+		t.Errorf("total rows = %d, want one per model:\n%s", count, output)
+	}
+}
+
+func TestMultiModelReportJSON(t *testing.T) {
+	document := report{
+		Started: time.Now().UTC(),
+		Models: []modelReport{
+			{Model: "one", Tasks: []taskResult{{Name: "task", Status: statusPass}}, Total: buildTotal(nil, priceTable{})},
+			{Model: "two", Tasks: []taskResult{{Name: "task", Status: statusFail}}, Total: buildTotal(nil, priceTable{})},
+		},
+	}
+	data, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal report: %v", err)
+	}
+	if _, ok := fields["models"]; !ok {
+		t.Fatalf("multi-model report has no models field: %s", data)
+	}
+	if _, ok := fields["model"]; ok {
+		t.Fatalf("multi-model report kept the single model field: %s", data)
+	}
+	var loaded report
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("load multi-model report: %v", err)
+	}
+	if len(loaded.Models) != 2 || loaded.Models[0].Model != "one" || loaded.Models[1].Model != "two" {
+		t.Fatalf("loaded models = %+v, want one and two", loaded.Models)
 	}
 }
