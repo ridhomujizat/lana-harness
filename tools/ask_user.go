@@ -35,6 +35,11 @@ type askUserOutput struct {
 
 type askUserTool struct{}
 
+// askUserGuidance is the head-prompt note shown when ask_user is offered
+// (REQ-ECX-011).
+const askUserGuidance = "Ask the owner when a decision belongs to them or the task is blocked on an answer they hold, because those choices are not yours to make. " +
+	"Do not ask for something the tools can find out (files, search results, command output); check first."
+
 // NewAskUser creates the ask_user tool.
 func NewAskUser() core.Tool { return &askUserTool{} }
 
@@ -47,6 +52,8 @@ func (t *askUserTool) Spec() core.ToolSpec {
 }
 
 func (t *askUserTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
+
+func (t *askUserTool) PromptGuidance() string { return askUserGuidance }
 
 func (t *askUserTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in askUserInput

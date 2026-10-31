@@ -19,6 +19,10 @@ var skillWriteSpec = json.RawMessage(`{"type":"object","properties":{"name":{"ty
 type skillLoadTool struct{}
 type skillWriteTool struct{}
 
+// skillLoadGuidance is the head-prompt note shown when skill_load is offered
+// (REQ-ECX-011). The skill list itself stays in the # Skills section.
+const skillLoadGuidance = "Call skill_load with a skill's name before following that skill; the loaded text is the current procedure, and the list in the prompt is only an index."
+
 // NewSkillLoad creates the skill_load tool.
 func NewSkillLoad() core.Tool { return &skillLoadTool{} }
 
@@ -29,6 +33,8 @@ func (t *skillLoadTool) Spec() core.ToolSpec {
 	return core.ToolSpec{Name: "skill_load", Description: "Load a skill by name: its instructions, its folder, and its files. Call this before following a skill listed in the prompt.", InputSchema: skillLoadSpec}
 }
 func (t *skillLoadTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
+
+func (t *skillLoadTool) PromptGuidance() string { return skillLoadGuidance }
 
 func (t *skillWriteTool) Spec() core.ToolSpec {
 	return core.ToolSpec{Name: "skill_write", Description: "Create or update one of your own skills (SKILL.md) so you can reuse a procedure that worked. name: lowercase letters, digits, - and _. description: one line saying when to use it.", InputSchema: skillWriteSpec}

@@ -13,12 +13,21 @@ type RosterEntry struct {
 	Description string
 }
 
+// ToolNote is the prompt guidance of one offered tool (REQ-ECX-010).
+type ToolNote struct {
+	Name string
+	Text string
+}
+
 // PromptInput is the data for one system prompt.
 type PromptInput struct {
-	Persona        string
-	User           []string
-	Memory         []string
-	MemoryCapture  bool
+	Persona   string
+	User      []string
+	Memory    []string
+	ToolNotes []ToolNote
+	// HasMCP reports whether the agent has at least one MCP server configured
+	// (REQ-ECX-012).
+	HasMCP         bool
 	Skills         []Skill
 	Roster         []RosterEntry
 	Agent          string
@@ -31,22 +40,18 @@ type PromptInput struct {
 	Now  time.Time
 }
 
-// memoryCaptureRules is the fixed section that tells an agent with memory_write
-// to save durable facts from every owner message. It is constant, so it does
-// not change the prompt prefix between turns (REQ-MEM-001, REQ-LTC-001).
-const memoryCaptureRules = "# Memory capture\n" +
-	"After every message from the owner, check it for a new durable fact: how they want to be addressed, their name or role, language or style preferences, standing instructions (\"always\", \"never\", \"from now on\"), decisions, or corrections of something you got wrong. This includes facts that are only implied or said in passing.\n" +
-	"- Save it at once with memory_write before you answer: target=user for facts about the owner, target=memory for your own notes about the environment.\n" +
-	"- If it contradicts an entry already shown above, use action=replace with old_text from that entry. Do not add a second entry for the same thing.\n" +
-	"- Keep each entry one short sentence. Never save passwords, API keys, or tokens."
+// blockerGeneralRules is always in the head prompt: how to report a request
+// that cannot be finished, and when tool status belongs in an answer
+// (REQ-ECX-001, REQ-ECX-012).
+const blockerGeneralRules = "# When something blocks you\n" +
+	"- When you cannot finish the request, say so plainly and say what is still needed, so the owner can decide the next step.\n" +
+	"- End each turn by telling the owner the result, including partial results, because the owner may not see the tool calls.\n" +
+	"- Talk about tools, MCP servers, or their status only when the current request needs them or the owner asks; unrelated status reports are noise."
 
-// blockingRules is the fixed section that tells the agent how to report a
-// blocker. It is runtime text, not part of the editable AGENT.md (REQ-TFB-008).
-const blockingRules = "# When something blocks you\n" +
-	"- If a tool or MCP server you need is unavailable, or a call to it fails, say so in your answer: name it, quote the error, say what you could not do, and say what the owner can do (for example: check the server in Settings → MCP, add a secret, or retry).\n" +
-	"- Do not work around a missing or failing MCP server by calling it or its API by hand (for example with bash).\n" +
-	"- If you cannot finish the request, say so plainly and say what is still needed. Never end a turn without telling the owner the result.\n" +
-	"- Talk about tools, MCP servers, or their status only when the current request needs them or the owner asks. Do not list tools or report their availability in greetings or small talk."
+// blockerMCPRules is added to the blocker section only when the agent has an
+// MCP server (REQ-ECX-012).
+const blockerMCPRules = "- When an MCP server you need is unavailable or a call to it fails, say so in your answer: name it, quote the error, say what you could not do, and say what the owner can do (for example: check the server in Settings → MCP, add a secret, or retry).\n" +
+	"- Do not work around a missing or failing MCP server by calling it or its API by hand (for example with bash), because that bypasses the server's own setup and status."
 
 // Section is one named part of a system prompt. Name is the stable identity
 // used to diff two prompts; Text is the rendered section, heading included.
@@ -57,14 +62,14 @@ type Section struct {
 
 // The section names.
 const (
-	SectionPersona       = "persona"
-	SectionTeam          = "team"
-	SectionUser          = "user"
-	SectionMemory        = "memory"
-	SectionMemoryCapture = "memory_capture"
-	SectionSkills        = "skills"
-	SectionBlockers      = "blockers"
-	SectionRuntime       = "runtime"
+	SectionPersona   = "persona"
+	SectionTeam      = "team"
+	SectionUser      = "user"
+	SectionMemory    = "memory"
+	SectionSkills    = "skills"
+	SectionToolNotes = "tool_notes"
+	SectionBlockers  = "blockers"
+	SectionRuntime   = "runtime"
 )
 
 // BuildSections renders the named system prompt sections in order. Empty
@@ -83,19 +88,52 @@ func BuildSections(in PromptInput) []Section {
 	if len(in.Memory) > 0 {
 		sections = append(sections, Section{Name: SectionMemory, Text: "# Your memory\n" + section(in.Memory, MemoryLimit)})
 	}
-	if in.MemoryCapture {
-		sections = append(sections, Section{Name: SectionMemoryCapture, Text: memoryCaptureRules})
-	}
 	if len(in.Skills) > 0 {
-		lines := []string{"# Skills", "Call skill_load with the skill name before following a skill."}
+		lines := []string{"# Skills"}
 		for _, skill := range in.Skills {
 			lines = append(lines, "- "+skill.Name+": "+skill.Description)
 		}
 		sections = append(sections, Section{Name: SectionSkills, Text: strings.Join(lines, "\n")})
 	}
-	sections = append(sections, Section{Name: SectionBlockers, Text: blockingRules})
+	if notes := toolNotes(in.ToolNotes); notes != "" {
+		sections = append(sections, Section{Name: SectionToolNotes, Text: notes})
+	}
+	sections = append(sections, Section{Name: SectionBlockers, Text: blockerRules(in.HasMCP)})
 	sections = append(sections, Section{Name: SectionRuntime, Text: "# Runtime context\n" + runtimeContext(in)})
 	return sections
+}
+
+// blockerRules renders the general blocker rules and, when the agent has an
+// MCP server, the MCP-specific rules (REQ-ECX-012).
+func blockerRules(hasMCP bool) string {
+	if !hasMCP {
+		return blockerGeneralRules
+	}
+	return blockerGeneralRules + "\n" + blockerMCPRules
+}
+
+// toolNotes renders one "## <tool>" block per guidance note, in tool-name
+// order. Empty notes are skipped, and "" means no section is rendered
+// (REQ-ECX-010).
+func toolNotes(notes []ToolNote) string {
+	list := make([]ToolNote, 0, len(notes))
+	for _, note := range notes {
+		name := strings.TrimSpace(note.Name)
+		text := strings.TrimSpace(note.Text)
+		if name == "" || text == "" {
+			continue
+		}
+		list = append(list, ToolNote{Name: name, Text: text})
+	}
+	if len(list) == 0 {
+		return ""
+	}
+	sort.SliceStable(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	blocks := make([]string, 0, len(list))
+	for _, note := range list {
+		blocks = append(blocks, "## "+note.Name+"\n"+note.Text)
+	}
+	return "# Tool notes\n" + strings.Join(blocks, "\n\n")
 }
 
 // Build renders the system prompt. Empty sections are skipped.
@@ -165,7 +203,7 @@ func roster(entries []RosterEntry) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "Use the task tool to delegate work to a teammate, and task_continue to follow up.")
+	lines = append(lines, "When a task fits a teammate's role, use the task tool to delegate it, and task_continue to follow up on it; this keeps each session focused on its own work.")
 	return strings.Join(lines, "\n")
 }
 

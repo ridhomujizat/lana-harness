@@ -189,9 +189,9 @@ func TestToolCallTextNudgeSkipsPlainAnswer(t *testing.T) {
 	}
 }
 
-// The memory capture section is present only when the turn's tool set offers
-// memory_write, and it stays byte-identical across two turns (REQ-MEM-001).
-func TestPromptMemoryCaptureSection(t *testing.T) {
+// The memory_write guidance appears only when the turn's tool set offers
+// memory_write, and it stays byte-identical across two turns (REQ-ECX-010).
+func TestPromptMemoryWriteGuidance(t *testing.T) {
 	with := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("a"), textResponse("b")}}, map[string]core.AgentConfig{
 		"assistant": {Provider: "mock", Model: "m", Tools: []string{"memory_write"}},
 	})
@@ -207,8 +207,11 @@ func TestPromptMemoryCaptureSection(t *testing.T) {
 	if len(prompts) != 1 {
 		t.Fatalf("system messages=%d want 1", len(prompts))
 	}
-	if !strings.Contains(prompts[0], "# Memory capture") {
-		t.Fatalf("prompt lacks the memory capture section:\n%s", prompts[0])
+	if !strings.Contains(prompts[0], "# Tool notes\n## memory_write\n") {
+		t.Fatalf("prompt lacks the memory_write note:\n%s", prompts[0])
+	}
+	if !strings.Contains(prompts[0], "replace or remove that entry instead of adding a second one") {
+		t.Fatalf("prompt lacks the memory hygiene rule:\n%s", prompts[0])
 	}
 	rec.mu.Lock()
 	requests := append([]core.ChatRequest(nil), rec.requests...)
@@ -222,8 +225,8 @@ func TestPromptMemoryCaptureSection(t *testing.T) {
 
 	without := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, nil)
 	without.run(t, "hi")
-	if got := without.systemPrompts(t)[0]; strings.Contains(got, "# Memory capture") {
-		t.Fatalf("prompt without memory_write must not carry the section:\n%s", got)
+	if got := without.systemPrompts(t)[0]; strings.Contains(got, "# Tool notes") || strings.Contains(got, "## memory_write") {
+		t.Fatalf("prompt without memory_write must not carry the note:\n%s", got)
 	}
 }
 

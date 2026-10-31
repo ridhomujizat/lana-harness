@@ -14,6 +14,14 @@ import (
 var memoryReadSpec = json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","enum":["user","memory"]}},"required":["target"],"additionalProperties":false}`)
 var memoryWriteSpec = json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","enum":["user","memory"]},"action":{"type":"string","enum":["add","replace","remove"]},"content":{"type":"string"},"old_text":{"type":"string"}},"required":["target","action"],"additionalProperties":false}`)
 
+// memoryWriteGuidance is the head-prompt note shown when memory_write is
+// offered (REQ-ECX-011, REQ-ECX-026). It replaces the old # Memory capture
+// section.
+const memoryWriteGuidance = "When the owner's message carries a durable fact, save it with memory_write before you answer: how they want to be addressed, their name or role, language or style preferences, standing instructions, decisions, or a correction of something you got wrong. This includes facts that are only implied or said in passing, so they survive compaction and later sessions.\n" +
+	"- target=user for facts about the owner, target=memory for your own notes about the environment.\n" +
+	"- When a new fact contradicts an entry shown above, use action=replace with old_text from that entry. When the current turn shows an entry is wrong or outdated, including a workaround that a tool now covers, replace or remove that entry instead of adding a second one.\n" +
+	"- Keep each entry one short sentence, and leave out secrets such as passwords, API keys, and tokens."
+
 type memoryReadTool struct{}
 type memoryWriteTool struct{}
 
@@ -28,10 +36,16 @@ func (t *memoryReadTool) Spec() core.ToolSpec {
 }
 func (t *memoryReadTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 
+// PromptGuidance returns "" so the memory rules render once, under
+// memory_write (REQ-ECX-011).
+func (t *memoryReadTool) PromptGuidance() string { return "" }
+
 func (t *memoryWriteTool) Spec() core.ToolSpec {
 	return core.ToolSpec{Name: "memory_write", Description: "Save durable facts. target=user for facts about the user, target=memory for your own notes. action=add appends content; replace and remove need old_text that matches exactly one entry. Keep entries short; consolidate when near the limit.", InputSchema: memoryWriteSpec}
 }
 func (t *memoryWriteTool) Risk(json.RawMessage) core.Risk { return core.RiskMemory }
+
+func (t *memoryWriteTool) PromptGuidance() string { return memoryWriteGuidance }
 
 // memoryFile returns the path and limit of target for the calling agent.
 func memoryFile(tc core.ToolCtx, target string) (string, int, error) {
