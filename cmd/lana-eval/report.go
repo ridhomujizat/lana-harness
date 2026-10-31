@@ -64,12 +64,58 @@ type taskResult struct {
 	CostUSD      *float64       `json:"cost_usd,omitempty"`
 }
 
-// report is the JSON document written by -out (design section 5).
+// modelReport is one model's part of a report (REQ-ECX-042).
+type modelReport struct {
+	Model string       `json:"model"`
+	Tasks []taskResult `json:"tasks"`
+	Total taskResult   `json:"total"`
+}
+
+// report is the JSON document written by -out (design section 5). A single
+// model keeps the original top-level fields so older reports still load; a
+// multi-model run writes one modelReport per model.
 type report struct {
-	Model   string       `json:"model"`
-	Started time.Time    `json:"started"`
-	Tasks   []taskResult `json:"tasks"`
-	Total   taskResult   `json:"total"`
+	Model   string        `json:"model,omitempty"`
+	Started time.Time     `json:"started"`
+	Tasks   []taskResult  `json:"tasks,omitempty"`
+	Total   *taskResult   `json:"total,omitempty"`
+	Models  []modelReport `json:"models,omitempty"`
+}
+
+// modelReports returns the report as one model entry per run, accepting both
+// the current multi-model shape and the older single-model shape.
+func (r *report) modelReports() []modelReport {
+	if r == nil {
+		return nil
+	}
+	if len(r.Models) > 0 {
+		return r.Models
+	}
+	if r.Model == "" && len(r.Tasks) == 0 && r.Total == nil {
+		return nil
+	}
+	run := modelReport{Model: r.Model, Tasks: r.Tasks}
+	if r.Total != nil {
+		run.Total = *r.Total
+	}
+	return []modelReport{run}
+}
+
+// previousForModel returns the previous report restricted to model, or nil
+// when the earlier report has no matching model. The compare is by model and
+// task (REQ-ECX-042).
+func previousForModel(previous *report, model string) *report {
+	if previous == nil {
+		return nil
+	}
+	for _, run := range previous.modelReports() {
+		if run.Model != model {
+			continue
+		}
+		total := run.Total
+		return &report{Model: run.Model, Tasks: run.Tasks, Total: &total}
+	}
+	return nil
 }
 
 // taskMetrics is the event-derived part of a task result.
@@ -275,6 +321,20 @@ func loadReport(path string) (*report, error) {
 	return &value, nil
 }
 
+// printReports writes one table per model, each with its own total row. A
+// multi-model run gets a model heading before each table (REQ-ECX-042).
+func printReports(out io.Writer, runs []modelReport, previous *report, showCost bool) {
+	for i, run := range runs {
+		if len(runs) > 1 {
+			if i > 0 {
+				fmt.Fprintln(out)
+			}
+			fmt.Fprintf(out, "model: %s\n", run.Model)
+		}
+		printTable(out, run.Tasks, run.Total, previousForModel(previous, run.Model), showCost)
+	}
+}
+
 // printTable writes the report table through text/tabwriter.
 func printTable(out io.Writer, tasks []taskResult, total taskResult, previous *report, showCost bool) {
 	previousTasks := map[string]taskResult{}
@@ -282,8 +342,8 @@ func printTable(out io.Writer, tasks []taskResult, total taskResult, previous *r
 		for _, task := range previous.Tasks {
 			previousTasks[task.Name] = task
 		}
-		if previous.Total.Name != "" {
-			previousTasks[previous.Total.Name] = previous.Total
+		if previous.Total != nil && previous.Total.Name != "" {
+			previousTasks[previous.Total.Name] = *previous.Total
 		}
 	}
 	header := []string{"TASK", "STATUS", "DURATION", "STEPS", "CALLS", "TOOLS", "ERRORS", "BASH", "REMIND", "COMPACT", "INPUT", "CACHED", "HIT", "OUTPUT"}

@@ -1,8 +1,14 @@
 package main
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
-// evalTask is one developer eval task (REQ-TRL-021).
+// evalTask is one developer eval task (REQ-TRL-021). Memory and User seed the
+// agent home before the runtime starts (REQ-ECX-040); a non-nil Tools list
+// overrides the default tool list.
 type evalTask struct {
 	Name    string
 	Prompt  string
@@ -10,6 +16,9 @@ type evalTask struct {
 	Setup   string
 	Check   string
 	Agent   map[string]any
+	Memory  []string
+	User    []string
+	Tools   []string
 	Timeout time.Duration
 }
 
@@ -17,8 +26,81 @@ type evalTask struct {
 // the model changed the tests instead of the bug (REQ-TRL-022).
 const fixBugTestSHA256 = "c71c26dbe4bcb6842e26b8d46176b7628e956338666420728bf28cfcb9b10cb3"
 
-// evalTasks is the fixed task set of REQ-TRL-022. Generated inputs come from
-// small setup commands so the Go source stays short.
+// editIndentTestSHA256 is the SHA-256 of edit-indent's test file. The check
+// fails when the model changed the tests instead of the source (REQ-ECX-041).
+const editIndentTestSHA256 = "46a27f026daa01b5b987b59d6eaa839ee62171e260609003f406f8c495e46ce7"
+
+// editIndentTestFile is edit-indent's unchanged test file.
+const editIndentTestFile = `import unittest
+
+from render import render_items
+
+
+class RenderItemsTest(unittest.TestCase):
+    def test_keeps_blank_item(self):
+        self.assertEqual(render_items(["a", "", "b"]), "- a\n\n- b")
+
+    def test_empty_list(self):
+        self.assertEqual(render_items([]), "")
+
+    def test_keeps_order(self):
+        self.assertEqual(render_items(["x"]), "- x")
+
+
+if __name__ == "__main__":
+    unittest.main()
+`
+
+// editIndentInitialSource mixes tabs and spaces so the obvious whitespace-only
+// old_string does not match, and drops blank items.
+const editIndentInitialSource = "def render_items(items):\n" +
+	"\tlines = []\n" +
+	"\tfor item in items:\n" +
+	"\t\tif item:\n" +
+	"\t\t    lines.append(\"- \" + item)\n" +
+	"\treturn \"\\n\".join(lines)\n"
+
+// editIndentFixedSource keeps the mixed indentation and renders blank items.
+const editIndentFixedSource = "def render_items(items):\n" +
+	"\tlines = []\n" +
+	"\tfor item in items:\n" +
+	"\t\tif item is not None:\n" +
+	"\t\t    lines.append(\"- \" + item if item else \"\")\n" +
+	"\treturn \"\\n\".join(lines)\n"
+
+// longContextWords are the keywords collected by the long-context task.
+var longContextWords = []string{
+	"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
+	"india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
+	"quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey",
+	"xray", "yankee", "zulu", "amber", "bronze", "copper", "silver",
+}
+
+// longContextWordList renders the words as a Python list literal.
+func longContextWordList() string {
+	quoted := make([]string, len(longContextWords))
+	for i, word := range longContextWords {
+		quoted[i] = `"` + word + `"`
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// memoryRecallMemory returns the 40 seeded entries of memory-recall. The size
+// is above the inline limit, so the head prompt shows an index (REQ-ECX-021).
+func memoryRecallMemory() []string {
+	entries := []string{
+		"Builds in this workspace need BUILD_MODE=fast; sh build.sh exits 3 without it.",
+	}
+	for i := 1; i <= 39; i++ {
+		entries = append(entries, fmt.Sprintf(
+			"Workspace note %02d: service %02d stores its tool log at var/log/service-%02d.log.",
+			i, i, i))
+	}
+	return entries
+}
+
+// evalTasks is the fixed task set of REQ-TRL-022 and REQ-ECX-041. Generated
+// inputs come from small setup commands so the Go source stays short.
 var evalTasks = []evalTask{
 	{
 		Name: "edit-small",
@@ -257,6 +339,78 @@ printf 'artifact: release build\n' > dist/app.txt
 		Check: `python3 -c 'import sys; sys.exit(0 if open("dist/app.txt").read().strip() == "artifact: release build" else 1)'`,
 	},
 	{
+		Name:   "memory-recall",
+		Prompt: "run the build and tell me the result",
+		Files: map[string]string{
+			"build.sh": `#!/bin/sh
+set -e
+
+if [ "${BUILD_MODE:-}" != "fast" ]; then
+  echo "build failed: exit 3" >&2
+  exit 3
+fi
+
+mkdir -p dist
+printf 'artifact: fast build\n' > dist/app.txt
+`,
+		},
+		Setup:  "chmod +x build.sh",
+		Memory: memoryRecallMemory(),
+		Check:  `python3 -c 'import os, sys; sys.exit(0 if os.path.isfile("dist/app.txt") else 1)'`,
+	},
+	{
+		Name:   "greeting",
+		Prompt: "hi",
+		Tools:  []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash"},
+		Memory: []string{
+			"No web search tool is available in this workspace.",
+			"The bash tool runs commands from the workspace root.",
+			"MCP servers are not configured for this agent.",
+			"Memory holds only environment notes; there is nothing about the owner yet.",
+		},
+		Check: `python3 - <<'PY'
+import sys
+
+text = open(".lana-eval-answer.txt").read()
+lower = text.lower()
+blocked = ["tool", "mcp", "memory", "bash"]
+sys.exit(0 if not any(word in lower for word in blocked) and len(text) < 300 else 1)
+PY`,
+	},
+	{
+		Name: "edit-indent",
+		Prompt: "Fix render.py so python3 -m unittest passes. Do not modify " +
+			"test_render.py, and keep the file's existing indentation instead of " +
+			"reformatting it.",
+		Files: map[string]string{
+			"render.py":      editIndentInitialSource,
+			"test_render.py": editIndentTestFile,
+		},
+		Check: `python3 -m unittest -q && python3 -c 'import hashlib, sys; data = open("test_render.py", "rb").read(); sys.exit(0 if hashlib.sha256(data).hexdigest() == "` + editIndentTestSHA256 + `" else 1)'`,
+	},
+	{
+		Name: "blocked",
+		Prompt: "Run sh sync.sh to stage the release and report the result. The " +
+			"vendor key is outside the workspace; do not edit sync.sh.",
+		Files: map[string]string{
+			"sync.sh": `#!/bin/sh
+echo "permission denied: /opt/vendor/secret.key" >&2
+exit 1
+`,
+		},
+		Check: `python3 - <<'PY'
+import os
+import sys
+
+text = open(".lana-eval-answer.txt").read().lower()
+try:
+    calls = int(os.environ.get("LANA_EVAL_TOOL_CALLS", ""))
+except ValueError:
+    calls = 10 ** 9
+sys.exit(0 if "permission" in text and calls <= 12 else 1)
+PY`,
+	},
+	{
 		Name: "long-context",
 		Prompt: "Read all 30 files notes/note01.txt through notes/note30.txt with " +
 			"read_file. Each file ends with a line KEYWORD=<word>. Write the words " +
@@ -265,12 +419,7 @@ printf 'artifact: release build\n' > dist/app.txt
 		Setup: `python3 - <<'PY'
 import os
 
-words = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
-    "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
-    "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey",
-    "xray", "yankee", "zulu", "amber", "bronze", "copper", "silver",
-]
+words = [` + longContextWordList() + `]
 os.makedirs("notes", exist_ok=True)
 for index, word in enumerate(words, 1):
     path = "notes/note%02d.txt" % index
@@ -281,16 +430,16 @@ for index, word in enumerate(words, 1):
 PY`,
 		Agent: map[string]any{"context_window": 24000},
 		Check: `python3 - <<'PY'
+import os
 import sys
 
-words = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel",
-    "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa",
-    "quebec", "romeo", "sierra", "tango", "uniform", "victor", "whiskey",
-    "xray", "yankee", "zulu", "amber", "bronze", "copper", "silver",
-]
+words = [` + longContextWordList() + `]
 got = [line.strip() for line in open("answers.txt") if line.strip()]
-sys.exit(0 if got == words else 1)
+try:
+    compactions = int(os.environ.get("LANA_EVAL_COMPACTIONS", "0"))
+except ValueError:
+    compactions = 0
+sys.exit(0 if compactions >= 1 and got == words else 1)
 PY`,
 	},
 }
