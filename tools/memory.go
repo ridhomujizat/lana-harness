@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 )
 
-var memoryReadSpec = json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","enum":["user","memory"]}},"required":["target"],"additionalProperties":false}`)
+const memoryQueryMax = 10
+
+var memoryReadSpec = json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","enum":["user","memory"],"description":"Which memory file to read: user for facts about the owner, memory for the agent's own notes."},"query":{"type":"string","description":"Search terms. Returns up to 10 entries at or above the relevance minimum, best first, each with its m<n> id. Use this when the prompt shows only the memory index."},"ids":{"type":"array","items":{"anyOf":[{"type":"string","pattern":"^m[0-9]+$"},{"type":"integer","minimum":1}]},"description":"Entry ids to return in full, as \"m3\" strings or integers. Takes precedence over query."}},"required":["target"],"additionalProperties":false}`)
 var memoryWriteSpec = json.RawMessage(`{"type":"object","properties":{"target":{"type":"string","enum":["user","memory"]},"action":{"type":"string","enum":["add","replace","remove"]},"content":{"type":"string"},"old_text":{"type":"string"}},"required":["target","action"],"additionalProperties":false}`)
 
 // memoryWriteGuidance is the head-prompt note shown when memory_write is
@@ -62,18 +65,78 @@ func memoryFile(tc core.ToolCtx, target string) (string, int, error) {
 	return "", 0, fmt.Errorf("invalid input: target must be user or memory")
 }
 
-// FormatMemory renders entries of target as shown by memory_read and /memory.
+// FormatMemory renders all entries of target with their m<n> ids, as shown by
+// memory_read.
 func FormatMemory(target string, entries []string, limit int) string {
+	ids := make([]int, len(entries))
+	for i := range entries {
+		ids[i] = i + 1
+	}
+	return formatMemory(target, entries, limit, ids)
+}
+
+// formatMemory renders the selected 1-based ids with the file header.
+func formatMemory(target string, entries []string, limit int, ids []int) string {
 	lines := []string{fmt.Sprintf("%s %d/%d characters, %d entries", target, agenthome.Size(entries), limit, len(entries))}
-	for i, entry := range entries {
-		lines = append(lines, fmt.Sprintf("%d. %s", i+1, strings.ReplaceAll(entry, "\n", "\n   ")))
+	for _, id := range ids {
+		lines = append(lines, fmt.Sprintf("m%d: %s", id, strings.ReplaceAll(entries[id-1], "\n", "\n   ")))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// memoryIDs parses the ids input, which accepts "m3" strings and integers. It
+// keeps request order and drops duplicates.
+func memoryIDs(values []any) ([]int, error) {
+	ids := make([]int, 0, len(values))
+	seen := make(map[int]bool, len(values))
+	for _, value := range values {
+		id, err := memoryID(value)
+		if err != nil {
+			return nil, err
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// memoryID parses one id value.
+func memoryID(value any) (int, error) {
+	errInvalid := errors.New(`ids must be "m<n>" or an integer of at least 1`)
+	switch v := value.(type) {
+	case float64:
+		id := int(v)
+		if v != float64(id) || id < 1 {
+			return 0, errInvalid
+		}
+		return id, nil
+	case string:
+		if !strings.HasPrefix(v, "m") || len(v) == 1 {
+			return 0, errInvalid
+		}
+		for _, r := range v[1:] {
+			if r < '0' || r > '9' {
+				return 0, errInvalid
+			}
+		}
+		id, err := strconv.Atoi(v[1:])
+		if err != nil || id < 1 {
+			return 0, errInvalid
+		}
+		return id, nil
+	default:
+		return 0, errInvalid
+	}
 }
 
 func (t *memoryReadTool) Call(_ context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {
 		Target string `json:"target"`
+		Query  string `json:"query"`
+		Ids    []any  `json:"ids"`
 	}
 	if err := decodeInput(raw, &in); err != nil {
 		return inputErrorOutput(err)
@@ -85,6 +148,29 @@ func (t *memoryReadTool) Call(_ context.Context, tc core.ToolCtx, raw json.RawMe
 	entries, err := agenthome.ReadEntries(path)
 	if err != nil {
 		return errorOutput(err.Error())
+	}
+	switch {
+	case len(in.Ids) > 0:
+		ids, err := memoryIDs(in.Ids)
+		if err != nil {
+			return inputErrorOutput(err)
+		}
+		for _, id := range ids {
+			if id > len(entries) {
+				return errorOutput(fmt.Sprintf("no entry m%d in %s", id, in.Target))
+			}
+		}
+		return successOutput(formatMemory(in.Target, entries, limit, ids))
+	case strings.TrimSpace(in.Query) != "":
+		ranked := agenthome.Rank(in.Query, entries)
+		if len(ranked) > memoryQueryMax {
+			ranked = ranked[:memoryQueryMax]
+		}
+		ids := make([]int, 0, len(ranked))
+		for _, item := range ranked {
+			ids = append(ids, item.ID)
+		}
+		return successOutput(formatMemory(in.Target, entries, limit, ids))
 	}
 	return successOutput(FormatMemory(in.Target, entries, limit))
 }

@@ -164,15 +164,17 @@ Server kenari
 	}
 }
 
+// REQ-ECX-020: the owner file keeps its 2 000-character truncation, while
+// memory above the inline limit becomes an index instead (REQ-ECX-021).
 func TestBuildTruncationWithoutOnboarding(t *testing.T) {
-	got := Build(PromptInput{Agent: "a", Memory: []string{strings.Repeat("m", MemoryLimit+10)}})
-	if strings.Contains(strings.ToLower(got), "onboarding") || strings.Contains(got, "# About the user") {
-		t.Fatalf("empty user file must add nothing:\n%s", got)
+	got := Build(PromptInput{Agent: "a", User: []string{strings.Repeat("m", UserLimit+10)}})
+	if strings.Contains(strings.ToLower(got), "onboarding") || strings.Contains(got, "# Your memory") {
+		t.Fatalf("empty memory file must add nothing:\n%s", got)
 	}
-	if !strings.Contains(got, fmt.Sprintf("[truncated: %d/%d characters; consolidate with memory_write]", MemoryLimit+10, MemoryLimit)) {
+	if !strings.Contains(got, fmt.Sprintf("[truncated: %d/%d characters; consolidate with memory_write]", UserLimit+10, UserLimit)) {
 		t.Fatal("truncation marker missing")
 	}
-	if strings.Index(got, "# Your memory") > strings.Index(got, "# Runtime context") {
+	if strings.Index(got, "# About the user") > strings.Index(got, "# Runtime context") {
 		t.Fatal("section order wrong")
 	}
 }

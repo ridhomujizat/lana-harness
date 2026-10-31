@@ -119,6 +119,31 @@ func TestContextBlockWithoutMCP(t *testing.T) {
 	}
 }
 
+// REQ-ECX-024: relevant memory lines follow the date line, and the block stays
+// empty without them.
+func TestContextBlockRelevantMemory(t *testing.T) {
+	got := ContextBlock(PromptInput{
+		Agent:          "lead",
+		Now:            time.Date(2026, 10, 31, 14, 5, 0, 0, time.UTC),
+		RelevantMemory: []string{"m3: Server kenari runs Debian", "m7: Deploy uses fish"},
+		UnavailableMCP: map[string]string{"dbx": "down"},
+	})
+	want := "date: 2026-10-31 Saturday 14:05 UTC (UTC+00:00)\n" +
+		"relevant memory:\n" +
+		"- m3: Server kenari runs Debian\n" +
+		"- m7: Deploy uses fish\n" +
+		"unavailable MCP servers: dbx (down)"
+	if !strings.Contains(got, want) {
+		t.Fatalf("context:\n%s\n--- want:\n%s", got, want)
+	}
+	if strings.Contains(ContextBlock(PromptInput{Agent: "lead"}), "relevant memory:") {
+		t.Fatal("empty RelevantMemory must add no line")
+	}
+	if strings.Contains(Build(PromptInput{Agent: "lead", RelevantMemory: []string{"m1: x"}}), "relevant memory:") {
+		t.Fatal("relevant memory must stay out of the head prompt")
+	}
+}
+
 // REQ-JOB-017: the background-jobs line is appended to <context> when present
 // and never leaks into the stable head prompt.
 func TestContextBlockJobs(t *testing.T) {

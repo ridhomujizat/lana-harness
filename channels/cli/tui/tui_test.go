@@ -310,7 +310,7 @@ func TestInteractiveSlashAndMenus(t *testing.T) {
 	send("/memory\r")
 	waitFor(t, &out, "· user 11/2000 characters, 1 entries")
 	waitFor(t, &out, "1. Name: Ridho")
-	waitFor(t, &out, "· memory 0/4000 characters, 0 entries")
+	waitFor(t, &out, "· memory 0/32000 characters, 0 entries")
 	send("/mcp\r")
 	waitFor(t, &out, "· github running, 26 tools")
 	send("/skills\r")

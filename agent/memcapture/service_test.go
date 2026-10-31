@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -330,5 +331,40 @@ func TestInstructionListsEntries(t *testing.T) {
 	}
 	if !strings.Contains(text, "Current agent memory (target=memory):\n(empty)") {
 		t.Fatalf("instruction misses the empty memory list:\n%s", text)
+	}
+}
+
+// REQ-ECX-026: the capture instruction keeps memory hygienic and lets the turn
+// prove an entry wrong, not only the owner's words.
+func TestInstructionMemoryHygiene(t *testing.T) {
+	text := captureInstruction(nil, []string{"nohup server & disown"})
+	for _, want := range []string{
+		"Look at what the latest turn proved, not only at what the owner said",
+		"replace or remove that entry instead of adding a second one",
+		"including a workaround that a tool now covers",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("instruction lacks %q:\n%s", want, text)
+		}
+	}
+	for _, word := range []string{"MUST", "ALWAYS", "NEVER", "CRITICAL", "IMPORTANT"} {
+		if strings.Contains(text, word) {
+			t.Fatalf("instruction uses %q:\n%s", word, text)
+		}
+	}
+}
+
+// In index mode the capture instruction still lists every entry, because a
+// replace or remove needs an exact old_text.
+func TestInstructionListsAllEntries(t *testing.T) {
+	entries := make([]string, 100)
+	for i := range entries {
+		entries[i] = fmt.Sprintf("entry %03d", i+1)
+	}
+	text := captureInstruction(nil, entries)
+	for _, entry := range entries {
+		if !strings.Contains(text, entry) {
+			t.Fatalf("instruction misses %q", entry)
+		}
 	}
 }
