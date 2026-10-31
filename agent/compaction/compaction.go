@@ -327,6 +327,14 @@ func (s *Service) warnTrigger(sessionID string, pol policy, trigger int64) {
 		"headroom", pol.headroom, "trigger", trigger)
 }
 
+// logSkip records a compaction that did not summarize for a reason other than
+// being below pressure, so a silent skip is visible on the next investigation
+// (REQ-LTC-013).
+func (s *Service) logSkip(req core.CompactRequest, reason string, attrs ...any) {
+	args := []any{"session_id", req.SessionID, "turn_id", req.TurnID, "trigger", req.Trigger, "reason", reason}
+	slog.Info("compaction skipped", append(args, attrs...)...)
+}
+
 // run is the compaction engine. It prunes oversized tool results first (no
 // model call), then summarizes the balanced span before the retained tail.
 func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.CompactionResult, error) {
@@ -361,6 +369,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 	// the summarizer again until the session grows or a new turn starts
 	// (REQ-LTC-016). "overflow" and "manual" always try.
 	if !force && s.throttled(req.SessionID, req.TurnID, events) {
+		s.logSkip(req, "throttled after a recent failed attempt")
 		return zero, nil
 	}
 	record := func() {
@@ -387,6 +396,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 		return zero, err
 	}
 	if len(units) == 0 {
+		s.logSkip(req, "no units in the derived history", "estimate_tokens", estimate, "trigger_tokens", trigger)
 		return zero, nil
 	}
 
@@ -422,16 +432,19 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 	// Step 2: summarize the span before the tail.
 	span := units[:tailStart]
 	if len(span) == 0 {
+		s.logSkip(req, "no span outside the retained tail", "estimate_tokens", estimate, "trigger_tokens", trigger, "units", len(units), "tail_start", tailStart)
 		return zero, nil
 	}
 	// A span that holds nothing but a prior summary cannot be condensed: a
 	// fresh summary of the checkpoint alone would not shrink it (REQ-LTC-016).
 	if onlySummary(span) {
+		s.logSkip(req, "span is only the prior summary", "estimate_tokens", estimate, "trigger_tokens", trigger, "units", len(units), "tail_start", tailStart)
 		return zero, nil
 	}
 	spanMessages := flatten(span)
 	spanChars := messagesChars(spanMessages)
 	if spanChars == 0 {
+		s.logSkip(req, "span has no text", "estimate_tokens", estimate, "trigger_tokens", trigger, "units", len(units), "tail_start", tailStart)
 		return zero, nil
 	}
 

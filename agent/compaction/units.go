@@ -196,10 +196,14 @@ func pruneIndex(events []core.SessionEvent) (map[string]string, error) {
 }
 
 // estimateTokens estimates the request size. With a usable step/end after the
-// latest compaction it uses that real usage plus the chars of later events;
-// otherwise it falls back to a char estimate of system, tools, and messages
-// (REQ-LTC-010).
-func estimateTokens(events []core.SessionEvent, req core.CompactRequest, derived []core.Message, prunes map[string]string) int64 {
+// latest compaction it anchors on that step's real usage and adds the chars of
+// the model surface the measured request did not include. The measured surface
+// is rebuilt from the events that existed when that request was sent, so the
+// newest step's tool results are counted once and later prunes relieve the
+// estimate exactly as core.DeriveMessages applies them to the turn request.
+// Without usage it falls back to a char estimate of system, tools, and messages
+// (REQ-LTC-010, REQ-LTC-012).
+func estimateTokens(events []core.SessionEvent, req core.CompactRequest, derived []core.Message, _ map[string]string) int64 {
 	sumSeq := int64(0)
 	for _, event := range events {
 		if event.Kind == core.KindCompactionSummary {
@@ -207,107 +211,77 @@ func estimateTokens(events []core.SessionEvent, req core.CompactRequest, derived
 		}
 	}
 	var usage core.Usage
-	stepSeq := int64(0)
+	var stepStartSeq, stepSeq int64
+	start := int64(0)
 	for _, event := range events {
-		if event.Seq <= sumSeq || event.Kind != core.KindStepEnd {
+		if event.Seq <= sumSeq {
 			continue
 		}
-		var payload core.StepEnd
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			continue
-		}
-		if payload.Usage.InputTokens > 0 {
-			usage = payload.Usage
-			stepSeq = event.Seq
+		switch event.Kind {
+		case core.KindStepStart:
+			start = event.Seq
+		case core.KindStepEnd:
+			var payload core.StepEnd
+			if json.Unmarshal(event.Payload, &payload) != nil {
+				continue
+			}
+			if payload.Usage.InputTokens > 0 {
+				usage = payload.Usage
+				stepSeq = event.Seq
+				stepStartSeq = start
+			}
 		}
 	}
 	if stepSeq > 0 {
-		// The step/end usage already counts the tool outputs as they were sent
-		// then. A prune event whose source result is inside that counted span
-		// frees chars the usage still charges, so subtract them.
-		chars := eventsChars(events, stepSeq, prunes) - pruneRelief(events, sumSeq, stepSeq)
-		return usage.InputTokens + usage.OutputTokens + chars/4
+		covered := measuredSurfaceChars(events, stepStartSeq, stepSeq)
+		delta := int64(messagesChars(derived)) - covered
+		return usage.InputTokens + usage.OutputTokens + delta/4
 	}
 	chars := int64(len(req.System)) + int64(len(toolsJSON(req.Tools))) + int64(messagesChars(derived))
 	return chars / 4
 }
 
-// eventsChars counts the chars of message-producing events with seq > afterSeq.
-func eventsChars(events []core.SessionEvent, afterSeq int64, prunes map[string]string) int64 {
-	var n int64
-	for _, event := range events {
-		if event.Seq <= afterSeq {
-			continue
-		}
-		n += int64(eventChars(event, prunes))
-	}
-	return n
-}
-
-// pruneRelief is the char count a step/end usage still charges for tool results
-// that the pruner has since shrunk. It counts every tool_result_pruned event
-// whose source result sits in the counted span (afterSeq, stepSeq].
-func pruneRelief(events []core.SessionEvent, afterSeq, stepSeq int64) int64 {
-	if stepSeq == 0 {
+// measuredSurfaceChars is the char count of the model surface a step/end usage
+// measured: the request prefix plus that step's assistant output, with only the
+// prunes that existed when the request was built. Tool results produced after
+// the assistant output are excluded because the measured request did not carry
+// them yet.
+func measuredSurfaceChars(events []core.SessionEvent, stepStartSeq, stepSeq int64) int64 {
+	if stepStartSeq == 0 || stepSeq == 0 {
 		return 0
 	}
-	original := map[int64]int{}
+	assistantSeq := int64(0)
 	for _, event := range events {
-		if event.Kind != core.KindToolResult {
+		if event.Seq <= stepStartSeq || event.Seq >= stepSeq {
 			continue
 		}
-		var payload core.ToolResultPayload
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			continue
+		if event.Kind == core.KindAssistantMessage {
+			assistantSeq = event.Seq
 		}
-		original[event.Seq] = len(payload.Output)
 	}
-	var n int64
+	if assistantSeq == 0 {
+		// No assistant output was recorded for the step; the usage measured
+		// only the request prefix.
+		assistantSeq = stepStartSeq
+	}
+	prefix := make([]core.SessionEvent, 0, len(events))
 	for _, event := range events {
-		if event.Kind != core.KindToolResultPruned {
-			continue
+		if event.Seq > assistantSeq {
+			break
 		}
-		var payload core.ToolResultPruned
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			continue
+		switch event.Kind {
+		case core.KindToolResultPruned, core.KindCompactionSummary:
+			if event.Seq >= stepStartSeq {
+				continue
+			}
 		}
-		if payload.SourceSeq <= afterSeq || payload.SourceSeq > stepSeq {
-			continue
-		}
-		if delta := original[payload.SourceSeq] - len(payload.Output); delta > 0 {
-			n += int64(delta)
-		}
+		prefix = append(prefix, event)
 	}
-	return n
-}
-
-// eventChars counts the content chars of one message-producing event, applying
-// the latest pruned output of a tool result.
-func eventChars(event core.SessionEvent, prunes map[string]string) int {
-	switch event.Kind {
-	case core.KindUserMessage:
-		var payload core.UserMessage
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			return 0
-		}
-		return contentChars(payload.Content)
-	case core.KindAssistantMessage:
-		var payload core.AssistantMessage
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			return 0
-		}
-		return contentChars(payload.Content)
-	case core.KindToolResult:
-		var payload core.ToolResultPayload
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			return 0
-		}
-		if replacement, ok := prunes[payload.CallID]; ok {
-			return len(replacement)
-		}
-		return len(payload.Output)
+	messages, err := core.DeriveMessages(prefix)
+	if err != nil {
+		return 0
 	}
-	return 0
+	return int64(messagesChars(messages))
 }
 
 func contentChars(blocks []core.ContentBlock) int {
