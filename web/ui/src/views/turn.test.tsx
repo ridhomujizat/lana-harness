@@ -110,6 +110,50 @@ describe("buildTurns", () => {
     expect(user.text).toBe("Cihuyy");
     expect(user.text).not.toContain("<context>");
   });
+
+  /* REQ-MEM-021: a runtime note makes no owner bubble. */
+  it("hides a runtime user message", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        runtime: true,
+        content: [{ type: "text", text: "runtime nudge" }],
+      }),
+      event(2, "user/message", "t1", {
+        content: [{ type: "text", text: "hello" }],
+      }),
+    ]);
+    const users = items.filter((item) => item.kind === "user");
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({ kind: "user", text: "hello" });
+  });
+
+  /* REQ-MEM-030: memory/captured becomes one muted note per operation. */
+  it("adds a memory note per captured operation", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        content: [{ type: "text", text: "call me boss" }],
+      }),
+      event(2, "assistant/message", "t1", {
+        content: [{ type: "text", text: "ok" }],
+      }),
+      event(3, "memory/captured", "t1", {
+        ops: [
+          { target: "user", action: "add", content: 'Called "boss"' },
+          { target: "user", action: "replace", content: "New", old_text: "Old" },
+          { target: "memory", action: "remove", old_text: "stale note" },
+        ],
+      }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    expect(turnItem.turn.notes).toEqual([
+      'Saved to memory: Called "boss"',
+      "Saved to memory: New",
+      "Removed from memory: stale note",
+    ]);
+  });
 });
 
 describe("turnSummary", () => {

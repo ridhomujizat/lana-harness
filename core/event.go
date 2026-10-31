@@ -42,6 +42,7 @@ const (
 	KindModelSelection    = "model/selection"
 	KindCompactionSummary = "compaction/summary"
 	KindToolResultPruned  = "tool_result_pruned"
+	KindMemoryCaptured    = "memory/captured"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -225,4 +226,22 @@ type ToolResultPruned struct {
 	CallID    string `json:"call_id"`
 	SourceSeq int64  `json:"source_seq"`
 	Output    string `json:"output"`
+}
+
+// MemoryOp is one validated operation of a capture pass.
+type MemoryOp struct {
+	Target  string `json:"target"`
+	Action  string `json:"action"`
+	Content string `json:"content"`
+	OldText string `json:"old_text"`
+}
+
+// MemoryCaptured is the payload of a memory/captured event: the operations a
+// capture pass applied and the usage of the pass (REQ-MEM-014). It is not part
+// of the model history.
+type MemoryCaptured struct {
+	V      int        `json:"v"`
+	TurnID string     `json:"turn_id"`
+	Ops    []MemoryOp `json:"ops"`
+	Usage  Usage      `json:"usage"`
 }

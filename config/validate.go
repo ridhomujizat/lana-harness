@@ -15,7 +15,7 @@ import (
 
 var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "timeout"}
-var agentKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
+var agentKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
@@ -312,6 +312,11 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			add(path+"."+key, typeMsg("float", val))
 		} else if f <= 0 || f >= 1 {
 			add(path+"."+key, "must be between 0 and 1")
+		}
+	}
+	if val, ok := v["memory_capture"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".memory_capture", typeMsg("boolean", val))
 		}
 	}
 	if val, ok := v["permission"]; ok {

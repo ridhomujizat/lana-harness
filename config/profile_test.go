@@ -25,6 +25,7 @@ func TestBuiltinProfileRows(t *testing.T) {
 		{ID: "permission", Module: "permission"},
 		{ID: "approval", Module: "approval"},
 		{ID: "compaction", Module: "compaction"},
+		{ID: "memcapture", Module: "memcapture"},
 	}
 	if len(res.Config.Modules) != len(want) {
 		t.Fatalf("modules=%d want %d: %+v", len(res.Config.Modules), len(want), res.Config.Modules)

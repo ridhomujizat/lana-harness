@@ -605,3 +605,45 @@ func TestAgentsMaxStepsRange(t *testing.T) {
 		t.Fatalf("max_steps=-1 detail = %+v", envelope.Error.Details[0])
 	}
 }
+
+// TestAgentsMemoryCaptureRoundTrip covers the memory_capture field of
+// REQ-MEM-010: an absent key reads as true, and both values round-trip through
+// the agent save.
+func TestAgentsMemoryCaptureRoundTrip(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	list := t016AgentsList(t, s, cookie)
+	if row := t016FindAgentRow(t, list, "coder"); !row.MemoryCapture {
+		t.Fatalf("absent memory_capture = %v, want true", row.MemoryCapture)
+	}
+
+	save := func(t *testing.T, value bool) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_version": webfiles.ConfigVersion(raw),
+			"memory_capture":   value,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("save memory_capture=%v status = %d, body = %q", value, rr.Code, rr.Body.String())
+		}
+		tables := t016ReadAgentTables(t, store.path)
+		if got := tables["coder"]["memory_capture"]; got != value {
+			t.Fatalf("saved memory_capture = %v (%T), want %v", got, got, value)
+		}
+		list := t016AgentsList(t, s, cookie)
+		if row := t016FindAgentRow(t, list, "coder"); row.MemoryCapture != value {
+			t.Fatalf("listed memory_capture = %v, want %v", row.MemoryCapture, value)
+		}
+	}
+
+	save(t, false)
+	save(t, true)
+}

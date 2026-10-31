@@ -48,11 +48,14 @@ type AgentConfig struct {
 	ContextWindow int      `toml:"context_window"`
 	// CompactionHeadroom, CompactionThreshold, and CompactionRetain tune the
 	// context pressure policy (REQ-LTC-011). Zero means the default is used.
-	CompactionHeadroom  int        `toml:"compaction_headroom"`
-	CompactionThreshold float64    `toml:"compaction_threshold"`
-	CompactionRetain    float64    `toml:"compaction_retain"`
-	Description         string     `toml:"description"`
-	Rules               AgentRules `toml:"rules"`
+	CompactionHeadroom  int     `toml:"compaction_headroom"`
+	CompactionThreshold float64 `toml:"compaction_threshold"`
+	CompactionRetain    float64 `toml:"compaction_retain"`
+	// MemoryCapture turns the background capture pass on or off. Nil means on
+	// (REQ-MEM-010).
+	MemoryCapture *bool      `toml:"memory_capture"`
+	Description   string     `toml:"description"`
+	Rules         AgentRules `toml:"rules"`
 }
 
 type AgentRules struct {

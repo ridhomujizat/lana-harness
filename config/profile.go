@@ -45,6 +45,11 @@ config = {}
 id = "compaction"
 module = "compaction"
 config = {}
+
+[[modules]]
+id = "memcapture"
+module = "memcapture"
+config = {}
 `
 
 const headlessTOML = `

@@ -213,6 +213,25 @@ export function userMessageText(payload: Record<string, unknown>): string {
   return contentText(content.slice(index));
 }
 
+/* REQ-MEM-030: one line per captured operation. add and replace name the saved
+   content; remove names the entry that was dropped. */
+export function memoryOpLine(op: unknown): string {
+  const value = asRecord(op);
+  switch (stringOf(value.action)) {
+    case "add":
+    case "replace": {
+      const content = stringOf(value.content);
+      return content ? "Saved to memory: " + content : "";
+    }
+    case "remove": {
+      const oldText = stringOf(value.old_text);
+      return oldText ? "Removed from memory: " + oldText : "";
+    }
+    default:
+      return "";
+  }
+}
+
 export function outcomeWords(outcome: unknown): string {
   switch (outcome) {
     case "allowed_once":
@@ -336,6 +355,10 @@ export function buildHistory(
         });
         break;
       case "user/message": {
+        // REQ-MEM-021: a runtime note is lana's own text, not an owner message.
+        if (payload.runtime === true) {
+          break;
+        }
         const text = userMessageText(payload);
         if (text) {
           items.push({ key, type: "user", label: "You", text });
@@ -453,6 +476,22 @@ export function buildHistory(
           });
         }
         break;
+      case "memory/captured": {
+        // REQ-MEM-030: one decision line per applied operation.
+        const ops = Array.isArray(payload.ops) ? payload.ops : [];
+        ops.forEach((op, index) => {
+          const text = memoryOpLine(op);
+          if (text) {
+            items.push({
+              key: key + "-" + index,
+              type: "decision",
+              label: "Memory",
+              text,
+            });
+          }
+        });
+        break;
+      }
       default:
         break;
     }

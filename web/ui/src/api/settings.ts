@@ -51,6 +51,7 @@ export interface ConfigAgent {
   permission?: string;
   max_steps?: number;
   context_window?: number;
+  memory_capture?: boolean;
   rules?: ConfigRules;
 }
 

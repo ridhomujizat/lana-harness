@@ -1,7 +1,7 @@
 # Requirements: Memory capture and tool-call safety nets
 
 - **Issue**: —
-- **Status**: Approved
+- **Status**: Implemented
 - **Revision**: 1
 - **Owner**: Ridho
 - **Contract**: — (config key and one event kind, listed below)

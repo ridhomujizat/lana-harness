@@ -63,7 +63,8 @@ type GeneralKey =
   | "fallback"
   | "permission"
   | "max_steps"
-  | "context_window";
+  | "context_window"
+  | "memory_capture";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
   "provider",
@@ -72,6 +73,7 @@ const GENERAL_KEYS: readonly GeneralKey[] = [
   "permission",
   "max_steps",
   "context_window",
+  "memory_capture",
 ];
 
 interface PermissionOption {
@@ -105,6 +107,7 @@ interface AgentValues {
   permission: Permission;
   max_steps: number;
   context_window: number;
+  memory_capture: boolean;
 }
 
 interface AgentForm {
@@ -114,6 +117,7 @@ interface AgentForm {
   permission: Permission;
   max_steps: string;
   context_window: string;
+  memory_capture: boolean;
 }
 
 interface FallbackDraft {
@@ -125,6 +129,8 @@ interface AgentDetailData {
   agent: Agent | null;
   agents: Agent[];
   providers: string[];
+  /* The configured tool list, so General can gate the memory toggle. */
+  tools: string[];
 }
 
 function pickText(...values: unknown[]): string {
@@ -174,6 +180,8 @@ function initialValues(agent: AgentLike, configAgent: ConfigAgent): AgentValues 
     ),
     max_steps: Number(record.max_steps) || 0,
     context_window: Number(record.context_window) || 0,
+    // REQ-MEM-010: memory_capture is on unless the config says false.
+    memory_capture: record.memory_capture !== false,
   };
 }
 
@@ -185,6 +193,7 @@ function formValues(initial: AgentValues): AgentForm {
     permission: normalizePermission(initial.permission),
     max_steps: initial.max_steps ? String(initial.max_steps) : "",
     context_window: initial.context_window ? String(initial.context_window) : "",
+    memory_capture: initial.memory_capture !== false,
   };
 }
 
@@ -196,6 +205,7 @@ function canonical(form: AgentForm): AgentValues {
     permission: normalizePermission(form.permission),
     max_steps: numberValue(form.max_steps),
     context_window: numberValue(form.context_window),
+    memory_capture: form.memory_capture === true,
   };
 }
 
@@ -273,6 +283,8 @@ function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
       patch.max_steps = current.max_steps;
     } else if (key === "context_window") {
       patch.context_window = current.context_window;
+    } else if (key === "memory_capture") {
+      patch.memory_capture = current.memory_capture;
     }
   }
   return patch;
@@ -437,7 +449,10 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
           .filter((value): value is string => Boolean(value))
           .sort();
         const initial = agent ? initialValues(agent, configAgent) : null;
-        setPage({ agent, agents: rows, providers });
+        const tools = Array.isArray(configAgent.tools)
+          ? configAgent.tools.map((tool) => String(tool))
+          : [];
+        setPage({ agent, agents: rows, providers, tools });
         setVersion(config && config.version ? String(config.version) : "");
         if (initial) {
           const values = formValues(initial);
@@ -1211,6 +1226,41 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                 </div>
               </div>
             </section>
+
+            {page && page.tools.includes("memory_write") ? (
+              <section
+                className="agent-form-section"
+                aria-labelledby="agent-memory-title"
+              >
+                <div className="agent-form-copy">
+                  <h2 id="agent-memory-title">Memory</h2>
+                  <p>
+                    After each turn, lana checks the conversation for
+                    preferences and corrections and saves them to memory.
+                  </p>
+                </div>
+                <div className="agent-form-controls">
+                  <label className="agent-switch">
+                    <input
+                      className="agent-switch-input"
+                      type="checkbox"
+                      role="switch"
+                      checked={form.memory_capture}
+                      disabled={saving}
+                      onChange={(event) =>
+                        updateField("memory_capture", event.target.checked)
+                      }
+                    />
+                    <span className="agent-switch-track" aria-hidden="true">
+                      <span className="agent-switch-thumb"></span>
+                    </span>
+                    <span className="agent-switch-text">
+                      Remember things automatically
+                    </span>
+                  </label>
+                </div>
+              </section>
+            ) : null}
 
             {saveNotice ? (
               <p className="notice notice-ok agent-save-notice" role="status">

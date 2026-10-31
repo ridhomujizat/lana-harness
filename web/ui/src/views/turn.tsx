@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SessionEvent } from "../api/sessions";
-import { contentText, cut, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
+import { contentText, cut, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { TeamBlock } from "./team";
 import type { TeamChildRequest } from "./team";
@@ -86,6 +86,8 @@ export interface Turn {
   groups?: TurnGroup[];
   stepCount?: number;
   currentStep?: number;
+  /* REQ-MEM-030: muted memory-capture lines, one per applied operation. */
+  notes?: string[];
   [key: string]: unknown;
 }
 
@@ -105,6 +107,7 @@ export interface ChatTurn extends Turn {
   groups: TurnGroup[];
   stepCount: number;
   currentStep: number;
+  notes: string[];
 }
 
 export type ThreadItem =
@@ -566,6 +569,15 @@ export function TurnBlock({
           <ActivityGroup key={segment.key} group={segment} />
         )
       )}
+      {(turn.notes || []).length > 0 ? (
+        <div>
+          {(turn.notes || []).map((note, index) => (
+            <p className="step-detail-status" key={"note-" + index}>
+              {note}
+            </p>
+          ))}
+        </div>
+      ) : null}
       {streamingText ? (
         <div className="turn-text turn-text-streaming">
           <Markdown text={streamingText} />
@@ -646,6 +658,7 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     running: false,
     stepCount: 0,
     currentStep: 0,
+    notes: [],
   };
 }
 
@@ -731,6 +744,10 @@ export function buildTurns(
         break;
       }
       case "user/message": {
+        // REQ-MEM-021: skip a runtime note so it makes no owner bubble.
+        if (payload.runtime === true) {
+          break;
+        }
         const text = userMessageText(payload);
         if (!text) {
           break;
@@ -847,6 +864,19 @@ export function buildTurns(
         turn.endedAt = createdAt;
         turn.stopReason = stringOf(payload.reason);
         turn.error = payload.error || null;
+        break;
+      }
+      case "memory/captured": {
+        // REQ-MEM-030: one muted note per applied operation.
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        const ops = Array.isArray(payload.ops) ? payload.ops : [];
+        for (const op of ops) {
+          const note = memoryOpLine(op);
+          if (note) {
+            turn.notes.push(note);
+          }
+        }
         break;
       }
       default:

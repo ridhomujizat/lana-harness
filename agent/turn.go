@@ -471,6 +471,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	promptBuilt := false
 	turnTools := []string{}
 	var totalUsage core.Usage
+	// ownerMessage marks that this turn stored at least one message from the
+	// owner, not a runtime note. A capture pass needs one (REQ-MEM-010).
+	ownerMessage := false
+	// lastResolved and lastSpecs carry the last step's resolution and tool
+	// declarations to the finished label for the capture pass (REQ-MEM-011).
+	var lastResolved resolvedAgent
+	var lastSpecs []core.ToolSpec
 	for {
 		claimedText := ""
 		claimed := false
@@ -549,6 +556,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			reason = "error"
 			goto finished
 		}
+		lastResolved = resolved
 		// REQ-WS-001: create a missing session workspace before any tool runs.
 		// A failure is logged and not fatal; bash, glob, and grep then report a
 		// clear workspace error instead of an operating system error.
@@ -668,6 +676,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				reason = "error"
 				goto finished
 			}
+			if !runtimeNote {
+				ownerMessage = true
+			}
 		}
 		step := steps + 1
 		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepStart, TurnID: turnID, Payload: core.StepStart{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model}}); err != nil {
@@ -686,6 +697,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				reason = "error"
 				goto finished
 			}
+			lastSpecs = specs
 		}
 		control, err := rn.reg.hooks.AgentRequest.Call(ctx, core.RequestControl{})
 		if err != nil {
@@ -906,6 +918,18 @@ finished:
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
 		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 	}
+	// REQ-MEM-010: after a root turn that stored an owner message and had
+	// memory_write, run one background capture pass. Capture returns at once,
+	// so the turn result is never delayed.
+	if cfg, ok := rn.reg.AgentConfig(lastResolved.name); ok && captureEligible(reason, lastResolved.child, ownerMessage, lastSpecs, cfg) {
+		if c := rn.reg.memoryCapturer(); c != nil {
+			c.Capture(core.CaptureRequest{
+				SessionID: rn.sessionID, TurnID: turnID, AgentName: lastResolved.name,
+				Home: rn.reg.home, Provider: lastResolved.provider, Model: lastResolved.model,
+				System: prompt, Tools: lastSpecs,
+			})
+		}
+	}
 	result.StopReason = reason
 	result.Text = lastText
 	result.Usage = totalUsage
@@ -998,6 +1022,28 @@ func stopToolOutput(ctx context.Context) core.ToolOutput {
 func containsString(list []string, name string) bool {
 	for _, item := range list {
 		if item == name {
+			return true
+		}
+	}
+	return false
+}
+
+// captureEligible reports whether a finished turn qualifies for a background
+// memory-capture pass (REQ-MEM-010).
+func captureEligible(reason string, child, ownerMessage bool, specs []core.ToolSpec, cfg core.AgentConfig) bool {
+	if reason != "end_turn" && reason != "max_steps" {
+		return false
+	}
+	if child || !ownerMessage || !hasToolSpec(specs, "memory_write") {
+		return false
+	}
+	return cfg.MemoryCapture == nil || *cfg.MemoryCapture
+}
+
+// hasToolSpec reports whether specs holds a tool with the given name.
+func hasToolSpec(specs []core.ToolSpec, name string) bool {
+	for _, spec := range specs {
+		if spec.Name == name {
 			return true
 		}
 	}

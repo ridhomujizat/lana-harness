@@ -62,6 +62,7 @@ type Registry struct {
 	hooks      *core.Hooks
 	questions  core.QuestionService
 	compaction core.Compactor
+	memory     core.MemoryCapturer
 	config     core.Config
 	secrets    core.Secrets
 	home       string
@@ -151,6 +152,14 @@ func (r *Registry) SetCompactor(c core.Compactor) { r.compaction = c }
 
 // compactor returns the compaction service, or nil when none is installed.
 func (r *Registry) compactor() core.Compactor { return r.compaction }
+
+// SetMemoryCapturer installs the memory-capture service used at turn end. It is
+// set at boot, before any turn starts; a nil service disables capture.
+func (r *Registry) SetMemoryCapturer(c core.MemoryCapturer) { r.memory = c }
+
+// memoryCapturer returns the memory-capture service, or nil when none is
+// installed.
+func (r *Registry) memoryCapturer() core.MemoryCapturer { return r.memory }
 
 // mcpManager returns the installed MCP manager, or nil when none is set.
 func (r *Registry) mcpManager() core.MCPManager {

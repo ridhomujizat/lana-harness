@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -339,6 +340,38 @@ func TestApprovalMenuKeys(t *testing.T) {
 	}
 	if model.approval != nil {
 		t.Fatal("approval was not closed")
+	}
+}
+
+// TestRestoreLinesHidesRuntimeNotes covers REQ-MEM-021: a restored user/message
+// with runtime:true is not shown, while an owner message is.
+func TestRestoreLinesHidesRuntimeNotes(t *testing.T) {
+	userEvent := func(seq int, text string, runtime bool) core.SessionEvent {
+		payload, err := json.Marshal(core.UserMessage{
+			V:       1,
+			Runtime: runtime,
+			Content: []core.ContentBlock{{Kind: core.BlockText, Text: text}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return core.SessionEvent{Seq: int64(seq), Kind: core.KindUserMessage, Payload: payload}
+	}
+	model := NewModel(context.Background(), Options{
+		Backend:   &fakeBackend{obs: core.NewObserve[core.LiveFrame]()},
+		SessionID: "s1",
+		Restore: []core.SessionEvent{
+			userEvent(1, "hello owner", false),
+			userEvent(2, "runtime nudge", true),
+		},
+	})
+
+	joined := strings.Join(model.restoreLines(), "\n")
+	if !strings.Contains(joined, "hello owner") {
+		t.Fatalf("owner message missing:\n%s", joined)
+	}
+	if strings.Contains(joined, "runtime nudge") {
+		t.Fatalf("runtime note was shown:\n%s", joined)
 	}
 }
 

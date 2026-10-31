@@ -54,6 +54,7 @@ export interface AgentWriteFields {
   description?: string;
   max_steps?: number;
   context_window?: number;
+  memory_capture?: boolean;
   rules?: { allow?: string[]; deny?: string[] };
   expected_version?: string;
 }

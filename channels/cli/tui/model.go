@@ -1598,6 +1598,11 @@ func (m *Model) restoreLines() []string {
 			if json.Unmarshal(event.Payload, &payload) != nil {
 				continue
 			}
+			// A runtime note is lana's own text, not an owner message
+			// (REQ-MEM-021).
+			if payload.Runtime {
+				continue
+			}
 			if text := textOf(payload.DisplayContent()); text != "" {
 				out = append(out, "")
 				out = append(out, renderUser(text)...)

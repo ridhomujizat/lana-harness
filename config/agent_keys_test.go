@@ -119,6 +119,33 @@ func TestAgentDisabledToolsValidation(t *testing.T) {
 	}
 }
 
+func TestAgentMemoryCaptureValidation(t *testing.T) {
+	for _, table := range []string{
+		"[agents.coder]\nmemory_capture = true\n",
+		"[agents.coder]\nmemory_capture = false\n",
+	} {
+		if _, err := loadAgentKeys(t, table); err != nil {
+			t.Fatalf("unexpected error for %q: %v", table, err)
+		}
+	}
+	errs := agentKeyErrors(t, "[agents.coder]\nmemory_capture = \"yes\"\n")
+	found := findError(errs, "agents.coder.memory_capture")
+	if found == nil || !strings.Contains(found.Msg, "boolean") {
+		t.Fatalf("memory_capture error = %+v", found)
+	}
+}
+
+func TestAgentMemoryCaptureLoaded(t *testing.T) {
+	res, err := loadAgentKeys(t, "[agents.coder]\nmemory_capture = false\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := res.Config.Agents["coder"]
+	if !ok || cfg.MemoryCapture == nil || *cfg.MemoryCapture {
+		t.Fatalf("memory_capture = %v", cfg.MemoryCapture)
+	}
+}
+
 func TestAgentDescriptionNoUnknownKey(t *testing.T) {
 	table := "[agents.coder]\ndescription = \"Checks disks\"\ndisabled_tools = [\"bash\", \"github/create_issue\"]\n"
 	res, err := loadAgentKeys(t, table)

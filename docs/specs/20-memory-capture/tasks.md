@@ -21,11 +21,15 @@ Each task is one `dsh-coder` run. Test command for every task:
 
 ### T-002 Capture service
 
+- Status: Done 2026-10-31. Evidence: go vet clean, go test all ok; memcapture added to the default profile.
+
 - Files: new `core/memcapture.go`, new `agent/memcapture/` (module, service, instruction, tests), `agent/registry.go` (sink + getter), `agent/turn.go` (call at `finished` only), `core/event.go` (`MemoryCaptured`, kind), `core/config.go` (`MemoryCapture *bool`), `config/validate.go`, `store/store.go` (`validKinds`), module registration where other modules are imported.
 - Covers: REQ-MEM-010–015. Design §2, §3 (config only).
 - Acceptance: design §7 capture cases.
 
 ### T-003 Web: toggle, runtime hiding, memory line
+
+- Status: Done 2026-10-31. Evidence: go test all ok, vitest 96/96, npm run build ok.
 
 - Files: `web/agents.go`, `web/agents_test.go`, `web/ui/src/views/agent-detail.tsx`, `web/ui/src/lib/format.ts`, `web/ui/src/views/turn.tsx`, tests, `channels/cli/tui/model.go` (runtime skip), `web/dist`.
 - Covers: REQ-MEM-021 (display), REQ-MEM-030, design §3 (web).

@@ -27,7 +27,7 @@ func (m mcpTestModule) Install(*core.Builder, core.ModuleConfig) error { return 
 func (m mcpTestModule) Stop(context.Context) error                     { return nil }
 
 func TestMain(m *testing.M) {
-	for _, name := range []string{"llm", "mcp", "sqlite_store", "agent", "compaction"} {
+	for _, name := range []string{"llm", "mcp", "sqlite_store", "agent", "compaction", "memcapture"} {
 		if !mcpModuleRegistered(name) {
 			core.RegisterModule(name, func() core.Module { return mcpTestModule{name: name} })
 		}

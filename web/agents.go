@@ -50,6 +50,7 @@ var agentKeys = map[string]bool{
 	"compaction_headroom":  true,
 	"compaction_threshold": true,
 	"compaction_retain":    true,
+	"memory_capture":       true,
 	"description":          true,
 	"rules":                true,
 }
@@ -110,6 +111,9 @@ type agentJSON struct {
 	ToolsCount    int             `json:"tools_count"`
 	SessionsCount int             `json:"sessions_count"`
 	LastActiveAt  *int64          `json:"last_active_at"`
+	// MemoryCapture is the background capture switch; an absent key means on
+	// (REQ-MEM-010).
+	MemoryCapture bool `json:"memory_capture"`
 }
 
 type listAgentsResponse struct {
@@ -146,8 +150,10 @@ type agentRecord struct {
 	CompactionHeadroom  int
 	CompactionThreshold float64
 	CompactionRetain    float64
-	Description         string
-	Rules               agentRules
+	// MemoryCapture is nil when the key is absent; nil means on (REQ-MEM-010).
+	MemoryCapture *bool
+	Description   string
+	Rules         agentRules
 }
 
 type agentRules struct {
@@ -238,6 +244,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			MCP:           []string{},
 			MCPStatus:     []mcpStatusJSON{},
 			DisabledTools: []string{},
+			MemoryCapture: true,
 		}
 		model := ""
 		configTools := 0
@@ -276,6 +283,9 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			row.Permission = record.Permission
 			row.Workspace = record.Workspace
 			row.DisabledTools = nonNilStrings(record.DisabledTools)
+			if record.MemoryCapture != nil {
+				row.MemoryCapture = *record.MemoryCapture
+			}
 			configTools = len(record.Tools)
 			if len(row.Skills) == 0 && len(record.Skills) > 0 {
 				row.Skills = nonNilStrings(record.Skills)
@@ -862,6 +872,13 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 			record.CompactionRetain = value
 		}
 		return nil
+	case "memory_capture":
+		var value bool
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		record.MemoryCapture = &value
+		return nil
 	case "description":
 		var value string
 		if err := json.Unmarshal(raw, &value); err != nil {
@@ -1015,6 +1032,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		CompactionHeadroom:  mapAgentInt(table, "compaction_headroom"),
 		CompactionThreshold: mapAgentFloat(table, "compaction_threshold"),
 		CompactionRetain:    mapAgentFloat(table, "compaction_retain"),
+		MemoryCapture:       mapAgentBoolPtr(table, "memory_capture"),
 		Description:         mapAgentString(table, "description"),
 	}
 	if rules, ok := table["rules"].(map[string]any); ok {
@@ -1069,6 +1087,16 @@ func mapAgentFloat(table map[string]any, key string) float64 {
 	}
 }
 
+// mapAgentBoolPtr returns nil when the key is absent. A config with no
+// memory_capture key means on (REQ-MEM-010).
+func mapAgentBoolPtr(table map[string]any, key string) *bool {
+	value, ok := table[key].(bool)
+	if !ok {
+		return nil
+	}
+	return &value
+}
+
 func renderAgentTable(name string, record agentRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[agents.%s]\n", name)
@@ -1088,6 +1116,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentInt(&b, "compaction_headroom", record.CompactionHeadroom)
 	writeAgentFloat(&b, "compaction_threshold", record.CompactionThreshold)
 	writeAgentFloat(&b, "compaction_retain", record.CompactionRetain)
+	writeAgentBoolPtr(&b, "memory_capture", record.MemoryCapture)
 	writeAgentString(&b, "description", record.Description)
 	if len(record.Rules.Allow) > 0 || len(record.Rules.Deny) > 0 {
 		parts := make([]string, 0, 2)
@@ -1128,6 +1157,15 @@ func writeAgentFloat(b *strings.Builder, key string, value float64) {
 		return
 	}
 	fmt.Fprintf(b, "%s = %s\n", key, strconv.FormatFloat(value, 'g', -1, 64))
+}
+
+// writeAgentBoolPtr writes the key only when it is present; nil means the
+// default and is left out of the table.
+func writeAgentBoolPtr(b *strings.Builder, key string, value *bool) {
+	if value == nil {
+		return
+	}
+	fmt.Fprintf(b, "%s = %t\n", key, *value)
 }
 
 func agentStringArray(values []string) string {

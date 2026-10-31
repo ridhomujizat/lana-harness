@@ -104,6 +104,25 @@ func TestDeriveSummaryFraming(t *testing.T) {
 	}
 }
 
+// REQ-MEM-014: memory/captured is not part of the model history.
+func TestDeriveIgnoresMemoryCaptured(t *testing.T) {
+	events := []SessionEvent{
+		seqEvent(t, 1, KindUserMessage, UserMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "hello"}}}),
+		seqEvent(t, 2, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "hi"}}}),
+		seqEvent(t, 3, KindMemoryCaptured, MemoryCaptured{V: 1, TurnID: "t", Ops: []MemoryOp{{Target: "user", Action: "add", Content: "x"}}}),
+	}
+	messages, err := DeriveMessages(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want 2: %+v", len(messages), messages)
+	}
+	if messages[0].Content[0].Text != "hello" || messages[1].Content[0].Text != "hi" {
+		t.Fatalf("history changed: %+v", messages)
+	}
+}
+
 // REQ-LTC-012: DeriveMessages uses the latest pruned output for a tool call.
 func TestDeriveAppliesPrune(t *testing.T) {
 	events := []SessionEvent{

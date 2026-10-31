@@ -19,6 +19,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/agent"
 	_ "github.com/ridhomujizat/lana-harness/agent/compaction"
+	_ "github.com/ridhomujizat/lana-harness/agent/memcapture"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
