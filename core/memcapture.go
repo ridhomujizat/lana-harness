@@ -19,4 +19,6 @@ type CaptureRequest struct {
 	Model     string
 	System    string
 	Tools     []ToolSpec
+	// ReasoningEffort matches the turn so the pass shares its prefix (REQ-MDL-005).
+	ReasoningEffort string
 }

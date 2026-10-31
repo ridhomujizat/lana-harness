@@ -58,10 +58,11 @@ export interface TurnUserText {
 
 export type TurnSegment =
   | { kind: "text"; key: string; text: string }
+  | { kind: "thinking"; key: string; text: string }
   | { kind: "step"; key: string; step: TurnStep };
 
 export interface TurnGroup {
-  kind: "text" | "activity";
+  kind: "text" | "thinking" | "activity";
   key: string;
   text?: string;
   steps?: TurnStep[];
@@ -128,6 +129,29 @@ function payloadOf(event: SessionEvent): Record<string, unknown> {
 
 function stringOf(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/* REQ-MDL-006: an assistant message's thinking blocks are kept separate from
+   the answer text. They render in a collapsed section, not as the reply. */
+function thinkingText(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  const pieces: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const value = block as Record<string, unknown>;
+    if (
+      value.type === "thinking" &&
+      typeof value.text === "string" &&
+      value.text !== ""
+    ) {
+      pieces.push(value.text);
+    }
+  }
+  return pieces.join("\n\n");
 }
 
 /* The avatar color follows the agent name, so one agent keeps one identity
@@ -459,10 +483,25 @@ function ActivityGroup({ group }: { group: TurnGroup }) {
   );
 }
 
+/* REQ-MDL-006: an assistant thinking block renders as a collapsed section above
+   the answer. Its text is model reasoning, not the reply. */
+function ThinkingBlock({ text }: { text: string }) {
+  return (
+    <details className="turn-thinking">
+      <summary className="turn-thinking-summary">Thinking</summary>
+      <div className="turn-text">
+        <Markdown text={text} />
+      </div>
+    </details>
+  );
+}
+
 export interface TurnBlockProps {
   turn: Turn;
   agent: string;
   streamingText?: string;
+  /* REQ-MDL-006: a live "Thinking…" note while only thinking deltas arrived. */
+  thinking?: boolean;
   waitingForInput?: boolean;
   team?: { lead: string; members: string[] } | null;
   rootEvents?: SessionEvent[];
@@ -481,6 +520,7 @@ export function TurnBlock({
   turn,
   agent,
   streamingText = "",
+  thinking = false,
   waitingForInput = false,
   team = null,
   rootEvents = [],
@@ -565,6 +605,8 @@ export function TurnBlock({
           <div className="turn-text" key={segment.key}>
             <Markdown text={segment.text} />
           </div>
+        ) : segment.kind === "thinking" ? (
+          <ThinkingBlock key={segment.key} text={segment.text || ""} />
         ) : (
           <ActivityGroup key={segment.key} group={segment} />
         )
@@ -582,6 +624,10 @@ export function TurnBlock({
         <div className="turn-text turn-text-streaming">
           <Markdown text={streamingText} />
         </div>
+      ) : thinking ? (
+        <p className="turn-thinking-live muted" role="status">
+          Thinking…
+        </p>
       ) : null}
       {statusCard && !cardDismissed ? (
         <div className="card" role="status" aria-live="polite">
@@ -774,6 +820,14 @@ export function buildTurns(
       case "assistant/message": {
         const turn = turnFor(event, payload);
         turn.lastAt = Math.max(turn.lastAt, createdAt);
+        const thinking = thinkingText(payload.content);
+        if (thinking) {
+          turn.segments.push({
+            kind: "thinking",
+            key: "thinking-" + event.seq,
+            text: thinking,
+          });
+        }
         const text = contentText(payload.content);
         if (text) {
           turn.segments.push({

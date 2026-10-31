@@ -166,6 +166,58 @@ func TestCompactNowSummary(t *testing.T) {
 	}
 }
 
+// REQ-MDL-011: the compaction window comes from the catalog when the agent sets
+// none, and a thinking model reserves the thinking output.
+func TestResolvePolicyCatalog(t *testing.T) {
+	cases := []struct {
+		name     string
+		agent    core.AgentConfig
+		maxToken int
+		effort   string
+		window   int64
+		output   int64
+	}{
+		{"deepseek-flash window", core.AgentConfig{Model: "deepseek-flash"}, 0, "", 1048576, 32000},
+		{"deepseek-chat window", core.AgentConfig{Model: "deepseek-chat"}, 0, "", 128000, 8192},
+		{"effort off keeps the plain output", core.AgentConfig{Model: "deepseek-flash"}, 0, "off", 1048576, 8192},
+		{"request max_tokens wins", core.AgentConfig{Model: "deepseek-flash"}, 2000, "", 1048576, 2000},
+		{"agent context_window wins", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 64000}, 0, "", 64000, 32000},
+		{"unknown model keeps the default", core.AgentConfig{Model: "unknown"}, 0, "", 128000, 8192},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &recordProvider{text: "x"}
+			_, _, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{"coder": tc.agent}})
+			pol := service.resolvePolicy("coder", tc.maxToken, tc.effort)
+			if pol.window != tc.window || pol.output != tc.output {
+				t.Fatalf("window=%d output=%d, want %d/%d", pol.window, pol.output, tc.window, tc.output)
+			}
+		})
+	}
+}
+
+// REQ-MDL-005: the compaction summary request carries the request's reasoning
+// effort.
+func TestCompactSummaryCarriesEffort(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "deepseek-flash"},
+	}})
+	seedTurn(t, store, info.ID)
+	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
+		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "deepseek-flash",
+		System: "head", ReasoningEffort: "high", Trigger: "manual",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 1 {
+		t.Fatalf("summary calls = %d, want 1", provider.count())
+	}
+	if got := provider.last().ReasoningEffort; got != "high" {
+		t.Fatalf("summary reasoning_effort = %q, want high", got)
+	}
+}
+
 func TestCompactNowRejects(t *testing.T) {
 	provider := &recordProvider{text: "x"}
 	store, info, service := newService(t, provider, core.Config{})

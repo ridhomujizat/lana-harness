@@ -720,7 +720,7 @@ func providerTestModel(name, kind string, agents map[string]map[string]any) stri
 	case "openrouter":
 		return "openai/gpt-5-mini"
 	case "deepseek":
-		return "deepseek-chat"
+		return "deepseek-flash"
 	case "anthropic":
 		return "claude-sonnet-4-5"
 	}

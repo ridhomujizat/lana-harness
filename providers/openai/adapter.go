@@ -29,15 +29,18 @@ type Config struct {
 	Headers           map[string]string
 	Timeout           string
 	StreamIdleTimeout string
+	// ThinkingFormat is the resolved thinking format: deepseek or none.
+	ThinkingFormat string
 }
 
 // Adapter is a core.Provider for one provider.
 type Adapter struct {
-	Name       string
-	cfg        Config
-	secrets    core.Secrets
-	client     *http.Client
-	streamIdle time.Duration
+	Name           string
+	cfg            Config
+	secrets        core.Secrets
+	client         *http.Client
+	streamIdle     time.Duration
+	thinkingFormat string
 }
 
 // NewAdapter creates an adapter.
@@ -81,12 +84,12 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 			return nil
 		},
 	}
-	return &Adapter{Name: name, cfg: cfg, secrets: secrets, client: client, streamIdle: streamIdle}, nil
+	return &Adapter{Name: name, cfg: cfg, secrets: secrets, client: client, streamIdle: streamIdle, thinkingFormat: cfg.ThinkingFormat}, nil
 }
 
 // Stream sends the request and returns an event iterator.
 func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
-	body, err := buildRequestBody(req)
+	body, err := buildRequestBody(req, a.thinkingFormat)
 	if err != nil {
 		return nil, err
 	}

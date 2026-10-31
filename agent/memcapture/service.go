@@ -112,7 +112,7 @@ func (s *Service) run(req core.CaptureRequest) {
 		{Kind: core.BlockText, Text: captureInstruction(userEntries, memoryEntries)},
 	}})
 	stream, err := provider.Stream(ctx, core.ChatRequest{
-		Model: req.Model, System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: captureMaxTokens,
+		Model: req.Model, System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: captureMaxTokens, ReasoningEffort: req.ReasoningEffort,
 	})
 	if err != nil {
 		s.warn("stream failed", req, err)

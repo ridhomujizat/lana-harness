@@ -30,6 +30,9 @@ type ProviderConfig struct {
 	Headers           map[string]string `toml:"headers"`
 	Timeout           string            `toml:"timeout"`
 	StreamIdleTimeout string            `toml:"stream_idle_timeout"`
+	// ThinkingFormat is "deepseek" or "none"; "" means the format is inferred
+	// from the base URL host (REQ-MDL-002).
+	ThinkingFormat string `toml:"thinking_format"`
 }
 
 type AgentConfig struct {
@@ -46,6 +49,9 @@ type AgentConfig struct {
 	Permission    string   `toml:"permission"`
 	MaxSteps      int      `toml:"max_steps"`
 	ContextWindow int      `toml:"context_window"`
+	// ReasoningEffort is "off", "low", "high", or "max"; "" uses the model's
+	// catalog default (REQ-MDL-001).
+	ReasoningEffort string `toml:"reasoning_effort"`
 	// CompactionHeadroom, CompactionThreshold, and CompactionRetain tune the
 	// context pressure policy (REQ-LTC-011). Zero means the default is used.
 	CompactionHeadroom  int     `toml:"compaction_headroom"`

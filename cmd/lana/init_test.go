@@ -15,7 +15,7 @@ func TestLookupProvider(t *testing.T) {
 	if !ok {
 		t.Fatal("deepseek not found")
 	}
-	if preset.baseURL != "https://api.deepseek.com/v1" || preset.keyEnv != "DEEPSEEK_API_KEY" || preset.model != "deepseek-chat" {
+	if preset.baseURL != "https://api.deepseek.com/v1" || preset.keyEnv != "DEEPSEEK_API_KEY" || preset.model != "deepseek-flash" {
 		t.Fatalf("preset = %+v", preset)
 	}
 	if _, ok := lookupProvider("anthropic"); ok {
@@ -42,7 +42,7 @@ func TestInitDeepSeekYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[providers.deepseek]", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "model = \"deepseek-chat\""} {
+	for _, want := range []string{"[providers.deepseek]", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "model = \"deepseek-flash\""} {
 		if !strings.Contains(string(cfg), want) {
 			t.Fatalf("config does not contain %q:\n%s", want, cfg)
 		}

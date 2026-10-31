@@ -208,7 +208,7 @@ func TestWireConvert(t *testing.T) {
 		MaxTokens:   100,
 		Temperature: &temp,
 	}
-	body, err := buildRequestBody(req)
+	body, err := buildRequestBody(req, formatNone)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestWireConvert(t *testing.T) {
 
 func TestWireImageUnsupported(t *testing.T) {
 	req := core.ChatRequest{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockImage}}}}}
-	if _, err := buildRequestBody(req); !errors.Is(err, ErrUnsupported) {
+	if _, err := buildRequestBody(req, formatNone); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("err=%v", err)
 	}
 }

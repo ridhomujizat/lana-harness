@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildTurns, turnEndCard, turnSummary } from "./turn";
+import { render, screen } from "@testing-library/react";
+import { buildTurns, turnEndCard, turnSummary, TurnBlock } from "./turn";
 import type { TurnStep } from "./turn";
 import type { SessionEvent, EventPayload } from "../api/sessions";
 
@@ -235,5 +236,50 @@ describe("turnEndCard", () => {
       steps: [step("dbx_list_tables", 1)],
     });
     expect(card).toBeNull();
+  });
+});
+
+/* REQ-MDL-006: an assistant thinking block is a collapsed section above the
+   answer, and it never becomes the answer text. */
+describe("turn thinking", () => {
+  it("renders a collapsed details above the answer text", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [
+          { type: "thinking", text: "the model reasoned" },
+          { type: "text", text: "the answer" },
+        ],
+      }),
+      event(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+
+    const { container } = render(
+      <TurnBlock turn={turnItem.turn} agent="lana" />
+    );
+    const details = container.querySelector("details.turn-thinking");
+    expect(details).not.toBeNull();
+    expect((details as HTMLDetailsElement).open).toBe(false);
+    expect(screen.getByText("Thinking")).toBeTruthy();
+    expect(details?.textContent).toContain("the model reasoned");
+    expect(screen.getByText("the answer")).toBeTruthy();
+  });
+
+  it("shows the muted Thinking note while only thinking deltas arrived", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "the answer" }],
+      }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+
+    render(<TurnBlock turn={turnItem.turn} agent="lana" thinking />);
+    expect(screen.getByText("Thinking…")).toBeTruthy();
   });
 });

@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -46,6 +47,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 			Headers:           provider.Headers,
 			Timeout:           provider.Timeout,
 			StreamIdleTimeout: provider.StreamIdleTimeout,
+			ThinkingFormat:    resolveThinkingFormat(provider),
 		}, b.Secrets())
 		if err != nil {
 			return err
@@ -90,6 +92,23 @@ func usedProviders(config core.Config) map[string]bool {
 		}
 	}
 	return used
+}
+
+// resolveThinkingFormat picks the provider thinking format: the configured
+// thinking_format when set, else deepseek for the api.deepseek.com host, else
+// none (REQ-MDL-002).
+func resolveThinkingFormat(provider core.ProviderConfig) string {
+	if provider.ThinkingFormat != "" {
+		return provider.ThinkingFormat
+	}
+	u, err := url.Parse(provider.BaseURL)
+	if err != nil {
+		return formatNone
+	}
+	if u.Hostname() == "api.deepseek.com" {
+		return formatDeepSeek
+	}
+	return formatNone
 }
 
 func sortedProviderNames(m map[string]core.ProviderConfig) []string {

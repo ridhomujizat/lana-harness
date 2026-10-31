@@ -69,7 +69,7 @@ func TestAgentNewYes(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent := result.Config.Agents["helper"]
-	if agent.Provider != "deepseek" || agent.Model != "deepseek-chat" || agent.Permission != "ask" || strings.Join(agent.Tools, ",") != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user" {
+	if agent.Provider != "deepseek" || agent.Model != "deepseek-flash" || agent.Permission != "ask" || strings.Join(agent.Tools, ",") != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user" {
 		t.Fatalf("agent = %+v", agent)
 	}
 	if result.Config.Routes[0].Agent != "default" {
@@ -145,7 +145,7 @@ func TestAgentNewWizard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := result.Config.Agents["dev"]; got.Permission != "trust" || got.Model != "deepseek-chat" {
+	if got := result.Config.Agents["dev"]; got.Permission != "trust" || got.Model != "deepseek-flash" {
 		t.Fatalf("agent = %+v", got)
 	}
 	if result.Config.Routes[0].Channel != "cli" || result.Config.Routes[0].Agent != "dev" {
@@ -157,7 +157,7 @@ func TestAgentListShowEdit(t *testing.T) {
 	home := initHome(t)
 	captureStdout(t, func() int { return agentNew([]string{"helper", "--yes"}, false) })
 	out, code := captureStdout(t, agentList)
-	if code != 0 || !strings.Contains(out, "default  deepseek:deepseek-chat  ask  persona=prompt_file:agents/default.md") || !strings.Contains(out, "helper  deepseek:deepseek-chat  ask  persona=AGENT.md  user=0/2000  memory=0/4000") {
+	if code != 0 || !strings.Contains(out, "default  deepseek:deepseek-flash  ask  persona=prompt_file:agents/default.md") || !strings.Contains(out, "helper  deepseek:deepseek-flash  ask  persona=AGENT.md  user=0/2000  memory=0/4000") {
 		t.Fatalf("list = %q", out)
 	}
 	t.Setenv("VISUAL", "")

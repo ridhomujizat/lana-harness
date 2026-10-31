@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // ErrTurnActive and ErrNothingToCompact originate from the store package.
@@ -25,9 +26,12 @@ var (
 const (
 	defaultContextWindow = 128000
 	defaultMaxTokens     = 8192
-	defaultHeadroom      = 16384
-	defaultThreshold     = 0.8
-	defaultRetain        = 0.16
+	// thinkingOutput is the output reservation of a thinking model
+	// (REQ-MDL-011).
+	thinkingOutput   = 32000
+	defaultHeadroom  = 16384
+	defaultThreshold = 0.8
+	defaultRetain    = 0.16
 )
 
 // Prune budgets (REQ-LTC-012).
@@ -243,11 +247,15 @@ func (s *Service) agentConfig(name string) (core.AgentConfig, bool) {
 	return agent, ok
 }
 
-func (s *Service) resolvePolicy(agentName string, maxTokens int) policy {
+func (s *Service) resolvePolicy(agentName string, maxTokens int, effort string) policy {
 	p := policy{window: defaultContextWindow, output: defaultMaxTokens, headroom: defaultHeadroom, threshold: defaultThreshold, retain: defaultRetain}
+	modelID := ""
+	agentWindow := false
 	if agent, ok := s.agentConfig(agentName); ok {
+		modelID = agent.Model
 		if agent.ContextWindow > 0 {
 			p.window = int64(agent.ContextWindow)
+			agentWindow = true
 		}
 		if agent.CompactionHeadroom > 0 {
 			p.headroom = int64(agent.CompactionHeadroom)
@@ -258,9 +266,28 @@ func (s *Service) resolvePolicy(agentName string, maxTokens int) policy {
 		if agent.CompactionRetain > 0 {
 			p.retain = agent.CompactionRetain
 		}
+		if effort == "" {
+			effort = agent.ReasoningEffort
+		}
+	}
+	known, ok := models.Lookup(modelID)
+	if modelID != "" && ok {
+		// REQ-MDL-010, REQ-MDL-011: the catalog window applies when the agent
+		// sets none.
+		if !agentWindow && known.ContextWindow > 0 {
+			p.window = int64(known.ContextWindow)
+		}
+		if effort == "" {
+			effort = known.DefaultEffort
+		}
 	}
 	if maxTokens > 0 {
+		// An explicit request max_tokens always wins.
 		p.output = int64(maxTokens)
+	} else if ok && known.Thinking != "" && effort != "off" {
+		// A thinking model reserves the thinking output too; "" counts as not
+		// off (REQ-MDL-011).
+		p.output = thinkingOutput
 	}
 	return p
 }
@@ -287,7 +314,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 		return zero, fmt.Errorf("unknown provider: %s", providerName)
 	}
 
-	pol := s.resolvePolicy(req.AgentName, req.MaxTokens)
+	pol := s.resolvePolicy(req.AgentName, req.MaxTokens, req.ReasoningEffort)
 	trigger := pol.trigger()
 	if trigger <= 0 {
 		return zero, nil
@@ -381,6 +408,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 	})
 	stream, err := provider.Stream(ctx, core.ChatRequest{
 		Model: model, System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: summaryMaxTokens,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	if err != nil {
 		record()
@@ -561,7 +589,8 @@ func (s *Service) stream(ctx context.Context, in core.LLMStreamInput, next core.
 	if _, compactErr := s.CompactIfNeeded(ctx, core.CompactRequest{
 		SessionID: in.SessionID, TurnID: in.TurnID, AgentName: in.AgentName,
 		Provider: providerName, Model: in.Request.Model, System: in.Request.System,
-		Tools: in.Request.Tools, MaxTokens: in.Request.MaxTokens, Trigger: "overflow",
+		Tools: in.Request.Tools, MaxTokens: in.Request.MaxTokens,
+		ReasoningEffort: in.Request.ReasoningEffort, Trigger: "overflow",
 	}); compactErr != nil {
 		slog.Warn("compaction retry failed", "session_id", in.SessionID, "error", compactErr)
 		return nil, err

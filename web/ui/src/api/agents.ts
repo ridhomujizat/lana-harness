@@ -28,6 +28,7 @@ export interface Agent {
   permission: string;
   workspace: string;
   disabled_tools: string[];
+  reasoning_effort?: string;
   tools_count: number;
   sessions_count: number;
   last_active_at: number | null;
@@ -55,6 +56,7 @@ export interface AgentWriteFields {
   max_steps?: number;
   context_window?: number;
   memory_capture?: boolean;
+  reasoning_effort?: string;
   rules?: { allow?: string[]; deny?: string[] };
   expected_version?: string;
 }
