@@ -18,6 +18,13 @@ vi.mock("../api/turns", async (importOriginal) => {
   };
 });
 
+/* The jobs strip fetches on mount (REQ-JOB-020); these tests do not exercise
+   it, so it is mocked to an empty list. */
+vi.mock("../api/jobs", () => ({
+  listSessionJobs: vi.fn().mockResolvedValue([]),
+  stopSessionJob: vi.fn(),
+}));
+
 const detail: SessionDetail = {
   id: "s1",
   channel: "web",

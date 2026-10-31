@@ -27,6 +27,8 @@ import {
   openStream,
 } from "../api/client";
 import type { SSEStream, StreamFrame, StreamState } from "../api/client";
+import { listSessionJobs, stopSessionJob } from "../api/jobs";
+import type { BackgroundJob } from "../api/jobs";
 import { answerQuestion, skipAllQuestions } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
 import { getSession, listEvents, patchSession } from "../api/sessions";
@@ -1078,6 +1080,230 @@ function Composer({
         />
       ) : null}
     </div>
+  );
+}
+
+/* REQ-JOB-020: the "Background jobs" strip above the composer. It polls every
+   3 s while at least one job runs, and Dismiss hides an ended job locally. */
+const JOB_POLL_MS = 3000;
+
+function jobStatusText(job: BackgroundJob): string {
+  if (job.status === "running") {
+    return "running";
+  }
+  if (job.status === "killed") {
+    return "killed";
+  }
+  return "exited with code " + job.exit_code;
+}
+
+/* The badge tone; a nonzero exit reads as a warning. */
+function jobTone(job: BackgroundJob): string {
+  if (job.status === "running") {
+    return "running";
+  }
+  if (job.status === "killed") {
+    return "killed";
+  }
+  return job.exit_code === 0 ? "exited" : "warning";
+}
+
+function jobAgeText(startedAt: number): string {
+  const minutes = Math.floor(Math.max(0, Date.now() - startedAt) / 60000);
+  if (minutes < 1) {
+    return "started just now";
+  }
+  if (minutes < 60) {
+    return "started " + minutes + "m ago";
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return "started " + hours + "h ago";
+  }
+  return "started " + Math.floor(hours / 24) + "d ago";
+}
+
+export function JobsStrip({ sessionId }: { sessionId: string }) {
+  const [jobs, setJobs] = useState<BackgroundJob[]>([]);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [openLogs, setOpenLogs] = useState<string[]>([]);
+  const [stopping, setStopping] = useState<string[]>([]);
+  const [stopErrors, setStopErrors] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    setJobs([]);
+    setDismissed([]);
+    setOpenLogs([]);
+    setStopping([]);
+    setStopErrors({});
+    setLoadError("");
+    listSessionJobs(sessionId)
+      .then((list) => {
+        if (alive) {
+          setJobs(Array.isArray(list) ? list : []);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (alive) {
+          setLoadError(errorMessage(failure));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [sessionId]);
+
+  const hasRunning = jobs.some((job) => job.status === "running");
+
+  useEffect(() => {
+    if (!hasRunning) {
+      return undefined;
+    }
+    let alive = true;
+    const timer = window.setInterval(() => {
+      listSessionJobs(sessionId)
+        .then((list) => {
+          if (alive) {
+            setJobs(Array.isArray(list) ? list : []);
+          }
+        })
+        .catch(() => {
+          /* A polling error stays silent; the next tick retries. */
+        });
+    }, JOB_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [hasRunning, sessionId]);
+
+  /* Running jobs first, then ended, each newest first. */
+  const visible = useMemo(() => {
+    const shown = jobs.filter((job) => !dismissed.includes(job.id));
+    return shown.slice().sort((left, right) => {
+      const leftRank = left.status === "running" ? 0 : 1;
+      const rightRank = right.status === "running" ? 0 : 1;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      return right.started_at - left.started_at;
+    });
+  }, [jobs, dismissed]);
+
+  function toggleLogs(jobId: string) {
+    setOpenLogs((current) =>
+      current.includes(jobId)
+        ? current.filter((id) => id !== jobId)
+        : current.concat([jobId])
+    );
+  }
+
+  function dismiss(jobId: string) {
+    setDismissed((current) => current.concat([jobId]));
+  }
+
+  async function stop(jobId: string) {
+    setStopping((current) =>
+      current.includes(jobId) ? current : current.concat([jobId])
+    );
+    setStopErrors((current) => {
+      const next = { ...current };
+      delete next[jobId];
+      return next;
+    });
+    try {
+      const stopped = await stopSessionJob(sessionId, jobId);
+      setJobs((current) =>
+        current.map((job) => (job.id === jobId ? stopped : job))
+      );
+    } catch (failure) {
+      setStopErrors((current) => ({
+        ...current,
+        [jobId]: errorMessage(failure),
+      }));
+    } finally {
+      setStopping((current) => current.filter((id) => id !== jobId));
+    }
+  }
+
+  if (visible.length === 0) {
+    // REQ-JOB-020: nothing to show. A fetch error still surfaces a small
+    // notice so a broken endpoint is not silent.
+    if (!loadError) {
+      return null;
+    }
+    return (
+      <section className="jobs-strip" aria-label="Background jobs">
+        <p className="jobs-strip-error" role="alert">
+          {loadError}
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="jobs-strip" aria-label="Background jobs">
+      <h2 className="jobs-strip-heading">Background jobs</h2>
+      {visible.map((job) => {
+        const logsId = "job-logs-" + job.id;
+        const open = openLogs.includes(job.id);
+        const busy = stopping.includes(job.id);
+        return (
+          <div className="job-row" key={job.id}>
+            <div className="job-main">
+              <span className="job-command" title={job.command}>
+                {job.command}
+              </span>
+              <span className={"job-badge job-badge-" + jobTone(job)}>
+                {jobStatusText(job)}
+              </span>
+              <span className="job-age">{jobAgeText(job.started_at)}</span>
+            </div>
+            <div className="job-actions">
+              <button
+                type="button"
+                className="job-action"
+                aria-expanded={open}
+                aria-controls={logsId}
+                onClick={() => toggleLogs(job.id)}
+              >
+                Logs
+              </button>
+              {job.status === "running" ? (
+                <button
+                  type="button"
+                  className="job-action job-stop"
+                  disabled={busy}
+                  onClick={() => stop(job.id)}
+                >
+                  {busy ? "Stopping…" : "Stop"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="job-action"
+                  onClick={() => dismiss(job.id)}
+                >
+                  Dismiss
+                </button>
+              )}
+            </div>
+            {open ? (
+              <pre className="job-logs" id={logsId}>
+                {job.tail || "No output yet."}
+              </pre>
+            ) : null}
+            {stopErrors[job.id] ? (
+              <p className="job-error" role="alert">
+                {stopErrors[job.id]}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -2354,6 +2580,7 @@ export function SessionPage({ id }: SessionPageProps) {
               />
             ) : null}
           </div>
+          <JobsStrip sessionId={id} />
           <Composer
             agent={agent}
             team={team}

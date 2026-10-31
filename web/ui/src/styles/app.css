@@ -2344,6 +2344,155 @@ pre.json {
   margin: 0 auto;
 }
 
+/* Background jobs strip above the composer (REQ-JOB-020). */
+.jobs-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 8px;
+  padding: 0 12px;
+}
+
+.jobs-strip-heading {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: var(--line-height-xs);
+}
+
+.jobs-strip-error {
+  margin: 0;
+  color: var(--text-error-primary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+}
+
+.job-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+}
+
+.job-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-command {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: var(--line-height-xs);
+  white-space: nowrap;
+}
+
+.job-badge-running {
+  border-color: var(--border-brand);
+  background: var(--bg-brand-primary);
+  color: var(--text-brand-secondary);
+}
+
+.job-badge-warning {
+  border-color: transparent;
+  background: var(--bg-warning-primary);
+  color: var(--text-warning-primary);
+}
+
+.job-badge-killed {
+  border-color: transparent;
+  background: var(--bg-error-primary);
+  color: var(--text-error-primary);
+}
+
+.job-age {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+}
+
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.job-action {
+  min-height: var(--control-height-xs);
+  padding: 4px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  line-height: var(--line-height-xs);
+  cursor: pointer;
+}
+
+.job-action:hover {
+  background: var(--bg-primary-hover);
+}
+
+.job-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.job-stop {
+  color: var(--text-error-primary);
+}
+
+.job-logs {
+  width: 100%;
+  max-height: 200px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+  white-space: pre;
+}
+
+.job-error {
+  margin: 0;
+  color: var(--text-error-primary);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-xs);
+}
+
 .chat-slot {
   display: flex;
   flex-direction: column;

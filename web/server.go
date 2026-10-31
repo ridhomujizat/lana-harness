@@ -68,6 +68,7 @@ type Server struct {
 	secretStore    SecretStore
 	agentFileStore AgentFileStore
 	skillStore     SkillStore
+	jobBackend     JobBackend
 	daemon         DaemonStore
 	telegramStatus func() TelegramStatus
 	telegramReset  TelegramResetSender

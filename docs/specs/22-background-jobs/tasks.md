@@ -16,5 +16,7 @@ task also `cd web/ui && env -u NODE_ENV npx vitest run && npm run build`.
 
 ### T-002 Web jobs strip
 
+- Status: Done 2026-10-31. Evidence: go test all ok, vitest 121/121, npm run build ok.
+
 - Files: web session routes (new `web/jobs.go`), runtime backend method(s) in `cmd/lana/web.go`, `web/ui/src/api/sessions.ts` (or new `api/jobs.ts`), `web/ui/src/views/session.tsx`, `web/ui/src/styles/app.css`, tests, `web/dist`.
 - Covers: REQ-JOB-020. Design §5.

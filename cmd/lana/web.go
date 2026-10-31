@@ -25,6 +25,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/agent/compaction"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/providers/openai"
 	"github.com/ridhomujizat/lana-harness/tools/permission"
@@ -73,6 +74,7 @@ var _ web.ProviderTester = (*webBackend)(nil)
 var _ web.MCPBackend = (*webBackend)(nil)
 var _ web.ToolCatalog = (*webBackend)(nil)
 var _ web.LiveConfigStore = (*webBackend)(nil)
+var _ web.JobBackend = (*webBackend)(nil)
 
 const (
 	// providerTestTimeout is the 15-second limit of API-WEB-019.
@@ -1326,6 +1328,62 @@ func (b *webBackend) Holder(ctx context.Context, id string) (web.Holder, error) 
 		return web.Holder{State: web.HolderOther, PID: pid}, nil
 	}
 	return web.Holder{State: web.HolderNone}, nil
+}
+
+// jobsTailBytes is the byte budget read for the jobs endpoints. It is larger
+// than the 4000-character cap so a multibyte tail keeps enough characters
+// after the handler trims it (REQ-JOB-020).
+const jobsTailBytes = 16000
+
+// SessionJobs implements web.JobBackend. The registry is in-memory, so it
+// holds only the jobs of this daemon run (REQ-JOB-018, REQ-JOB-020).
+func (b *webBackend) SessionJobs(ctx context.Context, sessionID string) ([]web.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	list := b.rt.Jobs().List(sessionID)
+	out := make([]web.Job, 0, len(list))
+	for _, job := range list {
+		out = append(out, b.webJob(sessionID, job))
+	}
+	return out, nil
+}
+
+// StopJob implements web.JobBackend. An unknown job id or one of another
+// session maps to web.ErrJobNotFound (REQ-JOB-020).
+func (b *webBackend) StopJob(ctx context.Context, sessionID, jobID string) (web.Job, error) {
+	if err := ctx.Err(); err != nil {
+		return web.Job{}, err
+	}
+	job, err := b.rt.Jobs().Kill(sessionID, jobID)
+	if err != nil {
+		if errors.Is(err, jobs.ErrUnknownJob) {
+			return web.Job{}, web.ErrJobNotFound
+		}
+		return web.Job{}, err
+	}
+	return b.webJob(sessionID, job), nil
+}
+
+// webJob maps a registry job to the web port type. EndedAt stays null while
+// the job runs; the tail is read with a byte budget and trimmed by the handler.
+func (b *webBackend) webJob(sessionID string, job jobs.Job) web.Job {
+	row := web.Job{
+		ID:        job.ID,
+		Command:   job.Command,
+		Status:    string(job.Status),
+		ExitCode:  job.ExitCode,
+		PID:       job.PID,
+		StartedAt: job.StartedAt.UnixMilli(),
+	}
+	if !job.EndedAt.IsZero() {
+		ended := job.EndedAt.UnixMilli()
+		row.EndedAt = &ended
+	}
+	if tail, err := b.rt.Jobs().Tail(sessionID, job.ID, jobsTailBytes); err == nil {
+		row.Tail = tail
+	}
+	return row
 }
 
 // waitRunning waits briefly for a turn to reach turn/start.

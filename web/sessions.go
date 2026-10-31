@@ -217,6 +217,9 @@ func (s *Server) SetBackend(backend Backend) {
 	if store, ok := backend.(SkillStore); ok {
 		s.skillStore = store
 	}
+	if port, ok := backend.(JobBackend); ok {
+		s.jobBackend = port
+	}
 }
 
 // registerSessionRoutes registers the T-003 routes through Handle so the
@@ -230,6 +233,7 @@ func (s *Server) registerSessionRoutes() {
 	s.Handle("GET /v1/sessions/{id}/usage", http.HandlerFunc(s.handleSessionUsage))
 	s.Handle("POST /v1/sessions/{id}/compact", http.HandlerFunc(s.handleCompactSession))
 	s.Handle("POST /v1/sessions/{id}/fork", http.HandlerFunc(s.handleForkSession))
+	s.registerJobRoutes()
 }
 
 type sessionJSON struct {

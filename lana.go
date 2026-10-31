@@ -180,6 +180,10 @@ type Runtime struct {
 	home     string
 }
 
+// Jobs returns the runtime's background-job registry (REQ-JOB-018,
+// REQ-JOB-020). It is never nil after New.
+func (rt *Runtime) Jobs() *jobs.Registry { return rt.jobs }
+
 func init() {
 	core.RegisterModule("memstore", func() core.Module { return &memstoreModule{} })
 	core.RegisterModule("provided_store", func() core.Module { return &providedStoreModule{} })

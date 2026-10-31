@@ -1,7 +1,7 @@
 # Requirements: Background jobs
 
 - **Issue**: —
-- **Status**: Approved
+- **Status**: Implemented
 - **Revision**: 1
 - **Owner**: Ridho
 - **Contract**: — (tool inputs, two tools, two web endpoints; listed below)
