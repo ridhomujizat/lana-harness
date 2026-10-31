@@ -326,6 +326,8 @@ export function panelStatus({
       return { tone: "error", text: "Failed · " + total + " steps" };
     case "max_steps":
       return { tone: "gray", text: "Stopped · " + total + " steps" };
+    case "loop":
+      return { tone: "gray", text: "Stopped · " + total + " steps" };
     default:
       return {
         tone: "success",

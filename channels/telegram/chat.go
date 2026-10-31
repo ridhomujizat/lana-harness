@@ -495,6 +495,8 @@ func (w *chat) endLine(out turnOutcome) string {
 		return "✗ Stopped by an error: " + message
 	case out.result.StopReason == "max_steps":
 		return fmt.Sprintf("⚠ Stopped after the step limit (%d steps).", w.stepCount())
+	case out.result.StopReason == "loop":
+		return "⚠ Stopped: lana kept repeating a step without progress."
 	}
 	return ""
 }

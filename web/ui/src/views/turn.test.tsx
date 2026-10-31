@@ -220,6 +220,13 @@ describe("turnEndCard", () => {
     ).toBe("Stopped after the step limit (25 steps).");
   });
 
+  /* REQ-LPG-010: a loop end gets its own reason line. */
+  it("renders the reason for a loop end", () => {
+    expect(turnEndCard({ stopReason: "loop" })?.text).toBe(
+      "Stopped: lana kept repeating a step without progress."
+    );
+  });
+
   it("adds the last step and its number when the turn ran a tool", () => {
     const card = turnEndCard({
       stopReason: "interrupted",

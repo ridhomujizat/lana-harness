@@ -255,6 +255,8 @@ export function stopReasonWords(reason: unknown): string {
       return "end of turn";
     case "max_steps":
       return "maximum steps reached";
+    case "loop":
+      return "stopped: no progress";
     case "cancelled":
       return "cancelled";
     case "error":

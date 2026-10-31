@@ -231,6 +231,8 @@ export function turnEndCard(turn: Turn): TurnEndCard | null {
   } else if (reason === "max_steps") {
     const count = Number(turn.stepCount) || 0;
     text = "Stopped after the step limit (" + count + " steps).";
+  } else if (reason === "loop") {
+    text = "Stopped: lana kept repeating a step without progress.";
   } else {
     return null;
   }

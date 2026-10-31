@@ -181,6 +181,9 @@ function turnEndAnnouncement(reason: string, error: unknown): string {
   if (reason === "max_steps") {
     return "Turn stopped: maximum steps reached.";
   }
+  if (reason === "loop") {
+    return "Turn stopped: repeated a step without progress.";
+  }
   return "Turn finished: " + stopReasonWords(reason) + ".";
 }
 

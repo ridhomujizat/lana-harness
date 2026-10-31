@@ -604,6 +604,7 @@ type Result struct {
 const (
 	StopEndTurn   = "end_turn"
 	StopMaxSteps  = "max_steps"
+	StopLoop      = "loop"
 	StopCancelled = "cancelled"
 	StopError     = "error"
 )

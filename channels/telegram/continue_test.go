@@ -89,6 +89,22 @@ func TestNormalEndHasNoContinueButton(t *testing.T) {
 	}
 }
 
+// REQ-LPG-010: a loop end shows its reason line and a Continue button.
+func TestLoopEndShowsContinue(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		return TurnResult{StopReason: "loop"}, nil
+	}
+	startChannel(t, api, backend)
+
+	api.text(ownerChat, "private", ownerID, "work")
+	api.waitCall("editMessageText", func(p map[string]any) bool {
+		text, _ := p["text"].(string)
+		return strings.HasSuffix(text, "⚠ Stopped: lana kept repeating a step without progress.") && continueButton(p, "S1")
+	})
+}
+
 // A refused press answers the callback with the refusal text (API-TFB-003).
 func TestContinueRefusedPressAnswersCallback(t *testing.T) {
 	api := newFakeAPI(t)
