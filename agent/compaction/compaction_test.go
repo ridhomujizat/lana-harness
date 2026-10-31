@@ -129,6 +129,33 @@ func seedToolSteps(t *testing.T, store *memstore.Store, id string, steps, chars 
 	appendEvents(t, store, id, core.EventDraft{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}})
 }
 
+// multiToolStep is one step whose assistant message calls several tools and
+// whose results are each chars long. It is shaped like the long single-turn
+// eval run: five read_file results of roughly 19 700 characters per step.
+func multiToolStep(i, calls, chars int, usage core.Usage) []core.EventDraft {
+	assistant := []core.ContentBlock{{Kind: core.BlockText, Text: "step"}}
+	for j := 0; j < calls; j++ {
+		assistant = append(assistant, core.ContentBlock{
+			Kind: core.BlockToolUse, ID: fmt.Sprintf("c%d_%d", i, j), Name: "big", Input: json.RawMessage(`{}`),
+		})
+	}
+	drafts := []core.EventDraft{
+		{Kind: core.KindStepStart, TurnID: "t", Payload: core.StepStart{V: 1, Step: i, Provider: "mock", Model: "m"}},
+		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: assistant}},
+	}
+	for j := 0; j < calls; j++ {
+		drafts = append(drafts, core.EventDraft{
+			Kind: core.KindToolResult, TurnID: "t",
+			Payload: core.ToolResultPayload{V: 1, CallID: fmt.Sprintf("c%d_%d", i, j), Status: core.ToolStatusSuccess, Output: strings.Repeat("x", chars)},
+		})
+	}
+	drafts = append(drafts, core.EventDraft{
+		Kind: core.KindStepEnd, TurnID: "t",
+		Payload: core.StepEnd{V: 1, Step: i, Provider: "mock", Model: "m", Usage: usage},
+	})
+	return drafts
+}
+
 func summaryCount(t *testing.T, store *memstore.Store, id string) (int, core.CompactionSummary) {
 	t.Helper()
 	events, err := store.ChainEvents(context.Background(), id)
@@ -682,5 +709,67 @@ func TestLiveAgentConfigLookup(t *testing.T) {
 	}
 	if count, _ := summaryCount(t, store, info.ID); count != 1 {
 		t.Fatalf("small live window wrote %d summaries, want 1", count)
+	}
+}
+
+// REQ-LTC-012/013 regression: a long single turn whose steps each carry five
+// ~19 700-character read_file results. The provider reports real usage, pruning
+// shrinks the oldest results, and the estimate must not treat that relief as
+// including the newest step's not-yet-counted results: pressure remains, so one
+// summary runs. The newest unit alone is larger than the trigger, so the
+// estimate can stay above T after the summary; a repeat check must not loop.
+func TestPressureSummaryRunsAfterPruningReportedUsage(t *testing.T) {
+	provider := &recordProvider{text: "condensed"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "deepseek-flash", ContextWindow: 24000},
+	}})
+	appendEvents(t, store, info.ID,
+		core.EventDraft{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "read all files"}}}},
+	)
+	// Step 1's usage was tiny; step 2 reports the five full results step 1
+	// returned, exactly like the eval run that motivated this test.
+	appendEvents(t, store, info.ID, multiToolStep(1, 5, 19700, core.Usage{InputTokens: 2544, OutputTokens: 177})...)
+	appendEvents(t, store, info.ID, multiToolStep(2, 5, 19700, core.Usage{InputTokens: 25803, OutputTokens: 496})...)
+
+	req := core.CompactRequest{
+		SessionID: info.ID, TurnID: "t", AgentName: "coder", Provider: "mock",
+		Model: "deepseek-flash", System: "head", Trigger: "pressure",
+	}
+	result, err := service.CompactIfNeeded(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 1 {
+		t.Fatalf("summary calls = %d, want 1: pruning hid pressure the provider still reports", provider.count())
+	}
+	count, payload := summaryCount(t, store, info.ID)
+	if count != 1 || payload.Summary != "condensed" {
+		t.Fatalf("summaries=%d payload=%+v", count, payload)
+	}
+	if payload.UptoSeq == 0 || payload.RetainedFromSeq <= payload.UptoSeq {
+		t.Fatalf("payload=%+v: retained tail must follow the summarized span", payload)
+	}
+	if result.TokensAfter >= result.TokensBefore {
+		t.Fatalf("summary did not shrink the request: before=%d after=%d", result.TokensBefore, result.TokensAfter)
+	}
+	messages, err := store.DeriveMessages(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) < 3 || !strings.Contains(messages[0].Content[0].Text, "<compacted-summary>") {
+		t.Fatalf("derived history does not start with a framed summary: %+v", messages)
+	}
+
+	// The newest unit alone is over T, so a second pressure check sees pressure
+	// again. It must skip the summary-only span instead of looping.
+	if _, err := service.CompactIfNeeded(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if provider.count() != 1 {
+		t.Fatalf("repeat check made %d summary calls, want 1", provider.count())
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 1 {
+		t.Fatalf("repeat check wrote %d summaries, want 1", count)
 	}
 }
