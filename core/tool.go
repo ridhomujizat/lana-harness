@@ -110,6 +110,14 @@ const (
 type ToolOutput struct {
 	Status ToolStatus
 	Output string
+	// Digest is the hex SHA-256 of the status and the output text, taken
+	// before the output is spilled. The loop guard compares it to spot an
+	// unchanged result (REQ-LPG-003).
+	Digest string `json:"-"`
+	// UnknownName is true when the call named a tool that was not offered
+	// (REQ-LPG-021), even after name repair. The turn counts these calls for
+	// the invalid-name strikes.
+	UnknownName bool `json:"-"`
 	// Usage is the token usage of child turns. It is added to the parent step
 	// usage and never serialized into the tool result.
 	Usage *Usage `json:"-"`

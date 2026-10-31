@@ -63,7 +63,7 @@ func TestToolNotEnabled(t *testing.T) {
 		if event.Kind == core.KindToolResult {
 			var payload core.ToolResultPayload
 			_ = json.Unmarshal(event.Payload, &payload)
-			if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "tool is not enabled") {
+			if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "does not exist") {
 				found = true
 			}
 		}

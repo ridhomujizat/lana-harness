@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -43,6 +45,20 @@ type callState struct {
 	ready  bool
 }
 
+// setOutput records a call's result and its pre-spill digest.
+func (s *callState) setOutput(out core.ToolOutput) {
+	out.Digest = outputDigest(out)
+	s.output = out
+}
+
+// outputDigest is the hex SHA-256 of a result's status and output text
+// (REQ-LPG-003). It is computed before spill so an unchanged result keeps the
+// same digest across calls.
+func outputDigest(out core.ToolOutput) string {
+	sum := sha256.Sum256([]byte(string(out.Status) + "\x00" + out.Output))
+	return hex.EncodeToString(sum[:])
+}
+
 // Run executes the tool pipeline for all calls and returns outputs in call order.
 func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []string, tc core.ToolCtx) []core.ToolOutput {
 	allowed := map[string]bool{}
@@ -54,23 +70,28 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 		state := &callState{call: call}
 		states[i] = state
 		if !allowed[call.Name] {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool is not enabled for agent"}
-			continue
+			repaired := repairToolName(call.Name, enabled)
+			if repaired == "" {
+				state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: unknownToolText(call.Name, enabled), UnknownName: true})
+				continue
+			}
+			slog.Info("tool name repaired", "from", call.Name, "to", repaired)
+			state.call.Name = repaired
 		}
-		tool, ok := tr.tools.Get(call.Name)
+		tool, ok := tr.tools.Get(state.call.Name)
 		if !ok {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "tool is not registered"}
+			state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: unknownToolText(state.call.Name, enabled), UnknownName: true})
 			continue
 		}
 		if err := validateInput(tool.Spec().InputSchema, call.Input); err != nil {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: "invalid input: " + err.Error()}
+			state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: "invalid input: " + err.Error()})
 			continue
 		}
 		state.tool = tool
 		state.call.Risk = tool.Risk(call.Input)
 		decision, err := tr.hooks.ToolsPreExecute.Call(ctx, core.ToolsPreExecuteInput{AgentName: tc.AgentName, Call: state.call})
 		if err != nil {
-			state.output = core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
+			state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()})
 			continue
 		}
 		if !decision.Allowed {
@@ -78,7 +99,7 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 			if status == "" {
 				status = core.ToolStatusRejected
 			}
-			state.output = core.ToolOutput{Status: status, Output: decision.Reason}
+			state.setOutput(core.ToolOutput{Status: status, Output: decision.Reason})
 			continue
 		}
 		state.ready = true
@@ -87,7 +108,7 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 	if ctx.Err() != nil {
 		for _, state := range states {
 			if state.ready {
-				state.output = stopToolOutput(ctx)
+				state.setOutput(stopToolOutput(ctx))
 				state.ready = false
 			}
 		}
@@ -116,10 +137,10 @@ func (tr *ToolRunner) Run(ctx context.Context, calls []core.ToolCall, enabled []
 
 	out := make([]core.ToolOutput, len(states))
 	for i, state := range states {
-		out[i] = state.output
-		if out[i].Status == "" {
-			out[i] = core.ToolOutput{Status: core.ToolStatusError, Output: "tool produced no output"}
+		if state.output.Status == "" {
+			state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: "tool produced no output"})
 		}
+		out[i] = state.output
 	}
 	return out
 }
@@ -147,7 +168,7 @@ func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.
 				defer func() { <-sem }()
 				tr.executeOne(ctx, s, tc)
 			case <-ctx.Done():
-				s.output = stopToolOutput(ctx)
+				s.setOutput(stopToolOutput(ctx))
 			}
 		}(state)
 	}
@@ -156,26 +177,26 @@ func (tr *ToolRunner) runBatch(ctx context.Context, batch []*callState, tc core.
 
 func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.ToolCtx) {
 	if ctx.Err() != nil {
-		state.output = stopToolOutput(ctx)
+		state.setOutput(stopToolOutput(ctx))
 		return
 	}
 	tc.CallID = state.call.CallID
 	input := core.ToolsExecuteInput{Ctx: tc, Call: state.call, Tool: state.tool}
 	output, err := tr.hooks.ToolsExecute.Call(ctx, input)
 	if err != nil {
-		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
+		state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()})
 		return
 	}
 	post, err := tr.hooks.ToolsPostExecute.Call(ctx, core.ToolsPostExecuteInput{Call: state.call, Output: output})
 	if err != nil {
-		state.output = core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()}
+		state.setOutput(core.ToolOutput{Status: core.ToolStatusError, Output: err.Error()})
 		return
 	}
 	if ctx.Err() != nil {
-		state.output = stopToolOutput(ctx)
+		state.setOutput(stopToolOutput(ctx))
 		return
 	}
-	state.output = post
+	state.setOutput(post)
 	tr.spillOutput(state, tc)
 }
 

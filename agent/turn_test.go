@@ -84,7 +84,7 @@ func TestAskUserNotEnabled(t *testing.T) {
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "tool is not enabled") {
+		if payload.CallID == "c1" && payload.Status == core.ToolStatusError && strings.Contains(payload.Output, "does not exist") {
 			found = true
 		}
 	}

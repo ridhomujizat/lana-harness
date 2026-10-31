@@ -350,3 +350,141 @@ func TestSpillPreviewKeepsRunes(t *testing.T) {
 		t.Fatalf("preview split a rune")
 	}
 }
+
+// namedTool is a trivial tool registered under an arbitrary name, used to
+// drive name repair against MCP-style names.
+type namedTool struct{ name string }
+
+var _ core.Tool = namedTool{}
+
+func (n namedTool) Spec() core.ToolSpec {
+	return core.ToolSpec{Name: n.name, InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)}
+}
+
+func (n namedTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
+
+func (n namedTool) Call(context.Context, core.ToolCtx, json.RawMessage) (core.ToolOutput, error) {
+	return core.ToolOutput{Status: core.ToolStatusSuccess, Output: n.name}, nil
+}
+
+func newNamedToolRunner(t *testing.T, names ...string) *ToolRunner {
+	t.Helper()
+	hooks := core.NewHooks()
+	tools.NewPipeline(hooks)
+	registry := tools.NewRegistry()
+	for _, name := range names {
+		if err := registry.Register(namedTool{name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hooks.ToolsPreExecute.SetDefault(func(context.Context, core.ToolsPreExecuteInput) (core.ToolDecision, error) {
+		return core.ToolDecision{Allowed: true}, nil
+	})
+	return NewToolRunner(hooks, registry)
+}
+
+// AC-LPG-020: a repaired name runs the offered tool.
+func TestToolNameRepairRunsOfferedTool(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ReadFile", "read-file", "read_file_tool"} {
+		calls := []core.ToolCall{{CallID: "c1", Name: name, Input: json.RawMessage(`{"path":"a.txt"}`)}}
+		out := tr.Run(context.Background(), calls, []string{"read_file"}, core.ToolCtx{SessionID: "s1", Home: t.TempDir(), Workspace: ws})[0]
+		if out.Status != core.ToolStatusSuccess || out.UnknownName {
+			t.Fatalf("%s: out=%+v", name, out)
+		}
+		if !strings.Contains(out.Output, "hello") {
+			t.Fatalf("%s: output=%q", name, out.Output)
+		}
+	}
+}
+
+// AC-LPG-021: create_issue runs the only offered MCP tool of that name, and is
+// unknown when two servers offer it.
+func TestToolNameRepairMCPRun(t *testing.T) {
+	one := newNamedToolRunner(t, "mcp__github__create_issue")
+	calls := []core.ToolCall{{CallID: "c1", Name: "create_issue", Input: json.RawMessage(`{}`)}}
+	out := one.Run(context.Background(), calls, []string{"mcp__github__create_issue"}, core.ToolCtx{SessionID: "s1"})[0]
+	if out.Status != core.ToolStatusSuccess || out.Output != "mcp__github__create_issue" {
+		t.Fatalf("out=%+v", out)
+	}
+
+	two := newNamedToolRunner(t, "mcp__github__create_issue", "mcp__gitlab__create_issue")
+	offered := []string{"mcp__github__create_issue", "mcp__gitlab__create_issue"}
+	out = two.Run(context.Background(), calls, offered, core.ToolCtx{SessionID: "s1"})[0]
+	if out.Status != core.ToolStatusError || !out.UnknownName {
+		t.Fatalf("out=%+v", out)
+	}
+	if !strings.Contains(out.Output, "does not exist") {
+		t.Fatalf("output=%q", out.Output)
+	}
+}
+
+// Digest is set and identical for two identical outputs, including a call
+// whose output is spilled (the spill preview carries a random file name).
+func TestToolOutputDigestStable(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	home := t.TempDir()
+	ws := t.TempDir()
+	calls := []core.ToolCall{{CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"printf hello"}`)}}
+	first := tr.Run(context.Background(), calls, []string{"bash"}, core.ToolCtx{SessionID: "s1", Home: home, Workspace: ws})[0]
+	second := tr.Run(context.Background(), calls, []string{"bash"}, core.ToolCtx{SessionID: "s1", Home: home, Workspace: ws})[0]
+	if first.Digest == "" || second.Digest == "" {
+		t.Fatalf("digest missing: %q %q", first.Digest, second.Digest)
+	}
+	if first.Digest != second.Digest {
+		t.Fatalf("digest changed: %q vs %q", first.Digest, second.Digest)
+	}
+}
+
+func TestToolOutputDigestBeforeSpill(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	home := t.TempDir()
+	ws := t.TempDir()
+	calls := []core.ToolCall{{CallID: "c1", Name: "bash", Input: json.RawMessage(`{"command":"yes a | head -c 100000"}`)}}
+	first := tr.Run(context.Background(), calls, []string{"bash"}, core.ToolCtx{SessionID: "s1", Home: home, Workspace: ws})[0]
+	second := tr.Run(context.Background(), calls, []string{"bash"}, core.ToolCtx{SessionID: "s1", Home: home, Workspace: ws})[0]
+	if !strings.Contains(first.Output, "Full output stored at: ") {
+		t.Fatalf("output was not spilled: %q", first.Output)
+	}
+	if first.Digest == "" {
+		t.Fatal("digest missing on a spilled output")
+	}
+	if first.Digest != second.Digest {
+		t.Fatalf("spilled digest changed: %q vs %q", first.Digest, second.Digest)
+	}
+}
+
+// Calls that end early with an error also get a digest, and the two name
+// failures are flagged as unknown.
+func TestToolOutputDigestOnError(t *testing.T) {
+	tr := newSpillToolRunner(t)
+	cases := []struct {
+		name    string
+		call    core.ToolCall
+		offered []string
+		unknown bool
+	}{
+		{"not offered", core.ToolCall{CallID: "c1", Name: "nope", Input: json.RawMessage(`{}`)}, []string{"read_file"}, true},
+		{"not registered", core.ToolCall{CallID: "c2", Name: "glob", Input: json.RawMessage(`{}`)}, []string{"glob"}, true},
+		{"invalid input", core.ToolCall{CallID: "c3", Name: "read_file", Input: json.RawMessage(`{"path":5}`)}, []string{"read_file"}, false},
+		{"empty name", core.ToolCall{CallID: "c4", Name: "", Input: json.RawMessage(`{}`)}, []string{"read_file"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := tr.Run(context.Background(), []core.ToolCall{tc.call}, tc.offered, core.ToolCtx{SessionID: "s1"})[0]
+			if out.Status != core.ToolStatusError {
+				t.Fatalf("out=%+v", out)
+			}
+			if out.Digest == "" {
+				t.Fatalf("digest missing: %+v", out)
+			}
+			if out.UnknownName != tc.unknown {
+				t.Fatalf("UnknownName=%v want %v", out.UnknownName, tc.unknown)
+			}
+		})
+	}
+}
