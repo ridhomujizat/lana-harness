@@ -1,7 +1,7 @@
 # Requirements: Tool reliability and the eval runner
 
 - **Issue**: —
-- **Status**: Approved
+- **Status**: Implemented
 - **Revision**: 1
 - **Owner**: Ridho
 - **Contract**: — (tool descriptions and inputs, one dev command; listed below)
