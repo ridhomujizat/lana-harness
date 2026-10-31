@@ -605,3 +605,55 @@ func TestAgentsMaxStepsRange(t *testing.T) {
 		t.Fatalf("max_steps=-1 detail = %+v", envelope.Error.Details[0])
 	}
 }
+
+// TestAgentsReasoningEffort covers REQ-MDL-001 and REQ-MDL-020: the effort
+// round-trips through the agent API and the live config, and an unknown value
+// is rejected like the other agent fields.
+func TestAgentsReasoningEffort(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	save := func(t *testing.T, value string) (int, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_version": webfiles.ConfigVersion(raw),
+			"reasoning_effort": value,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		return rr.Code, rr.Body.Bytes()
+	}
+
+	for _, value := range []string{"off", "low", "high", "max", ""} {
+		code, body := save(t, value)
+		if code != http.StatusOK {
+			t.Fatalf("reasoning_effort=%q status = %d, body = %q", value, code, body)
+		}
+		list := t016AgentsList(t, s, cookie)
+		row := t016FindAgentRow(t, list, "coder")
+		if row.ReasoningEffort != value {
+			t.Fatalf("read reasoning_effort = %q, want %q", row.ReasoningEffort, value)
+		}
+		tables := t016ReadAgentTables(t, store.path)
+		if got := agentRecordFromMap(tables["coder"]).ReasoningEffort; got != value {
+			t.Fatalf("saved reasoning_effort = %q, want %q", got, value)
+		}
+	}
+
+	code, body := save(t, "turbo")
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid reasoning_effort status = %d, body = %q", code, body)
+	}
+	envelope := decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("invalid reasoning_effort error = %+v", envelope.Error)
+	}
+	if key, _ := envelope.Error.Details[0]["key"].(string); key != "agents.coder.reasoning_effort" {
+		t.Fatalf("detail key = %q, want agents.coder.reasoning_effort", key)
+	}
+}

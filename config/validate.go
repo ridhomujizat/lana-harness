@@ -14,8 +14,8 @@ import (
 )
 
 var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
-var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "timeout"}
-var agentKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "rules", "skills", "subagents", "tools", "workspace"}
+var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
+var agentKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "tools", "workspace"}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
@@ -218,6 +218,14 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 			}
 		}
 	}
+	if val, ok := v["thinking_format"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".thinking_format", typeMsg("string", val))
+		} else if s != "" && !contains([]string{"deepseek", "none"}, s) {
+			add(path+".thinking_format", enumMsg(s, []string{"deepseek", "none"}))
+		}
+	}
 	for _, key := range []string{"timeout", "stream_idle_timeout"} {
 		if val, ok := v[key]; ok {
 			s, ok := val.(string)
@@ -317,6 +325,14 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["permission"]; ok {
 		if s, ok := val.(string); ok && !contains([]string{"ask", "never", "trust"}, s) {
 			add(path+".permission", enumMsg(s, []string{"ask", "never", "trust"}))
+		}
+	}
+	if val, ok := v["reasoning_effort"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".reasoning_effort", typeMsg("string", val))
+		} else if s != "" && !contains([]string{"off", "low", "high", "max"}, s) {
+			add(path+".reasoning_effort", enumMsg(s, []string{"off", "low", "high", "max"}))
 		}
 	}
 	if raw, ok := v["rules"]; ok {

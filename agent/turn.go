@@ -17,6 +17,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // Runner holds the state of one session.
@@ -109,6 +110,9 @@ type resolvedAgent struct {
 	fallback   []core.LLMTarget
 	maxSteps   int
 	child      bool
+	// reasoningEffort is the thinking effort of every step request; "" means
+	// the provider default (REQ-MDL-001).
+	reasoningEffort string
 }
 
 func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
@@ -176,6 +180,14 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// REQ-LTC-040: max_steps is opt-in; 0 means no limit for root and child
 	// sessions alike.
 	maxSteps := cfg.MaxSteps
+	// REQ-MDL-001: the agent's reasoning_effort wins, else the catalog default
+	// for the model, else the provider default ("").
+	effort := cfg.ReasoningEffort
+	if effort == "" {
+		if known, ok := models.Lookup(model); ok {
+			effort = known.DefaultEffort
+		}
+	}
 	fallback, err := parseFallback(cfg.Fallback)
 	if err != nil {
 		return resolvedAgent{}, err
@@ -198,22 +210,23 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		mcpServers = overlay
 	}
 	return resolvedAgent{
-		name:       cfgName,
-		team:       teamName,
-		delegates:  delegates,
-		roster:     roster,
-		provider:   provider,
-		model:      model,
-		promptFile: cfg.PromptFile,
-		channel:    info.Channel,
-		workspace:  workspace,
-		tools:      cfg.Tools,
-		disabled:   cfg.DisabledTools,
-		mcp:        mcpServers,
-		skills:     cfg.Skills,
-		fallback:   fallback,
-		maxSteps:   maxSteps,
-		child:      info.ParentSessionID != "",
+		name:            cfgName,
+		team:            teamName,
+		delegates:       delegates,
+		roster:          roster,
+		provider:        provider,
+		model:           model,
+		promptFile:      cfg.PromptFile,
+		channel:         info.Channel,
+		workspace:       workspace,
+		tools:           cfg.Tools,
+		disabled:        cfg.DisabledTools,
+		mcp:             mcpServers,
+		skills:          cfg.Skills,
+		fallback:        fallback,
+		maxSteps:        maxSteps,
+		child:           info.ParentSessionID != "",
+		reasoningEffort: effort,
 	}, nil
 }
 
@@ -700,7 +713,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			if _, cerr := c.CompactIfNeeded(ctx, core.CompactRequest{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name,
 				Provider: resolved.provider, Model: resolved.model, System: prompt,
-				Tools: specs, MaxTokens: control.MaxTokens, Trigger: "pressure",
+				Tools: specs, MaxTokens: control.MaxTokens,
+				ReasoningEffort: resolved.reasoningEffort, Trigger: "pressure",
 			}); cerr != nil {
 				slog.Warn("compaction failed", "session_id", rn.sessionID, "turn_id", turnID, "error", cerr)
 			}
@@ -714,10 +728,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		req := core.ChatRequest{Model: resolved.model, System: prompt, Messages: history, Tools: specs}
 		req.MaxTokens = control.MaxTokens
 		req.Temperature = control.Temperature
+		req.ReasoningEffort = resolved.reasoningEffort
 
 		targets := append([]core.LLMTarget{{Provider: resolved.provider, Model: resolved.model}}, resolved.fallback...)
 		var (
 			text       string
+			thinking   string
 			toolBlocks []core.ContentBlock
 			usage      core.Usage
 			stop       string
@@ -742,7 +758,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				seen      int
 				streamErr error
 			)
-			text, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID)
+			text, thinking, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID)
 			if streamErr == nil {
 				break
 			}
@@ -770,7 +786,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		totalUsage.InputTokens += usage.InputTokens
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CachedInputTokens += usage.CachedInputTokens
-		content := make([]core.ContentBlock, 0, 1+len(toolBlocks))
+		// REQ-MDL-003: the thinking block is stored first, then the answer text,
+		// then the tool calls.
+		content := make([]core.ContentBlock, 0, 2+len(toolBlocks))
+		if thinking != "" {
+			content = append(content, core.ContentBlock{Kind: core.BlockThinking, Text: thinking})
+		}
 		if text != "" {
 			content = append(content, core.ContentBlock{Kind: core.BlockText, Text: text})
 		}
@@ -913,28 +934,43 @@ finished:
 	return result
 }
 
-// consumeStream drains one step's stream. seen is the number of events read
-// before a failure, which tells a pre-first-event failure from a mid-stream one
-// (REQ-LTC-032).
-func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string) (string, []core.ContentBlock, core.Usage, string, int, error) {
+// consumeStream drains one step's stream. thinking is the reasoning text:
+// the explicit thinking block when the provider sends one, else the joined
+// thinking deltas. seen is the number of events read before a failure, which
+// tells a pre-first-event failure from a mid-stream one (REQ-LTC-032).
+func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string) (string, string, []core.ContentBlock, core.Usage, string, int, error) {
 	var text strings.Builder
+	var reasoning strings.Builder
+	thinkingBlock := ""
 	var blocks []core.ContentBlock
 	var usage core.Usage
 	stop := "end_turn"
 	seen := 0
+	thinking := func() string {
+		if thinkingBlock != "" {
+			return thinkingBlock
+		}
+		return reasoning.String()
+	}
 	for event, err := range stream {
 		if err != nil {
-			return text.String(), blocks, usage, stop, seen, err
+			return text.String(), thinking(), blocks, usage, stop, seen, err
 		}
 		seen++
 		switch event.Kind {
 		case core.ChatTextDelta:
 			text.WriteString(event.Text)
 			rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "text_delta", Text: event.Text})
+		case core.ChatThinkingDelta:
+			reasoning.WriteString(event.Text)
+			rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "thinking_delta", Text: event.Text})
 		case core.ChatBlock:
-			if event.Block.Kind == core.BlockText {
+			switch event.Block.Kind {
+			case core.BlockText:
 				text.WriteString(event.Block.Text)
-			} else {
+			case core.BlockThinking:
+				thinkingBlock = event.Block.Text
+			default:
 				blocks = append(blocks, event.Block)
 			}
 		case core.ChatUsage:
@@ -944,9 +980,9 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return text.String(), blocks, usage, stop, seen, err
+		return text.String(), thinking(), blocks, usage, stop, seen, err
 	}
-	return text.String(), blocks, usage, stop, seen, nil
+	return text.String(), thinking(), blocks, usage, stop, seen, nil
 }
 
 // writeStepAttempt records one failed stream attempt of a step. attempt counts

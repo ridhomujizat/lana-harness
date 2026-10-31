@@ -900,6 +900,7 @@ export function SessionPage({ id }: SessionPageProps) {
   const [liveTurnId, setLiveTurnId] = useState("");
   const [liveStartedAt, setLiveStartedAt] = useState(0);
   const [streamText, setStreamText] = useState("");
+  const [liveThinking, setLiveThinking] = useState(false);
   const [holder, setHolder] = useState("none");
   const [holderPid, setHolderPid] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
@@ -1147,6 +1148,7 @@ export function SessionPage({ id }: SessionPageProps) {
       setTurnRunning(false);
       setCancelling(false);
       setStreamText("");
+      setLiveThinking(false);
       setQueued(false);
       setLiveTurnId("");
       setLiveStartedAt(0);
@@ -1248,6 +1250,7 @@ export function SessionPage({ id }: SessionPageProps) {
     setStreamReady(false);
     setApprovals([]);
     setStreamText("");
+    setLiveThinking(false);
     setQueued(false);
     setPendingText("");
     setNotice(null);
@@ -1384,6 +1387,7 @@ export function SessionPage({ id }: SessionPageProps) {
         }
         if (event.kind === "assistant/message" || event.kind === "tool/call") {
           setStreamText("");
+          setLiveThinking(false);
         }
         if (event.kind === "approval/decided") {
           markApprovalDecided(
@@ -1492,14 +1496,22 @@ export function SessionPage({ id }: SessionPageProps) {
           }
         }
         if (frame.kind === "text_delta" && frame.text) {
+          setLiveThinking(false);
           setStreamText((current) => current + String(frame.text));
         }
+        /* REQ-MDL-006: a thinking delta shows a muted note with no thinking
+           text; the answer text or the next step clears it. */
+        if (frame.kind === "thinking_delta") {
+          setLiveThinking(true);
+        }
         if (frame.kind === "tool_call" || frame.kind === "tool_result") {
+          setLiveThinking(false);
           setStreamText("");
         }
         /* REQ-LTC-032: a step_retry drops the partial text of the failed step;
            streamText only ever holds the current step's streamed answer. */
         if (frame.kind === "step_retry") {
+          setLiveThinking(false);
           setStreamText("");
         }
       },
@@ -1690,6 +1702,7 @@ export function SessionPage({ id }: SessionPageProps) {
           setLiveStartedAt(Date.now());
         }
         setStreamText("");
+        setLiveThinking(false);
       }
       lastRunningRef.current = true;
       setTurnRunning(true);
@@ -1788,6 +1801,7 @@ export function SessionPage({ id }: SessionPageProps) {
           setLiveStartedAt(Date.now());
         }
         setStreamText("");
+        setLiveThinking(false);
       }
       lastRunningRef.current = true;
       setTurnRunning(true);
@@ -2075,6 +2089,11 @@ export function SessionPage({ id }: SessionPageProps) {
                   (liveTurnId ? item.turn.id === liveTurnId : true)
                     ? streamText
                     : ""
+                }
+                thinking={
+                  item.turn.running &&
+                  (liveTurnId ? item.turn.id === liveTurnId : true) &&
+                  liveThinking
                 }
               />
             )

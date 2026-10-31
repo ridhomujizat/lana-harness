@@ -23,6 +23,7 @@ type BlockKind string
 
 const (
 	BlockText       BlockKind = "text"
+	BlockThinking   BlockKind = "thinking"
 	BlockToolUse    BlockKind = "tool_use"
 	BlockToolResult BlockKind = "tool_result"
 	BlockImage      BlockKind = "image"
@@ -58,15 +59,19 @@ type ChatRequest struct {
 	Tools       []ToolSpec
 	MaxTokens   int
 	Temperature *float64
+	// ReasoningEffort selects the thinking effort: "", "off", "low", "high",
+	// or "max". "" means the provider default (REQ-MDL-001).
+	ReasoningEffort string
 }
 
 type ChatEventKind string
 
 const (
-	ChatTextDelta ChatEventKind = "text_delta"
-	ChatBlock     ChatEventKind = "block"
-	ChatUsage     ChatEventKind = "usage"
-	ChatStop      ChatEventKind = "stop"
+	ChatTextDelta     ChatEventKind = "text_delta"
+	ChatThinkingDelta ChatEventKind = "thinking_delta"
+	ChatBlock         ChatEventKind = "block"
+	ChatUsage         ChatEventKind = "usage"
+	ChatStop          ChatEventKind = "stop"
 )
 
 // ChatEvent is one chunk of a stream.

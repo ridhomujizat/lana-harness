@@ -997,14 +997,10 @@ func runningPreview(activeCalls []string, calls map[string]core.ToolCallPayload)
 	return ""
 }
 
+// assistantText returns the text blocks of an assistant message as one string.
+// Thinking blocks are not user-facing text, so they are skipped (REQ-MDL-006).
 func assistantText(blocks []core.ContentBlock) string {
-	parts := make([]string, 0, len(blocks))
-	for _, block := range blocks {
-		if strings.TrimSpace(block.Text) != "" {
-			parts = append(parts, block.Text)
-		}
-	}
-	return strings.Join(parts, " ")
+	return strings.TrimSpace(core.TextContent(blocks))
 }
 
 func cutPreview(text string) string {

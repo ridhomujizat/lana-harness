@@ -1298,6 +1298,26 @@ func TestSessionListPreviewTruncated(t *testing.T) {
 	}
 }
 
+// REQ-MDL-006: the preview shows the answer text and ignores the thinking
+// block of the same assistant message.
+func TestSessionListPreviewSkipsThinking(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "helper", Title: "thinking", Status: "idle", UpdatedAt: 1000})
+	addSessionEvent(t, backend, info.ID, core.KindAssistantMessage, core.AssistantMessage{V: 1, Content: []core.ContentBlock{
+		{Kind: core.BlockThinking, Text: "private reasoning"},
+		{Kind: core.BlockText, Text: "the answer"},
+	}})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	body := listSessionsForTest(t, s, cookie, "/v1/sessions")
+	if len(body.Sessions) != 1 {
+		t.Fatalf("rows = %+v", body.Sessions)
+	}
+	if preview := body.Sessions[0].Preview; preview != "the answer" {
+		t.Fatalf("preview = %q, want %q", preview, "the answer")
+	}
+}
+
 func TestSessionListAllInvalidStatusIsRejected(t *testing.T) {
 	backend, _ := sessionListFixture(t)
 	s, cookie, _ := newLoggedInSessionServer(t, backend)

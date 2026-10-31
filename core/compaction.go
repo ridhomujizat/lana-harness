@@ -21,6 +21,9 @@ type CompactRequest struct {
 	System    string
 	Tools     []ToolSpec
 	MaxTokens int
+	// ReasoningEffort is the turn's resolved thinking effort; "" means the
+	// provider or catalog default (REQ-MDL-001, REQ-MDL-005).
+	ReasoningEffort string
 	// Trigger is "pressure", "overflow", or "manual". "overflow" and "manual"
 	// ignore the pressure threshold.
 	Trigger string

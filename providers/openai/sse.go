@@ -16,8 +16,9 @@ import (
 )
 
 type chunkDelta struct {
-	Content   string `json:"content"`
-	ToolCalls []struct {
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoning_content"`
+	ToolCalls        []struct {
 		Index    int    `json:"index"`
 		ID       string `json:"id"`
 		Function struct {
@@ -69,6 +70,7 @@ func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStre
 		acc := map[int]*toolAccumulator{}
 		var finish string
 		var usage *chunkUsage
+		var reasoning strings.Builder
 		sawDone := false
 		for scanner.Scan() {
 			if err := ctx.Err(); err != nil {
@@ -96,6 +98,12 @@ func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStre
 				usage = c.Usage
 			}
 			for _, choice := range c.Choices {
+				if choice.Delta.ReasoningContent != "" {
+					reasoning.WriteString(choice.Delta.ReasoningContent)
+					if !yield(core.ChatEvent{Kind: core.ChatThinkingDelta, Text: choice.Delta.ReasoningContent}, nil) {
+						return
+					}
+				}
 				if choice.Delta.Content != "" {
 					if !yield(core.ChatEvent{Kind: core.ChatTextDelta, Text: choice.Delta.Content}, nil) {
 						return
@@ -131,6 +139,15 @@ func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStre
 		if !sawDone && finish == "" {
 			yield(core.ChatEvent{}, &core.ProviderError{Class: "network", Message: "stream disconnected before finish_reason"})
 			return
+		}
+		// The accumulated reasoning becomes one thinking block, emitted before
+		// the tool-use blocks so it stores first in the assistant message
+		// (REQ-MDL-003).
+		if reasoning.Len() > 0 {
+			block := core.ContentBlock{Kind: core.BlockThinking, Text: reasoning.String()}
+			if !yield(core.ChatEvent{Kind: core.ChatBlock, Block: block}, nil) {
+				return
+			}
 		}
 		indexes := make([]int, 0, len(acc))
 		for index := range acc {

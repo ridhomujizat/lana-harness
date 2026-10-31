@@ -67,7 +67,7 @@
 ## 6. Web settings (REQ-MDL-012, -020)
 
 - `web/agents.go`: field `reasoning_effort` read/write + validation; live config like `max_steps`.
-- New `GET /api/models?provider=<name>`: catalog for that provider (id, name, description,
+- New `GET /v1/models?provider=<name>` (alias `/api/models`): catalog for that provider (id, name, description,
   context_window, legacy, replacement, thinking, default_effort, efforts with descriptions).
 - `web/ui/src/views/agent-detail.tsx`: model picker (catalog + "Other…" free text), Thinking
   select shown when the selected model thinks, legacy banner with one-click switch to the

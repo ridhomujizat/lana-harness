@@ -5,6 +5,8 @@ import type { FormEvent, KeyboardEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import { duplicateAgent, listAgents, updateAgent } from "../api/agents";
 import type { Agent, AgentWriteFields } from "../api/agents";
+import { getModels } from "../api/models";
+import type { CatalogEffort, CatalogModel } from "../api/models";
 import { getConfig, listProviders } from "../api/settings";
 import type { ConfigAgent } from "../api/settings";
 import { createSession } from "../api/sessions";
@@ -60,6 +62,7 @@ const TABS: readonly TabEntry[] = [
 type GeneralKey =
   | "provider"
   | "model"
+  | "reasoning_effort"
   | "fallback"
   | "permission"
   | "max_steps"
@@ -68,6 +71,7 @@ type GeneralKey =
 const GENERAL_KEYS: readonly GeneralKey[] = [
   "provider",
   "model",
+  "reasoning_effort",
   "fallback",
   "permission",
   "max_steps",
@@ -101,6 +105,7 @@ const PERMISSIONS: readonly PermissionOption[] = [
 interface AgentValues {
   provider: string;
   model: string;
+  reasoning_effort: string;
   fallback: string[];
   permission: Permission;
   max_steps: number;
@@ -110,6 +115,7 @@ interface AgentValues {
 interface AgentForm {
   provider: string;
   model: string;
+  reasoning_effort: string;
   fallback: string[];
   permission: Permission;
   max_steps: string;
@@ -145,6 +151,13 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/* The Thinking option text carries the effort description of REQ-MDL-020. */
+function effortLabel(effort: CatalogEffort): string {
+  const value = String(effort.value || "");
+  const label = value ? value.charAt(0).toUpperCase() + value.slice(1) : "";
+  return effort.description ? label + " — " + effort.description : label;
+}
+
 /* POST /v1/sessions accepts "" (use the agent's model) or "<provider>:<model>". */
 function sessionModel(agent: AgentLike | null | undefined): string {
   const value = agent && agent.model ? String(agent.model) : "";
@@ -160,12 +173,13 @@ function sessionModel(agent: AgentLike | null | undefined): string {
   return "";
 }
 
-function initialValues(agent: AgentLike, configAgent: ConfigAgent): AgentValues {
+function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
   const record = configAgent || {};
   const parts = splitModel(agent);
   return {
     provider: pickText(record.provider, agent.provider, parts.provider),
     model: pickText(record.model, parts.model),
+    reasoning_effort: pickText(agent.reasoning_effort),
     fallback: Array.isArray(record.fallback)
       ? record.fallback.map((target) => String(target))
       : [],
@@ -181,6 +195,7 @@ function formValues(initial: AgentValues): AgentForm {
   return {
     provider: initial.provider || "",
     model: initial.model || "",
+    reasoning_effort: initial.reasoning_effort || "",
     fallback: Array.isArray(initial.fallback) ? initial.fallback.slice() : [],
     permission: normalizePermission(initial.permission),
     max_steps: initial.max_steps ? String(initial.max_steps) : "",
@@ -192,6 +207,7 @@ function canonical(form: AgentForm): AgentValues {
   return {
     provider: form.provider || "",
     model: form.model || "",
+    reasoning_effort: form.reasoning_effort || "",
     fallback: Array.isArray(form.fallback) ? form.fallback.slice() : [],
     permission: normalizePermission(form.permission),
     max_steps: numberValue(form.max_steps),
@@ -265,6 +281,8 @@ function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
       patch.provider = current.provider;
     } else if (key === "model") {
       patch.model = current.model;
+    } else if (key === "reasoning_effort") {
+      patch.reasoning_effort = current.reasoning_effort;
     } else if (key === "fallback") {
       patch.fallback = current.fallback.slice();
     } else if (key === "permission") {
@@ -397,7 +415,9 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const [details, setDetails] = useState<unknown[]>([]);
   const [stale, setStale] = useState(false);
   const [fallbackDraft, setFallbackDraft] = useState<FallbackDraft | null>(null);
-  const [customModel, setCustomModel] = useState(false);
+  const [otherModel, setOtherModel] = useState(false);
+  const [catalog, setCatalog] = useState<CatalogModel[]>([]);
+  const [efforts, setEfforts] = useState<CatalogEffort[]>([]);
   const [headerError, setHeaderError] = useState("");
   const [startBusy, setStartBusy] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
@@ -415,7 +435,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setSaveNotice("");
     setStale(false);
     setFallbackDraft(null);
-    setCustomModel(false);
+    setOtherModel(false);
     setHeaderError("");
 
     Promise.all([
@@ -486,27 +506,50 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     return Array.from(names).sort();
   }, [page, baseline]);
 
-  const modelOptions = useMemo(() => {
-    const names = new Set<string>();
-    if (baseline && baseline.model) {
-      names.add(baseline.model);
+  const provider = form && form.provider ? form.provider : "";
+
+  /* REQ-MDL-020: the model picker lists the catalog of the agent's provider.
+     The provider's base URL decides the catalog on the daemon side. */
+  useEffect(() => {
+    if (!provider) {
+      setCatalog([]);
+      setEfforts([]);
+      return undefined;
     }
-    for (const agent of (page && page.agents) || []) {
-      const parts = splitModel(agent);
-      if (parts.model) {
-        names.add(parts.model);
-      }
-    }
-    if (baseline) {
-      for (const target of baseline.fallback) {
-        const parts = splitTarget(target);
-        if (parts.model) {
-          names.add(parts.model);
+    let alive = true;
+    getModels(provider)
+      .then((data) => {
+        if (!alive) {
+          return;
         }
-      }
-    }
-    return Array.from(names).sort((left, right) => left.localeCompare(right));
-  }, [page, baseline]);
+        setCatalog(data && Array.isArray(data.models) ? data.models : []);
+        setEfforts(data && Array.isArray(data.efforts) ? data.efforts : []);
+      })
+      .catch(() => {
+        if (!alive) {
+          return;
+        }
+        setCatalog([]);
+        setEfforts([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [provider]);
+
+  /* A model that is not in the catalog stays selected through the free-text
+     field, so a save never drops it. */
+  const selectedCatalogModel = form
+    ? catalog.find((model) => model.id === form.model) || null
+    : null;
+  const customModel = Boolean(
+    otherModel || (form && form.model !== "" && !selectedCatalogModel)
+  );
+  const thinkingModel = Boolean(selectedCatalogModel && selectedCatalogModel.thinking);
+  const legacyReplacement =
+    selectedCatalogModel && selectedCatalogModel.legacy
+      ? selectedCatalogModel.replacement
+      : "";
 
   function updateField<K extends keyof AgentForm>(
     key: K,
@@ -536,7 +579,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       return;
     }
     setForm(formValues(baseline));
-    setCustomModel(false);
+    setOtherModel(false);
     setFallbackDraft(null);
     setSaveNotice("");
     setError("");
@@ -926,9 +969,10 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                       id="agent-provider"
                       value={form.provider}
                       disabled={saving}
-                      onChange={(event) =>
-                        updateField("provider", event.target.value)
-                      }
+                      onChange={(event) => {
+                        setOtherModel(false);
+                        updateField("provider", event.target.value);
+                      }}
                     >
                       <option value="">Not set</option>
                       {providerOptions.map((provider) => (
@@ -947,25 +991,25 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     </label>
                     <select
                       id="agent-model-select"
-                      value={customModel ? "__custom__" : form.model}
+                      value={customModel ? "__other__" : form.model}
                       disabled={saving}
                       onChange={(event) => {
                         const value = event.target.value;
-                        if (value === "__custom__") {
-                          setCustomModel(true);
+                        if (value === "__other__") {
+                          setOtherModel(true);
                           return;
                         }
-                        setCustomModel(false);
+                        setOtherModel(false);
                         updateField("model", value);
                       }}
                     >
                       <option value="">Provider default</option>
-                      {modelOptions.map((model) => (
-                        <option key={model} value={model}>
-                          {model}
+                      {catalog.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.name}
                         </option>
                       ))}
-                      <option value="__custom__">Custom model…</option>
+                      <option value="__other__">Other…</option>
                     </select>
                     {customModel ? (
                       <input
@@ -985,6 +1029,51 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     ) : null}
                   </div>
                 </div>
+
+                {legacyReplacement ? (
+                  <div className="agent-legacy-banner" role="status">
+                    <p className="muted">
+                      {"Legacy model — switch to " + legacyReplacement}
+                    </p>
+                    <button
+                      type="button"
+                      className="button-ui button-ui-secondary"
+                      disabled={saving}
+                      onClick={() => {
+                        setOtherModel(false);
+                        updateField("model", legacyReplacement);
+                      }}
+                    >
+                      {"Switch to " + legacyReplacement}
+                    </button>
+                  </div>
+                ) : null}
+
+                {thinkingModel ? (
+                  <div className="agent-form-field">
+                    <label
+                      className="agent-form-field-label"
+                      htmlFor="agent-thinking"
+                    >
+                      Thinking
+                    </label>
+                    <select
+                      id="agent-thinking"
+                      value={form.reasoning_effort}
+                      disabled={saving}
+                      onChange={(event) =>
+                        updateField("reasoning_effort", event.target.value)
+                      }
+                    >
+                      <option value="">Model default</option>
+                      {efforts.map((effort) => (
+                        <option key={effort.value} value={effort.value}>
+                          {effortLabel(effort)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
 
                 <div className="agent-form-field agent-form-field-wide">
                   <span

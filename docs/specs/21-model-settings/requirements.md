@@ -1,7 +1,7 @@
 # Requirements: Model settings, thinking, and the DeepSeek catalog
 
 - **Issue**: —
-- **Status**: Approved
+- **Status**: Implemented
 - **Revision**: 1
 - **Owner**: Ridho
 - **Contract**: — (config keys, one block kind, one live frame; listed below)
@@ -67,7 +67,7 @@
 - Provider config key `thinking_format` (`deepseek`|`none`).
 - Content block kind `thinking` (`{"type":"thinking","text":"..."}`) in `assistant/message`.
 - Live frame `thinking_delta` (`{text}`).
-- Web API `GET /api/models?provider=<name>` returns the catalog entries for that provider kind.
+- Web API `GET /v1/models?provider=<name>` (alias `/api/models`) returns the catalog entries for that provider kind.
 
 ## Out of scope
 

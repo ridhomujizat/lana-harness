@@ -47,6 +47,7 @@ var agentKeys = map[string]bool{
 	"permission":           true,
 	"max_steps":            true,
 	"context_window":       true,
+	"reasoning_effort":     true,
 	"compaction_headroom":  true,
 	"compaction_threshold": true,
 	"compaction_retain":    true,
@@ -81,6 +82,8 @@ func (s *Server) registerAgentRoutes() {
 	s.Handle("POST /v1/agents", http.HandlerFunc(s.handleCreateAgent))
 	s.Handle("PUT /v1/agents/{name}", http.HandlerFunc(s.handlePutAgent))
 	s.Handle("POST /v1/agents/{name}/duplicate", http.HandlerFunc(s.handleDuplicateAgent))
+	// The model catalog shares the agent settings surface (REQ-MDL-020).
+	s.registerModelRoutes()
 }
 
 type mcpStatusJSON struct {
@@ -94,22 +97,23 @@ type agentJSON struct {
 	// Kind is "agent" or "team" (API-TEAM-006).
 	Kind string `json:"kind"`
 	// Model is null for a team: each agent uses its own model.
-	Model         *string         `json:"model"`
-	Policy        string          `json:"policy"`
-	Lead          string          `json:"lead,omitempty"`
-	Members       []string        `json:"members,omitempty"`
-	Skills        []string        `json:"skills"`
-	MCP           []string        `json:"mcp"`
-	MCPStatus     []mcpStatusJSON `json:"mcp_status"`
-	Description   string          `json:"description"`
-	Default       bool            `json:"default"`
-	Provider      string          `json:"provider"`
-	Permission    string          `json:"permission"`
-	Workspace     string          `json:"workspace"`
-	DisabledTools []string        `json:"disabled_tools"`
-	ToolsCount    int             `json:"tools_count"`
-	SessionsCount int             `json:"sessions_count"`
-	LastActiveAt  *int64          `json:"last_active_at"`
+	Model           *string         `json:"model"`
+	Policy          string          `json:"policy"`
+	Lead            string          `json:"lead,omitempty"`
+	Members         []string        `json:"members,omitempty"`
+	Skills          []string        `json:"skills"`
+	MCP             []string        `json:"mcp"`
+	MCPStatus       []mcpStatusJSON `json:"mcp_status"`
+	Description     string          `json:"description"`
+	Default         bool            `json:"default"`
+	Provider        string          `json:"provider"`
+	Permission      string          `json:"permission"`
+	Workspace       string          `json:"workspace"`
+	DisabledTools   []string        `json:"disabled_tools"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	ToolsCount      int             `json:"tools_count"`
+	SessionsCount   int             `json:"sessions_count"`
+	LastActiveAt    *int64          `json:"last_active_at"`
 }
 
 type listAgentsResponse struct {
@@ -143,6 +147,7 @@ type agentRecord struct {
 	Permission          string
 	MaxSteps            int
 	ContextWindow       int
+	ReasoningEffort     string
 	CompactionHeadroom  int
 	CompactionThreshold float64
 	CompactionRetain    float64
@@ -276,6 +281,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			row.Permission = record.Permission
 			row.Workspace = record.Workspace
 			row.DisabledTools = nonNilStrings(record.DisabledTools)
+			row.ReasoningEffort = record.ReasoningEffort
 			configTools = len(record.Tools)
 			if len(row.Skills) == 0 && len(record.Skills) > 0 {
 				row.Skills = nonNilStrings(record.Skills)
@@ -838,6 +844,17 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.ContextWindow = value
 		return nil
+	case "reasoning_effort":
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		// REQ-MDL-001: an empty value uses the model's catalog default.
+		if value != "" && !validReasoningEffort(value) {
+			return errors.New("reasoning_effort must be one of off, low, high, max")
+		}
+		record.ReasoningEffort = value
+		return nil
 	case "compaction_headroom":
 		var value int
 		if err := json.Unmarshal(raw, &value); err != nil {
@@ -899,6 +916,17 @@ func validateAgentDescription(value string) string {
 
 func validAgentPermission(value string) bool {
 	for _, allowed := range []string{"ask", "trust", "never"} {
+		if value == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// validReasoningEffort reports whether value is one of the four efforts of
+// REQ-MDL-001.
+func validReasoningEffort(value string) bool {
+	for _, allowed := range []string{"off", "low", "high", "max"} {
 		if value == allowed {
 			return true
 		}
@@ -1012,6 +1040,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		Permission:          mapAgentString(table, "permission"),
 		MaxSteps:            mapAgentInt(table, "max_steps"),
 		ContextWindow:       mapAgentInt(table, "context_window"),
+		ReasoningEffort:     mapAgentString(table, "reasoning_effort"),
 		CompactionHeadroom:  mapAgentInt(table, "compaction_headroom"),
 		CompactionThreshold: mapAgentFloat(table, "compaction_threshold"),
 		CompactionRetain:    mapAgentFloat(table, "compaction_retain"),
@@ -1085,6 +1114,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentString(&b, "permission", record.Permission)
 	writeAgentInt(&b, "max_steps", record.MaxSteps)
 	writeAgentInt(&b, "context_window", record.ContextWindow)
+	writeAgentString(&b, "reasoning_effort", record.ReasoningEffort)
 	writeAgentInt(&b, "compaction_headroom", record.CompactionHeadroom)
 	writeAgentFloat(&b, "compaction_threshold", record.CompactionThreshold)
 	writeAgentFloat(&b, "compaction_retain", record.CompactionRetain)

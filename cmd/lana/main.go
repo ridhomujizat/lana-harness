@@ -85,7 +85,7 @@ type providerPreset struct {
 var providerPresets = []providerPreset{
 	{name: "openai", baseURL: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY", model: "gpt-5-mini"},
 	{name: "openrouter", baseURL: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "openai/gpt-5-mini"},
-	{name: "deepseek", baseURL: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY", model: "deepseek-chat"},
+	{name: "deepseek", baseURL: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY", model: "deepseek-flash"},
 }
 
 func lookupProvider(name string) (providerPreset, bool) {
