@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -12,7 +13,22 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1},"timeout_secs":{"type":"integer","minimum":1,"maximum":600}},"required":["command"],"additionalProperties":false}`)
+var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1},"timeout_secs":{"type":"integer","minimum":1,"maximum":600},"run_in_background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`)
+
+// bashDescription tells the model to use run_in_background for long-lived
+// commands instead of shell backgrounding (REQ-JOB-016).
+const bashDescription = "Runs a shell command in the workspace. For servers, watchers, and anything that does not exit, set run_in_background: true; never use &, nohup, setsid, or disown for that."
+
+// bashWaitDelay bounds how long a foreground call waits for the output pipe
+// after the shell exits (REQ-JOB-001).
+const bashWaitDelay = 2 * time.Second
+
+// backgroundWait is how long a background start waits for output or exit
+// (REQ-JOB-010).
+const backgroundWait = 3 * time.Second
+
+// backgroundTailMax is the largest tail a background start returns.
+const backgroundTailMax = 4000
 
 type bashTool struct{ guard *Guard }
 
@@ -20,14 +36,15 @@ type bashTool struct{ guard *Guard }
 func NewBash(guard *Guard) core.Tool { return &bashTool{guard: guard} }
 
 func (t *bashTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "bash", Description: "Runs a shell command in the workspace.", InputSchema: bashSpec}
+	return core.ToolSpec{Name: "bash", Description: bashDescription, InputSchema: bashSpec}
 }
 func (t *bashTool) Risk(json.RawMessage) core.Risk { return core.RiskExec }
 
 func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {
-		Command     string `json:"command"`
-		TimeoutSecs int    `json:"timeout_secs"`
+		Command         string `json:"command"`
+		TimeoutSecs     int    `json:"timeout_secs"`
+		RunInBackground bool   `json:"run_in_background"`
 	}
 	if err := decodeInput(raw, &in); err != nil {
 		return inputErrorOutput(err)
@@ -45,9 +62,16 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	if err := checkWorkspace(ws); err != nil {
 		return errorOutput(err.Error())
 	}
+	if in.RunInBackground {
+		return t.runBackground(ctx, tc, ws, in.Command)
+	}
 	cmd := exec.Command("sh", "-c", in.Command)
 	cmd.Dir = ws
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// A command that leaves a process holding the output pipe must not block
+	// the foreground call: after WaitDelay the pipe is closed and Wait returns
+	// (REQ-JOB-001).
+	cmd.WaitDelay = bashWaitDelay
 	out := &limitedWriter{limit: maxToolOutput}
 	cmd.Stdout = out
 	cmd.Stderr = out
@@ -61,7 +85,9 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	select {
 	case err := <-done:
 		text := out.String()
-		if err != nil {
+		// ErrWaitDelay means the shell exited and only a leftover process kept
+		// the pipe open; the call succeeded (REQ-JOB-001).
+		if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 			code := -1
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				code = exitErr.ExitCode()
@@ -79,6 +105,42 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		err := <-done
 		_ = err
 		return errorOutput(fmt.Sprintf("timed out after %d seconds", in.TimeoutSecs))
+	}
+}
+
+// runBackground starts the command as a background job and returns its id, pid,
+// log path, status, and the output so far (REQ-JOB-010).
+func (t *bashTool) runBackground(ctx context.Context, tc core.ToolCtx, ws, command string) (core.ToolOutput, error) {
+	if tc.Jobs == nil {
+		return errorOutput("run_in_background is not available in this runtime")
+	}
+	job, err := tc.Jobs.Start(tc.SessionID, ws, command)
+	if err != nil {
+		return errorOutput(err.Error())
+	}
+	// Wait briefly so a fast command reports its exit status right away.
+	waited := tc.Jobs.Wait(ctx, tc.SessionID, job.ID, backgroundWait)
+	status := jobStatusLabel(waited)
+	tail, err := tc.Jobs.Tail(tc.SessionID, job.ID, backgroundTailMax)
+	if err != nil {
+		return errorOutput(err.Error())
+	}
+	output := fmt.Sprintf("started job %s (pid %d), log %s\n%s", job.ID, job.PID, job.LogPath, status)
+	if tail != "" {
+		output += "\n" + tail
+	}
+	return successOutput(output)
+}
+
+// jobStatusLabel renders the "[status: ...]" line of a job snapshot.
+func jobStatusLabel(job core.JobView) string {
+	switch job.Status {
+	case core.JobStatusExited:
+		return fmt.Sprintf("[status: exited %d]", job.ExitCode)
+	case core.JobStatusKilled:
+		return "[status: killed]"
+	default:
+		return "[status: running]"
 	}
 }
 

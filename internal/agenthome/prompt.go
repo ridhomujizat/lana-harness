@@ -25,7 +25,10 @@ type PromptInput struct {
 	Channel        string
 	Workspace      string
 	UnavailableMCP map[string]string
-	Now            time.Time
+	// Jobs is the background-jobs context line, empty when the session has no
+	// jobs (REQ-JOB-017).
+	Jobs string
+	Now  time.Time
 }
 
 // memoryCaptureRules is the fixed section that tells an agent with memory_write
@@ -104,13 +107,17 @@ func Build(in PromptInput) string {
 	return strings.Join(texts, "\n\n")
 }
 
-// ContextBlock renders the volatile per-turn context: the date and the
-// unavailable MCP servers (REQ-LTC-001). It is added to the first user message
-// of a turn so the head prompt stays byte-stable.
+// ContextBlock renders the volatile per-turn context: the date, the
+// unavailable MCP servers, and the background jobs (REQ-LTC-001, REQ-JOB-017).
+// It is added to the first user message of a turn so the head prompt stays
+// byte-stable.
 func ContextBlock(in PromptInput) string {
 	lines := []string{"<context>", "date: " + stamp(in)}
 	if line := unavailableMCPLine(in.UnavailableMCP); line != "" {
 		lines = append(lines, line)
+	}
+	if in.Jobs != "" {
+		lines = append(lines, in.Jobs)
 	}
 	lines = append(lines, "</context>")
 	return strings.Join(lines, "\n")

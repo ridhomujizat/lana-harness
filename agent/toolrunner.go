@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
 
@@ -246,4 +248,76 @@ func cutRunes(s string, headN, tailN int) (string, string) {
 		return head, ""
 	}
 	return head, string(runes[len(runes)-tailN:])
+}
+
+// JobService is the background-job port of the agent package: core.JobService
+// plus the per-turn <context> line (REQ-JOB-015, REQ-JOB-017).
+type JobService interface {
+	core.JobService
+	ContextLine(sessionID string) string
+}
+
+// jobAdapter adapts *jobs.Registry to core.JobService so core and tools never
+// import the registry (REQ-JOB-010).
+type jobAdapter struct{ reg *jobs.Registry }
+
+// NewJobService returns the adapter the runtime installs with SetJobs.
+func NewJobService(reg *jobs.Registry) JobService { return jobAdapter{reg: reg} }
+
+func (a jobAdapter) Start(sessionID, workspace, command string) (core.JobView, error) {
+	job, err := a.reg.Start(sessionID, workspace, command)
+	if err != nil {
+		return core.JobView{}, err
+	}
+	return toJobView(*job), nil
+}
+
+func (a jobAdapter) List(sessionID string) []core.JobView {
+	list := a.reg.List(sessionID)
+	out := make([]core.JobView, 0, len(list))
+	for _, job := range list {
+		out = append(out, toJobView(job))
+	}
+	return out
+}
+
+func (a jobAdapter) ReadNew(sessionID, id string, max int) (string, int64, core.JobView, error) {
+	text, dropped, job, err := a.reg.ReadNew(sessionID, id, max)
+	if err != nil {
+		return "", 0, core.JobView{}, err
+	}
+	return text, dropped, toJobView(job), nil
+}
+
+func (a jobAdapter) Tail(sessionID, id string, max int) (string, error) {
+	return a.reg.Tail(sessionID, id, max)
+}
+
+func (a jobAdapter) Wait(ctx context.Context, sessionID, id string, d time.Duration) core.JobView {
+	return toJobView(a.reg.Wait(ctx, sessionID, id, d))
+}
+
+func (a jobAdapter) Kill(sessionID, id string) (core.JobView, error) {
+	job, err := a.reg.Kill(sessionID, id)
+	if err != nil {
+		return core.JobView{}, err
+	}
+	return toJobView(job), nil
+}
+
+func (a jobAdapter) ContextLine(sessionID string) string {
+	return a.reg.ContextLine(sessionID)
+}
+
+func toJobView(job jobs.Job) core.JobView {
+	return core.JobView{
+		ID:        job.ID,
+		Command:   job.Command,
+		LogPath:   job.LogPath,
+		PID:       job.PID,
+		StartedAt: job.StartedAt,
+		EndedAt:   job.EndedAt,
+		Status:    string(job.Status),
+		ExitCode:  job.ExitCode,
+	}
 }

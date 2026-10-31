@@ -110,6 +110,22 @@ func TestContextBlockWithoutMCP(t *testing.T) {
 	}
 }
 
+// REQ-JOB-017: the background-jobs line is appended to <context> when present
+// and never leaks into the stable head prompt.
+func TestContextBlockJobs(t *testing.T) {
+	line := "background jobs: bash-ab12 running (npm run dev, 4m)"
+	got := ContextBlock(PromptInput{Agent: "lead", Jobs: line})
+	if !strings.Contains(got, "\n"+line+"\n</context>") {
+		t.Fatalf("context lacks the jobs line:\n%s", got)
+	}
+	if strings.Contains(ContextBlock(PromptInput{Agent: "lead"}), "background jobs") {
+		t.Fatal("empty Jobs must add no line")
+	}
+	if strings.Contains(Build(PromptInput{Agent: "lead", Jobs: line}), "background jobs") {
+		t.Fatal("head prompt carries the volatile jobs line")
+	}
+}
+
 // REQ-MEM-001: the memory capture section is present only when MemoryCapture is
 // set, and it sits between the memory section and skills.
 func TestBuildMemoryCaptureSection(t *testing.T) {

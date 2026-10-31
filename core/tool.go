@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // Risk is the risk class of a tool.
@@ -52,6 +53,48 @@ type ToolCtx struct {
 	AllowedAgents []string
 	// Depth is the session depth. A root session has depth 0.
 	Depth int
+	// Jobs runs and tracks the session's background jobs. Nil when the runtime
+	// has no job registry (REQ-JOB-010).
+	Jobs JobService
+}
+
+// Background-job status values (REQ-JOB-010).
+const (
+	JobStatusRunning = "running"
+	JobStatusExited  = "exited"
+	JobStatusKilled  = "killed"
+)
+
+// JobView is a snapshot of one background job. Status is "running", "exited",
+// or "killed" (REQ-JOB-010).
+type JobView struct {
+	ID        string
+	Command   string
+	LogPath   string
+	PID       int
+	StartedAt time.Time
+	EndedAt   time.Time
+	Status    string
+	ExitCode  int
+}
+
+// JobService is the background-job port the bash and job tools read through
+// ToolCtx.Jobs (REQ-JOB-010..014). It is implemented by an adapter over the job
+// registry, so core never imports the registry.
+type JobService interface {
+	// Start runs command in workspace and returns the new job.
+	Start(sessionID, workspace, command string) (JobView, error)
+	// List returns the session's jobs, oldest first.
+	List(sessionID string) []JobView
+	// ReadNew returns the output since the previous ReadNew of the job, at
+	// most max bytes. dropped is the number of skipped bytes.
+	ReadNew(sessionID, id string, max int) (text string, dropped int64, job JobView, err error)
+	// Tail returns the last max bytes of the log without moving the cursor.
+	Tail(sessionID, id string, max int) (string, error)
+	// Wait waits until the job ends, d elapses, or ctx is done.
+	Wait(ctx context.Context, sessionID, id string, d time.Duration) JobView
+	// Kill stops the job and returns its final state.
+	Kill(sessionID, id string) (JobView, error)
 }
 
 // ToolStatus is the status of a tool result.

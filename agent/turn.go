@@ -322,6 +322,11 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
 		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, MemoryCapture: memoryCapture,
 	}
+	// REQ-JOB-017: the session's jobs go into the turn <context> block. Ended
+	// jobs are marked announced so they appear in one turn only.
+	if rn.reg.jobs != nil {
+		in.Jobs = rn.reg.jobs.ContextLine(rn.sessionID)
+	}
 	var home agenthome.Home
 	if rn.reg.home != "" {
 		home = agenthome.Paths(rn.reg.home, res.name)
@@ -637,6 +642,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 					turnTools = append(turnTools, name)
 				}
 			}
+			// REQ-JOB-015: an agent offered bash also gets the job tools without
+			// listing them. It runs before disabled_tools so a disabled job tool
+			// is removed like any other.
+			turnTools = addCompanionTools(turnTools, resolved.disabled, func(name string) bool {
+				_, ok := rn.reg.tools.Get(name)
+				return ok
+			})
 			// disabled_tools removes a name from the offered list. It is applied
 			// after the built-in, MCP, skill, and team tools are collected so a
 			// disabled team or skill tool is removed as well (AC-WEB-049, Q-024).
@@ -852,6 +864,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				MCPStatus:     rn.reg.ServerStatus,
 				AllowedAgents: resolved.delegates,
 				Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
+				Jobs:          rn.reg.jobs,
 			})
 			// Child usage from task and task_continue belongs to this step's
 			// usage (REQ-TEAM-013, AC-TEAM-031). Nil usage is ignored and the
@@ -1185,6 +1198,38 @@ func mcpServerOffered(tools []string, server string) bool {
 		}
 	}
 	return false
+}
+
+// companionTools are the background-job tools offered with bash (REQ-JOB-015).
+var companionTools = []string{"job_kill", "job_list", "job_output"}
+
+// addCompanionTools adds the background-job tools when bash is offered and
+// drops them when it is not. A disabled bash or job tool is never added, and a
+// tool the registry does not have is skipped (REQ-JOB-015).
+func addCompanionTools(tools, disabled []string, registered func(string) bool) []string {
+	hasBash := containsString(tools, "bash") && !containsString(disabled, "bash")
+	out := make([]string, 0, len(tools)+len(companionTools))
+	for _, name := range tools {
+		if isCompanionTool(name) && (!hasBash || !registered(name)) {
+			continue
+		}
+		out = append(out, name)
+	}
+	if !hasBash {
+		return out
+	}
+	for _, name := range companionTools {
+		if containsString(out, name) || containsString(disabled, name) || !registered(name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// isCompanionTool reports whether name is one of the background-job tools.
+func isCompanionTool(name string) bool {
+	return containsString(companionTools, name)
 }
 
 // filterDisabledTools drops every name in disabled from tools. An entry is a

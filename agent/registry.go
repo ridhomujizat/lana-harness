@@ -77,6 +77,10 @@ type Registry struct {
 	hub            *Hub
 	pipeline       *ToolRunner
 
+	// jobs is the background-job registry, set once at boot (REQ-JOB-010). Nil
+	// when the runtime has no job registry.
+	jobs JobService
+
 	// mcpMu guards the MCP manager, its admin flag, and the per-agent MCP
 	// overlay. The overlay replaces agents.<name>.mcp in memory until restart.
 	mcpMu       sync.Mutex
@@ -152,6 +156,10 @@ func (r *Registry) SetCompactor(c core.Compactor) { r.compaction = c }
 
 // compactor returns the compaction service, or nil when none is installed.
 func (r *Registry) compactor() core.Compactor { return r.compaction }
+
+// SetJobs installs the background-job registry used by turns and the job
+// tools. It is set once at boot, before any turn starts (REQ-JOB-010).
+func (r *Registry) SetJobs(j JobService) { r.jobs = j }
 
 // SetMemoryCapturer installs the memory-capture service used at turn end. It is
 // set at boot, before any turn starts; a nil service disables capture.

@@ -23,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
@@ -164,7 +165,9 @@ type Runtime struct {
 	result   *config.Result
 	registry *agent.Registry
 	store    core.SessionStore
-	closed   atomic.Bool
+	// jobs is the background-job registry of this process (REQ-JOB-018).
+	jobs   *jobs.Registry
+	closed atomic.Bool
 	// cfgMu guards the live-applied sections of result.Config: Agents, Teams,
 	// and MCP. Providers, routes, channels, web, and secrets stay fixed.
 	cfgMu sync.RWMutex
@@ -280,6 +283,10 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		_ = coreCtx.Shutdown(ctx)
 		return nil, fmt.Errorf("service agents not available")
 	}
+	// ONE background-job registry per runtime, next to the spill store. Jobs
+	// live and die with the process (REQ-JOB-018).
+	jobsRegistry := jobs.New(opts.Home)
+	registry.SetJobs(agent.NewJobService(jobsRegistry))
 	questionService := question.New(coreCtx.Sessions, coreCtx.Hooks)
 	coreCtx.Questions = questionService
 	registry.SetQuestions(questionService)
@@ -340,6 +347,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	rt := &Runtime{
 		ctx: root, cancel: cancel, coreCtx: coreCtx, result: result,
 		registry: registry, store: coreCtx.Sessions, approve: runtimeOpts.approve, home: opts.Home,
+		jobs: jobsRegistry,
 	}
 	return rt, nil
 }
@@ -909,6 +917,10 @@ func (rt *Runtime) Close() error {
 		return rt.closeErr
 	}
 	rt.closed.Store(true)
+	// REQ-JOB-018: kill every background job's process group on shutdown.
+	if rt.jobs != nil {
+		rt.jobs.Shutdown()
+	}
 	rt.cancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
