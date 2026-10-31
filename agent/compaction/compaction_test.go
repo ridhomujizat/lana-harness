@@ -167,7 +167,9 @@ func TestCompactNowSummary(t *testing.T) {
 }
 
 // REQ-MDL-011: the compaction window comes from the catalog when the agent sets
-// none, and a thinking model reserves the thinking output.
+// none, and a thinking model reserves the thinking output. REQ-ECX-030: the
+// output and headroom are capped relative to the window, and a window below
+// 4096 is raised to 4096.
 func TestResolvePolicyCatalog(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -176,13 +178,16 @@ func TestResolvePolicyCatalog(t *testing.T) {
 		effort   string
 		window   int64
 		output   int64
+		trigger  int64
 	}{
-		{"deepseek-flash window", core.AgentConfig{Model: "deepseek-flash"}, 0, "", 1048576, 32000},
-		{"deepseek-chat window", core.AgentConfig{Model: "deepseek-chat"}, 0, "", 128000, 8192},
-		{"effort off keeps the plain output", core.AgentConfig{Model: "deepseek-flash"}, 0, "off", 1048576, 8192},
-		{"request max_tokens wins", core.AgentConfig{Model: "deepseek-flash"}, 2000, "", 1048576, 2000},
-		{"agent context_window wins", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 64000}, 0, "", 64000, 32000},
-		{"unknown model keeps the default", core.AgentConfig{Model: "unknown"}, 0, "", 128000, 8192},
+		{"deepseek-flash window", core.AgentConfig{Model: "deepseek-flash"}, 0, "", 1048576, 32000, 838860},
+		{"deepseek-chat window", core.AgentConfig{Model: "deepseek-chat"}, 0, "", 128000, 8192, 102400},
+		{"effort off keeps the plain output", core.AgentConfig{Model: "deepseek-flash"}, 0, "off", 1048576, 8192, 838860},
+		{"request max_tokens wins", core.AgentConfig{Model: "deepseek-flash"}, 2000, "", 1048576, 2000, 838860},
+		{"agent context_window caps the thinking output", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 64000}, 0, "", 64000, 16000, 40000},
+		{"unknown model keeps the default", core.AgentConfig{Model: "unknown"}, 0, "", 128000, 8192, 102400},
+		{"thinking model on a small window", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 24000}, 0, "", 24000, 6000, 15000},
+		{"window below the floor is raised", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 1000}, 0, "", 4096, 1024, 2560},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -191,6 +196,12 @@ func TestResolvePolicyCatalog(t *testing.T) {
 			pol := service.resolvePolicy("coder", tc.maxToken, tc.effort)
 			if pol.window != tc.window || pol.output != tc.output {
 				t.Fatalf("window=%d output=%d, want %d/%d", pol.window, pol.output, tc.window, tc.output)
+			}
+			if got := pol.trigger(); got != tc.trigger {
+				t.Fatalf("trigger=%d, want %d", got, tc.trigger)
+			}
+			if got := pol.retained(); got <= 0 {
+				t.Fatalf("retained=%d, want a positive tail", got)
 			}
 		})
 	}
@@ -277,7 +288,9 @@ func TestPruneRelievesPressure(t *testing.T) {
 	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
 		"coder": {Provider: "mock", Model: "m", ContextWindow: 40000},
 	}})
-	seedToolSteps(t, store, info.ID, 5, 20000)
+	// The trigger of this window is 26808 tokens after the REQ-ECX-030 caps, so
+	// the seeded session must exceed that.
+	seedToolSteps(t, store, info.ID, 5, 22000)
 
 	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
 		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m",
@@ -323,7 +336,9 @@ func TestPruneThenSummarize(t *testing.T) {
 	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
 		"coder": {Provider: "mock", Model: "m", ContextWindow: 40000},
 	}})
-	seedToolSteps(t, store, info.ID, 4, 60000)
+	// The trigger of this window is 26808 tokens after the REQ-ECX-030 caps, so
+	// the pruned session must still exceed it for the summary to run.
+	seedToolSteps(t, store, info.ID, 4, 100000)
 
 	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
 		SessionID: info.ID, AgentName: "coder", Provider: "mock", Model: "m", System: "head", Trigger: "pressure",
@@ -512,7 +527,7 @@ func TestPruneRelievesUsagePressure(t *testing.T) {
 	}})
 	seedToolSteps(t, store, info.ID, 5, 12000)
 	appendEvents(t, store, info.ID, core.EventDraft{Kind: core.KindStepEnd, TurnID: "t", Payload: core.StepEnd{
-		V: 1, Step: 99, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 15500, OutputTokens: 500},
+		V: 1, Step: 99, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 27000, OutputTokens: 500},
 	}})
 
 	if _, err := service.CompactIfNeeded(context.Background(), core.CompactRequest{
@@ -556,7 +571,7 @@ func TestOnlySummarySpanIsSkipped(t *testing.T) {
 	upto := events[len(events)-1].Seq
 	appendEvents(t, store, info.ID,
 		core.EventDraft{Kind: core.KindCompactionSummary, TurnID: "t", Payload: core.CompactionSummary{
-			V: 1, Summary: strings.Repeat("s", 40000), FromSeq: 1, UptoSeq: upto, RetainedFromSeq: upto + 1,
+			V: 1, Summary: strings.Repeat("s", 100000), FromSeq: 1, UptoSeq: upto, RetainedFromSeq: upto + 1,
 		}},
 		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "new"}}}},
 		core.EventDraft{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "new reply"}}}},

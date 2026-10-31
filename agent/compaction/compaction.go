@@ -103,6 +103,11 @@ type Service struct {
 	// attempt (REQ-LTC-016).
 	failMu   sync.Mutex
 	failures map[string]failedAttempt
+
+	// warnMu guards warned, the per-session memory of a non-positive trigger
+	// warning (REQ-ECX-030).
+	warnMu sync.Mutex
+	warned map[string]bool
 }
 
 // failedAttempt remembers the last event seq and turn of a failed pressure
@@ -118,6 +123,7 @@ func NewService(s core.SessionStore, llm core.LLMRegistry, config core.Config) *
 		Store: s, LLM: llm, Config: config,
 		locks:    map[string]*sync.Mutex{},
 		failures: map[string]failedAttempt{},
+		warned:   map[string]bool{},
 	}
 }
 
@@ -289,7 +295,36 @@ func (s *Service) resolvePolicy(agentName string, maxTokens int, effort string) 
 		// off (REQ-MDL-011).
 		p.output = thinkingOutput
 	}
+	// REQ-ECX-030: keep the reserve proportional to the window so the pressure
+	// trigger stays positive even when the output reservation alone exceeds it.
+	if p.window < 4096 {
+		p.window = 4096
+	}
+	if p.output > p.window/4 {
+		p.output = p.window / 4
+	}
+	if p.headroom > p.window/8 {
+		p.headroom = p.window / 8
+	}
 	return p
+}
+
+// warnTrigger logs a non-positive pressure trigger once per session
+// (REQ-ECX-030). resolvePolicy caps the reserves so this should not happen; the
+// warning replaces the silent skip if it ever does.
+func (s *Service) warnTrigger(sessionID string, pol policy, trigger int64) {
+	s.warnMu.Lock()
+	defer s.warnMu.Unlock()
+	if s.warned == nil {
+		s.warned = map[string]bool{}
+	}
+	if s.warned[sessionID] {
+		return
+	}
+	s.warned[sessionID] = true
+	slog.Warn("compaction disabled: non-positive pressure trigger",
+		"session_id", sessionID, "window", pol.window, "output", pol.output,
+		"headroom", pol.headroom, "trigger", trigger)
 }
 
 // run is the compaction engine. It prunes oversized tool results first (no
@@ -317,6 +352,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 	pol := s.resolvePolicy(req.AgentName, req.MaxTokens, req.ReasoningEffort)
 	trigger := pol.trigger()
 	if trigger <= 0 {
+		s.warnTrigger(req.SessionID, pol, trigger)
 		return zero, nil
 	}
 	force := req.Trigger == "overflow" || req.Trigger == "manual"
