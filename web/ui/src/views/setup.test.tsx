@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { SetupWizard } from "./setup";
+import { SetupShell, SetupWizard } from "./setup";
 
 /* Step navigation and validation keep the behavior of views/setup.js. The
    wizard reads its draft once per page, so each test seeds sessionStorage
@@ -64,5 +64,36 @@ describe("setup wizard", () => {
     ).toBeTruthy();
     expect(screen.getByText("Enter a workspace path.")).toBeTruthy();
     expect(window.location.hash).toBe("");
+  });
+});
+
+describe("setup shell", () => {
+  it("renders the door mark behind the onboarding steps", () => {
+    const { container } = render(
+      <SetupShell step="provider">
+        <p>Connect a provider.</p>
+      </SetupShell>
+    );
+
+    const mark = container.querySelector(".door-mark");
+    expect(mark).not.toBeNull();
+    expect(mark?.getAttribute("aria-hidden")).toBe("true");
+    expect(mark?.querySelector(".door-right")).not.toBeNull();
+    expect(container.querySelector(".setup-steps")).not.toBeNull();
+    // The mark sits before the rail content so the steps and logo paint over it.
+    expect(mark?.nextElementSibling?.classList.contains("setup-rail-top")).toBe(
+      true
+    );
+  });
+
+  it("keeps the door mark on the door variant", () => {
+    const { container } = render(
+      <SetupShell step="unlock" variant="door">
+        <p>Unlock lana.</p>
+      </SetupShell>
+    );
+
+    expect(container.querySelector(".door-mark")).not.toBeNull();
+    expect(container.querySelector(".setup-steps")).toBeNull();
   });
 });

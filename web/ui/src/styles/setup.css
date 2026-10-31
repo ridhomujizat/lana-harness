@@ -697,6 +697,12 @@
     flex-direction: column;
   }
 
+  /* The rail becomes a compact top bar here; the oversized mark would sit on
+     top of the logo and steps. */
+  .door-mark {
+    display: none;
+  }
+
   .setup-rail {
     flex: 0 0 auto;
     gap: var(--space-card);
@@ -797,8 +803,9 @@
 /* ------------------------------------------------------------------ */
 /* Friendly login, welcome, and forgot screens (spec #18)              */
 /* Ported from docs/specs/18-friendly-web-login/mockups/mock.css.      */
-/* The rail keeps the logo, the door mark, and the place note; the     */
-/* login, forgot, and code screens do not show the setup steps.        */
+/* The rail keeps the logo, the door mark, and the place note; the login,
+   forgot, and code screens do not show the setup steps. The onboarding rail
+   shows the same mark behind its steps. */
 /* ------------------------------------------------------------------ */
 
 .setup-rail {
@@ -816,12 +823,26 @@
 }
 
 .door-mark path {
+  fill: var(--border-secondary);
+}
+
+/* On the onboarding rail the steps fill the top half; a smaller mark keeps
+   its apex below the last step on a laptop-height window. */
+.setup-rail:has(.setup-steps) .door-mark {
+  width: 420px;
+}
+
+/* The right stroke stays slightly darker so the mark reads as two faces.
+   In dark mode keep the original rail-token mix. */
+.door-mark .door-right {
+  fill: var(--border-primary);
+}
+
+[data-theme="dark"] .door-mark path {
   fill: var(--bg-tertiary);
 }
 
-/* mock.css hard-codes #1A1F2B for the right half. Mix the two rail tokens
-   instead so the mark follows the theme. */
-.door-mark .door-right {
+[data-theme="dark"] .door-mark .door-right {
   fill: color-mix(in srgb, var(--bg-tertiary) 70%, var(--bg-secondary));
 }
 
