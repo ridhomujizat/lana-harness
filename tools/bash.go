@@ -13,11 +13,17 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1},"timeout_secs":{"type":"integer","minimum":1,"maximum":600},"run_in_background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`)
+var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1,"description":"Shell command to run with sh -c."},"timeout_secs":{"type":"integer","minimum":1,"maximum":600,"description":"Timeout in seconds (1-600). Defaults to 120."},"run_in_background":{"type":"boolean","description":"Start the command as a background job and return its id without waiting for exit. Use for servers and watchers."}},"required":["command"],"additionalProperties":false}`)
 
 // bashDescription tells the model to use run_in_background for long-lived
-// commands instead of shell backgrounding (REQ-JOB-016).
-const bashDescription = "Runs a shell command in the workspace. For servers, watchers, and anything that does not exit, set run_in_background: true; never use &, nohup, setsid, or disown for that."
+// commands instead of shell backgrounding (REQ-JOB-016) and to use the
+// dedicated file tools instead of shell commands (REQ-TRL-002).
+const bashDescription = "Runs a shell command (`sh -c`) in the workspace and returns stdout and stderr. " +
+	"Each call starts in the workspace directory. Use it for builds, tests, git, package managers, and running programs. " +
+	"Do not use it to read, search, create, or edit files: use read_file, grep, glob, write_file, and edit_file. " +
+	"Shell commands such as `cat`, `head`, `tail`, `sed`, `awk`, `echo >`, `printf >`, heredocs, `grep`, `find`, and `ls -R` are not substitutes for those tools. " +
+	"For servers, watchers, and anything that does not exit, set run_in_background: true; never use &, nohup, setsid, or disown for that. " +
+	"The default timeout is 120 seconds; set timeout_secs (max 600) for longer commands."
 
 // bashWaitDelay bounds how long a foreground call waits for the output pipe
 // after the shell exits (REQ-JOB-001).

@@ -21,9 +21,9 @@ const (
 )
 
 var (
-	jobOutputSpec = json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","minLength":1},"wait":{"type":"boolean"},"timeout_secs":{"type":"integer","minimum":1,"maximum":600}},"required":["job_id"],"additionalProperties":false}`)
+	jobOutputSpec = json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","minLength":1,"description":"Job id returned by bash run_in_background."},"wait":{"type":"boolean","description":"Wait up to timeout_secs for the job to end. Defaults to false."},"timeout_secs":{"type":"integer","minimum":1,"maximum":600,"description":"Longest time to wait in seconds (1-600). Defaults to 30."}},"required":["job_id"],"additionalProperties":false}`)
 	jobListSpec   = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
-	jobKillSpec   = json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","minLength":1}},"required":["job_id"],"additionalProperties":false}`)
+	jobKillSpec   = json.RawMessage(`{"type":"object","properties":{"job_id":{"type":"string","minLength":1,"description":"Job id to stop."}},"required":["job_id"],"additionalProperties":false}`)
 )
 
 type jobOutputTool struct{}

@@ -335,8 +335,8 @@ func TestReadFileOutputNotSpilled(t *testing.T) {
 	if strings.Contains(out.Output, "Full output stored at:") {
 		t.Fatalf("read_file output was spilled")
 	}
-	if got := utf8.RuneCountInString(out.Output); got != 20000 {
-		t.Fatalf("inline runes=%d want 20000", got)
+	if got := utf8.RuneCountInString(out.Output); got != 20000+len("     1\t") {
+		t.Fatalf("inline runes=%d want %d", got, 20000+len("     1\t"))
 	}
 }
 
