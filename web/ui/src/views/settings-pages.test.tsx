@@ -227,4 +227,30 @@ describe("settings pages", () => {
       daemon.started_at
     );
   });
+
+  /* The connection test defaults its model from the base URL host. */
+  it("suggests a test model from the base URL host", async () => {
+    render(<SettingsProvidersPage />);
+    const add = await screen.findByRole("button", { name: /Add provider/ });
+    await waitFor(() => {
+      expect((add as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(add);
+
+    const base = (await screen.findByLabelText(/Base URL/)) as HTMLInputElement;
+    const model = screen.getByLabelText("Test model") as HTMLInputElement;
+
+    fireEvent.change(base, {
+      target: { value: "https://api.deepseek.com/v1" },
+    });
+    expect(model.placeholder).toBe("deepseek-flash");
+
+    fireEvent.change(base, {
+      target: { value: "https://openrouter.ai/api/v1" },
+    });
+    expect(model.placeholder).toBe("openai/gpt-5-mini");
+
+    fireEvent.change(base, { target: { value: "https://example.com/v1" } });
+    expect(model.placeholder).toBe("gpt-5-mini");
+  });
 });

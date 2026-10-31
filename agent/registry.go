@@ -657,8 +657,60 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	if _, exists := r.providersConfig()[providerName]; !exists {
 		return fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
 	}
-	payload := core.ModelSelection{V: core.PayloadVersion, Provider: providerName, Model: modelName}
+	selection, err := r.sessionSelection(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	// A model change keeps the session's reasoning effort (REQ-MDL-001).
+	payload := core.ModelSelection{
+		V:               core.PayloadVersion,
+		Provider:        providerName,
+		Model:           modelName,
+		ReasoningEffort: selection.ReasoningEffort,
+	}
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
+}
+
+// SetReasoningEffort sets the session's thinking effort. The provider:model
+// selection is kept; an empty value clears it, so the agent or model default
+// applies again (REQ-MDL-001).
+func (r *Registry) SetReasoningEffort(ctx context.Context, sessionID, effort string) error {
+	if err := r.sessionExists(ctx, sessionID); err != nil {
+		return err
+	}
+	selection, err := r.sessionSelection(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	payload := core.ModelSelection{
+		V:               core.PayloadVersion,
+		Provider:        selection.Provider,
+		Model:           selection.Model,
+		Agent:           selection.Agent,
+		ReasoningEffort: effort,
+	}
+	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
+}
+
+// sessionSelection returns the last model/selection payload of the session, or
+// the zero value when the session never selected one.
+func (r *Registry) sessionSelection(ctx context.Context, sessionID string) (core.ModelSelection, error) {
+	var selection core.ModelSelection
+	chain, err := r.store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return selection, err
+	}
+	for _, event := range chain {
+		if event.Kind != core.KindModelSelection {
+			continue
+		}
+		var payload core.ModelSelection
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return selection, err
+		}
+		selection = payload
+	}
+	return selection, nil
 }
 
 // sessionAgent returns the agent or team currently selected by the session.

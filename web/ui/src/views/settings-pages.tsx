@@ -180,6 +180,26 @@ function hasWebScheme(value: string): boolean {
   }
 }
 
+/* The default model of the connection test, keyed by the base URL host. It is
+   only a hint: the test model is never saved. */
+function defaultTestModel(baseUrl: string): string {
+  const value = String(baseUrl || "").trim();
+  let host = value;
+  try {
+    host = new URL(value).hostname;
+  } catch {
+    host = value.split("/")[0] || "";
+  }
+  host = host.toLowerCase();
+  if (host === "api.deepseek.com") {
+    return "deepseek-flash";
+  }
+  if (host === "openrouter.ai") {
+    return "openai/gpt-5-mini";
+  }
+  return "gpt-5-mini";
+}
+
 function matchesProvider(provider: ProviderRow, query: string): boolean {
   if (!query) {
     return true;
@@ -424,16 +444,9 @@ function ProviderDialog({
       return;
     }
     const base = baseUrl.trim();
-    const model = testModel.trim();
+    const model = testModel.trim() || defaultTestModel(base);
     if (!base) {
       setTestStatus({ tone: "error", text: "Enter a base URL first." });
-      return;
-    }
-    if (!model) {
-      setTestStatus({
-        tone: "error",
-        text: "Enter a model for the test. The model is not saved.",
-      });
       return;
     }
     if (!apiKey.trim() && !SECRET_NAME_RE.test(envPreview)) {
@@ -719,7 +732,7 @@ function ProviderDialog({
               disabled={busy || testing}
               autoComplete="off"
               spellCheck={false}
-              placeholder="gpt-5-mini"
+              placeholder={defaultTestModel(baseUrl)}
               onChange={(event) => setTestModel(event.target.value)}
             />
           </label>

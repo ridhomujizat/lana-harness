@@ -123,11 +123,12 @@ type SessionPage struct {
 // the session's agent or selected agent is a team (API-TEAM-005).
 type Session struct {
 	core.SessionInfo
-	Model        string
-	Policy       string
-	Team         *Team
-	TurnRunning  bool
-	InheritedSeq int64
+	Model           string
+	Policy          string
+	ReasoningEffort string
+	Team            *Team
+	TurnRunning     bool
+	InheritedSeq    int64
 }
 
 // EventPage is the result of the events endpoint.
@@ -188,6 +189,7 @@ type Backend interface {
 	Fork(ctx context.Context, id string) (Session, error)
 	SetAgent(ctx context.Context, id, agent string) error
 	SetModel(ctx context.Context, id, model string) error
+	SetReasoningEffort(ctx context.Context, id, effort string) error
 	SetPolicy(ctx context.Context, id, policy string) error
 
 	// Subscribe returns the live frames of a turn running in this process.
@@ -251,6 +253,7 @@ type sessionDetailJSON struct {
 	sessionJSON
 	Model           string `json:"model"`
 	Policy          string `json:"policy"`
+	ReasoningEffort string `json:"reasoning_effort"`
 	Workspace       string `json:"workspace"`
 	ParentSessionID string `json:"parent_session_id"`
 	InheritedSeq    int64  `json:"inherited_seq,omitempty"`
@@ -479,16 +482,17 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Agent        *string `json:"agent"`
-		Model        *string `json:"model"`
-		Policy       *string `json:"policy"`
-		ConfirmTrust bool    `json:"confirm_trust"`
+		Agent           *string `json:"agent"`
+		Model           *string `json:"model"`
+		Policy          *string `json:"policy"`
+		ReasoningEffort *string `json:"reasoning_effort"`
+		ConfirmTrust    bool    `json:"confirm_trust"`
 	}
 	if !decodeJSONObject(w, r, createSessionBody, &body) {
 		return
 	}
-	if body.Agent == nil && body.Model == nil && body.Policy == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "at least one of agent, model, policy is required")
+	if body.Agent == nil && body.Model == nil && body.Policy == nil && body.ReasoningEffort == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "at least one of agent, model, policy, reasoning_effort is required")
 		return
 	}
 	if body.Agent != nil {
@@ -522,6 +526,15 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		}
 		body.Policy = &policy
 	}
+	if body.ReasoningEffort != nil {
+		effort := strings.TrimSpace(*body.ReasoningEffort)
+		// An empty value clears the session effort (REQ-MDL-001).
+		if effort != "" && !validReasoningEffort(effort) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "reasoning_effort must be one of off, low, high, max")
+			return
+		}
+		body.ReasoningEffort = &effort
+	}
 
 	id := r.PathValue("id")
 	if body.Agent != nil {
@@ -533,6 +546,12 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	if body.Model != nil {
 		if err := backend.SetModel(r.Context(), id, *body.Model); err != nil {
 			s.writeBackendError(w, "set session model", err)
+			return
+		}
+	}
+	if body.ReasoningEffort != nil {
+		if err := backend.SetReasoningEffort(r.Context(), id, *body.ReasoningEffort); err != nil {
+			s.writeBackendError(w, "set session reasoning effort", err)
 			return
 		}
 	}
@@ -1074,6 +1093,7 @@ func sessionDetailFromSession(session Session, holder Holder) sessionDetailJSON 
 		sessionJSON:     row,
 		Model:           session.Model,
 		Policy:          session.Policy,
+		ReasoningEffort: session.ReasoningEffort,
 		Workspace:       session.Workspace,
 		ParentSessionID: session.ParentSessionID,
 		InheritedSeq:    session.InheritedSeq,

@@ -1237,6 +1237,33 @@ func (b *webBackend) SetModel(ctx context.Context, id, model string) error {
 	return nil
 }
 
+// SetReasoningEffort changes the session's thinking effort. An empty value
+// clears it, so the agent or model default applies (REQ-MDL-001).
+func (b *webBackend) SetReasoningEffort(ctx context.Context, id, effort string) error {
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return err
+	}
+	id = info.ID
+	if err := b.ensureLease(ctx, id); err != nil {
+		return err
+	}
+	if b.TurnActive(id) {
+		return web.ErrInvalidState
+	}
+	current, err := b.sessionReasoningEffort(ctx, info)
+	if err != nil {
+		return turnError(err)
+	}
+	if current == effort {
+		return nil
+	}
+	if err := b.rt.SetReasoningEffort(ctx, id, effort); err != nil {
+		return turnError(err)
+	}
+	return nil
+}
+
 // SetPolicy changes the session's effective policy.
 func (b *webBackend) SetPolicy(ctx context.Context, id, policy string) error {
 	info, err := b.resolveSession(ctx, id)
@@ -1405,6 +1432,10 @@ func (b *webBackend) session(ctx context.Context, info core.SessionInfo) (web.Se
 	if err != nil {
 		return web.Session{}, err
 	}
+	effort, err := b.sessionReasoningEffort(ctx, info)
+	if err != nil {
+		return web.Session{}, err
+	}
 	policy, err := b.rt.Policy(ctx, info.ID)
 	if err != nil {
 		return web.Session{}, err
@@ -1414,12 +1445,13 @@ func (b *webBackend) session(ctx context.Context, info core.SessionInfo) (web.Se
 		return web.Session{}, err
 	}
 	return web.Session{
-		SessionInfo:  info,
-		Model:        model,
-		Policy:       string(policy),
-		Team:         b.teamForAgent(agentName),
-		TurnRunning:  info.Status == "running",
-		InheritedSeq: info.InheritedSeq,
+		SessionInfo:     info,
+		Model:           model,
+		Policy:          string(policy),
+		ReasoningEffort: effort,
+		Team:            b.teamForAgent(agentName),
+		TurnRunning:     info.Status == "running",
+		InheritedSeq:    info.InheritedSeq,
 	}, nil
 }
 
@@ -1472,6 +1504,27 @@ func (b *webBackend) sessionModel(ctx context.Context, info core.SessionInfo) (s
 		}
 	}
 	return model, nil
+}
+
+// sessionReasoningEffort returns the effort of the last model/selection, or ""
+// when the session never selected one (REQ-MDL-001).
+func (b *webBackend) sessionReasoningEffort(ctx context.Context, info core.SessionInfo) (string, error) {
+	effort := ""
+	events, err := b.rt.History(ctx, info.ID)
+	if err != nil {
+		return "", err
+	}
+	for _, event := range events {
+		if event.Kind != core.KindModelSelection {
+			continue
+		}
+		var selection core.ModelSelection
+		if err := json.Unmarshal(event.Payload, &selection); err != nil {
+			return "", err
+		}
+		effort = selection.ReasoningEffort
+	}
+	return effort, nil
 }
 
 // sessionLookupError maps the prefix resolution errors to the port's not-found

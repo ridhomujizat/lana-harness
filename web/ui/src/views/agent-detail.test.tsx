@@ -26,7 +26,7 @@ vi.mock("../api/sessions", async (importOriginal) => {
   return { ...actual, createSession: vi.fn() };
 });
 
-import { listAgents } from "../api/agents";
+import { listAgents, updateAgent } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
 import type { ModelsResponse } from "../api/models";
@@ -181,5 +181,44 @@ describe("agent model settings", () => {
 
     const input = (await screen.findByLabelText("Custom model id")) as HTMLInputElement;
     expect(input.value).toBe("my-custom-model");
+  });
+});
+
+/* The save footer always states when the changes land; the restart notice is
+   driven by the save response's restart_required flag. */
+describe("agent save notice", () => {
+  it("always says changes apply from the next turn, with no restart notice", async () => {
+    load("deepseek-flash");
+
+    expect(
+      await screen.findByText("Changes apply from the next turn.")
+    ).toBeTruthy();
+    expect(screen.queryByText(/Some changes need a daemon restart/)).toBeNull();
+  });
+
+  it("shows the restart notice only after a save that needs a restart", async () => {
+    load("deepseek-flash");
+
+    const select = (await screen.findByRole("combobox", {
+      name: "Model",
+    })) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "deepseek-chat" } });
+    vi.mocked(updateAgent).mockResolvedValue({
+      name: "coder",
+      version: "v2",
+      restart_required: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(
+      await screen.findByText(/Some changes need a daemon restart/)
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", {
+        name: "Restart the daemon in Settings › General",
+      })
+    ).toBeTruthy();
+    expect(screen.getByText("Changes saved.")).toBeTruthy();
   });
 });

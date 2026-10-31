@@ -2514,9 +2514,18 @@ pre.json {
 
 .composer-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: var(--control-height-xs);
+}
+
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .composer-control {
@@ -2694,6 +2703,24 @@ pre.json {
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.menu-item-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.menu-tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
 }
 
 .menu-check {

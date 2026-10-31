@@ -85,5 +85,6 @@ type AgentRegistry interface {
 	Cancel(ctx context.Context, sessionID string) error
 	SetAgent(ctx context.Context, sessionID string, agent string) error
 	SetModel(ctx context.Context, sessionID string, model string) error
+	SetReasoningEffort(ctx context.Context, sessionID string, effort string) error
 	SubscribeLive(sessionID string) (*Subscription[LiveFrame], error)
 }

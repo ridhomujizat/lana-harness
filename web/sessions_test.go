@@ -23,6 +23,7 @@ type fakeWebBackend struct {
 	sessions     []core.SessionInfo
 	events       map[string][]core.SessionEvent
 	models       map[string]string
+	efforts      map[string]string
 	policies     map[string]string
 	agents       []Agent
 	agentNames   map[string]bool
@@ -45,6 +46,7 @@ func newFakeWebBackend() *fakeWebBackend {
 	return &fakeWebBackend{
 		events:      map[string][]core.SessionEvent{},
 		models:      map[string]string{},
+		efforts:     map[string]string{},
 		policies:    map[string]string{},
 		agentNames:  map[string]bool{},
 		turnActive:  map[string]bool{},
@@ -425,6 +427,22 @@ func (f *fakeWebBackend) SetModel(_ context.Context, sessionID, model string) er
 	return nil
 }
 
+func (f *fakeWebBackend) SetReasoningEffort(_ context.Context, sessionID, effort string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.find(sessionID); !ok {
+		return ErrSessionNotFound
+	}
+	if err := f.leaseError(sessionID); err != nil {
+		return err
+	}
+	if f.turnActive[sessionID] {
+		return ErrInvalidState
+	}
+	f.efforts[sessionID] = effort
+	return nil
+}
+
 func (f *fakeWebBackend) SetPolicy(_ context.Context, sessionID, policy string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -499,12 +517,13 @@ func (f *fakeWebBackend) detail(info core.SessionInfo) Session {
 		policy = "ask"
 	}
 	return Session{
-		SessionInfo:  info,
-		Model:        model,
-		Policy:       policy,
-		Team:         f.teamLocked(info.Agent),
-		TurnRunning:  info.Status == "running" || f.turnActive[info.ID],
-		InheritedSeq: info.InheritedSeq,
+		SessionInfo:     info,
+		Model:           model,
+		Policy:          policy,
+		ReasoningEffort: f.efforts[info.ID],
+		Team:            f.teamLocked(info.Agent),
+		TurnRunning:     info.Status == "running" || f.turnActive[info.ID],
+		InheritedSeq:    info.InheritedSeq,
 	}
 }
 
@@ -1487,5 +1506,44 @@ func TestPatchTeamSessionModelCoversTeamModelError(t *testing.T) {
 	s, cookie, csrf := newLoggedInSessionServer(t, backend)
 
 	rr := serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"model":"openai:gpt-5"}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+}
+
+// REQ-MDL-001: PATCH accepts the four session efforts, rejects an unknown one,
+// and an empty value ("Model default") clears it.
+func TestPatchSessionReasoningEffort(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "coder"})
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	for _, effort := range []string{"off", "low", "high", "max"} {
+		rr := serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"reasoning_effort":"`+effort+`"}`, cookie, csrf))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("effort %q status = %d, body = %q", effort, rr.Code, rr.Body.String())
+		}
+		var detail sessionDetailJSON
+		if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+			t.Fatal(err)
+		}
+		if detail.ReasoningEffort != effort {
+			t.Fatalf("effort %q read back = %q", effort, detail.ReasoningEffort)
+		}
+	}
+
+	// "Model default" clears the session effort.
+	rr := serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"reasoning_effort":""}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var cleared sessionDetailJSON
+	if err := json.Unmarshal(rr.Body.Bytes(), &cleared); err != nil {
+		t.Fatal(err)
+	}
+	if cleared.ReasoningEffort != "" {
+		t.Fatalf("cleared effort = %q, want empty", cleared.ReasoningEffort)
+	}
+
+	// An unknown value is rejected with the endpoint's error style.
+	rr = serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"reasoning_effort":"turbo"}`, cookie, csrf))
 	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
 }

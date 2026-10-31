@@ -150,3 +150,42 @@ func TestTurnReasoningEffort(t *testing.T) {
 		})
 	}
 }
+
+// REQ-MDL-001: the session's reasoning_effort wins over the agent and the
+// catalog default; an empty session effort falls back to the agent, then the
+// catalog.
+func TestTurnReasoningEffortPrecedence(t *testing.T) {
+	cases := []struct {
+		name        string
+		model       string
+		agentEffort string
+		selection   string
+		want        string
+	}{
+		{"selection wins over agent", "deepseek-flash", "low", "max", "max"},
+		{"selection wins over catalog", "deepseek-flash", "", "off", "off"},
+		{"agent wins when selection empty", "deepseek-flash", "low", "", "low"},
+		{"catalog default when both empty", "deepseek-flash", "", "", "high"},
+		{"unknown model has no default", "custom-model", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, map[string]core.AgentConfig{
+				"assistant": {Provider: "mock", Model: tc.model, ReasoningEffort: tc.agentEffort},
+			})
+			if tc.selection != "" {
+				if err := h.reg.SetReasoningEffort(context.Background(), h.info.ID, tc.selection); err != nil {
+					t.Fatal(err)
+				}
+			}
+			recording := &recordingProvider{}
+			h.llm.providers["mock"] = recording
+			if result := h.run(t, "hi"); result.StopReason != "end_turn" {
+				t.Fatalf("result=%+v", result)
+			}
+			if recording.last.ReasoningEffort != tc.want {
+				t.Fatalf("reasoning_effort=%q want %q", recording.last.ReasoningEffort, tc.want)
+			}
+		})
+	}
+}

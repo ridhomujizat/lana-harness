@@ -1294,3 +1294,98 @@ func TestWebModelSelectionErrorMapsTeamCoversREQTEAM022(t *testing.T) {
 		t.Fatalf("modelSelectionError(ErrUnknownProvider) = %v, want web.ErrInvalidModel", got)
 	}
 }
+
+// REQ-MDL-001: the web PATCH writes the session effort, GET returns it, an
+// invalid value is rejected, and "Model default" clears it back to the catalog
+// default on the next turn.
+func TestWebSessionReasoningEffort(t *testing.T) {
+	raw := `[providers.mock]
+kind = "openai_compat"
+base_url = "mock://local"
+
+[agents.lana]
+provider = "mock"
+model = "deepseek-flash"
+
+[[routes]]
+channel = "web"
+agent = "lana"
+`
+	home := t.TempDir()
+	writeLiveConfig(t, home, raw)
+	text, end := "ok", "end_turn"
+	rt, capture := liveWebRuntime(t, home, mock.Script{Responses: []mock.Response{
+		{Events: []mock.Event{{Text: &text}, {Stop: &end}}},
+		{Events: []mock.Event{{Text: &text}, {Stop: &end}}},
+		{Events: []mock.Event{{Text: &text}, {Stop: &end}}},
+		{Events: []mock.Event{{Text: &text}, {Stop: &end}}},
+	}})
+	_, ts, cookie, csrf := webServer(t, rt, home)
+
+	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
+	if err != nil {
+		t.Fatalf("CreateChannelSession: %v", err)
+	}
+	runTurn := func() {
+		t.Helper()
+		if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+	patchEffort := func(body string) {
+		t.Helper()
+		resp, data := webDo(t, http.MethodPatch, ts.URL+"/v1/sessions/"+info.ID, body, cookie, csrf)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("PATCH %s status = %d, body = %q", body, resp.StatusCode, data)
+		}
+	}
+	readEffort := func() string {
+		t.Helper()
+		resp, data := webDo(t, http.MethodGet, ts.URL+"/v1/sessions/"+info.ID, "", cookie, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET session status = %d, body = %q", resp.StatusCode, data)
+		}
+		var detail struct {
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		if err := json.Unmarshal(data, &detail); err != nil {
+			t.Fatal(err)
+		}
+		return detail.ReasoningEffort
+	}
+
+	// The catalog default applies before any selection.
+	runTurn()
+	if got := capture.lastReasoningEffort(); got != "high" {
+		t.Fatalf("default effort = %q, want high", got)
+	}
+
+	// A valid PATCH is stored, returned by GET, and reaches the next turn.
+	patchEffort(`{"reasoning_effort":"low"}`)
+	if got := readEffort(); got != "low" {
+		t.Fatalf("read effort = %q, want low", got)
+	}
+	runTurn()
+	if got := capture.lastReasoningEffort(); got != "low" {
+		t.Fatalf("turn effort = %q, want low", got)
+	}
+
+	// An invalid value is rejected and changes nothing.
+	resp, _ := webDo(t, http.MethodPatch, ts.URL+"/v1/sessions/"+info.ID, `{"reasoning_effort":"turbo"}`, cookie, csrf)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid effort status = %d, want 400", resp.StatusCode)
+	}
+	if got := readEffort(); got != "low" {
+		t.Fatalf("effort after invalid = %q, want low", got)
+	}
+
+	// "Model default" clears the session effort, so the catalog default returns.
+	patchEffort(`{"reasoning_effort":""}`)
+	if got := readEffort(); got != "" {
+		t.Fatalf("cleared effort = %q, want empty", got)
+	}
+	runTurn()
+	if got := capture.lastReasoningEffort(); got != "high" {
+		t.Fatalf("effort after clear = %q, want high", got)
+	}
+}

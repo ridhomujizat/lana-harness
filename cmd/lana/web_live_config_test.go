@@ -25,6 +25,16 @@ func (p *promptCaptureProvider) lastModel() string {
 	return p.requests[len(p.requests)-1].Model
 }
 
+// lastReasoningEffort returns the effort of the last chat request.
+func (p *promptCaptureProvider) lastReasoningEffort() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.requests) == 0 {
+		return ""
+	}
+	return p.requests[len(p.requests)-1].ReasoningEffort
+}
+
 func writeLiveConfig(t *testing.T, home, raw string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(raw), 0o600); err != nil {

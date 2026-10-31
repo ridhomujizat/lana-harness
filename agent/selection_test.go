@@ -80,6 +80,60 @@ func TestSetModelMidTurn(t *testing.T) {
 	}
 }
 
+// REQ-MDL-001: SetReasoningEffort writes the session effort; a model change
+// keeps it, and an empty value clears it back to the model default.
+func TestSetReasoningEffortEvent(t *testing.T) {
+	h := newHarness(t, mock.Script{}, map[string]core.AgentConfig{
+		"assistant": {Provider: "mock", Model: "m1"},
+	})
+	ctx := context.Background()
+	if err := h.reg.SetModel(ctx, h.info.ID, "mock:m2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.reg.SetReasoningEffort(ctx, h.info.ID, "low"); err != nil {
+		t.Fatal(err)
+	}
+	selection := lastSelection(t, h)
+	if selection.Provider != "mock" || selection.Model != "m2" || selection.ReasoningEffort != "low" {
+		t.Fatalf("selection=%+v", selection)
+	}
+
+	// A model change keeps the session effort.
+	if err := h.reg.SetModel(ctx, h.info.ID, "mock:m3"); err != nil {
+		t.Fatal(err)
+	}
+	selection = lastSelection(t, h)
+	if selection.Provider != "mock" || selection.Model != "m3" || selection.ReasoningEffort != "low" {
+		t.Fatalf("after model change selection=%+v", selection)
+	}
+
+	// "Model default" stores an empty effort and keeps the model.
+	if err := h.reg.SetReasoningEffort(ctx, h.info.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	selection = lastSelection(t, h)
+	if selection.Provider != "mock" || selection.Model != "m3" || selection.ReasoningEffort != "" {
+		t.Fatalf("after clear selection=%+v", selection)
+	}
+}
+
+// lastSelection returns the last model/selection payload of the harness session.
+func lastSelection(t *testing.T, h *harness) core.ModelSelection {
+	t.Helper()
+	var selection core.ModelSelection
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindModelSelection {
+			continue
+		}
+		var payload core.ModelSelection
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		selection = payload
+	}
+	return selection
+}
+
 func TestSetModelUnknownProvider(t *testing.T) {
 	h := newHarness(t, mock.Script{}, nil)
 	before := len(h.events(t))

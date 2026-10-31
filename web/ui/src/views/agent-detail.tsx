@@ -423,6 +423,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const [reloadToken, setReloadToken] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
+  const [restartNotice, setRestartNotice] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
   const [stale, setStale] = useState(false);
@@ -445,6 +446,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setError("");
     setDetails([]);
     setSaveNotice("");
+    setRestartNotice(false);
     setStale(false);
     setFallbackDraft(null);
     setOtherModel(false);
@@ -689,6 +691,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       return;
     }
     setSaveNotice("");
+    setRestartNotice(false);
     setError("");
     setDetails([]);
     setStale(false);
@@ -719,12 +722,8 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         setVersion(String(result.version));
       }
       setBaseline(current);
-      const restart = Boolean(result && result.restart_required);
-      setSaveNotice(
-        restart
-          ? "Changes saved. Restart the daemon for them to take effect."
-          : "Changes saved."
-      );
+      setSaveNotice("Changes saved.");
+      setRestartNotice(Boolean(result && result.restart_required));
       announce("Saved changes to " + agentName + ".");
     } catch (failure) {
       if (failure instanceof ApiError && failure.code === "stale_version") {
@@ -1356,6 +1355,18 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                 {saveNotice}
               </p>
             ) : null}
+            {restartNotice ? (
+              <p
+                className="notice notice-warn agent-save-notice"
+                role="status"
+              >
+                Some changes need a daemon restart.{" "}
+                <a href="#/settings/general">
+                  Restart the daemon in Settings › General
+                </a>
+                .
+              </p>
+            ) : null}
             {error ? (
               <div className="agent-save-error" role="alert">
                 <ErrorNotice message={error} details={details} />
@@ -1372,14 +1383,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
             ) : null}
 
             <div className="agent-save-bar">
-              <p className="agent-save-note">
-                Config changes apply after a daemon restart. Agent file changes
-                apply at the next turn.{" "}
-                <a href="#/settings/general">
-                  Restart the daemon in Settings › General
-                </a>
-                .
-              </p>
+              <p className="agent-save-note">Changes apply from the next turn.</p>
               <div className="agent-save-actions">
                 <button
                   type="button"

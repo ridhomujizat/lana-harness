@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ApiError } from "../api/client";
+import type { ModelsResponse } from "../api/models";
 import type { SessionDetail, SessionEvent } from "../api/sessions";
 import * as turnsApi from "../api/turns";
 import { SessionPage } from "./session";
@@ -33,6 +34,7 @@ const detail: SessionDetail = {
   team: null,
   model: "deepseek:chat",
   policy: "ask",
+  reasoning_effort: "",
   workspace: "/tmp/work",
   parent_session_id: "",
   turn_running: false,
@@ -58,13 +60,65 @@ function sessionEvent(
   return { seq, kind, turn_id: turnId, created_at: seq, payload };
 }
 
-function stubFetch(events: SessionEvent[]): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
+/* The model catalog of GET /v1/models (REQ-MDL-020). "chat" is the session's
+   current model; "old" is a legacy entry served without thinking. */
+const CATALOG: ModelsResponse = {
+  models: [
+    {
+      id: "chat",
+      name: "DeepSeek Chat",
+      description: "Current model.",
+      context_window: 128000,
+      legacy: false,
+      replacement: "",
+      thinking: "deepseek",
+      default_effort: "high",
+    },
+    {
+      id: "flash",
+      name: "DeepSeek Flash",
+      description: "Fast model.",
+      context_window: 1048576,
+      legacy: false,
+      replacement: "",
+      thinking: "deepseek",
+      default_effort: "high",
+    },
+    {
+      id: "old",
+      name: "DeepSeek Old",
+      description: "Legacy model.",
+      context_window: 64000,
+      legacy: true,
+      replacement: "deepseek-flash",
+      thinking: "",
+      default_effort: "",
+    },
+  ],
+  efforts: [
+    { value: "low", description: "Quick answers." },
+    { value: "high", description: "The default balance." },
+  ],
+};
+
+function stubFetch(
+  events: SessionEvent[],
+  overrides: Partial<SessionDetail> = {}
+) {
+  const base: SessionDetail = { ...detail, ...overrides };
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
+      const method = init && init.method ? init.method : "GET";
+      if (method === "PATCH" && url.includes("/v1/sessions/")) {
+        const patch = init && init.body ? JSON.parse(String(init.body)) : {};
+        return json({ ...base, ...patch });
+      }
       if (url.includes("/events")) {
         return json({ events, last_seq: events.length });
+      }
+      if (url.includes("/models")) {
+        return json(CATALOG);
       }
       if (url.endsWith("/agents")) {
         return json({ agents: [] });
@@ -72,9 +126,23 @@ function stubFetch(events: SessionEvent[]): void {
       if (url.includes("/stream")) {
         return new Response("", { status: 200 });
       }
-      return json(detail);
-    })
+      return json(base);
+    }
   );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function patchBody(
+  fetchMock: ReturnType<typeof vi.fn>
+): Record<string, unknown> | null {
+  for (const call of fetchMock.mock.calls) {
+    const init = call[1] as RequestInit | undefined;
+    if (init && init.method === "PATCH") {
+      return JSON.parse(String(init.body)) as Record<string, unknown>;
+    }
+  }
+  return null;
 }
 
 const interruptedTurn: SessionEvent[] = [
@@ -238,5 +306,126 @@ describe("session draining send", () => {
       await screen.findByText("lana is restarting. Try again in a moment.")
     ).toBeTruthy();
     expect(input.value).toBe("hello");
+  });
+});
+
+/* REQ-MDL-020: the composer model menu lists the provider catalog. */
+describe("composer model catalog", () => {
+  it("lists the catalog, tags legacy, checks the current model, and sets provider:model", async () => {
+    const fetchMock = stubFetch([]);
+
+    render(<SessionPage id="s1" />);
+    const pill = await screen.findByRole("button", {
+      name: "Model: deepseek:chat",
+    });
+    fireEvent.click(pill);
+
+    expect(await screen.findByText("DeepSeek Flash")).toBeTruthy();
+    expect(screen.getByText("deepseek:flash")).toBeTruthy();
+    expect(screen.getByText("Legacy")).toBeTruthy();
+
+    const current = screen.getByRole("menuitemradio", {
+      name: /DeepSeek Chat/,
+    });
+    expect(current.getAttribute("aria-checked")).toBe("true");
+    const legacy = screen.getByRole("menuitemradio", { name: /DeepSeek Old/ });
+    expect(legacy.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(
+      screen.getByRole("menuitemradio", { name: /DeepSeek Flash/ })
+    );
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ model: "deepseek:flash" });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Model: deepseek:flash" })
+    ).toBeTruthy();
+  });
+
+  it("keeps the free-text provider:model input working", async () => {
+    const fetchMock = stubFetch([]);
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model: deepseek:chat" })
+    );
+    const custom = screen.getByLabelText("Custom model as provider:model");
+    fireEvent.change(custom, { target: { value: "custom:my-model" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ model: "custom:my-model" });
+    });
+  });
+
+  /* A model change keeps the session effort; only "Model default" clears it. */
+  it("keeps the session effort when the model changes", async () => {
+    const fetchMock = stubFetch([], { reasoning_effort: "high" });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model: deepseek:chat" })
+    );
+    fireEvent.click(
+      screen.getByRole("menuitemradio", { name: /DeepSeek Flash/ })
+    );
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ model: "deepseek:flash" });
+    });
+    expect(patchBody(fetchMock)).not.toHaveProperty("reasoning_effort");
+    expect(
+      await screen.findByRole("button", { name: "Thinking: High" })
+    ).toBeTruthy();
+  });
+});
+
+/* REQ-MDL-001: the Thinking chip shows for a thinking model and sets the
+   session effort; "Model default" clears it. */
+describe("composer thinking chip", () => {
+  it("shows the chip, sets an effort, and labels it Thinking: High", async () => {
+    const fetchMock = stubFetch([]);
+
+    render(<SessionPage id="s1" />);
+    const chip = await screen.findByRole("button", {
+      name: "Thinking: Model default",
+    });
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /High/ }));
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ reasoning_effort: "high" });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Thinking: High" })
+    ).toBeTruthy();
+  });
+
+  it("clears the session effort with Model default", async () => {
+    const fetchMock = stubFetch([], { reasoning_effort: "high" });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Thinking: High" }));
+    fireEvent.click(
+      screen.getByRole("menuitemradio", { name: /Model default/ })
+    );
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ reasoning_effort: "" });
+    });
+  });
+
+  it("hides the chip for a non-thinking model", async () => {
+    stubFetch([], { model: "deepseek:old" });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model: deepseek:old" })
+    );
+    await screen.findByText("DeepSeek Flash");
+    expect(
+      screen.queryByRole("button", { name: "Thinking: Model default" })
+    ).toBeNull();
   });
 });

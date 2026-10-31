@@ -28,6 +28,7 @@ export interface Session {
 export interface SessionDetail extends Session {
   model: string;
   policy: string;
+  reasoning_effort: string;
   workspace: string;
   parent_session_id: string;
   inherited_seq?: number;
@@ -89,6 +90,7 @@ export interface PatchSessionRequest {
   agent?: string;
   model?: string;
   policy?: string;
+  reasoning_effort?: string;
   confirm_trust?: boolean;
 }
 

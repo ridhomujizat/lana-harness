@@ -14,6 +14,8 @@ import type {
 } from "react";
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
+import { getModels } from "../api/models";
+import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
 import type { ApprovalEvent } from "../api/approvals";
 import { authSession } from "../api/auth";
@@ -148,6 +150,12 @@ function shortModel(value: string): string {
   const text = String(value || "");
   const parts = text.split(":");
   return parts.length > 1 ? parts.slice(1).join(":") : text;
+}
+
+/* The chip and menu label of one reasoning effort: "low" -> "Low". */
+function effortName(value: string): string {
+  const text = String(value || "");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 }
 
 function turnCountText(count: unknown): string {
@@ -408,15 +416,21 @@ function AgentMenuContent({
 function ModelMenuContent({
   current,
   agentModel,
+  provider,
+  models,
   onPick,
 }: {
   current: string;
   agentModel: string;
+  provider: string;
+  models: CatalogModel[];
   onPick: (value: string) => void;
 }) {
   const [custom, setCustom] = useState("");
   const options: { value: string; label: string; meta: string }[] = [];
-  if (current) {
+  const currentId = shortModel(current);
+  const currentInCatalog = models.some((model) => model.id === currentId);
+  if (current && !currentInCatalog) {
     options.push({
       value: current,
       label: shortModel(current),
@@ -442,30 +456,53 @@ function ModelMenuContent({
   return (
     <>
       <p className="menu-heading">Model</p>
-      {options.length === 0 ? (
+      {options.length === 0 && models.length === 0 ? (
         <p className="menu-empty">No model is set yet.</p>
-      ) : (
-        options.map((option) => (
+      ) : null}
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="menuitemradio"
+          className="menu-item"
+          aria-checked={option.value === current}
+          onClick={() => onPick(option.value)}
+        >
+          <span className="menu-item-text">
+            <span>{option.label}</span>
+            <span className="menu-item-meta">
+              {option.meta + " · " + option.value}
+            </span>
+          </span>
+          {option.value === current ? (
+            <Icon name="check" className="icon-16 menu-check" />
+          ) : null}
+        </button>
+      ))}
+      {models.map((model) => {
+        const value = provider ? provider + ":" + model.id : model.id;
+        return (
           <button
-            key={option.value}
+            key={"catalog-" + model.id}
             type="button"
             role="menuitemradio"
             className="menu-item"
-            aria-checked={option.value === current}
-            onClick={() => onPick(option.value)}
+            aria-checked={value === current}
+            onClick={() => onPick(value)}
           >
             <span className="menu-item-text">
-              <span>{option.label}</span>
-              <span className="menu-item-meta">
-                {option.meta + " · " + option.value}
+              <span className="menu-item-name">
+                {model.name}
+                {model.legacy ? <span className="menu-tag">Legacy</span> : null}
               </span>
+              <span className="menu-item-meta">{value}</span>
             </span>
-            {option.value === current ? (
+            {value === current ? (
               <Icon name="check" className="icon-16 menu-check" />
             ) : null}
           </button>
-        ))
-      )}
+        );
+      })}
       <form className="menu-custom" onSubmit={submitCustom}>
         <input
           type="text"
@@ -479,6 +516,57 @@ function ModelMenuContent({
           Set
         </button>
       </form>
+    </>
+  );
+}
+
+/* The Thinking menu of REQ-MDL-001: "Model default" clears the session effort,
+   the four efforts set it with their description from /v1/models. */
+function ThinkingMenuContent({
+  current,
+  efforts,
+  onPick,
+}: {
+  current: string;
+  efforts: CatalogEffort[];
+  onPick: (value: string) => void;
+}) {
+  return (
+    <>
+      <p className="menu-heading">Thinking</p>
+      <button
+        type="button"
+        role="menuitemradio"
+        className="menu-item"
+        aria-checked={current === ""}
+        onClick={() => onPick("")}
+      >
+        <span className="menu-item-text">
+          <span>Model default</span>
+          <span className="menu-item-meta">Use the model's own effort.</span>
+        </span>
+        {current === "" ? (
+          <Icon name="check" className="icon-16 menu-check" />
+        ) : null}
+      </button>
+      {efforts.map((effort) => (
+        <button
+          key={effort.value}
+          type="button"
+          role="menuitemradio"
+          className="menu-item"
+          aria-checked={effort.value === current}
+          onClick={() => onPick(effort.value)}
+        >
+          <span className="menu-item-text">
+            <span>{effortName(effort.value)}</span>
+            <span className="menu-item-meta">{effort.description}</span>
+          </span>
+          {effort.value === current ? (
+            <Icon name="check" className="icon-16 menu-check" />
+          ) : null}
+        </button>
+      ))}
     </>
   );
 }
@@ -548,6 +636,7 @@ interface ComposerProps {
   team: Team | null;
   model: string;
   policy: string;
+  reasoningEffort: string;
   agents: Agent[];
   draft: string;
   readOnly: boolean;
@@ -560,6 +649,7 @@ interface ComposerProps {
   onStop: () => void;
   onAgent: (name: string) => void;
   onModel: (value: string) => void;
+  onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
 }
 
@@ -568,6 +658,7 @@ function Composer({
   team,
   model,
   policy,
+  reasoningEffort,
   agents,
   draft,
   readOnly,
@@ -580,14 +671,21 @@ function Composer({
   onStop,
   onAgent,
   onModel,
+  onEffort,
   onPolicy,
 }: ComposerProps) {
   const [menu, setMenu] = useState("");
   const [trustOpen, setTrustOpen] = useState(false);
   const [trustBusy, setTrustBusy] = useState(false);
   const [rows, setRows] = useState(COMPOSER_MIN_ROWS);
+  const [catalogState, setCatalogState] = useState<{
+    provider: string;
+    models: CatalogModel[];
+    efforts: CatalogEffort[];
+  }>({ provider: "", models: [], efforts: [] });
   const plusRef = useRef<HTMLButtonElement>(null);
   const modelRef = useRef<HTMLButtonElement>(null);
+  const thinkingRef = useRef<HTMLButtonElement>(null);
   const policyRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -612,10 +710,67 @@ function Composer({
     teamSession && team && team.name ? String(team.name) : agent || "agent";
   const busySession = readOnly || turnRunning;
 
-  function closeMenu(kind: "plus" | "model" | "policy") {
+  /* The provider of the current model, or the agent's provider when the
+     session has none. It keys the catalog fetch of REQ-MDL-020. */
+  const modelProvider = useMemo(() => {
+    const fromModel = modelValue ? String(modelValue).split(":")[0] : "";
+    if (fromModel) {
+      return fromModel;
+    }
+    return agentEntry && agentEntry.provider ? agentEntry.provider : "";
+  }, [modelValue, agentEntry]);
+
+  useEffect(() => {
+    if (!modelProvider) {
+      return undefined;
+    }
+    let cancelled = false;
+    getModels(modelProvider)
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setCatalogState({
+          provider: modelProvider,
+          models: Array.isArray(response.models) ? response.models : [],
+          efforts: Array.isArray(response.efforts) ? response.efforts : [],
+        });
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setCatalogState({ provider: modelProvider, models: [], efforts: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modelProvider]);
+
+  /* The fetched catalog belongs to one provider; switching providers hides it
+     until the new fetch lands. */
+  const catalog =
+    catalogState.provider === modelProvider ? catalogState.models : [];
+  const efforts =
+    catalogState.provider === modelProvider ? catalogState.efforts : [];
+
+  const currentEntry =
+    catalog.find((entry) => entry.id === shortModel(modelValue)) || null;
+  const thinksModel = Boolean(!teamSession && currentEntry && currentEntry.thinking);
+  const effortLabel = reasoningEffort
+    ? "Thinking: " + effortName(reasoningEffort)
+    : "Thinking: Model default";
+
+  function closeMenu(kind: "plus" | "model" | "thinking" | "policy") {
     setMenu("");
     const target =
-      kind === "plus" ? plusRef : kind === "model" ? modelRef : policyRef;
+      kind === "plus"
+        ? plusRef
+        : kind === "model"
+          ? modelRef
+          : kind === "thinking"
+            ? thinkingRef
+            : policyRef;
     if (target && target.current) {
       window.setTimeout(() => {
         if (target.current) {
@@ -639,6 +794,17 @@ function Composer({
       window.setTimeout(() => modelRef.current && modelRef.current.focus(), 0);
     }
     onModel(value);
+  }
+
+  function pickEffort(value: string) {
+    setMenu("");
+    if (thinkingRef.current) {
+      window.setTimeout(
+        () => thinkingRef.current && thinkingRef.current.focus(),
+        0
+      );
+    }
+    onEffort(value);
   }
 
   function pickPolicy(value: string) {
@@ -770,76 +936,111 @@ function Composer({
             </Popover>
           </span>
 
-          <span className="composer-control">
-            {teamSession ? (
-              <button
-                ref={modelRef}
-                type="button"
-                className="composer-pill is-team-model"
-                aria-label="Each agent in the team uses its own model."
-                title="Each agent in the team uses its own model."
-                disabled
-              >
-                <span className="composer-pill-label">per agent</span>
-                <Icon name="chevron-down" />
-              </button>
-            ) : (
-              <>
+          <span className="composer-chips">
+            <span className="composer-control">
+              {teamSession ? (
                 <button
                   ref={modelRef}
                   type="button"
-                  className="composer-pill"
-                  aria-label={"Model: " + (modelValue || "not set")}
-                  aria-haspopup="menu"
-                  aria-expanded={menu === "model"}
-                  title={modelValue || "No model set"}
-                  disabled={busySession}
-                  onClick={() => setMenu(menu === "model" ? "" : "model")}
+                  className="composer-pill is-team-model"
+                  aria-label="Each agent in the team uses its own model."
+                  title="Each agent in the team uses its own model."
+                  disabled
                 >
-                  <span className="composer-pill-label">
-                    {shortModel(modelValue) || "Model"}
-                  </span>
+                  <span className="composer-pill-label">per agent</span>
+                  <Icon name="chevron-down" />
+                </button>
+              ) : (
+                <>
+                  <button
+                    ref={modelRef}
+                    type="button"
+                    className="composer-pill"
+                    aria-label={"Model: " + (modelValue || "not set")}
+                    aria-haspopup="menu"
+                    aria-expanded={menu === "model"}
+                    title={modelValue || "No model set"}
+                    disabled={busySession}
+                    onClick={() => setMenu(menu === "model" ? "" : "model")}
+                  >
+                    <span className="composer-pill-label">
+                      {shortModel(modelValue) || "Model"}
+                    </span>
+                    <Icon name="chevron-down" />
+                  </button>
+                  <Popover
+                    open={menu === "model"}
+                    onClose={() => closeMenu("model")}
+                    triggerRef={modelRef}
+                    label="Model"
+                  >
+                    <ModelMenuContent
+                      current={modelValue}
+                      agentModel={agentModel}
+                      provider={modelProvider}
+                      models={catalog}
+                      onPick={pickModel}
+                    />
+                  </Popover>
+                </>
+              )}
+            </span>
+
+            {thinksModel ? (
+              <span className="composer-control">
+                <button
+                  ref={thinkingRef}
+                  type="button"
+                  className="composer-pill"
+                  aria-label={effortLabel}
+                  aria-haspopup="menu"
+                  aria-expanded={menu === "thinking"}
+                  title={effortLabel}
+                  disabled={busySession}
+                  onClick={() => setMenu(menu === "thinking" ? "" : "thinking")}
+                >
+                  <span className="composer-pill-label">{effortLabel}</span>
                   <Icon name="chevron-down" />
                 </button>
                 <Popover
-                  open={menu === "model"}
-                  onClose={() => closeMenu("model")}
-                  triggerRef={modelRef}
-                  label="Model"
+                  open={menu === "thinking"}
+                  onClose={() => closeMenu("thinking")}
+                  triggerRef={thinkingRef}
+                  label="Thinking"
                 >
-                  <ModelMenuContent
-                    current={modelValue}
-                    agentModel={agentModel}
-                    onPick={pickModel}
+                  <ThinkingMenuContent
+                    current={reasoningEffort}
+                    efforts={efforts}
+                    onPick={pickEffort}
                   />
                 </Popover>
-              </>
-            )}
-          </span>
+              </span>
+            ) : null}
 
-          <span className="composer-control">
-            <button
-              ref={policyRef}
-              type="button"
-              className="composer-pill"
-              aria-label={"Policy: " + policyLabel(policy)}
-              aria-haspopup="menu"
-              aria-expanded={menu === "policy"}
-              disabled={busySession}
-              onClick={() => setMenu(menu === "policy" ? "" : "policy")}
-            >
-              <Icon name="lock" />
-              <span className="composer-pill-label">{policyLabel(policy)}</span>
-              <Icon name="chevron-down" />
-            </button>
-            <Popover
-              open={menu === "policy"}
-              onClose={() => closeMenu("policy")}
-              triggerRef={policyRef}
-              label="Policy"
-            >
-              <PolicyMenuContent current={policy} onPick={pickPolicy} />
-            </Popover>
+            <span className="composer-control">
+              <button
+                ref={policyRef}
+                type="button"
+                className="composer-pill"
+                aria-label={"Policy: " + policyLabel(policy)}
+                aria-haspopup="menu"
+                aria-expanded={menu === "policy"}
+                disabled={busySession}
+                onClick={() => setMenu(menu === "policy" ? "" : "policy")}
+              >
+                <Icon name="lock" />
+                <span className="composer-pill-label">{policyLabel(policy)}</span>
+                <Icon name="chevron-down" />
+              </button>
+              <Popover
+                open={menu === "policy"}
+                onClose={() => closeMenu("policy")}
+                triggerRef={policyRef}
+                label="Policy"
+              >
+                <PolicyMenuContent current={policy} onPick={pickPolicy} />
+              </Popover>
+            </span>
           </span>
 
           <span className="composer-spacer"></span>
@@ -1867,6 +2068,19 @@ export function SessionPage({ id }: SessionPageProps) {
     [patch]
   );
 
+  /* REQ-MDL-001: "Model default" clears the session effort; a named effort
+     sets it. A model change keeps the session effort (REQ-MDL-020). */
+  const changeEffort = useCallback(
+    (value: string) =>
+      patch(
+        { reasoning_effort: value },
+        value
+          ? "Thinking changed to " + effortName(value) + "."
+          : "Thinking reset to the model default."
+      ),
+    [patch]
+  );
+
   const handleApprovalAnswer = useCallback(
     async (approval: ApprovalEvent, outcome: string) => {
       clearError();
@@ -2145,6 +2359,7 @@ export function SessionPage({ id }: SessionPageProps) {
             team={team}
             model={detail.model || ""}
             policy={detail.policy || "ask"}
+            reasoningEffort={detail.reasoning_effort || ""}
             agents={agents}
             draft={draft}
             readOnly={readOnly}
@@ -2157,6 +2372,7 @@ export function SessionPage({ id }: SessionPageProps) {
             onStop={cancelTurn}
             onAgent={changeAgent}
             onModel={changeModel}
+            onEffort={changeEffort}
             onPolicy={changePolicy}
           />
         </div>

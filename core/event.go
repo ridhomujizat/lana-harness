@@ -200,6 +200,9 @@ type ModelSelection struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	Agent    string `json:"agent,omitempty"`
+	// ReasoningEffort is the per-session thinking effort (REQ-MDL-001). Empty
+	// means the agent or model default applies.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type CompactionSummary struct {

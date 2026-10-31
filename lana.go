@@ -1449,6 +1449,15 @@ func (rt *Runtime) SetModel(ctx context.Context, sessionID, model string) error 
 	return rt.coreCtx.Agents.SetModel(ctx, sessionID, model)
 }
 
+// SetReasoningEffort changes the session's thinking effort. An empty value
+// clears it (REQ-MDL-001).
+func (rt *Runtime) SetReasoningEffort(ctx context.Context, sessionID, effort string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	return rt.coreCtx.Agents.SetReasoningEffort(ctx, sessionID, effort)
+}
+
 // Compact compacts the session's history now.
 func (rt *Runtime) Compact(ctx context.Context, sessionID string) (core.CompactionResult, error) {
 	if err := rt.closedError(); err != nil {

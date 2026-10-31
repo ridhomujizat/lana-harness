@@ -180,9 +180,12 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// REQ-LTC-040: max_steps is opt-in; 0 means no limit for root and child
 	// sessions alike.
 	maxSteps := cfg.MaxSteps
-	// REQ-MDL-001: the agent's reasoning_effort wins, else the catalog default
-	// for the model, else the provider default ("").
+	// REQ-MDL-001: the session's reasoning_effort wins, else the agent's, else
+	// the catalog default for the resolved model, else the provider default ("").
 	effort := cfg.ReasoningEffort
+	if hasSelection && selection.ReasoningEffort != "" {
+		effort = selection.ReasoningEffort
+	}
 	if effort == "" {
 		if known, ok := models.Lookup(model); ok {
 			effort = known.DefaultEffort
