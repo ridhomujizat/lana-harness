@@ -158,11 +158,11 @@ func TestStreamSteadyOutlivesTimeout(t *testing.T) {
 		flusher := w.(http.Flusher)
 		flusher.Flush()
 		for i := 0; i < 8; i++ {
-			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n")
+			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n")
 			flusher.Flush()
 			time.Sleep(40 * time.Millisecond)
 		}
-		fmt.Fprint(w, "data: [DONE]\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		flusher.Flush()
 	}))
 	defer srv.Close()

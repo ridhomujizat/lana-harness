@@ -478,7 +478,7 @@ func readFrom(path string, offset int64, max int) (string, int64, error) {
 		}
 		return "", 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return "", 0, err
@@ -517,7 +517,7 @@ func tailOf(path string, max int) (string, error) {
 		}
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return "", err

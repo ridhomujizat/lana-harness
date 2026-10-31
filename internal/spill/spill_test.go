@@ -67,7 +67,8 @@ func TestSessionHashSeparatesSessions(t *testing.T) {
 	if SessionHash("a") == SessionHash("b") {
 		t.Fatal("different sessions share a hash")
 	}
-	if SessionHash("a") != SessionHash("a") {
+	first, again := SessionHash("a"), SessionHash("a")
+	if first != again {
 		t.Fatal("the hash is not stable")
 	}
 	if len(SessionHash("a")) != 16 {

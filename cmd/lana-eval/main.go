@@ -43,11 +43,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	priceCached := fs.Float64("price-cached", 0, "USD per 1M cached input tokens")
 	priceOut := fs.Float64("price-out", 0, "USD per 1M output tokens")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "Usage: lana-eval [flags]")
-		fmt.Fprintln(fs.Output())
-		fmt.Fprintln(fs.Output(), "Runs the fixed developer eval tasks against a real provider.")
-		fmt.Fprintln(fs.Output())
-		fmt.Fprintln(fs.Output(), "Flags:")
+		_, _ = fmt.Fprintln(fs.Output(), "Usage: lana-eval [flags]")
+		_, _ = fmt.Fprintln(fs.Output())
+		_, _ = fmt.Fprintln(fs.Output(), "Runs the fixed developer eval tasks against a real provider.")
+		_, _ = fmt.Fprintln(fs.Output())
+		_, _ = fmt.Fprintln(fs.Output(), "Flags:")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -59,7 +59,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	selectedModels, err := parseModels(*models, *model)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 
@@ -67,7 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *runPattern != "" {
 		compiled, err := regexp.Compile(*runPattern)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: invalid -run pattern: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: invalid -run pattern: %v\n", err)
 			return 1
 		}
 		filter = compiled
@@ -79,18 +79,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if len(selected) == 0 {
-		fmt.Fprintln(stderr, "error: no eval tasks match -run")
+		_, _ = fmt.Fprintln(stderr, "error: no eval tasks match -run")
 		return 1
 	}
 
 	if os.Getenv(*keyEnv) == "" {
-		fmt.Fprintf(stderr, "error: %s is empty; set it or choose another -key-env\n", *keyEnv)
+		_, _ = fmt.Fprintf(stderr, "error: %s is empty; set it or choose another -key-env\n", *keyEnv)
 		return 1
 	}
 
 	previous, err := loadPrevious(*comparePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 
@@ -99,7 +99,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	prices := priceTable{in: *priceIn, cached: *priceCached, out: *priceOut}
 	prices.set = setFlags["price-in"] && setFlags["price-cached"] && setFlags["price-out"]
 	if !prices.set && (setFlags["price-in"] || setFlags["price-cached"] || setFlags["price-out"]) {
-		fmt.Fprintln(stderr, "warning: cost is disabled; set -price-in, -price-cached, and -price-out together")
+		_, _ = fmt.Fprintln(stderr, "warning: cost is disabled; set -price-in, -price-cached, and -price-out together")
 	}
 
 	document := report{Started: time.Now().UTC()}
@@ -118,14 +118,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		for _, task := range selected {
 			result, taskErr := runTask(context.Background(), task, cfg)
 			if taskErr != nil {
-				fmt.Fprintf(stderr, "error: %s: %v\n", task.Name, taskErr)
+				_, _ = fmt.Fprintf(stderr, "error: %s: %v\n", task.Name, taskErr)
 				return 1
 			}
 			run.Tasks = append(run.Tasks, result)
 			if len(selectedModels) > 1 {
-				fmt.Fprintf(stderr, "%s %s: %s\n", modelName, result.Name, result.Status)
+				_, _ = fmt.Fprintf(stderr, "%s %s: %s\n", modelName, result.Name, result.Status)
 			} else {
-				fmt.Fprintf(stderr, "%s: %s\n", result.Name, result.Status)
+				_, _ = fmt.Fprintf(stderr, "%s: %s\n", result.Name, result.Status)
 			}
 		}
 		run.Total = buildTotal(run.Tasks, prices)
@@ -144,12 +144,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *outPath != "" {
 		data, err := json.MarshalIndent(document, "", "  ")
 		if err != nil {
-			fmt.Fprintf(stderr, "error: encode report: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: encode report: %v\n", err)
 			return 1
 		}
 		data = append(data, '\n')
 		if err := os.WriteFile(*outPath, data, 0o644); err != nil {
-			fmt.Fprintf(stderr, "error: write report: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: write report: %v\n", err)
 			return 1
 		}
 	}

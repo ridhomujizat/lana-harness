@@ -141,10 +141,10 @@ func runTask(ctx context.Context, task evalTask, cfg runConfig) (result taskResu
 	}
 	if cfg.keep {
 		if cfg.stderr != nil {
-			fmt.Fprintf(cfg.stderr, "%s: keeping home %s\n", task.Name, home)
+			_, _ = fmt.Fprintf(cfg.stderr, "%s: keeping home %s\n", task.Name, home)
 		}
 	} else {
-		defer os.RemoveAll(home)
+		defer func() { _ = os.RemoveAll(home) }()
 	}
 
 	workspace, err := os.MkdirTemp("", "lana-eval-workspace-*")
@@ -153,10 +153,10 @@ func runTask(ctx context.Context, task evalTask, cfg runConfig) (result taskResu
 	}
 	if cfg.keep {
 		if cfg.stderr != nil {
-			fmt.Fprintf(cfg.stderr, "%s: keeping workspace %s\n", task.Name, workspace)
+			_, _ = fmt.Fprintf(cfg.stderr, "%s: keeping workspace %s\n", task.Name, workspace)
 		}
 	} else {
-		defer os.RemoveAll(workspace)
+		defer func() { _ = os.RemoveAll(workspace) }()
 	}
 
 	prompt, setup, check := task.Prompt, task.Setup, task.Check
@@ -199,7 +199,7 @@ func runTask(ctx context.Context, task evalTask, cfg runConfig) (result taskResu
 	defer func() {
 		if closeErr := rt.Close(); closeErr != nil {
 			if cfg.stderr != nil {
-				fmt.Fprintf(cfg.stderr, "%s: close runtime: %v\n", task.Name, closeErr)
+				_, _ = fmt.Fprintf(cfg.stderr, "%s: close runtime: %v\n", task.Name, closeErr)
 			}
 			if err == nil {
 				result.Status = statusError
@@ -431,7 +431,7 @@ func freePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	address, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
 		return 0, fmt.Errorf("unexpected listener address %T", listener.Addr())

@@ -295,8 +295,8 @@ func (g *loopGuard) observeResult(call core.ToolCall, key string, out core.ToolO
 	// REQ-LPG-002: the same-arguments failure count. The new detectors only
 	// track results that carry a digest, that is, results produced by the tool
 	// pipeline.
-	switch {
-	case out.Status == core.ToolStatusError:
+	switch out.Status {
+	case core.ToolStatusError:
 		if out.Digest != "" {
 			g.bumpFail(key)
 			if g.failBySig[key] == loopGuardFailWarn {
@@ -304,7 +304,7 @@ func (g *loopGuard) observeResult(call core.ToolCall, key string, out core.ToolO
 				reminders = appendReminder(reminders, loopGuardSameArgsReminder(call.Name, g.failBySig[key]))
 			}
 		}
-	case out.Status == core.ToolStatusSuccess:
+	case core.ToolStatusSuccess:
 		// A success resets the count of its own signature (REQ-LPG-002).
 		delete(g.failBySig, key)
 	}

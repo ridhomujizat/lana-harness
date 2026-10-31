@@ -327,9 +327,9 @@ func printReports(out io.Writer, runs []modelReport, previous *report, showCost 
 	for i, run := range runs {
 		if len(runs) > 1 {
 			if i > 0 {
-				fmt.Fprintln(out)
+				_, _ = fmt.Fprintln(out)
 			}
-			fmt.Fprintf(out, "model: %s\n", run.Model)
+			_, _ = fmt.Fprintf(out, "model: %s\n", run.Model)
 		}
 		printTable(out, run.Tasks, run.Total, previousForModel(previous, run.Model), showCost)
 	}
@@ -353,13 +353,13 @@ func printTable(out io.Writer, tasks []taskResult, total taskResult, previous *r
 	header = append(header, "END")
 
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, strings.Join(header, "\t"))
+	_, _ = fmt.Fprintln(w, strings.Join(header, "\t"))
 	for _, task := range tasks {
 		prev, has := previousTasks[task.Name]
-		fmt.Fprintln(w, tableRow(task, prev, has, showCost))
+		_, _ = fmt.Fprintln(w, tableRow(task, prev, has, showCost))
 	}
 	prev, has := previousTasks[total.Name]
-	fmt.Fprintln(w, tableRow(total, prev, has, showCost))
+	_, _ = fmt.Fprintln(w, tableRow(total, prev, has, showCost))
 	if err := w.Flush(); err != nil {
 		return
 	}
