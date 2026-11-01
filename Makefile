@@ -6,9 +6,9 @@ LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)$(DIRTY) -X main.b
 GO ?= go
 DIST ?= dist
 PREFIX ?= $(HOME)/.local
-PLATFORMS := "darwin arm64" "linux amd64" "linux arm64"
+PLATFORMS := "darwin arm64" "darwin amd64" "linux amd64" "linux arm64"
 
-.PHONY: build install release clean web web-check tag
+.PHONY: build install release checksums clean web web-check tag
 
 # build writes ./lana for daily use, with the version, commit, and build date.
 build:
@@ -54,6 +54,11 @@ release: web
 		printf '%-32s %s bytes\n' "$$out" "$$size"; \
 		if [ "$$size" -gt 41943040 ]; then echo "note: $$out exceeds 40 MB target"; fi; \
 	done
+
+# checksums writes dist/SHA256SUMS for the release binaries (install.sh checks it).
+checksums:
+	cd $(DIST) && (command -v sha256sum >/dev/null && sha256sum lana-* || shasum -a 256 lana-*) > SHA256SUMS
+	@cat $(DIST)/SHA256SUMS
 
 clean:
 	rm -rf $(DIST)

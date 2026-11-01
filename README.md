@@ -12,6 +12,7 @@ beta (`0.x.y-beta.N`): config keys, events, and tools may still change between b
 
 - macOS (Apple silicon or Intel) or Linux.
 - An API key for an OpenAI-compatible provider: DeepSeek, OpenAI, or OpenRouter.
+- For the prebuilt binary: `curl` or the `gh` CLI, and GitHub access to the repository.
 - To build from source, one of:
   - [Nix](https://nixos.org/download) with flakes. The dev shell in `flake.nix` provides Go,
     Node.js 22, SQLite, and make. This is the supported path.
@@ -22,40 +23,63 @@ No C compiler is needed: lana builds with `CGO_ENABLED=0`.
 
 ## Install
 
-### 1. Get the source
+### Option A: prebuilt binary (recommended)
+
+The repository is private, so the installer needs GitHub access: log in once with
+`gh auth login`, or export a `GITHUB_TOKEN` that can read the repository.
 
 ```sh
-git clone https://github.com/ridhomujizat/lana-harness.git
-cd lana-harness
-git checkout v0.1.0-beta.1   # or stay on development for the latest beta work
+gh api -H 'Accept: application/vnd.github.raw' \
+  'repos/ridhomujizat/lana-harness/contents/install.sh?ref=development' | bash
 ```
 
-### 2. Build and install
-
-With Nix:
+The script picks the binary for your OS and CPU (macOS arm64/amd64, Linux amd64/arm64) from the
+newest GitHub Release (betas included), checks it against `SHA256SUMS`, and installs it to
+`~/.local/bin/lana`. Options:
 
 ```sh
-nix develop -c make install
+LANA_VERSION=v0.1.0-beta.1 bash install.sh      # a specific version
+LANA_INSTALL_DIR=/usr/local/bin bash install.sh # another folder
+LANA_FROM_DIR=dist bash install.sh              # binaries from a local `make release checksums`
 ```
 
-Without Nix (Go 1.25+ on your PATH):
+Run the same command again to upgrade. Releases are published by
+`.github/workflows/release.yml` when a `v*` tag is pushed.
 
-```sh
-CGO_ENABLED=0 make install
-```
+### Option B: build from source
+
+1. Get the source:
+
+   ```sh
+   git clone https://github.com/ridhomujizat/lana-harness.git
+   cd lana-harness
+   git checkout v0.1.0-beta.1   # or stay on development for the latest beta work
+   ```
+
+2. Build and install. With Nix:
+
+   ```sh
+   nix develop -c make install
+   ```
+
+   Without Nix (Go 1.25+ on your PATH):
+
+   ```sh
+   CGO_ENABLED=0 make install
+   ```
 
 `make install` builds `./lana` with the version, commit, and build date, then copies it to
-`~/.local/bin/lana`. Use `make install PREFIX=/usr/local` to install somewhere else. Make sure
-the `bin` folder is on your `PATH`:
+`~/.local/bin/lana`. Use `make install PREFIX=/usr/local` to install somewhere else.
+`make build` alone writes `./lana` in the repo without installing it. `make release checksums`
+builds the release binaries and `SHA256SUMS` into `dist/`.
+
+### Put lana on your PATH
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc   # then open a new terminal
 lana --version
 # lana 0.1.0-beta.1 (61af960, 2026-11-01T17:36:08Z)
 ```
-
-`make build` alone writes `./lana` in the repo without installing it. `make release` builds
-binaries for macOS arm64, Linux amd64, and Linux arm64 into `dist/`.
 
 ### 3. Create the config
 
@@ -149,6 +173,8 @@ See [spec 30](docs/specs/30-knowledge/requirements.md) and
 [spec 31](docs/specs/31-knowledge-upkeep/requirements.md) for the details.
 
 ## Upgrade
+
+With the prebuilt binary, run the install command again. From source:
 
 ```sh
 cd lana-harness

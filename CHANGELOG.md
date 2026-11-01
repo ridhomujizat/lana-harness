@@ -7,11 +7,6 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
-### Added
-
-- `README.md` with install, daemon, knowledge, upgrade, and uninstall steps.
-- `make install` copies the built binary to `~/.local/bin` (`PREFIX` to change it).
-
 ## [0.1.0-beta.1] - 2026-11-02
 
 First tagged build, for daily use.
@@ -40,7 +35,12 @@ First tagged build, for daily use.
   turn's context (spec 30).
 - Knowledge upkeep: a journal pass after compaction, an `inbox/` folder, Telegram `/save`,
   nightly consolidation with a lint report, and a web Knowledge page (spec 31).
-- `lana --version` shows the version, commit, and build date; `make build` and `make tag`.
+- `lana --version` shows the version, commit, and build date; `make build`, `make install`,
+  `make tag`, and `make release checksums`.
+- `install.sh` installs a prebuilt binary from GitHub Releases with checksum verification;
+  a release workflow publishes binaries for macOS (arm64, amd64) and Linux (amd64, arm64)
+  when a `v*` tag is pushed.
+- `README.md` with install, daemon, knowledge, upgrade, and uninstall steps.
 
 ### Upgrade notes
 
