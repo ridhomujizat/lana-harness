@@ -21,11 +21,16 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/browser"
+	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/web"
 )
 
 // shutdownGrace is how long the daemon waits for channels after a stop signal.
 const shutdownGrace = 10 * time.Second
+
+// logBufferSize is the number of WARN+ log records the daemon keeps in memory
+// for the dashboard (REQ-DSH-009).
+const logBufferSize = 500
 
 // openBrowser opens the sign-in link on start (REQ-WLG-001). It is a variable
 // so tests can replace it and never start a real browser.
@@ -45,25 +50,34 @@ func cmdDaemon(args []string) int {
 	case "error":
 		level = slog.LevelError
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	// The buffer keeps the newest WARN+ records in memory for the dashboard
+	// while the text handler still writes every record to stderr (REQ-DSH-009).
+	logBuffer := logring.New(logBufferSize)
+	slog.SetDefault(slog.New(logring.Handler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}), logBuffer)))
 	// The first SIGTERM/SIGINT starts a stop drain; the next forces it
 	// (REQ-TFB-002).
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
-	return runDaemonSignals(context.Background(), os.Stderr, signals)
+	return runDaemonWithLogs(context.Background(), os.Stderr, signals, logBuffer)
 }
 
 // runDaemon runs the daemon until ctx ends and returns the exit code
 // (API-DMN-001). A caller that cancels ctx stops the daemon at once; the
 // signal-driven drain lives in cmdDaemon (REQ-TFB-002).
 func runDaemon(ctx context.Context, stderr io.Writer) int {
-	return runDaemonSignals(ctx, stderr, nil)
+	return runDaemonWithLogs(ctx, stderr, nil, nil)
 }
 
-// runDaemonSignals runs the daemon. signals is the shutdown channel of
-// cmdDaemon; nil means the caller cancels ctx instead.
+// runDaemonSignals runs the daemon without a log buffer. signals is the
+// shutdown channel of cmdDaemon; nil means the caller cancels ctx instead.
 func runDaemonSignals(ctx context.Context, stderr io.Writer, signals <-chan os.Signal) int {
+	return runDaemonWithLogs(ctx, stderr, signals, nil)
+}
+
+// runDaemonWithLogs runs the daemon. logBuffer collects the daemon's WARN+
+// records for the dashboard; nil disables the daemon log section.
+func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.Signal, logBuffer *logring.Buffer) int {
 	errorf := func(code int, format string, args ...any) int {
 		_, _ = fmt.Fprintf(stderr, "error: "+format+"\n", args...)
 		return code
@@ -223,6 +237,7 @@ func runDaemonSignals(ctx context.Context, stderr io.Writer, signals <-chan os.S
 
 	if webServer != nil {
 		backend := newWebBackend(rt, home, leases, runCtx)
+		backend.SetLogBuffer(logBuffer)
 		backend.SetRestartController(restart)
 		backend.SetDrainController(drain)
 		webServer.SetBackend(backend)

@@ -65,6 +65,19 @@ type LeaseProbe interface {
 	LeaseHolder(ctx context.Context, id string) (pid int, held bool, err error)
 }
 
+// EventScanner is an optional SessionStore extension that reads events of the
+// given kinds, across all sessions, created at or after sinceMS, in created_at
+// order. It backs the monitoring dashboard scan (design.md §2, REQ-DSH-001).
+type EventScanner interface {
+	ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[ScannedEvent, error]
+}
+
+// ScannedEvent is one session_events row with the owning session's agent.
+type ScannedEvent struct {
+	SessionEvent
+	Agent string // sessions.agent
+}
+
 // LiveFrame is a transient (streamed) frame that is not written to the log.
 type LiveFrame struct {
 	SessionID string

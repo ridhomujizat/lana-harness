@@ -227,6 +227,9 @@ func (s *Server) SetBackend(backend Backend) {
 	if port, ok := backend.(JobBackend); ok {
 		s.jobBackend = port
 	}
+	if port, ok := backend.(DashboardBackend); ok {
+		s.dashboardBackend = port
+	}
 }
 
 // registerSessionRoutes registers the T-003 routes through Handle so the

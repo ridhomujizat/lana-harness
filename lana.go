@@ -122,6 +122,9 @@ var (
 	// ErrNothingToContinue refuses Continue when the last turn ended normally
 	// (API-TFB-003).
 	ErrNothingToContinue = errors.New("the last turn ended normally")
+	// ErrScanUnsupported is returned by ScanEvents when the session store does
+	// not implement core.EventScanner (design.md §2).
+	ErrScanUnsupported = errors.New("session store does not support event scanning")
 )
 
 // ProviderError is an alias for core.ProviderError.
@@ -1481,6 +1484,28 @@ func (rt *Runtime) ListAllSessions(ctx context.Context, filter core.SessionFilte
 		return nil, err
 	}
 	return rt.store.List(ctx, filter)
+}
+
+// ScanEvents reads events of the given kinds across all sessions, created at or
+// after sinceMS, in created_at order. It requires the store to implement
+// core.EventScanner and yields ErrScanUnsupported otherwise (design.md §2).
+func (rt *Runtime) ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error] {
+	return func(yield func(core.ScannedEvent, error) bool) {
+		if err := rt.closedError(); err != nil {
+			yield(core.ScannedEvent{}, err)
+			return
+		}
+		scanner, ok := rt.store.(core.EventScanner)
+		if !ok {
+			yield(core.ScannedEvent{}, ErrScanUnsupported)
+			return
+		}
+		for event, err := range scanner.ScanEvents(ctx, kinds, sinceMS) {
+			if !yield(event, err) {
+				return
+			}
+		}
+	}
 }
 
 // ForkSession copies the session up to the end of its last turn.

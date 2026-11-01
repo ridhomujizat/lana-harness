@@ -52,28 +52,29 @@ type Config struct {
 
 // Server serves the dashboard and the /v1 API from embedded assets.
 type Server struct {
-	cfg            Config
-	logger         *slog.Logger
-	handler        http.Handler
-	mux            *http.ServeMux
-	assets         fs.FS
-	index          []byte
-	credentials    *credentialStore
-	signInCodes    *signInCodeStore
-	resetCodes     *resetCodeStore
-	loginLock      *loginLock
-	sessions       *browserSessions
-	backend        Backend
-	configStore    ConfigStore
-	secretStore    SecretStore
-	agentFileStore AgentFileStore
-	skillStore     SkillStore
-	jobBackend     JobBackend
-	daemon         DaemonStore
-	telegramStatus func() TelegramStatus
-	telegramReset  TelegramResetSender
-	approvals      *Approvals
-	questions      *Questions
+	cfg              Config
+	logger           *slog.Logger
+	handler          http.Handler
+	mux              *http.ServeMux
+	assets           fs.FS
+	index            []byte
+	credentials      *credentialStore
+	signInCodes      *signInCodeStore
+	resetCodes       *resetCodeStore
+	loginLock        *loginLock
+	sessions         *browserSessions
+	backend          Backend
+	configStore      ConfigStore
+	secretStore      SecretStore
+	agentFileStore   AgentFileStore
+	skillStore       SkillStore
+	jobBackend       JobBackend
+	dashboardBackend DashboardBackend
+	daemon           DaemonStore
+	telegramStatus   func() TelegramStatus
+	telegramReset    TelegramResetSender
+	approvals        *Approvals
+	questions        *Questions
 
 	// localSecret authenticates the daemon-only local control endpoint of
 	// API-WLG-008 (lana web reset-login, REQ-WLG-006). It is empty until the
@@ -351,6 +352,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v1/auth/session", s.checkHost(s.requireSession(http.HandlerFunc(s.handleSession))))
 	s.mux.Handle("GET /v1/auth/sessions", s.authenticate(http.HandlerFunc(s.handleBrowserSessions)))
 	s.mux.Handle("POST /v1/auth/sessions/revoke-others", s.authenticate(http.HandlerFunc(s.handleRevokeOtherBrowsers)))
+	s.registerDashboardRoutes()
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, _ *http.Request) {

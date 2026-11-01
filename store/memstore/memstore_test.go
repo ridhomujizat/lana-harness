@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -19,6 +20,83 @@ func newSession(t *testing.T) (*Store, core.SessionInfo) {
 		t.Fatal(err)
 	}
 	return s, info
+}
+
+// TestMemstoreScanEventsCoversCoreEventScanner mirrors the SQLite scan: kind
+// filtering, the sinceMS bound, the agent, and the reduced tool/result payload
+// (design.md §2).
+func TestMemstoreScanEventsCoversCoreEventScanner(t *testing.T) {
+	s := New()
+	first, err := s.Create(context.Background(), core.NewSession{Agent: "alice", Channel: "library", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Create(context.Background(), core.NewSession{Agent: "bob", Channel: "library", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	longOutput := strings.Repeat("x", 500) + `"quoted"`
+	if _, err := s.Append(context.Background(), first.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t1", Payload: core.TurnStart{V: 1, TurnID: "t1"}},
+		{Kind: core.KindToolCall, TurnID: "t1", Payload: core.ToolCallPayload{V: 1, CallID: "c1", Name: "read_file"}},
+		{Kind: core.KindToolResult, TurnID: "t1", Payload: core.ToolResultPayload{V: 1, CallID: "c1", Status: core.ToolStatusError, Output: longOutput}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(context.Background(), second.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := []string{core.KindTurnStart, core.KindToolCall, core.KindToolResult}
+	var got []core.ScannedEvent
+	for event, err := range s.ScanEvents(context.Background(), kinds, 0) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, event)
+	}
+	if len(got) != 4 {
+		t.Fatalf("scanned %d events, want 4: %+v", len(got), got)
+	}
+	agents := map[string]string{}
+	var result core.ScannedEvent
+	for _, event := range got {
+		agents[event.SessionID] = event.Agent
+		if event.Kind == core.KindToolResult {
+			result = event
+		}
+	}
+	if agents[first.ID] != "alice" || agents[second.ID] != "bob" {
+		t.Fatalf("agents = %+v", agents)
+	}
+
+	var reduced struct {
+		CallID string `json:"call_id"`
+		Status string `json:"status"`
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(result.Payload, &reduced); err != nil {
+		t.Fatalf("reduced payload %q: %v", result.Payload, err)
+	}
+	if reduced.CallID != "c1" || reduced.Status != "error" {
+		t.Fatalf("reduced = %+v", reduced)
+	}
+	if len([]rune(reduced.Output)) > 300 {
+		t.Fatalf("reduced output = %d runes, want <= 300", len([]rune(reduced.Output)))
+	}
+
+	count := 0
+	for _, err := range s.ScanEvents(context.Background(), nil, 0) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+	}
+	if count != 0 {
+		t.Fatalf("empty kinds scanned %d events", count)
+	}
 }
 
 func TestMemstoreSeq(t *testing.T) {

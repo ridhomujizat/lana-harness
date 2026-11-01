@@ -452,6 +452,59 @@ func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) ite
 	}
 }
 
+// ScanEvents implements core.EventScanner. It reads events of the given kinds
+// across every session, created at or after sinceMS, in (created_at,
+// session_id, seq) order. A tool/result payload is reduced to call_id, status,
+// and the first 300 characters of the output, so a large tool output is never
+// loaded (design.md §2, REQ-DSH-001).
+func (s *Store) ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error] {
+	return func(yield func(core.ScannedEvent, error) bool) {
+		if err := s.assertOpen(); err != nil {
+			yield(core.ScannedEvent{}, err)
+			return
+		}
+		if len(kinds) == 0 {
+			return
+		}
+		placeholders := make([]string, len(kinds))
+		args := make([]any, 0, len(kinds)+1)
+		for i, kind := range kinds {
+			placeholders[i] = "?"
+			args = append(args, kind)
+		}
+		args = append(args, sinceMS)
+		query := "SELECT e.session_id, e.seq, e.kind," +
+			" CASE WHEN e.kind = '" + core.KindToolResult + "'" +
+			" THEN json_object('call_id', json_extract(e.payload, '$.call_id'), 'status', json_extract(e.payload, '$.status'), 'output', substr(json_extract(e.payload, '$.output'), 1, 300))" +
+			" ELSE e.payload END," +
+			" COALESCE(e.turn_id, ''), e.created_at, s.agent" +
+			" FROM session_events e JOIN sessions s ON s.id = e.session_id" +
+			" WHERE e.kind IN (" + strings.Join(placeholders, ", ") + ") AND e.created_at >= ?" +
+			" ORDER BY e.created_at, e.session_id, e.seq"
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			yield(core.ScannedEvent{}, err)
+			return
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var event core.ScannedEvent
+			var payload string
+			if err := rows.Scan(&event.SessionID, &event.Seq, &event.Kind, &payload, &event.TurnID, &event.CreatedAt, &event.Agent); err != nil {
+				yield(core.ScannedEvent{}, err)
+				return
+			}
+			event.Payload = json.RawMessage(payload)
+			if !yield(event, nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(core.ScannedEvent{}, err)
+		}
+	}
+}
+
 func (s *Store) loadEvents(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	var out []core.SessionEvent
 	for event, err := range s.Events(ctx, sessionID, 1) {
@@ -879,4 +932,5 @@ func (s *Store) RebuildProjections(ctx context.Context) error {
 
 var _ core.SessionStore = (*Store)(nil)
 var _ core.LeaseProbe = (*Store)(nil)
+var _ core.EventScanner = (*Store)(nil)
 var _ = strings.TrimSpace

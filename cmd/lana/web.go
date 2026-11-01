@@ -28,6 +28,8 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
+	"github.com/ridhomujizat/lana-harness/internal/logring"
+	"github.com/ridhomujizat/lana-harness/internal/stats"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/providers/openai"
 	"github.com/ridhomujizat/lana-harness/tools/permission"
@@ -58,6 +60,9 @@ type webBackend struct {
 	restart *restartController
 	// drain waits for running turns before a restart (REQ-TFB-002).
 	drain *drainController
+	// logs holds the daemon's recent WARN+ records for the dashboard; nil means
+	// the daemon log section is empty (REQ-DSH-008, REQ-DSH-009).
+	logs *logring.Buffer
 
 	mu sync.Mutex
 	// root is the daemon root context. Turns run on it, never on a request
@@ -77,6 +82,7 @@ var _ web.MCPBackend = (*webBackend)(nil)
 var _ web.ToolCatalog = (*webBackend)(nil)
 var _ web.LiveConfigStore = (*webBackend)(nil)
 var _ web.JobBackend = (*webBackend)(nil)
+var _ web.DashboardBackend = (*webBackend)(nil)
 
 const (
 	// providerTestTimeout is the 15-second limit of API-WEB-019.
@@ -268,6 +274,89 @@ func (b *webBackend) SetRestartController(controller *restartController) {
 // (REQ-TFB-002, API-TFB-002).
 func (b *webBackend) SetDrainController(controller *drainController) {
 	b.drain = controller
+}
+
+// SetLogBuffer installs the daemon log buffer the dashboard reads
+// (REQ-DSH-008, REQ-DSH-009). A nil buffer leaves the daemon section empty.
+func (b *webBackend) SetLogBuffer(buffer *logring.Buffer) {
+	b.logs = buffer
+}
+
+// Dashboard implements web.DashboardBackend (API-DSH-001). It scans the session
+// events in the range, reads the daemon log buffer, folds both through
+// stats.Aggregate, and fills the live fields the pure aggregation cannot know
+// (REQ-DSH-002), including the configured agent names. A non-empty agent
+// narrows every section to that agent (REQ-DSH-011, API-DSH-001 r2).
+func (b *webBackend) Dashboard(ctx context.Context, rangeName, agent string) (stats.Dashboard, error) {
+	r, err := stats.ParseRange(rangeName, time.Now())
+	if err != nil {
+		return stats.Dashboard{}, err
+	}
+	events := make([]core.ScannedEvent, 0)
+	for event, scanErr := range b.rt.ScanEvents(ctx, stats.ScannedKinds, r.From) {
+		if scanErr != nil {
+			return stats.Dashboard{}, scanErr
+		}
+		events = append(events, event)
+	}
+	var logs []logring.Record
+	if b.logs != nil {
+		logs = b.logs.Since(r.From)
+	}
+	dashboard := stats.Aggregate(r, agent, events, logs)
+	// API-DSH-001 r2: agents lists every configured agent plus every other
+	// agent with scanned events, ignoring the filter, unique, and sorted. A
+	// configured agent with no data in the range is still listed, so merge the
+	// configured names that stats.Aggregate cannot know.
+	configured := b.rt.AgentNames()
+	seen := make(map[string]struct{}, len(dashboard.Agents)+len(configured))
+	agents := make([]string, 0, len(dashboard.Agents)+len(configured))
+	for _, names := range [][]string{dashboard.Agents, configured} {
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			agents = append(agents, name)
+		}
+	}
+	sort.Strings(agents)
+	dashboard.Agents = agents
+	dashboard.Range = rangeName
+	dashboard.Agent = agent
+	dashboard.DaemonStartedAt = b.startedAt.UnixMilli()
+	running, waiting, err := b.sessionStatusCounts(ctx, agent)
+	if err != nil {
+		return stats.Dashboard{}, err
+	}
+	dashboard.Now = stats.Now{SessionsRunning: running, SessionsWaitingInput: waiting}
+	return dashboard, nil
+}
+
+// sessionStatusCounts counts the sessions whose stored status is running or
+// waiting_input for the "Right now" block (REQ-DSH-002). A non-empty agent
+// counts only that agent's sessions (REQ-DSH-011).
+func (b *webBackend) sessionStatusCounts(ctx context.Context, agent string) (int64, int64, error) {
+	sessions, err := b.rt.ListAllSessions(ctx, core.SessionFilter{})
+	if err != nil {
+		return 0, 0, err
+	}
+	var running, waiting int64
+	for _, session := range sessions {
+		if agent != "" && session.Agent != agent {
+			continue
+		}
+		switch session.Status {
+		case web.SessionStatusRunning:
+			running++
+		case web.SessionStatusWaitingInput:
+			waiting++
+		}
+	}
+	return running, waiting, nil
 }
 
 // DaemonInfo implements web.DaemonStore (API-WEB-022).

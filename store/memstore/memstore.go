@@ -204,6 +204,90 @@ func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) ite
 	}
 }
 
+// ScanEvents implements core.EventScanner by iterating every session's events.
+// It mirrors the SQLite scan: the given kinds, created at or after sinceMS, in
+// (created_at, session_id, seq) order, with a reduced tool/result payload so a
+// large tool output is not carried (design.md §2, REQ-DSH-001).
+func (s *Store) ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error] {
+	return func(yield func(core.ScannedEvent, error) bool) {
+		if err := ctx.Err(); err != nil {
+			yield(core.ScannedEvent{}, err)
+			return
+		}
+		if len(kinds) == 0 {
+			return
+		}
+		want := make(map[string]bool, len(kinds))
+		for _, kind := range kinds {
+			want[kind] = true
+		}
+		s.mu.Lock()
+		var out []core.ScannedEvent
+		for _, sess := range s.sessions {
+			for _, event := range sess.events {
+				if !want[event.Kind] || event.CreatedAt < sinceMS {
+					continue
+				}
+				scanned := core.ScannedEvent{SessionEvent: event, Agent: sess.info.Agent}
+				if event.Kind == core.KindToolResult {
+					scanned.Payload = reducedToolResult(event.Payload)
+				}
+				out = append(out, scanned)
+			}
+		}
+		s.mu.Unlock()
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].CreatedAt != out[j].CreatedAt {
+				return out[i].CreatedAt < out[j].CreatedAt
+			}
+			if out[i].SessionID != out[j].SessionID {
+				return out[i].SessionID < out[j].SessionID
+			}
+			return out[i].Seq < out[j].Seq
+		})
+		for _, event := range out {
+			if err := ctx.Err(); err != nil {
+				yield(core.ScannedEvent{}, err)
+				return
+			}
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
+}
+
+// reducedToolResult keeps call_id, status, and the first 300 characters of the
+// output of a tool/result payload, matching the SQLite json_object reduction.
+func reducedToolResult(raw json.RawMessage) json.RawMessage {
+	var payload core.ToolResultPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return raw
+	}
+	reduced, err := json.Marshal(struct {
+		CallID string          `json:"call_id"`
+		Status core.ToolStatus `json:"status"`
+		Output string          `json:"output"`
+	}{
+		CallID: payload.CallID,
+		Status: payload.Status,
+		Output: cutRunes(payload.Output, 300),
+	})
+	if err != nil {
+		return raw
+	}
+	return reduced
+}
+
+// cutRunes keeps at most n leading characters of s.
+func cutRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
+}
+
 // ChainEvents returns the parent chain truncated at inherited_seq, followed by the session's events.
 func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	info, err := s.Info(ctx, sessionID)
@@ -312,3 +396,4 @@ func (s *Store) TryLease(ctx context.Context, sessionID string) (func() error, e
 func (s *Store) Close() error { return nil }
 
 var _ core.SessionStore = (*Store)(nil)
+var _ core.EventScanner = (*Store)(nil)
