@@ -1569,6 +1569,28 @@ func (rt *Runtime) SetRoomRead(ctx context.Context, room string, at int64) (int6
 	return reads.SetRoomRead(ctx, room, at)
 }
 
+// AppendRuntimeNote writes a hidden runtime user message to the session log.
+// The note is not an owner message: display surfaces hide it (REQ-MEM-021) and
+// a turn that starts afterwards reads it as context (API-ROOM-003,
+// REQ-ROOM-008).
+func (rt *Runtime) AppendRuntimeNote(ctx context.Context, sessionID, note string) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(note) == "" {
+		return nil
+	}
+	_, err := rt.store.Append(ctx, sessionID, []core.EventDraft{{
+		Kind: core.KindUserMessage,
+		Payload: core.UserMessage{
+			V:       core.PayloadVersion,
+			Content: []core.ContentBlock{{Kind: core.BlockText, Text: note}},
+			Runtime: true,
+		},
+	}})
+	return err
+}
+
 // ForkSession copies the session up to the end of its last turn.
 func (rt *Runtime) ForkSession(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {

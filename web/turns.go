@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -34,18 +35,40 @@ type cancelTurnResponse struct {
 	Turn string `json:"turn"`
 }
 
+// messageBody is the JSON body of a chat message (API-WEB-007, API-ROOM-003).
+type messageBody struct {
+	Text        *string  `json:"text"`
+	Attachments []string `json:"attachments"`
+}
+
+// noteSender is an optional Backend extension. A room send uses it to start a
+// turn that carries a hidden runtime note the agent reads before the owner
+// message (API-ROOM-003, REQ-ROOM-008).
+type noteSender interface {
+	SendNote(ctx context.Context, id, text string, attachments []string, note string) (SendResult, error)
+}
+
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	backend := s.backendOrError(w)
 	if backend == nil {
 		return
 	}
-	var body struct {
-		Text        *string  `json:"text"`
-		Attachments []string `json:"attachments"`
-	}
+	var body messageBody
 	if !decodeJSONObject(w, r, maxMessageBody, &body) {
 		return
 	}
+	result, ok := s.sendSessionMessage(w, r, backend, r.PathValue("id"), body, "")
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, sendMessageResponse(result))
+}
+
+// sendSessionMessage validates a message body and starts a turn on the session.
+// A non-empty note is delivered as a hidden runtime note before the owner
+// message (API-ROOM-003, REQ-ROOM-008). It writes the failure response and
+// returns ok=false on error.
+func (s *Server) sendSessionMessage(w http.ResponseWriter, r *http.Request, backend Backend, id string, body messageBody, note string) (SendResult, bool) {
 	text := ""
 	if body.Text != nil {
 		text = *body.Text
@@ -53,46 +76,57 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 	attachments := body.Attachments
 	if len(attachments) > attach.MaxFiles {
 		writeAPIError(w, http.StatusBadRequest, "too_many_files", fmt.Sprintf("a message may carry at most %d files", attach.MaxFiles))
-		return
+		return SendResult{}, false
 	}
 	// API-ATT-002: the text may be empty or absent when attachments are present.
 	if len(attachments) == 0 {
 		if body.Text == nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "text is required")
-			return
+			return SendResult{}, false
 		}
 		if strings.TrimSpace(text) == "" {
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "text must not be empty")
-			return
+			return SendResult{}, false
 		}
 	}
 	if utf8.RuneCountInString(text) > maxMessageChars {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "text must be at most 32000 characters")
-		return
+		return SendResult{}, false
 	}
-	id := r.PathValue("id")
 	for _, rel := range attachments {
 		// API-ATT-002: every path must be a file under the session workspace
 		// attachments/ directory; the error names the path.
 		if rel == "" {
 			writeAPIError(w, http.StatusBadRequest, "invalid_attachment", "attachment path is empty")
-			return
+			return SendResult{}, false
 		}
 		if _, err := backend.AttachmentPath(r.Context(), id, rel); err != nil {
 			if errors.Is(err, ErrSessionNotFound) {
 				s.writeBackendError(w, "send message", err)
-				return
+				return SendResult{}, false
 			}
 			writeAPIError(w, http.StatusBadRequest, "invalid_attachment", fmt.Sprintf("attachment path %q is not valid", rel))
-			return
+			return SendResult{}, false
 		}
 	}
-	result, err := backend.Send(r.Context(), id, text, attachments)
+	result, err := startMessageTurn(r.Context(), backend, id, text, attachments, note)
 	if err != nil {
 		s.writeBackendError(w, "send message", err)
-		return
+		return SendResult{}, false
 	}
-	writeJSON(w, http.StatusAccepted, sendMessageResponse(result))
+	return result, true
+}
+
+// startMessageTurn starts a turn on the session. A non-empty note is delivered
+// as a hidden runtime note when the backend supports notes; otherwise the note
+// is dropped and the plain owner message starts (API-ROOM-003, REQ-ROOM-008).
+func startMessageTurn(ctx context.Context, backend Backend, id, text string, attachments []string, note string) (SendResult, error) {
+	if note != "" {
+		if sender, ok := backend.(noteSender); ok {
+			return sender.SendNote(ctx, id, text, attachments, note)
+		}
+	}
+	return backend.Send(ctx, id, text, attachments)
 }
 
 func (s *Server) handleCancelTurn(w http.ResponseWriter, r *http.Request) {

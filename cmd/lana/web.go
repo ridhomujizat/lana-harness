@@ -1171,6 +1171,22 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 	return web.SendResult{Turn: "started", TurnID: turnID}, nil
 }
 
+// SendNote implements the optional web.noteSender extension: it writes a hidden
+// runtime note to the session log and then starts the turn, so the agent reads
+// the note before the owner message (API-ROOM-003, REQ-ROOM-008).
+func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments []string, note string) (web.SendResult, error) {
+	if strings.TrimSpace(note) != "" {
+		info, err := b.resolveSession(ctx, id)
+		if err != nil {
+			return web.SendResult{}, err
+		}
+		if err := b.rt.AppendRuntimeNote(ctx, info.ID, note); err != nil {
+			return web.SendResult{}, turnError(err)
+		}
+	}
+	return b.Send(ctx, id, text, attachments)
+}
+
 // SaveAttachment stores one uploaded file in the session workspace
 // (API-ATT-001, REQ-ATT-001).
 func (b *webBackend) SaveAttachment(ctx context.Context, id, name string, r io.Reader) (attach.Info, error) {

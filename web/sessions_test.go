@@ -44,6 +44,12 @@ type fakeWebBackend struct {
 
 	// sentAttachments records the paths of the last Send per session.
 	sentAttachments map[string][]string
+	// sentText records every text accepted by Send per session (REQ-ROOM-003).
+	sentText map[string][]string
+	// sentNotes records the last runtime note per session (REQ-ROOM-008).
+	sentNotes map[string]string
+	// roomReads holds the room read marks (REQ-ROOM-005).
+	roomReads map[string]int64
 	// savedAttachments records every file accepted by SaveAttachment.
 	savedAttachments []attach.Info
 	// attachmentPaths maps a workspace-relative attachments/ path to a file on
@@ -68,6 +74,9 @@ func newFakeWebBackend() *fakeWebBackend {
 		inbox:           map[string][]string{},
 		continueErr:     map[string]error{},
 		sentAttachments: map[string][]string{},
+		sentText:        map[string][]string{},
+		sentNotes:       map[string]string{},
+		roomReads:       map[string]int64{},
 		attachmentPaths: map[string]string{},
 		attachmentErr:   map[string]error{},
 		frames:          core.NewObserve[core.LiveFrame](),
@@ -304,12 +313,22 @@ func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string, attachm
 		return SendResult{}, err
 	}
 	f.sentAttachments[sessionID] = append([]string(nil), attachments...)
+	f.sentText[sessionID] = append(f.sentText[sessionID], text)
 	if f.turnActive[sessionID] {
 		f.inbox[sessionID] = append(f.inbox[sessionID], text)
 		return SendResult{Turn: "queued"}, nil
 	}
 	f.turnActive[sessionID] = true
 	return SendResult{Turn: "started", TurnID: "turn-fake"}, nil
+}
+
+// SendNote implements the optional noteSender extension (API-ROOM-003,
+// REQ-ROOM-008): it records the runtime note and then sends the message.
+func (f *fakeWebBackend) SendNote(ctx context.Context, sessionID, text string, attachments []string, note string) (SendResult, error) {
+	f.mu.Lock()
+	f.sentNotes[sessionID] = note
+	f.mu.Unlock()
+	return f.Send(ctx, sessionID, text, attachments)
 }
 
 // SaveAttachment records the uploaded bytes and returns an Info with a fixed
@@ -584,22 +603,85 @@ func (f *fakeWebBackend) Holder(_ context.Context, sessionID string) (Holder, er
 	return Holder{State: HolderNone}, nil
 }
 
-// ListAgentSessions is a stub that satisfies web.Backend (REQ-ROOM-002).
-func (f *fakeWebBackend) ListAgentSessions(context.Context, core.SessionFilter) ([]core.SessionInfo, error) {
-	return nil, nil
+// ListAgentSessions follows the same filter, sort, and limit rules as the store
+// adapter, backing a room's segments and its newest session (REQ-ROOM-002).
+func (f *fakeWebBackend) ListAgentSessions(_ context.Context, filter core.SessionFilter) ([]core.SessionInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]core.SessionInfo, 0, len(f.sessions))
+	for _, info := range f.sessions {
+		if filter.Agent != "" && info.Agent != filter.Agent {
+			continue
+		}
+		if filter.Channel != "" && info.Channel != filter.Channel {
+			continue
+		}
+		if filter.Address != "" && info.Address != filter.Address {
+			continue
+		}
+		if filter.TopLevelOnly && info.ParentSessionID != "" {
+			continue
+		}
+		if filter.Before > 0 && info.CreatedAt >= filter.Before {
+			continue
+		}
+		out = append(out, info)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].UpdatedAt != out[j].UpdatedAt {
+			return out[i].UpdatedAt > out[j].UpdatedAt
+		}
+		return out[i].ID > out[j].ID
+	})
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
 }
 
-// CountAgentEvents is a stub that satisfies web.Backend (REQ-ROOM-002,
-// REQ-ROOM-005).
-func (f *fakeWebBackend) CountAgentEvents(context.Context, string, []string, int64, bool) (int64, error) {
-	return 0, nil
+// CountAgentEvents mirrors the store query: events of the kinds in the agent's
+// sessions created after sinceMS (REQ-ROOM-002, REQ-ROOM-005).
+func (f *fakeWebBackend) CountAgentEvents(_ context.Context, agent string, kinds []string, sinceMS int64, topLevelOnly bool) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	wanted := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		wanted[kind] = true
+	}
+	var count int64
+	for _, info := range f.sessions {
+		if info.Agent != agent {
+			continue
+		}
+		if topLevelOnly && info.ParentSessionID != "" {
+			continue
+		}
+		for _, event := range f.events[info.ID] {
+			if wanted[event.Kind] && event.CreatedAt > sinceMS {
+				count++
+			}
+		}
+	}
+	return count, nil
 }
 
-// RoomReadAt is a stub that satisfies web.Backend (REQ-ROOM-005).
-func (f *fakeWebBackend) RoomReadAt(context.Context, string) (int64, error) { return 0, nil }
+// RoomReadAt implements web.Backend (REQ-ROOM-005).
+func (f *fakeWebBackend) RoomReadAt(_ context.Context, room string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.roomReads[room], nil
+}
 
-// SetRoomRead is a stub that satisfies web.Backend (REQ-ROOM-005).
-func (f *fakeWebBackend) SetRoomRead(context.Context, string, int64) (int64, error) { return 0, nil }
+// SetRoomRead implements web.Backend; the read time only moves forward
+// (REQ-ROOM-005).
+func (f *fakeWebBackend) SetRoomRead(_ context.Context, room string, at int64) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if current, ok := f.roomReads[room]; !ok || at > current {
+		f.roomReads[room] = at
+	}
+	return f.roomReads[room], nil
+}
 
 // ScanEvents is a stub that satisfies web.Backend (API-DSH-001).
 func (f *fakeWebBackend) ScanEvents(context.Context, []string, int64) iter.Seq2[core.ScannedEvent, error] {

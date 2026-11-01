@@ -76,6 +76,11 @@ type Server struct {
 	telegramReset    TelegramResetSender
 	approvals        *Approvals
 	questions        *Questions
+	// roomHub pushes changed room rows to the room streams (REQ-ROOM-007).
+	roomHub *roomHub
+	// roomLocks guards "find or create the current web session" per room
+	// (API-ROOM-003).
+	roomLocks sync.Map
 
 	// localSecret authenticates the daemon-only local control endpoint of
 	// API-WLG-008 (lana web reset-login, REQ-WLG-006). It is empty until the
@@ -141,6 +146,7 @@ func New(cfg Config) (*Server, error) {
 	s.signInCodes = newSignInCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
 	s.loginLock = newLoginLock(s.nowTime)
+	s.roomHub = newRoomHub(s)
 	if cfg.Enabled {
 		sessions, err := loadBrowserSessions(cfg.Home, s.nowTime())
 		if err != nil {
@@ -156,6 +162,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.registerSessionRoutes()
+	s.registerRoomRoutes()
 	s.registerTurnRoutes()
 	s.registerStreamRoutes()
 	s.registerApprovalRoutes()
