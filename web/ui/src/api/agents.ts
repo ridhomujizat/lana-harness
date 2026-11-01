@@ -45,6 +45,8 @@ export interface ListAgentsResponse {
 export interface AgentWriteFields {
   provider?: string;
   model?: string;
+  title?: string;
+  color?: string;
   fallback?: string[];
   prompt_file?: string;
   workspace?: string;

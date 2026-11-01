@@ -41,6 +41,8 @@ export interface ConfigRules {
 export interface ConfigAgent {
   provider?: string;
   model?: string;
+  title?: string;
+  color?: string;
   fallback?: string[];
   prompt_file?: string;
   workspace?: string;

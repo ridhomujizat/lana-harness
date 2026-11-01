@@ -91,6 +91,14 @@ describe("route table", () => {
     expect(skill.params).toEqual({ scope: "global", name: "review" });
   });
 
+  /* REQ-ROOM-010: the Overview tab is the default for #/agents/{name}. */
+  it("defaults the agent profile to the overview tab", () => {
+    const agent = parseRoute("#/agents/dana");
+    expect(agent.view).toBe("agent");
+    expect(agent.params).toEqual({ name: "dana", tab: "overview" });
+    expect(AGENT_TABS[0]).toBe("overview");
+  });
+
   it("parses the sign-in code from the hash query", () => {
     const welcome = parseRoute("#/welcome?code=abc123");
     expect(welcome.view).toBe("welcome");

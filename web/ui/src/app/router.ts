@@ -4,6 +4,7 @@
 export const DEFAULT_ROUTE = "#/chats";
 
 export const AGENT_TABS = [
+  "overview",
   "general",
   "persona",
   "tools",
@@ -12,6 +13,10 @@ export const AGENT_TABS = [
   "rules",
   "workspace",
 ] as const;
+
+/* REQ-ROOM-010: the Overview tab is the first tab and the default when a name
+   is opened without a tab segment. */
+export const DEFAULT_AGENT_TAB = AGENT_TABS[0];
 export const SETTINGS_TABS = [
   "general",
   "providers",
@@ -77,6 +82,7 @@ export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/sessions/new", view: "new-session", section: "sessions" },
   { path: "#/sessions/{id}", view: "session", section: "sessions" },
   { path: "#/agents", view: "agents", section: "agents" },
+  { path: "#/agents/{name}", view: "agent", section: "agents" },
   {
     path: "#/agents/{name}/{tab}",
     view: "agent",
@@ -189,6 +195,9 @@ export function parseRoute(hash: string): Route {
   for (const entry of ROUTE_TABLE) {
     const params = matchRoute(parts, entry);
     if (params !== null) {
+      if (entry.view === "agent" && !params.tab) {
+        params.tab = DEFAULT_AGENT_TAB;
+      }
       return {
         view: entry.view,
         section: entry.section,

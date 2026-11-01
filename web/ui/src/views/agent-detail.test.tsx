@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 /* The network calls of the General tab are mocked so the model picker, the
    Thinking select, and the legacy banner can be observed (REQ-MDL-012,
@@ -129,7 +129,7 @@ function load(model: string): void {
   vi.mocked(getConfig).mockResolvedValue(configFor(model));
   vi.mocked(listProviders).mockResolvedValue(PROVIDERS);
   vi.mocked(getModels).mockResolvedValue(CATALOG);
-  render(<AgentDetailPage name="coder" />);
+  render(<AgentDetailPage name="coder" tab="general" />);
 }
 
 afterEach(() => {
@@ -222,5 +222,31 @@ describe("agent save notice", () => {
       })
     ).toBeTruthy();
     expect(screen.getByText("Changes saved.")).toBeTruthy();
+  });
+});
+
+/* REQ-ROOM-009: the General tab writes the title and the color (AC-ROOM-014). */
+describe("agent profile fields", () => {
+  it("sends the title and the color in the PUT", async () => {
+    load("deepseek-flash");
+
+    const title = (await screen.findByLabelText("Title")) as HTMLInputElement;
+    fireEvent.change(title, { target: { value: "Finance" } });
+    fireEvent.click(screen.getByRole("radio", { name: "success" }));
+    vi.mocked(updateAgent).mockResolvedValue({
+      name: "coder",
+      version: "v2",
+      restart_required: false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith(
+        "coder",
+        { title: "Finance", color: "success" },
+        "v1"
+      );
+    });
   });
 });
