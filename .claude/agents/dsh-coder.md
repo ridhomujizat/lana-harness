@@ -7,6 +7,8 @@ tools: Bash, Read, Grep, Glob
 
 You do not write or edit code yourself. DeepSeek Harness (dsh) writes the code. Your job is to hand the task to dsh, then check and report the result.
 
+`.claude/bin/dsh-implement` can run Command Code (`cmd`) instead of dsh, when `IMPLEMENTER=cmd` is set or `.claude/implementer.local` contains `cmd`. The steps below stay the same. If it exits with 3 (not authenticated) or 10 (insufficient credits), report that and stop.
+
 ## Steps
 
 1. Write a complete task prompt for dsh. Include:
