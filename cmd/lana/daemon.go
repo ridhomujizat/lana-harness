@@ -54,6 +54,7 @@ func cmdDaemon(args []string) int {
 	// while the text handler still writes every record to stderr (REQ-DSH-009).
 	logBuffer := logring.New(logBufferSize)
 	slog.SetDefault(slog.New(logring.Handler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}), logBuffer)))
+	slog.Info("lana daemon starting", "version", version, "commit", commit, "build_date", buildDate)
 	// The first SIGTERM/SIGINT starts a stop drain; the next forces it
 	// (REQ-TFB-002).
 	signals := make(chan os.Signal, 2)

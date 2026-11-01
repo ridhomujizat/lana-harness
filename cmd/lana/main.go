@@ -28,6 +28,27 @@ import (
 
 var version = "dev"
 
+// commit is the git commit the binary was built from; it is set at build time
+// via -X main.commit=....
+var commit = ""
+
+// buildDate is the time the binary was built; it is set at build time via
+// -X main.buildDate=....
+var buildDate = ""
+
+// versionString renders the version line. commit and buildDate are added only
+// when set, and buildDate never appears on its own.
+func versionString() string {
+	switch {
+	case commit != "" && buildDate != "":
+		return fmt.Sprintf("lana %s (%s, %s)", version, commit, buildDate)
+	case commit != "":
+		return fmt.Sprintf("lana %s (%s)", version, commit)
+	default:
+		return fmt.Sprintf("lana %s", version)
+	}
+}
+
 func main() {
 	setupTerminalLogging()
 	os.Exit(run(os.Args[1:]))
@@ -40,7 +61,7 @@ func run(args []string) int {
 	}
 	switch args[0] {
 	case "-V", "--version", "version":
-		fmt.Printf("lana %s\n", version)
+		fmt.Println(versionString())
 		return 0
 	case "-h", "--help", "help":
 		help()

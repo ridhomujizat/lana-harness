@@ -1,9 +1,26 @@
-VERSION ?= dev
+VERSION ?= $(shell cat VERSION 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
+DIRTY := $(shell git diff --quiet HEAD -- . ':!design' 2>/dev/null || echo -dirty)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)$(DIRTY) -X main.buildDate=$(BUILD_DATE)
 GO ?= go
 DIST ?= dist
 PLATFORMS := "darwin arm64" "linux amd64" "linux arm64"
 
-.PHONY: release clean web web-check
+.PHONY: build release clean web web-check tag
+
+# build writes ./lana for daily use, with the version, commit, and build date.
+build:
+	$(GO) build -trimpath -ldflags="$(LDFLAGS)" -o lana ./cmd/lana
+	@./lana --version
+
+# tag creates the annotated git tag v$(VERSION) for the current commit. It
+# refuses a dirty tree and a tag that already exists.
+tag:
+	@git diff --quiet HEAD -- . ':!design' || { echo "tag: commit your changes first" >&2; exit 1; }
+	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null && { echo "tag: v$(VERSION) exists; bump VERSION" >&2; exit 1; } || true
+	git tag -a "v$(VERSION)" -m "lana $(VERSION)"
+	@echo "tagged v$(VERSION)"
 
 web:
 	cd web/ui && npm ci && npm run build
@@ -25,7 +42,7 @@ release: web
 		set -- $$target; os=$$1; arch=$$2; \
 		out="$(DIST)/lana-$$os-$$arch"; \
 		echo "build $$out"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o "$$out" ./cmd/lana || exit 1; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags="-s -w $(LDFLAGS)" -o "$$out" ./cmd/lana || exit 1; \
 		size=$$(wc -c < "$$out" | tr -d ' '); \
 		printf '%-32s %s bytes\n' "$$out" "$$size"; \
 		if [ "$$size" -gt 41943040 ]; then echo "note: $$out exceeds 40 MB target"; fi; \
