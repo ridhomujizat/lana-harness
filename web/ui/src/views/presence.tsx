@@ -212,8 +212,12 @@ function indexRows(rows: RoomRow[]): Record<string, RoomRow> {
 }
 
 /* One shared stream for the whole app: it opens on the first subscriber and
-   closes when none remain. If the stream errors it falls back to a 10 s
-   listRooms() poll until the stream connects again (REQ-ROOM-007). */
+   closes when none remain. The first subscriber also loads the rows with
+   listRooms() at once, in parallel with the stream, so the list never waits on
+   the stream. If no `rooms` event arrives within 4 s (a slow server or a
+   browser that cannot read the streamed body) it falls back to a 10 s
+   listRooms() poll until a `rooms` event arrives; a stream error starts the
+   same poll at once (REQ-ROOM-007). */
 let roomsState: RoomsState = {
   rows: [],
   byName: {},
@@ -224,6 +228,11 @@ let roomsState: RoomsState = {
 const listeners = new Set<() => void>();
 let stream: { close: () => void } | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let slowTimer: ReturnType<typeof setTimeout> | null = null;
+let roomsEventSeen = false;
+
+const POLL_INTERVAL_MS = 10000;
+const SLOW_STREAM_MS = 4000;
 
 function emit(): void {
   for (const listener of listeners) {
@@ -252,7 +261,7 @@ function startPolling(): void {
   void poll();
   pollTimer = setInterval(() => {
     void poll();
-  }, 10000);
+  }, POLL_INTERVAL_MS);
 }
 
 function stopPolling(): void {
@@ -262,12 +271,24 @@ function stopPolling(): void {
   }
 }
 
+function clearSlowTimer(): void {
+  if (slowTimer !== null) {
+    clearTimeout(slowTimer);
+    slowTimer = null;
+  }
+}
+
 function ensureStream(): void {
   if (stream !== null) {
     return;
   }
+  roomsEventSeen = false;
   stream = openRoomsStream({
     onRooms(rows) {
+      /* The stream delivered. Stop the slow-stream fallback and update. */
+      roomsEventSeen = true;
+      clearSlowTimer();
+      stopPolling();
       setState({ rows, byName: indexRows(rows), loading: false });
     },
     onRoom(row) {
@@ -279,16 +300,25 @@ function ensureStream(): void {
     },
     onState(connected) {
       setState({ connected });
-      if (connected) {
-        stopPolling();
-      } else {
+      /* A stream error starts the fallback poll; only a `rooms` event stops it. */
+      if (!connected) {
         startPolling();
       }
     },
   });
+  /* The stream is open but may never deliver a `rooms` event. Fall back to the
+     10 s poll when nothing arrived within 4 s. */
+  slowTimer = setTimeout(() => {
+    slowTimer = null;
+    if (!roomsEventSeen) {
+      startPolling();
+    }
+  }, SLOW_STREAM_MS);
 }
 
 function releaseStream(): void {
+  clearSlowTimer();
+  roomsEventSeen = false;
   if (stream) {
     stream.close();
     stream = null;
@@ -302,6 +332,8 @@ function releaseStream(): void {
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
+    /* Load the first rows at once, in parallel with the stream. */
+    void poll();
     ensureStream();
   }
   return () => {

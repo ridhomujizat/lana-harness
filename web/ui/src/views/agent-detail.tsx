@@ -13,7 +13,6 @@ import { createSession } from "../api/sessions";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import {
   Icon,
-  AgentAvatar,
   TeamAvatars,
   isTeam,
   splitModel,
@@ -935,43 +934,52 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         <span aria-current="page">{agent.name}</span>
       </nav>
 
-      <header className="agent-detail-header">
-        <div className="agent-detail-identity">
-          <AgentAvatar name={agent.name} size="56" />
-          <div className="agent-detail-heading">
-            <div className="agent-detail-name-row">
-              <h1 className="agent-detail-name">{agent.name}</h1>
-              {agent.default ? (
-                <span className="badge-ui badge-ui-brand">
-                  <span className="badge-ui-dot" aria-hidden="true"></span>
-                  Default
-                </span>
-              ) : null}
+      {/* REQ-WEB-047: the alive Overview tab shows only its own hero, so the
+          legacy header is hidden there. It stays on the other tabs, where the
+          Duplicate action lives. */}
+      {activeTab !== "overview" ? (
+        <header className="agent-detail-header">
+          <div className="agent-detail-identity">
+            <AgentFace
+              name={agent.name}
+              color={normalizeColor(agent.color)}
+              size={52}
+            />
+            <div className="agent-detail-heading">
+              <div className="agent-detail-name-row">
+                <h1 className="agent-detail-name">{agent.name}</h1>
+                {agent.default ? (
+                  <span className="badge-ui badge-ui-brand">
+                    <span className="badge-ui-dot" aria-hidden="true"></span>
+                    Default
+                  </span>
+                ) : null}
+              </div>
+              <p className="agent-detail-description">
+                {agent.description || "No description yet."}
+              </p>
+              <p className="agent-detail-meta">{sessionSummary(agent)}.</p>
             </div>
-            <p className="agent-detail-description">
-              {agent.description || "No description yet."}
-            </p>
-            <p className="agent-detail-meta">{sessionSummary(agent)}.</p>
           </div>
-        </div>
-        <div className="agent-detail-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={() => setDuplicateOpen(true)}
-          >
-            Duplicate
-          </button>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
-            disabled={startBusy}
-            onClick={startSession}
-          >
-            {startBusy ? "Starting…" : "Start session"}
-          </button>
-        </div>
-      </header>
+          <div className="agent-detail-actions">
+            <button
+              type="button"
+              className="button-ui button-ui-secondary"
+              onClick={() => setDuplicateOpen(true)}
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              className="button-ui button-ui-primary"
+              disabled={startBusy}
+              onClick={startSession}
+            >
+              {startBusy ? "Starting…" : "Start session"}
+            </button>
+          </div>
+        </header>
+      ) : null}
 
       {headerError ? (
         <div className="agent-header-error" role="alert">

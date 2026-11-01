@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 
 /* The presence kit reads one module. The stream and the list are mocked so the
    face, the label, the skeleton, and the listRooms fallback can be observed
@@ -32,6 +32,7 @@ function room(overrides: Partial<RoomRow> = {}): RoomRow {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("AgentFace (REQ-ROOM-006)", () => {
@@ -99,5 +100,59 @@ describe("useRooms (REQ-ROOM-007)", () => {
 
     expect(await screen.findByText("dana")).toBeTruthy();
     expect(listRooms).toHaveBeenCalled();
+  });
+
+  /* The list must populate even when the stream connects but never delivers a
+     `rooms` event. */
+  it("loads the rows from listRooms even when the stream never emits", async () => {
+    vi.mocked(openRoomsStream).mockImplementation(() => ({ close: () => {} }));
+    vi.mocked(listRooms).mockResolvedValue([room({ name: "nadia" })]);
+
+    function Probe() {
+      const { rows, loading } = useRooms();
+      if (loading) {
+        return <p>loading</p>;
+      }
+      return (
+        <ul>
+          {rows.map((row) => (
+            <li key={row.name}>{row.name}</li>
+          ))}
+        </ul>
+      );
+    }
+
+    render(<Probe />);
+
+    expect(await screen.findByText("nadia")).toBeTruthy();
+    expect(listRooms).toHaveBeenCalled();
+  });
+
+  /* When no `rooms` event arrives within 4 s, the 10 s poll starts. */
+  it("starts listRooms polling when no rooms event arrives within 4 s", async () => {
+    vi.useFakeTimers();
+    vi.mocked(openRoomsStream).mockImplementation(() => ({ close: () => {} }));
+    vi.mocked(listRooms).mockResolvedValue([room({ name: "nadia" })]);
+
+    function Probe() {
+      useRooms();
+      return null;
+    }
+
+    const { unmount } = render(<Probe />);
+    /* The immediate load happens on the first subscriber. */
+    expect(listRooms).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(listRooms).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(listRooms).toHaveBeenCalledTimes(3);
+
+    unmount();
   });
 });
