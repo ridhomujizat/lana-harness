@@ -28,9 +28,16 @@ import {
   pasteImageFiles,
   useAttachmentDraft,
 } from "./attachments";
-import { AgentFace, PresenceLabel, TypingDots } from "./presence";
+import { AgentFace, PresenceLabel, TeamFace, TypingDots, useRooms } from "./presence";
+import type { FaceRef } from "./presence";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
+import {
+  MentionChips,
+  MentionList,
+  RoomGroup,
+  useMentions,
+} from "./room-group";
 import { storedAttachments } from "./session";
 import { buildTurns, TurnBlock, UserBubble } from "./turn";
 import type { ChatTurn, ThreadItem } from "./turn";
@@ -170,6 +177,17 @@ export function activityPhrase(name: string): string {
   return ACTIVITY_PHRASES[key] || (key ? "using " + key : "thinking");
 }
 
+/* REQ-ROOM-008: the room header names the working members. */
+function workingLabel(names: string[]): string {
+  if (names.length === 1) {
+    return names[0] + " is working";
+  }
+  if (names.length === 2) {
+    return names[0] + " and " + names[1] + " are working";
+  }
+  return names.length + " members are working";
+}
+
 function stringOf(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -261,6 +279,34 @@ export function RoomView({ room }: RoomViewProps) {
   const startedRef = useRef(false);
   const handledSessionRef = useRef("");
   const attachmentDraft = useAttachmentDraft();
+  const { byName } = useRooms();
+
+  /* REQ-ROOM-008: the faces of the room, its lead and its members, with each
+     agent's configured color for the group chat. */
+  const faces = useMemo(() => {
+    const map: Record<string, FaceRef> = {};
+    for (const name of [room.name, room.lead, ...(room.members || [])]) {
+      if (!name || map[name]) {
+        continue;
+      }
+      const row = byName[name];
+      map[name] = {
+        name,
+        color: row ? row.color : undefined,
+        presence: row ? row.presence : undefined,
+      };
+    }
+    return map;
+  }, [byName, room.name, room.lead, room.members]);
+
+  /* The mention roster: the lead first, then the members, without repeats. */
+  const mentionNames = useMemo(() => {
+    const names = [room.lead, ...(room.members || [])].filter(Boolean);
+    return Array.from(new Set(names));
+  }, [room.lead, room.members]);
+
+  const team = room.kind === "team";
+  const mentions = useMentions(draft, setDraft, team ? mentionNames : []);
 
   const loadEvents = useCallback(async (ids: string[]) => {
     if (ids.length === 0) {
@@ -409,6 +455,12 @@ export function RoomView({ room }: RoomViewProps) {
         }
       },
       onFrame: (frame) => {
+        /* A team handoff streams child frames tagged with their session id and
+           agent (API-TEAM-011). The group room builds the member row from the
+           delegation, so a child frame leaves the lead's live state alone. */
+        if (stringOf(frame.child_session_id)) {
+          return;
+        }
         const turnId = stringOf(frame.turn_id);
         if (turnId) {
           setLiveTurnId(turnId);
@@ -858,7 +910,6 @@ export function RoomView({ room }: RoomViewProps) {
     }
   }
 
-  const team = room.kind === "team";
   const facts = team
     ? (room.members.length + 1) + " agents · " + room.turns_7d + " turns this week"
     : room.turns_7d + " turns this week";
@@ -870,7 +921,34 @@ export function RoomView({ room }: RoomViewProps) {
   const attachDisabled = !currentWebSessionId || sending || uploading;
   const activity = liveTool ? activityPhrase(liveTool) : "thinking";
 
+  /* REQ-ROOM-008: the group header stacks the member faces and names the
+     working members under the lead. */
+  const teamFaces = team
+    ? [room.lead, ...(room.members || [])]
+        .filter(Boolean)
+        .map((name) => faces[name] || { name })
+    : [];
+  const teamAgents = 1 + (room.members ? room.members.length : 0);
+  const workingMembers = team
+    ? mentionNames.filter((name) => {
+        const row = byName[name];
+        return (
+          name !== room.lead &&
+          row != null &&
+          row.presence != null &&
+          row.presence.state === "working"
+        );
+      })
+    : [];
+  const teamSubtitle =
+    "Lead: " +
+    (room.lead || "none") +
+    (workingMembers.length > 0 ? " · " + workingLabel(workingMembers) : "");
+
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (mentions.onKeyDown(event)) {
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void sendMessage();
@@ -930,17 +1008,21 @@ export function RoomView({ room }: RoomViewProps) {
       case "turn":
         return (
           <div className="msg-enter" key={node.key}>
-            <TurnBlock
-              turn={node.turn}
-              agent={room.name}
-              waitingForInput={Boolean(activeQuestion)}
-              streamingText={
-                node.sessionId === newestId && node.turn.running ? liveText : ""
-              }
-              thinking={
-                node.sessionId === newestId && node.turn.running && liveThinking
-              }
-            />
+            {team ? (
+              <RoomGroup turn={node.turn} room={room} faces={faces} />
+            ) : (
+              <TurnBlock
+                turn={node.turn}
+                agent={room.name}
+                waitingForInput={Boolean(activeQuestion)}
+                streamingText={
+                  node.sessionId === newestId && node.turn.running ? liveText : ""
+                }
+                thinking={
+                  node.sessionId === newestId && node.turn.running && liveThinking
+                }
+              />
+            )}
           </div>
         );
       default:
@@ -951,22 +1033,36 @@ export function RoomView({ room }: RoomViewProps) {
   return (
     <div className="room-view">
       <header className="room-head">
-        <AgentFace
-          name={room.name}
-          color={room.color}
-          presence={room.presence}
-          size={44}
-        />
+        {team ? (
+          <TeamFace faces={teamFaces} size={32} />
+        ) : (
+          <AgentFace
+            name={room.name}
+            color={room.color}
+            presence={room.presence}
+            size={44}
+          />
+        )}
         <div className="room-head-main">
           <div className="room-head-title">
             <span className="room-head-name">{room.name}</span>
-            {room.title ? (
+            {team ? (
+              <span className="badge-ui room-head-badge">
+                {"Team · " + teamAgents + " agents"}
+              </span>
+            ) : room.title ? (
               <span className="badge-ui room-head-badge">{room.title}</span>
             ) : null}
           </div>
           <div className="room-head-sub">
-            <PresenceLabel presence={room.presence} />
-            <span className="room-head-facts">{facts}</span>
+            {team ? (
+              <span className="room-head-facts">{teamSubtitle}</span>
+            ) : (
+              <>
+                <PresenceLabel presence={room.presence} />
+                <span className="room-head-facts">{facts}</span>
+              </>
+            )}
           </div>
         </div>
         <div className="room-head-actions">
@@ -1052,6 +1148,13 @@ export function RoomView({ room }: RoomViewProps) {
               Uploading…
             </p>
           ) : null}
+          {mentions.open ? (
+            <MentionList
+              names={mentions.matches}
+              active={mentions.index}
+              onPick={mentions.insert}
+            />
+          ) : null}
           <textarea
             className="room-composer-input"
             rows={2}
@@ -1059,10 +1162,20 @@ export function RoomView({ room }: RoomViewProps) {
             placeholder={placeholder}
             value={draft}
             disabled={sending}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              mentions.reset();
+            }}
             onKeyDown={composerKeyDown}
             onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
           ></textarea>
+          {team && mentionNames.length > 0 ? (
+            <MentionChips
+              names={mentionNames}
+              faces={faces}
+              onPick={mentions.insert}
+            />
+          ) : null}
           <div className="room-composer-bar">
             <span
               className="room-attach"

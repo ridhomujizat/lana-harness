@@ -6,7 +6,7 @@ import type { Presence, RoomRow } from "../api/rooms";
    presence label, skeletons, the typing dots, the unread badge, and the shared
    useRooms() store. Colors come from the design (rooms-1..4). */
 
-export type FaceSize = 24 | 32 | 44 | 52 | 96;
+export type FaceSize = 18 | 24 | 32 | 44 | 52 | 96;
 
 const FACE_COLORS = {
   brand: { bg: "#F4F3FF", fg: "#5925DC" },
@@ -22,6 +22,12 @@ type FaceColor = keyof typeof FACE_COLORS;
 function faceColors(color?: string): { bg: string; fg: string } {
   const key = color && color in FACE_COLORS ? (color as FaceColor) : "brand";
   return FACE_COLORS[key];
+}
+
+/* The tinted background and strong foreground of an agent color. The group
+   room uses them for the handoff chips and the message names (REQ-ROOM-008). */
+export function agentFaceColors(color?: string): { bg: string; fg: string } {
+  return faceColors(color);
 }
 
 /* The presence dot of the face; the label colors of PresenceLabel are a
