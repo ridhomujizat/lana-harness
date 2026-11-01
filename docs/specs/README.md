@@ -66,6 +66,9 @@ Order of work: approve requirements, then the contract (if applicable), then des
 Implementation must not start while there are still blocking open questions or earlier artifacts
 have not been approved.
 
+> **Gate lifted (2026-11-01)** for the new specs #29, #30, and #31. The owner said "oke sip implement 3 spec yg kamu usulkan".
+> Open questions are resolved with agent recommendations in each resolution table, marked Approved on behalf of the owner.
+>
 > **Gate lifted again (2026-10-30)** for the revisions of specs #5, #6, and #9, and for the new specs #10 and #11.
 > The same rules apply: agent recommendations in the resolution tables, marked Approved on behalf of the owner.
 >
@@ -137,3 +140,6 @@ it is reversible and does not change observable behavior.
 | — | Images and file attachments | [Approved r1](26-attachments/requirements.md) | [Approved r1](26-attachments/api-contract.md) | [Approved r1](26-attachments/design.md) | [Completed r1](26-attachments/tasks.md) |
 | — | Session trajectory view | [Approved r1](27-session-trajectory/requirements.md) | [Not required](27-session-trajectory/api-contract.md) | [Approved r1](27-session-trajectory/design.md) | [In Progress r1](27-session-trajectory/tasks.md) |
 | — | Monitoring dashboard | [Approved r2](28-monitoring-dashboard/requirements.md) | [Approved r2](28-monitoring-dashboard/api-contract.md) | [Approved r1](28-monitoring-dashboard/design.md) | [In Progress r1](28-monitoring-dashboard/tasks.md) |
+| — | Session search | [Approved r1](29-session-search/requirements.md) | [Not required](29-session-search/api-contract.md) | [Approved r1](29-session-search/design.md) | [Completed r1](29-session-search/tasks.md) |
+| — | Knowledge vault | [Approved r1](30-knowledge/requirements.md) | [Approved r1](30-knowledge/api-contract.md) | [Approved r1](30-knowledge/design.md) | [Completed r1](30-knowledge/tasks.md) |
+| — | Knowledge upkeep | [Approved r1](31-knowledge-upkeep/requirements.md) | [Approved r1](31-knowledge-upkeep/api-contract.md) | [Approved r1](31-knowledge-upkeep/design.md) | [Completed r1](31-knowledge-upkeep/tasks.md) |
