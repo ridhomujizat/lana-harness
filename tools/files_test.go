@@ -409,7 +409,7 @@ func TestToolDescriptionKeyPhrases(t *testing.T) {
 			"read_file", "grep", "glob", "write_file", "edit_file",
 			"cat", "sed", "find", "ls -R",
 		},
-		"read_file":  {"numbered lines", "not `cat`/`head`/`tail`", "Default 2000 lines", "never copy it into edit_file"},
+		"read_file":  {"numbered lines", "not `cat`/`head`/`tail`", "Default 2000 lines", "never copy it into edit_file", "images", "PDF"},
 		"write_file": {"Creates parent directories", "edit_file", "echo"},
 		"edit_file":  {"replace_all", "line-number prefix", "sed"},
 		"glob":       {"find", "ls -R", "1000"},

@@ -13,6 +13,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 )
 
 // captureTimeout bounds one pass; a pass still running at daemon shutdown is
@@ -101,6 +102,9 @@ func (s *Service) run(req core.CaptureRequest) {
 		s.warn("derive failed", req, err)
 		return
 	}
+	// REQ-ATT-007: the capture transcript shows an image as its placeholder
+	// text, never as image bytes.
+	history = withoutImages(history)
 	provider, ok := s.LLM.Provider(req.Provider)
 	if !ok {
 		s.warn("provider is not registered", req, nil)
@@ -247,6 +251,42 @@ func collectReply(stream core.ChatStream) (string, core.Usage, bool, error) {
 		}
 	}
 	return text.String(), usage, toolUse, nil
+}
+
+// withoutImages returns a copy of messages with every image block replaced by
+// its placeholder text and every tool-result image appended as a placeholder
+// line, so the capture transcript carries no image bytes (REQ-ATT-007). The
+// input and the stored events are not changed.
+func withoutImages(messages []core.Message) []core.Message {
+	out := make([]core.Message, len(messages))
+	for i, message := range messages {
+		blocks := make([]core.ContentBlock, len(message.Content))
+		for j, block := range message.Content {
+			switch block.Kind {
+			case core.BlockImage:
+				blocks[j] = core.ContentBlock{Kind: core.BlockText, Text: attach.Placeholder(block)}
+			case core.BlockToolResult:
+				if len(block.Images) > 0 {
+					lines := make([]string, 0, len(block.Images))
+					for _, image := range block.Images {
+						lines = append(lines, attach.Placeholder(image))
+					}
+					extra := strings.Join(lines, "\n")
+					if block.Output == "" {
+						block.Output = extra
+					} else {
+						block.Output += "\n" + extra
+					}
+					block.Images = nil
+				}
+				blocks[j] = block
+			default:
+				blocks[j] = block
+			}
+		}
+		out[i] = core.Message{Role: message.Role, Content: blocks}
+	}
+	return out
 }
 
 // parseOps strips a ```/```json fence and parses a JSON array of operations. It

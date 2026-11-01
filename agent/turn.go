@@ -26,7 +26,7 @@ type Runner struct {
 	sessionID string
 
 	mu      sync.Mutex
-	inbox   []string
+	inbox   []inboxItem
 	running bool
 	cancel  context.CancelCauseFunc
 	turnID  string
@@ -35,26 +35,33 @@ type Runner struct {
 	memoryShown map[int]bool
 }
 
-func (rn *Runner) popInbox() (string, bool) {
+// inboxItem is one queued owner message: its text and the workspace-relative
+// paths of its attachments (REQ-ATT-002).
+type inboxItem struct {
+	text        string
+	attachments []string
+}
+
+func (rn *Runner) popInbox() (inboxItem, bool) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
 	if len(rn.inbox) == 0 {
-		return "", false
+		return inboxItem{}, false
 	}
-	text := rn.inbox[0]
+	item := rn.inbox[0]
 	rn.inbox = rn.inbox[1:]
-	return text, true
+	return item, true
 }
 
-// pushFrontInbox returns text to the front of the inbox, so a message the step
+// pushFrontInbox returns item to the front of the inbox, so a message the step
 // cap took but did not use still starts the next turn.
-func (rn *Runner) pushFrontInbox(text string) {
+func (rn *Runner) pushFrontInbox(item inboxItem) {
 	rn.mu.Lock()
 	defer rn.mu.Unlock()
-	rn.inbox = append([]string{text}, rn.inbox...)
+	rn.inbox = append([]inboxItem{item}, rn.inbox...)
 }
 
-func (rn *Runner) runChain(ctx context.Context, initial, turnID, continueReason string) {
+func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, continueReason string) {
 	for {
 		result := rn.runTurn(ctx, initial, turnID, continueReason)
 		rn.reg.finishTurn(turnID, result)
@@ -113,6 +120,9 @@ type resolvedAgent struct {
 	fallback   []core.LLMTarget
 	maxSteps   int
 	child      bool
+	// vision reports whether the model can see images. The agent key wins over
+	// the catalog (REQ-ATT-003).
+	vision bool
 	// reasoningEffort is the thinking effort of every step request; "" means
 	// the provider default (REQ-MDL-001).
 	reasoningEffort string
@@ -194,6 +204,14 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 			effort = known.DefaultEffort
 		}
 	}
+	// REQ-ATT-003: the agent key wins over the catalog flag; an unknown model
+	// is not a vision model unless the agent sets vision = true.
+	vision := false
+	if cfg.Vision != nil {
+		vision = *cfg.Vision
+	} else if known, ok := models.Lookup(model); ok {
+		vision = known.Vision
+	}
 	fallback, err := parseFallback(cfg.Fallback)
 	if err != nil {
 		return resolvedAgent{}, err
@@ -232,6 +250,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		fallback:        fallback,
 		maxSteps:        maxSteps,
 		child:           info.ParentSessionID != "",
+		vision:          vision,
 		reasoningEffort: effort,
 	}, nil
 }
@@ -524,7 +543,7 @@ func removedHeading(text string) string {
 	return text
 }
 
-func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason string) (result TurnResult) {
+func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) (result TurnResult) {
 	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
@@ -580,6 +599,10 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 	for {
 		claimedText := ""
 		claimed := false
+		// claimedItem carries the claimed message and its attachments. Runtime
+		// notes leave it zero, so they never add attachment blocks
+		// (REQ-ATT-002).
+		var claimedItem inboxItem
 		// runtimeNote marks the claimed text as a note lana wrote itself, not
 		// an owner message (REQ-MEM-021). It is reset every step.
 		runtimeNote := false
@@ -591,17 +614,21 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		continueMsg := false
 		switch {
 		case hasInitial:
-			claimedText = initial
+			claimedItem = initial
+			claimedText = initial.text
 			claimed = true
 			hasInitial = false
 			continueMsg = continueReason != ""
 		case pendingTools:
-			claimedText, claimed = rn.popInbox()
-			inboxClaim = claimed
+			var item inboxItem
+			item, claimed = rn.popInbox()
 			if claimed {
 				// An owner message replaces the guard's reminder and resets both
 				// chains: repetition across an interjection is not a loop
 				// (REQ-TRL-013, REQ-TRL-014).
+				claimedItem = item
+				claimedText = item.text
+				inboxClaim = true
 				guard.reset()
 				pendingReminder = ""
 			} else if pendingReminder != "" {
@@ -612,14 +639,18 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			}
 		case continueNext:
 			continueNext = false
-			claimedText, claimed = rn.popInbox()
-			inboxClaim = claimed
+			var item inboxItem
+			item, claimed = rn.popInbox()
 			if claimed {
+				claimedItem = item
+				claimedText = item.text
+				inboxClaim = true
 				guard.reset()
 			}
 		default:
+			var item inboxItem
 			var ok bool
-			claimedText, ok = rn.popInbox()
+			item, ok = rn.popInbox()
 			if !ok {
 				// REQ-MEM-020: a reply that wrote a tool call as plain text
 				// ran nothing. Nudge it to use the native interface, at most
@@ -639,6 +670,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 					goto finished
 				}
 			} else {
+				claimedItem = item
+				claimedText = item.text
 				inboxClaim = true
 				// A mid-turn owner message resets both guard chains
 				// (REQ-TRL-014).
@@ -649,7 +682,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 
 		inputMsg := core.Message{Role: core.RoleUser}
 		if claimed {
-			inputMsg.Content = []core.ContentBlock{{Kind: core.BlockText, Text: claimedText}}
+			text := claimedText
+			// REQ-ATT-002: an owner message with attachments and no text is
+			// stored with the text "(attachments)".
+			if !runtimeNote && text == "" && len(claimedItem.attachments) > 0 {
+				text = "(attachments)"
+			}
+			inputMsg.Content = []core.ContentBlock{{Kind: core.BlockText, Text: text}}
 			decision, err := rn.reg.hooks.AgentPreStep.Call(ctx, core.PreStepInput{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: "", Step: steps + 1, Input: inputMsg,
 			})
@@ -692,7 +731,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			// A message popInbox already claimed stays for the next turn; the
 			// cap replaces the model input, not the owner's queued message.
 			if inboxClaim {
-				rn.pushFrontInbox(claimedText)
+				rn.pushFrontInbox(claimedItem)
 			}
 			if budgetReport {
 				reason = "max_steps"
@@ -712,7 +751,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		// (REQ-LPG-015).
 		if halted && !budgetReport && !loopReport {
 			if inboxClaim {
-				rn.pushFrontInbox(claimedText)
+				rn.pushFrontInbox(claimedItem)
 			}
 			budgetReport = true
 			loopReport = true
@@ -726,9 +765,17 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 		// message that arrived meanwhile stays for the next turn.
 		if loopReport && !pendingTools {
 			if inboxClaim {
-				rn.pushFrontInbox(claimedText)
+				rn.pushFrontInbox(claimedItem)
 			}
 			goto finished
+		}
+		// REQ-ATT-002: the owner message carries one block per attachment, in
+		// order, after the text block and before the <context> prefix the
+		// !promptBuilt branch adds. The step-cap and halt notes replaced
+		// inputMsg above, so they carry no attachments; the item was pushed
+		// back instead.
+		if claimed && !runtimeNote && len(claimedItem.attachments) > 0 {
+			inputMsg.Content = append(inputMsg.Content, ownerAttachmentBlocks(resolved.workspace, claimedItem.attachments)...)
 		}
 		var storedSections []core.PromptSection
 		// contextBlocks is the number of leading content blocks lana injects
@@ -880,6 +927,11 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished
+		}
+		// REQ-ATT-003: a model that cannot see images gets the placeholder text
+		// instead of image bytes. The stored events are unchanged.
+		if !resolved.vision {
+			history = textForImages(history)
 		}
 		req := core.ChatRequest{Model: resolved.model, System: prompt, Messages: history, Tools: specs}
 		req.MaxTokens = control.MaxTokens
@@ -1043,7 +1095,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial, turnID, continueReason s
 				if status == "" {
 					status = core.ToolStatusError
 				}
-				if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindToolResult, TurnID: turnID, Payload: core.ToolResultPayload{V: core.PayloadVersion, CallID: calls[i].CallID, Status: status, Output: output.Output}}); err != nil {
+				if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindToolResult, TurnID: turnID, Payload: core.ToolResultPayload{V: core.PayloadVersion, CallID: calls[i].CallID, Status: status, Output: output.Output, Images: output.Images}}); err != nil {
 					runErr = runtimeError(err)
 					reason = "error"
 					goto finished

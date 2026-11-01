@@ -23,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
@@ -536,27 +537,65 @@ func (rt *Runtime) routeAgent(agentName string) (string, error) {
 	return "", ErrNoRoute
 }
 
-func (rt *Runtime) openSession(ctx context.Context, req Request, agentName string) (core.SessionInfo, error) {
-	if req.SessionID != "" {
-		matches, err := rt.store.FindPrefix(ctx, req.SessionID)
-		if err != nil {
-			return core.SessionInfo{}, err
-		}
-		info, err := core.ResolvePrefix(matches, req.SessionID)
-		if err != nil {
-			return core.SessionInfo{}, err
-		}
-		return info, nil
+// resolveExisting returns the session named by id or prefix, and whether one
+// was found. An empty id finds nothing.
+func (rt *Runtime) resolveExisting(ctx context.Context, id string) (core.SessionInfo, bool, error) {
+	if id == "" {
+		return core.SessionInfo{}, false, nil
 	}
+	matches, err := rt.store.FindPrefix(ctx, id)
+	if err != nil {
+		return core.SessionInfo{}, false, err
+	}
+	info, err := core.ResolvePrefix(matches, id)
+	if err != nil {
+		return core.SessionInfo{}, false, err
+	}
+	return info, true, nil
+}
+
+// newSessionWorkspace is the workspace a new library session is created with:
+// the agent's configured workspace, or the working directory, normalized.
+func (rt *Runtime) newSessionWorkspace(agentName string) (string, error) {
 	workspace, err := os.Getwd()
 	if err != nil {
-		return core.SessionInfo{}, err
+		return "", err
 	}
 	if agentCfg, ok := rt.agentConfig(agentName); ok && agentCfg.Workspace != "" {
 		workspace = agentCfg.Workspace
 	}
-	workspace, err = normalizeWorkspace(workspace)
+	return normalizeWorkspace(workspace)
+}
+
+// validateAttachments rejects every path that is not a regular file under the
+// session workspace's attachments/ directory, naming the path (REQ-ATT-008).
+func validateAttachments(workspace string, paths []string) error {
+	for _, path := range paths {
+		if _, err := attach.Resolve(workspace, path); err != nil {
+			return fmt.Errorf("attachment %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func (rt *Runtime) openSession(ctx context.Context, req Request, agentName string) (core.SessionInfo, error) {
+	if info, found, err := rt.resolveExisting(ctx, req.SessionID); err != nil || found {
+		if err != nil {
+			return core.SessionInfo{}, err
+		}
+		// REQ-ATT-008: a rejected path is refused before the turn starts.
+		if err := validateAttachments(info.Workspace, req.Attachments); err != nil {
+			return core.SessionInfo{}, err
+		}
+		return info, nil
+	}
+	// REQ-ATT-008: the workspace is computed and the attachments validated
+	// before any session is created, so a rejected path leaves no new session.
+	workspace, err := rt.newSessionWorkspace(agentName)
 	if err != nil {
+		return core.SessionInfo{}, err
+	}
+	if err := validateAttachments(workspace, req.Attachments); err != nil {
 		return core.SessionInfo{}, err
 	}
 	return rt.store.Create(ctx, core.NewSession{Agent: agentName, Channel: "library", Workspace: workspace})
@@ -585,6 +624,10 @@ type Request struct {
 	Agent     string
 	Prompt    string
 	SessionID string
+	// Attachments are workspace-relative paths of files the owner sends with
+	// the message (API-ATT-006, REQ-ATT-008). Each must be a file under the
+	// session workspace's attachments/ directory.
+	Attachments []string
 }
 
 // Usage is the token count of one turn.
@@ -617,7 +660,7 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	if err := rt.drainError(); err != nil {
 		return Result{}, err
 	}
-	if strings.TrimSpace(req.Prompt) == "" {
+	if strings.TrimSpace(req.Prompt) == "" && len(req.Attachments) == 0 {
 		return Result{}, ErrEmptyPrompt
 	}
 	agentName, err := rt.agentFor(ctx, req)
@@ -628,7 +671,7 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt)
+	turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt, req.Attachments...)
 	if err != nil {
 		return Result{}, err
 	}
@@ -821,7 +864,7 @@ func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, err
 			yield(nil, err)
 			return
 		}
-		if strings.TrimSpace(req.Prompt) == "" {
+		if strings.TrimSpace(req.Prompt) == "" && len(req.Attachments) == 0 {
 			yield(nil, ErrEmptyPrompt)
 			return
 		}
@@ -835,7 +878,7 @@ func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, err
 			yield(nil, err)
 			return
 		}
-		turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt)
+		turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt, req.Attachments...)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -1348,16 +1391,27 @@ func (rt *Runtime) TurnActive(sessionID string) bool {
 	return rt.registry.TurnActive(sessionID)
 }
 
-// Send puts a message into the session's inbox. While draining it refuses the
-// message before it starts or queues a turn (REQ-TFB-002, API-TFB-008).
-func (rt *Runtime) Send(ctx context.Context, sessionID, text string) error {
+// Send puts a message into the session's inbox. attachments are
+// workspace-relative paths, validated against the session workspace before the
+// message starts or queues a turn (REQ-ATT-008). While draining it refuses the
+// message (REQ-TFB-002, API-TFB-008).
+func (rt *Runtime) Send(ctx context.Context, sessionID, text string, attachments ...string) error {
 	if err := rt.closedError(); err != nil {
 		return err
 	}
 	if err := rt.drainError(); err != nil {
 		return err
 	}
-	return rt.coreCtx.Agents.Send(ctx, sessionID, text)
+	if len(attachments) > 0 {
+		info, err := rt.SessionInfo(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if err := validateAttachments(info.Workspace, attachments); err != nil {
+			return err
+		}
+	}
+	return rt.registry.SendWithAttachments(ctx, sessionID, text, attachments...)
 }
 
 // Cancel cancels the turn that is currently running.

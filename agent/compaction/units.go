@@ -2,8 +2,10 @@ package compaction
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 )
 
 // unit is one balanced piece of derived history: a user message, or an
@@ -77,7 +79,7 @@ func buildUnits(events []core.SessionEvent, prunes map[string]string) ([]unit, e
 				kind:     "user",
 				startSeq: event.Seq,
 				endSeq:   event.Seq,
-				messages: []core.Message{{Role: core.RoleUser, Content: append([]core.ContentBlock(nil), payload.Content...)}},
+				messages: []core.Message{{Role: core.RoleUser, Content: imagePlaceholders(payload.Content)}},
 			})
 		case core.KindAssistantMessage:
 			var payload core.AssistantMessage
@@ -97,7 +99,10 @@ func buildUnits(events []core.SessionEvent, prunes map[string]string) ([]unit, e
 			}
 			output, ok := prunes[payload.CallID]
 			if !ok {
-				output = payload.Output
+				// The raw payload output is used only when not pruned; a pruned
+				// output already carries the placeholder lines the prune step
+				// wrote (REQ-ATT-007).
+				output = appendImagePlaceholders(payload.Output, payload.Images)
 			}
 			block := core.ContentBlock{
 				Kind:    core.BlockToolResult,
@@ -282,6 +287,38 @@ func measuredSurfaceChars(events []core.SessionEvent, stepStartSeq, stepSeq int6
 		return 0
 	}
 	return int64(messagesChars(messages))
+}
+
+// imagePlaceholders returns a copy of blocks with every image block replaced by
+// its placeholder text, so a summary request carries no image bytes
+// (REQ-ATT-007). The input slice is not changed.
+func imagePlaceholders(blocks []core.ContentBlock) []core.ContentBlock {
+	out := make([]core.ContentBlock, len(blocks))
+	copy(out, blocks)
+	for i := range out {
+		if out[i].Kind == core.BlockImage {
+			out[i] = core.ContentBlock{Kind: core.BlockText, Text: attach.Placeholder(out[i])}
+		}
+	}
+	return out
+}
+
+// appendImagePlaceholders adds one placeholder line per image to output,
+// newline-separated, with no leading newline when output is empty
+// (REQ-ATT-007).
+func appendImagePlaceholders(output string, images []core.ContentBlock) string {
+	if len(images) == 0 {
+		return output
+	}
+	lines := make([]string, 0, len(images))
+	for _, image := range images {
+		lines = append(lines, attach.Placeholder(image))
+	}
+	extra := strings.Join(lines, "\n")
+	if output == "" {
+		return extra
+	}
+	return output + "\n" + extra
 }
 
 func contentChars(blocks []core.ContentBlock) int {

@@ -10,10 +10,14 @@ import (
 	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 )
 
 const (
 	readFileDescription = "Reads a UTF-8 text file and returns numbered lines (`<n>\\t<line>`). " +
+		"Also reads PDFs as text with `--- page <k> ---` markers (a scanned PDF has no text and returns an error), " +
+		"and images, which come back as an image you can see when the model supports images; " +
+		"offset and limit do not apply to images. " +
 		"Use this, not `cat`/`head`/`tail` in bash, to inspect files. " +
 		"Default 2000 lines from `offset`; read large files in parts. " +
 		"The number prefix is not part of the file: never copy it into edit_file."
@@ -79,15 +83,52 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 		}
 		return errorOutput(err.Error())
 	}
+	head := data[:minInt(len(data), 512)]
+	rel := filepath.ToSlash(filepath.Clean(in.Path))
+	switch attach.Kind(head, rel) {
+	case "image":
+		block, w, h, err := attach.Image(path, rel)
+		if err != nil {
+			return errorOutput(fmt.Sprintf("could not read %s: %v", rel, err))
+		}
+		out, _ := successOutput(fmt.Sprintf("Image %s (%dx%d).", rel, w, h))
+		out.Images = []core.ContentBlock{block}
+		return out, nil
+	case "pdf":
+		pages, err := attach.PDFText(path)
+		if err != nil {
+			return errorOutput(fmt.Sprintf("could not read %s: %v", rel, err))
+		}
+		if !pagesHaveText(pages) {
+			return errorOutput(fmt.Sprintf("Attachment %s (PDF, %d pages) has no text layer. It is probably a scan: ask the owner to send photos or screenshots of the pages instead.", rel, len(pages)))
+		}
+		var b strings.Builder
+		for i, page := range pages {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			fmt.Fprintf(&b, "--- page %d ---", i+1)
+			b.WriteByte('\n')
+			b.WriteString(page)
+		}
+		return readTextRange(b.String(), in.Offset, in.Limit)
+	}
 	if bytes.IndexByte(data[:minInt(len(data), 8000)], 0) >= 0 {
 		return errorOutput("binary file")
 	}
-	lines := fileLines(string(data))
-	start := in.Offset - 1
+	return readTextRange(string(data), in.Offset, in.Limit)
+}
+
+// readTextRange numbers the lines of content and returns the window selected by
+// offset (1-based) and limit, followed by a notice when later lines remain. The
+// text-file and PDF paths of read_file share it.
+func readTextRange(content string, offset, limit int) (core.ToolOutput, error) {
+	lines := fileLines(content)
+	start := offset - 1
 	if start >= len(lines) {
 		return successOutput("")
 	}
-	end := start + in.Limit
+	end := start + limit
 	if end > len(lines) {
 		end = len(lines)
 	}
@@ -96,6 +137,17 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 		text += fmt.Sprintf("\n(Showing lines %d–%d of %d. Use offset=%d to read more.)", start+1, end, len(lines), end+1)
 	}
 	return successOutput(text)
+}
+
+// pagesHaveText reports whether any page of a PDF carries text. A PDF with no
+// pages has none, so it reads as a scan.
+func pagesHaveText(pages []string) bool {
+	for _, p := range pages {
+		if p != "" {
+			return true
+		}
+	}
+	return false
 }
 
 type writeFileTool struct{ guard *Guard }
