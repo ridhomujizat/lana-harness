@@ -71,15 +71,20 @@ func DeriveMessages(events []SessionEvent) ([]Message, error) {
 			if err := decodePayload(event.Payload, &payload); err != nil {
 				return nil, err
 			}
-			output, ok := pruned[payload.CallID]
-			if !ok {
-				output = payload.Output
+			output := payload.Output
+			images := payload.Images
+			// The pruned output already holds the image placeholder lines
+			// compaction wrote, so it replaces the images too (REQ-ATT-007).
+			if prunedOutput, ok := pruned[payload.CallID]; ok {
+				output = prunedOutput
+				images = nil
 			}
 			block := ContentBlock{
 				Kind:    BlockToolResult,
 				ID:      payload.CallID,
 				Output:  output,
 				IsError: payload.Status != ToolStatusSuccess,
+				Images:  images,
 			}
 			if n := len(messages); n > 0 && messages[n-1].Role == RoleUser && allToolResults(messages[n-1].Content) {
 				messages[n-1].Content = append(messages[n-1].Content, block)

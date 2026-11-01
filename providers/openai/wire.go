@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -60,22 +61,26 @@ func buildRequestBody(req core.ChatRequest, format string) ([]byte, error) {
 		switch message.Role {
 		case core.RoleUser:
 			var text string
+			var parts []map[string]any
 			var results []map[string]any
+			hasImage := false
 			for _, block := range message.Content {
 				switch block.Kind {
 				case core.BlockText:
 					text += block.Text
+					if block.Text != "" {
+						parts = append(parts, textPart(block.Text))
+					}
 				case core.BlockImage:
-					return nil, ErrUnsupported
+					hasImage = true
+					parts = append(parts, imagePart(block))
 				case core.BlockToolResult:
-					results = append(results, map[string]any{
-						"role":         "tool",
-						"tool_call_id": block.ID,
-						"content":      block.Output,
-					})
+					results = append(results, toolResultMessage(block))
 				}
 			}
-			if text != "" {
+			if hasImage {
+				out.Messages = append(out.Messages, map[string]any{"role": "user", "content": parts})
+			} else if text != "" {
 				out.Messages = append(out.Messages, map[string]any{"role": "user", "content": text})
 			}
 			out.Messages = append(out.Messages, results...)
@@ -138,6 +143,41 @@ func buildRequestBody(req core.ChatRequest, format string) ([]byte, error) {
 		})
 	}
 	return json.Marshal(out)
+}
+
+// textPart renders one text part of an OpenAI content array.
+func textPart(text string) map[string]any {
+	return map[string]any{"type": "text", "text": text}
+}
+
+// imagePart renders an image content block as an OpenAI image_url part. The
+// bytes travel inline as a data URL (REQ-ATT-002).
+func imagePart(block core.ContentBlock) map[string]any {
+	return map[string]any{
+		"type": "image_url",
+		"image_url": map[string]any{
+			"url": "data:" + block.MediaType + ";base64," + base64.StdEncoding.EncodeToString(block.Data),
+		},
+	}
+}
+
+// toolResultMessage renders a tool_result block as a role "tool" message. A
+// block with images carries a content array: the output text, then one image
+// part per image (REQ-ATT-004).
+func toolResultMessage(block core.ContentBlock) map[string]any {
+	var content any = block.Output
+	if len(block.Images) > 0 {
+		parts := []map[string]any{textPart(block.Output)}
+		for _, image := range block.Images {
+			parts = append(parts, imagePart(image))
+		}
+		content = parts
+	}
+	return map[string]any{
+		"role":         "tool",
+		"tool_call_id": block.ID,
+		"content":      content,
+	}
 }
 
 // applyThinking sets the thinking and reasoning_effort fields on a deepseek

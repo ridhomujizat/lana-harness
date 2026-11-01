@@ -110,6 +110,9 @@ const (
 type ToolOutput struct {
 	Status ToolStatus
 	Output string
+	// Images are the image blocks of the result. Unlike Usage they are
+	// persisted: the turn copies them into the tool/result event.
+	Images []ContentBlock
 	// Digest is the hex SHA-256 of the status and the output text, taken
 	// before the output is spilled. The loop guard compares it to spot an
 	// unchanged result (REQ-LPG-003).

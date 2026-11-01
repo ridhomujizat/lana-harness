@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -139,4 +140,78 @@ func TestDeriveAppliesPrune(t *testing.T) {
 	if len(messages) != 2 || messages[1].Content[0].Output != "pruned output" {
 		t.Fatalf("pruned output not applied: %+v", messages)
 	}
+}
+
+// REQ-ATT-004: a tool result payload keeps its images on the derived block, and
+// an image block in user/message passes through unchanged.
+func TestDeriveToolResultImages(t *testing.T) {
+	userImage := ContentBlock{Kind: BlockImage, MediaType: "image/jpeg", Data: []byte("jpeg-bytes"), Path: "attachments/b.jpg"}
+	resultImage := ContentBlock{Kind: BlockImage, MediaType: "image/png", Data: []byte("png-bytes"), Path: "attachments/a.png"}
+	events := []SessionEvent{
+		event(t, KindUserMessage, UserMessage{V: 1, Content: []ContentBlock{
+			{Kind: BlockText, Text: "look"},
+			userImage,
+		}}),
+		event(t, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{
+			{Kind: BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{}`)},
+		}}),
+		event(t, KindToolResult, ToolResultPayload{V: 1, CallID: "c1", Status: ToolStatusSuccess, Output: "Image a.png (2x2).", Images: []ContentBlock{resultImage}}),
+	}
+	messages, err := DeriveMessages(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("messages=%d: %+v", len(messages), messages)
+	}
+	if !reflect.DeepEqual(messages[0].Content[1], userImage) {
+		t.Fatalf("user image changed: %+v", messages[0].Content[1])
+	}
+	block := messages[2].Content[0]
+	if block.Kind != BlockToolResult || len(block.Images) != 1 || !reflect.DeepEqual(block.Images[0], resultImage) {
+		t.Fatalf("tool result block=%+v", block)
+	}
+}
+
+// REQ-ATT-007: a pruned tool result keeps only the pruned output, whose image
+// placeholder lines compaction already wrote, while an unpruned result keeps
+// its images.
+func TestDeriveToolResultImagesPruned(t *testing.T) {
+	image := ContentBlock{Kind: BlockImage, MediaType: "image/png", Data: []byte("png-bytes"), Path: "attachments/a.png"}
+	base := []SessionEvent{
+		event(t, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{
+			{Kind: BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{}`)},
+		}}),
+		event(t, KindToolResult, ToolResultPayload{V: 1, CallID: "c1", Status: ToolStatusSuccess, Output: "Image a.png (2x2).", Images: []ContentBlock{image}}),
+	}
+
+	t.Run("pruned", func(t *testing.T) {
+		events := append(append([]SessionEvent(nil), base...),
+			seqEvent(t, 3, KindToolResultPruned, ToolResultPruned{V: 1, CallID: "c1", SourceSeq: 2, Output: "pruned output\n[image attachments/a.png]"}))
+		messages, err := DeriveMessages(events)
+		if err != nil {
+			t.Fatal(err)
+		}
+		block := messages[1].Content[0]
+		if block.Output != "pruned output\n[image attachments/a.png]" {
+			t.Fatalf("output = %q", block.Output)
+		}
+		if len(block.Images) != 0 {
+			t.Fatalf("pruned result kept images: %+v", block.Images)
+		}
+	})
+
+	t.Run("kept", func(t *testing.T) {
+		messages, err := DeriveMessages(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		block := messages[1].Content[0]
+		if block.Output != "Image a.png (2x2)." {
+			t.Fatalf("output = %q", block.Output)
+		}
+		if len(block.Images) != 1 || !reflect.DeepEqual(block.Images[0], image) {
+			t.Fatalf("images = %+v", block.Images)
+		}
+	})
 }

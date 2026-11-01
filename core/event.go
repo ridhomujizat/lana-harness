@@ -148,10 +148,11 @@ type ToolCallPayload struct {
 }
 
 type ToolResultPayload struct {
-	V      int        `json:"v"`
-	CallID string     `json:"call_id"`
-	Status ToolStatus `json:"status"`
-	Output string     `json:"output"`
+	V      int            `json:"v"`
+	CallID string         `json:"call_id"`
+	Status ToolStatus     `json:"status"`
+	Output string         `json:"output"`
+	Images []ContentBlock `json:"images,omitempty"`
 }
 
 type ApprovalAsked struct {

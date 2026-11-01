@@ -59,9 +59,12 @@ type AgentConfig struct {
 	CompactionRetain    float64 `toml:"compaction_retain"`
 	// MemoryCapture turns the background capture pass on or off. Nil means on
 	// (REQ-MEM-010).
-	MemoryCapture *bool      `toml:"memory_capture"`
-	Description   string     `toml:"description"`
-	Rules         AgentRules `toml:"rules"`
+	MemoryCapture *bool `toml:"memory_capture"`
+	// Vision turns image input on or off for the agent. Nil means the catalog
+	// flag decides (API-ATT-005).
+	Vision      *bool      `toml:"vision"`
+	Description string     `toml:"description"`
+	Rules       AgentRules `toml:"rules"`
 }
 
 type AgentRules struct {

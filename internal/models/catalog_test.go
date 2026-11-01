@@ -137,3 +137,31 @@ func TestEfforts(t *testing.T) {
 		t.Fatalf("Efforts() = %+v, want %+v", got, want)
 	}
 }
+
+// REQ-ATT-003: only deepseek-flash and its alias are vision models; an unknown
+// model is not.
+func TestVision(t *testing.T) {
+	tests := []struct {
+		model string
+		ok    bool
+		want  bool
+	}{
+		{model: "deepseek-flash", ok: true, want: true},
+		{model: "deepseek-v4-flash", ok: true, want: true},
+		{model: "deepseek-v4-pro", ok: true, want: false},
+		{model: "deepseek-chat", ok: true, want: false},
+		{model: "deepseek-reasoner", ok: true, want: false},
+		{model: "unknown", ok: false, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.model, func(t *testing.T) {
+			got, ok := Lookup(tc.model)
+			if ok != tc.ok {
+				t.Fatalf("ok=%v want %v", ok, tc.ok)
+			}
+			if got.Vision != tc.want {
+				t.Fatalf("Vision=%v want %v", got.Vision, tc.want)
+			}
+		})
+	}
+}

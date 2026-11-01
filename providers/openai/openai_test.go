@@ -241,7 +241,7 @@ func TestWireConvert(t *testing.T) {
 }
 
 func TestWireImageUnsupported(t *testing.T) {
-	req := core.ChatRequest{Model: "m", Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockImage}}}}}
+	req := core.ChatRequest{Model: "m", Messages: []core.Message{{Role: core.RoleAssistant, Content: []core.ContentBlock{{Kind: core.BlockImage}}}}}
 	if _, err := buildRequestBody(req, formatNone); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("err=%v", err)
 	}

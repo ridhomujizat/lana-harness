@@ -40,6 +40,8 @@ type ContentBlock struct {
 	IsError   bool            `json:"is_error,omitempty"`
 	MediaType string          `json:"media_type,omitempty"`
 	Data      []byte          `json:"data,omitempty"`
+	Path      string          `json:"path,omitempty"`   // workspace-relative path of an image block
+	Images    []ContentBlock  `json:"images,omitempty"` // image blocks of a tool_result block
 }
 
 // Usage is the token count. InputTokens counts all prompt tokens

@@ -17,8 +17,10 @@ type Model struct {
 	Thinking string
 	// DefaultEffort is the effort used when the agent sets none.
 	DefaultEffort string
-	Legacy        bool
-	Replacement   string
+	// Vision marks models that accept image input (REQ-ATT-003).
+	Vision      bool
+	Legacy      bool
+	Replacement string
 }
 
 // catalog is keyed by model ID.
@@ -31,6 +33,7 @@ var catalog = map[string]Model{
 		MaxOutput:     384000,
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
+		Vision:        true,
 	},
 	"deepseek-v4-pro": {
 		ID:            "deepseek-v4-pro",
@@ -49,6 +52,7 @@ var catalog = map[string]Model{
 		MaxOutput:     384000,
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
+		Vision:        true,
 	},
 	"deepseek-chat": {
 		ID:            "deepseek-chat",

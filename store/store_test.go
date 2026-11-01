@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -836,5 +837,59 @@ func TestLeaseOtherHost(t *testing.T) {
 	var held *core.LeaseHeldError
 	if !errors.As(err, &held) || held.Host != "other-host" {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// REQ-ATT-004: a tool/result event keeps its images through Append and derive.
+func TestToolResultImagesSurviveStore(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	image := core.ContentBlock{Kind: core.BlockImage, MediaType: "image/png", Data: []byte("png-bytes"), Path: "attachments/a.png"}
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{}`)},
+		}}},
+		{Kind: core.KindToolResult, TurnID: "t", Payload: core.ToolResultPayload{V: 1, CallID: "c1", Status: core.ToolStatusSuccess, Output: "Image a.png (2x2).", Images: []core.ContentBlock{image}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := s.DeriveMessages(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages=%d", len(messages))
+	}
+	block := messages[1].Content[0]
+	if block.Kind != core.BlockToolResult || len(block.Images) != 1 || !reflect.DeepEqual(block.Images[0], image) {
+		t.Fatalf("block=%+v", block)
+	}
+}
+
+// REQ-ATT-002: a user/message image block keeps its media type, data, and path.
+func TestUserMessageImageSurvivesStore(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	image := core.ContentBlock{Kind: core.BlockImage, MediaType: "image/jpeg", Data: []byte("jpeg-bytes"), Path: "attachments/2026-11-01/a.jpg"}
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockText, Text: "look"},
+			image,
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := s.DeriveMessages(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || len(messages[0].Content) != 2 {
+		t.Fatalf("messages=%+v", messages)
+	}
+	got := messages[0].Content[1]
+	if got.Kind != core.BlockImage || got.MediaType != image.MediaType || !bytes.Equal(got.Data, image.Data) || got.Path != image.Path {
+		t.Fatalf("image block=%+v", got)
 	}
 }

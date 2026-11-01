@@ -146,6 +146,22 @@ func TestAgentMemoryCaptureLoaded(t *testing.T) {
 	}
 }
 
+func TestAgentVisionValidation(t *testing.T) {
+	for _, table := range []string{
+		"[agents.coder]\nvision = true\n",
+		"[agents.coder]\nvision = false\n",
+	} {
+		if _, err := loadAgentKeys(t, table); err != nil {
+			t.Fatalf("unexpected error for %q: %v", table, err)
+		}
+	}
+	errs := agentKeyErrors(t, "[agents.coder]\nvision = \"yes\"\n")
+	found := findError(errs, "agents.coder.vision")
+	if found == nil || !strings.Contains(found.Msg, "boolean") {
+		t.Fatalf("vision error = %+v", found)
+	}
+}
+
 func TestAgentDescriptionNoUnknownKey(t *testing.T) {
 	table := "[agents.coder]\ndescription = \"Checks disks\"\ndisabled_tools = [\"bash\", \"github/create_issue\"]\n"
 	res, err := loadAgentKeys(t, table)
