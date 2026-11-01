@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"os"
 	"reflect"
@@ -581,6 +582,28 @@ func (f *fakeWebBackend) Holder(_ context.Context, sessionID string) (Holder, er
 		return Holder{State: HolderSelf}, nil
 	}
 	return Holder{State: HolderNone}, nil
+}
+
+// ListAgentSessions is a stub that satisfies web.Backend (REQ-ROOM-002).
+func (f *fakeWebBackend) ListAgentSessions(context.Context, core.SessionFilter) ([]core.SessionInfo, error) {
+	return nil, nil
+}
+
+// CountAgentEvents is a stub that satisfies web.Backend (REQ-ROOM-002,
+// REQ-ROOM-005).
+func (f *fakeWebBackend) CountAgentEvents(context.Context, string, []string, int64, bool) (int64, error) {
+	return 0, nil
+}
+
+// RoomReadAt is a stub that satisfies web.Backend (REQ-ROOM-005).
+func (f *fakeWebBackend) RoomReadAt(context.Context, string) (int64, error) { return 0, nil }
+
+// SetRoomRead is a stub that satisfies web.Backend (REQ-ROOM-005).
+func (f *fakeWebBackend) SetRoomRead(context.Context, string, int64) (int64, error) { return 0, nil }
+
+// ScanEvents is a stub that satisfies web.Backend (API-DSH-001).
+func (f *fakeWebBackend) ScanEvents(context.Context, []string, int64) iter.Seq2[core.ScannedEvent, error] {
+	return func(func(core.ScannedEvent, error) bool) {}
 }
 
 func (f *fakeWebBackend) detail(info core.SessionInfo) Session {

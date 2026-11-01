@@ -39,9 +39,14 @@ type SessionFilter struct {
 	Channel         string
 	Address         string
 	ParentSessionID string
+	// Agent matches sessions.agent exactly; empty means no filter (REQ-ROOM-002).
+	Agent string
 	// TopLevelOnly excludes child sessions.
 	TopLevelOnly bool
-	Limit        int
+	// Before, when > 0, keeps only sessions created before this Unix ms time
+	// (REQ-ROOM-002).
+	Before int64
+	Limit  int
 }
 
 // SessionStore is the append-only event log.
@@ -70,6 +75,30 @@ type LeaseProbe interface {
 // order. It backs the monitoring dashboard scan (design.md §2, REQ-DSH-001).
 type EventScanner interface {
 	ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[ScannedEvent, error]
+}
+
+// AgentEventCounter is an optional SessionStore extension that counts the
+// events of one agent's sessions (REQ-ROOM-002, REQ-ROOM-005). It backs the
+// unread count and the finished-turn count of a room. The SQLite store
+// implements it; the in-memory store does not.
+type AgentEventCounter interface {
+	// CountAgentEvents counts the events of the given kinds in the sessions of
+	// agent created after sinceMS. When topLevelOnly, only the agent's
+	// top-level sessions are counted. An empty kinds slice returns 0 without
+	// querying.
+	CountAgentEvents(ctx context.Context, agent string, kinds []string, sinceMS int64, topLevelOnly bool) (int64, error)
+}
+
+// RoomReadStore is an optional SessionStore extension that stores the last read
+// time of every room (REQ-ROOM-005). The SQLite store implements it; the
+// in-memory store does not.
+type RoomReadStore interface {
+	// RoomReadAt returns the last read time of room, or 0 when it was never
+	// read.
+	RoomReadAt(ctx context.Context, room string) (int64, error)
+	// SetRoomRead stores at as the read time of room and returns the stored
+	// value. The read time only moves forward.
+	SetRoomRead(ctx context.Context, room string, at int64) (int64, error)
 }
 
 // ScannedEvent is one session_events row with the owning session's agent.

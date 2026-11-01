@@ -127,6 +127,10 @@ var (
 	// ErrScanUnsupported is returned by ScanEvents when the session store does
 	// not implement core.EventScanner (design.md §2).
 	ErrScanUnsupported = errors.New("session store does not support event scanning")
+	// ErrRoomStoreUnsupported is returned by the room store queries when the
+	// session store does not implement core.AgentEventCounter or
+	// core.RoomReadStore (REQ-ROOM-002, REQ-ROOM-005).
+	ErrRoomStoreUnsupported = errors.New("session store does not support room queries")
 )
 
 // ProviderError is an alias for core.ProviderError.
@@ -1521,6 +1525,48 @@ func (rt *Runtime) ScanEvents(ctx context.Context, kinds []string, sinceMS int64
 			}
 		}
 	}
+}
+
+// CountAgentEvents counts the events of the given kinds in the sessions of
+// agent created after sinceMS (REQ-ROOM-002, REQ-ROOM-005). It requires the
+// store to implement core.AgentEventCounter and yields ErrRoomStoreUnsupported
+// otherwise.
+func (rt *Runtime) CountAgentEvents(ctx context.Context, agent string, kinds []string, sinceMS int64, topLevelOnly bool) (int64, error) {
+	if err := rt.closedError(); err != nil {
+		return 0, err
+	}
+	counter, ok := rt.store.(core.AgentEventCounter)
+	if !ok {
+		return 0, ErrRoomStoreUnsupported
+	}
+	return counter.CountAgentEvents(ctx, agent, kinds, sinceMS, topLevelOnly)
+}
+
+// RoomReadAt returns the last read time of a room, or 0 when it was never read
+// (REQ-ROOM-005). It requires the store to implement core.RoomReadStore.
+func (rt *Runtime) RoomReadAt(ctx context.Context, room string) (int64, error) {
+	if err := rt.closedError(); err != nil {
+		return 0, err
+	}
+	reads, ok := rt.store.(core.RoomReadStore)
+	if !ok {
+		return 0, ErrRoomStoreUnsupported
+	}
+	return reads.RoomReadAt(ctx, room)
+}
+
+// SetRoomRead stores a room's read time, which only moves forward, and returns
+// the stored value (REQ-ROOM-005). It requires the store to implement
+// core.RoomReadStore.
+func (rt *Runtime) SetRoomRead(ctx context.Context, room string, at int64) (int64, error) {
+	if err := rt.closedError(); err != nil {
+		return 0, err
+	}
+	reads, ok := rt.store.(core.RoomReadStore)
+	if !ok {
+		return 0, ErrRoomStoreUnsupported
+	}
+	return reads.SetRoomRead(ctx, room, at)
 }
 
 // ForkSession copies the session up to the end of its last turn.

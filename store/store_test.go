@@ -1141,8 +1141,8 @@ func TestMigrateV3ToV4BackfillsSessionText(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Fatalf("version=%d, want 4", version)
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
 	}
 
 	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"deploy"}, Limit: 5})
@@ -1513,5 +1513,232 @@ func TestTextRows(t *testing.T) {
 	}
 	if len(none) != 1 || none[0].Seq != first.Seq {
 		t.Fatalf("none=%+v", none)
+	}
+}
+
+// REQ-ROOM-002: the session list filters by agent exactly and by creation time.
+func TestListFilterAgentAndBefore(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	dana, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	karin, err := s.Create(ctx, core.NewSession{Agent: "karin", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET created_at = 100 WHERE id = ?", dana.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET created_at = 200 WHERE id = ?", karin.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	byAgent, err := s.List(ctx, core.SessionFilter{Agent: "dana"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byAgent) != 1 || byAgent[0].ID != dana.ID {
+		t.Fatalf("byAgent=%+v want dana=%s", byAgent, dana.ID)
+	}
+
+	byBefore, err := s.List(ctx, core.SessionFilter{Before: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byBefore) != 1 || byBefore[0].ID != dana.ID {
+		t.Fatalf("byBefore=%+v want dana=%s", byBefore, dana.ID)
+	}
+
+	none, err := s.List(ctx, core.SessionFilter{Agent: "dana", Before: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("agent with before returned %+v", none)
+	}
+}
+
+// REQ-ROOM-002, REQ-ROOM-005: CountAgentEvents counts the events of one agent,
+// counts top-level sessions only on request, filters by kind and by creation
+// time, and returns 0 for an empty kinds slice without querying.
+func TestCountAgentEvents(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	dana, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir(), ParentSessionID: dana.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.Create(ctx, core.NewSession{Agent: "karin", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := []struct {
+		session string
+		kind    string
+		at      int64
+	}{
+		{dana.ID, core.KindAssistantMessage, 100},
+		{dana.ID, core.KindQuestionAsked, 200},
+		{dana.ID, core.KindTurnEnd, 300},
+		{child.ID, core.KindAssistantMessage, 150},
+		{other.ID, core.KindAssistantMessage, 150},
+	}
+	// Create writes session/created at seq 1, so the fixture events start at 2.
+	seq := map[string]int64{dana.ID: 1, child.ID: 1, other.ID: 1}
+	for _, event := range events {
+		seq[event.session]++
+		if _, err := s.db.Exec("INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, '{}', NULL, ?)", event.session, seq[event.session], event.kind, event.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	kinds := []string{core.KindAssistantMessage, core.KindQuestionAsked}
+	cases := []struct {
+		name  string
+		agent string
+		kinds []string
+		since int64
+		top   bool
+		want  int64
+	}{
+		{"all sessions", "dana", kinds, 0, false, 3},
+		{"top level only", "dana", kinds, 0, true, 2},
+		{"kind filter", "dana", []string{core.KindAssistantMessage}, 0, false, 2},
+		{"since filter", "dana", kinds, 120, false, 2},
+		{"other agent", "karin", kinds, 0, false, 1},
+		{"empty kinds", "dana", nil, 0, false, 0},
+	}
+	for _, tc := range cases {
+		got, err := s.CountAgentEvents(ctx, tc.agent, tc.kinds, tc.since, tc.top)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// REQ-ROOM-005: a room read mark only moves forward, and an unknown room reads
+// as 0.
+func TestRoomReadsUpsertKeepsMax(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	if at, err := s.RoomReadAt(ctx, "dana"); err != nil || at != 0 {
+		t.Fatalf("unknown room read_at=%d err=%v, want 0", at, err)
+	}
+	stored, err := s.SetRoomRead(ctx, "dana", 1000)
+	if err != nil || stored != 1000 {
+		t.Fatalf("first set stored=%d err=%v, want 1000", stored, err)
+	}
+	stored, err = s.SetRoomRead(ctx, "dana", 500)
+	if err != nil || stored != 1000 {
+		t.Fatalf("older set stored=%d err=%v, want 1000", stored, err)
+	}
+	if at, err := s.RoomReadAt(ctx, "dana"); err != nil || at != 1000 {
+		t.Fatalf("read_at=%d err=%v, want 1000", at, err)
+	}
+	stored, err = s.SetRoomRead(ctx, "dana", 2000)
+	if err != nil || stored != 2000 {
+		t.Fatalf("newer set stored=%d err=%v, want 2000", stored, err)
+	}
+	if at, err := s.RoomReadAt(ctx, "dana"); err != nil || at != 2000 {
+		t.Fatalf("read_at=%d err=%v, want 2000", at, err)
+	}
+}
+
+// REQ-ROOM-005: a fresh database has the room_reads table at the current schema
+// version.
+func TestMigrateFreshAddsRoomReads(t *testing.T) {
+	s, _ := openTest(t)
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'room_reads'").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("room_reads table count=%d, want 1", count)
+	}
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
+	}
+}
+
+// v4Database builds a schema-version-4 database the way the previous binary left
+// it: migrations 0001-0004 applied and user_version set to 4.
+func v4Database(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "lana.db")
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"migrations/0001_session_log.sql", "migrations/0002_session_leases.sql", "migrations/0003_session_status_waiting_input.sql", "migrations/0004_session_text.sql"} {
+		data, err := migrationFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 4"); err != nil {
+		t.Fatal(err)
+	}
+	return db, path
+}
+
+// REQ-ROOM-005: a version-4 database migrates to version 5 and its room reads
+// work.
+func TestMigrateV4ToV5AddsRoomReads(t *testing.T) {
+	ctx := context.Background()
+	db, path := v4Database(t)
+	var before int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'room_reads'").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != 0 {
+		t.Fatalf("v4 fixture already has a room_reads table")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 5 {
+		t.Fatalf("version=%d, want 5", version)
+	}
+	if stored, err := s.SetRoomRead(ctx, "dana", 5000); err != nil || stored != 5000 {
+		t.Fatalf("SetRoomRead stored=%d err=%v, want 5000", stored, err)
+	}
+	if at, err := s.RoomReadAt(ctx, "dana"); err != nil || at != 5000 {
+		t.Fatalf("RoomReadAt=%d err=%v, want 5000", at, err)
 	}
 }

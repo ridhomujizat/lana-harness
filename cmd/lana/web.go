@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -1499,6 +1500,35 @@ func (b *webBackend) Holder(ctx context.Context, id string) (web.Holder, error) 
 		return web.Holder{State: web.HolderOther, PID: pid}, nil
 	}
 	return web.Holder{State: web.HolderNone}, nil
+}
+
+// ListAgentSessions implements web.Backend. It delegates to the runtime's
+// session list with the store filter, backing a room's segments and its newest
+// web session (REQ-ROOM-002).
+func (b *webBackend) ListAgentSessions(ctx context.Context, filter core.SessionFilter) ([]core.SessionInfo, error) {
+	return b.rt.ListAllSessions(ctx, filter)
+}
+
+// CountAgentEvents implements web.Backend. It delegates to the runtime's
+// agent-scoped event count (REQ-ROOM-002, REQ-ROOM-005).
+func (b *webBackend) CountAgentEvents(ctx context.Context, agent string, kinds []string, sinceMS int64, topLevelOnly bool) (int64, error) {
+	return b.rt.CountAgentEvents(ctx, agent, kinds, sinceMS, topLevelOnly)
+}
+
+// RoomReadAt implements web.Backend (REQ-ROOM-005).
+func (b *webBackend) RoomReadAt(ctx context.Context, room string) (int64, error) {
+	return b.rt.RoomReadAt(ctx, room)
+}
+
+// SetRoomRead implements web.Backend (REQ-ROOM-005).
+func (b *webBackend) SetRoomRead(ctx context.Context, room string, at int64) (int64, error) {
+	return b.rt.SetRoomRead(ctx, room, at)
+}
+
+// ScanEvents implements web.Backend. It delegates to the runtime's cross-session
+// event scan the agent overview reads (API-DSH-001).
+func (b *webBackend) ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error] {
+	return b.rt.ScanEvents(ctx, kinds, sinceMS)
 }
 
 // jobsTailBytes is the byte budget read for the jobs endpoints. It is larger

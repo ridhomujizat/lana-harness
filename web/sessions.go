@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"net/http"
 	"sort"
 	"strconv"
@@ -205,6 +206,25 @@ type Backend interface {
 	TurnActive(id string) bool
 	// Holder reports the lease holder without taking the lease.
 	Holder(ctx context.Context, id string) (Holder, error)
+
+	// ListAgentSessions lists sessions that match a store filter. The room
+	// service reads a room's segments and its newest web session with it
+	// (REQ-ROOM-002).
+	ListAgentSessions(ctx context.Context, filter core.SessionFilter) ([]core.SessionInfo, error)
+	// CountAgentEvents counts the events of one agent's sessions. It backs a
+	// room's unread count and its finished-turn count (REQ-ROOM-002,
+	// REQ-ROOM-005).
+	CountAgentEvents(ctx context.Context, agent string, kinds []string, sinceMS int64, topLevelOnly bool) (int64, error)
+	// RoomReadAt returns the last read time of a room, or 0 when it was never
+	// read (REQ-ROOM-005).
+	RoomReadAt(ctx context.Context, room string) (int64, error)
+	// SetRoomRead stores a room's read time, which only moves forward, and
+	// returns the stored value (REQ-ROOM-005).
+	SetRoomRead(ctx context.Context, room string, at int64) (int64, error)
+	// ScanEvents reads events of the given kinds across every session, created
+	// at or after sinceMS. The agent overview reads the last seven days with it
+	// (API-DSH-001).
+	ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error]
 }
 
 // SetBackend installs the runtime port used by the session handlers. Call it
