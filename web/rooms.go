@@ -356,6 +356,11 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 	if err != nil {
 		return roomJSON{}, err
 	}
+	if readAt == 0 {
+		// A room the owner never opened counts only the last day as unread,
+		// so old history does not show as hundreds of new messages.
+		readAt = now - (24 * time.Hour).Milliseconds()
+	}
 	unread, err := s.backend.CountAgentEvents(ctx, agent.Name, []string{core.KindAssistantMessage, core.KindQuestionAsked}, readAt, true)
 	if err != nil {
 		return roomJSON{}, err
@@ -529,7 +534,7 @@ func resolvePresence(f presenceFacts) presenceJSON {
 	case f.problem:
 		return presenceJSON{State: "problem", Label: cutLabel(f.problemLabel), Since: f.problemSince, SessionID: f.problemSession}
 	}
-	label := ""
+	label := "No activity yet"
 	if f.lastActiveAt > 0 {
 		label = "Active " + relativeTime(f.now-f.lastActiveAt)
 	}

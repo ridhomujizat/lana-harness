@@ -152,7 +152,7 @@ indicator with a short activity line while a turn runs.
 
 The system shall count assistant answers and questions in a room's sessions that were created
 after the owner last read the room, show the count on the room row, and reset it when the owner
-opens the room.
+opens the room. A room the owner never opened counts only the last 24 hours.
 
 #### Acceptance criteria
 
