@@ -646,3 +646,78 @@
     order: 1;
   }
 }
+
+/* Knowledge page (spec 31 REQ-KNU-040, REQ-KNU-041). It reuses the dashboard
+   status sections above; these few rules cover the vault path, the upload and
+   run controls, the source lists, and the upkeep log. */
+
+.knowledge-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.knowledge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.knowledge-subtitle {
+  margin: 12px 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.knowledge-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.knowledge-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.knowledge-facts dt {
+  color: var(--text-tertiary);
+}
+
+.knowledge-facts dd {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.knowledge-log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-log-entry {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-tertiary);
+}
+
+.knowledge-log-entry:last-child {
+  border-bottom: 0;
+}
+
+.knowledge-log-heading {
+  margin: 0 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}

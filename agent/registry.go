@@ -63,6 +63,7 @@ type Registry struct {
 	questions  core.QuestionService
 	compaction core.Compactor
 	memory     core.MemoryCapturer
+	knowledge  core.Knowledge
 	config     core.Config
 	secrets    core.Secrets
 	home       string
@@ -168,6 +169,15 @@ func (r *Registry) SetMemoryCapturer(c core.MemoryCapturer) { r.memory = c }
 // memoryCapturer returns the memory-capture service, or nil when none is
 // installed.
 func (r *Registry) memoryCapturer() core.MemoryCapturer { return r.memory }
+
+// SetKnowledge installs the knowledge service used by the knowledge tools and
+// per-turn recall. It is set at boot, before any turn starts; a nil service
+// disables knowledge.
+func (r *Registry) SetKnowledge(k core.Knowledge) { r.knowledge = k }
+
+// knowledgeService returns the knowledge service, or nil when none is
+// installed.
+func (r *Registry) knowledgeService() core.Knowledge { return r.knowledge }
 
 // mcpManager returns the installed MCP manager, or nil when none is set.
 func (r *Registry) mcpManager() core.MCPManager {

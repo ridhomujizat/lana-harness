@@ -184,7 +184,7 @@ command = "github-mcp"
 	if err != nil {
 		t.Fatalf("ToolCatalog: %v", err)
 	}
-	wantOrder := []string{"files", "shell", "web", "memory", "skills", "mcp-admin", "chat", "mcp:github"}
+	wantOrder := []string{"files", "shell", "web", "memory", "knowledge", "skills", "mcp-admin", "chat", "mcp:github"}
 	if len(groups) != len(wantOrder) {
 		t.Fatalf("groups = %+v, want %d groups", groups, len(wantOrder))
 	}

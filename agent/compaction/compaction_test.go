@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
@@ -771,5 +772,99 @@ func TestPressureSummaryRunsAfterPruningReportedUsage(t *testing.T) {
 	}
 	if count, _ := summaryCount(t, store, info.ID); count != 1 {
 		t.Fatalf("repeat check wrote %d summaries, want 1", count)
+	}
+}
+
+// AC-KNU-002 (REQ-KNU-003a): the OnCompacted observer is called exactly once
+// with the session id and agent after a summary is stored.
+func TestOnCompactedObserverRunsOnceAfterSummary(t *testing.T) {
+	provider := &recordProvider{text: "short"}
+	store, info, service := newService(t, provider, core.Config{})
+	seedTurn(t, store, info.ID)
+
+	called := make(chan [2]string, 4)
+	service.OnCompacted(func(sessionID, agent string) {
+		called <- [2]string{sessionID, agent}
+	})
+
+	if _, err := service.CompactNow(context.Background(), info.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-called:
+		if got != [2]string{info.ID, info.Agent} {
+			t.Fatalf("observer = %v, want %s/%s", got, info.ID, info.Agent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("observer was not called")
+	}
+	select {
+	case extra := <-called:
+		t.Fatalf("observer called more than once: %v", extra)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// AC-KNU-002: the observer is not called when the summary append fails.
+func TestOnCompactedObserverNotCalledOnFailure(t *testing.T) {
+	provider := &recordProvider{text: "short", failures: 1}
+	store, info, service := newService(t, provider, core.Config{})
+	seedTurn(t, store, info.ID)
+
+	called := make(chan struct{}, 1)
+	service.OnCompacted(func(string, string) { called <- struct{}{} })
+
+	if _, err := service.CompactNow(context.Background(), info.ID); err == nil {
+		t.Fatal("CompactNow succeeded, want a provider error")
+	}
+	if count, _ := summaryCount(t, store, info.ID); count != 0 {
+		t.Fatalf("summaries = %d, want 0", count)
+	}
+	select {
+	case <-called:
+		t.Fatal("observer was called after a failed compaction")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// summaryFailStore refuses to append a compaction summary so the observer path
+// can be tested against a store write that fails after the summary is built.
+type summaryFailStore struct {
+	*memstore.Store
+}
+
+func (s *summaryFailStore) Append(ctx context.Context, sessionID string, drafts []core.EventDraft) ([]core.SessionEvent, error) {
+	for _, draft := range drafts {
+		if draft.Kind == core.KindCompactionSummary {
+			return nil, errors.New("summary append failed")
+		}
+	}
+	return s.Store.Append(ctx, sessionID, drafts)
+}
+
+// AC-KNU-002 (REQ-KNU-003a): the observer is not called when the summary store
+// write itself fails.
+func TestOnCompactedObserverNotCalledOnAppendFailure(t *testing.T) {
+	provider := &recordProvider{text: "short"}
+	store := &summaryFailStore{Store: memstore.New()}
+	info, err := store.Create(context.Background(), core.NewSession{Agent: "coder", Channel: "library", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, fakeLLM{provider}, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m"},
+	}})
+	seedTurn(t, store.Store, info.ID)
+
+	called := make(chan struct{}, 1)
+	service.OnCompacted(func(string, string) { called <- struct{}{} })
+
+	if _, err := service.CompactNow(context.Background(), info.ID); err == nil {
+		t.Fatal("CompactNow succeeded, want a summary append error")
+	}
+	select {
+	case <-called:
+		t.Fatal("observer was called after a failed summary append")
+	case <-time.After(50 * time.Millisecond):
 	}
 }

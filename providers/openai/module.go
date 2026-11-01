@@ -91,6 +91,16 @@ func usedProviders(config core.Config) map[string]bool {
 			}
 		}
 	}
+	// The embedding provider needs its key checked at boot too (API-KNW-004).
+	if config.Knowledge.EmbeddingProvider != "" {
+		used[config.Knowledge.EmbeddingProvider] = true
+	}
+	// The knowledge upkeep agent runs with its own provider; mark it explicitly
+	// so its key is checked even if the agent list above ever changes
+	// (API-KNU-001).
+	if agent, ok := config.Agents[config.Knowledge.Agent]; ok && agent.Provider != "" {
+		used[agent.Provider] = true
+	}
 	return used
 }
 

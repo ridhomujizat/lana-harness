@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SessionContentBlock, SessionEvent } from "../api/sessions";
-import { contentText, cut, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
+import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { TeamBlock } from "./team";
 import type { TeamChildRequest } from "./team";
@@ -1018,6 +1018,16 @@ export function buildTurns(
           if (note) {
             turn.notes.push(note);
           }
+        }
+        break;
+      }
+      case "knowledge/compiled": {
+        // REQ-KNW-060: one muted note for a knowledge compile pass.
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        const note = knowledgeCompiledLine(payload);
+        if (note) {
+          turn.notes.push(note);
         }
         break;
       }

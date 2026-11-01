@@ -297,8 +297,8 @@ func TestMigrateV2ToV3SessionsWaitingInput(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("version=%d, want 3", version)
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
 	}
 
 	parentAfter := readSessionRow(t, s.db, parentID)
@@ -981,5 +981,537 @@ func TestUserMessageImageSurvivesStore(t *testing.T) {
 	got := messages[0].Content[1]
 	if got.Kind != core.BlockImage || got.MediaType != image.MediaType || !bytes.Equal(got.Data, image.Data) || got.Path != image.Path {
 		t.Fatalf("image block=%+v", got)
+	}
+}
+
+func readSessionText(t *testing.T, db *sql.DB, sessionID string) []core.TextRow {
+	t.Helper()
+	rows, err := db.Query("SELECT session_id, seq, role, created_at, text FROM session_text WHERE session_id = ? ORDER BY seq", sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []core.TextRow
+	for rows.Next() {
+		var row core.TextRow
+		if err := rows.Scan(&row.SessionID, &row.Seq, &row.Role, &row.CreatedAt, &row.Text); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func appendUserText(t *testing.T, s *Store, sessionID, turnID, text string) core.SessionEvent {
+	t.Helper()
+	events, err := s.Append(context.Background(), sessionID, []core.EventDraft{{
+		Kind: core.KindUserMessage, TurnID: turnID,
+		Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: text}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events[0]
+}
+
+// AC-SSR-001 (REQ-SSR-001, REQ-SSR-002): a user and an assistant message become
+// searchable as they are appended; a runtime note, an injected context block,
+// and a non-text block are not indexed; pruning removes the session's rows.
+func TestSessionTextAppendIndexesConversationText(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Runtime: true, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "runtime note deploy"}}}},
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, ContextBlocks: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockText, Text: "context secret"},
+			{Kind: core.BlockText, Text: "deploy staging"},
+		}}},
+		{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockThinking, Text: "thinking hard"},
+			{Kind: core.BlockText, Text: "staging done"},
+		}}},
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockImage, MediaType: "image/png", Data: []byte("x")},
+		}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	indexed := readSessionText(t, s.db, info.ID)
+	if len(indexed) != 2 {
+		t.Fatalf("indexed %d rows, want 2: %+v", len(indexed), indexed)
+	}
+	if indexed[0].Seq != 4 || indexed[0].Role != "user" || indexed[0].Text != "deploy staging" {
+		t.Fatalf("first indexed row = %+v", indexed[0])
+	}
+	if indexed[1].Seq != 5 || indexed[1].Role != "assistant" || indexed[1].Text != "staging done" {
+		t.Fatalf("second indexed row = %+v", indexed[1])
+	}
+
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"deploy"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Session.ID != info.ID || hits[0].Row.Seq != 4 {
+		t.Fatalf("hits=%+v", hits)
+	}
+	hidden, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"secret"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hidden) != 0 {
+		t.Fatalf("context block was indexed: %+v", hidden)
+	}
+
+	if err := s.Prune(ctx, info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rows := readSessionText(t, s.db, info.ID); len(rows) != 0 {
+		t.Fatalf("prune left %d rows: %+v", len(rows), rows)
+	}
+}
+
+// v3Database builds a schema-version-3 database the way the previous binary left
+// it: migrations 0001-0003 applied and user_version set to 3.
+func v3Database(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "lana.db")
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"migrations/0001_session_log.sql", "migrations/0002_session_leases.sql", "migrations/0003_session_status_waiting_input.sql"} {
+		data, err := migrationFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
+		t.Fatal(err)
+	}
+	return db, path
+}
+
+// AC-SSR-002 (REQ-SSR-003): a version-3 database with events migrates to
+// version 4 and its old conversation text is found.
+func TestMigrateV3ToV4BackfillsSessionText(t *testing.T) {
+	ctx := context.Background()
+	db, path := v3Database(t)
+	const sessionID = "SESSIONV3"
+	if _, err := db.Exec("INSERT INTO sessions (id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, 'lana', 'web', 'addr', '/work', 'Old', 'idle', NULL, NULL, 3, 1, 1000, 1200)", sessionID); err != nil {
+		t.Fatal(err)
+	}
+	events := []eventRow{
+		{sessionID, 1, core.KindSessionCreated, `{"v":1,"agent":"lana"}`, "", 1000},
+		{sessionID, 2, core.KindUserMessage, `{"v":1,"content":[{"type":"text","text":"old deploy staging message"}]}`, "t1", 1100},
+		{sessionID, 3, core.KindAssistantMessage, `{"v":1,"content":[{"type":"text","text":"old staging reply"}]}`, "t1", 1200},
+	}
+	for _, event := range events {
+		if _, err := db.Exec("INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)", event.sessionID, event.seq, event.kind, event.payload, event.turnID, event.createdAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 4 {
+		t.Fatalf("version=%d, want 4", version)
+	}
+
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"deploy"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Session.ID != sessionID || hits[0].Row.Seq != 2 || hits[0].Row.Role != "user" {
+		t.Fatalf("hits=%+v", hits)
+	}
+	if !strings.Contains(hits[0].Snippet, "deploy") {
+		t.Fatalf("snippet=%q", hits[0].Snippet)
+	}
+	reply, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"reply"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reply) != 1 || reply[0].Row.Role != "assistant" || reply[0].Row.Seq != 3 {
+		t.Fatalf("reply=%+v", reply)
+	}
+}
+
+// REQ-SSR-011: a message holding two query terms ranks above one holding a
+// single term.
+func TestSearchTextRanksMoreTermsFirst(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	both := createSession(t, s)
+	one := createSession(t, s)
+	appendUserText(t, s, both.ID, "t", "alpha deploy staging")
+	appendUserText(t, s, one.ID, "t", "alpha deploy beta")
+
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"deploy", "staging"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[0].Session.ID != both.ID {
+		t.Fatalf("hits=%+v both=%s", hits, both.ID)
+	}
+}
+
+// REQ-SSR-014: a subagent session (parent set, no inherited_seq) is not
+// searchable, while a fork (parent set, inherited_seq > 0) is.
+func TestSearchTextSkipsSubagentsAndKeepsForks(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	parent := createSession(t, s)
+	sub, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendUserText(t, s, sub.ID, "t", "subagent needle magnetic")
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"magnetic"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("subagent session was searchable: %+v", hits)
+	}
+	// A NULL inherited_seq is excluded the same way.
+	if _, err := s.db.Exec("UPDATE sessions SET inherited_seq = NULL WHERE id = ?", sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	hits, err = s.SearchText(ctx, core.TextQuery{Terms: []string{"magnetic"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("NULL inherited_seq session was searchable: %+v", hits)
+	}
+
+	events, err := s.Append(ctx, parent.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Fork(ctx, parent.ID, events[1].Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendUserText(t, s, child.ID, "t", "fork needle radar")
+	hits, err = s.SearchText(ctx, core.TextQuery{Terms: []string{"radar"}, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Session.ID != child.ID || hits[0].Session.InheritedSeq != events[1].Seq {
+		t.Fatalf("fork hits=%+v child=%s", hits, child.ID)
+	}
+}
+
+// REQ-SSR-015: in the caller's own session only messages at or below the latest
+// compaction summary's upto_seq are returned; a session with no summary returns
+// no hits for itself.
+func TestSearchTextCallerUptoRule(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	caller := createSession(t, s)
+	other := createSession(t, s)
+	if _, err := s.Append(ctx, caller.ID, []core.EventDraft{
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "needle alpha"}}}},
+		{Kind: core.KindCompactionSummary, Payload: core.CompactionSummary{V: 1, FromSeq: 1, UptoSeq: 2}},
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "needle beta"}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	appendUserText(t, s, other.ID, "t", "needle gamma")
+
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"needle"}, CallerSession: caller.ID, Limit: 10, Context: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawCaller, sawOther bool
+	for _, hit := range hits {
+		if hit.Session.ID == caller.ID {
+			sawCaller = true
+			if hit.Row.Seq > 2 {
+				t.Fatalf("caller row above upto returned: %+v", hit.Row)
+			}
+		}
+		if hit.Session.ID == other.ID {
+			sawOther = true
+		}
+	}
+	if !sawCaller || !sawOther {
+		t.Fatalf("caller=%v other=%v hits=%+v", sawCaller, sawOther, hits)
+	}
+
+	none := createSession(t, s)
+	appendUserText(t, s, none.ID, "t", "needle epsilon")
+	hits, err = s.SearchText(ctx, core.TextQuery{Terms: []string{"needle"}, CallerSession: none.ID, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hit := range hits {
+		if hit.Session.ID == none.ID {
+			t.Fatalf("session without compaction returned its own row: %+v", hit)
+		}
+	}
+}
+
+// REQ-SSR-012: the first hit carries up to Context rows on each side of the
+// matching message, in seq order, the hit included.
+func TestSearchTextFillsAroundForFirstHit(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	for _, text := range []string{"one", "two", "deploy needle", "three", "four"} {
+		appendUserText(t, s, info.ID, "t", text)
+	}
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{"needle"}, Limit: 5, Context: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("hits=%+v", hits)
+	}
+	var seqs []int64
+	for _, row := range hits[0].Around {
+		seqs = append(seqs, row.Seq)
+	}
+	if !reflect.DeepEqual(seqs, []int64{3, 4, 5}) {
+		t.Fatalf("around seqs=%v, want [3 4 5]", seqs)
+	}
+	if hits[0].Around[1].Text != "deploy needle" {
+		t.Fatalf("hit row missing from around: %+v", hits[0].Around)
+	}
+}
+
+// REQ-SSR-013: TextWindow returns rows in seq order around a seq, resolves a
+// unique prefix, and reports unknown and ambiguous ids.
+func TestTextWindowOrderAndPrefix(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	for _, text := range []string{"one", "two", "three", "four", "five"} {
+		appendUserText(t, s, info.ID, "t", text)
+	}
+	_, rows, err := s.TextWindow(ctx, info.ID, 4, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seqs []int64
+	for _, row := range rows {
+		seqs = append(seqs, row.Seq)
+	}
+	if !reflect.DeepEqual(seqs, []int64{2, 3, 5, 6}) {
+		t.Fatalf("window seqs=%v, want [2 3 5 6]", seqs)
+	}
+	if rows[0].SessionID != info.ID || rows[0].Role != "user" {
+		t.Fatalf("row=%+v", rows[0])
+	}
+
+	resolved, prefixRows, err := s.TextWindow(ctx, strings.ToLower(info.ID[:8]), 4, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ID != info.ID || len(prefixRows) != 2 {
+		t.Fatalf("resolved=%s rows=%+v", resolved.ID, prefixRows)
+	}
+
+	if _, _, err := s.TextWindow(ctx, "NOSUCHPREFIX", 4, 1); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("unknown err=%v", err)
+	}
+
+	const insertSession = "INSERT INTO sessions (id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, 'a', 'library', 'addr', '/work', '', 'idle', NULL, NULL, 1, 0, 1000, 1000)"
+	for _, id := range []string{"ZZTESTAAA000000000000000001", "ZZTESTAAA000000000000000002"} {
+		if _, err := s.db.Exec(insertSession, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.TextWindow(ctx, "ZZTEST", 1, 1); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous err=%v", err)
+	}
+	if _, _, err := s.TextWindow(ctx, "ZZTESTAAA000000000000000001", 1, 1); err != nil {
+		t.Fatalf("full id err=%v", err)
+	}
+}
+
+// REQ-SSR-011: FTS syntax characters and operators in a term are searched as
+// literal words and can never break the query.
+func TestSearchTextMatchIsSafe(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	plain := createSession(t, s)
+	operator := createSession(t, s)
+	appendUserText(t, s, plain.ID, "t", "deploy staging")
+	appendUserText(t, s, operator.ID, "t", "we or they")
+
+	if hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{`"(*`}, Limit: 5}); err != nil || len(hits) != 0 {
+		t.Fatalf("quote term err=%v hits=%+v", err, hits)
+	}
+	hits, err := s.SearchText(ctx, core.TextQuery{Terms: []string{`"(*`, "OR"}, Limit: 5})
+	if err != nil {
+		t.Fatalf("OR term err=%v", err)
+	}
+	if len(hits) != 1 || hits[0].Session.ID != operator.ID {
+		t.Fatalf("OR was not searched as a literal word: %+v", hits)
+	}
+	hits, err = s.SearchText(ctx, core.TextQuery{Terms: []string{`"(*deploy`, "staging"}, Limit: 5})
+	if err != nil {
+		t.Fatalf("mixed term err=%v", err)
+	}
+	if len(hits) != 1 || hits[0].Session.ID != plain.ID {
+		t.Fatalf("mixed hits=%+v", hits)
+	}
+}
+
+// REQ-KNU-001, REQ-KNU-003: TextHeads lists searchable sessions that have
+// conversation text with their newest text seq: the root and the fork are
+// included, a subagent session is not, and the session info is filled.
+func TestTextHeads(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	root, err := s.Create(ctx, core.NewSession{Agent: "lana", Channel: "telegram", Address: "addr-1", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET title = ? WHERE id = ?", "Deploy staging", root.ID); err != nil {
+		t.Fatal(err)
+	}
+	_ = appendUserText(t, s, root.ID, "t", "first")
+	last := appendUserText(t, s, root.ID, "t", "second")
+
+	fork, err := s.Create(ctx, core.NewSession{Agent: "lana", Channel: "web", Address: "addr-2", Workspace: t.TempDir(), ParentSessionID: root.ID, InheritedSeq: last.Seq})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkRow := appendUserText(t, s, fork.ID, "t", "forked")
+
+	sub, err := s.Create(ctx, core.NewSession{Agent: "lana", Channel: "web", Workspace: t.TempDir(), ParentSessionID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendUserText(t, s, sub.ID, "t", "subagent text")
+
+	heads, err := s.TextHeads(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(heads) != 2 {
+		t.Fatalf("heads=%+v", heads)
+	}
+	byID := map[string]core.TextHead{}
+	for _, head := range heads {
+		byID[head.Session.ID] = head
+	}
+	rhead, ok := byID[root.ID]
+	if !ok || rhead.MaxSeq != last.Seq {
+		t.Fatalf("root head=%+v want MaxSeq=%d", rhead, last.Seq)
+	}
+	if rhead.Session.Agent != "lana" || rhead.Session.Channel != "telegram" || rhead.Session.Title != "Deploy staging" || rhead.Session.Address != "addr-1" {
+		t.Fatalf("root session info=%+v", rhead.Session)
+	}
+	fhead, ok := byID[fork.ID]
+	if !ok || fhead.MaxSeq != forkRow.Seq {
+		t.Fatalf("fork head=%+v want MaxSeq=%d", fhead, forkRow.Seq)
+	}
+	if fhead.Session.ParentSessionID != root.ID || fhead.Session.InheritedSeq != last.Seq {
+		t.Fatalf("fork session info=%+v", fhead.Session)
+	}
+	if _, ok := byID[sub.ID]; ok {
+		t.Fatalf("subagent session was included: %+v", heads)
+	}
+}
+
+// REQ-KNU-001, REQ-KNU-003: TextRows returns rows in seq order, afterSeq skips
+// earlier rows, the rune cap stops before the row that would exceed it, and a
+// first row larger than the cap is returned alone.
+func TestTextRows(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	info := createSession(t, s)
+	first := appendUserText(t, s, info.ID, "t", "alpha") // 5 runes
+	second := appendUserText(t, s, info.ID, "t", "beta") // 4 runes
+	third := appendUserText(t, s, info.ID, "t", "gamma") // 5 runes
+
+	all, err := s.TextRows(ctx, info.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seqs []int64
+	for _, row := range all {
+		seqs = append(seqs, row.Seq)
+	}
+	if !reflect.DeepEqual(seqs, []int64{first.Seq, second.Seq, third.Seq}) {
+		t.Fatalf("seqs=%v, want %v", seqs, []int64{first.Seq, second.Seq, third.Seq})
+	}
+	if all[0].SessionID != info.ID || all[0].Role != "user" || all[0].Text != "alpha" {
+		t.Fatalf("row=%+v", all[0])
+	}
+
+	after, err := s.TextRows(ctx, info.ID, second.Seq, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 1 || after[0].Seq != third.Seq {
+		t.Fatalf("after=%+v", after)
+	}
+
+	capped, err := s.TextRows(ctx, info.ID, 0, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capped) != 2 || capped[0].Seq != first.Seq || capped[1].Seq != second.Seq {
+		t.Fatalf("capped=%+v", capped)
+	}
+
+	tight, err := s.TextRows(ctx, info.ID, 0, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tight) != 1 || tight[0].Seq != first.Seq {
+		t.Fatalf("tight=%+v", tight)
+	}
+
+	one, err := s.TextRows(ctx, info.ID, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one) != 1 || one[0].Seq != first.Seq || one[0].Text != "alpha" {
+		t.Fatalf("one=%+v", one)
+	}
+
+	none, err := s.TextRows(ctx, info.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(none) != 1 || none[0].Seq != first.Seq {
+		t.Fatalf("none=%+v", none)
 	}
 }

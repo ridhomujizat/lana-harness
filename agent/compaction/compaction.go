@@ -108,6 +108,11 @@ type Service struct {
 	// warning (REQ-ECX-030).
 	warnMu sync.Mutex
 	warned map[string]bool
+
+	// obsMu guards observers, the callbacks run after a summary is stored
+	// (REQ-KNU-003a).
+	obsMu     sync.Mutex
+	observers []func(sessionID, agent string)
 }
 
 // failedAttempt remembers the last event seq and turn of a failed pressure
@@ -125,6 +130,34 @@ func NewService(s core.SessionStore, llm core.LLMRegistry, config core.Config) *
 		failures: map[string]failedAttempt{},
 		warned:   map[string]bool{},
 	}
+}
+
+// OnCompacted registers fn to run in a new goroutine after a compaction
+// summary is stored for a session (REQ-KNU-003a, design §4).
+func (s *Service) OnCompacted(fn func(sessionID, agent string)) {
+	if fn == nil {
+		return
+	}
+	s.obsMu.Lock()
+	defer s.obsMu.Unlock()
+	s.observers = append(s.observers, fn)
+}
+
+// notifyCompacted runs every observer once for a stored summary, in a new
+// goroutine (REQ-KNU-003a, design §4).
+func (s *Service) notifyCompacted(sessionID, agent string) {
+	s.obsMu.Lock()
+	observers := make([]func(sessionID, agent string), len(s.observers))
+	copy(observers, s.observers)
+	s.obsMu.Unlock()
+	if len(observers) == 0 {
+		return
+	}
+	go func() {
+		for _, fn := range observers {
+			fn(sessionID, agent)
+		}
+	}()
 }
 
 // sessionLock returns the per-session mutex that serializes compaction.
@@ -510,6 +543,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 	if _, err := s.Store.Append(ctx, req.SessionID, []core.EventDraft{{Kind: core.KindCompactionSummary, Payload: payload}}); err != nil {
 		return zero, err
 	}
+	s.notifyCompacted(req.SessionID, info.Agent)
 	return core.CompactionResult{UptoSeq: payload.UptoSeq, TokensBefore: tokensBefore, TokensAfter: tokensAfter}, nil
 }
 

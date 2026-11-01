@@ -46,9 +46,21 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if err := decodeInput(raw, &in); err != nil {
 		return inputErrorOutput(err)
 	}
-	parsed, err := url.Parse(in.URL)
+	_, text, err := FetchMarkdown(ctx, in.URL)
+	if err != nil {
+		return errorOutput(err.Error())
+	}
+	return successOutput(text)
+}
+
+// FetchMarkdown fetches an HTTP or HTTPS URL and returns the page title (when
+// the response is HTML) and the content converted to Markdown. It is the shared
+// fetch-and-convert code of web_fetch and knowledge_ingest (REQ-KNW-020). The
+// error texts are the ones web_fetch has always returned.
+func FetchMarkdown(ctx context.Context, rawURL string) (title, markdown string, err error) {
+	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return errorOutput("url must be http or https")
+		return "", "", errors.New("url must be http or https")
 	}
 	client := &http.Client{
 		Timeout: webFetchTimeout,
@@ -59,28 +71,28 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 			return nil
 		},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, in.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return errorOutput(err.Error())
+		return "", "", err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		var netErr net.Error
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return errorOutput("timed out after 30 seconds")
+			return "", "", errors.New("timed out after 30 seconds")
 		}
-		return errorOutput(err.Error())
+		return "", "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		return errorOutput(fmt.Sprintf("HTTP %d", resp.StatusCode))
+		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, webFetchLimit+1))
 	if err != nil {
-		return errorOutput(err.Error())
+		return "", "", err
 	}
 	if len(body) > webFetchLimit {
-		return errorOutput("response too large")
+		return "", "", errors.New("response too large")
 	}
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
@@ -91,19 +103,60 @@ func (t *webFetchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	case "text/html":
 		cleaned, err := stripHTML(body)
 		if err != nil {
-			return errorOutput(err.Error())
+			return "", "", err
 		}
+		title = htmlTitle(cleaned)
 		md, err := htmltomarkdown.ConvertString(cleaned)
 		if err != nil {
-			return errorOutput(err.Error())
+			return "", "", err
 		}
 		text = md
 	case "text/plain", "application/json":
 		text = string(body)
 	default:
-		return errorOutput("unsupported content type: " + mediaType)
+		return "", "", errors.New("unsupported content type: " + mediaType)
 	}
-	return successOutput(truncateText(strings.TrimSpace(text), maxToolOutput))
+	return title, truncateText(strings.TrimSpace(text), maxToolOutput), nil
+}
+
+// htmlTitle returns the trimmed text of the first <title> element of a document.
+func htmlTitle(doc string) string {
+	node, err := html.Parse(strings.NewReader(doc))
+	if err != nil {
+		return ""
+	}
+	var title string
+	var find func(*html.Node) bool
+	find = func(n *html.Node) bool {
+		if n.Type == html.ElementNode && n.Data == "title" {
+			title = strings.TrimSpace(textContent(n))
+			return true
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			if find(child) {
+				return true
+			}
+		}
+		return false
+	}
+	find(node)
+	return title
+}
+
+// textContent concatenates the text nodes under n.
+func textContent(n *html.Node) string {
+	var b strings.Builder
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.TextNode {
+			b.WriteString(n.Data)
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(n)
+	return b.String()
 }
 
 func stripHTML(body []byte) (string, error) {

@@ -155,6 +155,55 @@ describe("buildTurns", () => {
       "Removed from memory: stale note",
     ]);
   });
+
+  /* REQ-KNW-060: a knowledge compile pass becomes one muted note. */
+  it("adds a knowledge note for a compile pass", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        content: [{ type: "text", text: "compile this" }],
+      }),
+      event(2, "assistant/message", "t1", {
+        content: [{ type: "text", text: "ok" }],
+      }),
+      event(3, "knowledge/compiled", "t1", {
+        v: 1,
+        source: "sources/2026-11-01 Rapat Q4.pdf",
+        ops: [
+          { op: "create", title: "Rapat Q4" },
+          { op: "append", title: "Proyek X" },
+        ],
+        error: "",
+      }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    expect(turnItem.turn.notes).toEqual([
+      'Knowledge updated from "2026-11-01 Rapat Q4.pdf": created 1, updated 1',
+    ]);
+  });
+
+  it("adds a failed knowledge note when the compile errored", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        content: [{ type: "text", text: "compile this" }],
+      }),
+      event(2, "knowledge/compiled", "t1", {
+        v: 1,
+        source: "sources/2026-11-01 Rapat Q4.pdf",
+        ops: [{ op: "create", title: "Rapat Q4" }],
+        error: "invalid JSON",
+      }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    expect(turnItem.turn.notes).toEqual([
+      'Knowledge compile failed for "2026-11-01 Rapat Q4.pdf": invalid JSON',
+    ]);
+  });
 });
 
 describe("turnSummary", () => {

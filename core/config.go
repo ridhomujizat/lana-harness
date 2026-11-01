@@ -14,6 +14,24 @@ type Config struct {
 	Channels  map[string]map[string]any `toml:"channels"`
 	Modules   []ModuleRow               `toml:"modules"`
 	Web       WebConfig                 `toml:"web"`
+	Knowledge KnowledgeConfig           `toml:"knowledge"`
+}
+
+// KnowledgeConfig is the [knowledge] table (API-KNW-001, API-KNU-001).
+// AutoRecall nil means on; a non-nil false turns per-turn knowledge recall off.
+type KnowledgeConfig struct {
+	Path              string `toml:"path"`
+	AutoRecall        *bool  `toml:"auto_recall"`
+	EmbeddingProvider string `toml:"embedding_provider"`
+	EmbeddingModel    string `toml:"embedding_model"`
+	// Agent names the agent that runs knowledge upkeep. "" picks the first
+	// agent in name order with a knowledge tool (API-KNU-001).
+	Agent string `toml:"agent"`
+	// Journal turns the journal pass on or off. Nil means on (API-KNU-001).
+	Journal *bool `toml:"journal"`
+	// ConsolidateAt is the local HH:MM time of the nightly consolidation run.
+	// Nil means "03:00"; "" turns nightly runs off (API-KNU-001).
+	ConsolidateAt *string `toml:"consolidate_at"`
 }
 
 // WebConfig is the [web] table.

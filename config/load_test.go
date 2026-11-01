@@ -18,7 +18,7 @@ func (m fakeModule) Install(*core.Builder, core.ModuleConfig) error { return nil
 func (m fakeModule) Stop(context.Context) error                     { return nil }
 
 func TestMain(m *testing.M) {
-	for _, name := range []string{"llm", "tools", "mcp", "sqlite_store", "agent", "permission", "approval", "compaction", "memcapture", "cli_runner", "test_mod"} {
+	for _, name := range []string{"llm", "tools", "mcp", "sqlite_store", "agent", "permission", "approval", "compaction", "memcapture", "knowledge", "cli_runner", "test_mod"} {
 		n := name
 		core.RegisterModule(n, func() core.Module { return fakeModule{name: n} })
 	}

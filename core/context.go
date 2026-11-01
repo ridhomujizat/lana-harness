@@ -14,6 +14,7 @@ const (
 	ServiceQuestion   ServiceKey = "question"
 	ServiceCompaction ServiceKey = "compaction"
 	ServiceMCP        ServiceKey = "mcp"
+	ServiceKnowledge  ServiceKey = "knowledge"
 )
 
 // Context is the wiring produced by boot.

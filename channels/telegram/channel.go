@@ -50,6 +50,22 @@ type Backend interface {
 	Draining() bool
 }
 
+// KnowledgeSaver is an optional backend capability: the /save command stores an
+// item as a knowledge source (REQ-KNU-012, API-KNU-002). It is detected with a
+// type assertion, never added to Backend: a backend without it answers /save
+// with the "knowledge is not available" reply.
+type KnowledgeSaver interface {
+	SaveKnowledge(ctx context.Context, address, agent string, item SaveItem) (path string, duplicate bool, err error)
+}
+
+// SaveItem is one /save payload: a document (Data with Ext and Title), a URL, or
+// text (REQ-KNU-012).
+type SaveItem struct {
+	Title, Ext string
+	Data       []byte
+	URL, Text  string
+}
+
 // Commands is the list registered with setMyCommands (API-TG-005).
 var Commands = []Command{
 	{"new", "Start a new session"},

@@ -50,6 +50,11 @@ config = {}
 id = "memcapture"
 module = "memcapture"
 config = {}
+
+[[modules]]
+id = "knowledge"
+module = "knowledge"
+config = {}
 `
 
 const headlessTOML = `

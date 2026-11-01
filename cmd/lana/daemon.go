@@ -280,6 +280,10 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		}()
 	}
 
+	// REQ-KNU-011, REQ-KNU-020: the daemon owns the knowledge upkeep loop. It
+	// starts after the channels and stops with runCtx when the daemon does.
+	rt.StartKnowledgeUpkeep(runCtx)
+
 	// restartNow runs the same shutdown as SIGTERM and then replaces the
 	// process image. The daemon lock stays held (REQ-WEB-035).
 	restartNow := func(done <-chan error) int {
@@ -750,11 +754,57 @@ func (b *daemonBackend) Skills(agent string) []agenthome.Skill {
 	return b.rt.Skills(agent)
 }
 
+// SaveKnowledge stores a Telegram /save item as a knowledge source and starts
+// its compile (REQ-KNU-012, API-KNU-002).
+func (b *daemonBackend) SaveKnowledge(ctx context.Context, address, agent string, item telegram.SaveItem) (string, bool, error) {
+	result, err := b.rt.IngestKnowledge(ctx, lana.KnowledgeSave{
+		Address: address,
+		Channel: "telegram",
+		Agent:   agent,
+		Title:   item.Title,
+		Ext:     item.Ext,
+		Data:    item.Data,
+		URL:     item.URL,
+		Text:    item.Text,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return result.Path, result.Duplicate, nil
+}
+
 func (b *daemonBackend) AgentNames() []string           { return b.rt.AgentNames() }
 func (b *daemonBackend) AgentModel(agent string) string { return b.rt.AgentModel(agent) }
+
+// KnowledgeStatus implements web.KnowledgeBackend by delegating to the runtime
+// (API-KNU-003, REQ-KNU-040).
+func (b *daemonBackend) KnowledgeStatus(ctx context.Context) (core.KnowledgeStatus, error) {
+	return b.rt.KnowledgeStatus(ctx)
+}
+
+// KnowledgeReport implements web.KnowledgeBackend (API-KNU-004).
+func (b *daemonBackend) KnowledgeReport(ctx context.Context) (web.KnowledgeReport, error) {
+	report, err := b.rt.KnowledgeReport(ctx)
+	if err != nil {
+		return web.KnowledgeReport{}, err
+	}
+	return web.KnowledgeReport{Path: report.Path, Markdown: report.Markdown}, nil
+}
+
+// KnowledgeUpload implements web.KnowledgeBackend (API-KNU-005).
+func (b *daemonBackend) KnowledgeUpload(ctx context.Context, name string, data []byte) (string, error) {
+	return b.rt.KnowledgeUpload(ctx, name, data)
+}
+
+// KnowledgeConsolidate implements web.KnowledgeBackend (API-KNU-006).
+func (b *daemonBackend) KnowledgeConsolidate(ctx context.Context) error {
+	return knowledgeConsolidateError(b.rt.KnowledgeConsolidate(ctx))
+}
 
 // Draining reports the runtime gate so the Telegram text path refuses new
 // turns while the daemon shuts down (REQ-TFB-002, API-TFB-008).
 func (b *daemonBackend) Draining() bool { return b.rt.Draining() }
 
 var _ telegram.Backend = (*daemonBackend)(nil)
+var _ telegram.KnowledgeSaver = (*daemonBackend)(nil)
+var _ web.KnowledgeBackend = (*daemonBackend)(nil)

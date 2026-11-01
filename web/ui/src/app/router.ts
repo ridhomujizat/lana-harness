@@ -39,6 +39,7 @@ export type RouteView =
   | "skills"
   | "new-skill"
   | "skill"
+  | "knowledge"
   | "mcp"
   | "mcp-detail"
   | "channels"
@@ -80,6 +81,7 @@ export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/skills", view: "skills", section: "skills" },
   { path: "#/skills/new", view: "new-skill", section: "skills" },
   { path: "#/skills/{scope}/{name}", view: "skill", section: "skills" },
+  { path: "#/knowledge", view: "knowledge", section: "knowledge" },
   { path: "#/mcp", view: "mcp", section: "mcp" },
   { path: "#/mcp/{name}", view: "mcp-detail", section: "mcp" },
   { path: "#/channels", view: "channels", section: "channels" },

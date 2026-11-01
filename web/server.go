@@ -70,6 +70,7 @@ type Server struct {
 	skillStore       SkillStore
 	jobBackend       JobBackend
 	dashboardBackend DashboardBackend
+	knowledgeBackend KnowledgeBackend
 	daemon           DaemonStore
 	telegramStatus   func() TelegramStatus
 	telegramReset    TelegramResetSender
@@ -353,6 +354,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v1/auth/sessions", s.authenticate(http.HandlerFunc(s.handleBrowserSessions)))
 	s.mux.Handle("POST /v1/auth/sessions/revoke-others", s.authenticate(http.HandlerFunc(s.handleRevokeOtherBrowsers)))
 	s.registerDashboardRoutes()
+	s.registerKnowledgeRoutes()
 }
 
 func (s *Server) serveIndex(w http.ResponseWriter, _ *http.Request) {

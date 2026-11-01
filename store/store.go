@@ -16,6 +16,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 
@@ -39,7 +40,7 @@ var (
 	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 var validKinds = map[string]bool{
 	core.KindSessionCreated: true, core.KindTurnStart: true, core.KindTurnEnd: true,
@@ -49,7 +50,7 @@ var validKinds = map[string]bool{
 	core.KindApprovalDecided: true, core.KindApprovalPolicy: true, core.KindModelSelection: true,
 	core.KindQuestionAsked: true, core.KindQuestionAnswered: true,
 	core.KindCompactionSummary: true, core.KindToolResultPruned: true,
-	core.KindMemoryCaptured: true,
+	core.KindMemoryCaptured: true, core.KindKnowledgeCompiled: true,
 }
 
 // Store is the SQLite implementation of core.SessionStore.
@@ -104,7 +105,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return ErrSchemaTooNew
 	}
-	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input"}
+	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text"}
 	for v := version + 1; v <= schemaVersion; v++ {
 		name := fmt.Sprintf("migrations/%04d_%s.sql", v, names[v])
 		data, err := migrationFS.ReadFile(name)
@@ -113,6 +114,12 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 		if v == 3 {
 			if err := s.migrateSessionsRebuild(ctx, v, string(data)); err != nil {
+				return err
+			}
+			continue
+		}
+		if v == 4 {
+			if err := migrateSessionText(ctx, s.db, v, string(data)); err != nil {
 				return err
 			}
 			continue
@@ -175,6 +182,122 @@ func (s *Store) migrateSessionsRebuild(ctx context.Context, version int, stmt st
 		return err
 	}
 	return tx.Commit()
+}
+
+// migrateSessionText applies migration 4: it creates the session_text table and
+// its FTS5 index, then backfills the index from existing session_events in the
+// same transaction. An error rolls the whole transaction back, so a failed
+// backfill leaves the database at version 3 (REQ-SSR-003).
+func migrateSessionText(ctx context.Context, db *sql.DB, version int, stmt string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, stmt); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := backfillSessionText(ctx, tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", version)); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+// backfillSessionText indexes the conversation text of the events already in
+// the log. It reads every user/message and assistant/message row and inserts
+// one session_text row per event that yields conversation text (REQ-SSR-003).
+func backfillSessionText(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT session_id, seq, kind, payload, created_at FROM session_events WHERE kind IN (?, ?)", core.KindUserMessage, core.KindAssistantMessage)
+	if err != nil {
+		return err
+	}
+	type pendingRow struct {
+		sessionID string
+		seq       int64
+		role      string
+		text      string
+		createdAt int64
+	}
+	var pending []pendingRow
+	for rows.Next() {
+		var sessionID, kind string
+		var seq, createdAt int64
+		var payload []byte
+		if err := rows.Scan(&sessionID, &seq, &kind, &payload, &createdAt); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		role, text, ok := conversationText(kind, payload)
+		if !ok {
+			continue
+		}
+		pending = append(pending, pendingRow{sessionID: sessionID, seq: seq, role: role, text: text, createdAt: createdAt})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, row := range pending {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO session_text (session_id, seq, role, created_at, text) VALUES (?, ?, ?, ?, ?)", row.sessionID, row.seq, row.role, row.createdAt, row.text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// conversationText extracts the indexable conversation text of one event. It
+// keeps only the text blocks of a user/message or assistant/message, hides
+// runtime notes and the injected leading context blocks, and reports ok=false
+// when nothing is left (REQ-SSR-001).
+func conversationText(kind string, payload []byte) (role, text string, ok bool) {
+	switch kind {
+	case core.KindUserMessage:
+		var msg core.UserMessage
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			return "", "", false
+		}
+		if msg.Runtime {
+			return "", "", false
+		}
+		blocks := msg.Content
+		if msg.ContextBlocks > 0 {
+			if msg.ContextBlocks >= len(blocks) {
+				blocks = nil
+			} else {
+				blocks = blocks[msg.ContextBlocks:]
+			}
+		}
+		role, text = "user", joinTextBlocks(blocks)
+	case core.KindAssistantMessage:
+		var msg core.AssistantMessage
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			return "", "", false
+		}
+		role, text = "assistant", joinTextBlocks(msg.Content)
+	default:
+		return "", "", false
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", "", false
+	}
+	return role, text, true
+}
+
+// joinTextBlocks joins the text of the text blocks, ignoring every other kind.
+func joinTextBlocks(blocks []core.ContentBlock) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Kind == core.BlockText {
+			parts = append(parts, block.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
@@ -379,6 +502,11 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 			seq++
 			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)", sessionID, seq, draft.Kind, string(payload), draft.TurnID, now); err != nil {
 				return err
+			}
+			if role, text, ok := conversationText(draft.Kind, payload); ok {
+				if _, err := conn.ExecContext(ctx, "INSERT INTO session_text (session_id, seq, role, created_at, text) VALUES (?, ?, ?, ?, ?)", sessionID, seq, role, now, text); err != nil {
+					return err
+				}
 			}
 			events = append(events, core.SessionEvent{SessionID: sessionID, Seq: seq, Kind: draft.Kind, Payload: payload, TurnID: draft.TurnID, CreatedAt: now})
 			switch draft.Kind {
@@ -867,6 +995,9 @@ func (s *Store) Prune(ctx context.Context, sessionID string) error {
 		if _, err := conn.ExecContext(ctx, "INSERT INTO session_prune_allow (session_id) VALUES (?)", sessionID); err != nil {
 			return err
 		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM session_text WHERE session_id = ?", sessionID); err != nil {
+			return err
+		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM session_events WHERE session_id = ?", sessionID); err != nil {
 			return err
 		}
@@ -930,7 +1061,291 @@ func (s *Store) RebuildProjections(ctx context.Context) error {
 	})
 }
 
+// SearchText finds sessions whose conversation text matches q (REQ-SSR-011,
+// -012, -014, -015). Terms are matched as alternatives with BM25 ranking, the
+// best-matching message of a session represents it, and only searchable
+// sessions (roots and forks) are considered. In the caller's own session only
+// messages at or below the latest compaction summary's upto_seq are returned.
+func (s *Store) SearchText(ctx context.Context, q core.TextQuery) ([]core.TextHit, error) {
+	if err := s.assertOpen(); err != nil {
+		return nil, err
+	}
+	if len(q.Terms) == 0 {
+		return nil, nil
+	}
+	upto := int64(0)
+	if q.CallerSession != "" {
+		var err error
+		upto, err = s.callerUptoSeq(ctx, q.CallerSession)
+		if err != nil {
+			return nil, err
+		}
+	}
+	query := "SELECT t.session_id, t.seq, t.role, t.created_at, t.text," +
+		" snippet(session_text_fts, 0, '«', '»', '…', 24)," +
+		" s.agent, s.channel, s.title, s.address, s.parent_session_id, s.inherited_seq" +
+		" FROM session_text_fts" +
+		" JOIN session_text t ON t.rowid = session_text_fts.rowid" +
+		" JOIN sessions s ON s.id = t.session_id" +
+		" WHERE session_text_fts MATCH ?" +
+		" AND (s.parent_session_id IS NULL OR COALESCE(s.inherited_seq, 0) > 0)" +
+		" AND (? = '' OR s.agent = ?)" +
+		" ORDER BY bm25(session_text_fts)" +
+		" LIMIT 300"
+	rows, err := s.db.QueryContext(ctx, query, matchExpression(q.Terms), q.Agent, q.Agent)
+	if err != nil {
+		return nil, err
+	}
+	type match struct {
+		row     core.TextRow
+		snippet string
+		session core.SessionInfo
+	}
+	var matches []match
+	for rows.Next() {
+		var m match
+		var parent sql.NullString
+		var inherited sql.NullInt64
+		if err := rows.Scan(&m.row.SessionID, &m.row.Seq, &m.row.Role, &m.row.CreatedAt, &m.row.Text, &m.snippet,
+			&m.session.Agent, &m.session.Channel, &m.session.Title, &m.session.Address, &parent, &inherited); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		m.session.ID = m.row.SessionID
+		m.session.ParentSessionID = parent.String
+		m.session.InheritedSeq = inherited.Int64
+		matches = append(matches, m)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	_ = rows.Close()
+
+	var hits []core.TextHit
+	seen := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		if m.row.SessionID == q.CallerSession && (upto == 0 || m.row.Seq > upto) {
+			continue
+		}
+		if seen[m.row.SessionID] {
+			continue
+		}
+		seen[m.row.SessionID] = true
+		hits = append(hits, core.TextHit{Session: m.session, Row: m.row, Snippet: m.snippet})
+		if q.Limit > 0 && len(hits) >= q.Limit {
+			break
+		}
+	}
+	if len(hits) == 0 {
+		return nil, nil
+	}
+	aroundUpto := int64(0)
+	if hits[0].Row.SessionID == q.CallerSession {
+		aroundUpto = upto
+	}
+	before, err := s.textRowsBefore(ctx, hits[0].Row.SessionID, hits[0].Row.Seq, q.Context, aroundUpto)
+	if err != nil {
+		return nil, err
+	}
+	after, err := s.textRowsAfter(ctx, hits[0].Row.SessionID, hits[0].Row.Seq, q.Context, aroundUpto)
+	if err != nil {
+		return nil, err
+	}
+	around := make([]core.TextRow, 0, len(before)+1+len(after))
+	around = append(around, before...)
+	around = append(around, hits[0].Row)
+	around = append(around, after...)
+	hits[0].Around = around
+	return hits, nil
+}
+
+// TextWindow returns the conversation text of one session around aroundSeq
+// (REQ-SSR-013). sessionID is a full id or a unique prefix. The rows are in seq
+// order, before and after aroundSeq.
+func (s *Store) TextWindow(ctx context.Context, sessionID string, aroundSeq int64, radius int) (core.SessionInfo, []core.TextRow, error) {
+	if err := s.assertOpen(); err != nil {
+		return core.SessionInfo{}, nil, err
+	}
+	matches, err := s.FindPrefix(ctx, sessionID)
+	if err != nil {
+		return core.SessionInfo{}, nil, err
+	}
+	if len(matches) == 0 {
+		return core.SessionInfo{}, nil, ErrSessionNotFound
+	}
+	if len(matches) > 1 {
+		return core.SessionInfo{}, nil, errors.New("session id prefix is ambiguous")
+	}
+	info := matches[0]
+	before, err := s.textRowsBefore(ctx, info.ID, aroundSeq, radius, 0)
+	if err != nil {
+		return core.SessionInfo{}, nil, err
+	}
+	after, err := s.textRowsAfter(ctx, info.ID, aroundSeq, radius, 0)
+	if err != nil {
+		return core.SessionInfo{}, nil, err
+	}
+	out := make([]core.TextRow, 0, len(before)+len(after))
+	out = append(out, before...)
+	out = append(out, after...)
+	return info, out, nil
+}
+
+// TextHeads lists the searchable sessions (spec 29 definition: roots and forks)
+// that have conversation text, with each session's newest text seq (REQ-KNU-001,
+// REQ-KNU-003). The result is ordered by session id.
+func (s *Store) TextHeads(ctx context.Context) ([]core.TextHead, error) {
+	if err := s.assertOpen(); err != nil {
+		return nil, err
+	}
+	query := "SELECT t.session_id, MAX(t.seq)," +
+		" s.agent, s.channel, s.title, s.address, s.parent_session_id, s.inherited_seq" +
+		" FROM session_text t" +
+		" JOIN sessions s ON s.id = t.session_id" +
+		" WHERE (s.parent_session_id IS NULL OR COALESCE(s.inherited_seq, 0) > 0)" +
+		" GROUP BY t.session_id" +
+		" ORDER BY t.session_id"
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []core.TextHead
+	for rows.Next() {
+		var head core.TextHead
+		var parent sql.NullString
+		var inherited sql.NullInt64
+		if err := rows.Scan(&head.Session.ID, &head.MaxSeq,
+			&head.Session.Agent, &head.Session.Channel, &head.Session.Title, &head.Session.Address, &parent, &inherited); err != nil {
+			return nil, err
+		}
+		head.Session.ParentSessionID = parent.String
+		head.Session.InheritedSeq = inherited.Int64
+		out = append(out, head)
+	}
+	return out, rows.Err()
+}
+
+// TextRows returns the rows of sessionID with seq above afterSeq in seq order,
+// stopping before the total text would pass maxRunes runes (REQ-KNU-001,
+// REQ-KNU-003). The first row is always returned when any row exists, even when
+// it alone is larger than maxRunes; maxRunes <= 0 returns only that first row.
+func (s *Store) TextRows(ctx context.Context, sessionID string, afterSeq int64, maxRunes int) ([]core.TextRow, error) {
+	if err := s.assertOpen(); err != nil {
+		return nil, err
+	}
+	limit := maxRunes + 1
+	if limit < 1 {
+		limit = 1
+	}
+	rows, err := s.textRows(ctx, "SELECT session_id, seq, role, created_at, text FROM session_text WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?", sessionID, afterSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []core.TextRow
+	total := 0
+	for _, row := range rows {
+		n := utf8.RuneCountInString(row.Text)
+		if len(out) > 0 && (maxRunes <= 0 || total+n > maxRunes) {
+			break
+		}
+		out = append(out, row)
+		total += n
+	}
+	return out, nil
+}
+
+// callerUptoSeq returns the upto_seq of the latest compaction summary of the
+// session, or 0 when the session has no summary (REQ-SSR-015).
+func (s *Store) callerUptoSeq(ctx context.Context, sessionID string) (int64, error) {
+	var payload string
+	err := s.db.QueryRowContext(ctx, "SELECT payload FROM session_events WHERE session_id = ? AND kind = ? ORDER BY seq DESC LIMIT 1", sessionID, core.KindCompactionSummary).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var summary core.CompactionSummary
+	if err := json.Unmarshal([]byte(payload), &summary); err != nil {
+		return 0, err
+	}
+	return summary.UptoSeq, nil
+}
+
+// textRowsBefore returns up to limit session_text rows with seq below aroundSeq,
+// in ascending seq order. A non-zero upto caps the caller's own session.
+func (s *Store) textRowsBefore(ctx context.Context, sessionID string, aroundSeq int64, limit int, upto int64) ([]core.TextRow, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	query := "SELECT session_id, seq, role, created_at, text FROM session_text WHERE session_id = ? AND seq < ?"
+	args := []any{sessionID, aroundSeq}
+	if upto > 0 {
+		query += " AND seq <= ?"
+		args = append(args, upto)
+	}
+	query += " ORDER BY seq DESC LIMIT ?"
+	args = append(args, limit)
+	out, err := s.textRows(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// textRowsAfter returns up to limit session_text rows with seq above aroundSeq,
+// in ascending seq order. A non-zero upto caps the caller's own session.
+func (s *Store) textRowsAfter(ctx context.Context, sessionID string, aroundSeq int64, limit int, upto int64) ([]core.TextRow, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	query := "SELECT session_id, seq, role, created_at, text FROM session_text WHERE session_id = ? AND seq > ?"
+	args := []any{sessionID, aroundSeq}
+	if upto > 0 {
+		query += " AND seq <= ?"
+		args = append(args, upto)
+	}
+	query += " ORDER BY seq LIMIT ?"
+	args = append(args, limit)
+	return s.textRows(ctx, query, args...)
+}
+
+func (s *Store) textRows(ctx context.Context, query string, args ...any) ([]core.TextRow, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []core.TextRow
+	for rows.Next() {
+		var row core.TextRow
+		if err := rows.Scan(&row.SessionID, &row.Seq, &row.Role, &row.CreatedAt, &row.Text); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// matchExpression turns terms into an FTS5 MATCH string. Every term is a quoted
+// string, so FTS5 operators and syntax characters in a term are searched as
+// literal words and can never break the query (REQ-SSR-011). An inner double
+// quote is doubled.
+func matchExpression(terms []string) string {
+	quoted := make([]string, 0, len(terms))
+	for _, term := range terms {
+		quoted = append(quoted, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+	}
+	return strings.Join(quoted, " OR ")
+}
+
 var _ core.SessionStore = (*Store)(nil)
 var _ core.LeaseProbe = (*Store)(nil)
 var _ core.EventScanner = (*Store)(nil)
-var _ = strings.TrimSpace
+var _ core.SessionSearcher = (*Store)(nil)
+var _ core.SessionTextReader = (*Store)(nil)

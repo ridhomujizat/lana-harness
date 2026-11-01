@@ -13,8 +13,9 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-var topKeys = []string{"agents", "channels", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
+var topKeys = []string{"agents", "channels", "knowledge", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
+var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "tools", "vision", "workspace"}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
@@ -180,6 +181,14 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 			add("web", typeMsg("table", raw))
 		} else {
 			validateWeb(table, "web", add)
+		}
+	}
+	if raw, ok := m["knowledge"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add("knowledge", typeMsg("table", raw))
+		} else {
+			validateKnowledge(table, "knowledge", add)
 		}
 	}
 	return errs
@@ -578,6 +587,55 @@ func validateWeb(v map[string]any, path string, add func(string, string)) {
 	}
 }
 
+// validateKnowledge checks one [knowledge] table's keys and types
+// (API-KNW-001, API-KNU-001). The embedding_provider and agent references are
+// checked in validateEffective, where the merged config is known.
+func validateKnowledge(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(knowledgeKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, knowledgeKeys))
+		}
+	}
+	for _, key := range []string{"path", "embedding_provider", "embedding_model", "agent"} {
+		if val, ok := v[key]; ok {
+			if _, ok := val.(string); !ok {
+				add(path+"."+key, typeMsg("string", val))
+			}
+		}
+	}
+	if val, ok := v["auto_recall"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".auto_recall", typeMsg("boolean", val))
+		}
+	}
+	// API-KNU-001: journal turns the journal pass on or off.
+	if val, ok := v["journal"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".journal", typeMsg("boolean", val))
+		}
+	}
+	// API-KNU-001: consolidate_at is a 24-hour HH:MM local time, or "" to turn
+	// nightly runs off.
+	if val, ok := v["consolidate_at"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".consolidate_at", typeMsg("string", val))
+		} else if s != "" {
+			if _, err := time.Parse("15:04", s); err != nil {
+				add(path+".consolidate_at", `want HH:MM or ""`)
+			}
+		}
+	}
+	provider, _ := v["embedding_provider"].(string)
+	if provider != "" {
+		raw, exists := v["embedding_model"]
+		model, isString := raw.(string)
+		if !exists || (isString && model == "") {
+			add(path+".embedding_model", "required when embedding_provider is set")
+		}
+	}
+}
+
 func validateEffective(m map[string]any, positions map[string]pos, add func(string, string)) {
 	agents, _ := asMap(m["agents"])
 	teams, _ := asMap(m["teams"])
@@ -587,6 +645,25 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	agentNames := sortedKeys(agents)
 	teamNames := sortedKeys(teams)
 	mcpNames := sortedKeys(mcps)
+	if k, ok := asMap(m["knowledge"]); ok {
+		if name, ok := k["embedding_provider"].(string); ok && name != "" {
+			if raw, ok := providers[name]; ok {
+				pm, _ := asMap(raw)
+				kind, _ := pm["kind"].(string)
+				if kind != "" && kind != "openai_compat" {
+					add("knowledge.embedding_provider", fmt.Sprintf("provider %q must have kind openai_compat", name))
+				}
+			} else {
+				add("knowledge.embedding_provider", fmt.Sprintf("unknown provider %q", name))
+			}
+		}
+		// API-KNU-001: knowledge.agent must name a configured agent.
+		if name, ok := k["agent"].(string); ok && name != "" {
+			if !contains(agentNames, name) {
+				add("knowledge.agent", fmt.Sprintf("unknown agent %q", name))
+			}
+		}
+	}
 	for _, name := range agentNames {
 		agent, _ := asMap(agents[name])
 		path := "agents." + name

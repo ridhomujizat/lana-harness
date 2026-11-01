@@ -232,6 +232,48 @@ export function memoryOpLine(op: unknown): string {
   }
 }
 
+/* REQ-KNW-060: one muted line for a knowledge compile pass. It names the source
+   file and counts the created and updated pages; a failed pass names the error.
+   The source name is the last path segment of the payload source. */
+export function knowledgeCompiledLine(payload: unknown): string {
+  const value = asRecord(payload);
+  const source = stringOf(value.source);
+  const segments = source.split("/").filter((segment) => segment !== "");
+  const name = segments.length > 0 ? segments[segments.length - 1] : "";
+  const error = stringOf(value.error);
+  if (error) {
+    return 'Knowledge compile failed for "' + name + '": ' + error;
+  }
+  const ops = Array.isArray(value.ops) ? value.ops : [];
+  let created = 0;
+  let updated = 0;
+  for (const op of ops) {
+    switch (stringOf(asRecord(op).op)) {
+      case "create":
+        created += 1;
+        break;
+      case "append":
+      case "replace":
+      case "meta":
+        updated += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  const parts: string[] = [];
+  if (created > 0) {
+    parts.push("created " + created);
+  }
+  if (updated > 0) {
+    parts.push("updated " + updated);
+  }
+  if (parts.length === 0) {
+    return "";
+  }
+  return 'Knowledge updated from "' + name + '": ' + parts.join(", ");
+}
+
 export function outcomeWords(outcome: unknown): string {
   switch (outcome) {
     case "allowed_once":
@@ -492,6 +534,14 @@ export function buildHistory(
             });
           }
         });
+        break;
+      }
+      case "knowledge/compiled": {
+        // REQ-KNW-060: one decision line for a knowledge compile pass.
+        const text = knowledgeCompiledLine(payload);
+        if (text) {
+          items.push({ key, type: "decision", label: "Knowledge", text });
+        }
         break;
       }
       default:

@@ -93,6 +93,13 @@ type Provider interface {
 	Stream(ctx context.Context, req ChatRequest) (ChatStream, error)
 }
 
+// Embedder turns text inputs into embedding vectors for semantic search
+// (API-KNW-004). The returned slice is parallel to inputs: result i belongs to
+// inputs[i]. The caller splits large batches.
+type Embedder interface {
+	Embed(ctx context.Context, model string, inputs []string) ([][]float32, error)
+}
+
 // LLMRegistry stores providers by name from [providers.<name>].
 type LLMRegistry interface {
 	Provider(name string) (Provider, bool)

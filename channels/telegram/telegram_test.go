@@ -162,7 +162,7 @@ func TestNonTextAndCommands(t *testing.T) {
 	api.waitCall("sendMessage", textIs(unsupportedMediaReply))
 
 	api.text(ownerChat, "private", ownerID, "/help")
-	api.waitCall("sendMessage", textIs("I'm helper. Commands: /new /agent /memory /mcp /skills /compact /cancel /status"))
+	api.waitCall("sendMessage", textIs("I'm helper. Commands: /new /agent /memory /mcp /skills /compact /save /cancel /status"))
 	api.text(ownerChat, "private", ownerID, "/agent")
 	kb := api.waitCall("sendMessage", textIs("Current agent: helper"))
 	if !strings.Contains(api.dump(), `"callback_data":"g:coder"`) {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -190,6 +191,12 @@ func (w *chat) addressed(m *Message) bool {
 // at once, as a group of one; an album part is buffered until the album is
 // complete (REQ-ATT-005, AC-ATT-006).
 func (w *chat) handleMedia(ctx context.Context, m *Message, group bool) {
+	// A document whose caption is /save stores the file instead of starting a
+	// turn (REQ-KNU-012, API-KNU-002).
+	if m.Document != nil && w.isSaveCommand(m.Caption) {
+		w.handleCommand(ctx, m, strings.TrimSpace(m.Caption))
+		return
+	}
 	if m.MediaGroupID == "" {
 		if group && !w.addressed(m) {
 			return
@@ -1006,7 +1013,7 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 	args := fields[1:]
 	owner := m.From != nil && w.ch.isOwner(m.Chat.Type, m.From.ID)
 	switch name {
-	case "new", "agent", "compact", "cancel":
+	case "new", "agent", "compact", "cancel", "save":
 		if isGroup(m.Chat.Type) && !owner {
 			w.reply(ctx, m.MessageID, "✗ only the owner can use /"+name)
 			return
@@ -1017,7 +1024,7 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 	w.mu.Unlock()
 	switch name {
 	case "start", "help":
-		w.reply(ctx, m.MessageID, "I'm "+w.currentAgent(ctx)+". Commands: /new /agent /memory /mcp /skills /compact /cancel /status")
+		w.reply(ctx, m.MessageID, "I'm "+w.currentAgent(ctx)+". Commands: /new /agent /memory /mcp /skills /compact /save /cancel /status")
 	case "new":
 		if running {
 			w.reply(ctx, m.MessageID, waitReply)
@@ -1080,6 +1087,8 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 		if err := w.ch.backend.Cancel(ctx, session); err != nil {
 			w.reply(ctx, m.MessageID, "✗ "+err.Error())
 		}
+	case "save":
+		w.handleSave(ctx, m, args)
 	case "status":
 		session, agent, err := w.ensureSession(ctx)
 		if err != nil {
@@ -1096,6 +1105,130 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 	default:
 		w.reply(ctx, m.MessageID, "· unknown command: /"+name)
 	}
+}
+
+// handleSave stores the target message's document or text, the argument text,
+// or the argument URL as a knowledge source with the chat's current agent
+// (REQ-KNU-012, API-KNU-002). The target is the replied-to message when set,
+// else the command message.
+func (w *chat) handleSave(ctx context.Context, m *Message, args []string) {
+	saver, ok := w.ch.backend.(KnowledgeSaver)
+	if !ok {
+		w.reply(ctx, m.MessageID, "✗ knowledge is not available")
+		return
+	}
+	item, ok := w.saveItem(ctx, m, args)
+	if !ok {
+		return
+	}
+	path, duplicate, err := saver.SaveKnowledge(ctx, w.address(), w.currentAgent(ctx), item)
+	switch {
+	case err != nil && err.Error() == "knowledge is not available":
+		w.reply(ctx, m.MessageID, "✗ knowledge is not available")
+	case err != nil:
+		w.reply(ctx, m.MessageID, "✗ "+err.Error())
+	case duplicate:
+		w.reply(ctx, m.MessageID, "· already saved as "+path)
+	default:
+		w.reply(ctx, m.MessageID, "✓ saved "+path+" — compiling into wiki pages")
+	}
+}
+
+// saveItem builds the /save payload and replies itself on a failure. The target
+// is the replied-to message when set, else the command message (REQ-KNU-012):
+//  1. a document on the target with a supported extension is downloaded;
+//  2. else the arguments: one URL is fetched, any other text is stored;
+//  3. else the target's text or caption.
+func (w *chat) saveItem(ctx context.Context, m *Message, args []string) (SaveItem, bool) {
+	target := m
+	hasTarget := m.ReplyTo != nil
+	if hasTarget {
+		target = m.ReplyTo
+	}
+	if target.Document != nil {
+		return w.saveDocument(ctx, m.MessageID, target)
+	}
+	if len(args) > 0 {
+		text := strings.TrimSpace(strings.Join(args, " "))
+		if len(args) == 1 && isSaveURL(args[0]) {
+			return SaveItem{URL: text}, true
+		}
+		return SaveItem{Text: text}, true
+	}
+	if hasTarget {
+		if text := strings.TrimSpace(target.Text); text != "" {
+			return SaveItem{Text: text}, true
+		}
+		if text := strings.TrimSpace(target.Caption); text != "" {
+			return SaveItem{Text: text}, true
+		}
+	}
+	w.reply(ctx, m.MessageID, "✗ nothing to save: reply to a message or add text")
+	return SaveItem{}, false
+}
+
+// saveDocument downloads a document on the target and builds a SaveItem with
+// the file name without its extension as title (REQ-KNU-012, API-KNU-002). An
+// unsupported extension or a download failure gets a reply and ok=false.
+func (w *chat) saveDocument(ctx context.Context, replyTo int64, m *Message) (SaveItem, bool) {
+	name := m.Document.FileName
+	if name == "" {
+		name = "file"
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".md", ".txt", ".pdf", ".html":
+	default:
+		w.reply(ctx, replyTo, "✗ unsupported file type "+ext)
+		return SaveItem{}, false
+	}
+	if m.Document.FileSize > attach.MaxFileBytes {
+		w.reply(ctx, replyTo, tooLargeText(name))
+		return SaveItem{}, false
+	}
+	file, err := w.ch.api.GetFile(ctx, m.Document.FileID)
+	if err != nil {
+		w.mediaError(ctx, replyTo, name, err)
+		return SaveItem{}, false
+	}
+	if file.FileSize > attach.MaxFileBytes {
+		w.reply(ctx, replyTo, tooLargeText(name))
+		return SaveItem{}, false
+	}
+	var buf bytes.Buffer
+	if err := w.ch.api.Download(ctx, file.FilePath, &buf, attach.MaxFileBytes); err != nil {
+		w.mediaError(ctx, replyTo, name, err)
+		return SaveItem{}, false
+	}
+	return SaveItem{
+		Title: strings.TrimSuffix(name, filepath.Ext(name)),
+		Ext:   ext,
+		Data:  buf.Bytes(),
+	}, true
+}
+
+// isSaveCommand reports whether a caption is the /save command, with an optional
+// bot-name suffix (REQ-KNU-012, API-KNU-002).
+func (w *chat) isSaveCommand(caption string) bool {
+	fields := strings.Fields(caption)
+	if len(fields) == 0 {
+		return false
+	}
+	name := strings.TrimPrefix(fields[0], "/")
+	if at := strings.Index(name, "@"); at >= 0 {
+		if !strings.EqualFold(name[at+1:], w.ch.bot.Username) {
+			return false
+		}
+		name = name[:at]
+	}
+	return name == "save"
+}
+
+// isSaveURL reports whether a /save argument is a single http or https URL
+// (API-KNU-002).
+func isSaveURL(text string) bool {
+	lower := strings.ToLower(text)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 func (w *chat) switchAgent(ctx context.Context, replyTo int64, agent string) {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildHistory, contentText, memoryOpLine } from "./format";
+import {
+  buildHistory,
+  contentText,
+  knowledgeCompiledLine,
+  memoryOpLine,
+} from "./format";
 import type { SessionEvent, EventPayload } from "../api/sessions";
 
 function event(
@@ -60,6 +65,28 @@ describe("buildHistory", () => {
     ]);
     expect(items).toHaveLength(0);
   });
+
+  /* REQ-KNW-060: a knowledge compile pass becomes one decision line. */
+  it("renders a decision line for a knowledge compile pass", () => {
+    const items = buildHistory([
+      event(1, "knowledge/compiled", {
+        v: 1,
+        source: "sources/2026-11-01 Rapat Q4.pdf",
+        ops: [
+          { op: "create", title: "Rapat Q4" },
+          { op: "append", title: "Proyek X" },
+        ],
+        usage: { input_tokens: 12000, cached_input_tokens: 0, output_tokens: 900 },
+        error: "",
+      }),
+    ]);
+    expect(items.map((item) => ({ type: item.type, text: item.text }))).toEqual([
+      {
+        type: "decision",
+        text: 'Knowledge updated from "2026-11-01 Rapat Q4.pdf": created 1, updated 1',
+      },
+    ]);
+  });
 });
 
 describe("memoryOpLine", () => {
@@ -76,6 +103,48 @@ describe("memoryOpLine", () => {
     expect(memoryOpLine({ action: "remove", old_text: "stale note" })).toBe(
       "Removed from memory: stale note"
     );
+  });
+});
+
+describe("knowledgeCompiledLine", () => {
+  /* REQ-KNW-060: created counts create; updated counts append, replace, meta. */
+  it("counts created and updated operations", () => {
+    expect(
+      knowledgeCompiledLine({
+        source: "sources/2026-11-01 Rapat Q4.pdf",
+        ops: [
+          { op: "create", title: "Rapat Q4" },
+          { op: "append", title: "Proyek X" },
+        ],
+      })
+    ).toBe('Knowledge updated from "2026-11-01 Rapat Q4.pdf": created 1, updated 1');
+  });
+
+  it("names the failure with the source file name and the error", () => {
+    expect(
+      knowledgeCompiledLine({
+        source: "sources/2026-11-01 Rapat Q4.pdf",
+        ops: [{ op: "create", title: "Rapat Q4" }],
+        error: "invalid JSON",
+      })
+    ).toBe('Knowledge compile failed for "2026-11-01 Rapat Q4.pdf": invalid JSON');
+  });
+
+  it("omits an empty group and takes the name from the last segment", () => {
+    expect(
+      knowledgeCompiledLine({
+        source: "notes/topics/Proyek X.md",
+        ops: [
+          { op: "append", title: "Proyek X" },
+          { op: "meta", title: "Proyek X" },
+        ],
+      })
+    ).toBe('Knowledge updated from "Proyek X.md": updated 2');
+  });
+
+  it("returns an empty line with no operations and no error", () => {
+    expect(knowledgeCompiledLine({ source: "a/b.md", ops: [] })).toBe("");
+    expect(knowledgeCompiledLine({ source: "a/b.md" })).toBe("");
   });
 });
 

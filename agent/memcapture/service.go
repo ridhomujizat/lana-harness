@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
+	"github.com/ridhomujizat/lana-harness/internal/secretlike"
 )
 
 // captureTimeout bounds one pass; a pass still running at daemon shutdown is
@@ -28,16 +28,6 @@ const maxOps = 5
 
 // maxContentRunes is the longest add/replace content (REQ-MEM-013).
 const maxContentRunes = 300
-
-// secretPatterns reject secret-like content. The last one is case-insensitive.
-var secretPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`sk-[A-Za-z0-9]{16,}`),
-	regexp.MustCompile(`ghp_[A-Za-z0-9]{20,}`),
-	regexp.MustCompile(`xox[bp]-`),
-	regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
-	regexp.MustCompile(`-----BEGIN`),
-	regexp.MustCompile(`(?i)(password|passwd|api[_-]?key|token)\s*[:=]\s*\S{6,}`),
-}
 
 // Service implements core.MemoryCapturer.
 type Service struct {
@@ -213,17 +203,7 @@ func validOp(op core.MemoryOp) bool {
 	if strings.Contains(op.Content, agenthome.Separator) || strings.Contains(op.OldText, agenthome.Separator) {
 		return false
 	}
-	return !looksLikeSecret(op.Content) && !looksLikeSecret(op.OldText)
-}
-
-// looksLikeSecret reports whether text holds a secret-like value.
-func looksLikeSecret(text string) bool {
-	for _, pattern := range secretPatterns {
-		if pattern.MatchString(text) {
-			return true
-		}
-	}
-	return false
+	return !secretlike.Match(op.Content) && !secretlike.Match(op.OldText)
 }
 
 // collectReply reads the reply text and usage, and reports whether the reply

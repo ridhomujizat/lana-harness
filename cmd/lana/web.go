@@ -83,6 +83,7 @@ var _ web.ToolCatalog = (*webBackend)(nil)
 var _ web.LiveConfigStore = (*webBackend)(nil)
 var _ web.JobBackend = (*webBackend)(nil)
 var _ web.DashboardBackend = (*webBackend)(nil)
+var _ web.KnowledgeBackend = (*webBackend)(nil)
 
 const (
 	// providerTestTimeout is the 15-second limit of API-WEB-019.
@@ -357,6 +358,60 @@ func (b *webBackend) sessionStatusCounts(ctx context.Context, agent string) (int
 		}
 	}
 	return running, waiting, nil
+}
+
+// knowledgeConsolidateError maps the runtime's consolidate outcome to the web
+// port: a missing knowledge service becomes web.ErrKnowledgeUnavailable
+// (API-KNU-006). Busy and nil pass through unchanged.
+func knowledgeConsolidateError(err error) error {
+	if errors.Is(err, lana.ErrKnowledgeUnavailable) {
+		return web.ErrKnowledgeUnavailable
+	}
+	return err
+}
+
+// KnowledgeStatus implements web.KnowledgeBackend (API-KNU-003, REQ-KNU-040).
+// Without a runtime (the web backend used outside the daemon) it reports
+// available:false with non-null lists rather than panicking.
+func (b *webBackend) KnowledgeStatus(ctx context.Context) (core.KnowledgeStatus, error) {
+	if b.rt == nil {
+		return core.KnowledgeStatus{
+			SourcesPending:   []string{},
+			SourcesFailed:    []core.KnowledgeSourceError{},
+			InboxUnsupported: []string{},
+			Log:              []core.KnowledgeLogEntry{},
+		}, nil
+	}
+	return b.rt.KnowledgeStatus(ctx)
+}
+
+// KnowledgeReport implements web.KnowledgeBackend (API-KNU-004).
+func (b *webBackend) KnowledgeReport(ctx context.Context) (web.KnowledgeReport, error) {
+	if b.rt == nil {
+		return web.KnowledgeReport{}, web.ErrKnowledgeUnavailable
+	}
+	report, err := b.rt.KnowledgeReport(ctx)
+	if err != nil {
+		return web.KnowledgeReport{}, err
+	}
+	return web.KnowledgeReport{Path: report.Path, Markdown: report.Markdown}, nil
+}
+
+// KnowledgeUpload implements web.KnowledgeBackend (API-KNU-005).
+func (b *webBackend) KnowledgeUpload(ctx context.Context, name string, data []byte) (string, error) {
+	if b.rt == nil {
+		return "", web.ErrKnowledgeUnavailable
+	}
+	return b.rt.KnowledgeUpload(ctx, name, data)
+}
+
+// KnowledgeConsolidate implements web.KnowledgeBackend (API-KNU-006). Outside
+// the daemon it reports unavailable, which the route serves as 503.
+func (b *webBackend) KnowledgeConsolidate(ctx context.Context) error {
+	if b.rt == nil {
+		return web.ErrKnowledgeUnavailable
+	}
+	return knowledgeConsolidateError(b.rt.KnowledgeConsolidate(ctx))
 }
 
 // DaemonInfo implements web.DaemonStore (API-WEB-022).

@@ -167,12 +167,15 @@ var loopGuardUntracked = map[string]bool{
 // loopGuardReadOnly lists the tools whose repeated identical result is the
 // read-only no-progress case (Definitions, REQ-LPG-003).
 var loopGuardReadOnly = map[string]bool{
-	"read_file":   true,
-	"glob":        true,
-	"grep":        true,
-	"web_fetch":   true,
-	"memory_read": true,
-	"skill_load":  true,
+	"read_file":        true,
+	"glob":             true,
+	"grep":             true,
+	"web_fetch":        true,
+	"memory_read":      true,
+	"session_search":   true,
+	"knowledge_search": true,
+	"knowledge_read":   true,
+	"skill_load":       true,
 }
 
 // before decides one call before the step runs. A call that matches a block

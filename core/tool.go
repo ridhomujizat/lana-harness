@@ -56,6 +56,12 @@ type ToolCtx struct {
 	// Jobs runs and tracks the session's background jobs. Nil when the runtime
 	// has no job registry (REQ-JOB-010).
 	Jobs JobService
+	// Sessions searches past conversations for the session_search tool
+	// (REQ-SSR-010). Nil when the store has no text index.
+	Sessions SessionSearcher
+	// Knowledge reads and changes the knowledge vault for the knowledge tools
+	// (REQ-KNW-040..043). Nil when the runtime has no knowledge service.
+	Knowledge Knowledge
 }
 
 // Background-job status values (REQ-JOB-010).

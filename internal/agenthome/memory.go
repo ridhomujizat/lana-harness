@@ -128,6 +128,13 @@ func Tokens(s string) []string {
 	return out
 }
 
+// IsStopWord reports whether word is in the fixed stop-word list (REQ-ECX-025).
+// It lets a caller outside agenthome reuse the same list, as session search
+// does when it tokenizes a query (REQ-SSR-011).
+func IsStopWord(word string) bool {
+	return stopWords[word]
+}
+
 // stopWords is the fixed English and Indonesian list removed from tokens
 // (REQ-ECX-025).
 var stopWords = map[string]bool{

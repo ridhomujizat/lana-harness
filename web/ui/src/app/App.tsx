@@ -33,6 +33,7 @@ import {
 import { AgentsPage } from "../views/agents";
 import { AgentDetailPage } from "../views/agent-detail";
 import { SkillsPage, SkillEditorPage } from "../views/skills";
+import { KnowledgePage } from "../views/knowledge";
 import { McpPage, McpDetailPage } from "../views/mcp";
 import { SetupWizard, setupNeeded } from "../views/setup";
 import { ChannelsPage, TelegramPage } from "../views/channels";
@@ -88,6 +89,8 @@ function routeContent(
       return <AgentDetailPage name={params.name} tab={params.tab} />;
     case "skills":
       return <SkillsPage />;
+    case "knowledge":
+      return <KnowledgePage />;
     case "new-skill":
       return <SkillEditorPage isNew={true} />;
     case "skill":

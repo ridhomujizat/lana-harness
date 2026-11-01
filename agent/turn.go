@@ -33,6 +33,10 @@ type Runner struct {
 	// memoryShown holds the memory ids already put in a turn <context> block
 	// this session (REQ-ECX-024). It is in memory, so a restart forgets it.
 	memoryShown map[int]bool
+	// knowledgeShown holds the knowledge paths already put in a turn <context>
+	// block this session (REQ-KNW-050). It is in memory, so a restart forgets
+	// it.
+	knowledgeShown map[string]bool
 }
 
 // inboxItem is one queued owner message: its text and the workspace-relative
@@ -351,8 +355,10 @@ type promptBuild struct {
 // buildPrompt assembles the system prompt from the persona, the agent home
 // files, the skills, the tool guidance, and the runtime context. ownerText is
 // the first user message of the turn: when the memory is indexed it picks the
-// relevant entries for the <context> block (REQ-ECX-024).
-func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, notes []agenthome.ToolNote, hasMCP bool, ownerText string) (promptBuild, error) {
+// relevant entries for the <context> block (REQ-ECX-024). toolNames are the
+// tools offered in this turn; they gate per-turn knowledge recall
+// (REQ-KNW-050).
+func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unavailable map[string]string, notes []agenthome.ToolNote, hasMCP bool, ownerText string, toolNames []string) (promptBuild, error) {
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
 		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, ToolNotes: notes, HasMCP: hasMCP,
@@ -392,6 +398,7 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		}
 		in.RelevantMemory = rn.relevantMemory(ownerText, in.Memory)
 	}
+	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, toolNames)
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
 	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
 }
@@ -429,6 +436,79 @@ func (rn *Runner) relevantMemory(ownerText string, entries []string) []string {
 		out = append(out, fmt.Sprintf("m%d: %s", item.ID, entries[item.ID-1]))
 	}
 	return out
+}
+
+// The knowledge recall bounds and line cut (REQ-KNW-050).
+const (
+	knowledgeRecallMax     = 3
+	knowledgeRecallLineMax = 200
+	knowledgeRecallTimeout = 2 * time.Second
+)
+
+// relevantKnowledge returns up to knowledgeRecallMax knowledge pages relevant
+// to ownerText as "<title> (<path>): <description or snippet>" lines. Recall
+// runs only for an owner message, when knowledge_search is offered in this
+// turn, when auto_recall is not false, and when the knowledge service is
+// installed. A page already shown in this session is skipped, so each appears
+// once per session (REQ-KNW-050).
+func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []string {
+	if strings.TrimSpace(ownerText) == "" || !containsString(toolNames, "knowledge_search") {
+		return nil
+	}
+	if auto := rn.reg.config.Knowledge.AutoRecall; auto != nil && !*auto {
+		return nil
+	}
+	service := rn.reg.knowledgeService()
+	if service == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), knowledgeRecallTimeout)
+	defer cancel()
+	skip := func(path string) bool {
+		rn.mu.Lock()
+		defer rn.mu.Unlock()
+		return rn.knowledgeShown[path]
+	}
+	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, skip)
+	if err != nil {
+		slog.Debug("knowledge recall", "session_id", rn.sessionID, "error", err)
+		return nil
+	}
+	if len(hits) == 0 {
+		return nil
+	}
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	if rn.knowledgeShown == nil {
+		rn.knowledgeShown = make(map[string]bool, len(hits))
+	}
+	out := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		if rn.knowledgeShown[hit.Path] {
+			continue
+		}
+		rn.knowledgeShown[hit.Path] = true
+		out = append(out, knowledgeRecallLine(hit))
+	}
+	return out
+}
+
+// knowledgeRecallLine renders one recall line: the title, the vault path, and
+// the description or, when it is empty, the snippet cut to 200 runes
+// (REQ-KNW-050).
+func knowledgeRecallLine(hit core.KnowledgeHit) string {
+	text := strings.TrimSpace(hit.Description)
+	if text == "" {
+		text = strings.TrimSpace(hit.Snippet)
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if runes := []rune(text); len(runes) > knowledgeRecallLineMax {
+		text = string(runes[:knowledgeRecallLineMax]) + "…"
+	}
+	if text == "" {
+		return fmt.Sprintf("%s (%s)", hit.Title, hit.Path)
+	}
+	return fmt.Sprintf("%s (%s): %s", hit.Title, hit.Path, text)
 }
 
 // toolNotes collects the prompt guidance of the offered tools in name order.
@@ -842,7 +922,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			if claimed && !runtimeNote {
 				ownerText = claimedText
 			}
-			built, err := rn.buildPrompt(resolved, skills, unavailable, rn.toolNotes(turnTools), len(resolved.mcp) > 0, ownerText)
+			built, err := rn.buildPrompt(resolved, skills, unavailable, rn.toolNotes(turnTools), len(resolved.mcp) > 0, ownerText, turnTools)
 			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"
@@ -1055,6 +1135,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				if !resolved.child {
 					mcpAdmin = rn.reg.mcpAdminFor()
 				}
+				// REQ-SSR-010: session_search reads the conversation index when
+				// the store provides one.
+				var sessions core.SessionSearcher
+				if searcher, ok := rn.reg.store.(core.SessionSearcher); ok {
+					sessions = searcher
+				}
 				toolCtx := core.ToolCtx{
 					SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
 					Skills:        resolved.skills,
@@ -1065,6 +1151,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 					AllowedAgents: resolved.delegates,
 					Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
 					Jobs:          rn.reg.jobs,
+					Sessions:      sessions,
+					Knowledge:     rn.reg.knowledgeService(),
 				}
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as

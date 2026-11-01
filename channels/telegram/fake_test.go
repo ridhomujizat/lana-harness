@@ -287,6 +287,17 @@ type fakeBackend struct {
 	memoryHook func()
 	cancelCh   chan struct{}
 	draining   bool
+	// saved records the /save calls; saveHook overrides the default result
+	// (REQ-KNU-012, AC-KNU-004).
+	saved    []savedKnowledge
+	saveHook func(SaveItem) (string, bool, error)
+}
+
+// savedKnowledge is one SaveKnowledge call.
+type savedKnowledge struct {
+	Address string
+	Agent   string
+	Item    SaveItem
 }
 
 func newFakeBackend() *fakeBackend {
@@ -425,6 +436,29 @@ func (b *fakeBackend) Draining() bool {
 	return b.draining
 }
 
+// SaveKnowledge records the item and returns the default result, or saveHook's
+// result (REQ-KNU-012, AC-KNU-004).
+func (b *fakeBackend) SaveKnowledge(_ context.Context, address, agent string, item SaveItem) (string, bool, error) {
+	b.mu.Lock()
+	b.saved = append(b.saved, savedKnowledge{Address: address, Agent: agent, Item: item})
+	hook := b.saveHook
+	b.mu.Unlock()
+	if hook != nil {
+		return hook(item)
+	}
+	return "sources/2026-11-01 note.md", false, nil
+}
+
+func (b *fakeBackend) savedList() []savedKnowledge {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]savedKnowledge(nil), b.saved...)
+}
+
+// plainBackend hides the optional KnowledgeSaver capability, so /save answers
+// "knowledge is not available" (API-KNU-002).
+type plainBackend struct{ Backend }
+
 func (b *fakeBackend) promptList() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -461,7 +495,7 @@ const (
 )
 
 // startChannel runs a channel against fake API and backend until the test ends.
-func startChannel(t *testing.T, api *fakeAPI, backend *fakeBackend) (*Channel, context.CancelFunc, chan error) {
+func startChannel(t *testing.T, api *fakeAPI, backend Backend) (*Channel, context.CancelFunc, chan error) {
 	t.Helper()
 	cfg, err := ParseConfig(map[string]any{"api_base": api.srv.URL, "owner_ids": []any{ownerID}},
 		[]core.RouteConfig{{Channel: "telegram", Agent: "helper", Match: map[string]any{"chat_id": ownerChat}},

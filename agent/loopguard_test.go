@@ -638,3 +638,24 @@ func TestReadOnlyAnyArgsKey(t *testing.T) {
 		})
 	}
 }
+
+// AC-SSR-005 (REQ-SSR-018): session_search is read-only, so a repeated
+// identical result blocks like the other read-only tools.
+func TestLoopGuardSessionSearchReadOnly(t *testing.T) {
+	var g loopGuard
+	call := loopGuardTestCall("session_search", `{"query":"deploy staging"}`)
+	same := guardOutput(core.ToolStatusSuccess, "Found 1 sessions")
+	for i := 0; i < loopGuardSameBlock; i++ {
+		g.observe([]core.ToolCall{call}, []core.ToolOutput{same})
+	}
+	out, blocked := g.before(call)
+	if !blocked {
+		t.Fatal("the repeated session_search was not blocked")
+	}
+	if !strings.Contains(out.Output, "Blocked session_search") {
+		t.Fatalf("blocked output = %q", out.Output)
+	}
+	if g.halt == nil || g.halt.kind != loopGuardKindReadOnly {
+		t.Fatalf("halt = %+v, want the read-only halt", g.halt)
+	}
+}

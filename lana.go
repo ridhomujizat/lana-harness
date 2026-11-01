@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/agent"
 	_ "github.com/ridhomujizat/lana-harness/agent/compaction"
+	_ "github.com/ridhomujizat/lana-harness/agent/knowledge"
 	_ "github.com/ridhomujizat/lana-harness/agent/memcapture"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
@@ -31,7 +33,7 @@ import (
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
-	_ "github.com/ridhomujizat/lana-harness/tools"
+	"github.com/ridhomujizat/lana-harness/tools"
 	_ "github.com/ridhomujizat/lana-harness/tools/permission"
 )
 
@@ -155,7 +157,8 @@ var toolCatalogGroupOrder = []struct {
 	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep"}},
 	{ID: "shell", Label: "Shell", Names: []string{"bash"}},
 	{ID: "web", Label: "Web", Names: []string{"web_fetch"}},
-	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write"}},
+	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write", "session_search"}},
+	{ID: "knowledge", Label: "Knowledge", Names: []string{"knowledge_search", "knowledge_read", "knowledge_write", "knowledge_ingest"}},
 	{ID: "skills", Label: "Skills", Names: []string{"skill_load", "skill_write"}},
 	{ID: "mcp-admin", Label: "MCP", Names: []string{"mcp_manage"}},
 	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
@@ -182,6 +185,10 @@ type Runtime struct {
 	closeErr error
 	approve  ApproveFunc
 	home     string
+	// knowledgeMu guards knowledgeCancel, the stop of the background knowledge
+	// upkeep loop (REQ-KNU-011, design §9).
+	knowledgeMu     sync.Mutex
+	knowledgeCancel context.CancelFunc
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
@@ -972,6 +979,14 @@ func (rt *Runtime) Close() error {
 	if rt.jobs != nil {
 		rt.jobs.Shutdown()
 	}
+	// REQ-KNU-011: stop the knowledge upkeep loop first, so the module drain
+	// below waits for an in-flight pass before the process exits.
+	rt.knowledgeMu.Lock()
+	cancelKnowledge := rt.knowledgeCancel
+	rt.knowledgeMu.Unlock()
+	if cancelKnowledge != nil {
+		cancelKnowledge()
+	}
 	rt.cancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -1568,6 +1583,258 @@ func (rt *Runtime) Compact(ctx context.Context, sessionID string) (core.Compacti
 		return core.CompactionResult{}, errors.New("compaction service is incompatible")
 	}
 	return compactor.CompactNow(ctx, sessionID)
+}
+
+// knowledgeIngestTitleMax caps a title taken from the source text
+// (REQ-KNU-012).
+const knowledgeIngestTitleMax = 80
+
+// KnowledgeSave is one channel ingest request from /save or an inbox file: a
+// document, a URL, or text (REQ-KNU-012, API-KNU-002). Exactly one of Data, URL,
+// or Text is set.
+type KnowledgeSave struct {
+	Address string
+	Channel string
+	Agent   string
+	Title   string
+	Ext     string
+	Data    []byte
+	URL     string
+	Text    string
+}
+
+// IngestKnowledge stores a channel /save item as a knowledge source and starts
+// its compile with the channel's current agent (REQ-KNU-012, API-KNU-002). A URL
+// is fetched and stored as markdown with its source_url; text is stored as
+// markdown; an uploaded document keeps its title and extension. The compiled
+// event lands in the channel's current session when one exists.
+func (rt *Runtime) IngestKnowledge(ctx context.Context, in KnowledgeSave) (core.KnowledgeIngestResult, error) {
+	if err := rt.closedError(); err != nil {
+		return core.KnowledgeIngestResult{}, err
+	}
+	service, ok := rt.coreCtx.Lookup(core.ServiceKnowledge)
+	knowledge, compatible := service.(core.Knowledge)
+	if !ok || !compatible {
+		return core.KnowledgeIngestResult{}, errors.New("knowledge is not available")
+	}
+	ingest, err := knowledgeSaveIngest(ctx, in)
+	if err != nil {
+		return core.KnowledgeIngestResult{}, err
+	}
+	if info, found, err := rt.channelSessionFor(ctx, in.Channel, in.Address, in.Agent); err != nil {
+		return core.KnowledgeIngestResult{}, err
+	} else if found {
+		ingest.SessionID = info.ID
+	}
+	return knowledge.Ingest(ctx, ingest)
+}
+
+// ErrKnowledgeUnavailable is returned by the runtime's knowledge endpoints when
+// the runtime has no knowledge service (API-KNU-003–006, design §9).
+var ErrKnowledgeUnavailable = errors.New("knowledge is not available")
+
+// KnowledgeReport is the latest lint report: its vault-relative path and its
+// markdown (API-KNU-004).
+type KnowledgeReport struct {
+	Path     string
+	Markdown string
+}
+
+// knowledgeAdmin returns the knowledge upkeep service, or nil when the runtime
+// has none (design §9).
+func (rt *Runtime) knowledgeAdmin() core.KnowledgeAdmin {
+	service, ok := rt.coreCtx.Lookup(core.ServiceKnowledge)
+	if !ok || service == nil {
+		return nil
+	}
+	admin, ok := service.(core.KnowledgeAdmin)
+	if !ok {
+		return nil
+	}
+	return admin
+}
+
+// StartKnowledgeUpkeep starts the background upkeep loop when the runtime has a
+// knowledge service; otherwise it is a no-op (REQ-KNU-011, design §9). Only the
+// daemon calls it, and the loop stops with ctx.
+func (rt *Runtime) StartKnowledgeUpkeep(ctx context.Context) {
+	admin := rt.knowledgeAdmin()
+	if admin == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = rt.ctx
+	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	rt.knowledgeMu.Lock()
+	if rt.knowledgeCancel != nil {
+		rt.knowledgeMu.Unlock()
+		cancel()
+		return
+	}
+	rt.knowledgeCancel = cancel
+	rt.knowledgeMu.Unlock()
+	// The concrete service registers the loop in its worker WaitGroup, so the
+	// module drain waits for an in-flight pass on Close (design §9).
+	if joined, ok := admin.(interface{ StartUpkeepJoined(context.Context) }); ok {
+		joined.StartUpkeepJoined(loopCtx)
+		return
+	}
+	admin.StartUpkeep(loopCtx)
+}
+
+// unavailableKnowledgeStatus is the GET /v1/knowledge body when the runtime has
+// no knowledge service. The lists are non-nil so the JSON never holds null
+// (API-KNU-003).
+func unavailableKnowledgeStatus() core.KnowledgeStatus {
+	return core.KnowledgeStatus{
+		Available:        false,
+		SourcesPending:   []string{},
+		SourcesFailed:    []core.KnowledgeSourceError{},
+		InboxUnsupported: []string{},
+		Log:              []core.KnowledgeLogEntry{},
+	}
+}
+
+// KnowledgeStatus reports the vault state for GET /v1/knowledge (API-KNU-003,
+// REQ-KNU-040). Without a knowledge service it returns available:false rather
+// than an error, so the page can say why.
+func (rt *Runtime) KnowledgeStatus(ctx context.Context) (core.KnowledgeStatus, error) {
+	admin := rt.knowledgeAdmin()
+	if admin == nil {
+		return unavailableKnowledgeStatus(), nil
+	}
+	return admin.Status(ctx)
+}
+
+// KnowledgeReport returns the latest lint report for GET /v1/knowledge/report
+// (API-KNU-004, REQ-KNU-040). Without a knowledge service it returns
+// ErrKnowledgeUnavailable; the absence of a report reaches the caller as an
+// error wrapping os.ErrNotExist.
+func (rt *Runtime) KnowledgeReport(ctx context.Context) (KnowledgeReport, error) {
+	admin := rt.knowledgeAdmin()
+	if admin == nil {
+		return KnowledgeReport{}, ErrKnowledgeUnavailable
+	}
+	path, markdown, err := admin.Report(ctx)
+	if err != nil {
+		return KnowledgeReport{}, err
+	}
+	return KnowledgeReport{Path: path, Markdown: markdown}, nil
+}
+
+// KnowledgeUpload stores one uploaded file under inbox/ for POST
+// /v1/knowledge/upload (API-KNU-005, REQ-KNU-041). Without a knowledge service
+// it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeUpload(ctx context.Context, name string, data []byte) (string, error) {
+	admin := rt.knowledgeAdmin()
+	if admin == nil {
+		return "", ErrKnowledgeUnavailable
+	}
+	return admin.SaveInbox(ctx, name, data)
+}
+
+// KnowledgeConsolidate starts one nightly pass for POST
+// /v1/knowledge/consolidate (API-KNU-006, REQ-KNU-041). It returns
+// core.ErrKnowledgeBusy at once while a run is in progress; otherwise it starts
+// the pass in a goroutine on the runtime context so the HTTP call returns
+// immediately (design §9). Without a knowledge service it returns
+// ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeConsolidate(ctx context.Context) error {
+	admin := rt.knowledgeAdmin()
+	if admin == nil {
+		return ErrKnowledgeUnavailable
+	}
+	status, err := admin.Status(ctx)
+	if err != nil {
+		return err
+	}
+	if status.Consolidation.Running {
+		return core.ErrKnowledgeBusy
+	}
+	go func() {
+		if err := admin.Consolidate(rt.ctx); err != nil && !errors.Is(err, core.ErrKnowledgeBusy) {
+			slog.Warn("knowledge: consolidation failed", "error", err)
+		}
+	}()
+	return nil
+}
+
+// knowledgeSaveIngest converts a KnowledgeSave into a KnowledgeIngest. It is
+// separate from IngestKnowledge so the text conversion is unit-testable without
+// a service (REQ-KNU-012).
+func knowledgeSaveIngest(ctx context.Context, in KnowledgeSave) (core.KnowledgeIngest, error) {
+	item := core.KnowledgeIngest{
+		Title:     strings.TrimSpace(in.Title),
+		Ext:       in.Ext,
+		AgentName: in.Agent,
+		Data:      in.Data,
+	}
+	switch {
+	case strings.TrimSpace(in.URL) != "":
+		title, markdown, err := tools.FetchMarkdown(ctx, in.URL)
+		if err != nil {
+			return core.KnowledgeIngest{}, err
+		}
+		item.SourceURL = in.URL
+		item.Data = []byte(sourceURLFrontmatter(in.URL) + markdown)
+		item.Ext = "md"
+		if item.Title == "" {
+			if strings.TrimSpace(title) == "" {
+				title = firstNonEmptyLine(markdown)
+			}
+			item.Title = cutKnowledgeTitle(title, knowledgeIngestTitleMax)
+		}
+	case strings.TrimSpace(in.Text) != "":
+		item.Data = []byte(in.Text)
+		item.Ext = "md"
+		if item.Title == "" {
+			item.Title = cutKnowledgeTitle(firstNonEmptyLine(in.Text), knowledgeIngestTitleMax)
+		}
+	}
+	return item, nil
+}
+
+// channelSessionFor returns the channel's current session of agent for the
+// address without creating one (REQ-KNU-012).
+func (rt *Runtime) channelSessionFor(ctx context.Context, channel, address, agent string) (core.SessionInfo, bool, error) {
+	if rt.store == nil || channel == "" || address == "" || agent == "" {
+		return core.SessionInfo{}, false, nil
+	}
+	list, err := rt.store.List(ctx, core.SessionFilter{Channel: channel, Address: address, Limit: channelSessionScan})
+	if err != nil {
+		return core.SessionInfo{}, false, err
+	}
+	for _, info := range list {
+		if info.Agent == agent {
+			return info, true, nil
+		}
+	}
+	return core.SessionInfo{}, false, nil
+}
+
+// firstNonEmptyLine returns the first non-blank line of text, trimmed.
+func firstNonEmptyLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+// cutKnowledgeTitle trims a title and caps it at max runes (REQ-KNU-012).
+func cutKnowledgeTitle(text string, max int) string {
+	text = strings.TrimSpace(text)
+	if runes := []rune(text); len(runes) > max {
+		return strings.TrimSpace(string(runes[:max]))
+	}
+	return text
+}
+
+// sourceURLFrontmatter records where a fetched source came from (REQ-KNW-020).
+func sourceURLFrontmatter(rawURL string) string {
+	return "---\nsource_url: " + strconv.Quote(rawURL) + "\n---\n\n"
 }
 
 // agentFor picks the agent from the request, the session, or the default route.

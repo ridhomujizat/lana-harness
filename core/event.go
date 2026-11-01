@@ -43,6 +43,7 @@ const (
 	KindCompactionSummary = "compaction/summary"
 	KindToolResultPruned  = "tool_result_pruned"
 	KindMemoryCaptured    = "memory/captured"
+	KindKnowledgeCompiled = "knowledge/compiled"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -248,4 +249,23 @@ type MemoryCaptured struct {
 	TurnID string     `json:"turn_id"`
 	Ops    []MemoryOp `json:"ops"`
 	Usage  Usage      `json:"usage"`
+}
+
+// KnowledgeCompiledOp is one page operation a compile pass applied
+// (API-KNW-002). Op is the effective action: create, append, replace, or meta.
+type KnowledgeCompiledOp struct {
+	Op    string `json:"op"`
+	Title string `json:"title"`
+}
+
+// KnowledgeCompiled is the payload of a knowledge/compiled event: the source a
+// compile pass processed, the page operations it applied, the summed usage, and
+// an error when the pass failed (REQ-KNW-024, API-KNW-002). It is not part of
+// the model history.
+type KnowledgeCompiled struct {
+	V      int                   `json:"v"`
+	Source string                `json:"source"`
+	Ops    []KnowledgeCompiledOp `json:"ops"`
+	Usage  Usage                 `json:"usage"`
+	Error  string                `json:"error"`
 }

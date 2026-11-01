@@ -33,6 +33,7 @@ const NAV_ITEMS = [
   { key: "sessions", label: "Sessions", icon: "sessions", href: "#/sessions" },
   { key: "agents", label: "Agents", icon: "agents", href: "#/agents" },
   { key: "skills", label: "Skills", icon: "skills", href: "#/skills" },
+  { key: "knowledge", label: "Knowledge", icon: "file", href: "#/knowledge" },
   { key: "mcp", label: "MCP", icon: "mcp", href: "#/mcp" },
   { key: "channels", label: "Channels", icon: "channels", href: "#/channels" },
   {

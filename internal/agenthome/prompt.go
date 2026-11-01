@@ -37,6 +37,10 @@ type PromptInput struct {
 	// RelevantMemory holds the formatted "m<n>: <entry>" lines of the entries
 	// picked for this turn's first user message (REQ-ECX-024).
 	RelevantMemory []string
+	// RelevantKnowledge holds the formatted "<title> (<path>): <text>" lines
+	// of the knowledge pages picked for this turn's first user message
+	// (REQ-KNW-050).
+	RelevantKnowledge []string
 	// Jobs is the background-jobs context line, empty when the session has no
 	// jobs (REQ-JOB-017).
 	Jobs string
@@ -151,14 +155,20 @@ func Build(in PromptInput) string {
 }
 
 // ContextBlock renders the volatile per-turn context: the date, the relevant
-// memory, the unavailable MCP servers, and the background jobs (REQ-LTC-001,
-// REQ-ECX-024, REQ-JOB-017). It is added to the first user message of a turn so
-// the head prompt stays byte-stable.
+// memory and knowledge, the unavailable MCP servers, and the background jobs
+// (REQ-LTC-001, REQ-ECX-024, REQ-KNW-050, REQ-JOB-017). It is added to the
+// first user message of a turn so the head prompt stays byte-stable.
 func ContextBlock(in PromptInput) string {
 	lines := []string{"<context>", "date: " + stamp(in)}
 	if len(in.RelevantMemory) > 0 {
 		lines = append(lines, "relevant memory:")
 		for _, entry := range in.RelevantMemory {
+			lines = append(lines, "- "+entry)
+		}
+	}
+	if len(in.RelevantKnowledge) > 0 {
+		lines = append(lines, "relevant knowledge:")
+		for _, entry := range in.RelevantKnowledge {
 			lines = append(lines, "- "+entry)
 		}
 	}
