@@ -11,7 +11,13 @@ vi.mock("../api/rooms", async (importOriginal) => {
 
 import { listRooms, openRoomsStream } from "../api/rooms";
 import type { RoomRow } from "../api/rooms";
-import { AgentFace, PresenceLabel, SkeletonRows, useRooms } from "./presence";
+import {
+  AgentFace,
+  PresenceLabel,
+  SkeletonRows,
+  TeamFace,
+  useRooms,
+} from "./presence";
 
 function room(overrides: Partial<RoomRow> = {}): RoomRow {
   return {
@@ -47,6 +53,21 @@ describe("AgentFace (REQ-ROOM-006)", () => {
 
     const face = screen.getByRole("img", { name: "dana, working" });
     expect(face.textContent).toContain("D");
+  });
+});
+
+describe("TeamFace (REQ-ROOM-001)", () => {
+  /* The team avatar reserves its slot so the stacked faces never overlap the
+     text beside them; at most two faces render inside the fixed box. */
+  it("renders the faces inside a box of the requested size", () => {
+    const { container } = render(
+      <TeamFace faces={[{ name: "lana" }, { name: "rasya" }, { name: "cody" }]} size={44} />
+    );
+
+    const box = container.querySelector(".team-face") as HTMLElement;
+    expect(box.style.width).toBe("44px");
+    expect(box.style.height).toBe("44px");
+    expect(box.querySelectorAll(".agent-face")).toHaveLength(2);
   });
 });
 

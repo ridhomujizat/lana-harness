@@ -307,6 +307,43 @@ describe("Live turn (AC-ROOM-006)", () => {
   });
 });
 
+describe("Empty room (REQ-ROOM-002)", () => {
+  /* A fresh room shows the face and an invitation instead of a blank timeline. */
+  it("shows the room face and title for an agent room", async () => {
+    installRows([room({ name: "nadia", title: "Finance" })]);
+
+    const { container } = render(<ChatsPage roomName="nadia" />);
+
+    expect(
+      await screen.findByText("Start a conversation with nadia")
+    ).toBeTruthy();
+    const empty = container.querySelector(".room-empty");
+    expect(empty).not.toBeNull();
+    expect(empty?.querySelector(".agent-face")).not.toBeNull();
+    expect(empty?.textContent).toContain("Finance");
+  });
+
+  it("invites the team and names the lead for a team room", async () => {
+    installRows([
+      room({
+        name: "research-squad",
+        kind: "team",
+        title: "",
+        lead: "lana",
+        members: ["rasya", "cody"],
+      }),
+    ]);
+
+    render(<ChatsPage roomName="research-squad" />);
+
+    expect(
+      await screen.findByText(
+        "Ask the team something — lana will hand work to the right member"
+      )
+    ).toBeTruthy();
+  });
+});
+
 describe("Room composer (REQ-ROOM-003)", () => {
   it("sends with new_topic after New topic is picked", async () => {
     vi.mocked(roomSegments).mockResolvedValue({

@@ -167,18 +167,36 @@
   background: var(--fg-warning-primary);
 }
 
+/* The team avatar box of REQ-ROOM-001: a fixed square that reserves the slot
+   size, with up to two member faces stacked inside it. Its size is set inline
+   from the requested size, so the box never overflows the row. */
 .team-face {
+  position: relative;
   display: inline-flex;
-  align-items: center;
+  flex: 0 0 auto;
 }
 
 .team-face .agent-face {
-  margin-left: -8px;
+  position: absolute;
   box-shadow: 0 0 0 2px var(--bg-primary);
 }
 
 .team-face .agent-face:first-child {
-  margin-left: 0;
+  top: 0;
+  left: 0;
+}
+
+.team-face .agent-face:last-child {
+  right: 0;
+  bottom: 0;
+}
+
+.team-face .agent-face:only-child {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
 }
 
 .room-list {
@@ -702,6 +720,34 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* The empty room of REQ-ROOM-002: a fresh agent or team with no messages yet. */
+.room-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 100%;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.room-empty-title {
+  margin: 0;
+  max-width: 44ch;
+  color: var(--text-primary);
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  line-height: var(--line-height-section);
+}
+
+.room-empty-text {
+  margin: 0;
+  max-width: 52ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 
 .room-timeline .chat-bubble {

@@ -1014,6 +1014,7 @@ export function RoomView({ room }: RoomViewProps) {
               <TurnBlock
                 turn={node.turn}
                 agent={room.name}
+                agentColor={room.color}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1087,21 +1088,25 @@ export function RoomView({ room }: RoomViewProps) {
       ) : null}
 
       <div className="room-timeline-scroll" ref={scrollRef} onScroll={onScroll}>
-        <div className="room-timeline">
-          {loading && segments.length === 0 ? <SkeletonHint /> : null}
-          {nodes.map(renderNode)}
-          {loadingOlder ? (
-            <p className="room-older muted">Loading earlier messages…</p>
-          ) : null}
-          {turnRunning ? (
-            <div className="room-live" role="status">
-              <TypingDots />
-              <span className="room-live-text">
-                {room.name + " is " + activity + "…"}
-              </span>
-            </div>
-          ) : null}
-        </div>
+        {!loading && segments.length === 0 ? (
+          <RoomEmpty room={room} team={team} teamFaces={teamFaces} />
+        ) : (
+          <div className="room-timeline">
+            {loading && segments.length === 0 ? <SkeletonHint /> : null}
+            {nodes.map(renderNode)}
+            {loadingOlder ? (
+              <p className="room-older muted">Loading earlier messages…</p>
+            ) : null}
+            {turnRunning ? (
+              <div className="room-live" role="status">
+                <TypingDots />
+                <span className="room-live-text">
+                  {room.name + " is " + activity + "…"}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="room-composer">
@@ -1212,6 +1217,43 @@ export function RoomView({ room }: RoomViewProps) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* REQ-ROOM-002: a fresh room with no segments yet shows the room face and an
+   invitation instead of a blank timeline. */
+function RoomEmpty({
+  room,
+  team,
+  teamFaces,
+}: {
+  room: RoomRow;
+  team: boolean;
+  teamFaces: FaceRef[];
+}) {
+  return (
+    <div className="room-empty">
+      {team && teamFaces.length > 0 ? (
+        <TeamFace faces={teamFaces} size={52} />
+      ) : (
+        <AgentFace
+          name={room.name}
+          color={room.color}
+          presence={room.presence}
+          size={52}
+        />
+      )}
+      <h2 className="room-empty-title">
+        {team
+          ? "Ask the team something — " +
+            (room.lead || "the lead") +
+            " will hand work to the right member"
+          : "Start a conversation with " + room.name}
+      </h2>
+      {room.title ? (
+        <p className="room-empty-text muted">{room.title}</p>
+      ) : null}
     </div>
   );
 }

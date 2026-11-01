@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { CSSProperties } from "react";
 import { listRooms, openRoomsStream } from "../api/rooms";
 import type { Presence, RoomRow } from "../api/rooms";
 
@@ -55,6 +56,8 @@ export interface AgentFaceProps {
   color?: string;
   presence?: Presence | null;
   size?: FaceSize;
+  className?: string;
+  style?: CSSProperties;
 }
 
 export function AgentFace({
@@ -62,16 +65,18 @@ export function AgentFace({
   color,
   presence,
   size = 32,
+  className = "",
+  style,
 }: AgentFaceProps) {
   const face = faceColors(color);
   const state = presence ? presence.state : "";
   const label = presence ? name + ", " + state : name;
   return (
     <span
-      className={"agent-face size-" + size}
+      className={"agent-face size-" + size + (className ? " " + className : "")}
       role="img"
       aria-label={label}
-      style={{ background: face.bg, color: face.fg }}
+      style={{ background: face.bg, color: face.fg, ...style }}
     >
       {initialOf(name)}
       {state === "working" ? (
@@ -174,6 +179,9 @@ export interface FaceRef {
   presence?: Presence | null;
 }
 
+/* REQ-ROOM-001: the team avatar stacks up to two member faces. The faces are
+   absolutely positioned inside a box the size of the slot, so the cluster never
+   overlaps the text column beside it. */
 export function TeamFace({
   faces,
   size = 24,
@@ -181,15 +189,26 @@ export function TeamFace({
   faces: FaceRef[];
   size?: FaceSize;
 }) {
+  const memberSize = Math.round(size * 0.64);
   return (
-    <span className="team-face" aria-hidden="true">
-      {faces.slice(0, 3).map((face) => (
+    <span
+      className="team-face"
+      aria-hidden="true"
+      style={{ width: size, height: size }}
+    >
+      {faces.slice(0, 2).map((face) => (
         <AgentFace
           key={face.name}
           name={face.name}
           color={face.color}
           presence={face.presence}
           size={size}
+          className="team-face-member"
+          style={{
+            width: memberSize,
+            height: memberSize,
+            fontSize: Math.round(memberSize * 0.42),
+          }}
         />
       ))}
     </span>
