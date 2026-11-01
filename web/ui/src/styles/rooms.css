@@ -654,6 +654,16 @@
   white-space: nowrap;
 }
 
+/* REQ-ROOM-002: a new topic inside the same channel and day reads lighter than
+   the full "via <Channel> · <date>" divider, since the day is already named. */
+.room-divider-light {
+  color: var(--fg-quaternary);
+}
+
+.room-divider-light .room-divider-line {
+  background: var(--border-tertiary);
+}
+
 .room-day {
   display: flex;
   align-items: center;

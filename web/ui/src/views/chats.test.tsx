@@ -237,6 +237,132 @@ describe("Room timeline (REQ-ROOM-002)", () => {
     expect(screen.getByText("web message")).toBeTruthy();
     expect(screen.getByText("web answer")).toBeTruthy();
   });
+
+  it("skips a segment whose events have no visible item", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [
+        segment({
+          session_id: "s_a",
+          channel: "web",
+          created_at: 1000,
+          updated_at: 2000,
+        }),
+        segment({
+          session_id: "s_empty",
+          channel: "cli",
+          created_at: 3000,
+          updated_at: 4000,
+          turn_count: 0,
+        }),
+        segment({
+          session_id: "s_c",
+          channel: "telegram",
+          created_at: 5000,
+          updated_at: 6000,
+        }),
+      ],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockImplementation(async (id: string) => {
+      if (id === "s_a") {
+        return {
+          events: [
+            ev(1, "user/message", "t1", {
+              content: [{ type: "text", text: "first message" }],
+            }),
+          ],
+          last_seq: 1,
+        };
+      }
+      if (id === "s_empty") {
+        /* A session with only runtime events makes no visible item. */
+        return {
+          events: [
+            ev(5, "turn/start", "t9", { turn_id: "t9" }),
+            ev(6, "turn/end", "t9", { reason: "end_turn" }),
+          ],
+          last_seq: 6,
+        };
+      }
+      if (id === "s_c") {
+        return {
+          events: [
+            ev(10, "user/message", "t2", {
+              content: [{ type: "text", text: "second message" }],
+            }),
+          ],
+          last_seq: 10,
+        };
+      }
+      return { events: [], last_seq: 0 };
+    });
+    installRows([room({ name: "dana" })]);
+
+    const { container } = render(<ChatsPage roomName="dana" />);
+
+    expect(await screen.findByText("first message")).toBeTruthy();
+    expect(screen.getByText("second message")).toBeTruthy();
+    /* The empty CLI segment adds no divider, so one divider sits between the
+       two visible segments and one opens the first. */
+    expect(screen.queryByText(/via CLI/)).toBeNull();
+    expect(container.querySelectorAll(".room-divider").length).toBe(2);
+  });
+
+  it("shows a lighter New topic divider between same-channel same-day segments", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [
+        segment({
+          session_id: "s_one",
+          channel: "web",
+          created_at: 1000,
+          updated_at: 2000,
+        }),
+        segment({
+          session_id: "s_two",
+          channel: "web",
+          created_at: 5000,
+          updated_at: 6000,
+        }),
+      ],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockImplementation(async (id: string) => {
+      if (id === "s_one") {
+        return {
+          events: [
+            ev(1, "user/message", "t1", {
+              content: [{ type: "text", text: "first topic" }],
+            }),
+          ],
+          last_seq: 1,
+        };
+      }
+      if (id === "s_two") {
+        return {
+          events: [
+            ev(10, "user/message", "t2", {
+              content: [{ type: "text", text: "second topic" }],
+            }),
+          ],
+          last_seq: 10,
+        };
+      }
+      return { events: [], last_seq: 0 };
+    });
+    installRows([room({ name: "dana" })]);
+
+    const { container } = render(<ChatsPage roomName="dana" />);
+
+    expect(await screen.findByText("first topic")).toBeTruthy();
+    expect(screen.getByText("second topic")).toBeTruthy();
+    /* The second segment keeps the lighter "New topic" divider instead of
+       repeating "via Web · <date>". */
+    expect(
+      screen.getByText("New topic", { selector: ".room-divider-text" })
+    ).toBeTruthy();
+    expect(container.querySelector(".room-divider-light")).not.toBeNull();
+    expect(screen.getAllByText(/via Web/).length).toBe(1);
+  });
 });
 
 describe("Older segments (AC-ROOM-003)", () => {

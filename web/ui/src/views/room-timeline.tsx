@@ -237,7 +237,15 @@ function BookIcon() {
 type UserThreadItem = Extract<ThreadItem, { kind: "user" }>;
 
 type TimelineNode =
-  | { key: string; at: number; kind: "divider"; channel: string; date: string }
+  | {
+      key: string;
+      at: number;
+      kind: "divider";
+      channel: string;
+      date: string;
+      /* REQ-ROOM-002: a lighter divider when the channel and day did not change. */
+      topic: boolean;
+    }
   | { key: string; at: number; kind: "day"; dayLabel: string }
   | { key: string; at: number; kind: "summary"; sessionId: string }
   | { key: string; at: number; kind: "learned"; learnedText: string }
@@ -547,20 +555,15 @@ export function RoomView({ room }: RoomViewProps) {
   }, [room.name, lastMessageAt, lastMessageSession]);
 
   const nodes = useMemo<TimelineNode[]>(() => {
-    const list: TimelineNode[] = [];
+    /* REQ-ROOM-002: build the visible items of each segment first, so a segment
+       with no visible turn or notice is left out along with its divider. */
+    const blocks: { segment: Segment; items: TimelineNode[] }[] = [];
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index];
       if (!segment) {
         continue;
       }
       const segEvents = events[segment.session_id] || [];
-      list.push({
-        key: "div-" + segment.session_id,
-        at: segment.created_at,
-        kind: "divider",
-        channel: segment.channel,
-        date: shortDate(segment.created_at),
-      });
       const isNewest = segment.session_id === newestId;
       const threadEvents = segEvents.filter(
         (event) =>
@@ -618,15 +621,48 @@ export function RoomView({ room }: RoomViewProps) {
         }
       }
       entries.sort((left, right) => left.at - right.at);
-      for (const entry of entries) {
-        list.push(entry);
+      if (entries.length === 0) {
+        continue;
       }
+      blocks.push({ segment, items: entries });
     }
 
+    /* A divider opens each visible segment: the full channel and date, or a
+       lighter "New topic" when the channel and day did not change. The first
+       visible segment always takes the full divider. */
+    const list: TimelineNode[] = [];
+    let first = true;
+    let previousChannel = "";
+    let previousDay = "";
+    for (const block of blocks) {
+      const channel = block.segment.channel;
+      const day = dayKey(block.segment.created_at);
+      const topic = !first && channel === previousChannel && day === previousDay;
+      list.push({
+        key: "div-" + block.segment.session_id,
+        at: block.segment.created_at,
+        kind: "divider",
+        channel,
+        date: shortDate(block.segment.created_at),
+        topic,
+      });
+      for (const item of block.items) {
+        list.push(item);
+      }
+      first = false;
+      previousChannel = channel;
+      previousDay = day;
+    }
+
+    /* REQ-ROOM-002: one day divider per day. A full segment divider already
+       names its day, so the first message under it does not repeat it. */
     const withDays: TimelineNode[] = [];
     let lastDay = "";
     for (const node of list) {
       if (node.kind === "divider") {
+        if (!node.topic) {
+          lastDay = dayKey(node.at);
+        }
         withDays.push(node);
         continue;
       }
@@ -959,10 +995,17 @@ export function RoomView({ room }: RoomViewProps) {
     switch (node.kind) {
       case "divider":
         return (
-          <div className="room-divider" key={node.key}>
+          <div
+            className={"room-divider" + (node.topic ? " room-divider-light" : "")}
+            key={node.key}
+          >
             <span className="room-divider-line" aria-hidden="true" />
             <span className="room-divider-text">
-              {"via " + channelName(node.channel) + (node.date ? " · " + node.date : "")}
+              {node.topic
+                ? "New topic"
+                : "via " +
+                  channelName(node.channel) +
+                  (node.date ? " · " + node.date : "")}
             </span>
             <span className="room-divider-line" aria-hidden="true" />
           </div>
