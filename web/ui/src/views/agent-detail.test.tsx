@@ -38,6 +38,8 @@ function baseAgent(overrides: Partial<Agent>): Agent {
   return {
     name: "coder",
     kind: "agent",
+    title: "",
+    color: "brand",
     model: "deepseek-flash",
     policy: "ask",
     skills: [],

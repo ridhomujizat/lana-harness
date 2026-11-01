@@ -15,6 +15,8 @@ export interface McpStatus {
 export interface Agent {
   name: string;
   kind: string;
+  title: string;
+  color: string;
   model: string | null;
   policy: string;
   lead?: string;

@@ -1,0 +1,315 @@
+import { useSyncExternalStore } from "react";
+import { listRooms, openRoomsStream } from "../api/rooms";
+import type { Presence, RoomRow } from "../api/rooms";
+
+/* The presence kit of REQ-ROOM-006 and REQ-ROOM-013: the agent face, the
+   presence label, skeletons, the typing dots, the unread badge, and the shared
+   useRooms() store. Colors come from the design (rooms-1..4). */
+
+export type FaceSize = 24 | 32 | 44 | 52 | 96;
+
+const FACE_COLORS = {
+  brand: { bg: "#F4F3FF", fg: "#5925DC" },
+  success: { bg: "#ECFDF3", fg: "#067647" },
+  warning: { bg: "#FFFAEB", fg: "#B54708" },
+  error: { bg: "#FEF3F2", fg: "#B42318" },
+  blue: { bg: "#EFF8FF", fg: "#175CD3" },
+  gray: { bg: "#F2F4F7", fg: "#475467" },
+} as const;
+
+type FaceColor = keyof typeof FACE_COLORS;
+
+function faceColors(color?: string): { bg: string; fg: string } {
+  const key = color && color in FACE_COLORS ? (color as FaceColor) : "brand";
+  return FACE_COLORS[key];
+}
+
+/* The presence dot of the face; the label colors of PresenceLabel are a
+   separate, darker set. */
+const DOT_COLORS: Record<string, string> = {
+  waiting: "#F79009",
+  working: "#7F56D9",
+  problem: "#F04438",
+  online: "#17B26A",
+  resting: "#D0D5DD",
+};
+
+const LABEL_COLORS: Record<string, string> = {
+  waiting: "#B54708",
+  working: "#6941C6",
+  problem: "#B42318",
+};
+
+function initialOf(name: string): string {
+  return (Array.from(String(name || "").trim())[0] || "?").toUpperCase();
+}
+
+export interface AgentFaceProps {
+  name: string;
+  color?: string;
+  presence?: Presence | null;
+  size?: FaceSize;
+}
+
+export function AgentFace({
+  name,
+  color,
+  presence,
+  size = 32,
+}: AgentFaceProps) {
+  const face = faceColors(color);
+  const state = presence ? presence.state : "";
+  const label = presence ? name + ", " + state : name;
+  return (
+    <span
+      className={"agent-face size-" + size}
+      role="img"
+      aria-label={label}
+      style={{ background: face.bg, color: face.fg }}
+    >
+      {initialOf(name)}
+      {state === "working" ? (
+        <span className="agent-face-ring" aria-hidden="true" />
+      ) : null}
+      {presence ? (
+        <span
+          className={"agent-face-dot" + (state ? " state-" + state : "")}
+          aria-hidden="true"
+          style={{ background: DOT_COLORS[state] || DOT_COLORS.resting }}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+export function PresenceLabel({ presence }: { presence?: Presence | null }) {
+  if (!presence) {
+    return null;
+  }
+  const color = LABEL_COLORS[presence.state] || "#475467";
+  return (
+    <span className={"presence-label state-" + presence.state}>
+      <span
+        className="presence-label-dot"
+        style={{ background: color }}
+        aria-hidden="true"
+      />
+      <span className="presence-label-text" style={{ color }}>
+        {presence.label}
+      </span>
+    </span>
+  );
+}
+
+export function TypingDots() {
+  return (
+    <span className="typing-dots" role="status" aria-label="Typing">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+export interface SkeletonProps {
+  width?: number | string;
+  height?: number | string;
+  radius?: number | string;
+  className?: string;
+}
+
+export function Skeleton({ width, height, radius, className }: SkeletonProps) {
+  return (
+    <span
+      className={"skeleton" + (className ? " " + className : "")}
+      aria-hidden="true"
+      style={{ width, height, borderRadius: radius }}
+    />
+  );
+}
+
+export function SkeletonRows({ count = 3 }: { count?: number }) {
+  return (
+    <div className="skeleton-rows" aria-hidden="true">
+      {Array.from({ length: count }).map((_, index) => (
+        <Skeleton
+          key={index}
+          className="skeleton-row"
+          height={44}
+          radius={10}
+        />
+      ))}
+    </div>
+  );
+}
+
+export interface UnreadBadgeProps {
+  count: number;
+  tone?: string;
+}
+
+export function UnreadBadge({ count, tone = "brand" }: UnreadBadgeProps) {
+  if (!count || count <= 0) {
+    return null;
+  }
+  return (
+    <span
+      className={"unread-badge tone-" + tone}
+      aria-label={count + " unread"}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+export interface FaceRef {
+  name: string;
+  color?: string;
+  presence?: Presence | null;
+}
+
+export function TeamFace({
+  faces,
+  size = 24,
+}: {
+  faces: FaceRef[];
+  size?: FaceSize;
+}) {
+  return (
+    <span className="team-face" aria-hidden="true">
+      {faces.slice(0, 3).map((face) => (
+        <AgentFace
+          key={face.name}
+          name={face.name}
+          color={face.color}
+          presence={face.presence}
+          size={size}
+        />
+      ))}
+    </span>
+  );
+}
+
+export interface RoomsState {
+  rows: RoomRow[];
+  byName: Record<string, RoomRow>;
+  connected: boolean;
+  loading: boolean;
+}
+
+function indexRows(rows: RoomRow[]): Record<string, RoomRow> {
+  const byName: Record<string, RoomRow> = {};
+  for (const row of rows) {
+    byName[row.name] = row;
+  }
+  return byName;
+}
+
+/* One shared stream for the whole app: it opens on the first subscriber and
+   closes when none remain. If the stream errors it falls back to a 10 s
+   listRooms() poll until the stream connects again (REQ-ROOM-007). */
+let roomsState: RoomsState = {
+  rows: [],
+  byName: {},
+  connected: false,
+  loading: true,
+};
+
+const listeners = new Set<() => void>();
+let stream: { close: () => void } | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function emit(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function setState(patch: Partial<RoomsState>): void {
+  roomsState = { ...roomsState, ...patch };
+  emit();
+}
+
+async function poll(): Promise<void> {
+  try {
+    const rows = await listRooms();
+    setState({ rows, byName: indexRows(rows), loading: false });
+  } catch {
+    /* Keep the last rows; the next tick retries. */
+  }
+}
+
+function startPolling(): void {
+  if (pollTimer !== null) {
+    return;
+  }
+  void poll();
+  pollTimer = setInterval(() => {
+    void poll();
+  }, 10000);
+}
+
+function stopPolling(): void {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function ensureStream(): void {
+  if (stream !== null) {
+    return;
+  }
+  stream = openRoomsStream({
+    onRooms(rows) {
+      setState({ rows, byName: indexRows(rows), loading: false });
+    },
+    onRoom(row) {
+      const exists = roomsState.rows.some((item) => item.name === row.name);
+      const rows = exists
+        ? roomsState.rows.map((item) => (item.name === row.name ? row : item))
+        : [...roomsState.rows, row];
+      setState({ rows, byName: indexRows(rows), loading: false });
+    },
+    onState(connected) {
+      setState({ connected });
+      if (connected) {
+        stopPolling();
+      } else {
+        startPolling();
+      }
+    },
+  });
+}
+
+function releaseStream(): void {
+  if (stream) {
+    stream.close();
+    stream = null;
+  }
+  stopPolling();
+  if (roomsState.connected) {
+    setState({ connected: false });
+  }
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  if (listeners.size === 1) {
+    ensureStream();
+  }
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      releaseStream();
+    }
+  };
+}
+
+function getSnapshot(): RoomsState {
+  return roomsState;
+}
+
+export function useRooms(): RoomsState {
+  return useSyncExternalStore(subscribe, getSnapshot);
+}

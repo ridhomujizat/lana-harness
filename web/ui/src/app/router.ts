@@ -1,7 +1,7 @@
 /* The route table of REQ-WEB-030. {name} segments match any value; tab and
    step segments are limited by the lists on each entry. */
 
-export const DEFAULT_ROUTE = "#/sessions";
+export const DEFAULT_ROUTE = "#/chats";
 
 export const AGENT_TABS = [
   "general",
@@ -31,6 +31,8 @@ export const SETUP_STEPS = [
 
 export type RouteView =
   | "home"
+  | "chats"
+  | "chat"
   | "sessions"
   | "new-session"
   | "session"
@@ -68,7 +70,10 @@ export interface Route {
 
 export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/home", view: "home", section: "home" },
+  { path: "#/chats", view: "chats", section: "chats" },
+  { path: "#/chats/{name}", view: "chat", section: "chats" },
   { path: "#/sessions", view: "sessions", section: "sessions" },
+  { path: "#/history", view: "sessions", section: "sessions" },
   { path: "#/sessions/new", view: "new-session", section: "sessions" },
   { path: "#/sessions/{id}", view: "session", section: "sessions" },
   { path: "#/agents", view: "agents", section: "agents" },
@@ -157,8 +162,8 @@ export function parseRoute(hash: string): Route {
   const parts = rawPath.split("/").filter(Boolean).map(safeDecode);
   if (parts.length === 0) {
     return {
-      view: "sessions",
-      section: "sessions",
+      view: "chats",
+      section: "chats",
       params: queryParams,
       path: DEFAULT_ROUTE,
     };

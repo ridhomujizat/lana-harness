@@ -21,6 +21,7 @@ import { LoginLoading, LoginPage } from "../views/login";
 import { WelcomePage } from "../views/welcome";
 import { ForgotPage } from "../views/forgot";
 import { HomePage } from "../views/home";
+import { ChatsPage } from "../views/chats";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
 import { SessionsWorkspace } from "../views/sessions";
@@ -77,6 +78,9 @@ function routeContent(
       );
     case "home":
       return <HomePage />;
+    case "chats":
+    case "chat":
+      return <ChatsPage name={params.name} />;
     case "sessions":
       return <SessionsWorkspace />;
     case "new-session":

@@ -35,6 +35,8 @@ const CONFIG: GetConfigResponse = {
 const AGENT: Agent = {
   name: "scout",
   kind: "agent",
+  title: "",
+  color: "brand",
   model: "openai:gpt-4o",
   policy: "ask",
   skills: ["deploy"],

@@ -10,6 +10,9 @@ import {
 
 const ROUTES = [
   "#/home",
+  "#/chats",
+  "#/chats/{name}",
+  "#/history",
   "#/sessions",
   "#/sessions/new",
   "#/sessions/{id}",
@@ -105,10 +108,26 @@ describe("route table", () => {
   });
 
   it("keeps the rev 1 aliases and the default route", () => {
-    expect(parseRoute("").path).toBe("#/sessions");
-    expect(parseRoute("#/").view).toBe("sessions");
+    expect(parseRoute("").path).toBe("#/chats");
+    expect(parseRoute("#/").view).toBe("chats");
     expect(parseRoute("#/login").view).toBe("login");
     expect(parseRoute("#/new").path).toBe("#/sessions/new");
     expect(parseRoute("#/new").view).toBe("new-session");
+  });
+
+  /* REQ-ROOM-012: the default page is Chats; History reuses the sessions view. */
+  it("resolves the chats and history routes", () => {
+    const chats = parseRoute("#/chats");
+    expect(chats.view).toBe("chats");
+    expect(chats.section).toBe("chats");
+
+    const chat = parseRoute("#/chats/dana");
+    expect(chat.view).toBe("chat");
+    expect(chat.section).toBe("chats");
+    expect(chat.params).toEqual({ name: "dana" });
+
+    const history = parseRoute("#/history");
+    expect(history.view).toBe("sessions");
+    expect(history.section).toBe("sessions");
   });
 });
