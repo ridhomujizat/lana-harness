@@ -175,6 +175,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerMCPRoutes()
 	s.registerChannelRoutes()
 	s.registerAgentFileRoutes()
+	s.registerOverviewRoutes()
 	s.registerSkillRoutes()
 	s.registerDaemonRoutes()
 	s.registerSetupRoutes()

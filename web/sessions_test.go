@@ -683,9 +683,38 @@ func (f *fakeWebBackend) SetRoomRead(_ context.Context, room string, at int64) (
 	return f.roomReads[room], nil
 }
 
-// ScanEvents is a stub that satisfies web.Backend (API-DSH-001).
-func (f *fakeWebBackend) ScanEvents(context.Context, []string, int64) iter.Seq2[core.ScannedEvent, error] {
-	return func(func(core.ScannedEvent, error) bool) {}
+// ScanEvents walks every session's events of the wanted kinds, in created_at
+// order, and tags each with its owning session's agent, like the store query
+// the agent overview reads (API-ROOM-008).
+func (f *fakeWebBackend) ScanEvents(_ context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error] {
+	return func(yield func(core.ScannedEvent, error) bool) {
+		f.mu.Lock()
+		wanted := make(map[string]bool, len(kinds))
+		for _, kind := range kinds {
+			wanted[kind] = true
+		}
+		scanned := make([]core.ScannedEvent, 0)
+		for _, info := range f.sessions {
+			for _, event := range f.events[info.ID] {
+				if !wanted[event.Kind] || event.CreatedAt < sinceMS {
+					continue
+				}
+				scanned = append(scanned, core.ScannedEvent{SessionEvent: event, Agent: info.Agent})
+			}
+		}
+		f.mu.Unlock()
+		sort.SliceStable(scanned, func(i, j int) bool {
+			if scanned[i].CreatedAt != scanned[j].CreatedAt {
+				return scanned[i].CreatedAt < scanned[j].CreatedAt
+			}
+			return scanned[i].Seq < scanned[j].Seq
+		})
+		for _, event := range scanned {
+			if !yield(event, nil) {
+				return
+			}
+		}
+	}
 }
 
 func (f *fakeWebBackend) detail(info core.SessionInfo) Session {
