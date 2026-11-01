@@ -7,6 +7,11 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+
+- `README.md` with install, daemon, knowledge, upgrade, and uninstall steps.
+- `make install` copies the built binary to `~/.local/bin` (`PREFIX` to change it).
+
 ## [0.1.0-beta.1] - 2026-11-02
 
 First tagged build, for daily use.

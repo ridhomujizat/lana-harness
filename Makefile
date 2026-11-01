@@ -5,14 +5,21 @@ BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT)$(DIRTY) -X main.buildDate=$(BUILD_DATE)
 GO ?= go
 DIST ?= dist
+PREFIX ?= $(HOME)/.local
 PLATFORMS := "darwin arm64" "linux amd64" "linux arm64"
 
-.PHONY: build release clean web web-check tag
+.PHONY: build install release clean web web-check tag
 
 # build writes ./lana for daily use, with the version, commit, and build date.
 build:
 	$(GO) build -trimpath -ldflags="$(LDFLAGS)" -o lana ./cmd/lana
 	@./lana --version
+
+# install builds ./lana and copies it to $(PREFIX)/bin (default ~/.local/bin).
+install: build
+	@mkdir -p "$(PREFIX)/bin"
+	install -m 0755 lana "$(PREFIX)/bin/lana"
+	@echo "installed $(PREFIX)/bin/lana"
 
 # tag creates the annotated git tag v$(VERSION) for the current commit. It
 # refuses a dirty tree and a tag that already exists.
