@@ -52,6 +52,7 @@ var agentKeys = map[string]bool{
 	"compaction_threshold": true,
 	"compaction_retain":    true,
 	"memory_capture":       true,
+	"vision":               true,
 	"description":          true,
 	"rules":                true,
 }
@@ -118,6 +119,9 @@ type agentJSON struct {
 	// MemoryCapture is the background capture switch; an absent key means on
 	// (REQ-MEM-010).
 	MemoryCapture bool `json:"memory_capture"`
+	// Vision overrides the model's catalog vision flag (API-ATT-005). nil means
+	// the key is absent and the catalog decides.
+	Vision *bool `json:"vision,omitempty"`
 }
 
 type listAgentsResponse struct {
@@ -157,8 +161,11 @@ type agentRecord struct {
 	CompactionRetain    float64
 	// MemoryCapture is nil when the key is absent; nil means on (REQ-MEM-010).
 	MemoryCapture *bool
-	Description   string
-	Rules         agentRules
+	// Vision is nil when the key is absent; the model catalog decides then
+	// (API-ATT-005).
+	Vision      *bool
+	Description string
+	Rules       agentRules
 }
 
 type agentRules struct {
@@ -290,6 +297,10 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			row.DisabledTools = nonNilStrings(record.DisabledTools)
 			if record.MemoryCapture != nil {
 				row.MemoryCapture = *record.MemoryCapture
+			}
+			if record.Vision != nil {
+				vision := *record.Vision
+				row.Vision = &vision
 			}
 			row.ReasoningEffort = record.ReasoningEffort
 			configTools = len(record.Tools)
@@ -896,6 +907,14 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.MemoryCapture = &value
 		return nil
+	case "vision":
+		// API-ATT-005: a boolean that overrides the catalog vision flag.
+		var value bool
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		record.Vision = &value
+		return nil
 	case "description":
 		var value string
 		if err := json.Unmarshal(raw, &value); err != nil {
@@ -1062,6 +1081,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		CompactionThreshold: mapAgentFloat(table, "compaction_threshold"),
 		CompactionRetain:    mapAgentFloat(table, "compaction_retain"),
 		MemoryCapture:       mapAgentBoolPtr(table, "memory_capture"),
+		Vision:              mapAgentBoolPtr(table, "vision"),
 		Description:         mapAgentString(table, "description"),
 	}
 	if rules, ok := table["rules"].(map[string]any); ok {
@@ -1147,6 +1167,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentFloat(&b, "compaction_threshold", record.CompactionThreshold)
 	writeAgentFloat(&b, "compaction_retain", record.CompactionRetain)
 	writeAgentBoolPtr(&b, "memory_capture", record.MemoryCapture)
+	writeAgentBoolPtr(&b, "vision", record.Vision)
 	writeAgentString(&b, "description", record.Description)
 	if len(record.Rules.Allow) > 0 || len(record.Rules.Deny) > 0 {
 		parts := make([]string, 0, 2)

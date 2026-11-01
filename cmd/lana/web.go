@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -25,6 +26,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/agent/compaction"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/providers/openai"
@@ -963,8 +965,9 @@ func channelSettings(raw map[string]any) map[string]any {
 }
 
 // Send starts a turn on the daemon root context, or queues the text in the
-// session inbox when a turn is already running.
-func (b *webBackend) Send(ctx context.Context, id, text string) (web.SendResult, error) {
+// session inbox when a turn is already running. Attachments are
+// workspace-relative paths (API-ATT-002).
+func (b *webBackend) Send(ctx context.Context, id, text string, attachments []string) (web.SendResult, error) {
 	// API-TFB-008: refuse before starting or queueing a turn.
 	if b.rt.Draining() {
 		return web.SendResult{}, web.ErrDraining
@@ -979,7 +982,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string) (web.SendResult,
 	}
 	if b.TurnActive(id) {
 		b.waitRunning(id, 2*time.Second)
-		if err := b.rt.Send(ctx, id, text); err != nil {
+		if err := b.rt.Send(ctx, id, text, attachments...); err != nil {
 			return web.SendResult{}, turnError(err)
 		}
 		return web.SendResult{Turn: "queued"}, nil
@@ -996,7 +999,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string) (web.SendResult,
 		// Wait for the first turn to reach turn/start so Send lands in its
 		// inbox instead of starting a second turn.
 		b.waitRunning(id, 2*time.Second)
-		if err := b.rt.Send(ctx, id, text); err != nil {
+		if err := b.rt.Send(ctx, id, text, attachments...); err != nil {
 			return web.SendResult{}, turnError(err)
 		}
 		return web.SendResult{Turn: "queued"}, nil
@@ -1013,7 +1016,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string) (web.SendResult,
 	go func() {
 		defer close(done)
 		defer b.finishTurn(id)
-		if _, err := b.rt.Run(root, lana.Request{Prompt: text, SessionID: id}); err != nil {
+		if _, err := b.rt.Run(root, lana.Request{Prompt: text, SessionID: id, Attachments: attachments}); err != nil {
 			slog.Error("web: turn failed", "session", id, "error", err)
 		}
 	}()
@@ -1021,6 +1024,30 @@ func (b *webBackend) Send(ctx context.Context, id, text string) (web.SendResult,
 	// response carries the id of the turn that the stream reports.
 	turnID := b.waitTurnID(id, beforeSeq, done, time.Second)
 	return web.SendResult{Turn: "started", TurnID: turnID}, nil
+}
+
+// SaveAttachment stores one uploaded file in the session workspace
+// (API-ATT-001, REQ-ATT-001).
+func (b *webBackend) SaveAttachment(ctx context.Context, id, name string, r io.Reader) (attach.Info, error) {
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return attach.Info{}, err
+	}
+	saved, err := attach.Save(info.Workspace, name, r, time.Now())
+	if err != nil {
+		return attach.Info{}, err
+	}
+	return saved, nil
+}
+
+// AttachmentPath resolves a workspace-relative attachments/ path to an absolute
+// file path (API-ATT-002, API-ATT-003).
+func (b *webBackend) AttachmentPath(ctx context.Context, id, rel string) (string, error) {
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	return attach.Resolve(info.Workspace, rel)
 }
 
 // waitTurnID waits briefly for the turn/start event written by the turn.

@@ -18,6 +18,11 @@ import { getModels } from "../api/models";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
 import type { ApprovalEvent } from "../api/approvals";
+import {
+  attachmentName,
+  attachmentURL,
+  uploadAttachments,
+} from "../api/attachments";
 import { authSession } from "../api/auth";
 import {
   ApiError,
@@ -53,6 +58,17 @@ import { isTeam, rosterNames } from "./agent-common";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
 import { buildTurns, TurnBlock, UserBubble } from "./turn";
+import type { UserAttachment, UserAttachmentRef } from "./turn";
+import {
+  AttachmentChips,
+  AttachmentDropOverlay,
+  AttachButton,
+  pasteImageFiles,
+  revokeAttachmentURLs,
+  useAttachmentDraft,
+  useFileDrop,
+} from "./attachments";
+import type { DraftAttachment } from "./attachments";
 
 /* Chat view of the sessions screen (REQ-WEB-038, REQ-WEB-039, REQ-WEB-040).
    It replaces the rev 1 history list and keeps the turn block and the approval
@@ -98,6 +114,36 @@ interface SubmitResult {
 
 function stringOf(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/* storedAttachments turns an owner message's image blocks into served URLs
+   (API-ATT-003, API-ATT-004). */
+function storedAttachments(
+  id: string,
+  refs: UserAttachmentRef[] | undefined
+): UserAttachment[] {
+  return (refs || []).map((ref) => {
+    const image = ref.mediaType.startsWith("image/");
+    return {
+      key: ref.path,
+      name: attachmentName(ref.path),
+      src: image ? attachmentURL(id, ref.path) : "",
+      alt: ref.path,
+      isImage: image,
+    };
+  });
+}
+
+/* pendingAttachments renders the chosen files of an optimistic bubble from
+   their local object URLs. */
+function pendingAttachments(files: DraftAttachment[]): UserAttachment[] {
+  return files.map((file) => ({
+    key: file.id,
+    name: file.file.name,
+    src: file.url,
+    alt: file.file.name,
+    isImage: file.isImage,
+  }));
 }
 
 /* Count the textarea's rendered lines and clamp the rows attribute to 2..8.
@@ -644,12 +690,17 @@ interface ComposerProps {
   reasoningEffort: string;
   agents: Agent[];
   draft: string;
+  attachments: DraftAttachment[];
+  attachmentNotice: string;
+  uploading: boolean;
   readOnly: boolean;
   questionOpen: boolean;
   turnRunning: boolean;
   cancelling: boolean;
   sending: boolean;
   onDraft: (value: string) => void;
+  onFiles: (files: File[]) => void;
+  onRemoveAttachment: (id: string) => void;
   onSend: () => void;
   onStop: () => void;
   onAgent: (name: string) => void;
@@ -666,12 +717,17 @@ function Composer({
   reasoningEffort,
   agents,
   draft,
+  attachments,
+  attachmentNotice,
+  uploading,
   readOnly,
   questionOpen,
   turnRunning,
   cancelling,
   sending,
   onDraft,
+  onFiles,
+  onRemoveAttachment,
   onSend,
   onStop,
   onAgent,
@@ -868,6 +924,12 @@ function Composer({
         </p>
       ) : null}
       <div className="composer-box">
+        <AttachmentChips items={attachments} onRemove={onRemoveAttachment} />
+        {(attachmentNotice || uploading) ? (
+          <p className="composer-status" role="status">
+            {uploading ? "Uploading…" : attachmentNotice}
+          </p>
+        ) : null}
         <textarea
           ref={inputRef}
           className="composer-input"
@@ -883,6 +945,7 @@ function Composer({
           disabled={readOnly || questionOpen}
           onChange={(event) => onDraft(event.target.value)}
           onKeyDown={composerKeyDown}
+          onPaste={(event) => pasteImageFiles(event, onFiles)}
         ></textarea>
         <div className="composer-bar">
           <span className="composer-control">
@@ -919,12 +982,6 @@ function Composer({
                   <span className="menu-item-meta">{agent || "no agent"}</span>
                 </span>
               </button>
-              <button type="button" role="menuitem" className="menu-item" disabled>
-                <span className="menu-item-text">
-                  <span>Attach file</span>
-                  <span className="menu-item-meta">coming soon</span>
-                </span>
-              </button>
             </Popover>
             <Popover
               open={menu === "agent"}
@@ -939,6 +996,13 @@ function Composer({
                 onPick={pickAgent}
               />
             </Popover>
+          </span>
+
+          <span className="composer-control">
+            <AttachButton
+              disabled={readOnly || questionOpen || uploading}
+              onFiles={onFiles}
+            />
           </span>
 
           <span className="composer-chips">
@@ -1067,7 +1131,13 @@ function Composer({
               className="composer-send"
               aria-label="Send message"
               title="Send message"
-              disabled={readOnly || questionOpen || sending || !draft.trim()}
+              disabled={
+                readOnly ||
+                questionOpen ||
+                sending ||
+                uploading ||
+                (!draft.trim() && attachments.length === 0)
+              }
               onClick={onSend}
             >
               <Icon name="arrow-up" className="icon-20 send-icon" />
@@ -1339,6 +1409,8 @@ export function SessionPage({ id }: SessionPageProps) {
   const [continueBusy, setContinueBusy] = useState(false);
   const [continueError, setContinueError] = useState("");
   const [pendingText, setPendingText] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<DraftAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
   const [queued, setQueued] = useState(false);
   const [notice, setNotice] = useState<{ text: string; tone: string } | null>(
     null
@@ -1373,6 +1445,9 @@ export function SessionPage({ id }: SessionPageProps) {
   const lastRunningRef = useRef(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
+  const attachmentDraft = useAttachmentDraft();
+  const pendingFilesRef = useRef<DraftAttachment[]>([]);
+  const fileDrop = useFileDrop(attachmentDraft.addFiles);
 
   const readOnly = holder === "other";
   const busySession = readOnly || turnRunning;
@@ -1813,6 +1888,11 @@ export function SessionPage({ id }: SessionPageProps) {
         if (event.kind === "user/message" && pendingRef.current) {
           pendingRef.current = "";
           setPendingText("");
+          /* The stored message now shows its own attachments, so the pending
+             object URLs are freed. */
+          revokeAttachmentURLs(pendingFilesRef.current);
+          pendingFilesRef.current = [];
+          setPendingFiles([]);
           setQueued(false);
         }
         if (event.kind === "assistant/message" || event.kind === "tool/call") {
@@ -2095,7 +2175,7 @@ export function SessionPage({ id }: SessionPageProps) {
     if (node && stickRef.current) {
       node.scrollTop = node.scrollHeight;
     }
-  }, [thread, pendingText, streamText]);
+  }, [thread, pendingText, pendingFiles, streamText]);
 
   function handleScroll() {
     const node = messagesRef.current;
@@ -2107,7 +2187,8 @@ export function SessionPage({ id }: SessionPageProps) {
 
   async function sendMessage() {
     const text = draft.trim();
-    if (!text || readOnly || sending || turnRunning) {
+    const files = attachmentDraft.items.slice();
+    if ((!text && files.length === 0) || readOnly || sending || turnRunning) {
       return;
     }
     setSending(true);
@@ -2115,11 +2196,28 @@ export function SessionPage({ id }: SessionPageProps) {
     /* Show the bubble before the request so a fast turn that logs the user
        message before the response cannot leave a duplicate pending bubble. */
     setDraft("");
-    pendingRef.current = text;
+    pendingRef.current = text || "(attachments)";
     setPendingText(text);
+    pendingFilesRef.current = files;
+    setPendingFiles(files);
     setQueued(false);
     try {
-      const result = await sendMessageRequest(id, text);
+      let paths: string[] = [];
+      if (files.length > 0) {
+        /* API-ATT-001 then API-ATT-002: upload the files, then send their
+           paths with the text. */
+        setUploading(true);
+        const uploaded = await uploadAttachments(
+          id,
+          files.map((item) => item.file)
+        );
+        paths = uploaded.map((item) => item.path);
+        setUploading(false);
+      }
+      const result =
+        paths.length > 0
+          ? await sendMessageRequest(id, text, paths)
+          : await sendMessageRequest(id, text);
       if (result.turn === "queued") {
         setQueued(true);
         announce("Message queued. It will be claimed at the next step.");
@@ -2136,10 +2234,17 @@ export function SessionPage({ id }: SessionPageProps) {
       }
       lastRunningRef.current = true;
       setTurnRunning(true);
+      /* The pending bubble owns the object URLs until the user/message event
+         lands, so the chips are dropped without revoking them. */
+      attachmentDraft.clear();
     } catch (failure) {
       pendingRef.current = "";
       setPendingText("");
+      pendingFilesRef.current = [];
+      setPendingFiles([]);
       setDraft((current) => current || text);
+      /* Keep the files and the object URLs so the owner can retry. */
+      attachmentDraft.restore(files);
       /* API-TFB-008: the daemon refuses new turns while it drains. Keep the
          typed text so the owner can send it again. */
       if (isDaemonDraining(failure)) {
@@ -2149,6 +2254,7 @@ export function SessionPage({ id }: SessionPageProps) {
         reportError(failure, "Could not send the message.");
       }
     } finally {
+      setUploading(false);
       setSending(false);
     }
   }
@@ -2418,7 +2524,8 @@ export function SessionPage({ id }: SessionPageProps) {
   const waitingForInput =
     Boolean(activeQuestion) || detail.status === "waiting_input";
   const turnCount = Number(detail.turn_count) || 0;
-  const hasThread = thread.length > 0 || pendingText !== "";
+  const hasThread =
+    thread.length > 0 || pendingText !== "" || pendingFiles.length > 0;
   /* REQ-TFB-004: the end card shows under the session's last turn only. */
   const lastTurnKey = thread.reduce(
     (found: string, item) => (item.kind === "turn" ? item.key : found),
@@ -2426,7 +2533,12 @@ export function SessionPage({ id }: SessionPageProps) {
   );
 
   return (
-    <main id="main" className="chat-view">
+    <main
+      id="main"
+      className="chat-view"
+      {...fileDrop.handlers}
+    >
+      <AttachmentDropOverlay active={fileDrop.active} />
       <header className="chat-header">
         <div className="chat-header-title">
           <h1 className="chat-title">{detail.title || "Untitled session"}</h1>
@@ -2511,6 +2623,7 @@ export function SessionPage({ id }: SessionPageProps) {
                 key={item.key}
                 text={item.text}
                 continue={item.continue === true}
+                attachments={storedAttachments(id, item.attachments)}
               />
             ) : (
               <TurnBlock
@@ -2541,8 +2654,12 @@ export function SessionPage({ id }: SessionPageProps) {
               />
             )
           )}
-          {pendingText ? (
-            <UserBubble key="pending" text={pendingText} />
+          {pendingText || pendingFiles.length > 0 ? (
+            <UserBubble
+              key="pending"
+              text={pendingText}
+              attachments={pendingAttachments(pendingFiles)}
+            />
           ) : null}
           {!hasThread ? (
             <div className="chat-empty">
@@ -2592,12 +2709,17 @@ export function SessionPage({ id }: SessionPageProps) {
             reasoningEffort={detail.reasoning_effort || ""}
             agents={agents}
             draft={draft}
+            attachments={attachmentDraft.items}
+            attachmentNotice={attachmentDraft.notice}
+            uploading={uploading}
             readOnly={readOnly}
             questionOpen={Boolean(activeQuestion)}
             turnRunning={turnRunning}
             cancelling={cancelling}
             sending={sending}
             onDraft={setDraft}
+            onFiles={attachmentDraft.addFiles}
+            onRemoveAttachment={attachmentDraft.remove}
             onSend={sendMessage}
             onStop={cancelTurn}
             onAgent={changeAgent}

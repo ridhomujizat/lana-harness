@@ -55,6 +55,15 @@ export interface ListSessionsResponse {
 
 export type EventPayload = Record<string, unknown>;
 
+/* API-ATT-004: an image block carries its workspace-relative path and media
+   type; the web API drops the base64 data field. */
+export interface SessionContentBlock {
+  type: string;
+  text?: string;
+  media_type?: string;
+  path?: string;
+}
+
 export interface SessionEvent {
   seq: number;
   kind: string;

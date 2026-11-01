@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/toolfmt"
 )
 
@@ -181,7 +182,13 @@ type Backend interface {
 	CreateSession(ctx context.Context, agent, model string) (Session, error)
 	Agents() []Agent
 
-	Send(ctx context.Context, id, text string) (SendResult, error)
+	Send(ctx context.Context, id, text string, attachments []string) (SendResult, error)
+	// SaveAttachment stores one uploaded file in the session workspace
+	// (API-ATT-001). r is streamed, never buffered whole.
+	SaveAttachment(ctx context.Context, id, name string, r io.Reader) (attach.Info, error)
+	// AttachmentPath resolves a workspace-relative attachments/ path to an
+	// absolute file path (API-ATT-002, API-ATT-003).
+	AttachmentPath(ctx context.Context, id, rel string) (string, error)
 	// Continue starts a continue turn for the session (API-TFB-003).
 	Continue(ctx context.Context, id string) (SendResult, error)
 	Cancel(ctx context.Context, id string) (bool, error)
@@ -392,7 +399,7 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 			Kind:      event.Kind,
 			TurnID:    event.TurnID,
 			CreatedAt: event.CreatedAt,
-			Payload:   event.Payload,
+			Payload:   publicEventPayload(event.Kind, event.Payload),
 		})
 	}
 	writeJSON(w, http.StatusOK, response)

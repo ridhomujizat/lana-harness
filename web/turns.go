@@ -1,9 +1,13 @@
 package web
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 )
 
 const (
@@ -12,11 +16,13 @@ const (
 	maxMessageBody  = 1 << 20
 )
 
-// registerTurnRoutes registers API-WEB-007, API-WEB-009, and API-TFB-003.
+// registerTurnRoutes registers API-WEB-007, API-WEB-009, API-TFB-003, and the
+// attachment routes of API-ATT-001 and API-ATT-003.
 func (s *Server) registerTurnRoutes() {
 	s.Handle("POST /v1/sessions/{id}/messages", http.HandlerFunc(s.handleSendMessage))
 	s.Handle("POST /v1/sessions/{id}/cancel", http.HandlerFunc(s.handleCancelTurn))
 	s.Handle("POST /v1/sessions/{id}/continue", http.HandlerFunc(s.handleContinueTurn))
+	s.registerAttachmentRoutes()
 }
 
 type sendMessageResponse struct {
@@ -34,25 +40,54 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Text *string `json:"text"`
+		Text        *string  `json:"text"`
+		Attachments []string `json:"attachments"`
 	}
 	if !decodeJSONObject(w, r, maxMessageBody, &body) {
 		return
 	}
-	if body.Text == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "text is required")
+	text := ""
+	if body.Text != nil {
+		text = *body.Text
+	}
+	attachments := body.Attachments
+	if len(attachments) > attach.MaxFiles {
+		writeAPIError(w, http.StatusBadRequest, "too_many_files", fmt.Sprintf("a message may carry at most %d files", attach.MaxFiles))
 		return
 	}
-	text := *body.Text
-	if strings.TrimSpace(text) == "" {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "text must not be empty")
-		return
+	// API-ATT-002: the text may be empty or absent when attachments are present.
+	if len(attachments) == 0 {
+		if body.Text == nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "text is required")
+			return
+		}
+		if strings.TrimSpace(text) == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "text must not be empty")
+			return
+		}
 	}
 	if utf8.RuneCountInString(text) > maxMessageChars {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "text must be at most 32000 characters")
 		return
 	}
-	result, err := backend.Send(r.Context(), r.PathValue("id"), text)
+	id := r.PathValue("id")
+	for _, rel := range attachments {
+		// API-ATT-002: every path must be a file under the session workspace
+		// attachments/ directory; the error names the path.
+		if rel == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_attachment", "attachment path is empty")
+			return
+		}
+		if _, err := backend.AttachmentPath(r.Context(), id, rel); err != nil {
+			if errors.Is(err, ErrSessionNotFound) {
+				s.writeBackendError(w, "send message", err)
+				return
+			}
+			writeAPIError(w, http.StatusBadRequest, "invalid_attachment", fmt.Sprintf("attachment path %q is not valid", rel))
+			return
+		}
+	}
+	result, err := backend.Send(r.Context(), id, text, attachments)
 	if err != nil {
 		s.writeBackendError(w, "send message", err)
 		return

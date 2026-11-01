@@ -8,6 +8,7 @@ import type {
 } from "react";
 import type { Agent } from "../api/agents";
 import { listAgents } from "../api/agents";
+import { uploadAttachments } from "../api/attachments";
 import { ApiError, DAEMON_DRAINING_TEXT, errorMessage, isDaemonDraining } from "../api/client";
 import { listSessions } from "../api/sessions";
 import { createSession } from "../api/sessions";
@@ -15,6 +16,14 @@ import { sendMessage } from "../api/turns";
 import { avatarFor } from "../lib/avatar";
 import { ErrorDetails, useAnnounce } from "../ui/ui";
 import { CreateAgentDialog } from "./agents";
+import {
+  AttachmentChips,
+  AttachmentDropOverlay,
+  AttachButton,
+  pasteImageFiles,
+  useAttachmentDraft,
+  useFileDrop,
+} from "./attachments";
 
 /* REQ-WEB-041: the picker shows the agents of the most recent sessions first.
    A short RECENT list keeps it scannable; every other agent stays in AGENTS. */
@@ -532,6 +541,8 @@ export function NewSessionPage() {
   const [createdId, setCreatedId] = useState("");
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const taskRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentDraft = useAttachmentDraft();
+  const fileDrop = useFileDrop(attachmentDraft.addFiles);
 
   /* eslint-disable react-hooks/set-state-in-effect -- the picker load starts from a clean state, as in new-session.js */
   useEffect(() => {
@@ -640,11 +651,12 @@ export function NewSessionPage() {
       return;
     }
     const task = text.trim();
+    const files = attachmentDraft.items.slice();
     if (!selected) {
       setError("Pick an agent or team first.");
       return;
     }
-    if (!task) {
+    if (!task && files.length === 0) {
       setError("Describe what to work on first.");
       if (taskRef.current) {
         taskRef.current.focus();
@@ -683,8 +695,35 @@ export function NewSessionPage() {
       }
     }
 
+    let paths: string[] = [];
+    if (files.length > 0) {
+      try {
+        /* API-ATT-001: the session already exists, so a failed upload keeps
+           it and the chips so the owner can retry. */
+        const uploaded = await uploadAttachments(
+          sessionId,
+          files.map((item) => item.file)
+        );
+        paths = uploaded.map((item) => item.path);
+      } catch (failure) {
+        const message = isDaemonDraining(failure)
+          ? DAEMON_DRAINING_TEXT
+          : "The session was created, but the attachments did not upload. " +
+            errorMessage(failure);
+        setError(message);
+        setDetails(failure instanceof ApiError ? failure.details : []);
+        announce(message);
+        setBusy(false);
+        return;
+      }
+    }
+
     try {
-      await sendMessage(sessionId, task);
+      if (paths.length > 0) {
+        await sendMessage(sessionId, task, paths);
+      } else {
+        await sendMessage(sessionId, task);
+      }
     } catch (failure) {
       /* API-TFB-008: the daemon refuses new turns while it drains. Keep the
          typed task so the owner can start it again after the restart. */
@@ -699,6 +738,8 @@ export function NewSessionPage() {
       return;
     }
 
+    /* The sent message owns its attachments now, so the draft is cleared. */
+    attachmentDraft.clear();
     announce("Session started with " + selected.name + ".");
     setBusy(false);
     window.location.hash = "#/sessions/" + encodeURIComponent(sessionId);
@@ -722,11 +763,24 @@ export function NewSessionPage() {
           </p>
         </header>
 
-        <form className="new-session-form" onSubmit={submit}>
+        <form
+          className="new-session-form"
+          onSubmit={submit}
+          {...fileDrop.handlers}
+        >
           <div className="new-session-composer">
             <label className="sr-only" htmlFor="new-session-task">
               What should we work on?
             </label>
+            <AttachmentChips
+              items={attachmentDraft.items}
+              onRemove={attachmentDraft.remove}
+            />
+            {attachmentDraft.notice ? (
+              <p className="composer-status" role="status">
+                {attachmentDraft.notice}
+              </p>
+            ) : null}
             <textarea
               id="new-session-task"
               ref={taskRef}
@@ -737,9 +791,14 @@ export function NewSessionPage() {
               value={text}
               disabled={busy}
               onChange={(event) => setText(event.target.value)}
+              onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
             ></textarea>
 
             <div className="new-session-bar">
+              <AttachButton
+                disabled={busy}
+                onFiles={attachmentDraft.addFiles}
+              />
               <AgentPicker
                 agents={agents}
                 recentNames={recentNames}
@@ -780,6 +839,8 @@ export function NewSessionPage() {
               ) : null}
             </div>
           ) : null}
+
+          <AttachmentDropOverlay active={fileDrop.active} />
         </form>
       </div>
 

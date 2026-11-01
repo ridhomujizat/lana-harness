@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SessionEvent } from "../api/sessions";
+import type { SessionContentBlock, SessionEvent } from "../api/sessions";
 import { contentText, cut, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { TeamBlock } from "./team";
@@ -54,6 +54,25 @@ export interface TurnUserText {
   text: string;
   /* API-TFB-004: a continue message renders as a chip, not an owner bubble. */
   continue?: boolean;
+  /* API-ATT-004: the image attachments of an owner message, in order. */
+  attachments?: UserAttachmentRef[];
+}
+
+/* UserAttachmentRef is a stored image block of an owner message: the reader
+   turns it into a URL (API-ATT-003). */
+export interface UserAttachmentRef {
+  path: string;
+  mediaType: string;
+}
+
+/* UserAttachment is the renderable form of an attachment: a local object URL
+   for a pending file, or a served URL for a stored one. */
+export interface UserAttachment {
+  key: string;
+  name: string;
+  src: string;
+  alt: string;
+  isImage: boolean;
 }
 
 export type TurnSegment =
@@ -112,7 +131,13 @@ export interface ChatTurn extends Turn {
 }
 
 export type ThreadItem =
-  | { kind: "user"; key: string; text: string; continue?: boolean }
+  | {
+      kind: "user";
+      key: string;
+      text: string;
+      continue?: boolean;
+      attachments?: UserAttachmentRef[];
+    }
   | { kind: "turn"; key: string; turn: ChatTurn };
 
 export interface LiveTurnState {
@@ -668,11 +693,14 @@ export function TurnBlock({
 export interface UserBubbleProps {
   text: string;
   continue?: boolean;
+  /* API-ATT-004: the image thumbnails and file chips of an owner message. */
+  attachments?: UserAttachment[];
 }
 
 export function UserBubble({
   text,
   continue: isContinue = false,
+  attachments = [],
 }: UserBubbleProps) {
   if (isContinue) {
     /* API-TFB-004: a continue request is a chip, not owner text. */
@@ -684,7 +712,37 @@ export function UserBubble({
   }
   return (
     <div className="chat-user-row">
-      <div className="chat-bubble">{text}</div>
+      <div className="chat-bubble">
+        {text ? <span className="chat-bubble-text">{text}</span> : null}
+        {attachments.length > 0 ? (
+          <div className="chat-bubble-attachments">
+            {attachments.map((attachment) =>
+              attachment.isImage && attachment.src ? (
+                <a
+                  className="chat-attachment-image"
+                  key={attachment.key}
+                  href={attachment.src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    src={attachment.src}
+                    loading="lazy"
+                    alt={attachment.alt}
+                  />
+                </a>
+              ) : (
+                <span className="chat-attachment-file" key={attachment.key}>
+                  <Icon name="file" className="icon-16" />
+                  <span className="chat-attachment-name">
+                    {attachment.name}
+                  </span>
+                </span>
+              )
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -713,6 +771,32 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
 function pushStep(turn: ChatTurn, step: TurnStep): void {
   turn.segments.push({ kind: "step", key: "step-" + step.key, step });
   turn.steps.push(step);
+}
+
+/* userMessageAttachments collects the image blocks of an owner message. The
+   web API keeps the path and media type and drops the bytes (API-ATT-004). */
+function userMessageAttachments(
+  payload: Record<string, unknown>
+): UserAttachmentRef[] {
+  const content = payload.content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const refs: UserAttachmentRef[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const value = block as SessionContentBlock;
+    if (value.type === "image" && typeof value.path === "string" && value.path) {
+      refs.push({
+        path: value.path,
+        mediaType:
+          typeof value.media_type === "string" ? value.media_type : "",
+      });
+    }
+  }
+  return refs;
 }
 
 /* Builds the ordered chat thread from the durable event log plus the live
@@ -797,7 +881,8 @@ export function buildTurns(
           break;
         }
         const text = userMessageText(payload);
-        if (!text) {
+        const attachments = userMessageAttachments(payload);
+        if (!text && attachments.length === 0) {
           break;
         }
         const turn = turnFor(event, payload);
@@ -805,6 +890,7 @@ export function buildTurns(
           key: "user-" + event.seq,
           text,
           continue: payload.continue === true,
+          ...(attachments.length > 0 ? { attachments } : {}),
         });
         turn.lastAt = Math.max(turn.lastAt, createdAt);
         break;
@@ -1005,6 +1091,9 @@ export function buildTurns(
         key: message.key,
         text: message.text,
         continue: message.continue === true,
+        ...(message.attachments && message.attachments.length > 0
+          ? { attachments: message.attachments }
+          : {}),
       });
     }
     items.push({ kind: "turn", key: turn.key, turn });

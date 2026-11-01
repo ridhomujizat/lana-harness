@@ -699,3 +699,40 @@ func TestAgentsReasoningEffort(t *testing.T) {
 		t.Fatalf("detail key = %q, want agents.coder.reasoning_effort", key)
 	}
 }
+
+// TestAgentsVisionFlag covers API-ATT-005: PUT accepts a vision boolean and the
+// list returns it.
+func TestAgentsVisionFlag(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	save := func(t *testing.T, vision bool) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_version": webfiles.ConfigVersion(raw),
+			"vision":           vision,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("save status = %d, body = %q", rr.Code, rr.Body.String())
+		}
+	}
+
+	for _, want := range []bool{true, false} {
+		save(t, want)
+		record := agentRecordFromMap(t016ReadAgentTables(t, store.path)["coder"])
+		if record.Vision == nil || *record.Vision != want {
+			t.Fatalf("saved vision = %v, want %v", record.Vision, want)
+		}
+		row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
+		if row.Vision == nil || *row.Vision != want {
+			t.Fatalf("listed vision = %v, want %v", row.Vision, want)
+		}
+	}
+}

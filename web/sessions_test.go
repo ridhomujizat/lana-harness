@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 )
 
@@ -38,23 +41,36 @@ type fakeWebBackend struct {
 	compacted   []string
 	forked      []string
 
+	// sentAttachments records the paths of the last Send per session.
+	sentAttachments map[string][]string
+	// savedAttachments records every file accepted by SaveAttachment.
+	savedAttachments []attach.Info
+	// attachmentPaths maps a workspace-relative attachments/ path to a file on
+	// disk, so tests can serve it (API-ATT-003).
+	attachmentPaths map[string]string
+	// attachmentErr returns a forced SaveAttachment error for a file name.
+	attachmentErr map[string]error
+
 	frames     *core.Observe[core.LiveFrame]
 	subscribed chan struct{}
 }
 
 func newFakeWebBackend() *fakeWebBackend {
 	return &fakeWebBackend{
-		events:      map[string][]core.SessionEvent{},
-		models:      map[string]string{},
-		efforts:     map[string]string{},
-		policies:    map[string]string{},
-		agentNames:  map[string]bool{},
-		turnActive:  map[string]bool{},
-		leaseHeld:   map[string]int{},
-		inbox:       map[string][]string{},
-		continueErr: map[string]error{},
-		frames:      core.NewObserve[core.LiveFrame](),
-		subscribed:  make(chan struct{}, 8),
+		events:          map[string][]core.SessionEvent{},
+		models:          map[string]string{},
+		efforts:         map[string]string{},
+		policies:        map[string]string{},
+		agentNames:      map[string]bool{},
+		turnActive:      map[string]bool{},
+		leaseHeld:       map[string]int{},
+		inbox:           map[string][]string{},
+		continueErr:     map[string]error{},
+		sentAttachments: map[string][]string{},
+		attachmentPaths: map[string]string{},
+		attachmentErr:   map[string]error{},
+		frames:          core.NewObserve[core.LiveFrame](),
+		subscribed:      make(chan struct{}, 8),
 	}
 }
 
@@ -277,7 +293,7 @@ func (f *fakeWebBackend) leaseError(sessionID string) error {
 	return nil
 }
 
-func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string) (SendResult, error) {
+func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string, attachments []string) (SendResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.find(sessionID); !ok {
@@ -286,12 +302,72 @@ func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string) (SendRe
 	if err := f.leaseError(sessionID); err != nil {
 		return SendResult{}, err
 	}
+	f.sentAttachments[sessionID] = append([]string(nil), attachments...)
 	if f.turnActive[sessionID] {
 		f.inbox[sessionID] = append(f.inbox[sessionID], text)
 		return SendResult{Turn: "queued"}, nil
 	}
 	f.turnActive[sessionID] = true
 	return SendResult{Turn: "started", TurnID: "turn-fake"}, nil
+}
+
+// SaveAttachment records the uploaded bytes and returns an Info with a fixed
+// date, so the tests can assert the response and the paths.
+func (f *fakeWebBackend) SaveAttachment(_ context.Context, sessionID, name string, r io.Reader) (attach.Info, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.find(sessionID); !ok {
+		return attach.Info{}, ErrSessionNotFound
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return attach.Info{}, err
+	}
+	if err := f.attachmentErr[name]; err != nil {
+		return attach.Info{}, err
+	}
+	if int64(len(data)) > attach.MaxFileBytes {
+		return attach.Info{}, fmt.Errorf("%s is over the limit: %w", name, attach.ErrTooLarge)
+	}
+	info := attach.Info{
+		Path:      "attachments/2026-11-01/" + name,
+		Name:      name,
+		MediaType: fakeAttachmentMediaType(name),
+		Size:      int64(len(data)),
+	}
+	f.savedAttachments = append(f.savedAttachments, info)
+	return info, nil
+}
+
+// AttachmentPath resolves a path the test registered, and rejects anything
+// outside attachments/ so the handler's 404 path is exercised.
+func (f *fakeWebBackend) AttachmentPath(_ context.Context, sessionID, rel string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.find(sessionID); !ok {
+		return "", ErrSessionNotFound
+	}
+	if !strings.HasPrefix(rel, attach.Dir+"/") || strings.Contains(rel, "..") {
+		return "", attach.ErrOutside
+	}
+	abs, ok := f.attachmentPaths[rel]
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	return abs, nil
+}
+
+func fakeAttachmentMediaType(name string) string {
+	switch {
+	case strings.HasSuffix(name, ".png"):
+		return "image/png"
+	case strings.HasSuffix(name, ".jpg"), strings.HasSuffix(name, ".jpeg"):
+		return "image/jpeg"
+	case strings.HasSuffix(name, ".pdf"):
+		return "application/pdf"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func (f *fakeWebBackend) Cancel(_ context.Context, sessionID string) (bool, error) {

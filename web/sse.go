@@ -317,7 +317,7 @@ func writeChildEventLines(w http.ResponseWriter, flusher http.Flusher, child cor
 				Kind:      event.Kind,
 				TurnID:    event.TurnID,
 				CreatedAt: event.CreatedAt,
-				Payload:   event.Payload,
+				Payload:   publicEventPayload(event.Kind, event.Payload),
 			},
 			ChildSessionID: child.ID,
 			Agent:          child.Agent,
@@ -342,7 +342,7 @@ func writeEventLines(w http.ResponseWriter, flusher http.Flusher, events []core.
 			Kind:      event.Kind,
 			TurnID:    event.TurnID,
 			CreatedAt: event.CreatedAt,
-			Payload:   event.Payload,
+			Payload:   publicEventPayload(event.Kind, event.Payload),
 		}
 		if err := writeSSE(w, flusher, "event", strconv.FormatInt(event.Seq, 10), payload); err != nil {
 			return err

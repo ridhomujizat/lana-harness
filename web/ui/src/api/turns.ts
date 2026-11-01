@@ -17,14 +17,20 @@ export interface CompactSessionResponse {
   tokens_after: number;
 }
 
+/* API-ATT-002: attachments are the workspace-relative paths returned by
+   uploadAttachments. The attachments key is sent only when there are paths, so
+   a plain text send keeps its request body unchanged. */
 export function sendMessage(
   id: string,
-  text: string
+  text: string,
+  attachments?: string[]
 ): Promise<SendMessageResponse> {
+  const body =
+    attachments && attachments.length > 0 ? { text, attachments } : { text };
   return request<SendMessageResponse>(
     "POST",
     "/v1/sessions/" + encodeURIComponent(id) + "/messages",
-    { text }
+    body
   );
 }
 

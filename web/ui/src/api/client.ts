@@ -100,8 +100,14 @@ export async function request<T>(
     credentials: "same-origin",
   };
   if (body !== undefined) {
-    headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(body);
+    /* API-ATT-001: a FormData body is sent as multipart, so the browser sets
+       the boundary and the client must not set a content type. */
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      options.body = body;
+    } else {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
+    }
   }
   if (method !== "GET" && method !== "HEAD" && state.csrf) {
     headers["X-Lana-CSRF"] = state.csrf;
