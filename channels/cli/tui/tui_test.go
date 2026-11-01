@@ -204,13 +204,10 @@ func TestProgramFlow(t *testing.T) {
 		t.Fatalf("send input: %v", err)
 	}
 	waitFor(t, &out, "Hello from fake.")
-	full := out.String()
-	if !strings.Contains(full, "⏺ bash  echo hi") {
-		t.Fatalf("tool call not shown:\n%s", full)
-	}
-	if !strings.Contains(full, "✓ success") {
-		t.Fatalf("tool status not shown:\n%s", full)
-	}
+	// The fake publishes its text before the tool frames, so the tool lines
+	// may print a moment after the text; wait for them instead of checking at once.
+	waitFor(t, &out, "⏺ bash  echo hi")
+	waitFor(t, &out, "✓ success")
 	if _, err := writer.Write([]byte("/agent assistant\r")); err != nil {
 		t.Fatalf("send /agent: %v", err)
 	}
