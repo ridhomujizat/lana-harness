@@ -59,6 +59,7 @@ import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
 import { buildTurns, TurnBlock, UserBubble } from "./turn";
 import type { UserAttachment, UserAttachmentRef } from "./turn";
+import { TrajectoryView } from "./trajectory";
 import {
   AttachmentChips,
   AttachmentDropOverlay,
@@ -83,6 +84,36 @@ const POLICY_OPTIONS = [
 const COMPOSER_LINE_HEIGHT = 20;
 const COMPOSER_MIN_ROWS = 2;
 const COMPOSER_MAX_ROWS = 8;
+
+type SessionTab = "chat" | "trajectory";
+
+/* REQ-TRJ-001: the active tab lives in the URL (?view=trajectory). App parses
+   the hash query into route params, but the workspace renders SessionPage
+   directly, so SessionPage reads the same hash and follows hashchange. */
+function tabFromValue(value: string | undefined): SessionTab {
+  return value === "trajectory" ? "trajectory" : "chat";
+}
+
+function viewFromHash(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const hash = window.location.hash || "";
+  const queryIndex = hash.indexOf("?");
+  if (queryIndex < 0) {
+    return "";
+  }
+  try {
+    return new URLSearchParams(hash.slice(queryIndex + 1)).get("view") || "";
+  } catch {
+    return "";
+  }
+}
+
+function sessionHash(id: string, tab: SessionTab): string {
+  const base = "#/sessions/" + encodeURIComponent(id);
+  return tab === "trajectory" ? base + "?view=trajectory" : base;
+}
 
 interface ChildLogRequest {
   id: string;
@@ -1382,10 +1413,16 @@ export function JobsStrip({ sessionId }: { sessionId: string }) {
 
 export interface SessionPageProps {
   id: string;
+  /* The route's ?view= value. SessionPage also reads the hash when the
+     workspace does not pass it. */
+  view?: string;
 }
 
-export function SessionPage({ id }: SessionPageProps) {
+export function SessionPage({ id, view }: SessionPageProps) {
   const announce = useAnnounce();
+  const [tab, setTab] = useState<SessionTab>(() =>
+    tabFromValue(view !== undefined ? view : viewFromHash())
+  );
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -1451,6 +1488,30 @@ export function SessionPage({ id }: SessionPageProps) {
 
   const readOnly = holder === "other";
   const busySession = readOnly || turnRunning;
+
+  /* Keep the switch in sync with the URL. A caller that passes `view` owns the
+     value; otherwise the hash is the source of truth. */
+  useEffect(() => {
+    if (view !== undefined) {
+      setTab(tabFromValue(view));
+      return undefined;
+    }
+    const sync = () => setTab(tabFromValue(viewFromHash()));
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [id, view]);
+
+  const switchTab = useCallback(
+    (next: SessionTab) => {
+      setTab(next);
+      const nextHash = sessionHash(id, next);
+      if (window.location.hash !== nextHash) {
+        window.location.hash = nextHash;
+      }
+    },
+    [id]
+  );
 
   /* The open request comes from the session log: question/asked without a
      question/answered. It follows the same replay path as the rest of the
@@ -1745,6 +1806,11 @@ export function SessionPage({ id }: SessionPageProps) {
       });
     },
     []
+  );
+
+  const loadTrajectoryChild = useCallback(
+    (childId: string) => loadChildEvents([{ id: childId, agent: "" }]),
+    [loadChildEvents]
   );
 
   useEffect(() => {
@@ -2560,6 +2626,26 @@ export function SessionPage({ id }: SessionPageProps) {
           </div>
         </div>
         <div className="chat-actions">
+          <div className="chat-tabs" role="tablist" aria-label="Session view">
+            <button
+              type="button"
+              role="tab"
+              className="chat-tab"
+              aria-selected={tab === "chat"}
+              onClick={() => switchTab("chat")}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className="chat-tab"
+              aria-selected={tab === "trajectory"}
+              onClick={() => switchTab("trajectory")}
+            >
+              Trajectory
+            </button>
+          </div>
           <button
             type="button"
             className="button-ui button-ui-tertiary"
@@ -2615,63 +2701,72 @@ export function SessionPage({ id }: SessionPageProps) {
         ) : null}
       </div>
 
-      <div className="chat-messages" ref={messagesRef} onScroll={handleScroll}>
-        <div className="chat-thread">
-          {thread.map((item) =>
-            item.kind === "user" ? (
+      {tab === "trajectory" ? (
+        <TrajectoryView
+          sessionId={id}
+          events={events}
+          childEvents={childEvents}
+          onLoadChild={loadTrajectoryChild}
+          running={turnRunning}
+        />
+      ) : (
+        <div className="chat-messages" ref={messagesRef} onScroll={handleScroll}>
+          <div className="chat-thread">
+            {thread.map((item) =>
+              item.kind === "user" ? (
+                <UserBubble
+                  key={item.key}
+                  text={item.text}
+                  continue={item.continue === true}
+                  attachments={storedAttachments(id, item.attachments)}
+                />
+              ) : (
+                <TurnBlock
+                  key={item.key}
+                  turn={item.turn}
+                  agent={agent}
+                  team={team}
+                  rootEvents={turnEvents.get(item.turn.id) || []}
+                  childEvents={childEvents}
+                  childLive={childLive}
+                  onLoadChildren={loadChildEvents}
+                  waitingForInput={waitingForInput}
+                  showStatusCard={item.key === lastTurnKey && !turnRunning}
+                  onContinue={continueLastTurn}
+                  continueBusy={continueBusy}
+                  continueError={continueError}
+                  streamingText={
+                    item.turn.running &&
+                    (liveTurnId ? item.turn.id === liveTurnId : true)
+                      ? streamText
+                      : ""
+                  }
+                  thinking={
+                    item.turn.running &&
+                    (liveTurnId ? item.turn.id === liveTurnId : true) &&
+                    liveThinking
+                  }
+                />
+              )
+            )}
+            {pendingText || pendingFiles.length > 0 ? (
               <UserBubble
-                key={item.key}
-                text={item.text}
-                continue={item.continue === true}
-                attachments={storedAttachments(id, item.attachments)}
+                key="pending"
+                text={pendingText}
+                attachments={pendingAttachments(pendingFiles)}
               />
-            ) : (
-              <TurnBlock
-                key={item.key}
-                turn={item.turn}
-                agent={agent}
-                team={team}
-                rootEvents={turnEvents.get(item.turn.id) || []}
-                childEvents={childEvents}
-                childLive={childLive}
-                onLoadChildren={loadChildEvents}
-                waitingForInput={waitingForInput}
-                showStatusCard={item.key === lastTurnKey && !turnRunning}
-                onContinue={continueLastTurn}
-                continueBusy={continueBusy}
-                continueError={continueError}
-                streamingText={
-                  item.turn.running &&
-                  (liveTurnId ? item.turn.id === liveTurnId : true)
-                    ? streamText
-                    : ""
-                }
-                thinking={
-                  item.turn.running &&
-                  (liveTurnId ? item.turn.id === liveTurnId : true) &&
-                  liveThinking
-                }
-              />
-            )
-          )}
-          {pendingText || pendingFiles.length > 0 ? (
-            <UserBubble
-              key="pending"
-              text={pendingText}
-              attachments={pendingAttachments(pendingFiles)}
-            />
-          ) : null}
-          {!hasThread ? (
-            <div className="chat-empty">
-              <p className="chat-empty-title">No messages yet</p>
-              <p className="chat-empty-text">
-                Send the first message to {agent} with the composer below.
-              </p>
-            </div>
-          ) : null}
+            ) : null}
+            {!hasThread ? (
+              <div className="chat-empty">
+                <p className="chat-empty-title">No messages yet</p>
+                <p className="chat-empty-text">
+                  Send the first message to {agent} with the composer below.
+                </p>
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
-
+      )}
       <div className="chat-composer">
         <div className="chat-composer-inner">
           <div className="chat-slot">
