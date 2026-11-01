@@ -146,4 +146,4 @@ it is reversible and does not change observable behavior.
 | — | Session search | [Approved r1](29-session-search/requirements.md) | [Not required](29-session-search/api-contract.md) | [Approved r1](29-session-search/design.md) | [Completed r1](29-session-search/tasks.md) |
 | — | Knowledge vault | [Approved r1](30-knowledge/requirements.md) | [Approved r1](30-knowledge/api-contract.md) | [Approved r1](30-knowledge/design.md) | [Completed r1](30-knowledge/tasks.md) |
 | — | Knowledge upkeep | [Approved r1](31-knowledge-upkeep/requirements.md) | [Approved r1](31-knowledge-upkeep/api-contract.md) | [Approved r1](31-knowledge-upkeep/design.md) | [Completed r1](31-knowledge-upkeep/tasks.md) |
-| — | Agent rooms, presence, alive profile and roster | [Approved r1](32-agent-rooms/requirements.md) | [Approved r1](32-agent-rooms/api-contract.md) | [Approved r1](32-agent-rooms/design.md) | [In Progress r1](32-agent-rooms/tasks.md) |
+| — | Agent rooms, presence, alive profile and roster | [Approved r1](32-agent-rooms/requirements.md) | [Approved r1](32-agent-rooms/api-contract.md) | [Approved r1](32-agent-rooms/design.md) | [Completed r1](32-agent-rooms/tasks.md) |
