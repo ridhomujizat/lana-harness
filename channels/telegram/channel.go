@@ -27,8 +27,8 @@ type Backend interface {
 	// Lease takes the session lease; holding it already is not an error.
 	Lease(ctx context.Context, sessionID string) error
 	SessionInfo(ctx context.Context, sessionID string) (core.SessionInfo, error)
-	RunTurn(ctx context.Context, sessionID, prompt string) (TurnResult, error)
-	Send(ctx context.Context, sessionID, text string) error
+	RunTurn(ctx context.Context, sessionID, prompt string, attachments ...string) (TurnResult, error)
+	Send(ctx context.Context, sessionID, text string, attachments ...string) error
 	Cancel(ctx context.Context, sessionID string) error
 	// CanContinue reports why a continue turn may not start (API-TFB-003); a
 	// nil result means it may.
@@ -76,6 +76,9 @@ type Channel struct {
 	QuestionTimeout time.Duration
 	PollTimeout     int
 	MaxBackoff      time.Duration
+	// AlbumWait is how long an album waits for its last part before it is
+	// handled (REQ-ATT-005, AC-ATT-006). Tests shorten it.
+	AlbumWait time.Duration
 
 	// Now is the clock used for the status snapshot. Tests replace it; nil
 	// means time.Now.
@@ -101,7 +104,7 @@ func New(cfg Config, token string, backend Backend) *Channel {
 		api: NewClient(cfg.APIBase, token), cfg: cfg, backend: backend,
 		EditInterval: time.Second, TypingInterval: 5 * time.Second, ApprovalTimeout: 10 * time.Minute,
 		QuestionTimeout: 30 * time.Minute,
-		PollTimeout:     30, MaxBackoff: 30 * time.Second, Now: time.Now,
+		PollTimeout:     30, MaxBackoff: 30 * time.Second, AlbumWait: 1500 * time.Millisecond, Now: time.Now,
 		pending: newPendingChats(),
 		chats:   map[int64]*chat{}, sessions: map[string]*chat{}, approvals: map[string]*approval{},
 		questions: map[string]*question{},
@@ -235,7 +238,7 @@ func (c *Channel) worker(ctx context.Context, chatID int64, routeAgent string) *
 	if w, ok := c.chats[chatID]; ok {
 		return w
 	}
-	w := &chat{ch: c, id: chatID, routeAgent: routeAgent, updates: make(chan Update, 64)}
+	w := &chat{ch: c, id: chatID, routeAgent: routeAgent, updates: make(chan Update, 64), albums: map[string]*album{}, albumCh: make(chan albumKey, 64)}
 	c.chats[chatID] = w
 	c.wg.Add(1)
 	go func() {

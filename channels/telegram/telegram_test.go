@@ -158,8 +158,8 @@ func TestNonTextAndCommands(t *testing.T) {
 	api := newFakeAPI(t)
 	backend := newFakeBackend()
 	startChannel(t, api, backend)
-	api.push(Update{Message: &Message{MessageID: 5, From: &User{ID: ownerID}, Chat: Chat{ID: ownerChat, Type: "private"}, Photo: []any{map[string]any{"file_id": "x"}}}})
-	api.waitCall("sendMessage", textIs(textOnlyReply))
+	api.push(Update{Message: &Message{MessageID: 5, From: &User{ID: ownerID}, Chat: Chat{ID: ownerChat, Type: "private"}, Voice: map[string]any{"file_id": "x"}}})
+	api.waitCall("sendMessage", textIs(unsupportedMediaReply))
 
 	api.text(ownerChat, "private", ownerID, "/help")
 	api.waitCall("sendMessage", textIs("I'm helper. Commands: /new /agent /memory /mcp /skills /compact /cancel /status"))

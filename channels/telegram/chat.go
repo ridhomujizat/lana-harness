@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,16 +14,22 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/tgfmt"
 	"github.com/ridhomujizat/lana-harness/internal/toolfmt"
 )
 
 const (
-	textOnlyReply = "Only text messages are supported for now."
-	waitReply     = "· wait for the turn to finish"
+	// unsupportedMediaReply answers voice, audio, video, video notes, stickers,
+	// and animations (REQ-ATT-005).
+	unsupportedMediaReply = "I can read photos, PDFs, and text files. Voice, audio, and video are not supported yet."
+	waitReply             = "· wait for the turn to finish"
 	// drainingReply is the text a chat gets while the daemon drains
 	// (REQ-TFB-002, API-TFB-008).
 	drainingReply = "lana is restarting. Try again in a moment."
+	// albumLimitReply answers an album with more parts than attach.MaxFiles
+	// (REQ-ATT-005).
+	albumLimitReply = "· only the first 10 files were read"
 )
 
 // chat is the worker of one Telegram chat. It handles the chat's updates in order and
@@ -57,6 +64,29 @@ type chat struct {
 	usageIn          int64
 	usageOut         int64
 	turnWG           sync.WaitGroup
+
+	// albums buffers the parts of each in-flight album, keyed by media group
+	// ID, and albumCh wakes run to flush one. Both are touched only from the
+	// chat worker goroutine (REQ-ATT-005, AC-ATT-006).
+	albums  map[string]*album
+	albumCh chan albumKey
+}
+
+// album is one Telegram album being buffered while its parts arrive. gen
+// counts the parts; a flush whose generation is stale is ignored.
+type album struct {
+	parts []*Message
+	gen   int
+	timer *time.Timer
+}
+
+// albumKey identifies one album flush: the media group and the generation of
+// the album when the flush timer was armed. A flush handles every part queued
+// before it (REQ-ATT-005), so a key whose generation is stale never flushes a
+// newer buffer.
+type albumKey struct {
+	key string
+	gen int
 }
 
 type toolLine struct {
@@ -69,20 +99,46 @@ type toolLine struct {
 
 func (w *chat) address() string { return strconv.FormatInt(w.id, 10) }
 
+// run handles the chat's updates in order and flushes albums whose wait
+// elapsed. Before a flush it takes the updates already queued, so a part that
+// arrived while the worker was busy joins its album instead of starting a
+// second turn (REQ-ATT-005, AC-ATT-006).
 func (w *chat) run(ctx context.Context) {
 	defer w.turnWG.Wait()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case evt := <-w.albumCh:
+			w.drainQueued(ctx)
+			w.flushAlbum(ctx, evt)
 		case update := <-w.updates:
-			switch {
-			case update.CallbackQuery != nil:
-				w.handleCallback(ctx, update.CallbackQuery)
-			case update.Message != nil:
-				w.handleMessage(ctx, update.Message)
-			}
+			w.handleUpdate(ctx, update)
 		}
+	}
+}
+
+// handleUpdate handles one update: a CallbackQuery to handleCallback, a Message
+// to handleMessage.
+func (w *chat) handleUpdate(ctx context.Context, update Update) {
+	switch {
+	case update.CallbackQuery != nil:
+		w.handleCallback(ctx, update.CallbackQuery)
+	case update.Message != nil:
+		w.handleMessage(ctx, update.Message)
+	}
+}
+
+// drainQueued handles the updates already queued for the chat worker. The
+// snapshot length is exact because the worker is the only receiver of
+// w.updates; a queued album part re-arms its flush timer in bufferAlbum and so
+// makes the pending flush stale (REQ-ATT-005). It stops early when ctx is done.
+func (w *chat) drainQueued(ctx context.Context) {
+	for n := len(w.updates); n > 0; n-- {
+		if ctx.Err() != nil {
+			return
+		}
+		w.handleUpdate(ctx, <-w.updates)
 	}
 }
 
@@ -94,10 +150,14 @@ func (w *chat) repliesToBot(m *Message) bool {
 
 func (w *chat) handleMessage(ctx context.Context, m *Message) {
 	group := isGroup(m.Chat.Type)
+	if m.isFileMessage() {
+		w.handleMedia(ctx, m, group)
+		return
+	}
 	text := strings.TrimSpace(m.Text)
 	if text == "" {
-		if m.HasMedia() && (!group || w.repliesToBot(m)) {
-			w.reply(ctx, m.MessageID, textOnlyReply)
+		if m.hasUnsupportedMedia() && (!group || w.repliesToBot(m)) {
+			w.reply(ctx, m.MessageID, unsupportedMediaReply)
 		}
 		return
 	}
@@ -120,20 +180,224 @@ func (w *chat) handleMessage(ctx context.Context, m *Message) {
 	w.handleText(ctx, m, text)
 }
 
-func (w *chat) handleText(ctx context.Context, m *Message, text string) {
+// addressed reports whether a message in a group is for the bot: it replies to
+// the bot or its caption mentions the bot (REQ-ATT-005).
+func (w *chat) addressed(m *Message) bool {
+	return w.repliesToBot(m) || containsFold(m.Caption, "@"+w.ch.bot.Username)
+}
+
+// handleMedia routes a photo or document message. A single message is handled
+// at once, as a group of one; an album part is buffered until the album is
+// complete (REQ-ATT-005, AC-ATT-006).
+func (w *chat) handleMedia(ctx context.Context, m *Message, group bool) {
+	if m.MediaGroupID == "" {
+		if group && !w.addressed(m) {
+			return
+		}
+		w.mediaTurn(ctx, []*Message{m})
+		return
+	}
+	w.bufferAlbum(ctx, m)
+}
+
+// bufferAlbum appends a part to its album and re-arms the flush timer, so the
+// album is handled AlbumWait after its last part (REQ-ATT-005).
+func (w *chat) bufferAlbum(ctx context.Context, m *Message) {
+	a := w.albums[m.MediaGroupID]
+	if a == nil {
+		a = &album{}
+		w.albums[m.MediaGroupID] = a
+	}
+	a.parts = append(a.parts, m)
+	a.gen++
+	gen := a.gen
+	if a.timer != nil {
+		a.timer.Stop()
+	}
+	a.timer = time.AfterFunc(w.ch.AlbumWait, func() {
+		select {
+		case w.albumCh <- albumKey{key: m.MediaGroupID, gen: gen}:
+		case <-ctx.Done():
+		}
+	})
+}
+
+// flushAlbum handles an album whose last part arrived AlbumWait ago, together
+// with every part queued before it. A stale generation, or an unaddressed album
+// in a group, is dropped (REQ-ATT-005).
+func (w *chat) flushAlbum(ctx context.Context, evt albumKey) {
+	a := w.albums[evt.key]
+	if a == nil || a.gen != evt.gen {
+		return
+	}
+	if a.timer != nil {
+		a.timer.Stop()
+	}
+	delete(w.albums, evt.key)
+	if isGroup(a.parts[0].Chat.Type) && !w.albumAddressed(a.parts) {
+		return
+	}
+	w.mediaTurn(ctx, a.parts)
+}
+
+// albumAddressed reports whether any part of an album replies to the bot or
+// mentions it (REQ-ATT-005).
+func (w *chat) albumAddressed(parts []*Message) bool {
+	for _, part := range parts {
+		if w.addressed(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// mediaText returns the owner text of a file message: the trimmed caption,
+// mention-stripped and name-prefixed when the chat is a group and the caption
+// is non-empty, as the text path does (REQ-ATT-005).
+func (w *chat) mediaText(m *Message, group bool) string {
+	text := strings.TrimSpace(m.Caption)
+	if !group || text == "" {
+		return text
+	}
+	text = strings.TrimSpace(replaceFold(text, "@"+w.ch.bot.Username, ""))
+	if text == "" {
+		return ""
+	}
+	name := "someone"
+	if m.From != nil && m.From.FirstName != "" {
+		name = m.From.FirstName
+	}
+	return name + ": " + text
+}
+
+// mediaTurn saves the files of a photo or document message group into the
+// session workspace and hands the paths to the text path (REQ-ATT-005,
+// AC-ATT-006).
+func (w *chat) mediaTurn(ctx context.Context, parts []*Message) {
+	trigger := parts[0]
+	group := isGroup(trigger.Chat.Type)
+	// A drain starts no turn and downloads nothing (REQ-TFB-002, API-TFB-008).
+	if w.ch.backend.Draining() {
+		w.reply(ctx, trigger.MessageID, drainingReply)
+		return
+	}
+	session, _, err := w.ensureSession(ctx)
+	if err != nil {
+		w.reply(ctx, trigger.MessageID, sessionErrText(err))
+		return
+	}
+	info, err := w.ch.backend.SessionInfo(ctx, session)
+	if err != nil {
+		w.reply(ctx, trigger.MessageID, "✗ "+err.Error())
+		return
+	}
+
+	if len(parts) > attach.MaxFiles {
+		// Cut before any download; the extra parts are dropped (REQ-ATT-005).
+		parts = parts[:attach.MaxFiles]
+		w.reply(ctx, trigger.MessageID, albumLimitReply)
+	}
+
+	text := ""
+	for _, part := range parts {
+		if t := w.mediaText(part, group); text == "" {
+			text = t
+		}
+	}
+
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if path, ok := w.savePart(ctx, trigger.MessageID, info.Workspace, part); ok {
+			paths = append(paths, path)
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	w.handleText(ctx, trigger, text, paths...)
+}
+
+// savePart downloads one photo or document into the session workspace and
+// returns its workspace-relative path. A part over a limit gets the REQ-ATT-001
+// reply and is skipped; another error is reported and the part is skipped.
+func (w *chat) savePart(ctx context.Context, replyTo int64, workspace string, m *Message) (string, bool) {
+	name, fileID, size, ok := fileOf(m)
+	if !ok {
+		return "", false
+	}
+	if size > attach.MaxFileBytes {
+		w.reply(ctx, replyTo, tooLargeText(name))
+		return "", false
+	}
+	file, err := w.ch.api.GetFile(ctx, fileID)
+	if err != nil {
+		w.mediaError(ctx, replyTo, name, err)
+		return "", false
+	}
+	if file.FileSize > attach.MaxFileBytes {
+		w.reply(ctx, replyTo, tooLargeText(name))
+		return "", false
+	}
+	var buf bytes.Buffer
+	if err := w.ch.api.Download(ctx, file.FilePath, &buf, attach.MaxFileBytes); err != nil {
+		w.mediaError(ctx, replyTo, name, err)
+		return "", false
+	}
+	info, err := attach.Save(workspace, name, &buf, w.ch.now())
+	if err != nil {
+		w.mediaError(ctx, replyTo, name, err)
+		return "", false
+	}
+	return info.Path, true
+}
+
+// mediaError replies to a failed part: a file over the limit gets the
+// REQ-ATT-001 text, any other error names the file.
+func (w *chat) mediaError(ctx context.Context, replyTo int64, name string, err error) {
+	if errors.Is(err, attach.ErrTooLarge) {
+		w.reply(ctx, replyTo, tooLargeText(name))
+		return
+	}
+	w.reply(ctx, replyTo, "✗ "+name+": "+err.Error())
+}
+
+// fileOf returns the saved name, file ID, and declared size of a photo or
+// document message. A photo uses its largest size (REQ-ATT-005).
+func fileOf(m *Message) (name, fileID string, size int64, ok bool) {
+	if len(m.Photo) > 0 {
+		p := m.Photo[len(m.Photo)-1]
+		return fmt.Sprintf("photo-%d-1.jpg", m.MessageID), p.FileID, p.FileSize, true
+	}
+	if m.Document != nil {
+		name := m.Document.FileName
+		if name == "" {
+			name = "file"
+		}
+		return name, m.Document.FileID, m.Document.FileSize, true
+	}
+	return "", "", 0, false
+}
+
+// tooLargeText is the REQ-ATT-001 reply for a file over the per-file limit.
+func tooLargeText(name string) string {
+	return fmt.Sprintf("✗ %s is larger than 20 MB, the limit per file.", name)
+}
+
+func (w *chat) handleText(ctx context.Context, m *Message, text string, attachments ...string) {
 	// A drain starts no turn and queues nothing (REQ-TFB-002, API-TFB-008).
 	if w.ch.backend.Draining() {
 		w.reply(ctx, m.MessageID, drainingReply)
 		return
 	}
-	if w.captureQuestionText(ctx, m, text) {
+	// A message with attachments never answers a pending question (REQ-ATT-005).
+	if len(attachments) == 0 && w.captureQuestionText(ctx, m, text) {
 		return
 	}
 	w.mu.Lock()
 	running, session := w.running, w.session
 	w.mu.Unlock()
 	if running {
-		if err := w.ch.backend.Send(ctx, session, text); err != nil {
+		if err := w.ch.backend.Send(ctx, session, text, attachments...); err != nil {
 			w.reply(ctx, m.MessageID, "✗ "+err.Error())
 			return
 		}
@@ -145,7 +409,7 @@ func (w *chat) handleText(ctx context.Context, m *Message, text string) {
 		w.reply(ctx, m.MessageID, sessionErrText(err))
 		return
 	}
-	w.startTurn(ctx, m.MessageID, session, text)
+	w.startTurn(ctx, m.MessageID, session, text, attachments...)
 }
 
 func sessionErrText(err error) string {
@@ -240,9 +504,9 @@ func isParseError(err error) bool {
 }
 
 // startTurn runs one turn in a child goroutine.
-func (w *chat) startTurn(ctx context.Context, trigger int64, session, text string) {
+func (w *chat) startTurn(ctx context.Context, trigger int64, session, text string, attachments ...string) {
 	w.launchTurn(ctx, trigger, session, func(ctx context.Context) (TurnResult, error) {
-		return w.ch.backend.RunTurn(ctx, session, text)
+		return w.ch.backend.RunTurn(ctx, session, text, attachments...)
 	})
 }
 

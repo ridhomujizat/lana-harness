@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 )
 
 // ErrUnauthorized means Telegram rejected the bot token (HTTP 401).
@@ -151,6 +154,30 @@ type Chat struct {
 	Username  string `json:"username"`
 }
 
+// PhotoSize is one size of a photo message. A photo message carries several,
+// smallest first, so the last is the largest (REQ-ATT-005).
+type PhotoSize struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int64  `json:"file_size"`
+}
+
+// Document is a document message: any file the owner sends as a file.
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+}
+
+// File is a getFile result: the file's path on the Bot API file server and its
+// size in bytes.
+type File struct {
+	FilePath string `json:"file_path"`
+	FileSize int64  `json:"file_size"`
+}
+
 // Message is a Telegram message. Only the fields lana uses are decoded.
 type Message struct {
 	MessageID int64    `json:"message_id"`
@@ -158,21 +185,37 @@ type Message struct {
 	From      *User    `json:"from"`
 	Chat      Chat     `json:"chat"`
 	Text      string   `json:"text"`
+	Caption   string   `json:"caption"`
 	ReplyTo   *Message `json:"reply_to_message"`
-	Photo     []any    `json:"photo"`
-	Voice     any      `json:"voice"`
-	Audio     any      `json:"audio"`
-	Video     any      `json:"video"`
-	VideoNote any      `json:"video_note"`
-	Document  any      `json:"document"`
-	Sticker   any      `json:"sticker"`
-	Animation any      `json:"animation"`
+	// MediaGroupID is set on every part of an album (REQ-ATT-005, AC-ATT-006).
+	MediaGroupID string      `json:"media_group_id"`
+	Photo        []PhotoSize `json:"photo"`
+	Voice        any         `json:"voice"`
+	Audio        any         `json:"audio"`
+	Video        any         `json:"video"`
+	VideoNote    any         `json:"video_note"`
+	Document     *Document   `json:"document"`
+	Sticker      any         `json:"sticker"`
+	Animation    any         `json:"animation"`
 }
 
 // HasMedia reports whether the message carries non-text content.
 func (m *Message) HasMedia() bool {
 	return len(m.Photo) > 0 || m.Voice != nil || m.Audio != nil || m.Video != nil || m.VideoNote != nil ||
 		m.Document != nil || m.Sticker != nil || m.Animation != nil
+}
+
+// isFileMessage reports whether the message carries media lana saves as an
+// attachment: a photo or a document (REQ-ATT-005).
+func (m *Message) isFileMessage() bool {
+	return len(m.Photo) > 0 || m.Document != nil
+}
+
+// hasUnsupportedMedia reports whether the message carries media lana cannot
+// read (REQ-ATT-005).
+func (m *Message) hasUnsupportedMedia() bool {
+	return m.Voice != nil || m.Audio != nil || m.Video != nil || m.VideoNote != nil ||
+		m.Sticker != nil || m.Animation != nil
 }
 
 // CallbackQuery is a button press.
@@ -237,6 +280,57 @@ func (c *Client) GetUpdatesPeek(ctx context.Context) ([]Update, error) {
 		return nil, ErrConflict
 	}
 	return updates, err
+}
+
+// GetFile resolves a file ID to its path on the Bot API file server. An answer
+// the Bot API refuses because the file is over its own download limit becomes
+// an attach.ErrTooLarge error (REQ-ATT-005).
+func (c *Client) GetFile(ctx context.Context, fileID string) (File, error) {
+	var file File
+	err := c.call(ctx, "getFile", map[string]any{"file_id": fileID}, &file)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && strings.Contains(apiErr.Description, "file is too big") {
+		return File{}, fmt.Errorf("telegram: %s: %w", apiErr.Description, attach.ErrTooLarge)
+	}
+	return file, err
+}
+
+// Download streams a file from the Bot API file server into w, copying at most
+// limit bytes; more than limit bytes is attach.ErrTooLarge. A 401 is
+// ErrUnauthorized; another non-200 status is *APIError (REQ-ATT-005). The
+// token is scrubbed from transport errors.
+func (c *Client) Download(ctx context.Context, filePath string, w io.Writer, limit int64) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/file/bot"+c.token+"/"+filePath, nil)
+	if err != nil {
+		return c.scrub(err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return c.scrub(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return ErrUnauthorized
+	}
+	if resp.StatusCode != http.StatusOK {
+		var decoded apiResponse
+		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+			return &APIError{Code: resp.StatusCode, Description: "invalid response"}
+		}
+		code := decoded.ErrorCode
+		if code == 0 {
+			code = resp.StatusCode
+		}
+		return &APIError{Code: code, Description: decoded.Description}
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return c.scrub(err)
+	}
+	if n > limit {
+		return fmt.Errorf("telegram: file over %d bytes: %w", limit, attach.ErrTooLarge)
+	}
+	return nil
 }
 
 // SendOptions are optional sendMessage and editMessageText fields.

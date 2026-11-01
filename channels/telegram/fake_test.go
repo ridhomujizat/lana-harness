@@ -26,27 +26,39 @@ type cannedResponse struct {
 	body   string
 }
 
+// fakeFile is a file the fake Bot API can serve: a getFile path and its bytes.
+type fakeFile struct {
+	path string
+	size int64
+	data []byte
+}
+
 // fakeAPI is an in-memory Bot API server.
 type fakeAPI struct {
-	t       *testing.T
-	srv     *httptest.Server
-	mu      sync.Mutex
-	calls   []apiCall
-	updates []Update
-	nextID  int64
-	msgID   int64
-	fail    map[string][]cannedResponse
-	offsets []int64
+	t         *testing.T
+	srv       *httptest.Server
+	mu        sync.Mutex
+	calls     []apiCall
+	updates   []Update
+	nextID    int64
+	msgID     int64
+	fail      map[string][]cannedResponse
+	offsets   []int64
+	files     map[string]fakeFile
+	downloads []string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{t: t, nextID: 1, msgID: 100, fail: map[string][]cannedResponse{}}
+	f := &fakeAPI{t: t, nextID: 1, msgID: 100, fail: map[string][]cannedResponse{}, files: map[string]fakeFile{}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.srv.Close)
 	return f
 }
 
 func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
+	if f.serveDownload(w, r) {
+		return
+	}
 	parts := strings.Split(r.URL.Path, "/")
 	method := parts[len(parts)-1]
 	var params map[string]any
@@ -66,6 +78,17 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	switch method {
 	case "getMe":
 		result = User{ID: 999, IsBot: true, FirstName: "Lana", Username: "lana_bot"}
+	case "getFile":
+		fileID, _ := params["file_id"].(string)
+		f.mu.Lock()
+		file, ok := f.files[fileID]
+		f.mu.Unlock()
+		if !ok {
+			data, _ := json.Marshal(map[string]any{"ok": false, "error_code": 400, "description": "file not found"})
+			_, _ = w.Write(data)
+			return
+		}
+		result = map[string]any{"file_id": fileID, "file_path": file.path, "file_size": file.size}
 	case "getUpdates":
 		offset := int64(params["offset"].(float64))
 		deadline := time.Now().Add(50 * time.Millisecond)
@@ -102,6 +125,51 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// serveDownload answers the Bot API file route, /file/bot<token>/<path>. It runs
+// before the method split because the last path segment is a file name.
+func (f *fakeAPI) serveDownload(w http.ResponseWriter, r *http.Request) bool {
+	const prefix = "/file/bot"
+	if !strings.HasPrefix(r.URL.Path, prefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		rest = rest[i+1:]
+	} else {
+		rest = ""
+	}
+	f.mu.Lock()
+	f.downloads = append(f.downloads, rest)
+	var data []byte
+	found := false
+	for _, file := range f.files {
+		if file.path == rest {
+			data, found = file.data, true
+			break
+		}
+	}
+	f.mu.Unlock()
+	if !found {
+		w.WriteHeader(http.StatusNotFound)
+		return true
+	}
+	_, _ = w.Write(data)
+	return true
+}
+
+// addFile registers a file a photo or document message can resolve.
+func (f *fakeAPI) addFile(fileID, path string, data []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files[fileID] = fakeFile{path: path, size: int64(len(data)), data: data}
+}
+
+func (f *fakeAPI) downloadCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.downloads)
+}
+
 func (f *fakeAPI) failNext(method string, status int, body string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -120,6 +188,24 @@ func (f *fakeAPI) push(updates ...Update) {
 
 func (f *fakeAPI) text(chatID int64, chatType string, from int64, text string) {
 	f.push(Update{Message: &Message{MessageID: 1000 + f.nextID, From: &User{ID: from, FirstName: "Budi"}, Chat: Chat{ID: chatID, Type: chatType}, Text: text}})
+}
+
+// photo pushes a photo message. groupID non-empty makes it an album part.
+func (f *fakeAPI) photo(chatID int64, chatType string, from int64, fileID, caption, groupID string) {
+	f.push(Update{Message: &Message{
+		MessageID: 1000 + f.nextID, From: &User{ID: from, FirstName: "Budi"},
+		Chat: Chat{ID: chatID, Type: chatType}, Caption: caption, MediaGroupID: groupID,
+		Photo: []PhotoSize{{FileID: fileID, Width: 90, Height: 90, FileSize: 3}},
+	}})
+}
+
+// document pushes a document message.
+func (f *fakeAPI) document(chatID int64, chatType string, from int64, fileID, name string, size int64) {
+	f.push(Update{Message: &Message{
+		MessageID: 1000 + f.nextID, From: &User{ID: from, FirstName: "Budi"},
+		Chat:     Chat{ID: chatID, Type: chatType},
+		Document: &Document{FileID: fileID, FileName: name, FileSize: size},
+	}})
 }
 
 func (f *fakeAPI) callback(chatID int64, chatType string, from int64, data string) {
@@ -183,20 +269,24 @@ func textHas(want string) func(map[string]any) bool {
 
 // fakeBackend implements Backend in memory.
 type fakeBackend struct {
-	mu        sync.Mutex
-	obs       *core.Observe[core.LiveFrame]
-	sessions  []core.SessionInfo
-	teams     []string
-	nextID    int
-	sent      []string
-	prompts   []string
-	cancels   []string
-	continued []string
-	turn      func(ctx context.Context, session, prompt string) (TurnResult, error)
-	contTurn  func(ctx context.Context, session string) (TurnResult, error)
-	contErr   error
-	cancelCh  chan struct{}
-	draining  bool
+	mu         sync.Mutex
+	obs        *core.Observe[core.LiveFrame]
+	sessions   []core.SessionInfo
+	teams      []string
+	nextID     int
+	workspace  string
+	sent       []string
+	sentAtts   [][]string
+	prompts    []string
+	runAtts    [][]string
+	cancels    []string
+	continued  []string
+	turn       func(ctx context.Context, session, prompt string) (TurnResult, error)
+	contTurn   func(ctx context.Context, session string) (TurnResult, error)
+	contErr    error
+	memoryHook func()
+	cancelCh   chan struct{}
+	draining   bool
 }
 
 func newFakeBackend() *fakeBackend {
@@ -231,7 +321,7 @@ func (b *fakeBackend) NewSession(_ context.Context, address, agent string) (core
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.nextID++
-	info := core.SessionInfo{ID: fmt.Sprintf("S%d", b.nextID), Agent: agent, Channel: "telegram", Address: address}
+	info := core.SessionInfo{ID: fmt.Sprintf("S%d", b.nextID), Agent: agent, Channel: "telegram", Address: address, Workspace: b.workspace}
 	b.sessions = append(b.sessions, info)
 	return info, nil
 }
@@ -247,12 +337,13 @@ func (b *fakeBackend) SessionInfo(_ context.Context, id string) (core.SessionInf
 			return info, nil
 		}
 	}
-	return core.SessionInfo{ID: id, TurnCount: 3}, nil
+	return core.SessionInfo{ID: id, TurnCount: 3, Workspace: b.workspace}, nil
 }
 
-func (b *fakeBackend) RunTurn(ctx context.Context, session, prompt string) (TurnResult, error) {
+func (b *fakeBackend) RunTurn(ctx context.Context, session, prompt string, attachments ...string) (TurnResult, error) {
 	b.mu.Lock()
 	b.prompts = append(b.prompts, prompt)
+	b.runAtts = append(b.runAtts, append([]string(nil), attachments...))
 	turn := b.turn
 	b.mu.Unlock()
 	if turn == nil {
@@ -262,10 +353,11 @@ func (b *fakeBackend) RunTurn(ctx context.Context, session, prompt string) (Turn
 	return turn(ctx, session, prompt)
 }
 
-func (b *fakeBackend) Send(_ context.Context, _ string, text string) error {
+func (b *fakeBackend) Send(_ context.Context, _ string, text string, attachments ...string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.sent = append(b.sent, text)
+	b.sentAtts = append(b.sentAtts, append([]string(nil), attachments...))
 	return nil
 }
 
@@ -304,6 +396,12 @@ func (b *fakeBackend) SubscribeLive(context.Context, string) (*core.Subscription
 
 func (b *fakeBackend) Compact(context.Context, string) (int64, int64, error) { return 100, 40, nil }
 func (b *fakeBackend) Memory(string) ([]string, []string, error) {
+	b.mu.Lock()
+	hook := b.memoryHook
+	b.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return []string{"Name: Ridho"}, nil, nil
 }
 func (b *fakeBackend) MCPStatus(string) []core.MCPServerStatus {
@@ -333,6 +431,28 @@ func (b *fakeBackend) promptList() []string {
 	return append([]string(nil), b.prompts...)
 }
 
+// runAttachmentList returns the attachments of each RunTurn call, in order.
+func (b *fakeBackend) runAttachmentList() [][]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([][]string, len(b.runAtts))
+	for i := range b.runAtts {
+		out[i] = append([]string(nil), b.runAtts[i]...)
+	}
+	return out
+}
+
+// sentAttachmentList returns the attachments of each Send call, in order.
+func (b *fakeBackend) sentAttachmentList() [][]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([][]string, len(b.sentAtts))
+	for i := range b.sentAtts {
+		out[i] = append([]string(nil), b.sentAtts[i]...)
+	}
+	return out
+}
+
 const (
 	ownerChat = int64(111)
 	groupChat = int64(-500)
@@ -355,6 +475,7 @@ func startChannel(t *testing.T, api *fakeAPI, backend *fakeBackend) (*Channel, c
 	ch.ApprovalTimeout = time.Second
 	ch.PollTimeout = 0
 	ch.MaxBackoff = 40 * time.Millisecond
+	ch.AlbumWait = 100 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	if _, err := ch.Start(ctx); err != nil {
 		t.Fatal(err)

@@ -650,7 +650,7 @@ func (b *daemonBackend) SessionInfo(ctx context.Context, sessionID string) (core
 	return b.rt.SessionInfo(ctx, sessionID)
 }
 
-func (b *daemonBackend) RunTurn(ctx context.Context, sessionID, prompt string) (telegram.TurnResult, error) {
+func (b *daemonBackend) RunTurn(ctx context.Context, sessionID, prompt string, attachments ...string) (telegram.TurnResult, error) {
 	// The runtime turn does not follow ctx; cancel it explicitly when ctx ends (shutdown).
 	finished := make(chan struct{})
 	defer close(finished)
@@ -661,15 +661,15 @@ func (b *daemonBackend) RunTurn(ctx context.Context, sessionID, prompt string) (
 		case <-finished:
 		}
 	}()
-	result, err := b.rt.Run(ctx, lana.Request{Prompt: prompt, SessionID: sessionID})
+	result, err := b.rt.Run(ctx, lana.Request{Prompt: prompt, SessionID: sessionID, Attachments: attachments})
 	return telegram.TurnResult{
 		Text: result.Text, StopReason: result.StopReason,
 		InputTokens: int64(result.Usage.InputTokens), OutputTokens: int64(result.Usage.OutputTokens),
 	}, err
 }
 
-func (b *daemonBackend) Send(ctx context.Context, sessionID, text string) error {
-	return b.rt.Send(ctx, sessionID, text)
+func (b *daemonBackend) Send(ctx context.Context, sessionID, text string, attachments ...string) error {
+	return b.rt.Send(ctx, sessionID, text, attachments...)
 }
 
 // CanContinue reports why a continue turn may not start (API-TFB-003). The
