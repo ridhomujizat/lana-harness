@@ -129,22 +129,6 @@ func (e *testEnv) waitStatus(t *testing.T, src string, want ...string) kv.Source
 	return kv.SourceState{}
 }
 
-func (e *testEnv) sourceState(t *testing.T, src string) kv.SourceState {
-	t.Helper()
-	_, idx, err := e.svc.open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	st, ok, err := idx.GetSourceState(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatalf("source %s has no state", src)
-	}
-	return st
-}
-
 // page reads and parses one wiki page.
 func (e *testEnv) page(t *testing.T, title string) kv.Page {
 	t.Helper()

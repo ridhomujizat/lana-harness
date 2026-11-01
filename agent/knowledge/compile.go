@@ -466,7 +466,6 @@ func splitParts(text string) ([]string, bool) {
 		}
 		if len(cur) > 0 && len(cur)+need > compilePartRunes {
 			flush()
-			need = len(runes)
 		}
 		if len(cur) > 0 {
 			cur = append(cur, '\n', '\n')
