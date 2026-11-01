@@ -64,7 +64,11 @@ func (rn *Runner) pushFrontInbox(item inboxItem) {
 func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, continueReason string) {
 	for {
 		result := rn.runTurn(ctx, initial, turnID, continueReason)
-		rn.reg.finishTurn(turnID, result)
+		// finishedTurnID is the turn whose done channel finishTurn closes. Its
+		// signal must wait until the session's next state is set under the
+		// locks, so a Wait that returns never sees the session still running
+		// (and a Start right after it does not get ErrSessionBusy).
+		finishedTurnID := turnID
 		// Only the first turn of a chain is a continue; any message that
 		// arrives while it runs starts a plain turn.
 		continueReason = ""
@@ -77,6 +81,7 @@ func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, conti
 			rn.turnID = ""
 			rn.mu.Unlock()
 			rn.reg.mu.Unlock()
+			rn.reg.finishTurn(finishedTurnID, result)
 			return
 		}
 		rn.mu.Lock()
@@ -86,6 +91,7 @@ func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, conti
 			rn.turnID = ""
 			rn.mu.Unlock()
 			rn.reg.mu.Unlock()
+			rn.reg.finishTurn(finishedTurnID, result)
 			return
 		}
 		next := rn.inbox[0]
@@ -98,6 +104,10 @@ func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, conti
 		rn.reg.turns[turnID] = &turnState{done: make(chan struct{})}
 		rn.mu.Unlock()
 		rn.reg.mu.Unlock()
+		// The next turn is already marked running, so closing the finished
+		// turn's done channel now cannot make a waiter see an idle session that
+		// really has a queued message.
+		rn.reg.finishTurn(finishedTurnID, result)
 		ctx = nextCtx
 		initial = next
 	}
