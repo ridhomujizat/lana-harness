@@ -18,6 +18,9 @@ import (
 const (
 	UserLimit   = 2000
 	MemoryLimit = 32000
+	// JobLimit is the limit of JOB.md, the agent job description
+	// (REQ-ROOM-009, API-ROOM-007).
+	JobLimit = 4000
 )
 
 // Separator is the line that separates entries.
@@ -61,6 +64,8 @@ type Home struct {
 	Dir    string
 	Agent  string
 	Memory string
+	// Job is JOB.md, the agent job description (API-ROOM-007).
+	Job string
 }
 
 // Paths returns the paths of agent name under lanaHome.
@@ -70,6 +75,7 @@ func Paths(lanaHome, name string) Home {
 		Dir:    dir,
 		Agent:  filepath.Join(dir, "AGENT.md"),
 		Memory: filepath.Join(dir, "MEMORY.md"),
+		Job:    filepath.Join(dir, "JOB.md"),
 	}
 }
 

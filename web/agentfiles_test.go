@@ -183,3 +183,76 @@ func TestAgentMemoryLimit(t *testing.T) {
 		t.Fatalf("over-limit memory file exists: %v", err)
 	}
 }
+
+// TestAgentJobFile covers REQ-ROOM-009 and API-ROOM-007: the job file reads and
+// writes $LANA_HOME/agents/<name>/JOB.md with limit 4000 and the agent file
+// shape, a missing file reads as empty, and an over-limit save is refused.
+func TestAgentJobFile(t *testing.T) {
+	home := t.TempDir()
+	store := &testSettingsStore{home: home, agents: []string{"coder"}}
+	s, cookie, csrf := newSettingsTestServer(t, store)
+	path := agenthome.Paths(home, "coder").Job
+
+	// A missing file reads as empty content with the 4000 limit.
+	rr := serveAuth(s, settingsRequest(http.MethodGet, "/v1/agents/coder/files/job", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got agentFileResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "" || got.Characters != 0 || got.Limit == nil || *got.Limit != agenthome.JobLimit {
+		t.Fatalf("missing GET response = %+v", got)
+	}
+
+	content := "• Catat setiap transaksi"
+	payload, err := json.Marshal(map[string]string{"content": content, "expected_version": got.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr = serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder/files/job", string(payload), cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != content {
+		t.Fatalf("JOB.md = %q, want %q", data, content)
+	}
+
+	// GET reads it back with the limit.
+	rr = serveAuth(s, settingsRequest(http.MethodGet, "/v1/agents/coder/files/job", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != content || got.Characters != utf8.RuneCountInString(content) || got.Version != fileVersion([]byte(content)) {
+		t.Fatalf("GET response = %+v", got)
+	}
+	if got.Limit == nil || *got.Limit != agenthome.JobLimit {
+		t.Fatalf("GET limit = %v, want %d", got.Limit, agenthome.JobLimit)
+	}
+
+	// Over the limit is 422 and leaves the file unchanged.
+	over := strings.Repeat("j", agenthome.JobLimit+1)
+	payload, err = json.Marshal(map[string]string{"content": over, "expected_version": fileVersion([]byte(content))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr = serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder/files/job", string(payload), cookie, csrf))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("over-limit status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != content {
+		t.Fatal("over-limit save changed JOB.md")
+	}
+}

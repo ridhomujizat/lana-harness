@@ -161,6 +161,10 @@ func agentFileTarget(store AgentFileStore, name, file string) (agentFileRef, boo
 	case "memory":
 		limit := agenthome.MemoryLimit
 		return agentFileRef{name: "MEMORY.md", path: home.Memory, limit: &limit}, true
+	case "job":
+		// JOB.md is the agent job description (REQ-ROOM-009, API-ROOM-007).
+		limit := agenthome.JobLimit
+		return agentFileRef{name: "JOB.md", path: home.Job, limit: &limit}, true
 	default:
 		return agentFileRef{}, false
 	}
