@@ -79,8 +79,9 @@ function routeContent(
     case "home":
       return <HomePage />;
     case "chats":
+      return <ChatsPage />;
     case "chat":
-      return <ChatsPage name={params.name} />;
+      return <ChatsPage roomName={params.name} />;
     case "sessions":
       return <SessionsWorkspace />;
     case "new-session":

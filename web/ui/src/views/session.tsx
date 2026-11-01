@@ -148,8 +148,9 @@ function stringOf(value: unknown): string {
 }
 
 /* storedAttachments turns an owner message's image blocks into served URLs
-   (API-ATT-003, API-ATT-004). */
-function storedAttachments(
+   (API-ATT-003, API-ATT-004). It is exported so the room timeline renders the
+   same owner bubbles as the session view (REQ-ROOM-002). */
+export function storedAttachments(
   id: string,
   refs: UserAttachmentRef[] | undefined
 ): UserAttachment[] {
