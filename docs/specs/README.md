@@ -134,3 +134,4 @@ it is reversible and does not change observable behavior.
 | — | Agent teams | [Approved r1](10-agent-teams/requirements.md) | [Approved r1](10-agent-teams/api-contract.md) | [Approved r1](10-agent-teams/design.md) | [Approved r1](10-agent-teams/tasks.md) |
 | — | Ask-user questions | [Approved r1](11-ask-user-question/requirements.md) | [Approved r1](11-ask-user-question/api-contract.md) | [Approved r1](11-ask-user-question/design.md) | [Approved r1](11-ask-user-question/tasks.md) |
 | — | Loop guard escalation and tool-name recovery | [Approved r2](25-loop-guard-escalation/requirements.md) | [Approved r1](25-loop-guard-escalation/api-contract.md) | [Approved r2](25-loop-guard-escalation/design.md) | [Completed r2](25-loop-guard-escalation/tasks.md) |
+| — | Images and file attachments | [Approved r1](26-attachments/requirements.md) | [Approved r1](26-attachments/api-contract.md) | [Approved r1](26-attachments/design.md) | [Completed r1](26-attachments/tasks.md) |
