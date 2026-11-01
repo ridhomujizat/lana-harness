@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -249,9 +251,13 @@ func TestProgramFlow(t *testing.T) {
 	}
 }
 
+// testWait bounds the TUI test waits. It is generous so the suite still passes
+// on a loaded machine, where these tests run next to other packages' tests.
+const testWait = 10 * time.Second
+
 func waitFor(t *testing.T, buffer *syncBuffer, want string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testWait)
 	for time.Now().Before(deadline) {
 		if strings.Contains(buffer.String(), want) {
 			return
@@ -355,7 +361,7 @@ func TestCtrlCCancelsRunningTurn(t *testing.T) {
 	}
 	select {
 	case <-backend.started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("turn did not start")
 	}
 	if _, err := writer.Write([]byte("\x03")); err != nil {
@@ -366,7 +372,7 @@ func TestCtrlCCancelsRunningTurn(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("turn context error = %v, want context.Canceled", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("turn context was not cancelled")
 	}
 	waitFor(t, out, "· turn cancelled")
@@ -383,7 +389,7 @@ func TestCtrlCCancelsRunningTurn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("program did not finish")
 	}
 }
@@ -397,7 +403,7 @@ func TestEscCancelsRunningTurn(t *testing.T) {
 	}
 	select {
 	case <-backend.started:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("turn did not start")
 	}
 	if _, err := writer.Write([]byte("\x1b")); err != nil {
@@ -408,7 +414,7 @@ func TestEscCancelsRunningTurn(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("turn context error = %v, want context.Canceled", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testWait):
 		t.Fatal("turn context was not cancelled")
 	}
 	waitFor(t, out, "· turn cancelled")
@@ -425,7 +431,71 @@ func TestEscCancelsRunningTurn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testWait):
+		t.Fatal("program did not finish")
+	}
+}
+
+// slowUnwindBackend simulates the runtime taking time to unwind a cancelled
+// turn: its first turn reports the cancellation only after a short delay, the
+// way RunTurn finishes the cancelled end and kills the bash process group
+// before sending its outcome.
+type slowUnwindBackend struct {
+	*fakeBackend
+	started chan struct{}
+	calls   atomic.Int32
+}
+
+func newSlowUnwindBackend() *slowUnwindBackend {
+	return &slowUnwindBackend{
+		fakeBackend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()},
+		started:     make(chan struct{}),
+	}
+}
+
+func (b *slowUnwindBackend) RunTurn(ctx context.Context, sessionID, _ string) (TurnResult, error) {
+	if b.calls.Add(1) == 1 {
+		close(b.started)
+		<-ctx.Done()
+		time.Sleep(300 * time.Millisecond)
+		return TurnResult{StopReason: "cancelled"}, nil
+	}
+	b.obs.Publish(core.LiveFrame{SessionID: sessionID, Kind: "text_delta", Text: "Second answer."})
+	return TurnResult{Text: "Second answer.", StopReason: "end_turn"}, nil
+}
+
+// ctrl+c while the runtime is still unwinding a cancelled turn must let the
+// turn finish, so the TUI leaves the running state and accepts a new prompt.
+func TestCtrlCCancelsSlowUnwindingTurn(t *testing.T) {
+	backend := newSlowUnwindBackend()
+	writer, out, done := startRun(t, backend)
+	if _, err := writer.Write([]byte("hello\r")); err != nil {
+		t.Fatalf("send prompt: %v", err)
+	}
+	select {
+	case <-backend.started:
+	case <-time.After(testWait):
+		t.Fatal("turn did not start")
+	}
+	if _, err := writer.Write([]byte("\x03")); err != nil {
+		t.Fatalf("send ctrl+c: %v", err)
+	}
+	waitFor(t, out, "· turn cancelled")
+	// A prompt sent while the turn is running is queued, so this only runs once
+	// finishTurn cleared the running state.
+	if _, err := writer.Write([]byte("again\r")); err != nil {
+		t.Fatalf("send second prompt: %v", err)
+	}
+	waitFor(t, out, "Second answer.")
+	if _, err := writer.Write([]byte("/exit\r")); err != nil {
+		t.Fatalf("send exit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(testWait):
 		t.Fatal("program did not finish")
 	}
 }
@@ -562,6 +632,68 @@ func TestRestoreLinesHidesRuntimeNotes(t *testing.T) {
 	}
 	if strings.Contains(joined, "runtime nudge") {
 		t.Fatalf("runtime note was shown:\n%s", joined)
+	}
+}
+
+// restoreUserEvent builds a restored user/message event with the given blocks.
+func restoreUserEvent(t *testing.T, seq int, blocks ...core.ContentBlock) core.SessionEvent {
+	t.Helper()
+	payload, err := json.Marshal(core.UserMessage{V: 1, Content: blocks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return core.SessionEvent{Seq: int64(seq), Kind: core.KindUserMessage, Payload: payload}
+}
+
+// REQ-ATT-007: a restored user message shows each image block as a muted
+// placeholder line, in content order, without the image bytes.
+func TestRestoreLinesShowsImagePlaceholders(t *testing.T) {
+	imageA := core.ContentBlock{Kind: core.BlockImage, Path: "attachments/2026-11-01/a.png", MediaType: "image/png", Data: []byte("png-bytes")}
+	imageB := core.ContentBlock{Kind: core.BlockImage, Path: "attachments/2026-11-01/b.jpg", MediaType: "image/jpeg", Data: []byte("jpeg-bytes")}
+	model := NewModel(context.Background(), Options{
+		Backend:   &fakeBackend{obs: core.NewObserve[core.LiveFrame]()},
+		SessionID: "s1",
+		Restore: []core.SessionEvent{
+			restoreUserEvent(t, 1, core.ContentBlock{Kind: core.BlockText, Text: "look at these two"}, imageA, imageB),
+		},
+	})
+
+	joined := strings.Join(model.restoreLines(), "\n")
+	for _, want := range []string{"look at these two", "[image attachments/2026-11-01/a.png]", "[image attachments/2026-11-01/b.jpg]"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("output does not contain %q:\n%s", want, joined)
+		}
+	}
+	if got := strings.Count(joined, "[image "); got != 2 {
+		t.Fatalf("placeholder count = %d, want 2:\n%s", got, joined)
+	}
+	if text, image := strings.Index(joined, "look at these two"), strings.Index(joined, "[image "); text < 0 || image < 0 || text > image {
+		t.Fatalf("text line not before the image lines:\n%s", joined)
+	}
+	for _, data := range []string{"png-bytes", "jpeg-bytes"} {
+		if strings.Contains(joined, data) {
+			t.Fatalf("image bytes were printed:\n%s", joined)
+		}
+	}
+}
+
+// REQ-ATT-007: an images-only user message shows its placeholders without an
+// empty line standing in for the image.
+func TestRestoreLinesShowsImagesOnlyMessage(t *testing.T) {
+	image := core.ContentBlock{Kind: core.BlockImage, Path: "attachments/2026-11-01/a.png", MediaType: "image/png", Data: []byte("png-bytes")}
+	model := NewModel(context.Background(), Options{
+		Backend:   &fakeBackend{obs: core.NewObserve[core.LiveFrame]()},
+		SessionID: "s1",
+		Restore:   []core.SessionEvent{restoreUserEvent(t, 1, image)},
+	})
+
+	want := []string{
+		styleMuted.Render("· continuing session s1"),
+		"",
+		styleUser.Render("> ") + styleMuted.Render("[image attachments/2026-11-01/a.png]"),
+	}
+	if got := model.restoreLines(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("restoreLines = %#v, want %#v", got, want)
 	}
 }
 

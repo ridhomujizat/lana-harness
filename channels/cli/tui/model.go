@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 )
 
 // Options is the input to Run.
@@ -765,37 +766,48 @@ func (m *Model) pump(ctx context.Context, sub *core.Subscription[core.LiveFrame]
 	if m.program == nil {
 		return
 	}
-	send := func(frame core.LiveFrame) {
+	send := func(c context.Context, frame core.LiveFrame) {
 		// Child frames carry the root turn's fans-in. Resolve the child agent
 		// here, off the UI goroutine, so its tool line can be prefixed. Child
 		// text is not shown, so only tool frames need the lookup.
 		if frame.SessionID != m.sessionID && frame.Agent == "" && (frame.Kind == "tool_call" || frame.Kind == "tool_result") {
-			if info, err := m.backend.SessionInfo(ctx, frame.SessionID); err == nil {
+			if info, err := m.backend.SessionInfo(c, frame.SessionID); err == nil {
 				frame.Agent = info.Agent
 			}
 		}
 		m.program.Send(liveFrameMsg{frame: frame})
 	}
+	// complete drains the frames still buffered on sub, then reports the
+	// outcome so finishTurn can clear the running state.
+	complete := func(c context.Context, out turnOutcome) {
+		for sub.Len() > 0 {
+			recvCtx, cancel := context.WithTimeout(c, time.Second)
+			received, err := sub.Recv(recvCtx)
+			cancel()
+			if err != nil {
+				break
+			}
+			if received.Lagged > 0 {
+				continue
+			}
+			send(c, received.Value)
+		}
+		m.program.Send(turnDoneMsg{outcome: out})
+	}
 	for {
 		select {
 		case out := <-finish:
-			for sub.Len() > 0 {
-				recvCtx, cancel := context.WithTimeout(ctx, time.Second)
-				received, err := sub.Recv(recvCtx)
-				cancel()
-				if err != nil {
-					break
-				}
-				if received.Lagged > 0 {
-					continue
-				}
-				send(received.Value)
-			}
-			m.program.Send(turnDoneMsg{outcome: out})
+			complete(ctx, out)
 			return
 		default:
 		}
 		if ctx.Err() != nil {
+			// The runtime unwinds after cancel and then sends its outcome.
+			// Wait for it so the turn can finish instead of stalling the UI
+			// in the running state. Drain with a live context because ctx is
+			// already cancelled.
+			out := <-finish
+			complete(context.WithoutCancel(ctx), out)
 			return
 		}
 		recvCtx, cancel := context.WithTimeout(ctx, 25*time.Millisecond)
@@ -807,7 +819,7 @@ func (m *Model) pump(ctx context.Context, sub *core.Subscription[core.LiveFrame]
 		if received.Lagged > 0 {
 			continue
 		}
-		send(received.Value)
+		send(ctx, received.Value)
 	}
 }
 
@@ -1621,9 +1633,9 @@ func (m *Model) restoreLines() []string {
 			if payload.Runtime {
 				continue
 			}
-			if text := textOf(payload.DisplayContent()); text != "" {
+			if lines := restoredUserLines(payload); len(lines) > 0 {
 				out = append(out, "")
-				out = append(out, renderUser(text)...)
+				out = append(out, lines...)
 			}
 		case core.KindAssistantMessage:
 			var payload core.AssistantMessage
@@ -1635,6 +1647,41 @@ func (m *Model) restoreLines() []string {
 				out = append(out, m.renderAssistant(text)...)
 			}
 		}
+	}
+	return out
+}
+
+// restoredUserLines renders a restored user message in content order: text
+// blocks read as running text and each image block becomes one muted
+// placeholder line (REQ-ATT-007). Image bytes are never printed.
+func restoredUserLines(payload core.UserMessage) []string {
+	var lines []string
+	wroteText := false
+	for _, block := range payload.DisplayContent() {
+		switch block.Kind {
+		case core.BlockText:
+			if block.Text == "" {
+				continue
+			}
+			if wroteText {
+				lines = append(lines, "")
+			}
+			lines = append(lines, strings.Split(block.Text, "\n")...)
+			wroteText = true
+		case core.BlockImage:
+			lines = append(lines, styleMuted.Render(attach.Placeholder(block)))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i == 0 {
+			out = append(out, styleUser.Render("> ")+line)
+			continue
+		}
+		out = append(out, "  "+line)
 	}
 	return out
 }
