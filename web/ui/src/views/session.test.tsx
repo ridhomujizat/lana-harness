@@ -316,6 +316,45 @@ describe("session draining send", () => {
   });
 });
 
+/* The composer Stop button replaces Send while a turn runs and asks the server
+   to cancel it; a server with no turn brings Send back. */
+describe("session stop button", () => {
+  it("shows Stop instead of Send while a turn runs, and Stop asks the server to cancel it", async () => {
+    stubFetch([], { turn_running: true });
+    vi.mocked(turnsApi.cancelTurn).mockResolvedValue({ turn: "cancelling" });
+
+    render(<SessionPage id="s1" />);
+    const stop = await screen.findByRole("button", {
+      name: "Stop the running turn",
+    });
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+
+    fireEvent.click(stop);
+    await waitFor(() => {
+      expect(vi.mocked(turnsApi.cancelTurn)).toHaveBeenCalledWith("s1");
+    });
+    expect(await screen.findByText("Stopping the turn…")).toBeTruthy();
+  });
+
+  it("says no turn is running and brings Send back when the server has no turn", async () => {
+    stubFetch([], { turn_running: true });
+    vi.mocked(turnsApi.cancelTurn).mockResolvedValue({ turn: "idle" });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Stop the running turn" })
+    );
+
+    expect(
+      await screen.findByText("No turn is running.", { selector: "p.notice" })
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Stop the running turn" })
+    ).toBeNull();
+  });
+});
+
 /* REQ-MDL-020: the composer model menu lists the provider catalog. */
 describe("composer model catalog", () => {
   it("lists the catalog, tags legacy, checks the current model, and sets provider:model", async () => {

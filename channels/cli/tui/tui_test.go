@@ -302,6 +302,155 @@ func TestLoopStopLine(t *testing.T) {
 	}
 }
 
+// cancelBackend runs a turn that blocks until its context is cancelled and
+// then reports the cancellation. It drives the esc and ctrl+c paths of a live
+// turn, where the fake backend would otherwise finish at once.
+type cancelBackend struct {
+	*fakeBackend
+	started chan struct{}
+	ctxErr  chan error
+}
+
+func newCancelBackend() *cancelBackend {
+	return &cancelBackend{
+		fakeBackend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()},
+		started:     make(chan struct{}),
+		ctxErr:      make(chan error, 1),
+	}
+}
+
+func (b *cancelBackend) RunTurn(ctx context.Context, _, _ string) (TurnResult, error) {
+	close(b.started)
+	<-ctx.Done()
+	b.ctxErr <- ctx.Err()
+	return TurnResult{StopReason: "cancelled"}, nil
+}
+
+// startRun starts Run on a pipe the way TestLoopStopLine does and returns the
+// input writer, the transcript buffer, and the channel that receives Run's
+// error once the program quits.
+func startRun(t *testing.T, backend Backend) (*io.PipeWriter, *syncBuffer, chan error) {
+	t.Helper()
+	reader, writer := io.Pipe()
+	var out syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Backend: backend, Agent: "default", Model: "mock:mock", Policy: "ask",
+			SessionID: "S1", Cwd: "/tmp", Version: "test", Home: t.TempDir(),
+			In: reader, Out: &out,
+		})
+	}()
+	return writer, &out, done
+}
+
+// ctrl+c during a running turn cancels the turn and does not quit the program.
+func TestCtrlCCancelsRunningTurn(t *testing.T) {
+	backend := newCancelBackend()
+	writer, out, done := startRun(t, backend)
+	if _, err := writer.Write([]byte("hello\r")); err != nil {
+		t.Fatalf("send prompt: %v", err)
+	}
+	select {
+	case <-backend.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn did not start")
+	}
+	if _, err := writer.Write([]byte("\x03")); err != nil {
+		t.Fatalf("send ctrl+c: %v", err)
+	}
+	select {
+	case err := <-backend.ctxErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("turn context error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn context was not cancelled")
+	}
+	waitFor(t, out, "· turn cancelled")
+	select {
+	case err := <-done:
+		t.Fatalf("program quit after ctrl+c: %v", err)
+	default:
+	}
+	if _, err := writer.Write([]byte("/exit\r")); err != nil {
+		t.Fatalf("send exit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("program did not finish")
+	}
+}
+
+// esc during a running turn cancels the turn and does not quit the program.
+func TestEscCancelsRunningTurn(t *testing.T) {
+	backend := newCancelBackend()
+	writer, out, done := startRun(t, backend)
+	if _, err := writer.Write([]byte("hello\r")); err != nil {
+		t.Fatalf("send prompt: %v", err)
+	}
+	select {
+	case <-backend.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn did not start")
+	}
+	if _, err := writer.Write([]byte("\x1b")); err != nil {
+		t.Fatalf("send esc: %v", err)
+	}
+	select {
+	case err := <-backend.ctxErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("turn context error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("turn context was not cancelled")
+	}
+	waitFor(t, out, "· turn cancelled")
+	select {
+	case err := <-done:
+		t.Fatalf("program quit after esc: %v", err)
+	default:
+	}
+	if _, err := writer.Write([]byte("/exit\r")); err != nil {
+		t.Fatalf("send exit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("program did not finish")
+	}
+}
+
+// A second ctrl+c within two seconds on an idle, empty prompt quits the program.
+func TestCtrlCTwiceQuitsWhenIdle(t *testing.T) {
+	backend := &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}
+	writer, out, done := startRun(t, backend)
+	if _, err := writer.Write([]byte("\x03")); err != nil {
+		t.Fatalf("send ctrl+c: %v", err)
+	}
+	waitFor(t, out, "· press ctrl+c again to exit")
+	if _, err := writer.Write([]byte("\x03")); err != nil {
+		t.Fatalf("send second ctrl+c: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("program did not finish")
+	}
+}
+
 func TestApproverWithoutProgram(t *testing.T) {
 	approver := NewApprover()
 	outcome := approver.Ask(context.Background(), core.ApprovalRequest{ToolName: "bash"})
