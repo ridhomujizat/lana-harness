@@ -29,7 +29,7 @@ export function saveCollapsed(collapsed: boolean): void {
 }
 
 const NAV_ITEMS = [
-  { key: "home", label: "Home", icon: "home", href: "#/home" },
+  { key: "home", label: "Dashboard", icon: "home", href: "#/home" },
   { key: "sessions", label: "Sessions", icon: "sessions", href: "#/sessions" },
   { key: "agents", label: "Agents", icon: "agents", href: "#/agents" },
   { key: "skills", label: "Skills", icon: "skills", href: "#/skills" },
