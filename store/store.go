@@ -40,7 +40,7 @@ var (
 	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 var validKinds = map[string]bool{
 	core.KindSessionCreated: true, core.KindTurnStart: true, core.KindTurnEnd: true,
@@ -105,7 +105,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return ErrSchemaTooNew
 	}
-	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text"}
+	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads"}
 	for v := version + 1; v <= schemaVersion; v++ {
 		name := fmt.Sprintf("migrations/%04d_%s.sql", v, names[v])
 		data, err := migrationFS.ReadFile(name)
@@ -633,6 +633,71 @@ func (s *Store) ScanEvents(ctx context.Context, kinds []string, sinceMS int64) i
 	}
 }
 
+// CountAgentEvents implements core.AgentEventCounter (REQ-ROOM-002,
+// REQ-ROOM-005). It counts the events of the given kinds in the sessions of
+// agent created after sinceMS, joining session_events with sessions. With
+// topLevelOnly only the agent's top-level sessions are counted. An empty kinds
+// slice returns 0 without querying.
+func (s *Store) CountAgentEvents(ctx context.Context, agent string, kinds []string, sinceMS int64, topLevelOnly bool) (int64, error) {
+	if err := s.assertOpen(); err != nil {
+		return 0, err
+	}
+	if len(kinds) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(kinds))
+	args := make([]any, 0, len(kinds)+2)
+	args = append(args, agent)
+	for i, kind := range kinds {
+		placeholders[i] = "?"
+		args = append(args, kind)
+	}
+	args = append(args, sinceMS)
+	query := "SELECT COUNT(*) FROM session_events e JOIN sessions s ON s.id = e.session_id" +
+		" WHERE s.agent = ? AND e.kind IN (" + strings.Join(placeholders, ", ") + ") AND e.created_at > ?"
+	if topLevelOnly {
+		query += " AND (s.parent_session_id IS NULL OR s.parent_session_id = '')"
+	}
+	var count int64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// RoomReadAt implements core.RoomReadStore (REQ-ROOM-005). It returns 0 when
+// the room has no row.
+func (s *Store) RoomReadAt(ctx context.Context, room string) (int64, error) {
+	if err := s.assertOpen(); err != nil {
+		return 0, err
+	}
+	var at int64
+	err := s.db.QueryRowContext(ctx, "SELECT read_at FROM room_reads WHERE room = ?", room).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return at, nil
+}
+
+// SetRoomRead implements core.RoomReadStore (REQ-ROOM-005). It upserts the
+// read time, which only moves forward, and returns the stored value.
+func (s *Store) SetRoomRead(ctx context.Context, room string, at int64) (int64, error) {
+	var stored int64
+	err := s.withWrite(ctx, func(conn *sql.Conn) error {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO room_reads (room, read_at) VALUES (?, ?) ON CONFLICT(room) DO UPDATE SET read_at = max(read_at, excluded.read_at)", room, at); err != nil {
+			return err
+		}
+		return conn.QueryRowContext(ctx, "SELECT read_at FROM room_reads WHERE room = ?", room).Scan(&stored)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return stored, nil
+}
+
 func (s *Store) loadEvents(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	var out []core.SessionEvent
 	for event, err := range s.Events(ctx, sessionID, 1) {
@@ -698,10 +763,18 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 		query += " AND parent_session_id = ?"
 		args = append(args, f.ParentSessionID)
 	}
+	if f.Agent != "" {
+		query += " AND agent = ?"
+		args = append(args, f.Agent)
+	}
 	if f.TopLevelOnly {
 		query += " AND (parent_session_id IS NULL OR parent_session_id = '')"
 	}
-	query += " ORDER BY updated_at DESC"
+	if f.Before > 0 {
+		query += " AND updated_at < ?"
+		args = append(args, f.Before)
+	}
+	query += " ORDER BY updated_at DESC, created_at DESC, id DESC"
 	if f.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, f.Limit)
@@ -1347,5 +1420,7 @@ func matchExpression(terms []string) string {
 var _ core.SessionStore = (*Store)(nil)
 var _ core.LeaseProbe = (*Store)(nil)
 var _ core.EventScanner = (*Store)(nil)
+var _ core.AgentEventCounter = (*Store)(nil)
+var _ core.RoomReadStore = (*Store)(nil)
 var _ core.SessionSearcher = (*Store)(nil)
 var _ core.SessionTextReader = (*Store)(nil)

@@ -28,19 +28,60 @@ export function saveCollapsed(collapsed: boolean): void {
   }
 }
 
-const NAV_ITEMS = [
-  { key: "home", label: "Dashboard", icon: "home", href: "#/home" },
-  { key: "sessions", label: "Sessions", icon: "sessions", href: "#/sessions" },
-  { key: "agents", label: "Agents", icon: "agents", href: "#/agents" },
-  { key: "skills", label: "Skills", icon: "skills", href: "#/skills" },
-  { key: "knowledge", label: "Knowledge", icon: "file", href: "#/knowledge" },
-  { key: "mcp", label: "MCP", icon: "mcp", href: "#/mcp" },
-  { key: "channels", label: "Channels", icon: "channels", href: "#/channels" },
+interface NavItem {
+  key: string;
+  label: string;
+  icon: string;
+  href: string;
+}
+
+interface NavSection {
+  /* A missing title renders the items without a group heading. */
+  title?: string;
+  items: NavItem[];
+}
+
+/* REQ-ROOM-012: Home and Chats have no title; Observe and Configure group the
+   rest. History is the existing Sessions page. Workflows is hidden until the
+   page exists. */
+export const NAV_SECTIONS: NavSection[] = [
   {
-    key: "settings",
-    label: "Settings",
-    icon: "settings",
-    href: "#/settings/general",
+    items: [
+      { key: "home", label: "Home", icon: "home", href: "#/home" },
+      { key: "chats", label: "Chats", icon: "sessions", href: "#/chats" },
+    ],
+  },
+  {
+    title: "Observe",
+    items: [
+      {
+        key: "sessions",
+        label: "History",
+        icon: "sessions",
+        href: "#/sessions",
+      },
+    ],
+  },
+  {
+    title: "Configure",
+    items: [
+      { key: "agents", label: "Agents", icon: "agents", href: "#/agents" },
+      {
+        key: "knowledge",
+        label: "Knowledge",
+        icon: "file",
+        href: "#/knowledge",
+      },
+      { key: "skills", label: "Skills", icon: "skills", href: "#/skills" },
+      { key: "mcp", label: "MCP", icon: "mcp", href: "#/mcp" },
+      { key: "channels", label: "Channels", icon: "channels", href: "#/channels" },
+      {
+        key: "settings",
+        label: "Settings",
+        icon: "settings",
+        href: "#/settings/general",
+      },
+    ],
   },
 ];
 
@@ -100,22 +141,32 @@ export function Sidebar({
         </div>
 
         <nav id="sidebar-nav" className="sidebar-nav" aria-label="Main">
-          {NAV_ITEMS.map((item) => {
-            const active = route.section === item.key;
-            return (
-              <a
-                key={item.key}
-                className="nav-item"
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                aria-label={collapsed ? item.label : undefined}
-                title={collapsed ? item.label : undefined}
-              >
-                <Icon name={item.icon} />
-                <span className="nav-label">{item.label}</span>
-              </a>
-            );
-          })}
+          {NAV_SECTIONS.map((section, index) => (
+            <div
+              className="nav-section"
+              key={section.title ? section.title : "section-" + index}
+            >
+              {section.title ? (
+                <div className="nav-section-title">{section.title}</div>
+              ) : null}
+              {section.items.map((item) => {
+                const active = route.section === item.key;
+                return (
+                  <a
+                    key={item.key}
+                    className="nav-item"
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    aria-label={collapsed ? item.label : undefined}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Icon name={item.icon} />
+                    <span className="nav-label">{item.label}</span>
+                  </a>
+                );
+              })}
+            </div>
+          ))}
         </nav>
       </div>
 

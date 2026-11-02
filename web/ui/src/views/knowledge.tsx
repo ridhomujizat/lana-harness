@@ -121,6 +121,7 @@ export function KnowledgePage() {
       return undefined;
     }
     let alive = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the report fetch is async; the loaded flag clears before the await.
     setReportLoaded(false);
     getKnowledgeReport()
       .then((result) => {

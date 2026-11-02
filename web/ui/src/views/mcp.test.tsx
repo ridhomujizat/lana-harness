@@ -18,6 +18,8 @@ import { McpPage, McpDetailPage } from "./mcp";
 const AGENT: Agent = {
   name: "scout",
   kind: "agent",
+  title: "",
+  color: "brand",
   model: "openai:gpt-4o",
   policy: "ask",
   skills: [],

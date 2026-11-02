@@ -736,3 +736,116 @@ func TestAgentsVisionFlag(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentsTitleAndColor covers REQ-ROOM-009 and API-ROOM-007: title and color
+// round-trip through the agent save, an empty value removes the key, the list
+// resolves a derived color, and an invalid value is a field error with the
+// config unchanged.
+func TestAgentsTitleAndColor(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	derived := core.ResolveAgentColor("coder", "")
+	row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
+	if row.Title != "" || row.Color != derived || row.Color == "" {
+		t.Fatalf("initial title/color = %q/%q, want \"\"/%q", row.Title, row.Color, derived)
+	}
+
+	save := func(t *testing.T, body map[string]any) (int, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body["expected_version"] = webfiles.ConfigVersion(raw)
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		return rr.Code, rr.Body.Bytes()
+	}
+
+	code, body := save(t, map[string]any{"title": "Finance", "color": "success"})
+	if code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	record := agentRecordFromMap(t016ReadAgentTables(t, store.path)["coder"])
+	if record.Title != "Finance" || record.Color != "success" {
+		t.Fatalf("saved title/color = %q/%q", record.Title, record.Color)
+	}
+	row = t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
+	if row.Title != "Finance" || row.Color != "success" {
+		t.Fatalf("listed title/color = %q/%q", row.Title, row.Color)
+	}
+
+	// An empty string removes the key.
+	code, body = save(t, map[string]any{"title": "", "color": ""})
+	if code != http.StatusOK {
+		t.Fatalf("clear status = %d, body = %q", code, body)
+	}
+	table := t016ReadAgentTables(t, store.path)["coder"]
+	if _, ok := table["title"]; ok {
+		t.Fatalf("title key still present: %+v", table)
+	}
+	if _, ok := table["color"]; ok {
+		t.Fatalf("color key still present: %+v", table)
+	}
+	row = t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
+	if row.Title != "" || row.Color != derived {
+		t.Fatalf("cleared title/color = %q/%q", row.Title, row.Color)
+	}
+
+	// Invalid values are field errors and leave the config unchanged.
+	before, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body = save(t, map[string]any{"color": "green"})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid color status = %d, body = %q", code, body)
+	}
+	envelope := decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("invalid color error = %+v", envelope.Error)
+	}
+	if key, _ := envelope.Error.Details[0]["key"].(string); key != "agents.coder.color" {
+		t.Fatalf("invalid color key = %q", key)
+	}
+	code, body = save(t, map[string]any{"title": strings.Repeat("x", 61)})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("long title status = %d, body = %q", code, body)
+	}
+	envelope = decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("long title error = %+v", envelope.Error)
+	}
+	if key, _ := envelope.Error.Details[0]["key"].(string); key != "agents.coder.title" {
+		t.Fatalf("long title key = %q", key)
+	}
+	after, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("invalid title/color changed the config")
+	}
+}
+
+// TestAgentsTeamRowTitleAndColor covers API-ROOM-007: a team row shows the team
+// description as its title and the brand color.
+func TestAgentsTeamRowTitleAndColor(t *testing.T) {
+	raw := `version = 1
+
+[agents.lead]
+model = "m"
+`
+	s, _, cookie, _ := newT016AgentsServer(t, raw)
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "squad", Kind: "team", Lead: "lead", Members: []string{"lead"}, Policy: "ask", Description: "Career plan"}}
+	s.SetBackend(backend)
+
+	team := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "squad")
+	if team.Title != "Career plan" || team.Color != "brand" {
+		t.Fatalf("team title/color = %q/%q", team.Title, team.Color)
+	}
+}

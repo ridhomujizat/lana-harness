@@ -196,3 +196,79 @@ func TestAgentDescriptionDisabledToolsLoaded(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentTitleValidation covers REQ-ROOM-009 and API-ROOM-006:
+// agents.<name>.title is a single line of at most 60 characters.
+func TestAgentTitleValidation(t *testing.T) {
+	withTitle := func(value string) string {
+		return "[agents.coder]\ntitle = \"" + value + "\"\n"
+	}
+	tests := []struct {
+		name  string
+		table string
+		ok    bool
+		msg   string
+	}{
+		{name: "60 characters pass", table: withTitle(strings.Repeat("a", 60)), ok: true},
+		{name: "61 characters fail", table: withTitle(strings.Repeat("a", 61)), msg: "60"},
+		{name: "60 multibyte characters pass", table: withTitle(strings.Repeat("é", 60)), ok: true},
+		{name: "61 multibyte characters fail", table: withTitle(strings.Repeat("é", 61)), msg: "60"},
+		{name: "empty passes", table: withTitle(""), ok: true},
+		{name: "newline fails", table: withTitle(`one\ntwo`), msg: "one line"},
+		{name: "carriage return fails", table: withTitle(`one\rtwo`), msg: "one line"},
+		{name: "non string fails", table: "[agents.coder]\ntitle = 1\n", msg: "must be string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadAgentKeys(t, tt.table)
+			if tt.ok {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			var errs Errors
+			if !errors.As(err, &errs) {
+				t.Fatalf("error is not Errors: %v", err)
+			}
+			found := findError(errs, "agents.coder.title")
+			if found == nil {
+				t.Fatalf("no error for agents.coder.title: %v", errs)
+			}
+			if !strings.Contains(found.Msg, tt.msg) {
+				t.Fatalf("msg = %q, want it to contain %q", found.Msg, tt.msg)
+			}
+		})
+	}
+}
+
+// TestAgentColorValidation covers REQ-ROOM-009 and API-ROOM-006:
+// agents.<name>.color is one of the palette values, or empty.
+func TestAgentColorValidation(t *testing.T) {
+	for _, color := range []string{"brand", "success", "warning", "error", "blue", "gray", ""} {
+		table := "[agents.coder]\ncolor = \"" + color + "\"\n"
+		if _, err := loadAgentKeys(t, table); err != nil {
+			t.Fatalf("unexpected error for %q: %v", color, err)
+		}
+	}
+	found := findError(agentKeyErrors(t, "[agents.coder]\ncolor = \"green\"\n"), "agents.coder.color")
+	if found == nil || !strings.Contains(found.Msg, "green") {
+		t.Fatalf("color error = %+v", found)
+	}
+	if findError(agentKeyErrors(t, "[agents.coder]\ncolor = 1\n"), "agents.coder.color") == nil {
+		t.Fatal("no type error for agents.coder.color")
+	}
+}
+
+// TestAgentTitleColorLoaded covers API-ROOM-006: both keys load into the
+// effective config.
+func TestAgentTitleColorLoaded(t *testing.T) {
+	res, err := loadAgentKeys(t, "[agents.coder]\ntitle = \"Finance\"\ncolor = \"success\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := res.Config.Agents["coder"]
+	if cfg.Title != "Finance" || cfg.Color != "success" {
+		t.Fatalf("title/color = %q/%q", cfg.Title, cfg.Color)
+	}
+}

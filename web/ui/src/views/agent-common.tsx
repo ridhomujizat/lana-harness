@@ -1,5 +1,6 @@
 import { avatarFor } from "../lib/avatar";
 import { Icon as SharedIcon } from "../ui/ui";
+import { DEFAULT_AGENT_TAB } from "../app/router";
 
 /* Shared helpers for the agents pages (REQ-WEB-045, REQ-WEB-047). */
 
@@ -224,6 +225,6 @@ export function sessionSummary(agent: AgentLike | null | undefined): string {
   return sessions + ", last active " + active;
 }
 
-export function agentHref(name: string, tab = "general"): string {
+export function agentHref(name: string, tab: string = DEFAULT_AGENT_TAB): string {
   return "#/agents/" + encodeURIComponent(name) + "/" + tab;
 }

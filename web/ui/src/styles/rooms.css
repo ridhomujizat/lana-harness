@@ -1,0 +1,2057 @@
+/* Agent rooms: the presence kit, the room list, and the motion of
+   REQ-ROOM-013. Tokens come from tokens.css; shared classes from app.css. */
+
+/* The face and presence tints of REQ-ROOM-006 (design rooms-1..4). Light is the
+   default; dark keeps the same tint roles with readable letters and pills. */
+:root {
+  --face-brand-bg: #F4F3FF;
+  --face-brand-fg: #5925DC;
+  --face-success-bg: #ECFDF3;
+  --face-success-fg: #067647;
+  --face-warning-bg: #FFFAEB;
+  --face-warning-fg: #B54708;
+  --face-error-bg: #FEF3F2;
+  --face-error-fg: #B42318;
+  --face-blue-bg: #EFF8FF;
+  --face-blue-fg: #175CD3;
+  --face-gray-bg: #F2F4F7;
+  --face-gray-fg: #475467;
+  --presence-dot-waiting: #F79009;
+  --presence-dot-working: #7F56D9;
+  --presence-dot-problem: #F04438;
+  --presence-dot-online: #17B26A;
+  --presence-dot-resting: #D0D5DD;
+  --presence-label-waiting: #B54708;
+  --presence-label-working: #6941C6;
+  --presence-label-problem: #B42318;
+}
+
+[data-theme="dark"] {
+  --face-brand-bg: #1A1831;
+  --face-brand-fg: #B7B4DA;
+  --face-success-bg: #053321;
+  --face-success-fg: #47CD89;
+  --face-warning-bg: #4E1D09;
+  --face-warning-fg: #FDB022;
+  --face-error-bg: #55160C;
+  --face-error-fg: #F97066;
+  --face-blue-bg: #102A43;
+  --face-blue-fg: #84CAFF;
+  --face-gray-bg: #1F242F;
+  --face-gray-fg: #94969C;
+  --presence-dot-waiting: #F79009;
+  --presence-dot-working: #9E77ED;
+  --presence-dot-problem: #F04438;
+  --presence-dot-online: #17B26A;
+  --presence-dot-resting: #61646C;
+  --presence-label-waiting: #FDB022;
+  --presence-label-working: #B7B4DA;
+  --presence-label-problem: #F97066;
+}
+
+.agent-face {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+.agent-face.size-24 {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.agent-face.size-32 {
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+}
+
+.agent-face.size-44 {
+  width: 44px;
+  height: 44px;
+  font-size: 16px;
+}
+
+.agent-face.size-52 {
+  width: 52px;
+  height: 52px;
+  font-size: 18px;
+}
+
+.agent-face.size-96 {
+  width: 96px;
+  height: 96px;
+  font-size: 32px;
+}
+
+.agent-face-ring {
+  position: absolute;
+  inset: -2px;
+  border: 2px dashed #9e77ed;
+  border-radius: var(--radius-full);
+  pointer-events: none;
+  animation: ring-spin 6s linear infinite;
+}
+
+.agent-face-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  box-sizing: content-box;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--bg-primary);
+  border-radius: var(--radius-full);
+}
+
+.agent-face.size-44 .agent-face-dot,
+.agent-face.size-52 .agent-face-dot {
+  width: 11px;
+  height: 11px;
+}
+
+.agent-face.size-96 .agent-face-dot {
+  width: 18px;
+  height: 18px;
+  border-width: 3px;
+}
+
+/* The working and waiting dots glow; the ring spins. */
+.agent-face-dot.state-working,
+.agent-face-dot.state-waiting {
+  animation: presence-pulse 1.8s ease-in-out infinite;
+}
+
+.presence-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  line-height: var(--line-height-sm);
+}
+
+.presence-label-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--fg-quaternary);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--bg-secondary) 25%,
+    var(--bg-tertiary) 37%,
+    var(--bg-secondary) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-row {
+  width: 100%;
+}
+
+.unread-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand-solid);
+  color: var(--text-white);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  animation: badge-pop 200ms ease-out;
+}
+
+.unread-badge.tone-error {
+  background: var(--bg-error-solid);
+}
+
+.unread-badge.tone-warning {
+  background: var(--fg-warning-primary);
+}
+
+/* The team avatar box of REQ-ROOM-001: a fixed square that reserves the slot
+   size, with up to two member faces stacked inside it. Its size is set inline
+   from the requested size, so the box never overflows the row. */
+.team-face {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.team-face .agent-face {
+  position: absolute;
+  box-shadow: 0 0 0 2px var(--bg-primary);
+}
+
+.team-face .agent-face:first-child {
+  top: 0;
+  left: 0;
+}
+
+.team-face .agent-face:last-child {
+  right: 0;
+  bottom: 0;
+}
+
+.team-face .agent-face:only-child {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+}
+
+.room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-item-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  color: inherit;
+  text-decoration: none;
+}
+
+.room-item-link:hover {
+  background: var(--bg-primary-hover);
+}
+
+.room-item-link[aria-current="page"] {
+  background: var(--bg-active);
+}
+
+.room-item-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.room-item-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.room-item-name {
+  color: var(--text-primary);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  line-height: var(--line-height-body);
+}
+
+.room-item-title {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-enter {
+  animation: msg-enter 180ms ease-out;
+}
+
+.progress-bar-indeterminate {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes presence-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(127, 86, 217, 0.45);
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px rgba(127, 86, 217, 0);
+  }
+}
+
+@keyframes ring-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes typing-bounce {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: 0 0;
+  }
+}
+
+@keyframes msg-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes badge-pop {
+  from {
+    transform: scale(0.6);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* The Chats page of REQ-ROOM-001 to REQ-ROOM-005 (design rooms-1). The list
+   column is 340 px; the timeline fills the rest. */
+.rooms-page {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.rooms-list {
+  display: flex;
+  flex: 0 0 340px;
+  flex-direction: column;
+  width: 340px;
+  min-height: 0;
+  border-right: 1px solid var(--border-secondary);
+}
+
+.rooms-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+}
+
+.rooms-list-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.rooms-search {
+  position: relative;
+  margin: 0 16px 12px;
+}
+
+.rooms-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  opacity: 0.55;
+  transform: translateY(-50%);
+}
+
+.rooms-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px 0 32px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.rooms-search-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.rooms-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 12px;
+}
+
+.rooms-filter {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rooms-filter.is-active {
+  background: var(--bg-brand-solid);
+  color: var(--text-white);
+}
+
+.rooms-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 8px 16px;
+  overflow-y: auto;
+}
+
+.rooms-list-note {
+  padding: 16px;
+}
+
+.rooms-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rooms-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.rooms-row:hover {
+  background: var(--bg-primary-hover);
+}
+
+.rooms-row.is-selected {
+  border-color: var(--border-secondary);
+  background: var(--bg-active);
+}
+
+.rooms-row-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rooms-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rooms-row-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-time {
+  flex: 0 0 auto;
+  color: var(--fg-quaternary);
+  font-size: 12px;
+}
+
+.rooms-row-title {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rooms-row-preview {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.rooms-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 24px 16px;
+}
+
+.rooms-empty-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.rooms-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rooms-placeholder {
+  padding: 24px 32px;
+}
+
+/* The room timeline of REQ-ROOM-002 to REQ-ROOM-004. */
+.room-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.room-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 32px;
+  border-bottom: 1px solid var(--border-secondary);
+}
+
+.room-head-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.room-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.room-head-name {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.room-head-badge {
+  flex-shrink: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.room-head-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+}
+
+.room-head-facts {
+  color: var(--text-tertiary);
+}
+
+.room-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-notices {
+  margin: 8px 32px 0;
+}
+
+.room-timeline-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.room-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 32px 24px;
+}
+
+.room-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.room-divider-line {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-secondary);
+}
+
+.room-divider-text {
+  white-space: nowrap;
+}
+
+/* REQ-ROOM-002: a new topic inside the same channel and day reads lighter than
+   the full "via <Channel> · <date>" divider, since the day is already named. */
+.room-divider-light {
+  color: var(--fg-quaternary);
+}
+
+.room-divider-light .room-divider-line {
+  background: var(--border-tertiary);
+}
+
+.room-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-quaternary);
+  font-size: 12px;
+}
+
+.room-day::before,
+.room-day::after {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-secondary);
+  content: "";
+}
+
+.room-summary {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: center;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.room-summary-link {
+  color: var(--fg-brand-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.room-learned {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.room-book-icon {
+  flex: 0 0 auto;
+  color: var(--fg-quaternary);
+}
+
+.room-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-brand-primary);
+  font-size: var(--font-size-sm);
+}
+
+.room-older {
+  text-align: center;
+}
+
+.room-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The empty room of REQ-ROOM-002: a fresh agent or team with no messages yet. */
+.room-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 100%;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.room-empty-title {
+  margin: 0;
+  max-width: 44ch;
+  color: var(--text-primary);
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  line-height: var(--line-height-section);
+}
+
+.room-empty-text {
+  margin: 0;
+  max-width: 52ch;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.room-timeline .chat-bubble {
+  border-radius: 18px;
+}
+
+.room-timeline .turn-head .agent-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  line-height: 30px;
+}
+
+.room-timeline .turn-agent {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.room-timeline .chat-thread {
+  max-width: none;
+  margin: 0;
+}
+
+/* The composer of REQ-ROOM-003. */
+.room-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 32px 20px;
+  border-top: 1px solid var(--border-secondary);
+}
+
+.room-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.room-newtopic {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.room-composer-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: 14px;
+  background: var(--bg-primary);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+
+.room-composer-input {
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  resize: none;
+}
+
+.room-composer-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.room-composer-status {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.room-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-composer-spacer {
+  flex: 1 1 auto;
+}
+
+.room-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand-solid);
+  color: var(--text-white);
+  cursor: pointer;
+}
+
+.room-send:hover {
+  background: var(--bg-brand-solid-hover);
+}
+
+.room-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-face-ring,
+  .agent-face-dot.state-working,
+  .agent-face-dot.state-waiting,
+  .typing-dots span,
+  .skeleton,
+  .unread-badge,
+  .msg-enter,
+  .handoff-chip.handoff-working,
+  .progress-bar-indeterminate {
+    animation: none;
+  }
+}
+
+.agent-face.size-18 {
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+}
+
+/* The group room of REQ-ROOM-008 (design rooms-4). The lead's handoffs and
+   each member's answer render as their own message in that agent's color. */
+.room-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.group-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.group-msg-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.group-msg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.group-msg-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.group-lead-pill {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand-secondary);
+  color: var(--text-brand-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.group-msg-time,
+.group-msg-meta {
+  color: var(--fg-quaternary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.group-msg-text {
+  margin: 0;
+}
+
+.group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.handoff-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px 4px 5px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.handoff-chip.handoff-working {
+  animation: presence-pulse 1.8s ease-in-out infinite;
+}
+
+.handoff-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-working {
+  align-items: center;
+}
+
+.group-working-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+/* The mention chips and the "@" listbox of REQ-ROOM-008. */
+.room-composer-box {
+  position: relative;
+}
+
+.room-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.room-mention-chip {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.room-mention-chip:hover {
+  background: var(--bg-secondary-hover);
+}
+
+.room-mention-list {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  max-height: 220px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+}
+
+.room-mention-option {
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.room-mention-option.is-active,
+.room-mention-option:hover {
+  background: var(--bg-primary-hover);
+}
+
+/* ------------------------------------------------------------------ */
+/* Alive roster of REQ-ROOM-011 (design rooms-3).                      */
+/* ------------------------------------------------------------------ */
+
+.agents-pulse {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.agents-pulse-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.agents-pulse-item {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.agents-pulse-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-full);
+  background: var(--presence-dot-resting);
+}
+
+.agents-pulse-dot.state-working {
+  background: var(--presence-dot-working);
+}
+
+.agents-pulse-dot.state-waiting {
+  background: var(--presence-dot-waiting);
+}
+
+.agents-pulse-dot.state-problem {
+  background: var(--presence-dot-problem);
+}
+
+.agents-pulse-dot.state-online {
+  background: var(--presence-dot-online);
+}
+
+.agents-pulse-text {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.agents-pulse-total {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+  cursor: pointer;
+  transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.agent-card:hover {
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+}
+
+.agent-card.state-waiting {
+  border-color: #FEC84B;
+  box-shadow: 0 4px 10px rgba(247, 144, 9, 0.12);
+}
+
+.agent-card.state-working {
+  border-color: #D9D6FE;
+}
+
+.agent-card.state-problem {
+  border-color: var(--border-error);
+}
+
+.agent-card.state-resting {
+  background: #FCFCFD;
+}
+
+.agent-card.state-resting .agent-card-head,
+.agent-card.state-resting .agent-card-preview {
+  opacity: 0.85;
+}
+
+.agent-card.is-skeleton {
+  cursor: default;
+  gap: 10px;
+}
+
+.agent-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.agent-card-id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-card-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.agent-card-role {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.agent-card-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-card-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--fg-quaternary);
+}
+
+.agent-card-status-text {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-status.state-waiting {
+  background: var(--bg-warning-primary);
+}
+
+.agent-card-status.state-waiting .agent-card-status-dot {
+  background: var(--presence-dot-waiting);
+}
+
+.agent-card-status.state-waiting .agent-card-status-text {
+  color: var(--presence-label-waiting);
+}
+
+.agent-card-status.state-working {
+  background: #F9F5FF;
+}
+
+.agent-card-status.state-working .agent-card-status-dot {
+  background: var(--presence-dot-working);
+}
+
+.agent-card-status.state-working .agent-card-status-text {
+  color: var(--face-brand-fg);
+}
+
+.agent-card-status.state-problem {
+  background: var(--bg-error-primary);
+}
+
+.agent-card-status.state-problem .agent-card-status-dot {
+  background: var(--presence-dot-problem);
+}
+
+.agent-card-status.state-problem .agent-card-status-text {
+  color: var(--presence-label-problem);
+}
+
+.agent-card-progress {
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: #EBE9FE;
+}
+
+.agent-card-progress-bar {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--presence-dot-working);
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+.agent-card-preview {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.agent-card-turns {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.agent-card-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 180px;
+  padding: 24px;
+  border: 1px dashed #D6D6DA;
+  border-radius: var(--radius-xl);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.agent-card-add:hover {
+  background: var(--bg-primary-hover);
+}
+
+.agent-card-add-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-full);
+  color: var(--text-tertiary);
+}
+
+.agent-card-add-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agent-card-add-text {
+  max-width: 28ch;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+}
+
+@media (max-width: 1100px) {
+  .agents-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .agents-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Alive agent profile of REQ-ROOM-010 (design rooms-2).               */
+/* ------------------------------------------------------------------ */
+
+.ov-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-section);
+}
+
+.ov-skeleton-hero {
+  width: 100%;
+}
+
+.ov-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  align-items: start;
+}
+
+.ov-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.ov-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-2xl);
+}
+
+/* The hero face stays a perfect circle with its initial centered; the hero
+   card's own rounded frame must not bend the avatar into a rounded square. */
+.ov-hero > .agent-face {
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.ov-hero-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ov-hero-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-hero-name {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 36px;
+}
+
+.ov-hero-persona {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.ov-status-pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin: 0;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-brand-primary);
+  white-space: nowrap;
+}
+
+.ov-status-pill .presence-label-dot {
+  box-shadow: 0 0 0 3px rgba(127, 86, 217, 0.18);
+}
+
+.ov-hero-facts {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-sm);
+}
+
+.ov-hero-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ov-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+}
+
+.ov-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ov-card-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  line-height: var(--line-height-section);
+}
+
+.ov-card-link {
+  color: var(--fg-brand-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ov-card-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.ov-idle {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-body);
+}
+
+.ov-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.ov-step.status-running {
+  background: #F4F1FD;
+  color: var(--face-brand-fg);
+}
+
+.ov-step-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-step-time {
+  flex: 0 0 auto;
+  color: var(--fg-quaternary);
+  font-size: 12px;
+}
+
+.ov-step-done {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--bg-success-primary);
+  color: var(--fg-success-primary);
+}
+
+.ov-step-failed {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--bg-error-primary);
+  color: var(--fg-error-primary);
+}
+
+.ov-step-ring {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #9B8AFB;
+  border-radius: var(--radius-full);
+}
+
+.ov-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--presence-dot-working);
+  animation: presence-pulse 1.8s ease-in-out infinite;
+}
+
+.ov-step-pending {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+}
+
+.ov-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ov-filter {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ov-filter.is-active {
+  border-color: transparent;
+  background: var(--bg-brand-solid);
+  color: var(--text-white);
+}
+
+.ov-activity {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-tertiary);
+}
+
+.ov-activity-row:first-child {
+  border-top: 0;
+}
+
+.ov-activity-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+}
+
+.ov-activity-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ov-activity-title {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.ov-activity-detail {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.ov-activity-time {
+  flex: 0 0 auto;
+  color: var(--fg-quaternary);
+  font-size: 12px;
+}
+
+.ov-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ov-chip {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.ov-chip-more {
+  color: var(--text-tertiary);
+  text-decoration: none;
+}
+
+.ov-chip-more:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.ov-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 80px;
+}
+
+.ov-bar {
+  flex: 1 1 0;
+  min-height: 6px;
+  border-radius: 5px 5px 0 0;
+}
+
+.ov-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ov-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-stat-value {
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.ov-stat-label {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.ov-job {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
+  white-space: pre-wrap;
+}
+
+.ov-job-empty {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
+}
+
+.ov-look {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-look-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-look-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+}
+
+.ov-look-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ov-look-name {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+
+.ov-look-detail {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.ov-members {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ov-member-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ov-member-name {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.ov-member-status {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-member-lead {
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .ov-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ov-hero {
+    flex-wrap: wrap;
+  }
+
+  .ov-hero-actions {
+    flex-direction: row;
+    width: 100%;
+  }
+}
+
+/* The title and color fields of REQ-ROOM-009 in the General tab. */
+.agent-title-input {
+  max-width: 24rem;
+}
+
+.agent-field-count {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.agent-field-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-error-primary);
+  font-size: 12px;
+}
+
+.agent-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-color-preview {
+  display: inline-flex;
+  margin-right: 4px;
+}
+
+.agent-color-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.agent-color-swatch.is-selected {
+  border-color: var(--border-brand);
+  background: var(--bg-brand-primary);
+}
+
+.agent-color-swatch:focus-within {
+  outline: 2px solid var(--border-brand);
+  outline-offset: 2px;
+}
+
+.agent-color-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+
+.agent-color-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--fg-tertiary);
+}
+
+.agent-color-swatch.color-brand .agent-color-dot {
+  background: #5925DC;
+}
+
+.agent-color-swatch.color-success .agent-color-dot {
+  background: #067647;
+}
+
+.agent-color-swatch.color-warning .agent-color-dot {
+  background: #B54708;
+}
+
+.agent-color-swatch.color-error .agent-color-dot {
+  background: #B42318;
+}
+
+.agent-color-swatch.color-blue .agent-color-dot {
+  background: #175CD3;
+}
+
+.agent-color-swatch.color-gray .agent-color-dot {
+  background: #475467;
+}
+
+.agent-color-name {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-card-progress-bar,
+  .ov-step-dot {
+    animation: none;
+  }
+}
+
+/* Dark tints for the few light-only values that have no matching token. */
+[data-theme="dark"] .agent-card.state-waiting {
+  border-color: #FDB022;
+}
+
+[data-theme="dark"] .agent-card.state-working {
+  border-color: #49447E;
+}
+
+[data-theme="dark"] .agent-card.state-resting {
+  background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .agent-card-status.state-working {
+  background: var(--bg-brand-secondary);
+}
+
+[data-theme="dark"] .agent-card-progress {
+  background: var(--bg-brand-secondary);
+}
+
+[data-theme="dark"] .agent-card-add {
+  border-color: var(--border-primary);
+}
+
+[data-theme="dark"] .ov-step.status-running {
+  background: var(--bg-brand-secondary);
+}

@@ -47,8 +47,9 @@ export interface SharedTeamProps {
 
 /* Child logs carry the agent tag the session view adds (session.js) and the
    live rows carry a string seq, so the local event shape is wider than the
-   API's SessionEvent. */
-interface TeamEvent {
+   API's SessionEvent. The group room rebuilds these frames from a turn's
+   steps, so the shape is exported (REQ-ROOM-008). */
+export interface TeamEvent {
   kind: string;
   created_at?: number;
   seq?: number | string;

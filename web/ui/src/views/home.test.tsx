@@ -482,7 +482,7 @@ describe("agent filter (AC-DSH-008)", () => {
 });
 
 describe("sidebar (AC-DSH-006)", () => {
-  it("shows Dashboard for the home item", () => {
+  it("shows Home for the home item", () => {
     render(
       <Sidebar
         route={{ view: "home", section: "home", params: {}, path: "#/home" }}
@@ -493,8 +493,8 @@ describe("sidebar (AC-DSH-006)", () => {
       />
     );
 
-    const link = screen.getByRole("link", { name: "Dashboard" });
+    const link = screen.getByRole("link", { name: "Home" });
     expect(link.getAttribute("href")).toBe("#/home");
-    expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Dashboard" })).toBeNull();
   });
 });

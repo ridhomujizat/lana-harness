@@ -8,6 +8,7 @@ import "./styles/mcp.css";
 import "./styles/channels.css";
 import "./styles/settings.css";
 import "./styles/team.css";
+import "./styles/rooms.css";
 import "./styles/question.css";
 import "./styles/markdown.css";
 import { App } from "./app/App";

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { SessionContentBlock, SessionEvent } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
+import { AgentFace } from "./presence";
 import { TeamBlock } from "./team";
 import type { TeamChildRequest } from "./team";
 
@@ -526,6 +527,10 @@ function ThinkingBlock({ text }: { text: string }) {
 export interface TurnBlockProps {
   turn: Turn;
   agent: string;
+  /* The resolved agent color of the room timeline (REQ-ROOM-001): when it is
+     known the header shows the colored face; otherwise the legacy hashed
+     avatar of the session view stays. */
+  agentColor?: string;
   streamingText?: string;
   /* REQ-MDL-006: a live "Thinking…" note while only thinking deltas arrived. */
   thinking?: boolean;
@@ -546,6 +551,7 @@ export interface TurnBlockProps {
 export function TurnBlock({
   turn,
   agent,
+  agentColor = "",
   streamingText = "",
   thinking = false,
   waitingForInput = false,
@@ -616,12 +622,16 @@ export function TurnBlock({
   return (
     <article className="turn">
       <div className="turn-head">
-        <span
-          className={"agent-avatar tone-" + agentTone(agent)}
-          aria-hidden="true"
-        >
-          {agentInitial(agent)}
-        </span>
+        {agentColor ? (
+          <AgentFace name={agent} color={agentColor} size={32} />
+        ) : (
+          <span
+            className={"agent-avatar tone-" + agentTone(agent)}
+            aria-hidden="true"
+          >
+            {agentInitial(agent)}
+          </span>
+        )}
         <span className="turn-agent">{agent}</span>
         <span className="turn-status">{statusText}</span>
         <span className="turn-spacer"></span>

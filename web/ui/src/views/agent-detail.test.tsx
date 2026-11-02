@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 /* The network calls of the General tab are mocked so the model picker, the
    Thinking select, and the legacy banner can be observed (REQ-MDL-012,
@@ -25,11 +25,22 @@ vi.mock("../api/sessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/sessions")>();
   return { ...actual, createSession: vi.fn() };
 });
+vi.mock("../api/rooms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/rooms")>();
+  return {
+    ...actual,
+    getAgentOverview: vi.fn(),
+    listRooms: vi.fn(),
+    openRoomsStream: vi.fn(),
+  };
+});
 
 import { listAgents, updateAgent } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
 import type { ModelsResponse } from "../api/models";
+import { getAgentOverview, openRoomsStream } from "../api/rooms";
+import type { AgentOverview as AgentOverviewData } from "../api/rooms";
 import { getConfig, listProviders } from "../api/settings";
 import type { GetConfigResponse, ListProvidersResponse } from "../api/settings";
 import { AgentDetailPage } from "./agent-detail";
@@ -38,6 +49,8 @@ function baseAgent(overrides: Partial<Agent>): Agent {
   return {
     name: "coder",
     kind: "agent",
+    title: "",
+    color: "brand",
     model: "deepseek-flash",
     policy: "ask",
     skills: [],
@@ -122,12 +135,34 @@ const PROVIDERS: ListProvidersResponse = {
   restart_required: false,
 };
 
-function load(model: string): void {
+function mockAgent(model: string): void {
   vi.mocked(listAgents).mockResolvedValue({ agents: [baseAgent({ model })] });
   vi.mocked(getConfig).mockResolvedValue(configFor(model));
   vi.mocked(listProviders).mockResolvedValue(PROVIDERS);
   vi.mocked(getModels).mockResolvedValue(CATALOG);
-  render(<AgentDetailPage name="coder" />);
+}
+
+function load(model: string): void {
+  mockAgent(model);
+  render(<AgentDetailPage name="coder" tab="general" />);
+}
+
+function overviewData(): AgentOverviewData {
+  return {
+    name: "coder",
+    kind: "agent",
+    title: "Coding",
+    color: "brand",
+    persona_line: "",
+    created_at: Date.now() - 86400000,
+    presence: { state: "resting", label: "Resting", since: 0, session_id: "" },
+    now: null,
+    activity: [],
+    week: { days: [], turns: 0, questions: 0, notes: 0, tokens: 0 },
+    memory: { entries: [], total: 0 },
+    job: "",
+    looks_after: { channels: [], teams: [] },
+  };
 }
 
 afterEach(() => {
@@ -220,5 +255,70 @@ describe("agent save notice", () => {
       })
     ).toBeTruthy();
     expect(screen.getByText("Changes saved.")).toBeTruthy();
+  });
+});
+
+/* REQ-ROOM-009: the General tab writes the title and the color (AC-ROOM-014). */
+describe("agent profile fields", () => {
+  it("sends the title and the color in the PUT", async () => {
+    load("deepseek-flash");
+
+    const title = (await screen.findByLabelText("Title")) as HTMLInputElement;
+    fireEvent.change(title, { target: { value: "Finance" } });
+    fireEvent.click(screen.getByRole("radio", { name: "success" }));
+    vi.mocked(updateAgent).mockResolvedValue({
+      name: "coder",
+      version: "v2",
+      restart_required: false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith(
+        "coder",
+        { title: "Finance", color: "success" },
+        "v1"
+      );
+    });
+  });
+});
+
+/* REQ-WEB-047: the Overview tab shows only the hero, so the legacy header must
+   not duplicate the agent above it. The other tabs keep the header, and its
+   avatar uses the new AgentFace with the agent's resolved color. */
+describe("agent detail header (REQ-WEB-047)", () => {
+  it("hides the legacy header on the Overview tab and keeps it on General", async () => {
+    mockAgent("deepseek-flash");
+    vi.mocked(openRoomsStream).mockImplementation((handlers) => {
+      handlers.onRooms([]);
+      handlers.onState?.(true);
+      return { close: () => {} };
+    });
+    vi.mocked(getAgentOverview).mockResolvedValue(overviewData());
+
+    const overviewRender = render(
+      <AgentDetailPage name="coder" tab="overview" />
+    );
+    await screen.findByRole("tab", { name: "Overview" });
+    const overviewHeader = overviewRender.container.querySelector(
+      ".agent-detail-header"
+    );
+    expect(overviewHeader).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Start session" })
+    ).toBeNull();
+    overviewRender.unmount();
+
+    const generalRender = render(
+      <AgentDetailPage name="coder" tab="general" />
+    );
+    await screen.findByLabelText("Title");
+    const generalHeader = generalRender.container.querySelector(
+      ".agent-detail-header"
+    );
+    expect(generalHeader).toBeTruthy();
+    expect(generalHeader?.querySelector(".agent-face")).toBeTruthy();
+    expect(generalHeader?.querySelector(".agent-avatar")).toBeNull();
   });
 });

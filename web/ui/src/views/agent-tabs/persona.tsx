@@ -48,6 +48,15 @@ const FILES = [
     fallbackLimit: 4000,
     saveMessage: "Saved MEMORY.md. The next turn uses the new memory.",
   },
+  {
+    id: "job",
+    name: "JOB.md",
+    title: "Job",
+    note: "Job. What this agent is responsible for.",
+    help: "Written in Markdown. The agent reads it on every turn.",
+    fallbackLimit: 4000,
+    saveMessage: "Saved JOB.md. The next turn uses the new job.",
+  },
 ] as const satisfies readonly PersonaFile[];
 
 interface PersonaFileState {

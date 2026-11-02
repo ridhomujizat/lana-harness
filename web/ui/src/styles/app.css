@@ -321,6 +321,33 @@ textarea {
   width: 100%;
 }
 
+/* REQ-ROOM-012: Home and Chats have no title; Observe and Configure group the
+   rest under a small uppercase label that hides when the sidebar collapses. */
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.nav-section + .nav-section {
+  margin-top: 16px;
+}
+
+.nav-section-title {
+  padding: 0 10px 4px;
+  color: #98a2b3;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sidebar-collapsed .nav-section-title {
+  display: none;
+}
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -482,6 +509,19 @@ textarea {
 
 .app-content > #main {
   flex: 1 1 auto;
+}
+
+/* The Chats page owns the viewport: the room list and the timeline each scroll
+   on their own, and the document itself does not scroll. Scoped to the Chats
+   page so every other page keeps its normal document scroll. */
+.app-content:has(.rooms-page) {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-content:has(.rooms-page) > #main {
+  min-height: 0;
 }
 
 .sidebar-collapsed .sidebar {

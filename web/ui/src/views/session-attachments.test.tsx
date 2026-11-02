@@ -73,6 +73,8 @@ const detail: SessionDetail = {
 const agent: Agent = {
   name: "lana",
   kind: "agent",
+  title: "",
+  color: "brand",
   model: "deepseek:chat",
   policy: "ask",
   skills: [],

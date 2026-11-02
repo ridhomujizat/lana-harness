@@ -198,6 +198,24 @@ func (a *Approvals) Ask(ctx context.Context, req core.ApprovalRequest) core.Appr
 	}
 }
 
+// openRequests returns a snapshot of the open approval requests for the room
+// presence (REQ-ROOM-006). The caller maps each request to its room.
+func (a *Approvals) openRequests() []openRequest {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]openRequest, 0, len(a.open))
+	for _, pending := range a.open {
+		out = append(out, openRequest{
+			Kind:      "approval",
+			SessionID: pending.sessionID,
+			Agent:     pending.event.Agent,
+			Tool:      pending.event.Tool,
+			Since:     pending.event.ExpiresAt - approvalTimeout.Milliseconds(),
+		})
+	}
+	return out
+}
+
 // sessionRootResolver returns the current resolver under the broker lock.
 func (a *Approvals) sessionRootResolver() sessionRootResolver {
 	a.mu.Lock()

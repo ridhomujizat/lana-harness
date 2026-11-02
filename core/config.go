@@ -80,9 +80,15 @@ type AgentConfig struct {
 	MemoryCapture *bool `toml:"memory_capture"`
 	// Vision turns image input on or off for the agent. Nil means the catalog
 	// flag decides (API-ATT-005).
-	Vision      *bool      `toml:"vision"`
-	Description string     `toml:"description"`
-	Rules       AgentRules `toml:"rules"`
+	Vision      *bool  `toml:"vision"`
+	Description string `toml:"description"`
+	// Title is the agent role shown on its profile, at most 60 characters
+	// (REQ-ROOM-009, API-ROOM-006).
+	Title string `toml:"title"`
+	// Color is the avatar color, one of brand, success, warning, error, blue,
+	// gray; "" derives a stable color from the name (REQ-ROOM-009, API-ROOM-006).
+	Color string     `toml:"color"`
+	Rules AgentRules `toml:"rules"`
 }
 
 type AgentRules struct {

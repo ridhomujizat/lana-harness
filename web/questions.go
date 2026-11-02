@@ -173,6 +173,22 @@ func (q *Questions) Ask(ctx context.Context, req core.QuestionRequest) (core.Que
 	}
 }
 
+// openRequests returns a snapshot of the open question requests for the room
+// presence (REQ-ROOM-006). The caller maps each request to its room.
+func (q *Questions) openRequests() []openRequest {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make([]openRequest, 0, len(q.open))
+	for _, pending := range q.open {
+		out = append(out, openRequest{
+			Kind:      "question",
+			SessionID: pending.sessionID,
+			Since:     pending.event.ExpiresAt - questionTimeout.Milliseconds(),
+		})
+	}
+	return out
+}
+
 // sessionRootResolver returns the current resolver under the broker lock.
 func (q *Questions) sessionRootResolver() sessionRootResolver {
 	q.mu.Lock()

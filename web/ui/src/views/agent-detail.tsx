@@ -13,7 +13,6 @@ import { createSession } from "../api/sessions";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import {
   Icon,
-  AgentAvatar,
   TeamAvatars,
   isTeam,
   splitModel,
@@ -24,7 +23,9 @@ import {
   sessionSummary,
 } from "./agent-common";
 import type { AgentLike, Permission } from "./agent-common";
-import { TeamSummary } from "./agents";
+import { AgentOverview } from "./agent-overview";
+import { AgentFace } from "./presence";
+import { DEFAULT_AGENT_TAB } from "../app/router";
 import { PersonaTab } from "./agent-tabs/persona";
 import { ToolsTab } from "./agent-tabs/tools";
 import { SkillsTab } from "./agent-tabs/skills";
@@ -36,6 +37,7 @@ import { WorkspaceTab } from "./agent-tabs/workspace";
    tab. The other tabs show a placeholder until their slices land (T-030). */
 
 type TabId =
+  | "overview"
   | "general"
   | "persona"
   | "tools"
@@ -50,6 +52,7 @@ interface TabEntry {
 }
 
 const TABS: readonly TabEntry[] = [
+  { id: "overview", label: "Overview" },
   { id: "general", label: "General" },
   { id: "persona", label: "Persona & memory" },
   { id: "tools", label: "Tools" },
@@ -60,6 +63,8 @@ const TABS: readonly TabEntry[] = [
 ];
 
 type GeneralKey =
+  | "title"
+  | "color"
   | "provider"
   | "model"
   | "reasoning_effort"
@@ -70,6 +75,8 @@ type GeneralKey =
   | "memory_capture";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
+  "title",
+  "color",
   "provider",
   "model",
   "reasoning_effort",
@@ -79,6 +86,18 @@ const GENERAL_KEYS: readonly GeneralKey[] = [
   "context_window",
   "memory_capture",
 ];
+
+/* REQ-ROOM-009: the six agent colors and their swatch previews. */
+const AGENT_COLORS: readonly { value: string; label: string }[] = [
+  { value: "brand", label: "Brand" },
+  { value: "success", label: "Success" },
+  { value: "warning", label: "Warning" },
+  { value: "error", label: "Error" },
+  { value: "blue", label: "Blue" },
+  { value: "gray", label: "Gray" },
+];
+
+const TITLE_LIMIT = 60;
 
 interface PermissionOption {
   value: Permission;
@@ -105,6 +124,8 @@ const PERMISSIONS: readonly PermissionOption[] = [
 ];
 
 interface AgentValues {
+  title: string;
+  color: string;
   provider: string;
   model: string;
   reasoning_effort: string;
@@ -116,6 +137,8 @@ interface AgentValues {
 }
 
 interface AgentForm {
+  title: string;
+  color: string;
   provider: string;
   model: string;
   reasoning_effort: string;
@@ -157,6 +180,26 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/* REQ-ROOM-009: an agent color is one of the six names; anything else is brand. */
+function normalizeColor(value: unknown): string {
+  const name = String(value || "").toLowerCase();
+  return AGENT_COLORS.some((entry) => entry.value === name) ? name : "brand";
+}
+
+/* The field errors of the agents API carry the config key, for example
+   agents.dana.title. Pick the message for one key. */
+function issueMessage(details: unknown[], key: string): string {
+  for (const detail of details) {
+    if (detail && typeof detail === "object") {
+      const record = detail as { key?: unknown; message?: unknown };
+      if (String(record.key || "") === key) {
+        return record.message ? String(record.message) : "Invalid value.";
+      }
+    }
+  }
+  return "";
+}
+
 /* The Thinking option text carries the effort description of REQ-MDL-020. */
 function effortLabel(effort: CatalogEffort): string {
   const value = String(effort.value || "");
@@ -183,6 +226,8 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
   const record = configAgent || {};
   const parts = splitModel(agent);
   return {
+    title: pickText(record.title, agent.title),
+    color: normalizeColor(pickText(record.color, agent.color)),
     provider: pickText(record.provider, agent.provider, parts.provider),
     model: pickText(record.model, parts.model),
     reasoning_effort: pickText(agent.reasoning_effort),
@@ -201,6 +246,8 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
 
 function formValues(initial: AgentValues): AgentForm {
   return {
+    title: initial.title || "",
+    color: normalizeColor(initial.color),
     provider: initial.provider || "",
     model: initial.model || "",
     reasoning_effort: initial.reasoning_effort || "",
@@ -214,6 +261,8 @@ function formValues(initial: AgentValues): AgentForm {
 
 function canonical(form: AgentForm): AgentValues {
   return {
+    title: String(form.title || "").trim(),
+    color: normalizeColor(form.color),
     provider: form.provider || "",
     model: form.model || "",
     reasoning_effort: form.reasoning_effort || "",
@@ -244,6 +293,11 @@ function dirtyKeys(
 }
 
 function validateForm(form: AgentForm, baseline: AgentValues): string {
+  /* REQ-ROOM-009: the title is a single line of at most 60 characters. */
+  if (Array.from(String(form.title || "")).length > TITLE_LIMIT) {
+    return "The title is at most " + TITLE_LIMIT + " characters.";
+  }
+
   /* REQ-LTC-040: an empty max_steps means no limit; any whole number of 0 or
      more caps the turn. */
   const stepsText = String(form.max_steps || "").trim();
@@ -287,7 +341,11 @@ function nextDuplicateName(source: string, agents: AgentLike[]): string {
 function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
   const patch: AgentWriteFields = {};
   for (const key of keys) {
-    if (key === "provider") {
+    if (key === "title") {
+      patch.title = current.title;
+    } else if (key === "color") {
+      patch.color = current.color;
+    } else if (key === "provider") {
       patch.provider = current.provider;
     } else if (key === "model") {
       patch.model = current.model;
@@ -499,7 +557,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   }, [agentName, reloadToken, announce]);
 
   const activeTab: TabId =
-    TABS.find((item) => item.id === tab)?.id ?? "general";
+    TABS.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
 
   useEffect(() => {
     if (!pendingTabFocus.current) {
@@ -849,19 +907,12 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
             </div>
           </div>
         </header>
+        <AgentOverview name={agentName} agent={agent} />
         <div className="agent-team-card">
-          <h2>Team summary</h2>
-          <p className="hint">Teams are read-only in this build.</p>
-          <TeamSummary
-            team={{
-              name: agent.name,
-              lead: agent.lead ?? "",
-              members: agent.members ?? [],
-              description: agent.description,
-              sessions_count: agent.sessions_count,
-              last_active_at: agent.last_active_at,
-            }}
-          />
+          <p className="hint">
+            Teams are read-only here. Edit the{" "}
+            <code>[teams.{agent.name}]</code> table in the config file.
+          </p>
           <a className="button-ui button-ui-secondary" href="#/settings/config">
             Open the config file
           </a>
@@ -872,6 +923,8 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
 
   const canSave = dirty.length > 0 && !saving;
   const knownAgents = page ? page.agents : [];
+  const titleIssue = issueMessage(details, "agents." + agent.name + ".title");
+  const colorIssue = issueMessage(details, "agents." + agent.name + ".color");
 
   return (
     <main id="main" className="page agent-detail-page">
@@ -881,43 +934,52 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         <span aria-current="page">{agent.name}</span>
       </nav>
 
-      <header className="agent-detail-header">
-        <div className="agent-detail-identity">
-          <AgentAvatar name={agent.name} size="56" />
-          <div className="agent-detail-heading">
-            <div className="agent-detail-name-row">
-              <h1 className="agent-detail-name">{agent.name}</h1>
-              {agent.default ? (
-                <span className="badge-ui badge-ui-brand">
-                  <span className="badge-ui-dot" aria-hidden="true"></span>
-                  Default
-                </span>
-              ) : null}
+      {/* REQ-WEB-047: the alive Overview tab shows only its own hero, so the
+          legacy header is hidden there. It stays on the other tabs, where the
+          Duplicate action lives. */}
+      {activeTab !== "overview" ? (
+        <header className="agent-detail-header">
+          <div className="agent-detail-identity">
+            <AgentFace
+              name={agent.name}
+              color={normalizeColor(agent.color)}
+              size={52}
+            />
+            <div className="agent-detail-heading">
+              <div className="agent-detail-name-row">
+                <h1 className="agent-detail-name">{agent.name}</h1>
+                {agent.default ? (
+                  <span className="badge-ui badge-ui-brand">
+                    <span className="badge-ui-dot" aria-hidden="true"></span>
+                    Default
+                  </span>
+                ) : null}
+              </div>
+              <p className="agent-detail-description">
+                {agent.description || "No description yet."}
+              </p>
+              <p className="agent-detail-meta">{sessionSummary(agent)}.</p>
             </div>
-            <p className="agent-detail-description">
-              {agent.description || "No description yet."}
-            </p>
-            <p className="agent-detail-meta">{sessionSummary(agent)}.</p>
           </div>
-        </div>
-        <div className="agent-detail-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={() => setDuplicateOpen(true)}
-          >
-            Duplicate
-          </button>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
-            disabled={startBusy}
-            onClick={startSession}
-          >
-            {startBusy ? "Starting…" : "Start session"}
-          </button>
-        </div>
-      </header>
+          <div className="agent-detail-actions">
+            <button
+              type="button"
+              className="button-ui button-ui-secondary"
+              onClick={() => setDuplicateOpen(true)}
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              className="button-ui button-ui-primary"
+              disabled={startBusy}
+              onClick={startSession}
+            >
+              {startBusy ? "Starting…" : "Start session"}
+            </button>
+          </div>
+        </header>
+      ) : null}
 
       {headerError ? (
         <div className="agent-header-error" role="alert">
@@ -957,8 +1019,111 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         aria-labelledby={"agent-tab-" + activeTab}
         tabIndex={0}
       >
-        {activeTab === "general" && form ? (
+        {activeTab === "overview" ? (
+          <AgentOverview name={agentName} agent={agent} />
+        ) : activeTab === "general" && form ? (
           <form className="agent-general-form" onSubmit={save}>
+            <section
+              className="agent-form-section"
+              aria-labelledby="agent-profile-title"
+            >
+              <div className="agent-form-copy">
+                <h2 id="agent-profile-title">Profile</h2>
+                <p>
+                  The title and color the room list and the profile show for
+                  this agent.
+                </p>
+              </div>
+              <div className="agent-form-controls">
+                <div className="agent-form-field agent-form-field-wide">
+                  <label
+                    className="agent-form-field-label"
+                    htmlFor="agent-title"
+                  >
+                    Title
+                  </label>
+                  <input
+                    id="agent-title"
+                    className="agent-title-input"
+                    type="text"
+                    maxLength={TITLE_LIMIT}
+                    value={form.title}
+                    placeholder="e.g. Finance"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={saving}
+                    onChange={(event) =>
+                      updateField("title", event.target.value)
+                    }
+                  />
+                  <span className="agent-field-count">
+                    {Array.from(form.title).length + " / " + TITLE_LIMIT}
+                  </span>
+                  {titleIssue ? (
+                    <span className="agent-field-error" role="alert">
+                      {titleIssue}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="agent-form-field agent-form-field-wide">
+                  <span
+                    className="agent-form-field-label"
+                    id="agent-color-label"
+                  >
+                    Color
+                  </span>
+                  <div
+                    className="agent-color-picker"
+                    role="radiogroup"
+                    aria-labelledby="agent-color-label"
+                  >
+                    <span className="agent-color-preview" aria-hidden="true">
+                      <AgentFace name={agent.name} color={form.color} size={52} />
+                    </span>
+                    {AGENT_COLORS.map((entry) => {
+                      const selected = form.color === entry.value;
+                      return (
+                        <label
+                          key={entry.value}
+                          className={
+                            "agent-color-swatch color-" +
+                            entry.value +
+                            (selected ? " is-selected" : "")
+                          }
+                        >
+                          <input
+                            className="agent-color-input"
+                            type="radio"
+                            name="agent-color"
+                            value={entry.value}
+                            aria-label={entry.value}
+                            checked={selected}
+                            disabled={saving}
+                            onChange={() =>
+                              updateField("color", entry.value)
+                            }
+                          />
+                          <span
+                            className="agent-color-dot"
+                            aria-hidden="true"
+                          />
+                          <span className="agent-color-name">
+                            {entry.label}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {colorIssue ? (
+                    <span className="agent-field-error" role="alert">
+                      {colorIssue}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </section>
+
             <section
               className="agent-form-section"
               aria-labelledby="agent-model-title"

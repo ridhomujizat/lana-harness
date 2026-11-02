@@ -1,9 +1,10 @@
 /* The route table of REQ-WEB-030. {name} segments match any value; tab and
    step segments are limited by the lists on each entry. */
 
-export const DEFAULT_ROUTE = "#/sessions";
+export const DEFAULT_ROUTE = "#/chats";
 
 export const AGENT_TABS = [
+  "overview",
   "general",
   "persona",
   "tools",
@@ -12,6 +13,10 @@ export const AGENT_TABS = [
   "rules",
   "workspace",
 ] as const;
+
+/* REQ-ROOM-010: the Overview tab is the first tab and the default when a name
+   is opened without a tab segment. */
+export const DEFAULT_AGENT_TAB = AGENT_TABS[0];
 export const SETTINGS_TABS = [
   "general",
   "providers",
@@ -31,6 +36,8 @@ export const SETUP_STEPS = [
 
 export type RouteView =
   | "home"
+  | "chats"
+  | "chat"
   | "sessions"
   | "new-session"
   | "session"
@@ -68,10 +75,14 @@ export interface Route {
 
 export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/home", view: "home", section: "home" },
+  { path: "#/chats", view: "chats", section: "chats" },
+  { path: "#/chats/{name}", view: "chat", section: "chats" },
   { path: "#/sessions", view: "sessions", section: "sessions" },
+  { path: "#/history", view: "sessions", section: "sessions" },
   { path: "#/sessions/new", view: "new-session", section: "sessions" },
   { path: "#/sessions/{id}", view: "session", section: "sessions" },
   { path: "#/agents", view: "agents", section: "agents" },
+  { path: "#/agents/{name}", view: "agent", section: "agents" },
   {
     path: "#/agents/{name}/{tab}",
     view: "agent",
@@ -157,8 +168,8 @@ export function parseRoute(hash: string): Route {
   const parts = rawPath.split("/").filter(Boolean).map(safeDecode);
   if (parts.length === 0) {
     return {
-      view: "sessions",
-      section: "sessions",
+      view: "chats",
+      section: "chats",
       params: queryParams,
       path: DEFAULT_ROUTE,
     };
@@ -184,6 +195,9 @@ export function parseRoute(hash: string): Route {
   for (const entry of ROUTE_TABLE) {
     const params = matchRoute(parts, entry);
     if (params !== null) {
+      if (entry.view === "agent" && !params.tab) {
+        params.tab = DEFAULT_AGENT_TAB;
+      }
       return {
         view: entry.view,
         section: entry.section,

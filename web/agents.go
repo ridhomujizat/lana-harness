@@ -28,6 +28,12 @@ const agentBodyLimit = 64 << 10
 // maxAgentDescription mirrors the config validation limit (REQ-WEB-046).
 const maxAgentDescription = 120
 
+// maxAgentTitle mirrors the config validation limit (REQ-ROOM-009, API-ROOM-006).
+const maxAgentTitle = 60
+
+// agentColors are the accepted agent color values (API-ROOM-006, API-ROOM-007).
+var agentColors = []string{"brand", "success", "warning", "error", "blue", "gray"}
+
 // agentNameRE is the create and duplicate name rule of API-WEB-025.
 var agentNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 
@@ -54,6 +60,8 @@ var agentKeys = map[string]bool{
 	"memory_capture":       true,
 	"vision":               true,
 	"description":          true,
+	"title":                true,
+	"color":                true,
 	"rules":                true,
 }
 
@@ -99,23 +107,27 @@ type agentJSON struct {
 	// Kind is "agent" or "team" (API-TEAM-006).
 	Kind string `json:"kind"`
 	// Model is null for a team: each agent uses its own model.
-	Model           *string         `json:"model"`
-	Policy          string          `json:"policy"`
-	Lead            string          `json:"lead,omitempty"`
-	Members         []string        `json:"members,omitempty"`
-	Skills          []string        `json:"skills"`
-	MCP             []string        `json:"mcp"`
-	MCPStatus       []mcpStatusJSON `json:"mcp_status"`
-	Description     string          `json:"description"`
-	Default         bool            `json:"default"`
-	Provider        string          `json:"provider"`
-	Permission      string          `json:"permission"`
-	Workspace       string          `json:"workspace"`
-	DisabledTools   []string        `json:"disabled_tools"`
-	ReasoningEffort string          `json:"reasoning_effort"`
-	ToolsCount      int             `json:"tools_count"`
-	SessionsCount   int             `json:"sessions_count"`
-	LastActiveAt    *int64          `json:"last_active_at"`
+	Model       *string         `json:"model"`
+	Policy      string          `json:"policy"`
+	Lead        string          `json:"lead,omitempty"`
+	Members     []string        `json:"members,omitempty"`
+	Skills      []string        `json:"skills"`
+	MCP         []string        `json:"mcp"`
+	MCPStatus   []mcpStatusJSON `json:"mcp_status"`
+	Description string          `json:"description"`
+	// Title is the agent role, "" when unset (API-ROOM-007).
+	Title string `json:"title"`
+	// Color is the resolved avatar color, never empty (API-ROOM-007).
+	Color           string   `json:"color"`
+	Default         bool     `json:"default"`
+	Provider        string   `json:"provider"`
+	Permission      string   `json:"permission"`
+	Workspace       string   `json:"workspace"`
+	DisabledTools   []string `json:"disabled_tools"`
+	ReasoningEffort string   `json:"reasoning_effort"`
+	ToolsCount      int      `json:"tools_count"`
+	SessionsCount   int      `json:"sessions_count"`
+	LastActiveAt    *int64   `json:"last_active_at"`
 	// MemoryCapture is the background capture switch; an absent key means on
 	// (REQ-MEM-010).
 	MemoryCapture bool `json:"memory_capture"`
@@ -165,7 +177,12 @@ type agentRecord struct {
 	// (API-ATT-005).
 	Vision      *bool
 	Description string
-	Rules       agentRules
+	// Title is the agent role, "" when the key is absent (API-ROOM-007).
+	Title string
+	// Color is the avatar color, "" when absent and derived from the name
+	// (API-ROOM-007).
+	Color string
+	Rules agentRules
 }
 
 type agentRules struct {
@@ -257,6 +274,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			MCPStatus:     []mcpStatusJSON{},
 			DisabledTools: []string{},
 			MemoryCapture: true,
+			Color:         core.ResolveAgentColor(name, ""),
 		}
 		model := ""
 		configTools := 0
@@ -271,6 +289,10 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				row.Lead = agent.Lead
 				row.Members = nonNilStrings(agent.Members)
 				row.Description = agent.Description
+				// A team row shows the team description as its title and the
+				// brand color (API-ROOM-007).
+				row.Title = agent.Description
+				row.Color = "brand"
 				if stat, ok := stats[name]; ok && stat.count > 0 {
 					row.SessionsCount = stat.count
 					lastActive := stat.lastActive
@@ -291,6 +313,8 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		if table, ok := tables[name]; ok {
 			record := agentRecordFromMap(table)
 			row.Description = record.Description
+			row.Title = record.Title
+			row.Color = core.ResolveAgentColor(name, record.Color)
 			row.Provider = record.Provider
 			row.Permission = record.Permission
 			row.Workspace = record.Workspace
@@ -925,6 +949,28 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.Description = value
 		return nil
+	case "title":
+		// REQ-ROOM-009, API-ROOM-007: an empty title removes the key.
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if problem := validateAgentTitle(value); problem != "" {
+			return errors.New(problem)
+		}
+		record.Title = value
+		return nil
+	case "color":
+		// REQ-ROOM-009, API-ROOM-007: an empty color removes the key.
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if !validAgentColor(value) {
+			return errors.New("color must be one of brand, success, warning, error, blue, gray")
+		}
+		record.Color = value
+		return nil
 	case "rules":
 		var rules struct {
 			Allow []string `json:"allow"`
@@ -948,6 +994,32 @@ func validateAgentDescription(value string) string {
 		return fmt.Sprintf("must be at most %d characters (got %d)", maxAgentDescription, n)
 	}
 	return ""
+}
+
+// validateAgentTitle mirrors the config rule of API-ROOM-006: a single line of
+// at most 60 characters.
+func validateAgentTitle(value string) string {
+	if strings.ContainsAny(value, "\n\r") {
+		return "must be one line"
+	}
+	if n := utf8.RuneCountInString(value); n > maxAgentTitle {
+		return fmt.Sprintf("must be at most %d characters (got %d)", maxAgentTitle, n)
+	}
+	return ""
+}
+
+// validAgentColor reports whether value is one of the palette values; "" is
+// allowed and removes the key (API-ROOM-006).
+func validAgentColor(value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, allowed := range agentColors {
+		if value == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 func validAgentPermission(value string) bool {
@@ -1083,6 +1155,8 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		MemoryCapture:       mapAgentBoolPtr(table, "memory_capture"),
 		Vision:              mapAgentBoolPtr(table, "vision"),
 		Description:         mapAgentString(table, "description"),
+		Title:               mapAgentString(table, "title"),
+		Color:               mapAgentString(table, "color"),
 	}
 	if rules, ok := table["rules"].(map[string]any); ok {
 		record.Rules = agentRules{
@@ -1169,6 +1243,8 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentBoolPtr(&b, "memory_capture", record.MemoryCapture)
 	writeAgentBoolPtr(&b, "vision", record.Vision)
 	writeAgentString(&b, "description", record.Description)
+	writeAgentString(&b, "title", record.Title)
+	writeAgentString(&b, "color", record.Color)
 	if len(record.Rules.Allow) > 0 || len(record.Rules.Deny) > 0 {
 		parts := make([]string, 0, 2)
 		if len(record.Rules.Allow) > 0 {

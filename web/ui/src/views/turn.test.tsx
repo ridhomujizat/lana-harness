@@ -339,3 +339,30 @@ describe("turn thinking", () => {
     expect(screen.getByText("Thinking…")).toBeTruthy();
   });
 });
+
+/* REQ-ROOM-001: the room timeline passes the resolved agent color, so the turn
+   header shows the colored face; the session view keeps the legacy avatar. */
+describe("turn header avatar", () => {
+  it("uses the resolved color when the room timeline provides one", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "the answer" }],
+      }),
+      event(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+
+    const { container, rerender } = render(
+      <TurnBlock turn={turnItem.turn} agent="lana" agentColor="brand" />
+    );
+    expect(container.querySelector(".turn-head .agent-face")).not.toBeNull();
+    expect(container.querySelector(".turn-head .agent-avatar")).toBeNull();
+
+    rerender(<TurnBlock turn={turnItem.turn} agent="lana" />);
+    expect(container.querySelector(".turn-head .agent-face")).toBeNull();
+    expect(container.querySelector(".turn-head .agent-avatar")).not.toBeNull();
+  });
+});
