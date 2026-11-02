@@ -622,7 +622,7 @@ func (f *fakeWebBackend) ListAgentSessions(_ context.Context, filter core.Sessio
 		if filter.TopLevelOnly && info.ParentSessionID != "" {
 			continue
 		}
-		if filter.Before > 0 && info.CreatedAt >= filter.Before {
+		if filter.Before > 0 && info.UpdatedAt >= filter.Before {
 			continue
 		}
 		out = append(out, info)

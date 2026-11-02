@@ -89,7 +89,7 @@ Requirements own behavior. This file owns the exact shape of the new and changed
 | Location | Name | Type | Required | Meaning |
 |---|---|---|---:|---|
 | Path | `name` | string | Yes | Agent or team name |
-| Query | `before` | int | No | Return segments created strictly before this Unix ms |
+| Query | `before` | int | No | Return segments last updated strictly before this Unix ms |
 | Query | `limit` | int | No | 1–20, default 5 |
 
 ### Success — `200`
@@ -103,8 +103,8 @@ Requirements own behavior. This file owns the exact shape of the new and changed
 }
 ```
 
-- Segments are top-level sessions with `agent = name`, in **ascending** `created_at` order within
-  the page; the page itself is the newest `limit` segments before `before`.
+- Segments are top-level sessions with `agent = name`, in **ascending** `updated_at` order within
+  the page; the page is the `limit` most recently active segments before `before`.
 - The client reads each segment's events with the existing `GET /v1/sessions/{id}/events`.
 
 ### Failure

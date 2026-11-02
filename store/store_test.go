@@ -1516,7 +1516,8 @@ func TestTextRows(t *testing.T) {
 	}
 }
 
-// REQ-ROOM-002: the session list filters by agent exactly and by creation time.
+// REQ-ROOM-002: the session list filters by agent exactly and pages by last
+// update time, newest activity first.
 func TestListFilterAgentAndBefore(t *testing.T) {
 	ctx := context.Background()
 	s, _ := openTest(t)
@@ -1528,12 +1529,21 @@ func TestListFilterAgentAndBefore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec("UPDATE sessions SET created_at = 100 WHERE id = ?", dana.ID); err != nil {
+	lana, err := s.Create(ctx, core.NewSession{Agent: "lana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec("UPDATE sessions SET created_at = 200 WHERE id = ?", karin.ID); err != nil {
-		t.Fatal(err)
+	setTimes := func(id string, created, updated int64) {
+		t.Helper()
+		if _, err := s.db.Exec("UPDATE sessions SET created_at = ?, updated_at = ? WHERE id = ?", created, updated, id); err != nil {
+			t.Fatal(err)
+		}
 	}
+	// dana was created first but is the most recently active, so a created_at
+	// filter would keep it in every page.
+	setTimes(dana.ID, 100, 400)
+	setTimes(karin.ID, 200, 200)
+	setTimes(lana.ID, 300, 100)
 
 	byAgent, err := s.List(ctx, core.SessionFilter{Agent: "dana"})
 	if err != nil {
@@ -1543,15 +1553,15 @@ func TestListFilterAgentAndBefore(t *testing.T) {
 		t.Fatalf("byAgent=%+v want dana=%s", byAgent, dana.ID)
 	}
 
-	byBefore, err := s.List(ctx, core.SessionFilter{Before: 200})
+	byBefore, err := s.List(ctx, core.SessionFilter{Before: 300})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(byBefore) != 1 || byBefore[0].ID != dana.ID {
-		t.Fatalf("byBefore=%+v want dana=%s", byBefore, dana.ID)
+	if len(byBefore) != 2 || byBefore[0].ID != karin.ID || byBefore[1].ID != lana.ID {
+		t.Fatalf("byBefore=%+v want karin=%s lana=%s", byBefore, karin.ID, lana.ID)
 	}
 
-	none, err := s.List(ctx, core.SessionFilter{Agent: "dana", Before: 100})
+	none, err := s.List(ctx, core.SessionFilter{Agent: "dana", Before: 400})
 	if err != nil {
 		t.Fatal(err)
 	}

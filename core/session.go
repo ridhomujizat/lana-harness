@@ -43,8 +43,8 @@ type SessionFilter struct {
 	Agent string
 	// TopLevelOnly excludes child sessions.
 	TopLevelOnly bool
-	// Before, when > 0, keeps only sessions created before this Unix ms time
-	// (REQ-ROOM-002).
+	// Before, when > 0, keeps only sessions last updated before this Unix ms
+	// time (REQ-ROOM-002).
 	Before int64
 	Limit  int
 }

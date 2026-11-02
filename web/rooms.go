@@ -169,18 +169,23 @@ func (s *Server) handleRoomSegments(w http.ResponseWriter, r *http.Request) {
 		s.writeBackendError(w, "room segments", err)
 		return
 	}
-	// The store orders by updated_at; the page is the newest segments by
-	// created_at (API-ROOM-002).
-	sort.SliceStable(sessions, func(i, j int) bool {
-		return sessions[i].CreatedAt > sessions[j].CreatedAt
-	})
+	// The page is the limit most recently active segments; the store already
+	// returns them newest first (API-ROOM-002).
 	hasMore := len(sessions) > limit
 	if hasMore {
 		sessions = sessions[:limit]
 	}
-	// The page is returned in ascending created_at order.
+	// The page is returned in ascending updated_at order, ties by created_at
+	// then id, so the newest-active segment is last (API-ROOM-002).
 	sort.SliceStable(sessions, func(i, j int) bool {
-		return sessions[i].CreatedAt < sessions[j].CreatedAt
+		a, b := sessions[i], sessions[j]
+		if a.UpdatedAt != b.UpdatedAt {
+			return a.UpdatedAt < b.UpdatedAt
+		}
+		if a.CreatedAt != b.CreatedAt {
+			return a.CreatedAt < b.CreatedAt
+		}
+		return a.ID < b.ID
 	})
 	segments := make([]segmentJSON, 0, len(sessions))
 	for _, info := range sessions {

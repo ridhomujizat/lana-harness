@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -344,6 +345,85 @@ func TestRoomSegmentsPaging(t *testing.T) {
 	page = segmentsForTest(t, s, cookie, "/v1/rooms/dana/segments?limit=10&before=300")
 	if page.HasMore || len(page.Segments) != 2 || page.Segments[0].SessionID != byCreated[100] || page.Segments[1].SessionID != byCreated[200] {
 		t.Fatalf("third page = %+v", page)
+	}
+}
+
+// REQ-ROOM-002, AC-ROOM-002: the page is the most recently active segments, and
+// the conversation the owner continues (created long ago but active today) is
+// last and is not dropped.
+func TestRoomSegmentsOrderByLastActivity(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	byUpdated := map[int64]string{}
+	for _, s := range []struct{ created, updated int64 }{
+		{100, 900}, // created first, active last
+		{200, 800},
+		{300, 700},
+		{400, 600},
+	} {
+		info := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: s.created, UpdatedAt: s.updated})
+		byUpdated[s.updated] = info.ID
+	}
+	srv, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	page := segmentsForTest(t, srv, cookie, "/v1/rooms/dana/segments?limit=2")
+	if !page.HasMore || len(page.Segments) != 2 {
+		t.Fatalf("page = %+v, want 2 segments and has_more", page)
+	}
+	if page.Segments[0].SessionID != byUpdated[800] || page.Segments[1].SessionID != byUpdated[900] {
+		t.Fatalf("page = %+v, want the newest-active segment last", page.Segments)
+	}
+}
+
+// REQ-ROOM-002, AC-ROOM-003: paging by last activity returns the next older
+// page with no overlap and no missing segment.
+func TestRoomSegmentsPageByLastActivity(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	byUpdated := map[int64]string{}
+	for _, s := range []struct{ created, updated int64 }{
+		{100, 900},
+		{200, 800},
+		{300, 700},
+		{400, 600},
+		{500, 500},
+	} {
+		info := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: s.created, UpdatedAt: s.updated})
+		byUpdated[s.updated] = info.ID
+	}
+	srv, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	first := segmentsForTest(t, srv, cookie, "/v1/rooms/dana/segments?limit=2")
+	if !first.HasMore || len(first.Segments) != 2 {
+		t.Fatalf("first page = %+v", first)
+	}
+	if first.Segments[0].SessionID != byUpdated[800] || first.Segments[1].SessionID != byUpdated[900] {
+		t.Fatalf("first page = %+v", first.Segments)
+	}
+	// The oldest segment in the page is the cursor for the next page.
+	before := first.Segments[0].UpdatedAt
+
+	second := segmentsForTest(t, srv, cookie, "/v1/rooms/dana/segments?limit=2&before="+strconv.FormatInt(before, 10))
+	if !second.HasMore || len(second.Segments) != 2 {
+		t.Fatalf("second page = %+v", second)
+	}
+	if second.Segments[0].SessionID != byUpdated[600] || second.Segments[1].SessionID != byUpdated[700] {
+		t.Fatalf("second page = %+v", second.Segments)
+	}
+	seen := map[string]bool{}
+	for _, seg := range first.Segments {
+		seen[seg.SessionID] = true
+	}
+	for _, seg := range second.Segments {
+		if seen[seg.SessionID] {
+			t.Fatalf("segment %s appears on both pages", seg.SessionID)
+		}
+		seen[seg.SessionID] = true
+	}
+	for _, id := range []string{byUpdated[600], byUpdated[700], byUpdated[800], byUpdated[900]} {
+		if !seen[id] {
+			t.Fatalf("segment %s is missing from both pages", id)
+		}
 	}
 }
 

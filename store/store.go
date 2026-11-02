@@ -771,10 +771,10 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 		query += " AND (parent_session_id IS NULL OR parent_session_id = '')"
 	}
 	if f.Before > 0 {
-		query += " AND created_at < ?"
+		query += " AND updated_at < ?"
 		args = append(args, f.Before)
 	}
-	query += " ORDER BY updated_at DESC"
+	query += " ORDER BY updated_at DESC, created_at DESC, id DESC"
 	if f.Limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, f.Limit)

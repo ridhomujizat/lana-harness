@@ -108,11 +108,12 @@ name order.
 
 ### REQ-ROOM-002: Room timeline joins segments
 
-The system shall show a room as one timeline of its segments in creation order. Between two
+The system shall show a room as one timeline of its segments in last-activity order. Between two
 segments it shall show a divider with the channel and date of the newer segment. A
 `compaction/summary` event shall show as a divider that says earlier messages were summarized and
 that the full log is in History. The newest segment loads first; older segments load when the
-owner scrolls to the top.
+owner scrolls to the top. Segments are ordered by last activity (updated_at), so the conversation
+the owner continues is at the bottom.
 
 #### Acceptance criteria
 
