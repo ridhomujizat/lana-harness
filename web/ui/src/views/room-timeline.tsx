@@ -192,6 +192,33 @@ function stringOf(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+/* API-ROOM-002 orders segments by last activity: the list stays ascending by
+   updated_at everywhere, so the last segment is the one with the most recent
+   activity. */
+function byUpdatedAt(left: Segment, right: Segment): number {
+  return left.updated_at - right.updated_at;
+}
+
+/* Merge a freshly loaded page into the loaded segments by session id, keeping
+   the ascending updated_at order. */
+function mergeSegments(current: Segment[], incoming: Segment[]): Segment[] {
+  const byId = new Map(current.map((segment) => [segment.session_id, segment]));
+  for (const segment of incoming) {
+    byId.set(segment.session_id, segment);
+  }
+  return Array.from(byId.values()).sort(byUpdatedAt);
+}
+
+/* A segment still expects a live turn while it is running or waiting on the
+   owner; anything else is settled, so the working state clears. */
+function isActiveStatus(status: string): boolean {
+  return (
+    status === "running" ||
+    status === "waiting_approval" ||
+    status === "waiting_input"
+  );
+}
+
 /* The muted "Learned" line of a memory/captured or knowledge/compiled event
    (Q-004). The payload title or summary wins; otherwise the event is named. */
 function learnedLine(event: SessionEvent): string {
@@ -334,7 +361,8 @@ export function RoomView({ room }: RoomViewProps) {
     setEvents((current) => ({ ...current, ...loaded }));
   }, []);
 
-  /* REQ-ROOM-002: the newest page of segments loads first. */
+  /* REQ-ROOM-002: the newest page of segments loads first, ascending by
+     updated_at so the last segment is the most recently active. */
   useEffect(() => {
     let alive = true;
     roomSegments(room.name, { limit: LIMIT })
@@ -342,7 +370,7 @@ export function RoomView({ room }: RoomViewProps) {
         if (!alive) {
           return undefined;
         }
-        const list = page.segments || [];
+        const list = (page.segments || []).slice().sort(byUpdatedAt);
         setSegments(list);
         setHasMore(Boolean(page.has_more));
         return loadEvents(list.map((segment) => segment.session_id));
@@ -367,40 +395,6 @@ export function RoomView({ room }: RoomViewProps) {
     segments.length > 0 ? segments[segments.length - 1] : null;
   const newestId = lastSegment ? lastSegment.session_id : "";
 
-  /* REQ-ROOM-004: a Telegram turn started elsewhere shows up in the timeline. */
-  const lastSession = room.last_message ? room.last_message.session_id : "";
-  useEffect(() => {
-    if (!lastSession || handledSessionRef.current === lastSession) {
-      return;
-    }
-    handledSessionRef.current = lastSession;
-    if (segments.some((segment) => segment.session_id === lastSession)) {
-      return;
-    }
-    let alive = true;
-    roomSegments(room.name, { limit: LIMIT })
-      .then((page) => {
-        if (!alive) {
-          return undefined;
-        }
-        const list = page.segments || [];
-        setSegments((current) => {
-          const byId = new Map(current.map((segment) => [segment.session_id, segment]));
-          for (const segment of list) {
-            byId.set(segment.session_id, segment);
-          }
-          return Array.from(byId.values()).sort(
-            (left, right) => left.created_at - right.created_at
-          );
-        });
-        return loadEvents(list.map((segment) => segment.session_id));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [lastSession, segments, room.name, loadEvents]);
-
   const finishLive = useCallback(() => {
     startedRef.current = false;
     setTurnRunning(false);
@@ -410,6 +404,38 @@ export function RoomView({ room }: RoomViewProps) {
     setLiveTurnId("");
     setLiveStartedAt(0);
   }, []);
+
+  /* REQ-ROOM-004: a turn started elsewhere shows up in the timeline. When the
+     hub names a new last session, reload the newest page, merge it in ascending
+     updated_at order (so the active segment moves to the end) and clear the
+     working state when that segment is already settled. */
+  const lastSession = room.last_message ? room.last_message.session_id : "";
+  useEffect(() => {
+    if (!lastSession || handledSessionRef.current === lastSession) {
+      return;
+    }
+    handledSessionRef.current = lastSession;
+    let alive = true;
+    roomSegments(room.name, { limit: LIMIT })
+      .then((page) => {
+        if (!alive) {
+          return undefined;
+        }
+        const list = page.segments || [];
+        setSegments((current) => mergeSegments(current, list));
+        const target = list.find(
+          (segment) => segment.session_id === lastSession
+        );
+        if (target && !isActiveStatus(target.status)) {
+          finishLive();
+        }
+        return loadEvents(list.map((segment) => segment.session_id));
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [lastSession, room.name, loadEvents, finishLive]);
 
   /* The live tail streams the newest segment exactly like the session view. */
   useEffect(() => {
@@ -744,17 +770,13 @@ export function RoomView({ room }: RoomViewProps) {
     const oldest = segments[0];
     try {
       const page = await roomSegments(room.name, {
-        before: oldest ? oldest.created_at : 0,
+        before: oldest ? oldest.updated_at : 0,
         limit: LIMIT,
       });
       const older = page.segments || [];
-      const known = new Set(segments.map((segment) => segment.session_id));
-      const fresh = older.filter((segment) => !known.has(segment.session_id));
-      setSegments((current) =>
-        [...fresh, ...current].sort((left, right) => left.created_at - right.created_at)
-      );
+      setSegments((current) => mergeSegments(current, older));
       setHasMore(Boolean(page.has_more));
-      await loadEvents(fresh.map((segment) => segment.session_id));
+      await loadEvents(older.map((segment) => segment.session_id));
     } catch {
       /* Keep the current page; a later scroll retries. */
     } finally {
@@ -908,23 +930,34 @@ export function RoomView({ room }: RoomViewProps) {
       const result = await sendToRoom(room.name, body);
       setNewTopic(false);
       attachmentDraft.clear();
-      const isNew =
-        Boolean(result.session_id) &&
-        !segments.some((segment) => segment.session_id === result.session_id);
-      if (isNew) {
+      /* The sent session now has the most recent activity: move it to the end
+         and bump its updated_at so the live stream follows the session that
+         just received the message (API-ROOM-002, API-ROOM-003). */
+      if (result.session_id) {
         const now = Date.now();
-        const segment: Segment = {
-          session_id: result.session_id,
-          channel: "web",
-          address: "owner",
-          created_at: now,
-          updated_at: now,
-          turn_count: 0,
-          status: "running",
-        };
-        setSegments((current) =>
-          [...current, segment].sort((left, right) => left.created_at - right.created_at)
-        );
+        setSegments((current) => {
+          const exists = current.some(
+            (segment) => segment.session_id === result.session_id
+          );
+          const next = exists
+            ? current.map((segment) =>
+                segment.session_id === result.session_id
+                  ? { ...segment, updated_at: now, status: "running" }
+                  : segment
+              )
+            : current.concat([
+                {
+                  session_id: result.session_id,
+                  channel: "web",
+                  address: "owner",
+                  created_at: now,
+                  updated_at: now,
+                  turn_count: 0,
+                  status: "running",
+                },
+              ]);
+          return next.slice().sort(byUpdatedAt);
+        });
         await loadEvents([result.session_id]);
       }
       setTurnRunning(true);

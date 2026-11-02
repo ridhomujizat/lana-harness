@@ -9,42 +9,43 @@ import type { Presence, RoomRow } from "../api/rooms";
 
 export type FaceSize = 18 | 24 | 32 | 44 | 52 | 96;
 
-const FACE_COLORS = {
-  brand: { bg: "#F4F3FF", fg: "#5925DC" },
-  success: { bg: "#ECFDF3", fg: "#067647" },
-  warning: { bg: "#FFFAEB", fg: "#B54708" },
-  error: { bg: "#FEF3F2", fg: "#B42318" },
-  blue: { bg: "#EFF8FF", fg: "#175CD3" },
-  gray: { bg: "#F2F4F7", fg: "#475467" },
-} as const;
+/* The tinted background and strong foreground of an agent color come from the
+   theme-aware custom properties of rooms.css, so the faces are dark-tinted with
+   readable letters in dark mode and unchanged in light mode (REQ-ROOM-006). */
+const FACE_TONES = ["brand", "success", "warning", "error", "blue", "gray"] as const;
 
-type FaceColor = keyof typeof FACE_COLORS;
+type FaceTone = (typeof FACE_TONES)[number];
 
-function faceColors(color?: string): { bg: string; fg: string } {
-  const key = color && color in FACE_COLORS ? (color as FaceColor) : "brand";
-  return FACE_COLORS[key];
+function faceTone(color?: string): FaceTone {
+  return color && (FACE_TONES as readonly string[]).includes(color)
+    ? (color as FaceTone)
+    : "brand";
 }
 
 /* The tinted background and strong foreground of an agent color. The group
    room uses them for the handoff chips and the message names (REQ-ROOM-008). */
 export function agentFaceColors(color?: string): { bg: string; fg: string } {
-  return faceColors(color);
+  const tone = faceTone(color);
+  return {
+    bg: "var(--face-" + tone + "-bg)",
+    fg: "var(--face-" + tone + "-fg)",
+  };
 }
 
 /* The presence dot of the face; the label colors of PresenceLabel are a
-   separate, darker set. */
+   separate, darker set. Both read theme-aware custom properties. */
 const DOT_COLORS: Record<string, string> = {
-  waiting: "#F79009",
-  working: "#7F56D9",
-  problem: "#F04438",
-  online: "#17B26A",
-  resting: "#D0D5DD",
+  waiting: "var(--presence-dot-waiting)",
+  working: "var(--presence-dot-working)",
+  problem: "var(--presence-dot-problem)",
+  online: "var(--presence-dot-online)",
+  resting: "var(--presence-dot-resting)",
 };
 
 const LABEL_COLORS: Record<string, string> = {
-  waiting: "#B54708",
-  working: "#6941C6",
-  problem: "#B42318",
+  waiting: "var(--presence-label-waiting)",
+  working: "var(--presence-label-working)",
+  problem: "var(--presence-label-problem)",
 };
 
 function initialOf(name: string): string {
@@ -68,7 +69,7 @@ export function AgentFace({
   className = "",
   style,
 }: AgentFaceProps) {
-  const face = faceColors(color);
+  const face = agentFaceColors(color);
   const state = presence ? presence.state : "";
   const label = presence ? name + ", " + state : name;
   return (
@@ -97,7 +98,7 @@ export function PresenceLabel({ presence }: { presence?: Presence | null }) {
   if (!presence) {
     return null;
   }
-  const color = LABEL_COLORS[presence.state] || "#475467";
+  const color = LABEL_COLORS[presence.state] || "var(--fg-tertiary)";
   return (
     <span className={"presence-label state-" + presence.state}>
       <span

@@ -511,6 +511,19 @@ textarea {
   flex: 1 1 auto;
 }
 
+/* The Chats page owns the viewport: the room list and the timeline each scroll
+   on their own, and the document itself does not scroll. Scoped to the Chats
+   page so every other page keeps its normal document scroll. */
+.app-content:has(.rooms-page) {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-content:has(.rooms-page) > #main {
+  min-height: 0;
+}
+
 .sidebar-collapsed .sidebar {
   align-items: center;
   flex-basis: 80px;

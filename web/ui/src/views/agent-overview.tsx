@@ -272,7 +272,7 @@ export function AgentOverview({ name, agent }: AgentOverviewProps) {
         className="ov-hero"
         style={{
           background:
-            "linear-gradient(180deg, " + colors.bg + " 0%, #FFFFFF 100%)",
+            "linear-gradient(180deg, " + colors.bg + " 0%, var(--bg-primary) 100%)",
           borderColor: colors.bg,
         }}
       >
@@ -590,7 +590,7 @@ function TeamOverview({
         className="ov-hero"
         style={{
           background:
-            "linear-gradient(180deg, " + colors.bg + " 0%, #FFFFFF 100%)",
+            "linear-gradient(180deg, " + colors.bg + " 0%, var(--bg-primary) 100%)",
           borderColor: colors.bg,
         }}
       >

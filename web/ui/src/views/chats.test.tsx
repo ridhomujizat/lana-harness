@@ -398,7 +398,7 @@ describe("Older segments (AC-ROOM-003)", () => {
 
     await waitFor(() => {
       expect(vi.mocked(roomSegments)).toHaveBeenCalledWith("dana", {
-        before: 5000,
+        before: 6000,
         limit: 5,
       });
     });
