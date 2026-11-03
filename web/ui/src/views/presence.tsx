@@ -32,6 +32,21 @@ export function agentFaceColors(color?: string): { bg: string; fg: string } {
   };
 }
 
+/* The agent color as a Gr8r token, so a Gr8r Avatar keeps the same palette as
+   the tinted AgentFace and the roster (REQ-ROOM-006, REQ-ROOM-011). */
+const GR8R_COLORS: Record<string, string> = {
+  brand: "var(--violet)",
+  success: "var(--green)",
+  warning: "var(--amber)",
+  error: "var(--red)",
+  blue: "var(--blue)",
+  gray: "var(--gray)",
+};
+
+export function gr8rColor(color?: string): string {
+  return GR8R_COLORS[faceTone(color)] || "var(--violet)";
+}
+
 /* The presence dot of the face; the label colors of PresenceLabel are a
    separate, darker set. Both read theme-aware custom properties. */
 const DOT_COLORS: Record<string, string> = {
@@ -152,25 +167,6 @@ export function SkeletonRows({ count = 3 }: { count?: number }) {
         />
       ))}
     </div>
-  );
-}
-
-export interface UnreadBadgeProps {
-  count: number;
-  tone?: string;
-}
-
-export function UnreadBadge({ count, tone = "brand" }: UnreadBadgeProps) {
-  if (!count || count <= 0) {
-    return null;
-  }
-  return (
-    <span
-      className={"unread-badge tone-" + tone}
-      aria-label={count + " unread"}
-    >
-      {count > 99 ? "99+" : count}
-    </span>
   );
 }
 

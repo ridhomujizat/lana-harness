@@ -24,6 +24,9 @@ func acceptedAssetContentTypes(name string) []string {
 		return []string{"image/svg+xml"}
 	case ".txt":
 		return []string{"text/plain"}
+	case ".woff2":
+		// Self-hosted Geist (the CSP blocks third-party font hosts).
+		return []string{"font/woff2"}
 	default:
 		return nil
 	}

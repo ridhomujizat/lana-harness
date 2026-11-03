@@ -20,17 +20,27 @@ import type {
   SkillRow as SkillRowData,
 } from "../api/skills";
 import type { Agent } from "../api/agents";
-import { Dialog, ErrorNotice, Loading, Notice, useAnnounce } from "../ui/ui";
-import {
-  agoLabel,
-  AgentAvatar,
-  Icon,
-  isTeam,
-  rosterNames,
-  splitModel,
-  TeamAvatars,
-} from "./agent-common";
+import { Dialog, detailText, useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { avatarFor } from "../lib/avatar";
+import { agoLabel, isTeam, rosterNames, splitModel } from "./agent-common";
 import type { AgentLike } from "./agent-common";
+import {
+  Avatar,
+  AvatarStack,
+  Badge,
+  Button,
+  Checkbox,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  Input,
+  SearchInput,
+  Seg,
+  Select,
+  Skeleton,
+  Textarea,
+} from "../ui/gr8r";
 
 /* REQ-WEB-048, REQ-WEB-049; AC-WEB-051, AC-WEB-052: the skills list and the
    skill editor. Skills are markdown files with a small frontmatter block. The
@@ -56,13 +66,39 @@ function scopeAgent(scope: string | undefined): string {
     : "";
 }
 
+/* The agent identity colors (lib/avatar.ts) map onto the Gr8r status tokens so
+   one agent keeps one color in the picker, the roster and the skills editor. */
+const AVATAR_COLORS: Record<string, string> = {
+  "tone-brand": "var(--violet)",
+  "tone-success": "var(--green)",
+  "tone-warning": "var(--amber)",
+  "tone-error": "var(--red)",
+  "tone-gray": "var(--gray)",
+};
+
+function agentColor(name: string): string {
+  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+}
+
 function ScopeBadge({ scope }: { scope: string }) {
   const global = scope === "global";
   return (
-    <span className={"badge-ui" + (global ? " badge-ui-brand" : "")}>
-      <span className="badge-ui-dot" aria-hidden="true"></span>
+    <Badge tone={global ? "accent" : "gray"} dot>
       {scopeLabel(scope)}
-    </span>
+    </Badge>
+  );
+}
+
+function DetailsList({ details }: { details: unknown[] }) {
+  if (!details || details.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="err-list">
+      {details.map((detail, index) => (
+        <li key={index}>{detailText(detail)}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -315,24 +351,22 @@ function DeleteSkillDialog({
         its <code>skills</code> list. The runtime skips a listed skill that has
         no folder (Q-026).
       </p>
-      {error ? <ErrorNotice message={error} details={details} /> : null}
+      {error ? (
+        <div className="alert danger" role="alert">
+          <Ic name="circle-alert" size={15} />
+          <div className="grow">
+            <p className="skills-alert-msg">{error}</p>
+            <DetailsList details={details} />
+          </div>
+        </div>
+      ) : null}
       <div className="dialog-actions">
-        <button
-          type="button"
-          className="button-ui button-ui-secondary"
-          disabled={busy}
-          onClick={onClose}
-        >
+        <Button variant="secondary" disabled={busy} onClick={onClose}>
           Cancel
-        </button>
-        <button
-          type="button"
-          className="button-ui skills-danger"
-          disabled={busy}
-          onClick={confirm}
-        >
+        </Button>
+        <Button variant="danger" disabled={busy} loading={busy} onClick={confirm}>
           {busy ? "Deleting…" : "Delete skill"}
-        </button>
+        </Button>
       </div>
     </Dialog>
   );
@@ -340,7 +374,7 @@ function DeleteSkillDialog({
 
 interface SkillRowProps {
   skill: SkillRowData;
-  onOpen: (event: MouseEvent<HTMLTableRowElement>) => void;
+  onOpen: (event: MouseEvent<HTMLDivElement>) => void;
   onDelete: () => void;
 }
 
@@ -348,76 +382,66 @@ function SkillRow({ skill, onOpen, onDelete }: SkillRowProps) {
   const valid = skill.valid !== false;
   const canDelete = SKILL_NAME_RE.test(String(skill.name || ""));
   return (
-    <tr
-      className={"agents-row skills-row" + (valid ? "" : " is-invalid")}
-      onClick={onOpen}
-    >
-      <td>
-        <span className="agents-name-cell">
-          <span
-            className={"skills-tile" + (valid ? "" : " is-invalid")}
-            aria-hidden="true"
-          >
-            <Icon name="skills" />
-          </span>
-          <span className="agents-name-text">
-            <span className="agents-name-row">
-              <a
-                className="agents-name-action skills-name"
-                href={skillLinkTarget(skill)}
-              >
-                {skill.name}
-              </a>
-              {valid ? null : (
-                <span className="badge-ui badge-ui-error">
-                  <span className="badge-ui-dot" aria-hidden="true"></span>
-                  Can't load
-                </span>
-              )}
-            </span>
-            {valid ? (
-              <span className="agents-description">
-                {skill.description || ""}
-              </span>
-            ) : (
-              <span className="skills-error-text">
-                {skill.error || "This skill cannot be loaded."}
-              </span>
-            )}
-          </span>
+    <div className={"mini skills-row" + (valid ? "" : " is-invalid")} onClick={onOpen}>
+      <span
+        className={"skills-tile" + (valid ? "" : " is-invalid")}
+        aria-hidden="true"
+      >
+        <Ic name="file-code-2" size={15} />
+      </span>
+      <span className="skills-row-main">
+        <span className="skills-row-title">
+          <a className="skills-name" href={skillLinkTarget(skill)}>
+            {skill.name}
+          </a>
+          {valid ? null : (
+            <Badge tone="red" dot>
+              Can't load
+            </Badge>
+          )}
         </span>
-      </td>
-      <td>
+        {valid ? (
+          <span className="skills-row-desc">{skill.description || ""}</span>
+        ) : (
+          <span className="skills-row-desc is-error">
+            {skill.error || "This skill cannot be loaded."}
+          </span>
+        )}
+      </span>
+      <span className="skills-row-scope">
         <ScopeBadge scope={skill.scope} />
-      </td>
-      <td className="agents-number">{valid ? formatSize(skill.size) : "–"}</td>
-      <td className="skills-updated">{agoLabel(skill.updated_at) || "—"}</td>
-      <td className="skills-actions">
+      </span>
+      <span className="skills-row-size num">
+        {valid ? formatSize(skill.size) : "–"}
+      </span>
+      <span className="skills-row-updated">
+        {agoLabel(skill.updated_at) || "—"}
+      </span>
+      <span className="skills-row-actions">
         {valid || canDelete ? (
-          <button
-            type="button"
-            className="skills-delete"
-            aria-label={"Delete skill " + skill.name}
+          <IconButton
+            className="skills-del"
+            icon="trash-2"
+            size="sm"
+            label={"Delete skill " + skill.name}
             onClick={(event: MouseEvent<HTMLButtonElement>) => {
               event.stopPropagation();
               onDelete();
             }}
-          >
-            Delete
-          </button>
+          />
         ) : null}
         <a
-          className="skills-open"
+          className="ibtn ibtn-sm"
           href={skillLinkTarget(skill)}
           aria-label={"Open skill " + skill.name}
           onClick={(event: MouseEvent<HTMLAnchorElement>) =>
             event.stopPropagation()
           }
         >
-          <Icon name="chevron-right" />
+          <Ic name="chevron-right" size={16} />
         </a>
-      </td>
-    </tr>
+      </span>
+    </div>
   );
 }
 
@@ -532,7 +556,7 @@ export function SkillsPage() {
     setReloadToken((current) => current + 1);
   }
 
-  function openRow(event: MouseEvent<HTMLTableRowElement>, row: SkillRowData) {
+  function openRow(event: MouseEvent<HTMLDivElement>, row: SkillRowData) {
     const target = event.target;
     if (
       target instanceof Element &&
@@ -553,132 +577,127 @@ export function SkillsPage() {
 
   return (
     <main id="main" className="page skills-page">
-      <header className="agents-header">
-        <div className="agents-heading">
-          <h1 className="agents-title">Skills</h1>
-          <p className="agents-subtitle">
+      <header className="ph">
+        <div>
+          <h1>Skills</h1>
+          <p>
             Instructions an agent loads when a task needs them. Global skills
             work for every agent.
           </p>
         </div>
-        <a className="button-ui button-ui-primary" href="#/skills/new">
-          + New skill
-        </a>
+        <div className="acts">
+          <Button as="a" variant="primary" icon="plus" href="#/skills/new">
+            New skill
+          </Button>
+        </div>
       </header>
 
-      <div className="agents-toolbar">
-        <div className="sessions-search agents-search">
-          <span className="sessions-search-icon">
-            <Icon name="search" />
-          </span>
-          <label className="sr-only" htmlFor="skills-search-input">
-            Search skills
-          </label>
-          <input
-            id="skills-search-input"
-            className="sessions-search-input"
-            type="search"
-            placeholder="Search skills"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              changeQuery(event.target.value)
-            }
-          />
-        </div>
-        <div className="skills-scope-filter">
-          <span className="skills-scope-icon" aria-hidden="true">
-            <Icon name="filter" />
-          </span>
-          <label className="sr-only" htmlFor="skills-scope-select">
-            Filter by scope
-          </label>
-          <select
-            id="skills-scope-select"
-            className="skills-scope-select"
-            value={scope}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              changeScope(event.target.value)
-            }
-          >
-            <option value="all">All scopes</option>
-            <option value="global">Global</option>
-            {scopeOptions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </div>
-        <span className="agents-toolbar-spacer"></span>
+      <div className="skills-toolbar">
+        <SearchInput
+          wrapClassName="skills-search"
+          aria-label="Search skills"
+          placeholder="Search skills"
+          autoComplete="off"
+          spellCheck={false}
+          kbd={null}
+          value={query}
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            changeQuery(event.target.value)
+          }
+        />
+        <Seg
+          className="skills-scope-seg"
+          aria-label="Filter by scope"
+          options={[
+            { value: "all", label: "All scopes" },
+            { value: "global", label: "Global" },
+            ...scopeOptions.map((value) => ({ value, label: value })),
+          ]}
+          value={scope}
+          onChange={changeScope}
+        />
         {status === "ready" ? (
-          <p className="agents-summary" aria-live="polite">
+          <p className="skills-summary" aria-live="polite">
             {summary}
           </p>
         ) : null}
       </div>
 
-      {status === "loading" ? <Loading label="Loading skills…" /> : null}
+      {status === "loading" ? (
+        <div className="panel skills-list">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="mini skills-row skills-row-skeleton">
+              <Skeleton width={30} height={30} radius={8} />
+              <span className="skills-row-main">
+                <Skeleton width="40%" height={12} />
+                <Skeleton width="70%" height={10} />
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {status === "error" ? (
-        <div className="skills-state" role="alert">
-          <ErrorNotice message={error} details={details} />
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={reload}
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load skills"
+            text={error}
+            action={
+              <Button variant="secondary" onClick={reload}>
+                Try again
+              </Button>
+            }
           >
-            Try again
-          </button>
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
       ) : null}
 
       {status === "ready" && rows.length === 0 ? (
-        <div className="skills-empty">
-          <h2 className="empty-title">No skills yet</h2>
-          <p className="empty-text">
-            A skill is a folder with a SKILL.md that an agent loads when a task
-            needs it.
-          </p>
-          <a className="button-ui button-ui-primary" href="#/skills/new">
-            + New skill
-          </a>
+        <div className="panel">
+          <EmptyState
+            icon="sparkles"
+            title="No skills yet"
+            text="A skill is a folder with a SKILL.md that an agent loads when a task needs it."
+            action={
+              <Button as="a" variant="primary" icon="plus" href="#/skills/new">
+                New skill
+              </Button>
+            }
+          />
         </div>
       ) : null}
 
       {status === "ready" && rows.length > 0 && visible.length === 0 ? (
-        <p className="skills-state muted" role="status">
-          No skills match the current search and scope.
-        </p>
+        <div className="panel">
+          <EmptyState
+            icon="search-x"
+            size="sm"
+            title="No skills match"
+            text="No skills match the current search and scope."
+            role="status"
+          />
+        </div>
       ) : null}
 
       {status === "ready" && visible.length > 0 ? (
-        <div className="agents-table-wrap">
-          <table className="agents-table skills-table">
-            <caption className="sr-only">Skills</caption>
-            <thead>
-              <tr>
-                <th scope="col">Skill</th>
-                <th scope="col">Scope</th>
-                <th scope="col">Size</th>
-                <th scope="col">Updated</th>
-                <th scope="col">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageRows.map((row) => (
-                <SkillRow
-                  key={row.scope + "/" + row.name}
-                  skill={row}
-                  onOpen={(event) => openRow(event, row)}
-                  onDelete={() => setDeleteTarget(row)}
-                />
-              ))}
-            </tbody>
-          </table>
+        <section className="panel skills-list" aria-label="Skills">
+          <div className="skills-list-head" aria-hidden="true">
+            <span>Skill</span>
+            <span>Scope</span>
+            <span>Size</span>
+            <span>Updated</span>
+            <span></span>
+          </div>
+          {pageRows.map((row) => (
+            <SkillRow
+              key={row.scope + "/" + row.name}
+              skill={row}
+              onOpen={(event) => openRow(event, row)}
+              onDelete={() => setDeleteTarget(row)}
+            />
+          ))}
           <div className="skills-pagination">
             <p className="skills-pagination-info">
               Showing {firstRow}–{lastRow} of {visible.length}
@@ -687,27 +706,27 @@ export function SkillsPage() {
               Page {currentPage + 1} of {pageCount}
             </span>
             <div className="skills-pager">
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={currentPage === 0}
                 onClick={() => setPageIndex(Math.max(0, currentPage - 1))}
               >
                 Previous
-              </button>
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={currentPage >= pageCount - 1}
                 onClick={() =>
                   setPageIndex(Math.min(pageCount - 1, currentPage + 1))
                 }
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </section>
       ) : null}
 
       {deleteTarget ? (
@@ -819,27 +838,20 @@ function AddAgentsDialog({
       <p className="skills-dialog-subtitle">
         Picked agents can load this skill when a task needs it.
       </p>
-      <div className="sessions-search skills-dialog-search">
-        <span className="sessions-search-icon">
-          <Icon name="search" />
-        </span>
-        <label className="sr-only" htmlFor="skills-add-agent-search">
-          Search agents
-        </label>
-        <input
-          id="skills-add-agent-search"
-          data-autofocus
-          className="sessions-search-input"
-          type="search"
-          placeholder="Search agents"
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            setQuery(event.target.value)
-          }
-        />
-      </div>
+      <SearchInput
+        wrapClassName="skills-dialog-search"
+        id="skills-add-agent-search"
+        data-autofocus
+        aria-label="Search agents"
+        placeholder="Search agents"
+        autoComplete="off"
+        spellCheck={false}
+        kbd={null}
+        value={query}
+        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+          setQuery(event.target.value)
+        }
+      />
       <div className="skills-add-list">
         {agentOptions.filter(matches).map((agent) => {
           const added = selectedSet.has(agent.name);
@@ -854,14 +866,16 @@ function AddAgentsDialog({
                 (added ? " is-added" : "")
               }
             >
-              <input
-                type="checkbox"
-                className="skills-add-check"
+              <Checkbox
                 checked={checked}
                 disabled={added}
                 onChange={() => toggleAgent(agent.name)}
               />
-              <AgentAvatar name={agent.name} size="32" />
+              <Avatar
+                name={agent.name}
+                color={agentColor(agent.name)}
+                size="lg"
+              />
               <span className="skills-add-text">
                 <span className="skills-add-name">{agent.name}</span>
                 {model ? <span className="skills-add-meta">{model}</span> : null}
@@ -888,21 +902,25 @@ function AddAgentsDialog({
                 (allAdded ? " is-added" : "")
               }
             >
-              <input
-                type="checkbox"
-                className="skills-add-check"
+              <Checkbox
                 checked={allPicked}
                 disabled={allAdded || members.length === 0}
                 onChange={() => toggleTeam(team)}
               />
-              <TeamAvatars agent={team} size="24" />
+              <AvatarStack
+                size="sm"
+                max={3}
+                items={rosterNames(team).map((member) => ({
+                  name: member,
+                  color: agentColor(member),
+                }))}
+              />
               <span className="skills-add-text">
                 <span className="skills-add-name-row">
                   <span className="skills-add-name">{team.name}</span>
-                  <span className="badge-ui badge-ui-brand">
-                    <span className="badge-ui-dot" aria-hidden="true"></span>
+                  <Badge tone="accent" dot>
                     Team
-                  </span>
+                  </Badge>
                 </span>
                 <span className="skills-add-meta">
                   {members.length === 0
@@ -924,16 +942,11 @@ function AddAgentsDialog({
         ) : null}
       </div>
       <div className="dialog-actions">
-        <button
-          type="button"
-          className="button-ui button-ui-secondary"
-          onClick={onClose}
-        >
+        <Button variant="secondary" onClick={onClose}>
           Cancel
-        </button>
-        <button
-          type="button"
-          className="button-ui button-ui-primary"
+        </Button>
+        <Button
+          variant="primary"
           disabled={pending.length === 0}
           onClick={() => {
             onAdd(pending);
@@ -945,7 +958,7 @@ function AddAgentsDialog({
             : pending.length === 1
               ? "Add 1 agent"
               : "Add " + pending.length + " agents"}
-        </button>
+        </Button>
       </div>
     </Dialog>
   );
@@ -966,8 +979,8 @@ function AgentPickerRow({
 }: AgentPickerRowProps) {
   const model = agentModelLabel(agent);
   return (
-    <div className="skills-agent-row">
-      <AgentAvatar name={agent.name} size="28" />
+    <div className="mini skills-agent-row">
+      <Avatar name={agent.name} color={agentColor(agent.name)} size="md" />
       <span className="skills-agent-text">
         <span className="skills-agent-name">{agent.name}</span>
         {model ? <span className="skills-agent-model">{model}</span> : null}
@@ -975,14 +988,13 @@ function AgentPickerRow({
       {readOnly ? (
         <span className="skills-agent-owner">Owner</span>
       ) : (
-        <button
-          type="button"
+        <IconButton
           className="skills-agent-remove"
-          aria-label={"Remove " + agent.name + " from " + skillName}
+          size="sm"
+          icon="x"
+          label={"Remove " + agent.name + " from " + skillName}
           onClick={onRemove}
-        >
-          <Icon name="close" className="icon-16" />
-        </button>
+        />
       )}
     </div>
   );
@@ -1400,12 +1412,21 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
   if (status === "loading") {
     return (
       <main id="main" className="page skills-editor-page">
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          <a href="#/skills">Skills</a>
-          <span aria-hidden="true">/</span>
-          <span aria-current="page">{newSkill ? "New skill" : name}</span>
-        </nav>
-        <Loading label="Loading skill…" />
+        <div className="ph">
+          <div>
+            <a className="skills-back" href="#/skills">
+              <Ic name="arrow-left" size={14} />
+              Skills
+            </a>
+          </div>
+        </div>
+        <div className="panel skills-editor-loading" aria-busy="true">
+          <span className="sr">Loading skill…</span>
+          <Skeleton width={180} height={14} />
+          <Skeleton width="100%" height={30} radius={6} />
+          <Skeleton width="100%" height={30} radius={6} />
+          <Skeleton width="100%" height={120} radius={6} />
+        </div>
       </main>
     );
   }
@@ -1413,25 +1434,33 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
   if (status === "error") {
     return (
       <main id="main" className="page skills-editor-page">
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          <a href="#/skills">Skills</a>
-          <span aria-hidden="true">/</span>
-          <span aria-current="page">{newSkill ? "New skill" : name}</span>
-        </nav>
-        <div role="alert">
-          <ErrorNotice message={error} details={details} />
-        </div>
-        <div className="agent-state-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={reload}
+        <header className="ph">
+          <div>
+            <a className="skills-back" href="#/skills">
+              <Ic name="arrow-left" size={14} />
+              Skills
+            </a>
+            <h1>{newSkill ? "New skill" : name}</h1>
+          </div>
+          <div className="acts">
+            <Button as="a" variant="secondary" href="#/skills">
+              Back to skills
+            </Button>
+          </div>
+        </header>
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load the skill"
+            text={error}
+            action={
+              <Button variant="secondary" onClick={reload}>
+                Try again
+              </Button>
+            }
           >
-            Try again
-          </button>
-          <a className="button-ui button-ui-secondary" href="#/skills">
-            Back to skills
-          </a>
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
       </main>
     );
@@ -1448,169 +1477,211 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
 
   return (
     <main id="main" className="page skills-editor-page">
-      <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-        <a href="#/skills">Skills</a>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">{newSkill ? "New skill" : name}</span>
-      </nav>
-
-      <header className="skills-editor-header">
-        <div className="skills-editor-heading">
-          <div className="skills-editor-title-row">
-            <h1 className="skills-editor-title">{headingName}</h1>
-            <ScopeBadge scope={skillScope} />
-          </div>
-          <p className="skills-editor-subtitle">{subtitle}</p>
-        </div>
-        <div className="skills-editor-actions">
-          <a className="button-ui button-ui-secondary" href="#/skills">
-            Cancel
+      <header className="ph">
+        <div>
+          <a className="skills-back" href="#/skills">
+            <Ic name="arrow-left" size={14} />
+            Skills
           </a>
-          <button
+          <h1>{headingName}</h1>
+          <p>{subtitle}</p>
+        </div>
+        <div className="acts">
+          <ScopeBadge scope={skillScope} />
+          <Button as="a" variant="secondary" href="#/skills">
+            Cancel
+          </Button>
+          <Button
             type="submit"
             form="skill-editor-form"
-            className="button-ui button-ui-primary"
+            variant="primary"
+            loading={saving}
             disabled={saving}
           >
             {saving ? "Saving…" : "Save skill"}
-          </button>
+          </Button>
         </div>
       </header>
 
-      {error ? (
-        <div className="skills-save-feedback" role="alert">
-          <ErrorNotice message={error} details={details} />
-          {stale ? (
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              onClick={
-                created
-                  ? () => {
-                      window.location.hash = skillsHref(
-                        skillScope,
-                        savedName
-                      );
-                    }
-                  : reload
-              }
+      {error || saveState || (agentResults && agentResults.length > 0) ? (
+        <div className="skills-feedback">
+          {error ? (
+            <div className="alert danger" role="alert">
+              <Ic name="circle-alert" size={15} />
+              <div className="grow">
+                <p className="skills-alert-msg">{error}</p>
+                <DetailsList details={details} />
+              </div>
+              {stale ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={
+                    created
+                      ? () => {
+                          window.location.hash = skillsHref(
+                            skillScope,
+                            savedName
+                          );
+                        }
+                      : reload
+                  }
+                >
+                  {created ? "Open the saved skill" : "Reload"}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {saveState ? (
+            <div
+              className={"alert " + (saveState.tone === "warn" ? "warn" : "ok")}
+              aria-live="polite"
             >
-              {created ? "Open the saved skill" : "Reload"}
-            </button>
+              <Ic
+                name={
+                  saveState.tone === "warn" ? "triangle-alert" : "circle-check"
+                }
+                size={15}
+              />
+              <span>{saveState.message}</span>
+            </div>
+          ) : null}
+          {agentResults && agentResults.length > 0 ? (
+            <ul className="skills-agent-results">
+              {agentResults.map((result) => (
+                <li
+                  key={result.name}
+                  className={
+                    result.ok ? "skills-result-ok" : "skills-result-error"
+                  }
+                >
+                  <strong>{result.name}</strong>: {result.message}
+                </li>
+              ))}
+            </ul>
           ) : null}
         </div>
       ) : null}
 
-      <div className="skills-save-feedback" aria-live="polite">
-        {saveState ? (
-          <Notice tone={saveState.tone}>{saveState.message}</Notice>
-        ) : null}
-        {agentResults && agentResults.length > 0 ? (
-          <ul className="skills-agent-results">
-            {agentResults.map((result) => (
-              <li
-                key={result.name}
-                className={
-                  result.ok ? "skills-result-ok" : "skills-result-error"
-                }
-              >
-                <strong>{result.name}</strong>: {result.message}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-
       <form
         id="skill-editor-form"
-        className="skills-editor-body"
+        className="skills-form"
         onSubmit={save}
         noValidate
       >
-        <div className="skills-editor-details">
-          <label className="field skills-field">
-            <span className="field-label">Name</span>
-            {readOnlyName ? (
-              <input
-                className="skills-readonly skills-mono"
-                type="text"
-                value={newSkill ? skillName : name || ""}
-                readOnly
-                aria-describedby="skill-name-hint"
-              />
-            ) : (
-              <input
-                className="skills-mono"
-                type="text"
-                name="name"
-                value={skillName}
-                maxLength={64}
-                autoComplete="off"
-                spellCheck={false}
-                pattern="[a-z][a-z0-9_-]{0,63}"
-                required
-                aria-invalid={Boolean(nameError)}
-                aria-describedby={
-                  "skill-name-hint" + (nameError ? " skill-name-error" : "")
-                }
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  setSkillName(event.target.value);
-                  setNameError("");
-                }}
-              />
-            )}
-            <span id="skill-name-hint" className="hint">
-              Lowercase letters, digits, - and _.
-            </span>
-            {nameError ? (
-              <span id="skill-name-error" className="skills-field-error">
-                {nameError}
-              </span>
-            ) : null}
-          </label>
+        <section className="sblock skills-block">
+          <div className="srow">
+            <div className="skills-srow-text">
+              <label className="t" htmlFor="skill-name">
+                Name
+              </label>
+              <div className="d" id="skill-name-hint">
+                Lowercase letters, digits, - and _.
+              </div>
+            </div>
+            <div className="skills-ctl">
+              {readOnlyName ? (
+                <Input
+                  id="skill-name"
+                  className="skills-readonly mono"
+                  type="text"
+                  value={newSkill ? skillName : name || ""}
+                  readOnly
+                  aria-describedby="skill-name-hint"
+                />
+              ) : (
+                <Input
+                  id="skill-name"
+                  className="mono"
+                  type="text"
+                  name="name"
+                  value={skillName}
+                  maxLength={64}
+                  autoComplete="off"
+                  spellCheck={false}
+                  pattern="[a-z][a-z0-9_-]{0,63}"
+                  required
+                  invalid={Boolean(nameError)}
+                  aria-describedby={
+                    "skill-name-hint" + (nameError ? " skill-name-error" : "")
+                  }
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    setSkillName(event.target.value);
+                    setNameError("");
+                  }}
+                />
+              )}
+              {nameError ? (
+                <span id="skill-name-error" className="err">
+                  <Ic name="circle-alert" size={12} />
+                  {nameError}
+                </span>
+              ) : null}
+            </div>
+          </div>
 
-          <label className="field skills-field">
-            <span className="field-label">Scope</span>
-            {readOnlyScope ? (
-              <input
-                className="skills-readonly"
-                type="text"
-                value={scopeLabel(skillScope)}
-                readOnly
-                aria-describedby="skill-scope-hint"
-              />
-            ) : (
-              <select
-                name="scope"
-                value={skillScope}
-                aria-describedby="skill-scope-hint"
-                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                  setSkillScope(event.target.value)
-                }
-              >
-                <option value="global">Global</option>
-                {scopeChoices.map((agent) => (
-                  <option key={agent.name} value={"agent:" + agent.name}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <span id="skill-scope-hint" className="hint">
-              {readOnlyScope
-                ? "The scope cannot change after the skill is created."
-                : "Shared library. Or pick one agent to keep it private."}
-            </span>
-          </label>
+          <div className="srow">
+            <div className="skills-srow-text">
+              <label className="t" htmlFor="skill-scope">
+                Scope
+              </label>
+              <div className="d" id="skill-scope-hint">
+                {readOnlyScope
+                  ? "The scope cannot change after the skill is created."
+                  : "Shared library. Or pick one agent to keep it private."}
+              </div>
+            </div>
+            <div className="skills-ctl">
+              {readOnlyScope ? (
+                <Input
+                  id="skill-scope"
+                  className="skills-readonly"
+                  type="text"
+                  value={scopeLabel(skillScope)}
+                  readOnly
+                  aria-describedby="skill-scope-hint"
+                />
+              ) : (
+                <Select
+                  id="skill-scope"
+                  name="scope"
+                  aria-describedby="skill-scope-hint"
+                  options={[
+                    { value: "global", label: "Global" },
+                    ...scopeChoices.map((agent) => ({
+                      value: "agent:" + agent.name,
+                      label: agent.name,
+                    })),
+                  ]}
+                  value={skillScope}
+                  onChange={setSkillScope}
+                />
+              )}
+            </div>
+          </div>
 
-          <label className="field skills-field">
-            <span className="field-label">Description</span>
-            <textarea
+          <div className="srow">
+            <div className="skills-srow-text">
+              <div className="t">Folder</div>
+              <div className="d">Where the SKILL.md file lives.</div>
+            </div>
+            <div className="skills-ctl">
+              <code className="skills-folder mono">{folder}</code>
+            </div>
+          </div>
+        </section>
+
+        <section className="sblock skills-block">
+          <h2>Description</h2>
+          <div className="field skills-field">
+            <Textarea
+              id="skill-description"
               className="skills-description"
+              aria-label="Description"
               name="description"
-              rows={5}
+              rows={4}
               value={description}
-              aria-invalid={descriptionOver}
+              invalid={descriptionOver}
               aria-describedby={
                 "skill-description-hint skill-description-counter" +
                 (descriptionOver ? " skill-description-error" : "")
@@ -1619,7 +1690,7 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
                 setDescription(event.target.value);
                 setSaveState(null);
               }}
-            ></textarea>
+            ></Textarea>
             <span className="skills-counter-row">
               <span id="skill-description-hint" className="hint">
                 Agents read this to decide when to load the skill.
@@ -1635,97 +1706,93 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
               </span>
             </span>
             {descriptionOver ? (
-              <span id="skill-description-error" className="skills-field-error">
-                Description is over the{" "}
-                {formatCount(DESCRIPTION_LIMIT) +
+              <span id="skill-description-error" className="err">
+                <Ic name="circle-alert" size={12} />
+                {"Description is over the " +
+                  formatCount(DESCRIPTION_LIMIT) +
                   "-character limit. Saving shows the server error; nothing is written."}
               </span>
             ) : null}
-          </label>
+          </div>
+        </section>
 
-          <div className="field skills-field skills-agents-field">
-            <div className="skills-agents-head">
-              <span className="field-label">Agents</span>
-              <span className="skills-agents-count">
-                {showGlobalAgents
-                  ? selectedAgents.length + " of " + agentTotal
-                  : "Owner"}
-              </span>
-            </div>
-            <div className="skills-agent-list">
-              {showGlobalAgents ? (
-                selectedRows.map((agent) => (
-                  <AgentPickerRow
-                    key={agent.name}
-                    agent={agent}
-                    skillName={savedName || "this skill"}
-                    readOnly={false}
-                    onRemove={() => removeAgent(agent.name)}
-                  />
-                ))
-              ) : (
-                <AgentPickerRow
-                  agent={
-                    agentsByName.get(scopeAgent(skillScope)) || {
-                      name: scopeAgent(skillScope),
-                      kind: "agent",
-                    }
-                  }
-                  skillName={savedName || "this skill"}
-                  readOnly={true}
-                />
-              )}
-              {showGlobalAgents ? (
-                <button
-                  type="button"
-                  className="skills-add-agent"
-                  disabled={agentsError !== ""}
-                  onClick={() => setAddOpen(true)}
-                >
-                  <span className="skills-add-icon" aria-hidden="true">
-                    <Icon name="plus" />
-                  </span>
-                  <span>Add agent</span>
-                </button>
-              ) : null}
-            </div>
-            <span className="hint">
+        <section className="sblock skills-block">
+          <h2 className="skills-block-h">
+            Agents
+            <span className="skills-agents-count">
               {showGlobalAgents
-                ? "Only agents in this list load the skill."
-                : "This skill belongs to one agent."}
+                ? selectedAgents.length + " of " + agentTotal
+                : "Owner"}
             </span>
-            {agentsError ? (
-              <span className="skills-field-error">{agentsError}</span>
+          </h2>
+          <div className="panel skills-agents-panel">
+            {showGlobalAgents ? (
+              selectedRows.map((agent) => (
+                <AgentPickerRow
+                  key={agent.name}
+                  agent={agent}
+                  skillName={savedName || "this skill"}
+                  readOnly={false}
+                  onRemove={() => removeAgent(agent.name)}
+                />
+              ))
+            ) : (
+              <AgentPickerRow
+                agent={
+                  agentsByName.get(scopeAgent(skillScope)) || {
+                    name: scopeAgent(skillScope),
+                    kind: "agent",
+                  }
+                }
+                skillName={savedName || "this skill"}
+                readOnly={true}
+              />
+            )}
+            {showGlobalAgents ? (
+              <button
+                type="button"
+                className="mini skills-add-agent"
+                disabled={agentsError !== ""}
+                onClick={() => setAddOpen(true)}
+              >
+                <span className="skills-add-icon" aria-hidden="true">
+                  <Ic name="plus" size={16} />
+                </span>
+                <span>Add agent</span>
+              </button>
             ) : null}
           </div>
+          <span className="hint">
+            {showGlobalAgents
+              ? "Only agents in this list load the skill."
+              : "This skill belongs to one agent."}
+          </span>
+          {agentsError ? (
+            <span className="err">
+              <Ic name="circle-alert" size={12} />
+              {agentsError}
+            </span>
+          ) : null}
+        </section>
 
-          <div className="field skills-field">
-            <span className="field-label">Folder</span>
-            <code className="skills-folder">{folder}</code>
-          </div>
-        </div>
-
-        <div className="skills-editor-pane">
-          <div className="skills-pane-head">
-            <label className="field-label" htmlFor="skill-instructions">
-              Instructions
-            </label>
+        <section className="sblock skills-block">
+          <h2 className="skills-block-h">
+            Instructions
             <span className="skills-markdown">Markdown</span>
-          </div>
-          <textarea
+          </h2>
+          <Textarea
             id="skill-instructions"
-            className="skills-instructions"
+            className="mono skills-instructions"
+            aria-label="Instructions"
             name="instructions"
             value={instructions}
-            aria-invalid={instructionsOver}
-            aria-describedby={
-              "skill-instructions-hint skill-instructions-counter"
-            }
+            invalid={instructionsOver}
+            aria-describedby="skill-instructions-hint skill-instructions-counter"
             onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
               setInstructions(event.target.value);
               setSaveState(null);
             }}
-          ></textarea>
+          ></Textarea>
           <div className="skills-pane-foot">
             <span id="skill-instructions-hint" className="hint">
               Loaded on demand with skill_load. Keep it short and specific.
@@ -1740,7 +1807,7 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
               {formatCount(INSTRUCTIONS_LIMIT)}
             </span>
           </div>
-        </div>
+        </section>
       </form>
 
       {addOpen ? (

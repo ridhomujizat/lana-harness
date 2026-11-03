@@ -76,17 +76,17 @@
 .md code {
   padding: 1px 4px;
   border-radius: var(--radius-xs);
-  background: var(--bg-tertiary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--surface-2);
+  font-family: var(--mono);
   font-size: 0.9em;
 }
 
 .md-code {
   margin: 0 0 12px;
   overflow: hidden;
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
-  background: var(--bg-secondary);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
 }
 
 .md-code-head {
@@ -95,12 +95,12 @@
   justify-content: space-between;
   gap: 8px;
   padding: 4px 8px 4px 12px;
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: 1px solid var(--divider);
 }
 
 .md-code-lang {
   color: var(--text-tertiary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 16px;
 }
@@ -118,14 +118,17 @@
   font-weight: 500;
   line-height: 16px;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .md-copy:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
 }
 
 .md-copy:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -139,7 +142,7 @@
   padding: 0;
   border-radius: 0;
   background: transparent;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 13px;
   line-height: 1.55;
   white-space: pre;
@@ -148,7 +151,7 @@
 .md blockquote {
   margin: 0 0 12px;
   padding: 2px 0 2px 12px;
-  border-left: 3px solid var(--border-brand);
+  border-left: 3px solid var(--accent-line);
   color: var(--text-secondary);
 }
 
@@ -159,7 +162,7 @@
 .md hr {
   margin: var(--space-compact) 0;
   border: 0;
-  border-top: 1px solid var(--border-secondary);
+  border-top: 1px solid var(--divider);
 }
 
 .md-table-wrap {
@@ -177,13 +180,13 @@
 .md-table th,
 .md-table td {
   padding: 6px 10px;
-  border: 1px solid var(--border-secondary);
+  border: 1px solid var(--divider);
   text-align: left;
   vertical-align: top;
 }
 
 .md-table th {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
   font-weight: 600;
 }
 

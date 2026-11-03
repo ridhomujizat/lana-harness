@@ -1,0 +1,656 @@
+/* Gr8r-style rules for the settings pages (gr8r layer). Use Gr8r tokens and
+   classes. The rail/body/`srow`/`sblock` shapes come from gr8r/pages/settings.css;
+   only the Lana-specific bits live here. */
+
+/* ------------------------------------------------------------------ */
+/* Two-column shell: rail + section body                              */
+/* ------------------------------------------------------------------ */
+
+.page.settings-page {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+}
+
+.settings-page .set-in {
+  max-width: 780px;
+}
+
+.settings-page .set-nav .sitem {
+  text-decoration: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared bits                                                        */
+/* ------------------------------------------------------------------ */
+
+.settings-status {
+  min-height: 18px;
+  margin: 0 0 var(--s-3);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.settings-alert-msg {
+  margin: 0;
+}
+
+.settings-actions-bar {
+  display: flex;
+  margin-bottom: var(--s-3);
+}
+
+.settings-footer-note {
+  margin: var(--s-3) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.settings-footer-note a {
+  color: var(--accent);
+}
+
+.settings-loading {
+  overflow: hidden;
+  margin-bottom: var(--s-3);
+}
+
+.settings-loading-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 52px;
+}
+
+.settings-loading-inline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Restart banner                                                     */
+/* ------------------------------------------------------------------ */
+
+.settings-restart-banner {
+  align-items: center;
+  margin-bottom: var(--s-4);
+}
+
+.settings-restart-text {
+  flex: 1;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toolbar                                                            */
+/* ------------------------------------------------------------------ */
+
+.settings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-3);
+}
+
+.settings-search {
+  flex: 0 1 280px;
+}
+
+.settings-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Provider rows                                                      */
+/* ------------------------------------------------------------------ */
+
+.settings-providers {
+  overflow: hidden;
+}
+
+.mini.settings-provider {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) minmax(150px, 210px) minmax(72px, 110px) 40px;
+  gap: var(--s-3);
+  align-items: center;
+  min-height: 56px;
+}
+
+.settings-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-cell-t {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.settings-cell-s {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-provider-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-provider-key code {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-provider-users,
+.settings-provider-users-inner {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.settings-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+@media (max-width: 860px) {
+  .mini.settings-provider {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    min-height: 0;
+    padding: 10px 14px;
+  }
+
+  .settings-provider-users {
+    margin-left: auto;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tables (secrets, audit)                                            */
+/* ------------------------------------------------------------------ */
+
+.settings-page .tbl-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.settings-page .tbl th:first-child,
+.settings-page .tbl td:first-child {
+  padding-left: 14px;
+}
+
+.settings-page .tbl code {
+  color: var(--text-2);
+}
+
+.settings-col-actions {
+  width: 8%;
+}
+
+.tbl.settings-secrets-table th:nth-child(1) {
+  width: 50%;
+}
+
+.tbl.settings-secrets-table th:nth-child(2) {
+  width: 28%;
+}
+
+.tbl.settings-secrets-table th:nth-child(3) {
+  width: 14%;
+}
+
+.tbl.settings-audit-table th:nth-child(1) {
+  width: 17%;
+}
+
+.tbl.settings-audit-table th:nth-child(2) {
+  width: 16%;
+}
+
+.tbl.settings-audit-table th:nth-child(3) {
+  width: 25%;
+}
+
+.tbl.settings-audit-table th:nth-child(4) {
+  width: 42%;
+}
+
+.settings-row-action {
+  text-align: right;
+}
+
+.settings-rowmenu {
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.settings-secret-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.settings-secret-name > .i {
+  color: var(--text-4);
+}
+
+.settings-secret-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-secret-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-secret-dots {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 1px;
+}
+
+.settings-used-paths {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.settings-audit-time {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.settings-audit-keys {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.settings-load-more {
+  display: flex;
+  justify-content: center;
+  margin-top: var(--s-3);
+}
+
+/* ------------------------------------------------------------------ */
+/* Write-only note (secrets)                                          */
+/* ------------------------------------------------------------------ */
+
+.settings-write-note {
+  margin-bottom: var(--s-3);
+}
+
+.settings-write-note p {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Config editor                                                      */
+/* ------------------------------------------------------------------ */
+
+.settings-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.settings-config-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.settings-config-path {
+  flex: 1 1 24rem;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.settings-config-path code {
+  color: var(--text-2);
+}
+
+.settings-config-note {
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+.settings-editor {
+  display: flex;
+  height: min(64vh, 640px);
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.settings-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.settings-gutter {
+  flex: 0 0 48px;
+  padding: 12px 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--divider);
+  background: var(--surface-2);
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 21px;
+  text-align: right;
+  user-select: none;
+}
+
+.settings-gutter-line {
+  display: block;
+  height: 21px;
+  line-height: 21px;
+}
+
+.settings-config-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 21px;
+  resize: none;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.settings-config-editor:hover,
+.settings-config-editor:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* General: daemon / web / password / appearance / about              */
+/* ------------------------------------------------------------------ */
+
+.settings-daemon-control {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.settings-warning-text {
+  margin: var(--s-2) 0 0;
+  color: var(--amber);
+  font-size: var(--fs-sm);
+}
+
+.settings-address {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.settings-address .input {
+  width: 240px;
+}
+
+.settings-web-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: var(--s-2) 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.settings-web-saved {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.settings-web-saved a {
+  color: var(--accent);
+}
+
+.settings-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  max-width: 360px;
+  margin-top: var(--s-3);
+}
+
+.settings-password {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.settings-password .input {
+  padding-right: 34px;
+}
+
+.settings-password-eye {
+  position: absolute;
+  right: 3px;
+}
+
+.settings-password-actions {
+  display: flex;
+}
+
+.settings-about {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs                                                            */
+/* ------------------------------------------------------------------ */
+
+.settings-dialog-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.settings-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--divider);
+}
+
+.settings-dialog-section h3 {
+  margin: 0;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.settings-dialog-actions {
+  display: flex;
+}
+
+.settings-dialog-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.settings-test-result {
+  min-height: 18px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.settings-test-result.is-ok {
+  color: var(--green);
+}
+
+.settings-test-result.is-error {
+  color: var(--red);
+}
+
+.settings-confirm {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--red-soft);
+}
+
+.settings-confirm p {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.settings-secret-target {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.settings-running-turns {
+  padding: 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.settings-running-turns h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.settings-running-turns .hint {
+  margin: 0;
+}
+
+.settings-turn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-turn-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.settings-turn-title {
+  font-weight: 500;
+}
+
+.settings-turn-agent {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                         */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .page.settings-page {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+
+  .settings-page .set-in {
+    padding: 24px 20px 60px;
+  }
+}
+
+@media (max-width: 720px) {
+  .page.settings-page {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .set-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .set-nav .sitem {
+    width: auto;
+  }
+
+  .set-body {
+    overflow-y: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-editor {
+    transition: none;
+  }
+}

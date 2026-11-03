@@ -22,7 +22,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px var(--spacing-3xl);
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-primary);
 }
 
@@ -44,10 +44,14 @@
   line-height: 16px;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    color var(--dur);
 }
 
 .trajectory-button:hover:not(:disabled) {
-  background: var(--bg-primary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-button:disabled {
@@ -56,8 +60,8 @@
 }
 
 .trajectory-button[aria-pressed="true"] {
-  border-color: var(--border-brand);
-  background: var(--bg-brand-primary);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
   color: var(--text-brand-primary);
 }
 
@@ -100,6 +104,15 @@
   color: var(--text-primary);
   font-size: 12px;
   line-height: 16px;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.trajectory-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .trajectory-search-input::placeholder {
@@ -116,7 +129,7 @@
 .trajectory-overview {
   flex: 0 0 auto;
   padding: 8px var(--spacing-3xl) 6px;
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: 1px solid var(--divider);
   background: var(--bg-primary);
 }
 
@@ -152,6 +165,9 @@
   cursor: pointer;
   stroke: var(--bg-primary);
   stroke-width: 0.5;
+  transition:
+    stroke var(--dur),
+    stroke-width var(--dur);
 }
 
 .trajectory-overview-span:hover,
@@ -226,8 +242,8 @@
   top: 0;
   z-index: 5;
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border-secondary);
-  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
   color: var(--text-tertiary);
   font-size: 10px;
   font-weight: 600;
@@ -246,16 +262,17 @@
 
 .trajectory-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid var(--border-tertiary);
+  border-bottom: 1px solid var(--divider);
   vertical-align: top;
 }
 
 .trajectory-table tbody tr.traj-row {
   cursor: pointer;
+  transition: background var(--dur);
 }
 
 .trajectory-table tbody tr.traj-row:hover {
-  background: var(--bg-primary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-table tbody tr.traj-row:focus-visible {
@@ -264,7 +281,7 @@
 }
 
 .trajectory-table tbody tr.traj-row.is-selected {
-  background: var(--bg-active);
+  background: var(--accent-soft);
 }
 
 .trajectory-table tbody tr.traj-row.is-error .traj-content {
@@ -279,8 +296,8 @@
 .trajectory-step-row td,
 .trajectory-between-row td {
   padding: 0;
-  border-bottom: 1px solid var(--border-secondary);
-  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--divider);
+  background: var(--surface-2);
 }
 
 .trajectory-disclosure {
@@ -297,10 +314,11 @@
   line-height: 16px;
   text-align: left;
   cursor: pointer;
+  transition: background var(--dur);
 }
 
 .trajectory-disclosure:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-disclosure:focus-visible {
@@ -486,10 +504,11 @@
   font-weight: 600;
   line-height: 14px;
   cursor: pointer;
+  transition: background var(--dur);
 }
 
 .trajectory-subagent-toggle:hover {
-  background: var(--bg-primary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-subagent-link {
@@ -513,7 +532,7 @@
   max-width: 560px;
   min-height: 0;
   overflow: auto;
-  border-left: 1px solid var(--border-secondary);
+  border-left: 1px solid var(--divider);
   background: var(--bg-primary);
 }
 
@@ -522,7 +541,7 @@
   align-items: flex-start;
   gap: 8px;
   padding: 10px var(--spacing-xl);
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: 1px solid var(--divider);
 }
 
 .trajectory-inspector-heading {
@@ -558,10 +577,11 @@
   font-size: 11px;
   line-height: 14px;
   cursor: pointer;
+  transition: background var(--dur);
 }
 
 .trajectory-close:hover {
-  background: var(--bg-primary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-tabs {
@@ -569,7 +589,7 @@
   flex-wrap: wrap;
   gap: 2px;
   padding: 6px var(--spacing-xl);
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: 1px solid var(--divider);
 }
 
 .trajectory-tab {
@@ -583,15 +603,19 @@
   font-weight: 500;
   line-height: 14px;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    color var(--dur);
 }
 
 .trajectory-tab:hover {
-  background: var(--bg-primary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-tab[aria-selected="true"] {
-  border-color: var(--border-primary);
-  background: var(--bg-tertiary);
+  border-color: var(--border);
+  background: var(--surface-3);
   color: var(--text-primary);
 }
 
@@ -625,11 +649,11 @@
   margin: 0 0 10px;
   padding: 8px;
   overflow: auto;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
   color: var(--text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 16px;
   white-space: pre-wrap;
@@ -637,7 +661,7 @@
 }
 
 .trajectory-panel code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono);
   font-size: 11px;
 }
 
@@ -659,10 +683,11 @@
   font-size: 10px;
   line-height: 14px;
   cursor: pointer;
+  transition: background var(--dur);
 }
 
 .trajectory-copy:hover {
-  background: var(--bg-primary-hover);
+  background: var(--surface-2);
 }
 
 .trajectory-usage {
@@ -674,7 +699,7 @@
 .trajectory-usage th,
 .trajectory-usage td {
   padding: 4px 6px;
-  border-bottom: 1px solid var(--border-tertiary);
+  border-bottom: 1px solid var(--divider);
   text-align: right;
 }
 
@@ -710,8 +735,8 @@
 
 .trajectory-section {
   margin: 0 0 8px;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .trajectory-section > summary {
@@ -724,7 +749,7 @@
 }
 
 .trajectory-section[open] > summary {
-  border-bottom: 1px solid var(--border-secondary);
+  border-bottom: 1px solid var(--divider);
 }
 
 .trajectory-section-body {
@@ -756,10 +781,11 @@
 .chat-tabs {
   display: inline-flex;
   flex: 0 0 auto;
+  gap: 2px;
   padding: 2px;
-  border: 1px solid var(--border-secondary);
+  border: 0;
   border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  background: var(--surface-3);
 }
 
 .chat-tab {
@@ -773,6 +799,10 @@
   font-weight: 500;
   line-height: 16px;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur),
+    box-shadow var(--dur);
 }
 
 .chat-tab:hover {
@@ -780,9 +810,9 @@
 }
 
 .chat-tab[aria-selected="true"] {
-  background: var(--bg-primary);
+  background: var(--surface);
   color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--border-secondary);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
 .chat-tab:focus-visible {
@@ -806,7 +836,7 @@
     width: 100%;
     max-width: none;
     min-width: 0;
-    border-top: 1px solid var(--border-secondary);
+    border-top: 1px solid var(--divider);
     border-left: 0;
   }
 }
@@ -820,5 +850,20 @@
 
   .trajectory-search-input {
     max-width: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trajectory-button,
+  .trajectory-search-input,
+  .trajectory-overview-span,
+  .trajectory-table tbody tr.traj-row,
+  .trajectory-disclosure,
+  .trajectory-subagent-toggle,
+  .trajectory-close,
+  .trajectory-tab,
+  .trajectory-copy,
+  .chat-tab {
+    transition: none;
   }
 }

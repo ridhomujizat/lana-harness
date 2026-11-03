@@ -1,5 +1,4 @@
 /* eslint-disable react-hooks/set-state-in-effect -- the detail load resets its state before each request, as in agent-detail.js */
-/* eslint-disable react-hooks/immutability -- routing is a window.location hash change, as in agent-detail.js */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
@@ -10,21 +9,22 @@ import type { CatalogEffort, CatalogModel } from "../api/models";
 import { getConfig, listProviders } from "../api/settings";
 import type { ConfigAgent } from "../api/settings";
 import { createSession } from "../api/sessions";
-import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
+import { Dialog, detailText, useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
 import {
-  Icon,
-  TeamAvatars,
   isTeam,
+  rosterNames,
   splitModel,
   splitTarget,
   normalizePermission,
   providerLabel,
   agentHref,
   sessionSummary,
+  presenceTone,
 } from "./agent-common";
 import type { AgentLike, Permission } from "./agent-common";
 import { AgentOverview } from "./agent-overview";
-import { AgentFace } from "./presence";
+import { gr8rColor, useRooms } from "./presence";
 import { DEFAULT_AGENT_TAB } from "../app/router";
 import { PersonaTab } from "./agent-tabs/persona";
 import { ToolsTab } from "./agent-tabs/tools";
@@ -32,6 +32,20 @@ import { SkillsTab } from "./agent-tabs/skills";
 import { McpTab } from "./agent-tabs/mcp";
 import { RulesTab } from "./agent-tabs/rules";
 import { WorkspaceTab } from "./agent-tabs/workspace";
+import {
+  Avatar,
+  AvatarStack,
+  Badge,
+  Button,
+  Chip,
+  ErrorState,
+  Input,
+  Radio,
+  Select,
+  Skeleton,
+  Tabs,
+  Toggle,
+} from "../ui/gr8r";
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
    tab. The other tabs show a placeholder until their slices land (T-030). */
@@ -373,6 +387,20 @@ interface DuplicateAgentDialogProps {
   onDuplicated?: (name: string) => void;
 }
 
+/* The error details of the agents API, rendered under an error state. */
+function DetailsList({ details }: { details: unknown[] }) {
+  if (!details || details.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="err-list">
+      {details.map((detail, index) => (
+        <li key={index}>{detailText(detail)}</li>
+      ))}
+    </ul>
+  );
+}
+
 function DuplicateAgentDialog({
   source,
   agents,
@@ -428,9 +456,12 @@ function DuplicateAgentDialog({
           Copy <strong>{source}</strong> to a new agent. The config table and
           AGENT.md are copied; MEMORY.md is not.
         </p>
-        <label className="field">
-          <span className="field-label">New name</span>
-          <input
+        <div className="field">
+          <label className="label" htmlFor="duplicate-agent-name">
+            New name
+          </label>
+          <Input
+            id="duplicate-agent-name"
             data-autofocus
             type="text"
             value={name}
@@ -438,27 +469,27 @@ function DuplicateAgentDialog({
             spellCheck={false}
             pattern="[a-z0-9-]+"
             required
+            invalid={Boolean(error)}
             onChange={(event) => setName(event.target.value)}
           />
           <span className="hint">Lowercase letters, digits, and dashes.</span>
-        </label>
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        </div>
+        {error ? (
+          <div role="alert">
+            <p className="err">
+              <Ic name="circle-alert" size={12} />
+              {error}
+            </p>
+            <DetailsList details={details} />
+          </div>
+        ) : null}
         <div className="dialog-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            className="button-ui button-ui-primary"
-            disabled={busy}
-          >
+          </Button>
+          <Button type="submit" variant="primary" loading={busy} disabled={busy}>
             {busy ? "Duplicating…" : "Duplicate"}
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>
@@ -472,6 +503,7 @@ export interface AgentDetailPageProps {
 
 export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const announce = useAnnounce();
+  const { byName } = useRooms();
   const agentName = name ?? "";
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [page, setPage] = useState<AgentDetailData | null>(null);
@@ -492,7 +524,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const [headerError, setHeaderError] = useState("");
   const [startBusy, setStartBusy] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
-  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const tabsRef = useRef<HTMLDivElement | null>(null);
   const pendingTabFocus = useRef(false);
 
   useEffect(() => {
@@ -559,13 +591,15 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const activeTab: TabId =
     TABS.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
 
+  /* The tab bar keeps its focus when a hash change reloads the route. */
   useEffect(() => {
     if (!pendingTabFocus.current) {
       return;
     }
     pendingTabFocus.current = false;
-    const index = TABS.findIndex((item) => item.id === activeTab);
-    const node = tabRefs.current[index];
+    const node = tabsRef.current?.querySelector<HTMLElement>(
+      '.tab[aria-selected="true"]'
+    );
     if (node) {
       node.focus();
     }
@@ -662,14 +696,16 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setStale(false);
   }
 
-  function activateTab(index: number, focus: boolean) {
-    const next = TABS[index];
+  function activateTab(id: string, focus: boolean) {
+    const next = TABS.find((item) => item.id === id);
     if (!next) {
       return;
     }
     if (next.id === activeTab) {
       if (focus) {
-        const node = tabRefs.current[index];
+        const node = tabsRef.current?.querySelector<HTMLElement>(
+          '.tab[aria-selected="true"]'
+        );
         if (node) {
           node.focus();
         }
@@ -680,26 +716,43 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     window.location.hash = agentHref(agentName, next.id);
   }
 
-  function handleTabKeyDown(
-    event: KeyboardEvent<HTMLButtonElement>,
-    index: number
-  ) {
-    const last = TABS.length - 1;
-    let next: number | null = null;
-    if (event.key === "ArrowRight") {
-      next = index === last ? 0 : index + 1;
-    } else if (event.key === "ArrowLeft") {
-      next = index === 0 ? last : index - 1;
-    } else if (event.key === "Home") {
-      next = 0;
-    } else if (event.key === "End") {
-      next = last;
-    }
-    if (next === null) {
+  function handleTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (
+      event.key !== "ArrowRight" &&
+      event.key !== "ArrowLeft" &&
+      event.key !== "Home" &&
+      event.key !== "End"
+    ) {
       return;
     }
+    const nodes = Array.from(
+      tabsRef.current?.querySelectorAll<HTMLButtonElement>(".tab") ?? []
+    );
+    if (nodes.length === 0) {
+      return;
+    }
+    const current = nodes.findIndex((node) => node === document.activeElement);
+    let next = current < 0 ? 0 : current;
+    if (event.key === "ArrowRight") {
+      next = (next + 1) % nodes.length;
+    } else if (event.key === "ArrowLeft") {
+      next = (next - 1 + nodes.length) % nodes.length;
+    } else if (event.key === "Home") {
+      next = 0;
+    } else {
+      next = nodes.length - 1;
+    }
     event.preventDefault();
-    activateTab(next, true);
+    const target = TABS[next];
+    if (!target) {
+      return;
+    }
+    if (target.id === activeTab) {
+      nodes[next]?.focus();
+      return;
+    }
+    pendingTabFocus.current = true;
+    window.location.hash = agentHref(agentName, target.id);
   }
 
   function startFallback() {
@@ -830,9 +883,12 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   if (status === "loading") {
     return (
       <main id="main" className="page agent-detail-page">
-        <p className="muted" role="status">
+        <span className="sr" role="status">
           Loading agent…
-        </p>
+        </span>
+        <Skeleton width={220} height={24} />
+        <Skeleton width="100%" height={120} radius={12} />
+        <Skeleton width="100%" height={220} radius={12} />
       </main>
     );
   }
@@ -840,25 +896,24 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   if (status === "error") {
     return (
       <main id="main" className="page agent-detail-page">
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          <a href="#/agents">Agents</a>
-          <span aria-hidden="true">/</span>
-          <span>{agentName}</span>
-        </nav>
-        <div role="alert">
-          <ErrorNotice message={error} details={details} />
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load the agent"
+            text={error}
+            action={
+              <Button variant="secondary" onClick={reload}>
+                Try again
+              </Button>
+            }
+          >
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
         <div className="agent-state-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={reload}
-          >
-            Try again
-          </button>
-          <a className="button-ui button-ui-secondary" href="#/agents">
+          <Button as="a" variant="secondary" href="#/agents">
             Back to agents
-          </a>
+          </Button>
         </div>
       </main>
     );
@@ -868,18 +923,19 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   if (!agent) {
     return (
       <main id="main" className="page agent-detail-page">
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          <a href="#/agents">Agents</a>
-          <span aria-hidden="true">/</span>
-          <span>{agentName}</span>
-        </nav>
-        <h1>Agent not found</h1>
-        <p className="muted">
-          No configured agent or team is named <code>{agentName}</code>.
-        </p>
-        <a className="button-ui button-ui-secondary" href="#/agents">
-          Back to agents
-        </a>
+        <header className="ph">
+          <div>
+            <h1>Agent not found</h1>
+            <p>
+              No configured agent or team is named <code>{agentName}</code>.
+            </p>
+          </div>
+          <div className="acts">
+            <Button as="a" variant="secondary" href="#/agents">
+              Back to agents
+            </Button>
+          </div>
+        </header>
       </main>
     );
   }
@@ -887,36 +943,56 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   if (isTeam(agent)) {
     return (
       <main id="main" className="page agent-detail-page">
-        <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-          <a href="#/agents">Agents</a>
-          <span aria-hidden="true">/</span>
-          <span aria-current="page">{agent.name}</span>
-        </nav>
-        <header className="agent-detail-header">
+        <header className="ph agent-detail-header">
           <div className="agent-detail-identity">
-            <TeamAvatars agent={agent} size="36" />
+            <AvatarStack
+              size="lg"
+              max={3}
+              items={rosterNames(agent).map((member) => ({
+                name: member,
+                color: gr8rColor(member),
+              }))}
+            />
             <div className="agent-detail-heading">
               <div className="agent-detail-name-row">
                 <h1 className="agent-detail-name">{agent.name}</h1>
-                <span className="badge-ui badge-ui-brand">
-                  <span className="badge-ui-dot" aria-hidden="true"></span>
+                <Badge tone="accent" dot>
                   Team
-                </span>
+                </Badge>
               </div>
               <p className="agent-detail-meta">{sessionSummary(agent)}.</p>
             </div>
           </div>
+          <div className="acts">
+            <Button
+              as="a"
+              variant="primary"
+              href={"#/chats/" + encodeURIComponent(agent.name)}
+            >
+              {"Chat with " + agent.name}
+            </Button>
+            <Button as="a" variant="secondary" href="#/settings/config">
+              Open config
+            </Button>
+          </div>
         </header>
+
         <AgentOverview name={agentName} agent={agent} />
-        <div className="agent-team-card">
-          <p className="hint">
-            Teams are read-only here. Edit the{" "}
-            <code>[teams.{agent.name}]</code> table in the config file.
-          </p>
-          <a className="button-ui button-ui-secondary" href="#/settings/config">
-            Open the config file
-          </a>
-        </div>
+
+        <section className="panel">
+          <div className="panel-h">
+            <h2>Read-only</h2>
+          </div>
+          <div className="panel-b agent-team-readonly">
+            <p className="hint">
+              Teams are read-only here. Edit the{" "}
+              <code>[teams.{agent.name}]</code> table in the config file.
+            </p>
+            <Button as="a" variant="secondary" href="#/settings/config">
+              Open the config file
+            </Button>
+          </div>
+        </section>
       </main>
     );
   }
@@ -925,34 +1001,75 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const knownAgents = page ? page.agents : [];
   const titleIssue = issueMessage(details, "agents." + agent.name + ".title");
   const colorIssue = issueMessage(details, "agents." + agent.name + ".color");
+  const row = byName[agent.name];
+  const presence = row ? row.presence : null;
+  const activeLabel =
+    TABS.find((item) => item.id === activeTab)?.label || "Agent";
+
+  const modelOptions = [
+    { value: "", label: "Provider default" },
+    ...catalog.map((model) => ({ value: model.id, label: model.name })),
+    { value: "__other__", label: "Other…" },
+  ];
+  const thinkingOptions = [
+    { value: "", label: "Model default" },
+    ...efforts.map((effort) => ({
+      value: effort.value,
+      label: effortLabel(effort),
+    })),
+  ];
+
+  const tabBar = (
+    <div className="agent-detail-tabbar" ref={tabsRef}>
+      <Tabs
+        className="agent-detail-tabs"
+        aria-label="Agent sections"
+        value={activeTab}
+        onChange={(value) => activateTab(value, false)}
+        onKeyDown={handleTabKeyDown}
+        items={TABS.map((item) => ({ value: item.id, label: item.label }))}
+      />
+    </div>
+  );
+  const panelProps = {
+    className: "agent-tab-panel",
+    id: "agent-tabpanel",
+    role: "tabpanel",
+    "aria-label": activeLabel,
+    tabIndex: 0,
+  };
 
   return (
     <main id="main" className="page agent-detail-page">
-      <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-        <a href="#/agents">Agents</a>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">{agent.name}</span>
-      </nav>
-
       {/* REQ-WEB-047: the alive Overview tab shows only its own hero, so the
           legacy header is hidden there. It stays on the other tabs, where the
-          Duplicate action lives. */}
+          Chat, Settings, and Duplicate actions live. */}
       {activeTab !== "overview" ? (
-        <header className="agent-detail-header">
+        <header className="ph agent-detail-header">
           <div className="agent-detail-identity">
-            <AgentFace
+            <Avatar
+              size="lg"
               name={agent.name}
-              color={normalizeColor(agent.color)}
-              size={52}
+              color={gr8rColor(agent.color)}
+              presence={
+                presence
+                  ? presence.state === "online" || presence.state === "working"
+                  : false
+              }
             />
             <div className="agent-detail-heading">
               <div className="agent-detail-name-row">
                 <h1 className="agent-detail-name">{agent.name}</h1>
+                <Badge>{agent.title || "Agent"}</Badge>
                 {agent.default ? (
-                  <span className="badge-ui badge-ui-brand">
-                    <span className="badge-ui-dot" aria-hidden="true"></span>
+                  <Badge tone="accent" dot>
                     Default
-                  </span>
+                  </Badge>
+                ) : null}
+                {presence ? (
+                  <Badge tone={presenceTone(presence.state)} dot>
+                    {presence.label}
+                  </Badge>
                 ) : null}
               </div>
               <p className="agent-detail-description">
@@ -961,90 +1078,79 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               <p className="agent-detail-meta">{sessionSummary(agent)}.</p>
             </div>
           </div>
-          <div className="agent-detail-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              onClick={() => setDuplicateOpen(true)}
+          <div className="acts">
+            <Button
+              as="a"
+              variant="primary"
+              href={"#/chats/" + encodeURIComponent(agent.name)}
             >
-              Duplicate
-            </button>
-            <button
-              type="button"
-              className="button-ui button-ui-primary"
+              {"Chat with " + agent.name}
+            </Button>
+            <Button
+              as="a"
+              variant="secondary"
+              href={agentHref(agent.name, "general")}
+            >
+              Settings
+            </Button>
+            <Button
+              variant="secondary"
               disabled={startBusy}
               onClick={startSession}
             >
               {startBusy ? "Starting…" : "Start session"}
-            </button>
+            </Button>
+            <Button variant="ghost" onClick={() => setDuplicateOpen(true)}>
+              Duplicate
+            </Button>
           </div>
         </header>
       ) : null}
 
       {headerError ? (
-        <div className="agent-header-error" role="alert">
-          <ErrorNotice message={headerError} />
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not start a session"
+            text={headerError}
+          />
         </div>
       ) : null}
 
-      <div className="agent-tabs" role="tablist" aria-label="Agent sections">
-        {TABS.map((item, index) => {
-          const selected = item.id === activeTab;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              id={"agent-tab-" + item.id}
-              className="agent-tab"
-              aria-selected={selected ? "true" : "false"}
-              aria-controls="agent-tabpanel"
-              tabIndex={selected ? 0 : -1}
-              ref={(node) => {
-                tabRefs.current[index] = node;
-              }}
-              onClick={() => activateTab(index, false)}
-              onKeyDown={(event) => handleTabKeyDown(event, index)}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* On Overview the hero takes the header's place above the tabs, so the
+          overview renders the tab bar and the tab panel itself. */}
+      {activeTab === "overview" ? (
+        <AgentOverview
+          name={agentName}
+          agent={agent}
+          tabs={tabBar}
+          panelProps={panelProps}
+        />
+      ) : (
+        tabBar
+      )}
 
-      <section
-        className="agent-tab-panel"
-        id="agent-tabpanel"
-        role="tabpanel"
-        aria-labelledby={"agent-tab-" + activeTab}
-        tabIndex={0}
-      >
-        {activeTab === "overview" ? (
-          <AgentOverview name={agentName} agent={agent} />
-        ) : activeTab === "general" && form ? (
-          <form className="agent-general-form" onSubmit={save}>
+      {activeTab !== "overview" ? (
+      <section {...panelProps}>
+        {activeTab === "general" && form ? (
+          <form className="agent-general-form" onSubmit={save} noValidate>
             <section
-              className="agent-form-section"
+              className="sblock"
               aria-labelledby="agent-profile-title"
             >
-              <div className="agent-form-copy">
-                <h2 id="agent-profile-title">Profile</h2>
-                <p>
-                  The title and color the room list and the profile show for
-                  this agent.
-                </p>
-              </div>
-              <div className="agent-form-controls">
-                <div className="agent-form-field agent-form-field-wide">
-                  <label
-                    className="agent-form-field-label"
-                    htmlFor="agent-title"
-                  >
+              <h2 id="agent-profile-title">Profile</h2>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-title">
                     Title
                   </label>
-                  <input
+                  <div className="d">
+                    The title the room list and the profile show.
+                  </div>
+                </div>
+                <div className="agent-ctl">
+                  <Input
                     id="agent-title"
-                    className="agent-title-input"
                     type="text"
                     maxLength={TITLE_LIMIT}
                     value={form.title}
@@ -1052,49 +1158,48 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     autoComplete="off"
                     spellCheck={false}
                     disabled={saving}
+                    invalid={Boolean(titleIssue)}
                     onChange={(event) =>
                       updateField("title", event.target.value)
                     }
                   />
-                  <span className="agent-field-count">
+                  <span className="agent-counter">
                     {Array.from(form.title).length + " / " + TITLE_LIMIT}
                   </span>
                   {titleIssue ? (
-                    <span className="agent-field-error" role="alert">
+                    <span className="err" role="alert">
+                      <Ic name="circle-alert" size={12} />
                       {titleIssue}
                     </span>
                   ) : null}
                 </div>
+              </div>
 
-                <div className="agent-form-field agent-form-field-wide">
-                  <span
-                    className="agent-form-field-label"
-                    id="agent-color-label"
-                  >
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <span className="t" id="agent-color-label">
                     Color
                   </span>
+                  <div className="d">
+                    The agent&rsquo;s color in the room list and the profile.
+                  </div>
+                </div>
+                <div className="agent-ctl">
                   <div
                     className="agent-color-picker"
                     role="radiogroup"
                     aria-labelledby="agent-color-label"
                   >
-                    <span className="agent-color-preview" aria-hidden="true">
-                      <AgentFace name={agent.name} color={form.color} size={52} />
-                    </span>
                     {AGENT_COLORS.map((entry) => {
                       const selected = form.color === entry.value;
                       return (
                         <label
                           key={entry.value}
                           className={
-                            "agent-color-swatch color-" +
-                            entry.value +
-                            (selected ? " is-selected" : "")
+                            "agent-swatch" + (selected ? " is-on" : "")
                           }
                         >
-                          <input
-                            className="agent-color-input"
-                            type="radio"
+                          <Radio
                             name="agent-color"
                             value={entry.value}
                             aria-label={entry.value}
@@ -1105,10 +1210,12 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                             }
                           />
                           <span
-                            className="agent-color-dot"
+                            className={
+                              "agent-swatch-dot color-" + entry.value
+                            }
                             aria-hidden="true"
                           />
-                          <span className="agent-color-name">
+                          <span className="agent-swatch-name">
                             {entry.label}
                           </span>
                         </label>
@@ -1116,7 +1223,8 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     })}
                   </div>
                   {colorIssue ? (
-                    <span className="agent-field-error" role="alert">
+                    <span className="err" role="alert">
+                      <Ic name="circle-alert" size={12} />
                       {colorIssue}
                     </span>
                   ) : null}
@@ -1124,193 +1232,186 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
-            <section
-              className="agent-form-section"
-              aria-labelledby="agent-model-title"
-            >
-              <div className="agent-form-copy">
-                <h2 id="agent-model-title">Model</h2>
-                <p>
-                  The model this agent uses. Fallbacks run when the main model
-                  fails.
-                </p>
+            <section className="sblock" aria-labelledby="agent-model-title">
+              <h2 id="agent-model-title">Model</h2>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-provider">
+                    Provider
+                  </label>
+                  <div className="d">Where the model is served from.</div>
+                </div>
+                <div className="agent-ctl">
+                  <Select
+                    id="agent-provider"
+                    aria-label="Provider"
+                    value={form.provider}
+                    disabled={saving}
+                    options={[
+                      { value: "", label: "Not set" },
+                      ...providerOptions.map((name) => ({
+                        value: name,
+                        label: providerLabel(name),
+                      })),
+                    ]}
+                    onChange={(value) => {
+                      setOtherModel(false);
+                      updateField("provider", value);
+                    }}
+                  />
+                </div>
               </div>
-              <div className="agent-form-controls">
-                <div className="agent-form-row">
-                  <div className="agent-form-field">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="agent-provider"
-                    >
-                      Provider
-                    </label>
-                    <select
-                      id="agent-provider"
-                      value={form.provider}
-                      disabled={saving}
-                      onChange={(event) => {
-                        setOtherModel(false);
-                        updateField("provider", event.target.value);
-                      }}
-                    >
-                      <option value="">Not set</option>
-                      {providerOptions.map((provider) => (
-                        <option key={provider} value={provider}>
-                          {providerLabel(provider)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="agent-form-field">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="agent-model-select"
-                    >
-                      Model
-                    </label>
-                    <select
-                      id="agent-model-select"
-                      value={customModel ? "__other__" : form.model}
-                      disabled={saving}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (value === "__other__") {
-                          setOtherModel(true);
-                          return;
-                        }
-                        setOtherModel(false);
-                        updateField("model", value);
-                      }}
-                    >
-                      <option value="">Provider default</option>
-                      {catalog.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.name}
-                        </option>
-                      ))}
-                      <option value="__other__">Other…</option>
-                    </select>
-                    {customModel ? (
-                      <input
-                        id="agent-model-custom"
-                        className="agent-custom-model"
-                        type="text"
-                        aria-label="Custom model id"
-                        placeholder="model id"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={form.model}
-                        disabled={saving}
-                        onChange={(event) =>
-                          updateField("model", event.target.value)
-                        }
-                      />
-                    ) : null}
+
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-model-select">
+                    Model
+                  </label>
+                  <div className="d">
+                    The model this agent uses. Fallbacks run when it fails.
                   </div>
                 </div>
-
-                {legacyReplacement ? (
-                  <div className="agent-legacy-banner" role="status">
-                    <p className="muted">
-                      {"Legacy model — switch to " + legacyReplacement}
-                    </p>
-                    <button
-                      type="button"
-                      className="button-ui button-ui-secondary"
-                      disabled={saving}
-                      onClick={() => {
-                        setOtherModel(false);
-                        updateField("model", legacyReplacement);
-                      }}
-                    >
-                      {"Switch to " + legacyReplacement}
-                    </button>
-                  </div>
-                ) : null}
-
-                {thinkingModel ? (
-                  <div className="agent-form-field">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="agent-thinking"
-                    >
-                      Thinking
-                    </label>
-                    <select
-                      id="agent-thinking"
-                      value={form.reasoning_effort}
+                <div className="agent-ctl">
+                  <Select
+                    id="agent-model-select"
+                    aria-label="Model"
+                    value={customModel ? "__other__" : form.model}
+                    disabled={saving}
+                    options={modelOptions}
+                    onChange={(value) => {
+                      if (value === "__other__") {
+                        setOtherModel(true);
+                        return;
+                      }
+                      setOtherModel(false);
+                      updateField("model", value);
+                    }}
+                  />
+                  {customModel ? (
+                    <Input
+                      id="agent-model-custom"
+                      className="mono"
+                      type="text"
+                      aria-label="Custom model id"
+                      placeholder="model id"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={form.model}
                       disabled={saving}
                       onChange={(event) =>
-                        updateField("reasoning_effort", event.target.value)
+                        updateField("model", event.target.value)
                       }
-                    >
-                      <option value="">Model default</option>
-                      {efforts.map((effort) => (
-                        <option key={effort.value} value={effort.value}>
-                          {effortLabel(effort)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
+                    />
+                  ) : null}
+                </div>
+              </div>
 
-                <div className="agent-form-field agent-form-field-wide">
-                  <span
-                    className="agent-form-field-label"
-                    id="agent-fallback-label"
-                  >
+              {thinkingModel ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-thinking">
+                      Thinking
+                    </label>
+                    <div className="d">How much the model deliberates.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Select
+                      id="agent-thinking"
+                      aria-label="Thinking"
+                      value={form.reasoning_effort}
+                      disabled={saving}
+                      options={thinkingOptions}
+                      onChange={(value) =>
+                        updateField("reasoning_effort", value)
+                      }
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {legacyReplacement ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <div className="t">Legacy model</div>
+                    <div className="d">This model is superseded.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <div className="agent-legacy-banner" role="status">
+                      <Ic name="triangle-alert" size={15} />
+                      <span className="grow">
+                        {"Legacy model — switch to " + legacyReplacement}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={saving}
+                        onClick={() => {
+                          setOtherModel(false);
+                          updateField("model", legacyReplacement);
+                        }}
+                      >
+                        {"Switch to " + legacyReplacement}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <span className="t" id="agent-fallback-label">
                     Fallback
                   </span>
+                  <div className="d">
+                    Targets to try when the main model fails.
+                  </div>
+                </div>
+                <div className="agent-ctl agent-ctl-wide">
                   <div
                     className="agent-fallbacks"
                     role="group"
                     aria-labelledby="agent-fallback-label"
                   >
                     {form.fallback.length === 0 ? (
-                      <span className="agent-fallback-empty muted">
-                        No fallbacks.
-                      </span>
+                      <span className="hint">No fallbacks.</span>
                     ) : null}
                     {form.fallback.map((target, index) => {
                       const parts = splitTarget(target);
                       return (
-                        <span
+                        <Chip
                           key={target + ":" + index}
-                          className="agent-fallback-tag"
+                          removeLabel={"Remove fallback " + target}
+                          onRemove={
+                            saving ? undefined : () => removeFallback(index)
+                          }
                         >
-                          <span>
-                            {(parts.provider ? parts.provider + " / " : "") +
-                              parts.model}
-                          </span>
-                          <button
-                            type="button"
-                            className="agent-fallback-remove"
-                            aria-label={"Remove fallback " + target}
-                            disabled={saving}
-                            onClick={() => removeFallback(index)}
-                          >
-                            <Icon name="close" className="icon-16" />
-                          </button>
-                        </span>
+                          {(parts.provider ? parts.provider + " / " : "") +
+                            parts.model}
+                        </Chip>
                       );
                     })}
-                    <button
-                      type="button"
-                      className="agent-fallback-add"
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="plus"
                       disabled={saving}
                       onClick={startFallback}
                     >
-                      + Add fallback
-                    </button>
+                      Add fallback
+                    </Button>
                   </div>
 
                   {fallbackDraft ? (
                     <div className="agent-fallback-draft">
-                      <label className="agent-form-field">
-                        <span className="agent-form-field-label">
+                      <div className="field">
+                        <label
+                          className="label"
+                          htmlFor="agent-fallback-provider"
+                        >
                           Fallback provider
-                        </span>
-                        <input
+                        </label>
+                        <Input
+                          id="agent-fallback-provider"
                           type="text"
                           placeholder="provider"
                           autoComplete="off"
@@ -1321,12 +1422,13 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                             updateFallbackDraft("provider", event.target.value)
                           }
                         />
-                      </label>
-                      <label className="agent-form-field">
-                        <span className="agent-form-field-label">
+                      </div>
+                      <div className="field">
+                        <label className="label" htmlFor="agent-fallback-model">
                           Fallback model
-                        </span>
-                        <input
+                        </label>
+                        <Input
+                          id="agent-fallback-model"
                           type="text"
                           placeholder="model"
                           autoComplete="off"
@@ -1337,19 +1439,19 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                             updateFallbackDraft("model", event.target.value)
                           }
                         />
-                      </label>
+                      </div>
                       <div className="agent-fallback-draft-actions">
-                        <button
-                          type="button"
-                          className="button-ui button-ui-secondary"
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           disabled={saving}
                           onClick={() => setFallbackDraft(null)}
                         >
                           Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="button-ui button-ui-secondary"
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
                           disabled={
                             saving ||
                             !fallbackDraft.provider.trim() ||
@@ -1358,7 +1460,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                           onClick={addFallback}
                         >
                           Add
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   ) : null}
@@ -1367,150 +1469,139 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
             </section>
 
             <section
-              className="agent-form-section"
+              className="sblock"
               aria-labelledby="agent-permission-title"
             >
-              <div className="agent-form-copy">
-                <h2 id="agent-permission-title">Permission</h2>
-                <p>
-                  What happens when the agent wants to run a risky tool, such as
-                  bash or write_file.
-                </p>
-              </div>
-              <div className="agent-form-controls">
-                <fieldset className="agent-permission-tiles">
-                  <legend className="sr-only">Permission</legend>
-                  {PERMISSIONS.map((permission) => {
-                    const selected = form.permission === permission.value;
-                    return (
-                      <label
-                        key={permission.value}
-                        className={
-                          "agent-permission-tile" +
-                          (selected ? " is-selected" : "")
-                        }
-                      >
-                        <input
-                          className="agent-permission-input"
-                          type="radio"
-                          name="agent-permission"
-                          value={permission.value}
-                          checked={selected}
-                          disabled={saving}
-                          onChange={() =>
-                            updateField("permission", permission.value)
+              <h2 id="agent-permission-title">Permission</h2>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <span className="t" id="agent-permission-label">
+                    Risky tools
+                  </span>
+                  <div className="d">
+                    What happens when the agent wants to run a risky tool, such
+                    as bash or write_file.
+                  </div>
+                </div>
+                <div className="agent-ctl agent-ctl-wide">
+                  <div
+                    className="agent-permission-tiles"
+                    role="radiogroup"
+                    aria-labelledby="agent-permission-label"
+                  >
+                    {PERMISSIONS.map((permission) => {
+                      const selected = form.permission === permission.value;
+                      return (
+                        <label
+                          key={permission.value}
+                          className={
+                            "agent-permission-tile" +
+                            (selected ? " is-selected" : "")
                           }
-                        />
-                        <span className="agent-permission-text">
-                          <span className="agent-permission-title">
-                            {permission.title}
-                          </span>
-                          <span className="agent-permission-note">
-                            {permission.note}
-                          </span>
-                        </span>
-                        <span
-                          className="agent-permission-radio"
-                          aria-hidden="true"
                         >
-                          <span className="agent-permission-dot"></span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                </fieldset>
+                          <Radio
+                            name="agent-permission"
+                            value={permission.value}
+                            checked={selected}
+                            disabled={saving}
+                            onChange={() =>
+                              updateField("permission", permission.value)
+                            }
+                          />
+                          <span className="agent-permission-text">
+                            <span className="agent-permission-title">
+                              {permission.title}
+                            </span>
+                            <span className="agent-permission-note">
+                              {permission.note}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </section>
 
-            <section
-              className="agent-form-section"
-              aria-labelledby="agent-limits-title"
-            >
-              <div className="agent-form-copy">
-                <h2 id="agent-limits-title">Limits</h2>
-                <p>How long one turn can run. Leave max steps empty for no limit.</p>
+            <section className="sblock" aria-labelledby="agent-limits-title">
+              <h2 id="agent-limits-title">Limits</h2>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-max-steps">
+                    Max steps per turn
+                  </label>
+                  <div className="d">Leave empty for no limit.</div>
+                </div>
+                <div className="agent-ctl">
+                  <Input
+                    id="agent-max-steps"
+                    className="agent-number-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputMode="numeric"
+                    value={form.max_steps}
+                    placeholder="No limit"
+                    disabled={saving}
+                    onChange={(event) =>
+                      updateField("max_steps", event.target.value)
+                    }
+                  />
+                </div>
               </div>
-              <div className="agent-form-controls">
-                <div className="agent-form-row">
-                  <div className="agent-form-field">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="agent-max-steps"
-                    >
-                      Max steps per turn
-                    </label>
-                    <input
-                      id="agent-max-steps"
-                      className="agent-number-input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      inputMode="numeric"
-                      value={form.max_steps}
-                      placeholder="No limit"
-                      disabled={saving}
-                      onChange={(event) =>
-                        updateField("max_steps", event.target.value)
-                      }
-                    />
-                  </div>
-                  <div className="agent-form-field">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="agent-context-window"
-                    >
-                      Context window
-                    </label>
-                    <input
-                      id="agent-context-window"
-                      className="agent-number-input"
-                      type="number"
-                      min="1"
-                      step="1"
-                      inputMode="numeric"
-                      value={form.context_window}
-                      placeholder="Provider default"
-                      disabled={saving}
-                      onChange={(event) =>
-                        updateField("context_window", event.target.value)
-                      }
-                    />
-                  </div>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-context-window">
+                    Context window
+                  </label>
+                  <div className="d">Tokens kept in one turn.</div>
+                </div>
+                <div className="agent-ctl">
+                  <Input
+                    id="agent-context-window"
+                    className="agent-number-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
+                    value={form.context_window}
+                    placeholder="Provider default"
+                    disabled={saving}
+                    onChange={(event) =>
+                      updateField("context_window", event.target.value)
+                    }
+                  />
                 </div>
               </div>
             </section>
 
             {page && page.tools.includes("memory_write") ? (
               <section
-                className="agent-form-section"
+                className="sblock"
                 aria-labelledby="agent-memory-title"
               >
-                <div className="agent-form-copy">
-                  <h2 id="agent-memory-title">Memory</h2>
-                  <p>
-                    After each turn, lana checks the conversation for
-                    preferences and corrections and saves them to memory.
-                  </p>
-                </div>
-                <div className="agent-form-controls">
-                  <label className="agent-switch">
-                    <input
-                      className="agent-switch-input"
-                      type="checkbox"
-                      role="switch"
+                <h2 id="agent-memory-title">Memory</h2>
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <span className="t" id="agent-memory-label">
+                      Remember automatically
+                    </span>
+                    <div className="d">
+                      After each turn, lana keeps preferences and corrections it
+                      finds in the conversation.
+                    </div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Toggle
+                      aria-labelledby="agent-memory-label"
                       checked={form.memory_capture}
                       disabled={saving}
-                      onChange={(event) =>
-                        updateField("memory_capture", event.target.checked)
+                      onChange={(checked) =>
+                        updateField("memory_capture", checked)
                       }
                     />
-                    <span className="agent-switch-track" aria-hidden="true">
-                      <span className="agent-switch-thumb"></span>
-                    </span>
-                    <span className="agent-switch-text">
-                      Remember things automatically
-                    </span>
-                  </label>
+                  </div>
                 </div>
               </section>
             ) : null}
@@ -1533,38 +1624,44 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </p>
             ) : null}
             {error ? (
-              <div className="agent-save-error" role="alert">
-                <ErrorNotice message={error} details={details} />
-                {stale ? (
-                  <button
-                    type="button"
-                    className="button-ui button-ui-secondary"
-                    onClick={reload}
-                  >
-                    Reload settings
-                  </button>
-                ) : null}
+              <div className="panel agent-save-error" role="alert">
+                <ErrorState
+                  icon="cloud-alert"
+                  title="Could not save"
+                  text={error}
+                  action={
+                    stale ? (
+                      <Button variant="secondary" onClick={reload}>
+                        Reload settings
+                      </Button>
+                    ) : null
+                  }
+                >
+                  <DetailsList details={details} />
+                </ErrorState>
               </div>
             ) : null}
 
             <div className="agent-save-bar">
-              <p className="agent-save-note">Changes apply from the next turn.</p>
+              <p className="agent-save-note">
+                Changes apply from the next turn.
+              </p>
               <div className="agent-save-actions">
-                <button
-                  type="button"
-                  className="button-ui button-ui-secondary"
+                <Button
+                  variant="secondary"
                   disabled={!dirty.length || saving}
                   onClick={resetForm}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="button-ui button-ui-primary"
+                  variant="primary"
+                  loading={saving}
                   disabled={!canSave}
                 >
                   {saving ? "Saving…" : "Save changes"}
-                </button>
+                </Button>
               </div>
             </div>
           </form>
@@ -1582,6 +1679,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
           <WorkspaceTab name={agentName} />
         ) : null}
       </section>
+      ) : null}
 
       {duplicateOpen ? (
         <DuplicateAgentDialog

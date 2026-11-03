@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { errorMessage, isErrorCode, setCSRF } from "../api/client";
 import { authState, resetRestart, resetTelegram, resetVerify } from "../api/auth";
 import { useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { Button, Field, Input } from "../ui/gr8r";
 import { SetupShell } from "./setup";
 import { PasswordField } from "./login";
 
@@ -143,15 +145,15 @@ export function ForgotPage({ onLoggedIn }: ForgotPageProps) {
   if (mode === "restart") {
     return (
       <SetupShell step="unlock" variant="door">
-        <div className="setup-heading">
-          <h1 className="setup-title">Restart lana</h1>
-          <p className="setup-lede">
-            Close lana and start it again. A browser window opens where you can
-            set a new password.
-          </p>
-        </div>
-        <p className="after-form">
-          <a href="#/login">Back to log in</a>
+        <h1>Restart lana</h1>
+        <p className="sub">
+          Close lana and start it again. A browser window opens where you can set
+          a new password.
+        </p>
+        <p className="auth-foot">
+          <a className="link" href="#/login">
+            Back to log in
+          </a>
         </p>
       </SetupShell>
     );
@@ -160,39 +162,25 @@ export function ForgotPage({ onLoggedIn }: ForgotPageProps) {
   if (mode === "code") {
     return (
       <SetupShell step="unlock" variant="door">
-        <div className="setup-heading">
-          <h1 className="setup-title">Enter the code</h1>
-          <p className="setup-lede">
-            We sent it to Telegram. It works for 10 minutes.
-          </p>
-        </div>
+        <h1>Enter the code</h1>
+        <p className="sub">We sent it to Telegram. It works for 10 minutes.</p>
 
-        <form className="setup-form" onSubmit={submitCode}>
-          <div className="setup-field code-field">
-            <label className="setup-label" htmlFor="reset-code">
-              Code
-            </label>
-            <input
+        <form className="auth-form" onSubmit={submitCode}>
+          <Field label="Code" htmlFor="reset-code" error={codeError}>
+            <Input
               id="reset-code"
-              type="text"
+              className="code-input"
               inputMode="numeric"
               autoComplete="one-time-code"
               spellCheck={false}
               value={code}
               disabled={busy}
-              aria-invalid={codeError ? "true" : undefined}
-              aria-describedby={codeError ? "reset-code-error" : undefined}
               onChange={(event) => {
                 setCode(event.target.value);
                 setCodeError("");
               }}
             />
-            {codeError ? (
-              <p id="reset-code-error" className="setup-field-error" role="alert">
-                {codeError}
-              </p>
-            ) : null}
-          </div>
+          </Field>
           <PasswordField
             id="reset-password"
             label="New password"
@@ -219,29 +207,19 @@ export function ForgotPage({ onLoggedIn }: ForgotPageProps) {
             }}
           />
           {error ? (
-            <p className="setup-field-error" role="alert">
-              {error}
-            </p>
+            <div className="alert danger" role="alert">
+              <Ic name="circle-alert" size={15} />
+              <span>{error}</span>
+            </div>
           ) : null}
-          <div className="setup-actions">
-            <button
-              type="submit"
-              className="button-ui button-ui-primary"
-              disabled={busy}
-            >
-              {busy ? "Saving…" : "Set new password"}
-            </button>
-          </div>
+          <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy}>
+            Set new password
+          </Button>
         </form>
 
-        <p className="after-form">
+        <p className="auth-foot">
           No message?{" "}
-          <button
-            type="button"
-            className="link-button"
-            disabled={busy}
-            onClick={sendCode}
-          >
+          <button type="button" className="link" disabled={busy} onClick={sendCode}>
             Send a new code
           </button>
         </p>
@@ -251,52 +229,43 @@ export function ForgotPage({ onLoggedIn }: ForgotPageProps) {
 
   return (
     <SetupShell step="unlock" variant="door">
-      <div className="setup-heading">
-        <h1 className="setup-title">Reset your password</h1>
-        <p className="setup-lede">Choose how you want to prove it is you.</p>
-      </div>
+      <h1>Reset your password</h1>
+      <p className="sub">Choose how you want to prove it is you.</p>
 
       <ul className="reset-list">
         {telegramReset ? (
           <li>
-            <div>
+            <div className="grow">
               <h2>Send a code to Telegram</h2>
               <p>We send a 6-digit code to your private chat on Telegram.</p>
             </div>
-            <button
-              type="button"
-              className="button-ui button-ui-primary"
-              disabled={busy}
-              onClick={sendCode}
-            >
+            <Button variant="primary" disabled={busy} onClick={sendCode}>
               Send code
-            </button>
+            </Button>
           </li>
         ) : null}
         <li>
-          <div>
+          <div className="grow">
             <h2>Restart lana to get a sign-in link</h2>
             <p>Close lana and start it again to get a sign-in link.</p>
           </div>
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={busy}
-            onClick={useRestart}
-          >
+          <Button variant="secondary" disabled={busy} onClick={useRestart}>
             Use restart
-          </button>
+          </Button>
         </li>
       </ul>
 
       {error ? (
-        <p className="setup-field-error" role="alert">
-          {error}
-        </p>
+        <div className="alert danger" role="alert">
+          <Ic name="circle-alert" size={15} />
+          <span>{error}</span>
+        </div>
       ) : null}
 
-      <p className="after-form">
-        <a href="#/login">Back to log in</a>
+      <p className="auth-foot">
+        <a className="link" href="#/login">
+          Back to log in
+        </a>
       </p>
     </SetupShell>
   );

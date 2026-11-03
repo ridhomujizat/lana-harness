@@ -109,7 +109,7 @@ const auditEntry: AuditEntry = {
 };
 
 describe("settings shell", () => {
-  it("marks the active tab and moves focus with the arrow keys", () => {
+  it("marks the active section and moves focus with the arrow keys", () => {
     render(
       <>
         <SettingsTabs active="providers" />
@@ -117,15 +117,15 @@ describe("settings shell", () => {
       </>
     );
 
-    const active = screen.getByRole("tab", { name: "Providers" });
-    expect(active.getAttribute("aria-selected")).toBe("true");
-    expect(active.getAttribute("tabindex")).toBe("0");
+    const active = screen.getByRole("link", { name: "Providers" });
+    expect(active.getAttribute("aria-current")).toBe("page");
+    expect(active.className).toContain("on");
     expect(screen.getByText("Panel body")).toBeTruthy();
 
     active.focus();
-    fireEvent.keyDown(active, { key: "ArrowRight" });
+    fireEvent.keyDown(active, { key: "ArrowDown" });
     expect(document.activeElement).toBe(
-      screen.getByRole("tab", { name: "Secrets" })
+      screen.getByRole("link", { name: "Secrets" })
     );
   });
 
@@ -179,7 +179,19 @@ describe("settings pages", () => {
     render(<SettingsSecretsPage />);
     expect(await screen.findByText("OPENAI_API_KEY")).toBeTruthy();
     expect(screen.getByText("providers.openai")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Replace" })).toBeTruthy();
+  });
+
+  it("opens the secret row menu with replace and remove", async () => {
+    render(<SettingsSecretsPage />);
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Actions for OPENAI_API_KEY",
+      })
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Replace" })
+    ).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toBeTruthy();
   });
 
   it("loads config.toml into the editor", async () => {

@@ -266,7 +266,7 @@ describe("dashboard render (AC-DSH-004)", () => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("24h");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    fireEvent.click(screen.getByRole("tab", { name: "7 days" }));
     await waitFor(() => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("7d");
     });
@@ -284,7 +284,7 @@ describe("dashboard render (AC-DSH-004)", () => {
     render(<HomePage />);
     await waitFor(() => expect(pending.has("24h")).toBe(true));
 
-    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    fireEvent.click(screen.getByRole("tab", { name: "7 days" }));
     await waitFor(() => expect(pending.has("7d")).toBe(true));
 
     const sevenDay = makeDashboard({
@@ -329,7 +329,7 @@ describe("error log (AC-DSH-005)", () => {
     const list = await screen.findByRole("list", { name: "Error log" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("button", { name: "Tool" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Tool" }));
     expect(within(list).getAllByRole("listitem")).toHaveLength(1);
     expect(within(list).getByText(/file not found: a.txt/)).toBeTruthy();
     expect(within(list).queryByText(/mcp server exited/)).toBeNull();
@@ -365,11 +365,12 @@ describe("agent filter (AC-DSH-008)", () => {
     render(<HomePage />);
 
     const select = await screen.findByRole("combobox", { name: "Agent" });
-    const options = within(select)
+    fireEvent.click(select);
+    const options = screen
       .getAllByRole("option")
       .map((option) => option.textContent);
     expect(options).toEqual(["All agents", "assistant", "lana"]);
-    expect((select as HTMLSelectElement).value).toBe("");
+    expect(select.textContent).toContain("All agents");
   });
 
   it("refetches with the chosen agent and writes it to the hash", async () => {
@@ -379,9 +380,8 @@ describe("agent filter (AC-DSH-008)", () => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("24h");
     });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), {
-      target: { value: "lana" },
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    fireEvent.click(screen.getByRole("option", { name: "lana" }));
 
     await waitFor(() => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("24h", "lana");
@@ -400,9 +400,9 @@ describe("agent filter (AC-DSH-008)", () => {
       expect(vi.mocked(getDashboard)).toHaveBeenNthCalledWith(1, "7d", "lana");
     });
     const select = screen.getByRole("combobox", { name: "Agent" });
-    expect((select as HTMLSelectElement).value).toBe("lana");
+    expect(select.textContent).toContain("lana");
     expect(
-      screen.getByRole("button", { name: "7 days" }).getAttribute("aria-pressed")
+      screen.getByRole("tab", { name: "7 days" }).getAttribute("aria-selected")
     ).toBe("true");
   });
 
@@ -414,8 +414,9 @@ describe("agent filter (AC-DSH-008)", () => {
     render(<HomePage />);
 
     const select = await screen.findByRole("combobox", { name: "Agent" });
-    expect((select as HTMLSelectElement).value).toBe("lana");
-    expect(within(select).getByRole("option", { name: "lana" })).toBeTruthy();
+    expect(select.textContent).toContain("lana");
+    fireEvent.click(select);
+    expect(screen.getByRole("option", { name: "lana" })).toBeTruthy();
   });
 
   it("falls back to 24 hours for an invalid range", async () => {
@@ -436,7 +437,7 @@ describe("agent filter (AC-DSH-008)", () => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("24h", "lana");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    fireEvent.click(screen.getByRole("tab", { name: "7 days" }));
     await waitFor(() => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("7d", "lana");
     });
@@ -451,14 +452,13 @@ describe("agent filter (AC-DSH-008)", () => {
       expect(vi.mocked(getDashboard)).toHaveBeenCalledWith("7d", "lana");
     });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), {
-      target: { value: "" },
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    fireEvent.click(screen.getByRole("option", { name: "All agents" }));
     await waitFor(() => {
       expect(window.location.hash).toBe("#/home?range=7d");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "24 hours" }));
+    fireEvent.click(screen.getByRole("tab", { name: "24 hours" }));
     await waitFor(() => {
       expect(window.location.hash).toBe("#/home");
     });
@@ -471,12 +471,11 @@ describe("agent filter (AC-DSH-008)", () => {
     expect(screen.queryByText(/Daemon logs are not per agent/)).toBeNull();
     await screen.findByRole("list", { name: "Error log" });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), {
-      target: { value: "lana" },
-    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent" }));
+    fireEvent.click(screen.getByRole("option", { name: "lana" }));
 
     expect(await screen.findByText(/Daemon logs are not per agent/)).toBeTruthy();
-    const daemon = screen.getByRole("button", { name: "Daemon" });
+    const daemon = screen.getByRole("tab", { name: "Daemon" });
     expect((daemon as HTMLButtonElement).disabled).toBe(true);
   });
 });

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, DragEvent } from "react";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "../api/attachments";
-import { Icon } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { Chip, IconButton } from "../ui/gr8r";
 
 /* The shared attachment affordances of the session and new-session composers
    (REQ-ATT-006). Files are held as drafts until they are uploaded; image
@@ -147,32 +148,25 @@ export function AttachmentChips({
   return (
     <ul className="attach-chips" aria-label="Attached files">
       {items.map((item) => (
-        <li className="attach-chip" key={item.id}>
-          {item.isImage && item.url ? (
-            <img
-              className="attach-chip-thumb"
-              src={item.url}
-              alt={item.file.name}
-            />
-          ) : (
-            <span className="attach-chip-icon" aria-hidden="true">
-              <Icon name="file" className="icon-16" />
-            </span>
-          )}
-          <span className="attach-chip-text">
-            <span className="attach-chip-name">{item.file.name}</span>
-            <span className="attach-chip-type">
-              {item.file.type || "file"}
-            </span>
-          </span>
-          <button
-            type="button"
-            className="attach-chip-remove"
-            aria-label={"Remove " + item.file.name}
-            onClick={() => onRemove(item.id)}
+        <li key={item.id}>
+          <Chip
+            className="attach-chip"
+            removeLabel={"Remove " + item.file.name}
+            onRemove={() => onRemove(item.id)}
           >
-            <Icon name="close" className="icon-16" />
-          </button>
+            {item.isImage && item.url ? (
+              <img
+                className="attach-chip-thumb"
+                src={item.url}
+                alt={item.file.name}
+              />
+            ) : (
+              <span className="attach-chip-icon" aria-hidden="true">
+                <Ic name="file" size={13} />
+              </span>
+            )}
+            <span className="attach-chip-name">{item.file.name}</span>
+          </Chip>
         </li>
       ))}
     </ul>
@@ -190,20 +184,18 @@ export function AttachButton({
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <>
-      <button
-        type="button"
-        className="composer-plus"
-        aria-label="Attach files"
-        title="Attach files"
+      <IconButton
+        icon="paperclip"
+        size="sm"
+        tip="Attach files"
+        label="Attach files"
         disabled={disabled}
         onClick={() => {
           if (inputRef.current) {
             inputRef.current.click();
           }
         }}
-      >
-        <Icon name="paperclip" />
-      </button>
+      />
       <input
         ref={inputRef}
         className="attach-input"
@@ -232,7 +224,7 @@ export function AttachmentDropOverlay({ active }: { active: boolean }) {
   return (
     <div className="attach-drop" role="status">
       <div className="attach-drop-inner">
-        <Icon name="paperclip" className="icon-24" />
+        <Ic name="paperclip" size={24} />
         <p className="attach-drop-text">Drop files to attach</p>
       </div>
     </div>

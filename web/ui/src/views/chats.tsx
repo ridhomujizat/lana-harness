@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RoomRow } from "../api/rooms";
-import {
-  AgentFace,
-  PresenceLabel,
-  SkeletonRows,
-  TeamFace,
-  UnreadBadge,
-  useRooms,
-} from "./presence";
+import { gr8rColor, PresenceLabel, useRooms } from "./presence";
 import { relativeShort, RoomView } from "./room-timeline";
+import {
+  Avatar,
+  AvatarStack,
+  Badge,
+  Button,
+  EmptyState,
+  SearchInput,
+  Seg,
+  Skeleton,
+} from "../ui/gr8r";
+import type { BadgeTone } from "../ui/gr8r";
 
 /* The Chats page of REQ-ROOM-001 to REQ-ROOM-005: the room list column and the
    room timeline. The list rows come from the live useRooms() store; the
@@ -36,15 +40,15 @@ function needsYou(row: RoomRow): boolean {
   return state === "waiting" || state === "problem";
 }
 
-function unreadTone(row: RoomRow): string {
+function unreadTone(row: RoomRow): BadgeTone {
   const state = rowState(row);
   if (state === "waiting") {
-    return "warning";
+    return "amber";
   }
   if (state === "problem") {
-    return "error";
+    return "red";
   }
-  return "brand";
+  return "accent";
 }
 
 /* The status line: the presence label while busy, waiting or broken; the last
@@ -60,17 +64,19 @@ function rowStatus(row: RoomRow) {
 
 function RowFace({ row }: { row: RoomRow }) {
   if (row.kind === "team") {
-    const faces = [row.lead, ...(row.members || [])]
+    const items = [row.lead, ...(row.members || [])]
       .filter(Boolean)
-      .map((name) => ({ name: String(name) }));
-    return <TeamFace faces={faces} size={32} />;
+      .map((name) => ({ name: String(name), color: gr8rColor(row.color) }));
+    return <AvatarStack items={items} max={2} size="lg" />;
   }
+  const state = rowState(row);
   return (
-    <AgentFace
+    <Avatar
       name={row.name}
-      color={row.color}
-      presence={row.presence}
-      size={44}
+      color={gr8rColor(row.color)}
+      size="lg"
+      presence={Boolean(row.presence)}
+      className={state ? "state-" + state : undefined}
     />
   );
 }
@@ -140,53 +146,63 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
       <aside className="rooms-list" aria-label="Chats">
         <header className="rooms-list-head">
           <h1 className="rooms-list-title">Chats</h1>
-          <a className="button-ui button-ui-secondary" href="#/agents">
-            + New agent
-          </a>
+          <Button as="a" href="#/agents" size="sm" icon="plus">
+            New agent
+          </Button>
         </header>
-        <div className="rooms-search">
-          <img
-            className="icon-16 rooms-search-icon"
-            src="/assets/icons/search.svg"
-            alt=""
-            aria-hidden="true"
-          />
-          <input
-            type="search"
-            className="rooms-search-input"
-            placeholder="Search agents and messages"
-            aria-label="Search agents and messages"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
-        <div className="rooms-filters" role="tablist" aria-label="Room filters">
-          {FILTERS.map((entry) => (
-            <button
-              key={entry.key}
-              type="button"
-              role="tab"
-              aria-selected={filter === entry.key}
-              className={"rooms-filter" + (filter === entry.key ? " is-active" : "")}
-              onClick={() => setFilter(entry.key)}
-            >
-              {entry.label + " " + countFor(entry.key)}
-            </button>
-          ))}
-        </div>
+        <SearchInput
+          wrapClassName="rooms-search"
+          placeholder="Search agents and messages"
+          aria-label="Search agents and messages"
+          autoComplete="off"
+          spellCheck={false}
+          kbd={null}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <Seg
+          className="rooms-filters"
+          aria-label="Room filters"
+          value={filter}
+          onChange={(value) => setFilter(value as FilterKey)}
+          options={FILTERS.map((entry) => ({
+            value: entry.key,
+            label: entry.label + " ",
+            count: countFor(entry.key),
+          }))}
+        />
         <div className="rooms-list-body">
           {loading && rows.length === 0 ? (
-            <SkeletonRows count={5} />
-          ) : rows.length === 0 ? (
-            <div className="rooms-empty">
-              <p className="rooms-empty-title">No chats yet</p>
-              <p className="muted">Create an agent to start a chat.</p>
-              <a className="button-ui button-ui-secondary" href="#/agents">
-                + New agent
-              </a>
+            <div className="rooms-skeleton" aria-hidden="true">
+              {Array.from({ length: 5 }).map((_, index) => (
+                <div className="rooms-skeleton-row" key={index}>
+                  <Skeleton width={36} height={36} radius="50%" />
+                  <div className="rooms-skeleton-lines">
+                    <Skeleton width="60%" height={10} />
+                    <Skeleton width="90%" height={10} />
+                  </div>
+                </div>
+              ))}
             </div>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              size="sm"
+              icon="message-square"
+              title="No chats yet"
+              text="Create an agent to start a chat."
+              action={
+                <Button as="a" href="#/agents" variant="secondary" icon="plus">
+                  New agent
+                </Button>
+              }
+            />
           ) : visible.length === 0 ? (
-            <p className="muted rooms-list-note">No chats match.</p>
+            <EmptyState
+              size="sm"
+              icon="search-x"
+              title="No chats match"
+              text="Try a different search or filter."
+            />
           ) : (
             <ul className="rooms-rows">
               {visible.map((row) => {
@@ -195,7 +211,7 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
                 return (
                   <li key={row.name}>
                     <a
-                      className={"rooms-row" + (active ? " is-selected" : "")}
+                      className={"rooms-row" + (active ? " on" : "")}
                       href={"#/chats/" + encodeURIComponent(row.name)}
                       aria-current={active ? "page" : undefined}
                     >
@@ -210,9 +226,15 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
                         </span>
                         <span className="rooms-row-line">{rowStatus(row)}</span>
                       </span>
-                      <span className="rooms-row-badge">
-                        <UnreadBadge count={row.unread} tone={unreadTone(row)} />
-                      </span>
+                      {row.unread > 0 ? (
+                        <Badge
+                          className="rooms-row-badge"
+                          tone={unreadTone(row)}
+                          aria-label={row.unread + " unread"}
+                        >
+                          {row.unread > 99 ? "99+" : row.unread}
+                        </Badge>
+                      ) : null}
                     </a>
                   </li>
                 );
@@ -226,14 +248,24 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
           <RoomView key={selected.name} room={selected} />
         ) : rows.length === 0 && !loading ? (
           <div className="rooms-placeholder">
-            <p className="muted">Create an agent to start a chat.</p>
-            <a className="button-ui button-ui-secondary" href="#/agents">
-              + New agent
-            </a>
+            <EmptyState
+              icon="message-square"
+              title="No chats yet"
+              text="Create an agent to start a chat."
+              action={
+                <Button as="a" href="#/agents" variant="primary" icon="plus">
+                  New agent
+                </Button>
+              }
+            />
           </div>
         ) : (
           <div className="rooms-placeholder">
-            <SkeletonRows count={3} />
+            <div className="rooms-placeholder-skeleton" aria-hidden="true">
+              <Skeleton width={220} height={12} />
+              <Skeleton width={160} height={12} />
+              <Skeleton width={200} height={12} />
+            </div>
           </div>
         )}
       </section>

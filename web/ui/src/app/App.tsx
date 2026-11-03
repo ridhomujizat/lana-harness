@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { authSession, logout as apiLogout } from "../api/auth";
 import { setCSRF, setUnauthorizedHandler } from "../api/client";
@@ -17,6 +17,7 @@ import type { Route } from "./router";
 import { Sidebar, readCollapsed, saveCollapsed } from "./Sidebar";
 import type { DaemonCard } from "./Sidebar";
 import { useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
 import { LoginLoading, LoginPage } from "../views/login";
 import { WelcomePage } from "../views/welcome";
 import { ForgotPage } from "../views/forgot";
@@ -138,6 +139,78 @@ function routeContent(
   }
 }
 
+interface Crumb {
+  label: string;
+  /* Absent on the trail's last crumb, which is the current page. */
+  href?: string;
+}
+
+function titleCase(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+/* The topbar trail, e.g. "Agents / cody", "Settings / Providers". */
+export function crumbsFor(route: Route): Crumb[] {
+  const params = route.params || {};
+  switch (route.view) {
+    case "home":
+      return [{ label: "Home" }];
+    case "chats":
+      return [{ label: "Chats" }];
+    case "chat":
+      return [
+        { label: "Chats", href: "#/chats" },
+        { label: params.name || "Chat" },
+      ];
+    case "sessions":
+    case "new-session":
+    case "session":
+      return [{ label: "History" }];
+    case "agents":
+      return [{ label: "Agents" }];
+    case "agent":
+      return [
+        { label: "Agents", href: "#/agents" },
+        { label: params.name || "Agent" },
+      ];
+    case "skills":
+      return [{ label: "Skills" }];
+    case "new-skill":
+      return [
+        { label: "Skills", href: "#/skills" },
+        { label: "New skill" },
+      ];
+    case "skill":
+      return [
+        { label: "Skills", href: "#/skills" },
+        { label: params.name || "Skill" },
+      ];
+    case "knowledge":
+      return [{ label: "Knowledge" }];
+    case "mcp":
+      return [{ label: "MCP" }];
+    case "mcp-detail":
+      return [
+        { label: "MCP", href: "#/mcp" },
+        { label: params.name || "Server" },
+      ];
+    case "channels":
+      return [{ label: "Channels" }];
+    case "telegram":
+      return [
+        { label: "Channels", href: "#/channels" },
+        { label: "Telegram" },
+      ];
+    case "settings":
+      return [
+        { label: "Settings", href: "#/settings/general" },
+        { label: titleCase(params.tab || "general") },
+      ];
+    default:
+      return [{ label: "Not found" }];
+  }
+}
+
 function formatUptime(milliseconds: number): string {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) {
     return "uptime unknown";
@@ -185,6 +258,7 @@ export function App() {
   const [auth, setAuth] = useState<AuthState>("checking");
   const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [mnav, setMnav] = useState(false);
   const [daemonInfo, setDaemonInfo] = useState<DaemonState | null>(null);
 
   useEffect(() => {
@@ -353,17 +427,69 @@ export function App() {
   }
 
   const daemon = daemonCard(daemonInfo);
+  const crumbs = crumbsFor(route);
   return (
-    <div className={"app-shell" + (collapsed ? " sidebar-collapsed" : "")}>
+    <div
+      className={
+        "shell" + (collapsed ? " collapsed" : "") + (mnav ? " mnav" : "")
+      }
+    >
       <Sidebar
         route={route}
         collapsed={collapsed}
         onToggle={toggleSidebar}
         onLogout={logout}
+        onNavigate={() => setMnav(false)}
         daemon={daemon}
       />
-      <div className="app-content">
-        {routeContent(route, theme, changeTheme)}
+      {mnav ? (
+        <div
+          className="side-scrim"
+          aria-hidden="true"
+          onClick={() => setMnav(false)}
+        />
+      ) : null}
+      <div className="main">
+        <header className="topbar">
+          <button
+            type="button"
+            className="ibtn mnav-btn"
+            aria-label="Open navigation"
+            onClick={() => setMnav(true)}
+          >
+            <Ic name="menu" size={17} />
+          </button>
+          <nav className="crumbs trunc" aria-label="Breadcrumb">
+            {crumbs.map((crumb, index) => (
+              <Fragment key={crumb.label + "-" + index}>
+                {index > 0 ? <span className="sep">/</span> : null}
+                {crumb.href ? (
+                  <a href={crumb.href}>{crumb.label}</a>
+                ) : (
+                  <span className="cur">{crumb.label}</span>
+                )}
+              </Fragment>
+            ))}
+          </nav>
+          <span className="sp"></span>
+          <a
+            className="btn btn-secondary btn-sm"
+            href="#/sessions/new"
+            aria-label="New session"
+          >
+            <Ic name="plus" size={14} />
+            <span className="hide-m">New</span>
+            <Ic name="chevron-down" size={12} className="hide-m" />
+          </a>
+        </header>
+        <div
+          className="content fx-route"
+          id="main-content"
+          tabIndex={-1}
+          key={route.path}
+        >
+          {routeContent(route, theme, changeTheme)}
+        </div>
       </div>
     </div>
   );

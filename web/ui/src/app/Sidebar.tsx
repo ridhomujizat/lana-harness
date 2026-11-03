@@ -1,4 +1,5 @@
-import { Icon } from "../ui/ui";
+import { Fragment } from "react";
+import { Ic, LanaMark } from "../ui/icons";
 import type { Route } from "./router";
 
 export const SIDEBAR_KEY = "lana.sidebar";
@@ -41,69 +42,65 @@ interface NavSection {
   items: NavItem[];
 }
 
-/* REQ-ROOM-012: Home and Chats have no title; Observe and Configure group the
-   rest. History is the existing Sessions page. Workflows is hidden until the
-   page exists. */
+/* Home and Chats sit under "Workspace" (owner request 2026-11-02, replacing
+   the untitled group of REQ-ROOM-012); Observe and Configure group the rest.
+   History is the existing Sessions page. Workflows is hidden until the page
+   exists. Settings lives in the sidebar footer. */
 export const NAV_SECTIONS: NavSection[] = [
   {
+    title: "Workspace",
     items: [
-      { key: "home", label: "Home", icon: "home", href: "#/home" },
-      { key: "chats", label: "Chats", icon: "sessions", href: "#/chats" },
+      { key: "home", label: "Home", icon: "house", href: "#/home" },
+      { key: "chats", label: "Chats", icon: "messages-square", href: "#/chats" },
     ],
   },
   {
     title: "Observe",
-    items: [
-      {
-        key: "sessions",
-        label: "History",
-        icon: "sessions",
-        href: "#/sessions",
-      },
-    ],
+    items: [{ key: "sessions", label: "History", icon: "history", href: "#/sessions" }],
   },
   {
     title: "Configure",
     items: [
-      { key: "agents", label: "Agents", icon: "agents", href: "#/agents" },
-      {
-        key: "knowledge",
-        label: "Knowledge",
-        icon: "file",
-        href: "#/knowledge",
-      },
-      { key: "skills", label: "Skills", icon: "skills", href: "#/skills" },
-      { key: "mcp", label: "MCP", icon: "mcp", href: "#/mcp" },
-      { key: "channels", label: "Channels", icon: "channels", href: "#/channels" },
-      {
-        key: "settings",
-        label: "Settings",
-        icon: "settings",
-        href: "#/settings/general",
-      },
+      { key: "agents", label: "Agents", icon: "bot", href: "#/agents" },
+      { key: "knowledge", label: "Knowledge", icon: "book-open", href: "#/knowledge" },
+      { key: "skills", label: "Skills", icon: "sparkles", href: "#/skills" },
+      { key: "mcp", label: "MCP", icon: "plug", href: "#/mcp" },
+      { key: "channels", label: "Channels", icon: "radio-tower", href: "#/channels" },
     ],
   },
 ];
 
-function SidebarToggle({
+const SETTINGS_ITEM: NavItem = {
+  key: "settings",
+  label: "Settings",
+  icon: "settings",
+  href: "#/settings/general",
+};
+
+function SItem({
+  item,
+  active,
   collapsed,
-  onToggle,
+  onNavigate,
 }: {
+  item: NavItem;
+  active: boolean;
   collapsed: boolean;
-  onToggle: () => void;
+  onNavigate?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className="icon-button sidebar-toggle"
-      aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      aria-expanded={!collapsed}
-      aria-controls="sidebar-nav"
-      title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      onClick={onToggle}
+    <a
+      className={"sitem" + (active ? " on" : "")}
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      aria-label={item.label}
+      data-tip={collapsed ? item.label : undefined}
+      data-tip-pos={collapsed ? "right" : undefined}
+      onClick={onNavigate}
     >
-      <Icon name={collapsed ? "sidebar-expand" : "sidebar-collapse"} />
-    </button>
+      <Ic name={item.icon} />
+      <span className="trunc">{item.label}</span>
+    </a>
   );
 }
 
@@ -112,6 +109,7 @@ export interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
   onLogout: () => void;
+  onNavigate?: () => void;
   daemon: DaemonCard;
 }
 
@@ -120,116 +118,111 @@ export function Sidebar({
   collapsed,
   onToggle,
   onLogout,
+  onNavigate,
   daemon,
 }: SidebarProps) {
+  const daemonTip = daemon.title + " · " + daemon.meta;
   return (
-    <aside className="sidebar" aria-label="Sidebar">
-      <div className="sidebar-top">
-        <div className="sidebar-logo">
-          <a className="logo-lockup" href="#/home" aria-label="lana">
-            <img
-              className="logo-mark"
-              src="/assets/icons/logo-mark.svg"
-              alt=""
-              aria-hidden="true"
-            />
-            {collapsed ? null : <span className="logo-word">LΛNΛ</span>}
+    <nav id="sidebar-nav" className="side" aria-label="Main">
+      <div className="side-top">
+        <div className="row" style={{ gap: 2 }}>
+          <a
+            className="ws grow"
+            href="#/home"
+            aria-label="Lana home"
+            data-tip={collapsed ? daemonTip : undefined}
+            data-tip-pos={collapsed ? "right" : undefined}
+            onClick={onNavigate}
+          >
+            <LanaMark size={24} />
+            <span className="ws-text grow">
+              <span className="ws-name lana-word trunc">LΛNΛ</span>
+              <span className="ws-sub trunc" title={daemonTip}>
+                {daemon.meta}
+              </span>
+            </span>
           </a>
           {collapsed ? null : (
-            <SidebarToggle collapsed={collapsed} onToggle={onToggle} />
-          )}
-        </div>
-
-        <nav id="sidebar-nav" className="sidebar-nav" aria-label="Main">
-          {NAV_SECTIONS.map((section, index) => (
-            <div
-              className="nav-section"
-              key={section.title ? section.title : "section-" + index}
-            >
-              {section.title ? (
-                <div className="nav-section-title">{section.title}</div>
-              ) : null}
-              {section.items.map((item) => {
-                const active = route.section === item.key;
-                return (
-                  <a
-                    key={item.key}
-                    className="nav-item"
-                    href={item.href}
-                    aria-current={active ? "page" : undefined}
-                    aria-label={collapsed ? item.label : undefined}
-                    title={collapsed ? item.label : undefined}
-                  >
-                    <Icon name={item.icon} />
-                    <span className="nav-label">{item.label}</span>
-                  </a>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-      </div>
-
-      <div className="sidebar-bottom">
-        {collapsed ? (
-          <SidebarToggle collapsed={collapsed} onToggle={onToggle} />
-        ) : null}
-
-        <div
-          className={
-            "daemon-card" +
-            (daemon.state === "unavailable" ? " is-unavailable" : "")
-          }
-          title={collapsed ? daemon.title + " · " + daemon.meta : undefined}
-        >
-          <div className="daemon-title">
-            <span
-              className={
-                "status-dot" +
-                (daemon.state === "unavailable" ? " is-unavailable" : "")
-              }
-              aria-hidden="true"
-            ></span>
-            <span className="daemon-label">{daemon.title}</span>
-          </div>
-          <p className="daemon-meta">{daemon.meta}</p>
-        </div>
-
-        {collapsed ? null : <hr className="sidebar-divider" />}
-
-        <div className="owner-row">
-          {collapsed ? (
             <button
               type="button"
-              className="owner-avatar avatar-button"
-              aria-label="Log out"
-              title="Log out"
-              onClick={onLogout}
+              className="ibtn ibtn-sm hide-m"
+              aria-label="Collapse sidebar"
+              aria-expanded={true}
+              aria-controls="sidebar-nav"
+              title="Collapse sidebar"
+              onClick={onToggle}
             >
-              OW
+              <Ic name="panel-left" size={15} />
             </button>
-          ) : (
-            <>
-              <span className="owner-avatar" aria-hidden="true">
-                OW
-              </span>
-              <div className="owner-text">
-                <div className="owner-name">Owner</div>
-                <div className="owner-meta">This browser</div>
-              </div>
-              <button
-                type="button"
-                className="icon-button owner-logout"
-                aria-label="Log out"
-                title="Log out"
-                onClick={onLogout}
-              >
-                <Icon name="logout" />
-              </button>
-            </>
           )}
         </div>
       </div>
-    </aside>
+
+      <div className="side-scroll">
+        {collapsed ? (
+          <button
+            type="button"
+            className="sitem"
+            aria-label="Expand sidebar"
+            aria-expanded={false}
+            aria-controls="sidebar-nav"
+            data-tip="Expand sidebar"
+            data-tip-pos="right"
+            onClick={onToggle}
+          >
+            <Ic name="panel-left" size={16} />
+          </button>
+        ) : null}
+
+        {NAV_SECTIONS.map((section, index) => {
+          const items = section.items.map((item) => (
+            <SItem
+              key={item.key}
+              item={item}
+              active={route.section === item.key}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+            />
+          ));
+          if (!section.title) {
+            return <Fragment key={"section-" + index}>{items}</Fragment>;
+          }
+          return (
+            <div className="sgroup" key={section.title}>
+              <div className="sgroup-h">{section.title}</div>
+              {items}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="side-bot">
+        <SItem
+          item={SETTINGS_ITEM}
+          active={route.section === SETTINGS_ITEM.key}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
+        <div className="row">
+          <span
+            className="av md"
+            aria-hidden="true"
+            style={{ background: "var(--surface-3)", color: "var(--text-2)" }}
+          >
+            OW
+          </span>
+          <span className="trunc grow">Owner</span>
+          <button
+            type="button"
+            className="ibtn ibtn-sm"
+            aria-label="Log out"
+            title="Log out"
+            onClick={onLogout}
+          >
+            <Ic name="log-out" size={15} />
+          </button>
+        </div>
+      </div>
+    </nav>
   );
 }

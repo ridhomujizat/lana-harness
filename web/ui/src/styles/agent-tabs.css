@@ -12,9 +12,10 @@
   align-items: flex-start;
   gap: 12px;
   padding: var(--space-section);
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-xl);
+  border: 0;
+  border-radius: var(--radius-lg);
   background: var(--bg-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .agent-tabs-state .error-box {
@@ -68,77 +69,103 @@
   line-height: var(--line-height-sm);
 }
 
+/* One search box: the icon sits inside the input, with no extra bordered
+   wrapper around it (Gr8r .inwrap / .input). */
 .agent-tabs-search {
+  position: relative;
   display: flex;
-  flex: 0 1 320px;
+  flex: 0 1 300px;
   align-items: center;
-  gap: 8px;
   min-width: 200px;
-  min-height: var(--control-height);
-  padding: 7px 12px;
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
 }
 
-.agent-tabs-search:focus-within {
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 1px;
+.agent-tabs-search img {
+  position: absolute;
+  left: 9px;
+  width: 13px;
+  height: 13px;
+  color: var(--text-4);
+  pointer-events: none;
 }
 
 .agent-tabs-search input {
   width: 100%;
   min-width: 0;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  font-size: var(--font-size-body);
-  line-height: var(--line-height-body);
+  height: var(--h-sm);
+  padding: 0 10px 0 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.agent-tabs-search input:hover {
+  border-color: color-mix(in srgb, var(--border-strong) 60%, var(--text-3));
 }
 
 .agent-tabs-search input:focus,
 .agent-tabs-search input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
   outline: none;
 }
 
 /* Tables */
 
 .agent-tabs-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-xl);
-  background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
 }
 
 .agent-tabs-table {
   width: 100%;
   min-width: 40rem;
   border-collapse: collapse;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
 }
 
 .agent-tabs-table th,
 .agent-tabs-table td {
-  padding: 10px var(--space-section);
-  border-bottom: 1px solid var(--border-secondary);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--divider);
   text-align: left;
   vertical-align: middle;
 }
 
 .agent-tabs-table thead th {
-  background: var(--bg-secondary);
-  color: var(--text-quaternary);
-  font-size: var(--font-size-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
   font-weight: 500;
-  line-height: var(--line-height-sm);
   white-space: nowrap;
+}
+
+.agent-tabs-table tbody tr {
+  transition: background var(--dur);
+  animation: riseIn 0.3s var(--ease) both;
+}
+
+.agent-tabs-table tbody tr:nth-child(2) {
+  animation-delay: 0.04s;
+}
+
+.agent-tabs-table tbody tr:nth-child(3) {
+  animation-delay: 0.08s;
+}
+
+.agent-tabs-table tbody tr:nth-child(n + 4) {
+  animation-delay: 0.1s;
+}
+
+.agent-tabs-table tbody tr:hover {
+  background: var(--surface-2);
 }
 
 .agent-tabs-table tbody:last-child tr:last-child > * {
@@ -147,7 +174,7 @@
 
 .agent-tabs-group-row > th,
 .agent-tabs-group-row > td {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .agent-tabs-group-title {
@@ -183,10 +210,13 @@
   font-weight: 600;
   line-height: 20px;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .agent-tabs-link-button:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
 }
 
 .agent-tabs-link-button:disabled {
@@ -245,21 +275,20 @@
 }
 
 .agent-tabs-tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
   margin-right: 12px;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
   vertical-align: middle;
 }
 
 .agent-tabs-tile img {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .agent-tabs-icon-button,
@@ -276,11 +305,14 @@
   background: transparent;
   color: var(--text-quaternary);
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .agent-tabs-icon-button:hover,
 .agent-tabs-row-link:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
   color: var(--text-secondary);
 }
 
@@ -295,21 +327,21 @@
 
 .agent-tabs-empty {
   margin: 0;
-  padding: var(--space-section);
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-xl);
-  background: var(--bg-primary);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
 }
 
 /* Badge tones that app.css does not define */
 
 .agent-tabs-badge-success {
   border-color: transparent;
-  background: var(--bg-success-primary);
-  color: var(--text-success-primary);
+  background: var(--green-soft);
+  color: var(--fg-success-primary);
 }
 
 .agent-tabs-badge-success .badge-ui-dot {
@@ -318,8 +350,8 @@
 
 .agent-tabs-badge-error {
   border-color: transparent;
-  background: var(--bg-error-primary);
-  color: var(--text-error-primary);
+  background: var(--red-soft);
+  color: var(--fg-error-primary);
 }
 
 .agent-tabs-badge-error .badge-ui-dot {
@@ -328,8 +360,8 @@
 
 .agent-tabs-badge-warning {
   border-color: transparent;
-  background: var(--bg-warning-primary);
-  color: var(--text-warning-primary);
+  background: var(--amber-soft);
+  color: var(--fg-warning-primary);
 }
 
 .agent-tabs-badge-warning .badge-ui-dot {
@@ -364,31 +396,31 @@
   position: relative;
   display: inline-block;
   flex: 0 0 auto;
-  width: 36px;
-  height: 20px;
-  border-radius: var(--radius-full);
-  background: var(--bg-quaternary);
-  transition: background-color 150ms ease;
+  width: 30px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+  transition: background var(--dur);
 }
 
 .agent-switch-thumb {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-full);
-  background: var(--fg-white);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.2);
-  transition: transform 150ms ease;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--r-full);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform var(--dur) var(--ease);
 }
 
 .agent-switch-input:checked + .agent-switch-track {
-  background: var(--bg-brand-solid);
+  background: var(--accent);
 }
 
 .agent-switch-input:checked + .agent-switch-track .agent-switch-thumb {
-  transform: translateX(16px);
+  transform: translateX(12px);
 }
 
 .agent-switch-input:focus-visible + .agent-switch-track {
@@ -447,14 +479,19 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur),
+    box-shadow var(--dur);
 }
 
 .agent-persona-file:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .agent-persona-file.is-active {
-  background: var(--bg-active);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent-line);
 }
 
 .agent-persona-file:focus-visible {
@@ -524,15 +561,28 @@
   width: 100%;
   min-height: 420px;
   padding: 12px 12px;
-  border: 1px solid var(--border-brand);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: var(--font-size-body);
   line-height: var(--line-height-body);
-  box-shadow: 0 0 0 3px var(--bg-brand-primary);
   resize: vertical;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.agent-persona-textarea:hover {
+  border-color: color-mix(in srgb, var(--border-strong) 60%, var(--text-tertiary));
+}
+
+.agent-persona-textarea:focus,
+.agent-persona-textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .agent-persona-footer {
@@ -633,8 +683,10 @@
 .agent-tabs-dialog {
   width: min(35rem, calc(100vw - 2rem));
   padding: var(--space-section);
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-2xl);
+  border: 0;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  animation: popIn 0.16s var(--ease) both;
 }
 
 .agent-tabs-dialog .dialog-title {
@@ -687,14 +739,18 @@
   padding: 10px 12px;
   border-radius: var(--radius-md);
   cursor: pointer;
+  transition:
+    background var(--dur),
+    box-shadow var(--dur);
 }
 
 .agent-skills-option:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .agent-skills-option.is-checked {
-  background: var(--bg-secondary);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent-line);
 }
 
 .agent-skills-option input {
@@ -826,9 +882,19 @@
   border-radius: var(--radius-md);
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 14px;
   line-height: 20px;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.agent-rules-input:focus,
+.agent-rules-input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .agent-rules-empty {
@@ -850,10 +916,13 @@
   font-weight: 600;
   line-height: var(--line-height-sm);
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .agent-rules-add:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
 }
 
 .agent-rules-add:disabled {
@@ -924,5 +993,17 @@
   .agent-tabs-table td {
     padding-right: var(--space-compact);
     padding-left: var(--space-compact);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-tabs-table tbody tr,
+  .agent-tabs-dialog {
+    animation: fadeOnly 0.12s both !important;
+  }
+
+  .agent-tabs-table tbody tr:hover,
+  .agent-persona-file:hover {
+    transform: none;
   }
 }

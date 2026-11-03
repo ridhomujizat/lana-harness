@@ -445,7 +445,7 @@ describe("Empty room (REQ-ROOM-002)", () => {
     ).toBeTruthy();
     const empty = container.querySelector(".room-empty");
     expect(empty).not.toBeNull();
-    expect(empty?.querySelector(".agent-face")).not.toBeNull();
+    expect(empty?.querySelector(".av")).not.toBeNull();
     expect(empty?.textContent).toContain("Finance");
   });
 

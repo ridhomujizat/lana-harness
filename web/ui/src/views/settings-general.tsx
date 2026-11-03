@@ -10,17 +10,19 @@ import { changePassword } from "../api/auth";
 import type { BrowserSessionInfo } from "../api/auth";
 import type { DaemonInfo } from "../api/daemon";
 import type { GetConfigResponse } from "../api/settings";
-import { ErrorNotice, Loading } from "../ui/ui";
-import { PasswordField } from "./login";
+import { Ic } from "../ui/icons";
+import { Badge, Button, Field, IconButton, Input, Seg, Skeleton } from "../ui/gr8r";
 import {
+  Alert,
   SettingsPanel,
   SettingsRestartBanner,
   SettingsRestartDialog,
   SettingsTabs,
+  StatusLine,
   markSettingsSaved,
 } from "./settings-pages";
 
-/* Settings > General (REQ-WEB-054). The theme tiles of REQ-WEB-031 stay here;
+/* Settings > General (REQ-WEB-054). The theme choice of REQ-WEB-031 stays here;
    the daemon, web dashboard, and about sections come from API-WEB-022,
    API-WEB-024, API-WEB-029, and API-WEB-013. "Change password" (REQ-WLG-007,
    API-WLG-007) sets a new password and signs out the other browsers. */
@@ -79,6 +81,52 @@ function browserLabel(count: number): string {
     (value === 1
       ? " browser signed in as owner"
       : " browsers signed in as owner")
+  );
+}
+
+interface PasswordInputProps {
+  id: string;
+  label: string;
+  value: string;
+  autoComplete: string;
+  disabled?: boolean;
+  hint?: string;
+  onChange: (value: string) => void;
+}
+
+/* A Gr8r Field + Input with the eye toggle in the Gr8r icon-button style. */
+function PasswordInput({
+  id,
+  label,
+  value,
+  autoComplete,
+  disabled = false,
+  hint,
+  onChange,
+}: PasswordInputProps) {
+  const [shown, setShown] = useState(false);
+  return (
+    <Field label={label} htmlFor={id} hint={hint}>
+      <span className="settings-password">
+        <Input
+          id={id}
+          type={shown ? "text" : "password"}
+          autoComplete={autoComplete}
+          spellCheck={false}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <IconButton
+          className="settings-password-eye"
+          icon={shown ? "eye-off" : "eye"}
+          size="sm"
+          on={shown}
+          label={shown ? "Hide password" : "Show password"}
+          onClick={() => setShown((current) => !current)}
+        />
+      </span>
+    </Field>
   );
 }
 
@@ -309,249 +357,210 @@ export function SettingsGeneralPage({
   return (
     <main id="main" className="page settings-page">
       <SettingsTabs active="general" />
-      <SettingsPanel active="general">
+      <SettingsPanel
+        active="general"
+        title="General"
+        description="The daemon, the dashboard, your password, and this browser."
+      >
         <SettingsRestartBanner
           restartRequired={Boolean(config && config.restart_required)}
           onRestarted={handleRestarted}
         />
 
         {state === "loading" && !daemon && !config ? (
-          <Loading label="Loading settings…" />
+          <div className="settings-loading-inline" aria-busy="true">
+            <span className="sr">Loading settings…</span>
+            <Skeleton width={180} height={14} />
+            <Skeleton width="70%" height={12} />
+          </div>
         ) : null}
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        <Alert tone="danger" message={error} details={details} />
         {state === "error" ? (
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={busy}
-              onClick={() => void load(true)}
-            >
+          <div className="settings-actions-bar">
+            <Button variant="secondary" disabled={busy} onClick={() => void load(true)}>
               Reload settings
-            </button>
+            </Button>
           </div>
         ) : null}
-        <p
-          className="settings-status"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {message}
-        </p>
+        <StatusLine text={message} />
 
-        <section className="settings-row" aria-labelledby="settings-daemon-title">
-          <div className="settings-row-label">
-            <h2 id="settings-daemon-title">Daemon</h2>
-            <p>lana daemon runs agents, channels and this dashboard.</p>
-          </div>
-          <div className="settings-row-controls">
-            <div className="settings-daemon-card">
-              <div className="settings-daemon-text">
-                <div className="settings-daemon-title-row">
-                  <h3>{daemonState}</h3>
-                  {daemon ? (
-                    <span className="badge-ui badge-ui-success">
-                      <span
-                        className="settings-inline-dot is-success"
-                        aria-hidden="true"
-                      ></span>
-                      Healthy
-                    </span>
-                  ) : null}
-                </div>
-                <p className="settings-daemon-meta">{daemonMeta}</p>
-                {daemon && !daemon.restart_supported ? (
-                  <p className="settings-warning-text">
-                    Restarting from the browser is not supported on this platform.
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+        <section className="sblock" aria-labelledby="settings-daemon-title">
+          <h2 id="settings-daemon-title">Daemon</h2>
+          <div className="srow">
+            <div>
+              <div className="t">{daemonState}</div>
+              <div className="d mono">{daemonMeta}</div>
+            </div>
+            <div className="settings-daemon-control">
+              {daemon ? (
+                <Badge tone="green" dot>
+                  Healthy
+                </Badge>
+              ) : null}
+              <Button
+                variant="secondary"
+                icon="rotate-cw"
                 disabled={busy || !daemon || !daemon.restart_supported}
                 onClick={() => setShowRestart(true)}
               >
                 Restart daemon
-              </button>
+              </Button>
             </div>
           </div>
+          {daemon && !daemon.restart_supported ? (
+            <p className="settings-warning-text">
+              Restarting from the browser is not supported on this platform.
+            </p>
+          ) : null}
         </section>
 
-        <section className="settings-row" aria-labelledby="settings-web-title">
-          <div className="settings-row-label">
-            <h2 id="settings-web-title">Web dashboard</h2>
-            <p>
-              Where this dashboard listens. Only owners signed in on this browser
-              can use it.
-            </p>
-          </div>
-          <div className="settings-row-controls">
-            <form className="settings-address-form" onSubmit={saveAddress}>
-              <div className="field">
-                <label
-                  className="field-label"
-                  htmlFor="settings-web-address"
-                >
-                  Address
-                </label>
-                <div className="settings-address-row">
-                  <input
-                    id="settings-web-address"
-                    type="text"
-                    name="web-address"
-                    value={address}
-                    disabled={busy}
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="127.0.0.1:18300"
-                    onChange={(event) => setAddress(event.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    className="button-ui button-ui-secondary"
-                    disabled={busy || !config || !config.version}
-                  >
-                    Save address
-                  </button>
-                </div>
+        <section className="sblock" aria-labelledby="settings-web-title">
+          <h2 id="settings-web-title">Web dashboard</h2>
+          <form className="srow" onSubmit={saveAddress}>
+            <div>
+              <div className="t">Address</div>
+              <div className="d">
+                Where this dashboard listens. Only owners signed in on this
+                browser can use it.
               </div>
-              <p className="settings-web-note">
-                <span
-                  className="settings-inline-dot is-warning"
-                  aria-hidden="true"
-                ></span>
-                Changing the address needs a daemon restart.
-              </p>
-            </form>
-            {savedUrl ? (
-              <p className="settings-web-saved">
-                After the restart, open <a href={savedUrl}>{savedUrl}</a>.
-              </p>
-            ) : null}
-            <div className="settings-browser-row">
-              <p>{browserLabel(browserCount)}</p>
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+            </div>
+            <div className="settings-address">
+              <Input
+                id="settings-web-address"
+                className="mono"
+                type="text"
+                name="web-address"
+                aria-label="Address"
+                value={address}
+                disabled={busy}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="127.0.0.1:18300"
+                onChange={(event) => setAddress(event.target.value)}
+              />
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={busy || !config || !config.version}
+              >
+                Save address
+              </Button>
+            </div>
+          </form>
+          <p className="settings-web-note">
+            <Ic name="triangle-alert" size={13} />
+            Changing the address needs a daemon restart.
+          </p>
+          {savedUrl ? (
+            <p className="settings-web-saved">
+              After the restart, open <a href={savedUrl}>{savedUrl}</a>.
+            </p>
+          ) : null}
+          <div className="srow">
+            <div>
+              <div className="t">Signed-in browsers</div>
+              <div className="d">{browserLabel(browserCount)}</div>
+            </div>
+            <div>
+              <Button
+                variant="secondary"
                 disabled={busy}
                 onClick={signOutOtherBrowsers}
               >
                 Sign out other browsers
-              </button>
+              </Button>
             </div>
           </div>
         </section>
 
-        <section
-          className="settings-row"
-          aria-labelledby="settings-password-title"
-        >
-          <div className="settings-row-label">
-            <h2 id="settings-password-title">Change password</h2>
-            <p>Set a new password to open lana on this computer.</p>
-          </div>
-          <div className="settings-row-controls">
-            <form
-              className="settings-password-form"
-              onSubmit={changePasswordSubmit}
-            >
-              <PasswordField
-                id="settings-current-password"
-                label="Current password"
-                value={currentPassword}
-                autoComplete="current-password"
+        <section className="sblock" aria-labelledby="settings-password-title">
+          <h2 id="settings-password-title">Change password</h2>
+          <form
+            className="settings-password-form"
+            onSubmit={changePasswordSubmit}
+          >
+            <PasswordInput
+              id="settings-current-password"
+              label="Current password"
+              value={currentPassword}
+              autoComplete="current-password"
+              disabled={busy}
+              onChange={(value) => {
+                setCurrentPassword(value);
+                setPasswordError("");
+              }}
+            />
+            <PasswordInput
+              id="settings-new-password"
+              label="New password"
+              value={newPassword}
+              autoComplete="new-password"
+              disabled={busy}
+              hint="At least 8 characters."
+              onChange={(value) => {
+                setNewPassword(value);
+                setPasswordError("");
+              }}
+            />
+            <PasswordInput
+              id="settings-confirm-password"
+              label="Type it again"
+              value={confirmPassword}
+              autoComplete="new-password"
+              disabled={busy}
+              onChange={(value) => {
+                setConfirmPassword(value);
+                setPasswordError("");
+              }}
+            />
+            {passwordError ? (
+              <span className="err" role="alert">
+                <Ic name="circle-alert" size={12} />
+                {passwordError}
+              </span>
+            ) : null}
+            <div className="settings-password-actions">
+              <Button
+                type="submit"
+                variant="primary"
                 disabled={busy}
-                onChange={(value) => {
-                  setCurrentPassword(value);
-                  setPasswordError("");
-                }}
+                loading={busy}
+              >
+                {busy ? "Changing…" : "Change password"}
+              </Button>
+            </div>
+          </form>
+        </section>
+
+        <section className="sblock" aria-labelledby="settings-appearance-title">
+          <h2 id="settings-appearance-title">Appearance</h2>
+          <div className="srow">
+            <div>
+              <div className="t">Theme</div>
+              <div className="d">Theme for this browser.</div>
+            </div>
+            <div>
+              <Seg
+                aria-label="Theme"
+                options={THEME_CHOICES.map((choice) => ({
+                  value: choice,
+                  label: themeLabel(choice),
+                }))}
+                value={theme}
+                onChange={(value) => onThemeChange(value as ThemeChoice)}
               />
-              <PasswordField
-                id="settings-new-password"
-                label="New password"
-                value={newPassword}
-                autoComplete="new-password"
-                disabled={busy}
-                hint="At least 8 characters."
-                onChange={(value) => {
-                  setNewPassword(value);
-                  setPasswordError("");
-                }}
-              />
-              <PasswordField
-                id="settings-confirm-password"
-                label="Type it again"
-                value={confirmPassword}
-                autoComplete="new-password"
-                disabled={busy}
-                onChange={(value) => {
-                  setConfirmPassword(value);
-                  setPasswordError("");
-                }}
-              />
-              {passwordError ? (
-                <p className="setup-field-error" role="alert">
-                  {passwordError}
-                </p>
-              ) : null}
-              <div className="settings-password-actions">
-                <button
-                  type="submit"
-                  className="button-ui button-ui-primary"
-                  disabled={busy}
-                >
-                  {busy ? "Changing…" : "Change password"}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         </section>
 
-        <section
-          className="settings-row"
-          aria-labelledby="settings-appearance-title"
-        >
-          <div className="settings-row-label">
-            <h2 id="settings-appearance-title">Appearance</h2>
-            <p>Theme for this browser.</p>
-          </div>
-          <div className="settings-row-controls">
-            <fieldset className="theme-tiles settings-appearance-tiles">
-              <legend className="sr-only">Theme</legend>
-              {THEME_CHOICES.map((choice) => (
-                <label
-                  key={choice}
-                  className={
-                    "theme-tile" + (theme === choice ? " is-selected" : "")
-                  }
-                >
-                  <input
-                    className="theme-radio"
-                    type="radio"
-                    name="theme"
-                    value={choice}
-                    checked={theme === choice}
-                    onChange={() => onThemeChange(choice)}
-                  />
-                  <span
-                    className={"theme-preview theme-preview-" + choice}
-                    aria-hidden="true"
-                  ></span>
-                  <span className="theme-name">{themeLabel(choice)}</span>
-                </label>
-              ))}
-            </fieldset>
-          </div>
-        </section>
-
-        <section className="settings-row" aria-labelledby="settings-about-title">
-          <div className="settings-row-label">
-            <h2 id="settings-about-title">About</h2>
-          </div>
-          <div className="settings-row-controls">
-            <p className="settings-about">
+        <section className="sblock" aria-labelledby="settings-about-title">
+          <h2 id="settings-about-title">About</h2>
+          <div className="srow">
+            <div>
+              <div className="t">Version</div>
+              <div className="d">This daemon build.</div>
+            </div>
+            <div className="settings-about mono">
               {daemon
                 ? "lana " +
                   (daemon.version || "unknown") +
@@ -562,7 +571,7 @@ export function SettingsGeneralPage({
                   "/" +
                   (daemon.arch || "?")
                 : "Loading daemon details…"}
-            </p>
+            </div>
           </div>
         </section>
 

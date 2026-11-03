@@ -5,15 +5,31 @@ import { ApiError, errorMessage } from "../api/client";
 import { createAgent, listAgents } from "../api/agents";
 import type { Agent, CreateAgentRequest } from "../api/agents";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { avatarFor } from "../lib/avatar";
 import {
-  Icon,
   isTeam,
   rosterNames,
   agentHref,
+  splitModel,
+  providerLabel,
 } from "./agent-common";
 import type { AgentLike } from "./agent-common";
-import { AgentFace, Skeleton, TeamFace, useRooms } from "./presence";
+import { useRooms } from "./presence";
 import type { RoomRow } from "../api/rooms";
+import {
+  Avatar,
+  AvatarStack,
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Lbl,
+  SearchInput,
+  Select,
+  Skeleton,
+} from "../ui/gr8r";
+import type { BadgeTone } from "../ui/gr8r";
 
 /* REQ-ROOM-011: the alive roster. The Agents page shows a team pulse and one
    status card per agent and team (design rooms-3). The create dialog is
@@ -41,8 +57,36 @@ const STATE_FALLBACK: Record<string, string> = {
   waiting: "Waiting for you",
   problem: "Has a problem",
   online: "Online",
-  resting: "Resting",
+  resting: "Idle",
 };
+
+/* The agent identity colors of lib/avatar.ts map onto the Gr8r status tokens,
+   so one agent keeps one color in the picker, the chat, and the roster. */
+const AVATAR_COLORS: Record<string, string> = {
+  "tone-brand": "var(--violet)",
+  "tone-success": "var(--green)",
+  "tone-warning": "var(--amber)",
+  "tone-error": "var(--red)",
+  "tone-gray": "var(--gray)",
+};
+
+function agentColor(name: string): string {
+  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+}
+
+/* green active / gray idle / amber waiting / red error (page mapping). */
+function stateTone(state: string): BadgeTone {
+  if (state === "waiting") {
+    return "amber";
+  }
+  if (state === "problem") {
+    return "red";
+  }
+  if (state === "working" || state === "online") {
+    return "green";
+  }
+  return "gray";
+}
 
 interface CardAction {
   label: string;
@@ -74,15 +118,6 @@ function memberCount(row: RoomRow | undefined): number {
   }
   const names = [row.lead, ...(row.members || [])].filter(Boolean);
   return names.length;
-}
-
-function teamFaces(row: RoomRow | undefined): { name: string; color?: string }[] {
-  if (!row) {
-    return [];
-  }
-  return [row.lead, ...(row.members || [])]
-    .filter(Boolean)
-    .map((name) => ({ name: String(name) }));
 }
 
 export interface CreateAgentDialogProps {
@@ -179,21 +214,22 @@ export function CreateAgentDialog({
           </span>
         </label>
 
-        <label className="field">
-          <span className="field-label">Template</span>
-          <select
+        <div className="field">
+          <label className="field-label" htmlFor="create-agent-template">
+            Template
+          </label>
+          <Select
+            id="create-agent-template"
             name="template"
             value={template}
-            onChange={(event) => setTemplate(event.target.value)}
-          >
-            {TEMPLATES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+            onChange={setTemplate}
+            options={TEMPLATES.map((item) => ({
+              value: item.value,
+              label: item.label,
+            }))}
+          />
           <span className="hint">{templateInfo.note}</span>
-        </label>
+        </div>
 
         <label className="field">
           <span className="field-label">Workspace</span>
@@ -281,17 +317,20 @@ function AgentCard({
 }) {
   const team = isTeam(agent);
   const state = roomState(row);
-  const faceColor = (row && row.color) || agent.color;
   const presence = row ? row.presence : null;
   const statusWord =
-    row && row.presence && row.presence.label
-      ? row.presence.label
-      : STATE_FALLBACK[state] || "Resting";
+    presence && presence.label
+      ? presence.label
+      : STATE_FALLBACK[state] || "Idle";
   const action = cardAction(state, agent.name);
   const preview =
     row && row.last_message && row.last_message.preview
       ? row.last_message.preview
       : "No conversations yet";
+  const description =
+    agent.description && agent.description.trim()
+      ? agent.description
+      : preview;
   const members = memberCount(row);
   const role = team
     ? "Team" + (row && row.lead ? " · lead " + row.lead : "")
@@ -301,35 +340,31 @@ function AgentCard({
       ? members + (members === 1 ? " member" : " members")
       : "Team"
     : Number(row ? row.turns_7d : 0) + " tasks · 7d";
-  const faces = team ? teamFaces(row) : [];
-
-  const classes = [
-    "agent-card",
-    state ? "state-" + state : "",
-    agent.default ? "is-default" : "",
-    team ? "is-team" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const model = splitModel(agent);
+  const modelLabel = model.model
+    ? model.provider
+      ? providerLabel(model.provider) + " · " + model.model
+      : model.model
+    : "";
 
   return (
-    <article
-      className={classes}
-      onClick={(event) => onOpen(event, agent.name)}
-    >
+    <article className="pcard" onClick={(event) => onOpen(event, agent.name)}>
       <div className="agent-card-head">
         {team ? (
-          faces.length > 0 ? (
-            <TeamFace faces={faces} size={52} />
-          ) : (
-            <AgentFace name={agent.name} color="brand" presence={presence} size={52} />
-          )
+          <AvatarStack
+            size="md"
+            max={3}
+            items={rosterNames(agent).map((name) => ({
+              name,
+              color: agentColor(name),
+            }))}
+          />
         ) : (
-          <AgentFace
+          <Avatar
             name={agent.name}
-            color={faceColor}
-            presence={presence}
-            size={52}
+            color={agentColor(agent.name)}
+            size="md"
+            presence={state === "online" || state === "working"}
           />
         )}
         <div className="agent-card-id">
@@ -338,32 +373,28 @@ function AgentCard({
           </a>
           <span className="agent-card-role">{role}</span>
         </div>
+        <Badge tone={stateTone(state)} dot>
+          {statusWord}
+        </Badge>
       </div>
 
-      <div className={"agent-card-status" + (state ? " state-" + state : "")}>
-        <span className="agent-card-status-line">
-          <span className="agent-card-status-dot" aria-hidden="true" />
-          <span className="agent-card-status-text">{statusWord}</span>
-        </span>
-        {state === "working" ? (
-          <span className="agent-card-progress" aria-hidden="true">
-            <span className="agent-card-progress-bar" />
-          </span>
-        ) : null}
-      </div>
+      <p className="agent-card-preview">{description}</p>
 
-      <p className="agent-card-preview">{preview}</p>
+      {modelLabel ? (
+        <div className="agent-card-meta">
+          <Lbl color="var(--text-4)">{modelLabel}</Lbl>
+        </div>
+      ) : null}
 
       <footer className="agent-card-foot">
-        <a
-          className={
-            "button-ui " +
-            (action.primary ? "button-ui-primary" : "button-ui-secondary")
-          }
+        <Button
+          as="a"
+          size="sm"
+          variant={action.primary ? "primary" : "secondary"}
           href={"#/chats/" + encodeURIComponent(agent.name)}
         >
           {action.label}
-        </a>
+        </Button>
         <span className="agent-card-turns">{foot}</span>
       </footer>
     </article>
@@ -376,7 +407,6 @@ export function AgentsPage() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [agents, setAgents] = useState<Agent[]>([]);
   const [error, setError] = useState("");
-  const [details, setDetails] = useState<unknown[]>([]);
   const [query, setQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
@@ -385,7 +415,6 @@ export function AgentsPage() {
     let alive = true;
     setStatus("loading");
     setError("");
-    setDetails([]);
     listAgents()
       .then((page) => {
         if (!alive) {
@@ -402,7 +431,6 @@ export function AgentsPage() {
         }
         const message = errorMessage(failure);
         setError(message);
-        setDetails(failure instanceof ApiError ? failure.details : []);
         setStatus("error");
         announce("Could not load agents. " + message);
       });
@@ -453,24 +481,25 @@ export function AgentsPage() {
     setReloadToken((current) => current + 1);
   }
 
-  const showSkeleton = status === "loading" || (loading && agents.length === 0);
+  const showSkeleton =
+    status !== "error" && (status === "loading" || (loading && agents.length === 0));
 
   return (
     <main id="main" className="page agents-page">
-      <header className="agents-header">
-        <div className="agents-heading">
-          <h1 className="agents-title">Agents</h1>
-          <p className="agents-subtitle">
-            Your team. Each agent has a job, its own room and its own memory.
-          </p>
+      <header className="ph">
+        <div>
+          <h1>Agents</h1>
+          <p>Your team. Each agent has a job, its own room and its own memory.</p>
         </div>
-        <button
-          type="button"
-          className="button-ui button-ui-primary"
-          onClick={() => setShowCreate(true)}
-        >
-          + Hire an agent
-        </button>
+        <div className="acts">
+          <Button
+            variant="primary"
+            icon="plus"
+            onClick={() => setShowCreate(true)}
+          >
+            Hire an agent
+          </Button>
+        </div>
       </header>
 
       <div className="agents-pulse">
@@ -481,15 +510,9 @@ export function AgentsPage() {
               return null;
             }
             return (
-              <span key={entry.state} className="agents-pulse-item">
-                <span
-                  className={"agents-pulse-dot state-" + entry.state}
-                  aria-hidden="true"
-                />
-                <span className="agents-pulse-text">
-                  {count + " " + entry.word}
-                </span>
-              </span>
+              <Badge key={entry.state} tone={stateTone(entry.state)} dot>
+                {count + " " + entry.word}
+              </Badge>
             );
           })}
         </div>
@@ -499,77 +522,97 @@ export function AgentsPage() {
       </div>
 
       <div className="agents-toolbar">
-        <div className="sessions-search agents-search">
-          <span className="sessions-search-icon">
-            <Icon name="search" />
-          </span>
-          <label className="sr-only" htmlFor="agents-search-input">
-            Search agents
-          </label>
-          <input
-            id="agents-search-input"
-            className="sessions-search-input"
-            type="search"
-            placeholder="Search agents"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
+        <SearchInput
+          wrapClassName="agents-search"
+          aria-label="Search agents"
+          placeholder="Search agents"
+          autoComplete="off"
+          spellCheck={false}
+          kbd={null}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        {status === "ready" ? (
+          <p className="agents-total">
+            {visible.length + (visible.length === 1 ? " agent" : " agents")}
+          </p>
+        ) : null}
       </div>
 
       {status === "error" ? (
-        <div className="agents-state" role="alert">
-          <ErrorNotice message={error} details={details} />
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={() => setReloadToken((current) => current + 1)}
-          >
-            Try again
-          </button>
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load agents"
+            text={error}
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => setReloadToken((current) => current + 1)}
+              >
+                Try again
+              </Button>
+            }
+          />
         </div>
       ) : null}
 
       {showSkeleton ? (
-        <div className="agents-grid">
+        <div className="pgrid">
           {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="agent-card is-skeleton">
-              <Skeleton height={52} width={52} radius="50%" />
-              <Skeleton height={16} width="60%" radius={6} />
-              <Skeleton height={34} width="100%" radius={8} />
-              <Skeleton height={14} width="80%" radius={6} />
-              <Skeleton height={32} width="100%" radius={8} />
+            <div key={index} className="pcard agent-skeleton">
+              <div className="agent-card-head">
+                <Skeleton width={26} height={26} radius="50%" />
+                <div className="agent-card-id">
+                  <Skeleton width="55%" height={13} />
+                  <Skeleton width="35%" height={11} />
+                </div>
+              </div>
+              <Skeleton width="100%" height={12} />
+              <Skeleton width="85%" height={12} />
+              <Skeleton width="100%" height={26} radius={6} />
             </div>
           ))}
         </div>
       ) : null}
 
       {status === "ready" && agents.length === 0 ? (
-        <div className="agents-empty">
-          <h2 className="agents-empty-title">No agents yet</h2>
-          <p className="agents-empty-text">
-            Create the first agent to give it a model, tools, and a persona.
-          </p>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
-            onClick={() => setShowCreate(true)}
-          >
-            + Hire an agent
-          </button>
+        <div className="panel">
+          <EmptyState
+            icon="bot"
+            title="No agents yet"
+            text="Create the first agent to give it a model, tools, and a persona."
+            action={
+              <Button
+                variant="primary"
+                icon="plus"
+                onClick={() => setShowCreate(true)}
+              >
+                Hire an agent
+              </Button>
+            }
+          />
         </div>
       ) : null}
 
       {status === "ready" && agents.length > 0 && visible.length === 0 ? (
-        <p className="agents-state muted" role="status">
-          No agents match “{query.trim()}”.
-        </p>
+        <div className="panel">
+          <EmptyState
+            icon="search-x"
+            size="sm"
+            title="No agents match"
+            text={"No agents match “" + query.trim() + "”."}
+            action={
+              <Button variant="secondary" onClick={() => setQuery("")}>
+                Clear search
+              </Button>
+            }
+          />
+        </div>
       ) : null}
 
-      {status === "ready" && agents.length > 0 && visible.length > 0 ? (
-        <div className="agents-grid">
+      {status === "ready" && visible.length > 0 ? (
+        <div className="pgrid">
           {visible.map((agent) => (
             <AgentCard
               key={agent.name}
@@ -580,14 +623,14 @@ export function AgentsPage() {
           ))}
           <button
             type="button"
-            className="agent-card-add"
+            className="pcard agent-add"
             onClick={() => setShowCreate(true)}
           >
-            <span className="agent-card-add-icon" aria-hidden="true">
-              <Icon name="plus" />
+            <span className="agent-add-icon" aria-hidden="true">
+              <Ic name="plus" size={18} />
             </span>
-            <span className="agent-card-add-title">Hire a new agent</span>
-            <span className="agent-card-add-text">
+            <span className="agent-add-title">Hire a new agent</span>
+            <span className="agent-add-text">
               Describe the job. Lana drafts its name, persona, tools and first
               workflow for you to review.
             </span>

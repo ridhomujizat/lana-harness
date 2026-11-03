@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import { getDashboard } from "../api/dashboard";
 import type {
@@ -7,11 +6,24 @@ import type {
   DashboardErrorRow,
   DashboardRange,
 } from "../api/dashboard";
-import "../styles/dashboard.css";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Panel,
+  Seg,
+  Select,
+  Stackbar,
+  Stat,
+} from "../ui/gr8r";
+import type { BadgeTone } from "../ui/gr8r";
+import { Ic } from "../ui/icons";
 
 /* The monitoring dashboard (spec 28 T-002). Every number comes from recorded
    data: token usage, tools, turn outcomes, the error log, and what is running
-   now. Plain and dense: numbers, one chart, tables, an error log. */
+   now. Rendered with the Gr8r home markup: a greeting header, a KPI strip, and
+   a two-column panel grid. */
 
 const RANGES: Array<{ value: DashboardRange; label: string }> = [
   { value: "24h", label: "24 hours" },
@@ -83,6 +95,13 @@ const SOURCE_LABELS: Record<string, string> = {
   daemon: "Daemon",
 };
 
+const SOURCE_TONES: Record<string, BadgeTone> = {
+  turn: "accent",
+  provider: "amber",
+  tool: "red",
+  daemon: "gray",
+};
+
 const BREAKDOWN_SOURCE_LABELS: Record<string, string> = {
   turn: "Chat turns",
   compaction: "Compaction",
@@ -111,6 +130,34 @@ const MONTHS = [
   "Nov",
   "Dec",
 ];
+
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) {
+    return "Good morning";
+  }
+  if (hour < 18) {
+    return "Good afternoon";
+  }
+  return "Good evening";
+}
+
+function todayLabel(): string {
+  const date = new Date();
+  return (
+    WEEKDAYS[date.getDay()] + ", " + MONTHS[date.getMonth()] + " " + date.getDate()
+  );
+}
 
 function trimDecimal(value: number): string {
   const rounded = Math.round(value * 10) / 10;
@@ -172,34 +219,6 @@ function duration(ms: number): string {
   return trimDecimal(value / 60000) + " min";
 }
 
-function niceStep(raw: number): number {
-  if (!(raw > 0)) {
-    return 1;
-  }
-  const base = Math.pow(10, Math.floor(Math.log10(raw)));
-  const fraction = raw / base;
-  let nice = 10;
-  if (fraction <= 1) {
-    nice = 1;
-  } else if (fraction <= 2) {
-    nice = 2;
-  } else if (fraction <= 2.5) {
-    nice = 2.5;
-  } else if (fraction <= 5) {
-    nice = 5;
-  }
-  return nice * base;
-}
-
-/* Four y ticks: 0 and three clean steps that clear the tallest bucket. */
-function axisTicks(max: number): number[] {
-  const raw = max > 0 ? max : 1;
-  const step = niceStep(raw / 3);
-  return [0, step, step * 2, step * 3];
-}
-
-const CHART = { width: 960, height: 240, left: 56, right: 16, top: 12, bottom: 30 };
-
 interface ChartRow {
   start: number;
   input: number;
@@ -208,10 +227,10 @@ interface ChartRow {
   total: number;
 }
 
-/* REQ-DSH-004: a stacked bar chart of input (not cached), cached input, and
-   output tokens per bucket, with a tooltip and an accessible table. */
+/* REQ-DSH-004: token usage per bucket as a stacked Gr8r bar (input that was not
+   cached, cached input, and output), with a legend and an accessible table of
+   the same values. */
 function TokenChart({ data }: { data: Dashboard }) {
-  const [hover, setHover] = useState<number | null>(null);
   const bucketMs = data.bucket_ms || 3600000;
 
   const rows = useMemo<ChartRow[]>(
@@ -234,155 +253,82 @@ function TokenChart({ data }: { data: Dashboard }) {
   const totalTokens = rows.reduce((sum, row) => sum + row.total, 0);
 
   if (rows.length === 0 || totalTokens === 0) {
-    return <p className="dash-empty">No token usage in this range.</p>;
+    return (
+      <EmptyState
+        size="sm"
+        icon="chart-column"
+        text="No token usage in this range."
+      />
+    );
   }
 
-  const ticks = axisTicks(rows.reduce((max, row) => Math.max(max, row.total), 0));
-  const top = ticks[ticks.length - 1] || 1;
-  const plotW = CHART.width - CHART.left - CHART.right;
-  const plotH = CHART.height - CHART.top - CHART.bottom;
-  const slot = plotW / rows.length;
-  const barW = Math.max(1, slot * 0.68);
-  const labelEvery = Math.max(1, Math.ceil(rows.length / 6));
-  const hovered = hover !== null ? rows[hover] : null;
-
-  function yOf(value: number): number {
-    return CHART.top + plotH - (value / top) * plotH;
-  }
+  const max = rows.reduce((peak, row) => Math.max(peak, row.total), 0) || 1;
 
   return (
-    <div className="dash-chart">
-      <div className="dash-chart-plot">
-        <svg
-          className="dash-chart-svg"
-          viewBox={"0 0 " + CHART.width + " " + CHART.height}
-          role="img"
-          aria-label={
-            "Token usage over time, " +
-            count(totalTokens) +
-            " tokens across " +
-            rows.length +
-            " buckets. A table of the same values follows."
-          }
-        >
-          {ticks.map((tick) => (
-            <g key={tick}>
-              <line
-                className="dash-chart-grid"
-                x1={CHART.left}
-                x2={CHART.width - CHART.right}
-                y1={yOf(tick)}
-                y2={yOf(tick)}
+    <div className="home-chart">
+      <div
+        className="home-chart-plot"
+        role="img"
+        aria-label={
+          "Token usage over time, " +
+          count(totalTokens) +
+          " tokens across " +
+          rows.length +
+          " buckets. A table of the same values follows."
+        }
+      >
+        {rows.map((row) => (
+          <div className="home-chart-row" key={row.start}>
+            <span className="home-chart-label num">
+              {bucketLabel(row.start, bucketMs)}
+            </span>
+            <span className="home-chart-bar">
+              <Stackbar
+                height={10}
+                parts={[
+                  {
+                    value: row.input,
+                    color: "var(--accent)",
+                    label: "Input not cached " + count(row.input),
+                  },
+                  {
+                    value: row.cached,
+                    color: "var(--amber)",
+                    label: "Cached input " + count(row.cached),
+                  },
+                  {
+                    value: row.output,
+                    color: "var(--green)",
+                    label: "Output " + count(row.output),
+                  },
+                  { value: max - row.total, color: "transparent" },
+                ]}
               />
-              <text
-                className="dash-chart-ylabel"
-                x={CHART.left - 8}
-                y={yOf(tick) + 4}
-                textAnchor="end"
-              >
-                {compact(tick)}
-              </text>
-            </g>
-          ))}
-
-          {rows.map((row, index) => {
-            const x = CHART.left + slot * index + (slot - barW) / 2;
-            const base = CHART.top + plotH;
-            const inputH = (row.input / top) * plotH;
-            const cachedH = (row.cached / top) * plotH;
-            const outputH = (row.output / top) * plotH;
-            return (
-              <g key={row.start}>
-                <rect
-                  className="dash-bar dash-bar-input"
-                  x={x}
-                  y={base - inputH}
-                  width={barW}
-                  height={inputH}
-                />
-                <rect
-                  className="dash-bar dash-bar-cached"
-                  x={x}
-                  y={base - inputH - cachedH}
-                  width={barW}
-                  height={cachedH}
-                />
-                <rect
-                  className="dash-bar dash-bar-output"
-                  x={x}
-                  y={base - inputH - cachedH - outputH}
-                  width={barW}
-                  height={outputH}
-                />
-                <rect
-                  className="dash-bar-hit"
-                  x={CHART.left + slot * index}
-                  y={CHART.top}
-                  width={slot}
-                  height={plotH}
-                  onMouseEnter={() => setHover(index)}
-                  onMouseLeave={() => setHover(null)}
-                />
-                {index % labelEvery === 0 ? (
-                  <text
-                    className="dash-chart-xlabel"
-                    x={CHART.left + slot * index + slot / 2}
-                    y={CHART.height - 10}
-                    textAnchor="middle"
-                  >
-                    {bucketLabel(row.start, bucketMs)}
-                  </text>
-                ) : null}
-              </g>
-            );
-          })}
-        </svg>
-
-        {hovered && hover !== null ? (
-          <div
-            className="dash-chart-tooltip"
-            style={{
-              left:
-                ((CHART.left + slot * hover + slot / 2) / CHART.width) * 100 +
-                "%",
-            }}
-          >
-            <div className="dash-chart-tooltip-time">
-              {bucketLabel(hovered.start, bucketMs)}
-            </div>
-            <dl className="dash-chart-tooltip-list">
-              <dt>Input</dt>
-              <dd>{count(hovered.input)}</dd>
-              <dt>Cached</dt>
-              <dd>{count(hovered.cached)}</dd>
-              <dt>Output</dt>
-              <dd>{count(hovered.output)}</dd>
-              <dt>Total</dt>
-              <dd>{count(hovered.total)}</dd>
-            </dl>
+            </span>
+            <span className="home-chart-total num">{compact(row.total)}</span>
           </div>
-        ) : null}
+        ))}
       </div>
 
-      <div className="dash-chart-legend">
-        <span className="dash-legend-item">
-          <span className="dash-swatch dash-swatch-input" aria-hidden="true" />
+      <div className="home-chart-legend">
+        <span className="home-legend-item">
+          <span className="home-swatch home-swatch-input" aria-hidden="true" />
           Input (not cached)
         </span>
-        <span className="dash-legend-item">
-          <span className="dash-swatch dash-swatch-cached" aria-hidden="true" />
+        <span className="home-legend-item">
+          <span className="home-swatch home-swatch-cached" aria-hidden="true" />
           Cached input
         </span>
-        <span className="dash-legend-item">
-          <span className="dash-swatch dash-swatch-output" aria-hidden="true" />
+        <span className="home-legend-item">
+          <span className="home-swatch home-swatch-output" aria-hidden="true" />
           Output
         </span>
       </div>
 
-      <details className="dash-chart-table">
+      <details className="home-chart-table">
         <summary>Show as table</summary>
-        <div className="dash-table-wrap">
-          <table className="dash-table">
+        <div className="home-table-wrap">
+          <table className="perm-t home-table">
             <caption className="sr-only">
               Token usage per bucket in this range
             </caption>
@@ -407,10 +353,10 @@ function TokenChart({ data }: { data: Dashboard }) {
               {rows.map((row) => (
                 <tr key={row.start}>
                   <td>{bucketLabel(row.start, bucketMs)}</td>
-                  <td className="is-num">{count(row.input)}</td>
-                  <td className="is-num">{count(row.cached)}</td>
-                  <td className="is-num">{count(row.output)}</td>
-                  <td className="is-num">{count(row.total)}</td>
+                  <td className="is-num num">{count(row.input)}</td>
+                  <td className="is-num num">{count(row.cached)}</td>
+                  <td className="is-num num">{count(row.output)}</td>
+                  <td className="is-num num">{count(row.total)}</td>
                 </tr>
               ))}
             </tbody>
@@ -418,44 +364,6 @@ function TokenChart({ data }: { data: Dashboard }) {
         </div>
       </details>
     </div>
-  );
-}
-
-function StatTile({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  return (
-    <div className="dash-tile">
-      <div className="dash-tile-label">{label}</div>
-      <div className="dash-tile-value">{value}</div>
-      <div className="dash-tile-sub">{sub}</div>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  note,
-  children,
-}: {
-  title: string;
-  note?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="dash-section">
-      <div className="dash-section-head">
-        <h2 className="dash-section-title">{title}</h2>
-        {note ? <p className="dash-note">{note}</p> : null}
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -472,34 +380,35 @@ function ErrorLogRow({
   const href = sessionId
     ? "#/sessions/" + encodeURIComponent(sessionId) + "?view=trajectory"
     : "";
+  const source = row.source || "";
   return (
-    <li className="dash-error-row">
-      <div className="dash-error-head">
-        <span className="dash-error-time">{clockTime(row.at)}</span>
-        <span className={"dash-error-source is-" + (row.source || "unknown")}>
-          {SOURCE_LABELS[row.source] || row.source || "Other"}
-        </span>
-        <span className="dash-error-agent">{row.agent || "—"}</span>
+    <li className="home-error-row">
+      <div className="home-error-head">
+        <span className="home-error-time num">{clockTime(row.at)}</span>
+        <Badge tone={SOURCE_TONES[source] || "gray"} dot>
+          {SOURCE_LABELS[source] || source || "Other"}
+        </Badge>
+        <span className="home-error-agent trunc">{row.agent || "—"}</span>
         <button
           type="button"
-          className={"dash-error-message" + (open ? " is-open" : "")}
+          className={"home-error-message" + (open ? " is-open" : "")}
           aria-expanded={open}
           onClick={onToggle}
         >
           {row.message || "(no message)"}
         </button>
         {href ? (
-          <a className="dash-error-link" href={href}>
+          <a className="home-error-link" href={href}>
             Trajectory
           </a>
         ) : null}
       </div>
       {open ? (
-        <dl className="dash-error-detail">
+        <dl className="home-error-detail">
           <dt>Level</dt>
           <dd>{row.level || "error"}</dd>
           <dt>Source</dt>
-          <dd>{SOURCE_LABELS[row.source] || row.source || "Other"}</dd>
+          <dd>{SOURCE_LABELS[source] || source || "Other"}</dd>
           {row.agent ? (
             <>
               <dt>Agent</dt>
@@ -677,433 +586,450 @@ export function HomePage() {
   const tokensTotal = summary
     ? (summary.input_tokens || 0) + (summary.output_tokens || 0)
     : 0;
+  const cachedDetail =
+    "Cached " +
+    share(summary?.cached_input_tokens || 0, summary?.input_tokens || 0) +
+    " of input";
+  const turnsDetail =
+    "Failed " +
+    count(summary?.turns_failed || 0) +
+    " · " +
+    share(summary?.turns_failed || 0, summary?.turns || 0);
+  const toolsDetail =
+    "Errors " +
+    count(summary?.tool_errors || 0) +
+    " · " +
+    share(summary?.tool_errors || 0, summary?.tool_calls || 0);
 
   return (
-    <main id="main" className="page dash-page">
-      <header className="dash-head">
-        <h1 className="dash-title">Dashboard</h1>
-        <div className="dash-controls">
-          <div className="dash-range" role="group" aria-label="Time range">
-            {RANGES.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={
-                  "dash-range-button" + (range === option.value ? " is-active" : "")
-                }
-                aria-pressed={range === option.value}
-                onClick={() => {
-                  if (option.value === range) {
-                    return;
-                  }
-                  writeHash(option.value, agent);
-                  setLoading(true);
-                  setRange(option.value);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <div className="dash-agent">
-            <label className="dash-agent-label" htmlFor="dash-agent-select">
+    <main id="main" className="page home-page">
+      <header className="ph">
+        <div>
+          <h1>
+            {greeting()}, Lana
+          </h1>
+          <p>
+            <span className="num">{todayLabel()}</span> · Here's what's
+            happening across your workspace.
+          </p>
+        </div>
+        <div className="acts">
+          <Seg
+            className="home-range"
+            aria-label="Time range"
+            options={RANGES.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
+            value={range}
+            onChange={(next) => {
+              if (next === range) {
+                return;
+              }
+              writeHash(next as DashboardRange, agent);
+              setLoading(true);
+              setRange(next as DashboardRange);
+            }}
+          />
+          <div className="home-agent">
+            <label className="home-agent-label" htmlFor="home-agent-select">
               Agent
             </label>
-            <select
-              id="dash-agent-select"
-              className="dash-agent-select"
+            <Select
+              id="home-agent-select"
+              placeholder="All agents"
+              options={[
+                { value: "", label: "All agents" },
+                ...agentOptions.map((name) => ({ value: name, label: name })),
+              ]}
               value={agent}
-              onChange={(event) => changeAgent(event.target.value)}
-            >
-              <option value="">All agents</option>
-              {agentOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+              onChange={changeAgent}
+            />
           </div>
-          <span className="dash-updated" aria-live="polite">
+          <span className="home-updated num" aria-live="polite">
             {updatedAt ? "Updated " + clockTime(updatedAt) : "Loading"}
           </span>
-          <button
-            type="button"
-            className="button-ui button-ui-secondary dash-refresh"
+          <Button
+            as="a"
+            href="#/sessions/new"
+            variant="primary"
+            icon="plus"
+            size="sm"
+          >
+            New chat
+          </Button>
+          <Button
+            variant="secondary"
+            icon="refresh-cw"
+            size="sm"
             onClick={reload}
             disabled={loading}
           >
             Refresh
-          </button>
+          </Button>
         </div>
       </header>
 
       {error ? (
-        <div className="error-box dash-error-notice" role="alert">
-          <p className="error-message">{error}</p>
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={reload}
-          >
-            Retry
-          </button>
+        <div className="home-alert" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not refresh"
+            text={error}
+            action={
+              <Button variant="secondary" icon="refresh-cw" onClick={reload}>
+                Retry
+              </Button>
+            }
+          />
         </div>
       ) : null}
 
       {!data ? (
-        <p className="dash-empty">
+        <div className="home-empty">
           {error ? "No data yet." : "Loading the dashboard…"}
-        </p>
+        </div>
       ) : (
         <>
-          <section className="dash-section">
-            <div className="dash-section-head">
-              <h2 className="dash-section-title">Right now</h2>
-            </div>
-            <div className="dash-now">
-              <a className="dash-now-item" href="#/sessions">
-                <span className="dash-now-count">
-                  {count(now?.sessions_running || 0)}
-                </span>
-                Running
-              </a>
-              <a className="dash-now-item" href="#/sessions">
-                <span className="dash-now-count">
-                  {count(now?.sessions_waiting_input || 0)}
-                </span>
-                Waiting for answer
-              </a>
-            </div>
-          </section>
-
-          <div className="dash-tiles">
-            <StatTile
+          <div className="stats home-stats">
+            <Stat
+              icon="coins"
               label="Tokens"
               value={count(tokensTotal)}
-              sub={
-                "Cached " +
-                share(summary?.cached_input_tokens || 0, summary?.input_tokens || 0) +
-                " of input"
-              }
+              detail={cachedDetail}
             />
-            <StatTile
+            <Stat
+              icon="activity"
               label="Turns"
               value={count(summary?.turns || 0)}
-              sub={
-                "Failed " +
-                count(summary?.turns_failed || 0) +
-                " · " +
-                share(summary?.turns_failed || 0, summary?.turns || 0)
-              }
+              detail={turnsDetail}
+              tone={summary?.turns_failed ? "bad" : "up"}
             />
-            <StatTile
+            <Stat
+              icon="wrench"
               label="Tool calls"
               value={count(summary?.tool_calls || 0)}
-              sub={
-                "Errors " +
-                count(summary?.tool_errors || 0) +
-                " · " +
-                share(summary?.tool_errors || 0, summary?.tool_calls || 0)
-              }
+              detail={toolsDetail}
+              tone={summary?.tool_errors ? "bad" : "up"}
             />
-            <StatTile
+            <Stat
+              icon="repeat"
               label="Provider retries"
               value={count(summary?.provider_retries || 0)}
-              sub="Retried model attempts"
+              detail="Retried model attempts"
             />
           </div>
 
-          <Section title="Token usage">
-            <TokenChart data={data} />
-          </Section>
+          <div className="grid2 home-grid">
+            <div className="stack">
+              <Panel title="Token usage">
+                <TokenChart data={data} />
+              </Panel>
 
-          <div className="dash-columns">
-            <Section title="By model">
-              {modelRows.length === 0 ? (
-                <p className="dash-empty">No model usage in this range.</p>
-              ) : (
-                <div className="dash-table-wrap">
-                  <table className="dash-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Provider</th>
-                        <th scope="col">Model</th>
-                        <th scope="col" className="is-num">
-                          Requests
-                        </th>
-                        <th scope="col" className="is-num">
-                          Input
-                        </th>
-                        <th scope="col" className="is-num">
-                          Cached
-                        </th>
-                        <th scope="col" className="is-num">
-                          Output
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {modelRows.map((row) => (
-                        <tr key={row.provider + "/" + row.model}>
-                          <td>{row.provider}</td>
-                          <td>{row.model}</td>
-                          <td className="is-num">{count(row.requests)}</td>
-                          <td className="is-num">{count(row.input_tokens)}</td>
-                          <td className="is-num">
-                            {count(row.cached_input_tokens)}
-                          </td>
-                          <td className="is-num">{count(row.output_tokens)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Section>
-
-            <Section title="By agent">
-              {agentRows.length === 0 ? (
-                <p className="dash-empty">No agent activity in this range.</p>
-              ) : (
-                <div className="dash-table-wrap">
-                  <table className="dash-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Agent</th>
-                        <th scope="col" className="is-num">
-                          Turns
-                        </th>
-                        <th scope="col" className="is-num">
-                          Input
-                        </th>
-                        <th scope="col" className="is-num">
-                          Cached
-                        </th>
-                        <th scope="col" className="is-num">
-                          Output
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {agentRows.map((row) => (
-                        <tr key={row.agent}>
-                          <td>{row.agent}</td>
-                          <td className="is-num">{count(row.turns)}</td>
-                          <td className="is-num">{count(row.input_tokens)}</td>
-                          <td className="is-num">
-                            {count(row.cached_input_tokens)}
-                          </td>
-                          <td className="is-num">{count(row.output_tokens)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Section>
-          </div>
-
-          <Section title="By source">
-            {sourceRows.length === 0 ||
-            sourceRows.every((row) => !row.count) ? (
-              <p className="dash-empty">No token usage by source in this range.</p>
-            ) : (
-              <div className="dash-table-wrap">
-                <table className="dash-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Source</th>
-                      <th scope="col" className="is-num">
-                        Count
-                      </th>
-                      <th scope="col" className="is-num">
-                        Input
-                      </th>
-                      <th scope="col" className="is-num">
-                        Cached
-                      </th>
-                      <th scope="col" className="is-num">
-                        Output
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sourceRows.map((row) => (
-                      <tr key={row.source}>
-                        <td>
-                          {BREAKDOWN_SOURCE_LABELS[row.source] || row.source}
-                        </td>
-                        <td className="is-num">{count(row.count)}</td>
-                        <td className="is-num">{count(row.input_tokens)}</td>
-                        <td className="is-num">
-                          {count(row.cached_input_tokens)}
-                        </td>
-                        <td className="is-num">{count(row.output_tokens)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Section>
-
-          <Section title="Tools">
-            {toolRows.length === 0 ? (
-              <p className="dash-empty">No tool calls in this range.</p>
-            ) : (
-              <div className="dash-table-wrap">
-                <table className="dash-table dash-tools-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Tool</th>
-                      <th scope="col" className="is-num">
-                        Calls
-                      </th>
-                      <th scope="col" className="is-num">
-                        Errors
-                      </th>
-                      <th scope="col" className="is-num">
-                        Rejected
-                      </th>
-                      <th scope="col" className="is-num">
-                        Error share
-                      </th>
-                      <th scope="col" className="is-num">
-                        Avg time
-                      </th>
-                      <th scope="col" className="is-num">
-                        p95 time
-                      </th>
-                      <th scope="col">Last error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {toolRows.map((row) => {
-                      const marked = row.calls >= 5 && row.errors / row.calls > 0.2;
-                      return (
-                        <tr
-                          key={row.name}
-                          className={marked ? "is-danger" : undefined}
-                        >
-                          <td>{row.name}</td>
-                          <td className="is-num">{count(row.calls)}</td>
-                          <td className="is-num">{count(row.errors)}</td>
-                          <td className="is-num">{count(row.rejected)}</td>
-                          <td className="is-num">
-                            {share(row.errors, row.calls)}
-                          </td>
-                          <td className="is-num">{duration(row.avg_ms)}</td>
-                          <td className="is-num">{duration(row.p95_ms)}</td>
-                          <td className="dash-last-error">
-                            {row.last_error ? (
-                              <>
-                                <span className="dash-last-error-text">
-                                  {row.last_error}
-                                </span>
-                                <span className="dash-last-error-time">
-                                  {clockTime(row.last_error_at)}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="dash-muted">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Section>
-
-          <Section title="Turn outcomes">
-            {reasonRows.length === 0 ? (
-              <p className="dash-empty">No turns in this range.</p>
-            ) : (
-              <>
-                <p className="dash-note">
-                  Average turn time {duration(data.turn_duration?.avg_ms || 0)} ·
-                  p95 {duration(data.turn_duration?.p95_ms || 0)}
-                </p>
-                <div className="dash-table-wrap">
-                  <table className="dash-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Outcome</th>
-                        <th scope="col" className="is-num">
-                          Count
-                        </th>
-                        <th scope="col" className="is-num">
-                          Share
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reasonRows.map((row) => (
-                        <tr key={row.reason}>
-                          <td>{row.reason || "end_turn"}</td>
-                          <td className="is-num">{count(row.count)}</td>
-                          <td className="is-num">
-                            {share(row.count, summary?.turns || 0)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </Section>
-
-          <Section title="Error log">
-            <div className="dash-chips" role="group" aria-label="Error source">
-              {ERROR_FILTERS.map((filter) => {
-                const daemonHidden = filter.value === "daemon" && agent !== "";
-                return (
-                  <button
-                    key={filter.value}
-                    type="button"
-                    className={
-                      "dash-chip" +
-                      (errorFilter === filter.value ? " is-active" : "")
-                    }
-                    aria-pressed={errorFilter === filter.value}
-                    disabled={daemonHidden}
-                    title={daemonHidden ? DAEMON_AGENT_NOTE : undefined}
-                    onClick={() => setErrorFilter(filter.value)}
-                  >
-                    {filter.label}
-                  </button>
-                );
-              })}
-            </div>
-            {agent ? (
-              <p className="dash-note">{DAEMON_AGENT_NOTE}</p>
-            ) : (
-              <p className="dash-note">
-                Daemon rows cover the time since the daemon last started
-                {data.daemon_started_at
-                  ? " (" + clockTime(data.daemon_started_at) + ")"
-                  : ""}
-                .
-              </p>
-            )}
-            {visibleErrors.length === 0 ? (
-              <p className="dash-empty">No errors in this range.</p>
-            ) : (
-              <ul className="dash-errors" aria-label="Error log">
-                {visibleErrors.map(({ row, key }) => (
-                  <ErrorLogRow
-                    key={key}
-                    row={row}
-                    open={openErrors.includes(key)}
-                    onToggle={() => toggleError(key)}
+              <Panel title="Tools">
+                {toolRows.length === 0 ? (
+                  <EmptyState
+                    size="sm"
+                    icon="wrench"
+                    text="No tool calls in this range."
                   />
-                ))}
-              </ul>
-            )}
-          </Section>
+                ) : (
+                  <div className="home-table-wrap">
+                    <table className="perm-t home-table home-tools-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Tool</th>
+                          <th scope="col" className="is-num">
+                            Calls
+                          </th>
+                          <th scope="col" className="is-num">
+                            Errors
+                          </th>
+                          <th scope="col" className="is-num">
+                            Rejected
+                          </th>
+                          <th scope="col" className="is-num">
+                            Error share
+                          </th>
+                          <th scope="col" className="is-num">
+                            Avg time
+                          </th>
+                          <th scope="col" className="is-num">
+                            p95 time
+                          </th>
+                          <th scope="col">Last error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {toolRows.map((row) => {
+                          const marked =
+                            row.calls >= 5 && row.errors / row.calls > 0.2;
+                          return (
+                            <tr
+                              key={row.name}
+                              className={marked ? "is-danger" : undefined}
+                            >
+                              <td>{row.name}</td>
+                              <td className="is-num num">{count(row.calls)}</td>
+                              <td className="is-num num">{count(row.errors)}</td>
+                              <td className="is-num num">
+                                {count(row.rejected)}
+                              </td>
+                              <td className="is-num num">
+                                {share(row.errors, row.calls)}
+                              </td>
+                              <td className="is-num num">
+                                {duration(row.avg_ms)}
+                              </td>
+                              <td className="is-num num">
+                                {duration(row.p95_ms)}
+                              </td>
+                              <td className="home-last-error">
+                                {row.last_error ? (
+                                  <>
+                                    <span className="home-last-error-text">
+                                      {row.last_error}
+                                    </span>
+                                    <span className="home-last-error-time num">
+                                      {clockTime(row.last_error_at)}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="faint">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="Turn outcomes">
+                {reasonRows.length === 0 ? (
+                  <EmptyState
+                    size="sm"
+                    icon="circle-dot"
+                    text="No turns in this range."
+                  />
+                ) : (
+                  <>
+                    <p className="home-note">
+                      Average turn time{" "}
+                      {duration(data.turn_duration?.avg_ms || 0)} · p95{" "}
+                      {duration(data.turn_duration?.p95_ms || 0)}
+                    </p>
+                    <div className="home-table-wrap">
+                      <table className="perm-t home-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Outcome</th>
+                            <th scope="col" className="is-num">
+                              Count
+                            </th>
+                            <th scope="col" className="is-num">
+                              Share
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reasonRows.map((row) => (
+                            <tr key={row.reason}>
+                              <td>{row.reason || "end_turn"}</td>
+                              <td className="is-num num">{count(row.count)}</td>
+                              <td className="is-num num">
+                                {share(row.count, summary?.turns || 0)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </Panel>
+
+              <Panel
+                title="Error log"
+                actions={
+                  <Seg
+                    className="home-err-filter"
+                    aria-label="Error source"
+                    options={ERROR_FILTERS.map((filter) => {
+                      const daemonHidden =
+                        filter.value === "daemon" && agent !== "";
+                      return {
+                        value: filter.value,
+                        label: filter.label,
+                        disabled: daemonHidden,
+                        title: daemonHidden ? DAEMON_AGENT_NOTE : undefined,
+                      };
+                    })}
+                    value={errorFilter}
+                    onChange={(next) => setErrorFilter(next)}
+                  />
+                }
+              >
+                <p className="home-note">
+                  {agent ? (
+                    DAEMON_AGENT_NOTE
+                  ) : (
+                    <>
+                      Daemon rows cover the time since the daemon last started
+                      {data.daemon_started_at
+                        ? " (" + clockTime(data.daemon_started_at) + ")"
+                        : ""}
+                      .
+                    </>
+                  )}
+                </p>
+                {visibleErrors.length === 0 ? (
+                  <EmptyState
+                    size="sm"
+                    icon="circle-check"
+                    text="No errors in this range."
+                  />
+                ) : (
+                  <ul className="home-errors" aria-label="Error log">
+                    {visibleErrors.map(({ row, key }) => (
+                      <ErrorLogRow
+                        key={key}
+                        row={row}
+                        open={openErrors.includes(key)}
+                        onToggle={() => toggleError(key)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+            </div>
+
+            <div className="stack">
+              <Panel title="Right now">
+                <div className="home-rows">
+                  <a className="home-row" href="#/sessions">
+                    <span className="home-row-icon" aria-hidden="true">
+                      <Ic name="activity" size={15} />
+                    </span>
+                    <span className="home-row-label grow">Running</span>
+                    <span className="home-row-value num">
+                      {count(now?.sessions_running || 0)}
+                    </span>
+                  </a>
+                  <a className="home-row" href="#/sessions">
+                    <span className="home-row-icon" aria-hidden="true">
+                      <Ic name="clock" size={15} />
+                    </span>
+                    <span className="home-row-label grow">
+                      Waiting for answer
+                    </span>
+                    <span className="home-row-value num">
+                      {count(now?.sessions_waiting_input || 0)}
+                    </span>
+                  </a>
+                </div>
+              </Panel>
+
+              <Panel title="By model">
+                {modelRows.length === 0 ? (
+                  <EmptyState
+                    size="sm"
+                    icon="cpu"
+                    text="No model usage in this range."
+                  />
+                ) : (
+                  <div className="home-rows">
+                    {modelRows.map((row) => (
+                      <div
+                        className="home-row"
+                        key={row.provider + "/" + row.model}
+                      >
+                        <span className="home-row-main">
+                          <span className="home-row-title trunc">
+                            {row.model}
+                          </span>
+                          <span className="home-row-sub">
+                            {row.provider} · {count(row.requests)} requests
+                          </span>
+                        </span>
+                        <span className="home-row-value num">
+                          {compact(
+                            (row.input_tokens || 0) + (row.output_tokens || 0)
+                          )}{" "}
+                          tok
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="By agent">
+                {agentRows.length === 0 ? (
+                  <EmptyState
+                    size="sm"
+                    icon="users"
+                    text="No agent activity in this range."
+                  />
+                ) : (
+                  <div className="home-rows">
+                    {agentRows.map((row) => (
+                      <div className="home-row" key={row.agent}>
+                        <span className="home-row-main">
+                          <span className="home-row-title trunc">
+                            {row.agent}
+                          </span>
+                          <span className="home-row-sub">
+                            {count(row.turns)} turns
+                          </span>
+                        </span>
+                        <span className="home-row-value num">
+                          {compact(
+                            (row.input_tokens || 0) + (row.output_tokens || 0)
+                          )}{" "}
+                          tok
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <Panel title="By source">
+                {sourceRows.length === 0 ||
+                sourceRows.every((row) => !row.count) ? (
+                  <EmptyState
+                    size="sm"
+                    icon="layers"
+                    text="No token usage by source in this range."
+                  />
+                ) : (
+                  <div className="home-rows">
+                    {sourceRows.map((row) => (
+                      <div className="home-row" key={row.source}>
+                        <span className="home-row-main">
+                          <span className="home-row-title trunc">
+                            {BREAKDOWN_SOURCE_LABELS[row.source] || row.source}
+                          </span>
+                          <span className="home-row-sub">
+                            {count(row.count)} calls
+                          </span>
+                        </span>
+                        <span className="home-row-value num">
+                          {compact(
+                            (row.input_tokens || 0) + (row.output_tokens || 0)
+                          )}{" "}
+                          tok
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+            </div>
+          </div>
         </>
       )}
     </main>

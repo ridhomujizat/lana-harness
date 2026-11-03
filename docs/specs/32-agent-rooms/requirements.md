@@ -259,7 +259,8 @@ finished turns in 7 days, and a context action: "Answer" when waiting, "Watch li
 
 ### REQ-ROOM-012: Navigation
 
-The system shall group the sidebar as: Home, Chats, Workflows (no title); **OBSERVE**: History;
+The system shall group the sidebar as: **WORKSPACE**: Home, Chats, Workflows (title added by the
+owner on 2026-11-02 with the Gr8r port; it was untitled before); **OBSERVE**: History;
 **CONFIGURE**: Agents, Knowledge, Skills, MCP, Channels, Settings. History is the existing
 Sessions page with the same function. Workflows is shown only when a Workflows page exists. The
 default page after login is Chats. Old `#/sessions` links keep working.

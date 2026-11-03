@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../api/mcp", () => ({
   listMcpServers: vi.fn(),
@@ -111,11 +111,15 @@ describe("mcp detail", () => {
     expect(screen.getByDisplayValue("npx")).toBeTruthy();
     expect(screen.getByDisplayValue(/docs-server/)).toBeTruthy();
     expect(screen.getByDisplayValue("TOKEN")).toBeTruthy();
-    expect(screen.getByText("Search docs")).toBeTruthy();
-    expect(screen.getByText("fetch")).toBeTruthy();
-    expect(screen.getByText("scout")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Save changes" })
     ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Tools/ }));
+    expect(screen.getByText("Search docs")).toBeTruthy();
+    expect(screen.getByText("fetch")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Agents/ }));
+    expect(screen.getByText("scout")).toBeTruthy();
   });
 });

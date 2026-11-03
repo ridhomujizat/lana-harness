@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { errorMessage, isErrorCode, setCSRF } from "../api/client";
 import { authState, login } from "../api/auth";
-import { Icon, Loading, useAnnounce } from "../ui/ui";
+import { useAnnounce } from "../ui/ui";
+import { LanaMark } from "../ui/icons";
+import { Button, Field, IconButton, Input } from "../ui/gr8r";
 import { SetupShell } from "./setup";
 
 /* Daily login (REQ-WLG-003, mockup 2). The owner types the password they set
@@ -47,48 +49,35 @@ export function PasswordField({
   onChange,
 }: PasswordFieldProps) {
   const [shown, setShown] = useState(false);
-  const hintId = hint ? id + "-hint" : "";
-  const errorId = error ? id + "-error" : "";
-  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
   return (
-    <div className="setup-field">
-      <label className="setup-label" htmlFor={id}>
-        {label}
-      </label>
-      <div className="pw-wrap">
-        <input
+    <Field
+      label={label}
+      htmlFor={id}
+      hint={hint || undefined}
+      error={error || undefined}
+    >
+      <div className="pw-field">
+        <Input
           id={id}
+          className="input-lg"
           type={shown ? "text" : "password"}
           autoComplete={autoComplete}
           spellCheck={false}
           value={value}
           disabled={disabled}
-          aria-invalid={error ? "true" : undefined}
-          aria-describedby={describedBy}
           onChange={(event) => onChange(event.target.value)}
         />
-        <button
-          type="button"
-          className="pw-toggle"
-          aria-label={shown ? "Hide password" : "Show password"}
-          aria-pressed={shown}
+        <IconButton
+          size="sm"
+          className="pw-eye"
+          icon={shown ? "eye-off" : "eye"}
+          label={shown ? "Hide password" : "Show password"}
+          on={shown}
           disabled={disabled}
           onClick={() => setShown((current) => !current)}
-        >
-          <Icon name={shown ? "eye-off" : "eye"} />
-        </button>
+        />
       </div>
-      {hint ? (
-        <p id={hintId} className="setup-hint">
-          {hint}
-        </p>
-      ) : null}
-      {error ? (
-        <p id={errorId} className="setup-field-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    </Field>
   );
 }
 
@@ -148,19 +137,15 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
   return (
     <SetupShell step="unlock" variant="door">
-      <div className="setup-heading">
-        <h1 className="setup-title">
-          {noPassword ? "Set up your password" : "Log in"}
-        </h1>
-        <p className="setup-lede">
-          {noPassword
-            ? "lana opened a sign-in link in a new browser tab when it started. Switch to that tab, or restart lana to open a new one."
-            : "Enter the password you made when you set up lana."}
-        </p>
-      </div>
+      <h1>{noPassword ? "Set up your password" : "Log in"}</h1>
+      <p className="sub">
+        {noPassword
+          ? "lana opened a sign-in link in a new browser tab when it started. Switch to that tab, or restart lana to open a new one."
+          : "Enter the password you made when you set up lana."}
+      </p>
 
       {noPassword ? null : (
-        <form className="setup-form" onSubmit={submit}>
+        <form className="auth-form" onSubmit={submit}>
           <PasswordField
             id="login-password"
             label="Password"
@@ -173,21 +158,18 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
               setError("");
             }}
           />
-          <div className="setup-actions">
-            <button
-              type="submit"
-              className="button-ui button-ui-primary"
-              disabled={busy}
-            >
-              {busy ? "Logging in…" : "Log in"}
-            </button>
-          </div>
+          <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy}>
+            Log in
+          </Button>
         </form>
       )}
 
       {noPassword ? null : (
-        <p className="after-form">
-          Forgot it? <a href="#/forgot">Reset your password</a>
+        <p className="auth-foot">
+          Forgot it?{" "}
+          <a className="link" href="#/forgot">
+            Reset your password
+          </a>
         </p>
       )}
     </SetupShell>
@@ -196,9 +178,19 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
 export function LoginLoading() {
   return (
-    <main id="main" className="page page-narrow">
-      <h1>lana dashboard</h1>
-      <Loading label="Checking your browser session." />
-    </main>
+    <div className="auth">
+      <div className="auth-c">
+        <div className="auth-card">
+          <span className="auth-mark">
+            <LanaMark size={30} />
+          </span>
+          <h1>lana</h1>
+          <p className="sub">Checking your browser session.</p>
+          <div className="auth-loading" role="status" aria-live="polite">
+            <span className="auth-spinner" aria-hidden="true"></span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

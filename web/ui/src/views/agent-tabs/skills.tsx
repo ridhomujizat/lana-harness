@@ -6,7 +6,8 @@ import { isErrorCode, loadAgentTab, updateAgent } from "../../api/agents";
 import { listSkills } from "../../api/skills";
 import type { SkillRow } from "../../api/skills";
 import { Dialog, ErrorNotice, Loading } from "../../ui/ui";
-import { Icon, AgentAvatar, agoLabel } from "../agent-common";
+import { AgentAvatar, agoLabel } from "../agent-common";
+import { Ic } from "../../ui/icons";
 
 /* REQ-WEB-047: the agent's skills list. Removing a name changes only the
    agent's config; the skill files stay. Adding picks global skills. */
@@ -144,7 +145,7 @@ function AddSkillsDialog({
 
         <label className="agent-tabs-search agent-skills-search">
           <span className="sr-only">Search skills</span>
-          <Icon name="search" />
+          <Ic name="search" size={13} />
           <input
             data-autofocus
             type="search"
@@ -212,7 +213,7 @@ function AddSkillsDialog({
           <div className="dialog-actions">
             <button
               type="button"
-              className="button-ui button-ui-secondary"
+              className="btn btn-secondary btn-sm"
               disabled={busy}
               onClick={onClose}
             >
@@ -220,7 +221,7 @@ function AddSkillsDialog({
             </button>
             <button
               type="submit"
-              className="button-ui button-ui-primary"
+              className="btn btn-primary btn-sm"
               disabled={busy || selected.length === 0}
             >
               {busy ? "Adding…" : addLabel}
@@ -416,7 +417,7 @@ export function SkillsTab({ name }: SkillsTabProps) {
         </div>
         <button
           type="button"
-          className="button-ui button-ui-secondary"
+          className="btn btn-secondary btn-sm"
           onClick={reload}
         >
           Try again
@@ -430,7 +431,7 @@ export function SkillsTab({ name }: SkillsTabProps) {
       <div className="agent-tabs-toolbar">
         <label className="agent-tabs-search">
           <span className="sr-only">Search skills</span>
-          <Icon name="search" />
+          <Ic name="search" size={13} />
           <input
             type="search"
             placeholder="Search skills"
@@ -445,11 +446,12 @@ export function SkillsTab({ name }: SkillsTabProps) {
         </p>
         <button
           type="button"
-          className="button-ui button-ui-primary"
+          className="btn btn-primary btn-sm"
           disabled={saving}
           onClick={() => setAddOpen(true)}
         >
-          + Add skill
+          <Ic name="plus" size={13} />
+          Add skill
         </button>
       </div>
 
@@ -460,8 +462,8 @@ export function SkillsTab({ name }: SkillsTabProps) {
       ) : rows.length === 0 ? (
         <p className="agent-tabs-empty">No skills match “{query}”.</p>
       ) : (
-        <div className="agent-tabs-table-wrap">
-          <table className="agent-tabs-table agent-skills-table">
+        <div className="perm-t agent-tabs-table-wrap">
+          <table className="perm-t agent-tabs-table agent-skills-table">
             <thead>
               <tr>
                 <th scope="col">Skill</th>
@@ -491,21 +493,23 @@ export function SkillsTab({ name }: SkillsTabProps) {
                 return (
                   <tr key={row.name}>
                     <th scope="row" className="agent-skills-name-cell">
-                      <span className="agent-tabs-tile">
-                        <Icon name="skills" />
-                      </span>
-                      <span className="agent-skills-text">
-                        <span className="agent-skills-name">{row.name}</span>
-                        <span className="agent-skills-desc">{description}</span>
+                      <span className="agent-tabs-namecell">
+                        <span className="agent-tabs-tile">
+                          <Ic name="sparkles" size={15} />
+                        </span>
+                        <span className="agent-mcp-text">
+                          <span className="agent-skills-name">{row.name}</span>
+                          <span className="agent-skills-desc">{description}</span>
+                        </span>
                       </span>
                     </th>
                     <td>
                       {!entry ? (
-                        <span className="badge-ui">Missing</span>
+                        <span className="badge">Missing</span>
                       ) : entry.scope === "global" ? (
-                        <span className="badge-ui badge-ui-brand">
+                        <span className="badge accent">
                           <span
-                            className="badge-ui-dot"
+                            className="dot"
                             aria-hidden="true"
                           ></span>
                           Global
@@ -532,7 +536,7 @@ export function SkillsTab({ name }: SkillsTabProps) {
                         disabled={saving}
                         onClick={() => removeSkill(row.name)}
                       >
-                        <Icon name="close" className="icon-16" />
+                        <Ic name="x" size={14} />
                       </button>
                     </td>
                   </tr>
@@ -561,7 +565,7 @@ export function SkillsTab({ name }: SkillsTabProps) {
           {stale ? (
             <button
               type="button"
-              className="button-ui button-ui-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={reload}
             >
               Reload skills

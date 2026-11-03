@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import {
   consolidateKnowledge,
@@ -11,14 +11,24 @@ import {
 } from "../api/knowledge";
 import type { KnowledgeReport, KnowledgeStatus } from "../api/knowledge";
 import { Markdown } from "../lib/markdown";
-import { ErrorNotice, Loading, Notice } from "../ui/ui";
-import "../styles/dashboard.css";
+import { detailText } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import {
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Panel,
+  Skeleton,
+  Stat,
+} from "../ui/gr8r";
 
 /* REQ-KNU-040, REQ-KNU-041; AC-KNU-008: the Knowledge page shows the vault
    status and the upkeep log, uploads files into inbox/, and starts a
-   consolidation run. The layout follows the monitoring dashboard: a status
-   row, then one section per topic. The status is polled while a run is in
-   progress. */
+   consolidation run. The layout follows the Gr8r files view: a page header,
+   a KPI strip, panels for the vault, upload, consolidation and sources, and
+   the latest lint report with the upkeep log. The status is polled while a
+   run is in progress. */
 
 const POLL_MS = 10000;
 
@@ -54,6 +64,60 @@ function embeddingText(status: KnowledgeStatus): string {
 interface Feedback {
   tone: string;
   message: string;
+}
+
+/* Gr8r inline alert for the upload and consolidation feedback. */
+function Alert({ tone, children }: { tone: string; children: ReactNode }) {
+  const warn = tone === "warn";
+  return (
+    <div
+      className={"alert " + (warn ? "warn" : "ok")}
+      role="status"
+      aria-live="polite"
+    >
+      <Ic name={warn ? "triangle-alert" : "circle-check"} size={15} />
+      <span className="grow">{children}</span>
+    </div>
+  );
+}
+
+function DetailsList({ details }: { details: unknown[] }) {
+  if (!details || details.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="knowledge-details">
+      {details.map((detail, index) => (
+        <li key={index}>{detailText(detail)}</li>
+      ))}
+    </ul>
+  );
+}
+
+/* One vault source row: an icon tile, the path, and the error when it failed. */
+function SourceRow({
+  icon,
+  path,
+  error,
+}: {
+  icon: string;
+  path: string;
+  error?: string;
+}) {
+  return (
+    <div className="mini knowledge-source">
+      <span
+        className={"knowledge-tile" + (error ? " is-error" : "")}
+        aria-hidden="true"
+      >
+        <Ic name={icon} size={15} />
+      </span>
+      <span className="knowledge-source-main">
+        <code className="mono knowledge-path">{path}</code>
+        {error ? <span className="knowledge-source-error">{error}</span> : null}
+      </span>
+    </div>
+  );
 }
 
 export function KnowledgePage() {
@@ -226,23 +290,47 @@ export function KnowledgePage() {
 
   if (!data) {
     return (
-      <main id="main" className="page dash-page">
-        <header className="dash-head">
-          <h1 className="dash-title">Knowledge</h1>
-        </header>
-        {status === "error" ? (
-          <div className="dash-error-notice" role="alert">
-            <ErrorNotice message={error} details={details} />
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
+      <main id="main" className="page knowledge-page">
+        <header className="ph">
+          <div>
+            <h1>Knowledge</h1>
+            <p>The vault, its sources, and the upkeep that keeps them current.</p>
+          </div>
+          <div className="acts">
+            <Button
+              variant="secondary"
+              icon="refresh-cw"
               onClick={reload}
+              disabled={status === "loading"}
             >
-              Try again
-            </button>
+              Refresh
+            </Button>
+          </div>
+        </header>
+
+        {status === "error" ? (
+          <div className="panel" role="alert">
+            <ErrorState
+              icon="cloud-alert"
+              title="Could not load knowledge"
+              text={error}
+              action={
+                <Button variant="secondary" onClick={reload}>
+                  Try again
+                </Button>
+              }
+            >
+              <DetailsList details={details} />
+            </ErrorState>
           </div>
         ) : (
-          <Loading label="Loading knowledge…" />
+          <div className="panel knowledge-loading" aria-busy="true">
+            <span className="sr">Loading knowledge…</span>
+            <Skeleton width="42%" height={14} />
+            <Skeleton width="100%" height={64} radius={10} />
+            <Skeleton width="88%" height={12} />
+            <Skeleton width="70%" height={12} />
+          </div>
         )}
       </main>
     );
@@ -250,14 +338,20 @@ export function KnowledgePage() {
 
   if (!data.available) {
     return (
-      <main id="main" className="page dash-page">
-        <header className="dash-head">
-          <h1 className="dash-title">Knowledge</h1>
+      <main id="main" className="page knowledge-page">
+        <header className="ph">
+          <div>
+            <h1>Knowledge</h1>
+            <p>The vault, its sources, and the upkeep that keeps them current.</p>
+          </div>
         </header>
-        <Notice tone="info">
-          The knowledge service is not running, so there is nothing to show
-          here. It starts with the daemon (lana daemon).
-        </Notice>
+        <div className="panel">
+          <EmptyState
+            icon="database"
+            title="Knowledge is off"
+            text="The knowledge service is not running, so there is nothing to show here. It starts with the daemon (lana daemon)."
+          />
+        </div>
       </main>
     );
   }
@@ -271,115 +365,161 @@ export function KnowledgePage() {
   const nextAt = formatTime(consolidation.next_at);
 
   return (
-    <main id="main" className="page dash-page">
-      <header className="dash-head">
-        <h1 className="dash-title">Knowledge</h1>
-        <div className="dash-controls">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary dash-refresh"
+    <main id="main" className="page knowledge-page">
+      <header className="ph">
+        <div>
+          <h1>Knowledge</h1>
+          <p>The vault, its sources, and the upkeep that keeps them current.</p>
+        </div>
+        <div className="acts">
+          <Button
+            variant="secondary"
+            icon="refresh-cw"
             onClick={reload}
             disabled={status === "loading"}
           >
             Refresh
-          </button>
+          </Button>
+          <Button
+            variant="primary"
+            icon="upload"
+            onClick={() => inputRef.current?.click()}
+          >
+            Upload files
+          </Button>
         </div>
       </header>
 
+      <div className="stats knowledge-stats">
+        <Stat
+          icon="file-text"
+          label="Pages"
+          value={count(data.counts.pages)}
+          detail="wiki pages"
+        />
+        <Stat
+          icon="inbox"
+          label="Sources"
+          value={count(data.counts.sources)}
+          detail="ingested sources"
+        />
+        <Stat
+          icon="calendar-days"
+          label="Journal days"
+          value={count(data.counts.journal_days)}
+          detail="daily notes"
+        />
+      </div>
+
       {error ? (
-        <div className="dash-error-notice" role="alert">
-          <ErrorNotice message={error} details={details} />
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={reload}
+        <div className="knowledge-error" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not refresh knowledge"
+            text={error}
+            action={
+              <Button variant="secondary" icon="refresh-cw" onClick={reload}>
+                Retry
+              </Button>
+            }
           >
-            Retry
-          </button>
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
       ) : null}
 
-      <section className="dash-section">
-        <div className="dash-section-head">
-          <h2 className="dash-section-title">Vault</h2>
-          <p className="dash-note">
-            <code className="knowledge-path">{data.path}</code>
+      <Panel
+        title="Vault"
+        actions={
+          data.exists ? (
+            <Badge tone="green" dot>
+              Ready
+            </Badge>
+          ) : (
+            <Badge tone="amber" dot>
+              Not created
+            </Badge>
+          )
+        }
+      >
+        <div>
+          <p className="knowledge-note">
+            <code className="mono knowledge-path">{data.path}</code>
           </p>
-        </div>
-        {data.exists ? null : (
-          <p className="dash-note">
-            The vault has not been created yet; the first ingest creates it.
+          {data.exists ? null : (
+            <p className="knowledge-note">
+              The vault has not been created yet; the first ingest creates it.
+            </p>
+          )}
+          <dl className="knowledge-facts">
+            <dt>Embedding</dt>
+            <dd>{embeddingText(data)}</dd>
+          </dl>
+          <p className="knowledge-note">
+            Knowledge agent: {data.agent || "none configured"}
           </p>
-        )}
-        <div className="dash-tiles">
-          <div className="dash-tile">
-            <div className="dash-tile-label">Pages</div>
-            <div className="dash-tile-value">{count(data.counts.pages)}</div>
-            <div className="dash-tile-sub">wiki pages</div>
-          </div>
-          <div className="dash-tile">
-            <div className="dash-tile-label">Sources</div>
-            <div className="dash-tile-value">{count(data.counts.sources)}</div>
-            <div className="dash-tile-sub">ingested sources</div>
-          </div>
-          <div className="dash-tile">
-            <div className="dash-tile-label">Journal days</div>
-            <div className="dash-tile-value">
-              {count(data.counts.journal_days)}
+          {data.agent_error ? (
+            <div className="alert danger" role="alert">
+              <Ic name="circle-alert" size={15} />
+              <span className="grow">{data.agent_error}</span>
             </div>
-            <div className="dash-tile-sub">daily notes</div>
-          </div>
+          ) : null}
         </div>
-        <p className="dash-note">Embedding: {embeddingText(data)}</p>
-        <p className="dash-note">
-          Knowledge agent: {data.agent || "none configured"}
-        </p>
-        {data.agent_error ? <ErrorNotice message={data.agent_error} /> : null}
-      </section>
+      </Panel>
 
-      <section className="dash-section">
-        <div className="dash-section-head">
-          <h2 className="dash-section-title">Upload to inbox</h2>
-        </div>
-        <p className="dash-note">
+      <Panel title="Upload to inbox">
+        <p className="knowledge-note">
           Markdown, text, PDF, or HTML files (up to 30 MB each). They land in
           inbox/ and are compiled into wiki pages.
         </p>
-        <div className="knowledge-actions">
-          <label className="sr-only" htmlFor="knowledge-upload">
-            Files to upload
+        <div className="knowledge-upload">
+          <label
+            className="knowledge-dropzone"
+            htmlFor="knowledge-upload"
+          >
+            <Ic name="upload-cloud" size={18} />
+            <span>Drop files here or browse</span>
           </label>
           <input
             id="knowledge-upload"
             ref={inputRef}
+            className="sr"
             type="file"
             multiple
             accept=".md,.txt,.pdf,.html"
+            aria-label="Files to upload"
             onChange={onPick}
           />
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
+          <Button
+            variant="primary"
+            icon="upload"
             disabled={uploading || picked.length === 0}
+            loading={uploading}
             onClick={upload}
           >
             {uploading ? "Uploading…" : "Upload"}
-          </button>
+          </Button>
         </div>
-        {uploadFeedback ? (
-          <Notice tone={uploadFeedback.tone}>{uploadFeedback.message}</Notice>
+        {picked.length > 0 ? (
+          <p className="knowledge-note">
+            {picked.length} file{picked.length === 1 ? "" : "s"} ready:{" "}
+            {picked.map((file) => file.name).join(", ")}
+          </p>
         ) : null}
-      </section>
+        {uploadFeedback ? (
+          <Alert tone={uploadFeedback.tone}>{uploadFeedback.message}</Alert>
+        ) : null}
+      </Panel>
 
-      <section className="dash-section">
-        <div className="dash-section-head">
-          <h2 className="dash-section-title">Consolidation</h2>
-        </div>
-        <div className="knowledge-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
+      <Panel
+        title="Consolidation"
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            icon="play"
             disabled={starting || running}
+            loading={starting}
             onClick={runNow}
           >
             {running
@@ -387,11 +527,9 @@ export function KnowledgePage() {
               : starting
                 ? "Starting…"
                 : "Run consolidation now"}
-          </button>
-        </div>
-        {runFeedback ? (
-          <Notice tone={runFeedback.tone}>{runFeedback.message}</Notice>
-        ) : null}
+          </Button>
+        }
+      >
         <dl className="knowledge-facts">
           <dt>Last run</dt>
           <dd>{lastAt || "never"}</dd>
@@ -400,77 +538,98 @@ export function KnowledgePage() {
           <dt>Report</dt>
           <dd>{consolidation.report || "—"}</dd>
         </dl>
-        {consolidation.last_error ? (
-          <ErrorNotice
-            message={"Last consolidation error: " + consolidation.last_error}
-          />
+        {runFeedback ? (
+          <Alert tone={runFeedback.tone}>{runFeedback.message}</Alert>
         ) : null}
-      </section>
+        {consolidation.last_error ? (
+          <div className="alert danger knowledge-inline-alert" role="alert">
+            <Ic name="circle-alert" size={15} />
+            <span className="grow">
+              {"Last consolidation error: " + consolidation.last_error}
+            </span>
+          </div>
+        ) : null}
+      </Panel>
 
-      <section className="dash-section">
-        <div className="dash-section-head">
-          <h2 className="dash-section-title">Sources</h2>
-        </div>
-        <h3 className="knowledge-subtitle">Pending</h3>
+      <Panel title="Sources">
+        <h3 className="knowledge-subtitle">
+          Pending <span className="cnt">{pending.length}</span>
+        </h3>
         {pending.length === 0 ? (
-          <p className="dash-empty">None</p>
+          <p className="knowledge-empty">None</p>
         ) : (
-          <ul className="knowledge-list">
+          <div className="knowledge-rows">
             {pending.map((path) => (
-              <li key={path}>{path}</li>
+              <SourceRow key={path} icon="hourglass" path={path} />
             ))}
-          </ul>
+          </div>
         )}
-        <h3 className="knowledge-subtitle">Failed</h3>
+
+        <h3 className="knowledge-subtitle">
+          Failed <span className="cnt">{failed.length}</span>
+        </h3>
         {failed.length === 0 ? (
-          <p className="dash-empty">None</p>
+          <p className="knowledge-empty">None</p>
         ) : (
-          <ul className="knowledge-list">
+          <div className="knowledge-rows">
             {failed.map((item) => (
-              <li key={item.path}>
-                <code className="knowledge-path">{item.path}</code> — {item.error}
-              </li>
+              <SourceRow
+                key={item.path}
+                icon="file-x"
+                path={item.path}
+                error={item.error}
+              />
             ))}
-          </ul>
+          </div>
         )}
-        <h3 className="knowledge-subtitle">Unsupported inbox files</h3>
+
+        <h3 className="knowledge-subtitle">
+          Unsupported inbox files{" "}
+          <span className="cnt">{unsupported.length}</span>
+        </h3>
         {unsupported.length === 0 ? (
-          <p className="dash-empty">None</p>
+          <p className="knowledge-empty">None</p>
         ) : (
-          <ul className="knowledge-list">
+          <div className="knowledge-rows">
             {unsupported.map((path) => (
-              <li key={path}>{path}</li>
+              <SourceRow key={path} icon="file-warning" path={path} />
             ))}
-          </ul>
+          </div>
         )}
-      </section>
+      </Panel>
 
-      <section className="dash-section">
-        <div className="dash-section-head">
-          <h2 className="dash-section-title">Latest lint report</h2>
-          {report ? (
-            <p className="dash-note">
-              <code className="knowledge-path">{report.path}</code>
-            </p>
-          ) : null}
-        </div>
+      <Panel
+        title="Latest lint report"
+        actions={
+          report ? (
+            <code className="mono knowledge-panel-path">{report.path}</code>
+          ) : null
+        }
+      >
         {reportError ? (
-          <ErrorNotice message={reportError} />
+          <div className="alert danger" role="alert">
+            <Ic name="circle-alert" size={15} />
+            <span className="grow">{reportError}</span>
+          </div>
         ) : !reportLoaded ? (
-          <Loading label="Loading report…" />
+          <div className="knowledge-loading" aria-busy="true">
+            <span className="sr">Loading report…</span>
+            <Skeleton width="60%" height={12} />
+            <Skeleton width="90%" height={12} />
+            <Skeleton width="75%" height={12} />
+          </div>
         ) : report ? (
-          <Markdown text={report.markdown} />
+          <div className="knowledge-report">
+            <Markdown text={report.markdown} />
+          </div>
         ) : (
-          <p className="dash-empty">No report yet</p>
+          <p className="knowledge-empty">No report yet</p>
         )}
-      </section>
+      </Panel>
 
-      <section className="dash-section">
-        <div className="dash-section-head">
-          <h2 className="dash-section-title">Recent log</h2>
-        </div>
+      <Panel title="Recent log">
         {log.length === 0 ? (
-          <p className="dash-empty">No log entries yet.</p>
+          <p className="knowledge-empty">No log entries yet.</p>
         ) : (
           <ul className="knowledge-log">
             {log.map((entry, index) => (
@@ -487,7 +646,7 @@ export function KnowledgePage() {
             ))}
           </ul>
         )}
-      </section>
+      </Panel>
     </main>
   );
 }

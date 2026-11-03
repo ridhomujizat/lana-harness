@@ -1,12 +1,12 @@
 /* eslint-disable react-hooks/set-state-in-effect -- the legacy views reset
    their loading state inside the load effect; the port keeps that 1:1. */
-/* eslint-disable react-hooks/immutability -- routing is a window.location
-   hash assignment, as in the legacy views. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent, MouseEvent } from "react";
+import type { ChangeEvent, FormEvent, MouseEvent, ReactNode } from "react";
 import { errorMessage, ApiError } from "../api/client";
-import { Dialog, ErrorNotice, Loading } from "../ui/ui";
-import { AgentAvatar, Icon, splitModel } from "./agent-common";
+import { detailText } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { avatarFor } from "../lib/avatar";
+import { splitModel } from "./agent-common";
 import {
   listMcpServers,
   saveMcpServer,
@@ -21,6 +21,29 @@ import type {
   McpToolWire,
 } from "../api/mcp";
 import type { Agent } from "../api/agents";
+import {
+  Avatar,
+  AvatarStack,
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  Input,
+  Lbl,
+  Menu,
+  MenuItem,
+  Modal,
+  Panel,
+  SearchInput,
+  Seg,
+  Select,
+  Skeleton,
+  Tabs,
+  Textarea,
+} from "../ui/gr8r";
+import type { BadgeTone } from "../ui/gr8r";
 
 /* T-032: the MCP list (REQ-WEB-050), the MCP detail page, and the add-server
    dialog with the inline test (REQ-WEB-051). The daemon never returns env or
@@ -28,12 +51,12 @@ import type { Agent } from "../api/agents";
 
 const PAGE_SIZE = 8;
 
-const TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+const TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "command", label: "Command" },
   { value: "url", label: "URL" },
 ];
 
-const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "", label: "All status" },
   { value: "connected", label: "Connected" },
   { value: "unreachable", label: "Unreachable" },
@@ -131,23 +154,80 @@ function effectiveStatus(
   return "idle";
 }
 
-function statusMeta(status: McpStatus): { label: string; className: string } {
+/* The server colors (lib/avatar.ts) map onto the Gr8r status tokens so one
+   agent keeps one color in the list, the detail, and the agents pages. */
+const AVATAR_COLORS: Record<string, string> = {
+  "tone-brand": "var(--violet)",
+  "tone-success": "var(--green)",
+  "tone-warning": "var(--amber)",
+  "tone-error": "var(--red)",
+  "tone-gray": "var(--gray)",
+};
+
+function agentColor(name: string): string {
+  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+}
+
+function statusTone(status: McpStatus): BadgeTone {
   if (status === "connected") {
-    return { label: "Connected", className: "badge-ui mcp-badge-success" };
+    return "green";
   }
   if (status === "unreachable") {
-    return { label: "Unreachable", className: "badge-ui badge-ui-error" };
+    return "red";
   }
-  return { label: "Idle", className: "badge-ui" };
+  return "gray";
+}
+
+function statusLabel(status: McpStatus): string {
+  if (status === "connected") {
+    return "Connected";
+  }
+  if (status === "unreachable") {
+    return "Unreachable";
+  }
+  return "Idle";
 }
 
 function StatusBadge({ server }: { server: McpServerRow }) {
-  const meta = statusMeta(effectiveStatus(server));
+  const status = effectiveStatus(server);
   return (
-    <span className={meta.className}>
-      <span className="badge-ui-dot" aria-hidden="true"></span>
-      {meta.label}
-    </span>
+    <Badge tone={statusTone(status)} dot>
+      {statusLabel(status)}
+    </Badge>
+  );
+}
+
+function DetailsList({ details }: { details: unknown[] }) {
+  if (!details || details.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="mcp-details">
+      {details.map((detail, index) => (
+        <li key={index}>{detailText(detail)}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ErrorAlert({
+  message,
+  details,
+  action,
+}: {
+  message: string;
+  details?: unknown[];
+  action?: ReactNode;
+}) {
+  return (
+    <div className="alert danger" role="alert">
+      <Ic name="circle-alert" size={15} />
+      <div className="grow">
+        <p className="mcp-alert-msg">{message}</p>
+        <DetailsList details={details || []} />
+      </div>
+      {action}
+    </div>
   );
 }
 
@@ -405,45 +485,6 @@ function withRows(
   return kind === "env" ? { ...form, env: rows } : { ...form, headers: rows };
 }
 
-interface TypeControlProps {
-  idPrefix: string;
-  value: string;
-  disabled: boolean;
-  onChange: (value: string) => void;
-}
-
-function TypeControl({
-  idPrefix,
-  value,
-  disabled,
-  onChange,
-}: TypeControlProps) {
-  return (
-    <fieldset className="mcp-segmented" disabled={disabled}>
-      <legend className="sr-only">Type</legend>
-      {TYPE_OPTIONS.map((option) => (
-        <label
-          key={option.value}
-          className={
-            "mcp-segment" + (value === option.value ? " is-selected" : "")
-          }
-        >
-          <input
-            className="sr-only"
-            type="radio"
-            name={idPrefix}
-            value={option.value}
-            checked={value === option.value}
-            disabled={disabled}
-            onChange={() => onChange(option.value)}
-          />
-          <span>{option.label}</span>
-        </label>
-      ))}
-    </fieldset>
-  );
-}
-
 interface KeyValueRowsProps {
   idPrefix: string;
   kind: KeyValueKind;
@@ -466,22 +507,22 @@ function KeyValueRows({
   const noun = kind === "headers" ? "header" : "variable";
   const group = kind === "headers" ? "Header" : "Environment variable";
   return (
-    <div className="mcp-key-list">
+    <div className="mcp-kv">
       {rows.length === 0 ? (
-        <p className="mcp-key-empty">No {noun}s yet.</p>
+        <p className="mcp-kv-empty">No {noun}s yet.</p>
       ) : null}
       {rows.map((row, index) => {
         const key = String(row.key || "").trim();
         const masked = row.value === "***";
         const removeLabel = "Remove " + noun + (key ? " " + key : "");
         return (
-          <div className="mcp-key-row" key={idPrefix + "-" + index}>
-            <label className="sr-only" htmlFor={idPrefix + "-key-" + index}>
+          <div className="mcp-kv-row" key={idPrefix + "-" + index}>
+            <label className="sr" htmlFor={idPrefix + "-key-" + index}>
               {group + " key " + (index + 1)}
             </label>
-            <input
+            <Input
               id={idPrefix + "-key-" + index}
-              className="mcp-mono-input"
+              className="mono"
               type="text"
               value={row.key}
               placeholder="KEY"
@@ -492,12 +533,12 @@ function KeyValueRows({
                 onChange(index, "key", event.target.value)
               }
             />
-            <label className="sr-only" htmlFor={idPrefix + "-value-" + index}>
+            <label className="sr" htmlFor={idPrefix + "-value-" + index}>
               {group + " value " + (index + 1)}
             </label>
-            <input
+            <Input
               id={idPrefix + "-value-" + index}
-              className="mcp-key-value mcp-mono-input"
+              className="mono mcp-kv-value"
               type="password"
               value={masked ? "" : row.value}
               placeholder={masked ? "••••••••" : "Value"}
@@ -508,27 +549,25 @@ function KeyValueRows({
                 onChange(index, "value", event.target.value)
               }
             />
-            <button
-              type="button"
-              className="mcp-key-remove"
-              aria-label={removeLabel}
+            <IconButton
+              size="sm"
+              icon="x"
+              label={removeLabel}
               disabled={disabled}
               onClick={() => onRemove(index)}
-            >
-              <Icon name="close" className="icon-16" />
-            </button>
+            />
           </div>
         );
       })}
-      <button
-        type="button"
-        className="mcp-add-key"
+      <Button
+        variant="ghost"
+        size="sm"
+        icon="plus"
         disabled={disabled}
         onClick={onAdd}
       >
-        <Icon name="plus" className="icon-16" />
-        <span>{kind === "headers" ? "Add header" : "Add variable"}</span>
-      </button>
+        {kind === "headers" ? "Add header" : "Add variable"}
+      </Button>
     </div>
   );
 }
@@ -699,20 +738,37 @@ function AddServerDialog({
         : "");
 
   return (
-    <Dialog
+    <Modal
       title="Add MCP server"
-      className="mcp-add-dialog"
       dismissible={!busy}
       onClose={onClose}
+      footer={
+        <div className="mcp-dialog-footer">
+          <p className="mcp-dialog-note">You pick agents after adding it.</p>
+          <div className="dialog-actions">
+            <Button variant="secondary" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="mcp-add-form"
+              variant="primary"
+              disabled={busy}
+              loading={busy}
+            >
+              {busy ? "Adding…" : "Add server"}
+            </Button>
+          </div>
+        </div>
+      }
     >
-      <form className="mcp-dialog-form" onSubmit={submit}>
+      <form id="mcp-add-form" className="mcp-dialog-form" onSubmit={submit}>
         <p className="mcp-dialog-subtitle">
           Run a local command or connect to a server URL.
         </p>
 
-        <label className="mcp-field">
-          <span className="mcp-field-label">Name</span>
-          <input
+        <Field label="Name" hint="Lowercase letters, digits, and dashes.">
+          <Input
             data-autofocus
             type="text"
             name="name"
@@ -722,36 +778,36 @@ function AddServerDialog({
             pattern="[a-z0-9-]+"
             required
             disabled={busy}
-            aria-describedby="mcp-add-name-hint"
             onChange={(event: ChangeEvent<HTMLInputElement>) => {
               setName(event.target.value);
               setError("");
               setDetails([]);
             }}
           />
-          <span id="mcp-add-name-hint" className="hint">
-            Lowercase letters, digits, and dashes.
-          </span>
-        </label>
+        </Field>
 
-        <div className="mcp-field">
-          <span className="mcp-field-label" aria-hidden="true">
+        <div className="field">
+          <span className="label" id="mcp-add-type-label">
             Type
           </span>
-          <TypeControl
-            idPrefix="mcp-add-type"
+          <Seg
+            className="mcp-type-seg"
+            aria-labelledby="mcp-add-type-label"
+            options={TYPE_OPTIONS}
             value={form.type}
-            disabled={busy}
-            onChange={(value) => updateField("type", value)}
+            onChange={(value) => {
+              if (!busy) {
+                updateField("type", value);
+              }
+            }}
           />
         </div>
 
         {form.type === "command" ? (
           <div className="mcp-command-fields">
-            <label className="mcp-field">
-              <span className="mcp-field-label">Command</span>
-              <input
-                className="mcp-mono-input"
+            <Field label="Command">
+              <Input
+                className="mono"
                 type="text"
                 value={form.command}
                 placeholder="npx"
@@ -762,11 +818,10 @@ function AddServerDialog({
                   updateField("command", event.target.value)
                 }
               />
-            </label>
-            <label className="mcp-field">
-              <span className="mcp-field-label">Arguments</span>
-              <textarea
-                className="mcp-mono-input"
+            </Field>
+            <Field label="Arguments" hint="Put each argument on its own line.">
+              <Textarea
+                className="mono"
                 rows={3}
                 value={form.args}
                 placeholder="One argument per line"
@@ -775,11 +830,10 @@ function AddServerDialog({
                 onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
                   updateField("args", event.target.value)
                 }
-              ></textarea>
-              <span className="hint">Put each argument on its own line.</span>
-            </label>
-            <div className="mcp-field">
-              <span className="mcp-field-label">Environment</span>
+              ></Textarea>
+            </Field>
+            <div className="field">
+              <span className="label">Environment</span>
               <KeyValueRows
                 idPrefix="mcp-add-env"
                 kind="env"
@@ -795,10 +849,9 @@ function AddServerDialog({
           </div>
         ) : (
           <div className="mcp-command-fields">
-            <label className="mcp-field">
-              <span className="mcp-field-label">URL</span>
-              <input
-                className="mcp-mono-input"
+            <Field label="URL" hint="Use the full http or https address.">
+              <Input
+                className="mono"
                 type="text"
                 value={form.url}
                 placeholder="Server URL"
@@ -809,10 +862,9 @@ function AddServerDialog({
                   updateField("url", event.target.value)
                 }
               />
-              <span className="hint">Use the full http or https address.</span>
-            </label>
-            <div className="mcp-field">
-              <span className="mcp-field-label">Headers</span>
+            </Field>
+            <div className="field">
+              <span className="label">Headers</span>
               <KeyValueRows
                 idPrefix="mcp-add-header"
                 kind="headers"
@@ -828,22 +880,16 @@ function AddServerDialog({
           </div>
         )}
 
-        <div className="mcp-test-row">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
+        <div className="mcp-test">
+          <Button
+            variant="secondary"
             disabled={busy || testing}
             aria-describedby={testId}
             onClick={runTest}
           >
             {testing ? "Testing…" : tested ? "Test again" : "Test"}
-          </button>
-          <p
-            id={testId}
-            className={testClass}
-            role="status"
-            aria-live="polite"
-          >
+          </Button>
+          <p id={testId} className={testClass} role="status" aria-live="polite">
             {testing
               ? "Testing the server…"
               : testResult
@@ -852,30 +898,113 @@ function AddServerDialog({
           </p>
         </div>
 
-        {error ? <ErrorNotice message={error} details={details} /> : null}
-
-        <div className="mcp-dialog-footer">
-          <p className="mcp-dialog-note">You pick agents after adding it.</p>
-          <div className="dialog-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={busy}
-              onClick={onClose}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="button-ui button-ui-primary"
-              disabled={busy}
-            >
-              {busy ? "Adding…" : "Add server"}
-            </button>
-          </div>
-        </div>
+        {error ? <ErrorAlert message={error} details={details} /> : null}
       </form>
-    </Dialog>
+    </Modal>
+  );
+}
+
+interface ServerRowProps {
+  server: McpServerRow;
+  restarting: boolean;
+  onRestart: () => void;
+  onOpen: (event: MouseEvent<HTMLElement>, server: McpServerRow) => void;
+}
+
+/* One server row. The name opens the detail page; the ellipsis opens the row
+   actions (open or restart). */
+function ServerRow({ server, restarting, onRestart, onOpen }: ServerRowProps) {
+  const moreRef = useRef<HTMLSpanElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const target = serverTarget(server);
+  const agentNames = Array.isArray(server.agents)
+    ? server.agents.map(String)
+    : [];
+  const shown = agentNames.slice(0, 4);
+
+  return (
+    <div className="mini mcp-row" onClick={(event) => onOpen(event, server)}>
+      <span className="mcp-tile" aria-hidden="true">
+        <Ic name="server" size={16} />
+      </span>
+      <span className="mcp-row-main">
+        <a className="mcp-row-name" href={serverHref(server.name)}>
+          {server.name}
+        </a>
+        <span className="mcp-row-target mono">{target || "—"}</span>
+      </span>
+      <span className="mcp-row-transport">
+        <Lbl color="var(--text-4)">{typeLabel(serverType(server))}</Lbl>
+      </span>
+      <span className="mcp-row-tools num">
+        {Number(server.tools_count) || 0}
+      </span>
+      <span className="mcp-row-agents">
+        {agentNames.length === 0 ? (
+          <span className="mcp-muted">No agents</span>
+        ) : (
+          <>
+            <AvatarStack
+              size="sm"
+              max={4}
+              items={shown.map((agentName) => ({
+                name: agentName,
+                color: agentColor(agentName),
+              }))}
+            />
+            {agentNames.length > shown.length ? (
+              <span className="mcp-agent-more">
+                +{agentNames.length - shown.length}
+              </span>
+            ) : null}
+            <span className="sr">Used by {agentNames.join(", ")}</span>
+          </>
+        )}
+      </span>
+      <span className="mcp-row-status">
+        <StatusBadge server={server} />
+      </span>
+      <span className="mcp-row-actions">
+        <span className="mcp-row-more" ref={moreRef}>
+          <IconButton
+            icon="ellipsis"
+            size="sm"
+            label={"Actions for " + server.name}
+            on={menuOpen}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuOpen((current) => !current);
+            }}
+          />
+          <Menu
+            anchorRef={moreRef}
+            open={menuOpen}
+            onClose={() => setMenuOpen(false)}
+          >
+            <MenuItem
+              icon="arrow-up-right"
+              onClick={() => {
+                setMenuOpen(false);
+                window.location.hash = serverHref(server.name);
+              }}
+            >
+              Open server
+            </MenuItem>
+            <MenuItem
+              icon="refresh-cw"
+              disabled={restarting}
+              onClick={() => {
+                setMenuOpen(false);
+                onRestart();
+              }}
+            >
+              Restart server
+            </MenuItem>
+          </Menu>
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -890,6 +1019,7 @@ export function McpPage() {
   const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [live, setLive] = useState("");
+  const [restarting, setRestarting] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -955,7 +1085,7 @@ export function McpPage() {
     setReloadToken((current) => current + 1);
   }
 
-  function openRow(event: MouseEvent<HTMLTableRowElement>, server: McpServerRow) {
+  function openRow(event: MouseEvent<HTMLElement>, server: McpServerRow) {
     const target = event.target;
     if (
       target instanceof Element &&
@@ -966,239 +1096,215 @@ export function McpPage() {
     window.location.hash = serverHref(server.name);
   }
 
+  async function restartServer(serverName: string) {
+    if (restarting) {
+      return;
+    }
+    setRestarting(serverName);
+    setLive("");
+    try {
+      const result = await restartMcpServer(serverName);
+      const nextState = result && result.state ? String(result.state) : "";
+      const nextError = result && result.error ? String(result.error) : "";
+      setServers((current) =>
+        current.map((server) =>
+          server.name === serverName
+            ? {
+                ...server,
+                state: nextState || "stopped",
+                error: nextError,
+                status:
+                  nextState === "running"
+                    ? "connected"
+                    : nextState === "unavailable"
+                      ? "unreachable"
+                      : "idle",
+              }
+            : server
+        )
+      );
+      setLive(serverName + ". " + restartLine(nextState, nextError));
+    } catch (failure) {
+      setLive("Could not restart " + serverName + ". " + errorMessage(failure));
+    } finally {
+      setRestarting("");
+    }
+  }
+
   return (
     <main id="main" className="page mcp-page">
-      <header className="agents-header">
-        <div className="agents-heading">
-          <h1 className="agents-title">MCP</h1>
-          <p className="agents-subtitle">
+      <header className="ph">
+        <div>
+          <h1>MCP</h1>
+          <p>
             {status === "ready"
               ? summary
               : "External tools from Model Context Protocol servers."}
           </p>
         </div>
-        <button
-          type="button"
-          className="button-ui button-ui-primary"
-          disabled={status !== "ready" || !version}
-          onClick={() => setDialogOpen(true)}
-        >
-          + Add server
-        </button>
+        <div className="acts">
+          <Button
+            variant="primary"
+            icon="plus"
+            disabled={status !== "ready" || !version}
+            onClick={() => setDialogOpen(true)}
+          >
+            Add server
+          </Button>
+        </div>
       </header>
 
-      <div className="agents-toolbar">
-        <div className="sessions-search agents-search">
-          <span className="sessions-search-icon">
-            <Icon name="search" />
-          </span>
-          <label className="sr-only" htmlFor="mcp-search-input">
-            Search servers
-          </label>
-          <input
-            id="mcp-search-input"
-            className="sessions-search-input"
-            type="search"
-            placeholder="Search servers"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              setQuery(event.target.value)
-            }
-          />
-        </div>
-        <div className="mcp-filter">
-          <Icon name="filter" />
-          <label className="sr-only" htmlFor="mcp-status-filter">
-            Status
-          </label>
-          <select
-            id="mcp-status-filter"
-            className="mcp-filter-select"
-            value={filter}
-            onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-              setFilter(event.target.value)
-            }
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <span className="agents-toolbar-spacer"></span>
+      <div className="mcp-toolbar">
+        <SearchInput
+          wrapClassName="mcp-search"
+          aria-label="Search servers"
+          placeholder="Search servers"
+          autoComplete="off"
+          spellCheck={false}
+          kbd={null}
+          value={query}
+          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            setQuery(event.target.value)
+          }
+        />
+        <Seg
+          className="mcp-status-seg"
+          aria-label="Filter by status"
+          options={STATUS_OPTIONS}
+          value={filter}
+          onChange={setFilter}
+        />
       </div>
 
-      <p
-        className={live ? "mcp-live" : "sr-only"}
-        role="status"
-        aria-live="polite"
-      >
+      <p className={live ? "mcp-live" : "sr"} role="status" aria-live="polite">
         {live}
       </p>
 
-      {status === "loading" ? <Loading label="Loading MCP servers…" /> : null}
+      {status === "loading" ? (
+        <section className="panel mcp-list" aria-busy="true">
+          <span className="sr">Loading MCP servers…</span>
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="mini mcp-row mcp-row-skeleton">
+              <Skeleton width={30} height={30} radius={8} />
+              <span className="mcp-row-main">
+                <Skeleton width="40%" height={12} />
+                <Skeleton width="70%" height={10} />
+              </span>
+            </div>
+          ))}
+        </section>
+      ) : null}
 
       {status === "error" ? (
-        <div className="agents-state" role="alert">
-          <ErrorNotice message={error} details={details} />
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={() => setReloadToken((current) => current + 1)}
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load MCP servers"
+            text={error}
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => setReloadToken((current) => current + 1)}
+              >
+                Try again
+              </Button>
+            }
           >
-            Try again
-          </button>
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
       ) : null}
 
       {status === "ready" && servers.length === 0 ? (
-        <div className="agents-empty">
-          <h2 className="agents-empty-title">No MCP servers yet.</h2>
-          <p className="agents-empty-text">
-            Add a server once, then pick which agents use it.
-          </p>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
-            disabled={!version}
-            onClick={() => setDialogOpen(true)}
-          >
-            + Add server
-          </button>
+        <div className="panel">
+          <EmptyState
+            icon="server"
+            title="No MCP servers yet."
+            text="Add a server once, then pick which agents use it."
+            action={
+              <Button
+                variant="primary"
+                icon="plus"
+                disabled={!version}
+                onClick={() => setDialogOpen(true)}
+              >
+                Add server
+              </Button>
+            }
+          />
         </div>
       ) : null}
 
       {status === "ready" && servers.length > 0 && filtered.length === 0 ? (
-        <p className="agents-state muted" role="status">
-          {query.trim()
-            ? "No servers match “" + query.trim() + "”."
-            : "No servers match this status filter."}
-        </p>
+        <div className="panel">
+          <EmptyState
+            icon="search-x"
+            size="sm"
+            title="No servers match"
+            text={
+              query.trim()
+                ? "No servers match “" + query.trim() + "”."
+                : "No servers match this status filter."
+            }
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setQuery("");
+                  setFilter("");
+                }}
+              >
+                Clear filters
+              </Button>
+            }
+            role="status"
+          />
+        </div>
       ) : null}
 
       {status === "ready" && rows.length > 0 ? (
-        <div className="mcp-table-card">
-          <div className="mcp-table-scroll">
-            <table className="agents-table mcp-table">
-              <caption className="sr-only">MCP servers</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Server</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Tools</th>
-                  <th scope="col">Agents</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">
-                    <span className="sr-only">Open</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((server) => {
-                  const target = serverTarget(server);
-                  const agentNames = Array.isArray(server.agents)
-                    ? server.agents.map(String)
-                    : [];
-                  const shown = agentNames.slice(0, 4);
-                  return (
-                    <tr
-                      key={server.name}
-                      onClick={(event) => openRow(event, server)}
-                    >
-                      <td>
-                        <span className="mcp-server-cell">
-                          <span className="mcp-server-tile" aria-hidden="true">
-                            <Icon name="mcp" />
-                          </span>
-                          <span className="mcp-server-text">
-                            <a
-                              className="mcp-server-name"
-                              href={serverHref(server.name)}
-                            >
-                              {server.name}
-                            </a>
-                            <span className="mcp-server-target">
-                              {target || "—"}
-                            </span>
-                          </span>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="badge-ui mcp-type-badge">
-                          <span className="badge-ui-dot" aria-hidden="true"></span>
-                          {typeLabel(serverType(server))}
-                        </span>
-                      </td>
-                      <td className="agents-number">
-                        {Number(server.tools_count) || 0}
-                      </td>
-                      <td>
-                        {agentNames.length === 0 ? (
-                          <span className="mcp-muted">No agents</span>
-                        ) : (
-                          <span className="mcp-agent-cell">
-                            <span
-                              className="agent-avatar-group"
-                              aria-hidden="true"
-                            >
-                              {shown.map((agentName) => (
-                                <AgentAvatar
-                                  key={agentName}
-                                  name={agentName}
-                                  size="24"
-                                />
-                              ))}
-                            </span>
-                            {agentNames.length > shown.length ? (
-                              <span className="mcp-agent-more">
-                                +{agentNames.length - shown.length}
-                              </span>
-                            ) : null}
-                            <span className="sr-only">
-                              Used by {agentNames.join(", ")}
-                            </span>
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <StatusBadge server={server} />
-                      </td>
-                      <td className="agents-chevron">
-                        <Icon name="chevron-right" />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <section className="panel mcp-list" aria-label="MCP servers">
+          <div className="mcp-list-head" aria-hidden="true">
+            <span>Server</span>
+            <span>Transport</span>
+            <span>Tools</span>
+            <span>Agents</span>
+            <span>Status</span>
+            <span></span>
           </div>
+          {rows.map((server) => (
+            <ServerRow
+              key={server.name}
+              server={server}
+              restarting={restarting === server.name}
+              onRestart={() => restartServer(server.name)}
+              onOpen={openRow}
+            />
+          ))}
           <nav className="mcp-pagination" aria-label="Pagination">
             <p className="mcp-pagination-text">
               Showing {start + 1}–{start + rows.length} of {filtered.length}
             </p>
             <div className="mcp-pagination-actions">
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={currentPage <= 1}
                 onClick={() => setPage(Math.max(1, currentPage - 1))}
               >
                 Previous
-              </button>
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
                 disabled={currentPage >= pageCount}
                 onClick={() => setPage(Math.min(pageCount, currentPage + 1))}
               >
                 Next
-              </button>
+              </Button>
             </div>
           </nav>
-        </div>
+        </section>
       ) : null}
 
       {dialogOpen ? (
@@ -1212,13 +1318,12 @@ export function McpPage() {
   );
 }
 
-function DetailBreadcrumb({ name }: { name: string }) {
+function DetailBack() {
   return (
-    <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-      <a href="#/mcp">MCP</a>
-      <span aria-hidden="true">/</span>
-      <span aria-current="page">{name}</span>
-    </nav>
+    <a className="mcp-back" href="#/mcp">
+      <Ic name="arrow-left" size={14} />
+      MCP
+    </a>
   );
 }
 
@@ -1251,7 +1356,8 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerValue, setPickerValue] = useState("");
   const [showAllTools, setShowAllTools] = useState(false);
-  const pickerRef = useRef<HTMLSelectElement>(null);
+  const [tab, setTab] = useState("connection");
+  const pickerRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -1644,8 +1750,20 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
   if (status === "loading") {
     return (
       <main id="main" className="page mcp-detail-page">
-        <DetailBreadcrumb name={name} />
-        <Loading label="Loading MCP server…" />
+        <div className="ph">
+          <div>
+            <DetailBack />
+          </div>
+        </div>
+        <Panel bodyClassName="mcp-panel-body">
+          <div className="mcp-loading" aria-busy="true">
+            <span className="sr">Loading MCP server…</span>
+            <Skeleton width={180} height={14} />
+            <Skeleton width="100%" height={34} radius={6} />
+            <Skeleton width="100%" height={34} radius={6} />
+            <Skeleton width="100%" height={96} radius={6} />
+          </div>
+        </Panel>
       </main>
     );
   }
@@ -1653,15 +1771,26 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
   if (status === "not-found" || (status === "ready" && !server)) {
     return (
       <main id="main" className="page mcp-detail-page">
-        <DetailBreadcrumb name={name} />
-        <div className="agents-empty">
-          <h1 className="agents-empty-title">Server not found</h1>
-          <p className="agents-empty-text">
-            No MCP server named <code>{name}</code> is configured.
-          </p>
-          <a className="button-ui button-ui-secondary" href="#/mcp">
-            Back to MCP servers
-          </a>
+        <div className="ph">
+          <div>
+            <DetailBack />
+          </div>
+        </div>
+        <div className="panel">
+          <EmptyState
+            icon="server-off"
+            title="Server not found"
+            text={
+              <>
+                No MCP server named <code>{name}</code> is configured.
+              </>
+            }
+            action={
+              <Button as="a" variant="secondary" href="#/mcp">
+                Back to MCP servers
+              </Button>
+            }
+          />
         </div>
       </main>
     );
@@ -1670,21 +1799,30 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
   if (status === "error" || !form || !server) {
     return (
       <main id="main" className="page mcp-detail-page">
-        <DetailBreadcrumb name={name} />
-        <div role="alert">
-          <ErrorNotice message={error} details={details} />
+        <div className="ph">
+          <div>
+            <DetailBack />
+            <h1>{name}</h1>
+          </div>
         </div>
-        <div className="agent-state-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={reload}
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load the server"
+            text={error}
+            action={
+              <div className="mcp-state-actions">
+                <Button variant="secondary" onClick={reload}>
+                  Try again
+                </Button>
+                <Button as="a" variant="secondary" href="#/mcp">
+                  Back to MCP servers
+                </Button>
+              </div>
+            }
           >
-            Try again
-          </button>
-          <a className="button-ui button-ui-secondary" href="#/mcp">
-            Back to MCP servers
-          </a>
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
       </main>
     );
@@ -1706,38 +1844,30 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
 
   return (
     <main id="main" className="page mcp-detail-page">
-      <DetailBreadcrumb name={name} />
-
-      <header className="mcp-detail-header">
-        <div className="mcp-detail-identity">
-          <span className="mcp-detail-tile" aria-hidden="true">
-            <Icon name="mcp" />
-          </span>
-          <div className="mcp-detail-heading">
-            <div className="mcp-detail-name-row">
-              <h1 className="mcp-detail-name">{server.name}</h1>
-              <StatusBadge server={server} />
-            </div>
-            <p className="mcp-detail-meta">{stateSummary(server)}</p>
-          </div>
+      <header className="ph">
+        <div>
+          <DetailBack />
+          <h1>{server.name}</h1>
+          <p>{stateSummary(server)}</p>
         </div>
-        <div className="mcp-detail-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
+        <div className="acts">
+          <StatusBadge server={server} />
+          <Button
+            variant="secondary"
+            icon="refresh-cw"
             disabled={restarting}
             onClick={restart}
           >
             {restarting ? "Restarting…" : "Restart"}
-          </button>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
+          </Button>
+          <Button
+            variant="primary"
             disabled={!dirty || saving}
+            loading={saving}
             onClick={save}
           >
             {saving ? "Saving…" : "Save changes"}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -1745,7 +1875,7 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
         className={
           "mcp-live" +
           (restartStatus && restartStatus.tone === "error" ? " is-error" : "") +
-          (restartStatus ? "" : " sr-only")
+          (restartStatus ? "" : " sr")
         }
         role="status"
         aria-live="polite"
@@ -1753,176 +1883,217 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
         {restartStatus ? restartStatus.text : ""}
       </p>
 
-      <div
-        className={saveNotice ? "mcp-save-notice" : "sr-only"}
+      <p
+        className={saveNotice ? "mcp-saved" : "sr"}
         role="status"
         aria-live="polite"
       >
-        {saveNotice ? (
-          <p className="notice notice-ok">{saveNotice}</p>
-        ) : null}
-      </div>
+        {saveNotice}
+      </p>
 
       {error ? (
-        <div className="mcp-error" role="alert">
-          <ErrorNotice message={error} details={details} />
-          {stale ? (
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              onClick={reload}
-            >
-              Reload settings
-            </button>
-          ) : null}
-        </div>
+        <ErrorAlert
+          message={error}
+          details={details}
+          action={
+            stale ? (
+              <Button variant="secondary" size="sm" onClick={reload}>
+                Reload settings
+              </Button>
+            ) : null
+          }
+        />
       ) : null}
 
-      <div className="mcp-detail-grid">
-        <form
-          id="mcp-connection-form"
-          className="mcp-connection"
-          aria-labelledby="mcp-connection-title"
-          onSubmit={save}
-        >
-          <h2 className="mcp-section-title" id="mcp-connection-title">
-            Connection
-          </h2>
+      <Tabs
+        className="mcp-tabs"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "connection", label: "Connection", icon: "plug" },
+          { value: "agents", label: "Agents", count: serverAgents.length },
+          { value: "tools", label: "Tools", count: toolsCount },
+        ]}
+      />
 
-          <div className="mcp-field">
-            <span className="mcp-field-label" aria-hidden="true">
-              Type
-            </span>
-            <TypeControl
-              idPrefix="mcp-detail-type"
-              value={form.type}
-              disabled={saving}
-              onChange={(value) => updateField("type", value)}
-            />
+      <div className="mcp-tab-body">
+        {tab === "connection" ? (
+          <div className="mcp-tab-stack">
+            <Panel bodyClassName="mcp-panel-body">
+              <form id="mcp-connection-form" className="mcp-conn" onSubmit={save}>
+                <div className="srow">
+                  <div className="mcp-srow-text">
+                    <div className="t" id="mcp-detail-type-label">
+                      Type
+                    </div>
+                    <div className="d">How this server is reached.</div>
+                  </div>
+                  <div className="mcp-ctl">
+                    <Seg
+                      className="mcp-type-seg"
+                      aria-labelledby="mcp-detail-type-label"
+                      options={TYPE_OPTIONS}
+                      value={form.type}
+                      onChange={(value) => {
+                        if (!saving) {
+                          updateField("type", value);
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {form.type === "command" ? (
+                  <>
+                    <div className="srow">
+                      <div className="mcp-srow-text">
+                        <label className="t" htmlFor="mcp-command">
+                          Command
+                        </label>
+                        <div className="d">The executable to run.</div>
+                      </div>
+                      <div className="mcp-ctl">
+                        <Input
+                          id="mcp-command"
+                          className="mono"
+                          type="text"
+                          value={form.command}
+                          autoComplete="off"
+                          spellCheck={false}
+                          disabled={saving}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            updateField("command", event.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="srow">
+                      <div className="mcp-srow-text">
+                        <label className="t" htmlFor="mcp-args">
+                          Arguments
+                        </label>
+                        <div className="d">One argument per line.</div>
+                      </div>
+                      <div className="mcp-ctl">
+                        <Textarea
+                          id="mcp-args"
+                          className="mono"
+                          rows={3}
+                          value={form.args}
+                          placeholder="One argument per line"
+                          spellCheck={false}
+                          disabled={saving}
+                          onChange={(
+                            event: ChangeEvent<HTMLTextAreaElement>
+                          ) => updateField("args", event.target.value)}
+                        ></Textarea>
+                      </div>
+                    </div>
+                    <div className="srow">
+                      <div className="mcp-srow-text">
+                        <div className="t">Environment</div>
+                        <div className="d">Values are hidden after you save.</div>
+                      </div>
+                      <div className="mcp-ctl">
+                        <KeyValueRows
+                          idPrefix="mcp-detail-env"
+                          kind="env"
+                          rows={form.env}
+                          disabled={saving}
+                          onAdd={() => addRow("env")}
+                          onChange={(index, field, value) =>
+                            updateRow("env", index, field, value)
+                          }
+                          onRemove={(index) => removeRow("env", index)}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="srow">
+                      <div className="mcp-srow-text">
+                        <label className="t" htmlFor="mcp-url">
+                          URL
+                        </label>
+                        <div className="d">The full http or https address.</div>
+                      </div>
+                      <div className="mcp-ctl">
+                        <Input
+                          id="mcp-url"
+                          className="mono"
+                          type="text"
+                          value={form.url}
+                          autoComplete="off"
+                          spellCheck={false}
+                          disabled={saving}
+                          onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                            updateField("url", event.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="srow">
+                      <div className="mcp-srow-text">
+                        <div className="t">Headers</div>
+                        <div className="d">Values are hidden after you save.</div>
+                      </div>
+                      <div className="mcp-ctl">
+                        <KeyValueRows
+                          idPrefix="mcp-detail-header"
+                          kind="headers"
+                          rows={form.headers}
+                          disabled={saving}
+                          onAdd={() => addRow("headers")}
+                          onChange={(index, field, value) =>
+                            updateRow("headers", index, field, value)
+                          }
+                          onRemove={(index) => removeRow("headers", index)}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </form>
+            </Panel>
+
+            {server.error ? (
+              <Panel title="Daemon output" bodyClassName="mcp-panel-body">
+                <pre className="mcp-mono-pre mono">{server.error}</pre>
+              </Panel>
+            ) : null}
           </div>
+        ) : null}
 
-          {form.type === "command" ? (
-            <div className="mcp-command-fields">
-              <label className="mcp-field">
-                <span className="mcp-field-label">Command</span>
-                <input
-                  className="mcp-mono-input"
-                  type="text"
-                  value={form.command}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={saving}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    updateField("command", event.target.value)
-                  }
-                />
-              </label>
-              <label className="mcp-field">
-                <span className="mcp-field-label">Arguments</span>
-                <textarea
-                  className="mcp-mono-input"
-                  rows={3}
-                  value={form.args}
-                  placeholder="One argument per line"
-                  spellCheck={false}
-                  disabled={saving}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                    updateField("args", event.target.value)
-                  }
-                ></textarea>
-                <span className="hint">Put each argument on its own line.</span>
-              </label>
-              <div className="mcp-field">
-                <span className="mcp-field-label">Environment</span>
-                <KeyValueRows
-                  idPrefix="mcp-detail-env"
-                  kind="env"
-                  rows={form.env}
-                  disabled={saving}
-                  onAdd={() => addRow("env")}
-                  onChange={(index, field, value) =>
-                    updateRow("env", index, field, value)
-                  }
-                  onRemove={(index) => removeRow("env", index)}
-                />
-              </div>
-              <p className="hint mcp-connection-note">
-                Values are hidden after you save. Use secrets for tokens.
-              </p>
-            </div>
-          ) : (
-            <div className="mcp-command-fields">
-              <label className="mcp-field">
-                <span className="mcp-field-label">URL</span>
-                <input
-                  className="mcp-mono-input"
-                  type="text"
-                  value={form.url}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={saving}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    updateField("url", event.target.value)
-                  }
-                />
-                <span className="hint">Use the full http or https address.</span>
-              </label>
-              <div className="mcp-field">
-                <span className="mcp-field-label">Headers</span>
-                <KeyValueRows
-                  idPrefix="mcp-detail-header"
-                  kind="headers"
-                  rows={form.headers}
-                  disabled={saving}
-                  onAdd={() => addRow("headers")}
-                  onChange={(index, field, value) =>
-                    updateRow("headers", index, field, value)
-                  }
-                  onRemove={(index) => removeRow("headers", index)}
-                />
-              </div>
-              <p className="hint mcp-connection-note">
-                Values are hidden after you save. Use secrets for tokens.
-              </p>
-            </div>
-          )}
-        </form>
+        {tab === "agents" ? (
+          <Panel bodyClassName="mcp-panel-body">
+            <p className="mcp-section-meta">
+              {serverAgents.length} of {agents.length} agents use this server
+            </p>
 
-        <div className="mcp-detail-side">
-          <section className="mcp-section" aria-labelledby="mcp-agents-title">
-            <div className="mcp-section-head">
-              <h2 className="mcp-section-title" id="mcp-agents-title">
-                Agents
-              </h2>
-              <span className="mcp-section-meta">
-                {serverAgents.length} of {agents.length}
-              </span>
-            </div>
-
-            <div
-              className={agentLive ? "mcp-live" : "sr-only"}
+            <p
+              className={agentLive ? "mcp-live" : "sr"}
               role="status"
               aria-live="polite"
             >
               {agentLive}
-            </div>
+            </p>
 
             {agentError ? (
-              <div className="mcp-agent-error" role="alert">
-                <ErrorNotice message={agentError} details={agentDetails} />
-                {agentStale ? (
-                  <button
-                    type="button"
-                    className="button-ui button-ui-secondary"
-                    onClick={reload}
-                  >
-                    Reload settings
-                  </button>
-                ) : null}
-              </div>
+              <ErrorAlert
+                message={agentError}
+                details={agentDetails}
+                action={
+                  agentStale ? (
+                    <Button variant="secondary" size="sm" onClick={reload}>
+                      Reload settings
+                    </Button>
+                  ) : null
+                }
+              />
             ) : null}
 
-            <div className="mcp-agent-list">
+            <div className="mcp-agents">
               {agentRows.length === 0 ? (
                 <p className="mcp-agent-empty">
                   No agents use this server yet.
@@ -1930,136 +2101,134 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
               ) : (
                 agentRows.map((agent) => (
                   <div className="mcp-agent-row" key={agent.name}>
-                    <AgentAvatar name={agent.name} size="28" />
+                    <Avatar
+                      name={agent.name}
+                      color={agentColor(agent.name)}
+                      size="md"
+                    />
                     <span className="mcp-agent-text">
                       <span className="mcp-agent-name">{agent.name}</span>
                       <span className="mcp-agent-model">
                         {modelLabel(agent)}
                       </span>
                     </span>
-                    <button
-                      type="button"
-                      className="mcp-icon-button"
-                      aria-label={"Remove agent " + agent.name}
+                    <IconButton
+                      size="sm"
+                      icon="x"
+                      label={"Remove agent " + agent.name}
                       disabled={Boolean(agentBusy)}
                       onClick={() => removeAgent(agent)}
-                    >
-                      <Icon name="close" className="icon-16" />
-                    </button>
+                    />
                   </div>
                 ))
               )}
 
               {pickerOpen ? (
-                <form className="mcp-agent-picker" onSubmit={addAgent}>
-                  <label
-                    className="sr-only"
-                    htmlFor="mcp-agent-picker-select"
-                  >
-                    Agent
-                  </label>
-                  <select
-                    id="mcp-agent-picker-select"
-                    ref={pickerRef}
-                    value={pickerValue}
-                    disabled={Boolean(agentBusy)}
-                    onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                      setPickerValue(event.target.value)
-                    }
-                  >
-                    {availableAgents.map((agent) => (
-                      <option key={agent.name} value={agent.name}>
-                        {agent.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
+                <form
+                  className="mcp-picker"
+                  ref={pickerRef}
+                  tabIndex={-1}
+                  onSubmit={addAgent}
+                >
+                  <span className="mcp-picker-select">
+                    <Select
+                      id="mcp-agent-picker-select"
+                      aria-label="Agent"
+                      options={availableAgents.map((agent) => ({
+                        value: agent.name,
+                        label: agent.name,
+                      }))}
+                      value={pickerValue}
+                      disabled={Boolean(agentBusy)}
+                      onChange={setPickerValue}
+                    />
+                  </span>
+                  <Button
                     type="submit"
-                    className="button-ui button-ui-primary"
+                    variant="primary"
+                    size="sm"
                     disabled={Boolean(agentBusy) || !pickerValue}
                   >
                     Add
-                  </button>
-                  <button
-                    type="button"
-                    className="button-ui button-ui-secondary"
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     disabled={Boolean(agentBusy)}
                     onClick={() => setPickerOpen(false)}
                   >
                     Cancel
-                  </button>
+                  </Button>
                 </form>
               ) : (
-                <button
-                  type="button"
-                  className="mcp-add-agent"
-                  disabled={
-                    Boolean(agentBusy) || availableAgents.length === 0
-                  }
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="plus"
+                  block
+                  disabled={Boolean(agentBusy) || availableAgents.length === 0}
                   onClick={openPicker}
                 >
-                  <span className="mcp-add-agent-tile" aria-hidden="true">
-                    <Icon name="plus" className="icon-16" />
-                  </span>
-                  <span>
-                    {availableAgents.length === 0
-                      ? "Every agent uses this server"
-                      : "Add agent"}
-                  </span>
-                </button>
+                  {availableAgents.length === 0
+                    ? "Every agent uses this server"
+                    : "Add agent"}
+                </Button>
               )}
             </div>
-          </section>
+          </Panel>
+        ) : null}
 
-          <section className="mcp-section" aria-labelledby="mcp-tools-title">
-            <div className="mcp-section-head">
-              <h2 className="mcp-section-title" id="mcp-tools-title">
-                Tools
-              </h2>
-              <span className="mcp-section-meta">
-                {toolsCount} from this server
-              </span>
-            </div>
+        {tab === "tools" ? (
+          <Panel bodyClassName="mcp-panel-body">
+            <p className="mcp-section-meta">{toolsCount} from this server</p>
 
             {entries.length > 0 ? (
-              <div className="mcp-tool-list">
-                {visibleTools.map((tool) => (
-                  <div className="mcp-tool-row" key={tool.name}>
-                    <span className="mcp-tool-name">{tool.name}</span>
-                    <span className="mcp-tool-description">
-                      {tool.description}
-                    </span>
-                  </div>
-                ))}
+              <div className="mcp-tools">
+                <table className="perm-t">
+                  <caption className="sr">
+                    Tools reported by this server
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">Tool</th>
+                      <th scope="col">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleTools.map((tool) => (
+                      <tr key={tool.name}>
+                        <td className="mcp-tool-name">{tool.name}</td>
+                        <td className="mcp-muted">{tool.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
                 {entries.length > 6 ? (
-                  <button
-                    type="button"
-                    className="mcp-tool-more"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => setShowAllTools((current) => !current)}
                   >
                     {showAllTools
                       ? "Show fewer tools"
                       : "Show all " + totalTools + " tools"}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             ) : (
-              <div className="mcp-tool-list">
-                <p className="mcp-tool-empty">
-                  This daemon reports the tool count but not the tool names.
-                  {" "}
-                  {toolsCount === 0
-                    ? "No tools were reported yet."
-                    : countLabel(toolsCount, "tool") + " reported."}
-                </p>
-              </div>
+              <p className="mcp-muted">
+                This daemon reports the tool count but not the tool names.{" "}
+                {toolsCount === 0
+                  ? "No tools were reported yet."
+                  : countLabel(toolsCount, "tool") + " reported."}
+              </p>
             )}
 
-            <p className="mcp-tool-hint">
+            <p className="mcp-hint">
               Turn tools on or off per agent in the agent's Tools tab.
             </p>
-          </section>
-        </div>
+          </Panel>
+        ) : null}
       </div>
     </main>
   );

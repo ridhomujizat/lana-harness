@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { errorMessage, isErrorCode, setCSRF } from "../api/client";
 import { authState, claim } from "../api/auth";
 import { useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { Button } from "../ui/gr8r";
 import { SetupShell } from "./setup";
 import { PasswordField } from "./login";
 
@@ -89,10 +91,8 @@ export function WelcomePage({ code, onLoggedIn }: WelcomePageProps) {
   if (expired) {
     return (
       <SetupShell step="unlock" variant="door">
-        <div className="setup-heading">
-          <h1 className="setup-title">This link has expired</h1>
-          <p className="setup-lede">Restart lana to get a new one.</p>
-        </div>
+        <h1>This link has expired</h1>
+        <p className="sub">Restart lana to get a new one.</p>
       </SetupShell>
     );
   }
@@ -102,14 +102,10 @@ export function WelcomePage({ code, onLoggedIn }: WelcomePageProps) {
 
   return (
     <SetupShell step="unlock" variant={passwordSet ? "door" : "steps"}>
-      <div className="setup-heading">
-        <h1 className="setup-title">{title}</h1>
-        <p className="setup-lede">
-          You will use it to open lana on this computer.
-        </p>
-      </div>
+      <h1>{title}</h1>
+      <p className="sub">You will use it to open lana on this computer.</p>
 
-      <form className="setup-form" onSubmit={submit}>
+      <form className="auth-form" onSubmit={submit}>
         <PasswordField
           id="welcome-password"
           label="Password"
@@ -136,19 +132,14 @@ export function WelcomePage({ code, onLoggedIn }: WelcomePageProps) {
           }}
         />
         {error ? (
-          <p className="setup-field-error" role="alert">
-            {error}
-          </p>
+          <div className="alert danger" role="alert">
+            <Ic name="circle-alert" size={15} />
+            <span>{error}</span>
+          </div>
         ) : null}
-        <div className="setup-actions">
-          <button
-            type="submit"
-            className="button-ui button-ui-primary"
-            disabled={busy}
-          >
-            {busy ? "Saving…" : action}
-          </button>
-        </div>
+        <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy}>
+          {action}
+        </Button>
       </form>
     </SetupShell>
   );

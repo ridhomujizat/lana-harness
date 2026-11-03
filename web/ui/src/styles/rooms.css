@@ -56,6 +56,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--bg-primary);
   font-weight: 600;
   line-height: 1;
   user-select: none;
@@ -94,7 +95,7 @@
 .agent-face-ring {
   position: absolute;
   inset: -2px;
-  border: 2px dashed #9e77ed;
+  border: 2px dashed var(--presence-dot-working);
   border-radius: var(--radius-full);
   pointer-events: none;
   animation: ring-spin 6s linear infinite;
@@ -189,32 +190,6 @@
   width: 100%;
 }
 
-.unread-badge {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--bg-brand-solid);
-  color: var(--text-white);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 20px;
-  white-space: nowrap;
-  animation: badge-pop 200ms ease-out;
-}
-
-.unread-badge.tone-error {
-  background: var(--bg-error-solid);
-}
-
-.unread-badge.tone-warning {
-  background: var(--fg-warning-primary);
-}
-
 /* The team avatar box of REQ-ROOM-001: a fixed square that reserves the slot
    size, with up to two member faces stacked inside it. Its size is set inline
    from the requested size, so the box never overflows the row. */
@@ -226,7 +201,7 @@
 
 .team-face .agent-face {
   position: absolute;
-  box-shadow: 0 0 0 2px var(--bg-primary);
+  box-shadow: 0 0 0 1.5px var(--bg-primary);
 }
 
 .team-face .agent-face:first-child {
@@ -247,65 +222,10 @@
   transform: translate(-50%, -50%);
 }
 
-.room-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.room-item-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: var(--radius-lg);
-  color: inherit;
-  text-decoration: none;
-}
-
-.room-item-link:hover {
-  background: var(--bg-primary-hover);
-}
-
-.room-item-link[aria-current="page"] {
-  background: var(--bg-active);
-}
-
-.room-item-body {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.room-item-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.room-item-name {
-  color: var(--text-primary);
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  line-height: var(--line-height-body);
-}
-
-.room-item-title {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* Timeline rows are keyed, so this runs once when a new message mounts,
+   not on every stream update. */
 .msg-enter {
-  animation: msg-enter 180ms ease-out;
+  animation: riseIn 0.3s var(--ease) both;
 }
 
 .progress-bar-indeterminate {
@@ -315,11 +235,11 @@
 @keyframes presence-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(127, 86, 217, 0.45);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--presence-dot-working) 45%, transparent);
   }
 
   50% {
-    box-shadow: 0 0 0 4px rgba(127, 86, 217, 0);
+    box-shadow: 0 0 0 4px transparent;
   }
 }
 
@@ -357,28 +277,6 @@
   }
 }
 
-@keyframes msg-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes badge-pop {
-  from {
-    transform: scale(0.6);
-  }
-
-  to {
-    transform: scale(1);
-  }
-}
-
 @keyframes progress-indeterminate {
   0% {
     transform: translateX(-100%);
@@ -387,222 +285,6 @@
   100% {
     transform: translateX(100%);
   }
-}
-
-/* The Chats page of REQ-ROOM-001 to REQ-ROOM-005 (design rooms-1). The list
-   column is 340 px; the timeline fills the rest. */
-.rooms-page {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: stretch;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  background: var(--bg-primary);
-}
-
-.rooms-list {
-  display: flex;
-  flex: 0 0 340px;
-  flex-direction: column;
-  width: 340px;
-  min-height: 0;
-  border-right: 1px solid var(--border-secondary);
-}
-
-.rooms-list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 16px 12px;
-}
-
-.rooms-list-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.rooms-search {
-  position: relative;
-  margin: 0 16px 12px;
-}
-
-.rooms-search-icon {
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  opacity: 0.55;
-  transform: translateY(-50%);
-}
-
-.rooms-search-input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 36px;
-  padding: 0 12px 0 32px;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font: inherit;
-}
-
-.rooms-search-input::placeholder {
-  color: var(--text-placeholder);
-}
-
-.rooms-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 16px 12px;
-}
-
-.rooms-filter {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-full);
-  background: var(--bg-secondary);
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.rooms-filter.is-active {
-  background: var(--bg-brand-solid);
-  color: var(--text-white);
-}
-
-.rooms-list-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 0 8px 16px;
-  overflow-y: auto;
-}
-
-.rooms-list-note {
-  padding: 16px;
-}
-
-.rooms-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rooms-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.rooms-row:hover {
-  background: var(--bg-primary-hover);
-}
-
-.rooms-row.is-selected {
-  border-color: var(--border-secondary);
-  background: var(--bg-active);
-}
-
-.rooms-row-body {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.rooms-row-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.rooms-row-name {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: var(--font-size-body);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rooms-row-time {
-  flex: 0 0 auto;
-  color: var(--fg-quaternary);
-  font-size: 12px;
-}
-
-.rooms-row-title {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rooms-row-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.rooms-row-preview {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rooms-row-badge {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.rooms-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 24px 16px;
-}
-
-.rooms-empty-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-.rooms-panel {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-.rooms-placeholder {
-  padding: 24px 32px;
 }
 
 /* The room timeline of REQ-ROOM-002 to REQ-ROOM-004. */
@@ -810,6 +492,14 @@
 
 .room-timeline .chat-bubble {
   border-radius: 18px;
+  transition:
+    background var(--dur),
+    box-shadow var(--dur);
+}
+
+.room-timeline .chat-bubble:hover {
+  background: var(--bg-quaternary);
+  box-shadow: var(--shadow-sm);
 }
 
 .room-timeline .turn-head .agent-avatar {
@@ -855,32 +545,6 @@
   white-space: nowrap;
 }
 
-.room-composer-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-primary);
-  border-radius: 14px;
-  background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-}
-
-.room-composer-input {
-  width: 100%;
-  min-height: 44px;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  resize: none;
-}
-
-.room-composer-input::placeholder {
-  color: var(--text-placeholder);
-}
-
 .room-composer-status {
   margin: 0;
   color: var(--text-tertiary);
@@ -895,42 +559,6 @@
 
 .room-composer-spacer {
   flex: 1 1 auto;
-}
-
-.room-send {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: var(--radius-full);
-  background: var(--bg-brand-solid);
-  color: var(--text-white);
-  cursor: pointer;
-}
-
-.room-send:hover {
-  background: var(--bg-brand-solid-hover);
-}
-
-.room-send:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agent-face-ring,
-  .agent-face-dot.state-working,
-  .agent-face-dot.state-waiting,
-  .typing-dots span,
-  .skeleton,
-  .unread-badge,
-  .msg-enter,
-  .handoff-chip.handoff-working,
-  .progress-bar-indeterminate {
-    animation: none;
-  }
 }
 
 .agent-face.size-18 {
@@ -1042,10 +670,6 @@
 }
 
 /* The mention chips and the "@" listbox of REQ-ROOM-008. */
-.room-composer-box {
-  position: relative;
-}
-
 .room-mentions {
   display: flex;
   flex-wrap: wrap;
@@ -1063,10 +687,14 @@
   line-height: 18px;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur),
+    box-shadow var(--dur);
 }
 
 .room-mention-chip:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
 }
 
 .room-mention-list {
@@ -1079,351 +707,34 @@
   gap: 2px;
   min-width: 180px;
   max-height: 220px;
-  padding: 6px;
+  padding: 4px;
   overflow-y: auto;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-lg);
+  border: 0;
+  border-radius: var(--radius-md);
   background: var(--bg-primary);
-  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+  box-shadow: var(--shadow-pop);
+  transform-origin: bottom left;
+  animation: popIn 0.16s var(--ease) both;
 }
 
 .room-mention-option {
   padding: 6px 8px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-primary);
   font: inherit;
   font-size: var(--font-size-sm);
   text-align: left;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .room-mention-option.is-active,
 .room-mention-option:hover {
-  background: var(--bg-primary-hover);
-}
-
-/* ------------------------------------------------------------------ */
-/* Alive roster of REQ-ROOM-011 (design rooms-3).                      */
-/* ------------------------------------------------------------------ */
-
-.agents-pulse {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: var(--bg-secondary);
-}
-
-.agents-pulse-counts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-}
-
-.agents-pulse-item {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-
-.agents-pulse-dot {
-  flex: 0 0 auto;
-  width: 9px;
-  height: 9px;
-  border-radius: var(--radius-full);
-  background: var(--presence-dot-resting);
-}
-
-.agents-pulse-dot.state-working {
-  background: var(--presence-dot-working);
-}
-
-.agents-pulse-dot.state-waiting {
-  background: var(--presence-dot-waiting);
-}
-
-.agents-pulse-dot.state-problem {
-  background: var(--presence-dot-problem);
-}
-
-.agents-pulse-dot.state-online {
-  background: var(--presence-dot-online);
-}
-
-.agents-pulse-text {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-}
-
-.agents-pulse-total {
-  margin: 0;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-}
-
-.agents-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.agent-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-xl);
-  background: var(--bg-primary);
-  cursor: pointer;
-  transition: box-shadow 150ms ease, border-color 150ms ease;
-}
-
-.agent-card:hover {
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-}
-
-.agent-card.state-waiting {
-  border-color: #FEC84B;
-  box-shadow: 0 4px 10px rgba(247, 144, 9, 0.12);
-}
-
-.agent-card.state-working {
-  border-color: #D9D6FE;
-}
-
-.agent-card.state-problem {
-  border-color: var(--border-error);
-}
-
-.agent-card.state-resting {
-  background: #FCFCFD;
-}
-
-.agent-card.state-resting .agent-card-head,
-.agent-card.state-resting .agent-card-preview {
-  opacity: 0.85;
-}
-
-.agent-card.is-skeleton {
-  cursor: default;
-  gap: 10px;
-}
-
-.agent-card-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.agent-card-id {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.agent-card-name {
-  overflow: hidden;
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 22px;
-  text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-card-name:hover {
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
-
-.agent-card-role {
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-card-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--bg-secondary);
-}
-
-.agent-card-status-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.agent-card-status-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background: var(--fg-quaternary);
-}
-
-.agent-card-status-text {
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-card-status.state-waiting {
-  background: var(--bg-warning-primary);
-}
-
-.agent-card-status.state-waiting .agent-card-status-dot {
-  background: var(--presence-dot-waiting);
-}
-
-.agent-card-status.state-waiting .agent-card-status-text {
-  color: var(--presence-label-waiting);
-}
-
-.agent-card-status.state-working {
-  background: #F9F5FF;
-}
-
-.agent-card-status.state-working .agent-card-status-dot {
-  background: var(--presence-dot-working);
-}
-
-.agent-card-status.state-working .agent-card-status-text {
-  color: var(--face-brand-fg);
-}
-
-.agent-card-status.state-problem {
-  background: var(--bg-error-primary);
-}
-
-.agent-card-status.state-problem .agent-card-status-dot {
-  background: var(--presence-dot-problem);
-}
-
-.agent-card-status.state-problem .agent-card-status-text {
-  color: var(--presence-label-problem);
-}
-
-.agent-card-progress {
-  display: block;
-  overflow: hidden;
-  width: 100%;
-  height: 4px;
-  border-radius: var(--radius-full);
-  background: #EBE9FE;
-}
-
-.agent-card-progress-bar {
-  display: block;
-  width: 40%;
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: var(--presence-dot-working);
-  animation: progress-indeterminate 1.4s ease-in-out infinite;
-}
-
-.agent-card-preview {
-  margin: 0;
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-card-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: auto;
-}
-
-.agent-card-turns {
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-xs);
-  white-space: nowrap;
-}
-
-.agent-card-add {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 180px;
-  padding: 24px;
-  border: 1px dashed #D6D6DA;
-  border-radius: var(--radius-xl);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  text-align: center;
-  cursor: pointer;
-}
-
-.agent-card-add:hover {
-  background: var(--bg-primary-hover);
-}
-
-.agent-card-add-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-full);
-  color: var(--text-tertiary);
-}
-
-.agent-card-add-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.agent-card-add-text {
-  max-width: 28ch;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-  line-height: var(--line-height-sm);
-}
-
-@media (max-width: 1100px) {
-  .agents-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 700px) {
-  .agents-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  background: var(--surface-2);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1459,8 +770,10 @@
   align-items: flex-start;
   gap: 20px;
   padding: 20px;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-2xl);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-card);
 }
 
 /* The hero face stays a perfect circle with its initial centered; the hero
@@ -1513,7 +826,7 @@
 }
 
 .ov-status-pill .presence-label-dot {
-  box-shadow: 0 0 0 3px rgba(127, 86, 217, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--presence-dot-working) 18%, transparent);
 }
 
 .ov-hero-facts {
@@ -1535,9 +848,10 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-xl);
+  border: 0;
+  border-radius: var(--radius-lg);
   background: var(--bg-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .ov-card-head {
@@ -1595,7 +909,7 @@
 }
 
 .ov-step.status-running {
-  background: #F4F1FD;
+  background: var(--bg-brand-primary);
   color: var(--face-brand-fg);
 }
 
@@ -1644,7 +958,7 @@
   box-sizing: border-box;
   width: 20px;
   height: 20px;
-  border: 2px solid #9B8AFB;
+  border: 2px solid var(--presence-dot-working);
   border-radius: var(--radius-full);
 }
 
@@ -1682,6 +996,15 @@
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    color var(--dur);
+}
+
+.ov-filter:hover {
+  background: var(--surface-2);
+  color: var(--text-secondary);
 }
 
 .ov-filter.is-active {
@@ -1963,6 +1286,14 @@
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-full);
   cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.agent-color-swatch:hover {
+  background: var(--surface-2);
 }
 
 .agent-color-swatch.is-selected {
@@ -1971,8 +1302,9 @@
 }
 
 .agent-color-swatch:focus-within {
-  outline: 2px solid var(--border-brand);
-  outline-offset: 2px;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .agent-color-input {
@@ -1991,27 +1323,27 @@
 }
 
 .agent-color-swatch.color-brand .agent-color-dot {
-  background: #5925DC;
+  background: var(--face-brand-fg);
 }
 
 .agent-color-swatch.color-success .agent-color-dot {
-  background: #067647;
+  background: var(--face-success-fg);
 }
 
 .agent-color-swatch.color-warning .agent-color-dot {
-  background: #B54708;
+  background: var(--face-warning-fg);
 }
 
 .agent-color-swatch.color-error .agent-color-dot {
-  background: #B42318;
+  background: var(--face-error-fg);
 }
 
 .agent-color-swatch.color-blue .agent-color-dot {
-  background: #175CD3;
+  background: var(--face-blue-fg);
 }
 
 .agent-color-swatch.color-gray .agent-color-dot {
-  background: #475467;
+  background: var(--face-gray-fg);
 }
 
 .agent-color-name {
@@ -2020,38 +1352,25 @@
   font-weight: 500;
 }
 
+/* Dark tints for the few light-only values that have no matching token. */
+[data-theme="dark"] .ov-step.status-running {
+  background: var(--bg-brand-secondary);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .agent-card-progress-bar,
+  .agent-face-ring,
+  .agent-face-dot.state-working,
+  .agent-face-dot.state-waiting,
+  .typing-dots span,
+  .skeleton,
+  .handoff-chip.handoff-working,
+  .progress-bar-indeterminate,
   .ov-step-dot {
     animation: none;
   }
-}
 
-/* Dark tints for the few light-only values that have no matching token. */
-[data-theme="dark"] .agent-card.state-waiting {
-  border-color: #FDB022;
-}
-
-[data-theme="dark"] .agent-card.state-working {
-  border-color: #49447E;
-}
-
-[data-theme="dark"] .agent-card.state-resting {
-  background: var(--bg-secondary);
-}
-
-[data-theme="dark"] .agent-card-status.state-working {
-  background: var(--bg-brand-secondary);
-}
-
-[data-theme="dark"] .agent-card-progress {
-  background: var(--bg-brand-secondary);
-}
-
-[data-theme="dark"] .agent-card-add {
-  border-color: var(--border-primary);
-}
-
-[data-theme="dark"] .ov-step.status-running {
-  background: var(--bg-brand-secondary);
+  .room-mention-list,
+  .msg-enter {
+    animation: fadeOnly 0.12s both !important;
+  }
 }

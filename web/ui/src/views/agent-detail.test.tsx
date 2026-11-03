@@ -183,23 +183,25 @@ describe("agent model settings", () => {
     expect(
       screen.queryByText("Legacy model — switch to deepseek-flash")
     ).toBeNull();
-    const select = screen.getByRole("combobox", {
-      name: "Model",
-    }) as HTMLSelectElement;
-    expect(select.value).toBe("deepseek-flash");
+    /* The Gr8r Select is a combobox button; its label is the catalog name. */
+    expect(
+      screen.getByRole("combobox", { name: "Model" }).textContent
+    ).toContain("DeepSeek Flash");
   });
 
-  /* REQ-MDL-020: the Thinking select is shown for a thinking model. */
+  /* REQ-MDL-020: the Thinking select is shown for a thinking model, with the
+     effort descriptions as its options. */
   it("shows the Thinking select with effort descriptions for a thinking model", async () => {
     load("deepseek-flash");
 
-    const select = (await screen.findByRole("combobox", {
-      name: "Thinking",
-    })) as HTMLSelectElement;
-    expect(select.textContent).toContain(
-      "Prefer for routine or latency-sensitive tasks."
-    );
-    expect(select.textContent).toContain("Model default");
+    const thinking = await screen.findByRole("combobox", { name: "Thinking" });
+    expect(thinking.textContent).toContain("Model default");
+    fireEvent.click(thinking);
+    expect(
+      await screen.findByRole("option", {
+        name: /Prefer for routine or latency-sensitive tasks/,
+      })
+    ).toBeTruthy();
   });
 
   it("hides the Thinking select for a non-thinking model", async () => {
@@ -234,10 +236,9 @@ describe("agent save notice", () => {
   it("shows the restart notice only after a save that needs a restart", async () => {
     load("deepseek-flash");
 
-    const select = (await screen.findByRole("combobox", {
-      name: "Model",
-    })) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "deepseek-chat" } });
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    fireEvent.click(model);
+    fireEvent.click(await screen.findByRole("option", { name: "DeepSeek Chat" }));
     vi.mocked(updateAgent).mockResolvedValue({
       name: "coder",
       version: "v2",
@@ -318,7 +319,7 @@ describe("agent detail header (REQ-WEB-047)", () => {
       ".agent-detail-header"
     );
     expect(generalHeader).toBeTruthy();
-    expect(generalHeader?.querySelector(".agent-face")).toBeTruthy();
+    expect(generalHeader?.querySelector(".av")).toBeTruthy();
     expect(generalHeader?.querySelector(".agent-avatar")).toBeNull();
   });
 });

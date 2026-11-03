@@ -1,16 +1,5 @@
 import { createRoot } from "react-dom/client";
-import "./styles/tokens.css";
-import "./styles/app.css";
-import "./styles/setup.css";
-import "./styles/agent-tabs.css";
-import "./styles/skills.css";
-import "./styles/mcp.css";
-import "./styles/channels.css";
-import "./styles/settings.css";
-import "./styles/team.css";
-import "./styles/rooms.css";
-import "./styles/question.css";
-import "./styles/markdown.css";
+import "./styles/index.css";
 import { App } from "./app/App";
 import { AnnouncerProvider } from "./ui/ui";
 

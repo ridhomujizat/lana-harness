@@ -5,7 +5,7 @@ import { isErrorCode, loadAgentTab, updateAgent } from "../../api/agents";
 import { listMcp } from "../../api/mcp";
 import type { McpServerRow } from "../../api/mcp";
 import { ErrorNotice, Loading } from "../../ui/ui";
-import { Icon } from "../agent-common";
+import { Ic } from "../../ui/icons";
 
 /* REQ-WEB-047: the MCP servers with tool count and status. The On switch
    edits the agent's mcp list; adding a server lives on the MCP page. */
@@ -23,13 +23,13 @@ function statusMeta(server: McpServerRow): { label: string; tone: string } {
     }
   }
   if (value === "connected") {
-    return { label: "Connected", tone: "success" };
+    return { label: "Connected", tone: "green" };
   }
   if (value === "unreachable") {
-    return { label: "Unreachable", tone: "error" };
+    return { label: "Unreachable", tone: "red" };
   }
   if (value === "needs_sign_in") {
-    return { label: "Needs sign-in", tone: "warning" };
+    return { label: "Needs sign-in", tone: "amber" };
   }
   if (value === "idle") {
     return { label: "Idle", tone: "" };
@@ -201,7 +201,7 @@ export function McpTab({ name }: McpTabProps) {
         </div>
         <button
           type="button"
-          className="button-ui button-ui-secondary"
+          className="btn btn-secondary btn-sm"
           onClick={reload}
         >
           Try again
@@ -223,7 +223,7 @@ export function McpTab({ name }: McpTabProps) {
       <div className="agent-tabs-toolbar">
         <label className="agent-tabs-search">
           <span className="sr-only">Search servers</span>
-          <Icon name="search" />
+          <Ic name="search" size={13} />
           <input
             type="search"
             placeholder="Search servers"
@@ -234,8 +234,9 @@ export function McpTab({ name }: McpTabProps) {
         </label>
         <span className="agent-tabs-toolbar-spacer"></span>
         <p className="agent-tabs-summary">{summaryText}</p>
-        <a className="button-ui button-ui-primary" href="#/mcp">
-          + Add server
+        <a className="btn btn-primary btn-sm" href="#/mcp">
+          <Ic name="plus" size={13} />
+          Add server
         </a>
       </div>
 
@@ -246,8 +247,8 @@ export function McpTab({ name }: McpTabProps) {
       ) : visibleServers.length === 0 ? (
         <p className="agent-tabs-empty">No servers match “{query}”.</p>
       ) : (
-        <div className="agent-tabs-table-wrap">
-          <table className="agent-tabs-table agent-mcp-table">
+        <div className="perm-t agent-tabs-table-wrap">
+          <table className="perm-t agent-tabs-table agent-mcp-table">
             <thead>
               <tr>
                 <th scope="col">Server</th>
@@ -273,14 +274,16 @@ export function McpTab({ name }: McpTabProps) {
                 return (
                   <tr key={server.name}>
                     <th scope="row" className="agent-mcp-name-cell">
+                      <span className="agent-tabs-namecell">
                       <span className="agent-tabs-tile">
-                        <Icon name="mcp" />
+                        <Ic name="plug" size={15} />
                       </span>
                       <span className="agent-mcp-text">
                         <span className="agent-mcp-name">{server.name}</span>
                         <span className="agent-mcp-command">
                           {serverDescription(server)}
                         </span>
+                      </span>
                       </span>
                     </th>
                     <td className="agent-mcp-tools">
@@ -289,12 +292,12 @@ export function McpTab({ name }: McpTabProps) {
                     <td>
                       <span
                         className={
-                          "badge-ui" +
-                          (meta.tone ? " agent-tabs-badge-" + meta.tone : "")
+                          "badge" +
+                          (meta.tone ? " " + meta.tone : "")
                         }
                       >
                         <span
-                          className="badge-ui-dot"
+                          className="dot"
                           aria-hidden="true"
                         ></span>
                         {meta.label}
@@ -303,7 +306,7 @@ export function McpTab({ name }: McpTabProps) {
                     <td className="agent-tabs-switch-cell">
                       <label className="agent-switch">
                         <input
-                          className="agent-switch-input"
+                          className="toggle"
                           type="checkbox"
                           role="switch"
                           aria-labelledby={labelId}
@@ -313,12 +316,6 @@ export function McpTab({ name }: McpTabProps) {
                             toggleServer(server.name, event.target.checked)
                           }
                         />
-                        <span
-                          className="agent-switch-track"
-                          aria-hidden="true"
-                        >
-                          <span className="agent-switch-thumb"></span>
-                        </span>
                         <span className="agent-switch-text">
                           {enabled ? "On" : "Off"}
                         </span>
@@ -332,7 +329,7 @@ export function McpTab({ name }: McpTabProps) {
                           "Open " + server.name + " on the MCP page"
                         }
                       >
-                        <Icon name="chevron-right" className="icon-16" />
+                        <Ic name="chevron-right" size={15} />
                       </a>
                     </td>
                   </tr>
@@ -361,7 +358,7 @@ export function McpTab({ name }: McpTabProps) {
           {stale ? (
             <button
               type="button"
-              className="button-ui button-ui-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={reload}
             >
               Reload servers

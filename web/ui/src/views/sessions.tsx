@@ -1,14 +1,19 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import { listSessions } from "../api/sessions";
 import type { ListSessionsResponse, Session } from "../api/sessions";
 import { formatTime } from "../lib/format";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Chip,
+  IconButton,
+  Lbl,
+  SearchInput,
+  Select,
+} from "../ui/gr8r";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import { NewSessionPage } from "./new-session";
 import { SessionPage } from "./session";
@@ -88,6 +93,14 @@ function copyFilters(filters: Filters | null | undefined): Filters {
     agent: source.agent || "",
   };
 }
+
+/* The channel chip colour, using Gr8r tokens. */
+const CHANNEL_COLORS: Record<string, string> = {
+  web: "var(--accent)",
+  cli: "var(--teal)",
+  telegram: "var(--blue)",
+  library: "var(--gray)",
+};
 
 function channelLabel(value: string): string {
   switch (value) {
@@ -263,7 +276,7 @@ function FacetOption({
 }) {
   return (
     <label className="facet-option">
-      <input type="checkbox" checked={checked} onChange={onChange} />
+      <Checkbox checked={checked} onChange={onChange} />
       <span className="facet-option-label">{label}</span>
       <span className="facet-option-count">{count}</span>
     </label>
@@ -292,37 +305,37 @@ function SessionItem({
       ? "PID " + session.holder_pid
       : "";
   return (
-    <li className={"session-item" + (selected ? " is-selected" : "")}>
+    <li className={"session-row" + (selected ? " is-selected" : "")}>
       <a
-        className="session-item-link"
+        className="session-row-link"
         href={"#/sessions/" + encodeURIComponent(session.id)}
         title={formatTime(session.updated_at)}
         aria-current={selected ? "page" : undefined}
         tabIndex={tabIndex}
         data-session-row
       >
-        <span className="session-item-top">
-          <span className="session-item-meta">
-            {showDot ? (
-              <span
-                className={"session-dot status-" + status}
-                aria-hidden="true"
-              ></span>
-            ) : null}
-            <span className="session-item-agent">{agent}</span>
-            <span className="session-item-channel">
-              {channelLabel(channel)}
-            </span>
-            {holder ? (
-              <span className="session-item-holder">{holder}</span>
-            ) : null}
-          </span>
-          <span className="session-item-time">
+        <span className="session-row-head">
+          <span className="session-row-title trunc">{title}</span>
+          <span className="session-row-time num">
             {relativeTime(session.updated_at)}
           </span>
         </span>
-        <span className="session-item-title">{title}</span>
-        <span className="session-item-preview">{preview}</span>
+        <span className="session-row-meta">
+          {showDot ? (
+            <span
+              className={"session-row-dot status-" + status}
+              aria-hidden="true"
+            />
+          ) : null}
+          <span className="session-row-agent trunc">{agent}</span>
+          <Lbl color={CHANNEL_COLORS[channel] || "var(--gray)"}>
+            {channelLabel(channel)}
+          </Lbl>
+          {holder ? (
+            <span className="session-row-holder">{holder}</span>
+          ) : null}
+        </span>
+        <span className="session-row-preview trunc">{preview}</span>
       </a>
     </li>
   );
@@ -395,7 +408,6 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
   const [details, setDetails] = useState<unknown[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
-  const filterButtonRef = useRef<HTMLButtonElement>(null);
 
   /* Debounce the search box so typing "disk" issues one list request. */
   useEffect(() => {
@@ -522,17 +534,8 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
     setFilterOpen(true);
   }
 
-  function refocusFilterButton() {
-    window.setTimeout(() => {
-      if (filterButtonRef.current) {
-        filterButtonRef.current.focus();
-      }
-    }, 0);
-  }
-
   function closeFilter() {
     setFilterOpen(false);
-    refocusFilterButton();
   }
 
   function applyFilter() {
@@ -544,7 +547,6 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
         ? "Filters cleared."
         : "Filters applied. " + count + (count === 1 ? " filter." : " filters.")
     );
-    refocusFilterButton();
   }
 
   function toggleStatus(value: string) {
@@ -629,73 +631,67 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
             <h1 className="sessions-title" id="sessions-title">
               Sessions
             </h1>
-            <span
-              className="badge-ui badge-ui-count"
-              title={"Showing " + sessions.length + " sessions"}
-            >
-              <span className="badge-ui-dot" aria-hidden="true"></span>
+            <Badge title={"Showing " + sessions.length + " sessions"}>
               {countText}
-            </span>
+            </Badge>
           </div>
-          <a className="button-ui button-ui-secondary" href="#/sessions/new">
-            + New
-          </a>
+          <Button
+            as="a"
+            href="#/sessions/new"
+            variant="secondary"
+            size="sm"
+            icon="plus"
+          >
+            New
+          </Button>
         </div>
 
-        <div className="sessions-search">
-          <span className="sessions-search-icon">
-            <Icon name="search" />
-          </span>
-          <input
+        <div className="sessions-toolbar">
+          <SearchInput
+            wrapClassName="sessions-search"
+            kbd={null}
             type="search"
-            className="sessions-search-input"
             aria-label="Search sessions"
             placeholder="Search sessions"
             autoComplete="off"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
-          <button
-            ref={filterButtonRef}
-            type="button"
-            className={
-              "sessions-filter-button" +
-              (chips.length > 0 ? " has-filters" : "")
-            }
-            aria-label={
-              "Filter sessions" +
-              (chips.length > 0 ? ", " + chips.length + " active" : "")
-            }
-            aria-haspopup="dialog"
-            aria-expanded={filterOpen}
-            onClick={openFilter}
-          >
-            <Icon name="filter" />
+          <div className="sessions-filter">
+            <IconButton
+              icon="list-filter"
+              size="sm"
+              label={
+                "Filter sessions" +
+                (chips.length > 0 ? ", " + chips.length + " active" : "")
+              }
+              aria-haspopup="dialog"
+              aria-expanded={filterOpen}
+              on={chips.length > 0}
+              onClick={openFilter}
+            />
             {chips.length > 0 ? (
-              <span className="sessions-filter-count">{chips.length}</span>
+              <Badge tone="accent" className="sessions-filter-count">
+                {chips.length}
+              </Badge>
             ) : null}
-          </button>
+          </div>
         </div>
 
         {chips.length > 0 ? (
-          <div className="sessions-active-filters">
+          <div className="sessions-chips">
             {chips.map((chip) => (
-              <button
-                type="button"
-                className="filter-chip"
+              <Chip
                 key={chip.key}
-                aria-label={"Remove filter " + chip.label}
-                onClick={() => removeFilter(chip.kind, chip.value)}
+                onRemove={() => removeFilter(chip.kind, chip.value)}
+                removeLabel={"Remove filter " + chip.label}
               >
-                <span>{chip.label}</span>
-                <span className="filter-chip-x" aria-hidden="true">
-                  ×
-                </span>
-              </button>
+                {chip.label}
+              </Chip>
             ))}
-            <button type="button" className="filter-clear" onClick={clearAll}>
+            <Button variant="ghost" size="sm" onClick={clearAll}>
               Clear all
-            </button>
+            </Button>
           </div>
         ) : null}
       </header>
@@ -704,13 +700,12 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
         {error ? (
           <div className="sessions-error">
             <ErrorNotice message={error} details={details} />
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
+            <Button
+              variant="secondary"
               onClick={() => setReloadToken((value) => value + 1)}
             >
               Try again
-            </button>
+            </Button>
           </div>
         ) : null}
 
@@ -729,17 +724,13 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
                 : "Start a session to see it here."}
             </p>
             {chips.length > 0 ? (
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
-                onClick={clearAll}
-              >
+              <Button variant="secondary" onClick={clearAll}>
                 Clear filters
-              </button>
+              </Button>
             ) : (
-              <a className="button-ui button-ui-secondary" href="#/sessions/new">
+              <Button as="a" href="#/sessions/new" variant="secondary">
                 New session
-              </a>
+              </Button>
             )}
           </div>
         ) : null}
@@ -772,14 +763,14 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
 
       {hasMore ? (
         <div className="sessions-load-more">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
+          <Button
+            variant="secondary"
+            block
             disabled={loading || loadingMore}
             onClick={() => void loadMore()}
           >
             {loadingMore ? "Loading…" : "Load more"}
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -795,7 +786,7 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
               aria-labelledby="filter-channel-title"
             >
               <h3 className="filter-section-title" id="filter-channel-title">
-                CHANNEL
+                Channel
               </h3>
               {CHANNEL_FACETS.map((facet) => (
                 <FacetOption
@@ -819,7 +810,7 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
               aria-labelledby="filter-status-title"
             >
               <h3 className="filter-section-title" id="filter-status-title">
-                STATUS
+                Status
               </h3>
               {STATUS_FACETS.map((facet) => (
                 <FacetOption
@@ -837,48 +828,42 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
               aria-labelledby="filter-agent-title"
             >
               <h3 className="filter-section-title" id="filter-agent-title">
-                AGENT
+                Agent
               </h3>
-              <select
+              <Select
                 className="facet-select"
                 aria-label="Agent or team"
+                placeholder="Any agent or team"
                 value={draft.agent}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    agent: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Any agent or team</option>
-                {agentNames.map((name) => (
-                  <option key={name} value={name}>
-                    {agentFacetLabel(
+                options={[
+                  { value: "", label: "Any agent or team" },
+                  ...agentNames.map((name) => ({
+                    value: name,
+                    label: agentFacetLabel(
                       name,
                       facets.agentKinds[name],
                       facetCount(facets.agent, name)
-                    )}
-                  </option>
-                ))}
-              </select>
+                    ),
+                  })),
+                ]}
+                onChange={(next) =>
+                  setDraft((current) => ({ ...current, agent: next }))
+                }
+              />
             </section>
           </div>
 
           <div className="filter-footer">
-            <button
-              type="button"
-              className="filter-clear"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setDraft(emptyFilters())}
             >
               Clear all
-            </button>
-            <button
-              type="button"
-              className="button-ui button-ui-primary"
-              onClick={applyFilter}
-            >
+            </Button>
+            <Button variant="primary" size="sm" onClick={applyFilter}>
               {previewButtonLabel(preview)}
-            </button>
+            </Button>
           </div>
         </Dialog>
       ) : null}

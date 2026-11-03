@@ -5,6 +5,8 @@ import { ApiError, errorMessage } from "../../api/client";
 import { getAgentFile, saveAgentFile, isErrorCode } from "../../api/agents";
 import type { AgentFileResponse } from "../../api/agents";
 import { ErrorNotice, Loading } from "../../ui/ui";
+import { Ic } from "../../ui/icons";
+import { Button, Lbl } from "../../ui/gr8r";
 
 /* REQ-WEB-047: AGENT.md, USER.md, and MEMORY.md with a counter, Revert, and
    Save. USER.md is the one shared file; the API labels it "user". */
@@ -309,13 +311,9 @@ export function PersonaTab({ name }: PersonaTabProps) {
         <div role="alert">
           <ErrorNotice message={error} details={details} />
         </div>
-        <button
-          type="button"
-          className="button-ui button-ui-secondary"
-          onClick={reload}
-        >
+        <Button variant="secondary" size="sm" icon="rotate-cw" onClick={reload}>
           Try again
-        </button>
+        </Button>
       </div>
     );
   }
@@ -330,12 +328,8 @@ export function PersonaTab({ name }: PersonaTabProps) {
     (dirty ? " · Unsaved changes" : "");
 
   return (
-    <div className="agent-persona">
-      <div
-        className="agent-persona-files"
-        role="group"
-        aria-label="Persona files"
-      >
+    <div className="persona">
+      <div className="persona-files" role="group" aria-label="Persona files">
         {FILES.map((file) => {
           const entry = files?.[file.id];
           if (!entry) {
@@ -352,94 +346,102 @@ export function PersonaTab({ name }: PersonaTabProps) {
             <button
               key={file.id}
               type="button"
-              className={"agent-persona-file" + (active ? " is-active" : "")}
+              className={"pfile" + (active ? " on" : "")}
               aria-pressed={active ? "true" : "false"}
               disabled={saving}
               onClick={() => selectFile(file.id)}
             >
-              <span className="agent-persona-file-row">
-                <span className="agent-persona-file-name">{file.name}</span>
-                <span className="agent-persona-file-count">{count}</span>
+              <Ic name="file-text" size={15} />
+              <span className="pfile-body">
+                <span className="pfile-row">
+                  <span className="pfile-name">{file.name}</span>
+                  <span className="pfile-count">{count}</span>
+                </span>
+                <span className="pfile-note">{file.note}</span>
               </span>
-              <span className="agent-persona-file-note">{file.note}</span>
             </button>
           );
         })}
       </div>
 
-      <form className="agent-persona-editor" onSubmit={save} noValidate>
-        <div className="agent-persona-heading">
-          <h2 id="agent-persona-title">{meta.title}</h2>
-          <p id="agent-persona-help">{meta.help}</p>
+      <form className="panel persona-editor" onSubmit={save} noValidate>
+        <div className="panel-h">
+          <div>
+            <h2 id="agent-persona-title">{meta.title}</h2>
+            <p id="agent-persona-help" className="persona-help">
+              {meta.help}
+            </p>
+          </div>
+          <Lbl>{meta.name}</Lbl>
         </div>
-        <label className="sr-only" htmlFor="agent-persona-editor">
-          {meta.name} text
-        </label>
-        <textarea
-          id="agent-persona-editor"
-          className="agent-persona-textarea"
-          aria-labelledby="agent-persona-title"
-          aria-describedby="agent-persona-help agent-persona-count"
-          spellCheck={false}
-          value={current.content}
-          disabled={saving}
-          onChange={(event) => updateContent(event.target.value)}
-        ></textarea>
+        <div className="panel-b">
+          <label className="sr-only" htmlFor="agent-persona-editor">
+            {meta.name} text
+          </label>
+          <textarea
+            id="agent-persona-editor"
+            className="textarea persona-textarea"
+            aria-labelledby="agent-persona-title"
+            aria-describedby="agent-persona-help agent-persona-count"
+            spellCheck={false}
+            value={current.content}
+            disabled={saving}
+            onChange={(event) => updateContent(event.target.value)}
+          ></textarea>
 
-        <div className="agent-persona-footer">
+          {over ? (
+            <p className="persona-over" role="alert">
+              Over the limit by {formatNumber(overBy)} characters. Shorten it
+              before saving.
+            </p>
+          ) : null}
+
+          <div className="agent-tabs-live" role="status" aria-live="polite">
+            {notice ? (
+              <p className="notice notice-ok agent-tabs-notice">{notice}</p>
+            ) : null}
+          </div>
+
+          {error ? (
+            <div className="agent-tabs-error" role="alert">
+              <ErrorNotice message={error} details={details} />
+              {stale ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={reload}
+                  disabled={saving}
+                >
+                  Reload file
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="persona-footer">
           <p
             id="agent-persona-count"
-            className={"agent-persona-count" + (over ? " is-over" : "")}
+            className={"persona-count" + (over ? " is-over" : "")}
           >
             {countLabel}
           </p>
-          <div className="agent-persona-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={!dirty || saving}
-              onClick={revert}
-            >
-              Revert
-            </button>
-            <button
-              type="submit"
-              className="button-ui button-ui-primary"
-              disabled={!dirty || saving}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!dirty || saving}
+            onClick={revert}
+          >
+            Revert
+          </Button>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={!dirty || saving}
+          >
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </div>
-
-        {over ? (
-          <p className="agent-persona-over" role="alert">
-            Over the limit by {formatNumber(overBy)} characters. Shorten it
-            before saving.
-          </p>
-        ) : null}
-
-        <div className="agent-tabs-live" role="status" aria-live="polite">
-          {notice ? (
-            <p className="notice notice-ok agent-tabs-notice">{notice}</p>
-          ) : null}
-        </div>
-
-        {error ? (
-          <div className="agent-tabs-error" role="alert">
-            <ErrorNotice message={error} details={details} />
-            {stale ? (
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
-                onClick={reload}
-                disabled={saving}
-              >
-                Reload file
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </form>
     </div>
   );

@@ -29,15 +29,25 @@ import type {
 } from "../api/channels";
 import type { Agent } from "../api/agents";
 import { getDaemon } from "../api/settings";
+import { Dialog, detailText, useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { agoLabel } from "./agent-common";
 import {
-  Dialog,
-  ErrorNotice,
-  Icon,
-  Loading,
-  Notice,
-  useAnnounce,
-} from "../ui/ui";
-import { AgentAvatar, agoLabel } from "./agent-common";
+  Avatar,
+  Badge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Field,
+  IconButton,
+  Input,
+  Panel,
+  Radio,
+  Select,
+  Skeleton,
+  Toggle,
+} from "../ui/gr8r";
+import type { BadgeTone } from "../ui/gr8r";
 import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
 
 /* REQ-WEB-052: the channels list and the Telegram detail. REQ-WEB-053: the
@@ -70,53 +80,41 @@ const COMING_SOON = [
   {
     name: "discord",
     label: "Discord",
-    letter: "D",
+    icon: "message-circle",
     description: "Talk to agents in a server or DM.",
   },
   {
     name: "slack",
     label: "Slack",
-    letter: "S",
+    icon: "hash",
     description: "Mention an agent in a channel.",
   },
   {
     name: "whatsapp",
     label: "WhatsApp",
-    letter: "W",
+    icon: "phone",
     description: "Chat with an agent from your phone.",
   },
 ];
 
-function Badge({
-  label,
-  className = "badge-ui",
-}: {
-  label: string;
-  className?: string;
-}) {
-  return (
-    <span className={className}>
-      <span className="badge-ui-dot" aria-hidden="true"></span>
-      {label}
-    </span>
-  );
-}
+/* The agent identity colors (lib/avatar.ts) map onto the Gr8r status tokens so
+   one agent keeps one color in the roster, the list and the detail page. */
+const AVATAR_COLORS: Record<string, string> = {
+  "tone-brand": "var(--violet)",
+  "tone-success": "var(--green)",
+  "tone-warning": "var(--amber)",
+  "tone-error": "var(--red)",
+  "tone-gray": "var(--gray)",
+};
 
-function InitialAvatar({ name, small = false }: { name: string; small?: boolean }) {
-  return (
-    <span
-      className={"channel-avatar" + (small ? " channel-avatar-sm" : "")}
-      aria-hidden="true"
-    >
-      {avatarFor(name).initial}
-    </span>
-  );
+function agentColor(name: string): string {
+  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
 }
 
 function TelegramMark() {
   return (
     <svg
-      className="channel-tile-mark"
+      className="chan-mark"
       viewBox="0 0 24 24"
       aria-hidden="true"
       focusable="false"
@@ -129,43 +127,17 @@ function TelegramMark() {
   );
 }
 
-function ChannelTile({
-  children,
-  telegram = false,
-  large = false,
-}: {
-  children?: ReactNode;
-  telegram?: boolean;
-  large?: boolean;
-}) {
-  let className = "channel-tile";
-  if (telegram) {
-    className += " channel-tile-telegram";
-  }
-  if (large) {
-    className += " channel-tile-lg";
-  }
-  return (
-    <span className={className} aria-hidden="true">
-      {children}
-    </span>
-  );
-}
-
 function telegramStatus(status: string | undefined): {
   label: string;
-  className: string;
+  tone: BadgeTone;
 } {
   if (status === "connected") {
-    return {
-      label: "Connected",
-      className: "badge-ui channel-badge-success",
-    };
+    return { label: "Connected", tone: "green" };
   }
   if (status === "token_missing") {
-    return { label: "Token missing", className: "badge-ui badge-ui-warning" };
+    return { label: "Token missing", tone: "amber" };
   }
-  return { label: "Off", className: "badge-ui" };
+  return { label: "Off", tone: "gray" };
 }
 
 function chatTypeLabel(type: string): string {
@@ -200,19 +172,6 @@ function telegramMeta(telegram: TelegramChannelCard): string {
     }
   }
   return parts.join(" · ");
-}
-
-function TelegramBreadcrumb() {
-  return (
-    <nav className="agent-breadcrumb" aria-label="Breadcrumb">
-      <ol className="channel-crumbs">
-        <li>
-          <a href="#/channels">Channels</a>
-        </li>
-        <li aria-current="page">Telegram</li>
-      </ol>
-    </nav>
-  );
 }
 
 function parseChatId(value: unknown): number | null {
@@ -273,6 +232,126 @@ function isTelegramCard(card: ChannelCard): card is TelegramChannelCard {
 
 function isWebCard(card: ChannelCard): card is SimpleChannelCard {
   return card.name === "web";
+}
+
+function DetailsList({ details }: { details: unknown[] }) {
+  if (!details || details.length === 0) {
+    return null;
+  }
+  return (
+    <ul className="err-list">
+      {details.map((detail, index) => (
+        <li key={index}>{detailText(detail)}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ErrorAlert({
+  message,
+  details,
+}: {
+  message: string;
+  details?: unknown[];
+}) {
+  return (
+    <div className="alert danger" role="alert">
+      <Ic name="circle-alert" size={15} />
+      <div className="grow">
+        <p className="chan-alert-msg">{message}</p>
+        <DetailsList details={details || []} />
+      </div>
+    </div>
+  );
+}
+
+interface SettingRowProps {
+  id: string;
+  label: string;
+  hint?: ReactNode;
+  control: ReactNode;
+  error?: ReactNode;
+}
+
+/* A Gr8r settings row: label and hint on the left, control on the right. */
+function SettingRow({ id, label, hint, control, error }: SettingRowProps) {
+  return (
+    <div className="srow">
+      <div className="chan-srow-text">
+        <label className="t" htmlFor={id}>
+          {label}
+        </label>
+        {hint ? <div className="d">{hint}</div> : null}
+      </div>
+      <div className="chan-ctl">
+        {control}
+        {error ? (
+          <span className="err" role="alert">
+            <Ic name="circle-alert" size={12} />
+            {error}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+interface ChannelTileProps {
+  children: ReactNode;
+  brand?: boolean;
+}
+
+function ChannelTile({ children, brand }: ChannelTileProps) {
+  return (
+    <span className={"chan-tile" + (brand ? " is-brand" : "")} aria-hidden="true">
+      {children}
+    </span>
+  );
+}
+
+interface ChannelRowProps {
+  tile: ReactNode;
+  brand?: boolean;
+  title: string;
+  badge: ReactNode;
+  meta: ReactNode;
+  agent?: string;
+  action?: ReactNode;
+  muted?: boolean;
+}
+
+/* One card of the channels grid (Gr8r projects/members style). */
+function ChannelRow({
+  tile,
+  brand,
+  title,
+  badge,
+  meta,
+  agent,
+  action,
+  muted,
+}: ChannelRowProps) {
+  return (
+    <article className={"chan-card" + (muted ? " is-muted" : "")}>
+      <div className="chan-card-head">
+        <ChannelTile brand={brand}>{tile}</ChannelTile>
+        <div className="chan-card-id">
+          <div className="chan-card-title">
+            <h2 className="chan-card-name">{title}</h2>
+            {badge}
+          </div>
+          <p className="chan-card-meta">{meta}</p>
+        </div>
+      </div>
+      {agent ? (
+        <div className="chan-card-agent">
+          <Avatar name={agent} color={agentColor(agent)} size="sm" />
+          <span>{agent}</span>
+        </div>
+      ) : null}
+      {action ? <div className="chan-card-foot">{action}</div> : null}
+    </article>
+  );
 }
 
 export function ChannelsPage() {
@@ -342,129 +421,130 @@ export function ChannelsPage() {
   }
   telegramMetaParts.push(countText(chatCount, "chat", "chats"));
   telegramMetaParts.push(countText(ownerCount, "owner", "owners"));
+  const telegramAgent = telegram ? routedAgent(telegram, null) : "";
 
   return (
     <main id="main" className="page channels-page">
-      <header className="channels-header">
-        <h1 className="agents-title">Channels</h1>
-        <p className="agents-subtitle">
-          Where people reach your agents. Each chat goes to one agent.
-        </p>
+      <header className="ph">
+        <div>
+          <h1>Channels</h1>
+          <p>Where people reach your agents. Each chat goes to one agent.</p>
+        </div>
       </header>
 
       {status === "loading" ? (
-        <div className="channels-state" role="status">
-          <Loading label="Loading channels…" />
+        <div className="chan-grid" aria-busy="true">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="chan-card chan-skeleton">
+              <div className="chan-card-head">
+                <Skeleton width={40} height={40} radius={10} />
+                <div className="chan-card-id">
+                  <Skeleton width="45%" height={13} />
+                  <Skeleton width="70%" height={11} />
+                </div>
+              </div>
+              <Skeleton width="100%" height={26} radius={6} />
+            </div>
+          ))}
         </div>
       ) : null}
 
       {status === "error" ? (
-        <div className="channels-state" role="alert">
-          <ErrorNotice message={error} details={details} />
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={() => setReloadToken((current) => current + 1)}
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load channels"
+            text={error}
+            action={
+              <Button
+                variant="secondary"
+                onClick={() => setReloadToken((current) => current + 1)}
+              >
+                Try again
+              </Button>
+            }
           >
-            Try again
-          </button>
+            <DetailsList details={details} />
+          </ErrorState>
         </div>
       ) : null}
 
       {status === "ready" && channels.length === 0 ? (
-        <div className="channels-empty">
-          <h2 className="channels-empty-title">No channels yet</h2>
-          <p className="channels-empty-text">
-            Channels appear here when the daemon has Telegram, the web view, or
-            the CLI available.
-          </p>
+        <div className="panel">
+          <EmptyState
+            icon="radio-tower"
+            title="No channels yet"
+            text="Channels appear here when the daemon has Telegram, the web view, or the CLI available."
+          />
         </div>
       ) : null}
 
       {status === "ready" && channels.length > 0 ? (
-        <ul className="channels-list">
-          <li className="channel-card">
-            <ChannelTile telegram>
-              <TelegramMark />
-            </ChannelTile>
-            <div className="channel-card-main">
-              <div className="channel-card-name-row">
-                <h2 className="channel-card-name">Telegram</h2>
-                <Badge
-                  label={telegramState.label}
-                  className={telegramState.className}
-                />
-              </div>
-              <p className="channel-card-meta">{telegramMetaParts.join(" · ")}</p>
-            </div>
-            <div className="channel-card-action">
-              <a
-                className="button-ui button-ui-secondary"
+        <div className="chan-grid">
+          <ChannelRow
+            brand
+            tile={<TelegramMark />}
+            title="Telegram"
+            badge={
+              <Badge tone={telegramState.tone} dot>
+                {telegramState.label}
+              </Badge>
+            }
+            meta={telegramMetaParts.join(" · ")}
+            agent={telegramAgent}
+            action={
+              <Button
+                as="a"
+                variant="secondary"
+                size="sm"
                 href="#/channels/telegram"
                 aria-label="Manage Telegram"
               >
                 Manage
-              </a>
-            </div>
-          </li>
+              </Button>
+            }
+          />
 
-          <li className="channel-card">
-            <ChannelTile>
-              <Icon name="globe" />
-            </ChannelTile>
-            <div className="channel-card-main">
-              <div className="channel-card-name-row">
-                <h2 className="channel-card-name">Web</h2>
-                <Badge
-                  label={web?.status === "on" ? "On" : "Off"}
-                  className={
-                    web?.status === "on"
-                      ? "badge-ui channel-badge-success"
-                      : "badge-ui"
-                  }
-                />
-              </div>
-              <p className="channel-card-meta">
-                {web?.addr ? "This dashboard · " + web.addr : "This dashboard"}
-              </p>
-            </div>
-            <div className="channel-card-action">
-              <a
-                className="button-ui button-ui-secondary"
+          <ChannelRow
+            tile={<Ic name="globe" size={20} />}
+            title="Web"
+            badge={
+              <Badge tone={web?.status === "on" ? "green" : "gray"} dot>
+                {web?.status === "on" ? "On" : "Off"}
+              </Badge>
+            }
+            meta={web?.addr ? "This dashboard · " + web.addr : "This dashboard"}
+            action={
+              <Button
+                as="a"
+                variant="secondary"
+                size="sm"
                 href="#/settings/general"
                 aria-label="Web settings"
               >
                 Settings
-              </a>
-            </div>
-          </li>
+              </Button>
+            }
+          />
 
-          <li className="channel-card">
-            <ChannelTile>
-              <Icon name="terminal" />
-            </ChannelTile>
-            <div className="channel-card-main">
-              <div className="channel-card-name-row">
-                <h2 className="channel-card-name">CLI</h2>
-                <Badge label="Built in" />
-              </div>
-              <p className="channel-card-meta">lana chat in your terminal</p>
-            </div>
-          </li>
+          <ChannelRow
+            tile={<Ic name="terminal" size={20} />}
+            title="CLI"
+            badge={<Badge>Built in</Badge>}
+            meta="lana chat in your terminal"
+          />
 
           {COMING_SOON.map((channel) => (
-            <li className="channel-card is-muted" key={channel.name}>
-              <ChannelTile>{channel.letter}</ChannelTile>
-              <div className="channel-card-main">
-                <div className="channel-card-name-row">
-                  <h2 className="channel-card-name">{channel.label}</h2>
-                  <Badge label="Coming soon" />
-                </div>
-                <p className="channel-card-meta">{channel.description}</p>
-              </div>
-            </li>
+            <ChannelRow
+              key={channel.name}
+              muted
+              tile={<Ic name={channel.icon} size={20} />}
+              title={channel.label}
+              badge={<Badge tone="gray">Coming soon</Badge>}
+              meta={channel.description}
+            />
           ))}
-        </ul>
+        </div>
       ) : null}
     </main>
   );
@@ -501,6 +581,7 @@ export function TelegramPage() {
 
   /* Step 1: the token field is local state and is cleared after a save. */
   const [tokenInput, setTokenInput] = useState("");
+  const [showToken, setShowToken] = useState(false);
   const [savingToken, setSavingToken] = useState(false);
   const [tokenError, setTokenError] = useState("");
   const [tokenBot, setTokenBot] = useState("");
@@ -654,6 +735,8 @@ export function TelegramPage() {
   const tokenDone = Boolean(telegram && telegram.token_present && botUsername);
   const connected = Boolean(telegram && telegram.status === "connected");
   const activeAgent = lastConnectedAgent || routedAgent(telegram, lastConnectedChatId);
+  const stepTwoDone = discoveredChats.length > 0 || chats.length > 0;
+  const stepThreeDone = chats.length > 0;
 
   function writeErrorText(failure: unknown): string {
     if (failure instanceof ApiError && failure.code === "stale_version") {
@@ -1175,10 +1258,21 @@ export function TelegramPage() {
 
   if (status === "loading") {
     return (
-      <main id="main" className="page channels-page">
-        <TelegramBreadcrumb />
-        <div className="channels-state" role="status">
-          <Loading label="Loading Telegram…" />
+      <main id="main" className="page channels-page channels-detail">
+        <header className="ph">
+          <div>
+            <a className="chan-back" href="#/channels">
+              <Ic name="arrow-left" size={14} />
+              Channels
+            </a>
+          </div>
+        </header>
+        <div className="panel chan-loading" aria-busy="true">
+          <span className="sr">Loading Telegram…</span>
+          <Skeleton width={160} height={14} />
+          <Skeleton width="100%" height={30} radius={6} />
+          <Skeleton width="100%" height={30} radius={6} />
+          <Skeleton width="100%" height={90} radius={6} />
         </div>
       </main>
     );
@@ -1186,22 +1280,32 @@ export function TelegramPage() {
 
   if (status === "error" || !telegram) {
     return (
-      <main id="main" className="page channels-page">
-        <TelegramBreadcrumb />
-        <div className="channels-state" role="alert">
-          <ErrorNotice message={loadError} details={loadDetails} />
-        </div>
-        <div className="agent-state-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            onClick={() => void load(true)}
+      <main id="main" className="page channels-page channels-detail">
+        <header className="ph">
+          <div>
+            <a className="chan-back" href="#/channels">
+              <Ic name="arrow-left" size={14} />
+              Channels
+            </a>
+            <h1>Telegram</h1>
+          </div>
+          <div className="acts">
+            <Button as="a" variant="secondary" href="#/channels">
+              Back to channels
+            </Button>
+            <Button variant="primary" onClick={() => void load(true)}>
+              Try again
+            </Button>
+          </div>
+        </header>
+        <div className="panel" role="alert">
+          <ErrorState
+            icon="cloud-alert"
+            title="Could not load the Telegram channel"
+            text={loadError}
           >
-            Try again
-          </button>
-          <a className="button-ui button-ui-secondary" href="#/channels">
-            Back to channels
-          </a>
+            <DetailsList details={loadDetails} />
+          </ErrorState>
         </div>
       </main>
     );
@@ -1213,665 +1317,662 @@ export function TelegramPage() {
     (telegram.token_present
       ? { tone: "ok", text: "Token found." }
       : { tone: "warn", text: "Token missing." });
+  const agentOptions = agents.map((agent) => ({
+    value: agent.name,
+    label: agent.name,
+  }));
 
   return (
-    <main id="main" className="page channels-page">
-      <TelegramBreadcrumb />
+    <main id="main" className="page channels-page channels-detail">
+      <header className="ph">
+        <div>
+          <a className="chan-back" href="#/channels">
+            <Ic name="arrow-left" size={14} />
+            Channels
+          </a>
+          <div className="chan-ph-title">
+            <h1>Telegram</h1>
+            <Badge tone={state.tone} dot>
+              {state.label}
+            </Badge>
+          </div>
+          <p>{telegramMeta(telegram)}</p>
+        </div>
+        <div className="acts">
+          <Button variant="secondary" disabled={saving} onClick={disconnect}>
+            Disconnect
+          </Button>
+          <Button
+            type="submit"
+            form="telegram-form"
+            variant="primary"
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      </header>
 
-      <form className="channel-form" noValidate onSubmit={saveChanges}>
-        <header className="agent-detail-header">
-          <div className="agent-detail-identity">
-            <ChannelTile telegram large>
-              <TelegramMark />
-            </ChannelTile>
-            <div className="agent-detail-heading">
-              <div className="agent-detail-name-row">
-                <h1 className="agent-detail-name">Telegram</h1>
-                <Badge label={state.label} className={state.className} />
-              </div>
-              <p className="agent-detail-meta">{telegramMeta(telegram)}</p>
+      <form
+        id="telegram-form"
+        className="channels-form"
+        noValidate
+        onSubmit={saveChanges}
+      >
+        <div className="chan-notice" role="status" aria-live="polite">
+          {notice ? (
+            <div className="alert ok">
+              <Ic name="circle-check" size={15} />
+              <span>{notice}</span>
             </div>
-          </div>
-          <div className="agent-detail-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={saving}
-              onClick={disconnect}
-            >
-              Disconnect
-            </button>
-            <button
-              type="submit"
-              className="button-ui button-ui-primary"
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Save changes"}
-            </button>
-          </div>
-        </header>
-
-        <div className="channel-notice" role="status" aria-live="polite">
-          {notice ? <Notice>{notice}</Notice> : null}
+          ) : null}
         </div>
 
         {saveError ? (
-          <div className="agent-save-error" role="alert">
-            <ErrorNotice message={saveError} details={saveDetails} />
-          </div>
+          <ErrorAlert message={saveError} details={saveDetails} />
         ) : null}
 
         {connected && !showSteps ? (
-          <section
-            className="channel-connected-summary"
-            aria-labelledby="channel-connected-title"
-          >
-            <h2 id="channel-connected-title" className="channel-connected-title">
-              Connected
-            </h2>
-            <p className="channel-connected-name">
-              Connected to {botUsername ? "@" + botUsername : "your bot"}
-            </p>
-            <p
-              className="channel-connected-text"
-              role="status"
-              aria-live="polite"
-            >
-              {connectedText(botUsername, activeAgent)}
-            </p>
-            <div className="channel-connected-actions">
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+          <Panel
+            className="chan-connected"
+            title="Connected"
+            actions={
+              <Button
+                size="sm"
+                variant="secondary"
                 onClick={() => setShowSteps(true)}
               >
                 Show steps
-              </button>
-            </div>
-          </section>
+              </Button>
+            }
+          >
+            <p className="chan-connected-name">
+              Connected to {botUsername ? "@" + botUsername : "your bot"}
+            </p>
+            <p className="chan-connected-text" role="status" aria-live="polite">
+              {connectedText(botUsername, activeAgent)}
+            </p>
+          </Panel>
         ) : (
-          <ol className="channel-setup-steps">
-            <li className="channel-setup-step">
-              <h2 className="channel-step-title">Paste your bot token</h2>
-              <p className="channel-step-help">
-                Create a bot with @BotFather in Telegram, then paste the token it
-                gives you.
-              </p>
-              {tokenDone && !replaceToken ? (
-                <div className="channel-step-done">
-                  <p className="channel-step-done-text">
-                    Connected to @{botUsername}
-                  </p>
-                  <button
-                    type="button"
-                    className="button-ui button-ui-secondary"
-                    onClick={() => {
-                      setReplaceToken(true);
-                      setTokenError("");
-                    }}
-                  >
-                    Replace token
-                  </button>
-                </div>
-              ) : (
-                <div className="channel-step-form">
-                  <div className="agent-form-field">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="telegram-bot-token"
-                    >
-                      Bot token
-                    </label>
-                    <input
-                      id="telegram-bot-token"
-                      className="agent-number-input"
-                      type="password"
-                      name="bot_token"
-                      value={tokenInput}
-                      autoComplete="off"
-                      spellCheck={false}
-                      disabled={savingToken}
-                      aria-describedby={
-                        tokenError ? "telegram-bot-token-error" : undefined
-                      }
-                      onChange={(event) => {
-                        setTokenInput(event.target.value);
-                        if (tokenError) {
-                          setTokenError("");
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void saveToken();
-                        }
-                      }}
-                    />
-                  </div>
-                  {tokenError ? (
-                    <p
-                      id="telegram-bot-token-error"
-                      className="channel-step-error"
-                      role="alert"
-                    >
-                      {tokenError}
+          <ol className="chan-steps">
+            <li className={"chan-step" + (tokenDone ? " is-done" : "")}>
+              <span className="chan-step-ic" aria-hidden="true">
+                {tokenDone ? <Ic name="check" size={14} /> : "1"}
+              </span>
+              <div className="chan-step-body">
+                <h2 className="chan-step-title">Paste your bot token</h2>
+                {tokenDone && !replaceToken ? (
+                  <div className="chan-step-done">
+                    <p className="chan-step-done-text">
+                      Connected to @{botUsername}
                     </p>
-                  ) : null}
-                  <div className="channel-step-actions">
-                    <button
-                      type="button"
-                      className="button-ui button-ui-primary"
-                      disabled={savingToken}
-                      onClick={saveToken}
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setReplaceToken(true);
+                        setTokenError("");
+                      }}
                     >
-                      {savingToken ? "Saving…" : "Save token"}
-                    </button>
-                    {tokenDone ? (
-                      <button
-                        type="button"
-                        className="button-ui button-ui-secondary"
-                        disabled={savingToken}
-                        onClick={() => {
-                          setReplaceToken(false);
-                          setTokenInput("");
-                          setTokenError("");
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    ) : null}
+                      Replace token
+                    </Button>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="chan-step-form">
+                    <SettingRow
+                      id="telegram-bot-token"
+                      label="Bot token"
+                      hint="Create a bot with @BotFather in Telegram, then paste the token it gives you."
+                      error={tokenError || undefined}
+                      control={
+                        <div className="chan-token-input">
+                          <Input
+                            id="telegram-bot-token"
+                            type={showToken ? "text" : "password"}
+                            name="bot_token"
+                            value={tokenInput}
+                            autoComplete="off"
+                            spellCheck={false}
+                            disabled={savingToken}
+                            onChange={(event) => {
+                              setTokenInput(event.target.value);
+                              if (tokenError) {
+                                setTokenError("");
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void saveToken();
+                              }
+                            }}
+                          />
+                          <IconButton
+                            icon={showToken ? "eye-off" : "eye"}
+                            size="sm"
+                            label={showToken ? "Hide token" : "Show token"}
+                            onClick={() =>
+                              setShowToken((current) => !current)
+                            }
+                          />
+                        </div>
+                      }
+                    />
+                    <div className="chan-step-actions">
+                      <Button
+                        variant="primary"
+                        disabled={savingToken}
+                        onClick={saveToken}
+                      >
+                        {savingToken ? "Saving…" : "Save token"}
+                      </Button>
+                      {tokenDone ? (
+                        <Button
+                          variant="secondary"
+                          disabled={savingToken}
+                          onClick={() => {
+                            setReplaceToken(false);
+                            setTokenInput("");
+                            setTokenError("");
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+              </div>
             </li>
 
-            <li className="channel-setup-step">
-              <h2 className="channel-step-title">Send a message to your bot</h2>
-              <p className="channel-step-help">
-                Open{" "}
-                {tokenDone && botURL ? (
-                  <a
-                    className="channel-step-link"
-                    href={botURL}
-                    target="_blank"
-                    rel="noopener noreferrer"
+            <li className={"chan-step" + (stepTwoDone ? " is-done" : "")}>
+              <span className="chan-step-ic" aria-hidden="true">
+                {stepTwoDone ? <Ic name="check" size={14} /> : "2"}
+              </span>
+              <div className="chan-step-body">
+                <h2 className="chan-step-title">Send a message to your bot</h2>
+                <p className="chan-step-help">
+                  Open{" "}
+                  {tokenDone && botURL ? (
+                    <a
+                      className="chan-step-link"
+                      href={botURL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      @{botUsername}
+                      <span className="sr"> (opens in a new tab)</span>
+                    </a>
+                  ) : (
+                    <span>{botUsername ? "@" + botUsername : "your bot"}</span>
+                  )}{" "}
+                  in Telegram and send any message, then press Find my chat.
+                </p>
+                <div className="chan-step-actions">
+                  <Button
+                    variant="primary"
+                    disabled={!tokenDone || discovering}
+                    onClick={findChats}
                   >
-                    @{botUsername}
-                    <span className="sr-only"> (opens in a new tab)</span>
-                  </a>
-                ) : (
-                  <span>{botUsername ? "@" + botUsername : "your bot"}</span>
-                )}{" "}
-                in Telegram and send any message, then press Find my chat.
-              </p>
-              <div className="channel-step-actions">
-                <button
-                  type="button"
-                  className="button-ui button-ui-primary"
-                  disabled={!tokenDone || discovering}
-                  onClick={findChats}
+                    {discovering ? "Looking…" : "Find my chat"}
+                  </Button>
+                </div>
+                <p
+                  className="chan-step-status"
+                  role="status"
+                  aria-live="polite"
                 >
-                  {discovering ? "Looking…" : "Find my chat"}
-                </button>
-              </div>
-              <p className="channel-step-status" role="status" aria-live="polite">
-                {discoverPhase === "empty" ? discoverEmptyText(botUsername) : ""}
-              </p>
-              {discoverError ? (
-                <div className="channel-step-alert" role="alert">
-                  <ErrorNotice
+                  {discoverPhase === "empty"
+                    ? discoverEmptyText(botUsername)
+                    : ""}
+                </p>
+                {discoverError ? (
+                  <ErrorAlert
                     message={discoverError}
                     details={discoverDetails}
                   />
-                </div>
-              ) : null}
+                ) : null}
+              </div>
             </li>
 
-            <li className="channel-setup-step">
-              <h2 className="channel-step-title">Connect the chat</h2>
-              {!tokenDone || discoveredChats.length === 0 ? (
-                <p className="channel-step-help">
-                  Find your chat first, then connect it here.
-                </p>
-              ) : (
-                <div className="channel-seen-list">
-                  <div className="agent-form-field channel-agent-select">
-                    <label
-                      className="agent-form-field-label"
-                      htmlFor="telegram-connect-agent"
-                    >
-                      Agent
-                    </label>
-                    <select
-                      id="telegram-connect-agent"
-                      value={connectAgent}
-                      disabled={connectingChat !== null}
-                      onChange={(event) => setConnectAgent(event.target.value)}
-                    >
-                      {agents.map((agent) => (
-                        <option key={agent.name} value={agent.name}>
-                          {agent.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {agents.length === 0 ? (
-                    <p className="channel-hint">
-                      No agents are configured yet.{" "}
-                      <a href="#/agents">Create an agent</a> first.
-                    </p>
-                  ) : null}
-                  <div className="channel-table-wrap">
-                    <table className="channel-table channel-seen-table">
-                      <caption className="sr-only">
-                        Chats that sent your bot a message
-                      </caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">Name</th>
-                          <th scope="col">Type</th>
-                          <th scope="col">Sender</th>
-                          <th scope="col" className="channel-table-actions">
-                            <span className="sr-only">Actions</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {discoveredChats.map((chat) => {
-                          const name = chat.name || chat.sender_name || "";
-                          return (
-                            <tr key={String(chat.chat_id)}>
-                              <td>
-                                <span className="channel-chat-cell">
-                                  <InitialAvatar name={name} small />
-                                  <span className="channel-chat-name">
-                                    {name}
-                                  </span>
-                                </span>
-                              </td>
-                              <td>
-                                <Badge label={chatTypeLabel(chat.type)} />
-                              </td>
-                              <td>{chat.sender_name || ""}</td>
-                              <td className="channel-table-actions">
-                                <button
-                                  type="button"
-                                  className="button-ui button-ui-primary"
-                                  disabled={connectingChat !== null || !connectAgent}
-                                  onClick={() => void connectChat(chat)}
-                                >
-                                  Connect
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-              <p className="channel-step-status" role="status" aria-live="polite">
-                {connectStatus}
-              </p>
-              {connectError ? (
-                <div className="channel-step-alert" role="alert">
-                  <ErrorNotice message={connectError} details={connectDetails} />
-                </div>
-              ) : null}
-              {restartFallback ? (
-                <div className="channel-step-fallback">
-                  <p className="channel-step-fallback-text">
-                    Restart lana to finish
+            <li className={"chan-step" + (stepThreeDone ? " is-done" : "")}>
+              <span className="chan-step-ic" aria-hidden="true">
+                {stepThreeDone ? <Ic name="check" size={14} /> : "3"}
+              </span>
+              <div className="chan-step-body">
+                <h2 className="chan-step-title">Connect the chat</h2>
+                {!tokenDone || discoveredChats.length === 0 ? (
+                  <p className="chan-step-help">
+                    Find your chat first, then connect it here.
                   </p>
-                  <button
-                    type="button"
-                    className="button-ui button-ui-secondary"
-                    onClick={() => {
-                      void retryRestart();
-                    }}
-                  >
-                    Restart daemon
-                  </button>
-                </div>
-              ) : null}
+                ) : (
+                  <div className="chan-seen">
+                    <SettingRow
+                      id="telegram-connect-agent"
+                      label="Agent"
+                      hint="New messages from this chat go to this agent. People can switch with /agent."
+                      control={
+                        <Select
+                          aria-label="Agent for this chat"
+                          options={agentOptions}
+                          value={connectAgent}
+                          onChange={setConnectAgent}
+                        />
+                      }
+                    />
+                    {agents.length === 0 ? (
+                      <p className="hint">
+                        No agents are configured yet.{" "}
+                        <a href="#/agents">Create an agent</a> first.
+                      </p>
+                    ) : null}
+                    <div className="chan-tablewrap">
+                      <table className="perm-t chan-table">
+                        <caption className="sr">
+                          Chats that sent your bot a message
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Type</th>
+                            <th scope="col">Sender</th>
+                            <th scope="col">
+                              <span className="sr">Actions</span>
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {discoveredChats.map((chat) => {
+                            const name = chat.name || chat.sender_name || "";
+                            return (
+                              <tr key={String(chat.chat_id)}>
+                                <td>
+                                  <span className="chan-agent">
+                                    <Avatar
+                                      name={name}
+                                      color={agentColor(name)}
+                                      size="sm"
+                                    />
+                                    <span className="chan-name">{name}</span>
+                                  </span>
+                                </td>
+                                <td>
+                                  <Badge>{chatTypeLabel(chat.type)}</Badge>
+                                </td>
+                                <td>{chat.sender_name || ""}</td>
+                                <td className="chan-rowactions">
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    disabled={
+                                      connectingChat !== null || !connectAgent
+                                    }
+                                    onClick={() => void connectChat(chat)}
+                                  >
+                                    Connect
+                                  </Button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                <p
+                  className="chan-step-status"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {connectStatus}
+                </p>
+                {connectError ? (
+                  <ErrorAlert message={connectError} details={connectDetails} />
+                ) : null}
+                {restartFallback ? (
+                  <div className="alert warn">
+                    <Ic name="triangle-alert" size={15} />
+                    <span className="grow">Restart lana to finish</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        void retryRestart();
+                      }}
+                    >
+                      Restart daemon
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             </li>
           </ol>
         )}
 
-        <section className="agent-form-section" aria-labelledby="channel-status-title">
-          <div className="agent-form-copy">
-            <h2 id="channel-status-title">Status</h2>
-            <p>Saved with this page. A daemon restart applies the change.</p>
-          </div>
-          <div className="agent-form-controls">
-            <label className="channel-switch">
-              <input
-                type="checkbox"
-                role="switch"
-                aria-checked={enabled ? "true" : "false"}
+        <section className="sblock">
+          <h2>Status</h2>
+          <div className="srow">
+            <div>
+              <div className="t">Enabled</div>
+              <div className="d">
+                Saved with this page. A daemon restart applies the change.
+              </div>
+            </div>
+            <div className="row">
+              <span className="chan-switch-label">{enabled ? "On" : "Off"}</span>
+              <Toggle
+                aria-label="Telegram on"
                 checked={enabled}
                 disabled={saving || (zeroChats && !enabled)}
-                onChange={(event) => setEnabled(event.target.checked)}
+                onChange={setEnabled}
               />
-              <span className="channel-switch-track" aria-hidden="true"></span>
-              <span className="channel-switch-text">
-                {enabled ? "On" : "Off"}
-              </span>
-            </label>
-            {zeroChats ? (
-              <p className="channel-hint channel-switch-hint">
-                Add a chat first before you turn Telegram on.
-              </p>
-            ) : (
-              <p className="channel-hint">
-                Telegram polls for new messages while the daemon runs.
-              </p>
-            )}
+            </div>
           </div>
+          <p className={zeroChats ? "hint chan-hint-warn" : "hint"}>
+            {zeroChats
+              ? "Add a chat first before you turn Telegram on."
+              : "Telegram polls for new messages while the daemon runs."}
+          </p>
         </section>
 
-        <details className="channel-advanced" ref={advancedRef}>
-          <summary className="channel-advanced-summary">Advanced</summary>
-          <div className="channel-advanced-body">
-            <div className="agent-form-field channel-advanced-field">
-              <label
-                className="agent-form-field-label"
-                htmlFor="telegram-token-env"
-              >
-                Token variable
-              </label>
-              <input
-                id="telegram-token-env"
-                className="agent-number-input"
-                type="text"
-                name="token_env"
-                value={tokenEnv}
-                autoComplete="off"
-                spellCheck={false}
-                aria-describedby={
-                  tokenEnvError ? "telegram-token-env-error" : undefined
-                }
-                onChange={(event) => {
-                  setTokenEnv(event.target.value);
-                  if (tokenEnvError) {
-                    setTokenEnvError("");
+        <section className="sblock">
+          <h2>Advanced</h2>
+          <Panel bodyClassName="chan-advanced-body">
+            <details className="chan-advanced" ref={advancedRef}>
+              <summary className="chan-advanced-summary">
+                <Ic name="chevron-right" size={15} />
+                <span>Token variable and API base</span>
+              </summary>
+              <div className="chan-advanced-in">
+                <SettingRow
+                  id="telegram-token-env"
+                  label="Token variable"
+                  hint="The environment variable that holds the bot token."
+                  error={tokenEnvError || undefined}
+                  control={
+                    <Input
+                      id="telegram-token-env"
+                      type="text"
+                      name="token_env"
+                      value={tokenEnv}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) => {
+                        setTokenEnv(event.target.value);
+                        if (tokenEnvError) {
+                          setTokenEnvError("");
+                        }
+                      }}
+                    />
                   }
-                }}
-              />
-              {tokenEnvError ? (
-                <p
-                  id="telegram-token-env-error"
-                  className="channel-step-error"
-                  role="alert"
-                >
-                  {tokenEnvError}
-                </p>
-              ) : null}
-            </div>
-            <div className="agent-form-field channel-advanced-field">
-              <label
-                className="agent-form-field-label"
-                htmlFor="telegram-api-base"
-              >
-                API base
-              </label>
-              <input
-                id="telegram-api-base"
-                className="agent-number-input"
-                type="text"
-                name="api_base"
-                value={apiBase}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Default Bot API server"
-                onChange={(event) => setApiBase(event.target.value)}
-              />
-            </div>
-            <div className="channel-token-row">
-              <p
-                className={"channel-token-status is-" + tokenState.tone}
-                role="status"
-                aria-live="polite"
-              >
-                <span className="channel-token-dot" aria-hidden="true"></span>
-                <span>{tokenState.text}</span>
-              </p>
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
-                disabled={checking || saving}
-                onClick={checkToken}
-              >
-                {checking ? "Checking…" : "Check token"}
-              </button>
-            </div>
-          </div>
-        </details>
+                />
+                <SettingRow
+                  id="telegram-api-base"
+                  label="API base"
+                  hint="Leave empty to use the default Bot API server."
+                  control={
+                    <Input
+                      id="telegram-api-base"
+                      type="text"
+                      name="api_base"
+                      value={apiBase}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="Default Bot API server"
+                      onChange={(event) => setApiBase(event.target.value)}
+                    />
+                  }
+                />
+                <div className="chan-token-row">
+                  <p
+                    className={"chan-status is-" + tokenState.tone}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="chan-dot" aria-hidden="true"></span>
+                    <span>{tokenState.text}</span>
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={checking || saving}
+                    onClick={checkToken}
+                  >
+                    {checking ? "Checking…" : "Check token"}
+                  </Button>
+                </div>
+              </div>
+            </details>
+          </Panel>
+        </section>
 
-        <section className="agent-form-section" aria-labelledby="channel-owners-title">
-          <div className="agent-form-copy">
-            <h2 id="channel-owners-title">Owners</h2>
-            <p>
-              Owners approve tools, and run /new, /agent, /compact and /cancel in
-              groups.
-            </p>
-          </div>
-          <div className="agent-form-controls">
-            <div className="channel-panel">
-              <div className="channel-owner-table-wrap">
-                <table className="channel-table">
-                  <caption className="sr-only">Telegram owners</caption>
-                  <thead>
+        <section className="sblock">
+          <h2>Owners</h2>
+          <p className="chan-section-hint">
+            Owners approve tools, and run /new, /agent, /compact and /cancel in
+            groups.
+          </p>
+          <div className="panel chan-panel">
+            <div className="chan-tablewrap">
+              <table className="perm-t chan-table">
+                <caption className="sr">Telegram owners</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Owner</th>
+                    <th scope="col">Telegram user ID</th>
+                    <th scope="col">
+                      <span className="sr">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {owners.length === 0 ? (
                     <tr>
-                      <th scope="col">Owner</th>
-                      <th scope="col">Telegram user ID</th>
-                      <th scope="col" className="channel-table-actions">
-                        <span className="sr-only">Actions</span>
-                      </th>
+                      <td colSpan={3} className="chan-empty">
+                        No owners yet. Add the Telegram user ID of each person
+                        who may run commands.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {owners.length === 0 ? (
-                      <tr className="channel-empty-row">
-                        <td colSpan={3}>
-                          No owners yet. Add the Telegram user ID of each person
-                          who may run commands.
+                  ) : (
+                    owners.map((owner) => (
+                      <tr key={owner.id}>
+                        <td>
+                          <span className="chan-agent">
+                            <Avatar
+                              name={owner.name || String(owner.id)}
+                              color={agentColor(owner.name || String(owner.id))}
+                              size="sm"
+                            />
+                            <span
+                              className={
+                                "chan-name" + (owner.name ? "" : " is-empty")
+                              }
+                            >
+                              {owner.name || "No display name"}
+                            </span>
+                          </span>
+                        </td>
+                        <td>
+                          <code className="chan-code">{owner.id}</code>
+                        </td>
+                        <td className="chan-rowactions">
+                          <IconButton
+                            size="sm"
+                            icon="x"
+                            label={"Remove owner " + (owner.name || owner.id)}
+                            disabled={saving}
+                            onClick={() => void removeOwner(owner)}
+                          />
                         </td>
                       </tr>
-                    ) : (
-                      owners.map((owner) => (
-                        <tr key={owner.id}>
-                          <td>
-                            <span className="channel-chat-cell">
-                              <InitialAvatar
-                                name={owner.name || String(owner.id)}
-                                small
-                              />
-                              <span
-                                className={
-                                  "channel-owner-name" +
-                                  (owner.name ? "" : " is-empty")
-                                }
-                              >
-                                {owner.name || "No display name"}
-                              </span>
-                            </span>
-                          </td>
-                          <td>
-                            <code className="channel-owner-id">{owner.id}</code>
-                          </td>
-                          <td className="channel-table-actions">
-                            <button
-                              type="button"
-                              className="channel-icon-button"
-                              aria-label={
-                                "Remove owner " + (owner.name || owner.id)
-                              }
-                              disabled={saving}
-                              onClick={() => void removeOwner(owner)}
-                            >
-                              <Icon name="close" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {ownerFormOpen ? (
-                <div className="channel-add-owner">
-                  <div className="channel-add-owner-row">
-                    <label className="agent-form-field channel-add-owner-field">
-                      <span className="agent-form-field-label">
-                        Telegram user ID
-                      </span>
-                      <input
-                        className="agent-number-input"
-                        type="number"
-                        step="1"
-                        inputMode="numeric"
-                        value={ownerDraft}
-                        autoComplete="off"
-                        onChange={(event) => setOwnerDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            void addOwner();
-                          }
-                        }}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="button-ui button-ui-primary"
-                      disabled={saving}
-                      onClick={addOwner}
-                    >
-                      Add
-                    </button>
-                    <button
-                      type="button"
-                      className="button-ui button-ui-secondary"
-                      disabled={saving}
-                      onClick={() => {
-                        setOwnerFormOpen(false);
-                        setOwnerDraft("");
-                        setOwnerError("");
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  {ownerError ? (
-                    <div className="channel-field-error" role="alert">
-                      <ErrorNotice message={ownerError} />
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="channel-add-owner-button"
-                  disabled={saving}
-                  onClick={() => setOwnerFormOpen(true)}
-                >
-                  <Icon name="plus" />
-                  <span>Add owner</span>
-                </button>
-              )}
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
+            {ownerFormOpen ? (
+              <div className="chan-addrow-form">
+                <Field
+                  label="Telegram user ID"
+                  hint="The number shown on the person's Telegram profile."
+                  className="chan-addrow-grow"
+                >
+                  <Input
+                    type="number"
+                    step="1"
+                    inputMode="numeric"
+                    value={ownerDraft}
+                    autoComplete="off"
+                    onChange={(event) => setOwnerDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void addOwner();
+                      }
+                    }}
+                  />
+                </Field>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={saving}
+                  onClick={addOwner}
+                >
+                  Add
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={saving}
+                  onClick={() => {
+                    setOwnerFormOpen(false);
+                    setOwnerDraft("");
+                    setOwnerError("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="chan-addrow"
+                disabled={saving}
+                onClick={() => setOwnerFormOpen(true)}
+              >
+                <Ic name="plus" size={14} />
+                <span>Add owner</span>
+              </button>
+            )}
+            {ownerError ? (
+              <div className="chan-inline-alert">
+                <ErrorAlert message={ownerError} />
+              </div>
+            ) : null}
           </div>
         </section>
 
-        <section className="channel-chats-section" aria-labelledby="channel-chats-title">
-          <div className="channel-chats-head">
+        <section className="sblock">
+          <div className="chan-sechead">
             <div>
-              <h2 id="channel-chats-title" className="channel-section-title">
-                Chats
-              </h2>
-              <p className="channel-section-text">
+              <h2>Chats</h2>
+              <p className="chan-section-hint">
                 Only these chats reach the bot. In groups the bot answers only
                 when someone mentions it.
               </p>
             </div>
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="plus"
               disabled={saving}
               aria-busy={openingChat ? "true" : "false"}
               onClick={openAddChat}
             >
-              {openingChat ? "Loading chats…" : "+ Add chat"}
-            </button>
+              {openingChat ? "Loading chats…" : "Add chat"}
+            </Button>
           </div>
-          <div className="channel-table-wrap">
-            <table className="channel-table">
-              <caption className="sr-only">
-                Telegram chats and the agent each one reaches
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Chat</th>
-                  <th scope="col">Type</th>
-                  <th scope="col">Chat ID</th>
-                  <th scope="col">Agent</th>
-                  <th scope="col" className="channel-table-actions">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {chats.length === 0 ? (
-                  <tr className="channel-empty-row">
-                    <td colSpan={5}>
-                      No chats yet. Add a chat to let people reach an agent from
-                      Telegram.
-                    </td>
+          <div className="panel chan-panel">
+            <div className="chan-tablewrap">
+              <table className="perm-t chan-table">
+                <caption className="sr">
+                  Telegram chats and the agent each one reaches
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Chat</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Chat ID</th>
+                    <th scope="col">Agent</th>
+                    <th scope="col">
+                      <span className="sr">Actions</span>
+                    </th>
                   </tr>
-                ) : (
-                  chats.map((chat) => {
-                    const name = chat.name || "Chat " + chat.chat_id;
-                    return (
-                      <tr key={chat.chat_id}>
-                        <td>
-                          <span className="channel-chat-cell">
-                            <InitialAvatar name={name} small />
-                            <span className="channel-chat-name">{name}</span>
-                          </span>
-                        </td>
-                        <td>
-                          <Badge label={chatTypeLabel(chat.type)} />
-                        </td>
-                        <td>
-                          <code className="channel-chat-id">{chat.chat_id}</code>
-                        </td>
-                        <td>
-                          <span className="channel-agent">
-                            {chat.agent ? (
-                              <AgentAvatar name={chat.agent} size="24" />
-                            ) : null}
-                            <span>{chat.agent || "No agent"}</span>
-                          </span>
-                        </td>
-                        <td className="channel-table-actions">
-                          <button
-                            type="button"
-                            className="channel-icon-button"
-                            aria-label={"Remove chat " + name}
-                            disabled={saving}
-                            onClick={() => void removeChat(chat)}
-                          >
-                            <Icon name="close" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {chats.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="chan-empty">
+                        No chats yet. Add a chat to let people reach an agent
+                        from Telegram.
+                      </td>
+                    </tr>
+                  ) : (
+                    chats.map((chat) => {
+                      const name = chat.name || "Chat " + chat.chat_id;
+                      return (
+                        <tr key={chat.chat_id}>
+                          <td>
+                            <span className="chan-agent">
+                              <Avatar
+                                name={name}
+                                color={agentColor(name)}
+                                size="sm"
+                              />
+                              <span className="chan-name">{name}</span>
+                            </span>
+                          </td>
+                          <td>
+                            <Badge>{chatTypeLabel(chat.type)}</Badge>
+                          </td>
+                          <td>
+                            <code className="chan-code">{chat.chat_id}</code>
+                          </td>
+                          <td>
+                            <span className="chan-agent">
+                              {chat.agent ? (
+                                <Avatar
+                                  name={chat.agent}
+                                  color={agentColor(chat.agent)}
+                                  size="sm"
+                                />
+                              ) : null}
+                              <span
+                                className={
+                                  "chan-name" +
+                                  (chat.agent ? "" : " is-empty")
+                                }
+                              >
+                                {chat.agent || "No agent"}
+                              </span>
+                            </span>
+                          </td>
+                          <td className="chan-rowactions">
+                            <IconButton
+                              size="sm"
+                              icon="x"
+                              label={"Remove chat " + name}
+                              disabled={saving}
+                              onClick={() => void removeChat(chat)}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
       </form>
@@ -1927,6 +2028,9 @@ function AddChatDialog({
 
   const chats = Array.isArray(waiting) ? waiting : [];
   const firstWaiting = chats.length > 0;
+  const agentOptions = [{ value: "", label: "Choose an agent" }].concat(
+    agents.map((item) => ({ value: item.name, label: item.name }))
+  );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1987,33 +2091,30 @@ function AddChatDialog({
     }
   }
 
+  function clearError() {
+    if (error) {
+      setError("");
+    }
+  }
+
   return (
-    <Dialog
-      title="Add chat"
-      className="channel-dialog"
-      dismissible={!busy}
-      onClose={onClose}
-    >
-      <form className="agent-dialog-form" noValidate onSubmit={submit}>
-        <p className="channel-dialog-intro">
+    <Dialog title="Add chat" dismissible={!busy} onClose={onClose}>
+      <form className="stack" noValidate onSubmit={submit}>
+        <p className="chan-dialog-intro">
           Send any message to the bot from the chat or group. It shows up below.
         </p>
 
-        <fieldset className="channel-waiting">
+        <fieldset className="chan-waiting">
           <legend>Chats waiting for access</legend>
-          {waitingError ? (
-            <div className="channel-field-error" role="alert">
-              <ErrorNotice message={waitingError} />
-            </div>
-          ) : null}
+          {waitingError ? <ErrorAlert message={waitingError} /> : null}
           {!waitingError && chats.length === 0 ? (
-            <p className="channel-waiting-empty">
+            <p className="chan-waiting-empty">
               No chats are waiting. Send a message to the bot from the chat, then
               open this again.
             </p>
           ) : null}
           {chats.length > 0 ? (
-            <ul className="channel-waiting-list">
+            <ul className="chan-waiting-list">
               {chats.map((chat, index) => {
                 const id = String(chat.chat_id);
                 const name = chat.name || "Chat " + chat.chat_id;
@@ -2022,24 +2123,21 @@ function AddChatDialog({
                   <li key={id}>
                     <label
                       className={
-                        "channel-waiting-item" +
-                        (isSelected ? " is-selected" : "")
+                        "chan-waiting-item" + (isSelected ? " is-selected" : "")
                       }
                     >
-                      <InitialAvatar name={name} small />
-                      <span className="channel-waiting-text">
-                        <span className="channel-waiting-name-row">
-                          <span className="channel-waiting-name">{name}</span>
-                          <Badge label={chatTypeLabel(chat.type)} />
+                      <Avatar name={name} color={agentColor(name)} size="sm" />
+                      <span className="chan-waiting-text">
+                        <span className="chan-waiting-name-row">
+                          <span className="chan-waiting-name">{name}</span>
+                          <Badge>{chatTypeLabel(chat.type)}</Badge>
                         </span>
-                        <span className="channel-waiting-meta">
+                        <span className="chan-waiting-meta">
                           <code>{chat.chat_id}</code> · wrote{" "}
                           {agoLabel(chat.last_message_at) || "just now"}
                         </span>
                       </span>
-                      <input
-                        className="channel-radio"
-                        type="radio"
+                      <Radio
                         name="waiting-chat"
                         value={id}
                         checked={isSelected}
@@ -2054,12 +2152,11 @@ function AddChatDialog({
           ) : null}
         </fieldset>
 
-        <label className="agent-form-field">
-          <span className="agent-form-field-label">
-            Not listed? Enter the chat ID by hand.
-          </span>
-          <input
-            className="agent-number-input"
+        <Field
+          label="Not listed? Enter the chat ID by hand."
+          hint="Group chat IDs are negative. A typed ID takes precedence over the list."
+        >
+          <Input
             type="number"
             step="1"
             inputMode="numeric"
@@ -2067,60 +2164,44 @@ function AddChatDialog({
             autoComplete="off"
             placeholder="Chat ID"
             data-autofocus={firstWaiting ? undefined : ""}
-            onChange={(event) => setManualId(event.target.value)}
+            onChange={(event) => {
+              setManualId(event.target.value);
+              clearError();
+            }}
           />
-          <span className="channel-hint">
-            Group chat IDs are negative. A typed ID takes precedence over the list.
-          </span>
-        </label>
+        </Field>
 
-        <label className="agent-form-field">
-          <span className="agent-form-field-label">Agent</span>
-          <select
+        <Field label="Agent">
+          <Select
+            aria-label="Agent for this chat"
+            options={agentOptions}
             value={agent}
-            onChange={(event) => setAgent(event.target.value)}
-          >
-            <option value="">Choose an agent</option>
-            {agents.map((item) => (
-              <option key={item.name} value={item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="channel-hint">
+            onChange={(value) => {
+              setAgent(value);
+              clearError();
+            }}
+          />
+        </Field>
+        <p className="hint">
           New messages from this chat go to this agent. People can switch with
           /agent.
         </p>
         {agents.length === 0 ? (
-          <p className="channel-hint">
+          <p className="hint">
             No agents are configured yet. <a href="#/agents">Create an agent</a>{" "}
             first.
           </p>
         ) : null}
 
-        {error ? (
-          <div className="channel-field-error" role="alert">
-            <ErrorNotice message={error} details={details} />
-          </div>
-        ) : null}
+        {error ? <ErrorAlert message={error} details={details} /> : null}
 
         <div className="dialog-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            className="button-ui button-ui-primary"
-            disabled={busy}
-          >
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy}>
             {busy ? "Adding…" : "Add chat"}
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>

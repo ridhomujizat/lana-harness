@@ -7,7 +7,9 @@ import {
   waitForDaemonRestart,
 } from "../api/daemon";
 import type { DaemonInfo } from "../api/daemon";
-import { Dialog, ErrorNotice, Loading } from "../ui/ui";
+import { ErrorDetails } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { Button, Modal, Skeleton } from "../ui/gr8r";
 
 /* REQ-TFB-003: one restart flow for Settings > General and the Telegram
    connect step. start() posts the restart (API-TFB-002); a draining answer
@@ -231,6 +233,18 @@ export function useDaemonRestart(
   };
 }
 
+function RestartError({ message, details }: { message: string; details: unknown[] }) {
+  return (
+    <div className="alert danger" role="alert">
+      <Ic name="circle-alert" size={15} />
+      <div className="grow">
+        <p className="settings-alert-msg">{message}</p>
+        <ErrorDetails details={details} />
+      </div>
+    </div>
+  );
+}
+
 export interface RestartDaemonDialogProps {
   controller: DaemonRestartController;
   onClose: () => void;
@@ -282,7 +296,35 @@ export function RestartDaemonDialog({
   if (controller.phase !== "idle") {
     const waiting = controller.phase === "waiting";
     return (
-      <Dialog title="Restart daemon?" dismissible={false} onClose={onClose}>
+      <Modal
+        title="Restart daemon?"
+        dismissible={false}
+        onClose={onClose}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={controller.busy || !waiting}
+              onClick={() => {
+                void controller.cancel();
+              }}
+            >
+              Cancel
+            </Button>
+            <span className="sp" />
+            <Button
+              variant="primary"
+              disabled={controller.busy || !waiting}
+              loading={controller.busy}
+              onClick={() => {
+                void controller.force();
+              }}
+            >
+              Restart now
+            </Button>
+          </>
+        }
+      >
         <div className="settings-dialog-form">
           <p className="hint">
             {waiting
@@ -306,35 +348,13 @@ export function RestartDaemonDialog({
               : "Restarting…"}
           </p>
           {controller.error ? (
-            <ErrorNotice
+            <RestartError
               message={controller.error}
               details={controller.details}
             />
           ) : null}
-          <div className="dialog-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={controller.busy || !waiting}
-              onClick={() => {
-                void controller.cancel();
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="button-ui button-ui-primary"
-              disabled={controller.busy || !waiting}
-              onClick={() => {
-                void controller.force();
-              }}
-            >
-              Restart now
-            </button>
-          </div>
         </div>
-      </Dialog>
+      </Modal>
     );
   }
 
@@ -342,19 +362,46 @@ export function RestartDaemonDialog({
   const supported = !info || info.restart_supported;
 
   return (
-    <Dialog
+    <Modal
       title="Restart daemon?"
       dismissible={!controller.busy}
       onClose={onClose}
+      footer={
+        <>
+          <span className="sp" />
+          <Button
+            variant="secondary"
+            disabled={controller.busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={controller.busy || loading || !info || !supported}
+            loading={controller.busy}
+            onClick={() => {
+              void controller.start(info ? info.started_at : 0);
+            }}
+          >
+            {controller.busy ? "Restarting…" : "Restart daemon"}
+          </Button>
+        </>
+      }
     >
       <div className="settings-dialog-form">
         <p className="hint">
           The daemon restarts in place. Every running turn ends and this page
           reconnects when the daemon is back.
         </p>
-        {loading ? <Loading label="Checking the daemon…" /> : null}
+        {loading ? (
+          <div className="settings-dialog-loading" aria-busy="true">
+            <span className="sr">Checking the daemon…</span>
+            <Skeleton width="60%" height={12} />
+          </div>
+        ) : null}
         {loadError ? (
-          <ErrorNotice message={loadError} details={loadDetails} />
+          <RestartError message={loadError} details={loadDetails} />
         ) : null}
         {info ? (
           <section
@@ -389,29 +436,12 @@ export function RestartDaemonDialog({
           </p>
         ) : null}
         {controller.error ? (
-          <ErrorNotice message={controller.error} details={controller.details} />
+          <RestartError
+            message={controller.error}
+            details={controller.details}
+          />
         ) : null}
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={controller.busy}
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
-            disabled={controller.busy || loading || !info || !supported}
-            onClick={() => {
-              void controller.start(info ? info.started_at : 0);
-            }}
-          >
-            {controller.busy ? "Restarting…" : "Restart daemon"}
-          </button>
-        </div>
       </div>
-    </Dialog>
+    </Modal>
   );
 }

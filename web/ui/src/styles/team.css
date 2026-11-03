@@ -75,8 +75,8 @@
 /* Status badges. The base badge-ui class supplies the shape, dot, and size. */
 .team-badge-warning {
   border-color: transparent;
-  background: var(--bg-warning-primary);
-  color: var(--text-warning-primary);
+  background: var(--amber-soft);
+  color: var(--fg-warning-primary);
 }
 
 .team-badge-warning .badge-ui-dot {
@@ -85,8 +85,8 @@
 
 .team-badge-success {
   border-color: transparent;
-  background: var(--bg-success-primary);
-  color: var(--text-success-primary);
+  background: var(--green-soft);
+  color: var(--fg-success-primary);
 }
 
 .team-badge-success .badge-ui-dot {
@@ -95,8 +95,8 @@
 
 .team-badge-error {
   border-color: transparent;
-  background: var(--bg-error-primary);
-  color: var(--text-error-primary);
+  background: var(--red-soft);
+  color: var(--fg-error-primary);
 }
 
 .team-badge-error .badge-ui-dot {
@@ -104,8 +104,8 @@
 }
 
 .team-badge-neutral {
-  border-color: var(--border-secondary);
-  background: var(--bg-secondary);
+  border-color: transparent;
+  background: var(--surface-2);
   color: var(--text-secondary);
 }
 
@@ -118,9 +118,10 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-secondary);
-  border-radius: var(--radius-xl);
-  background: var(--bg-secondary);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-card);
 }
 
 .team-work-head {
@@ -158,10 +159,13 @@
   line-height: 20px;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .team-work-toggle:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-2);
 }
 
 .team-work-toggle:focus-visible {
@@ -258,9 +262,10 @@
   gap: 10px;
   min-height: 36px;
   padding: 6px 10px;
-  border: 1px solid var(--border-secondary);
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--bg-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .team-tool-name {
@@ -290,9 +295,10 @@
 .team-answer {
   margin: 0 12px 12px;
   padding: 10px 12px 12px;
-  border: 1px solid var(--border-secondary);
+  border: 0;
   border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
   background: var(--bg-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .team-answer-head {
@@ -334,5 +340,11 @@
 
   .team-tools {
     margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .team-work-toggle {
+    transition: none;
   }
 }

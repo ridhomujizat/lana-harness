@@ -1,0 +1,369 @@
+/* Gr8r-style rules for the home page (gr8r layer). Use Gr8r tokens and classes. */
+
+/* The Gr8r .stat is a <button>; drop the legacy button chrome it would inherit
+   (background, colour, weight, radius) while keeping the panels.css layout. */
+.home-page .stat {
+  background: none;
+  color: inherit;
+  font-weight: inherit;
+  align-items: stretch;
+  justify-content: normal;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.home-stats {
+  margin-bottom: 16px;
+}
+
+.home-grid {
+  margin-top: 0;
+}
+
+/* Header controls */
+
+.home-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-agent-label {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.home-agent .select-btn {
+  min-width: 9rem;
+  max-width: 12rem;
+}
+
+.home-updated {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+.home-alert {
+  margin-bottom: 16px;
+}
+
+.home-alert .empty-state {
+  padding: 20px 16px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.home-empty {
+  padding: 32px 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.home-note {
+  margin: 0 0 10px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+/* Tables */
+
+.home-table-wrap {
+  margin: 0 -8px;
+  overflow-x: auto;
+}
+
+.home-page .home-table th,
+.home-page .home-table td {
+  text-align: left;
+  vertical-align: middle;
+}
+
+.home-page .home-table .is-num {
+  text-align: right;
+}
+
+.home-page .home-table tr.is-danger td {
+  color: var(--red);
+}
+
+.home-tools-table {
+  min-width: 620px;
+}
+
+.home-last-error {
+  max-width: 240px;
+}
+
+.home-last-error-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-last-error-time {
+  display: block;
+  color: var(--text-4);
+  font-size: var(--fs-2xs);
+}
+
+.home-page .home-table tr.is-danger .home-last-error-time {
+  color: inherit;
+}
+
+/* Token usage bars */
+
+.home-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 2px;
+}
+
+.home-chart-plot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-chart-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-chart-label {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.home-chart-bar {
+  min-width: 0;
+}
+
+.home-chart-total {
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  text-align: right;
+}
+
+.home-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.home-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.home-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-xs);
+}
+
+.home-swatch-input {
+  background: var(--accent);
+}
+
+.home-swatch-cached {
+  background: var(--amber);
+}
+
+.home-swatch-output {
+  background: var(--green);
+}
+
+.home-chart-table summary {
+  width: max-content;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.home-chart-table summary:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.home-chart-table .home-table-wrap {
+  margin-top: 8px;
+}
+
+/* Rows (Right now, By model, By agent, By source) */
+
+.home-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.home-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--divider);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+
+.home-rows > .home-row:first-child {
+  border-top: 0;
+}
+
+a.home-row:hover .home-row-label {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.home-row-icon {
+  display: inline-flex;
+  color: var(--text-4);
+}
+
+.home-row-label {
+  color: var(--text-2);
+}
+
+.home-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.home-row-title {
+  color: var(--text);
+}
+
+.home-row-sub {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.home-row-value {
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Error log */
+
+.home-err-filter {
+  flex-wrap: wrap;
+}
+
+.home-err-filter button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.home-errors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.home-error-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--divider);
+}
+
+.home-errors > .home-error-row:first-child {
+  border-top: 0;
+}
+
+.home-error-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-error-time {
+  flex: 0 0 auto;
+  width: 40px;
+  color: var(--text-4);
+  font-size: var(--fs-2xs);
+}
+
+.home-error-agent {
+  flex: 0 1 auto;
+  max-width: 120px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+.home-error-message {
+  display: block;
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.home-error-message:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.home-error-message.is-open {
+  overflow-wrap: anywhere;
+  text-decoration: none;
+  white-space: normal;
+}
+
+.home-error-link {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  text-decoration: none;
+}
+
+.home-error-link:hover {
+  text-decoration: underline;
+}
+
+.home-error-detail {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 8px 0 1px;
+  padding-left: 48px;
+  font-size: var(--fs-2xs);
+}
+
+.home-error-detail dt {
+  color: var(--text-4);
+}
+
+.home-error-detail dd {
+  margin: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}

@@ -1,6 +1,7 @@
 import { avatarFor } from "../lib/avatar";
 import { Icon as SharedIcon } from "../ui/ui";
 import { DEFAULT_AGENT_TAB } from "../app/router";
+import type { BadgeTone } from "../ui/gr8r";
 
 /* Shared helpers for the agents pages (REQ-WEB-045, REQ-WEB-047). */
 
@@ -172,6 +173,21 @@ export function permissionMeta(value: unknown): PermissionMeta {
     return { label: "Never", className: "badge-ui badge-ui-error" };
   }
   return { label: "Ask", className: "badge-ui" };
+}
+
+/* REQ-ROOM-011: the roster badge mapping. Green while it works or is online,
+   amber when it waits for the owner, red on a problem, gray when resting. */
+export function presenceTone(state: string | undefined | null): BadgeTone {
+  if (state === "waiting") {
+    return "amber";
+  }
+  if (state === "problem") {
+    return "red";
+  }
+  if (state === "working" || state === "online") {
+    return "green";
+  }
+  return "gray";
 }
 
 /* Compact relative time for the list and the detail header. */

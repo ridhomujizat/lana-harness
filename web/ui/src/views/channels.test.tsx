@@ -85,7 +85,7 @@ describe("channels views", () => {
     expect(vi.mocked(saveTelegram)).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(
-        container.querySelector<HTMLDetailsElement>("details.channel-advanced")
+        container.querySelector<HTMLDetailsElement>("details.chan-advanced")
           ?.open
       ).toBe(true);
     });

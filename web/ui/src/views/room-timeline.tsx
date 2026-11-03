@@ -19,7 +19,9 @@ import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
 import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
-import { ErrorNotice, Icon } from "../ui/ui";
+import { ErrorDetails } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import { Avatar, AvatarStack, Badge, Button, Skeleton } from "../ui/gr8r";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
 import {
@@ -28,7 +30,7 @@ import {
   pasteImageFiles,
   useAttachmentDraft,
 } from "./attachments";
-import { AgentFace, PresenceLabel, TeamFace, TypingDots, useRooms } from "./presence";
+import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
 import type { FaceRef } from "./presence";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
@@ -1111,24 +1113,29 @@ export function RoomView({ room }: RoomViewProps) {
     <div className="room-view">
       <header className="room-head">
         {team ? (
-          <TeamFace faces={teamFaces} size={32} />
+          <AvatarStack
+            size="lg"
+            max={3}
+            items={teamFaces.map((face) => ({
+              name: face.name,
+              color: gr8rColor(face.color),
+            }))}
+          />
         ) : (
-          <AgentFace
+          <Avatar
             name={room.name}
-            color={room.color}
-            presence={room.presence}
-            size={44}
+            color={gr8rColor(room.color)}
+            size="lg"
+            presence={Boolean(room.presence)}
           />
         )}
         <div className="room-head-main">
           <div className="room-head-title">
             <span className="room-head-name">{room.name}</span>
             {team ? (
-              <span className="badge-ui room-head-badge">
-                {"Team · " + teamAgents + " agents"}
-              </span>
+              <Badge tone="violet">{"Team · " + teamAgents + " agents"}</Badge>
             ) : room.title ? (
-              <span className="badge-ui room-head-badge">{room.title}</span>
+              <Badge>{room.title}</Badge>
             ) : null}
           </div>
           <div className="room-head-sub">
@@ -1143,24 +1150,27 @@ export function RoomView({ room }: RoomViewProps) {
           </div>
         </div>
         <div className="room-head-actions">
-          <a
-            className="button-ui button-ui-secondary"
+          <Button
+            as="a"
+            size="sm"
             href={"#/agents/" + encodeURIComponent(room.name)}
           >
             View profile
-          </a>
+          </Button>
         </div>
       </header>
 
       {loadError ? (
-        <div className="room-notices">
-          <ErrorNotice message={loadError} />
+        <div className="alert danger room-notices" role="alert">
+          <Ic name="triangle-alert" size={15} />
+          <div>{loadError}</div>
         </div>
       ) : null}
       {streamState === "reconnecting" ? (
-        <p className="notice notice-warn room-notices">
-          The live stream is reconnecting.
-        </p>
+        <div className="alert warn room-notices" role="status">
+          <Ic name="wifi-off" size={15} />
+          <div>The live stream is reconnecting.</div>
+        </div>
       ) : null}
 
       <div className="room-timeline-scroll" ref={scrollRef} onScroll={onScroll}>
@@ -1187,7 +1197,13 @@ export function RoomView({ room }: RoomViewProps) {
 
       <div className="room-composer">
         {actionError ? (
-          <ErrorNotice message={actionError} details={actionDetails} />
+          <div className="alert danger" role="alert">
+            <Ic name="triangle-alert" size={15} />
+            <div>
+              {actionError}
+              <ErrorDetails details={actionDetails} />
+            </div>
+          </div>
         ) : null}
         <div className="room-slot">
           {activeApproval ? (
@@ -1214,7 +1230,7 @@ export function RoomView({ room }: RoomViewProps) {
           ) : null}
         </div>
         {newTopic ? <div className="room-newtopic">New topic</div> : null}
-        <div className="room-composer-box">
+        <div className="cbox">
           <AttachmentChips
             items={attachmentDraft.items}
             onRemove={attachmentDraft.remove}
@@ -1237,7 +1253,6 @@ export function RoomView({ room }: RoomViewProps) {
             />
           ) : null}
           <textarea
-            className="room-composer-input"
             rows={2}
             aria-label={"Message " + (team ? "the team" : room.name)}
             placeholder={placeholder}
@@ -1271,25 +1286,25 @@ export function RoomView({ room }: RoomViewProps) {
                 onFiles={attachmentDraft.addFiles}
               />
             </span>
-            <button
-              type="button"
-              className="button-ui button-ui-tertiary room-newtopic-btn"
+            <Button
+              size="sm"
+              variant="ghost"
+              className={newTopic ? "on" : undefined}
               disabled={sending}
               onClick={() => setNewTopic((value) => !value)}
             >
               New topic
-            </button>
+            </Button>
             <span className="room-composer-spacer"></span>
-            <button
-              type="button"
-              className="room-send"
+            <Button
+              size="sm"
+              variant="primary"
+              icon="arrow-up"
               aria-label="Send message"
               title="Send message"
               disabled={sending || (!draft.trim() && attachmentDraft.items.length === 0)}
               onClick={() => void sendMessage()}
-            >
-              <Icon name="arrow-up" className="icon-20" />
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -1311,13 +1326,20 @@ function RoomEmpty({
   return (
     <div className="room-empty">
       {team && teamFaces.length > 0 ? (
-        <TeamFace faces={teamFaces} size={52} />
+        <AvatarStack
+          size="xl"
+          max={3}
+          items={teamFaces.map((face) => ({
+            name: face.name,
+            color: gr8rColor(face.color),
+          }))}
+        />
       ) : (
-        <AgentFace
+        <Avatar
           name={room.name}
-          color={room.color}
-          presence={room.presence}
-          size={52}
+          color={gr8rColor(room.color)}
+          size="xl"
+          presence={Boolean(room.presence)}
         />
       )}
       <h2 className="room-empty-title">
@@ -1337,10 +1359,10 @@ function RoomEmpty({
 /* The loading placeholders of REQ-ROOM-013, matching the room list. */
 function SkeletonHint() {
   return (
-    <div className="room-skeleton">
-      <span className="skeleton skeleton-row" style={{ height: 32 }} aria-hidden="true" />
-      <span className="skeleton skeleton-row" style={{ height: 56 }} aria-hidden="true" />
-      <span className="skeleton skeleton-row" style={{ height: 32 }} aria-hidden="true" />
+    <div className="room-skeleton" aria-hidden="true">
+      <Skeleton width="100%" height={32} />
+      <Skeleton width="100%" height={56} />
+      <Skeleton width="100%" height={32} />
     </div>
   );
 }

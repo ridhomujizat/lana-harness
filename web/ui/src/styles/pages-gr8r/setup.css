@@ -1,0 +1,268 @@
+/* Gr8r-style rules for the setup wizard and the shared auth shell (gr8r layer).
+   The `.auth` / `.auth-card` / `.onb` / `.steps` / `.opt` shapes come from
+   gr8r/pages/auth.css; these are the Lana bindings (brand bar, form stack,
+   option tiles, ready checklist). */
+
+/* ------------------------------------------------------------------ */
+/* Shell: brand bar, centred card, footer                             */
+/* ------------------------------------------------------------------ */
+
+.auth > .auth-foot {
+  padding: 18px;
+}
+
+.auth-card > .auth-foot {
+  margin: 0;
+}
+
+.auth-mark {
+  display: flex;
+  justify-content: center;
+}
+
+.auth-loading {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+/* The "Step n of 5" label under the progress bars. */
+.steps-sub {
+  margin-top: -8px;
+  font-size: var(--fs-2xs);
+  text-align: center;
+}
+
+/* The wide wizard card (the persona step with two textareas). */
+.auth-card.onb-wide {
+  max-width: 640px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Forms                                                              */
+/* ------------------------------------------------------------------ */
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.auth-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.auth-status:empty {
+  display: none;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: 2px;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.field-hint-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.auth-tip {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.auth-save-error {
+  min-width: 0;
+}
+
+.alert-body {
+  margin: 2px 0 0;
+  color: var(--text-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Option tiles                                                       */
+/* ------------------------------------------------------------------ */
+
+/* The legacy `button` rules (lower layer) leave height/padding/colour on a bare
+   <button>; `.opt` is a Gr8r class applied to a <button>, so block those here
+   and keep the Gr8r tile spacing. */
+.auth .opt {
+  height: auto;
+  min-height: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 14px 12px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.auth .opt b {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.auth .opt span {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ------------------------------------------------------------------ */
+/* Connect: suggested models                                          */
+/* ------------------------------------------------------------------ */
+
+.suggests {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.auth .suggest {
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Restart / spinner                                                  */
+/* ------------------------------------------------------------------ */
+
+.auth-restart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 24px 8px;
+  text-align: center;
+}
+
+.auth-restart-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.auth-restart-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.auth-restart .hint {
+  max-width: 34rem;
+}
+
+.auth-restart-ic {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-lg);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.auth-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ready checklist                                                    */
+/* ------------------------------------------------------------------ */
+
+.ready-badge {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  border-radius: var(--r-lg);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.ready-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 12px 14px;
+}
+
+.ready-row + .ready-row {
+  border-top: 1px solid var(--divider);
+}
+
+.ready-ic {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ready-t {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.ready-s {
+  font-size: var(--fs-2xs);
+}
+
+.ready-ok {
+  display: inline-flex;
+  color: var(--green);
+}
+
+.ready-link {
+  align-self: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                         */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 560px) {
+  .opts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auth-actions .btn-primary {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-spinner {
+    animation: none;
+    border-color: var(--accent);
+  }
+}

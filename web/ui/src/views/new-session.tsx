@@ -13,8 +13,10 @@ import { ApiError, DAEMON_DRAINING_TEXT, errorMessage, isDaemonDraining } from "
 import { listSessions } from "../api/sessions";
 import { createSession } from "../api/sessions";
 import { sendMessage } from "../api/turns";
-import { avatarFor } from "../lib/avatar";
 import { ErrorDetails, useAnnounce } from "../ui/ui";
+import { Ic, LanaMark } from "../ui/icons";
+import { Avatar, AvatarStack, Button, SearchInput } from "../ui/gr8r";
+import { gr8rColor } from "./presence";
 import { CreateAgentDialog } from "./agents";
 import {
   AttachmentChips,
@@ -31,29 +33,6 @@ const RECENT_LIMIT = 3;
 const RECENT_POOL = 20;
 const TASK_LIMIT = 32000;
 const LISTBOX_ID = "new-session-agent-listbox";
-
-function Icon({ name, className = "icon-20" }: { name: string; className?: string }) {
-  return (
-    <img
-      className={className}
-      src={"/assets/icons/" + name + ".svg"}
-      alt=""
-      aria-hidden="true"
-    />
-  );
-}
-
-function AgentAvatar({ name, size = "28" }: { name: string; size?: string }) {
-  const avatar = avatarFor(name);
-  return (
-    <span
-      className={"agent-avatar avatar-" + size + " " + avatar.colorClass}
-      aria-hidden="true"
-    >
-      {avatar.initial}
-    </span>
-  );
-}
 
 function isTeam(agent: Agent | null): boolean {
   return Boolean(agent) && agent?.kind === "team";
@@ -144,7 +123,7 @@ function optionId(index: number): string {
   return "new-session-option-" + index;
 }
 
-function TeamAvatars({ agent }: { agent: Agent }) {
+function TeamAvatars({ agent, byName }: { agent: Agent; byName: Map<string, Agent> }) {
   const names: string[] = [];
   if (agent.lead) {
     names.push(agent.lead);
@@ -162,11 +141,14 @@ function TeamAvatars({ agent }: { agent: Agent }) {
     names.push(agent.name);
   }
   return (
-    <span className="agent-avatar-group" aria-hidden="true">
-      {names.map((name) => (
-        <AgentAvatar key={name} name={name} size="26" />
-      ))}
-    </span>
+    <AvatarStack
+      size="sm"
+      max={3}
+      items={names.map((name) => ({
+        name,
+        color: gr8rColor(byName.get(name)?.color),
+      }))}
+    />
   );
 }
 
@@ -193,11 +175,7 @@ function AgentOption({
       type="button"
       role="option"
       id={id}
-      className={
-        "agent-option" +
-        (team ? " agent-option-team" : "") +
-        (active ? " is-active" : "")
-      }
+      className={"agent-option" + (active ? " is-active" : "")}
       aria-selected={selected ? "true" : "false"}
       tabIndex={-1}
       data-active={active ? "true" : undefined}
@@ -205,9 +183,9 @@ function AgentOption({
       onMouseEnter={onHover}
     >
       {team ? (
-        <TeamAvatars agent={agent} />
+        <TeamAvatars agent={agent} byName={byName} />
       ) : (
-        <AgentAvatar name={agent.name} size="28" />
+        <Avatar name={agent.name} color={gr8rColor(agent.color)} size="md" />
       )}
       <span className="agent-option-text">
         <span className="agent-option-name">{agent.name}</span>
@@ -218,7 +196,7 @@ function AgentOption({
         </span>
       </span>
       {selected ? (
-        <Icon name="check" className="icon-16 agent-option-check" />
+        <Ic name="check" size={14} className="agent-option-check" />
       ) : null}
     </button>
   );
@@ -246,8 +224,8 @@ function AgentPicker({
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
-  const chipRef = useRef<HTMLButtonElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
+  const chipRef = useRef<HTMLSpanElement>(null);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const selected = agents.find((agent) => agent.name === selectedName) || null;
@@ -260,9 +238,9 @@ function AgentPicker({
     if (!open) {
       return;
     }
-    if (searchRef.current) {
-      searchRef.current.focus();
-    }
+    searchBoxRef.current
+      ?.querySelector<HTMLInputElement>("input")
+      ?.focus();
   }, [open]);
 
   useEffect(() => {
@@ -306,8 +284,8 @@ function AgentPicker({
   function closePicker(restoreFocus: boolean) {
     setOpen(false);
     setSearch("");
-    if (restoreFocus && chipRef.current) {
-      chipRef.current.focus();
+    if (restoreFocus) {
+      chipRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     }
   }
 
@@ -406,37 +384,45 @@ function AgentPicker({
       onBlur={handleFocusOut}
       onKeyDown={handlePickerKeyDown}
     >
-      <button
-        ref={chipRef}
-        type="button"
-        className={"agent-chip" + (open ? " is-open" : "")}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={open ? LISTBOX_ID : undefined}
-        aria-label={selected ? "Change agent: " + selected.name : "Pick an agent"}
-        disabled={disabled}
-        onClick={togglePicker}
-      >
-        {selected ? (
-          <AgentAvatar name={selected.name} size="22" />
-        ) : (
-          <span className="agent-avatar avatar-22 tone-gray" aria-hidden="true">
-            ?
+      <span className="agent-picker-trigger" ref={chipRef}>
+        <Button
+          variant="secondary"
+          iconRight="chevron-down"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={open ? LISTBOX_ID : undefined}
+          aria-label={
+            selected ? "Change agent: " + selected.name : "Pick an agent"
+          }
+          disabled={disabled}
+          onClick={togglePicker}
+        >
+          {selected ? (
+            <Avatar
+              name={selected.name}
+              color={gr8rColor(selected.color)}
+              size="sm"
+            />
+          ) : (
+            <Avatar empty size="sm" />
+          )}
+          <span className="agent-chip-label">
+            {loading
+              ? "Loading agents…"
+              : selected
+                ? selected.name
+                : "Pick an agent"}
           </span>
-        )}
-        <span className="agent-chip-label">
-          {loading ? "Loading agents…" : selected ? selected.name : "Pick an agent"}
-        </span>
-        <Icon name="chevron-down" />
-      </button>
+        </Button>
+      </span>
 
       {open ? (
         <div className="agent-picker-menu">
-          <div className="agent-picker-search">
-            <Icon name="search" />
-            <input
-              ref={searchRef}
-              className="agent-picker-search-input"
+          <div ref={searchBoxRef}>
+            <SearchInput
+              wrapClassName="agent-picker-search"
+              kbd={null}
+              size="sm"
               type="search"
               role="combobox"
               aria-label="Search agents and teams"
@@ -450,10 +436,10 @@ function AgentPicker({
               onChange={handleSearchInput}
               onKeyDown={handleSearchKeyDown}
             />
-            <span className="agent-picker-count" aria-hidden="true">
-              {options.all.length}
-            </span>
           </div>
+          <span className="agent-picker-count" aria-hidden="true">
+            {options.all.length}
+          </span>
 
           <div
             className="agent-picker-list"
@@ -464,8 +450,8 @@ function AgentPicker({
           >
             {options.recent.length > 0 ? (
               <div className="agent-picker-group" role="group" aria-label="Recent">
-                <div className="agent-picker-heading" aria-hidden="true">
-                  RECENT
+                <div className="mh" aria-hidden="true">
+                  Recent
                 </div>
                 {options.recent.map((agent, index) => (
                   <AgentOption
@@ -483,8 +469,8 @@ function AgentPicker({
             ) : null}
             {options.others.length > 0 ? (
               <div className="agent-picker-group" role="group" aria-label="Agents">
-                <div className="agent-picker-heading" aria-hidden="true">
-                  AGENTS
+                <div className="mh" aria-hidden="true">
+                  Agents
                 </div>
                 {options.others.map((agent, index) => {
                   const optionIndex = options.recent.length + index;
@@ -517,7 +503,7 @@ function AgentPicker({
               href="#/agents"
               onClick={handleCreateAgent}
             >
-              <Icon name="plus" />
+              <Ic name="plus" size={13} />
               <span>Create agent</span>
             </a>
             <span className="agent-picker-hint">↑↓ to move · Enter to pick</span>
@@ -746,21 +732,18 @@ export function NewSessionPage() {
   }
 
   return (
-    <main id="main" className="new-session-view">
+    <main id="main" className="page new-session-page">
       <div className="new-session-content">
-        <header className="new-session-heading">
+        <header className="new-session-head">
           <span className="new-session-mark">
-            <img
-              className="new-session-logo"
-              src="/assets/icons/logo-mark.svg"
-              alt=""
-              aria-hidden="true"
-            />
+            <LanaMark size={28} />
           </span>
-          <h1 className="new-session-title">New session</h1>
-          <p className="new-session-subtitle">
-            Pick who works on it, then describe the task.
-          </p>
+          <div className="new-session-head-text">
+            <h1 className="new-session-title">New session</h1>
+            <p className="new-session-subtitle">
+              Pick who works on it, then describe the task.
+            </p>
+          </div>
         </header>
 
         <form
@@ -768,8 +751,8 @@ export function NewSessionPage() {
           onSubmit={submit}
           {...fileDrop.handlers}
         >
-          <div className="new-session-composer">
-            <label className="sr-only" htmlFor="new-session-task">
+          <div className="cbox new-session-composer">
+            <label className="sr" htmlFor="new-session-task">
               What should we work on?
             </label>
             <AttachmentChips
@@ -808,14 +791,14 @@ export function NewSessionPage() {
                 onSelect={selectAgent}
                 onCreateAgent={() => setShowCreateAgent(true)}
               />
-              <span className="new-session-spacer"></span>
-              <button
+              <span className="sp"></span>
+              <Button
                 type="submit"
-                className="button-ui button-ui-primary new-session-start"
+                variant="primary"
                 disabled={loading || busy || !selected}
               >
                 {busy ? "Starting…" : "Start session"}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -827,16 +810,19 @@ export function NewSessionPage() {
           ) : null}
 
           {error ? (
-            <div className="new-session-error" role="alert">
-              <p className="new-session-error-message">{error}</p>
-              <ErrorDetails details={details} />
-              {createdId ? (
-                <p className="new-session-error-link">
-                  <a href={"#/sessions/" + encodeURIComponent(createdId)}>
-                    Open the created session
-                  </a>
-                </p>
-              ) : null}
+            <div className="alert danger new-session-error" role="alert">
+              <Ic name="triangle-alert" size={15} />
+              <div>
+                <p className="new-session-error-message">{error}</p>
+                <ErrorDetails details={details} />
+                {createdId ? (
+                  <p className="new-session-error-link">
+                    <a href={"#/sessions/" + encodeURIComponent(createdId)}>
+                      Open the created session
+                    </a>
+                  </p>
+                ) : null}
+              </div>
             </div>
           ) : null}
 

@@ -9,8 +9,6 @@ import {
 import type {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
-  ReactNode,
-  RefObject,
 } from "react";
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
@@ -51,7 +49,15 @@ import {
   sendMessage as sendMessageRequest,
 } from "../api/turns";
 import { holderText, stopReasonWords } from "../lib/format";
-import { Dialog, ErrorNotice, Loading, useAnnounce } from "../ui/ui";
+import { ErrorNotice, Loading, useAnnounce } from "../ui/ui";
+import { Ic } from "../ui/icons";
+import {
+  Button,
+  IconButton,
+  Input,
+  Menu,
+  Modal,
+} from "../ui/gr8r";
 import { ApprovalCard, approvalResultWords } from "./approval";
 import type { ApprovalItem } from "./approval";
 import { isTeam, rosterNames } from "./agent-common";
@@ -185,23 +191,6 @@ function composerRowCount(node: HTMLTextAreaElement): number {
   return Math.min(COMPOSER_MAX_ROWS, Math.max(COMPOSER_MIN_ROWS, lines));
 }
 
-function Icon({
-  name,
-  className = "icon-20",
-}: {
-  name: string;
-  className?: string;
-}) {
-  return (
-    <img
-      className={className}
-      src={"/assets/icons/" + name + ".svg"}
-      alt=""
-      aria-hidden="true"
-    />
-  );
-}
-
 function channelLabel(value: string): string {
   switch (value) {
     case "web":
@@ -307,147 +296,6 @@ function questionClosedWords(payload: Record<string, unknown>): string {
   return "Already answered elsewhere";
 }
 
-function menuFocusables(node: HTMLElement | null): HTMLElement[] {
-  if (!node) {
-    return [];
-  }
-  return Array.from(
-    node.querySelectorAll<HTMLElement>(
-      "button:not([disabled]), input:not([disabled])"
-    )
-  );
-}
-
-/* Small menu popover for the composer. Escape closes it and returns focus to
-   the trigger; arrows and Tab move through the items. */
-function Popover({
-  open,
-  onClose,
-  triggerRef,
-  label,
-  align = "left",
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  triggerRef: RefObject<HTMLElement | null>;
-  label: string;
-  align?: "left" | "right";
-  children?: ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  // eslint-disable-next-line react-hooks/refs -- the latest close handler is kept for the native listeners, as in session.js
-  closeRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-    const node = ref.current;
-    const items = menuFocusables(node);
-    if (items.length > 0) {
-      items[0]?.focus();
-    } else if (node) {
-      node.focus();
-    }
-    function handlePointer(event: MouseEvent) {
-      const trigger = triggerRef && triggerRef.current;
-      if (node && node.contains(event.target as Node)) {
-        return;
-      }
-      if (trigger && trigger.contains(event.target as Node)) {
-        return;
-      }
-      closeRef.current();
-    }
-    function handleFocusOut(event: FocusEvent) {
-      if (!ref.current) {
-        return;
-      }
-      if (
-        event.relatedTarget &&
-        ref.current.contains(event.relatedTarget as Node)
-      ) {
-        return;
-      }
-      if (!event.relatedTarget) {
-        return;
-      }
-      closeRef.current();
-    }
-    document.addEventListener("mousedown", handlePointer);
-    node?.addEventListener("focusout", handleFocusOut);
-    return () => {
-      document.removeEventListener("mousedown", handlePointer);
-      node?.removeEventListener("focusout", handleFocusOut);
-    };
-  }, [open, triggerRef]);
-
-  if (!open) {
-    return null;
-  }
-
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeRef.current();
-      const trigger = triggerRef && triggerRef.current;
-      if (trigger) {
-        trigger.focus();
-      }
-      return;
-    }
-    if (
-      event.key !== "ArrowDown" &&
-      event.key !== "ArrowUp" &&
-      event.key !== "Home" &&
-      event.key !== "End"
-    ) {
-      return;
-    }
-    const target = event.target;
-    if (
-      target instanceof HTMLElement &&
-      (target.nodeName === "INPUT" || target.nodeName === "TEXTAREA")
-    ) {
-      return;
-    }
-    const items = menuFocusables(ref.current);
-    if (items.length === 0) {
-      return;
-    }
-    event.preventDefault();
-    const active = document.activeElement;
-    const index = active ? items.indexOf(active as HTMLElement) : -1;
-    let next = index;
-    if (event.key === "ArrowDown") {
-      next = index < 0 ? 0 : (index + 1) % items.length;
-    } else if (event.key === "ArrowUp") {
-      next = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
-    } else if (event.key === "Home") {
-      next = 0;
-    } else {
-      next = items.length - 1;
-    }
-    items[next]?.focus();
-  }
-
-  return (
-    <div
-      ref={ref}
-      className={"composer-menu" + (align === "right" ? " is-right" : "")}
-      role="menu"
-      aria-label={label}
-      tabIndex={-1}
-      onKeyDown={handleKeyDown}
-    >
-      {children}
-    </div>
-  );
-}
-
 function AgentMenuContent({
   agents,
   current,
@@ -461,9 +309,9 @@ function AgentMenuContent({
 }) {
   return (
     <>
-      <p className="menu-heading">Switch agent or team</p>
+      <p className="mh">Switch agent or team</p>
       {agents.length === 0 ? (
-        <p className="menu-empty">No agents configured.</p>
+        <p className="mi-empty">No agents configured.</p>
       ) : (
         agents.map((entry) => {
           const team = isTeam(entry);
@@ -472,21 +320,23 @@ function AgentMenuContent({
               key={entry.name}
               type="button"
               role="menuitemradio"
-              className="menu-item"
+              className="mi"
               aria-checked={entry.name === current}
               disabled={disabled}
               onClick={() => onPick(entry.name)}
             >
-              <span className="menu-item-text">
-                <span>{entry.name}</span>
-                <span className="menu-item-meta">
+              <span className="mi-text">
+                <span className="mi-name">{entry.name}</span>
+                <span className="mi-meta">
                   {team
                     ? "Team · " + rosterNames(entry).length + " agents"
                     : entry.model || "agent default"}
                 </span>
               </span>
               {entry.name === current ? (
-                <Icon name="check" className="icon-16 menu-check" />
+                <span className="ck">
+                  <Ic name="check" size={14} />
+                </span>
               ) : null}
             </button>
           );
@@ -538,27 +388,29 @@ function ModelMenuContent({
 
   return (
     <>
-      <p className="menu-heading">Model</p>
+      <p className="mh">Model</p>
       {options.length === 0 && models.length === 0 ? (
-        <p className="menu-empty">No model is set yet.</p>
+        <p className="mi-empty">No model is set yet.</p>
       ) : null}
       {options.map((option) => (
         <button
           key={option.value}
           type="button"
           role="menuitemradio"
-          className="menu-item"
+          className="mi"
           aria-checked={option.value === current}
           onClick={() => onPick(option.value)}
         >
-          <span className="menu-item-text">
-            <span>{option.label}</span>
-            <span className="menu-item-meta">
+          <span className="mi-text">
+            <span className="mi-name">{option.label}</span>
+            <span className="mi-meta">
               {option.meta + " · " + option.value}
             </span>
           </span>
           {option.value === current ? (
-            <Icon name="check" className="icon-16 menu-check" />
+            <span className="ck">
+              <Ic name="check" size={14} />
+            </span>
           ) : null}
         </button>
       ))}
@@ -569,35 +421,37 @@ function ModelMenuContent({
             key={"catalog-" + model.id}
             type="button"
             role="menuitemradio"
-            className="menu-item"
+            className="mi"
             aria-checked={value === current}
             onClick={() => onPick(value)}
           >
-            <span className="menu-item-text">
-              <span className="menu-item-name">
+            <span className="mi-text">
+              <span className="mi-name">
                 {model.name}
-                {model.legacy ? <span className="menu-tag">Legacy</span> : null}
+                {model.legacy ? <span className="tag">Legacy</span> : null}
               </span>
-              <span className="menu-item-meta">{value}</span>
+              <span className="mi-meta">{value}</span>
             </span>
             {value === current ? (
-              <Icon name="check" className="icon-16 menu-check" />
+              <span className="ck">
+                <Ic name="check" size={14} />
+              </span>
             ) : null}
           </button>
         );
       })}
-      <form className="menu-custom" onSubmit={submitCustom}>
-        <input
+      <form className="mi-custom" onSubmit={submitCustom}>
+        <Input
           type="text"
-          className="menu-custom-input"
+          className="mi-custom-input"
           aria-label="Custom model as provider:model"
           placeholder="provider:model"
           value={custom}
           onChange={(event) => setCustom(event.target.value)}
         />
-        <button type="submit" className="menu-set" disabled={!custom.trim()}>
+        <Button type="submit" size="sm" disabled={!custom.trim()}>
           Set
-        </button>
+        </Button>
       </form>
     </>
   );
@@ -616,20 +470,22 @@ function ThinkingMenuContent({
 }) {
   return (
     <>
-      <p className="menu-heading">Thinking</p>
+      <p className="mh">Thinking</p>
       <button
         type="button"
         role="menuitemradio"
-        className="menu-item"
+        className="mi"
         aria-checked={current === ""}
         onClick={() => onPick("")}
       >
-        <span className="menu-item-text">
-          <span>Model default</span>
-          <span className="menu-item-meta">Use the model's own effort.</span>
+        <span className="mi-text">
+          <span className="mi-name">Model default</span>
+          <span className="mi-meta">Use the model's own effort.</span>
         </span>
         {current === "" ? (
-          <Icon name="check" className="icon-16 menu-check" />
+          <span className="ck">
+            <Ic name="check" size={14} />
+          </span>
         ) : null}
       </button>
       {efforts.map((effort) => (
@@ -637,16 +493,18 @@ function ThinkingMenuContent({
           key={effort.value}
           type="button"
           role="menuitemradio"
-          className="menu-item"
+          className="mi"
           aria-checked={effort.value === current}
           onClick={() => onPick(effort.value)}
         >
-          <span className="menu-item-text">
-            <span>{effortName(effort.value)}</span>
-            <span className="menu-item-meta">{effort.description}</span>
+          <span className="mi-text">
+            <span className="mi-name">{effortName(effort.value)}</span>
+            <span className="mi-meta">{effort.description}</span>
           </span>
           {effort.value === current ? (
-            <Icon name="check" className="icon-16 menu-check" />
+            <span className="ck">
+              <Ic name="check" size={14} />
+            </span>
           ) : null}
         </button>
       ))}
@@ -663,26 +521,28 @@ function PolicyMenuContent({
 }) {
   return (
     <>
-      <p className="menu-heading">Policy</p>
+      <p className="mh">Policy</p>
       {POLICY_OPTIONS.map((option) => (
         <button
           key={option.value}
           type="button"
           role="menuitemradio"
-          className="menu-item"
+          className="mi"
           aria-checked={option.value === current}
           onClick={() => onPick(option.value)}
         >
-          <span className="menu-item-text">
-            <span>{option.label}</span>
-            <span className="menu-item-meta">{option.hint}</span>
+          <span className="mi-text">
+            <span className="mi-name">{option.label}</span>
+            <span className="mi-meta">{option.hint}</span>
           </span>
           {option.value === current ? (
-            <Icon name="check" className="icon-16 menu-check" />
+            <span className="ck">
+              <Ic name="check" size={14} />
+            </span>
           ) : null}
         </button>
       ))}
-      <p className="menu-note">Choosing Trust asks for confirmation first.</p>
+      <p className="mi-note">Choosing Trust asks for confirmation first.</p>
     </>
   );
 }
@@ -697,20 +557,36 @@ function TrustDialog({
   onConfirm: () => void;
 }) {
   return (
-    <Dialog title="Set policy to trust?" onClose={onCancel}>
+    <Modal
+      title="Set policy to trust?"
+      onClose={onCancel}
+      footer={
+        <>
+          <Button
+            type="button"
+            variant="secondary"
+            data-autofocus
+            disabled={busy}
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={busy}
+            onClick={onConfirm}
+          >
+            {busy ? "Saving…" : "Set policy to trust"}
+          </Button>
+        </>
+      }
+    >
       <p>
         Policy <strong>trust</strong> lets tools in this session run without
         asking for approval. Only choose it for an agent and session you trust.
       </p>
-      <div className="dialog-actions">
-        <button type="button" data-autofocus disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="button" className="danger" disabled={busy} onClick={onConfirm}>
-          {busy ? "Saving…" : "Set policy to trust"}
-        </button>
-      </div>
-    </Dialog>
+    </Modal>
   );
 }
 
@@ -776,10 +652,10 @@ function Composer({
     models: CatalogModel[];
     efforts: CatalogEffort[];
   }>({ provider: "", models: [], efforts: [] });
-  const plusRef = useRef<HTMLButtonElement>(null);
-  const modelRef = useRef<HTMLButtonElement>(null);
-  const thinkingRef = useRef<HTMLButtonElement>(null);
-  const policyRef = useRef<HTMLButtonElement>(null);
+  const plusRef = useRef<HTMLSpanElement>(null);
+  const modelRef = useRef<HTMLSpanElement>(null);
+  const thinkingRef = useRef<HTMLSpanElement>(null);
+  const policyRef = useRef<HTMLSpanElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useLayoutEffect(() => {
@@ -854,6 +730,15 @@ function Composer({
     ? "Thinking: " + effortName(reasoningEffort)
     : "Thinking: Model default";
 
+  /* The Gr8r buttons do not forward refs, so the trigger refs point at their
+     wrapper spans; focus the button inside. */
+  function focusIn(ref: typeof plusRef) {
+    window.setTimeout(
+      () => ref.current?.querySelector<HTMLButtonElement>("button")?.focus(),
+      0
+    );
+  }
+
   function closeMenu(kind: "plus" | "model" | "thinking" | "policy") {
     setMenu("");
     const target =
@@ -864,39 +749,24 @@ function Composer({
           : kind === "thinking"
             ? thinkingRef
             : policyRef;
-    if (target && target.current) {
-      window.setTimeout(() => {
-        if (target.current) {
-          target.current.focus();
-        }
-      }, 0);
-    }
+    focusIn(target);
   }
 
   function pickAgent(name: string) {
     setMenu("");
-    if (plusRef.current) {
-      window.setTimeout(() => plusRef.current && plusRef.current.focus(), 0);
-    }
+    focusIn(plusRef);
     onAgent(name);
   }
 
   function pickModel(value: string) {
     setMenu("");
-    if (modelRef.current) {
-      window.setTimeout(() => modelRef.current && modelRef.current.focus(), 0);
-    }
+    focusIn(modelRef);
     onModel(value);
   }
 
   function pickEffort(value: string) {
     setMenu("");
-    if (thinkingRef.current) {
-      window.setTimeout(
-        () => thinkingRef.current && thinkingRef.current.focus(),
-        0
-      );
-    }
+    focusIn(thinkingRef);
     onEffort(value);
   }
 
@@ -906,23 +776,13 @@ function Composer({
       setTrustOpen(true);
       return;
     }
-    if (policyRef.current) {
-      window.setTimeout(
-        () => policyRef.current && policyRef.current.focus(),
-        0
-      );
-    }
+    focusIn(policyRef);
     onPolicy(value, false);
   }
 
   function cancelTrust() {
     setTrustOpen(false);
-    if (policyRef.current) {
-      window.setTimeout(
-        () => policyRef.current && policyRef.current.focus(),
-        0
-      );
-    }
+    focusIn(policyRef);
   }
 
   async function confirmTrust() {
@@ -930,12 +790,7 @@ function Composer({
     await onPolicy("trust", true);
     setTrustBusy(false);
     setTrustOpen(false);
-    if (policyRef.current) {
-      window.setTimeout(
-        () => policyRef.current && policyRef.current.focus(),
-        0
-      );
-    }
+    focusIn(policyRef);
   }
 
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -951,11 +806,11 @@ function Composer({
   return (
     <div className="composer">
       {questionOpen ? (
-        <p className="sr-only" id="composer-question-note">
+        <p className="sr" id="composer-question-note">
           Answer the question above
         </p>
       ) : null}
-      <div className="composer-box">
+      <div className="cbox">
         <AttachmentChips items={attachments} onRemove={onRemoveAttachment} />
         {(attachmentNotice || uploading) ? (
           <p className="composer-status" role="status">
@@ -980,46 +835,42 @@ function Composer({
           onPaste={(event) => pasteImageFiles(event, onFiles)}
         ></textarea>
         <div className="composer-bar">
-          <span className="composer-control">
-            <button
-              ref={plusRef}
-              type="button"
-              className="composer-plus"
-              aria-label="Composer actions"
+          <span className="composer-control" ref={plusRef}>
+            <IconButton
+              icon="plus"
+              size="sm"
+              label="Composer actions"
+              tip="Composer actions"
               aria-haspopup="menu"
               aria-expanded={menu === "plus" || menu === "agent"}
               disabled={readOnly}
               onClick={() =>
                 setMenu(menu === "plus" || menu === "agent" ? "" : "plus")
               }
-            >
-              <Icon name="plus" />
-            </button>
-            <Popover
+            />
+            <Menu
+              anchorRef={plusRef}
               open={menu === "plus"}
               onClose={() => closeMenu("plus")}
-              triggerRef={plusRef}
-              label="Composer actions"
             >
-              <p className="menu-heading">Composer</p>
+              <p className="mh">Composer</p>
               <button
                 type="button"
                 role="menuitem"
-                className="menu-item"
+                className="mi"
                 disabled={busySession}
                 onClick={() => setMenu("agent")}
               >
-                <span className="menu-item-text">
-                  <span>Switch agent or team</span>
-                  <span className="menu-item-meta">{agent || "no agent"}</span>
+                <span className="mi-text">
+                  <span className="mi-name">Switch agent or team</span>
+                  <span className="mi-meta">{agent || "no agent"}</span>
                 </span>
               </button>
-            </Popover>
-            <Popover
+            </Menu>
+            <Menu
+              anchorRef={plusRef}
               open={menu === "agent"}
               onClose={() => closeMenu("plus")}
-              triggerRef={plusRef}
-              label="Switch agent or team"
             >
               <AgentMenuContent
                 agents={agents}
@@ -1027,7 +878,7 @@ function Composer({
                 disabled={busySession}
                 onPick={pickAgent}
               />
-            </Popover>
+            </Menu>
           </span>
 
           <span className="composer-control">
@@ -1038,25 +889,24 @@ function Composer({
           </span>
 
           <span className="composer-chips">
-            <span className="composer-control">
+            <span className="composer-control" ref={modelRef}>
               {teamSession ? (
-                <button
-                  ref={modelRef}
-                  type="button"
-                  className="composer-pill is-team-model"
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  iconRight="chevron-down"
                   aria-label="Each agent in the team uses its own model."
                   title="Each agent in the team uses its own model."
                   disabled
                 >
-                  <span className="composer-pill-label">per agent</span>
-                  <Icon name="chevron-down" />
-                </button>
+                  per agent
+                </Button>
               ) : (
                 <>
-                  <button
-                    ref={modelRef}
-                    type="button"
-                    className="composer-pill"
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    iconRight="chevron-down"
                     aria-label={"Model: " + (modelValue || "not set")}
                     aria-haspopup="menu"
                     aria-expanded={menu === "model"}
@@ -1064,16 +914,12 @@ function Composer({
                     disabled={busySession}
                     onClick={() => setMenu(menu === "model" ? "" : "model")}
                   >
-                    <span className="composer-pill-label">
-                      {shortModel(modelValue) || "Model"}
-                    </span>
-                    <Icon name="chevron-down" />
-                  </button>
-                  <Popover
+                    {shortModel(modelValue) || "Model"}
+                  </Button>
+                  <Menu
+                    anchorRef={modelRef}
                     open={menu === "model"}
                     onClose={() => closeMenu("model")}
-                    triggerRef={modelRef}
-                    label="Model"
                   >
                     <ModelMenuContent
                       current={modelValue}
@@ -1082,17 +928,17 @@ function Composer({
                       models={catalog}
                       onPick={pickModel}
                     />
-                  </Popover>
+                  </Menu>
                 </>
               )}
             </span>
 
             {thinksModel ? (
-              <span className="composer-control">
-                <button
-                  ref={thinkingRef}
-                  type="button"
-                  className="composer-pill"
+              <span className="composer-control" ref={thinkingRef}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  iconRight="chevron-down"
                   aria-label={effortLabel}
                   aria-haspopup="menu"
                   aria-expanded={menu === "thinking"}
@@ -1100,67 +946,63 @@ function Composer({
                   disabled={busySession}
                   onClick={() => setMenu(menu === "thinking" ? "" : "thinking")}
                 >
-                  <span className="composer-pill-label">{effortLabel}</span>
-                  <Icon name="chevron-down" />
-                </button>
-                <Popover
+                  {effortLabel}
+                </Button>
+                <Menu
+                  anchorRef={thinkingRef}
                   open={menu === "thinking"}
                   onClose={() => closeMenu("thinking")}
-                  triggerRef={thinkingRef}
-                  label="Thinking"
                 >
                   <ThinkingMenuContent
                     current={reasoningEffort}
                     efforts={efforts}
                     onPick={pickEffort}
                   />
-                </Popover>
+                </Menu>
               </span>
             ) : null}
 
-            <span className="composer-control">
-              <button
-                ref={policyRef}
-                type="button"
-                className="composer-pill"
+            <span className="composer-control" ref={policyRef}>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="lock"
+                iconRight="chevron-down"
                 aria-label={"Policy: " + policyLabel(policy)}
                 aria-haspopup="menu"
                 aria-expanded={menu === "policy"}
                 disabled={busySession}
                 onClick={() => setMenu(menu === "policy" ? "" : "policy")}
               >
-                <Icon name="lock" />
-                <span className="composer-pill-label">{policyLabel(policy)}</span>
-                <Icon name="chevron-down" />
-              </button>
-              <Popover
+                {policyLabel(policy)}
+              </Button>
+              <Menu
+                anchorRef={policyRef}
                 open={menu === "policy"}
                 onClose={() => closeMenu("policy")}
-                triggerRef={policyRef}
-                label="Policy"
               >
                 <PolicyMenuContent current={policy} onPick={pickPolicy} />
-              </Popover>
+              </Menu>
             </span>
           </span>
 
-          <span className="composer-spacer"></span>
+          <span className="sp"></span>
 
           {turnRunning && !readOnly ? (
-            <button
-              type="button"
-              className="composer-send composer-stop"
+            <Button
+              size="sm"
+              variant="danger-ghost"
+              icon="square"
               aria-label="Stop the running turn"
               title="Stop the running turn"
               disabled={cancelling}
               onClick={onStop}
-            >
-              <span className="stop-square" aria-hidden="true"></span>
-            </button>
+            />
           ) : (
-            <button
-              type="button"
-              className="composer-send"
+            <Button
+              size="sm"
+              variant="primary"
+              icon="arrow-up"
               aria-label="Send message"
               title="Send message"
               disabled={
@@ -1171,9 +1013,7 @@ function Composer({
                 (!draft.trim() && attachments.length === 0)
               }
               onClick={onSend}
-            >
-              <Icon name="arrow-up" className="icon-20 send-icon" />
-            </button>
+            />
           )}
         </div>
       </div>

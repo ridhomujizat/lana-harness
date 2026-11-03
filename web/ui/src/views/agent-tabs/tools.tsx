@@ -5,7 +5,7 @@ import { isErrorCode, loadAgentTab, updateAgent } from "../../api/agents";
 import { getToolCatalog } from "../../api/tools";
 import type { ToolGroup, ToolSource } from "../../api/tools";
 import { ErrorNotice, Loading } from "../../ui/ui";
-import { Icon } from "../agent-common";
+import { Ic } from "../../ui/icons";
 import { computeToolsPayload, isMcpGroup } from "./tools-payload";
 import type { ToolConfigState } from "./tools-payload";
 
@@ -309,7 +309,7 @@ export function ToolsTab({ name }: ToolsTabProps) {
         </div>
         <button
           type="button"
-          className="button-ui button-ui-secondary"
+          className="btn btn-secondary btn-sm"
           onClick={reload}
         >
           Try again
@@ -330,7 +330,7 @@ export function ToolsTab({ name }: ToolsTabProps) {
       <div className="agent-tabs-toolbar">
         <label className="agent-tabs-search">
           <span className="sr-only">Search tools</span>
-          <Icon name="search" />
+          <Ic name="search" size={13} />
           <input
             type="search"
             placeholder="Search tools"
@@ -350,8 +350,8 @@ export function ToolsTab({ name }: ToolsTabProps) {
             : "No tools are configured for this agent."}
         </p>
       ) : (
-        <div className="agent-tabs-table-wrap">
-          <table className="agent-tabs-table">
+        <div className="perm-t agent-tabs-table-wrap">
+          <table className="perm-t agent-tabs-table">
             <thead>
               <tr>
                 <th scope="col">Tool</th>
@@ -372,8 +372,8 @@ export function ToolsTab({ name }: ToolsTabProps) {
                   <th scope="rowgroup" colSpan={2}>
                     <span className="agent-tabs-group-title">
                       {group.label}{" "}
-                      <span className="badge-ui agent-tabs-count">
-                        <span className="badge-ui-dot" aria-hidden="true"></span>
+                      <span className="badge agent-tabs-count">
+                        <span className="dot" aria-hidden="true"></span>
                         {group.tools.length}
                       </span>{" "}
                       {isMcpGroup(group) ? (
@@ -384,7 +384,7 @@ export function ToolsTab({ name }: ToolsTabProps) {
                   <td colSpan={2} className="agent-tabs-group-action">
                     <button
                       type="button"
-                      className="agent-tabs-link-button"
+                      className="btn btn-ghost btn-sm"
                       disabled={
                         saving || group.tools.every((tool) => !tool.enabled)
                       }
@@ -407,9 +407,9 @@ export function ToolsTab({ name }: ToolsTabProps) {
                       <td className="agent-tabs-risk">{riskLabel(tool.risk)}</td>
                       <td>
                         {tool.asks_first ? (
-                          <span className="badge-ui agent-tabs-badge-warning">
+                          <span className="badge amber">
                             <span
-                              className="badge-ui-dot"
+                              className="dot"
                               aria-hidden="true"
                             ></span>
                             Asks first
@@ -421,7 +421,7 @@ export function ToolsTab({ name }: ToolsTabProps) {
                       <td className="agent-tabs-switch-cell">
                         <label className="agent-switch">
                           <input
-                            className="agent-switch-input"
+                            className="toggle"
                             type="checkbox"
                             role="switch"
                             aria-labelledby={labelId}
@@ -435,12 +435,6 @@ export function ToolsTab({ name }: ToolsTabProps) {
                               )
                             }
                           />
-                          <span
-                            className="agent-switch-track"
-                            aria-hidden="true"
-                          >
-                            <span className="agent-switch-thumb"></span>
-                          </span>
                           <span className="agent-switch-text">
                             {tool.enabled ? "On" : "Off"}
                           </span>
@@ -478,7 +472,7 @@ export function ToolsTab({ name }: ToolsTabProps) {
           {stale ? (
             <button
               type="button"
-              className="button-ui button-ui-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={reload}
             >
               Reload tools

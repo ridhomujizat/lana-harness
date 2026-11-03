@@ -9,10 +9,11 @@
   gap: 12px;
   margin-bottom: 8px;
   padding: 16px 12px 12px;
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-2xl);
+  border: 0;
+  border-radius: var(--radius-lg);
   background: var(--bg-primary);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+  box-shadow: var(--shadow-card);
+  animation: riseIn 0.3s var(--ease) both;
 }
 
 .question-card:focus {
@@ -84,10 +85,13 @@
   border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
+  transition:
+    background var(--dur),
+    color var(--dur);
 }
 
 .question-icon-button:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .question-icon-button:disabled {
@@ -125,10 +129,14 @@
   border-radius: var(--radius-lg);
   background: var(--bg-primary);
   cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    box-shadow var(--dur);
 }
 
 .question-options-single .question-option:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .question-options-single .question-option + .question-option::before {
@@ -137,16 +145,21 @@
   right: 12px;
   left: 12px;
   height: 1px;
-  background: var(--border-secondary);
+  background: var(--divider);
   content: "";
 }
 
 .question-options-multi .question-option {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .question-options-multi .question-option:hover {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-3);
+}
+
+.question-option:has(.question-option-input:checked) {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent-line);
 }
 
 .question-option.is-static {
@@ -158,17 +171,17 @@
 }
 
 .question-options-multi .question-option.is-static:hover {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 /* Keyboard focus shows as the hover background, not a ring: a ring around a
    row looked broken next to the row dividers. A mouse click shows nothing. */
 .question-options-single .question-option:has(:focus-visible) {
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .question-options-multi .question-option:has(:focus-visible) {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-3);
 }
 
 .question-option-input {
@@ -192,11 +205,15 @@
   height: 28px;
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
+  background: var(--surface-2);
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
   font-weight: 500;
   line-height: var(--line-height-sm);
+  transition:
+    background var(--dur),
+    color var(--dur),
+    border-color var(--dur);
 }
 
 .question-option:hover .question-key {
@@ -264,7 +281,7 @@
   gap: 12px;
   padding: 8px 8px 8px 12px;
   border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
+  background: var(--surface-2);
 }
 
 .question-else {
@@ -273,6 +290,7 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
+  transition: background var(--dur);
 }
 
 .question-else-button {
@@ -343,7 +361,8 @@
 }
 
 .question-else:focus-within {
-  background: var(--bg-secondary-hover);
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
 .question-buttons {
@@ -361,7 +380,7 @@
   margin: 0;
   padding: 10px 12px;
   border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
+  background: var(--surface-2);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -394,5 +413,11 @@
   .question-buttons {
     width: 100%;
     justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-card {
+    animation: fadeOnly 0.12s both !important;
   }
 }

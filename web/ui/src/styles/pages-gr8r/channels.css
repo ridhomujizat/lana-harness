@@ -1,0 +1,707 @@
+/* Gr8r-style rules for the channels pages (gr8r layer). Use Gr8r tokens and
+   classes. The list follows the Gr8r projects/members card look; the Telegram
+   detail follows the Gr8r settings look (label left, control right). */
+
+/* ------------------------------------------------------------------ */
+/* Channels list                                                       */
+/* ------------------------------------------------------------------ */
+
+.chan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+
+.chan-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.chan-card.is-muted {
+  background: var(--sunken);
+}
+
+.chan-skeleton {
+  pointer-events: none;
+}
+
+.chan-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-width: 0;
+}
+
+.chan-tile {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+/* lana: the Telegram brand colour stays on the tile only. */
+.chan-tile.is-brand {
+  background: #229ed9;
+  color: #fff;
+}
+
+.chan-mark {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.chan-card-id {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.chan-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.chan-card-name {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chan-card-meta {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.chan-card-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.chan-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: auto;
+}
+
+.chan-card-foot .btn {
+  margin-left: auto;
+}
+
+@media (max-width: 700px) {
+  .chan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Telegram detail — header                                            */
+/* ------------------------------------------------------------------ */
+
+.page.channels-detail {
+  max-width: 900px;
+}
+
+.chan-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  transition: color var(--dur);
+}
+
+.chan-back:hover {
+  color: var(--text);
+}
+
+.chan-ph-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.channels-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.chan-notice {
+  margin-bottom: var(--s-3);
+}
+
+.channels-form > .alert {
+  margin-bottom: var(--s-3);
+}
+
+.chan-alert-msg {
+  margin: 0;
+}
+
+.chan-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+}
+
+/* ------------------------------------------------------------------ */
+/* Telegram detail — connected summary                                 */
+/* ------------------------------------------------------------------ */
+
+.chan-connected {
+  margin-bottom: var(--s-4);
+}
+
+.chan-connected-name {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.chan-connected-text {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/* Telegram detail — setup checklist                                   */
+/* ------------------------------------------------------------------ */
+
+.chan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: 0 0 var(--s-4);
+  padding: 0;
+  list-style: none;
+}
+
+.chan-step {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.chan-step.is-done {
+  background: var(--surface-2);
+}
+
+.chan-step-ic {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.chan-step.is-done .chan-step-ic {
+  border-color: transparent;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+/* lana: the tick pops in when the step is done (Gr8r popCheck). */
+.chan-step.is-done .chan-step-ic .i {
+  animation: popCheck 0.42s var(--spring) both;
+}
+
+.chan-step-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.chan-step-title {
+  margin: 0;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.chan-step-help {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.chan-step-link {
+  color: var(--accent);
+}
+
+.chan-step-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.chan-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.chan-step-status:empty {
+  display: none;
+}
+
+.chan-step-status {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.chan-step-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  background: var(--green-soft);
+}
+
+.chan-step-done-text {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.chan-step-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.chan-token-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.chan-token-input .input {
+  flex: 1 1 auto;
+}
+
+.chan-seen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* Gr8r settings rows (label left, control right) inside a step card. */
+.chan-srow-text {
+  min-width: 0;
+}
+
+.chan-ctl {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 260px;
+}
+
+.chan-ctl .input,
+.chan-ctl .select {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Telegram detail — settings rows                                     */
+/* ------------------------------------------------------------------ */
+
+.chan-switch-label {
+  min-width: 26px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: right;
+}
+
+.chan-hint-warn {
+  color: var(--amber);
+}
+
+.chan-section-hint {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Advanced (collapsible panel)                                        */
+/* ------------------------------------------------------------------ */
+
+.chan-advanced-body {
+  padding: 0;
+}
+
+.chan-advanced summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.chan-advanced-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 11px 14px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  user-select: none;
+}
+
+.chan-advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chan-advanced-summary:hover {
+  color: var(--text);
+}
+
+.chan-advanced-summary .i {
+  transition: transform var(--dur) var(--ease);
+}
+
+.chan-advanced[open] .chan-advanced-summary .i {
+  transform: rotate(90deg);
+}
+
+.chan-advanced-in {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: 4px 14px 14px;
+}
+
+.chan-token-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.chan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.chan-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+
+.chan-status.is-ok .chan-dot {
+  background: var(--green);
+}
+
+.chan-status.is-warn .chan-dot {
+  background: var(--amber);
+}
+
+.chan-status.is-error .chan-dot {
+  background: var(--red);
+}
+
+.chan-status.is-pending .chan-dot {
+  background: var(--accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Owners + chats tables                                               */
+/* ------------------------------------------------------------------ */
+
+.chan-sechead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chan-sechead h2 {
+  margin: 0;
+  font-size: var(--fs);
+  font-weight: 600;
+}
+
+.chan-sechead .btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.chan-panel {
+  margin-top: var(--s-2);
+  overflow: hidden;
+}
+
+.chan-tablewrap {
+  overflow-x: auto;
+}
+
+.chan-table th,
+.chan-table td {
+  text-align: left;
+}
+
+.chan-table th:first-child,
+.chan-table td:first-child {
+  padding-left: 14px;
+}
+
+.chan-table th:last-child,
+.chan-table td:last-child {
+  text-align: right;
+}
+
+.chan-table .chan-empty {
+  padding: 18px 14px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.chan-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.chan-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chan-name.is-empty {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.chan-code {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+.chan-rowactions {
+  white-space: nowrap;
+}
+
+.chan-addrow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-top: 1px solid var(--divider);
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: left;
+}
+
+.chan-addrow:hover {
+  background: var(--surface-2);
+}
+
+.chan-addrow:disabled {
+  color: var(--text-4);
+  cursor: not-allowed;
+}
+
+.chan-addrow-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-2);
+  padding: 12px 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.chan-addrow-grow {
+  flex: 1 1 12rem;
+}
+
+.chan-inline-alert {
+  padding: 0 14px 14px;
+}
+
+@media (max-width: 640px) {
+  .chan-sechead {
+    flex-direction: column;
+  }
+
+  .chan-sechead .btn {
+    margin-left: 0;
+  }
+
+  .chan-ctl {
+    min-width: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Add-chat dialog                                                     */
+/* ------------------------------------------------------------------ */
+
+.chan-dialog-intro {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.chan-waiting {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.chan-waiting legend {
+  margin: 0 0 6px;
+  padding: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.chan-waiting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 15rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chan-waiting-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur);
+}
+
+.chan-waiting-item:hover {
+  background: var(--surface-2);
+}
+
+.chan-waiting-item.is-selected {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.chan-waiting-item .radio {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.chan-waiting-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chan-waiting-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.chan-waiting-name {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.chan-waiting-meta {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.chan-waiting-empty {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chan-step.is-done .chan-step-ic .i {
+    animation: fadeOnly 0.12s both !important;
+  }
+
+  .chan-advanced-summary .i {
+    transition: none;
+  }
+}

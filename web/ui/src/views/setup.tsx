@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { ApiError, errorMessage, setCSRF } from "../api/client";
 import { ErrorNotice, useAnnounce } from "../ui/ui";
-import { Icon, providerLabel } from "./agent-common";
+import { Ic, LanaMark } from "../ui/icons";
+import { Button, Field, IconButton, Input, Textarea, cn } from "../ui/gr8r";
+import { providerLabel } from "./agent-common";
 import {
   getDaemonStartedAt,
   getSetup,
@@ -13,12 +15,13 @@ import {
 import type { SetupTestProviderResponse } from "../api/setup";
 
 /* Setup wizard (REQ-WEB-032, REQ-WEB-033, REQ-WEB-034). The shell and the
-   progress rail are shared with the Unlock step in views/login.js. Every step
-   is a hash route under #/setup/{step}; app.js owns the route table. */
+   progress are shared with the Unlock step in views/login.js. Every step is a
+   hash route under #/setup/{step}; app.js owns the route table. */
 
 const DRAFT_KEY = "lana.setup";
 const SUMMARY_KEY = "lana.setup.summary";
 const USER_LIMIT = 2000;
+const STEP_TOTAL = 5;
 
 /* The asset scan forbids every protocol-relative URL in shell files, so the
    scheme is assembled instead of written as one literal. */
@@ -27,7 +30,7 @@ const SECURE = "https:" + "/".repeat(2);
 interface ProviderPreset {
   id: string;
   label: string;
-  initials: string;
+  icon: string;
   description: string;
   kind: string;
   baseUrl: string;
@@ -40,7 +43,7 @@ const PROVIDERS = [
   {
     id: "openai",
     label: "OpenAI",
-    initials: "AI",
+    icon: "sparkles",
     description: "GPT models through api.openai.com.",
     kind: "openai_compat",
     baseUrl: SECURE + "api.openai.com/v1",
@@ -51,7 +54,7 @@ const PROVIDERS = [
   {
     id: "anthropic",
     label: "Anthropic",
-    initials: "AN",
+    icon: "bot",
     description: "Claude models through api.anthropic.com.",
     /* Q-029: until a native adapter exists, Anthropic uses the
        OpenAI-compatible endpoint through the same openai_compat kind. */
@@ -64,7 +67,7 @@ const PROVIDERS = [
   {
     id: "openrouter",
     label: "OpenRouter",
-    initials: "OR",
+    icon: "route",
     description: "Models from many vendors with one key.",
     kind: "openai_compat",
     baseUrl: SECURE + "openrouter.ai/api/v1",
@@ -86,6 +89,7 @@ for (const preset of PROVIDERS) {
 interface TemplatePreset {
   id: string;
   label: string;
+  icon: string;
   note: string;
 }
 
@@ -93,16 +97,19 @@ const TEMPLATES = [
   {
     id: "assistant",
     label: "Assistant",
+    icon: "message-circle",
     note: "Everyday help and research.",
   },
   {
     id: "coder",
     label: "Coder",
+    icon: "code",
     note: "Works in a code repository.",
   },
   {
     id: "worker",
     label: "Worker",
+    icon: "hammer",
     note: "Runs tasks, checks results.",
   },
 ] as const satisfies readonly TemplatePreset[];
@@ -115,6 +122,7 @@ for (const template of TEMPLATES) {
 interface PermissionPreset {
   id: string;
   label: string;
+  icon: string;
   note: string;
   summary: string;
 }
@@ -123,18 +131,21 @@ const PERMISSIONS = [
   {
     id: "ask",
     label: "Ask",
+    icon: "circle-help",
     note: "Approve risky tool calls.",
     summary: "Ask before risky tools",
   },
   {
     id: "trust",
     label: "Trust",
+    icon: "shield-check",
     note: "Run tools without asking.",
     summary: "Run tools without asking",
   },
   {
     id: "never",
     label: "Never",
+    icon: "ban",
     note: "Block risky tool calls.",
     summary: "Block risky tool calls",
   },
@@ -144,43 +155,6 @@ const PERMISSION_BY_ID: Record<string, PermissionPreset> = {};
 for (const permission of PERMISSIONS) {
   PERMISSION_BY_ID[permission.id] = permission;
 }
-
-interface RailStep {
-  title: string;
-  note: string;
-}
-
-const RAIL_STEPS: readonly RailStep[] = [
-  {
-    title: "Create your password",
-    note: "Only you can open lana",
-  },
-  {
-    title: "Choose a provider",
-    note: "OpenAI, Anthropic, or OpenRouter",
-  },
-  {
-    title: "Connect your model",
-    note: "API key, base URL, and model",
-  },
-  {
-    title: "Set up your agent",
-    note: "Name, template, and tool access",
-  },
-  {
-    title: "Start chatting",
-    note: "Open your first session",
-  },
-];
-
-const RAIL_INDEX: Record<string, number> = {
-  unlock: 0,
-  provider: 1,
-  connect: 2,
-  agent: 3,
-  persona: 3,
-  ready: 4,
-};
 
 const STEP_NUMBER: Record<string, number> = {
   unlock: 1,
@@ -438,71 +412,35 @@ function providerFailure(result: SetupTestProviderResponse | null): string {
   return "The provider did not answer.";
 }
 
-function stepEyebrow(step: string): string {
-  if (step === "persona") {
-    return "Step 4 of 5 · Persona";
-  }
-  return "Step " + String(STEP_NUMBER[step]) + " of 5";
-}
-
 /* The API contract has no template preview endpoint, so the persona fields
    start empty and "Reset to template" stays disabled with a short note. */
 const TEMPLATE_PREVIEW_AVAILABLE = false;
 
-interface ProgressStepProps {
-  state: string;
-  title: string;
-  note: string;
-  connector: boolean;
-}
-
-function ProgressStep({ state, title, note, connector }: ProgressStepProps) {
-  const stateLabel =
-    state === "complete"
-      ? "Complete"
-      : state === "current"
-        ? "Current step"
-        : "Not started";
+/* The step progress of the Gr8r onboarding card: one bar per step, the bars
+   up to the current step filled, the current one growing in. */
+function Steps({ step }: { step: string }) {
+  const current = STEP_NUMBER[step] || 1;
   return (
-    <li
-      className={"setup-step is-" + state}
-      aria-current={state === "current" ? "step" : undefined}
-    >
-      <span className="setup-step-marker" aria-hidden="true">
-        <span className="setup-step-icon">
-          {state === "complete" ? (
-            <Icon name="check" className="setup-check-icon" />
-          ) : (
-            <span className="setup-step-dot"></span>
-          )}
-        </span>
-        {connector ? <span className="setup-step-connector"></span> : null}
-      </span>
-      <span className="setup-step-copy">
-        <span className="sr-only">{stateLabel}: </span>
-        <span className="setup-step-title">{title}</span>
-        <span className="setup-step-note">{note}</span>
-      </span>
-    </li>
-  );
-}
-
-/* The decorative door mark of the setup rail (login, forgot, code, and
-   onboarding): the two shapes of the logo Λ drawn large and cut off by the
-   rail edges. */
-function DoorMark() {
-  return (
-    <svg className="door-mark" viewBox="0 0 34 32" aria-hidden="true">
-      <path
-        transform="matrix(1 0 0 1 1.264 4.75)"
-        d="M0.39 18.028L9.681 1.528C10.213 0.584 11.212 0 12.295 0L15.843 0C18.138 0 19.583 2.472 18.457 4.472L9.166 20.972C8.635 21.916 7.636 22.5 6.552 22.5L3.004 22.5C0.709 22.5 -0.736 20.028 0.39 18.028Z"
-      />
-      <path
-        className="door-right"
-        transform="matrix(1 0 0 1 11.889 4.75)"
-        d="M3.004 0L6.552 0C7.636 0 8.635 0.584 9.166 1.528L18.457 18.028C19.583 20.028 18.138 22.5 15.843 22.5L12.295 22.5C11.212 22.5 10.213 21.916 9.681 20.972L0.39 4.472C-0.736 2.472 0.709 0 3.004 0Z"
-      />
-    </svg>
+    <>
+      <div
+        className="steps"
+        role="progressbar"
+        aria-valuemin={1}
+        aria-valuemax={STEP_TOTAL}
+        aria-valuenow={current}
+        aria-label="Setup progress"
+      >
+        {Array.from({ length: STEP_TOTAL }, (_unused, index) => (
+          <i
+            key={index}
+            className={cn(index + 1 <= current && "on", index + 1 === current && "cur")}
+          ></i>
+        ))}
+      </div>
+      <div className="steps-sub faint">
+        Step {current} of {STEP_TOTAL}
+      </div>
+    </>
   );
 }
 
@@ -513,96 +451,59 @@ export interface SetupShellProps {
   children?: ReactNode;
 }
 
+/* The Gr8r auth/onboarding shell: a full-page column with the brand bar, a
+   centred card, and a quiet footer. The door variant is the pre-login card
+   (login, welcome, forgot); the steps variant is the setup wizard and adds the
+   progress bars. */
 export function SetupShell({
   step,
   size = "regular",
   variant = "steps",
   children,
 }: SetupShellProps) {
-  const current = RAIL_INDEX[step] || 0;
   const door = variant === "door";
-  const contentClass =
-    size === "wide"
-      ? " setup-content-wide"
-      : size === "agent"
-        ? " setup-content-agent"
-        : "";
   return (
-    <div className="setup-shell">
-      <aside className="setup-rail" aria-label={door ? "lana" : "Setup progress"}>
-        <DoorMark />
-        <div className="setup-rail-top">
-          <a
-            className="logo-lockup setup-logo"
-            href={door ? "#/login" : "#/setup/unlock"}
-            aria-label={door ? "lana" : "lana setup"}
-          >
-            <img
-              className="logo-mark"
-              src="/assets/icons/logo-mark.svg"
-              alt=""
-              aria-hidden="true"
-            />
-            <span className="logo-word">LΛNΛ</span>
-          </a>
-          {door ? null : (
-            <ol className="setup-steps">
-              {RAIL_STEPS.map((entry, index) => {
-                const state =
-                  index < current
-                    ? "complete"
-                    : index === current
-                      ? "current"
-                      : "incomplete";
-                const note =
-                  step === "persona" && index === 3
-                    ? "Persona and your profile"
-                    : entry.note;
-                return (
-                  <ProgressStep
-                    key={entry.title}
-                    state={state}
-                    title={entry.title}
-                    note={note}
-                    connector={index < RAIL_STEPS.length - 1}
-                  />
-                );
-              })}
-            </ol>
+    <div className="auth">
+      <div className="auth-top">
+        <span className="brand">
+          <LanaMark size={22} />
+          <span className="lana-word">LΛNΛ</span>
+        </span>
+      </div>
+      <div className="auth-c">
+        <div
+          className={cn(
+            "auth-card",
+            door ? "fx-auth" : "onb fx-step",
+            size === "wide" && "onb-wide"
           )}
+        >
+          {door ? null : <Steps step={step} />}
+          {children}
         </div>
-        {door ? (
-          <p className="rail-place">
-            <strong>lana on this computer</strong>
-            Only this computer can open this page.
-          </p>
-        ) : (
-          <div className="setup-rail-footer">
-            <span className="setup-local">Local only · {setupAddress()}</span>
-            <span className="setup-help">Help</span>
-          </div>
-        )}
-      </aside>
-      <main id="main" className="setup-main">
-        <div className={"setup-content" + contentClass}>{children}</div>
-      </main>
+      </div>
+      <div className="auth-foot">
+        <span className="faint">
+          {door
+            ? "lana on this computer · only this computer can open this page."
+            : "Local only · " + setupAddress()}
+        </span>
+      </div>
     </div>
   );
 }
 
 interface StepHeadingProps {
-  step: string;
   title: string;
   children?: ReactNode;
 }
 
-function StepHeading({ step, title, children }: StepHeadingProps) {
+function StepHeading({ title, children }: StepHeadingProps) {
   return (
-    <div className="setup-heading">
-      <span className="setup-eyebrow">{stepEyebrow(step)}</span>
-      <h1 className="setup-title">{title}</h1>
-      <p className="setup-lede">{children}</p>
-    </div>
+    <>
+      <h1>{title}</h1>
+      <p className="sub">{children}</p>
+    </>
   );
 }
 
@@ -636,68 +537,44 @@ function ProviderStep() {
 
   return (
     <SetupShell step="provider">
-      <StepHeading step="provider" title="Choose a model provider">
+      <StepHeading title="Choose a model provider">
         Pick where lana sends model requests. Each provider has a default base URL
         that you can change in the next step.
       </StepHeading>
 
-      <fieldset className="setup-group">
-        <legend className="sr-only">Provider</legend>
-        <div className="setup-provider-list">
-          {PROVIDERS.map((preset) => {
-            const selected = preset.id === provider;
-            return (
-              <label
-                key={preset.id}
-                className={
-                  "agent-permission-tile setup-provider-card" +
-                  (selected ? " is-selected" : "")
-                }
-              >
-                <input
-                  className="agent-permission-input"
-                  type="radio"
-                  name="setup-provider"
-                  value={preset.id}
-                  checked={selected}
-                  onChange={() => selectProvider(preset.id)}
-                />
-                <span className="setup-provider-logo" aria-hidden="true">
-                  {preset.initials}
-                </span>
-                <span className="agent-permission-text setup-provider-text">
-                  <span className="agent-permission-title">{preset.label}</span>
-                  <span className="agent-permission-note">
-                    {preset.description}
-                  </span>
-                  <span className="setup-provider-meta">
-                    {preset.kind} · {preset.baseUrl}
-                  </span>
-                </span>
-                <span className="agent-permission-radio" aria-hidden="true">
-                  <span className="agent-permission-dot"></span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
+      <div className="opts" role="radiogroup" aria-label="Provider">
+        {PROVIDERS.map((preset) => {
+          const on = preset.id === provider;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              className={cn("opt", on && "on")}
+              onClick={() => selectProvider(preset.id)}
+            >
+              <Ic name={preset.icon} size={18} />
+              <b>{preset.label}</b>
+              <span>{preset.description}</span>
+            </button>
+          );
+        })}
+      </div>
 
-      <div className="setup-actions">
-        <button
-          type="button"
-          className="button-ui button-ui-secondary"
-          onClick={() => go("unlock")}
-        >
+      <div className="auth-actions">
+        <Button variant="ghost" onClick={() => go("unlock")}>
           Back
-        </button>
-        <button
-          type="button"
-          className="button-ui button-ui-primary"
+        </Button>
+        <span className="sp"></span>
+        <Button
+          variant="primary"
+          size="lg"
+          iconRight="arrow-right"
           onClick={() => go("connect")}
         >
           Continue
-        </button>
+        </Button>
       </div>
     </SetupShell>
   );
@@ -714,6 +591,7 @@ function ConnectStep() {
   const [draft] = useState(readDraft);
   const preset = providerById(draft.provider);
   const [connect, setConnect] = useState(() => draft.connect);
+  const [keyShown, setKeyShown] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<ConnectFieldErrors>({});
   const [result, setResult] = useState<SetupTestProviderResponse | null>(null);
   const [requestError, setRequestError] = useState<unknown>(null);
@@ -798,29 +676,9 @@ function ConnectStep() {
     go("agent");
   }
 
-  const apiKeyDescribedBy = [
-    "setup-api-key-hint",
-    fieldErrors.apiKey ? "setup-api-key-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const baseUrlDescribedBy = [
-    "setup-base-url-hint",
-    fieldErrors.baseUrl ? "setup-base-url-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const modelDescribedBy = [
-    "setup-model-hint",
-    fieldErrors.model ? "setup-model-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   const latency = Number(result && result.latency_ms) || 0;
-  const alertTone = result && result.ok ? "is-success" : "is-error";
-  const alertTitle =
-    result && result.ok ? "Connection works" : "Could not reach the model";
+  const testedOk = Boolean(result && result.ok);
+  const alertTitle = testedOk ? "Connection works" : "Could not reach the model";
   const alertBody = result
     ? result.ok
       ? connect.model.trim() + " answered in " + latency + " ms."
@@ -831,150 +689,133 @@ function ConnectStep() {
 
   return (
     <SetupShell step="connect">
-      <StepHeading step="connect" title={"Connect " + preset.label}>
+      <StepHeading title={"Connect " + preset.label}>
         Add the API key and pick the default model. lana tests the connection
         before it saves.
       </StepHeading>
 
-      <form className="setup-form" onSubmit={continueNext}>
-        <div className="setup-field">
-          <label className="setup-label" htmlFor="setup-api-key">
-            API key
-          </label>
-          <input
-            id="setup-api-key"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={connect.apiKey}
-            disabled={testing}
-            aria-required="true"
-            aria-invalid={fieldErrors.apiKey ? "true" : undefined}
-            aria-describedby={apiKeyDescribedBy}
-            onChange={(event) => update("apiKey", event.target.value)}
-          />
-          <p id="setup-api-key-hint" className="setup-hint">
-            Saved to secrets.env as {preset.keyEnv}. It stays on this machine.
-          </p>
-          {fieldErrors.apiKey ? (
-            <p id="setup-api-key-error" className="setup-field-error" role="alert">
-              {fieldErrors.apiKey}
-            </p>
-          ) : null}
-        </div>
+      <form className="auth-form" onSubmit={continueNext}>
+        <Field
+          label="API key"
+          htmlFor="setup-api-key"
+          hint={"Saved to secrets.env as " + preset.keyEnv + ". It stays on this machine."}
+          error={fieldErrors.apiKey}
+        >
+          <div className="pw-field">
+            <Input
+              id="setup-api-key"
+              className="input-lg"
+              type={keyShown ? "text" : "password"}
+              autoComplete="off"
+              spellCheck={false}
+              value={connect.apiKey}
+              disabled={testing}
+              aria-required="true"
+              onChange={(event) => update("apiKey", event.target.value)}
+            />
+            <IconButton
+              size="sm"
+              className="pw-eye"
+              icon={keyShown ? "eye-off" : "eye"}
+              label={keyShown ? "Hide API key" : "Show API key"}
+              on={keyShown}
+              disabled={testing}
+              onClick={() => setKeyShown((current) => !current)}
+            />
+          </div>
+        </Field>
 
-        <div className="setup-field">
-          <label className="setup-label" htmlFor="setup-base-url">
-            Base URL
-          </label>
-          <input
+        <Field
+          label="Base URL"
+          htmlFor="setup-base-url"
+          hint="Change it for a proxy or a compatible gateway."
+          error={fieldErrors.baseUrl}
+        >
+          <Input
             id="setup-base-url"
+            className="input-lg"
             type="url"
             autoComplete="url"
             spellCheck={false}
             value={connect.baseUrl}
             disabled={testing}
             aria-required="true"
-            aria-invalid={fieldErrors.baseUrl ? "true" : undefined}
-            aria-describedby={baseUrlDescribedBy}
             onChange={(event) => update("baseUrl", event.target.value)}
           />
-          <p id="setup-base-url-hint" className="setup-hint">
-            Change it for a proxy or a compatible gateway.
-          </p>
-          {fieldErrors.baseUrl ? (
-            <p id="setup-base-url-error" className="setup-field-error" role="alert">
-              {fieldErrors.baseUrl}
-            </p>
-          ) : null}
-        </div>
+        </Field>
 
-        <div className="setup-field">
-          <label className="setup-label" htmlFor="setup-model">
-            Default model
-          </label>
-          <input
+        <Field
+          label="Default model"
+          htmlFor="setup-model"
+          hint="The default agent uses this model. Change it any time in Settings."
+          error={fieldErrors.model}
+        >
+          <Input
             id="setup-model"
+            className="input-lg"
             type="text"
             autoComplete="off"
             spellCheck={false}
             value={connect.model}
             disabled={testing}
             aria-required="true"
-            aria-invalid={fieldErrors.model ? "true" : undefined}
-            aria-describedby={modelDescribedBy}
             onChange={(event) => update("model", event.target.value)}
           />
-          <p id="setup-model-hint" className="setup-hint">
-            The default agent uses this model. Change it any time in Settings.
-          </p>
-          {fieldErrors.model ? (
-            <p id="setup-model-error" className="setup-field-error" role="alert">
-              {fieldErrors.model}
-            </p>
-          ) : null}
-          <div className="setup-suggestions">
-            <span className="setup-suggestions-label">Suggested:</span>
-            {preset.suggestions.map((model) => (
+        </Field>
+
+        <div className="suggests">
+          <span className="faint">Suggested</span>
+          {preset.suggestions.map((model) => {
+            const on = connect.model === model;
+            return (
               <button
                 key={model}
                 type="button"
-                className={
-                  "badge-ui setup-suggestion" +
-                  (connect.model === model ? " badge-ui-brand" : "")
-                }
-                aria-pressed={connect.model === model}
+                className={cn("badge", "suggest", on && "accent")}
+                aria-pressed={on}
                 disabled={testing}
                 onClick={() => update("model", model)}
               >
-                <span className="badge-ui-dot" aria-hidden="true"></span>{model}
+                <span className="dot" aria-hidden="true"></span>
+                {model}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
         <div
-          className="setup-test-region"
+          className="auth-status"
           role="status"
           aria-live="polite"
           aria-atomic="true"
         >
           {result || requestError ? (
-            <div className={"setup-alert " + alertTone}>
-              <span className="setup-alert-icon" aria-hidden="true"></span>
-              <span className="setup-alert-copy">
-                <span className="setup-alert-title">{alertTitle}</span>
-                <p className="setup-alert-body">{alertBody}</p>
-              </span>
+            <div className={cn("alert", testedOk ? "ok" : "danger")}>
+              <Ic name={testedOk ? "circle-check" : "circle-alert"} size={15} />
+              <div className="grow">
+                <b>{alertTitle}</b>
+                <p className="alert-body">{alertBody}</p>
+              </div>
             </div>
           ) : null}
         </div>
 
-        <div className="setup-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={testing}
-            onClick={runTest}
-          >
-            {testing
-              ? "Testing…"
-              : result && !result.ok
-                ? "Test again"
-                : "Test connection"}
-          </button>
-          <button
+        <div className="auth-actions">
+          <Button variant="secondary" disabled={testing} onClick={runTest}>
+            {result && !result.ok ? "Test again" : "Test connection"}
+          </Button>
+          <span className="sp"></span>
+          <Button
             type="submit"
-            className="button-ui button-ui-primary"
+            variant="primary"
+            loading={testing}
             disabled={!tested || testing}
           >
             Save and continue
-          </button>
+          </Button>
         </div>
         {!tested ? (
-          <p className="setup-actions-note">
-            Test the connection before you continue.
-          </p>
+          <p className="hint">Test the connection before you continue.</p>
         ) : null}
       </form>
     </SetupShell>
@@ -1019,175 +860,117 @@ function AgentStep() {
     go("persona");
   }
 
-  const nameDescribedBy = [
-    "setup-agent-name-hint",
-    errors.name ? "setup-agent-name-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const workspaceDescribedBy = [
-    "setup-workspace-hint",
-    errors.workspace ? "setup-workspace-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   return (
-    <SetupShell step="agent" size="agent">
-      <StepHeading step="agent" title="Set up your agent">
+    <SetupShell step="agent">
+      <StepHeading title="Set up your agent">
         This agent answers every new session. You can add more agents and change
         these choices later in Settings.
       </StepHeading>
 
-      <div className="setup-form">
-        <div className="setup-field">
-          <label className="setup-label" htmlFor="setup-agent-name">
-            Agent name
-          </label>
-          <input
+      <div className="auth-form">
+        <Field
+          label="Agent name"
+          htmlFor="setup-agent-name"
+          hint="Lowercase letters, numbers, and dashes. Routes and the CLI use this name."
+          error={errors.name}
+        >
+          <Input
             id="setup-agent-name"
+            className="input-lg"
             type="text"
             autoComplete="off"
             spellCheck={false}
             value={agent.name}
             aria-required="true"
-            aria-invalid={errors.name ? "true" : undefined}
-            aria-describedby={nameDescribedBy}
             onChange={(event) => update("name", event.target.value)}
           />
-          <p id="setup-agent-name-hint" className="setup-hint">
-            Lowercase letters, numbers, and dashes. Routes and the CLI use this
-            name.
-          </p>
-          {errors.name ? (
-            <p id="setup-agent-name-error" className="setup-field-error" role="alert">
-              {errors.name}
-            </p>
-          ) : null}
-        </div>
+        </Field>
 
-        <fieldset className="setup-group">
-          <legend className="setup-label">Template</legend>
-          <div className="agent-permission-tiles setup-tiles">
+        <div className="auth-group">
+          <span className="label">Template</span>
+          <div className="opts" role="radiogroup" aria-label="Template">
             {TEMPLATES.map((template) => {
-              const selected = agent.template === template.id;
+              const on = agent.template === template.id;
               return (
-                <label
+                <button
                   key={template.id}
-                  className={
-                    "agent-permission-tile" + (selected ? " is-selected" : "")
-                  }
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className={cn("opt", on && "on")}
+                  onClick={() => update("template", template.id)}
                 >
-                  <input
-                    className="agent-permission-input"
-                    type="radio"
-                    name="setup-template"
-                    value={template.id}
-                    checked={selected}
-                    onChange={() => update("template", template.id)}
-                  />
-                  <span className="agent-permission-text">
-                    <span className="agent-permission-title">
-                      {template.label}
-                    </span>
-                    <span className="agent-permission-note">
-                      {template.note}
-                    </span>
-                  </span>
-                  <span className="agent-permission-radio" aria-hidden="true">
-                    <span className="agent-permission-dot"></span>
-                  </span>
-                </label>
+                  <Ic name={template.icon} size={18} />
+                  <b>{template.label}</b>
+                  <span>{template.note}</span>
+                </button>
               );
             })}
           </div>
-          <p className="setup-hint">
+          <span className="hint">
             A starting point. You can rewrite the whole persona on the next
             screen.
-          </p>
-        </fieldset>
+          </span>
+        </div>
 
-        <div className="setup-field">
-          <label className="setup-label" htmlFor="setup-workspace">
-            Workspace
-          </label>
-          <input
+        <Field
+          label="Workspace"
+          htmlFor="setup-workspace"
+          hint="File and bash tools work inside this folder."
+          error={errors.workspace}
+        >
+          <Input
             id="setup-workspace"
+            className="input-lg"
             type="text"
             autoComplete="off"
             spellCheck={false}
             value={agent.workspace}
             aria-required="true"
-            aria-invalid={errors.workspace ? "true" : undefined}
-            aria-describedby={workspaceDescribedBy}
             onChange={(event) => update("workspace", event.target.value)}
           />
-          <p id="setup-workspace-hint" className="setup-hint">
-            File and bash tools work inside this folder.
-          </p>
-          {errors.workspace ? (
-            <p id="setup-workspace-error" className="setup-field-error" role="alert">
-              {errors.workspace}
-            </p>
-          ) : null}
-        </div>
+        </Field>
 
-        <fieldset className="setup-group">
-          <legend className="setup-label">Tool permission</legend>
-          <div className="agent-permission-tiles setup-tiles">
+        <div className="auth-group">
+          <span className="label">Tool permission</span>
+          <div className="opts" role="radiogroup" aria-label="Tool permission">
             {PERMISSIONS.map((permission) => {
-              const selected = agent.permission === permission.id;
+              const on = agent.permission === permission.id;
               return (
-                <label
+                <button
                   key={permission.id}
-                  className={
-                    "agent-permission-tile" + (selected ? " is-selected" : "")
-                  }
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className={cn("opt", on && "on")}
+                  onClick={() => update("permission", permission.id)}
                 >
-                  <input
-                    className="agent-permission-input"
-                    type="radio"
-                    name="setup-permission"
-                    value={permission.id}
-                    checked={selected}
-                    onChange={() => update("permission", permission.id)}
-                  />
-                  <span className="agent-permission-text">
-                    <span className="agent-permission-title">
-                      {permission.label}
-                    </span>
-                    <span className="agent-permission-note">
-                      {permission.note}
-                    </span>
-                  </span>
-                  <span className="agent-permission-radio" aria-hidden="true">
-                    <span className="agent-permission-dot"></span>
-                  </span>
-                </label>
+                  <Ic name={permission.icon} size={18} />
+                  <b>{permission.label}</b>
+                  <span>{permission.note}</span>
+                </button>
               );
             })}
           </div>
-          <p className="setup-hint">
+          <span className="hint">
             Ask is recommended. Memory tools never ask for approval.
-          </p>
-        </fieldset>
+          </span>
+        </div>
       </div>
 
-      <div className="setup-actions">
-        <button
-          type="button"
-          className="button-ui button-ui-secondary"
-          onClick={() => go("connect")}
-        >
+      <div className="auth-actions">
+        <Button variant="ghost" onClick={() => go("connect")}>
           Back
-        </button>
-        <button
-          type="button"
-          className="button-ui button-ui-primary"
+        </Button>
+        <span className="sp"></span>
+        <Button
+          variant="primary"
+          size="lg"
+          iconRight="arrow-right"
           onClick={continueNext}
         >
           Continue
-        </button>
+        </Button>
       </div>
     </SetupShell>
   );
@@ -1203,14 +986,14 @@ function RestartPanel({ phase, error, onRetry }: RestartPanelProps) {
   if (phase === "restarting") {
     return (
       <div
-        className="setup-restart"
+        className="auth-restart"
         role="status"
         aria-live="polite"
         aria-atomic="true"
       >
-        <span className="setup-spinner" aria-hidden="true"></span>
-        <h1 className="setup-restart-title">Restarting lana…</h1>
-        <p className="setup-restart-text">
+        <span className="auth-spinner" aria-hidden="true"></span>
+        <h1 className="auth-restart-title">Restarting lana…</h1>
+        <p className="auth-restart-text">
           Setup is saved. The daemon restarts in place and this page reconnects
           on its own.
         </p>
@@ -1218,23 +1001,19 @@ function RestartPanel({ phase, error, onRetry }: RestartPanelProps) {
     );
   }
   return (
-    <div className="setup-restart is-error" role="alert">
-      <span className="setup-restart-icon" aria-hidden="true">
-        !
+    <div className="auth-restart" role="alert">
+      <span className="auth-restart-ic" aria-hidden="true">
+        <Ic name="circle-alert" size={20} />
       </span>
-      <h1 className="setup-restart-title">The daemon did not answer</h1>
-      <p className="setup-restart-text">{errorMessage(error)}</p>
-      <p className="setup-hint">
+      <h1 className="auth-restart-title">The daemon did not answer</h1>
+      <p className="auth-restart-text">{errorMessage(error)}</p>
+      <p className="hint">
         If lana is still starting, check again. You can also restart it from the
         terminal.
       </p>
-      <button
-        type="button"
-        className="button-ui button-ui-secondary setup-retry"
-        onClick={onRetry}
-      >
+      <Button variant="secondary" onClick={onRetry}>
         Check again
-      </button>
+      </Button>
     </div>
   );
 }
@@ -1375,110 +1154,79 @@ function PersonaStep() {
     );
   }
 
-  const agentDescribedBy = [
-    "setup-agent-md-hint",
-    "setup-agent-md-count",
-    errors.agentMd ? "setup-agent-md-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const userDescribedBy = [
-    "setup-user-md-hint",
-    "setup-user-md-count",
-    errors.userMd ? "setup-user-md-error" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
   return (
     <SetupShell step="persona" size="wide">
-      <StepHeading step="persona" title="Make it yours">
+      <StepHeading title="Make it yours">
         Edit how the agent behaves and tell it about you. Both are plain Markdown
         files in the agent home, so you can change them any time.
       </StepHeading>
 
-      <form className="setup-form setup-persona-form" onSubmit={submit}>
-        <div className="setup-field">
-          <div className="setup-label-row">
-            <label className="setup-label" htmlFor="setup-agent-md">
+      <form className="auth-form" onSubmit={submit}>
+        <Field
+          hint={
+            <span className="field-hint-row">
+              <span>Write any tone, rules, or role.</span>
+              <span>{numberFormat.format(agentCharacters)} characters</span>
+            </span>
+          }
+          error={errors.agentMd}
+        >
+          <div className="field-label-row">
+            <label className="label" htmlFor="setup-agent-md">
               Persona · AGENT.md
             </label>
-            <button
-              type="button"
-              className="link-button setup-reset"
+            <Button
+              variant="ghost"
+              size="sm"
               disabled={!TEMPLATE_PREVIEW_AVAILABLE}
               aria-describedby="setup-template-note"
             >
               Reset to template
-            </button>
+            </Button>
           </div>
-          <textarea
+          <Textarea
             id="setup-agent-md"
-            className="setup-textarea"
             rows={8}
             value={persona.agentMd}
             aria-required="true"
-            aria-invalid={errors.agentMd ? "true" : undefined}
-            aria-describedby={agentDescribedBy}
             onChange={(event) => update("agentMd", event.target.value)}
-          ></textarea>
-          <div className="setup-hint-row">
-            <p id="setup-agent-md-hint" className="setup-hint">
-              Write any tone, rules, or role.
-            </p>
-            <span id="setup-agent-md-count" className="setup-counter">
-              {numberFormat.format(agentCharacters)} characters
-            </span>
-          </div>
-          <p id="setup-template-note" className="setup-note">
+          ></Textarea>
+          <span className="hint" id="setup-template-note">
             The template preview is not available yet. Write the persona
             yourself; you can edit it later in Settings.
-          </p>
-          {errors.agentMd ? (
-            <p id="setup-agent-md-error" className="setup-field-error" role="alert">
-              {errors.agentMd}
-            </p>
-          ) : null}
-        </div>
+          </span>
+        </Field>
 
-        <div className="setup-field">
-          <div className="setup-label-row">
-            <label className="setup-label" htmlFor="setup-user-md">
+        <Field
+          hint={
+            <span className="field-hint-row">
+              <span>The agent reads this on every turn. It adds facts it learns later.</span>
+              <span>{numberFormat.format(userCharacters)} / 2,000</span>
+            </span>
+          }
+          error={errors.userMd}
+        >
+          <div className="field-label-row">
+            <label className="label" htmlFor="setup-user-md">
               About you · USER.md
             </label>
-            <span className="setup-label-note">Optional</span>
+            <span className="faint">Optional</span>
           </div>
-          <textarea
+          <Textarea
             id="setup-user-md"
-            className="setup-textarea"
             rows={8}
             value={persona.userMd}
-            aria-invalid={errors.userMd ? "true" : undefined}
-            aria-describedby={userDescribedBy}
             onChange={(event) => update("userMd", event.target.value)}
-          ></textarea>
-          <div className="setup-hint-row">
-            <p id="setup-user-md-hint" className="setup-hint">
-              The agent reads this on every turn. It adds facts it learns later.
-            </p>
-            <span id="setup-user-md-count" className="setup-counter">
-              {numberFormat.format(userCharacters)} / 2,000
-            </span>
-          </div>
-          {errors.userMd ? (
-            <p id="setup-user-md-error" className="setup-field-error" role="alert">
-              {errors.userMd}
-            </p>
-          ) : null}
-        </div>
+          ></Textarea>
+        </Field>
 
-        <p className="setup-tip">
+        <p className="panel auth-tip">
           Memory (MEMORY.md) fills itself as you chat. You can review and edit it
           in Settings › Agents.
         </p>
 
         {saveError ? (
-          <div className="setup-save-error" role="alert">
+          <div className="auth-save-error" role="alert">
             <ErrorNotice
               message={errorMessage(saveError)}
               details={saveError instanceof ApiError ? saveError.details : []}
@@ -1486,22 +1234,14 @@ function PersonaStep() {
           </div>
         ) : null}
 
-        <div className="setup-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={saving}
-            onClick={() => go("agent")}
-          >
+        <div className="auth-actions">
+          <Button variant="ghost" disabled={saving} onClick={() => go("agent")}>
             Back
-          </button>
-          <button
-            type="submit"
-            className="button-ui button-ui-primary"
-            disabled={saving}
-          >
-            {saving ? "Saving…" : "Save and continue"}
-          </button>
+          </Button>
+          <span className="sp"></span>
+          <Button type="submit" variant="primary" loading={saving} disabled={saving}>
+            Save and continue
+          </Button>
         </div>
       </form>
     </SetupShell>
@@ -1512,53 +1252,63 @@ function ReadyStep() {
   const summary = readSummary() || summaryFor(readDraft());
   const permission =
     summary.permissionLabel || permissionById(summary.permission).summary;
-  const rows: { label: string; value: string }[] = [
+  const rows: { icon: string; label: string; value: string }[] = [
     {
+      icon: "server",
       label: "Provider",
       value: summary.providerLabel || providerLabel(summary.provider),
     },
-    { label: "Model", value: summary.model || "The provider default" },
+    { icon: "cpu", label: "Model", value: summary.model || "The provider default" },
     {
+      icon: "bot",
       label: "Agent",
       value:
         (summary.agentName || "default") +
         " · " +
         (summary.templateLabel || templateById(summary.template).label),
     },
-    { label: "Tool permission", value: permission },
-    { label: "Workspace", value: summary.workspace || "~/lana/workspace" },
+    { icon: "shield-check", label: "Tool permission", value: permission },
+    {
+      icon: "folder",
+      label: "Workspace",
+      value: summary.workspace || "~/lana/workspace",
+    },
   ];
 
   return (
     <SetupShell step="ready">
-      <StepHeading step="ready" title="lana is ready">
+      <span className="ready-badge">
+        <Ic name="circle-check" size={22} />
+      </span>
+      <h1>lana is ready</h1>
+      <p className="sub">
         Your agent is set up. Start a session here or from the CLI. Connect
         Telegram and other channels later in Channels.
-      </StepHeading>
+      </p>
 
-      <div className="setup-summary">
+      <div className="panel">
         {rows.map((row) => (
-          <div key={row.label} className="setup-summary-row">
-            <span className="setup-summary-label">{row.label}</span>
-            <span className="setup-summary-value">{row.value}</span>
+          <div key={row.label} className="ready-row">
+            <span className="ready-ic">
+              <Ic name={row.icon} size={14} />
+            </span>
+            <div className="grow">
+              <div className="ready-t">{row.label}</div>
+              <div className="faint ready-s">{row.value}</div>
+            </div>
+            <span className="ready-ok">
+              <Ic name="check" size={15} />
+            </span>
           </div>
         ))}
       </div>
 
-      <div className="setup-ready-actions">
-        <a
-          className="button-ui button-ui-primary setup-ready-primary"
-          href="#/sessions/new"
-        >
-          Start your first session
-        </a>
-        <a
-          className="button-ui button-ui-tertiary setup-ready-secondary"
-          href="#/settings/general"
-        >
-          Open settings
-        </a>
-      </div>
+      <Button variant="primary" size="lg" block as="a" href="#/sessions/new">
+        Start your first session
+      </Button>
+      <a className="link ready-link" href="#/settings/general">
+        Open settings
+      </a>
     </SetupShell>
   );
 }

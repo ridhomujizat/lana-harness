@@ -22,8 +22,28 @@ import type {
 import type { ListSecretsResponse, SecretRow } from "../api/secrets";
 import type { DaemonInfo } from "../api/daemon";
 import type { AuditEntry } from "../api/audit";
-import { Dialog, ErrorDetails, ErrorNotice, Icon, Loading } from "../ui/ui";
-import { AgentAvatar, agoLabel } from "./agent-common";
+import { ErrorDetails } from "../ui/ui";
+import { avatarFor } from "../lib/avatar";
+import { agoLabel } from "./agent-common";
+import { Ic } from "../ui/icons";
+import {
+  Avatar,
+  AvatarStack,
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  Menu,
+  MenuItem,
+  Modal,
+  SearchInput,
+  Select,
+  Skeleton,
+  Textarea,
+} from "../ui/gr8r";
+import type { BadgeTone } from "../ui/gr8r";
 import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
 
 /* Settings rev 2 (T-034): the shared shell plus Providers, Secrets, Config file,
@@ -31,11 +51,11 @@ import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
    here, so this file must not import settings-general.js. */
 
 const SETTINGS_TABS = [
-  { key: "general", label: "General" },
-  { key: "providers", label: "Providers" },
-  { key: "secrets", label: "Secrets" },
-  { key: "config", label: "Config file" },
-  { key: "audit", label: "Audit log" },
+  { key: "general", label: "General", icon: "sliders-horizontal" },
+  { key: "providers", label: "Providers", icon: "plug" },
+  { key: "secrets", label: "Secrets", icon: "key-round" },
+  { key: "config", label: "Config file", icon: "file-code" },
+  { key: "audit", label: "Audit log", icon: "scroll-text" },
 ];
 
 const PROVIDER_KINDS = [
@@ -92,7 +112,7 @@ function failureInfo(failure: unknown): {
   };
 }
 
-function StatusLine({ text }: { text: string }) {
+export function StatusLine({ text }: { text: string }) {
   return (
     <p
       className="settings-status"
@@ -102,6 +122,53 @@ function StatusLine({ text }: { text: string }) {
     >
       {text}
     </p>
+  );
+}
+
+/* Gr8r `.alert` in place of the legacy error box: one message plus the detail
+   list, with the tone and icon matching Gr8r's state colours. */
+export function Alert({
+  tone,
+  icon = "circle-alert",
+  message,
+  details,
+}: {
+  tone: "danger" | "warn" | "ok" | "info";
+  icon?: string;
+  message?: string;
+  details?: unknown[];
+}) {
+  const hasDetails = Array.isArray(details) && details.length > 0;
+  if (!message && !hasDetails) {
+    return null;
+  }
+  return (
+    <div
+      className={"alert " + tone}
+      role={tone === "danger" ? "alert" : undefined}
+      aria-live={tone === "danger" ? undefined : "polite"}
+    >
+      <Ic name={icon} size={15} />
+      <div className="grow">
+        {message ? <p className="settings-alert-msg">{message}</p> : null}
+        <ErrorDetails details={details} />
+      </div>
+    </div>
+  );
+}
+
+function LoadingRows({ label }: { label: string }) {
+  return (
+    <div className="panel settings-loading" aria-busy="true">
+      <span className="sr">{label}</span>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="mini settings-loading-row">
+          <Skeleton width={30} height={30} radius={8} />
+          <Skeleton width="40%" height={12} />
+          <Skeleton width="18%" height={12} />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -117,11 +184,6 @@ function defaultProviderEnv(name: string): string {
   return validStart + "_API_KEY";
 }
 
-function providerInitial(name: string): string {
-  const text = String(name || "").trim();
-  return text ? (Array.from(text)[0] || "").toUpperCase() : "?";
-}
-
 function providerAgents(usedBy: string[] | undefined): string[] {
   if (!Array.isArray(usedBy)) {
     return [];
@@ -134,38 +196,52 @@ function providerAgents(usedBy: string[] | undefined): string[] {
     .filter(Boolean);
 }
 
+/* The agent identity colours (lib/avatar.ts) map onto the Gr8r status tokens so
+   one agent keeps one colour wherever it appears. */
+const AVATAR_COLORS: Record<string, string> = {
+  "tone-brand": "var(--violet)",
+  "tone-success": "var(--green)",
+  "tone-warning": "var(--amber)",
+  "tone-error": "var(--red)",
+  "tone-gray": "var(--gray)",
+};
+
+function agentColor(name: string): string {
+  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+}
+
 function ProviderUsers({ usedBy }: { usedBy: string[] }) {
   const names = providerAgents(usedBy);
   if (names.length === 0) {
-    return <span className="settings-muted">No agents</span>;
+    return <span className="hint">No agents</span>;
   }
   return (
-    <span className="settings-used-by">
-      <span className="agent-avatar-group" aria-hidden="true">
-        {names.map((name) => (
-          <AgentAvatar key={name} name={name} size="24" />
-        ))}
-      </span>
-      <span className="sr-only">{names.join(", ")}</span>
+    <span className="settings-provider-users-inner">
+      <AvatarStack
+        size="sm"
+        max={3}
+        items={names.map((name) => ({ name, color: agentColor(name) }))}
+      />
+      <span className="sr">{names.join(", ")}</span>
     </span>
   );
 }
 
 function providerKeyState(provider: ProviderRow): {
   label: string;
-  className: string;
+  tone: BadgeTone;
   note: string;
 } {
   if (!provider || !provider.api_key_env) {
-    return { label: "No key needed", className: "is-none", note: "" };
+    return { label: "No key needed", tone: "gray", note: "" };
   }
   if (provider.key_state === "overridden_by_env") {
-    return { label: "Set", className: "is-set", note: "from environment" };
+    return { label: "Set", tone: "green", note: "from environment" };
   }
   if (provider.key_state === "set") {
-    return { label: "Set", className: "is-set", note: "" };
+    return { label: "Set", tone: "green", note: "" };
   }
-  return { label: "Missing", className: "is-missing", note: "" };
+  return { label: "Missing", tone: "amber", note: "" };
 }
 
 function hasWebScheme(value: string): boolean {
@@ -237,89 +313,88 @@ export interface SettingsTabsProps {
   active: string;
 }
 
+/* The Gr8r settings rail: Lana's sections as `.sitem` rows, the active one
+   carrying `.on` and aria-current. Arrow keys move focus down the list. */
 export function SettingsTabs({ active }: SettingsTabsProps) {
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (
-      event.key !== "ArrowRight" &&
-      event.key !== "ArrowLeft" &&
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
       event.key !== "Home" &&
       event.key !== "End"
     ) {
       return;
     }
-    const tabs = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(".sitem")
     );
-    if (tabs.length === 0) {
+    if (items.length === 0) {
       return;
     }
-    const index = tabs.findIndex((tab) => tab === document.activeElement);
+    const index = items.findIndex((item) => item === document.activeElement);
     let next = index < 0 ? 0 : index;
-    if (event.key === "ArrowRight") {
-      next = (next + 1) % tabs.length;
-    } else if (event.key === "ArrowLeft") {
-      next = (next - 1 + tabs.length) % tabs.length;
+    if (event.key === "ArrowDown") {
+      next = (next + 1) % items.length;
+    } else if (event.key === "ArrowUp") {
+      next = (next - 1 + items.length) % items.length;
     } else if (event.key === "Home") {
       next = 0;
     } else {
-      next = tabs.length - 1;
+      next = items.length - 1;
     }
     event.preventDefault();
-    const target = tabs[next];
+    const target = items[next];
     if (target) {
       target.focus();
     }
   }
 
   return (
-    <div className="settings-head">
-      <header className="settings-header">
-        <h1 className="settings-title">Settings</h1>
-        <p className="settings-subtitle">
-          Providers, secrets and the daemon. Agents, skills, MCP and channels have
-          their own pages.
-        </p>
-      </header>
-      <nav
-        className="settings-tabs"
-        role="tablist"
-        aria-label="Settings"
-        onKeyDown={handleKeyDown}
-      >
-        {SETTINGS_TABS.map((tab) => (
-          <a
-            key={tab.key}
-            id={"settings-tab-" + tab.key}
-            className={"settings-tab" + (active === tab.key ? " is-active" : "")}
-            role="tab"
-            href={"#/settings/" + tab.key}
-            aria-selected={active === tab.key ? "true" : "false"}
-            aria-controls={"settings-panel-" + tab.key}
-            tabIndex={active === tab.key ? 0 : -1}
-          >
-            {tab.label}
-          </a>
-        ))}
-      </nav>
-    </div>
+    <nav className="set-nav" aria-label="Settings" onKeyDown={handleKeyDown}>
+      {SETTINGS_TABS.map((tab) => (
+        <a
+          key={tab.key}
+          id={"settings-tab-" + tab.key}
+          className={"sitem" + (active === tab.key ? " on" : "")}
+          href={"#/settings/" + tab.key}
+          aria-current={active === tab.key ? "page" : undefined}
+        >
+          <Ic name={tab.icon} size={15} />
+          <span>{tab.label}</span>
+        </a>
+      ))}
+    </nav>
   );
 }
 
 export interface SettingsPanelProps {
   active: string;
+  title?: ReactNode;
+  description?: ReactNode;
   children?: ReactNode;
 }
 
-export function SettingsPanel({ active, children }: SettingsPanelProps) {
+/* The Gr8r settings body: `.set-body > .set-in` with a `.ph` section header,
+   then the section blocks. */
+export function SettingsPanel({
+  active,
+  title,
+  description,
+  children,
+}: SettingsPanelProps) {
   return (
-    <div
-      id={"settings-panel-" + active}
-      className="settings-panel"
-      role="tabpanel"
-      aria-labelledby={"settings-tab-" + active}
-      tabIndex={0}
-    >
-      {children}
+    <div id={"settings-panel-" + active} className="set-body">
+      <div className="set-in">
+        {title ? (
+          <header className="ph">
+            <div>
+              <h1>{title}</h1>
+              {description ? <p>{description}</p> : null}
+            </div>
+          </header>
+        ) : null}
+        {children}
+      </div>
     </div>
   );
 }
@@ -363,19 +438,20 @@ export function SettingsRestartBanner({
   }
   const saved = savedAgoLabel();
   return (
-    <div className="settings-restart-banner">
-      <span className="settings-inline-dot is-warning" aria-hidden="true"></span>
+    <div className="alert warn settings-restart-banner">
+      <Ic name="triangle-alert" size={15} />
       <p className="settings-restart-text">
         {saved ? "Saved " + saved + ". " : "Saved. "}Restart the daemon for the
         saved changes to take effect.
       </p>
-      <button
-        type="button"
-        className="button-ui button-ui-secondary"
+      <Button
+        variant="secondary"
+        size="sm"
+        icon="rotate-cw"
         onClick={() => setOpen(true)}
       >
         Restart daemon
-      </button>
+      </Button>
       {open ? (
         <SettingsRestartDialog
           onClose={() => setOpen(false)}
@@ -419,8 +495,6 @@ function ProviderDialog({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
-  const removeButtonRef = useRef<HTMLButtonElement>(null);
-  const wasConfirmingRef = useRef(false);
 
   const trimmedName = name.trim();
   const envPreview =
@@ -428,14 +502,10 @@ function ProviderDialog({
 
   useEffect(() => {
     if (confirmDelete) {
-      wasConfirmingRef.current = true;
       const node = document.getElementById("settings-provider-remove-cancel");
       if (node) {
         node.focus();
       }
-    } else if (wasConfirmingRef.current && removeButtonRef.current) {
-      wasConfirmingRef.current = false;
-      removeButtonRef.current.focus();
     }
   }, [confirmDelete]);
 
@@ -604,12 +674,61 @@ function ProviderDialog({
   }
 
   return (
-    <Dialog
+    <Modal
       title={editing ? "Edit provider" : "Add provider"}
       dismissible={!busy}
       onClose={onClose}
+      footer={
+        confirmDelete ? (
+          <>
+            <Button
+              id="settings-provider-remove-cancel"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              Cancel
+            </Button>
+            <span className="sp" />
+            <Button
+              variant="danger"
+              disabled={busy}
+              loading={busy}
+              onClick={removeProvider}
+            >
+              {busy ? "Removing…" : "Remove provider"}
+            </Button>
+          </>
+        ) : (
+          <>
+            {editing ? (
+              <Button
+                variant="danger-ghost"
+                disabled={busy}
+                onClick={() => setConfirmDelete(true)}
+              >
+                Remove provider
+              </Button>
+            ) : null}
+            <span className="sp" />
+            <Button variant="secondary" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="settings-provider-form"
+              variant="primary"
+              disabled={busy}
+              loading={busy}
+            >
+              {busy ? "Saving…" : "Save provider"}
+            </Button>
+          </>
+        )
+      }
     >
       <form
+        id="settings-provider-form"
         className="settings-dialog-form"
         onSubmit={confirmDelete ? (event) => event.preventDefault() : submit}
       >
@@ -619,9 +738,11 @@ function ProviderDialog({
             : "Add a provider table. Agents can pick it after the daemon restarts."}
         </p>
 
-        <label className="field">
-          <span className="field-label">Name</span>
-          <input
+        <Field
+          label="Name"
+          hint="Lowercase letters, digits, and dashes. The name cannot change after it is saved."
+        >
+          <Input
             data-autofocus={editing ? undefined : true}
             type="text"
             name="provider-name"
@@ -631,34 +752,25 @@ function ProviderDialog({
             spellCheck={false}
             pattern="[a-z0-9-]+"
             required
-            aria-describedby="settings-provider-name-hint"
             onChange={(event) => setName(event.target.value)}
           />
-          <span id="settings-provider-name-hint" className="hint">
-            Lowercase letters, digits, and dashes. The name cannot change after it
-            is saved.
-          </span>
-        </label>
+        </Field>
 
-        <label className="field">
-          <span className="field-label">Kind</span>
-          <select
-            name="provider-kind"
+        <Field label="Kind">
+          <Select
+            aria-label="Kind"
+            options={PROVIDER_KINDS}
             value={kind}
             disabled={busy}
-            onChange={(event) => setKind(event.target.value)}
-          >
-            {PROVIDER_KINDS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setKind}
+          />
+        </Field>
 
-        <label className="field">
-          <span className="field-label">Base URL</span>
-          <input
+        <Field
+          label="Base URL"
+          hint="The API endpoint, starting with the http or https scheme."
+        >
+          <Input
             data-autofocus={editing ? true : undefined}
             type="url"
             name="provider-base-url"
@@ -668,17 +780,20 @@ function ProviderDialog({
             spellCheck={false}
             placeholder="Provider API endpoint"
             required
-            aria-describedby="settings-provider-base-url-hint"
             onChange={(event) => setBaseUrl(event.target.value)}
           />
-          <span id="settings-provider-base-url-hint" className="hint">
-            The API endpoint, starting with the http or https scheme.
-          </span>
-        </label>
+        </Field>
 
-        <label className="field">
-          <span className="field-label">API key variable</span>
-          <input
+        <Field
+          label="API key variable"
+          hint={
+            <>
+              The env name written to config.toml. Defaults to{" "}
+              {defaultProviderEnv(trimmedName) || "<NAME>_API_KEY"}.
+            </>
+          }
+        >
+          <Input
             type="text"
             name="provider-key-env"
             value={apiKeyEnv}
@@ -686,33 +801,28 @@ function ProviderDialog({
             autoComplete="off"
             spellCheck={false}
             placeholder={defaultProviderEnv(trimmedName) || "OPENAI_API_KEY"}
-            aria-describedby="settings-provider-key-env-hint"
             onChange={(event) => setApiKeyEnv(event.target.value)}
           />
-          <span id="settings-provider-key-env-hint" className="hint">
-            The env name written to config.toml. Defaults to{" "}
-            {defaultProviderEnv(trimmedName) || "<NAME>_API_KEY"}.
-          </span>
-        </label>
+        </Field>
 
-        <label className="field">
-          <span className="field-label">API key</span>
-          <input
+        <Field
+          label="API key"
+          hint={
+            editing
+              ? "Leave empty to keep the saved key. A new key is tested before it is written."
+              : "Stored write-only in secrets.env. Leave empty if this provider does not need a key."
+          }
+        >
+          <Input
             type="password"
             name="provider-api-key"
             value={apiKey}
             disabled={busy}
             autoComplete="new-password"
             spellCheck={false}
-            aria-describedby="settings-provider-api-key-hint"
             onChange={(event) => setApiKey(event.target.value)}
           />
-          <span id="settings-provider-api-key-hint" className="hint">
-            {editing
-              ? "Leave empty to keep the saved key. A new key is tested before it is written."
-              : "Stored write-only in secrets.env. Leave empty if this provider does not need a key."}
-          </span>
-        </label>
+        </Field>
 
         <section
           className="settings-dialog-section"
@@ -723,9 +833,8 @@ function ProviderDialog({
             The test sends one small request. The model is used for the test only
             and is not saved.
           </p>
-          <label className="field">
-            <span className="field-label">Test model</span>
-            <input
+          <Field label="Test model">
+            <Input
               type="text"
               name="provider-test-model"
               value={testModel}
@@ -735,16 +844,16 @@ function ProviderDialog({
               placeholder={defaultTestModel(baseUrl)}
               onChange={(event) => setTestModel(event.target.value)}
             />
-          </label>
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
+          </Field>
+          <div className="settings-dialog-actions">
+            <Button
+              variant="secondary"
+              icon="plug"
               disabled={busy || testing}
               onClick={testConnection}
             >
               {testing ? "Testing…" : "Test connection"}
-            </button>
+            </Button>
           </div>
           <p
             className={
@@ -758,7 +867,7 @@ function ProviderDialog({
           </p>
         </section>
 
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        <Alert tone="danger" message={error} details={details} />
 
         {confirmDelete ? (
           <div className="settings-confirm">
@@ -766,59 +875,10 @@ function ProviderDialog({
               Remove <strong>{provider ? provider.name : ""}</strong>? This cannot
               be undone. An agent that uses this provider must be changed first.
             </p>
-            <div className="dialog-actions">
-              <button
-                id="settings-provider-remove-cancel"
-                type="button"
-                className="button-ui button-ui-secondary"
-                disabled={busy}
-                onClick={() => setConfirmDelete(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="button-ui settings-danger-button"
-                disabled={busy}
-                onClick={removeProvider}
-              >
-                {busy ? "Removing…" : "Remove provider"}
-              </button>
-            </div>
           </div>
-        ) : (
-          <div className="dialog-actions">
-            {editing ? (
-              <button
-                ref={removeButtonRef}
-                type="button"
-                className="button-ui button-ui-tertiary"
-                disabled={busy}
-                onClick={() => setConfirmDelete(true)}
-              >
-                Remove provider
-              </button>
-            ) : null}
-            <span className="settings-dialog-spacer"></span>
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={busy}
-              onClick={onClose}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="button-ui button-ui-primary"
-              disabled={busy}
-            >
-              {busy ? "Saving…" : "Save provider"}
-            </button>
-          </div>
-        )}
+        ) : null}
       </form>
-    </Dialog>
+    </Modal>
   );
 }
 
@@ -882,10 +942,7 @@ export function SettingsProvidersPage() {
     reload();
   }
 
-  function openRow(
-    event: MouseEvent<HTMLTableRowElement>,
-    provider: ProviderRow
-  ) {
+  function openRow(event: MouseEvent<HTMLDivElement>, provider: ProviderRow) {
     const target = event.target;
     if (
       target instanceof Element &&
@@ -899,35 +956,32 @@ export function SettingsProvidersPage() {
   return (
     <main id="main" className="page settings-page">
       <SettingsTabs active="providers" />
-      <SettingsPanel active="providers">
+      <SettingsPanel
+        active="providers"
+        title="Providers"
+        description="Connections agents use to reach a model."
+      >
         <SettingsRestartBanner
           restartRequired={Boolean(data && data.restart_required)}
           onRestarted={reload}
         />
 
         <div className="settings-toolbar">
-          <div className="sessions-search settings-search">
-            <span className="sessions-search-icon">
-              <Icon name="search" />
-            </span>
-            <label className="sr-only" htmlFor="settings-providers-search">
-              Search providers
-            </label>
-            <input
-              id="settings-providers-search"
-              className="sessions-search-input"
-              type="search"
-              placeholder="Search providers"
-              autoComplete="off"
-              spellCheck={false}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <span className="settings-toolbar-spacer"></span>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
+          <SearchInput
+            wrapClassName="settings-search"
+            aria-label="Search providers"
+            placeholder="Search providers"
+            autoComplete="off"
+            spellCheck={false}
+            kbd={null}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <span className="settings-toolbar-spacer" />
+          <Button
+            variant="primary"
+            size="sm"
+            icon="plus"
             disabled={!data || !data.version || state === "loading"}
             title={
               data && !data.version
@@ -936,139 +990,104 @@ export function SettingsProvidersPage() {
             }
             onClick={() => setDialog({ provider: null })}
           >
-            + Add provider
-          </button>
+            Add provider
+          </Button>
         </div>
 
         <StatusLine text={message} />
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        <Alert tone="danger" message={error} details={details} />
         {state === "error" ? (
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              onClick={reload}
-            >
+          <div className="settings-actions-bar">
+            <Button variant="secondary" onClick={reload}>
               Reload providers
-            </button>
+            </Button>
           </div>
         ) : null}
         {state === "loading" ? (
-          <Loading label="Loading providers…" />
+          <LoadingRows label="Loading providers…" />
         ) : state === "ready" && visible.length === 0 ? (
-          <div className="settings-empty">
-            <p className="settings-empty-title">
-              {providers.length === 0
-                ? "No providers configured"
-                : "No providers match “" + query.trim() + "”"}
-            </p>
-            <p className="settings-empty-text">
-              {providers.length === 0
-                ? "Add a provider to let agents send requests to a model."
-                : "Try a different name, URL, or kind."}
-            </p>
+          <div className="panel">
+            <EmptyState
+              icon={providers.length === 0 ? "plug" : "search-x"}
+              size={providers.length === 0 ? undefined : "sm"}
+              title={
+                providers.length === 0
+                  ? "No providers configured"
+                  : "No providers match “" + query.trim() + "”"
+              }
+              text={
+                providers.length === 0
+                  ? "Add a provider to let agents send requests to a model."
+                  : "Try a different name, URL, or kind."
+              }
+            />
           </div>
         ) : null}
 
         {state === "ready" && visible.length > 0 ? (
-          <div className="settings-table-wrap">
-            <table className="settings-table settings-providers-table">
-              <caption className="sr-only">Providers</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Provider</th>
-                  <th scope="col">Kind</th>
-                  <th scope="col">API key</th>
-                  <th scope="col">Used by</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((provider) => {
-                  const key = providerKeyState(provider);
-                  return (
-                    <tr
-                      key={provider.name}
-                      className="settings-clickable-row"
-                      onClick={(event) => openRow(event, provider)}
-                    >
-                      <td>
-                        <span className="settings-name-cell">
-                          <span className="settings-initial" aria-hidden="true">
-                            {providerInitial(provider.name)}
-                          </span>
-                          <span className="settings-name-text">
-                            <span className="settings-name">
-                              {provider.name}
-                            </span>
-                            <span className="settings-sub">
-                              {provider.base_url}
-                            </span>
-                          </span>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="badge-ui">
-                          <span className="badge-ui-dot" aria-hidden="true"></span>
-                          {provider.kind}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="settings-key-cell">
-                          {provider.api_key_env ? (
-                            <>
-                              <code className="settings-key-env">
-                                {provider.api_key_env}
-                              </code>
-                              <span
-                                className={
-                                  "settings-key-state " + key.className
-                                }
-                              >
-                                <span
-                                  className="settings-dot"
-                                  aria-hidden="true"
-                                ></span>
-                                {key.label}
-                                {key.note ? (
-                                  <span className="settings-key-note">
-                                    {key.note}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="settings-key-state is-none">
-                              <span
-                                className="settings-dot"
-                                aria-hidden="true"
-                              ></span>
-                              No key needed
-                            </span>
-                          )}
-                        </span>
-                      </td>
-                      <td>
-                        <ProviderUsers usedBy={provider.used_by} />
-                      </td>
-                      <td className="settings-row-action">
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={"Edit " + provider.name}
-                          onClick={() => setDialog({ provider })}
-                        >
-                          <Icon name="chevron-right" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <section
+            className="panel settings-providers"
+            aria-label="Providers"
+          >
+            {visible.map((provider) => {
+              const key = providerKeyState(provider);
+              return (
+                <div
+                  key={provider.name}
+                  className="mini settings-provider"
+                  onClick={(event) => openRow(event, provider)}
+                >
+                  <Avatar
+                    name={provider.name}
+                    color={agentColor(provider.name)}
+                    size="lg"
+                  />
+                  <span className="settings-cell">
+                    <span className="settings-cell-t">
+                      <span className="settings-name mono">
+                        {provider.name}
+                      </span>
+                      <Badge>{provider.kind}</Badge>
+                    </span>
+                    <span className="settings-cell-s mono">
+                      {provider.base_url}
+                    </span>
+                  </span>
+                  <span className="settings-provider-key">
+                    {provider.api_key_env ? (
+                      <>
+                        <code className="mono">{provider.api_key_env}</code>
+                        <Badge tone={key.tone} dot>
+                          {key.label}
+                        </Badge>
+                        {key.note ? (
+                          <span className="hint">{key.note}</span>
+                        ) : null}
+                      </>
+                    ) : (
+                      <Badge tone={key.tone} dot>
+                        {key.label}
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="settings-provider-users">
+                    <ProviderUsers usedBy={provider.used_by} />
+                  </span>
+                  <span className="settings-row-actions">
+                    <IconButton
+                      icon="chevron-right"
+                      size="sm"
+                      label={"Edit " + provider.name}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setDialog({ provider });
+                      }}
+                    />
+                  </span>
+                </div>
+              );
+            })}
+          </section>
         ) : null}
 
         <p className="settings-footer-note">
@@ -1153,21 +1172,40 @@ function SecretDialog({ secret, version, onClose, onSaved }: SecretDialogProps) 
   }
 
   return (
-    <Dialog
+    <Modal
       title={editing ? "Replace secret" : "New secret"}
       dismissible={!busy}
       onClose={onClose}
+      footer={
+        <>
+          <span className="sp" />
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form="settings-secret-form"
+            variant="primary"
+            disabled={busy}
+            loading={busy}
+          >
+            {busy ? "Saving…" : editing ? "Replace secret" : "Save secret"}
+          </Button>
+        </>
+      }
     >
-      <form className="settings-dialog-form" onSubmit={submit}>
+      <form id="settings-secret-form" className="settings-dialog-form" onSubmit={submit}>
         {editing ? (
           <p className="settings-secret-target">
-            Replacing <code>{secret ? secret.name : ""}</code>. The old value is
-            removed.
+            Replacing <code className="mono">{secret ? secret.name : ""}</code>.
+            The old value is removed.
           </p>
         ) : (
-          <label className="field">
-            <span className="field-label">Name</span>
-            <input
+          <Field
+            label="Name"
+            hint="Letters, digits, and underscores; must not start with a digit."
+          >
+            <Input
               data-autofocus={true}
               type="text"
               name="secret-name"
@@ -1177,18 +1215,16 @@ function SecretDialog({ secret, version, onClose, onSaved }: SecretDialogProps) 
               spellCheck={false}
               pattern="[A-Za-z_][A-Za-z0-9_]*"
               required
-              aria-describedby="settings-secret-name-hint"
               onChange={(event) => setName(event.target.value)}
             />
-            <span id="settings-secret-name-hint" className="hint">
-              Letters, digits, and underscores; must not start with a digit.
-            </span>
-          </label>
+          </Field>
         )}
 
-        <label className="field">
-          <span className="field-label">{editing ? "New value" : "Value"}</span>
-          <input
+        <Field
+          label={editing ? "New value" : "Value"}
+          hint="Values are write-only. The value is never shown again after saving."
+        >
+          <Input
             data-autofocus={editing ? true : undefined}
             type="password"
             name="secret-value"
@@ -1197,35 +1233,13 @@ function SecretDialog({ secret, version, onClose, onSaved }: SecretDialogProps) 
             autoComplete="new-password"
             spellCheck={false}
             required
-            aria-describedby="settings-secret-value-hint"
             onChange={(event) => setValue(event.target.value)}
           />
-          <span id="settings-secret-value-hint" className="hint">
-            Values are write-only. The value is never shown again after saving.
-          </span>
-        </label>
+        </Field>
 
-        {error ? <ErrorNotice message={error} details={details} /> : null}
-
-        <div className="dialog-actions">
-          <button
-            type="button"
-            className="button-ui button-ui-secondary"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="button-ui button-ui-primary"
-            disabled={busy}
-          >
-            {busy ? "Saving…" : editing ? "Replace secret" : "Save secret"}
-          </button>
-        </div>
+        <Alert tone="danger" message={error} details={details} />
       </form>
-    </Dialog>
+    </Modal>
   );
 }
 
@@ -1280,38 +1294,93 @@ function RemoveSecretDialog({
   }
 
   return (
-    <Dialog
+    <Modal
       title={"Remove " + secret.name + "?"}
       dismissible={!busy}
       onClose={onClose}
-    >
-      <div className="settings-dialog-form">
-        <p>
-          This removes the value from <code>secrets.env</code>. An agent or
-          channel that uses this secret will fail until it is set again.
-        </p>
-        {error ? <ErrorNotice message={error} details={details} /> : null}
-        <div className="dialog-actions">
-          <button
+      footer={
+        <>
+          <span className="sp" />
+          <Button
             data-autofocus={true}
-            type="button"
-            className="button-ui button-ui-secondary"
+            variant="secondary"
             disabled={busy}
             onClick={onClose}
           >
             Cancel
-          </button>
-          <button
-            type="button"
-            className="button-ui settings-danger-button"
+          </Button>
+          <Button
+            variant="danger"
             disabled={busy}
+            loading={busy}
             onClick={remove}
           >
             {busy ? "Removing…" : "Remove secret"}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <div className="settings-dialog-form">
+        <p>
+          This removes the value from <code className="mono">secrets.env</code>.
+          An agent or channel that uses this secret will fail until it is set
+          again.
+        </p>
+        <Alert tone="danger" message={error} details={details} />
       </div>
-    </Dialog>
+    </Modal>
+  );
+}
+
+/* The row action menu: an IconButton that opens the Gr8r popover menu with the
+   Replace and Remove items (REQ-WEB-055). */
+function RowMenu({
+  label,
+  onReplace,
+  onRemove,
+  removeDisabled,
+  removeTitle,
+}: {
+  label: string;
+  onReplace: () => void;
+  onRemove: () => void;
+  removeDisabled?: boolean;
+  removeTitle?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  return (
+    <span className="settings-rowmenu" ref={anchorRef}>
+      <IconButton
+        icon="ellipsis"
+        size="sm"
+        label={label}
+        onClick={() => setOpen(true)}
+      />
+      <Menu anchorRef={anchorRef} open={open} onClose={() => setOpen(false)}>
+        <MenuItem
+          icon="refresh-cw"
+          onClick={() => {
+            setOpen(false);
+            onReplace();
+          }}
+        >
+          Replace
+        </MenuItem>
+        <MenuItem
+          icon="trash-2"
+          danger
+          disabled={removeDisabled}
+          title={removeTitle}
+          onClick={() => {
+            setOpen(false);
+            onRemove();
+          }}
+        >
+          Remove
+        </MenuItem>
+      </Menu>
+    </span>
   );
 }
 
@@ -1383,14 +1452,18 @@ export function SettingsSecretsPage() {
   return (
     <main id="main" className="page settings-page">
       <SettingsTabs active="secrets" />
-      <SettingsPanel active="secrets">
+      <SettingsPanel
+        active="secrets"
+        title="Secrets"
+        description="Write-only values providers, channels, and MCP servers read at start."
+      >
         <SettingsRestartBanner
           restartRequired={Boolean(data && data.restart_required)}
           onRestarted={reload}
         />
 
-        <div className="settings-write-note">
-          <Icon name="lock" />
+        <div className="alert info settings-write-note">
+          <Ic name="lock" size={15} />
           <p>
             Values are write-only. After you save one, nobody can read it here
             again. You can replace or remove it, not read it.
@@ -1398,76 +1471,69 @@ export function SettingsSecretsPage() {
         </div>
 
         <div className="settings-toolbar">
-          <div className="sessions-search settings-search">
-            <span className="sessions-search-icon">
-              <Icon name="search" />
-            </span>
-            <label className="sr-only" htmlFor="settings-secrets-search">
-              Search secrets
-            </label>
-            <input
-              id="settings-secrets-search"
-              className="sessions-search-input"
-              type="search"
-              placeholder="Search secrets"
-              autoComplete="off"
-              spellCheck={false}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <span className="settings-toolbar-spacer"></span>
-          <button
-            type="button"
-            className="button-ui button-ui-primary"
+          <SearchInput
+            wrapClassName="settings-search"
+            aria-label="Search secrets"
+            placeholder="Search secrets"
+            autoComplete="off"
+            spellCheck={false}
+            kbd={null}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <span className="settings-toolbar-spacer" />
+          <Button
+            variant="primary"
+            size="sm"
+            icon="plus"
             disabled={!data || state === "loading"}
             onClick={() => setDialog({ secret: null })}
           >
-            + New secret
-          </button>
+            New secret
+          </Button>
         </div>
 
         <StatusLine text={message} />
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        <Alert tone="danger" message={error} details={details} />
         {state === "error" ? (
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              onClick={reload}
-            >
+          <div className="settings-actions-bar">
+            <Button variant="secondary" onClick={reload}>
               Reload secrets
-            </button>
+            </Button>
           </div>
         ) : null}
         {state === "loading" ? (
-          <Loading label="Loading secrets…" />
+          <LoadingRows label="Loading secrets…" />
         ) : state === "ready" && visible.length === 0 ? (
-          <div className="settings-empty">
-            <p className="settings-empty-title">
-              {secrets.length === 0
-                ? "No secrets yet"
-                : "No secrets match “" + query.trim() + "”"}
-            </p>
-            <p className="settings-empty-text">
-              {secrets.length === 0
-                ? "Add a secret for a provider, a channel, or an MCP server."
-                : "Try a different name or usage."}
-            </p>
+          <div className="panel">
+            <EmptyState
+              icon={secrets.length === 0 ? "key-round" : "search-x"}
+              size={secrets.length === 0 ? undefined : "sm"}
+              title={
+                secrets.length === 0
+                  ? "No secrets yet"
+                  : "No secrets match “" + query.trim() + "”"
+              }
+              text={
+                secrets.length === 0
+                  ? "Add a secret for a provider, a channel, or an MCP server."
+                  : "Try a different name or usage."
+              }
+            />
           </div>
         ) : null}
 
         {state === "ready" && visible.length > 0 ? (
-          <div className="settings-table-wrap">
-            <table className="settings-table settings-secrets-table">
-              <caption className="sr-only">Secrets</caption>
+          <div className="tbl-wrap">
+            <table className="tbl settings-secrets-table">
+              <caption className="sr">Secrets</caption>
               <thead>
                 <tr>
                   <th scope="col">Name</th>
                   <th scope="col">Used by</th>
                   <th scope="col">Updated</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
+                  <th scope="col" className="settings-col-actions">
+                    <span className="sr">Actions</span>
                   </th>
                 </tr>
               </thead>
@@ -1481,9 +1547,9 @@ export function SettingsSecretsPage() {
                     <tr key={secret.name}>
                       <td>
                         <span className="settings-secret-name">
-                          <Icon name="lock" />
+                          <Ic name="lock" size={14} />
                           <span className="settings-secret-text">
-                            <code>{secret.name}</code>
+                            <code className="mono">{secret.name}</code>
                             <span className="settings-secret-value">
                               {isSet ? (
                                 <>
@@ -1493,19 +1559,17 @@ export function SettingsSecretsPage() {
                                   >
                                     ••••••••••••
                                   </span>
-                                  <span className="settings-secret-state">
+                                  <Badge tone="green" dot>
                                     Set
-                                  </span>
+                                  </Badge>
                                 </>
                               ) : (
-                                <span className="settings-secret-state">
+                                <Badge tone="gray" dot>
                                   Not set
-                                </span>
+                                </Badge>
                               )}
                               {secret.overridden_by_env ? (
-                                <span className="badge-ui badge-ui-warning">
-                                  From environment
-                                </span>
+                                <Badge tone="amber">From environment</Badge>
                               ) : null}
                             </span>
                           </span>
@@ -1517,34 +1581,27 @@ export function SettingsSecretsPage() {
                             {usedBy.map((path, index) => (
                               <span key={path}>
                                 {index > 0 ? ", " : ""}
-                                <code>{path}</code>
+                                <code className="mono">{path}</code>
                               </span>
                             ))}
                           </span>
                         ) : (
-                          <span className="settings-muted">Not used</span>
+                          <span className="hint">Not used</span>
                         )}
                       </td>
-                      <td>{agoLabel(secret.updated_at) || "—"}</td>
+                      <td className="settings-audit-time">
+                        {agoLabel(secret.updated_at) || "—"}
+                      </td>
                       <td className="settings-row-action">
-                        <span className="settings-actions">
-                          <button
-                            type="button"
-                            className="button-ui button-ui-tertiary"
-                            onClick={() => setDialog({ secret })}
-                          >
-                            Replace
-                          </button>
-                          <button
-                            type="button"
-                            className="button-ui button-ui-tertiary"
-                            disabled={!isSet}
-                            title={!isSet ? "This secret is not set." : undefined}
-                            onClick={() => setRemoveTarget(secret)}
-                          >
-                            Remove
-                          </button>
-                        </span>
+                        <RowMenu
+                          label={"Actions for " + secret.name}
+                          onReplace={() => setDialog({ secret })}
+                          onRemove={() => setRemoveTarget(secret)}
+                          removeDisabled={!isSet}
+                          removeTitle={
+                            !isSet ? "This secret is not set." : undefined
+                          }
+                        />
                       </td>
                     </tr>
                   );
@@ -1556,8 +1613,8 @@ export function SettingsSecretsPage() {
 
         {data && data.version ? (
           <p className="settings-footer-note">
-            Secrets are stored in <code>secrets.env</code>. Every write uses the
-            version this list loaded.
+            Secrets are stored in <code className="mono">secrets.env</code>.
+            Every write uses the version this list loaded.
           </p>
         ) : null}
 
@@ -1724,51 +1781,54 @@ export function SettingsConfigPage() {
   return (
     <main id="main" className="page settings-page">
       <SettingsTabs active="config" />
-      <SettingsPanel active="config">
+      <SettingsPanel
+        active="config"
+        title="Config file"
+        description="The daemon's config.toml, edited in place."
+      >
         <SettingsRestartBanner
           restartRequired={Boolean(config && config.restart_required)}
           onRestarted={() => void load(false)}
         />
 
         {state === "loading" && !config ? (
-          <Loading label="Loading config.toml…" />
+          <LoadingRows label="Loading config.toml…" />
         ) : null}
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        <Alert tone="danger" message={error} details={details} />
         {state === "error" ? (
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              disabled={busy}
-              onClick={() => void load(true)}
-            >
+          <div className="settings-actions-bar">
+            <Button variant="secondary" disabled={busy} onClick={() => void load(true)}>
               Reload config
-            </button>
+            </Button>
           </div>
         ) : null}
         <StatusLine text={message} />
         {missing ? (
-          <p className="notice notice-warn">
-            config.toml is missing. Run <code>lana init</code> to create it; the
-            web view does not create the file.
-          </p>
+          <div className="alert warn">
+            <Ic name="triangle-alert" size={15} />
+            <span>
+              config.toml is missing. Run <code className="mono">lana init</code>{" "}
+              to create it; the web view does not create the file.
+            </span>
+          </div>
         ) : null}
 
         <form className="settings-config-form" onSubmit={save}>
           <div className="settings-config-head">
             <p className="settings-config-path">
-              <code>{path}</code>{" "}
+              <code className="mono">{path}</code>{" "}
               <span className="settings-config-note">
                 · validated on save · comments kept · secret values show as ***
               </span>
             </p>
-            <button
+            <Button
               type="submit"
-              className="button-ui button-ui-primary"
+              variant="primary"
               disabled={busy || missing || !config || !raw.trim()}
+              loading={busy}
             >
               {busy ? "Saving…" : "Save config.toml"}
-            </button>
+            </Button>
           </div>
 
           <div className="settings-editor">
@@ -1779,38 +1839,36 @@ export function SettingsConfigPage() {
                 </span>
               ))}
             </div>
-            <label className="sr-only" htmlFor="settings-config-raw">
-              config.toml contents
-            </label>
-            <textarea
+            <Textarea
               id="settings-config-raw"
-              className="settings-editor-input"
+              className="settings-config-editor mono"
+              aria-label="config.toml contents"
               wrap="off"
               spellCheck={false}
               value={raw}
               disabled={busy || missing || !config}
               onChange={(event) => setRaw(event.target.value)}
               onScroll={syncGutter}
-            ></textarea>
+            />
           </div>
         </form>
 
         {validationErrors.length > 0 ? (
-          <div className="error-box settings-validation">
-            <p className="error-message">Validation errors</p>
-            <ErrorDetails details={validationErrors} />
-          </div>
+          <Alert
+            tone="danger"
+            message="Validation errors"
+            details={validationErrors}
+          />
         ) : null}
         {errorCode === "stale_version" ? (
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
+          <div className="settings-actions-bar">
+            <Button
+              variant="secondary"
               disabled={busy}
               onClick={() => void load(true)}
             >
               Reload from disk
-            </button>
+            </Button>
           </div>
         ) : null}
         {config && config.version ? (
@@ -1839,6 +1897,19 @@ function auditTimeISO(value: unknown): string | undefined {
   return new Date(number).toISOString();
 }
 
+function matchesAudit(entry: AuditEntry, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+  const keys = Array.isArray(entry.changed_keys) ? entry.changed_keys : [];
+  return [entry.kind, entry.target]
+    .concat(keys)
+    .filter((value) => value !== null && value !== undefined)
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+}
+
 export function SettingsAuditPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [nextBefore, setNextBefore] = useState<number | null>(null);
@@ -1847,6 +1918,7 @@ export function SettingsAuditPage() {
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
   const [message, setMessage] = useState("");
+  const [query, setQuery] = useState("");
   const [restartRequired, setRestartRequired] = useState(false);
 
   const loadRestartState = useCallback(() => {
@@ -1903,10 +1975,20 @@ export function SettingsAuditPage() {
     void loadPage(null, false);
   }, [loadPage, loadRestartState]);
 
+  const search = query.trim().toLowerCase();
+  const visible = useMemo(
+    () => entries.filter((entry) => matchesAudit(entry, search)),
+    [entries, search]
+  );
+
   return (
     <main id="main" className="page settings-page">
       <SettingsTabs active="audit" />
-      <SettingsPanel active="audit">
+      <SettingsPanel
+        active="audit"
+        title="Audit log"
+        description="Every settings change the daemon recorded, newest first."
+      >
         <SettingsRestartBanner
           restartRequired={restartRequired}
           onRestarted={() => {
@@ -1915,35 +1997,54 @@ export function SettingsAuditPage() {
           }}
         />
 
+        <div className="settings-toolbar">
+          <SearchInput
+            wrapClassName="settings-search"
+            aria-label="Search audit log"
+            placeholder="Search audit log"
+            autoComplete="off"
+            spellCheck={false}
+            kbd={null}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+
         <StatusLine text={message} />
-        {error ? <ErrorNotice message={error} details={details} /> : null}
+        <Alert tone="danger" message={error} details={details} />
         {state === "error" ? (
-          <div className="form-actions">
-            <button
-              type="button"
-              className="button-ui button-ui-secondary"
-              onClick={() => void loadPage(null, false)}
-            >
+          <div className="settings-actions-bar">
+            <Button variant="secondary" onClick={() => void loadPage(null, false)}>
               Reload audit log
-            </button>
+            </Button>
           </div>
         ) : null}
 
         {state === "loading" ? (
-          <Loading label="Loading the audit log…" />
+          <LoadingRows label="Loading the audit log…" />
         ) : state === "ready" && entries.length === 0 ? (
-          <div className="settings-empty">
-            <p className="settings-empty-title">No settings changes yet</p>
-            <p className="settings-empty-text">
-              Saves, restarts, and sign-outs appear here after they happen.
-            </p>
+          <div className="panel">
+            <EmptyState
+              icon="scroll-text"
+              title="No settings changes yet"
+              text="Saves, restarts, and sign-outs appear here after they happen."
+            />
+          </div>
+        ) : state === "ready" && visible.length === 0 ? (
+          <div className="panel">
+            <EmptyState
+              icon="search-x"
+              size="sm"
+              title="No entries match"
+              text="No audit entries match the current search."
+            />
           </div>
         ) : null}
 
-        {state === "ready" && entries.length > 0 ? (
-          <div className="settings-table-wrap">
-            <table className="settings-table settings-audit-table">
-              <caption className="sr-only">Settings audit log</caption>
+        {state === "ready" && visible.length > 0 ? (
+          <div className="tbl-wrap">
+            <table className="tbl settings-audit-table">
+              <caption className="sr">Settings audit log</caption>
               <thead>
                 <tr>
                   <th scope="col">Time</th>
@@ -1953,7 +2054,7 @@ export function SettingsAuditPage() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry, index) => {
+                {visible.map((entry, index) => {
                   const changed = Array.isArray(entry.changed_keys)
                     ? entry.changed_keys
                     : [];
@@ -1966,21 +2067,21 @@ export function SettingsAuditPage() {
                         </time>
                       </td>
                       <td>
-                        <span className="badge-ui">{entry.kind}</span>
+                        <Badge>{entry.kind}</Badge>
                       </td>
                       <td>
-                        <code>{entry.target || "—"}</code>
+                        <code className="mono">{entry.target || "—"}</code>
                       </td>
                       <td className="settings-audit-keys">
                         {changed.length > 0 ? (
                           changed.map((key, keyIndex) => (
                             <span key={key + ":" + keyIndex}>
                               {keyIndex > 0 ? ", " : ""}
-                              <code>{key}</code>
+                              <code className="mono">{key}</code>
                             </span>
                           ))
                         ) : (
-                          <span className="settings-muted">—</span>
+                          <span className="hint">—</span>
                         )}
                       </td>
                     </tr>
@@ -1994,14 +2095,14 @@ export function SettingsAuditPage() {
         {state === "ready" && entries.length > 0 ? (
           <div className="settings-load-more">
             {nextBefore !== null ? (
-              <button
-                type="button"
-                className="button-ui button-ui-secondary"
+              <Button
+                variant="secondary"
+                loading={loadingMore}
                 disabled={loadingMore}
                 onClick={() => void loadPage(nextBefore, true)}
               >
                 {loadingMore ? "Loading…" : "Load more"}
-              </button>
+              </Button>
             ) : (
               <p className="settings-footer-note">
                 That is every entry in the audit file.

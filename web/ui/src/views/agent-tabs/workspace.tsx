@@ -142,7 +142,7 @@ export function WorkspaceTab({ name }: WorkspaceTabProps) {
         </div>
         <button
           type="button"
-          className="button-ui button-ui-secondary"
+          className="btn btn-secondary btn-sm"
           onClick={reload}
         >
           Try again
@@ -204,7 +204,7 @@ export function WorkspaceTab({ name }: WorkspaceTabProps) {
           {stale ? (
             <button
               type="button"
-              className="button-ui button-ui-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={reload}
             >
               Reload workspace
@@ -220,7 +220,7 @@ export function WorkspaceTab({ name }: WorkspaceTabProps) {
         <div className="agent-save-actions">
           <button
             type="button"
-            className="button-ui button-ui-secondary"
+            className="btn btn-secondary btn-sm"
             disabled={!dirty || saving}
             onClick={revert}
           >
@@ -228,7 +228,7 @@ export function WorkspaceTab({ name }: WorkspaceTabProps) {
           </button>
           <button
             type="submit"
-            className="button-ui button-ui-primary"
+            className="btn btn-primary btn-sm"
             disabled={!dirty || saving}
           >
             {saving ? "Saving…" : "Save"}

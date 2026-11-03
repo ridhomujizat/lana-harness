@@ -4,7 +4,7 @@ import type { FormEvent } from "react";
 import { ApiError, errorMessage } from "../../api/client";
 import { isErrorCode, loadAgentTab, updateAgent } from "../../api/agents";
 import { ErrorNotice, Loading } from "../../ui/ui";
-import { Icon } from "../agent-common";
+import { Ic } from "../../ui/icons";
 
 /* REQ-WEB-047: the allow and deny pattern lists. Each row is one pattern;
    saving writes rules as {"allow": [...], "deny": [...]}. */
@@ -49,7 +49,7 @@ const RULE_SECTIONS: readonly RuleSection[] = [
     description:
       "Patterns that skip the approval step. One pattern per row, for example bash(go test*).",
     empty: "No allow rules.",
-    add: "+ Add allow rule",
+    add: "Add allow rule",
   },
   {
     kind: "deny",
@@ -57,7 +57,7 @@ const RULE_SECTIONS: readonly RuleSection[] = [
     description:
       "Patterns that are always refused. One pattern per row, for example bash(rm -rf*).",
     empty: "No deny rules.",
-    add: "+ Add deny rule",
+    add: "Add deny rule",
   },
 ];
 
@@ -220,7 +220,7 @@ export function RulesTab({ name }: RulesTabProps) {
         </div>
         <button
           type="button"
-          className="button-ui button-ui-secondary"
+          className="btn btn-secondary btn-sm"
           onClick={reload}
         >
           Try again
@@ -286,17 +286,18 @@ export function RulesTab({ name }: RulesTabProps) {
                     disabled={saving}
                     onClick={() => removeRule(section.kind, index)}
                   >
-                    <Icon name="close" className="icon-16" />
+                    <Ic name="x" size={14} />
                   </button>
                 </div>
               );
             })}
             <button
               type="button"
-              className="agent-rules-add"
+              className="btn btn-ghost btn-sm agent-rules-add"
               disabled={saving}
               onClick={() => addRule(section.kind)}
             >
+              <Ic name="plus" size={13} />
               {section.add}
             </button>
           </div>
@@ -321,7 +322,7 @@ export function RulesTab({ name }: RulesTabProps) {
           {stale ? (
             <button
               type="button"
-              className="button-ui button-ui-secondary"
+              className="btn btn-secondary btn-sm"
               onClick={reload}
             >
               Reload rules
@@ -337,7 +338,7 @@ export function RulesTab({ name }: RulesTabProps) {
         <div className="agent-save-actions">
           <button
             type="button"
-            className="button-ui button-ui-secondary"
+            className="btn btn-secondary btn-sm"
             disabled={!dirty || saving}
             onClick={revert}
           >
@@ -345,7 +346,7 @@ export function RulesTab({ name }: RulesTabProps) {
           </button>
           <button
             type="submit"
-            className="button-ui button-ui-primary"
+            className="btn btn-primary btn-sm"
             disabled={!dirty || saving}
           >
             {saving ? "Saving…" : "Save"}

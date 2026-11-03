@@ -44,7 +44,7 @@ describe("setup wizard", () => {
 
     const anthropic = screen.getByRole("radio", { name: /Anthropic/ });
     fireEvent.click(anthropic);
-    expect((anthropic as HTMLInputElement).checked).toBe(true);
+    expect(anthropic.getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect(window.location.hash).toBe("#/setup/connect");
@@ -68,32 +68,34 @@ describe("setup wizard", () => {
 });
 
 describe("setup shell", () => {
-  it("renders the door mark behind the onboarding steps", () => {
+  it("shows the Lana brand and the step progress for the wizard", () => {
     const { container } = render(
       <SetupShell step="provider">
         <p>Connect a provider.</p>
       </SetupShell>
     );
 
-    const mark = container.querySelector(".door-mark");
-    expect(mark).not.toBeNull();
-    expect(mark?.getAttribute("aria-hidden")).toBe("true");
-    expect(mark?.querySelector(".door-right")).not.toBeNull();
-    expect(container.querySelector(".setup-steps")).not.toBeNull();
-    // The mark sits before the rail content so the steps and logo paint over it.
-    expect(mark?.nextElementSibling?.classList.contains("setup-rail-top")).toBe(
-      true
-    );
+    expect(container.querySelector(".auth")).not.toBeNull();
+    const brand = container.querySelector(".auth-top .brand");
+    expect(brand).not.toBeNull();
+    expect(brand?.querySelector("img.lana-mark")).not.toBeNull();
+    expect(brand?.textContent).toContain("LΛNΛ");
+
+    // Step 2 of 5: two bars filled, the second one current.
+    const bars = container.querySelectorAll(".auth-card .steps i");
+    expect(bars.length).toBe(5);
+    expect(container.querySelectorAll(".steps i.on").length).toBe(2);
+    expect(container.querySelectorAll(".steps i.cur").length).toBe(1);
   });
 
-  it("keeps the door mark on the door variant", () => {
+  it("drops the step progress on the door variant", () => {
     const { container } = render(
       <SetupShell step="unlock" variant="door">
         <p>Unlock lana.</p>
       </SetupShell>
     );
 
-    expect(container.querySelector(".door-mark")).not.toBeNull();
-    expect(container.querySelector(".setup-steps")).toBeNull();
+    expect(container.querySelector(".auth-card.fx-auth")).not.toBeNull();
+    expect(container.querySelector(".steps")).toBeNull();
   });
 });

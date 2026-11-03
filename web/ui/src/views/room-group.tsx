@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
-import type { Presence, RoomRow } from "../api/rooms";
+import type { RoomRow } from "../api/rooms";
 import { Markdown } from "../lib/markdown";
-import { AgentFace, agentFaceColors, TypingDots } from "./presence";
+import { Avatar, Button } from "../ui/gr8r";
+import { agentFaceColors, gr8rColor, TypingDots } from "./presence";
 import type { FaceRef } from "./presence";
 import { teamSteps } from "./team";
 import type { TeamEvent, TeamStep } from "./team";
@@ -245,7 +246,11 @@ function HandoffChipView({
       style={{ background: colors.bg, color: colors.fg }}
       aria-label={text}
     >
-      <AgentFace name={chip.agent} color={face ? face.color : undefined} size={18} />
+      <Avatar
+        name={chip.agent}
+        color={gr8rColor(face ? face.color : undefined)}
+        size="sm"
+      />
       <span className="handoff-text">{text}</span>
     </span>
   );
@@ -264,7 +269,11 @@ function LeadMessage({
   const color = agentFaceColors(face ? face.color : undefined).fg;
   return (
     <div className="group-msg group-lead-msg">
-      <AgentFace name={lead} color={face ? face.color : undefined} size={32} />
+      <Avatar
+        name={lead}
+        color={gr8rColor(face ? face.color : undefined)}
+        size="md"
+      />
       <div className="group-msg-main">
         <div className="group-msg-head">
           <span className="group-msg-name" style={{ color }}>
@@ -306,7 +315,11 @@ function MemberMessage({
     .join(" · ");
   return (
     <div className="group-msg group-member-msg">
-      <AgentFace name={item.agent} color={face ? face.color : undefined} size={32} />
+      <Avatar
+        name={item.agent}
+        color={gr8rColor(face ? face.color : undefined)}
+        size="md"
+      />
       <div className="group-msg-main">
         <div className="group-msg-head">
           <span className="group-msg-name" style={{ color }}>
@@ -329,19 +342,13 @@ function WorkingRow({
   item: Extract<GroupItem, { kind: "working" }>;
   face: FaceRef | undefined;
 }) {
-  const presence: Presence = {
-    state: "working",
-    label: item.agent + " is working",
-    since: 0,
-    session_id: "",
-  };
   return (
     <div className="group-msg group-member-msg group-working" role="status">
-      <AgentFace
+      <Avatar
         name={item.agent}
-        color={face ? face.color : undefined}
-        presence={presence}
-        size={32}
+        color={gr8rColor(face ? face.color : undefined)}
+        presence
+        size="md"
       />
       <div className="group-msg-main">
         <span className="group-working-text">
@@ -393,15 +400,16 @@ export function MentionChips({ names, faces, onPick }: MentionChipsProps) {
   return (
     <div className="room-mentions">
       {names.map((name) => (
-        <button
+        <Button
           key={name}
-          type="button"
+          size="sm"
+          variant="ghost"
           className="room-mention-chip"
           style={{ color: agentFaceColors(faces[name] ? faces[name].color : undefined).fg }}
           onClick={() => onPick(name)}
         >
           {"@" + name}
-        </button>
+        </Button>
       ))}
     </div>
   );
