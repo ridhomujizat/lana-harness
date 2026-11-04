@@ -286,6 +286,8 @@ export interface RoomViewProps {
 }
 
 export function RoomView({ room }: RoomViewProps) {
+  /* API-WF-021: the reply of a workflow chat command shown above the composer. */
+  const [commandReply, setCommandReply] = useState("");
   const [segments, setSegments] = useState<Segment[]>([]);
   const [events, setEvents] = useState<Record<string, SessionEvent[]>>({});
   const [hasMore, setHasMore] = useState(false);
@@ -909,6 +911,7 @@ export function RoomView({ room }: RoomViewProps) {
     setSending(true);
     setActionError("");
     setActionDetails([]);
+    setCommandReply("");
     setDraft("");
     const topic = newTopic;
     try {
@@ -932,6 +935,11 @@ export function RoomView({ room }: RoomViewProps) {
       const result = await sendToRoom(room.name, body);
       setNewTopic(false);
       attachmentDraft.clear();
+      if (result.command) {
+        /* API-WF-021: a workflow chat command started a run, not a turn. */
+        setCommandReply(result.command.reply);
+        return;
+      }
       /* The sent session now has the most recent activity: move it to the end
          and bump its updated_at so the live stream follows the session that
          just received the message (API-ROOM-002, API-ROOM-003). */
@@ -1196,6 +1204,12 @@ export function RoomView({ room }: RoomViewProps) {
       </div>
 
       <div className="room-composer">
+        {commandReply ? (
+          <div className="alert info" role="status">
+            <Ic name="workflow" size={15} />
+            <div>{commandReply}</div>
+          </div>
+        ) : null}
         {actionError ? (
           <div className="alert danger" role="alert">
             <Ic name="triangle-alert" size={15} />

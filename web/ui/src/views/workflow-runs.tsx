@@ -112,14 +112,14 @@ function decorate(detail: RunDetail) {
       continue;
     }
     const row = main || rows[0]!;
-    const tries = row.attempts ? row.attempts.length : 0;
+    const tries = (row.attempts || []).length;
     switch (row.status) {
       case "succeeded":
       case "fallback": {
         tones[node.id] = "ok";
         let text = row.ended_at ? duration(row.ended_at - row.started_at) : "Done";
         if (node.type.startsWith("trigger.")) {
-          text = clock(row.started_at, true);
+          text = row.started_at ? clock(row.started_at, true) : "Fired";
         } else if (node.type === "loop") {
           const output = row.output as { count?: number } | null;
           text = (output && output.count !== undefined ? output.count : 0) + " items";
@@ -280,7 +280,7 @@ function NodePanel({
   const sub =
     meta.label +
     (items.length > 0 ? " · ran " + items.length + " times" : "") +
-    (failed && failed.attempts.length > 1 ? " · failed after " + failed.attempts.length + " tries" : "");
+    (failed && (failed.attempts || []).length > 1 ? " · failed after " + (failed.attempts || []).length + " tries" : "");
   const tabItems = [
     ...(failed ? [{ value: "error", label: "Error" }] : [{ value: "output", label: "Output" }]),
     { value: "input", label: "Input" },

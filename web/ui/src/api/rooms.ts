@@ -1,4 +1,5 @@
 import { queryString, request } from "./client";
+import type { WorkflowCommandReply } from "./turns";
 
 /* Room calls of API-ROOM-001 to API-ROOM-005 and API-ROOM-008. Types are
    written by hand from the Go JSON structs. */
@@ -129,6 +130,8 @@ export interface SendRoomResponse {
   created: boolean;
   turn: string;
   turn_id?: string;
+  /* API-WF-021: set when the text was a workflow chat command. */
+  command?: WorkflowCommandReply;
 }
 
 export interface MarkRoomReadResponse {

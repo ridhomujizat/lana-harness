@@ -3,9 +3,19 @@ import type { SessionDetail } from "./sessions";
 
 /* Turn calls of API-WEB-007, API-WEB-009, and API-WEB-010. */
 
+/* API-WF-021: a "/<command>" that matches a workflow starts a run instead of a
+   turn; the response then carries only `command`. */
+export interface WorkflowCommandReply {
+  workflow_id: string;
+  run_id: string;
+  number: number;
+  reply: string;
+}
+
 export interface SendMessageResponse {
   turn: string;
   turn_id?: string;
+  command?: WorkflowCommandReply;
 }
 
 export interface CancelTurnResponse {

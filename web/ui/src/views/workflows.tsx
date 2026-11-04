@@ -327,7 +327,10 @@ export function WorkflowsPage() {
           />
         ) : null}
         {rows.map((row) => {
-          const trigger = row.triggers.find((item) => item.enabled) || row.triggers[0];
+          const trigger =
+            row.triggers.find((item) => item.enabled && item.type !== "trigger.manual") ||
+            row.triggers.find((item) => item.enabled) ||
+            row.triggers[0];
           return (
             <a
               key={row.id}

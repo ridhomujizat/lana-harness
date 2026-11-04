@@ -133,7 +133,7 @@ func (d workflowDeps) Bash(ctx context.Context, req workflow.BashRequest) (workf
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, "bash", "-lc", req.Command)
+	cmd := exec.CommandContext(runCtx, "bash", "-c", req.Command)
 	cmd.Dir = workspace
 	out, err := cmd.CombinedOutput()
 	result := workflow.BashResult{Output: tailBytes(out, bashOutputLimit)}

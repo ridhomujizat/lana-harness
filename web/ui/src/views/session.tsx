@@ -2125,6 +2125,17 @@ export function SessionPage({ id, view }: SessionPageProps) {
         paths.length > 0
           ? await sendMessageRequest(id, text, paths)
           : await sendMessageRequest(id, text);
+      if (result.command) {
+        /* API-WF-021: a workflow chat command started a run, not a turn. */
+        pendingRef.current = "";
+        setPendingText("");
+        pendingFilesRef.current = [];
+        setPendingFiles([]);
+        attachmentDraft.clear();
+        showNotice(result.command.reply, "info");
+        announce(result.command.reply);
+        return;
+      }
       if (result.turn === "queued") {
         setQueued(true);
         announce("Message queued. It will be claimed at the next step.");
