@@ -563,3 +563,7 @@ func TestWorkflowUnavailable(t *testing.T) {
 	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/workflows", "", cookie, ""))
 	assertAuthError(t, rr, http.StatusServiceUnavailable, "workflows_unavailable")
 }
+
+// *workflow.Service satisfies the WorkflowBackend port the web handlers use
+// (spec #33, design section "Web (web/workflows.go)").
+var _ WorkflowBackend = (*workflow.Service)(nil)

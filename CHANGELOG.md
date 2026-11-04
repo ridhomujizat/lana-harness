@@ -7,6 +7,14 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+
+- Workflows (spec #33): n8n-style automation graphs guarded by one bot. Triggers (run button,
+  schedule, interval, webhook, lana events, `/command` in web chat and Telegram), AI, tool, flow
+  and state nodes, `{{ }}` templates, durable runs, per-workflow state, the error ladder with
+  guardian decisions, the permission lock, and the guardian assistant in the editor. Web pages:
+  list, editor canvas, executions and settings.
+
 ## [0.1.0-beta.1] - 2026-11-02
 
 First tagged build, for daily use.

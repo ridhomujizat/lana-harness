@@ -780,6 +780,8 @@ func (s *Server) writeWorkflowErrorWithNotFound(w http.ResponseWriter, operation
 		writeAPIError(w, http.StatusBadRequest, "invalid_choice", "the choice is not valid for this decision")
 	case errors.Is(err, workflow.ErrLockRequired):
 		writeAPIError(w, http.StatusConflict, "lock_required", "the workflow permissions must be locked again")
+	case errors.Is(err, workflow.ErrGuardianUnavailable):
+		writeAPIError(w, http.StatusServiceUnavailable, "guardian_unavailable", "the guardian is not available")
 	case errors.As(err, &invalid):
 		code := "invalid_graph"
 		if len(invalid.Issues) == 1 && invalid.Issues[0].Code == "unknown_agent" {
