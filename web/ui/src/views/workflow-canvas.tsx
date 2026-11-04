@@ -485,7 +485,10 @@ export function WorkflowCanvas({
       return;
     }
     event.preventDefault();
-    const point = toCanvas(event.clientX, event.clientY);
+    /* Synthetic drops (tests, some assistive tools) may carry no coordinates. */
+    const cx = Number.isFinite(event.clientX) ? event.clientX : 0;
+    const cy = Number.isFinite(event.clientY) ? event.clientY : 0;
+    const point = toCanvas(cx, cy);
     onDropType(type, { x: snap(point.x - NODE_W / 2), y: snap(point.y - NODE_H / 2) });
   }
 
