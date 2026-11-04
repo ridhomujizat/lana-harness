@@ -453,7 +453,7 @@ export function nodeSubtitle(node: WfNode): string {
     case "browser":
       return "Browser · Obscura" + (p.stealth ? " · stealth" : "");
     case "bash":
-      return "Bash · " + (bare(p.command).split("\n")[0] || "command");
+      return "Bash · " + (str(p.command).split("\n")[0] || "command");
     case "webfetch":
       return "Web fetch · " + (bare(p.url) || "url");
     case "tool":

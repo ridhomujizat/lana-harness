@@ -290,7 +290,7 @@ func newWorkflowTestServer(t *testing.T, wf WorkflowBackend) (*Server, *http.Coo
 // workflow sessions, newest first, and counts them in the stats.
 func TestWorkflowListMergesToolApprovals(t *testing.T) {
 	overview := workflow.Overview{
-		Workflows: []workflow.Summary{{ID: "riset-harian"}},
+		Workflows: []workflow.Summary{{ID: "riset-harian", Name: "Riset harian"}},
 		Stats:     workflow.Stats{Decisions: 1, WaitingOnYou: 1},
 		Attention: []workflow.Attention{
 			{Decision: workflow.Decision{ID: "d_1", Kind: "guardian", CreatedAt: 300}},
@@ -300,7 +300,14 @@ func TestWorkflowListMergesToolApprovals(t *testing.T) {
 		{ID: "ap_1", SessionID: "wf-session", Tool: "bash", Argument: "/bin/rm -rf /tmp/x", Agent: "researcher", CreatedAt: 900},
 		{ID: "ap_2", SessionID: "other-session", Tool: "webfetch", CreatedAt: 800},
 	}
-	mergeWorkflowApprovals(&overview, approvals, func(sessionID string) bool { return sessionID == "wf-session" })
+	mergeWorkflowApprovals(&overview, approvals,
+		func(sessionID string) bool { return sessionID == "wf-session" },
+		func(sessionID string) string {
+			if sessionID == "wf-session" {
+				return "riset-harian"
+			}
+			return ""
+		})
 
 	if len(overview.Attention) != 2 {
 		t.Fatalf("attention = %+v", overview.Attention)
@@ -319,6 +326,9 @@ func TestWorkflowListMergesToolApprovals(t *testing.T) {
 	if row.Reason != "researcher wants bash: /bin/rm -rf /tmp/x" {
 		t.Fatalf("reason = %q", row.Reason)
 	}
+	if row.WorkflowID != "riset-harian" || row.WorkflowName != "Riset harian" {
+		t.Fatalf("workflow = %q/%q", row.WorkflowID, row.WorkflowName)
+	}
 	if overview.Stats.WaitingOnYou != 2 || overview.Stats.Approvals != 1 || overview.Stats.Decisions != 1 {
 		t.Fatalf("stats = %+v", overview.Stats)
 	}
@@ -328,9 +338,13 @@ func TestWorkflowListMergesToolApprovals(t *testing.T) {
 // approvals (AC-WF-019 server side).
 func TestWorkflowListIncludesBrokerApproval(t *testing.T) {
 	backend := newFakeWorkflowBackend()
-	backend.overview = workflow.Overview{Workflows: []workflow.Summary{{ID: "riset-harian"}}}
+	backend.overview = workflow.Overview{Workflows: []workflow.Summary{{ID: "riset-harian", Name: "Riset harian"}}}
 	backend.workflowSessions["wf-session"] = true
-	s, cookie, _ := newWorkflowTestServer(t, backend)
+
+	sessions := newFakeWebBackend()
+	sessions.addSession(core.SessionInfo{ID: "wf-session", Channel: "workflow", Address: "riset-harian", Agent: "researcher"})
+	s, cookie, _ := newLoggedInSessionServer(t, sessions)
+	s.SetWorkflows(backend)
 
 	expires := int64(5_000_000) + approvalTimeout.Milliseconds()
 	s.approvals.mu.Lock()
@@ -351,6 +365,9 @@ func TestWorkflowListIncludesBrokerApproval(t *testing.T) {
 	}
 	if len(got.Attention) != 1 || got.Attention[0].Kind != "tool_approval" || got.Attention[0].ID != "ap_1" {
 		t.Fatalf("attention = %+v", got.Attention)
+	}
+	if got.Attention[0].WorkflowID != "riset-harian" || got.Attention[0].WorkflowName != "Riset harian" {
+		t.Fatalf("workflow = %q/%q", got.Attention[0].WorkflowID, got.Attention[0].WorkflowName)
 	}
 	if got.Stats.WaitingOnYou != 1 || got.Stats.Approvals != 1 {
 		t.Fatalf("stats = %+v", got.Stats)

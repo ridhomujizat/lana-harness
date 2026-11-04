@@ -129,7 +129,7 @@ function AttentionRow({
   }
   const title =
     item.kind === "tool_approval"
-      ? item.workflow_name + " wants a tool outside its lock"
+      ? (item.workflow_name || "A workflow") + " wants a tool outside its lock"
       : item.workflow_name + " is waiting for your approval";
   return (
     <li className="wf-att">

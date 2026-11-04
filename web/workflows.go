@@ -140,7 +140,7 @@ func (s *Server) handleWorkflowList(w http.ResponseWriter, r *http.Request) {
 	if overview.Attention == nil {
 		overview.Attention = []workflow.Attention{}
 	}
-	mergeWorkflowApprovals(&overview, s.openWorkflowApprovals(), backend.IsWorkflowSession)
+	mergeWorkflowApprovals(&overview, s.openWorkflowApprovals(), backend.IsWorkflowSession, s.workflowSessionAddress(r.Context()))
 	writeJSON(w, http.StatusOK, overview)
 }
 
@@ -646,6 +646,9 @@ func (s *Server) handleWorkflowStream(w http.ResponseWriter, r *http.Request) {
 type workflowApproval struct {
 	ID        string
 	SessionID string
+	// Address is the workflow id of the session (channel "workflow" carries the
+	// workflow id). It is empty until the session is looked up.
+	Address   string
 	Tool      string
 	Argument  string
 	Agent     string
@@ -676,17 +679,42 @@ func (s *Server) openWorkflowApprovals() []workflowApproval {
 	return out
 }
 
+// workflowSessionAddress returns the address (the workflow id) of a session,
+// read through the web backend's session lookup. It returns "" when the backend
+// is absent or the session cannot be read.
+func (s *Server) workflowSessionAddress(ctx context.Context) func(string) string {
+	return func(sessionID string) string {
+		if s.backend == nil {
+			return ""
+		}
+		session, err := s.backend.Session(ctx, sessionID)
+		if err != nil {
+			return ""
+		}
+		return session.Address
+	}
+}
+
 // mergeWorkflowApprovals appends the open tool approvals of workflow sessions
 // to the attention list, newest first, and counts them in the stats
 // (API-WF-001, REQ-WF-011). isWorkflow reports whether a session runs on
-// channel "workflow".
-func mergeWorkflowApprovals(overview *workflow.Overview, approvals []workflowApproval, isWorkflow func(string) bool) {
+// channel "workflow". addressOf resolves a session's address (the workflow id)
+// when the approval does not already carry it.
+func mergeWorkflowApprovals(overview *workflow.Overview, approvals []workflowApproval, isWorkflow func(string) bool, addressOf func(string) string) {
+	names := make(map[string]string, len(overview.Workflows))
+	for _, summary := range overview.Workflows {
+		names[summary.ID] = summary.Name
+	}
 	added := 0
 	for _, approval := range approvals {
 		if isWorkflow != nil && !isWorkflow(approval.SessionID) {
 			continue
 		}
-		overview.Attention = append(overview.Attention, workflowApprovalAttention(approval))
+		address := approval.Address
+		if address == "" && addressOf != nil {
+			address = addressOf(approval.SessionID)
+		}
+		overview.Attention = append(overview.Attention, workflowApprovalAttention(approval, address, names))
 		added++
 	}
 	if added == 0 {
@@ -701,27 +729,34 @@ func mergeWorkflowApprovals(overview *workflow.Overview, approvals []workflowApp
 
 // workflowApprovalAttention builds one tool_approval attention row. The id is
 // the web approval request id, so the UI answers it through
-// POST /v1/approvals/{id} (AC-WF-019).
-func workflowApprovalAttention(approval workflowApproval) workflow.Attention {
+// POST /v1/approvals/{id} (AC-WF-019). WorkflowID is the session address and
+// WorkflowName is the workflow's name, falling back to its id.
+func workflowApprovalAttention(approval workflowApproval, workflowID string, names map[string]string) workflow.Attention {
 	agent := approval.Agent
 	if agent == "" {
-		agent = "A workflow"
+		agent = "The worker"
 	}
 	reason := agent + " wants " + approval.Tool
 	if approval.Argument != "" {
 		reason += ": " + approval.Argument
 	}
+	name := names[workflowID]
+	if name == "" {
+		name = workflowID
+	}
 	return workflow.Attention{
 		Decision: workflow.Decision{
-			ID:        approval.ID,
-			Kind:      "tool_approval",
-			Action:    "ask",
-			Reason:    reason,
-			Status:    "pending",
-			CreatedAt: approval.CreatedAt,
+			ID:         approval.ID,
+			WorkflowID: workflowID,
+			Kind:       "tool_approval",
+			Action:     "ask",
+			Reason:     reason,
+			Status:     "pending",
+			CreatedAt:  approval.CreatedAt,
 		},
-		Tool:     approval.Tool,
-		Argument: approval.Argument,
+		WorkflowName: name,
+		Tool:         approval.Tool,
+		Argument:     approval.Argument,
 	}
 }
 

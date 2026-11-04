@@ -121,6 +121,9 @@ export function duration(ms: number): string {
   if (!ms || ms < 0) {
     return "0 s";
   }
+  if (ms < 1000) {
+    return "<1 s";
+  }
   const sec = Math.round(ms / 1000);
   if (sec < 60) {
     return sec + " s";
