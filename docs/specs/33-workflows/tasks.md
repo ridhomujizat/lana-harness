@@ -7,7 +7,7 @@
 - **Requirements revision**: 1
 - **Contract revision**: 1
 - **Design revision**: 1
-- **Status**: In progress (T-012 smoke running)
+- **Status**: Completed
 
 ## Execution rules
 
@@ -55,9 +55,36 @@
   - Evidence: `preview screenshots workflows-1, -4` pass · commit fb5b84d
 - [x] `T-011` Editor canvas, inspector, assistant, executions
   - Evidence: `npx vitest run (253 tests)` pass · commit fb5b84d, 73f0300, 37d9061
-- [ ] `T-012` Build, verify, runtime smoke
+- [x] `T-012` Build, verify, runtime smoke
+  - Evidence: `gofmt -l .` empty, `go vet ./...`, `golangci-lint run ./...` 0 issues, `go test -race ./...` pass,
+    `make web` + `make web-check`, `npx vitest run` 253 pass · runtime smoke below · commit afc67c8
 
 ## Approval
 
 - **Approved by**: agent on behalf of the owner (gate lifted 2026-11-05)
 - **Approved on**: 2026-11-05
+
+## Runtime smoke notes (T-012, 2026-11-05)
+
+Daemon built from this branch on a copy of the owner's `LANA_HOME` (sessions copied with `sqlite3 .backup`,
+Telegram off, MCP removed, port 18399), real DeepSeek provider. Screenshots in [evidence/](evidence/).
+
+| Check | Result |
+|---|---|
+| Deterministic graph: state_set → loop(3) → bash → if → webfetch → state_set | succeeded; dead `false` branch skipped; state kept |
+| `agent` node with output schema on the real model | `{"score": 6, "reason": …}`, 3.9k tokens |
+| `/smoke …` in web chat (API-WF-021) | `Run #2 of Smoke agent started`, no agent turn |
+| Webhook wrong / right token (AC-WF-004) | 401 `bad_token` / 202 with run id |
+| `bash exit 3` with failure mode guardian (real guardian) | guardian chose `skip`, downstream node ran, run succeeded |
+| Approval node approve / deny | branch `approved` / `denied` taken |
+| Daemon killed while a run waited for approval, then again during a 40 s wait | run resumed both times and succeeded |
+| Worker calling `bash` outside the lock (AC-WF-016) | approval in Needs attention ("Smoke lock wants a tool outside its lock"); approve → ran `date`; reject → worker answered without it |
+| Guardian assistant: "add a Send message node" | v2 saved by guardian, change card `+ Send message`, ~4 s |
+
+Bugs found by the smoke and fixed: guardian `skip` also skipped downstream nodes; answering a decision launched
+the run on the HTTP request context, so the run stopped when the request ended; bash nodes ran a login shell
+(profile noise in output); `attempts`/`logs` could be `null`; tool approvals had no workflow name.
+
+Not exercised live: Telegram buttons and `/command` in Telegram (unit tests only, Telegram was off), the
+Obscura browser node (unit test for the missing-binary path only), schedule/interval firing on the wall clock
+(unit tests with a fake clock), lana event triggers.
