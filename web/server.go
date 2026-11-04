@@ -71,11 +71,15 @@ type Server struct {
 	jobBackend       JobBackend
 	dashboardBackend DashboardBackend
 	knowledgeBackend KnowledgeBackend
-	daemon           DaemonStore
-	telegramStatus   func() TelegramStatus
-	telegramReset    TelegramResetSender
-	approvals        *Approvals
-	questions        *Questions
+	// workflows is the workflow port of the /v1/workflows routes (spec #33).
+	// It is guarded by workflowsMu so SetWorkflows may run after Start.
+	workflows      WorkflowBackend
+	workflowsMu    sync.RWMutex
+	daemon         DaemonStore
+	telegramStatus func() TelegramStatus
+	telegramReset  TelegramResetSender
+	approvals      *Approvals
+	questions      *Questions
 	// roomHub pushes changed room rows to the room streams (REQ-ROOM-007).
 	roomHub *roomHub
 	// roomLocks guards "find or create the current web session" per room
@@ -183,6 +187,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerWebRoutes()
 	s.registerAuditRoutes()
 	s.registerLocalRoutes()
+	s.registerWorkflowRoutes()
 	s.handler = securityHeaders(s.mux)
 	return s, nil
 }

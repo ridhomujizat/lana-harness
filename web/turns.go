@@ -109,6 +109,12 @@ func (s *Server) sendSessionMessage(w http.ResponseWriter, r *http.Request, back
 			return SendResult{}, false
 		}
 	}
+	// API-WF-021: a leading "/" may be a workflow chat command. A handled
+	// command starts no turn and has already written its 200 response, so the
+	// caller must not write again.
+	if s.runWorkflowCommand(w, r, text) {
+		return SendResult{}, false
+	}
 	result, err := startMessageTurn(r.Context(), backend, id, text, attachments, note)
 	if err != nil {
 		s.writeBackendError(w, "send message", err)
