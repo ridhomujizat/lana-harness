@@ -665,6 +665,125 @@ func TestEngineGuardianSkip(t *testing.T) {
 	}
 }
 
+// TestEngineGuardianSkipContinuesDownstream covers AC-WF-013: a skip lets the
+// run continue, so a node past the skipped one still runs.
+func TestEngineGuardianSkipContinuesDownstream(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.bashSeq["exit 3"] = []BashResult{{ExitCode: 3, Output: ""}}
+	deps.replies = []fakeReply{{
+		agent: "g", contains: "You are the guardian",
+		text:   `{"action":"skip","reason":"optional step","confidence":0.9}`,
+		tokens: 7,
+	}}
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("go", "trigger.manual", "Go", nil),
+			wfNode("check", "bash", "Check", map[string]any{"command": "exit 3"}),
+			wfNode("after", "state_set", "After", map[string]any{"key": "ran", "value": true}),
+		},
+		Edges: []Edge{wfEdge("go", "out", "check"), wfEdge("check", "out", "after")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	if got := mustRun(t, st, run.ID); got.Status != RunSucceeded {
+		t.Fatalf("run=%+v want succeeded", got)
+	}
+	check := mustNode(t, st, run.ID, "check", -1)
+	if check.Status != NodeSkipped || check.Port != "out" {
+		t.Fatalf("check=%+v want skipped with port out", check)
+	}
+	if got := mustNode(t, st, run.ID, "after", -1).Status; got != NodeSucceeded {
+		t.Fatalf("after=%s want succeeded", got)
+	}
+	if _, ok := stateRaw(t, st, wf.ID, "ran"); !ok {
+		t.Fatal("after did not run: state ran not written")
+	}
+}
+
+// recordingStore wraps MemStore and keeps every NodeRun as the engine passed it
+// to the store, before MemStore's clone can drop empty slices.
+type recordingStore struct {
+	*MemStore
+	mu    sync.Mutex
+	saved []NodeRun
+}
+
+func (r *recordingStore) PutNodeRun(ctx context.Context, nr NodeRun) error {
+	r.mu.Lock()
+	r.saved = append(r.saved, nr)
+	r.mu.Unlock()
+	return r.MemStore.PutNodeRun(ctx, nr)
+}
+
+func (r *recordingStore) rows() []NodeRun {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]NodeRun(nil), r.saved...)
+}
+
+// TestEngineNodeRunsHaveNoNullArrays checks that every saved NodeRun has non-nil
+// attempts and logs, and that trigger and skipped rows carry timestamps.
+func TestEngineNodeRunsHaveNoNullArrays(t *testing.T) {
+	st := NewMemStore()
+	rec := &recordingStore{MemStore: st}
+	deps := newFakeDeps()
+	deps.bashSeq["bad"] = []BashResult{{ExitCode: 1, Output: "boom"}}
+	deps.replies = []fakeReply{{
+		agent: "g", contains: "You are the guardian",
+		text: `{"action":"skip","reason":"optional step","confidence":0.9}`,
+	}}
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", nil),
+			wfNode("check", "bash", "Check", map[string]any{"command": "bad"}),
+			wfNode("after", "state_set", "After", map[string]any{"key": "ran", "value": true}),
+		},
+		Edges: []Edge{wfEdge("start", "out", "check"), wfEdge("check", "out", "after")},
+	}
+	wf := seedWorkflow(t, rec.MemStore, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, rec.MemStore, wf, "manual", nil)
+
+	eng := NewEngine(rec, deps, EngineOptions{Sleep: func(context.Context, time.Duration) error { return nil }})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	rows := rec.rows()
+	if len(rows) == 0 {
+		t.Fatal("no node runs were saved")
+	}
+	last := map[string]NodeRun{}
+	for _, nr := range rows {
+		b, err := json.Marshal(nr)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", nr.NodeID, err)
+		}
+		if strings.Contains(string(b), `"attempts":null`) || strings.Contains(string(b), `"logs":null`) {
+			t.Fatalf("node %s has a null array: %s", nr.NodeID, b)
+		}
+		if nr.Attempts == nil || nr.Logs == nil {
+			t.Fatalf("node %s has nil arrays: %+v", nr.NodeID, nr)
+		}
+		last[nr.NodeID] = nr
+	}
+	for _, id := range []string{"start", "check"} {
+		nr, ok := last[id]
+		if !ok {
+			t.Fatalf("no saved row for %s", id)
+		}
+		if nr.StartedAt == 0 || nr.EndedAt == 0 {
+			t.Fatalf("node %s has zero times: %+v", id, nr)
+		}
+	}
+}
+
 // ---- AC-WF-014 ------------------------------------------------------------
 
 // guardianAskWorkflow builds a workflow whose only node always fails and whose
@@ -914,6 +1033,47 @@ func TestEngineApprovalDeny(t *testing.T) {
 	}
 	if _, ok := stateRaw(t, st, wf.ID, "denied"); !ok {
 		t.Fatal("denied branch did not run")
+	}
+}
+
+// TestEngineAnswerSurvivesCallerCancel covers the live bug where Service.Answer
+// handed the HTTP request context to Launch: the run goroutine inherited it and
+// was cancelled when the request ended, leaving the run stuck "running". After
+// Answer returns, cancelling the caller's context must not stop the run, which
+// must still reach succeeded.
+func TestEngineAnswerSurvivesCallerCancel(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	g := approvalGraph()
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	if got := mustRun(t, st, run.ID); got.Status != RunWaiting {
+		t.Fatalf("run=%+v want waiting on the approval", got)
+	}
+	dec := pendingDecision(t, st, run.ID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if _, err := eng.Answer(ctx, dec.ID, "approve"); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	cancel()
+	eng.Wait()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := mustRun(t, st, run.ID)
+		if got.Status == RunSucceeded {
+			break
+		}
+		if got.Status == RunFailed || got.Status == RunCancelled || time.Now().After(deadline) {
+			t.Fatalf("run=%+v want succeeded", got)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

@@ -77,7 +77,7 @@ func BuildDiagnosisPrompt(in DiagnosisInput) string {
 		b.WriteString("(none)\n")
 	}
 	for _, r := range recent {
-		b.WriteString(fmt.Sprintf("#%d %s %s\n", r.Number, r.Status, r.Error))
+		fmt.Fprintf(&b, "#%d %s %s\n", r.Number, r.Status, r.Error)
 	}
 	b.WriteString("\n")
 

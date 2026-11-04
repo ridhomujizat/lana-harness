@@ -218,10 +218,10 @@ func DescribeCron(expr string) string {
 	if mi, ok := cronInt(minF); ok {
 		if hi, ok := cronInt(hourF); ok && domF == "*" && monF == "*" {
 			clock := fmt.Sprintf("%02d:%02d", hi, mi)
-			switch {
-			case dowF == "*":
+			switch dowF {
+			case "*":
 				return "Every day " + clock
-			case dowF == "1-5":
+			case "1-5":
 				return "Weekdays " + clock
 			default:
 				if name, ok := cronWeekday(dowF); ok {

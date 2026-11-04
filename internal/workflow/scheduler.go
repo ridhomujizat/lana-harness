@@ -32,6 +32,10 @@ func (s *Service) Start(ctx context.Context) error {
 	root := s.rootCtx
 	s.ctxMu.Unlock()
 
+	// Runs launched from a request (Answer, StartRun) must outlive that
+	// request: the engine derives each run's context from this root.
+	s.engine.SetRoot(root)
+
 	now := s.now()
 	s.seedLastFired(root, now)
 
@@ -59,6 +63,7 @@ func (s *Service) Close() {
 		cancel()
 	}
 	s.wg.Wait()
+	s.engine.CancelAll()
 	s.engine.Wait()
 
 	s.subMu.Lock()

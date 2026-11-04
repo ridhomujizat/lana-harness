@@ -709,8 +709,8 @@ func (s *Service) Assist(ctx context.Context, id string, baseVersion int, messag
 
 	now := s.now().UnixMilli()
 	var msg ChatMessage
-	switch {
-	case reply.Graph == nil:
+	switch reply.Graph {
+	case nil:
 		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, CreatedAt: now}
 	default:
 		issues := Validate(*reply.Graph, s.deps.AgentExists)

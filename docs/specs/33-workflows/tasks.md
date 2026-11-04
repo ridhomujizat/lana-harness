@@ -7,7 +7,7 @@
 - **Requirements revision**: 1
 - **Contract revision**: 1
 - **Design revision**: 1
-- **Status**: In progress
+- **Status**: In progress (T-012 smoke running)
 
 ## Execution rules
 
@@ -33,17 +33,28 @@
 
 ## Tasks
 
-- [ ] `T-001` Model, Store and Deps types — `internal/workflow/{model,store,deps}.go`
-- [ ] `T-002` Catalog, validation, templates, conditions, cron, lock, MemStore — `internal/workflow/*.go` + tests
-- [ ] `T-003` SQLite store — `store/migrations/0006_workflows.sql`, `store/workflow.go`, tests
-- [ ] `T-004` Engine, guardian, service, scheduler — `internal/workflow/{engine,guardian,service}.go` + tests
-- [ ] `T-005` Web handlers, stream, webhook, chat command — `web/workflows.go`, `web/sessions.go` hook, tests
-- [ ] `T-006` Runtime glue — `lana_workflow.go`, `lana.go` (create/start/close), tests
-- [ ] `T-007` Telegram — `channels/telegram/workflow.go` (owner buttons, `w:` callbacks, command hook), tests
-- [ ] `T-008` Wiring — `cmd/lana/daemon.go`, `cmd/lana/web.go`
-- [ ] `T-009` Web API client, routes, sidebar, fixtures
-- [ ] `T-010` List and settings pages
-- [ ] `T-011` Editor canvas, inspector, assistant, executions
+- [x] `T-001` Model, Store and Deps types — `internal/workflow/{model,store,deps}.go`
+  - Evidence: `go build/vet ./internal/workflow` pass · commit a822af6
+- [x] `T-002` Catalog, validation, templates, conditions, cron, lock, MemStore — `internal/workflow/*.go` + tests
+  - Evidence: `go test ./internal/workflow -run MemStore|Catalog|Lock|Template|Compare|Cron` pass · commit abe7e34
+- [x] `T-003` SQLite store — `store/migrations/0006_workflows.sql`, `store/workflow.go`, tests
+  - Evidence: `go test ./store/...` pass · commit 35cd773
+- [x] `T-004` Engine, guardian, service, scheduler — `internal/workflow/{engine,guardian,service}.go` + tests
+  - Evidence: `go test -race ./internal/workflow` pass · commit 5afd654, 567f2e6, f4a82fa
+- [x] `T-005` Web handlers, stream, webhook, chat command — `web/workflows.go`, `web/sessions.go` hook, tests
+  - Evidence: `go test ./web/...` pass · commit 94b1964
+- [x] `T-006` Runtime glue — `lana_workflow.go`, `lana.go` (create/start/close), tests
+  - Evidence: `go test -race . -run Workflow` pass · commit ae71630
+- [x] `T-007` Telegram — `channels/telegram/workflow.go` (owner buttons, `w:` callbacks, command hook), tests
+  - Evidence: `go test -race ./channels/telegram/...` pass · commit 6ee1715
+- [x] `T-008` Wiring — `cmd/lana/daemon.go`, `cmd/lana/web.go`
+  - Evidence: `go test -race . ./cmd/...` pass · commit see git log
+- [x] `T-009` Web API client, routes, sidebar, fixtures
+  - Evidence: `npm run typecheck, eslint` pass · commit fb5b84d
+- [x] `T-010` List and settings pages
+  - Evidence: `preview screenshots workflows-1, -4` pass · commit fb5b84d
+- [x] `T-011` Editor canvas, inspector, assistant, executions
+  - Evidence: `npx vitest run (253 tests)` pass · commit fb5b84d, 73f0300, 37d9061
 - [ ] `T-012` Build, verify, runtime smoke
 
 ## Approval

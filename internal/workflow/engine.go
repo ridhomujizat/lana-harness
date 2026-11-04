@@ -50,6 +50,9 @@ type EngineOptions struct {
 	Changed func(workflowID, runID string)
 	// DiagnoseTimeout bounds one guardian diagnosis; nil uses three minutes.
 	DiagnoseTimeout time.Duration
+	// Root bounds every run goroutine; nil uses context.Background(). Launch
+	// derives each run's context from it, never from the caller's ctx.
+	Root context.Context
 }
 
 // liveRun tracks one running goroutine so Launch, Cancel and Live can find it.
@@ -63,6 +66,9 @@ type Engine struct {
 	store Store
 	deps  Deps
 	opts  EngineOptions
+
+	rootMu  sync.RWMutex
+	rootCtx context.Context
 
 	mu   sync.Mutex
 	live map[string]*liveRun
@@ -80,7 +86,29 @@ func NewEngine(st Store, deps Deps, opts EngineOptions) *Engine {
 	if opts.DiagnoseTimeout <= 0 {
 		opts.DiagnoseTimeout = engineDiagnoseTimeout
 	}
-	return &Engine{store: st, deps: deps, opts: opts, live: map[string]*liveRun{}}
+	if opts.Root == nil {
+		opts.Root = context.Background()
+	}
+	return &Engine{store: st, deps: deps, opts: opts, rootCtx: opts.Root, live: map[string]*liveRun{}}
+}
+
+// SetRoot replaces the context that bounds launched runs (REQ-WF-007). It lets
+// a service install its own root so a run's goroutine survives the request or
+// handler context that launched it. A nil ctx resets to context.Background().
+func (e *Engine) SetRoot(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	e.rootMu.Lock()
+	e.rootCtx = ctx
+	e.rootMu.Unlock()
+}
+
+// root returns the context that bounds launched runs.
+func (e *Engine) root() context.Context {
+	e.rootMu.RLock()
+	defer e.rootMu.RUnlock()
+	return e.rootCtx
 }
 
 // sleepWithContext waits for d or until ctx is done.
@@ -116,8 +144,11 @@ func (e *Engine) notify(ctx context.Context, n Notice) {
 }
 
 // Launch starts a goroutine that executes runID when it is not already live
-// (REQ-WF-007). ctx is the service root context. A finished run is ignored, and
-// a waiting run is ignored unless it waits on a due timer.
+// (REQ-WF-007). ctx is used only for the store reads taken before the goroutine
+// starts; the run's own context derives from the engine root, so cancelling the
+// caller's context (an HTTP request, for instance) never stops the run. A
+// finished run is ignored, and a waiting run is ignored unless it waits on a
+// due timer.
 func (e *Engine) Launch(ctx context.Context, runID string) {
 	run, err := e.store.GetRun(ctx, runID)
 	if err != nil {
@@ -137,7 +168,7 @@ func (e *Engine) Launch(ctx context.Context, runID string) {
 		e.mu.Unlock()
 		return
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(e.root())
 	lr := &liveRun{cancel: cancel, done: make(chan struct{})}
 	e.live[runID] = lr
 	e.wg.Add(1)
@@ -215,6 +246,20 @@ func (e *Engine) Cancel(ctx context.Context, runID string) (Run, error) {
 	return run, nil
 }
 
+// CancelAll cancels every live run without waiting. Service.Close uses it so a
+// shutdown stops runs even when the engine root was never installed (REQ-WF-007).
+func (e *Engine) CancelAll() {
+	e.mu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(e.live))
+	for _, lr := range e.live {
+		cancels = append(cancels, lr.cancel)
+	}
+	e.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
 // Answer resolves a pending decision and resumes the run (REQ-WF-008). It
 // returns ErrNotFound for an unknown decision, ErrDecisionClosed when it is not
 // pending, and ErrInvalidChoice for a choice the decision does not accept.
@@ -266,6 +311,7 @@ func (e *Engine) Answer(ctx context.Context, decisionID, choice string) (Run, er
 			row.Port = "denied"
 			row.Output = nodeJSON(map[string]any{"approved": false})
 		}
+		normalizeRow(&row, now, false)
 		_ = e.store.PutNodeRun(ctx, row)
 		e.resumeRun(ctx, run)
 		return run, nil
@@ -284,7 +330,9 @@ func (e *Engine) Answer(ctx context.Context, decisionID, choice string) (Run, er
 		if row.Error == "" {
 			row.Error = "skipped by owner"
 		}
+		row.Port = "out" // the run continues past an owner skip (AC-WF-013)
 		row.EndedAt = now
+		normalizeRow(&row, now, false)
 		_ = e.store.PutNodeRun(ctx, row)
 	case "stop":
 		run.Status = RunFailed
@@ -675,11 +723,18 @@ func (ex *runExec) edgeLive(e Edge, target Node, item int) bool {
 }
 
 // rowLive reports whether a finished source row lets its edges run on: a
-// succeeded or fallback node, or a failed node whose policy is continue.
+// succeeded or fallback node, a failed node whose policy is continue, or a node
+// skipped by a decision (REQ-WF-008, AC-WF-013).
 func (ex *runExec) rowLive(row NodeRun, src Node) bool {
 	switch row.Status {
 	case NodeSucceeded, NodeFallback:
 		return true
+	case NodeSkipped:
+		// A decision "skip" keeps the node's outgoing edges live so the run
+		// continues; a skip caused by a dead branch keeps Port "" and stays
+		// dead. A skipped source with Port "out" behaves like a succeeded
+		// source with output null.
+		return row.Port == "out"
 	case NodeFailed:
 		return ex.policy(src).Mode == "continue"
 	default:
@@ -873,7 +928,7 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 	case "skip":
 		ex.putDecision(dec)
 		ex.appendLog(row, "guardian skipped: "+d.Reason)
-		ex.skipNode(row, msg)
+		ex.skipNodeContinue(row, msg)
 	case "fallback":
 		ex.putDecision(dec)
 		out := p.Fallback
@@ -1017,9 +1072,41 @@ func (ex *runExec) ensureRow(node Node, item int) *NodeRun {
 	return r
 }
 
-// putRow persists a node run.
+// putRow persists a node run with its durable defaults filled in.
 func (ex *runExec) putRow(nr NodeRun) {
+	normalizeRow(&nr, ex.now(), isTriggerType(ex.nodes[nr.NodeID].Type))
 	_ = ex.e.store.PutNodeRun(ex.ctx, nr)
+}
+
+// normalizeRow fills the durable defaults of a node run before it is saved:
+// Attempts and Logs are never nil so their JSON is never null, and a trigger or
+// skipped row always carries start and end times.
+func normalizeRow(row *NodeRun, now int64, trigger bool) {
+	if row.Attempts == nil {
+		row.Attempts = []Attempt{}
+	}
+	if row.Logs == nil {
+		row.Logs = []string{}
+	}
+	if trigger || row.Status == NodeSkipped {
+		if row.StartedAt == 0 {
+			row.StartedAt = now
+		}
+		if row.EndedAt == 0 {
+			row.EndedAt = now
+		}
+	}
+}
+
+// skipNodeContinue marks a node skipped by a decision and keeps its outgoing
+// edges live, so a guardian or owner "skip" lets the run continue
+// (REQ-WF-008, AC-WF-013).
+func (ex *runExec) skipNodeContinue(row *NodeRun, msg string) {
+	ex.skipNode(row, msg)
+	if row.Status == NodeSkipped {
+		row.Port = "out"
+		ex.putRow(*row)
+	}
 }
 
 // putDecision persists a decision and publishes the change.
