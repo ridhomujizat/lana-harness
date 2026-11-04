@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -297,6 +298,30 @@ func (rt *Runtime) IsWorkflowSession(id string) bool {
 	_, ok := rt.wfSessions[id]
 	rt.wfMu.Unlock()
 	return ok
+}
+
+// Workflows returns the workflow service (design §Runtime glue). It is never
+// nil after New.
+func (rt *Runtime) Workflows() *workflow.Service { return rt.workflows }
+
+// StartWorkflows resumes durable runs, starts the scheduler, and bridges
+// session events to the engine (REQ-WF-003, REQ-WF-007, design §Runtime glue).
+// It is a no-op after the first call. The engine stops with ctx.
+func (rt *Runtime) StartWorkflows(ctx context.Context) {
+	if rt.workflows == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = rt.ctx
+	}
+	rt.workflowsOnce.Do(func() {
+		if err := rt.workflows.Start(ctx); err != nil {
+			slog.Warn("workflow: start", "error", err)
+		}
+		go rt.SubscribeSessionEvents(ctx, func(kind, sessionID, agent string, data json.RawMessage) {
+			rt.workflows.HandleEvent(ctx, kind, sessionID, agent, data)
+		})
+	})
 }
 
 // SubscribeSessionEvents passes every session event whose session is not on

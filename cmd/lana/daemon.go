@@ -211,7 +211,7 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 	if webServer != nil {
 		questionRouter.web = webQuestionResponder(webServer.Questions())
 	}
-	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web"))
+	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"))
 	if err != nil {
 		return errorf(2, "%v", err)
 	}
@@ -223,6 +223,12 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 
 	if telegramActive {
 		channel = telegram.New(tgcfg, token, &daemonBackend{rt: rt, home: home, leases: leases})
+		// REQ-WF-005, REQ-WF-008, API-WF-022: the owner answers workflow
+		// decisions and commands in Telegram; the workflow notice tells them an
+		// approval is waiting on the web.
+		channel.SetWorkflowHooks(workflowHooks(rt))
+		rt.Workflows().SetNotifier(telegramWorkflowNotifier{ch: channel})
+		router.workflowNotice = telegramWorkflowNotice(channel)
 		bot, err := channel.Start(runCtx)
 		if errors.Is(err, telegram.ErrUnauthorized) {
 			return errorf(2, "telegram: invalid bot token")
@@ -242,6 +248,9 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		backend.SetRestartController(restart)
 		backend.SetDrainController(drain)
 		webServer.SetBackend(backend)
+		// REQ-WF-011, API-WF-001: the Workflows page reads the service and lists
+		// its approval decisions under Needs attention.
+		webServer.SetWorkflows(rt.Workflows())
 		webServer.SetDaemonStore(backend)
 		webServer.SetSecretStore(backend)
 		webServer.SetAgentFileStore(backend)
@@ -284,6 +293,11 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 	// REQ-KNU-011, REQ-KNU-020: the daemon owns the knowledge upkeep loop. It
 	// starts after the channels and stops with runCtx when the daemon does.
 	rt.StartKnowledgeUpkeep(runCtx)
+
+	// REQ-WF-003, REQ-WF-007: the daemon owns the workflow scheduler, durable
+	// resume and event-trigger bridge. They start after the channels and stop
+	// with runCtx when the daemon does.
+	rt.StartWorkflows(runCtx)
 
 	// restartNow runs the same shutdown as SIGTERM and then replaces the
 	// process image. The daemon lock stays held (REQ-WEB-035).
@@ -569,6 +583,10 @@ type ApprovalRouter struct {
 	sessionInfo func(context.Context, string) (core.SessionInfo, error)
 	telegram    func(context.Context, core.ApprovalRequest) core.ApprovalOutcome
 	web         func(context.Context, core.ApprovalRequest) core.ApprovalOutcome
+	// workflowNotice sends a Telegram heads-up for a channel "workflow"
+	// approval; the answer happens on the web (design §Wiring, REQ-WF-009).
+	// It runs in a goroutine and never blocks the approval.
+	workflowNotice func(ctx context.Context, req core.ApprovalRequest, info core.SessionInfo)
 }
 
 // Approve routes req to the responder of the session's channel.
@@ -587,6 +605,16 @@ func (r *ApprovalRouter) Approve(ctx context.Context, req core.ApprovalRequest) 
 			return r.telegram(ctx, req)
 		}
 	case "web":
+		if r.web != nil {
+			return r.web(ctx, req)
+		}
+	case "workflow":
+		// The owner answers on the web; Telegram only gets a heads-up, sent
+		// off the approval path.
+		if r.workflowNotice != nil {
+			notice, request := r.workflowNotice, req
+			go notice(context.WithoutCancel(ctx), request, info)
+		}
 		if r.web != nil {
 			return r.web(ctx, req)
 		}
@@ -618,7 +646,8 @@ func (r *QuestionRouter) Ask(ctx context.Context, req core.QuestionRequest) core
 		if r.telegram != nil {
 			return r.telegram(ctx, req)
 		}
-	case "web":
+	case "web", "workflow":
+		// A workflow session's question is answered on the web (design §Wiring).
 		if r.web != nil {
 			return r.web(ctx, req)
 		}

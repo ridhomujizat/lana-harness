@@ -311,6 +311,27 @@ func TestWorkflowDepsToolHelpers(t *testing.T) {
 	}
 }
 
+// REQ-WF-003, REQ-WF-007: the runtime builds a workflow service, StartWorkflows
+// is a no-op on the second call, and Close ends it without hanging.
+func TestRuntimeWorkflowsLifecycle(t *testing.T) {
+	rt := newWorkflowRuntime(t, mock.Script{}, nil)
+	if rt.Workflows() == nil {
+		t.Fatal("Workflows() is nil after New")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rt.StartWorkflows(ctx)
+	// A second call must be a no-op and must not restart the service.
+	rt.StartWorkflows(ctx)
+
+	// Close runs in the helper's cleanup; calling it here proves it returns
+	// while the scheduler and event bridge are running.
+	if err := rt.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 // REQ-WF-003: SubscribeSessionEvents passes non-workflow session events to fn
 // and skips workflow sessions.
 func TestWorkflowSubscribeSessionEvents(t *testing.T) {

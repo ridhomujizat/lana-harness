@@ -29,6 +29,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
+	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	_ "github.com/ridhomujizat/lana-harness/store"
@@ -197,6 +198,12 @@ type Runtime struct {
 	// upkeep loop (REQ-KNU-011, design §9).
 	knowledgeMu     sync.Mutex
 	knowledgeCancel context.CancelFunc
+	// workflows is the workflow service (REQ-WF-003, REQ-WF-007). It is never
+	// nil after New.
+	workflows *workflow.Service
+	// workflowsOnce makes StartWorkflows start the service at most once, like
+	// StartKnowledgeUpkeep.
+	workflowsOnce sync.Once
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
@@ -376,6 +383,15 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	// tool list, step budget and lock are decided before the permission engine
 	// asks the owner. It only acts on sessions a workflow run registered.
 	coreCtx.Hooks.ToolsPreExecute.Use(rt.workflowToolGate, core.WithPrepend())
+	// The workflow service uses the session store when it implements
+	// workflow.Store, else an in-memory store (design §Runtime glue).
+	var wfStore workflow.Store = workflow.NewMemStore()
+	if st, ok := rt.store.(workflow.Store); ok {
+		wfStore = st
+	}
+	rt.workflows = workflow.NewService(wfStore, rt.WorkflowDeps(),
+		workflow.WithSessionCheck(rt.IsWorkflowSession),
+		workflow.WithLogger(slog.Default()))
 	return rt, nil
 }
 
@@ -998,6 +1014,12 @@ func (rt *Runtime) Close() error {
 	rt.knowledgeMu.Unlock()
 	if cancelKnowledge != nil {
 		cancelKnowledge()
+	}
+	// REQ-WF-007: stop the workflow engine and scheduler before the agent
+	// registry closes, so a run goroutine waiting on an agent turn ends first.
+	// Close cancels the engine context, which cancels its turns.
+	if rt.workflows != nil {
+		rt.workflows.Close()
 	}
 	rt.cancel()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
