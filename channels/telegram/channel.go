@@ -110,6 +110,7 @@ type Channel struct {
 	sessions      map[string]*chat
 	approvals     map[string]*approval
 	questions     map[string]*question
+	hooks         WorkflowHooks
 	wg            sync.WaitGroup
 	fatal         chan error
 }

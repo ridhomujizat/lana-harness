@@ -1103,6 +1103,14 @@ func (w *chat) handleCommand(ctx context.Context, m *Message, text string) {
 		policy, _ := w.ch.backend.Policy(ctx, session)
 		w.reply(ctx, m.MessageID, fmt.Sprintf("agent %s · model %s · policy %s · session %s · %d turns", agent, w.ch.backend.AgentModel(agent), policy, session, info.TurnCount))
 	default:
+		// A workflow command takes a non-built-in owner command; an unhandled
+		// one falls back to the unknown-command reply (API-WF-022).
+		if owner {
+			if reply, handled := w.ch.workflowCommand(ctx, text); handled {
+				w.reply(ctx, m.MessageID, reply)
+				return
+			}
+		}
 		w.reply(ctx, m.MessageID, "· unknown command: /"+name)
 	}
 }
@@ -1321,6 +1329,8 @@ func (w *chat) handleCallback(ctx context.Context, q *CallbackQuery) {
 		w.switchAgent(ctx, replyTo, rest)
 	case "c":
 		w.answerContinue(ctx, q, rest, owner)
+	case "w":
+		w.answerWorkflow(ctx, q, rest, owner)
 	default:
 		w.ch.apiErr("answerCallbackQuery", w.ch.api.AnswerCallbackQuery(ctx, q.ID, ""))
 	}
