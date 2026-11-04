@@ -40,7 +40,7 @@ var (
 	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 var validKinds = map[string]bool{
 	core.KindSessionCreated: true, core.KindTurnStart: true, core.KindTurnEnd: true,
@@ -105,7 +105,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return ErrSchemaTooNew
 	}
-	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads"}
+	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads", 6: "workflows"}
 	for v := version + 1; v <= schemaVersion; v++ {
 		name := fmt.Sprintf("migrations/%04d_%s.sql", v, names[v])
 		data, err := migrationFS.ReadFile(name)

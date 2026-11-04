@@ -578,6 +578,11 @@ func TestListOrderAndLimit(t *testing.T) {
 	a := createSession(t, s)
 	b := createSession(t, s)
 	_, _ = s.Append(context.Background(), a.ID, []core.EventDraft{{Kind: core.KindUserMessage, Payload: core.UserMessage{V: 1}}})
+	// Both sessions may be created in the same millisecond, which would make the
+	// updated_at ordering ambiguous; force a's last-activity time ahead of b's.
+	if _, err := s.db.Exec("UPDATE sessions SET updated_at = updated_at + 1 WHERE id = ?", a.ID); err != nil {
+		t.Fatal(err)
+	}
 	list, err := s.List(context.Background(), core.SessionFilter{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -1742,8 +1747,8 @@ func TestMigrateV4ToV5AddsRoomReads(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("version=%d, want 5", version)
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
 	}
 	if stored, err := s.SetRoomRead(ctx, "dana", 5000); err != nil || stored != 5000 {
 		t.Fatalf("SetRoomRead stored=%d err=%v, want 5000", stored, err)
