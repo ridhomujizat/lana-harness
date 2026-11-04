@@ -189,6 +189,10 @@ type Runtime struct {
 	closeErr error
 	approve  ApproveFunc
 	home     string
+	// wfMu guards wfSessions, the live sessions of workflow runs in this
+	// process (REQ-WF-005, REQ-WF-009, design §Runtime glue).
+	wfMu       sync.Mutex
+	wfSessions map[string]*workflowSession
 	// knowledgeMu guards knowledgeCancel, the stop of the background knowledge
 	// upkeep loop (REQ-KNU-011, design §9).
 	knowledgeMu     sync.Mutex
@@ -366,8 +370,12 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	rt := &Runtime{
 		ctx: root, cancel: cancel, coreCtx: coreCtx, result: result,
 		registry: registry, store: coreCtx.Sessions, approve: runtimeOpts.approve, home: opts.Home,
-		jobs: jobsRegistry,
+		jobs: jobsRegistry, wfSessions: map[string]*workflowSession{},
 	}
+	// REQ-WF-009, AC-WF-016: the workflow tool gate is prepended so a worker's
+	// tool list, step budget and lock are decided before the permission engine
+	// asks the owner. It only acts on sessions a workflow run registered.
+	coreCtx.Hooks.ToolsPreExecute.Use(rt.workflowToolGate, core.WithPrepend())
 	return rt, nil
 }
 
