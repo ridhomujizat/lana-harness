@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import "../styles/index.css";
+import { ToastProvider } from "../ui/gr8r";
 import { AnnouncerProvider } from "../ui/ui";
 import { applyTheme, isThemeChoice, saveTheme } from "../app/theme";
 import { mockApi } from "./fixtures";
@@ -117,8 +118,10 @@ if (mount) {
   void import("../app/App").then(({ App }) => {
     createRoot(mount).render(
       <AnnouncerProvider>
+<ToastProvider>
         <App />
-      </AnnouncerProvider>
+  </ToastProvider>
+    </AnnouncerProvider>
     );
   });
 }

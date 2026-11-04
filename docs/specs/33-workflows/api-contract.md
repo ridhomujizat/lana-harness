@@ -13,7 +13,7 @@
 | Topic | Decision or authority |
 |---|---|
 | Authentication | Web session cookie + CSRF header via `Server.Handle` (spec #9). Exception: `API-WF-020` webhook uses `X-Lana-Token`. |
-| Errors | `{"error":{"code","message","details"}}`. Graph problems: `details.issues = [{node_id, code, message}]`. |
+| Errors | `{"error":{"code","message","details"}}`. Graph problems: `details = [{"issues": [{node_id, code, message}]}]`. |
 | Serialization | JSON, snake_case. Times are Unix milliseconds. Ids are strings. |
 | Versioning | Paths under `/v1`; additions only. |
 

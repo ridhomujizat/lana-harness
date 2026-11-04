@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "./styles/index.css";
 import { App } from "./app/App";
+import { ToastProvider } from "./ui/gr8r";
 import { AnnouncerProvider } from "./ui/ui";
 
 const mount = document.getElementById("app");
@@ -10,7 +11,9 @@ if (mount) {
   mount.textContent = "";
   createRoot(mount).render(
     <AnnouncerProvider>
+<ToastProvider>
       <App />
+</ToastProvider>
     </AnnouncerProvider>
   );
 }

@@ -23,6 +23,8 @@ import { WelcomePage } from "../views/welcome";
 import { ForgotPage } from "../views/forgot";
 import { HomePage } from "../views/home";
 import { ChatsPage } from "../views/chats";
+import { WorkflowsPage } from "../views/workflows";
+import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
 import { SessionsWorkspace } from "../views/sessions";
@@ -83,6 +85,18 @@ function routeContent(
       return <ChatsPage />;
     case "chat":
       return <ChatsPage roomName={params.name} />;
+    case "workflows":
+      return <WorkflowsPage />;
+    case "workflow-new":
+      return <WorkflowPage key="new" tab="editor" />;
+    case "workflow":
+      return <WorkflowPage key={params.id} id={params.id} tab="editor" />;
+    case "workflow-runs":
+      return <WorkflowPage key={params.id} id={params.id} tab="runs" />;
+    case "workflow-run":
+      return <WorkflowPage key={params.id} id={params.id} tab="runs" run={params.run} />;
+    case "workflow-settings":
+      return <WorkflowPage key={params.id} id={params.id} tab="settings" />;
     case "sessions":
       return <SessionsWorkspace />;
     case "new-session":
@@ -162,6 +176,15 @@ export function crumbsFor(route: Route): Crumb[] {
         { label: "Chats", href: "#/chats" },
         { label: params.name || "Chat" },
       ];
+    case "workflows":
+      return [{ label: "Workflows" }];
+    case "workflow-new":
+      return [{ label: "Workflows", href: "#/workflows" }, { label: "New workflow" }];
+    case "workflow":
+    case "workflow-runs":
+    case "workflow-run":
+    case "workflow-settings":
+      return [{ label: "Workflows", href: "#/workflows" }, { label: params.id || "Workflow" }];
     case "sessions":
     case "new-session":
     case "session":

@@ -1,3 +1,4 @@
+import { mockWorkflows } from "./workflow-fixtures";
 import type {
   Agent,
   AgentCreatedResponse,
@@ -1857,6 +1858,8 @@ export function mockApi(method: string, url: URL): MockResult {
   }
 
   switch (at(1)) {
+    case "workflows":
+      return mockWorkflows(m, parts);
     case "auth": {
       if (at(2) === "state" && isGet) return { status: 200, body: authStateFixture };
       if (at(2) === "session" && isGet) {

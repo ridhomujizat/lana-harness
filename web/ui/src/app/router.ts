@@ -38,6 +38,12 @@ export type RouteView =
   | "home"
   | "chats"
   | "chat"
+  | "workflows"
+  | "workflow-new"
+  | "workflow"
+  | "workflow-runs"
+  | "workflow-run"
+  | "workflow-settings"
   | "sessions"
   | "new-session"
   | "session"
@@ -77,6 +83,12 @@ export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/home", view: "home", section: "home" },
   { path: "#/chats", view: "chats", section: "chats" },
   { path: "#/chats/{name}", view: "chat", section: "chats" },
+  { path: "#/workflows", view: "workflows", section: "workflows" },
+  { path: "#/workflows/new", view: "workflow-new", section: "workflows" },
+  { path: "#/workflows/{id}", view: "workflow", section: "workflows" },
+  { path: "#/workflows/{id}/runs", view: "workflow-runs", section: "workflows" },
+  { path: "#/workflows/{id}/runs/{run}", view: "workflow-run", section: "workflows" },
+  { path: "#/workflows/{id}/settings", view: "workflow-settings", section: "workflows" },
   { path: "#/sessions", view: "sessions", section: "sessions" },
   { path: "#/history", view: "sessions", section: "sessions" },
   { path: "#/sessions/new", view: "new-session", section: "sessions" },
