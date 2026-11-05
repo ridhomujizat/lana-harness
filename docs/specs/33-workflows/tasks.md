@@ -88,3 +88,10 @@ the run on the HTTP request context, so the run stopped when the request ended; 
 Not exercised live: Telegram buttons and `/command` in Telegram (unit tests only, Telegram was off), the
 Obscura browser node (unit test for the missing-binary path only), schedule/interval firing on the wall clock
 (unit tests with a fake clock), lana event triggers.
+
+### Follow-up smoke (2026-11-05, scratch LANA_HOME, port 18398, build e38e0b9)
+
+| Check | Result |
+|---|---|
+| Schedule trigger `* * * * *` (Asia/Jakarta), bash node `hello-kit greet schedule` | activated 12:16:25; runs #1 12:16:26 and #2 12:17:26, trigger `schedule`, both succeeded; output "hello, schedule" (a Tools program on the bash PATH) |
+| Obscura browser control from a chat (MCP) | navigate, interactive elements, click, snapshot: see spec 34 tasks r2 |

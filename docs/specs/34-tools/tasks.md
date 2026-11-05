@@ -42,3 +42,11 @@ Not exercised live: a real install command (Obscura was already installed), down
 | Chat: open example.com, click the link, report title + URL | `browser_navigate` → `browser_interactive_elements` (`e1` "Learn more") → `browser_click e1` → `browser_snapshot`: "Example Domains", https://www.iana.org/help/example-domains; turn ended, session idle, no approval prompt (trust) |
 
 Not exercised live: a real catalog install (needs the owner to click Install), `tools_request` approval in a chat.
+
+### Follow-up smoke (2026-11-05, build e38e0b9)
+
+| Check | Result |
+|---|---|
+| Owner clicked Install on yt-dlp (port 18399) | download install succeeded, `yt-dlp --version` 2026.10.26; Obscura was already on PATH, so no install ran |
+| `tools_request` in a chat (agent `default`, permission trust, custom package `hello-kit`) | approval asked (risk admin) despite trust; allowed once, result "installed: hello_kit_greet"; the agent then ran `hello-kit greet Ridho` in bash: found in `tools/hello-kit/bin` via PATH, output "hello, Ridho" |
+| yt-dlp `transcript` (subagent live run through `Store.Run`) | en-orig and ko-orig auto captions as clean text (1.4–1.6 KB); a video with no auto captions gives "wrote no output file" with yt-dlp's reason |
