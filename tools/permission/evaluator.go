@@ -13,9 +13,20 @@ import (
 
 // Engine is the tools.pre_execute listener.
 type Engine struct {
-	Store    core.SessionStore
-	Config   core.Config
+	Store  core.SessionStore
+	Config core.Config
+	// ConfigFn, when set, returns the current config on every call, so a live
+	// config apply reaches the engine. Config is used when it is nil.
+	ConfigFn func() core.Config
 	Approval core.ApprovalService
+}
+
+// config returns the config for one tool call.
+func (e *Engine) config() core.Config {
+	if e.ConfigFn != nil {
+		return e.ConfigFn()
+	}
+	return e.Config
 }
 
 // Handle decides a single tool call.
@@ -32,7 +43,8 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if agentName == "" {
 		agentName = info.Agent
 	}
-	agent := e.Config.Agents[agentName]
+	cfg := e.config()
+	agent := cfg.Agents[agentName]
 	workspace := info.Workspace
 	if workspace == "" {
 		workspace = agent.Workspace
@@ -62,7 +74,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		if err != nil {
 			return reject("failed to read parent log: " + err.Error()), nil
 		}
-		parentAgent := e.Config.Agents[parentInfo.Agent]
+		parentAgent := cfg.Agents[parentInfo.Agent]
 		parentFallback := core.PolicyAsk
 		if parentAgent.Permission != "" {
 			parentFallback = core.Policy(parentAgent.Permission)

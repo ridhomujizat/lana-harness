@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -19,11 +20,31 @@ type ApprovalService struct {
 	Hooks   *core.Hooks
 	Config  core.Config
 	Timeout time.Duration
+
+	// cfgMu guards Config once the service is shared. ApplyConfig swaps it
+	// while tool calls read it through CurrentConfig.
+	cfgMu sync.RWMutex
 }
 
 // NewApprovalService creates the service.
 func NewApprovalService(store core.SessionStore, hooks *core.Hooks, config core.Config) *ApprovalService {
 	return &ApprovalService{Store: store, Hooks: hooks, Config: config, Timeout: 10 * time.Minute}
+}
+
+// ApplyConfig replaces the config the service and the permission engine read.
+// The runtime calls it when a config save is applied live, so a changed agent
+// permission or rule takes effect on the next tool call.
+func (s *ApprovalService) ApplyConfig(cfg core.Config) {
+	s.cfgMu.Lock()
+	s.Config = cfg
+	s.cfgMu.Unlock()
+}
+
+// CurrentConfig returns the config last set by the constructor or ApplyConfig.
+func (s *ApprovalService) CurrentConfig() core.Config {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.Config
 }
 
 func (s *ApprovalService) append(ctx context.Context, sessionID, kind, turnID string, payload any) error {
@@ -109,7 +130,7 @@ func (s *ApprovalService) EffectivePolicy(ctx context.Context, sessionID string)
 		return "", err
 	}
 	fallback := core.PolicyAsk
-	if agent, ok := s.Config.Agents[info.Agent]; ok && agent.Permission != "" {
+	if agent, ok := s.CurrentConfig().Agents[info.Agent]; ok && agent.Permission != "" {
 		fallback = core.Policy(agent.Permission)
 	}
 	events, err := s.Store.ChainEvents(ctx, sessionID)

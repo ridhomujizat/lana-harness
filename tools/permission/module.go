@@ -53,6 +53,11 @@ func (m *permissionModule) Install(b *core.Builder, cfg core.ModuleConfig) error
 	}
 	approval := approvalAny.(core.ApprovalService)
 	engine := &Engine{Store: store, Config: b.Config(), Approval: approval}
+	// The approval service holds the live config (see ApplyConfig), so the
+	// engine reads agent permissions and rules from it on every call.
+	if svc, ok := approval.(*ApprovalService); ok {
+		engine.ConfigFn = svc.CurrentConfig
+	}
 	b.Hooks().ToolsPreExecute.Use(engine.Handle)
 	return nil
 }

@@ -437,9 +437,16 @@ func (rt *Runtime) ApplyConfig(cfg core.Config) {
 	rt.result.Config.Agents = agents
 	rt.result.Config.Teams = teams
 	rt.result.Config.MCP = mcpCfg
+	live := rt.result.Config
 	rt.cfgMu.Unlock()
 	if rt.registry != nil {
 		rt.registry.ApplyConfig(cfg)
+	}
+	// The permission engine and approval service read agent permission,
+	// rules, and workspace from their own config copy; refresh it so a saved
+	// change applies to the next tool call without a restart.
+	if applier, ok := rt.coreCtx.Approval.(interface{ ApplyConfig(core.Config) }); ok {
+		applier.ApplyConfig(live)
 	}
 }
 
