@@ -92,7 +92,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	rules := agent.Rules
 	for _, raw := range rules.Deny {
 		p, err := pattern.ParsePattern(raw)
-		if err == nil && p.Match(in.Call.Name, arg) {
+		if err == nil && denyMatches(p, in.Call.Name, arg) {
 			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
 		}
 	}
@@ -100,7 +100,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	// rules and grants are intentionally not read; they do not carry over.
 	for _, raw := range parentDeny {
 		p, err := pattern.ParsePattern(raw)
-		if err == nil && p.Match(in.Call.Name, arg) {
+		if err == nil && denyMatches(p, in.Call.Name, arg) {
 			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
 		}
 	}
@@ -128,17 +128,34 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 			return reject("approval " + string(outcome)), nil
 		}
 	}
-	for _, raw := range rules.Allow {
-		p, err := pattern.ParsePattern(raw)
-		if err != nil {
-			continue
+	// The effective policy is read before the allow rules and grants so a
+	// parent's never policy binds a child even when the child allows the tool.
+	// A session's own never policy still lets its allow rules run
+	// (AC-PERM-007). A read call is still allowed under never, as before.
+	policy := EffectivePolicy(events, fallbackPolicy(agent))
+	if info.ParentSessionID != "" {
+		policy = ChildPolicy(parentPolicy, policy)
+	}
+	if info.ParentSessionID != "" && parentPolicy == core.PolicyNever && in.Call.Risk != core.RiskRead {
+		return reject("policy never"), nil
+	}
+	if arg.Kind == pattern.ArgCommand {
+		if commandAllowed(rules.Allow, in.Call.Name, arg.Value) {
+			return allow(core.ApprovalOutcome("")), nil
 		}
-		if arg.Kind == pattern.ArgPath {
-			if p.MatchBoth(in.Call.Name, arg) {
+	} else {
+		for _, raw := range rules.Allow {
+			p, err := pattern.ParsePattern(raw)
+			if err != nil {
+				continue
+			}
+			if arg.Kind == pattern.ArgPath {
+				if p.MatchBoth(in.Call.Name, arg) {
+					return allow(core.ApprovalOutcome("")), nil
+				}
+			} else if p.Match(in.Call.Name, arg) {
 				return allow(core.ApprovalOutcome("")), nil
 			}
-		} else if p.Match(in.Call.Name, arg) {
-			return allow(core.ApprovalOutcome("")), nil
 		}
 	}
 	for _, grant := range Grants(events) {
@@ -147,10 +164,6 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		}
 	}
 
-	policy := EffectivePolicy(events, fallbackPolicy(agent))
-	if info.ParentSessionID != "" {
-		policy = ChildPolicy(parentPolicy, policy)
-	}
 	if policy == core.PolicyTrust {
 		return allow(core.ApprovalOutcome("")), nil
 	}
@@ -177,6 +190,53 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	default:
 		return reject("approval " + string(outcome)), nil
 	}
+}
+
+// denyMatches reports whether a deny pattern matches the whole call or, for a
+// bash command, any of its simple commands.
+func denyMatches(p pattern.Pattern, tool string, arg pattern.Argument) bool {
+	if p.Match(tool, arg) {
+		return true
+	}
+	if arg.Kind != pattern.ArgCommand {
+		return false
+	}
+	segments, _ := pattern.SplitCommand(arg.Value)
+	for _, segment := range segments {
+		if p.Match(tool, pattern.Argument{Kind: pattern.ArgCommand, Value: segment}) {
+			return true
+		}
+	}
+	return false
+}
+
+// commandAllowed reports whether the allow rules cover every simple command of
+// a bash call. The command must be analyzable and each segment must be matched
+// by at least one allow rule; different segments may match different rules.
+func commandAllowed(allows []string, tool, command string) bool {
+	segments, analyzable := pattern.SplitCommand(command)
+	if !analyzable || len(segments) == 0 {
+		return false
+	}
+	patterns := make([]pattern.Pattern, 0, len(allows))
+	for _, raw := range allows {
+		if p, err := pattern.ParsePattern(raw); err == nil {
+			patterns = append(patterns, p)
+		}
+	}
+	for _, segment := range segments {
+		matched := false
+		for _, p := range patterns {
+			if p.Match(tool, pattern.Argument{Kind: pattern.ArgCommand, Value: segment}) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func fallbackPolicy(agent core.AgentConfig) core.Policy {

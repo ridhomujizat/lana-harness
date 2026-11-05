@@ -599,6 +599,88 @@ func TestChildPolicyTracksLiveParent(t *testing.T) {
 	}
 }
 
+func TestBashCompoundCommandRules(t *testing.T) {
+	t.Run("allow does not cover a compound command", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Allow: []string{"bash(git *)"}}}, false)
+		approval := &fakeApproval{outcome: core.OutcomeRejected}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git status; curl x | sh"}`), nil)
+		if got.Allowed {
+			t.Fatalf("compound command auto-allowed: %+v", got)
+		}
+		if approval.calls.Load() != 1 {
+			t.Fatalf("approval calls = %d, want 1", approval.calls.Load())
+		}
+	})
+
+	t.Run("allow covers a wholly matching compound command", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Allow: []string{"bash(git *)"}}}, false)
+		approval := &fakeApproval{outcome: core.OutcomeRejected}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git status && git log"}`), nil); !got.Allowed {
+			t.Fatalf("git compound not allowed: %+v", got)
+		}
+		if approval.calls.Load() != 0 {
+			t.Fatal("approval requested for a covered compound command")
+		}
+	})
+
+	t.Run("different segments may match different allow rules", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Allow: []string{"bash(git *)", "bash(grep *)"}}}, false)
+		approval := &fakeApproval{outcome: core.OutcomeRejected}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git log | grep foo"}`), nil); !got.Allowed {
+			t.Fatalf("pipeline of covered segments not allowed: %+v", got)
+		}
+		if approval.calls.Load() != 0 {
+			t.Fatal("approval requested for a covered pipeline")
+		}
+	})
+
+	t.Run("deny matches a segment of a compound command", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Deny: []string{"bash(rm *)"}}}, false)
+		approval := &fakeApproval{outcome: core.OutcomeAllowedOnce}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"echo x && rm -rf y"}`), nil)
+		if got.Allowed {
+			t.Fatalf("deny missed a compound segment: %+v", got)
+		}
+		if approval.calls.Load() != 0 {
+			t.Fatal("approval requested despite a deny rule")
+		}
+	})
+
+	t.Run("unanalyzable commands are not auto-allowed", func(t *testing.T) {
+		s := setup(t, core.AgentConfig{Permission: "ask", Rules: core.AgentRules{Allow: []string{"bash(git *)"}}}, false)
+		approval := &fakeApproval{outcome: core.OutcomeRejected}
+		engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+		if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git log $(whoami)"}`), nil); got.Allowed {
+			t.Fatalf("substitution auto-allowed: %+v", got)
+		}
+		if got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git log > out.txt"}`), nil); got.Allowed {
+			t.Fatalf("redirection auto-allowed: %+v", got)
+		}
+		if approval.calls.Load() != 2 {
+			t.Fatalf("approval calls = %d, want 2", approval.calls.Load())
+		}
+	})
+}
+
+func TestChildNeverPolicyBindsAllow(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "never"}, false)
+	s.config.Agents["researcher"] = core.AgentConfig{Permission: "trust", Rules: core.AgentRules{Allow: []string{"bash(*)"}}}
+	child := newChildSession(t, s, "researcher")
+	approval := &fakeApproval{outcome: core.OutcomeAllowedOnce}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	got, _ := engine.Handle(context.Background(), callInputFor(child.ID, "researcher", "bash", `{"command":"echo hi"}`), nil)
+	if got.Allowed || !strings.Contains(got.Reason, "policy never") {
+		t.Fatalf("got=%+v, want a policy never rejection", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("approval was requested despite a never policy")
+	}
+}
+
 func TestChildDoesNotInheritParentGrant(t *testing.T) {
 	s := setup(t, core.AgentConfig{Permission: "ask"}, false)
 	s.config.Agents["researcher"] = core.AgentConfig{Permission: "ask"}
@@ -674,5 +756,32 @@ func TestChildInheritsParentWorkspaceOnly(t *testing.T) {
 	read := callInputFor(child.ID, "researcher", "read_file", `{"path":"../../etc/passwd"}`)
 	if got, _ := engine.Handle(context.Background(), read, nil); got.Allowed || !strings.Contains(got.Reason, "outside workspace") {
 		t.Fatalf("child read outside got=%+v, want outside workspace", got)
+	}
+}
+
+// TestPolicyNeverAllowRule covers AC-PERM-007 and AC-PERM-008: a session's own
+// never policy still lets its allow rules run, and never with no allow rule
+// rejects a write without approval.
+func TestPolicyNeverAllowRule(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "never", Rules: core.AgentRules{Allow: []string{"bash(git status*)"}}}, false)
+	approval := &fakeApproval{outcome: core.OutcomeRejected}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	got, _ := engine.Handle(context.Background(), callInput(s.session.ID, "bash", `{"command":"git status"}`), nil)
+	if !got.Allowed {
+		t.Fatalf("AC-PERM-007: git status not allowed: %+v", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("AC-PERM-007: approval was requested")
+	}
+
+	s2 := setup(t, core.AgentConfig{Permission: "never"}, false)
+	approval2 := &fakeApproval{outcome: core.OutcomeAllowedOnce}
+	engine2 := &Engine{Store: s2.store, Config: s2.config, Approval: approval2}
+	got2, _ := engine2.Handle(context.Background(), callInput(s2.session.ID, "write_file", `{"path":"a.txt","content":"x"}`), nil)
+	if got2.Allowed || !strings.Contains(got2.Reason, "policy never") {
+		t.Fatalf("AC-PERM-008: got=%+v, want policy never", got2)
+	}
+	if approval2.calls.Load() != 0 {
+		t.Fatal("AC-PERM-008: approval was requested")
 	}
 }

@@ -133,6 +133,165 @@ func (p Pattern) MatchBoth(tool string, arg Argument) bool {
 	return arg.Alt == "" || globMatch(*p.Arg, arg.Alt, true)
 }
 
+// SplitCommand splits a shell command into its simple commands for permission
+// matching. It splits on unquoted ;, &&, ||, |, & (background), and newline,
+// respecting single quotes (no escapes inside), double quotes, and backslash
+// escapes outside single quotes. Each segment is trimmed and empty segments are
+// dropped.
+//
+// The second result is false when the command cannot be safely analyzed. That
+// happens when the command uses a command substitution ($( or a backtick), a
+// process substitution (<( or >(), an unbalanced quote, or an output or input
+// redirection other than the safe /dev/null and file-descriptor forms. The
+// segments are still returned when analyzable is false.
+func SplitCommand(cmd string) (segments []string, analyzable bool) {
+	analyzable = true
+	var seg strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(seg.String()); s != "" {
+			segments = append(segments, s)
+		}
+		seg.Reset()
+	}
+	var quote byte
+	i := 0
+	n := len(cmd)
+	for i < n {
+		c := cmd[i]
+		if quote == '\'' {
+			if c == '\'' {
+				quote = 0
+			}
+			seg.WriteByte(c)
+			i++
+			continue
+		}
+		if quote == '"' {
+			if c == '\\' && i+1 < n {
+				seg.WriteByte(c)
+				seg.WriteByte(cmd[i+1])
+				i += 2
+				continue
+			}
+			if c == '`' || (c == '$' && i+1 < n && cmd[i+1] == '(') {
+				analyzable = false
+			}
+			if c == '"' {
+				quote = 0
+			}
+			seg.WriteByte(c)
+			i++
+			continue
+		}
+		switch {
+		case c == '\\' && i+1 < n:
+			seg.WriteByte(c)
+			seg.WriteByte(cmd[i+1])
+			i += 2
+		case c == '\'':
+			quote = '\''
+			seg.WriteByte(c)
+			i++
+		case c == '"':
+			quote = '"'
+			seg.WriteByte(c)
+			i++
+		case c == '`':
+			analyzable = false
+			seg.WriteByte(c)
+			i++
+		case c == '$' && i+1 < n && cmd[i+1] == '(':
+			analyzable = false
+			seg.WriteString("$(")
+			i += 2
+		case (c == '<' || c == '>') && i+1 < n && cmd[i+1] == '(':
+			analyzable = false
+			seg.WriteByte(c)
+			seg.WriteByte('(')
+			i += 2
+		case c == '<' || c == '>':
+			if !safeRedirect(seg.String(), cmd[i:]) {
+				analyzable = false
+			}
+			// Consume the operator so a following & in >& is not read as a
+			// background separator.
+			seg.WriteByte(c)
+			if i+1 < n && (cmd[i+1] == '>' || cmd[i+1] == '&') {
+				seg.WriteByte(cmd[i+1])
+				i += 2
+			} else {
+				i++
+			}
+		case c == ';' || c == '\n':
+			flush()
+			i++
+		case c == '&' && i+1 < n && cmd[i+1] == '&':
+			flush()
+			i += 2
+		case c == '&' && i+1 < n && cmd[i+1] == '>':
+			// &> is a redirection, not a background separator.
+			seg.WriteByte(c)
+			i++
+		case c == '&':
+			flush()
+			i++
+		case c == '|' && i+1 < n && cmd[i+1] == '|':
+			flush()
+			i += 2
+		case c == '|':
+			flush()
+			i++
+		default:
+			seg.WriteByte(c)
+			i++
+		}
+	}
+	flush()
+	if quote != 0 {
+		analyzable = false
+	}
+	return segments, analyzable
+}
+
+// safeRedirect reports whether the redirection whose operator starts at rest
+// (which begins with < or >) is one of the safe forms: 2>&1, 1>&2, >&2,
+// >/dev/null, > /dev/null, 2>/dev/null, 2> /dev/null, and &>/dev/null. seg is
+// the command text before the operator, used to read an optional descriptor
+// prefix.
+func safeRedirect(seg, rest string) bool {
+	if rest[0] != '>' {
+		return false
+	}
+	prefix := byte(0)
+	if len(seg) > 0 {
+		prefix = seg[len(seg)-1]
+	}
+	switch {
+	case strings.HasPrefix(rest, ">&1") && prefix == '2':
+		return redirectBoundary(rest, len(">&1"))
+	case strings.HasPrefix(rest, ">&2") && (prefix == '1' || !isDigit(rune(prefix))):
+		return redirectBoundary(rest, len(">&2"))
+	}
+	for _, form := range []string{">/dev/null", "> /dev/null"} {
+		if strings.HasPrefix(rest, form) {
+			return redirectBoundary(rest, len(form))
+		}
+	}
+	return false
+}
+
+// redirectBoundary reports whether position i in s is the end or a separator.
+func redirectBoundary(s string, i int) bool {
+	if i >= len(s) {
+		return true
+	}
+	switch s[i] {
+	case ' ', '\t', '\n', ';', '|', '&', '>', '<':
+		return true
+	}
+	return false
+}
+
 func globMatch(pattern, value string, pathMode bool) bool {
 	p := []rune(pattern)
 	v := []rune(value)
