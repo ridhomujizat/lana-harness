@@ -21,7 +21,6 @@ type fakeToolboxBackend struct {
 	mu sync.Mutex
 
 	packages []toolbox.Package
-	listErr  error
 
 	getPackage toolbox.Package
 	getErr     error
