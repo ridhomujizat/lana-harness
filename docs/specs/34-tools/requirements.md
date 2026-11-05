@@ -2,7 +2,7 @@
 
 - **Issue**: `—`
 - **Status**: Approved (owner answers 2026-11-05)
-- **Revision**: 1
+- **Revision**: 2
 - **Owner**: ridho
 - **Contract**: api-contract.md — Required (not written yet)
 
@@ -11,7 +11,8 @@
 | Source | Reference | Used for |
 |---|---|---|
 | Owner request | Chat, 2026-11-05: "obscura kan belum tentu ada di device user … tool yang di dapat di install … ga cuman obscura … bisa di guanakan di seluruh workflow dan session" | Goal and scope |
-| Owner answers | Chat, 2026-11-05: name "Tools"; normal installs (not only nix); agents may request an install with approval; MCP stays separate; no built-in packages | Resolutions |
+| Owner answers | Chat, 2026-11-05: name "Tools"; normal installs (not only nix); agents may request an install with approval; MCP stays separate; no built-in packages | Resolutions (r1) |
+| Owner feedback | Chat, 2026-11-05: "kasih list app yg bisa di install, tinggal klik install, tanpa isi commands"; "Obscura … agent bisa mengendalikan browser" | r2: built-in catalog, one-click install, MCP-providing packages |
 | Smoke test | spec #33 T-012: the browser node fails when `obscura` is not on PATH | Problem |
 | Existing specs | #7 MCP and skills, #12 MCP manage, #22 background jobs, #33 workflows | Reuse: MCP manager, job runner, approvals, tool registry |
 
@@ -109,3 +110,19 @@ A **Tools** page (Configure → Tools; the code calls it the toolbox) where the 
 | 3 | Agent requests | Allowed, always with an owner approval. | Owner |
 | 4 | Merge MCP | No; MCP stays its own page. | Owner |
 | 5 | Built-in packages | None; the catalog starts empty. | Owner |
+
+## Revision 2 (owner feedback 2026-11-05)
+
+- **REQ-TB-001 (changed) Catalog.** Lana ships a small curated catalog of manifests (Obscura, yt-dlp, pandoc, ffmpeg)
+  embedded in the binary. The Tools page lists them as apps with one **Install** button. "Add custom tool" with a
+  manifest stays available as an advanced option. A local manifest with the same id overrides the catalog entry.
+- **REQ-TB-009 One-click install.** Install picks the first method that fits this machine: its `os`/`arch` filter
+  matches and every program in its `requires` list (for example `brew`) is on PATH. The owner never edits commands to
+  install a catalog app.
+- **REQ-TB-010 Whole-archive downloads.** `extract = "*"` unpacks every regular file of the archive into `bin/`
+  (stripping one leading folder), for programs that ship helper binaries (Obscura ships `obscura-worker`).
+- **REQ-TB-011 MCP-providing packages.** A manifest may declare `[mcp] args = [...]` (templates `{{data}}`, `{{bin}}`).
+  When the package is installed, lana adds a managed MCP server `[mcp.<id>]` that runs the resolved binary with those
+  args, and removes it on uninstall. The owner turns it on per agent from the tool page ("Use with agents") or the
+  agent's MCP tab. Obscura uses this to give agents full browser control (navigate, snapshot, click, fill, type,
+  screenshot, tabs, cookies and storage state) with a persistent profile in the package data dir.
