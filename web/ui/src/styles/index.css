@@ -55,3 +55,4 @@
 @import "./pages-gr8r/observe.css" layer(gr8r);
 @import "./pages-gr8r/tools.css" layer(gr8r);
 @import "./pages-gr8r/calendar.css" layer(gr8r);
+@import "./mobile.css" layer(gr8r);

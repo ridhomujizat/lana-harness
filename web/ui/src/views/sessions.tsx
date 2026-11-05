@@ -1,3 +1,4 @@
+import { Ic } from "../ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
@@ -368,9 +369,14 @@ export function SessionsWorkspace({
   newSession = false,
 }: SessionsWorkspaceProps) {
   return (
-    <div className="sessions-workspace">
+    <div className={"sessions-workspace" + (newSession || selectedId ? " has-detail" : "")}>
       <SessionsPage selectedId={selectedId} />
       <div className="sessions-chat-pane">
+        {/* Phones show the list and the session as separate screens. */}
+        <a className="sessions-back" href="#/sessions">
+          <Ic name="chevron-left" size={16} />
+          Sessions
+        </a>
         {newSession ? (
           <NewSessionPage />
         ) : selectedId ? (

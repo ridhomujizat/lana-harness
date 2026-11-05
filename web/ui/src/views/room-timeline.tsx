@@ -1120,6 +1120,9 @@ export function RoomView({ room }: RoomViewProps) {
   return (
     <div className="room-view">
       <header className="room-head">
+        <a className="ibtn ibtn-sm room-back" href="#/chats" aria-label="All chats">
+          <Ic name="chevron-left" size={18} />
+        </a>
         {team ? (
           <AvatarStack
             size="lg"
