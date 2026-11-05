@@ -73,8 +73,12 @@ type Server struct {
 	knowledgeBackend KnowledgeBackend
 	// workflows is the workflow port of the /v1/workflows routes (spec #33).
 	// It is guarded by workflowsMu so SetWorkflows may run after Start.
-	workflows      WorkflowBackend
-	workflowsMu    sync.RWMutex
+	workflows   WorkflowBackend
+	workflowsMu sync.RWMutex
+	// toolbox is the Tools port of the /v1/toolbox routes (spec #34). It is
+	// guarded by toolboxMu so SetToolbox may run after Start.
+	toolbox        ToolboxBackend
+	toolboxMu      sync.RWMutex
 	daemon         DaemonStore
 	telegramStatus func() TelegramStatus
 	telegramReset  TelegramResetSender
@@ -188,6 +192,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerAuditRoutes()
 	s.registerLocalRoutes()
 	s.registerWorkflowRoutes()
+	s.registerToolboxRoutes()
 	s.handler = securityHeaders(s.mux)
 	return s, nil
 }
