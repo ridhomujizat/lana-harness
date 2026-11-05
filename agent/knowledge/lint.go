@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -418,16 +419,26 @@ func (s *Service) lintPageContradictions(ctx context.Context, provider core.Prov
 	return parseLintReply(reply)
 }
 
-// parseLintReply strips a fence and parses a contradiction reply, capping it at
-// lintMaxItems (design §8).
+// parseLintReply strips a fence and parses a contradiction reply, skipping an
+// item whose shape does not decode and capping the rest at lintMaxItems
+// (design §8).
 func parseLintReply(text string) ([]lintContradiction, error) {
 	trimmed := stripFence(strings.TrimSpace(text))
 	if !strings.HasPrefix(trimmed, "[") {
 		return nil, errors.New("lint reply is not a JSON array")
 	}
-	var items []lintContradiction
-	if err := decodeLLMJSON(trimmed, &items); err != nil {
+	var raw []json.RawMessage
+	if err := decodeLLMJSON(trimmed, &raw); err != nil {
 		return nil, err
+	}
+	var items []lintContradiction
+	for _, item := range raw {
+		var c lintContradiction
+		if err := json.Unmarshal(item, &c); err != nil {
+			slog.Debug("knowledge lint: item skipped: malformed JSON", "error", err)
+			continue
+		}
+		items = append(items, c)
 	}
 	if len(items) > lintMaxItems {
 		items = items[:lintMaxItems]

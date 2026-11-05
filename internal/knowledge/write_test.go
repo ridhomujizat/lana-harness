@@ -254,3 +254,17 @@ func TestAppendTextHeadingWithHashes(t *testing.T) {
 		t.Fatalf("text not under the existing heading:\n%s", got)
 	}
 }
+
+// A re-run of the same compile pass must not append a block twice: a block that
+// already occurs in the body is skipped and an all-duplicate append leaves the
+// body unchanged.
+func TestAppendTextSkipsDuplicateBlocks(t *testing.T) {
+	body := "Baris satu.\n\nBaris dua."
+	got := appendText(body, "", "Baris dua.\n\nBaris tiga.")
+	if want := "Baris satu.\n\nBaris dua.\n\nBaris tiga."; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	if all := appendText(body, "", "Baris satu.\n\nBaris dua."); all != body {
+		t.Fatalf("all-duplicate append changed the body: %q", all)
+	}
+}

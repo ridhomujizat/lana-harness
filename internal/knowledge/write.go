@@ -258,11 +258,19 @@ func renderPage(page Page, action string, op Op, today string) (string, error) {
 }
 
 // appendText adds text at the end of body, or at the end of the section named
-// by heading, creating that section when it is missing (REQ-KNW-010).
+// by heading, creating that section when it is missing (REQ-KNW-010). A block
+// whose text already occurs in body is skipped, so re-running a compile pass
+// does not append the same paragraphs twice; when every block is a duplicate,
+// body is returned unchanged.
 func appendText(body, heading, text string) string {
 	text = strings.TrimRight(text, "\n")
 	// A model may send the heading with its markdown hashes ("## Peran").
 	heading = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(heading), "#"))
+	body = strings.TrimRight(body, "\n")
+	text = dedupeBlocks(body, text)
+	if strings.TrimSpace(text) == "" {
+		return body
+	}
 	if heading == "" {
 		return joinBlocks(body, text)
 	}
@@ -307,6 +315,48 @@ func appendText(body, heading, text string) string {
 		out = append(out, lines[end:]...)
 	}
 	return strings.Join(out, "\n")
+}
+
+// dedupeBlocks removes every blank-line-separated block of add whose
+// whitespace-trimmed text equals a whole block already in body. A block that
+// is only a substring of a longer one is kept, so a short line is not lost. It
+// returns the empty string when every block is a duplicate.
+func dedupeBlocks(body, add string) string {
+	existing := map[string]bool{}
+	for _, block := range splitBlocks(body) {
+		existing[strings.TrimSpace(block)] = true
+	}
+	var kept []string
+	for _, block := range splitBlocks(add) {
+		trimmed := strings.TrimSpace(block)
+		if trimmed == "" || existing[trimmed] {
+			continue
+		}
+		existing[trimmed] = true
+		kept = append(kept, trimmed)
+	}
+	return strings.Join(kept, "\n\n")
+}
+
+// splitBlocks splits text into non-empty blocks at blank lines.
+func splitBlocks(text string) []string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	var out []string
+	var cur []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) == "" {
+			if len(cur) > 0 {
+				out = append(out, strings.Join(cur, "\n"))
+				cur = nil
+			}
+			continue
+		}
+		cur = append(cur, line)
+	}
+	if len(cur) > 0 {
+		out = append(out, strings.Join(cur, "\n"))
+	}
+	return out
 }
 
 // joinBlocks joins body and add with one blank line between them.

@@ -271,6 +271,27 @@ func TestCaptureTakesFirstFiveOps(t *testing.T) {
 	}
 }
 
+// Invalid operations must not consume the maxOps quota: a valid op that follows
+// five invalid ones is still applied (REQ-MEM-012, REQ-MEM-013).
+func TestCaptureCountsOnlyValidOpsAgainstQuota(t *testing.T) {
+	invalid := `{"target":"bogus","action":"add","content":"x"}`
+	reply := "[" + strings.Join([]string{invalid, invalid, invalid, invalid, invalid, `{"target":"user","action":"add","content":"kept"}`}, ",") + "]"
+	provider := &fakeProvider{text: reply}
+	store, svc, id, home := newTestService(t, provider)
+	seedHistory(t, store, id)
+
+	svc.Capture(core.CaptureRequest{SessionID: id, TurnID: "t", AgentName: "assistant", Home: home, Provider: "mock", Model: "m"})
+	waitIdle(t, svc, id)
+
+	entries := userEntries(t, home)
+	if len(entries) != 1 || entries[0] != "kept" {
+		t.Fatalf("user entries = %v, want [kept]", entries)
+	}
+	if captured := capturedEvents(t, store, id); len(captured) != 1 || len(captured[0].Ops) != 1 {
+		t.Fatalf("captured = %+v, want one applied op", captured)
+	}
+}
+
 func TestCaptureSecondPassIgnoredWhileInFlight(t *testing.T) {
 	gate := make(chan struct{})
 	provider := &fakeProvider{text: "[]", gate: gate}

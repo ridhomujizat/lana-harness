@@ -46,25 +46,20 @@ func (s *Service) promote(ctx context.Context) ([]promotion, error) {
 			continue
 		}
 		abs := filepath.Join(vault.Root(), filepath.FromSlash(rel))
-		info, err := os.Stat(abs)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		size := info.Size()
-		if size < offset {
-			offset = 0
-		}
-		if size <= offset {
-			continue
-		}
 		data, err := os.ReadFile(abs)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if offset > int64(len(data)) {
+		// The mark is the exact byte length of the file just read, so a block
+		// appended between the read and the mark is compiled on the next run
+		// instead of being counted early and skipped (design §7).
+		// A file shorter than the mark was rewritten; compile it from the start.
+		if int64(len(data)) < offset {
 			offset = 0
+		}
+		if int64(len(data)) <= offset {
+			continue
 		}
 		text := string(data[offset:])
 		if strings.TrimSpace(text) == "" {
@@ -83,7 +78,7 @@ func (s *Service) promote(ctx context.Context) ([]promotion, error) {
 			errs = append(errs, fmt.Errorf("%s: %w", rel, err))
 			continue
 		}
-		if err := idx.SetPromoteOffset(rel, size); err != nil {
+		if err := idx.SetPromoteOffset(rel, int64(len(data))); err != nil {
 			errs = append(errs, err)
 			continue
 		}

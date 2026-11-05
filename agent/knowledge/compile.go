@@ -2,6 +2,7 @@ package knowledge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -121,6 +122,15 @@ func (s *Service) compile(ctx context.Context, in compileInput) (compileResult, 
 	}
 
 	var changed []string
+	// Pages an earlier part already wrote are re-indexed even when a later part
+	// fails, so the queue's next attempt and search see them (REQ-KNW-023).
+	defer func() {
+		for _, rel := range changed {
+			if err := idx.SyncFile(filepath.Join(vault.Root(), filepath.FromSlash(rel))); err != nil {
+				slog.Warn("knowledge compile: re-index failed", "path", rel, "error", err)
+			}
+		}
+	}()
 	for i, part := range parts {
 		reply, u, err := s.compilePart(ctx, vault, idx, provider, agentCfg, in, i+1, len(parts), part)
 		res.Usage = addUsage(res.Usage, u)
@@ -150,11 +160,6 @@ func (s *Service) compile(ctx context.Context, in compileInput) (compileResult, 
 			} else if created != "" {
 				changed = append(changed, created)
 			}
-		}
-	}
-	for _, rel := range changed {
-		if err := idx.SyncFile(filepath.Join(vault.Root(), filepath.FromSlash(rel))); err != nil {
-			slog.Warn("knowledge compile: re-index failed", "path", rel, "error", err)
 		}
 	}
 	return res, nil
@@ -507,15 +512,25 @@ func splitParagraphs(text string) []string {
 }
 
 // parseCompiledOps strips a ```json fence and parses the reply as a JSON array
-// of operations (design §5 step 4).
+// of operations, skipping an element whose shape does not decode so one bad
+// operation does not drop the whole reply (design §5 step 4).
 func parseCompiledOps(text string) ([]compiledOp, error) {
 	trimmed := stripFence(strings.TrimSpace(text))
 	if !strings.HasPrefix(trimmed, "[") {
 		return nil, errors.New("compile reply is not a JSON array")
 	}
-	var ops []compiledOp
-	if err := decodeLLMJSON(trimmed, &ops); err != nil {
+	var raw []json.RawMessage
+	if err := decodeLLMJSON(trimmed, &raw); err != nil {
 		return nil, err
+	}
+	var ops []compiledOp
+	for _, item := range raw {
+		var op compiledOp
+		if err := json.Unmarshal(item, &op); err != nil {
+			slog.Debug("knowledge compile: op skipped: malformed JSON", "error", err)
+			continue
+		}
+		ops = append(ops, op)
 	}
 	return ops, nil
 }

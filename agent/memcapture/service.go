@@ -126,15 +126,19 @@ func (s *Service) run(req core.CaptureRequest) {
 		slog.Debug("memory capture dropped: reply is not a JSON array", "agent", req.AgentName, "session_id", req.SessionID, "turn_id", req.TurnID)
 		return
 	}
-	if len(ops) > maxOps {
-		ops = ops[:maxOps]
-	}
-	applied := make([]core.MemoryOp, 0, len(ops))
+	valid := make([]core.MemoryOp, 0, len(ops))
 	for _, op := range ops {
 		if !validOp(op) {
 			slog.Debug("memory capture op skipped: invalid", "agent", req.AgentName, "session_id", req.SessionID, "turn_id", req.TurnID, "target", op.Target, "action", op.Action)
 			continue
 		}
+		valid = append(valid, op)
+	}
+	if len(valid) > maxOps {
+		valid = valid[:maxOps]
+	}
+	applied := make([]core.MemoryOp, 0, len(valid))
+	for _, op := range valid {
 		if !s.apply(req, op) {
 			continue
 		}

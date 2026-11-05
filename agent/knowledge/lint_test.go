@@ -115,6 +115,18 @@ func TestLintNoProblems(t *testing.T) {
 	}
 }
 
+// One malformed item must not drop the whole contradiction reply.
+func TestParseLintReplySkipsMalformedItem(t *testing.T) {
+	reply := `[{"page":"A","claim":"x","contradicts":"y","where":"B"},{"page":"C","claim":42}]`
+	items, err := parseLintReply(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Page != "A" {
+		t.Fatalf("items = %+v, want only the well-formed item", items)
+	}
+}
+
 // wikiMtimes records the mtime of every file under wiki/.
 func wikiMtimes(t *testing.T, root string) map[string]time.Time {
 	t.Helper()

@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,7 @@ type fakeProvider struct {
 	text     string
 	usage    core.Usage
 	err      error
+	errAt    int
 	gate     chan struct{}
 	calls    int
 	requests []core.ChatRequest
@@ -36,8 +38,12 @@ type fakeProvider struct {
 func (p *fakeProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	p.mu.Lock()
 	p.calls++
+	n := p.calls
 	p.requests = append(p.requests, req)
 	text, usage, err, gate := p.text, p.usage, p.err, p.gate
+	if p.errAt > 0 && n == p.errAt {
+		err = errors.New("provider failure")
+	}
 	p.mu.Unlock()
 	if gate != nil {
 		select {
