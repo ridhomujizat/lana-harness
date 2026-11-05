@@ -1,8 +1,8 @@
-# Requirements: Toolbox (installable tools)
+# Requirements: Tools (installable programs)
 
 - **Issue**: `—`
-- **Status**: Draft — open questions below block approval
-- **Revision**: 0
+- **Status**: Approved (owner answers 2026-11-05)
+- **Revision**: 1
 - **Owner**: ridho
 - **Contract**: api-contract.md — Required (not written yet)
 
@@ -11,6 +11,7 @@
 | Source | Reference | Used for |
 |---|---|---|
 | Owner request | Chat, 2026-11-05: "obscura kan belum tentu ada di device user … tool yang di dapat di install … ga cuman obscura … bisa di guanakan di seluruh workflow dan session" | Goal and scope |
+| Owner answers | Chat, 2026-11-05: name "Tools"; normal installs (not only nix); agents may request an install with approval; MCP stays separate; no built-in packages | Resolutions |
 | Smoke test | spec #33 T-012: the browser node fails when `obscura` is not on PATH | Problem |
 | Existing specs | #7 MCP and skills, #12 MCP manage, #22 background jobs, #33 workflows | Reuse: MCP manager, job runner, approvals, tool registry |
 
@@ -23,7 +24,7 @@ and workflows depend on it. Each program is also wired in by hand: the browser n
 
 ## Goal
 
-A **Toolbox** where the owner installs external programs once and then uses them everywhere in lana:
+A **Tools** page (Configure → Tools; the code calls it the toolbox) where the owner installs external programs once and then uses them everywhere in lana:
 
 - as tools for agents in chats and sessions, picked per agent like MCP servers;
 - as workflow nodes and in the generic `tool` node, with the permission lock;
@@ -31,11 +32,12 @@ A **Toolbox** where the owner installs external programs once and then uses them
 
 ## Concepts
 
-- **Package**: one external program described by a **manifest** (`toolbox.toml`), for example `obscura`. The manifest
+- **Package**: one external program described by a **manifest** (`tool.toml`), for example `obscura`. The manifest
   holds:
   - identity: id, name, description, homepage, license, icon;
-  - **install methods**, in order of preference: a direct download (URL per OS/arch plus a sha256), `nix profile`,
-    `brew`, `npm -g --prefix`, `uv tool`, `cargo install`, `go install`;
+  - **install methods**, tried in order: a shell install command (`brew install obscura`, `npm install -g …`,
+    `pipx install …`, `curl … | sh`, `nix profile install …`), or a direct download (URL per OS/arch plus an optional
+    sha256) unpacked into the package `bin/`. Nix is one method among others, never assumed;
   - **detect**: the binary name, a version command, and a minimum version;
   - **provides**: what the package gives lana (see below);
   - **needs**: secrets or env vars the package needs, for example an API key, which live in the existing secret store.
@@ -46,26 +48,29 @@ A **Toolbox** where the owner installs external programs once and then uses them
   manager, so the package installs the binary and registers `[mcp.<id>]`.
 - **Workflow node**: a package may offer node types. The palette shows them in a "Toolbox" group. A node is a command
   with a form for its input schema. The current `browser` node becomes the `obscura.fetch` node.
-- **Package home**: `$LANA_HOME/toolbox/<id>/`. Downloaded binaries go in `bin/`, persistent data (browser profiles,
+- **Package home**: `$LANA_HOME/tools/<id>/`. Downloaded binaries go in `bin/`, persistent data (browser profiles,
   caches) in `data/`, and install logs in `logs/`. No root rights, no global installs (owner rule: no sudo or global
   npm).
 
 ## Behavior rules (draft)
 
-- **REQ-TB-001 Catalog.** Lana ships a curated built-in catalog of manifests, starting with Obscura. The owner can add a
-  local manifest folder (`$LANA_HOME/toolbox/local/<id>/toolbox.toml`). A remote index is out of scope for v1.
+- **REQ-TB-001 Catalog.** The catalog starts empty; lana ships no packages. The owner adds a package with a form, by
+  pasting a manifest, or by asking an agent to draft one (the draft still needs the owner's approval). Manifests live in
+  `$LANA_HOME/tools/<id>/tool.toml`. A remote index is out of scope.
 - **REQ-TB-002 Detection.** On start and on demand, lana checks every package: the binary in the package `bin/`, then
   PATH. It runs the version command and records the status: `installed vX`, `missing`, `too_old`, `broken` (the version
-  command fails), or `update` (the manifest knows a newer version).
+  command fails).
 - **REQ-TB-003 Install.** Only the owner installs, updates or uninstalls, from the web page or by answering an
-  approval. The owner picks a method (the first available one is the default). The install runs as a background job
-  with a live log. A download is verified with sha256 before it runs. An agent may *ask* for a package (a question to
-  the owner, "Install Obscura?"), but never installs one by itself.
+  approval. The owner picks a method (the first one is the default). The install runs as a background job with a live
+  log. A download with a sha256 is verified before it is unpacked. An agent may request an install or a new package
+  through the `tools_request` tool; it always raises an owner approval (risk admin, never auto-allowed, not even by
+  a workflow lock) and installs only after Approve.
 - **REQ-TB-004 Commands as tools.** Each installed package registers its commands in the tool registry as
-  `<package>.<command>`. Their risk goes through the normal permission engine. A missing package registers nothing.
-- **REQ-TB-005 Agents.** The agent Tools tab shows a "Toolbox" group. The owner turns a package or a command on per
-  agent, stored in `[agents.<name>] toolbox = ["obscura"]`. Session turns then offer those commands.
-- **REQ-TB-006 Workflows.** Package nodes appear in the palette. Validation reports `package_missing` with an Install
+  `<package>_<command>` (for example `obscura_fetch`). Their risk goes through the normal permission engine. A missing package registers nothing.
+- **REQ-TB-005 Agents.** The agent Tools tab shows an "Installed tools" group. The owner turns a command on per agent;
+  it is stored in the existing `[agents.<name>] tools` list, so session turns offer it like a built-in tool.
+- **REQ-TB-006 Workflows.** Installed commands appear in the palette under "Installed tools" as `tool` nodes with a form
+  from the input schema. The `browser` node needs a package that provides the binary `obscura`. Validation reports `package_missing` with an Install
   link. Activation refuses a graph that needs a missing package. The lock lists package commands with their risk. A run
   that hits a package removed after activation fails the node with "Obscura is not installed", and the guardian treats
   that as non-transient and may ask the owner to install it.
@@ -73,25 +78,20 @@ A **Toolbox** where the owner installs external programs once and then uses them
 - **REQ-TB-008 Uninstall.** Uninstall removes `bin/` and keeps `data/` unless the owner chooses "also delete data".
   Agents and workflows that use the package show it as missing.
 
-## Web (draft)
+## Web
 
-- **Configure → Toolbox** page: cards for installed and available packages, each with its status, version, what it
-  provides (commands, MCP, nodes) and "Used by" (agents and workflows); a filter; and "Add local package".
-- **Package detail** page: description, install method picker, Install / Update / Uninstall, a live install log, a
-  health check button, the command list with input schemas and a "Try it" form, a per-agent switch, and the workflows
-  that use it.
-- **Workflow editor**: a Toolbox palette group; a missing-package banner on nodes, with an Install link.
-- **Schedules / Logs**: install jobs and command failures show up in Logs.
+- **Configure → Tools**: a list of packages with status, version, the commands they provide and "Used by"; an empty
+  state that explains how to add one; "Add tool" (form or pasted manifest).
+- **Tool detail**: description, install methods with Install / Reinstall / Uninstall, a live install log, a health check
+  ("Check again"), the commands with their input fields and a "Try it" form, and the agents and workflows that use it.
+- **Workflow editor**: an "Installed tools" palette group; a missing-package issue with a link to Tools.
 
 ## Phases
 
-1. **P1 (unblocks the smoke test).** Manifest format; built-in Obscura manifest; detection and statuses; the Toolbox
-   page (list and detail, read-only plus Install via the download and nix methods); the browser node resolves
-   `obscura` through the Toolbox and shows "not installed — Install"; workflow validation reports `package_missing`.
-2. **P2.** Commands as registered tools; the per-agent Toolbox switch; workflow palette nodes generated from commands;
-   lock and permission integration; "Try it".
-3. **P3.** MCP-backed packages (Obscura MCP for interactive browsing in chats); local manifests; update checks; more
-   built-in packages (yt-dlp, ffmpeg, pandoc, gh).
+1. **P1 (this build).** Manifest format and storage; add/edit/delete; detection and statuses; install and uninstall as
+   jobs with a live log; commands registered as tools; per-agent enable through the Tools tab; workflow `tool` nodes
+   and the browser node resolve packages; the Tools pages; `tools_request` with owner approval.
+2. **P2.** Agent-drafted manifests from chat; MCP-providing packages; update checks.
 
 ## Not included (v1)
 
@@ -100,12 +100,12 @@ A **Toolbox** where the owner installs external programs once and then uses them
 - Windows.
 - Sandboxing beyond lana's existing permission engine and workspace rules.
 
-## Open questions
+## Resolutions
 
-| # | Question | Agent recommendation |
-|---|---|---|
-| 1 | Name in the sidebar: "Toolbox", "Tools" or "Apps"? Agents already have a "Tools" tab. | **Toolbox**, under Configure next to MCP. |
-| 2 | Which install methods count as default? | Direct download into `$LANA_HOME/toolbox` (no root, works on any device), then nix when a flake is present, brew only if the owner allows it. |
-| 3 | Can an agent request an install mid-turn? | Yes, as an approval-style question to the owner; never silent. |
-| 4 | Should MCP servers move into the Toolbox page? | No for v1: MCP stays its own page; a package can *provide* an MCP server that also shows there. |
-| 5 | First built-in packages after Obscura? | yt-dlp, ffmpeg, pandoc, gh (all have static builds or simple installers). |
+| # | Question | Resolution | Status |
+|---|---|---|---|
+| 1 | Name | "Tools" in the sidebar (Configure). | Owner |
+| 2 | Install methods | Normal installs: a shell install command or a download; nix is optional, never assumed. | Owner |
+| 3 | Agent requests | Allowed, always with an owner approval. | Owner |
+| 4 | Merge MCP | No; MCP stays its own page. | Owner |
+| 5 | Built-in packages | None; the catalog starts empty. | Owner |
