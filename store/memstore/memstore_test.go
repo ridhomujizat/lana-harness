@@ -256,3 +256,127 @@ func TestMemstoreUserMessageImage(t *testing.T) {
 		t.Fatalf("image block=%+v", got)
 	}
 }
+
+// Bug 2: a batch that fails validation must not commit any of its earlier
+// drafts, matching the SQLite store's transaction rollback.
+func TestMemstoreAppendIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	s, info := newSession(t)
+	before, err := s.Info(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append(ctx, info.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}},
+	}); !errors.Is(err, ErrTurnActive) {
+		t.Fatalf("err=%v, want ErrTurnActive", err)
+	}
+	after, err := s.Info(ctx, info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.LastSeq != before.LastSeq || after.Status != before.Status || after.TurnCount != before.TurnCount {
+		t.Fatalf("after=%+v before=%+v", after, before)
+	}
+	count := 0
+	for _, err := range s.Events(ctx, info.ID, 1) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+	}
+	if count != 1 {
+		t.Fatalf("event count=%d, want 1 (only session/created)", count)
+	}
+}
+
+// Bug 3: memstore Create rejects a parent session that does not exist.
+func TestMemstoreCreateRejectsMissingParent(t *testing.T) {
+	if _, err := New().Create(context.Background(), core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: "missing-parent"}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("err=%v, want core.ErrNotFound", err)
+	}
+}
+
+// Bug 1: a memstore session created with an inherited seq starts after it.
+func TestMemstoreCreateInheritedSeq(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	parent, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: parent.ID, InheritedSeq: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.InheritedSeq != 9 || child.LastSeq != 10 {
+		t.Fatalf("child=%+v, want LastSeq=10", child)
+	}
+	events, err := s.Append(ctx, child.ID, []core.EventDraft{
+		{Kind: core.KindUserMessage, TurnID: "c", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Seq != 11 {
+		t.Fatalf("events=%+v, want first seq=11", events)
+	}
+}
+
+// Bug 3: memstore List honors every filter the SQLite store honors:
+// ParentSessionID, Agent, TopLevelOnly, Before and the updated_at DESC,
+// created_at DESC, id DESC ordering.
+func TestMemstoreListFilters(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	dana, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	karin, err := s.Create(ctx, core.NewSession{Agent: "karin", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir(), ParentSessionID: dana.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.sessions[dana.ID].info.CreatedAt, s.sessions[dana.ID].info.UpdatedAt = 100, 400
+	s.sessions[karin.ID].info.CreatedAt, s.sessions[karin.ID].info.UpdatedAt = 200, 200
+	s.sessions[child.ID].info.CreatedAt, s.sessions[child.ID].info.UpdatedAt = 300, 100
+	s.mu.Unlock()
+
+	byAgent, err := s.List(ctx, core.SessionFilter{Agent: "dana"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byAgent) != 2 || byAgent[0].ID != dana.ID || byAgent[1].ID != child.ID {
+		t.Fatalf("byAgent=%+v", byAgent)
+	}
+
+	byParent, err := s.List(ctx, core.SessionFilter{ParentSessionID: dana.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byParent) != 1 || byParent[0].ID != child.ID {
+		t.Fatalf("byParent=%+v", byParent)
+	}
+
+	top, err := s.List(ctx, core.SessionFilter{TopLevelOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(top) != 2 || top[0].ID != dana.ID || top[1].ID != karin.ID {
+		t.Fatalf("top=%+v", top)
+	}
+
+	before, err := s.List(ctx, core.SessionFilter{Before: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 2 || before[0].ID != karin.ID || before[1].ID != child.ID {
+		t.Fatalf("before=%+v", before)
+	}
+}

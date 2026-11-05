@@ -578,8 +578,8 @@ func TestListOrderAndLimit(t *testing.T) {
 	a := createSession(t, s)
 	b := createSession(t, s)
 	_, _ = s.Append(context.Background(), a.ID, []core.EventDraft{{Kind: core.KindUserMessage, Payload: core.UserMessage{V: 1}}})
-	// Both sessions may be created in the same millisecond, which would make the
-	// updated_at ordering ambiguous; force a's last-activity time ahead of b's.
+	// The append bumps updated_at, but both sessions can share the same
+	// millisecond, so force a strict ordering for the assertion.
 	if _, err := s.db.Exec("UPDATE sessions SET updated_at = updated_at + 1 WHERE id = ?", a.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -1756,4 +1756,123 @@ func TestMigrateV4ToV5AddsRoomReads(t *testing.T) {
 	if at, err := s.RoomReadAt(ctx, "dana"); err != nil || at != 5000 {
 		t.Fatalf("RoomReadAt=%d err=%v, want 5000", at, err)
 	}
+}
+
+// Bug 1: the child of a fork continues the parent's seq space, so the child's
+// own events never collide with the inherited range and a compaction summary
+// that reached into that range no longer drops them from the model history.
+func TestForkSeqsAreMonotonicAndDeriveKeepsChildMessages(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	parent := createSession(t, s)
+	events, err := s.Append(ctx, parent.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "parent turn"}}}},
+		{Kind: core.KindCompactionSummary, Payload: core.CompactionSummary{V: 1, FromSeq: 1, UptoSeq: 3, RetainedFromSeq: 1, Summary: "older turns"}},
+		{Kind: core.KindTurnEnd, TurnID: "t", Payload: core.TurnEnd{V: 1, TurnID: "t", Reason: "end_turn"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := events[len(events)-1].Seq
+	child, err := s.Fork(ctx, parent.ID, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.InheritedSeq != at || child.LastSeq != at+1 {
+		t.Fatalf("child=%+v, want InheritedSeq=%d LastSeq=%d", child, at, at+1)
+	}
+	childEvents, err := s.Append(ctx, child.ID, []core.EventDraft{
+		{Kind: core.KindUserMessage, TurnID: "c", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "child one"}}}},
+		{Kind: core.KindUserMessage, TurnID: "c", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "child two"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range childEvents {
+		if event.Seq <= at {
+			t.Fatalf("child event seq=%d is not after the fork seq %d", event.Seq, at)
+		}
+	}
+	chain, err := s.ChainEvents(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(chain); i++ {
+		if chain[i].Seq <= chain[i-1].Seq {
+			t.Fatalf("chain is not seq-ordered at %d: %d then %d", i, chain[i-1].Seq, chain[i].Seq)
+		}
+	}
+	messages, err := s.DeriveMessages(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts := messageTexts(messages)
+	for _, want := range []string{"older turns", "child one", "child two"} {
+		if !containsText(texts, want) {
+			t.Fatalf("derived messages %v missing %q", texts, want)
+		}
+	}
+}
+
+// Bug 1: Create with an inherited seq starts the new session after it.
+func TestCreateWithInheritedSeqStartsAfterInherited(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	parent := createSession(t, s)
+	child, err := s.Create(ctx, core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir(), ParentSessionID: parent.ID, InheritedSeq: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.InheritedSeq != 40 || child.LastSeq != 41 {
+		t.Fatalf("child=%+v, want LastSeq=41", child)
+	}
+	var createdSeq int64
+	for event, err := range s.Events(ctx, child.ID, 1) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Kind == core.KindSessionCreated {
+			createdSeq = event.Seq
+		}
+	}
+	if createdSeq != 41 {
+		t.Fatalf("session/created seq=%d, want 41", createdSeq)
+	}
+	if next := appendUserText(t, s, child.ID, "c", "hello"); next.Seq != 42 {
+		t.Fatalf("first child append seq=%d, want 42", next.Seq)
+	}
+}
+
+// Bug 4: the store's not-found sentinel wraps core.ErrNotFound so callers that
+// map core.ErrNotFound to 404 see a not-found instead of a 500.
+func TestErrSessionNotFoundMatchesCoreNotFound(t *testing.T) {
+	if !errors.Is(ErrSessionNotFound, core.ErrNotFound) {
+		t.Fatalf("ErrSessionNotFound does not wrap core.ErrNotFound")
+	}
+	s, _ := openTest(t)
+	if _, err := s.Info(context.Background(), "missing-session-id"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("Info on a missing session err=%v, want core.ErrNotFound", err)
+	}
+}
+
+func messageTexts(messages []core.Message) []string {
+	var out []string
+	for _, message := range messages {
+		for _, block := range message.Content {
+			if block.Kind == core.BlockText {
+				out = append(out, block.Text)
+			}
+		}
+	}
+	return out
+}
+
+func containsText(texts []string, want string) bool {
+	for _, text := range texts {
+		if strings.Contains(text, want) {
+			return true
+		}
+	}
+	return false
 }

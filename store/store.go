@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -28,7 +29,7 @@ import (
 var migrationFS embed.FS
 
 var (
-	ErrSessionNotFound       = errors.New("session not found")
+	ErrSessionNotFound       = fmt.Errorf("session not found: %w", core.ErrNotFound)
 	ErrForkNotAtTurnBoundary = errors.New("fork is only allowed at turn/end")
 	ErrTurnActive            = errors.New("a turn is still running")
 	ErrLeaseNotHeld          = errors.New("session is not held by this process")
@@ -58,7 +59,7 @@ type Store struct {
 	mu     sync.Mutex
 	db     *sql.DB
 	path   string
-	closed bool
+	closed atomic.Bool
 	Hooks  *core.Hooks
 }
 
@@ -319,19 +320,19 @@ func checkForeignKeys(ctx context.Context, tx *sql.Tx) error {
 	return rows.Err()
 }
 
-// Close closes the store.
+// Close closes the store. It is safe to call more than once: only the first
+// call closes the database.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
+	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	s.closed = true
 	return s.db.Close()
 }
 
 func (s *Store) assertOpen() error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrStoreClosed
 	}
 	return nil
@@ -340,6 +341,16 @@ func (s *Store) assertOpen() error {
 func nowMS() int64 { return time.Now().UnixMilli() }
 
 func (s *Store) withWrite(ctx context.Context, fn func(*sql.Conn) error) error {
+	return s.withWriteAfter(ctx, nil, fn)
+}
+
+// withWriteAfter commits fn's transaction like withWrite and then runs
+// afterCommit while still holding the write lock. The callback only runs after
+// a successful COMMIT, so a failed transaction never notifies observers, and
+// because the lock is held across the commit and the callback the notification
+// order matches the commit order. Append uses this to publish its events in
+// seq order.
+func (s *Store) withWriteAfter(ctx context.Context, afterCommit func(), fn func(*sql.Conn) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.assertOpen(); err != nil {
@@ -360,6 +371,9 @@ func (s *Store) withWrite(ctx context.Context, fn func(*sql.Conn) error) error {
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		return err
+	}
+	if afterCommit != nil {
+		afterCommit()
 	}
 	return nil
 }
@@ -414,6 +428,10 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 	}
 	sessionID := id.New()
 	now := nowMS()
+	firstSeq := int64(1)
+	if in.InheritedSeq > 0 {
+		firstSeq = in.InheritedSeq + 1
+	}
 	info := core.SessionInfo{ID: sessionID, Agent: in.Agent, Channel: in.Channel, Address: in.Address, Workspace: workspace, Status: "idle", ParentSessionID: in.ParentSessionID, InheritedSeq: in.InheritedSeq, CreatedAt: now, UpdatedAt: now}
 	err := s.withWrite(ctx, func(conn *sql.Conn) error {
 		if in.ParentSessionID != "" {
@@ -430,13 +448,13 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 		if err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', NULLIF(?, ''), ?, 1, 0, ?, ?)", sessionID, in.Agent, in.Channel, in.Address, workspace, in.ParentSessionID, in.InheritedSeq, now, now); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', NULLIF(?, ''), ?, ?, 0, ?, ?)", sessionID, in.Agent, in.Channel, in.Address, workspace, in.ParentSessionID, in.InheritedSeq, firstSeq, now, now); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, 1, ?, ?, NULL, ?)", sessionID, core.KindSessionCreated, string(payload), now); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, firstSeq, core.KindSessionCreated, string(payload), now); err != nil {
 			return err
 		}
-		info.LastSeq = 1
+		info.LastSeq = firstSeq
 		return nil
 	})
 	if err != nil {
@@ -476,7 +494,14 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 		return nil, errors.New("drafts are empty")
 	}
 	var events []core.SessionEvent
-	err := s.withWrite(ctx, func(conn *sql.Conn) error {
+	err := s.withWriteAfter(ctx, func() {
+		if s.Hooks == nil || s.Hooks.SessionEvent == nil {
+			return
+		}
+		for _, event := range events {
+			s.Hooks.SessionEvent.Publish(event)
+		}
+	}, func(conn *sql.Conn) error {
 		var status string
 		var lastSeq int64
 		err := conn.QueryRowContext(ctx, "SELECT status, last_seq FROM sessions WHERE id = ?", sessionID).Scan(&status, &lastSeq)
@@ -533,11 +558,6 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 	})
 	if err != nil {
 		return nil, err
-	}
-	if s.Hooks != nil && s.Hooks.SessionEvent != nil {
-		for _, event := range events {
-			s.Hooks.SessionEvent.Publish(event)
-		}
 	}
 	return events, nil
 }
@@ -844,13 +864,14 @@ func (s *Store) Fork(ctx context.Context, parentID string, atSeq int64) (core.Se
 	}
 	childID := id.New()
 	now := nowMS()
+	firstSeq := atSeq + 1
 	created := core.SessionCreated{V: core.PayloadVersion, Agent: parent.Agent, Channel: parent.Channel, Address: parent.Address, Workspace: parent.Workspace, ParentSessionID: parentID, InheritedSeq: atSeq}
 	payload, _ := json.Marshal(created)
 	err = s.withWrite(ctx, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, 1, 0, ?, ?)", childID, parent.Agent, parent.Channel, parent.Address, parent.Workspace, parentID, atSeq, now, now); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, ?, 0, ?, ?)", childID, parent.Agent, parent.Channel, parent.Address, parent.Workspace, parentID, atSeq, firstSeq, now, now); err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, 1, ?, ?, NULL, ?)", childID, core.KindSessionCreated, string(payload), now)
+		_, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", childID, firstSeq, core.KindSessionCreated, string(payload), now)
 		return err
 	})
 	if err != nil {

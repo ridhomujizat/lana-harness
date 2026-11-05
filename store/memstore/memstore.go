@@ -79,6 +79,12 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 	sess := &session{info: info}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if in.ParentSessionID != "" {
+		if _, ok := s.sessions[in.ParentSessionID]; !ok {
+			return core.SessionInfo{}, fmt.Errorf("%w: parent session %s", core.ErrNotFound, in.ParentSessionID)
+		}
+	}
+	sess.seq = in.InheritedSeq
 	s.sessions[info.ID] = sess
 	payload := core.SessionCreated{
 		V:               core.PayloadVersion,
@@ -135,40 +141,56 @@ func (s *Store) Append(ctx context.Context, sessionID string, drafts []core.Even
 }
 
 func (s *Store) appendLocked(sess *session, drafts []core.EventDraft) ([]core.SessionEvent, error) {
-	var out []core.SessionEvent
 	now := nowMS()
+	type staged struct {
+		kind    string
+		payload json.RawMessage
+		turnID  string
+		seq     int64
+	}
+	status := sess.info.Status
+	seq := sess.seq
+	stagedEvents := make([]staged, 0, len(drafts))
+	turnCount := int64(0)
 	for _, draft := range drafts {
-		if draft.Kind == core.KindTurnStart && (sess.info.Status == "running" || sess.info.Status == "waiting_input") {
+		if draft.Kind == core.KindTurnStart && (status == "running" || status == "waiting_input") {
 			return nil, ErrTurnActive
 		}
 		payload, err := json.Marshal(draft.Payload)
 		if err != nil {
 			return nil, err
 		}
-		sess.seq++
+		seq++
+		stagedEvents = append(stagedEvents, staged{kind: draft.Kind, payload: payload, turnID: draft.TurnID, seq: seq})
+		switch draft.Kind {
+		case core.KindTurnStart:
+			status = "running"
+			turnCount++
+		case core.KindTurnEnd:
+			status = "idle"
+		case core.KindQuestionAsked:
+			status = "waiting_input"
+		case core.KindQuestionAnswered:
+			status = "running"
+		}
+	}
+	out := make([]core.SessionEvent, 0, len(stagedEvents))
+	for _, e := range stagedEvents {
 		event := core.SessionEvent{
 			SessionID: sess.info.ID,
-			Seq:       sess.seq,
-			Kind:      draft.Kind,
-			Payload:   payload,
-			TurnID:    draft.TurnID,
+			Seq:       e.seq,
+			Kind:      e.kind,
+			Payload:   e.payload,
+			TurnID:    e.turnID,
 			CreatedAt: now,
 		}
 		sess.events = append(sess.events, event)
 		out = append(out, event)
-		switch draft.Kind {
-		case core.KindTurnStart:
-			sess.info.Status = "running"
-			sess.info.TurnCount++
-		case core.KindTurnEnd:
-			sess.info.Status = "idle"
-		case core.KindQuestionAsked:
-			sess.info.Status = "waiting_input"
-		case core.KindQuestionAnswered:
-			sess.info.Status = "running"
-		}
 	}
-	sess.info.LastSeq = sess.seq
+	sess.seq = seq
+	sess.info.Status = status
+	sess.info.TurnCount += turnCount
+	sess.info.LastSeq = seq
 	sess.info.UpdatedAt = now
 	return out, nil
 }
@@ -341,12 +363,27 @@ func (s *Store) List(ctx context.Context, filter core.SessionFilter) ([]core.Ses
 		if filter.Address != "" && info.Address != filter.Address {
 			continue
 		}
+		if filter.ParentSessionID != "" && info.ParentSessionID != filter.ParentSessionID {
+			continue
+		}
+		if filter.Agent != "" && info.Agent != filter.Agent {
+			continue
+		}
+		if filter.TopLevelOnly && info.ParentSessionID != "" {
+			continue
+		}
+		if filter.Before > 0 && info.UpdatedAt >= filter.Before {
+			continue
+		}
 		out = append(out, info)
 	}
 	s.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].UpdatedAt != out[j].UpdatedAt {
 			return out[i].UpdatedAt > out[j].UpdatedAt
+		}
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
 		}
 		return out[i].ID > out[j].ID
 	})
