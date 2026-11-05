@@ -27,6 +27,7 @@ const (
 	engineLogMaxLineLen   = 500
 	engineWorkerSteps     = 12
 	engineWorkerTokens    = 20000
+	engineRepairChars     = 4000
 	engineBashTimeout     = 120 * time.Second
 	engineBrowserTimeout  = 30 * time.Second
 	engineMinConfidence   = 0.6
@@ -848,6 +849,9 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 
 	// guardian: one diagnosis per node per item and run.
 	if ex.guardianDecisionExists(node.ID, item) {
+		if ex.fixFailedInLoop(node, item, row) {
+			return
+		}
 		ex.failNode(row, msg)
 		ex.failRun(node, msg)
 		return
@@ -934,6 +938,9 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 			return
 		}
 		ex.appendLog(row, "retry_fix failed: "+err.Error())
+		if ex.fixFailedInLoop(node, item, row) {
+			return
+		}
 		ex.failNode(row, err.Error())
 		ex.failRun(node, err.Error())
 	case "skip":
@@ -960,6 +967,33 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 		ex.failNode(row, msg)
 		ex.failRun(node, msg)
 	}
+}
+
+// fixFailedInLoop marks a loop body node and the rest of its item's body skipped
+// when a guardian decision was applied and the node failed again, so the loop
+// moves on to the next item instead of failing the run (REQ-WF-008). It reports
+// whether the node ran inside a loop; outside a loop the caller keeps failing the
+// node and the run.
+func (ex *runExec) fixFailedInLoop(node Node, item int, row *NodeRun) bool {
+	if item < 0 || node.Parent == "" {
+		return false
+	}
+	ex.appendLog(row, "skipped after the guardian fix failed")
+	ex.skipNodeContinue(row, "skipped after the guardian fix failed")
+	past := false
+	for _, bn := range topoOrder(ex.bodyNodes(node.Parent), ex.graph.Edges) {
+		if bn.ID == node.ID {
+			past = true
+			continue
+		}
+		if !past {
+			continue
+		}
+		r := ex.ensureRow(bn, item)
+		ex.appendLog(r, "skipped after the guardian fix failed")
+		ex.skipNode(r, "skipped after the guardian fix failed")
+	}
+	return true
 }
 
 // diagnose sends the failure to the guardian and parses one decision

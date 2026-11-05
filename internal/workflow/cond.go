@@ -327,6 +327,16 @@ func firstBraceSpan(s string) (string, bool) {
 	return "", false
 }
 
+// schemaFieldType returns the type name of one schema field spec: a type name
+// optionally followed by a free note (REQ-WF-005).
+func schemaFieldType(spec string) string {
+	want := spec
+	if i := strings.IndexByte(want, ' '); i >= 0 {
+		want = want[:i]
+	}
+	return strings.TrimSpace(want)
+}
+
 // CheckSchema validates v against an output_schema: every schema field is a
 // type string (optionally followed by a free note) and every field is required
 // (REQ-WF-005). It joins every problem into one error.
@@ -346,11 +356,7 @@ func CheckSchema(schema map[string]any, v any) error {
 		if !ok {
 			continue
 		}
-		want := spec
-		if i := strings.IndexByte(want, ' '); i >= 0 {
-			want = want[:i]
-		}
-		want = strings.TrimSpace(want)
+		want := schemaFieldType(spec)
 		val, present := m[k]
 		if !present {
 			problems = append(problems, fmt.Sprintf("field %q: missing", k))
@@ -412,6 +418,139 @@ func schemaArrayOK(v any, elem string) bool {
 		}
 	}
 	return true
+}
+
+// CoerceToSchema returns a copy of v (which must be a map) with its fields
+// converted to the JSON types named by an output_schema, so a near-miss answer
+// still validates (REQ-WF-005, REQ-WF-008): a list of lines where a string is
+// wanted, a numeric string where a number is wanted, and so on. Fields the
+// schema does not name are kept untouched. It then runs CheckSchema on the
+// result and returns its error when the answer is still invalid.
+func CoerceToSchema(schema map[string]any, v any) (any, error) {
+	m, ok := normalize(v).(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("workflow: output_schema wants an object, got %s", typeName(normalize(v)))
+	}
+	out := make(map[string]any, len(m))
+	for k, val := range m {
+		out[k] = val
+	}
+	for _, k := range sortedKeys(schema) {
+		spec, ok := schema[k].(string)
+		if !ok {
+			continue
+		}
+		val, present := m[k]
+		if !present {
+			continue
+		}
+		if c, ok := coerceToType(schemaFieldType(spec), val); ok {
+			out[k] = c
+		}
+	}
+	if err := CheckSchema(schema, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// coerceToType converts one value to the JSON type named want, reporting whether
+// it applies (REQ-WF-005).
+func coerceToType(want string, v any) (any, bool) {
+	switch want {
+	case "string":
+		return coerceString(v)
+	case "integer":
+		return coerceNumber(v, true)
+	case "number":
+		return coerceNumber(v, false)
+	case "boolean":
+		return coerceBool(v)
+	case "string[]":
+		if s, ok := v.(string); ok {
+			return []any{s}, true
+		}
+	case "integer[]":
+		return coerceNumberArray(v, true)
+	case "number[]":
+		return coerceNumberArray(v, false)
+	}
+	return v, false
+}
+
+// coerceString joins an array of strings into one newline-separated string with
+// each element trimmed, and formats a number or bool with fmt (REQ-WF-005).
+func coerceString(v any) (any, bool) {
+	switch t := v.(type) {
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, e := range t {
+			s, ok := e.(string)
+			if !ok {
+				return v, false
+			}
+			parts = append(parts, strings.TrimSpace(s))
+		}
+		return strings.Join(parts, "\n"), true
+	case float64, float32, int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64, json.Number, bool:
+		return fmt.Sprint(t), true
+	}
+	return v, false
+}
+
+// coerceNumber converts a numeric string to a number; with wantInt it also
+// requires an integral value, so "8" and 8.0 coerce while 7.5 stays a number
+// (REQ-WF-005).
+func coerceNumber(v any, wantInt bool) (any, bool) {
+	if s, ok := v.(string); ok {
+		f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if err != nil {
+			return v, false
+		}
+		if wantInt && f != math.Trunc(f) {
+			return v, false
+		}
+		return f, true
+	}
+	if f, ok := asFloat(v); ok {
+		if wantInt && f != math.Trunc(f) {
+			return v, false
+		}
+		return f, true
+	}
+	return v, false
+}
+
+// coerceNumberArray converts the numeric strings of an array per element
+// (REQ-WF-005).
+func coerceNumberArray(v any, wantInt bool) (any, bool) {
+	arr, ok := normalize(v).([]any)
+	if !ok {
+		return v, false
+	}
+	out := make([]any, len(arr))
+	for i, e := range arr {
+		if c, ok := coerceNumber(e, wantInt); ok {
+			out[i] = c
+		} else {
+			out[i] = e
+		}
+	}
+	return out, true
+}
+
+// coerceBool reads the strings "true" and "false" (REQ-WF-005).
+func coerceBool(v any) (any, bool) {
+	if s, ok := v.(string); ok {
+		switch strings.TrimSpace(s) {
+		case "true":
+			return true, true
+		case "false":
+			return false, true
+		}
+	}
+	return v, false
 }
 
 // typeName names the JSON type of v for schema error messages.

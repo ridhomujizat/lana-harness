@@ -219,3 +219,104 @@ func TestCheckSchemaNotObject(t *testing.T) {
 		t.Fatal("CheckSchema(string) = nil, want error")
 	}
 }
+
+// TestCoerceToSchema covers every coercion of REQ-WF-005: a string field takes a
+// joined list or a formatted number/bool, numeric strings and whole numbers fill
+// integer and number fields, the strings "true"/"false" fill boolean, a single
+// string fills a string array, numeric strings coerce per array element, and
+// unknown fields are kept.
+func TestCoerceToSchema(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema map[string]any
+		in     map[string]any
+		want   map[string]any
+	}{
+		{"array to string",
+			map[string]any{"summary": "string"},
+			map[string]any{"summary": []any{"a", " b "}},
+			map[string]any{"summary": "a\nb"}},
+		{"number to string",
+			map[string]any{"summary": "string"},
+			map[string]any{"summary": float64(8)},
+			map[string]any{"summary": "8"}},
+		{"bool to string",
+			map[string]any{"summary": "string"},
+			map[string]any{"summary": true},
+			map[string]any{"summary": "true"}},
+		{"numeric string to integer",
+			map[string]any{"score": "integer"},
+			map[string]any{"score": " 8 "},
+			map[string]any{"score": float64(8)}},
+		{"whole number to integer",
+			map[string]any{"score": "integer"},
+			map[string]any{"score": float64(8)},
+			map[string]any{"score": float64(8)}},
+		{"numeric string to number",
+			map[string]any{"ratio": "number"},
+			map[string]any{"ratio": "0.5"},
+			map[string]any{"ratio": 0.5}},
+		{"true string to boolean",
+			map[string]any{"ok": "boolean"},
+			map[string]any{"ok": "true"},
+			map[string]any{"ok": true}},
+		{"false string to boolean",
+			map[string]any{"ok": "boolean"},
+			map[string]any{"ok": " false "},
+			map[string]any{"ok": false}},
+		{"string to string array",
+			map[string]any{"links": "string[]"},
+			map[string]any{"links": "a"},
+			map[string]any{"links": []any{"a"}}},
+		{"numeric strings to integer array",
+			map[string]any{"scores": "integer[]"},
+			map[string]any{"scores": []any{"1", " 2 "}},
+			map[string]any{"scores": []any{float64(1), float64(2)}}},
+		{"numeric strings to number array",
+			map[string]any{"ratios": "number[]"},
+			map[string]any{"ratios": []any{"0.5", "1"}},
+			map[string]any{"ratios": []any{0.5, float64(1)}}},
+		{"unknown field kept",
+			map[string]any{"score": "integer"},
+			map[string]any{"score": 8, "extra": []any{"x"}},
+			map[string]any{"score": float64(8), "extra": []any{"x"}}},
+	}
+	for _, tc := range cases {
+		got, err := CoerceToSchema(tc.schema, tc.in)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("%s = %#v, want %#v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestCoerceToSchemaStillInvalid returns the CheckSchema error when a value
+// cannot be coerced, and rejects a non-object answer.
+func TestCoerceToSchemaStillInvalid(t *testing.T) {
+	if _, err := CoerceToSchema(map[string]any{"score": "integer"}, map[string]any{"score": 7.5}); err == nil {
+		t.Fatal("CoerceToSchema(fraction) = nil error, want error")
+	}
+	if _, err := CoerceToSchema(map[string]any{"ok": "boolean"}, map[string]any{"ok": "yes"}); err == nil {
+		t.Fatal("CoerceToSchema(bad bool) = nil error, want error")
+	}
+	if _, err := CoerceToSchema(map[string]any{"a": "string"}, "not an object"); err == nil {
+		t.Fatal("CoerceToSchema(non-object) = nil error, want error")
+	}
+}
+
+// TestCoerceToSchemaCopy leaves the input map untouched.
+func TestCoerceToSchemaCopy(t *testing.T) {
+	in := map[string]any{"score": "8"}
+	got, err := CoerceToSchema(map[string]any{"score": "integer"}, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in["score"] != "8" {
+		t.Fatalf("input was mutated: %#v", in)
+	}
+	if got.(map[string]any)["score"] != float64(8) {
+		t.Fatalf("got=%#v", got)
+	}
+}

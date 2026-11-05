@@ -317,6 +317,16 @@ func decodeAny(t *testing.T, raw json.RawMessage) any {
 	return v
 }
 
+// hasLog reports whether logs contain line.
+func hasLog(logs []string, line string) bool {
+	for _, l := range logs {
+		if l == line {
+			return true
+		}
+	}
+	return false
+}
+
 // ---- AC-WF-006 ------------------------------------------------------------
 
 func TestEngineIfBranchSkips(t *testing.T) {
@@ -500,10 +510,16 @@ func TestEngineSchemaOk(t *testing.T) {
 	}
 }
 
+// TestEngineSchemaError covers REQ-WF-005: when the answer and its one repair
+// answer both miss the schema, the node fails with schema_error after exactly two
+// agent calls.
 func TestEngineSchemaError(t *testing.T) {
 	st := NewMemStore()
 	deps := newFakeDeps()
-	deps.replies = []fakeReply{{contains: "score it", text: "it is probably fine"}}
+	deps.replies = []fakeReply{
+		{contains: "Your previous answer did not match", text: "still not JSON"},
+		{contains: "score it", text: "it is probably fine"},
+	}
 
 	g := Graph{
 		Nodes: []Node{
@@ -528,8 +544,138 @@ func TestEngineSchemaError(t *testing.T) {
 	if nr.Status != NodeFailed || !strings.Contains(nr.Error, "schema_error") {
 		t.Fatalf("node=%+v want schema_error", nr)
 	}
+	if deps.agentCount() != 2 {
+		t.Fatalf("agent calls=%d want 2", deps.agentCount())
+	}
+	if !hasLog(nr.Logs, "repair: asked for JSON again") {
+		t.Fatalf("node logs=%v want the repair line", nr.Logs)
+	}
+}
+
+// TestEngineSchemaRepairSucceeds covers REQ-WF-005: a prose first answer is
+// repaired with one extra call whose valid JSON makes the node succeed.
+func TestEngineSchemaRepairSucceeds(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{contains: "Your previous answer did not match", text: `{"score":8}`, tokens: 5},
+		{contains: "score it", text: "it is probably fine", tokens: 3},
+	}
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", nil),
+			wfNode("a", "agent", "A", map[string]any{"prompt": "score it", "output_schema": map[string]any{"score": "integer"}}),
+		},
+		Edges: []Edge{wfEdge("start", "out", "a")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	if got := mustRun(t, st, run.ID); got.Status != RunSucceeded {
+		t.Fatalf("run=%+v want succeeded", got)
+	}
+	out := decodeAny(t, mustNode(t, st, run.ID, "a", -1).Output).(map[string]any)
+	if out["score"] != float64(8) {
+		t.Fatalf("output=%v want score 8", out)
+	}
+	if deps.agentCount() != 2 {
+		t.Fatalf("agent calls=%d want 2", deps.agentCount())
+	}
+	if nr := mustNode(t, st, run.ID, "a", -1); nr.Tokens != 8 || !hasLog(nr.Logs, "repair: asked for JSON again") {
+		t.Fatalf("node=%+v want tokens 8 and the repair line", nr)
+	}
+}
+
+// TestEngineSchemaCoercesArray covers REQ-WF-005 live failure: an array of
+// strings for a string field is joined without any repair call.
+func TestEngineSchemaCoercesArray(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{{contains: "summarize it", text: `{"summary":["first line","second"]}`}}
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", nil),
+			wfNode("a", "agent", "A", map[string]any{"prompt": "summarize it", "output_schema": map[string]any{"summary": "string"}}),
+		},
+		Edges: []Edge{wfEdge("start", "out", "a")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	if got := mustRun(t, st, run.ID); got.Status != RunSucceeded {
+		t.Fatalf("run=%+v want succeeded", got)
+	}
+	out := decodeAny(t, mustNode(t, st, run.ID, "a", -1).Output).(map[string]any)
+	if out["summary"] != "first line\nsecond" {
+		t.Fatalf("output=%v want the joined summary", out)
+	}
 	if deps.agentCount() != 1 {
-		t.Fatalf("agent calls=%d want 1", deps.agentCount())
+		t.Fatalf("agent calls=%d want 1 (no repair)", deps.agentCount())
+	}
+}
+
+// TestEngineLoopSkipsItemAfterFixFails covers REQ-WF-008: when a loop body node
+// fails again after a guardian retry_fix, that item is skipped so the loop keeps
+// going instead of failing the run.
+func TestEngineLoopSkipsItemAfterFixFails(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "g", contains: "You are the guardian",
+			text: `{"action":"retry_fix","reason":"match the schema","fix":{},"confidence":0.9}`},
+		{contains: "Your previous answer did not match", text: "still prose"},
+		{contains: "summarize a", text: "prose a"},
+		{contains: "summarize b", text: `{"summary":"ok"}`},
+	}
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", nil),
+			wfNode("each", "loop", "Each", map[string]any{"items": []any{"a", "b"}}),
+			{ID: "sum", Type: "worker", Name: "Sum", Parent: "each",
+				Params: map[string]any{"task": "summarize {{ item }}", "output_schema": map[string]any{"summary": "string"}}},
+		},
+		Edges: []Edge{
+			wfEdge("start", "out", "each"),
+			{ID: "body", From: "each", FromPort: "body", To: "sum"},
+		},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	if got := mustRun(t, st, run.ID); got.Status != RunSucceeded {
+		t.Fatalf("run=%+v want succeeded", got)
+	}
+	item0 := mustNode(t, st, run.ID, "sum", 0)
+	if item0.Status != NodeSkipped {
+		t.Fatalf("item 0=%s want skipped", item0.Status)
+	}
+	if !strings.Contains(item0.Error, "skipped after the guardian fix failed") {
+		t.Fatalf("item 0 error=%q", item0.Error)
+	}
+	if got := mustNode(t, st, run.ID, "sum", 1).Status; got != NodeSucceeded {
+		t.Fatalf("item 1=%s want succeeded", got)
+	}
+	out := decodeAny(t, mustNode(t, st, run.ID, "each", -1).Output).(map[string]any)
+	if out["ok"] != float64(1) || out["skipped"] != float64(1) || out["count"] != float64(2) {
+		t.Fatalf("loop summary=%v want ok 1 skipped 1 count 2", out)
+	}
+	if deps.agentCount() != 6 {
+		t.Fatalf("agent calls=%d want 6", deps.agentCount())
 	}
 }
 

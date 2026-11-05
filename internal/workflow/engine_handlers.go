@@ -26,15 +26,15 @@ type nodeResult struct {
 func (ex *runExec) invoke(ctx context.Context, node Node, item int, params map[string]any) (nodeResult, error) {
 	switch node.Type {
 	case "agent":
-		return ex.agentNode(ctx, node, params, ex.wf.Guardian, paramString(params, "prompt"))
+		return ex.agentNode(ctx, node, item, params, ex.wf.Guardian, paramString(params, "prompt"))
 	case "bot":
 		agent := paramString(params, "agent")
 		if agent == "" {
 			agent = ex.wf.Guardian
 		}
-		return ex.agentNode(ctx, node, params, agent, paramString(params, "prompt"))
+		return ex.agentNode(ctx, node, item, params, agent, paramString(params, "prompt"))
 	case "worker":
-		return ex.workerNode(ctx, node, params)
+		return ex.workerNode(ctx, node, item, params)
 	case "browser":
 		return ex.browserNode(ctx, node, params)
 	case "bash":
@@ -66,12 +66,13 @@ func (ex *runExec) invoke(ctx context.Context, node Node, item int, params map[s
 
 // agentNode runs a prompt on one agent (REQ-WF-005). With an output schema the
 // answer must be JSON matching it, else the node fails with schema_error.
-func (ex *runExec) agentNode(ctx context.Context, node Node, params map[string]any, agent, prompt string) (nodeResult, error) {
+func (ex *runExec) agentNode(ctx context.Context, node Node, item int, params map[string]any, agent, prompt string) (nodeResult, error) {
 	schema, hasSchema := params["output_schema"].(map[string]any)
 	if hasSchema {
 		prompt += "\n\nAnswer with ONE JSON object only matching: " + compactJSON(schema)
 	}
-	res, err := ex.callAgent(ctx, node, AgentRequest{Agent: agent, Prompt: prompt})
+	base := AgentRequest{Agent: agent, Prompt: prompt}
+	res, err := ex.callAgent(ctx, node, base)
 	if err != nil {
 		return nodeResult{Tokens: res.Tokens, SessionID: res.SessionID}, err
 	}
@@ -79,18 +80,14 @@ func (ex *runExec) agentNode(ctx context.Context, node Node, params map[string]a
 		return nodeResult{Tokens: res.Tokens, SessionID: res.SessionID}, errors.New("agent stopped with an error")
 	}
 	if hasSchema {
-		v, verr := ex.parseSchema(schema, res.Text)
-		if verr != nil {
-			return nodeResult{Tokens: res.Tokens, SessionID: res.SessionID}, verr
-		}
-		return nodeResult{Output: v, Port: "out", Tokens: res.Tokens, SessionID: res.SessionID}, nil
+		return ex.finishSchema(ctx, node, item, base, res, schema)
 	}
 	return nodeResult{Output: map[string]any{"text": res.Text}, Port: "out", Tokens: res.Tokens, SessionID: res.SessionID}, nil
 }
 
 // workerNode runs a task in a fresh session of an agent with a model, tool list
 // and step budget, then caps its tokens (REQ-WF-005).
-func (ex *runExec) workerNode(ctx context.Context, node Node, params map[string]any) (nodeResult, error) {
+func (ex *runExec) workerNode(ctx context.Context, node Node, item int, params map[string]any) (nodeResult, error) {
 	agent := paramString(params, "agent")
 	if agent == "" {
 		agent = ex.wf.Guardian
@@ -107,10 +104,11 @@ func (ex *runExec) workerNode(ctx context.Context, node Node, params map[string]
 		prompt += "\n\nAnswer with ONE JSON object only matching: " + compactJSON(schema)
 	}
 
-	res, err := ex.callAgent(ctx, node, AgentRequest{
+	base := AgentRequest{
 		Agent: agent, Prompt: prompt, Model: paramString(params, "model"),
 		Tools: tools, MaxSteps: maxSteps,
-	})
+	}
+	res, err := ex.callAgent(ctx, node, base)
 	if err != nil {
 		return nodeResult{Tokens: res.Tokens, SessionID: res.SessionID}, err
 	}
@@ -122,11 +120,7 @@ func (ex *runExec) workerNode(ctx context.Context, node Node, params map[string]
 			fmt.Errorf("budget: used %d tokens of %d", res.Tokens, int64(maxTokens))
 	}
 	if hasSchema {
-		v, verr := ex.parseSchema(schema, res.Text)
-		if verr != nil {
-			return nodeResult{Tokens: res.Tokens, SessionID: res.SessionID}, verr
-		}
-		return nodeResult{Output: v, Port: "out", Tokens: res.Tokens, SessionID: res.SessionID}, nil
+		return ex.finishSchema(ctx, node, item, base, res, schema)
 	}
 	return nodeResult{Output: map[string]any{"text": res.Text}, Port: "out", Tokens: res.Tokens, SessionID: res.SessionID}, nil
 }
@@ -430,17 +424,71 @@ func (ex *runExec) callAgent(ctx context.Context, node Node, req AgentRequest) (
 	return ex.e.deps.RunAgent(ctx, req)
 }
 
-// parseSchema extracts and validates an agent answer against a schema
-// (REQ-WF-005, AC-WF-009).
+// parseSchema extracts an agent answer and coerces it to a schema, so a
+// near-miss answer (a list where a string is wanted, a numeric string where a
+// number is wanted) still validates (REQ-WF-005, REQ-WF-008, AC-WF-009).
 func (ex *runExec) parseSchema(schema map[string]any, text string) (any, error) {
 	v, err := ExtractJSON(text)
 	if err != nil {
 		return nil, fmt.Errorf("schema_error: %w", err)
 	}
-	if err := CheckSchema(schema, v); err != nil {
+	v, err = CoerceToSchema(schema, v)
+	if err != nil {
 		return nil, fmt.Errorf("schema_error: %w", err)
 	}
 	return v, nil
+}
+
+// finishSchema turns a schema-bearing answer into a node result: it validates
+// the answer, and when the answer does not match it makes one repair call before
+// failing (REQ-WF-005, REQ-WF-008). base is the request that produced res and is
+// replayed for the repair with only the prompt replaced. When even the repair
+// answer is invalid the node still fails with its schema_error, which is not
+// transient.
+func (ex *runExec) finishSchema(ctx context.Context, node Node, item int, base AgentRequest, res AgentResult, schema map[string]any) (nodeResult, error) {
+	v, verr := ex.parseSchema(schema, res.Text)
+	if verr == nil {
+		return nodeResult{Output: v, Port: "out", Tokens: res.Tokens, SessionID: res.SessionID}, nil
+	}
+	ex.appendLog(ex.ensureRow(node, item), "repair: asked for JSON again")
+	rep, rerr := ex.repairSchema(ctx, node, base, schema, res.Text, verr)
+	tokens := res.Tokens + rep.Tokens
+	if rerr == nil {
+		if rv, rverr := ex.parseSchema(schema, rep.Text); rverr == nil {
+			return nodeResult{Output: rv, Port: "out", Tokens: tokens, SessionID: rep.SessionID}, nil
+		}
+	}
+	return nodeResult{Tokens: tokens, SessionID: res.SessionID}, verr
+}
+
+// repairSchema makes the one repair RunAgent call after a schema error: the same
+// agent, model, tools and lock as the original call, with a prompt that repeats
+// the error, the previous answer and the schema (REQ-WF-005, REQ-WF-008).
+func (ex *runExec) repairSchema(ctx context.Context, node Node, base AgentRequest, schema map[string]any, prevText string, prevErr error) (AgentResult, error) {
+	prompt := fmt.Sprintf(
+		"Your previous answer did not match the required JSON shape: %s.\nPrevious answer:\n%s\n\nReply with ONE JSON object only, no prose, matching: %s",
+		prevErr.Error(), firstChars(prevText, engineRepairChars), compactJSON(schema))
+	req := AgentRequest{
+		Agent: base.Agent, Prompt: prompt, Model: base.Model,
+		Tools: base.Tools, MaxSteps: base.MaxSteps,
+	}
+	rep, err := ex.callAgent(ctx, node, req)
+	if err != nil {
+		return rep, err
+	}
+	if rep.StopReason == "error" {
+		return rep, errors.New("agent stopped with an error")
+	}
+	return rep, nil
+}
+
+// firstChars returns the first n characters of s.
+func firstChars(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 // paramString reads a string param.
