@@ -858,3 +858,5 @@ button.wf-item:hover { background: var(--surface-2); }
 .wf-foot { max-width: calc(100% - 232px); overflow: hidden; }
 .wf-editor .wf-foot { max-width: calc(100% - 462px); }
 .wf-editor .wf-empty { left: 230px; }
+.wf-pal-empty { display: block; padding: 6px 8px; font-size: var(--fs-xs); color: var(--text-3); text-decoration: none; }
+.wf-pal-empty:hover { color: var(--text); text-decoration: underline; }

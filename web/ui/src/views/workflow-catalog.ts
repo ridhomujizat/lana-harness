@@ -208,12 +208,12 @@ export const NODE_CATALOG: NodeMeta[] = [
   {
     type: "tool",
     group: "tool",
-    label: "MCP tool",
+    label: "Tool",
     icon: "plug",
     tint: "blue",
     ports: ["out"],
     fields: [
-      { name: "name", label: "Tool name", kind: "text", required: true, mono: true },
+      { name: "name", label: "Tool name", kind: "text", required: true, mono: true, help: "Any registered tool: an installed Tools command (obscura_fetch), an MCP tool or a built-in." },
       { name: "input", label: "Input", kind: "json", mono: true },
     ],
     defaults: { name: "", input: {} },

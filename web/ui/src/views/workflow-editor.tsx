@@ -22,6 +22,8 @@ import type {
   WfNode,
   Workflow,
 } from "../api/workflows";
+import { listPackages } from "../api/toolbox";
+import type { CommandView } from "../api/toolbox";
 import { Ic } from "../ui/icons";
 import { Button, Modal, Seg, Textarea, useToast } from "../ui/gr8r";
 import { WorkflowAssistant } from "./workflow-assistant";
@@ -41,9 +43,41 @@ function sameGraph(a: Graph, b: Graph): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function Palette({ onAdd }: { onAdd: (type: string) => void }) {
+/* Installed Tools commands (spec #34 REQ-TB-006) become `tool` nodes. */
+function useInstalledCommands(): CommandView[] {
+  const [commands, setCommands] = useState<CommandView[]>([]);
+  useEffect(() => {
+    let live = true;
+    listPackages()
+      .then((response) => {
+        if (live) {
+          setCommands(
+            response.packages
+              .filter((pkg) => pkg.status === "installed" || pkg.status === "too_old")
+              .flatMap((pkg) => pkg.commands)
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return commands;
+}
+
+function Palette({
+  onAdd,
+  onAddCommand,
+}: {
+  onAdd: (type: string) => void;
+  onAddCommand: (command: CommandView) => void;
+}) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
+  const commands = useInstalledCommands().filter(
+    (command) => !q || command.tool.includes(q) || command.description.toLowerCase().includes(q)
+  );
   return (
     <aside className="wf-palette" aria-label="Add a node">
       <div className="wf-pal-search">
@@ -86,6 +120,26 @@ function Palette({ onAdd }: { onAdd: (type: string) => void }) {
             </div>
           );
         })}
+        <div className="wf-pal-group">
+          <span className="wf-pal-h g-tool">Installed tools</span>
+          {commands.map((command) => (
+            <button
+              key={command.tool}
+              type="button"
+              className="wf-pal-item"
+              onClick={() => onAddCommand(command)}
+              title={command.description}
+            >
+              <Ic name="package" size={15} />
+              <span className="mono">{command.tool}</span>
+            </button>
+          ))}
+          {commands.length === 0 ? (
+            <a className="wf-pal-empty" href="#/tools">
+              Install programs on the Tools page
+            </a>
+          ) : null}
+        </div>
       </div>
     </aside>
   );
@@ -215,6 +269,21 @@ export function WorkflowEditor({
     const next = at
       ? { ...draft, nodes: [...draft.nodes, node] }
       : addNodeBelow(draft, node, selectedNode);
+    setDraft(next);
+    select(node.id);
+  }
+
+  function addCommand(command: CommandView) {
+    const node = makeNode(draft, "tool");
+    node.id = newNodeId(draft, command.tool.replace(/_/g, "-"));
+    node.name = command.description.split(/[.(]/)[0]!.trim().slice(0, 40) || command.tool;
+    node.params = {
+      name: command.tool,
+      input: Object.fromEntries(
+        command.input.map((field) => [field.name, field.default ?? (field.required ? "" : undefined)])
+      ),
+    };
+    const next = addNodeBelow(draft, node, selectedNode);
     setDraft(next);
     select(node.id);
   }
@@ -507,7 +576,7 @@ export function WorkflowEditor({
       />
       <div className="wf-editor">
         <div className="wf-stage">
-          <Palette onAdd={(type) => addType(type)} />
+          <Palette onAdd={(type) => addType(type)} onAddCommand={addCommand} />
           <WorkflowCanvas
             graph={draft}
             selectedId={selected}
