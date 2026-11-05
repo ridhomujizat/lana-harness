@@ -49,6 +49,8 @@ risk = "read"                        # read|write|admin
 timeout_secs = 60
 output = "text"                      # text|json
 workdir = "data"                     # data (<home>/tools/<id>/data) | workspace (the calling session workspace)
+output_from = "stdout"               # stdout (combined stdout+stderr) | files (the files written into {{out}})
+transform = ""                       # optional: "subtitles" cleans WebVTT/SRT into plain transcript text
 
 [commands.input]                     # field → {type, description, required, default, enum}
 url = { type = "string", description = "Page URL", required = true }
@@ -58,7 +60,21 @@ format = { type = "string", enum = ["markdown", "text", "html"], default = "mark
 ```
 
 Validation: id/name/command name patterns, at least one detect binary, args reference only declared fields,
-`risk`/`output`/`workdir` enums, `install` entries have exactly one of `command` or `url`.
+`risk`/`output`/`workdir`/`output_from`/`transform` enums, `install` entries have exactly one of `command` or `url`.
+`{{out}}` is allowed only with `output_from = "files"`, and a files command must use it; `out` is then a reserved
+input name. `transform = "subtitles"` needs `output = "text"`.
+
+A command whose program cannot print its result writes files instead (REQ-TB-012):
+
+```toml
+[[commands]]
+name = "transcript"                  # yt-dlp catalog entry
+args = ["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", "{{lang}}",
+        "--sub-format", "vtt/best", "-o", "{{out}}/%(id)s.%(ext)s", "{{url}}"]
+risk = "read"
+output_from = "files"
+transform = "subtitles"
+```
 
 ## Status and detection
 
@@ -79,6 +95,14 @@ cancellable. Downloads stream to a temp file, verify sha256 when set, extract th
 string; missing optional fields with no default drop the whole arg), exec the resolved binary (no shell, so no
 injection), env from `[env]` (secrets resolved through an injected resolver), timeout, combined output capped at
 64 KiB; exit ≠ 0 → error with the last 500 chars. Output `json` → must parse.
+
+With `output_from = "files"`, `{{out}}` renders to a fresh temp directory created for the run and removed after it.
+The result is the content of the regular files written there, sorted by path, each under a `== <name>` line when
+there is more than one, with the transform applied per file, capped at 256 KiB with a "…cut off at 256 KiB" note.
+The process output is used only for errors: exit ≠ 0 as above, or no file written → "toolbox: <cmd> wrote no output
+file" with the last 500 chars. `transform = "subtitles"` drops the WebVTT header, NOTE/STYLE blocks, cue ids and
+numbers, timing lines and inline tags (`<c>`, `<00:00:01.120>`), decodes HTML entities, drops the rolling duplicate
+lines of YouTube auto captions and joins the cue text into readable lines.
 
 ## Tools in sessions and workflows
 

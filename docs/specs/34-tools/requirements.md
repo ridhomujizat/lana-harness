@@ -126,3 +126,8 @@ A **Tools** page (Configure → Tools; the code calls it the toolbox) where the 
   args, and removes it on uninstall. The owner turns it on per agent from the tool page ("Use with agents") or the
   agent's MCP tab. Obscura uses this to give agents full browser control (navigate, snapshot, click, fill, type,
   screenshot, tabs, cookies and storage state) with a persistent profile in the package data dir.
+- **REQ-TB-012 File output.** A catalog command may return the files it writes, optionally cleaned as a transcript.
+  `output_from = "files"` gives the command a fresh `{{out}}` directory per run and returns the content of the files
+  written there (256 KiB cap) instead of the process output; `transform = "subtitles"` turns WebVTT/SRT into plain
+  text. yt-dlp uses this for `yt_dlp_transcript`: the video's subtitles or auto captions as plain text (default
+  languages `.*-orig`, the auto captions in the spoken language; translated captions often fail with HTTP 429).

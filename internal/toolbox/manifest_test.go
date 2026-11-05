@@ -593,6 +593,161 @@ TOKEN = "literal"
 	}
 }
 
+// filesManifest wraps one command table in a valid package (REQ-TB-012).
+func filesManifest(command string) string {
+	return `
+id = "x"
+name = "X"
+
+[detect]
+binary = "x"
+
+[[install]]
+command = "true"
+` + command
+}
+
+// TestValidateOutputFiles checks the output_from, {{out}} and transform rules
+// (REQ-TB-012).
+func TestValidateOutputFiles(t *testing.T) {
+	cases := []struct {
+		name    string
+		command string
+		want    string
+	}{
+		{
+			name: "out without output_from files",
+			command: `
+[[commands]]
+name = "go"
+risk = "read"
+args = ["{{out}}/x"]
+`,
+			want: "commands[0].args[0]",
+		},
+		{
+			name: "output_from files without out",
+			command: `
+[[commands]]
+name = "go"
+risk = "read"
+args = ["run"]
+output_from = "files"
+`,
+			want: "commands[0].output_from",
+		},
+		{
+			name: "unknown output_from",
+			command: `
+[[commands]]
+name = "go"
+risk = "read"
+output_from = "stderr"
+`,
+			want: "commands[0].output_from",
+		},
+		{
+			name: "out declared as an input",
+			command: `
+[[commands]]
+name = "go"
+risk = "read"
+args = ["{{out}}"]
+output_from = "files"
+
+[commands.input]
+out = { type = "string" }
+`,
+			want: "commands[0].input.out",
+		},
+		{
+			name: "unknown transform",
+			command: `
+[[commands]]
+name = "go"
+risk = "read"
+transform = "markdown"
+`,
+			want: "commands[0].transform",
+		},
+		{
+			name: "subtitles with json output",
+			command: `
+[[commands]]
+name = "go"
+risk = "read"
+output = "json"
+transform = "subtitles"
+`,
+			want: "commands[0].transform",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, issues := ParseManifest(filesManifest(tc.command))
+			if !hasField(issues, tc.want) {
+				t.Fatalf("want an issue on %q, got %+v", tc.want, issues)
+			}
+		})
+	}
+
+	manifest, issues := ParseManifest(filesManifest(`
+[[commands]]
+name = "go"
+risk = "read"
+args = ["-o", "{{out}}/%(id)s.%(ext)s", "{{url}}"]
+output_from = "files"
+transform = "subtitles"
+
+[commands.input]
+url = { type = "string", required = true }
+
+[[commands]]
+name = "plain"
+risk = "read"
+args = ["{{out}}"]
+
+[commands.input]
+out = { type = "string" }
+`))
+	if len(issues) != 0 {
+		t.Fatalf("valid files command issues: %+v", issues)
+	}
+	if manifest.Commands[0].OutputFrom != "files" || manifest.Commands[1].OutputFrom != "stdout" {
+		t.Fatalf("output_from=%q,%q want files,stdout", manifest.Commands[0].OutputFrom, manifest.Commands[1].OutputFrom)
+	}
+}
+
+// TestEncodeRoundTripOutputFiles keeps output_from and transform across an
+// encode and reparse (REQ-TB-012).
+func TestEncodeRoundTripOutputFiles(t *testing.T) {
+	original, issues := ParseManifest(filesManifest(`
+[[commands]]
+name = "go"
+risk = "read"
+args = ["{{out}}"]
+output_from = "files"
+transform = "subtitles"
+`))
+	if len(issues) != 0 {
+		t.Fatalf("issues: %+v", issues)
+	}
+	text, err := Encode(original)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	again, issues := ParseManifest(text)
+	if len(issues) != 0 {
+		t.Fatalf("round trip issues: %+v\n%s", issues, text)
+	}
+	if !reflect.DeepEqual(original, again) {
+		t.Fatalf("round trip mismatch:\nfirst=%+v\nsecond=%+v\ntoml=%s", original, again, text)
+	}
+	if !strings.Contains(text, `output_from = 'files'`) && !strings.Contains(text, `output_from = "files"`) {
+		t.Fatalf("encoded manifest lacks output_from:\n%s", text)
+	}
+}
+
 // hasField reports whether any issue sits on the wanted field.
 func hasField(issues []Issue, field string) bool {
 	for _, issue := range issues {

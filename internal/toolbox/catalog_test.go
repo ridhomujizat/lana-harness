@@ -37,6 +37,17 @@ func TestCatalogLoads(t *testing.T) {
 			t.Fatalf("obscura install extract=%q want *", md.Extract)
 		}
 	}
+	ytdlp := svc.catalog.byID["yt-dlp"]
+	transcript, ok := findCommand(ytdlp, "transcript")
+	if !ok {
+		t.Fatalf("yt-dlp has no transcript command: %+v", ytdlp.Commands)
+	}
+	if transcript.OutputFrom != "files" || transcript.Transform != "subtitles" || transcript.Risk != "read" {
+		t.Fatalf("transcript=%+v", transcript)
+	}
+	if !transcript.Input["url"].Required || transcript.Input["lang"].Default == nil {
+		t.Fatalf("transcript input=%+v", transcript.Input)
+	}
 	pandoc := svc.catalog.byID["pandoc"]
 	if got := pandoc.Install[0].Requires; len(got) != 1 || got[0] != "brew" {
 		t.Fatalf("pandoc requires=%v", got)

@@ -46,6 +46,16 @@ const (
 	maxTimeoutSecs     = 3600
 )
 
+// Output sources and transforms of a command (REQ-TB-012). With output_from
+// "files" the {{out}} template renders to a fresh temp directory per run and
+// the result is the content of the files the command writes there.
+const (
+	outputFromStdout   = "stdout"
+	outputFromFiles    = "files"
+	outField           = "out"
+	transformSubtitles = "subtitles"
+)
+
 // Manifest is one package definition, the tool.toml file of REQ-TB-001.
 type Manifest struct {
 	ID          string            `toml:"id" json:"id"`
@@ -105,6 +115,8 @@ type Command struct {
 	TimeoutSecs int                   `toml:"timeout_secs" json:"timeout_secs"`
 	Output      string                `toml:"output" json:"output"`
 	Workdir     string                `toml:"workdir" json:"workdir"`
+	OutputFrom  string                `toml:"output_from" json:"output_from"`
+	Transform   string                `toml:"transform,omitempty" json:"transform,omitempty"`
 	Input       map[string]InputField `toml:"input,omitempty" json:"input"`
 }
 
@@ -136,7 +148,7 @@ func ParseManifest(text string) (Manifest, []Issue) {
 }
 
 // applyDefaults fills the defaults of the design: timeout_secs 120, output
-// "text", workdir "data" and input type "string". risk has no default: an
+// "text", workdir "data", output_from "stdout" and input type "string". risk has no default: an
 // empty risk is a validation error (REQ-TB-004).
 func applyDefaults(m *Manifest) {
 	for i := range m.Commands {
@@ -149,6 +161,9 @@ func applyDefaults(m *Manifest) {
 		}
 		if c.Workdir == "" {
 			c.Workdir = "data"
+		}
+		if c.OutputFrom == "" {
+			c.OutputFrom = outputFromStdout
 		}
 		for name, f := range c.Input {
 			if f.Type == "" {
@@ -222,6 +237,24 @@ func (m Manifest) Validate() []Issue {
 		if c.TimeoutSecs < 0 || c.TimeoutSecs > maxTimeoutSecs {
 			add(field+".timeout_secs", "timeout_secs must be between 0 and %d", maxTimeoutSecs)
 		}
+		files := c.OutputFrom == outputFromFiles
+		if !validOutputFrom(c.OutputFrom) {
+			add(field+".output_from", "output_from %q must be stdout or files", c.OutputFrom)
+		}
+		if files && !usesOut(c.Args) {
+			add(field+".output_from", "output_from = \"files\" needs an arg that uses {{out}}")
+		}
+		if files {
+			if _, ok := c.Input[outField]; ok {
+				add(field+".input."+outField, "input name %q is reserved for the {{out}} directory", outField)
+			}
+		}
+		if !validTransform(c.Transform) {
+			add(field+".transform", "transform %q must be empty or subtitles", c.Transform)
+		}
+		if c.Transform == transformSubtitles && c.Output == "json" {
+			add(field+".transform", "transform subtitles produces text, so output must be text")
+		}
 		for _, name := range sortedNames(c.Input) {
 			f := c.Input[name]
 			inputField := field + ".input." + name
@@ -234,8 +267,16 @@ func (m Manifest) Validate() []Issue {
 		}
 		for j, arg := range c.Args {
 			for _, ref := range refRE.FindAllStringSubmatch(arg, -1) {
+				if ref[1] == outField && files {
+					continue
+				}
 				if _, ok := c.Input[ref[1]]; !ok {
-					add(fmt.Sprintf("%s.args[%d]", field, j), "arg references undeclared field %q", ref[1])
+					argField := fmt.Sprintf("%s.args[%d]", field, j)
+					if ref[1] == outField {
+						add(argField, "{{out}} needs output_from = \"files\"")
+						continue
+					}
+					add(argField, "arg references undeclared field %q", ref[1])
 				}
 			}
 		}
@@ -366,6 +407,29 @@ func validRisk(risk string) bool {
 // validOutput reports whether output is text or json.
 func validOutput(output string) bool {
 	return output == "text" || output == "json"
+}
+
+// validOutputFrom reports whether output_from is stdout or files (REQ-TB-012).
+func validOutputFrom(from string) bool {
+	return from == outputFromStdout || from == outputFromFiles
+}
+
+// validTransform reports whether transform is empty or a known transform
+// (REQ-TB-012).
+func validTransform(transform string) bool {
+	return transform == "" || transform == transformSubtitles
+}
+
+// usesOut reports whether any arg template references {{out}} (REQ-TB-012).
+func usesOut(args []string) bool {
+	for _, arg := range args {
+		for _, ref := range refRE.FindAllStringSubmatch(arg, -1) {
+			if ref[1] == outField {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validWorkdir reports whether workdir is data or workspace.

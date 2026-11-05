@@ -6,18 +6,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // maxOutput is the combined-output cap of one command run (design "Command
 // execution").
 const maxOutput = 64 * 1024
+
+// maxFileOutput is the output cap of a command with output_from = "files"
+// (REQ-TB-012).
+const maxFileOutput = 256 * 1024
+
+// maxFileRead bounds how many bytes of written files one run reads before a
+// transform shrinks them (REQ-TB-012).
+const maxFileRead = 16 << 20
 
 // errorTail is how many trailing characters an exit-code error keeps.
 const errorTail = 500
@@ -32,7 +44,10 @@ type RunResult struct {
 // Run renders the argv template of a command, execs the resolved binary with no
 // shell and returns its output (REQ-TB-004). It validates the required inputs
 // and enum values, applies defaults and resolves [env] secrets through the
-// injected resolver (REQ-TB-007).
+// injected resolver (REQ-TB-007). With output_from = "files" the {{out}}
+// template is a fresh temp directory, removed after the run, and the output is
+// the content of the files written there; a transform then cleans it
+// (REQ-TB-012).
 func (s *Store) Run(ctx context.Context, m Manifest, cmdName string, input map[string]any, workspace string, secret func(string) (string, bool)) (RunResult, error) {
 	command, ok := findCommand(m, cmdName)
 	if !ok {
@@ -42,7 +57,6 @@ func (s *Store) Run(ctx context.Context, m Manifest, cmdName string, input map[s
 	if err != nil {
 		return RunResult{}, err
 	}
-	args := renderArgs(command.Args, values)
 
 	path, ok := s.Resolve(m)
 	if !ok {
@@ -56,6 +70,17 @@ func (s *Store) Run(ctx context.Context, m Manifest, cmdName string, input map[s
 	if err != nil {
 		return RunResult{}, err
 	}
+	files := command.OutputFrom == outputFromFiles
+	var outDir string
+	if files {
+		outDir, err = os.MkdirTemp("", "lana-"+m.ID+"-out-*")
+		if err != nil {
+			return RunResult{}, err
+		}
+		defer func() { _ = os.RemoveAll(outDir) }()
+		values[outField] = outDir
+	}
+	args := renderArgs(command.Args, values)
 
 	timeout := command.TimeoutSecs
 	if timeout <= 0 {
@@ -91,13 +116,121 @@ func (s *Store) Run(ctx context.Context, m Manifest, cmdName string, input map[s
 	if exitCode != 0 {
 		return RunResult{}, fmt.Errorf("exit code %d: %s", exitCode, tail(text, errorTail))
 	}
+	truncated, limit := out.Truncated(), maxOutput
+	if files {
+		fileText, found, cut, err := fileOutput(outDir, command.Transform)
+		if err != nil {
+			return RunResult{}, err
+		}
+		if !found {
+			return RunResult{}, fmt.Errorf("toolbox: %s wrote no output file: %s", cmdName, tail(strings.TrimSpace(text), errorTail))
+		}
+		text, truncated, limit = fileText, cut, maxFileOutput
+	} else if command.Transform != "" {
+		text = applyTransform(command.Transform, text)
+	}
 	if command.Output == "json" && !json.Valid([]byte(strings.TrimSpace(text))) {
-		if out.Truncated() {
-			return RunResult{}, fmt.Errorf("toolbox: command output is larger than %d KiB and was cut off, so it is not valid JSON", maxOutput/1024)
+		if truncated {
+			return RunResult{}, fmt.Errorf("toolbox: command output is larger than %d KiB and was cut off, so it is not valid JSON", limit/1024)
 		}
 		return RunResult{}, errors.New("toolbox: command output is not valid JSON")
 	}
 	return RunResult{Output: text, ExitCode: exitCode, DurationMs: duration}, nil
+}
+
+// fileOutput reads the regular files written under dir, sorted by path,
+// applies the transform to each and joins them. With more than one file each
+// part starts with a "== <name>" line. The result is capped at maxFileOutput
+// with a note; found is false when no file was written (REQ-TB-012).
+func fileOutput(dir, transform string) (text string, found, truncated bool, err error) {
+	var names []string
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.Type().IsRegular() {
+			rel, relErr := filepath.Rel(dir, path)
+			if relErr != nil {
+				return relErr
+			}
+			names = append(names, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		return "", false, false, fmt.Errorf("toolbox: read output files: %w", err)
+	}
+	if len(names) == 0 {
+		return "", false, false, nil
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	budget := maxFileRead
+	for i, name := range names {
+		if budget <= 0 {
+			truncated = true
+			break
+		}
+		content, readCut, readErr := readCapped(filepath.Join(dir, filepath.FromSlash(name)), budget)
+		if readErr != nil {
+			return "", true, false, fmt.Errorf("toolbox: read output file %s: %w", name, readErr)
+		}
+		budget -= len(content)
+		truncated = truncated || readCut
+		part := string(content)
+		if transform != "" {
+			part = applyTransform(transform, part)
+		}
+		if len(names) > 1 {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString("== " + name + "\n")
+		}
+		b.WriteString(strings.TrimRight(part, "\n"))
+		b.WriteString("\n")
+	}
+	text = b.String()
+	if len(text) > maxFileOutput {
+		cut := maxFileOutput
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut]
+		truncated = true
+	}
+	if truncated {
+		text = strings.TrimRight(text, "\n") + fmt.Sprintf("\n…cut off at %d KiB\n", maxFileOutput/1024)
+	}
+	return text, true, truncated, nil
+}
+
+// readCapped reads at most limit bytes of a file and reports whether more was
+// left.
+func readCapped(path string, limit int) ([]byte, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = f.Close() }()
+	content, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(content) > limit {
+		return content[:limit], true, nil
+	}
+	return content, false, nil
+}
+
+// applyTransform runs a named output transform (REQ-TB-012). An unknown name
+// leaves the text unchanged; validation rejects it earlier.
+func applyTransform(transform, text string) string {
+	if transform == transformSubtitles {
+		return SubtitlesToText(text)
+	}
+	return text
 }
 
 // findCommand returns the named command of a manifest.
