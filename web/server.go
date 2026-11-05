@@ -77,8 +77,11 @@ type Server struct {
 	workflowsMu sync.RWMutex
 	// toolbox is the Tools port of the /v1/toolbox routes (spec #34). It is
 	// guarded by toolboxMu so SetToolbox may run after Start.
-	toolbox        ToolboxBackend
-	toolboxMu      sync.RWMutex
+	toolbox   ToolboxBackend
+	toolboxMu sync.RWMutex
+	// calendar holds the calendar and Google ports of the /v1/calendar routes
+	// (spec #35) and the pending Google OAuth states.
+	calendar       calendarPort
 	daemon         DaemonStore
 	telegramStatus func() TelegramStatus
 	telegramReset  TelegramResetSender
@@ -197,6 +200,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerLocalRoutes()
 	s.registerWorkflowRoutes()
 	s.registerToolboxRoutes()
+	s.registerCalendarRoutes()
 	s.handler = securityHeaders(s.mux)
 	return s, nil
 }
