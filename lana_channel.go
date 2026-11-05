@@ -2,6 +2,8 @@ package lana
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -74,11 +76,52 @@ func (rt *Runtime) CreateChannelSession(ctx context.Context, channel, address, a
 
 // LeaseSession takes the session lease so no other process can use the session.
 // The returned function releases it.
+//
+// Taking the lease also repairs an orphaned turn: a session still "running" or
+// "waiting_input" whose turn/end was lost (the previous holder died mid-turn)
+// gets an "interrupted" turn/end and goes back to idle, so its next message
+// runs instead of queueing forever. The lease rules out a live turn in another
+// process that leases; a turn running in this process (workflow, CLI and
+// channel turns hold no lease of their own) is never repaired.
 func (rt *Runtime) LeaseSession(ctx context.Context, sessionID string) (func() error, error) {
 	if err := rt.closedError(); err != nil {
 		return nil, err
 	}
-	return rt.store.TryLease(ctx, sessionID)
+	release, err := rt.store.TryLease(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := rt.repairOrphanedTurn(ctx, sessionID); err != nil {
+		_ = release()
+		return nil, fmt.Errorf("repair session %s: %w", sessionID, err)
+	}
+	return release, nil
+}
+
+// repairOrphanedTurn closes the session's open turn when no turn for it runs
+// in this process. The caller holds the session lease.
+func (rt *Runtime) repairOrphanedTurn(ctx context.Context, sessionID string) error {
+	info, err := rt.store.Info(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if info.Status != "running" && info.Status != "waiting_input" {
+		return nil
+	}
+	if rt.registry == nil {
+		return nil
+	}
+	repaired, err := rt.registry.WithoutTurn(sessionID, func() error {
+		_, err := rt.store.Open(ctx, sessionID)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if repaired {
+		slog.Warn("session: closed a turn left open by a dead process", "session", sessionID, "status", info.Status)
+	}
+	return nil
 }
 
 // LeaseHolder reports the PID of the process holding the session lease without

@@ -859,10 +859,15 @@ func (s *Store) Fork(ctx context.Context, parentID string, atSeq int64) (core.Se
 	return s.info(ctx, childID)
 }
 
-// Open opens a session with repair and a lease requirement.
+// Open opens a session with repair and a lease requirement. The caller must
+// hold the session lease. When the session is still "running" or
+// "waiting_input" (its turn/end was lost, for example because the process died
+// mid-turn), Open closes every orphaned approval, question and tool call with
+// an "interrupted" outcome, appends an "interrupted" turn/end for the orphaned
+// turn and sets the status back to idle. The caller must make sure no turn for
+// the session is live, since Open cannot tell a live turn from a dead one.
 func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, error) {
-	info, err := s.info(ctx, sessionID)
-	if err != nil {
+	if _, err := s.info(ctx, sessionID); err != nil {
 		return core.SessionInfo{}, err
 	}
 	var held int
@@ -873,9 +878,12 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 	if held == 0 {
 		return core.SessionInfo{}, ErrLeaseNotHeld
 	}
-	err = s.withWrite(ctx, func(conn *sql.Conn) error {
+	var repaired []core.SessionEvent
+	err := s.withWrite(ctx, func(conn *sql.Conn) error {
+		repaired = nil
 		var status string
-		if err := conn.QueryRowContext(ctx, "SELECT status FROM sessions WHERE id = ?", sessionID).Scan(&status); err != nil {
+		var seq int64
+		if err := conn.QueryRowContext(ctx, "SELECT status, last_seq FROM sessions WHERE id = ?", sessionID).Scan(&status, &seq); err != nil {
 			return err
 		}
 		if status != "running" && status != "waiting_input" {
@@ -884,6 +892,26 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 		events, err := s.loadEvents(ctx, sessionID)
 		if err != nil {
 			return err
+		}
+		now := nowMS()
+		insert := func(kind, turnID string, payload any) error {
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+			seq++
+			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)", sessionID, seq, kind, string(raw), turnID, now); err != nil {
+				return err
+			}
+			repaired = append(repaired, core.SessionEvent{SessionID: sessionID, Seq: seq, Kind: kind, Payload: raw, TurnID: turnID, CreatedAt: now})
+			return nil
+		}
+		// The orphaned turn is the last one started.
+		var turnID string
+		for _, event := range events {
+			if event.Kind == core.KindTurnStart {
+				turnID = event.TurnID
+			}
 		}
 		// Orphaned approval.
 		asked := map[string]string{}
@@ -900,15 +928,11 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 				decided[p.RequestID] = true
 			}
 		}
-		seq := info.LastSeq
-		now := nowMS()
 		for requestID, callID := range asked {
 			if decided[requestID] {
 				continue
 			}
-			seq++
-			payload, _ := json.Marshal(core.ApprovalDecided{V: 1, RequestID: requestID, CallID: callID, Outcome: core.OutcomeUnavailable, Reason: "interrupted"})
-			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, seq, core.KindApprovalDecided, string(payload), now); err != nil {
+			if err := insert(core.KindApprovalDecided, "", core.ApprovalDecided{V: 1, RequestID: requestID, CallID: callID, Outcome: core.OutcomeUnavailable, Reason: "interrupted"}); err != nil {
 				return err
 			}
 		}
@@ -931,9 +955,7 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 			if questionAnswers[requestID] {
 				continue
 			}
-			seq++
-			payload, _ := json.Marshal(core.QuestionAnswered{V: 1, RequestID: requestID, CallID: callID, Outcome: core.QuestionStatusUnavailable, Responder: "none", Reason: core.QuestionReasonInterrupted})
-			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, seq, core.KindQuestionAnswered, string(payload), now); err != nil {
+			if err := insert(core.KindQuestionAnswered, "", core.QuestionAnswered{V: 1, RequestID: requestID, CallID: callID, Outcome: core.QuestionStatusUnavailable, Responder: "none", Reason: core.QuestionReasonInterrupted}); err != nil {
 				return err
 			}
 		}
@@ -952,30 +974,27 @@ func (s *Store) Open(ctx context.Context, sessionID string) (core.SessionInfo, e
 				results[p.CallID] = true
 			}
 		}
-		for callID, turnID := range calls {
+		for callID, callTurn := range calls {
 			if results[callID] {
 				continue
 			}
-			seq++
-			payload, _ := json.Marshal(core.ToolResultPayload{V: 1, CallID: callID, Status: core.ToolStatusError, Output: "interrupted"})
-			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?)", sessionID, seq, core.KindToolResult, string(payload), turnID, now); err != nil {
+			if err := insert(core.KindToolResult, callTurn, core.ToolResultPayload{V: 1, CallID: callID, Status: core.ToolStatusError, Output: "interrupted"}); err != nil {
 				return err
 			}
 		}
-		{
-			seq++
-			payload, _ := json.Marshal(core.TurnEnd{V: 1, TurnID: "", Reason: "interrupted"})
-			if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, seq, core.KindTurnEnd, string(payload), now); err != nil {
-				return err
-			}
-		}
-		if _, err := conn.ExecContext(ctx, "UPDATE sessions SET status = 'idle', last_seq = ?, updated_at = ? WHERE id = ?", seq, now, sessionID); err != nil {
+		if err := insert(core.KindTurnEnd, turnID, core.TurnEnd{V: 1, TurnID: turnID, Reason: "interrupted"}); err != nil {
 			return err
 		}
-		return nil
+		_, err = conn.ExecContext(ctx, "UPDATE sessions SET status = 'idle', last_seq = ?, updated_at = ? WHERE id = ?", seq, now, sessionID)
+		return err
 	})
 	if err != nil {
 		return core.SessionInfo{}, err
+	}
+	if s.Hooks != nil && s.Hooks.SessionEvent != nil {
+		for _, event := range repaired {
+			s.Hooks.SessionEvent.Publish(event)
+		}
 	}
 	return s.info(ctx, sessionID)
 }

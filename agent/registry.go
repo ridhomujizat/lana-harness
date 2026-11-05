@@ -784,6 +784,26 @@ func (r *Registry) TurnActive(sessionID string) bool {
 	return runner.running
 }
 
+// WithoutTurn calls fn while no turn for the session runs or can start in this
+// process. It returns false without calling fn when a turn for the session is
+// running. A Start or Send for the session waits until fn returns. It backs the
+// repair of a turn whose turn/end was lost, which must never touch a live turn.
+func (r *Registry) WithoutTurn(sessionID string, fn func() error) (bool, error) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return false, ErrClosed
+	}
+	runner := r.runnerLocked(sessionID)
+	runner.mu.Lock()
+	r.mu.Unlock()
+	defer runner.mu.Unlock()
+	if runner.running {
+		return false, nil
+	}
+	return true, fn()
+}
+
 func (r *Registry) appendEvent(ctx context.Context, sessionID, kind, turnID string, payload any) error {
 	events := &Events{Store: r.store, SessionID: sessionID}
 	_, err := events.Append(ctx, core.EventDraft{Kind: kind, TurnID: turnID, Payload: payload})
