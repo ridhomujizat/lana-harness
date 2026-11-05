@@ -264,7 +264,7 @@ func TestKnowledgeIngest(t *testing.T) {
 	}
 
 	// A path that escapes the workspace is rejected.
-	escape := callKnowledgeTool(t, NewKnowledgeIngest(), core.ToolCtx{Knowledge: &fakeKnowledge{}, Workspace: ws}, `{"path":"../secret.txt"}`)
+	escape := callKnowledgeTool(t, NewKnowledgeIngest(), core.ToolCtx{Knowledge: &fakeKnowledge{}, Workspace: ws, WorkspaceOnly: true}, `{"path":"../secret.txt"}`)
 	if escape.Status != core.ToolStatusRejected {
 		t.Fatalf("escape output = %+v", escape)
 	}
@@ -277,7 +277,7 @@ func TestKnowledgeIngest(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(ws, "link.txt")); err != nil {
 		t.Fatal(err)
 	}
-	link := callKnowledgeTool(t, NewKnowledgeIngest(), core.ToolCtx{Knowledge: &fakeKnowledge{}, Workspace: ws}, `{"path":"link.txt"}`)
+	link := callKnowledgeTool(t, NewKnowledgeIngest(), core.ToolCtx{Knowledge: &fakeKnowledge{}, Workspace: ws, WorkspaceOnly: true}, `{"path":"link.txt"}`)
 	if link.Status != core.ToolStatusRejected {
 		t.Fatalf("symlink output = %+v", link)
 	}

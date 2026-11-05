@@ -16,7 +16,7 @@ import (
 var topKeys = []string{"agents", "channels", "knowledge", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace"}
+var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
@@ -362,6 +362,11 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["memory_capture"]; ok {
 		if _, ok := val.(bool); !ok {
 			add(path+".memory_capture", typeMsg("boolean", val))
+		}
+	}
+	if val, ok := v["workspace_only"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".workspace_only", typeMsg("boolean", val))
 		}
 	}
 	if val, ok := v["vision"]; ok {

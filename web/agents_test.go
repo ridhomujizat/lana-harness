@@ -648,6 +648,47 @@ func TestAgentsMemoryCaptureRoundTrip(t *testing.T) {
 	save(t, true)
 }
 
+// TestAgentsWorkspaceOnlyRoundTrip covers the workspace_only field: an absent
+// key reads as false, a true value round-trips through the agent save, and a
+// false save removes the key.
+func TestAgentsWorkspaceOnlyRoundTrip(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	list := t016AgentsList(t, s, cookie)
+	if row := t016FindAgentRow(t, list, "coder"); row.WorkspaceOnly {
+		t.Fatalf("absent workspace_only = %v, want false", row.WorkspaceOnly)
+	}
+
+	save := func(t *testing.T, value bool) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_version": webfiles.ConfigVersion(raw),
+			"workspace_only":   value,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("save workspace_only=%v status = %d, body = %q", value, rr.Code, rr.Body.String())
+		}
+		list := t016AgentsList(t, s, cookie)
+		if row := t016FindAgentRow(t, list, "coder"); row.WorkspaceOnly != value {
+			t.Fatalf("listed workspace_only = %v, want %v", row.WorkspaceOnly, value)
+		}
+	}
+
+	save(t, true)
+	save(t, false)
+	if got := t016ReadAgentTables(t, store.path)["coder"]["workspace_only"]; got != nil {
+		t.Fatalf("workspace_only key after false save = %v, want removed", got)
+	}
+}
+
 // TestAgentsReasoningEffort covers REQ-MDL-001 and REQ-MDL-020: the effort
 // round-trips through the agent API and the live config, and an unknown value
 // is rejected like the other agent fields.

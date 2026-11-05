@@ -46,7 +46,7 @@ func TestReadFileOtherSessionSpillRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := NewReadFile(&Guard{}).Call(context.Background(), core.ToolCtx{Workspace: ws, Home: home, SessionID: "s2"}, input)
+	out, err := NewReadFile(&Guard{}).Call(context.Background(), core.ToolCtx{Workspace: ws, Home: home, SessionID: "s2", WorkspaceOnly: true}, input)
 	if err != nil {
 		t.Fatal(err)
 	}

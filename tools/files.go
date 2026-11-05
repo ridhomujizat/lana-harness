@@ -72,7 +72,7 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if in.Limit < 1 || in.Limit > 2000 {
 		return inputErrorOutput(fmt.Errorf("limit must be between 1 and 2000"))
 	}
-	path, rejected := resolveReadToolPath(t.guard, tc, tc.Workspace, in.Path)
+	path, rejected := resolveReadToolPath(t.guard, tc, in.Path)
 	if rejected != nil {
 		return *rejected, nil
 	}
@@ -171,7 +171,7 @@ func (t *writeFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawM
 	if in.Path == "" {
 		return inputErrorOutput(fmt.Errorf("path is required"))
 	}
-	path, rejected := resolveToolPath(t.guard, tc.Workspace, in.Path)
+	path, rejected := resolveToolPath(t.guard, tc, in.Path)
 	if rejected != nil {
 		return *rejected, nil
 	}
@@ -228,7 +228,7 @@ func (t *editFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if in.OldString == in.NewString {
 		return inputErrorOutput(fmt.Errorf("old_string and new_string must differ"))
 	}
-	path, rejected := resolveToolPath(t.guard, tc.Workspace, in.Path)
+	path, rejected := resolveToolPath(t.guard, tc, in.Path)
 	if rejected != nil {
 		return *rejected, nil
 	}

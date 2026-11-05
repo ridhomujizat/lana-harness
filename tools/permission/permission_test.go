@@ -125,8 +125,9 @@ func TestWorkspaceNewFile(t *testing.T) {
 
 func TestEvaluateOrder(t *testing.T) {
 	s := setup(t, core.AgentConfig{
-		Permission: "ask",
-		Rules:      core.AgentRules{Deny: []string{"bash(rm*)"}, Allow: []string{"bash(git*)"}},
+		Permission:    "ask",
+		WorkspaceOnly: true,
+		Rules:         core.AgentRules{Deny: []string{"bash(rm*)"}, Allow: []string{"bash(git*)"}},
 	}, false)
 	approval := &fakeApproval{outcome: core.OutcomeRejected}
 	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
@@ -213,7 +214,7 @@ func TestGrantCoversWholeTool(t *testing.T) {
 }
 
 func TestGrantDoesNotBypassWorkspace(t *testing.T) {
-	s := setup(t, core.AgentConfig{Permission: "ask"}, false)
+	s := setup(t, core.AgentConfig{Permission: "ask", WorkspaceOnly: true}, false)
 	if _, err := s.store.Append(context.Background(), s.session.ID, []core.EventDraft{
 		{Kind: core.KindToolCall, Payload: core.ToolCallPayload{V: 1, CallID: "c1", Name: "write_file", Input: json.RawMessage(`{"path":"a.txt","content":"x"}`)}},
 		{Kind: core.KindApprovalDecided, Payload: core.ApprovalDecided{V: 1, RequestID: "r1", CallID: "c1", Outcome: core.OutcomeAllowedSession}},
@@ -613,5 +614,65 @@ func TestChildDoesNotInheritParentGrant(t *testing.T) {
 	got, _ := engine.Handle(context.Background(), callInputFor(child.ID, "researcher", "bash", `{"command":"git status"}`), nil)
 	if got.Allowed || approval.calls.Load() != 1 {
 		t.Fatalf("got=%+v approval calls=%d, want an approval request", got, approval.calls.Load())
+	}
+}
+
+// TestWorkspaceOnlyOffAllowsOutsidePaths: with workspace_only off (the
+// default), the permission engine no longer rejects an outside path. A read is
+// allowed and a write under ask goes to approval.
+func TestWorkspaceOnlyOffAllowsOutsidePaths(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "ask"}, false)
+	approval := &fakeApproval{outcome: core.OutcomeRejected}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+
+	read := callInput(s.session.ID, "read_file", `{"path":"../../etc/passwd"}`)
+	if got, _ := engine.Handle(context.Background(), read, nil); !got.Allowed {
+		t.Fatalf("read outside (workspace_only off) got=%+v, want allowed", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("read outside requested approval")
+	}
+
+	write := callInput(s.session.ID, "write_file", `{"path":"../outside.txt","content":"x"}`)
+	got, _ := engine.Handle(context.Background(), write, nil)
+	if got.Allowed || strings.Contains(got.Reason, "outside workspace") {
+		t.Fatalf("write outside got=%+v, want an approval request", got)
+	}
+	if approval.calls.Load() != 1 {
+		t.Fatalf("write outside approval calls = %d, want 1", approval.calls.Load())
+	}
+}
+
+// TestWorkspaceOnlyRejectsOutsidePaths: workspace_only keeps the outside
+// rejection for both reads and writes.
+func TestWorkspaceOnlyRejectsOutsidePaths(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "ask", WorkspaceOnly: true}, false)
+	approval := &fakeApproval{outcome: core.OutcomeAllowedOnce}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+
+	read := callInput(s.session.ID, "read_file", `{"path":"../../etc/passwd"}`)
+	if got, _ := engine.Handle(context.Background(), read, nil); got.Allowed || !strings.Contains(got.Reason, "outside workspace") {
+		t.Fatalf("read outside got=%+v, want outside workspace", got)
+	}
+	write := callInput(s.session.ID, "write_file", `{"path":"../outside.txt","content":"x"}`)
+	if got, _ := engine.Handle(context.Background(), write, nil); got.Allowed || !strings.Contains(got.Reason, "outside workspace") {
+		t.Fatalf("write outside got=%+v, want outside workspace", got)
+	}
+	if approval.calls.Load() != 0 {
+		t.Fatal("approval was requested for an outside path")
+	}
+}
+
+// TestChildInheritsParentWorkspaceOnly: a child whose parent agent sets
+// workspace_only is restricted even when the child's own agent leaves it off.
+func TestChildInheritsParentWorkspaceOnly(t *testing.T) {
+	s := setup(t, core.AgentConfig{Permission: "ask", WorkspaceOnly: true}, false)
+	s.config.Agents["researcher"] = core.AgentConfig{Permission: "ask"}
+	child := newChildSession(t, s, "researcher")
+	approval := &fakeApproval{outcome: core.OutcomeAllowedOnce}
+	engine := &Engine{Store: s.store, Config: s.config, Approval: approval}
+	read := callInputFor(child.ID, "researcher", "read_file", `{"path":"../../etc/passwd"}`)
+	if got, _ := engine.Handle(context.Background(), read, nil); got.Allowed || !strings.Contains(got.Reason, "outside workspace") {
+		t.Fatalf("child read outside got=%+v, want outside workspace", got)
 	}
 }

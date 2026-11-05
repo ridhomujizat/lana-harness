@@ -56,15 +56,9 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if !ok {
 		return reject("invalid input"), nil
 	}
-	if arg.Kind == pattern.ArgPath && !WithinWorkspace(workspace, arg.Value) {
-		return reject("outside workspace"), nil
-	}
-	if arg.Kind == pattern.ArgPath && arg.Alt != "" && !WithinWorkspace(workspace, arg.Alt) {
-		return reject("outside workspace"), nil
-	}
-
 	var parentPolicy core.Policy
 	var parentDeny []string
+	parentWorkspaceOnly := false
 	if info.ParentSessionID != "" {
 		parentInfo, err := e.Store.Info(ctx, info.ParentSessionID)
 		if err != nil {
@@ -81,6 +75,18 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		}
 		parentPolicy = EffectivePolicy(parentEvents, parentFallback)
 		parentDeny = parentAgent.Rules.Deny
+		parentWorkspaceOnly = parentAgent.WorkspaceOnly
+	}
+	// workspace_only keeps every path inside the session workspace. A child
+	// inherits the restriction from its parent agent even when the child's own
+	// agent leaves it off.
+	if agent.WorkspaceOnly || parentWorkspaceOnly {
+		if arg.Kind == pattern.ArgPath && !WithinWorkspace(workspace, arg.Value) {
+			return reject("outside workspace"), nil
+		}
+		if arg.Kind == pattern.ArgPath && arg.Alt != "" && !WithinWorkspace(workspace, arg.Alt) {
+			return reject("outside workspace"), nil
+		}
 	}
 
 	rules := agent.Rules

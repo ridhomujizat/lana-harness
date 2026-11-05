@@ -386,7 +386,7 @@ func (t *knowledgeIngestTool) Call(ctx context.Context, tc core.ToolCtx, raw jso
 	)
 	switch {
 	case strings.TrimSpace(in.Path) != "":
-		abs, rejected := resolveToolPath(nil, tc.Workspace, in.Path)
+		abs, rejected := resolveToolPath(nil, tc, in.Path)
 		if rejected != nil {
 			return *rejected, nil
 		}

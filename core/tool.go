@@ -34,6 +34,9 @@ type ToolCtx struct {
 	CallID    string
 	AgentName string
 	Workspace string
+	// WorkspaceOnly keeps the file tools inside the workspace. False (the
+	// default) lets them reach any path.
+	WorkspaceOnly bool
 	// Home is $LANA_HOME. Empty when the runtime has no home folder.
 	Home string
 	// Skills are the global skills listed in the agent's config.

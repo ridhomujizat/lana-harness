@@ -58,6 +58,7 @@ var agentKeys = map[string]bool{
 	"compaction_threshold": true,
 	"compaction_retain":    true,
 	"memory_capture":       true,
+	"workspace_only":       true,
 	"vision":               true,
 	"description":          true,
 	"title":                true,
@@ -131,6 +132,9 @@ type agentJSON struct {
 	// MemoryCapture is the background capture switch; an absent key means on
 	// (REQ-MEM-010).
 	MemoryCapture bool `json:"memory_capture"`
+	// WorkspaceOnly keeps the file tools inside the workspace; an absent key
+	// means off.
+	WorkspaceOnly bool `json:"workspace_only"`
 	// Vision overrides the model's catalog vision flag (API-ATT-005). nil means
 	// the key is absent and the catalog decides.
 	Vision *bool `json:"vision,omitempty"`
@@ -173,6 +177,9 @@ type agentRecord struct {
 	CompactionRetain    float64
 	// MemoryCapture is nil when the key is absent; nil means on (REQ-MEM-010).
 	MemoryCapture *bool
+	// WorkspaceOnly keeps the file tools inside the workspace; an absent key
+	// means off.
+	WorkspaceOnly bool
 	// Vision is nil when the key is absent; the model catalog decides then
 	// (API-ATT-005).
 	Vision      *bool
@@ -322,6 +329,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			if record.MemoryCapture != nil {
 				row.MemoryCapture = *record.MemoryCapture
 			}
+			row.WorkspaceOnly = record.WorkspaceOnly
 			if record.Vision != nil {
 				vision := *record.Vision
 				row.Vision = &vision
@@ -931,6 +939,13 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.MemoryCapture = &value
 		return nil
+	case "workspace_only":
+		var value bool
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		record.WorkspaceOnly = value
+		return nil
 	case "vision":
 		// API-ATT-005: a boolean that overrides the catalog vision flag.
 		var value bool
@@ -1153,6 +1168,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		CompactionThreshold: mapAgentFloat(table, "compaction_threshold"),
 		CompactionRetain:    mapAgentFloat(table, "compaction_retain"),
 		MemoryCapture:       mapAgentBoolPtr(table, "memory_capture"),
+		WorkspaceOnly:       mapAgentBool(table, "workspace_only"),
 		Vision:              mapAgentBoolPtr(table, "vision"),
 		Description:         mapAgentString(table, "description"),
 		Title:               mapAgentString(table, "title"),
@@ -1220,6 +1236,13 @@ func mapAgentBoolPtr(table map[string]any, key string) *bool {
 	return &value
 }
 
+// mapAgentBool returns false when the key is absent. A config with no
+// workspace_only key leaves the guard open.
+func mapAgentBool(table map[string]any, key string) bool {
+	value, _ := table[key].(bool)
+	return value
+}
+
 func renderAgentTable(name string, record agentRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[agents.%s]\n", name)
@@ -1241,6 +1264,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentFloat(&b, "compaction_threshold", record.CompactionThreshold)
 	writeAgentFloat(&b, "compaction_retain", record.CompactionRetain)
 	writeAgentBoolPtr(&b, "memory_capture", record.MemoryCapture)
+	writeAgentBool(&b, "workspace_only", record.WorkspaceOnly)
 	writeAgentBoolPtr(&b, "vision", record.Vision)
 	writeAgentString(&b, "description", record.Description)
 	writeAgentString(&b, "title", record.Title)
@@ -1293,6 +1317,15 @@ func writeAgentBoolPtr(b *strings.Builder, key string, value *bool) {
 		return
 	}
 	fmt.Fprintf(b, "%s = %t\n", key, *value)
+}
+
+// writeAgentBool writes the key only when it is true; false is the default and
+// is left out of the table.
+func writeAgentBool(b *strings.Builder, key string, value bool) {
+	if !value {
+		return
+	}
+	fmt.Fprintf(b, "%s = %t\n", key, value)
 }
 
 func agentStringArray(values []string) string {

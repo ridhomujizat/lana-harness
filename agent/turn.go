@@ -146,6 +146,9 @@ type resolvedAgent struct {
 	// vision reports whether the model can see images. The agent key wins over
 	// the catalog (REQ-ATT-003).
 	vision bool
+	// workspaceOnly keeps the file tools inside the workspace when the agent
+	// sets workspace_only = true.
+	workspaceOnly bool
 	// reasoningEffort is the thinking effort of every step request; "" means
 	// the provider default (REQ-MDL-001).
 	reasoningEffort string
@@ -274,6 +277,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		maxSteps:        maxSteps,
 		child:           info.ParentSessionID != "",
 		vision:          vision,
+		workspaceOnly:   cfg.WorkspaceOnly,
 		reasoningEffort: effort,
 	}, nil
 }
@@ -1175,6 +1179,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				}
 				toolCtx := core.ToolCtx{
 					SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
+					WorkspaceOnly: resolved.workspaceOnly,
 					Skills:        resolved.skills,
 					Questions:     rn.reg.questions,
 					Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},

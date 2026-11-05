@@ -86,7 +86,8 @@ type GeneralKey =
   | "permission"
   | "max_steps"
   | "context_window"
-  | "memory_capture";
+  | "memory_capture"
+  | "workspace_only";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
   "title",
@@ -99,6 +100,7 @@ const GENERAL_KEYS: readonly GeneralKey[] = [
   "max_steps",
   "context_window",
   "memory_capture",
+  "workspace_only",
 ];
 
 /* REQ-ROOM-009: the six agent colors and their swatch previews. */
@@ -148,6 +150,7 @@ interface AgentValues {
   max_steps: number;
   context_window: number;
   memory_capture: boolean;
+  workspace_only: boolean;
 }
 
 interface AgentForm {
@@ -161,6 +164,7 @@ interface AgentForm {
   max_steps: string;
   context_window: string;
   memory_capture: boolean;
+  workspace_only: boolean;
 }
 
 interface FallbackDraft {
@@ -255,6 +259,8 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
     context_window: Number(record.context_window) || 0,
     // REQ-MEM-010: memory_capture is on unless the config says false.
     memory_capture: record.memory_capture !== false,
+    // workspace_only is off unless the config says true.
+    workspace_only: record.workspace_only === true,
   };
 }
 
@@ -270,6 +276,7 @@ function formValues(initial: AgentValues): AgentForm {
     max_steps: initial.max_steps ? String(initial.max_steps) : "",
     context_window: initial.context_window ? String(initial.context_window) : "",
     memory_capture: initial.memory_capture !== false,
+    workspace_only: initial.workspace_only === true,
   };
 }
 
@@ -285,6 +292,7 @@ function canonical(form: AgentForm): AgentValues {
     max_steps: numberValue(form.max_steps),
     context_window: numberValue(form.context_window),
     memory_capture: form.memory_capture === true,
+    workspace_only: form.workspace_only === true,
   };
 }
 
@@ -375,6 +383,8 @@ function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
       patch.context_window = current.context_window;
     } else if (key === "memory_capture") {
       patch.memory_capture = current.memory_capture;
+    } else if (key === "workspace_only") {
+      patch.workspace_only = current.workspace_only;
     }
   }
   return patch;
@@ -1570,6 +1580,31 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     disabled={saving}
                     onChange={(event) =>
                       updateField("context_window", event.target.value)
+                    }
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section className="sblock" aria-labelledby="agent-files-title">
+              <h2 id="agent-files-title">Files</h2>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <span className="t" id="agent-workspace-only-label">
+                    Stay in the workspace
+                  </span>
+                  <div className="d">
+                    When on, file tools only read and edit files inside the
+                    agent's workspace. When off, they can reach any path.
+                  </div>
+                </div>
+                <div className="agent-ctl">
+                  <Toggle
+                    aria-labelledby="agent-workspace-only-label"
+                    checked={form.workspace_only}
+                    disabled={saving}
+                    onChange={(checked) =>
+                      updateField("workspace_only", checked)
                     }
                   />
                 </div>

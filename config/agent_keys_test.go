@@ -146,6 +146,33 @@ func TestAgentMemoryCaptureLoaded(t *testing.T) {
 	}
 }
 
+func TestAgentWorkspaceOnlyValidation(t *testing.T) {
+	for _, table := range []string{
+		"[agents.coder]\nworkspace_only = true\n",
+		"[agents.coder]\nworkspace_only = false\n",
+	} {
+		if _, err := loadAgentKeys(t, table); err != nil {
+			t.Fatalf("unexpected error for %q: %v", table, err)
+		}
+	}
+	errs := agentKeyErrors(t, "[agents.coder]\nworkspace_only = \"yes\"\n")
+	found := findError(errs, "agents.coder.workspace_only")
+	if found == nil || !strings.Contains(found.Msg, "boolean") {
+		t.Fatalf("workspace_only error = %+v", found)
+	}
+}
+
+func TestAgentWorkspaceOnlyLoaded(t *testing.T) {
+	res, err := loadAgentKeys(t, "[agents.coder]\nworkspace_only = true\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, ok := res.Config.Agents["coder"]
+	if !ok || !cfg.WorkspaceOnly {
+		t.Fatalf("workspace_only = %v", cfg.WorkspaceOnly)
+	}
+}
+
 func TestAgentVisionValidation(t *testing.T) {
 	for _, table := range []string{
 		"[agents.coder]\nvision = true\n",

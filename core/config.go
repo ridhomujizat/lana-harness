@@ -78,6 +78,9 @@ type AgentConfig struct {
 	// MemoryCapture turns the background capture pass on or off. Nil means on
 	// (REQ-MEM-010).
 	MemoryCapture *bool `toml:"memory_capture"`
+	// WorkspaceOnly keeps the file tools and the permission engine inside the
+	// session workspace. False (the default) lets them reach any path.
+	WorkspaceOnly bool `toml:"workspace_only"`
 	// Vision turns image input on or off for the agent. Nil means the catalog
 	// flag decides (API-ATT-005).
 	Vision      *bool  `toml:"vision"`

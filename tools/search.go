@@ -56,7 +56,7 @@ func (t *globTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	}
 	base := ws
 	if in.Path != "" {
-		resolved, rejected := resolveReadToolPath(t.guard, tc, ws, in.Path)
+		resolved, rejected := resolveReadToolPath(t.guard, tc, in.Path)
 		if rejected != nil {
 			return *rejected, nil
 		}
@@ -145,7 +145,7 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	}
 	base := ws
 	if in.Path != "" {
-		resolved, rejected := resolveReadToolPath(t.guard, tc, ws, in.Path)
+		resolved, rejected := resolveReadToolPath(t.guard, tc, in.Path)
 		if rejected != nil {
 			return *rejected, nil
 		}

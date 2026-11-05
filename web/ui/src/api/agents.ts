@@ -60,6 +60,7 @@ export interface AgentWriteFields {
   max_steps?: number;
   context_window?: number;
   memory_capture?: boolean;
+  workspace_only?: boolean;
   reasoning_effort?: string;
   rules?: { allow?: string[]; deny?: string[] };
   expected_version?: string;

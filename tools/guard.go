@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/pathguard"
 	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
 
@@ -34,36 +35,57 @@ func (g *Guard) Resolve(path string) (string, error) {
 	return ResolveInWorkspace(ws, path)
 }
 
-// ResolveInWorkspace returns the absolute path with symlinks evaluated.
-func ResolveInWorkspace(workspace, path string) (string, error) {
+// expandPath turns path into a cleaned absolute path. A leading ~ expands to
+// the user home; a relative path joins the absolute workspace. It also returns
+// the absolute workspace.
+func expandPath(workspace, path string) (string, string, error) {
 	ws, err := filepath.Abs(workspace)
 	if err != nil {
-		return "", err
-	}
-	if resolved, err := filepath.EvalSymlinks(ws); err == nil {
-		ws = resolved
+		return "", "", err
 	}
 	target := path
+	if strings.HasPrefix(target, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", "", err
+		}
+		target = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(target, "~"), "/"))
+	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(ws, target)
 	}
-	target, err = filepath.Abs(target)
+	return ws, filepath.Clean(target), nil
+}
+
+// ResolvePathAnywhere returns the cleaned absolute path with symlinks resolved
+// as far as the path exists. It has no workspace boundary: a leading ~ expands
+// to the user home and a relative path joins the absolute workspace.
+func ResolvePathAnywhere(workspace, path string) (string, error) {
+	_, target, err := expandPath(workspace, path)
 	if err != nil {
 		return "", err
 	}
-	if resolved, err := filepath.EvalSymlinks(target); err == nil {
-		target = resolved
-	} else {
-		parent := filepath.Dir(target)
-		if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
-			target = filepath.Join(resolvedParent, filepath.Base(target))
-		}
-	}
-	rel, err := filepath.Rel(ws, target)
+	return pathguard.Resolve(target)
+}
+
+// ResolveInWorkspace returns the absolute path with every symlink component
+// resolved. A dangling symlink and a symlink in a parent component are both
+// followed, so a target or a symlink that lands outside the workspace is
+// rejected with ErrOutsideWorkspace.
+func ResolveInWorkspace(workspace, path string) (string, error) {
+	ws, target, err := expandPath(workspace, path)
 	if err != nil {
-		return "", ErrOutsideWorkspace
+		return "", err
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+	ws, err = pathguard.Resolve(ws)
+	if err != nil {
+		return "", err
+	}
+	target, err = pathguard.Resolve(target)
+	if err != nil {
+		return "", err
+	}
+	if !pathguard.Inside(ws, target) {
 		return "", ErrOutsideWorkspace
 	}
 	return target, nil
@@ -106,8 +128,19 @@ func effectiveWorkspace(g *Guard, tcWorkspace string) string {
 	return "."
 }
 
-func resolveToolPath(g *Guard, tcWorkspace, path string) (string, *core.ToolOutput) {
-	resolved, err := ResolveInWorkspace(effectiveWorkspace(g, tcWorkspace), path)
+// resolveToolPath resolves a path for the file tools. With tc.WorkspaceOnly it
+// keeps the path inside the workspace; otherwise any path is reachable.
+func resolveToolPath(g *Guard, tc core.ToolCtx, path string) (string, *core.ToolOutput) {
+	workspace := effectiveWorkspace(g, tc.Workspace)
+	var (
+		resolved string
+		err      error
+	)
+	if tc.WorkspaceOnly {
+		resolved, err = ResolveInWorkspace(workspace, path)
+	} else {
+		resolved, err = ResolvePathAnywhere(workspace, path)
+	}
 	if err == nil {
 		return resolved, nil
 	}
@@ -121,16 +154,16 @@ func resolveToolPath(g *Guard, tcWorkspace, path string) (string, *core.ToolOutp
 
 // resolveReadToolPath resolves a path for the read-only tools. A path inside
 // the spill directory of the session in tc is accepted even when it is outside
-// the workspace (REQ-LTC-021); every other path resolves against the workspace.
-func resolveReadToolPath(g *Guard, tc core.ToolCtx, workspace, path string) (string, *core.ToolOutput) {
+// the workspace (REQ-LTC-021); every other path follows tc.WorkspaceOnly.
+func resolveReadToolPath(g *Guard, tc core.ToolCtx, path string) (string, *core.ToolOutput) {
 	dir, ok := spillSessionDir(tc)
 	if !ok {
-		return resolveToolPath(g, workspace, path)
+		return resolveToolPath(g, tc, path)
 	}
 	if target, inside := pathWithin(dir, path); inside {
 		return target, nil
 	}
-	return resolveToolPath(g, workspace, path)
+	return resolveToolPath(g, tc, path)
 }
 
 // spillSessionDir returns the canonical spill directory of the session in tc.

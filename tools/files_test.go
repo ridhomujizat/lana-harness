@@ -15,7 +15,12 @@ import (
 
 func callTool(t *testing.T, tool core.Tool, workspace, input string) core.ToolOutput {
 	t.Helper()
-	out, err := tool.Call(context.Background(), core.ToolCtx{Workspace: workspace}, json.RawMessage(input))
+	return callToolCtx(t, tool, core.ToolCtx{Workspace: workspace}, input)
+}
+
+func callToolCtx(t *testing.T, tool core.Tool, tc core.ToolCtx, input string) core.ToolOutput {
+	t.Helper()
+	out, err := tool.Call(context.Background(), tc, json.RawMessage(input))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +348,7 @@ func TestGuardOutside(t *testing.T) {
 	if _, err := ResolveInWorkspace(ws, "/etc/passwd"); !errors.Is(err, ErrOutsideWorkspace) {
 		t.Fatalf("err=%v", err)
 	}
-	out := callTool(t, NewReadFile(&Guard{Workspace: ws}), ws, `{"path":"/etc/passwd"}`)
+	out := callToolCtx(t, NewReadFile(&Guard{Workspace: ws}), core.ToolCtx{Workspace: ws, WorkspaceOnly: true}, `{"path":"/etc/passwd"}`)
 	if out.Status != core.ToolStatusRejected || out.Output != "outside workspace" {
 		t.Fatalf("out=%+v", out)
 	}
@@ -358,7 +363,7 @@ func TestGuardSymlinkOut(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(ws, "link")); err != nil {
 		t.Fatal(err)
 	}
-	out := callTool(t, NewReadFile(&Guard{Workspace: ws}), ws, `{"path":"link"}`)
+	out := callToolCtx(t, NewReadFile(&Guard{Workspace: ws}), core.ToolCtx{Workspace: ws, WorkspaceOnly: true}, `{"path":"link"}`)
 	if out.Status != core.ToolStatusRejected {
 		t.Fatalf("out=%+v", out)
 	}
