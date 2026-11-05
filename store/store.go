@@ -18,10 +18,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/id"
+	"github.com/ridhomujizat/lana-harness/internal/sqlitex"
 )
 
 //go:embed migrations/*.sql
@@ -79,7 +78,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	_ = os.Chmod(path, 0o600)
 	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
-	db, err := openDB(dsn)
+	db, err := sqlitex.Open(dsn)
 	if err != nil {
 		return nil, err
 	}

@@ -18,10 +18,9 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
+	"github.com/ridhomujizat/lana-harness/internal/sqlitex"
 )
 
 // Index sizing and schema constants (design §3).
@@ -127,7 +126,7 @@ func OpenIndex(dbPath, vaultRoot string) (*Index, error) {
 		return nil, err
 	}
 	dsn := "file:" + dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sqlitex.Open(dsn)
 	if err != nil {
 		return nil, err
 	}

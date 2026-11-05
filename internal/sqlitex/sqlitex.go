@@ -1,9 +1,13 @@
-package store
+// Package sqlitex opens modernc.org/sqlite databases through a connector that
+// keeps a caller's cancelled context away from the driver's query path.
+package sqlitex
 
 import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+
+	_ "modernc.org/sqlite"
 )
 
 // sqliteConn is the set of driver interfaces a modernc.org/sqlite connection
@@ -19,8 +23,9 @@ type sqliteConn interface {
 	driver.Validator
 }
 
-// openDB opens the database through cancelSafeConnector.
-func openDB(dsn string) (*sql.DB, error) {
+// Open opens the SQLite database at dsn through cancelSafeConnector. Use it
+// instead of sql.Open("sqlite", dsn).
+func Open(dsn string) (*sql.DB, error) {
 	plain, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
@@ -33,14 +38,20 @@ func openDB(dsn string) (*sql.DB, error) {
 // cancelSafeConnector opens connections that never hand a cancellable context
 // to the driver's query path.
 //
-// modernc.org/sqlite (v1.34.x) leaks the statement when the context ends while
-// QueryContext runs: it has already stepped the first row, then drops the rows
-// without closing them and returns ctx.Err(). database/sql returns the
+// modernc.org/sqlite before v1.61.1 leaks the statement when the context ends
+// while QueryContext runs: it has already stepped the first row, then drops the
+// rows without closing them and returns ctx.Err(). database/sql returns the
 // connection to the pool with that statement still open, so the connection
 // keeps an old WAL read snapshot. The next BEGIN IMMEDIATE on it fails at once
 // with SQLITE_BUSY_SNAPSHOT ("database is locked (517)"), and so does every
 // later write that lands on it. Web stream pollers cancel their reads whenever
 // a client drops the request, which is enough to poison a connection.
+//
+// v1.61.1 closes those rows, but cancelled reads still left connections in
+// use for a while after every caller had returned, so they outlived db.Close
+// and its files changed after Close (store's TestCancelledReadsDoNotBreakWrites
+// failed its TempDir cleanup in 4 of 320 runs without this connector, and in
+// none of 290 with it).
 type cancelSafeConnector struct {
 	dsn    string
 	driver driver.Driver
