@@ -93,3 +93,15 @@
     white-space: normal;
   }
 }
+
+/* After the page-enter animation, content that mounts later (a switched tab
+   panel, table rows, stat cards) appears at once instead of rising in again. */
+.fx-route.settled > .page > *,
+.fx-route.settled > .page > * > *,
+.fx-route.settled .agent-tabs-table tbody tr,
+.fx-route.settled .wf-stat,
+.fx-route.settled .wf-runs .wf-node,
+.fx-route.settled .grid2 > *,
+.fx-route.settled .grid2 > * > * {
+  animation: none;
+}

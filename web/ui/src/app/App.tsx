@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { authSession, logout as apiLogout } from "../api/auth";
 import { setCSRF, setUnauthorizedHandler } from "../api/client";
@@ -300,8 +300,47 @@ function daemonCard(info: DaemonState | null): DaemonCard {
   };
 }
 
+/* The remount key of the content area. Switching tabs inside one page (agent
+   profile, workflow, settings) or picking another item in a list + detail
+   page (chats, history) keeps the page mounted, so it neither reloads nor
+   replays the page-enter animation (owner report 2026-11-05). */
+export function pageKey(route: Route): string {
+  const params = route.params || {};
+  switch (route.view) {
+    case "agent":
+      return "agent:" + (params.name || "");
+    case "workflow":
+    case "workflow-runs":
+    case "workflow-run":
+    case "workflow-settings":
+      return "workflow:" + (params.id || "");
+    case "settings":
+      return "settings";
+    case "chats":
+    case "chat":
+      return "chats";
+    case "sessions":
+    case "new-session":
+    case "session":
+      return "sessions";
+    default:
+      return route.path;
+  }
+}
+
 export function App() {
+
   const route = useRoute();
+  /* The page-enter animation plays once per page: after it, the content is
+     marked settled so a tab panel or list item that mounts later shows at
+     once (owner report 2026-11-05). */
+  const currentPage = pageKey(route);
+  const settleRoute = useCallback((node: HTMLDivElement | null) => {
+    if (!node) {
+      return;
+    }
+    window.setTimeout(() => node.classList.add("settled"), 700);
+  }, []);
   const announce = useAnnounce();
   const [auth, setAuth] = useState<AuthState>("checking");
   const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
@@ -534,7 +573,8 @@ export function App() {
           className="content fx-route"
           id="main-content"
           tabIndex={-1}
-          key={route.path}
+          key={currentPage}
+          ref={settleRoute}
         >
           {routeContent(route, theme, changeTheme)}
         </div>
