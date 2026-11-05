@@ -1,17 +1,25 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/ridhomujizat/lana-harness/internal/mcpconfig"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
+	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 )
 
@@ -41,14 +49,71 @@ type ToolboxBackend interface {
 	Jobs(id string) []toolbox.Job
 	Log(id, jobID string) (string, bool, error)
 	Run(ctx context.Context, id, cmd string, input map[string]any, workspace string) (toolbox.RunResult, error)
+	// MCPServers returns one MCP server per installed package that declares an
+	// [mcp] spec (REQ-TB-011).
+	MCPServers() []toolbox.MCPServer
 }
+
+// toolboxMCPSyncMu serializes the managed-MCP applies so a toolbox event and a
+// direct sync never interleave. The config write itself is also under
+// configWriteMu (REQ-TB-011).
+var toolboxMCPSyncMu sync.Mutex
+
+// toolboxMCPLoops tracks the one background MCP sync loop each server owns.
+var toolboxMCPLoops sync.Map
 
 // SetToolbox installs the Tools port. Call it before Start; a nil port makes
 // the /v1/toolbox routes answer 503 toolbox_unavailable.
+//
+// Installing the port also starts the managed-MCP loop: the loop applies the
+// [mcp.<package id>] servers of the installed packages and follows the toolbox
+// change stream, and it stops with the server (REQ-TB-011).
 func (s *Server) SetToolbox(b ToolboxBackend) {
 	s.toolboxMu.Lock()
-	defer s.toolboxMu.Unlock()
 	s.toolbox = b
+	store := s.configStore
+	s.toolboxMu.Unlock()
+	if b == nil {
+		return
+	}
+	// Capture the config store here so the loop never reads a field another
+	// goroutine may write. A server without a config store has nothing to sync.
+	if _, loaded := toolboxMCPLoops.LoadOrStore(s, struct{}{}); loaded {
+		return
+	}
+	go s.runToolboxMCP(b, store)
+}
+
+// runToolboxMCP applies the managed MCP servers of the installed packages on
+// every toolbox change until the server stops (REQ-TB-011).
+func (s *Server) runToolboxMCP(backend ToolboxBackend, store ConfigStore) {
+	changes, unsubscribe := backend.Subscribe()
+	defer unsubscribe()
+	s.runToolboxMCPSync(context.Background(), backend, store)
+	for {
+		select {
+		case <-s.stopping():
+			return
+		case _, ok := <-changes:
+			if !ok {
+				return
+			}
+			s.runToolboxMCPSync(context.Background(), backend, store)
+		}
+	}
+}
+
+// syncToolboxMCP applies the managed MCP servers once with the installed config
+// store (REQ-TB-011).
+func (s *Server) syncToolboxMCP(ctx context.Context) {
+	s.runToolboxMCPSync(ctx, s.toolboxBackend(), s.configStore)
+}
+
+// runToolboxMCPSync serializes one apply of the managed MCP servers.
+func (s *Server) runToolboxMCPSync(ctx context.Context, backend ToolboxBackend, store ConfigStore) {
+	toolboxMCPSyncMu.Lock()
+	defer toolboxMCPSyncMu.Unlock()
+	s.applyToolboxMCP(ctx, backend, store)
 }
 
 func (s *Server) toolboxBackend() ToolboxBackend {
@@ -67,7 +132,7 @@ func (s *Server) toolboxOrError(w http.ResponseWriter) ToolboxBackend {
 	return backend
 }
 
-// registerToolboxRoutes registers API-TB-001 through API-TB-009 (spec #34).
+// registerToolboxRoutes registers API-TB-001 through API-TB-010 (spec #34).
 // The /v1 routes go through Handle so the auth, Host, Origin, and CSRF checks
 // apply.
 func (s *Server) registerToolboxRoutes() {
@@ -80,6 +145,7 @@ func (s *Server) registerToolboxRoutes() {
 	s.Handle("POST /v1/toolbox/{id}/install", http.HandlerFunc(s.handleToolboxInstall))
 	s.Handle("POST /v1/toolbox/{id}/uninstall", http.HandlerFunc(s.handleToolboxUninstall))
 	s.Handle("POST /v1/toolbox/{id}/check", http.HandlerFunc(s.handleToolboxCheck))
+	s.Handle("POST /v1/toolbox/{id}/agents", http.HandlerFunc(s.handleToolboxSetAgent))
 	s.Handle("GET /v1/toolbox/{id}/jobs/{job}/log", http.HandlerFunc(s.handleToolboxJobLog))
 	s.Handle("POST /v1/toolbox/{id}/run", http.HandlerFunc(s.handleToolboxRun))
 }
@@ -185,20 +251,25 @@ func (s *Server) handleToolboxDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleToolboxInstall serves API-TB-006 (REQ-TB-003). The job runs in the
-// background, so the answer is 202 with the running job.
+// handleToolboxInstall serves API-TB-006 (REQ-TB-003, REQ-TB-009). The job runs
+// in the background, so the answer is 202 with the running job. A missing
+// method, or -1, installs with the first method that fits this machine.
 func (s *Server) handleToolboxInstall(w http.ResponseWriter, r *http.Request) {
 	backend := s.toolboxOrError(w)
 	if backend == nil {
 		return
 	}
 	var body struct {
-		Method int `json:"method"`
+		Method *int `json:"method"`
 	}
 	if !decodeJSONObject(w, r, toolboxBodyLimit, &body) {
 		return
 	}
-	job, err := backend.Install(r.Context(), r.PathValue("id"), body.Method)
+	method := -1
+	if body.Method != nil {
+		method = *body.Method
+	}
+	job, err := backend.Install(r.Context(), r.PathValue("id"), method)
 	if err != nil {
 		s.writeToolboxError(w, "install package", err)
 		return
@@ -232,6 +303,159 @@ func (s *Server) handleToolboxCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, pkg.View())
+}
+
+// errToolboxAgentNotFound is the "Use with agents" error for an unknown agent.
+var errToolboxAgentNotFound = errors.New("web: toolbox agent not found")
+
+// errToolboxConfigMissing is the "Use with agents" error for a missing
+// config.toml.
+var errToolboxConfigMissing = errors.New("web: config.toml does not exist")
+
+// handleToolboxSetAgent serves API-TB-010, the "Use with agents" switch of
+// REQ-TB-011. It turns one package on or off for one agent and answers the
+// refreshed detail. An MCP package toggles the agent's mcp list; a package
+// without an MCP spec toggles its command tools in the agent's tools list. A
+// package that is not installed is 409 not_installed (REQ-TB-011).
+func (s *Server) handleToolboxSetAgent(w http.ResponseWriter, r *http.Request) {
+	backend := s.toolboxOrError(w)
+	if backend == nil {
+		return
+	}
+	var body struct {
+		Agent   string `json:"agent"`
+		Enabled bool   `json:"enabled"`
+	}
+	if !decodeJSONObject(w, r, toolboxBodyLimit, &body) {
+		return
+	}
+	store := s.configStoreOrError(w)
+	if store == nil {
+		return
+	}
+	id := r.PathValue("id")
+	pkg, err := backend.Get(r.Context(), id)
+	if err != nil {
+		s.writeToolboxError(w, "get package", err)
+		return
+	}
+	if pkg.Status.State != toolbox.StateInstalled {
+		writeAPIError(w, http.StatusConflict, "not_installed", "package is not installed")
+		return
+	}
+	if err := s.setToolboxAgentUse(r.Context(), backend, store, pkg, body.Agent, body.Enabled); err != nil {
+		s.writeToolboxAgentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.toolboxDetail(r.Context(), backend, id, pkg))
+}
+
+// setToolboxAgentUse edits one agent's mcp or tools list with the same config
+// path PUT /v1/agents/{name} uses: read the current version internally, rewrite
+// the one table, validate, write, and apply (REQ-TB-011).
+func (s *Server) setToolboxAgentUse(ctx context.Context, backend ToolboxBackend, store ConfigStore, pkg toolbox.Package, agent string, enabled bool) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	file, err := store.ConfigFile(ctx)
+	if err != nil {
+		return err
+	}
+	if !file.Exists {
+		return errToolboxConfigMissing
+	}
+	tables, err := parseAgentTables(file.Raw)
+	if err != nil {
+		return err
+	}
+	source, exists := tables[agent]
+	if !exists {
+		return errToolboxAgentNotFound
+	}
+	record := agentRecordFromMap(source)
+	candidate := file.Raw
+	if pkg.Manifest.MCP != nil {
+		if enabled {
+			// The agent's mcp list must name a registered server, so write the
+			// managed [mcp.<id>] table first when it is still missing.
+			if srv, ok := toolboxMCPServer(backend, pkg.Manifest.ID); ok {
+				next, _, err := toolboxEnsureMCPTable(ctx, store, candidate, srv)
+				if err != nil {
+					return err
+				}
+				candidate = next
+			}
+		}
+		record.MCP = setStringList(record.MCP, pkg.Manifest.ID, enabled)
+	} else {
+		for _, command := range pkg.Manifest.Commands {
+			record.Tools = setStringList(record.Tools, toolbox.ToolName(pkg.Manifest.ID, command.Name), enabled)
+		}
+	}
+	table := renderAgentTable(agent, record)
+	candidate, _, err = webfiles.RewriteTable(ctx, agentChecker(store), candidate, "[agents."+agent+"]", table)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(candidate, file.Raw) {
+		return nil
+	}
+	if err := store.ConfigWrite(ctx, candidate); err != nil {
+		return err
+	}
+	s.applyLiveConfig(ctx, store, candidate)
+	return nil
+}
+
+// writeToolboxAgentError maps a "Use with agents" failure to the contract
+// error. A validation problem keeps the config issue details.
+func (s *Server) writeToolboxAgentError(w http.ResponseWriter, err error) {
+	var mcpInvalid *mcpValidationError
+	var agentInvalid *agentValidationError
+	switch {
+	case errors.Is(err, errToolboxAgentNotFound):
+		writeAPIError(w, http.StatusNotFound, "agent_not_found", "agent is not configured")
+	case errors.Is(err, errToolboxConfigMissing):
+		writeAPIError(w, http.StatusConflict, "config_missing", "config.toml does not exist")
+	case errors.As(err, &mcpInvalid):
+		writeMCPIssues(w, mcpInvalid.issues)
+	case errors.As(err, &agentInvalid):
+		writeAgentIssues(w, agentInvalid.issues)
+	default:
+		s.logger.Error("web: set toolbox agent use", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+	}
+}
+
+// toolboxMCPServer returns the resolved MCP server of a package, when one is
+// available (REQ-TB-011).
+func toolboxMCPServer(backend ToolboxBackend, id string) (toolbox.MCPServer, bool) {
+	for _, srv := range backend.MCPServers() {
+		if srv.Package == id {
+			return srv, true
+		}
+	}
+	return toolbox.MCPServer{}, false
+}
+
+// setStringList adds value to list when on and removes it otherwise, keeping
+// the order of the entries that stay.
+func setStringList(list []string, value string, on bool) []string {
+	out := make([]string, 0, len(list)+1)
+	present := false
+	for _, item := range list {
+		if item == value {
+			present = true
+			if !on {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	if on && !present {
+		out = append(out, value)
+	}
+	return out
 }
 
 // handleToolboxJobLog serves API-TB-009: the log tail and whether the job has
@@ -362,13 +586,20 @@ type toolboxUsedBy struct {
 	Workflows []toolboxWorkflowRef `json:"workflows"`
 }
 
-// toolboxDetailView is the PackageView plus the manifest text, the last jobs
-// and the used_by lists (API-TB-003).
+// toolboxAgentUse is one "Use with agents" row of API-TB-003 (REQ-TB-011).
+type toolboxAgentUse struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+// toolboxDetailView is the PackageView plus the manifest text, the last jobs,
+// the used_by lists, and the "Use with agents" rows (API-TB-003).
 type toolboxDetailView struct {
 	toolbox.PackageView
-	Manifest string        `json:"manifest"`
-	Jobs     []toolbox.Job `json:"jobs"`
-	UsedBy   toolboxUsedBy `json:"used_by"`
+	Manifest string            `json:"manifest"`
+	Jobs     []toolbox.Job     `json:"jobs"`
+	UsedBy   toolboxUsedBy     `json:"used_by"`
+	Agents   []toolboxAgentUse `json:"agents"`
 }
 
 func (s *Server) toolboxDetail(ctx context.Context, backend ToolboxBackend, id string, pkg toolbox.Package) toolboxDetailView {
@@ -391,7 +622,51 @@ func (s *Server) toolboxDetail(ctx context.Context, backend ToolboxBackend, id s
 			Agents:    s.toolboxUsedByAgents(ctx, toolNames),
 			Workflows: s.toolboxUsedByWorkflows(ctx, toolNames, pkg.Manifest.Detect.Binary),
 		},
+		Agents: s.toolboxDetailAgents(ctx, pkg),
 	}
+}
+
+// toolboxDetailAgents lists every configured agent with whether it may use the
+// package: an MCP package is on when the agent's mcp list names the package id,
+// a package without an MCP spec is on when the agent's tools list holds one of
+// its command tools (REQ-TB-005, REQ-TB-011). Teams are not agents and are not
+// listed.
+func (s *Server) toolboxDetailAgents(ctx context.Context, pkg toolbox.Package) []toolboxAgentUse {
+	rows := []toolboxAgentUse{}
+	store := s.configStore
+	if store == nil {
+		return rows
+	}
+	file, err := store.ConfigFile(ctx)
+	if err != nil || !file.Exists {
+		return rows
+	}
+	tables, err := parseAgentTables(file.Raw)
+	if err != nil {
+		return rows
+	}
+	names := make([]string, 0, len(tables))
+	for name := range tables {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		rows = append(rows, toolboxAgentUse{Name: name, Enabled: toolboxAgentUses(pkg, agentRecordFromMap(tables[name]))})
+	}
+	return rows
+}
+
+// toolboxAgentUses reports whether an agent record turns a package on.
+func toolboxAgentUses(pkg toolbox.Package, record agentRecord) bool {
+	if pkg.Manifest.MCP != nil {
+		return slices.Contains(record.MCP, pkg.Manifest.ID)
+	}
+	for _, command := range pkg.Manifest.Commands {
+		if slices.Contains(record.Tools, toolbox.ToolName(pkg.Manifest.ID, command.Name)) {
+			return true
+		}
+	}
+	return false
 }
 
 // toolboxManifestText returns the tool.toml text of a package: the raw file
@@ -520,4 +795,236 @@ func (s *Server) writeToolboxError(w http.ResponseWriter, operation string, err 
 		s.logger.Error("web: "+operation, "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
+}
+
+// toolboxManagedMCPFile names the file, under <LANA_HOME>/tools, that records
+// the MCP servers lana created for installed packages (REQ-TB-011).
+const toolboxManagedMCPFile = ".managed-mcp.json"
+
+// applyToolboxMCP makes config.toml match the MCP servers of the installed
+// packages (REQ-TB-011). For every server it adds or updates [mcp.<id>] through
+// the same rewrite, validate, write, and apply path the MCP save handler uses.
+// A name lana recorded earlier but that is no longer provided (the package was
+// uninstalled) is dropped from every agent's mcp list and then removed from
+// config. A server lana did not create is never touched. On any failure the
+// function logs and returns; the next toolbox event retries.
+func (s *Server) applyToolboxMCP(ctx context.Context, backend ToolboxBackend, store ConfigStore) {
+	if backend == nil || store == nil {
+		return
+	}
+	servers := backend.MCPServers()
+	desired := make(map[string]toolbox.MCPServer, len(servers))
+	names := make([]string, 0, len(servers))
+	for _, srv := range servers {
+		if srv.Package == "" {
+			continue
+		}
+		desired[srv.Package] = srv
+		names = append(names, srv.Package)
+	}
+	sort.Strings(names)
+
+	path := s.toolboxManagedMCPPath(store)
+	managed := s.readManagedMCP(path)
+	sort.Strings(managed)
+
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	file, err := store.ConfigFile(ctx)
+	if err != nil {
+		s.logger.Error("web: toolbox mcp: read config", "error", err)
+		return
+	}
+	if !file.Exists {
+		return
+	}
+	candidate := file.Raw
+	changed := false
+
+	// Add or update the server of every installed MCP package.
+	for _, name := range names {
+		next, wrote, err := toolboxEnsureMCPTable(ctx, store, candidate, desired[name])
+		if err != nil {
+			s.logger.Error("web: toolbox mcp: ensure server", "package", name, "error", err)
+			return
+		}
+		if wrote {
+			candidate = next
+			changed = true
+		}
+	}
+
+	// Drop the server of every managed package that is gone. The agent mcp
+	// lists go first so every intermediate candidate stays valid (REQ-TB-011).
+	for _, name := range managed {
+		if _, ok := desired[name]; ok {
+			continue
+		}
+		next, wrote, err := toolboxRemoveMCPFromAgents(ctx, store, candidate, name)
+		if err != nil {
+			s.logger.Error("web: toolbox mcp: drop server from agents", "package", name, "error", err)
+			return
+		}
+		if wrote {
+			candidate = next
+			changed = true
+		}
+		next, wrote, err = toolboxRemoveMCPTable(ctx, store, candidate, name)
+		if err != nil {
+			s.logger.Error("web: toolbox mcp: remove server", "package", name, "error", err)
+			return
+		}
+		if wrote {
+			candidate = next
+			changed = true
+		}
+	}
+
+	if changed {
+		if err := store.ConfigWrite(ctx, candidate); err != nil {
+			s.logger.Error("web: toolbox mcp: write config", "error", err)
+			return
+		}
+		s.applyLiveConfig(ctx, store, candidate)
+	}
+	if !slices.Equal(managed, names) {
+		if err := s.writeManagedMCP(path, names); err != nil {
+			s.logger.Error("web: toolbox mcp: write managed list", "error", err)
+		}
+	}
+}
+
+// toolboxManagedMCPPath is <LANA_HOME>/tools/.managed-mcp.json, the managed-MCP
+// record of REQ-TB-011.
+func (s *Server) toolboxManagedMCPPath(store ConfigStore) string {
+	home := s.cfg.Home
+	if settings, ok := store.(interface{ SettingsHome() string }); ok {
+		if dir := settings.SettingsHome(); dir != "" {
+			home = dir
+		}
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, "tools", toolboxManagedMCPFile)
+}
+
+// readManagedMCP returns the names recorded as managed. A missing or unreadable
+// file reads as no names, so a first run never removes anything.
+func (s *Server) readManagedMCP(path string) []string {
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		s.logger.Warn("web: toolbox mcp: managed record is not readable", "path", path, "error", err)
+		return nil
+	}
+	return doc.Names
+}
+
+// writeManagedMCP records the managed names (REQ-TB-011).
+func (s *Server) writeManagedMCP(path string, names []string) error {
+	if path == "" {
+		return nil
+	}
+	if names == nil {
+		names = []string{}
+	}
+	data, err := json.MarshalIndent(struct {
+		Names []string `json:"names"`
+	}{Names: names}, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return webfiles.AtomicWrite(path, data)
+}
+
+// toolboxEnsureMCPTable adds or updates [mcp.<package>] in data when it is
+// missing or different from srv. It reuses the MCP rewrite helpers, so no TOML
+// editing logic is duplicated (REQ-TB-011).
+func toolboxEnsureMCPTable(ctx context.Context, store ConfigStore, data []byte, srv toolbox.MCPServer) ([]byte, bool, error) {
+	def := mcpconfig.Definition{Type: "command", Command: srv.Command, Args: srv.Args, Env: srv.Env}
+	mcpconfig.Normalize(&def)
+	document, err := mcpconfig.Parse(data)
+	if err != nil {
+		return data, false, err
+	}
+	if toolboxMCPEqual(mcpconfig.FromMap(document.MCP[srv.Package]), def) {
+		return data, false, nil
+	}
+	table := mcpconfig.Render(srv.Package, def)
+	next, _, err := webfiles.RewriteTable(ctx, mcpChecker(store), data, "[mcp."+srv.Package+"]", table)
+	if err != nil {
+		return data, false, err
+	}
+	return next, true, nil
+}
+
+// toolboxRemoveMCPTable removes the [mcp.<name>] table when it is present.
+func toolboxRemoveMCPTable(ctx context.Context, store ConfigStore, data []byte, name string) ([]byte, bool, error) {
+	document, err := mcpconfig.Parse(data)
+	if err != nil {
+		return data, false, err
+	}
+	if _, ok := document.MCP[name]; !ok {
+		return data, false, nil
+	}
+	next, _, err := webfiles.RewriteTable(ctx, mcpChecker(store), data, "[mcp."+name+"]", "")
+	if err != nil {
+		return data, false, err
+	}
+	return next, true, nil
+}
+
+// toolboxRemoveMCPFromAgents drops name from the mcp list of every agent that
+// names it, through the same agent rewrite path PUT /v1/agents/{name} uses
+// (REQ-TB-011).
+func toolboxRemoveMCPFromAgents(ctx context.Context, store ConfigStore, data []byte, name string) ([]byte, bool, error) {
+	tables, err := parseAgentTables(data)
+	if err != nil {
+		return data, false, err
+	}
+	agents := make([]string, 0, len(tables))
+	for agent := range tables {
+		agents = append(agents, agent)
+	}
+	sort.Strings(agents)
+	changed := false
+	for _, agent := range agents {
+		record := agentRecordFromMap(tables[agent])
+		if !slices.Contains(record.MCP, name) {
+			continue
+		}
+		record.MCP = setStringList(record.MCP, name, false)
+		next, _, err := webfiles.RewriteTable(ctx, agentChecker(store), data, "[agents."+agent+"]", renderAgentTable(agent, record))
+		if err != nil {
+			return data, false, err
+		}
+		data = next
+		changed = true
+	}
+	return data, changed, nil
+}
+
+// toolboxMCPEqual reports whether a stored definition already matches a wanted
+// one (REQ-TB-011).
+func toolboxMCPEqual(stored, want mcpconfig.Definition) bool {
+	return stored.Type == want.Type &&
+		stored.Command == want.Command &&
+		stored.URL == want.URL &&
+		slices.Equal(stored.Args, want.Args) &&
+		maps.Equal(stored.Env, want.Env) &&
+		maps.Equal(stored.Headers, want.Headers)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -57,20 +58,45 @@ type fakeToolboxBackend struct {
 	runResult toolbox.RunResult
 	runErr    error
 
-	changes    chan string
+	subs       []chan string
 	unsubCount int
+
+	mcpServers []toolbox.MCPServer
 }
 
 func newFakeToolboxBackend() *fakeToolboxBackend {
-	return &fakeToolboxBackend{changes: make(chan string, 8)}
+	return &fakeToolboxBackend{}
 }
 
 func (f *fakeToolboxBackend) Subscribe() (<-chan string, func()) {
-	return f.changes, func() {
+	f.mu.Lock()
+	ch := make(chan string, 8)
+	f.subs = append(f.subs, ch)
+	f.mu.Unlock()
+	return ch, func() {
 		f.mu.Lock()
 		f.unsubCount++
 		f.mu.Unlock()
 	}
+}
+
+// broadcast delivers a changed package id to every subscriber, like the real
+// toolbox service does (REQ-TB-002).
+func (f *fakeToolboxBackend) broadcast(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, ch := range f.subs {
+		select {
+		case ch <- id:
+		default:
+		}
+	}
+}
+
+func (f *fakeToolboxBackend) MCPServers() []toolbox.MCPServer {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mcpServers
 }
 
 func (f *fakeToolboxBackend) List(context.Context) []toolbox.Package {
@@ -443,7 +469,7 @@ func TestToolboxStreamEmitsChanged(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	reader := bufio.NewReader(resp.Body)
 
-	backend.changes <- "obscura"
+	backend.broadcast("obscura")
 	block := waitSSE(t, reader, "changed")
 	var change struct {
 		Package string `json:"package"`
@@ -466,3 +492,355 @@ func TestToolboxUnavailable(t *testing.T) {
 // *toolbox.Service satisfies the ToolboxBackend port the web handlers use
 // (spec #34, design section "Web API").
 var _ ToolboxBackend = (*toolbox.Service)(nil)
+
+// toolboxTestMCPPackage builds an obscura-like package that provides an MCP
+// server (REQ-TB-011).
+func toolboxTestMCPPackage(id, name string) toolbox.Package {
+	pkg := toolboxTestPackage(id, name)
+	pkg.Manifest.MCP = &toolbox.MCPSpec{Args: []string{"--stealth", "mcp"}}
+	return pkg
+}
+
+func readToolboxConfig(t *testing.T, store *testConfigStore) string {
+	t.Helper()
+	data, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func readManagedMCPNames(t *testing.T, s *Server, store *testConfigStore) []string {
+	t.Helper()
+	data, err := os.ReadFile(s.toolboxManagedMCPPath(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("managed record %q: %v", data, err)
+	}
+	return doc.Names
+}
+
+func writeManagedMCPNames(t *testing.T, s *Server, store *testConfigStore, names []string) {
+	t.Helper()
+	if err := s.writeManagedMCP(s.toolboxManagedMCPPath(store), names); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The sync configs are small valid files. The removal one already holds the
+// managed server and an agent that names it (REQ-TB-011).
+const (
+	toolboxSyncMCPConfig = `version = 1
+
+[agents.helper]
+model = "helper"
+`
+
+	toolboxSyncMCPRemovalConfig = `version = 1
+
+[mcp.obscura]
+command = "/old/obscura"
+args = ["mcp"]
+
+[agents.helper]
+model = "helper"
+mcp = ["obscura"]
+`
+
+	toolboxSyncMCPUnmanagedConfig = `version = 1
+
+[mcp.other]
+command = "/usr/bin/other"
+
+[agents.helper]
+model = "helper"
+`
+)
+
+// REQ-TB-011: the sync adds [mcp.obscura] with the rendered command and args,
+// records it as managed, and a second sync with the same data writes nothing.
+func TestToolboxSyncMCPAddsAndIsIdempotent(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	backend.mcpServers = []toolbox.MCPServer{{
+		Package: "obscura",
+		Command: "/opt/obscura/bin/obscura",
+		Args:    []string{"--stealth", "mcp"},
+	}}
+	s, _, _ := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+
+	s.syncToolboxMCP(context.Background())
+
+	raw := readToolboxConfig(t, store)
+	if !strings.Contains(raw, "[mcp.obscura]") {
+		t.Fatalf("config has no [mcp.obscura]: %q", raw)
+	}
+	if !strings.Contains(raw, "/opt/obscura/bin/obscura") || !strings.Contains(raw, "--stealth") {
+		t.Fatalf("config has the wrong server: %q", raw)
+	}
+	managed := readManagedMCPNames(t, s, store)
+	if len(managed) != 1 || managed[0] != "obscura" {
+		t.Fatalf("managed = %v", managed)
+	}
+
+	// A second sync with the same data writes nothing.
+	s.syncToolboxMCP(context.Background())
+	if after := readToolboxConfig(t, store); after != raw {
+		t.Fatalf("a second sync changed the config:\n%s", after)
+	}
+}
+
+// REQ-TB-011: a managed name that is gone is removed from every agent's mcp
+// list and then from config.
+func TestToolboxSyncMCPRemovesUninstalled(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPRemovalConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	s, _, _ := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+	writeManagedMCPNames(t, s, store, []string{"obscura"})
+
+	s.syncToolboxMCP(context.Background())
+
+	raw := readToolboxConfig(t, store)
+	if strings.Contains(raw, "[mcp.obscura]") {
+		t.Fatalf("config still has [mcp.obscura]: %q", raw)
+	}
+	tables, err := parseAgentTables([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record := agentRecordFromMap(tables["helper"]); len(record.MCP) != 0 {
+		t.Fatalf("agent mcp = %v", record.MCP)
+	}
+	if managed := readManagedMCPNames(t, s, store); len(managed) != 0 {
+		t.Fatalf("managed = %v", managed)
+	}
+}
+
+// REQ-TB-011: an MCP server lana did not create is never touched.
+func TestToolboxSyncMCPKeepsUnmanaged(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPUnmanagedConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	backend.mcpServers = []toolbox.MCPServer{{Package: "obscura", Command: "/opt/obscura", Args: []string{"mcp"}}}
+	s, _, _ := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+
+	s.syncToolboxMCP(context.Background())
+
+	raw := readToolboxConfig(t, store)
+	if !strings.Contains(raw, "[mcp.other]") || !strings.Contains(raw, `command = "/usr/bin/other"`) {
+		t.Fatalf("the unmanaged server was touched: %q", raw)
+	}
+	if !strings.Contains(raw, "[mcp.obscura]") {
+		t.Fatalf("the managed server was not added: %q", raw)
+	}
+	if managed := readManagedMCPNames(t, s, store); len(managed) != 1 || managed[0] != "obscura" {
+		t.Fatalf("managed = %v", managed)
+	}
+}
+
+// REQ-TB-011: the detail lists every configured agent with its enabled flag,
+// from the mcp list for an MCP package and from the tools list otherwise.
+func TestToolboxDetailAgents(t *testing.T) {
+	mcpConfig := `version = 1
+
+[mcp.obscura]
+command = "/opt/obscura"
+
+[agents.a]
+model = "m"
+mcp = ["obscura"]
+
+[agents.b]
+model = "m"
+`
+	backend := newFakeToolboxBackend()
+	backend.getPackage = toolboxTestMCPPackage("obscura", "Obscura")
+	s, cookie, _ := newToolboxTestServer(t, backend)
+	s.SetConfigStore(newTestConfigStore(t, mcpConfig, 0o600, ConfigSettings{}))
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/toolbox/obscura", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Agents []toolboxAgentUse `json:"agents"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(got.Agents) != 2 || got.Agents[0].Name != "a" || !got.Agents[0].Enabled || got.Agents[1].Name != "b" || got.Agents[1].Enabled {
+		t.Fatalf("agents = %+v", got.Agents)
+	}
+
+	// A package without an MCP spec is enabled through the agent's tools list.
+	commandConfig := `version = 1
+
+[agents.a]
+model = "m"
+tools = ["obscura_fetch"]
+
+[agents.b]
+model = "m"
+`
+	backend.getPackage = toolboxTestPackage("obscura", "Obscura")
+	s.SetConfigStore(newTestConfigStore(t, commandConfig, 0o600, ConfigSettings{}))
+	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/toolbox/obscura", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	got.Agents = nil
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(got.Agents) != 2 || !got.Agents[0].Enabled || got.Agents[1].Enabled {
+		t.Fatalf("agents = %+v", got.Agents)
+	}
+}
+
+// API-TB-010, REQ-TB-011: "Use with agents" toggles the package id in the
+// agent's mcp list for an MCP package and answers the refreshed detail.
+func TestToolboxSetAgentMCP(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	backend.getPackage = toolboxTestMCPPackage("obscura", "Obscura")
+	backend.mcpServers = []toolbox.MCPServer{{Package: "obscura", Command: "/opt/obscura", Args: []string{"mcp"}}}
+	s, cookie, csrf := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/agents", `{"agent":"helper","enabled":true}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Agents []toolboxAgentUse `json:"agents"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(got.Agents) != 1 || !got.Agents[0].Enabled {
+		t.Fatalf("agents = %+v", got.Agents)
+	}
+	raw := readToolboxConfig(t, store)
+	if !strings.Contains(raw, "[mcp.obscura]") {
+		t.Fatalf("config has no [mcp.obscura]: %q", raw)
+	}
+	tables, err := parseAgentTables([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record := agentRecordFromMap(tables["helper"]); len(record.MCP) != 1 || record.MCP[0] != "obscura" {
+		t.Fatalf("agent mcp = %v", record.MCP)
+	}
+
+	// Turning it off drops the id again, and leaves the server table alone.
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/agents", `{"agent":"helper","enabled":false}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(got.Agents) != 1 || got.Agents[0].Enabled {
+		t.Fatalf("agents = %+v", got.Agents)
+	}
+	raw = readToolboxConfig(t, store)
+	tables, err = parseAgentTables([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record := agentRecordFromMap(tables["helper"]); len(record.MCP) != 0 {
+		t.Fatalf("agent mcp = %v", record.MCP)
+	}
+}
+
+// API-TB-010, REQ-TB-011: a package without an MCP spec toggles its command
+// tools in the agent's tools list.
+func TestToolboxSetAgentTools(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	backend.getPackage = toolboxTestPackage("obscura", "Obscura")
+	s, cookie, csrf := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/agents", `{"agent":"helper","enabled":true}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	tables, err := parseAgentTables([]byte(readToolboxConfig(t, store)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record := agentRecordFromMap(tables["helper"]); len(record.Tools) != 1 || record.Tools[0] != "obscura_fetch" {
+		t.Fatalf("agent tools = %v", record.Tools)
+	}
+	if record := agentRecordFromMap(tables["helper"]); len(record.MCP) != 0 {
+		t.Fatalf("agent mcp = %v", record.MCP)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/agents", `{"agent":"helper","enabled":false}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	tables, err = parseAgentTables([]byte(readToolboxConfig(t, store)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record := agentRecordFromMap(tables["helper"]); len(record.Tools) != 0 {
+		t.Fatalf("agent tools = %v", record.Tools)
+	}
+}
+
+// API-TB-010: an uninstalled package is 409 not_installed and an unknown agent
+// is 404 agent_not_found.
+func TestToolboxSetAgentErrors(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	pkg := toolboxTestMCPPackage("obscura", "Obscura")
+	pkg.Status.State = toolbox.StateMissing
+	backend.getPackage = pkg
+	s, cookie, csrf := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/agents", `{"agent":"helper","enabled":true}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusConflict, "not_installed")
+
+	backend.getPackage = toolboxTestMCPPackage("obscura", "Obscura")
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/agents", `{"agent":"nope","enabled":true}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusNotFound, "agent_not_found")
+}
+
+// API-TB-006, REQ-TB-009: a missing method and -1 both install with the method
+// that fits this machine.
+func TestToolboxInstallAutoMethod(t *testing.T) {
+	backend := newFakeToolboxBackend()
+	s, cookie, csrf := newToolboxTestServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/install", `{}`, cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	backend.mu.Lock()
+	method := backend.installMethod
+	backend.mu.Unlock()
+	if method != -1 {
+		t.Fatalf("method = %d, want -1", method)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/install", `{"method":0}`, cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	backend.mu.Lock()
+	method = backend.installMethod
+	backend.mu.Unlock()
+	if method != 0 {
+		t.Fatalf("method = %d, want 0", method)
+	}
+}
