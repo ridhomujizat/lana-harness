@@ -25,6 +25,8 @@ import { HomePage } from "../views/home";
 import { ChatsPage } from "../views/chats";
 import { WorkflowsPage } from "../views/workflows";
 import { LogsPage } from "../views/logs";
+import { ToolsPage } from "../views/tools";
+import { ToolDetailPage } from "../views/tool-detail";
 import { SchedulesPage } from "../views/schedules";
 import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
@@ -89,6 +91,10 @@ function routeContent(
       return <ChatsPage roomName={params.name} />;
     case "logs":
       return <LogsPage />;
+    case "tools":
+      return <ToolsPage />;
+    case "tool":
+      return <ToolDetailPage key={params.id} id={params.id || ""} />;
     case "schedules":
       return <SchedulesPage />;
     case "workflows":
@@ -184,6 +190,10 @@ export function crumbsFor(route: Route): Crumb[] {
       ];
     case "logs":
       return [{ label: "Logs" }];
+    case "tools":
+      return [{ label: "Tools" }];
+    case "tool":
+      return [{ label: "Tools", href: "#/tools" }, { label: params.id || "Tool" }];
     case "schedules":
       return [{ label: "Schedules" }];
     case "workflows":

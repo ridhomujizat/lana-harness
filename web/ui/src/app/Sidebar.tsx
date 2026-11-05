@@ -69,6 +69,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "agents", label: "Agents", icon: "bot", href: "#/agents" },
       { key: "knowledge", label: "Knowledge", icon: "book-open", href: "#/knowledge" },
       { key: "skills", label: "Skills", icon: "sparkles", href: "#/skills" },
+      { key: "tools", label: "Tools", icon: "package", href: "#/tools" },
       { key: "mcp", label: "MCP", icon: "plug", href: "#/mcp" },
       { key: "channels", label: "Channels", icon: "radio-tower", href: "#/channels" },
     ],

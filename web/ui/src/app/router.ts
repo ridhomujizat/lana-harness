@@ -39,6 +39,8 @@ export type RouteView =
   | "chats"
   | "chat"
   | "logs"
+  | "tools"
+  | "tool"
   | "schedules"
   | "workflows"
   | "workflow-new"
@@ -86,6 +88,8 @@ export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/chats", view: "chats", section: "chats" },
   { path: "#/chats/{name}", view: "chat", section: "chats" },
   { path: "#/logs", view: "logs", section: "logs" },
+  { path: "#/tools", view: "tools", section: "tools" },
+  { path: "#/tools/{id}", view: "tool", section: "tools" },
   { path: "#/schedules", view: "schedules", section: "schedules" },
   { path: "#/workflows", view: "workflows", section: "workflows" },
   { path: "#/workflows/new", view: "workflow-new", section: "workflows" },
