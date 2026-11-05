@@ -319,6 +319,14 @@ func (s *Subscription[T]) Len() int {
 	return s.size
 }
 
+// Closed reports whether the subscription was closed. A hub uses it to drop
+// dead subscribers.
+func (s *Subscription[T]) Closed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
 // Close releases the subscriber.
 func (s *Subscription[T]) Close() { s.close() }
 

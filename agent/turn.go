@@ -67,7 +67,16 @@ func (rn *Runner) pushFrontInbox(item inboxItem) {
 
 func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, continueReason string) {
 	for {
+		// turnCancel is the cancel func of the turn about to run. Releasing it
+		// once the turn's work is done keeps the per-turn context tree of a
+		// long session bounded; the next chained turn gets its own context.
+		rn.mu.Lock()
+		turnCancel := rn.cancel
+		rn.mu.Unlock()
 		result := rn.runTurn(ctx, initial, turnID, continueReason)
+		if turnCancel != nil {
+			turnCancel(context.Canceled)
+		}
 		// finishedTurnID is the turn whose done channel finishTurn closes. Its
 		// signal must wait until the session's next state is set under the
 		// locks, so a Wait that returns never sees the session still running

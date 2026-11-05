@@ -164,3 +164,31 @@ func TestHubParentSlowSubscriberWarns(t *testing.T) {
 		t.Fatalf("warning not found: %s", buf.String())
 	}
 }
+
+// TestHubPrunesClosedSubscriptions covers that a closed subscription is dropped
+// from the hub instead of pinning its ring buffer forever.
+func TestHubPrunesClosedSubscriptions(t *testing.T) {
+	hub := NewHub()
+	defer hub.Close()
+	sub := hub.Subscribe("session")
+	sub.Close()
+
+	hub.Publish("session", core.LiveFrame{SessionID: "session", Kind: "text_delta", Text: "x"})
+
+	hub.mu.Lock()
+	_, ok := hub.subs["session"]
+	hub.mu.Unlock()
+	if ok {
+		t.Fatal("closed subscription kept in the hub")
+	}
+
+	// A subscriber created after the prune is the only entry for the session.
+	live := hub.Subscribe("session")
+	defer live.Close()
+	hub.mu.Lock()
+	n := len(hub.subs["session"])
+	hub.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("subs after re-subscribe = %d, want 1", n)
+	}
+}

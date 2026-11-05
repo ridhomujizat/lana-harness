@@ -37,10 +37,33 @@ func (h *Hub) Link(parentID, childID string) {
 	h.parents[childID] = parentID
 }
 
+// pruneSubs drops the closed subscriptions of one session and deletes the map
+// key when none remain. The caller holds h.mu. Each subscription keeps a
+// 1024-frame ring buffer, so dropping a closed one releases that memory.
+func (h *Hub) pruneSubs(sessionID string) {
+	subs := h.subs[sessionID]
+	if len(subs) == 0 {
+		return
+	}
+	live := subs[:0]
+	for _, sub := range subs {
+		if sub.Closed() {
+			continue
+		}
+		live = append(live, sub)
+	}
+	if len(live) == 0 {
+		delete(h.subs, sessionID)
+		return
+	}
+	h.subs[sessionID] = live
+}
+
 // Subscribe creates a subscription for the session.
 func (h *Hub) Subscribe(sessionID string) *core.Subscription[core.LiveFrame] {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.pruneSubs(sessionID)
 	obs := h.stream[sessionID]
 	if obs == nil {
 		obs = core.NewObserve[core.LiveFrame]()
@@ -82,6 +105,7 @@ func (h *Hub) Publish(sessionID string, frame core.LiveFrame) {
 		if obs == nil {
 			continue
 		}
+		h.pruneSubs(id)
 		targets = append(targets, target{
 			sessionID: id,
 			obs:       obs,
@@ -89,6 +113,7 @@ func (h *Hub) Publish(sessionID string, frame core.LiveFrame) {
 		})
 	}
 	h.mu.Unlock()
+	// Only live subscribers can drop a frame; closed ones were pruned above.
 	for _, target := range targets {
 		for _, sub := range target.subs {
 			if sub.Len() >= core.ObserveBuffer {

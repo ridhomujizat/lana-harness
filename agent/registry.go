@@ -32,6 +32,11 @@ type turnState struct {
 // maxActiveChildren is the number of child turns one parent may run at once.
 const maxActiveChildren = 3
 
+// finishedTurnCap is the number of finished turns kept with their result, so a
+// Wait shortly after a turn ends still finds it. Older finished records are
+// dropped; a running turn is never dropped.
+const finishedTurnCap = 256
+
 // mcpAdmin is core.MCPManager plus the hot-apply operations the registry
 // forwards to core.MCPAdmin.
 type mcpAdmin interface {
@@ -69,9 +74,13 @@ type Registry struct {
 	home       string
 	defaultWS  string
 
-	mu             sync.Mutex
-	runners        map[string]*Runner
-	turns          map[string]*turnState
+	mu      sync.Mutex
+	runners map[string]*Runner
+	turns   map[string]*turnState
+	// turnOrder is the turn ids finished in finish order, oldest first.
+	// finishTurn trims the oldest finished records beyond finishedTurnCap so
+	// the turns map cannot grow without bound over a long session.
+	turnOrder      []string
 	activeChildren map[string]int
 	closed         bool
 	wg             sync.WaitGroup
@@ -411,10 +420,18 @@ func (r *Registry) releaseChild(parentID string) {
 
 func (r *Registry) finishTurn(turnID string, result TurnResult) {
 	r.mu.Lock()
-	state := r.turns[turnID]
-	if state != nil {
+	if state := r.turns[turnID]; state != nil {
 		state.result = result
 		close(state.done)
+		// Remember the finish order and drop the oldest finished records once
+		// the cap is passed. Only finished turns are tracked, so a running turn
+		// is never deleted.
+		r.turnOrder = append(r.turnOrder, turnID)
+		for len(r.turnOrder) > finishedTurnCap {
+			oldest := r.turnOrder[0]
+			r.turnOrder = r.turnOrder[1:]
+			delete(r.turns, oldest)
+		}
 	}
 	r.mu.Unlock()
 }
