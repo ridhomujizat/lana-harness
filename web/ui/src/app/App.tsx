@@ -28,6 +28,7 @@ import { LogsPage } from "../views/logs";
 import { ToolsPage } from "../views/tools";
 import { ToolDetailPage } from "../views/tool-detail";
 import { SchedulesPage } from "../views/schedules";
+import { CalendarPage } from "../views/calendar";
 import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
@@ -97,6 +98,8 @@ function routeContent(
       return <ToolDetailPage key={params.id} id={params.id || ""} />;
     case "schedules":
       return <SchedulesPage />;
+    case "calendar":
+      return <CalendarPage params={route.params || {}} />;
     case "workflows":
       return <WorkflowsPage />;
     case "workflow-new":
@@ -196,6 +199,8 @@ export function crumbsFor(route: Route): Crumb[] {
       return [{ label: "Tools", href: "#/tools" }, { label: params.id || "Tool" }];
     case "schedules":
       return [{ label: "Schedules" }];
+    case "calendar":
+      return [{ label: "Calendar" }];
     case "workflows":
       return [{ label: "Workflows" }];
     case "workflow-new":
