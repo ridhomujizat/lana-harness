@@ -23,3 +23,22 @@
 
 Not exercised live: a real install command (Obscura was already installed), download installs (unit tests with httptest),
 `tools_request` approval in a chat (unit test only).
+
+## Revision 2 (catalog, one-click install, MCP packages)
+
+- [x] R2-T1 built-in catalog (obscura, yt-dlp, pandoc, ffmpeg), auto method pick, whole-archive extract, `[mcp]` packages — 898a8e1
+- [x] R2-T2 web: app list with one-click Install, detail with "Use with agents" switches, MCP server sync — 63c3efd, e018e6f, aaf8f8b
+- [x] R2-T3 fixes found in the smoke: a missing agent tool warns instead of stopping lana (b017cba); permission changes
+  apply without a restart (d1a12de); cancelled reads no longer poison pooled SQLite connections, turn/end retried on
+  a busy store (dfffac5)
+- [x] R2-T4 verify: `golangci-lint run ./...` 0 issues, `go test -race ./...` pass, vitest 258 pass
+
+### Runtime smoke r2 (2026-11-05, scratch LANA_HOME, port 18398, build dfffac5)
+
+| Check | Result |
+|---|---|
+| `GET /v1/toolbox` | 4 catalog apps; Obscura detected on PATH |
+| "Use with agents" on for `default` | config gains `[mcp.obscura]` and `mcp = ['obscura']`; MCP connects with 37 tools |
+| Chat: open example.com, click the link, report title + URL | `browser_navigate` → `browser_interactive_elements` (`e1` "Learn more") → `browser_click e1` → `browser_snapshot`: "Example Domains", https://www.iana.org/help/example-domains; turn ended, session idle, no approval prompt (trust) |
+
+Not exercised live: a real catalog install (needs the owner to click Install), `tools_request` approval in a chat.
