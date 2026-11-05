@@ -79,7 +79,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	_ = os.Chmod(path, 0o600)
 	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := openDB(dsn)
 	if err != nil {
 		return nil, err
 	}
