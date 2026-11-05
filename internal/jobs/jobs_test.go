@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -293,6 +294,61 @@ func TestShutdownKillsAll(t *testing.T) {
 			t.Fatalf("job %s=%+v ok=%v want killed", job.ID, got, ok)
 		}
 	}
+}
+
+// TestKillEscalatesToGroupMembers checks that Kill SIGKILLs a group member that
+// ignores SIGTERM after the sh leader exits (REQ-JOB-014).
+func TestKillEscalatesToGroupMembers(t *testing.T) {
+	old := killGrace
+	killGrace = 300 * time.Millisecond
+	defer func() { killGrace = old }()
+
+	reg := newTestRegistry(t)
+	// The background subshell ignores SIGTERM and prints its pid; the outer
+	// shell then becomes a plain sleep that dies on SIGTERM.
+	job, err := reg.Start("s1", t.TempDir(), `( trap "" TERM; exec sleep 30 ) & echo $!; exec sleep 60`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := waitForChildPID(t, reg, "s1", job.ID)
+	if !processAlive(child) {
+		t.Fatalf("background child %d is not alive before the kill", child)
+	}
+
+	killed, err := reg.Kill("s1", job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if killed.Status != StatusKilled {
+		t.Fatalf("status=%q want killed", killed.Status)
+	}
+	if processAlive(job.PID) {
+		t.Fatalf("leader %d is still alive after kill", job.PID)
+	}
+	deadline := time.Now().Add(killGrace + 2*time.Second)
+	for processAlive(child) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if processAlive(child) {
+		t.Fatalf("background child %d survived the kill", child)
+	}
+}
+
+// waitForChildPID reads the pid the job's first line prints.
+func waitForChildPID(t *testing.T, reg *Registry, sessionID, id string) int {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		tail, err := reg.Tail(sessionID, id, 4096)
+		if err == nil {
+			if pid, convErr := strconv.Atoi(strings.TrimSpace(tail)); convErr == nil {
+				return pid
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("could not read the background child pid")
+	return 0
 }
 
 // A background job sees the registry's extra PATH dirs (Tools page installs).

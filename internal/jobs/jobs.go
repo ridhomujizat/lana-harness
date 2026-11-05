@@ -36,8 +36,9 @@ const (
 // defaultMaxPerSession is the running-job cap per session (REQ-JOB-011).
 const defaultMaxPerSession = 10
 
-// killGrace is how long a kill waits for SIGTERM before SIGKILL (REQ-JOB-014).
-const killGrace = 5 * time.Second
+// killGrace is how long a kill waits for SIGTERM before SIGKILL
+// (REQ-JOB-014). It is a variable so tests can shorten it.
+var killGrace = 5 * time.Second
 
 // ErrUnknownJob is returned for an id that is unknown or owned by another
 // session. The message never reveals the other session (REQ-JOB-011).
@@ -308,8 +309,12 @@ func (r *Registry) Kill(sessionID, id string) (Job, error) {
 	if done == nil {
 		return r.snapshot(sessionID, id), nil
 	}
+	start := time.Now()
 	select {
 	case <-done:
+		// The sh leader exited; a group member that ignores SIGTERM may still
+		// run, so finish the grace period and SIGKILL the group if it stays.
+		escalateIfGroupAlive(pid, killGrace-time.Since(start))
 	case <-time.After(killGrace):
 		// Re-check before SIGKILL so a process that exited at the boundary is
 		// not killed by a reused pid.
@@ -319,6 +324,33 @@ func (r *Registry) Kill(sessionID, id string) (Job, error) {
 		<-done
 	}
 	return r.snapshot(sessionID, id), nil
+}
+
+// escalateIfGroupAlive waits out the rest of the grace period for the killed
+// job's process group to disappear, then SIGKILLs it. The leader can exit while
+// a member that ignores SIGTERM stays; a process group id is not reused while
+// the group still has members, so killing it after the leader exited is safe.
+func escalateIfGroupAlive(pid int, timeout time.Duration) {
+	if pid <= 0 || !groupAlive(pid) {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		wait := 100 * time.Millisecond
+		if remaining := time.Until(deadline); remaining < wait {
+			wait = remaining
+		}
+		time.Sleep(wait)
+		if !groupAlive(pid) {
+			return
+		}
+	}
+	killGroup(pid)
+}
+
+// groupAlive reports whether the process group of pid still has members.
+func groupAlive(pid int) bool {
+	return syscall.Kill(-pid, 0) == nil
 }
 
 // isRunning reports whether the job is still running.
