@@ -60,7 +60,7 @@ func TestPrivateChatTurn(t *testing.T) {
 	}
 	startChannel(t, api, backend)
 	api.text(ownerChat, "private", ownerID, "check disk")
-	api.waitCall("sendMessage", textIs("…"))
+	api.waitCall("sendMessage", textIs(liveStart))
 	api.waitCall("sendChatAction", nil)
 	final := api.waitCall("editMessageText", textHas("Disk is <b>fine</b>."))
 	text := final.Params["text"].(string)
@@ -89,7 +89,7 @@ func TestStepRetryDropsPartialText(t *testing.T) {
 	}
 	startChannel(t, api, backend)
 	api.text(ownerChat, "private", ownerID, "go")
-	api.waitCall("sendMessage", textIs("…"))
+	api.waitCall("sendMessage", textIs(liveStart))
 	final := api.waitCall("editMessageText", textHas("final answer"))
 	text := final.Params["text"].(string)
 	if strings.Contains(text, "partial") {
@@ -139,7 +139,7 @@ func TestInboxDuringTurnAndCancel(t *testing.T) {
 	}
 	startChannel(t, api, backend)
 	api.text(ownerChat, "private", ownerID, "long task")
-	api.waitCall("sendMessage", textIs("…"))
+	api.waitCall("sendMessage", textIs(liveStart))
 	api.text(ownerChat, "private", ownerID, "also this")
 	api.waitCall("setMessageReaction", nil)
 	backend.mu.Lock()

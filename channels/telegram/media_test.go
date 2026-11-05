@@ -191,7 +191,7 @@ func TestPhotoWhileTurnRunningGoesToInbox(t *testing.T) {
 	startChannel(t, api, backend)
 
 	api.text(ownerChat, "private", ownerID, "long")
-	api.waitCall("sendMessage", textIs("…"))
+	api.waitCall("sendMessage", textIs(liveStart))
 	api.photo(ownerChat, "private", ownerID, "p1", "look", "")
 	api.waitCall("setMessageReaction", nil)
 
