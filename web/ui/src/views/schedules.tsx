@@ -3,11 +3,10 @@ import { errorMessage } from "../api/client";
 import { getWorkflow, listRuns, listWorkflows, startRun } from "../api/workflows";
 import type { Run, WfNode, Workflow } from "../api/workflows";
 import { Ic } from "../ui/icons";
-import { Badge, Button, EmptyState, ErrorState, Panel, Seg, useToast } from "../ui/gr8r";
+import { Badge, Button, EmptyState, ErrorState, Seg, useToast } from "../ui/gr8r";
 import { nextCron } from "./cron-next";
 import { describeCron, isTrigger, nodeMeta } from "./workflow-catalog";
 import {
-  AgentFace,
   RUN_TONES,
   RUN_WORDS,
   WorkflowBadge,
@@ -21,6 +20,8 @@ import {
 /* Observe → Schedules (owner request 2026-11-05): every trigger that can start
    a workflow on its own, with the next fire time of schedules and intervals,
    and the latest runs across workflows (spec #33 REQ-WF-003). */
+
+type Filter = "timed" | "listening" | "all";
 
 interface TriggerRow {
   workflow: Workflow;
@@ -63,72 +64,87 @@ function untilText(ms: number, now: number): string {
   return "in " + Math.round(hours / 24) + " days";
 }
 
-function TriggerTable({
-list,
-timedRows,
-now,
-busy,
-onRun,
+function whenText(row: TriggerRow, now: number): { main: string; sub: string } {
+  const timed = row.node.type === "trigger.schedule" || row.node.type === "trigger.interval";
+  if (!row.live) {
+    return {
+      main: "Not firing",
+      sub: row.node.params.enabled === false ? "trigger is off" : "workflow is " + row.workflow.status,
+    };
+  }
+  if (!timed) {
+    return { main: "Listening", sub: "starts on demand" };
+  }
+  if (!row.next) {
+    return { main: "—", sub: "no upcoming time" };
+  }
+  return { main: dayClock(row.next, now), sub: untilText(row.next, now) };
+}
+
+function TriggerList({
+  list,
+  now,
+  busy,
+  onRun,
 }: {
-list: TriggerRow[];
-timedRows: boolean;
-now: number;
-busy: string;
-onRun: (workflow: Workflow) => void;
+  list: TriggerRow[];
+  now: number;
+  busy: string;
+  onRun: (workflow: Workflow) => void;
 }) {
   return (
-    <div className="sch-table" role="table">
+    <section className="sch-table" aria-label="Triggers">
       <div className="sch-tr sch-th" role="row">
-        <span>{timedRows ? "Next run" : "Trigger"}</span>
+        <span>When</span>
+        <span>Trigger</span>
         <span>Workflow</span>
-        <span>{timedRows ? "Schedule" : "Listens to"}</span>
         <span>Status</span>
         <span />
       </div>
       {list.map((row) => {
         const meta = nodeMeta(row.node.type);
         const text = triggerText(row.node, row.workflow);
+        const when = whenText(row, now);
         return (
           <div className={"sch-tr" + (row.live ? "" : " off")} role="row" key={row.workflow.id + row.node.id}>
-            <span className="sch-when">
+            <span className="sch-cell">
+              <b className="num">{when.main}</b>
+              <small>{when.sub}</small>
+            </span>
+            <span className="sch-trigger">
               <span className={"wf-ico sm tint-" + (row.live ? "green" : "gray")}>
-                <Ic name={meta.icon} size={15} />
+                <Ic name={meta.icon} size={14} />
               </span>
-              {timedRows ? (
-                <span>
-                  <b>{row.live && row.next ? untilText(row.next, now) : row.live ? "—" : "Not firing"}</b>
-                  <small className="num">{row.live && row.next ? dayClock(row.next, now) : row.node.params.enabled === false ? "trigger off" : "workflow " + row.workflow.status}</small>
-                </span>
-              ) : (
-                <span>
-                  <b>{meta.label}</b>
-                  <small>{row.live ? "listening" : row.node.params.enabled === false ? "trigger off" : "workflow " + row.workflow.status}</small>
-                </span>
-              )}
+              <span className="sch-cell">
+                <span className="trunc">{text.title}</span>
+                <small className="trunc mono">{text.detail}</small>
+              </span>
             </span>
-            <a className="sch-wf" href={"#/workflows/" + encodeURIComponent(row.workflow.id)}>
-              <AgentFace name={row.workflow.guardian} />
-              <span>
-                <b className="trunc">{row.workflow.name}</b>
-                <small className="trunc">Guarded by {row.workflow.guardian}</small>
-              </span>
+            <a className="sch-cell sch-wf" href={"#/workflows/" + encodeURIComponent(row.workflow.id)}>
+              <span className="trunc">{row.workflow.name}</span>
+              <small className="trunc">
+                Guarded by {row.workflow.guardian} · v{row.workflow.version}
+              </small>
             </a>
-            <span className="sch-what">
-              <span className="mono trunc">{text.title}</span>
-              <small className="trunc">{text.detail}</small>
-            </span>
             <span>
               <WorkflowBadge status={row.workflow.status} />
             </span>
             <span className="sch-acts">
-              <Button size="sm" loading={busy === row.workflow.id} onClick={() => onRun(row.workflow)}>
-                Run now
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="play"
+                loading={busy === row.workflow.id}
+                onClick={() => onRun(row.workflow)}
+                aria-label={"Run " + row.workflow.name + " now"}
+              >
+                Run
               </Button>
             </span>
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -138,7 +154,7 @@ export function SchedulesPage() {
   const [workflows, setWorkflows] = useState<Workflow[] | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState("");
-  const [filter, setFilter] = useState<"live" | "all">("live");
+  const [filter, setFilter] = useState<Filter>("timed");
   const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
@@ -196,9 +212,6 @@ export function SchedulesPage() {
     });
   }, [workflows, runs, now]);
 
-  const shown = filter === "live" ? rows.filter((row) => row.live) : rows;
-  const timed = shown.filter((row) => row.node.type === "trigger.schedule" || row.node.type === "trigger.interval");
-  const others = shown.filter((row) => !(row.node.type === "trigger.schedule" || row.node.type === "trigger.interval"));
   const nextUp = rows.find((row) => row.live && row.next > 0);
   const names = new Map((workflows || []).map((workflow) => [workflow.id, workflow.name]));
 
@@ -222,6 +235,13 @@ export function SchedulesPage() {
     );
   }
 
+  const isTimed = (row: TriggerRow) => row.node.type === "trigger.schedule" || row.node.type === "trigger.interval";
+  const liveRows = rows.filter((row) => row.live);
+  const shownRows =
+    filter === "timed" ? liveRows.filter(isTimed) : filter === "listening" ? liveRows.filter((row) => !isTimed(row)) : rows;
+  const startOfDay = new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
+  const runsToday = runs.filter((run) => run.started_at >= startOfDay).length;
+
   return (
     <main id="main" className="page wide sch-page">
       <header className="ph">
@@ -230,73 +250,87 @@ export function SchedulesPage() {
           <p>Everything that can start a workflow on its own, and what ran lately.</p>
         </div>
         <div className="acts">
-          <Seg
-            value={filter}
-            onChange={(value) => setFilter(value as "live" | "all")}
-            options={[
-              { value: "live", label: "Active", count: rows.filter((row) => row.live).length },
-              { value: "all", label: "All", count: rows.length },
-            ]}
-          />
           <Button as="a" href="#/workflows/new" variant="primary" icon="plus" size="sm">
             New workflow
           </Button>
         </div>
       </header>
 
-      {workflows ? (
-        <div className="sch-next">
-          <Ic name="alarm-clock" size={16} />
-          {nextUp ? (
-            <span>
-              Next: <b>{nextUp.workflow.name}</b> {untilText(nextUp.next, now)} · {dayClock(nextUp.next, now)}
-            </span>
-          ) : (
-            <span>No schedule will fire. Activate a workflow with a Schedule or Interval trigger.</span>
-          )}
+      <div className="home-now sch-summary">
+        <span className="home-now-k">Next</span>
+        {nextUp ? (
+          <a className="home-now-item" href={"#/workflows/" + encodeURIComponent(nextUp.workflow.id)}>
+            <b>{nextUp.workflow.name}</b> · {dayClock(nextUp.next, now)} · {untilText(nextUp.next, now)}
+          </a>
+        ) : (
+          <span className="home-now-item">No schedule will fire</span>
+        )}
+        <span className="home-now-item">
+          <b className="num">{liveRows.length}</b> active triggers
+        </span>
+        <span className="home-now-item">
+          <b className="num">{runsToday}</b> runs today
+        </span>
+      </div>
+
+      <div className="sch-toolbar">
+        <Seg
+          value={filter}
+          onChange={(value) => setFilter(value as Filter)}
+          options={[
+            { value: "timed", label: "Upcoming", count: liveRows.filter(isTimed).length },
+            { value: "listening", label: "Listening", count: liveRows.filter((row) => !isTimed(row)).length },
+            { value: "all", label: "All", count: rows.length },
+          ]}
+        />
+      </div>
+
+      {!workflows ? <p className="muted sch-pad">Loading…</p> : null}
+      {workflows && shownRows.length === 0 ? (
+        <div className="panel">
+          <EmptyState
+            icon="calendar-clock"
+            title={filter === "listening" ? "Nothing is listening" : "Nothing scheduled"}
+            text={
+              filter === "listening"
+                ? "Add a Webhook, Chat command or Lana event trigger to an active workflow."
+                : "Add a Schedule or Interval trigger to a workflow and activate it."
+            }
+          />
         </div>
       ) : null}
+      {shownRows.length > 0 ? <TriggerList list={shownRows} now={now} busy={busy} onRun={(wf) => void runNow(wf)} /> : null}
 
-      <Panel title="Timed triggers">
-        {!workflows ? <p className="muted sch-pad">Loading…</p> : null}
-        {workflows && timed.length === 0 ? (
-          <EmptyState size="sm" icon="calendar-clock" title="No schedules" text="Add a Schedule or Interval trigger to a workflow and activate it." />
-        ) : null}
-        {timed.length > 0 ? <TriggerTable list={timed} timedRows now={now} busy={busy} onRun={(wf) => void runNow(wf)} /> : null}
-      </Panel>
-
-      <Panel title="Webhooks, commands and events">
-        {workflows && others.length === 0 ? (
-          <EmptyState size="sm" icon="radio" text="No webhook, chat command or event triggers." />
-        ) : null}
-        {others.length > 0 ? <TriggerTable list={others} timedRows={false} now={now} busy={busy} onRun={(wf) => void runNow(wf)} /> : null}
-      </Panel>
-
-      <Panel title="Recent runs">
-        {workflows && runs.length === 0 ? <EmptyState size="sm" icon="play" text="No workflow has run yet." /> : null}
-        {runs.length > 0 ? (
-          <ul className="sch-runs">
-            {runs.slice(0, 15).map((run) => (
-              <li key={run.id}>
-                <a href={"#/workflows/" + encodeURIComponent(run.workflow_id) + "/runs/" + run.number}>
-                  <span>
-                    <Badge tone={RUN_TONES[run.status]} dot>
-                      {RUN_WORDS[run.status]}
-                    </Badge>
-                  </span>
-                  <b className="trunc">
-                    {names.get(run.workflow_id) || run.workflow_id} · Run #{run.number}
-                  </b>
-                  <span className="muted trunc">
-                    {run.trigger} · {run.error || run.summary || duration((run.ended_at || now) - run.started_at)}
-                  </span>
-                  <span className="muted num">{ago(run.started_at, now)}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </Panel>
+      <h2 className="sch-h2">Recent runs</h2>
+      {workflows && runs.length === 0 ? (
+        <div className="panel">
+          <EmptyState size="sm" icon="play" text="No workflow has run yet." />
+        </div>
+      ) : null}
+      {runs.length > 0 ? (
+        <section className="sch-table" aria-label="Recent runs">
+          {runs.slice(0, 12).map((run) => (
+            <a
+              className="sch-run"
+              key={run.id}
+              href={"#/workflows/" + encodeURIComponent(run.workflow_id) + "/runs/" + run.number}
+            >
+              <span>
+                <Badge tone={RUN_TONES[run.status]} dot>
+                  {RUN_WORDS[run.status]}
+                </Badge>
+              </span>
+              <span className="trunc">
+                {names.get(run.workflow_id) || run.workflow_id} <span className="muted">#{run.number}</span>
+              </span>
+              <span className="muted trunc">
+                {run.trigger} · {run.error || run.summary || duration((run.ended_at || now) - run.started_at)}
+              </span>
+              <span className="muted num">{ago(run.started_at, now)}</span>
+            </a>
+          ))}
+        </section>
+      ) : null}
     </main>
   );
 }
