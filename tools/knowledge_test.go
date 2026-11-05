@@ -359,6 +359,20 @@ func TestKnowledgeIngestConversions(t *testing.T) {
 	}
 }
 
+// knowledge_ingest is memory unless the input fetches a URL, which needs the
+// same owner approval as any other network access (REQ-KNW-040).
+func TestKnowledgeIngestRisk(t *testing.T) {
+	tool := NewKnowledgeIngest()
+	if got := tool.Risk(json.RawMessage(`{"url":"https://example.com"}`)); got != core.RiskNetwork {
+		t.Fatalf("url risk = %q, want %q", got, core.RiskNetwork)
+	}
+	for _, input := range []string{`{"text":"x"}`, `{"path":"notes.md"}`, `{"url":""}`, `{}`, `not-json`} {
+		if got := tool.Risk(json.RawMessage(input)); got != core.RiskMemory {
+			t.Fatalf("risk(%s) = %q, want %q", input, got, core.RiskMemory)
+		}
+	}
+}
+
 // Every knowledge tool reports a missing service.
 func TestKnowledgeUnavailable(t *testing.T) {
 	cases := []struct {

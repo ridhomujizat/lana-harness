@@ -351,9 +351,19 @@ func (t *knowledgeIngestTool) Spec() core.ToolSpec {
 	}
 }
 
-// Risk is memory: the tool stores a source and schedules a compile pass
+// Risk is network when the input fetches a URL, so a URL ingest needs the same
+// owner approval as any other network access, and memory otherwise: an ingest
+// of a file or text only stores a source and schedules a compile pass
 // (REQ-KNW-040).
-func (t *knowledgeIngestTool) Risk(json.RawMessage) core.Risk { return core.RiskMemory }
+func (t *knowledgeIngestTool) Risk(raw json.RawMessage) core.Risk {
+	var in struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(raw, &in); err == nil && in.URL != "" {
+		return core.RiskNetwork
+	}
+	return core.RiskMemory
+}
 
 func (t *knowledgeIngestTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {
@@ -389,6 +399,9 @@ func (t *knowledgeIngestTool) Call(ctx context.Context, tc core.ToolCtx, raw jso
 		abs, rejected := resolveToolPath(nil, tc, in.Path)
 		if rejected != nil {
 			return *rejected, nil
+		}
+		if err := statReadablePath(abs); err != nil {
+			return errorOutput(err.Error())
 		}
 		raw, err := os.ReadFile(abs)
 		if err != nil {

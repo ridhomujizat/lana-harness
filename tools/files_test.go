@@ -405,6 +405,109 @@ func TestBuiltinToolDescriptions(t *testing.T) {
 	}
 }
 
+func TestReadFileTooLarge(t *testing.T) {
+	ws := t.TempDir()
+	path := filepath.Join(ws, "big.txt")
+	writeSparseFile(t, path, maxReadFileBytes+1)
+	out := callTool(t, NewReadFile(&Guard{Workspace: ws}), ws, `{"path":"big.txt"}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "file is too large to read") || !strings.Contains(out.Output, "sed -n") {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
+func TestReadFileNotRegular(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.Mkdir(filepath.Join(ws, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := callTool(t, NewReadFile(&Guard{Workspace: ws}), ws, `{"path":"dir"}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "not a regular file") {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
+func TestEditFileTooLarge(t *testing.T) {
+	ws := t.TempDir()
+	path := filepath.Join(ws, "big.txt")
+	writeSparseFile(t, path, maxReadFileBytes+1)
+	out := callTool(t, NewEditFile(&Guard{Workspace: ws}), ws, `{"path":"big.txt","old_string":"a","new_string":"b"}`)
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "file is too large to read") {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
+// writeSparseFile creates a file of size bytes without writing the data.
+func writeSparseFile(t *testing.T, path string, size int64) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWriteFileThroughSymlinkKeepsLink checks that the atomic write replaces the
+// symlink target and leaves the symlink a symlink.
+func TestWriteFileThroughSymlinkKeepsLink(t *testing.T) {
+	ws := t.TempDir()
+	target := filepath.Join(ws, "real.txt")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(ws, "link.txt")
+	if err := os.Symlink("real.txt", link); err != nil {
+		t.Fatal(err)
+	}
+	out := callTool(t, NewWriteFile(&Guard{Workspace: ws}), ws, `{"path":"link.txt","content":"new"}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("out=%+v", out)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link is no longer a symlink: %v", info.Mode())
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "new" {
+		t.Fatalf("target data=%q err=%v", data, err)
+	}
+}
+
+func TestEditFileThroughSymlinkKeepsLink(t *testing.T) {
+	ws := t.TempDir()
+	target := filepath.Join(ws, "real.txt")
+	if err := os.WriteFile(target, []byte("one two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(ws, "link.txt")
+	if err := os.Symlink("real.txt", link); err != nil {
+		t.Fatal(err)
+	}
+	out := callTool(t, NewEditFile(&Guard{Workspace: ws}), ws, `{"path":"link.txt","old_string":"two","new_string":"2"}`)
+	if out.Status != core.ToolStatusSuccess {
+		t.Fatalf("out=%+v", out)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link is no longer a symlink: %v", info.Mode())
+	}
+	data, err := os.ReadFile(target)
+	if err != nil || string(data) != "one 2" {
+		t.Fatalf("target data=%q err=%v", data, err)
+	}
+}
+
 func TestToolDescriptionKeyPhrases(t *testing.T) {
 	cases := map[string][]string{
 		"bash": {

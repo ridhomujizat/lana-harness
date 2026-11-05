@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,38 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
+	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
+
+// maxReadFileBytes caps the file read_file, edit_file, and knowledge_ingest
+// load in one call, so a huge file cannot exhaust memory and a FIFO cannot
+// block the turn.
+const maxReadFileBytes = 16 << 20
+
+// fileTooLargeError reports a file over maxReadFileBytes.
+type fileTooLargeError struct{ size int64 }
+
+func (e *fileTooLargeError) Error() string {
+	return fmt.Sprintf("file is too large to read: %d bytes, limit 16 MiB", e.size)
+}
+
+// statReadablePath refuses a path that cannot be read in one call: a
+// non-regular file such as a FIFO, device, or directory, or a file over
+// maxReadFileBytes. A missing path returns nil, so the caller keeps its own
+// not-found message.
+func statReadablePath(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("not a regular file: %s", path)
+	}
+	if info.Size() > maxReadFileBytes {
+		return &fileTooLargeError{size: info.Size()}
+	}
+	return nil
+}
 
 const (
 	readFileDescription = "Reads a UTF-8 text file and returns numbered lines (`<n>\\t<line>`). " +
@@ -75,6 +107,13 @@ func (t *readFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	path, rejected := resolveReadToolPath(t.guard, tc, in.Path)
 	if rejected != nil {
 		return *rejected, nil
+	}
+	if err := statReadablePath(path); err != nil {
+		var tooLarge *fileTooLargeError
+		if errors.As(err, &tooLarge) {
+			return errorOutput(err.Error() + " Use bash with head, tail, or sed -n to read part of it.")
+		}
+		return errorOutput(err.Error())
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -187,7 +226,7 @@ func (t *writeFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawM
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return errorOutput(err.Error())
 	}
-	if err := os.WriteFile(path, []byte(in.Content), mode); err != nil {
+	if err := webfiles.AtomicWriteMode(path, []byte(in.Content), mode); err != nil {
 		return errorOutput(err.Error())
 	}
 	verb := "Created"
@@ -232,6 +271,9 @@ func (t *editFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if rejected != nil {
 		return *rejected, nil
 	}
+	if err := statReadablePath(path); err != nil {
+		return errorOutput(err.Error())
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -259,7 +301,7 @@ func (t *editFileTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 	if info, statErr := os.Stat(path); statErr == nil {
 		mode = info.Mode().Perm()
 	}
-	if err := os.WriteFile(path, []byte(out), mode); err != nil {
+	if err := webfiles.AtomicWriteMode(path, []byte(out), mode); err != nil {
 		return errorOutput(err.Error())
 	}
 	text := fmt.Sprintf("Edited %s: replaced %d occurrence(s).", in.Path, replaced)

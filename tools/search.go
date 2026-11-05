@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -157,6 +158,7 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		roots = append(roots, dir)
 	}
 	var results []string
+	var notes []string
 	err = filepath.WalkDir(base, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -219,6 +221,7 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 			return nil
 		}
 		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 		lineNo := 0
 		for scanner.Scan() {
 			lineNo++
@@ -236,11 +239,20 @@ func (t *grepTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 			}
 		}
 		_ = f.Close()
+		if err := scanner.Err(); err != nil {
+			if errors.Is(err, bufio.ErrTooLong) {
+				notes = append(notes, rel+": skipped after a line longer than 1 MiB")
+				return nil
+			}
+			notes = append(notes, rel+": read failed: "+err.Error())
+			return nil
+		}
 		return nil
 	})
 	if err != nil && err != io.EOF {
 		return errorOutput(err.Error())
 	}
+	results = append(results, notes...)
 	if len(results) == 0 {
 		return successOutput("no matches")
 	}

@@ -110,6 +110,20 @@ func TestGrepGlobFilter(t *testing.T) {
 	_ = json.RawMessage(nil)
 }
 
+func TestGrepLongLineThenMatch(t *testing.T) {
+	ws := t.TempDir()
+	// A line over the old 64 KiB scanner limit must not stop the scan before a
+	// later matching line.
+	content := strings.Repeat("x", 200*1024) + "\nneedle here\n"
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := callTool(t, NewGrep(&Guard{Workspace: ws}), ws, `{"pattern":"needle"}`)
+	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "a.txt:2: needle here") {
+		t.Fatalf("out=%+v", out)
+	}
+}
+
 func TestGlobMissingWorkspace(t *testing.T) {
 	ws := filepath.Join(t.TempDir(), "missing", "workspace")
 	out := callTool(t, NewGlob(&Guard{Workspace: ws}), ws, `{"pattern":"**/*.go"}`)
