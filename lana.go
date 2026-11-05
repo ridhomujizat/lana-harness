@@ -29,6 +29,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
+	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
@@ -204,6 +205,17 @@ type Runtime struct {
 	// workflowsOnce makes StartWorkflows start the service at most once, like
 	// StartKnowledgeUpkeep.
 	workflowsOnce sync.Once
+	// toolbox is the installable-tools service (REQ-TB-001). It is never nil
+	// after New.
+	toolbox *toolbox.Service
+	// toolboxMu guards toolboxNames, the tool names this runtime registered
+	// from the toolbox. Built-in tools are registered elsewhere and are never
+	// in the set, so syncToolboxTools never unregisters them.
+	toolboxMu    sync.Mutex
+	toolboxNames map[string]bool
+	// toolboxWatch tracks the goroutine that refreshes the registered toolbox
+	// tools on every toolbox change (REQ-TB-004).
+	toolboxWatch sync.WaitGroup
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
@@ -378,6 +390,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		ctx: root, cancel: cancel, coreCtx: coreCtx, result: result,
 		registry: registry, store: coreCtx.Sessions, approve: runtimeOpts.approve, home: opts.Home,
 		jobs: jobsRegistry, wfSessions: map[string]*workflowSession{},
+		toolboxNames: map[string]bool{},
 	}
 	// REQ-WF-009, AC-WF-016: the workflow tool gate is prepended so a worker's
 	// tool list, step budget and lock are decided before the permission engine
@@ -392,6 +405,15 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	rt.workflows = workflow.NewService(wfStore, rt.WorkflowDeps(),
 		workflow.WithSessionCheck(rt.IsWorkflowSession),
 		workflow.WithLogger(slog.Default()))
+	// REQ-TB-001, REQ-TB-004: one toolbox service per runtime, over
+	// <LANA_HOME>/tools, with the secret store as its env resolver. The
+	// installed commands are registered at once and refreshed on every change.
+	rt.toolbox = toolbox.New(rt.toolboxRoot(),
+		toolbox.WithSecrets(rt.toolboxSecret),
+		toolbox.WithLogger(slog.Default()))
+	rt.syncToolboxTools()
+	rt.toolboxWatch.Add(1)
+	go rt.watchToolbox()
 	return rt, nil
 }
 
@@ -1022,6 +1044,13 @@ func (rt *Runtime) Close() error {
 		rt.workflows.Close()
 	}
 	rt.cancel()
+	// REQ-TB-003, REQ-TB-004: stop the toolbox jobs and the tool refresh loop
+	// before the registry closes, so no toolbox change touches a closing
+	// registry.
+	if rt.toolbox != nil {
+		rt.toolbox.Close()
+	}
+	rt.toolboxWatch.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := rt.registry.Close(ctx); err != nil {
@@ -1216,6 +1245,37 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 			})
 		}
 		groups = append(groups, ToolGroup{ID: group.ID, Label: group.Label, Tools: entries})
+	}
+
+	// REQ-TB-005: the installed toolbox commands get their own group, after the
+	// built-in groups. A command behaves like a built-in that is not in the
+	// agent's tools list: it stays off until the owner adds its name to
+	// [agents.<name>].tools. The group is left out when no package is
+	// installed, so the catalog stays as it was before any package existed.
+	installed := make([]ToolEntry, 0)
+	for _, name := range rt.catalogToolNames() {
+		tool, ok := registry.Get(name)
+		if !ok {
+			continue
+		}
+		if _, ok := tool.(*toolboxCommandTool); !ok {
+			continue
+		}
+		listed := slices.Contains(agentCfg.Tools, name)
+		source := "not_listed"
+		if listed {
+			source = "listed"
+		}
+		installed = append(installed, ToolEntry{
+			Name:      name,
+			Risk:      string(tool.Risk(nil)),
+			AsksFirst: toolAsksFirst(tool, agentCfg),
+			Enabled:   listed && !disabled[name],
+			Source:    source,
+		})
+	}
+	if len(installed) > 0 {
+		groups = append(groups, ToolGroup{ID: "installed", Label: "Installed tools", Tools: installed})
 	}
 
 	// MCP tools are grouped by server. The agent's own server list carries the

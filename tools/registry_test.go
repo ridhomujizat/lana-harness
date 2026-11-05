@@ -3,7 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -67,6 +69,44 @@ func TestRegistryRejectsDuplicate(t *testing.T) {
 	if _, err := r.Specs([]string{"y"}); err == nil {
 		t.Fatal("unregistered tool did not error")
 	}
+}
+
+func TestRegistryUnregister(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register(dummyTool{name: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if !r.Unregister("x") {
+		t.Fatal("Unregister(x)=false, want true")
+	}
+	if _, ok := r.Get("x"); ok {
+		t.Fatal("x is still registered")
+	}
+	if r.Unregister("x") {
+		t.Fatal("Unregister(x)=true on the second call")
+	}
+	// A name freed by Unregister can be registered again.
+	if err := r.Register(dummyTool{name: "x"}); err != nil {
+		t.Fatalf("re-register: %v", err)
+	}
+}
+
+func TestRegistryConcurrent(t *testing.T) {
+	r := NewRegistry()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			name := fmt.Sprintf("tool%d", i%4)
+			_ = r.Register(dummyTool{name: name})
+			_ = r.Names()
+			_, _ = r.Get(name)
+			_, _ = r.Specs([]string{name})
+			r.Unregister(name)
+		}(i)
+	}
+	wg.Wait()
 }
 
 func TestExecuteRecoversPanic(t *testing.T) {

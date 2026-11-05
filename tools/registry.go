@@ -5,12 +5,16 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// Registry is the implementation of core.ToolRegistry.
+// Registry is the implementation of core.ToolRegistry. It is safe for
+// concurrent use, so a toolbox change can register and unregister tools while
+// turns read them.
 type Registry struct {
+	mu    sync.RWMutex
 	tools map[string]core.Tool
 }
 
@@ -26,6 +30,8 @@ func (r *Registry) Register(t core.Tool) error {
 	if name == "" {
 		return fmt.Errorf("tool name is empty")
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, ok := r.tools[name]; ok {
 		return fmt.Errorf("tool '%s' is already registered", name)
 	}
@@ -33,14 +39,30 @@ func (r *Registry) Register(t core.Tool) error {
 	return nil
 }
 
+// Unregister removes the tool with the given name and reports whether one was
+// registered under it.
+func (r *Registry) Unregister(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.tools[name]; !ok {
+		return false
+	}
+	delete(r.tools, name)
+	return true
+}
+
 // Get returns the tool with the given name.
 func (r *Registry) Get(name string) (core.Tool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	return t, ok
 }
 
 // Specs returns the specs in the order of the requested names.
 func (r *Registry) Specs(names []string) ([]core.ToolSpec, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]core.ToolSpec, 0, len(names))
 	for _, name := range names {
 		t, ok := r.tools[name]
@@ -54,6 +76,8 @@ func (r *Registry) Specs(names []string) ([]core.ToolSpec, error) {
 
 // Names returns the registered tool names, sorted.
 func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
 		names = append(names, name)

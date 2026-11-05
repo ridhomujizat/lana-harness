@@ -222,7 +222,8 @@ func TestWorkflowDepsBash(t *testing.T) {
 	}
 }
 
-// REQ-WF-005: Browse reports a missing obscura binary before starting anything.
+// REQ-WF-005, REQ-TB-006: Browse reports a missing obscura binary before
+// starting anything.
 func TestWorkflowDepsBrowseMissing(t *testing.T) {
 	rt := newWorkflowRuntime(t, mock.Script{}, nil)
 	empty := t.TempDir()
@@ -230,7 +231,7 @@ func TestWorkflowDepsBrowseMissing(t *testing.T) {
 	_, err := rt.WorkflowDeps().Browse(context.Background(), workflow.BrowseRequest{
 		WorkflowID: "wf1", URL: "https://example.com",
 	})
-	if err == nil || !strings.Contains(err.Error(), "obscura is not installed or not on PATH") {
+	if err == nil || !strings.Contains(err.Error(), "Obscura is not installed. Add it on the Tools page.") {
 		t.Fatalf("Browse error=%v", err)
 	}
 }

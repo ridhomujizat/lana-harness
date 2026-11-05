@@ -156,12 +156,14 @@ func (d workflowDeps) WebFetch(ctx context.Context, url string) (title, markdown
 	return tools.FetchMarkdown(ctx, url)
 }
 
-// Browse renders a page with the obscura browser engine (REQ-WF-005).
+// Browse renders a page with the obscura browser engine (REQ-WF-005,
+// REQ-TB-006). The binary comes from an installed package that provides it, or
+// from PATH.
 func (d workflowDeps) Browse(ctx context.Context, req workflow.BrowseRequest) (string, error) {
 	rt := d.rt
-	binary, err := exec.LookPath("obscura")
-	if err != nil {
-		return "", errors.New("obscura is not installed or not on PATH")
+	binary, ok := rt.toolbox.FindBinary("obscura")
+	if !ok {
+		return "", errors.New("Obscura is not installed. Add it on the Tools page.") //nolint:staticcheck // ST1005: the workflow node shows this exact text.
 	}
 	format := req.Format
 	if format == "" {
@@ -192,7 +194,7 @@ func (d workflowDeps) Browse(ctx context.Context, req workflow.BrowseRequest) (s
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	if runCtx.Err() != nil {
 		return "", fmt.Errorf("browse: timeout after %s", timeout)
 	}
@@ -266,7 +268,9 @@ func (rt *Runtime) workflowToolGate(ctx context.Context, in core.ToolsPreExecute
 	if over {
 		return core.ToolDecision{Allowed: false, Outcome: core.OutcomeRejected, Status: core.ToolStatusRejected, Reason: "step budget used"}, nil
 	}
-	if session.lock[in.Call.Name] {
+	// REQ-TB-003: tools_request always raises an owner approval, so a workflow
+	// lock never auto-allows it.
+	if in.Call.Name != toolsRequestToolName && session.lock[in.Call.Name] {
 		return core.ToolDecision{Allowed: true, Outcome: core.OutcomeAllowedOnce}, nil
 	}
 	return next(ctx, in)
