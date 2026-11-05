@@ -235,6 +235,24 @@ func TestResolvePolicyCatalog(t *testing.T) {
 	}
 }
 
+// REQ-LTC-011: the retained tail budget is a token budget. A 1000-token budget
+// keeps units totalling about 4000 characters (chars/4), not 1000.
+func TestTailIndexUsesTokenBudget(t *testing.T) {
+	units := make([]unit, 6)
+	for i := range units {
+		units[i] = unit{kind: "user", chars: 1000}
+	}
+	// Each 1000-char unit is 250 tokens, so four fit in 1000 tokens (4000
+	// characters) and the fifth would overflow.
+	if got := tailIndex(units, 1000, false); got != 2 {
+		t.Fatalf("tailIndex = %d, want 2 (four 250-token units)", got)
+	}
+	// newestOnly always keeps the newest unit, whatever the budget.
+	if got := tailIndex(units, 0, true); got != len(units)-1 {
+		t.Fatalf("newestOnly tailIndex = %d, want %d", got, len(units)-1)
+	}
+}
+
 // REQ-MDL-005: the compaction summary request carries the request's reasoning
 // effort.
 func TestCompactSummaryCarriesEffort(t *testing.T) {
@@ -627,7 +645,7 @@ func TestPressureAttemptThrottled(t *testing.T) {
 	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
 		"coder": {Provider: "mock", Model: "m", ContextWindow: 32000},
 	}})
-	seedToolSteps(t, store, info.ID, 5, 3000)
+	seedToolSteps(t, store, info.ID, 6, 3000)
 	appendEvents(t, store, info.ID, core.EventDraft{Kind: core.KindStepEnd, TurnID: "t", Payload: core.StepEnd{
 		V: 1, Step: 99, Provider: "mock", Model: "m", Usage: core.Usage{InputTokens: 100000, OutputTokens: 1000},
 	}})

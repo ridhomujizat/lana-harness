@@ -1053,7 +1053,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		// REQ-ATT-003: a model that cannot see images gets the placeholder text
 		// instead of image bytes. The stored events are unchanged.
 		if !resolved.vision {
-			history = textForImages(history)
+			history = core.TextForImages(history)
 		}
 		req := core.ChatRequest{Model: resolved.model, System: prompt, Messages: history, Tools: specs}
 		req.MaxTokens = control.MaxTokens

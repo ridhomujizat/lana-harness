@@ -68,3 +68,63 @@ func TestSummaryRequestHasNoImageBytes(t *testing.T) {
 		t.Fatalf("summary request has no %q placeholder", want)
 	}
 }
+
+// REQ-ATT-003: the overflow retry re-derives the messages, which carry the
+// stored image bytes again. When the original request had none, the retry must
+// replace them with placeholder text instead of resending images to a model
+// that cannot see them.
+func TestOverflowRetryStripsImages(t *testing.T) {
+	provider := &recordProvider{text: "condensed", failures: 1}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Provider: "mock", Model: "m"},
+	}})
+	const path = "attachments/2026-11-01/a.png"
+	appendEvents(t, store, info.ID,
+		core.EventDraft{Kind: core.KindTurnStart, TurnID: "t", Payload: core.TurnStart{V: 1, TurnID: "t"}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockText, Text: strings.Repeat("u", 60000)},
+		}}},
+		core.EventDraft{Kind: core.KindAssistantMessage, TurnID: "t", Payload: core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "reply"}}}},
+		core.EventDraft{Kind: core.KindUserMessage, TurnID: "t", Payload: core.UserMessage{V: 1, Content: []core.ContentBlock{
+			{Kind: core.BlockImage, MediaType: "image/png", Path: path, Data: []byte{1, 2, 3}},
+		}}},
+	)
+	hooks := core.NewHooks()
+	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
+		return provider.Stream(ctx, in.Request)
+	})
+	service.Install(hooks)
+
+	// The agent already replaced the image with its placeholder for this
+	// non-vision model, so the original request carries no image bytes.
+	req := core.ChatRequest{Model: "m", System: "head", Messages: []core.Message{
+		{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "[image " + path + ": the current model cannot see images]"}}},
+	}}
+	stream, err := hooks.LLMStream.Call(context.Background(), core.LLMStreamInput{
+		SessionID: info.ID, TurnID: "t", Step: 1, Targets: []core.LLMTarget{{Provider: "mock", Model: "m"}}, Request: req,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range stream {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if hasImageData(provider.last().Messages) {
+		t.Fatalf("retry request carries image bytes: %+v", provider.last().Messages)
+	}
+	want := "[image " + path + ": the current model cannot see images]"
+	found := false
+	for _, message := range provider.last().Messages {
+		for _, block := range message.Content {
+			if strings.Contains(block.Text, want) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("retry request has no %q placeholder: %+v", want, provider.last().Messages)
+	}
+}

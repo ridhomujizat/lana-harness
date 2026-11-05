@@ -686,6 +686,13 @@ func (s *Service) stream(ctx context.Context, in core.LLMStreamInput, next core.
 	if deriveErr != nil {
 		return nil, err
 	}
+	// The agent replaces image bytes with placeholder text for a model that
+	// cannot see images, but the re-derived messages carry the stored images
+	// again. When the original request had none, keep the retry image-free
+	// (REQ-ATT-003).
+	if !hasImageData(in.Request.Messages) && hasImageData(messages) {
+		messages = core.TextForImages(messages)
+	}
 	in.Request.Messages = messages
 	return next(ctx, in)
 }

@@ -161,9 +161,11 @@ func onlySummary(units []unit) bool {
 }
 
 // tailIndex returns the index of the first retained unit. The tail walks units
-// from the newest back while their char estimate fits the budget, always
-// keeping at least the newest unit. With newestOnly the tail is the newest unit
-// alone (REQ-LTC-013, REQ-LTC-016).
+// from the newest back while their estimated token count fits the token budget
+// (REQ-LTC-011), always keeping at least the newest unit. A unit's estimate is
+// its char count divided by 4, rounded up, the same chars/4 rule the rest of the
+// package uses. With newestOnly the tail is the newest unit alone (REQ-LTC-013,
+// REQ-LTC-016).
 func tailIndex(units []unit, budget int64, newestOnly bool) int {
 	if len(units) == 0 {
 		return 0
@@ -172,16 +174,22 @@ func tailIndex(units []unit, budget int64, newestOnly bool) int {
 		return len(units) - 1
 	}
 	start := len(units) - 1
-	sum := int64(units[start].chars)
+	sum := estimateUnitTokens(units[start])
 	for i := start - 1; i >= 0; i-- {
-		chars := int64(units[i].chars)
-		if sum+chars > budget {
+		tokens := estimateUnitTokens(units[i])
+		if sum+tokens > budget {
 			break
 		}
-		sum += chars
+		sum += tokens
 		start = i
 	}
 	return start
+}
+
+// estimateUnitTokens estimates a unit's token count from its char count with the
+// package rule, chars/4 rounded up.
+func estimateUnitTokens(u unit) int64 {
+	return (int64(u.chars) + 3) / 4
 }
 
 // pruneIndex maps a tool call id to the newest pruned output recorded for it.
@@ -301,6 +309,20 @@ func imagePlaceholders(blocks []core.ContentBlock) []core.ContentBlock {
 		}
 	}
 	return out
+}
+
+// hasImageData reports whether any message content block carries image bytes,
+// at the top level or inside a tool result. It mirrors what core.TextForImages
+// replaces, so a request can be checked before it is rewritten (REQ-ATT-003).
+func hasImageData(messages []core.Message) bool {
+	for _, message := range messages {
+		for _, block := range message.Content {
+			if block.Kind == core.BlockImage || (block.Kind == core.BlockToolResult && len(block.Images) > 0) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // appendImagePlaceholders adds one placeholder line per image to output,
