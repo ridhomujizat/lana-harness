@@ -26,6 +26,8 @@ export interface InstallView {
   label: string;
   kind: "command" | "download";
   detail: string;
+  fits?: boolean;
+  reason?: string;
 }
 
 export interface PackageView {
@@ -41,6 +43,12 @@ export interface PackageView {
   commands: CommandView[];
   install: InstallView[];
   updated_at: number;
+  /* Revision 2 (REQ-TB-001/009/011). */
+  source?: "catalog" | "custom";
+  icon?: string;
+  category?: string;
+  mcp?: { args: string[] } | null;
+  auto_method?: number;
 }
 
 export interface ToolJob {
@@ -60,10 +68,17 @@ export interface UsedBy {
   workflows: { id: string; name: string }[];
 }
 
+/* One agent and whether it may use this tool (its MCP server and commands). */
+export interface AgentUse {
+  name: string;
+  enabled: boolean;
+}
+
 export interface PackageDetail extends PackageView {
   manifest: string;
   jobs: ToolJob[];
   used_by: UsedBy;
+  agents?: AgentUse[];
 }
 
 export interface RunResult {
@@ -95,12 +110,17 @@ export function deletePackage(id: string, uninstall = false): Promise<void> {
   return request<void>("DELETE", pkg(id) + (uninstall ? "?uninstall=1" : ""));
 }
 
-export function installPackage(id: string, method: number): Promise<ToolJob> {
+/* method -1 lets lana pick the first method that fits this machine. */
+export function installPackage(id: string, method = -1): Promise<ToolJob> {
   return request<ToolJob>("POST", pkg(id) + "/install", { method });
 }
 
 export function uninstallPackage(id: string): Promise<ToolJob> {
   return request<ToolJob>("POST", pkg(id) + "/uninstall");
+}
+
+export function setAgentUse(id: string, agent: string, enabled: boolean): Promise<PackageDetail> {
+  return request<PackageDetail>("POST", pkg(id) + "/agents", { agent, enabled });
 }
 
 export function checkPackage(id: string): Promise<PackageView> {

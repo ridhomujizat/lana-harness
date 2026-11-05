@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
+import type { MouseEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
-import { MANIFEST_TEMPLATE, addPackage, listPackages, openToolboxStream } from "../api/toolbox";
+import { MANIFEST_TEMPLATE, addPackage, installPackage, listPackages, openToolboxStream } from "../api/toolbox";
 import type { PackageState, PackageView } from "../api/toolbox";
 import { Ic } from "../ui/icons";
-import { Badge, Button, EmptyState, ErrorState, Modal, SearchInput, Textarea } from "../ui/gr8r";
+import { Badge, Button, EmptyState, ErrorState, Modal, SearchInput, Textarea, useToast } from "../ui/gr8r";
 import type { BadgeTone } from "../ui/gr8r";
 
-/* Configure → Tools (spec #34): programs the owner installs once and then uses
-   from agents in chats and from workflows. The catalog starts empty. */
+/* Configure → Tools (spec #34 r2): an app list. Lana ships a small catalog
+   (REQ-TB-001); the owner installs an app with one click (REQ-TB-009). Custom
+   manifests stay behind "Add custom tool". */
 
 export const STATE_TONES: Record<PackageState, BadgeTone> = {
   installed: "green",
@@ -22,10 +24,14 @@ export const STATE_WORDS: Record<PackageState, string> = {
   installed: "Installed",
   installing: "Installing",
   missing: "Not installed",
-  too_old: "Too old",
+  too_old: "Update needed",
   broken: "Broken",
   failed: "Install failed",
 };
+
+export function isInstalled(pkg: PackageView): boolean {
+  return pkg.status === "installed" || pkg.status === "too_old";
+}
 
 export function StateBadge({ pkg }: { pkg: PackageView }) {
   const state = pkg.installing ? "installing" : pkg.status;
@@ -35,6 +41,30 @@ export function StateBadge({ pkg }: { pkg: PackageView }) {
       {state === "installed" && pkg.version ? " · " + pkg.version : ""}
     </Badge>
   );
+}
+
+export function AppIcon({ pkg, size = "md" }: { pkg: PackageView; size?: "md" | "lg" }) {
+  return (
+    <span className={"tl-app-ico " + size + (isInstalled(pkg) ? " on" : "")}>
+      <Ic name={pkg.icon || "package"} size={size === "lg" ? 24 : 20} />
+    </span>
+  );
+}
+
+/* What an app gives lana, in one line. */
+export function provides(pkg: PackageView): string {
+  const parts: string[] = [];
+  if (pkg.mcp) {
+    parts.push("Browser control for agents");
+  }
+  const commands = pkg.commands.filter((cmd) => !(pkg.mcp && cmd.name === "fetch"));
+  if (pkg.mcp && pkg.commands.some((cmd) => cmd.name === "fetch")) {
+    parts.push("page fetch in workflows");
+  }
+  if (commands.length > 0) {
+    parts.push(commands.map((cmd) => cmd.name).join(", "));
+  }
+  return parts.join(" · ");
 }
 
 export interface ManifestIssue {
@@ -58,7 +88,7 @@ export function useToolboxStream(onChange: (id: string) => void) {
 }
 
 function AddToolModal({ onClose, onAdded }: { onClose: () => void; onAdded: (pkg: PackageView) => void }) {
-  const [text, setText] = useState(MANIFEST_TEMPLATE);
+  const [text, setText] = useState(MANIFEST_TEMPLATE.replace('id = "obscura"', 'id = "my-tool"'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [issues, setIssues] = useState<ManifestIssue[]>([]);
@@ -79,8 +109,8 @@ function AddToolModal({ onClose, onAdded }: { onClose: () => void; onAdded: (pkg
 
   return (
     <Modal
-      title="Add a tool"
-      subtitle="Describe the program in a manifest: how to find it, how to install it, and the commands agents and workflows may call."
+      title="Add a custom tool"
+      subtitle="For a program that is not in the list: describe how to find it, how to install it, and the commands lana may run."
       size="lg"
       onClose={onClose}
       footer={
@@ -94,16 +124,12 @@ function AddToolModal({ onClose, onAdded }: { onClose: () => void; onAdded: (pkg
     >
       <Textarea
         className="mono tl-manifest"
-        rows={22}
+        rows={20}
         value={text}
         spellCheck={false}
         onChange={(event) => setText(event.target.value)}
         aria-label="Manifest (TOML)"
       />
-      <p className="tl-hint">
-        The example is a starting point: change the install command to what works on your machine (Homebrew, npm,
-        pipx, a curl script, nix) or use a download URL. Nothing is installed until you press Install.
-      </p>
       {error ? (
         <div className="tl-issues" role="alert">
           <b>{issues.length > 0 ? "Fix the manifest" : error}</b>
@@ -122,11 +148,53 @@ function AddToolModal({ onClose, onAdded }: { onClose: () => void; onAdded: (pkg
   );
 }
 
+function AppCard({ pkg, onInstall, busy }: { pkg: PackageView; onInstall: (pkg: PackageView) => void; busy: boolean }) {
+  const href = "#/tools/" + encodeURIComponent(pkg.id);
+  const installed = isInstalled(pkg);
+  const canInstall = (pkg.auto_method ?? 0) >= 0 && pkg.install.length > 0;
+  const click = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onInstall(pkg);
+  };
+  return (
+    <a className={"tl-card" + (installed ? " on" : "")} href={href}>
+      <div className="tl-card-top">
+        <AppIcon pkg={pkg} />
+        <div className="tl-card-title">
+          <b>{pkg.name}</b>
+          <span>{pkg.category || (pkg.source === "custom" ? "Custom" : "Tool")}</span>
+        </div>
+      </div>
+      <p className="tl-card-desc">{pkg.description}</p>
+      <p className="tl-card-gives">{provides(pkg)}</p>
+      <div className="tl-card-foot">
+        {installed || pkg.installing || pkg.status === "failed" || pkg.status === "broken" ? (
+          <StateBadge pkg={pkg} />
+        ) : (
+          <span className="muted tl-card-note">{canInstall ? "Ready to install" : "Install it yourself"}</span>
+        )}
+        {installed ? (
+          <span className="tl-open">
+            Open <Ic name="arrow-right" size={13} />
+          </span>
+        ) : pkg.installing ? null : canInstall ? (
+          <Button size="sm" variant="primary" icon="download" loading={busy} onClick={click}>
+            Install
+          </Button>
+        ) : null}
+      </div>
+    </a>
+  );
+}
+
 export function ToolsPage() {
+  const toast = useToast();
   const [packages, setPackages] = useState<PackageView[] | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState("");
 
   const load = useCallback(() => {
     listPackages()
@@ -142,21 +210,36 @@ export function ToolsPage() {
   }, [load]);
   useToolboxStream(useCallback(() => load(), [load]));
 
+  async function install(pkg: PackageView) {
+    setBusy(pkg.id);
+    try {
+      await installPackage(pkg.id);
+      toast.show({ title: "Installing " + pkg.name, body: "You can keep working; the card updates when it is done.", tone: "info" });
+      load();
+    } catch (failure) {
+      toast.show({ title: "Could not install " + pkg.name, body: errorMessage(failure), tone: "error" });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  const q = query.trim().toLowerCase();
   const shown = (packages || []).filter((pkg) =>
-    (pkg.name + " " + pkg.id + " " + pkg.description).toLowerCase().includes(query.trim().toLowerCase())
+    (pkg.name + " " + pkg.id + " " + pkg.description + " " + (pkg.category || "")).toLowerCase().includes(q)
   );
-  const installed = (packages || []).filter((pkg) => pkg.status === "installed").length;
+  const installed = shown.filter(isInstalled);
+  const available = shown.filter((pkg) => !isInstalled(pkg));
 
   return (
     <main id="main" className="page tl-page">
       <header className="ph">
         <div>
           <h1>Tools</h1>
-          <p>Programs lana can run for you. Install one once, then turn its commands on for agents or use them in workflows.</p>
+          <p>Apps lana can use for you. Install one with a click, then let agents and workflows use it.</p>
         </div>
         <div className="acts">
-          <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>
-            Add tool
+          <Button icon="plus" onClick={() => setAdding(true)}>
+            Add custom tool
           </Button>
         </div>
       </header>
@@ -165,7 +248,7 @@ export function ToolsPage() {
         <ErrorState title="Could not load tools" text={error} action={<Button onClick={load}>Try again</Button>} />
       ) : null}
 
-      {packages && packages.length > 0 ? (
+      {packages && packages.length > 4 ? (
         <div className="tl-toolbar">
           <SearchInput
             value={query}
@@ -174,60 +257,34 @@ export function ToolsPage() {
             placeholder="Search tools"
             aria-label="Search tools"
           />
-          <span className="muted">
-            {packages.length} tools · {installed} installed
-          </span>
         </div>
       ) : null}
 
-      {packages && packages.length === 0 ? (
-        <div className="panel">
-          <EmptyState
-            icon="package"
-            title="No tools yet"
-            text="Add a program such as Obscura (headless browser), yt-dlp or ffmpeg. Lana installs it on this machine and offers its commands to agents and workflows."
-            action={
-              <Button variant="primary" icon="plus" onClick={() => setAdding(true)}>
-                Add tool
-              </Button>
-            }
-          />
-        </div>
+      {installed.length > 0 ? (
+        <>
+          <h2 className="tl-h2">Installed</h2>
+          <div className="tl-grid-apps">
+            {installed.map((pkg) => (
+              <AppCard key={pkg.id} pkg={pkg} onInstall={(item) => void install(item)} busy={busy === pkg.id} />
+            ))}
+          </div>
+        </>
       ) : null}
 
-      {shown.length > 0 ? (
-        <section className="tl-list" aria-label="Tools">
-          {shown.map((pkg) => (
-            <a key={pkg.id} className="tl-row" href={"#/tools/" + encodeURIComponent(pkg.id)}>
-              <span className={"tl-ico s-" + pkg.status}>
-                <Ic name="package" size={18} />
-              </span>
-              <span className="tl-main">
-                <span className="tl-name">
-                  <b>{pkg.name}</b>
-                  <span className="muted mono">{pkg.id}</span>
-                </span>
-                <span className="tl-desc trunc">{pkg.description || "No description"}</span>
-              </span>
-              <span className="tl-cmds">
-                {pkg.commands.slice(0, 3).map((cmd) => (
-                  <code key={cmd.name}>{cmd.tool}</code>
-                ))}
-                {pkg.commands.length > 3 ? <span className="muted">+{pkg.commands.length - 3}</span> : null}
-                {pkg.commands.length === 0 ? <span className="muted">no commands</span> : null}
-              </span>
-              <span>
-                <StateBadge pkg={pkg} />
-              </span>
-              <Ic name="chevron-right" size={16} className="tl-chev" />
-            </a>
-          ))}
-        </section>
+      {available.length > 0 ? (
+        <>
+          <h2 className="tl-h2">Available</h2>
+          <div className="tl-grid-apps">
+            {available.map((pkg) => (
+              <AppCard key={pkg.id} pkg={pkg} onInstall={(item) => void install(item)} busy={busy === pkg.id} />
+            ))}
+          </div>
+        </>
       ) : null}
 
-      {packages && packages.length > 0 && shown.length === 0 ? (
+      {packages && shown.length === 0 ? (
         <div className="panel">
-          <EmptyState size="sm" icon="search-x" text="No tool matches the search." />
+          <EmptyState size="sm" icon="search-x" text={packages.length === 0 ? "No tools yet." : "No tool matches the search."} />
         </div>
       ) : null}
 

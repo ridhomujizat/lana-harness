@@ -26,8 +26,14 @@ const obscura: PackageDetail = {
       ],
     },
   ],
-  install: [{ label: "Homebrew", kind: "command", detail: "brew install obscura" }],
+  install: [{ label: "Download (macOS, Apple silicon)", kind: "download", detail: "github.com/h4ckf0r0day/obscura/releases/…/obscura-aarch64-macos-stealth.tar.gz", fits: true }],
   updated_at: NOW,
+  source: "catalog",
+  icon: "globe",
+  category: "Browser",
+  mcp: { args: ["--stealth", "--storage-dir", "{{data}}/profile", "mcp"] },
+  auto_method: 0,
+  agents: [{ name: "default", enabled: true }, { name: "lana", enabled: false }, { name: "researcher", enabled: false }],
   manifest: MANIFEST_TEMPLATE,
   jobs: [
     { id: "j1", package: "obscura", kind: "install", method: 0, label: "Homebrew", status: "succeeded", started_at: NOW - 600000, ended_at: NOW - 540000, error: "" },
@@ -39,15 +45,41 @@ const ytdlp: PackageDetail = {
   ...obscura,
   id: "yt-dlp",
   name: "yt-dlp",
-  description: "Download video and audio, read subtitles",
+  description: "Read video details and subtitles from YouTube and many other sites",
+  icon: "video",
+  category: "Media",
+  mcp: null,
+  agents: [{ name: "default", enabled: false }, { name: "lana", enabled: false }],
   homepage: "https://github.com/yt-dlp/yt-dlp",
   status: "missing",
   version: "",
   binary_path: "",
   commands: [{ name: "subtitles", tool: "yt_dlp_subtitles", description: "Fetch the subtitles of a video", risk: "read", input: [{ name: "url", type: "string", description: "Video URL", required: true }] }],
-  install: [{ label: "pipx", kind: "command", detail: "pipx install yt-dlp" }, { label: "Download (macOS)", kind: "download", detail: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" }],
+  install: [{ label: "Download (macOS)", kind: "download", detail: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos", fits: true }],
   jobs: [],
   used_by: { agents: [], workflows: [] },
+};
+
+const pandoc: PackageDetail = {
+  ...ytdlp,
+  id: "pandoc",
+  name: "Pandoc",
+  description: "Convert documents between Markdown, Word, HTML, PDF and more",
+  icon: "file-text",
+  category: "Documents",
+  commands: [{ name: "convert", tool: "pandoc_convert", description: "Convert a file in the workspace to another format", risk: "write", input: [] }],
+  install: [{ label: "Homebrew", kind: "command", detail: "brew install pandoc", fits: true }],
+};
+
+const ffmpeg: PackageDetail = {
+  ...pandoc,
+  id: "ffmpeg",
+  name: "FFmpeg",
+  description: "Convert and trim audio and video files",
+  icon: "film",
+  category: "Media",
+  install: [{ label: "Homebrew", kind: "command", detail: "brew install ffmpeg", fits: false, reason: "needs brew" }],
+  auto_method: -1,
 };
 
 export function mockToolbox(method: string, parts: string[]): { status: number; body: unknown; stream?: string } {
@@ -55,7 +87,7 @@ export function mockToolbox(method: string, parts: string[]): { status: number; 
   const empty = new URLSearchParams(window.location.search).get("empty") === "tools";
   if (!at(2)) {
     if (method === "POST") return { status: 201, body: ytdlp };
-    return { status: 200, body: { packages: empty ? [] : [obscura, ytdlp] } };
+    return { status: 200, body: { packages: empty ? [] : [obscura, ytdlp, pandoc, ffmpeg] } };
   }
   if (at(2) === "stream") return { status: 200, body: null, stream: ": ping\n\n" };
   const pkg = at(2) === "yt-dlp" ? ytdlp : obscura;
