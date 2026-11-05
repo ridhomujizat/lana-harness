@@ -24,6 +24,8 @@ import { ForgotPage } from "../views/forgot";
 import { HomePage } from "../views/home";
 import { ChatsPage } from "../views/chats";
 import { WorkflowsPage } from "../views/workflows";
+import { LogsPage } from "../views/logs";
+import { SchedulesPage } from "../views/schedules";
 import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
@@ -85,6 +87,10 @@ function routeContent(
       return <ChatsPage />;
     case "chat":
       return <ChatsPage roomName={params.name} />;
+    case "logs":
+      return <LogsPage />;
+    case "schedules":
+      return <SchedulesPage />;
     case "workflows":
       return <WorkflowsPage />;
     case "workflow-new":
@@ -176,6 +182,10 @@ export function crumbsFor(route: Route): Crumb[] {
         { label: "Chats", href: "#/chats" },
         { label: params.name || "Chat" },
       ];
+    case "logs":
+      return [{ label: "Logs" }];
+    case "schedules":
+      return [{ label: "Schedules" }];
     case "workflows":
       return [{ label: "Workflows" }];
     case "workflow-new":

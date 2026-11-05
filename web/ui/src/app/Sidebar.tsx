@@ -57,7 +57,11 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     title: "Observe",
-    items: [{ key: "sessions", label: "History", icon: "history", href: "#/sessions" }],
+    items: [
+      { key: "sessions", label: "History", icon: "history", href: "#/sessions" },
+      { key: "logs", label: "Logs", icon: "scroll-text", href: "#/logs" },
+      { key: "schedules", label: "Schedules", icon: "calendar-clock", href: "#/schedules" },
+    ],
   },
   {
     title: "Configure",

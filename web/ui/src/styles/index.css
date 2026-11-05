@@ -52,3 +52,4 @@
 @import "./pages-gr8r/setup.css" layer(gr8r);
 @import "./pages-gr8r/login.css" layer(gr8r);
 @import "./pages-gr8r/workflows.css" layer(gr8r);
+@import "./pages-gr8r/observe.css" layer(gr8r);

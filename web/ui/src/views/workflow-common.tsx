@@ -154,6 +154,13 @@ export function dayClock(ms: number, now = Date.now()): string {
   const date = new Date(ms);
   const today = new Date(now);
   const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  if (ms >= startToday + 2 * 86400000) {
+    const month = date.toLocaleString("en", { month: "short" });
+    return month + " " + date.getDate() + ", " + clock(ms);
+  }
+  if (ms >= startToday + 86400000) {
+    return "Tomorrow " + clock(ms);
+  }
   if (ms >= startToday) {
     return "Today " + clock(ms);
   }

@@ -164,5 +164,7 @@
 .empty-state {
   flex: 1 1 auto;
   width: 100%;
+  /* The legacy sheet caps it at 360px, which pinned it to the left edge. */
+  max-width: none;
   align-self: stretch;
 }

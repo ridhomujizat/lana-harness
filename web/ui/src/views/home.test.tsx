@@ -5,6 +5,7 @@ import { getDashboard } from "../api/dashboard";
 import type { Dashboard } from "../api/dashboard";
 import { Sidebar } from "../app/Sidebar";
 import { HomePage } from "./home";
+import { LogsPage } from "./logs";
 
 /* The dashboard reads one endpoint, so the module is mocked and the view is
    rendered on its own (AC-DSH-004, AC-DSH-005, AC-DSH-006). */
@@ -227,12 +228,13 @@ describe("dashboard render (AC-DSH-004)", () => {
     expect(screen.getByText("Memory capture")).toBeTruthy();
     expect(screen.getByText("Tools")).toBeTruthy();
     expect(screen.getByText("Turn outcomes")).toBeTruthy();
-    expect(screen.getByText("Error log")).toBeTruthy();
+    /* The error log moved to Observe → Logs (2026-11-05). */
+    expect(screen.queryByText("Error log")).toBeNull();
   });
 
   it("marks a tool row only with enough calls and a high error share", async () => {
     vi.mocked(getDashboard).mockResolvedValue(makeDashboard());
-    render(<HomePage />);
+    render(<LogsPage />);
 
     /* read_file: 80 calls, 30 errors (38%) is marked; grep: 4 calls is not. */
     const readFile = (await screen.findByText("read_file")).closest("tr");
@@ -255,7 +257,13 @@ describe("dashboard render (AC-DSH-004)", () => {
     expect(screen.getByText("No agent activity in this range.")).toBeTruthy();
     expect(screen.getByText("No tool calls in this range.")).toBeTruthy();
     expect(screen.getByText("No turns in this range.")).toBeTruthy();
-    expect(screen.getByText("No errors in this range.")).toBeTruthy();
+  });
+
+  it("shows the empty error log on the Logs page", async () => {
+    vi.mocked(getDashboard).mockResolvedValue(makeDashboard(EMPTY_DASHBOARD));
+    render(<LogsPage />);
+    expect(await screen.findByText("No errors in this range.")).toBeTruthy();
+    expect(screen.getByText("No tool calls in this range.")).toBeTruthy();
   });
 
   it("switches range and refetches with the new range", async () => {
@@ -324,7 +332,7 @@ describe("dashboard render (AC-DSH-004)", () => {
 describe("error log (AC-DSH-005)", () => {
   it("narrows rows by source when a chip is pressed", async () => {
     vi.mocked(getDashboard).mockResolvedValue(makeDashboard());
-    render(<HomePage />);
+    render(<LogsPage />);
 
     const list = await screen.findByRole("list", { name: "Error log" });
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
@@ -337,7 +345,7 @@ describe("error log (AC-DSH-005)", () => {
 
   it("links session rows to the trajectory view", async () => {
     vi.mocked(getDashboard).mockResolvedValue(makeDashboard());
-    render(<HomePage />);
+    render(<LogsPage />);
 
     const link = await screen.findByRole("link", { name: "Trajectory" });
     expect(link.getAttribute("href")).toBe(
@@ -347,7 +355,7 @@ describe("error log (AC-DSH-005)", () => {
 
   it("expands an error row on click", async () => {
     vi.mocked(getDashboard).mockResolvedValue(makeDashboard());
-    render(<HomePage />);
+    render(<LogsPage />);
 
     const toggle = await screen.findByRole("button", {
       name: /file not found: a.txt/,
@@ -466,7 +474,8 @@ describe("agent filter (AC-DSH-008)", () => {
 
   it("notes that daemon rows are not per agent when one is selected", async () => {
     vi.mocked(getDashboard).mockResolvedValue(makeDashboard());
-    render(<HomePage />);
+    window.history.replaceState(null, "", "#/logs");
+    render(<LogsPage />);
 
     expect(screen.queryByText(/Daemon logs are not per agent/)).toBeNull();
     await screen.findByRole("list", { name: "Error log" });

@@ -1930,7 +1930,11 @@ export function mockApi(method: string, url: URL): MockResult {
     case "mcp": {
       if (at(2) === "test") return { status: 200, body: mcpTestFixture };
       if (at(3) === "restart") return { status: 200, body: mcpRestartFixture };
-      if (isGet) return { status: 200, body: mcpFixture };
+      if (isGet) {
+        /* ?empty=mcp shows the empty state. */
+        const empty = new URLSearchParams(window.location.search).get("empty");
+        return { status: 200, body: empty === "mcp" ? { ...mcpFixture, servers: [] } : mcpFixture };
+      }
       return { status: 200, body: mcpSaveFixture };
     }
     case "skills": {
