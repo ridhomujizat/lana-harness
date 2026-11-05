@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -97,5 +99,51 @@ func TestWebFetchTimeout(t *testing.T) {
 	out := callTool(t, NewWebFetch(&Guard{}), t.TempDir(), `{"url":"`+srv.URL+`"}`)
 	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "timed out after 30 seconds") {
 		t.Fatalf("out=%+v", out)
+	}
+}
+
+// TestBlockedAddress checks the address guard of web_fetch: cloud metadata,
+// link-local, multicast, and the unspecified address are refused; loopback and
+// private ranges stay reachable.
+func TestBlockedAddress(t *testing.T) {
+	blocked := []string{
+		"169.254.169.254", // AWS/GCP/Azure metadata
+		"169.254.0.1",     // link-local unicast
+		"fe80::1",         // IPv6 link-local unicast
+		"224.0.0.1",       // multicast (link-local)
+		"239.1.2.3",       // multicast
+		"ff02::1",         // IPv6 link-local multicast
+		"ff00::1",         // IPv6 multicast
+		"0.0.0.0",         // unspecified
+		"::",              // unspecified
+		"100.100.100.200", // Alibaba metadata
+	}
+	for _, s := range blocked {
+		if err := blockedAddress(net.ParseIP(s)); err == nil {
+			t.Errorf("blockedAddress(%s) = nil, want an error", s)
+		} else if !strings.Contains(err.Error(), "blocked address") {
+			t.Errorf("blockedAddress(%s) error = %q", s, err)
+		}
+	}
+	allowed := []string{
+		"127.0.0.1", "::1", "10.0.0.1", "172.16.5.4", "192.168.1.1", "8.8.8.8",
+	}
+	for _, s := range allowed {
+		if err := blockedAddress(net.ParseIP(s)); err != nil {
+			t.Errorf("blockedAddress(%s) = %v, want nil", s, err)
+		}
+	}
+}
+
+// TestWebFetchBlocksMetadataURL checks that a fetch of a cloud metadata address
+// is refused by the dialer, so no request leaves the process.
+func TestWebFetchBlocksMetadataURL(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("http_proxy", "")
+	t.Setenv("https_proxy", "")
+	_, _, err := FetchMarkdown(context.Background(), "http://169.254.169.254/")
+	if err == nil || !strings.Contains(err.Error(), "blocked address") {
+		t.Fatalf("err=%v want blocked address", err)
 	}
 }

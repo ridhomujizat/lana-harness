@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
@@ -28,6 +29,49 @@ var webFetchSpec = json.RawMessage(`{"type":"object","properties":{"url":{"type"
 // webFetchDescription explains what web_fetch returns and its main limits.
 const webFetchDescription = "Fetches an HTTP or HTTPS URL and returns its content as text: HTML is converted to Markdown, and text/plain or application/json is returned raw. " +
 	"Times out after 30 seconds, rejects responses over 5 MiB and non-text content types, and follows at most 5 redirects."
+
+// alibabaMetadataIP is the Alibaba Cloud instance metadata endpoint.
+var alibabaMetadataIP = net.IPv4(100, 100, 100, 200)
+
+// webFetchTransport clones the default transport (proxy from the environment,
+// timeouts) and dials through a guard that refuses cloud metadata and
+// link-local or multicast targets. The check lives in the dialer, so it also
+// covers a redirect and a DNS rebind.
+var webFetchTransport = func() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   blockDialAddress,
+	}).DialContext
+	return transport
+}()
+
+// blockDialAddress refuses a dial to a blocked address. net calls it with the
+// resolved address, so a hostname that resolves to one is refused too.
+func blockDialAddress(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return blockedAddress(ip)
+	}
+	return nil
+}
+
+// blockedAddress returns an error for an address web_fetch must not reach:
+// cloud metadata endpoints, the unspecified address, and link-local or
+// multicast ranges (IsMulticast also covers link-local multicast). Loopback
+// and private ranges stay allowed on purpose: the owner fetches local dev
+// servers, and a network fetch needs approval under the ask policy.
+func blockedAddress(ip net.IP) error {
+	switch {
+	case ip.IsUnspecified(), ip.IsMulticast(), ip.IsLinkLocalUnicast(), ip.Equal(alibabaMetadataIP):
+		return fmt.Errorf("blocked address: %s", ip)
+	}
+	return nil
+}
 
 type webFetchTool struct{ guard *Guard }
 
@@ -63,7 +107,8 @@ func FetchMarkdown(ctx context.Context, rawURL string) (title, markdown string, 
 		return "", "", errors.New("url must be http or https")
 	}
 	client := &http.Client{
-		Timeout: webFetchTimeout,
+		Timeout:   webFetchTimeout,
+		Transport: webFetchTransport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
