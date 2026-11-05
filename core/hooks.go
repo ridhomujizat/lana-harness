@@ -2,8 +2,25 @@ package core
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 )
+
+// callHook invokes a hook listener and turns a panic into an error, so one bad
+// listener cannot take down the agent turn goroutine that called it.
+func callHook[O any](fn func() (O, error)) (out O, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var zero O
+			out = zero
+			err = fmt.Errorf("hook listener panicked: %v", r)
+			slog.Error("hook listener panicked", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	return fn()
+}
 
 // Next forwards to the next listener, or to the default handler at the end of the chain.
 type Next[I, O any] func(ctx context.Context, in I) (O, error)
@@ -90,12 +107,12 @@ func (w *Waterfall[I, O]) Call(ctx context.Context, in I) (O, error) {
 				var zero O
 				return zero, ErrNoDefault
 			}
-			return def(ctx, input)
+			return callHook(func() (O, error) { return def(ctx, input) })
 		}
 		next := func(ctx context.Context, nextInput I) (O, error) {
 			return run(i+1, nextInput)
 		}
-		return listeners[i].listener(ctx, input, next)
+		return callHook(func() (O, error) { return listeners[i].listener(ctx, input, next) })
 	}
 	return run(0, in)
 }
@@ -144,7 +161,7 @@ func (s *Serial[I, O]) Call(ctx context.Context, in I) ([]O, error) {
 	s.mu.RUnlock()
 	out := make([]O, 0, len(listeners))
 	for _, entry := range listeners {
-		v, err := entry.listener(ctx, in)
+		v, err := callHook(func() (O, error) { return entry.listener(ctx, in) })
 		if err != nil {
 			return nil, err
 		}
