@@ -251,6 +251,7 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		// REQ-WF-011, API-WF-001: the Workflows page reads the service and lists
 		// its approval decisions under Needs attention.
 		webServer.SetWorkflows(rt.Workflows())
+		webServer.SetToolbox(rt.Toolbox())
 		webServer.SetDaemonStore(backend)
 		webServer.SetSecretStore(backend)
 		webServer.SetAgentFileStore(backend)
