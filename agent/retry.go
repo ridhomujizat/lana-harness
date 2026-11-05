@@ -54,11 +54,19 @@ func (r *Retry) handle(ctx context.Context, in core.LLMStreamInput, next core.Ne
 			one.Targets = []core.LLMTarget{target}
 			stream, err := next(ctx, one)
 			if err == nil {
-				var first core.ChatEvent
-				var rest *streamPump
-				first, rest, err = pumpStream(ctx, stream)
-				if err == nil {
-					return replayStream(first, rest), nil
+				// A provider that returns no stream and no error is a broken
+				// adapter; treat it like a network failure so the retry and
+				// fallback logic applies instead of dereferencing a nil
+				// iterator.
+				if stream == nil {
+					err = &core.ProviderError{Class: "network", Message: "provider returned no stream"}
+				} else {
+					var first core.ChatEvent
+					var rest *streamPump
+					first, rest, err = pumpStream(ctx, stream)
+					if err == nil {
+						return replayStream(first, rest), nil
+					}
 				}
 			}
 			if ctx.Err() != nil {

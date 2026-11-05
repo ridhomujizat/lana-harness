@@ -200,3 +200,28 @@ func TestRetryJitterRange(t *testing.T) {
 		}
 	}
 }
+
+// nilStreamProvider returns no stream and no error, the broken adapter case.
+type nilStreamProvider struct {
+	calls atomic.Int32
+}
+
+func (p *nilStreamProvider) Stream(context.Context, core.ChatRequest) (core.ChatStream, error) {
+	p.calls.Add(1)
+	return nil, nil
+}
+
+// TestRetryNilStream covers that a provider returning (nil, nil) is treated as
+// a retryable network failure instead of dereferencing a nil iterator.
+func TestRetryNilStream(t *testing.T) {
+	provider := &nilStreamProvider{}
+	hooks, _, sessionID := retryHarness(t, map[string]core.Provider{"p": provider}, nil)
+	err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}})
+	var pe *core.ProviderError
+	if !errors.As(err, &pe) || pe.Class != "network" {
+		t.Fatalf("err=%v want a network ProviderError", err)
+	}
+	if got := provider.calls.Load(); got != maxRetries+1 {
+		t.Fatalf("calls=%d want %d", got, maxRetries+1)
+	}
+}

@@ -887,6 +887,36 @@ func TestSubagentChildCancelOnly(t *testing.T) {
 	}
 }
 
+// TestSubagentContinueRejectsUnallowedAgent covers that task_continue applies
+// the same delegate allowlist as task: a child whose agent is not allowed is
+// refused.
+func TestSubagentContinueRejectsUnallowedAgent(t *testing.T) {
+	h := newSubagentHarness(t, mock.Script{Responses: []mock.Response{textResponse("unused")}},
+		map[string]core.AgentConfig{
+			"coder":    {Provider: "mock", Model: "m", Tools: []string{"task", "task_continue"}, Subagents: []string{"explorer"}},
+			"explorer": {Provider: "mock", Model: "child-model"},
+			"writer":   {Provider: "mock", Model: "child-model"},
+		})
+	parent := newSubagentParent(t, h, "coder")
+	child, err := h.store.Create(context.Background(), core.NewSession{
+		Agent: "writer", Channel: parent.Channel, Address: parent.Address, Workspace: parent.Workspace, ParentSessionID: parent.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &subagentRunner{reg: h.reg, allowed: []string{"explorer"}}
+	out, err := runner.Continue(context.Background(), core.ContinueRequest{
+		ParentSessionID: parent.ID, SessionID: child.ID, Prompt: "Also check X",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "agent 'writer' is not a subagent of this agent (allowed: explorer)"
+	if out.Status != core.ToolStatusError || out.Output != want {
+		t.Fatalf("output=%+v want %q", out, want)
+	}
+}
+
 // TestSubagentSpawnLinksChildToParent covers that Spawn links the child session
 // so its live frames reach the parent's subscribers.
 func TestSubagentSpawnLinksChildToParent(t *testing.T) {

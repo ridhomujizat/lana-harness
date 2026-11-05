@@ -1191,8 +1191,26 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				// usual and every result is stored in call order.
 				var runnable []core.ToolCall
 				var runnableIndex []int
+				// stepKeys counts, per call identity, the identical calls seen
+				// earlier in this step. guard.observe only advances the repeat
+				// chain after the whole step, so without this count one response
+				// with many identical calls would run all of them past the block
+				// threshold (REQ-LPG-008).
+				stepKeys := map[string]int{}
 				for i, call := range calls {
 					out, blocked := guard.before(call)
+					if !blocked && !loopGuardUntracked[call.Name] {
+						key := call.Name + "\x00" + canonicalArgs(call.Input)
+						prior := 0
+						if key == guard.lastKey {
+							prior = guard.repeat
+						}
+						if prior+stepKeys[key] >= loopGuardStreakLen {
+							out = guard.block(call, loopGuardKindIdenticalStreak, prior+stepKeys[key], loopGuardBlockedIdenticalText)
+							blocked = true
+						}
+						stepKeys[key]++
+					}
 					if blocked {
 						outputs[i] = out
 						slog.Info("loop guard block", "session_id", rn.sessionID, "turn_id", turnID,

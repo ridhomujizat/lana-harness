@@ -282,3 +282,49 @@ func TestTurnLoopGuardReportDoesNotRunTools(t *testing.T) {
 		t.Fatalf("requests=%d want %d", got, want)
 	}
 }
+
+// TestTurnLoopGuardSameStepIdenticalCallsBlocked covers that one response with
+// many identical calls runs at most the guard's repeat block threshold of
+// them; the rest get the synthetic block result.
+func TestTurnLoopGuardSameStepIdenticalCallsBlocked(t *testing.T) {
+	const calls = 20
+	events := make([]mock.Event, 0, calls+1)
+	for i := 0; i < calls; i++ {
+		events = append(events, mock.Event{ToolUse: &mock.ToolUse{
+			ID: fmt.Sprintf("c%d", i), Name: "bash", Input: json.RawMessage(`{"command":"true"}`),
+		}})
+	}
+	events = append(events, mock.Event{Stop: strptr("tool_use")})
+	h := newHarness(t, mock.Script{Responses: []mock.Response{
+		{Events: events},
+		textResponse("report"),
+	}}, map[string]core.AgentConfig{
+		"assistant": {Provider: "mock", Model: "m", Tools: []string{"bash"}},
+	})
+	allowAllTools(h)
+
+	if result := h.run(t, "hi"); result.StopReason != "loop" {
+		t.Fatalf("result=%+v", result)
+	}
+	executed, blocked := 0, 0
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindToolResult {
+			continue
+		}
+		var payload core.ToolResultPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Status == core.ToolStatusError && strings.HasPrefix(payload.Output, "Blocked bash") {
+			blocked++
+			continue
+		}
+		executed++
+	}
+	if executed > loopGuardStreakLen {
+		t.Fatalf("executed %d identical calls, want at most %d", executed, loopGuardStreakLen)
+	}
+	if blocked != calls-executed {
+		t.Fatalf("executed=%d blocked=%d want %d blocked", executed, blocked, calls-executed)
+	}
+}

@@ -79,6 +79,9 @@ func (s *subagentRunner) Continue(ctx context.Context, req core.ContinueRequest)
 	if err != nil || child.ParentSessionID != req.ParentSessionID {
 		return toolError(fmt.Sprintf("session %s is not a subagent of this session", req.SessionID)), nil
 	}
+	if !containsString(s.allowed, child.Agent) {
+		return toolError(fmt.Sprintf("agent '%s' is not a subagent of this agent (allowed: %s)", child.Agent, strings.Join(s.allowed, ", "))), nil
+	}
 	if count, ok := s.reg.acquireChild(req.ParentSessionID); !ok {
 		return toolError(fmt.Sprintf("%d subagents are already running", count)), nil
 	}
