@@ -695,6 +695,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 	pendingReminder := ""
 	// guard tracks this turn's exact-repeat chain and failure streak.
 	var guard loopGuard
+	// pendingClaim holds the inbox message popInbox took for this step until
+	// its user/message event is stored. Every error exit before that event
+	// returns it to the inbox at the finished label, so a claimed owner message
+	// is never lost; the step cap and halt paths return it explicitly.
+	var pendingClaim inboxItem
+	claimedPending := false
 	for {
 		claimedText := ""
 		claimed := false
@@ -728,6 +734,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				claimedItem = item
 				claimedText = item.text
 				inboxClaim = true
+				pendingClaim = item
+				claimedPending = true
 				guard.reset()
 				pendingReminder = ""
 			} else if pendingReminder != "" {
@@ -744,6 +752,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				claimedItem = item
 				claimedText = item.text
 				inboxClaim = true
+				pendingClaim = item
+				claimedPending = true
 				guard.reset()
 			}
 		default:
@@ -772,6 +782,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				claimedItem = item
 				claimedText = item.text
 				inboxClaim = true
+				pendingClaim = item
+				claimedPending = true
 				// A mid-turn owner message resets both guard chains
 				// (REQ-TRL-014).
 				guard.reset()
@@ -798,6 +810,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			}
 			if decision.Reject {
 				slog.Info("agent.pre_step rejected message", "session_id", rn.sessionID, "turn_id", turnID, "reason", decision.Reason)
+				// A rejected message is dropped on purpose, not re-queued.
+				claimedPending = false
 				goto finished
 			}
 			if len(decision.Input.Content) > 0 {
@@ -831,6 +845,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			// cap replaces the model input, not the owner's queued message.
 			if inboxClaim {
 				rn.pushFrontInbox(claimedItem)
+				claimedPending = false
 			}
 			if budgetReport {
 				reason = "max_steps"
@@ -851,6 +866,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		if halted && !budgetReport && !loopReport {
 			if inboxClaim {
 				rn.pushFrontInbox(claimedItem)
+				claimedPending = false
 			}
 			budgetReport = true
 			loopReport = true
@@ -865,6 +881,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		if loopReport && !pendingTools {
 			if inboxClaim {
 				rn.pushFrontInbox(claimedItem)
+				claimedPending = false
 			}
 			goto finished
 		}
@@ -984,6 +1001,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				reason = "error"
 				goto finished
 			}
+			// The claimed message is stored now, so it is no longer re-queued.
+			claimedPending = false
 			if !runtimeNote {
 				ownerMessage = true
 			}
@@ -1278,6 +1297,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 	}
 
 finished:
+	// A message popInbox claimed but never stored is owed to the inbox: an
+	// early error exit (pre-step, resolve, prompt, or event write) must not
+	// swallow an owner message.
+	if claimedPending {
+		rn.pushFrontInbox(pendingClaim)
+	}
 	// A setup step can fail only because the turn context ended. That is a
 	// stop, not a runtime error, so the context mapping below applies
 	// (REQ-TFB-001).
