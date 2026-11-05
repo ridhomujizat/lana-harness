@@ -853,7 +853,17 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 		return
 	}
 
+	// Surface the in-flight diagnosis: keep the row running with the failure
+	// and attempts so far, and tell the run summary the guardian is checking
+	// (REQ-WF-008).
+	row.Error = msg
+	ex.appendLog(row, "guardian is checking the failure")
+	ex.putRow(*row)
+	ex.run.Summary = "guardian is checking " + nodeName(node)
+	ex.saveRun()
+
 	d, tokens, derr := ex.diagnose(ctx, node, row, lastErr)
+	ex.run.Summary = ""
 	ex.run.Tokens += tokens
 	ex.saveRun()
 	if derr != nil {
@@ -897,6 +907,7 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 		ex.appendLog(row, "guardian asks the owner: "+d.Reason)
 		ex.run.Status = RunWaiting
 		ex.run.WaitingReason = "owner"
+		ex.run.Summary = "waiting for your call on " + nodeName(node)
 		ex.saveRun()
 		ex.notify(ctx, Notice{
 			WorkflowID: ex.wf.ID, WorkflowName: ex.wf.Name, RunNumber: ex.run.Number,
@@ -1029,6 +1040,7 @@ func (ex *runExec) finish() {
 	} else {
 		ex.run.Status = RunFailed
 		ex.run.Error = failed
+		ex.run.Summary = ""
 	}
 	ex.run.WaitingReason = ""
 	ex.run.EndedAt = ex.now()

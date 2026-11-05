@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -291,7 +292,11 @@ func (ex *runExec) stateSetNode(ctx context.Context, params map[string]any) (nod
 func (ex *runExec) loopNode(ctx context.Context, node Node, params map[string]any) (nodeResult, error) {
 	raw, ok := normalize(params["items"]).([]any)
 	if !ok {
-		return nodeResult{}, errors.New("loop items must be an array")
+		msg := "loop items must be a JSON array, got " + typeName(params["items"])
+		if tpl, isStr := node.Params["items"].(string); isStr && strings.Contains(tpl, "{{") {
+			msg += " from " + tpl
+		}
+		return nodeResult{}, errors.New(msg)
 	}
 	if len(raw) > engineLoopMaxItems {
 		return nodeResult{}, fmt.Errorf("loop items has %d entries, the maximum is %d", len(raw), engineLoopMaxItems)
@@ -363,6 +368,7 @@ func (ex *runExec) waitNode(row *NodeRun, node Node, params map[string]any) {
 	ex.putRow(*row)
 	ex.run.Status = RunWaiting
 	ex.run.WaitingReason = "wait"
+	ex.run.Summary = ""
 	ex.run.WakeAt = now + int64(seconds*1000)
 	ex.saveRun()
 }
@@ -391,6 +397,7 @@ func (ex *runExec) approvalNode(ctx context.Context, row *NodeRun, node Node, pa
 
 	ex.run.Status = RunWaiting
 	ex.run.WaitingReason = "approval"
+	ex.run.Summary = ""
 	ex.run.WakeAt = 0
 	ex.saveRun()
 

@@ -47,6 +47,9 @@ function runLine(run: Run, now: number): { text: string; tone: string } {
   const took = duration((run.ended_at || now) - run.started_at);
   switch (run.status) {
     case "running":
+      if (run.summary.startsWith("guardian is checking")) {
+        return { text: "Guardian is checking a failure · " + took, tone: "blue" };
+      }
       return { text: trigger + " · running " + took, tone: "blue" };
     case "waiting":
       return {
@@ -135,7 +138,11 @@ function decorate(detail: RunDetail) {
         break;
       case "running":
         tones[node.id] = "run";
-        badges[node.id] = { text: "Running", tone: "blue" };
+        /* The engine keeps the error on a running row while the guardian
+           diagnoses it (REQ-WF-008 step 3). */
+        badges[node.id] = row.error
+          ? { text: "Guardian checking…", tone: "violet" }
+          : { text: "Running", tone: "blue" };
         break;
       case "waiting":
         tones[node.id] = "wait";

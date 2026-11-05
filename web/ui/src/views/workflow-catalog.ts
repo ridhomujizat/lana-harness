@@ -13,7 +13,10 @@ export type FieldKind =
   | "agent"
   | "tools"
   | "json"
-  | "list";
+  | "list"
+  /* JSON when the text parses as JSON (arrays, numbers, true), else a string
+     such as a {{ }} template. */
+  | "value";
 
 export interface FieldSpec {
   name: string;
@@ -249,7 +252,7 @@ export const NODE_CATALOG: NodeMeta[] = [
     fields: [
       { name: "left", label: "Value", kind: "text", required: true, mono: true, placeholder: "{{ nodes.rank.output.score }}" },
       { name: "op", label: "Is", kind: "select", required: true, options: ["==", "!=", ">", ">=", "<", "<=", "contains", "not_contains", "exists", "not_exists", "truthy", "falsy"] },
-      { name: "right", label: "Than / to", kind: "text", mono: true },
+      { name: "right", label: "Than / to", kind: "value", mono: true },
     ],
     defaults: { left: "", op: ">=", right: "" },
   },
@@ -273,7 +276,7 @@ export const NODE_CATALOG: NodeMeta[] = [
     icon: "repeat",
     tint: "orange",
     ports: ["body", "done"],
-    fields: [{ name: "items", label: "Items", kind: "text", required: true, mono: true, placeholder: "{{ state.sources }}", help: "An array. Nodes inside the loop box run once per item and read {{ item }}." }],
+    fields: [{ name: "items", label: "Items", kind: "value", required: true, mono: true, placeholder: '["a.com", "b.com"] or {{ state.sources }}', help: "A JSON array, or a {{ }} that gives one. Nodes inside the loop box run once per item and read {{ item }}." }],
     defaults: { items: "" },
   },
   {
@@ -328,7 +331,7 @@ export const NODE_CATALOG: NodeMeta[] = [
     ports: ["out"],
     fields: [
       { name: "key", label: "Key", kind: "text", required: true, mono: true },
-      { name: "value", label: "Value", kind: "text", required: true, mono: true },
+      { name: "value", label: "Value", kind: "value", required: true, mono: true },
     ],
     defaults: { key: "", value: "" },
   },
@@ -467,6 +470,9 @@ export function nodeSubtitle(node: WfNode): string {
     case "switch":
       return "Switch · " + bare(p.value);
     case "loop": {
+      if (Array.isArray(p.items)) {
+        return "Loop · " + p.items.length + " items";
+      }
       return "Loop · " + (bare(p.items) || "items");
     }
     case "wait":

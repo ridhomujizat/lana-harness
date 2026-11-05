@@ -38,6 +38,12 @@ type fakeDeps struct {
 	// test can cancel a run that is provably inside a node handler.
 	blockStarted chan struct{}
 
+	// guardianStarted is signaled when the guardian diagnosis enters RunAgent
+	// and guardianRelease unblocks it, so a test can read the store while the
+	// diagnosis is in flight.
+	guardianStarted chan struct{}
+	guardianRelease chan struct{}
+
 	browse    map[string]string
 	web       map[string][2]string
 	tools     map[string]string
@@ -56,6 +62,13 @@ func newFakeDeps() *fakeDeps {
 }
 
 func (f *fakeDeps) RunAgent(_ context.Context, req AgentRequest) (AgentResult, error) {
+	if f.guardianStarted != nil && strings.Contains(req.Prompt, "You are the guardian") {
+		select {
+		case f.guardianStarted <- struct{}{}:
+		default:
+		}
+		<-f.guardianRelease
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.agentCalls = append(f.agentCalls, req)
@@ -424,6 +437,39 @@ func TestEngineLoopBashEcho(t *testing.T) {
 	}
 }
 
+// TestEngineLoopItemsErrorNamesTheValueAndSource checks the loop error of
+// REQ-WF-005: a non-array items param names the JSON type it got and, when the
+// raw param is a template, the template it came from. The error is not
+// transient.
+func TestEngineLoopItemsErrorNamesTheValueAndSource(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", nil),
+			{ID: "each", Type: "loop", Name: "Each",
+				Params:    map[string]any{"items": "{{ state.missing }}"},
+				OnFailure: &FailurePolicy{Mode: "stop"}},
+		},
+		Edges: []Edge{wfEdge("start", "out", "each")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	want := "loop items must be a JSON array, got null from {{ state.missing }}"
+	if got := mustNode(t, st, run.ID, "each", -1).Error; got != want {
+		t.Fatalf("loop error=%q want %q", got, want)
+	}
+	if IsTransient(errors.New(want)) {
+		t.Fatal("the loop items error must not be transient")
+	}
+}
+
 // ---- AC-WF-009 ------------------------------------------------------------
 
 func TestEngineSchemaOk(t *testing.T) {
@@ -704,6 +750,53 @@ func TestEngineGuardianSkipContinuesDownstream(t *testing.T) {
 	}
 	if _, ok := stateRaw(t, st, wf.ID, "ran"); !ok {
 		t.Fatal("after did not run: state ran not written")
+	}
+}
+
+// TestEngineGuardianProgressWhileChecking covers REQ-WF-008: while the guardian
+// diagnosis is in flight the node row stays running with its error and the run
+// summary tells the UI the guardian is checking.
+func TestEngineGuardianProgressWhileChecking(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.bashSeq["bad"] = []BashResult{{ExitCode: 1, Output: "boom"}}
+	deps.guardianStarted = make(chan struct{}, 1)
+	deps.guardianRelease = make(chan struct{})
+	deps.replies = []fakeReply{{
+		agent: "g", contains: "You are the guardian",
+		text: `{"action":"skip","reason":"optional step","confidence":0.9}`,
+	}}
+
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", nil),
+			wfNode("bad", "bash", "Bad", map[string]any{"command": "bad"}),
+		},
+		Edges: []Edge{wfEdge("start", "out", "bad")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	run := seedRun(t, st, wf, "manual", nil)
+
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	<-deps.guardianStarted // the diagnosis is now in flight
+
+	nr := mustNode(t, st, run.ID, "bad", -1)
+	if nr.Status != NodeRunning {
+		t.Fatalf("node=%s want running while the guardian is checking", nr.Status)
+	}
+	if nr.Error == "" {
+		t.Fatal("node lost its error while the guardian is checking")
+	}
+	if got := mustRun(t, st, run.ID); !strings.HasPrefix(got.Summary, "guardian is checking") {
+		t.Fatalf("run summary=%q want guardian is checking...", got.Summary)
+	}
+
+	close(deps.guardianRelease)
+	eng.Wait()
+
+	if got := mustRun(t, st, run.ID); got.Status != RunSucceeded {
+		t.Fatalf("run=%+v want succeeded", got)
 	}
 }
 

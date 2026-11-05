@@ -70,6 +70,46 @@ function JsonField({
   );
 }
 
+/* A value that is JSON when it parses (arrays, numbers, booleans, objects) and
+   a plain string otherwise, so both ["a","b"] and {{ state.x }} work. */
+function ValueField({
+  value,
+  onChange,
+  id,
+  placeholder,
+}: {
+  value: unknown;
+  onChange: (value: unknown) => void;
+  id: string;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(() =>
+    value === undefined || value === null ? "" : typeof value === "string" ? value : JSON.stringify(value)
+  );
+  return (
+    <Input
+      id={id}
+      className="mono"
+      value={text}
+      placeholder={placeholder}
+      onChange={(event) => {
+        const next = event.target.value;
+        setText(next);
+        const trimmed = next.trim();
+        if (/^[[{]|^-?\d|^(true|false|null)$/.test(trimmed)) {
+          try {
+            onChange(JSON.parse(trimmed));
+            return;
+          } catch {
+            /* Not JSON yet: keep the text as a string. */
+          }
+        }
+        onChange(next);
+      }}
+    />
+  );
+}
+
 function ToolsField({
   value,
   onChange,
@@ -219,6 +259,17 @@ function ParamField({
                 .filter(Boolean)
             )
           }
+        />
+      );
+      break;
+    case "value":
+      control = (
+        <ValueField
+          key={node.id + spec.name}
+          id={id}
+          value={value}
+          placeholder={spec.placeholder}
+          onChange={(next) => set(spec.name, next)}
         />
       );
       break;

@@ -27,7 +27,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       nodes: [
         { id: "every-day", type: "trigger.schedule", name: "Every day 07:00", position: { x: X, y: 0 }, params: { cron: "0 7 * * *", timezone: "Asia/Jakarta", enabled: true } },
         { id: "run-button", type: "trigger.manual", name: "Run button", position: { x: X + 300, y: 0 }, params: { enabled: true } },
-        { id: "each", type: "loop", name: "For each source", position: { x: X, y: 104 }, params: { items: "{{ state.sources }}" } },
+        { id: "each", type: "loop", name: "For each source", position: { x: X, y: 104 }, params: { items: ["techcrunch.com", "dailysocial.id", "theverge.com", "news.ycombinator.com", "katadata.co.id"] } },
         { id: "scrape", type: "browser", name: "Scrape page", parent: "each", position: { x: X, y: 232 }, params: { url: "https://{{ item }}", format: "markdown", stealth: true, timeout_secs: 30 }, on_failure: { mode: "guardian", retries: 2, backoff_secs: [10, 30] } },
         { id: "summarize", type: "worker", name: "Summarize source", parent: "each", position: { x: X, y: 336 }, params: { task: "Summarize {{ nodes.scrape.output.content }} in 5 bullets for an Indonesian tech reader. Score importance from 1 to 10. Keep the link {{ nodes.scrape.output.url }}.", tools: [], max_steps: 6, max_tokens: 20000, output_schema: { summary: "string", score: "integer 1-10", links: "string[]" } } },
         { id: "rank", type: "agent", name: "Rank by importance", position: { x: X, y: 472 }, params: { prompt: "Rank these summaries by importance and pick the top one: {{ nodes.each.output.items }}", output_schema: { top: "object", digest: "string" } } },
