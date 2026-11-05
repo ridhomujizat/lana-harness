@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
@@ -26,21 +27,43 @@ func (rt *Runtime) ActiveAgent(ctx context.Context, channel, address string) (st
 }
 
 // ChannelSession returns the most recent session of the agent for the channel address,
-// creating one when none exists.
+// creating one when none exists. The lookup and the create are serialized per
+// (channel, address, agent) key, so concurrent messages cannot create two
+// sessions, and the agent filter lets an older session be found even when the
+// address has many newer sessions of other agents.
 func (rt *Runtime) ChannelSession(ctx context.Context, channel, address, agentName string) (core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {
 		return core.SessionInfo{}, err
 	}
-	list, err := rt.store.List(ctx, core.SessionFilter{Channel: channel, Address: address, Limit: channelSessionScan})
+	unlock := rt.lockChannelSession(channel, address, agentName)
+	defer unlock()
+	list, err := rt.store.List(ctx, core.SessionFilter{Channel: channel, Address: address, Agent: agentName, Limit: 1})
 	if err != nil {
 		return core.SessionInfo{}, err
 	}
-	for _, info := range list {
-		if info.Agent == agentName {
-			return info, nil
-		}
+	if len(list) > 0 {
+		return list[0], nil
 	}
 	return rt.CreateChannelSession(ctx, channel, address, agentName)
+}
+
+// lockChannelSession serializes get-or-create for one (channel, address, agent)
+// key. The returned function releases the lock. The map entries are tiny and
+// stay for the lifetime of the runtime.
+func (rt *Runtime) lockChannelSession(channel, address, agentName string) func() {
+	key := channel + "\x00" + address + "\x00" + agentName
+	rt.sessionMu.Lock()
+	if rt.sessionLocks == nil {
+		rt.sessionLocks = make(map[string]*sync.Mutex)
+	}
+	mu, ok := rt.sessionLocks[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		rt.sessionLocks[key] = mu
+	}
+	rt.sessionMu.Unlock()
+	mu.Lock()
+	return mu.Unlock
 }
 
 // CreateChannelSession creates a new session for the channel address. The workspace is the

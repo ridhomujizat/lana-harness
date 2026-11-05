@@ -189,8 +189,16 @@ type Runtime struct {
 	draining atomic.Bool
 	closeMu  sync.Mutex
 	closeErr error
-	approve  ApproveFunc
-	home     string
+	// consolidateWG tracks the in-flight nightly knowledge consolidation started
+	// by KnowledgeConsolidate, so Close joins it after cancelling rt.ctx and
+	// before the store is shut down (REQ-KNU-041).
+	consolidateWG sync.WaitGroup
+	// sessionMu guards sessionLocks, which serializes ChannelSession
+	// get-or-create per (channel, address, agent) key.
+	sessionMu    sync.Mutex
+	sessionLocks map[string]*sync.Mutex
+	approve      ApproveFunc
+	home         string
 	// wfMu guards wfSessions, the live sessions of workflow runs in this
 	// process (REQ-WF-005, REQ-WF-009, design §Runtime glue).
 	wfMu       sync.Mutex
@@ -1052,6 +1060,9 @@ func (rt *Runtime) Close() error {
 		rt.workflows.Close()
 	}
 	rt.cancel()
+	// Join the in-flight nightly consolidation before the store closes, so it
+	// cannot write to a store Shutdown has already closed (REQ-KNU-041).
+	rt.consolidateWG.Wait()
 	// REQ-TB-003, REQ-TB-004: stop the toolbox jobs and the tool refresh loop
 	// before the registry closes, so no toolbox change touches a closing
 	// registry.
@@ -1824,6 +1835,14 @@ func (rt *Runtime) knowledgeAdmin() core.KnowledgeAdmin {
 // knowledge service; otherwise it is a no-op (REQ-KNU-011, design §9). Only the
 // daemon calls it, and the loop stops with ctx.
 func (rt *Runtime) StartKnowledgeUpkeep(ctx context.Context) {
+	// Refuse to start the loop on a runtime that Close already took down; the
+	// check shares closeMu with Close so a loop can never outlive the runtime.
+	rt.closeMu.Lock()
+	closed := rt.closed.Load()
+	rt.closeMu.Unlock()
+	if closed {
+		return
+	}
 	admin := rt.knowledgeAdmin()
 	if admin == nil {
 		return
@@ -1918,7 +1937,18 @@ func (rt *Runtime) KnowledgeConsolidate(ctx context.Context) error {
 	if status.Consolidation.Running {
 		return core.ErrKnowledgeBusy
 	}
+	// Register the pass under closeMu so Close's Wait cannot race with Add: once
+	// Close holds the lock no new pass starts, so Wait only ever waits on passes
+	// registered before it.
+	rt.closeMu.Lock()
+	if rt.closed.Load() {
+		rt.closeMu.Unlock()
+		return ErrClosed
+	}
+	rt.consolidateWG.Add(1)
+	rt.closeMu.Unlock()
 	go func() {
+		defer rt.consolidateWG.Done()
 		if err := admin.Consolidate(rt.ctx); err != nil && !errors.Is(err, core.ErrKnowledgeBusy) {
 			slog.Warn("knowledge: consolidation failed", "error", err)
 		}
