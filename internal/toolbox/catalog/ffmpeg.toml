@@ -1,0 +1,27 @@
+id = "ffmpeg"
+name = "FFmpeg"
+description = "Convert and trim audio and video files"
+homepage = "https://ffmpeg.org"
+icon = "film"
+category = "Media"
+
+[detect]
+binary = "ffmpeg"
+version_args = ["-version"]
+
+[[install]]
+label = "Homebrew"
+command = "brew install ffmpeg"
+requires = ["brew"]
+
+[[commands]]
+name = "convert"
+description = "Convert a media file in the workspace (the output extension picks the format)"
+args = ["-y", "-i", "{{input}}", "{{output}}"]
+risk = "write"
+timeout_secs = 900
+workdir = "workspace"
+
+[commands.input]
+input = { type = "string", description = "Input file path", required = true }
+output = { type = "string", description = "Output file path", required = true }

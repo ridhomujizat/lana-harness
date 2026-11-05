@@ -114,6 +114,24 @@ func TestCheckUnparseableVersion(t *testing.T) {
 	}
 }
 
+// TestVersionFromLine strips a leading binary name and keeps the first line
+// (REQ-TB-002).
+func TestVersionFromLine(t *testing.T) {
+	cases := []struct {
+		binary, line, want string
+	}{
+		{"obscura", "obscura 0.2.2", "0.2.2"},
+		{"obscura", "0.2.2", "0.2.2"},
+		{"pandoc", "pandoc 3.1.9\nCompiled with...", "3.1.9"},
+		{"x", "no-version-here", "no-version-here"},
+	}
+	for _, tc := range cases {
+		if got := versionFromLine(tc.binary, firstLine(tc.line)); got != tc.want {
+			t.Fatalf("versionFromLine(%q,%q)=%q want %q", tc.binary, tc.line, got, tc.want)
+		}
+	}
+}
+
 // TestCompareVersions checks the dotted numeric compare, ignoring non-numeric
 // parts and missing segments.
 func TestCompareVersions(t *testing.T) {

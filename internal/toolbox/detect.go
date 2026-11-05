@@ -82,17 +82,14 @@ func (s *Store) Check(ctx context.Context, m Manifest) Status {
 	}
 
 	line := firstLine(string(out))
-	version := parseVersion(line)
-	if version == "" {
-		version = strings.TrimSpace(line)
-	}
+	version := versionFromLine(m.Detect.Binary, line)
 	status.Version = version
 
 	if m.Detect.MinVersion == "" {
 		status.State = StateInstalled
 		return status
 	}
-	if parseVersion(line) == "" {
+	if parseVersion(version) == "" {
 		status.State = StateBroken
 		status.Error = "could not parse a version from " + strconv.Quote(line)
 		return status
@@ -117,6 +114,24 @@ func firstLine(s string) string {
 // parseVersion returns the first dotted numeric run of line, or "".
 func parseVersion(line string) string {
 	return versionRE.FindString(line)
+}
+
+// versionFromLine reads the version of a version command's first line: the
+// first dotted number, with a leading binary name stripped when present
+// ("obscura 0.2.2" -> "0.2.2") (REQ-TB-002).
+func versionFromLine(binary, line string) string {
+	line = strings.TrimSpace(line)
+	if binary != "" {
+		if rest, ok := strings.CutPrefix(line, binary); ok {
+			if rest = strings.TrimSpace(rest); rest != "" {
+				line = rest
+			}
+		}
+	}
+	if version := parseVersion(line); version != "" {
+		return version
+	}
+	return line
 }
 
 // compareVersions compares two dotted numeric versions: -1, 0 or 1. Non-numeric

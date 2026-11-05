@@ -8,7 +8,9 @@ package toolbox
 
 import (
 	"fmt"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -19,6 +21,17 @@ import (
 // or digit, hold lowercase letters, digits and dashes, and be at most 40
 // characters (REQ-TB-001).
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+
+// Source values of a package: "catalog" for a built-in manifest, "custom" for
+// one stored on disk (REQ-TB-001).
+const (
+	SourceCatalog = "catalog"
+	SourceCustom  = "custom"
+)
+
+// wholeArchive is the extract value that unpacks every file of an archive
+// (REQ-TB-010).
+const wholeArchive = "*"
 
 // commandNamePattern is the command name form of the design:
 // `^[a-z][a-z0-9_]{0,29}$` (REQ-TB-004).
@@ -39,11 +52,22 @@ type Manifest struct {
 	Name        string            `toml:"name" json:"name"`
 	Description string            `toml:"description,omitempty" json:"description"`
 	Homepage    string            `toml:"homepage,omitempty" json:"homepage"`
+	Icon        string            `toml:"icon,omitempty" json:"icon,omitempty"`
+	Category    string            `toml:"category,omitempty" json:"category,omitempty"`
 	Detect      Detect            `toml:"detect" json:"detect"`
 	Install     []InstallMethod   `toml:"install,omitempty" json:"install"`
 	Uninstall   UninstallSpec     `toml:"uninstall" json:"uninstall"`
 	Commands    []Command         `toml:"commands,omitempty" json:"commands"`
 	Env         map[string]string `toml:"env,omitempty" json:"env"`
+	MCP         *MCPSpec          `toml:"mcp,omitempty" json:"mcp,omitempty"`
+}
+
+// MCPSpec is the optional MCP server a package provides: the args of the
+// resolved binary, with the {{data}} and {{bin}} templates, and the env it
+// starts with (REQ-TB-011).
+type MCPSpec struct {
+	Args []string          `toml:"args" json:"args"`
+	Env  map[string]string `toml:"env,omitempty" json:"env,omitempty"`
 }
 
 // Detect finds the package binary and its version (REQ-TB-002).
@@ -54,15 +78,17 @@ type Detect struct {
 }
 
 // InstallMethod is one way to install a package: a shell command or a direct
-// download, filtered by OS and arch (REQ-TB-003).
+// download, filtered by OS and arch (REQ-TB-003). Requires names programs that
+// must be on PATH for the method to apply (REQ-TB-009).
 type InstallMethod struct {
-	Label   string `toml:"label,omitempty" json:"label"`
-	Command string `toml:"command,omitempty" json:"command"`
-	URL     string `toml:"url,omitempty" json:"url"`
-	SHA256  string `toml:"sha256,omitempty" json:"sha256"`
-	OS      string `toml:"os,omitempty" json:"os"`
-	Arch    string `toml:"arch,omitempty" json:"arch"`
-	Extract string `toml:"extract,omitempty" json:"extract"`
+	Label    string   `toml:"label,omitempty" json:"label"`
+	Command  string   `toml:"command,omitempty" json:"command"`
+	URL      string   `toml:"url,omitempty" json:"url"`
+	SHA256   string   `toml:"sha256,omitempty" json:"sha256"`
+	OS       string   `toml:"os,omitempty" json:"os"`
+	Arch     string   `toml:"arch,omitempty" json:"arch"`
+	Extract  string   `toml:"extract,omitempty" json:"extract"`
+	Requires []string `toml:"requires,omitempty" json:"requires,omitempty"`
 }
 
 // UninstallSpec is the optional cleanup command of an uninstall (REQ-TB-008).
@@ -166,11 +192,11 @@ func (m Manifest) Validate() []Issue {
 		case !hasCommand && !hasURL:
 			add(field, "an install method needs a command or a url")
 		}
-		if md.OS != "" && md.OS != "darwin" && md.OS != "linux" {
-			add(field+".os", "os %q must be darwin or linux", md.OS)
+		if md.OS != "" && !validOS(md.OS) {
+			add(field+".os", "os %q must be darwin, macos or linux", md.OS)
 		}
-		if md.Arch != "" && md.Arch != "arm64" && md.Arch != "amd64" {
-			add(field+".arch", "arch %q must be arm64 or amd64", md.Arch)
+		if md.Arch != "" && !validArch(md.Arch) {
+			add(field+".arch", "arch %q must be arm64, aarch64, amd64 or x86_64", md.Arch)
 		}
 	}
 
@@ -215,6 +241,10 @@ func (m Manifest) Validate() []Issue {
 		}
 	}
 
+	if m.MCP != nil && len(m.MCP.Args) == 0 {
+		add("mcp.args", "an mcp spec needs at least one argument")
+	}
+
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Field != issues[j].Field {
 			return issues[i].Field < issues[j].Field
@@ -233,10 +263,93 @@ func Encode(m Manifest) (string, error) {
 	return string(b), nil
 }
 
+// MethodFits reports whether install method i applies to this machine: its
+// os/arch filter matches (with the macos, x86_64 and aarch64 aliases) and every
+// program in Requires is on PATH. The string explains why it does not fit
+// (REQ-TB-009).
+func (m Manifest) MethodFits(i int) (bool, string) {
+	if i < 0 || i >= len(m.Install) {
+		return false, fmt.Sprintf("install method %d does not exist", i)
+	}
+	md := m.Install[i]
+	if md.OS != "" && normalizeOS(md.OS) != runtime.GOOS {
+		return false, fmt.Sprintf("os %q does not match %s", md.OS, runtime.GOOS)
+	}
+	if md.Arch != "" && normalizeArch(md.Arch) != runtime.GOARCH {
+		return false, fmt.Sprintf("arch %q does not match %s", md.Arch, runtime.GOARCH)
+	}
+	for _, program := range md.Requires {
+		if strings.TrimSpace(program) == "" {
+			continue
+		}
+		if _, err := exec.LookPath(program); err != nil {
+			return false, fmt.Sprintf("requires %s on PATH", program)
+		}
+	}
+	return true, ""
+}
+
+// AutoMethod returns the first install method that fits this machine, or -1 and
+// false when none does (REQ-TB-009).
+func (m Manifest) AutoMethod() (int, bool) {
+	for i := range m.Install {
+		if ok, _ := m.MethodFits(i); ok {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
 // ToolName is the tool name of one command: the package id with dashes turned
 // into underscores, then the command name (REQ-TB-004).
 func ToolName(pkg, cmd string) string {
 	return strings.ReplaceAll(pkg, "-", "_") + "_" + cmd
+}
+
+// validOS reports whether an install method os filter is known, accepting the
+// macos alias of darwin (REQ-TB-009).
+func validOS(os string) bool {
+	switch normalizeOS(os) {
+	case "darwin", "linux":
+		return true
+	default:
+		return false
+	}
+}
+
+// validArch reports whether an install method arch filter is known, accepting
+// the x86_64 and aarch64 aliases (REQ-TB-009).
+func validArch(arch string) bool {
+	switch normalizeArch(arch) {
+	case "arm64", "amd64":
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeOS maps an os filter to its runtime.GOOS value (REQ-TB-009).
+func normalizeOS(os string) string {
+	switch strings.ToLower(strings.TrimSpace(os)) {
+	case "macos", "darwin":
+		return "darwin"
+	case "linux":
+		return "linux"
+	default:
+		return strings.ToLower(strings.TrimSpace(os))
+	}
+}
+
+// normalizeArch maps an arch filter to its runtime.GOARCH value (REQ-TB-009).
+func normalizeArch(arch string) string {
+	switch strings.ToLower(strings.TrimSpace(arch)) {
+	case "x86_64", "amd64":
+		return "amd64"
+	case "aarch64", "arm64":
+		return "arm64"
+	default:
+		return strings.ToLower(strings.TrimSpace(arch))
+	}
 }
 
 // validRisk reports whether risk is one of the design values. risk is required,

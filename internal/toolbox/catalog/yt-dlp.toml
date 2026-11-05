@@ -1,0 +1,38 @@
+id = "yt-dlp"
+name = "yt-dlp"
+description = "Read video details and subtitles from YouTube and many other sites"
+homepage = "https://github.com/yt-dlp/yt-dlp"
+icon = "video"
+category = "Media"
+
+[detect]
+binary = "yt-dlp"
+version_args = ["--version"]
+
+[[install]]
+label = "Download (macOS)"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+os = "darwin"
+
+[[install]]
+label = "Download (Linux, x86-64)"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
+os = "linux"
+arch = "amd64"
+
+[[install]]
+label = "Download (Linux, ARM64)"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
+os = "linux"
+arch = "arm64"
+
+[[commands]]
+name = "info"
+description = "Video title, channel, duration, description and formats as JSON"
+args = ["--dump-json", "--skip-download", "--no-warnings", "{{url}}"]
+risk = "read"
+timeout_secs = 60
+output = "json"
+
+[commands.input]
+url = { type = "string", description = "Video URL", required = true }

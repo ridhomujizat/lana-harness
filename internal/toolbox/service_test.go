@@ -50,12 +50,18 @@ func TestNewDetectsStoredPackages(t *testing.T) {
 func TestServiceAddListGet(t *testing.T) {
 	svc := testService(t)
 	added := addManifest(t, svc, smallManifest("faketool"))
-	if added.Manifest.ID != "faketool" || added.Status.State != StateMissing {
+	if added.Manifest.ID != "faketool" || added.Status.State != StateMissing || added.Source != SourceCustom {
 		t.Fatalf("added=%+v", added)
 	}
-	list := svc.List(context.Background())
-	if len(list) != 1 || list[0].Manifest.ID != "faketool" {
-		t.Fatalf("list=%+v", list)
+	// List merges the stored package with the built-in catalog (REQ-TB-001).
+	var found bool
+	for _, pkg := range svc.List(context.Background()) {
+		if pkg.Manifest.ID == "faketool" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("faketool is not in the list")
 	}
 	if _, err := svc.Get(context.Background(), "ghost"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("get ghost err=%v want ErrNotFound", err)
@@ -190,9 +196,15 @@ func TestServiceInstalledAndFindBinary(t *testing.T) {
 	}
 	waitJob(t, svc, "faketool", job.ID)
 
-	installed := svc.Installed()
-	if len(installed) != 1 || installed[0].Manifest.ID != "faketool" {
-		t.Fatalf("installed=%+v", installed)
+	// Installed merges the catalog too, so only faketool is asserted here.
+	var found bool
+	for _, pkg := range svc.Installed() {
+		if pkg.Manifest.ID == "faketool" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("faketool is not installed: %+v", svc.Installed())
 	}
 	path, ok := svc.FindBinary("faketool")
 	if !ok || path != svc.Store().BinDir("faketool")+"/faketool" {

@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -179,8 +178,8 @@ func (jm *jobManager) install(ctx context.Context, m Manifest, method int, log i
 		return fmt.Errorf("toolbox: install method %d does not exist", method)
 	}
 	md := m.Install[method]
-	if !methodMatches(md) {
-		return ErrMethodMismatch
+	if fits, reason := m.MethodFits(method); !fits {
+		return fmt.Errorf("%w: %s", ErrMethodMismatch, reason)
 	}
 	switch {
 	case strings.TrimSpace(md.Command) != "":
@@ -359,18 +358,6 @@ func (jm *jobManager) close() {
 	jm.wg.Wait()
 }
 
-// methodMatches reports whether an install method's OS/arch filter matches this
-// machine (REQ-TB-003).
-func methodMatches(md InstallMethod) bool {
-	if md.OS != "" && md.OS != runtime.GOOS {
-		return false
-	}
-	if md.Arch != "" && md.Arch != runtime.GOARCH {
-		return false
-	}
-	return true
-}
-
 // shellEnv builds the environment of an install command: the daemon env, PATH
 // with bin/ first, and BIN_DIR, PKG_DIR and DATA_DIR (REQ-TB-003).
 func shellEnv(store *Store, m Manifest) []string {
@@ -415,11 +402,14 @@ func clearDir(dir string) error {
 }
 
 // extract writes the package binary from a downloaded file into binDir: a raw
-// binary when extract is "", otherwise the named member of a tar.gz or zip
-// archive (REQ-TB-003).
+// binary when extract is "", the named member of a tar.gz or zip archive, or
+// every regular file when extract is "*" (REQ-TB-003, REQ-TB-010).
 func extract(src string, md InstallMethod, binDir, binary string) error {
 	if err := os.MkdirAll(binDir, installedDirMode); err != nil {
 		return err
+	}
+	if md.Extract == wholeArchive {
+		return extractAll(src, md.URL, binDir)
 	}
 	dest := filepath.Join(binDir, binary)
 	if md.Extract == "" {
@@ -434,6 +424,225 @@ func extract(src string, md InstallMethod, binDir, binary string) error {
 	default:
 		return fmt.Errorf("toolbox: cannot extract %q from an unknown archive type", md.Extract)
 	}
+}
+
+// extractAll unpacks every regular file of a tar.gz or zip archive into binDir
+// (REQ-TB-010).
+func extractAll(src, url, binDir string) error {
+	lower := strings.ToLower(url)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
+		return extractTarGzAll(src, binDir)
+	case strings.HasSuffix(lower, ".zip"):
+		return extractZipAll(src, binDir)
+	default:
+		return errors.New("toolbox: cannot unpack an archive of an unknown type")
+	}
+}
+
+// extractTarGzAll unpacks every regular file of a gzipped tar archive into
+// binDir, stripping one leading directory when every entry shares it
+// (REQ-TB-010).
+func extractTarGzAll(src, binDir string) error {
+	names, err := tarGzRegularNames(src)
+	if err != nil {
+		return err
+	}
+	if err := checkArchivePaths(names); err != nil {
+		return err
+	}
+	prefix := commonArchivePrefix(names)
+
+	file, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = gz.Close() }()
+	reader := tar.NewReader(gz)
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if !header.FileInfo().Mode().IsRegular() {
+			continue
+		}
+		if err := writeArchiveMember(binDir, header.Name, prefix, header.FileInfo().Mode(), reader); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// extractZipAll unpacks every regular file of a zip archive into binDir,
+// stripping one leading directory when every entry shares it (REQ-TB-010).
+func extractZipAll(src, binDir string) error {
+	reader, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = reader.Close() }()
+	names := make([]string, 0, len(reader.File))
+	for _, file := range reader.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		names = append(names, file.Name)
+	}
+	if err := checkArchivePaths(names); err != nil {
+		return err
+	}
+	prefix := commonArchivePrefix(names)
+	for _, file := range reader.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return err
+		}
+		err = writeArchiveMember(binDir, file.Name, prefix, file.Mode(), rc)
+		_ = rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tarGzRegularNames lists the regular-file member names of a gzipped tar
+// archive.
+func tarGzRegularNames(src string) ([]string, error) {
+	file, err := os.Open(src)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = gz.Close() }()
+	reader := tar.NewReader(gz)
+	var names []string
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !header.FileInfo().Mode().IsRegular() {
+			continue
+		}
+		names = append(names, header.Name)
+	}
+	return names, nil
+}
+
+// checkArchivePaths rejects an archive whose member paths would escape binDir
+// (REQ-TB-010).
+func checkArchivePaths(names []string) error {
+	for _, name := range names {
+		if !safeArchivePath(name) {
+			return fmt.Errorf("toolbox: archive member %q has an unsafe path", name)
+		}
+	}
+	return nil
+}
+
+// safeArchivePath reports whether a member path is relative and free of ".."
+// segments (REQ-TB-010).
+func safeArchivePath(name string) bool {
+	if name == "" || strings.HasPrefix(name, "/") || filepath.IsAbs(name) {
+		return false
+	}
+	if filepath.VolumeName(name) != "" {
+		return false
+	}
+	for _, part := range strings.Split(strings.ReplaceAll(name, "\\", "/"), "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// commonArchivePrefix returns the single leading directory every member shares,
+// or "" when there is none (REQ-TB-010).
+func commonArchivePrefix(names []string) string {
+	prefix := ""
+	for i, name := range names {
+		first := firstPathSegment(name)
+		if first == "" {
+			return ""
+		}
+		if i == 0 {
+			prefix = first
+			continue
+		}
+		if first != prefix {
+			return ""
+		}
+	}
+	return prefix
+}
+
+// firstPathSegment returns the first directory of a member path, or "" for a
+// top-level file.
+func firstPathSegment(name string) string {
+	name = strings.TrimPrefix(name, "./")
+	if i := strings.IndexByte(name, '/'); i >= 0 {
+		return name[:i]
+	}
+	return ""
+}
+
+// writeArchiveMember writes one archive member into binDir, stripping prefix
+// and keeping an executable mode for files with any exec bit or no extension
+// (REQ-TB-010).
+func writeArchiveMember(binDir, name, prefix string, mode os.FileMode, r io.Reader) error {
+	rel := stripArchivePrefix(name, prefix)
+	if rel == "" {
+		return nil
+	}
+	if !safeArchivePath(rel) {
+		return fmt.Errorf("toolbox: archive member %q has an unsafe path", name)
+	}
+	dest := filepath.Join(binDir, filepath.FromSlash(rel))
+	if dir := filepath.Dir(dest); dir != binDir {
+		if err := os.MkdirAll(dir, installedDirMode); err != nil {
+			return err
+		}
+	}
+	return writeFileMode(dest, r, archiveFileMode(rel, mode))
+}
+
+// stripArchivePrefix removes the shared leading directory of a member path.
+func stripArchivePrefix(name, prefix string) string {
+	name = strings.TrimPrefix(name, "./")
+	if prefix == "" {
+		return name
+	}
+	return strings.TrimPrefix(name, prefix+"/")
+}
+
+// archiveFileMode is the installed mode of an unpacked member: 0755 for a file
+// with any exec bit or no extension, else 0644 (REQ-TB-010).
+func archiveFileMode(name string, mode os.FileMode) os.FileMode {
+	if mode&0o111 != 0 || filepath.Ext(name) == "" {
+		return installedFileMode
+	}
+	return 0o644
 }
 
 // extractTarGz copies one member of a gzipped tar archive to dest.
@@ -512,7 +721,12 @@ func copyExecutable(src, dest string) error {
 
 // writeExecutable writes r to dest and makes it executable.
 func writeExecutable(dest string, r io.Reader) error {
-	out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, installedFileMode)
+	return writeFileMode(dest, r, installedFileMode)
+}
+
+// writeFileMode writes r to dest and sets mode on the result.
+func writeFileMode(dest string, r io.Reader, mode os.FileMode) error {
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
@@ -523,7 +737,7 @@ func writeExecutable(dest string, r io.Reader) error {
 	if err := out.Close(); err != nil {
 		return err
 	}
-	return os.Chmod(dest, installedFileMode)
+	return os.Chmod(dest, mode)
 }
 
 // newJobID returns a job id: "tool-" plus 16 lowercase hex characters.

@@ -389,3 +389,149 @@ func zipFile(t *testing.T, name, content string) []byte {
 	}
 	return buf.Bytes()
 }
+
+// TestExtractWholeArchive unpacks every member of a tar.gz into binDir,
+// stripping the shared leading folder and setting the modes (REQ-TB-010).
+func TestExtractWholeArchive(t *testing.T) {
+	archive := tarGzEntries(t, []tarEntry{
+		{"obscura-0.2.6/obscura", "#!/bin/sh\necho obscura\n", 0o755},
+		{"obscura-0.2.6/obscura-worker", "#!/bin/sh\necho worker\n", 0o644},
+		{"obscura-0.2.6/lib/helper", "helper", 0o755},
+		{"obscura-0.2.6/README.md", "readme", 0o644},
+		{"obscura-0.2.6/notes.md", "notes", 0o755},
+	})
+	binDir := t.TempDir()
+	md := InstallMethod{URL: "https://example.com/obscura.tar.gz", Extract: "*"}
+	if err := extract(writeTemp(t, archive), md, binDir, "obscura"); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	assertMode(t, filepath.Join(binDir, "obscura"), 0o755)
+	assertMode(t, filepath.Join(binDir, "obscura-worker"), 0o755)
+	assertMode(t, filepath.Join(binDir, "lib", "helper"), 0o755)
+	assertMode(t, filepath.Join(binDir, "README.md"), 0o644)
+	assertMode(t, filepath.Join(binDir, "notes.md"), 0o755)
+}
+
+// TestExtractWholeArchiveZip unpacks a zip the same way (REQ-TB-010).
+func TestExtractWholeArchiveZip(t *testing.T) {
+	archive := zipEntries(t, [][2]string{
+		{"obscura/obscura", "binary"},
+		{"obscura/README.md", "readme"},
+	})
+	binDir := t.TempDir()
+	md := InstallMethod{URL: "https://example.com/obscura.zip", Extract: "*"}
+	if err := extract(writeTemp(t, archive), md, binDir, "obscura"); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	assertMode(t, filepath.Join(binDir, "obscura"), 0o755)
+	assertMode(t, filepath.Join(binDir, "README.md"), 0o644)
+}
+
+// TestExtractWholeArchiveRejectsEscape refuses an archive member that would
+// write outside binDir (REQ-TB-010).
+func TestExtractWholeArchiveRejectsEscape(t *testing.T) {
+	archive := tarGzEntries(t, []tarEntry{{"../evil", "boom", 0o755}})
+	md := InstallMethod{URL: "https://example.com/x.tar.gz", Extract: "*"}
+	if err := extract(writeTemp(t, archive), md, t.TempDir(), "x"); err == nil {
+		t.Fatal("want an unsafe-path error")
+	}
+}
+
+// TestInstallWholeArchive downloads a tar.gz and installs every member
+// (REQ-TB-003, REQ-TB-010).
+func TestInstallWholeArchive(t *testing.T) {
+	archive := tarGzEntries(t, []tarEntry{
+		{"obscura-0.2.6/obscura", fakeBinary, 0o755},
+		{"obscura-0.2.6/obscura-worker", "worker", 0o755},
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(archive)
+	}))
+	defer srv.Close()
+
+	svc := testService(t)
+	addManifest(t, svc, downloadManifest(srv.URL+"/obscura.tar.gz", sha256Hex(archive), "*"))
+
+	job, err := svc.Install(context.Background(), "faketool", 0)
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if done := waitJob(t, svc, "faketool", job.ID); done.Status != JobSucceeded {
+		t.Fatalf("job=%+v", done)
+	}
+	assertMode(t, filepath.Join(svc.Store().BinDir("faketool"), "obscura"), 0o755)
+	assertMode(t, filepath.Join(svc.Store().BinDir("faketool"), "obscura-worker"), 0o755)
+}
+
+// tarEntry is one member of a test tar archive.
+type tarEntry struct {
+	name    string
+	content string
+	mode    int64
+}
+
+// tarGzEntries builds a gzipped tar archive from entries, in name order.
+func tarGzEntries(t *testing.T, entries []tarEntry) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, entry := range entries {
+		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Mode: entry.mode, Size: int64(len(entry.content)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatalf("tar header: %v", err)
+		}
+		if _, err := tw.Write([]byte(entry.content)); err != nil {
+			t.Fatalf("tar write: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar close: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gz close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// zipEntries builds a zip archive from name/content pairs.
+func zipEntries(t *testing.T, entries [][2]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, entry := range entries {
+		w, err := zw.Create(entry[0])
+		if err != nil {
+			t.Fatalf("zip create: %v", err)
+		}
+		if _, err := w.Write([]byte(entry[1])); err != nil {
+			t.Fatalf("zip write: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// writeTemp writes data to a temp file and returns its path.
+func writeTemp(t *testing.T, data []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "archive")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+	return path
+}
+
+// assertMode checks that path exists with the wanted permission bits.
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode of %s = %v want %v", path, got, want)
+	}
+}

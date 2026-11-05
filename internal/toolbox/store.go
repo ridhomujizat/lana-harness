@@ -40,12 +40,14 @@ func (s *Store) ManifestPath(id string) string { return filepath.Join(s.Dir(id),
 
 // Stored is one package directory read by List. Problem is set when the
 // directory holds no readable tool.toml, so one broken package never hides the
-// others (REQ-TB-001).
+// others (REQ-TB-001). Source is filled by the Service when it merges the
+// stored packages with the built-in catalog.
 type Stored struct {
 	ID        string
 	Manifest  Manifest
 	Problem   string
 	UpdatedAt int64
+	Source    string
 }
 
 // List reads every <id>/tool.toml. A directory without a valid manifest is

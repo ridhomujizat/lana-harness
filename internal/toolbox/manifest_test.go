@@ -466,6 +466,133 @@ func TestInputSchema(t *testing.T) {
 	}
 }
 
+// TestParseManifestCatalogFields reads the revision 2 fields: icon, category,
+// requires and the [mcp] spec (REQ-TB-001, REQ-TB-009, REQ-TB-011).
+func TestParseManifestCatalogFields(t *testing.T) {
+	manifest, issues := ParseManifest(`
+id = "obscura"
+name = "Obscura"
+icon = "globe"
+category = "Browser"
+
+[detect]
+binary = "obscura"
+version_args = ["--version"]
+
+[[install]]
+label = "Download (macOS)"
+url = "https://example.com/obscura.tar.gz"
+os = "macos"
+arch = "aarch64"
+extract = "*"
+
+[[install]]
+label = "Homebrew"
+command = "brew install obscura"
+requires = ["brew"]
+
+[mcp]
+args = ["--stealth", "--storage-dir", "{{data}}/profile", "mcp"]
+
+[mcp.env]
+TOKEN = "secret:OBSCURA_KEY"
+
+[[commands]]
+name = "fetch"
+risk = "read"
+args = ["fetch", "{{url}}"]
+
+[commands.input]
+url = { type = "string", required = true }
+`)
+	if len(issues) != 0 {
+		t.Fatalf("issues: %+v", issues)
+	}
+	if manifest.Icon != "globe" || manifest.Category != "Browser" {
+		t.Fatalf("icon=%q category=%q", manifest.Icon, manifest.Category)
+	}
+	if got := manifest.Install[1].Requires; len(got) != 1 || got[0] != "brew" {
+		t.Fatalf("requires=%v", got)
+	}
+	if manifest.Install[0].Extract != "*" {
+		t.Fatalf("extract=%q", manifest.Install[0].Extract)
+	}
+	if manifest.MCP == nil || len(manifest.MCP.Args) != 4 {
+		t.Fatalf("mcp=%+v", manifest.MCP)
+	}
+	if manifest.MCP.Env["TOKEN"] != "secret:OBSCURA_KEY" {
+		t.Fatalf("mcp env=%v", manifest.MCP.Env)
+	}
+}
+
+// TestValidateMCPNeedsArgs requires at least one argument in an [mcp] spec
+// (REQ-TB-011).
+func TestValidateMCPNeedsArgs(t *testing.T) {
+	_, issues := ParseManifest(`
+id = "x"
+name = "X"
+
+[detect]
+binary = "x"
+
+[[install]]
+command = "true"
+
+[mcp]
+args = []
+`)
+	if !hasField(issues, "mcp.args") {
+		t.Fatalf("issues=%+v want mcp.args", issues)
+	}
+}
+
+// TestEncodeRoundTripCatalogFields keeps icon, category, requires and the mcp
+// spec across an encode and reparse (REQ-TB-001).
+func TestEncodeRoundTripCatalogFields(t *testing.T) {
+	original, issues := ParseManifest(`
+id = "obscura"
+name = "Obscura"
+icon = "globe"
+category = "Browser"
+
+[detect]
+binary = "obscura"
+version_args = ["--version"]
+
+[[install]]
+label = "Homebrew"
+command = "brew install obscura"
+requires = ["brew"]
+
+[[install]]
+label = "Download"
+url = "https://example.com/obscura.tar.gz"
+os = "darwin"
+arch = "arm64"
+extract = "*"
+
+[mcp]
+args = ["mcp"]
+
+[mcp.env]
+TOKEN = "literal"
+`)
+	if len(issues) != 0 {
+		t.Fatalf("issues: %+v", issues)
+	}
+	text, err := Encode(original)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	again, issues := ParseManifest(text)
+	if len(issues) != 0 {
+		t.Fatalf("round trip issues: %+v\n%s", issues, text)
+	}
+	if !reflect.DeepEqual(original, again) {
+		t.Fatalf("round trip mismatch:\nfirst=%+v\nsecond=%+v\ntoml=%s", original, again, text)
+	}
+}
+
 // hasField reports whether any issue sits on the wanted field.
 func hasField(issues []Issue, field string) bool {
 	for _, issue := range issues {
