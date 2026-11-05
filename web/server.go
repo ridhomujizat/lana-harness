@@ -106,6 +106,10 @@ type Server struct {
 	// stored events are read for sessions without in-process live frames.
 	heartbeat time.Duration
 	poll      time.Duration
+	// toolboxJobPoll is the poll interval of the install watcher that
+	// registers a package's managed MCP server once its install succeeds
+	// (REQ-TB-011).
+	toolboxJobPoll time.Duration
 
 	mu       sync.Mutex
 	ln       net.Listener

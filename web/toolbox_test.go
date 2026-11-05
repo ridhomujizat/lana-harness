@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +53,7 @@ type fakeToolboxBackend struct {
 	checkErr     error
 
 	jobs    []toolbox.Job
+	jobsFn  func(id string) []toolbox.Job
 	logText string
 	logDone bool
 	logErr  error
@@ -152,9 +155,12 @@ func (f *fakeToolboxBackend) Check(_ context.Context, _ string) (toolbox.Package
 	return f.checkPackage, f.checkErr
 }
 
-func (f *fakeToolboxBackend) Jobs(_ string) []toolbox.Job {
+func (f *fakeToolboxBackend) Jobs(id string) []toolbox.Job {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.jobsFn != nil {
+		return f.jobsFn(id)
+	}
 	return f.jobs
 }
 
@@ -411,6 +417,67 @@ func TestToolboxInstall(t *testing.T) {
 	assertAuthError(t, rr, http.StatusConflict, "package_busy")
 }
 
+// REQ-TB-011: a successful install job adds the managed MCP server of the
+// package. The job is watched in the background; nothing is added while it runs.
+func TestToolboxInstallRegistersMCP(t *testing.T) {
+	store := newTestConfigStore(t, toolboxSyncMCPConfig, 0o600, ConfigSettings{})
+	backend := newFakeToolboxBackend()
+	backend.installJob = toolbox.Job{ID: "tool-1", Package: "obscura", Kind: toolbox.JobKindInstall, Status: toolbox.JobRunning}
+	backend.mcpServers = []toolbox.MCPServer{{Package: "obscura", Command: "/opt/obscura", Args: []string{"mcp"}}}
+	var status atomic.Value
+	status.Store(toolbox.JobRunning)
+	backend.jobsFn = func(string) []toolbox.Job {
+		return []toolbox.Job{{
+			ID: "tool-1", Package: "obscura", Kind: toolbox.JobKindInstall,
+			Status: status.Load().(string),
+		}}
+	}
+	s, cookie, csrf := newToolboxTestServer(t, backend)
+	s.SetConfigStore(store)
+	s.SetToolboxJobPollInterval(5 * time.Millisecond)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/toolbox/obscura/install", `{"method":1}`, cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if raw := readToolboxConfig(t, store); strings.Contains(raw, "[mcp.obscura]") {
+		t.Fatalf("the server was added while the job still runs: %q", raw)
+	}
+
+	// The job succeeds: the watcher registers the server and records it.
+	status.Store(toolbox.JobSucceeded)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		names := managedMCPNames(s, store)
+		if len(names) == 1 && names[0] == "obscura" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	raw := readToolboxConfig(t, store)
+	if !strings.Contains(raw, "[mcp.obscura]") || !strings.Contains(raw, "/opt/obscura") {
+		t.Fatalf("the successful install did not register the server: %q", raw)
+	}
+	if managed := readManagedMCPNames(t, s, store); len(managed) != 1 || managed[0] != "obscura" {
+		t.Fatalf("managed = %v", managed)
+	}
+}
+
+// managedMCPNames reads the managed-MCP record, or nil when it is absent.
+func managedMCPNames(s *Server, store *testConfigStore) []string {
+	data, err := os.ReadFile(s.toolboxManagedMCPPath(store))
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	return doc.Names
+}
+
 // API-TB-009: the job log answer carries the text and the done flag.
 func TestToolboxJobLog(t *testing.T) {
 	backend := newFakeToolboxBackend()
@@ -562,9 +629,9 @@ model = "helper"
 `
 )
 
-// REQ-TB-011: the sync adds [mcp.obscura] with the rendered command and args,
-// records it as managed, and a second sync with the same data writes nothing.
-func TestToolboxSyncMCPAddsAndIsIdempotent(t *testing.T) {
+// REQ-TB-011: the background sync never adds a server on its own. An installed
+// MCP package with an empty managed list leaves config.toml untouched.
+func TestToolboxSyncMCPStartupAddsNothing(t *testing.T) {
 	store := newTestConfigStore(t, toolboxSyncMCPConfig, 0o600, ConfigSettings{})
 	backend := newFakeToolboxBackend()
 	backend.mcpServers = []toolbox.MCPServer{{
@@ -575,32 +642,28 @@ func TestToolboxSyncMCPAddsAndIsIdempotent(t *testing.T) {
 	s, _, _ := newToolboxTestServer(t, backend)
 	s.SetConfigStore(store)
 
+	before := readToolboxConfig(t, store)
 	s.syncToolboxMCP(context.Background())
 
-	raw := readToolboxConfig(t, store)
-	if !strings.Contains(raw, "[mcp.obscura]") {
-		t.Fatalf("config has no [mcp.obscura]: %q", raw)
+	if after := readToolboxConfig(t, store); after != before {
+		t.Fatalf("the sync added a server on its own:\n%s", after)
 	}
-	if !strings.Contains(raw, "/opt/obscura/bin/obscura") || !strings.Contains(raw, "--stealth") {
-		t.Fatalf("config has the wrong server: %q", raw)
-	}
-	managed := readManagedMCPNames(t, s, store)
-	if len(managed) != 1 || managed[0] != "obscura" {
-		t.Fatalf("managed = %v", managed)
-	}
-
-	// A second sync with the same data writes nothing.
-	s.syncToolboxMCP(context.Background())
-	if after := readToolboxConfig(t, store); after != raw {
-		t.Fatalf("a second sync changed the config:\n%s", after)
+	if _, err := os.Stat(s.toolboxManagedMCPPath(store)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the sync created a managed record: %v", err)
 	}
 }
 
-// REQ-TB-011: a managed name that is gone is removed from every agent's mcp
-// list and then from config.
-func TestToolboxSyncMCPRemovesUninstalled(t *testing.T) {
+// REQ-TB-011: the sync re-renders a managed server whose command and args
+// changed, and removes it from config and from every agent's mcp list once the
+// package stops providing it (uninstalled).
+func TestToolboxSyncMCPUpdatesAndRemovesManaged(t *testing.T) {
 	store := newTestConfigStore(t, toolboxSyncMCPRemovalConfig, 0o600, ConfigSettings{})
 	backend := newFakeToolboxBackend()
+	backend.mcpServers = []toolbox.MCPServer{{
+		Package: "obscura",
+		Command: "/new/obscura",
+		Args:    []string{"--stealth", "mcp"},
+	}}
 	s, _, _ := newToolboxTestServer(t, backend)
 	s.SetConfigStore(store)
 	writeManagedMCPNames(t, s, store, []string{"obscura"})
@@ -608,6 +671,20 @@ func TestToolboxSyncMCPRemovesUninstalled(t *testing.T) {
 	s.syncToolboxMCP(context.Background())
 
 	raw := readToolboxConfig(t, store)
+	if !strings.Contains(raw, "/new/obscura") || !strings.Contains(raw, "--stealth") {
+		t.Fatalf("the managed server was not re-rendered: %q", raw)
+	}
+	if managed := readManagedMCPNames(t, s, store); len(managed) != 1 || managed[0] != "obscura" {
+		t.Fatalf("managed = %v", managed)
+	}
+
+	// The package no longer provides an MCP server: it is dropped.
+	backend.mu.Lock()
+	backend.mcpServers = nil
+	backend.mu.Unlock()
+	s.syncToolboxMCP(context.Background())
+
+	raw = readToolboxConfig(t, store)
 	if strings.Contains(raw, "[mcp.obscura]") {
 		t.Fatalf("config still has [mcp.obscura]: %q", raw)
 	}
@@ -623,7 +700,8 @@ func TestToolboxSyncMCPRemovesUninstalled(t *testing.T) {
 	}
 }
 
-// REQ-TB-011: an MCP server lana did not create is never touched.
+// REQ-TB-011: an MCP server lana did not create is never touched, and the sync
+// does not add one of its own for an installed package.
 func TestToolboxSyncMCPKeepsUnmanaged(t *testing.T) {
 	store := newTestConfigStore(t, toolboxSyncMCPUnmanagedConfig, 0o600, ConfigSettings{})
 	backend := newFakeToolboxBackend()
@@ -637,11 +715,8 @@ func TestToolboxSyncMCPKeepsUnmanaged(t *testing.T) {
 	if !strings.Contains(raw, "[mcp.other]") || !strings.Contains(raw, `command = "/usr/bin/other"`) {
 		t.Fatalf("the unmanaged server was touched: %q", raw)
 	}
-	if !strings.Contains(raw, "[mcp.obscura]") {
-		t.Fatalf("the managed server was not added: %q", raw)
-	}
-	if managed := readManagedMCPNames(t, s, store); len(managed) != 1 || managed[0] != "obscura" {
-		t.Fatalf("managed = %v", managed)
+	if strings.Contains(raw, "[mcp.obscura]") {
+		t.Fatalf("the sync added a server on its own: %q", raw)
 	}
 }
 
@@ -737,6 +812,9 @@ func TestToolboxSetAgentMCP(t *testing.T) {
 	}
 	if record := agentRecordFromMap(tables["helper"]); len(record.MCP) != 1 || record.MCP[0] != "obscura" {
 		t.Fatalf("agent mcp = %v", record.MCP)
+	}
+	if managed := readManagedMCPNames(t, s, store); len(managed) != 1 || managed[0] != "obscura" {
+		t.Fatalf("managed = %v", managed)
 	}
 
 	// Turning it off drops the id again, and leaves the server table alone.

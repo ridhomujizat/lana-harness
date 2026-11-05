@@ -28,6 +28,11 @@ const (
 	toolboxBodyLimit = 1 << 20
 	// toolboxJobHistory is how many jobs the detail view keeps (API-TB-003).
 	toolboxJobHistory = 10
+	// toolboxJobWatchTimeout bounds how long the install watcher follows a job
+	// before giving up (REQ-TB-011).
+	toolboxJobWatchTimeout = 20 * time.Minute
+	// toolboxJobPollDefault is the install-watcher poll interval.
+	toolboxJobPollDefault = 2 * time.Second
 )
 
 // ToolboxBackend is the subset of *toolbox.Service the web handlers use
@@ -65,9 +70,10 @@ var toolboxMCPLoops sync.Map
 // SetToolbox installs the Tools port. Call it before Start; a nil port makes
 // the /v1/toolbox routes answer 503 toolbox_unavailable.
 //
-// Installing the port also starts the managed-MCP loop: the loop applies the
-// [mcp.<package id>] servers of the installed packages and follows the toolbox
-// change stream, and it stops with the server (REQ-TB-011).
+// Installing the port also starts the managed-MCP loop: the loop keeps the
+// [mcp.<package id>] servers lana recorded in step with the installed packages
+// (it updates or removes a recorded server, never adds one) and follows the
+// toolbox change stream, and it stops with the server (REQ-TB-011).
 func (s *Server) SetToolbox(b ToolboxBackend) {
 	s.toolboxMu.Lock()
 	s.toolbox = b
@@ -84,8 +90,8 @@ func (s *Server) SetToolbox(b ToolboxBackend) {
 	go s.runToolboxMCP(b, store)
 }
 
-// runToolboxMCP applies the managed MCP servers of the installed packages on
-// every toolbox change until the server stops (REQ-TB-011).
+// runToolboxMCP keeps the managed MCP servers in step with the installed
+// packages on every toolbox change until the server stops (REQ-TB-011).
 func (s *Server) runToolboxMCP(backend ToolboxBackend, store ConfigStore) {
 	changes, unsubscribe := backend.Subscribe()
 	defer unsubscribe()
@@ -253,7 +259,9 @@ func (s *Server) handleToolboxDelete(w http.ResponseWriter, r *http.Request) {
 
 // handleToolboxInstall serves API-TB-006 (REQ-TB-003, REQ-TB-009). The job runs
 // in the background, so the answer is 202 with the running job. A missing
-// method, or -1, installs with the first method that fits this machine.
+// method, or -1, installs with the first method that fits this machine. A
+// successful install is followed by a watcher that registers the package's
+// managed MCP server, when it provides one (REQ-TB-011).
 func (s *Server) handleToolboxInstall(w http.ResponseWriter, r *http.Request) {
 	backend := s.toolboxOrError(w)
 	if backend == nil {
@@ -274,7 +282,75 @@ func (s *Server) handleToolboxInstall(w http.ResponseWriter, r *http.Request) {
 		s.writeToolboxError(w, "install package", err)
 		return
 	}
+	// The install is the owner's action that may add [mcp.<id>], but the job
+	// runs in the background, so a server-owned watcher adds it on success
+	// (REQ-TB-011).
+	go s.watchToolboxInstallJob(backend, s.configStore, r.PathValue("id"), job.ID)
 	writeJSON(w, http.StatusAccepted, job)
+}
+
+// watchToolboxInstallJob follows one install job and, when it succeeds,
+// registers the managed MCP server of the package (REQ-TB-011). It polls the
+// job until it leaves "running", or until the deadline, and stops with the
+// server.
+func (s *Server) watchToolboxInstallJob(backend ToolboxBackend, store ConfigStore, id, jobID string) {
+	if backend == nil || store == nil || id == "" || jobID == "" {
+		return
+	}
+	ticker := time.NewTicker(s.toolboxJobPollInterval())
+	defer ticker.Stop()
+	deadline := time.NewTimer(toolboxJobWatchTimeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case <-s.stopping():
+			return
+		case <-deadline.C:
+			return
+		case <-ticker.C:
+		}
+		status, ok := toolboxJobStatus(backend, id, jobID)
+		if !ok || status == toolbox.JobRunning {
+			continue
+		}
+		if status == toolbox.JobSucceeded {
+			if err := s.addToolboxMCP(context.Background(), backend, store, id); err != nil {
+				s.logger.Error("web: toolbox mcp: add after install", "package", id, "error", err)
+			}
+		}
+		return
+	}
+}
+
+// toolboxJobStatus returns the status of one job of a package, and whether it
+// is known yet (REQ-TB-011).
+func toolboxJobStatus(backend ToolboxBackend, id, jobID string) (string, bool) {
+	for _, job := range backend.Jobs(id) {
+		if job.ID == jobID {
+			return job.Status, true
+		}
+	}
+	return "", false
+}
+
+// toolboxJobPollInterval returns the install-watcher poll interval.
+func (s *Server) toolboxJobPollInterval() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.toolboxJobPoll <= 0 {
+		return toolboxJobPollDefault
+	}
+	return s.toolboxJobPoll
+}
+
+// SetToolboxJobPollInterval overrides the install-watcher poll interval (tests).
+func (s *Server) SetToolboxJobPollInterval(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if d <= 0 {
+		d = toolboxJobPollDefault
+	}
+	s.toolboxJobPoll = d
 }
 
 // handleToolboxUninstall serves API-TB-007 (REQ-TB-008).
@@ -397,14 +473,70 @@ func (s *Server) setToolboxAgentUse(ctx context.Context, backend ToolboxBackend,
 	if err != nil {
 		return err
 	}
-	if bytes.Equal(candidate, file.Raw) {
+	if !bytes.Equal(candidate, file.Raw) {
+		if err := store.ConfigWrite(ctx, candidate); err != nil {
+			return err
+		}
+		s.applyLiveConfig(ctx, store, candidate)
+	}
+	// Turning an MCP package on for an agent is the owner's action that adds
+	// the server, so record it as managed for the background sync (REQ-TB-011).
+	if pkg.Manifest.MCP != nil && enabled {
+		if err := s.recordManagedMCP(store, pkg.Manifest.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addToolboxMCP registers the managed MCP server of one installed package when
+// it provides one: it writes [mcp.<id>] through the same rewrite path the MCP
+// save handler uses and records the id as managed (REQ-TB-011). It never
+// creates config.toml and never touches an unmanaged entry.
+func (s *Server) addToolboxMCP(ctx context.Context, backend ToolboxBackend, store ConfigStore, id string) error {
+	if backend == nil || store == nil {
 		return nil
 	}
-	if err := store.ConfigWrite(ctx, candidate); err != nil {
+	srv, ok := toolboxMCPServer(backend, id)
+	if !ok {
+		return nil
+	}
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+	file, err := store.ConfigFile(ctx)
+	if err != nil {
 		return err
 	}
-	s.applyLiveConfig(ctx, store, candidate)
-	return nil
+	if !file.Exists {
+		return nil
+	}
+	candidate, wrote, err := toolboxEnsureMCPTable(ctx, store, file.Raw, srv)
+	if err != nil {
+		return err
+	}
+	if wrote {
+		if err := store.ConfigWrite(ctx, candidate); err != nil {
+			return err
+		}
+		s.applyLiveConfig(ctx, store, candidate)
+	}
+	return s.recordManagedMCP(store, id)
+}
+
+// recordManagedMCP adds a name to the managed-MCP record so the background sync
+// keeps it in step and removes it on uninstall (REQ-TB-011).
+func (s *Server) recordManagedMCP(store ConfigStore, name string) error {
+	path := s.toolboxManagedMCPPath(store)
+	if path == "" || name == "" {
+		return nil
+	}
+	names := s.readManagedMCP(path)
+	if slices.Contains(names, name) {
+		return nil
+	}
+	names = append(names, name)
+	sort.Strings(names)
+	return s.writeManagedMCP(path, names)
 }
 
 // writeToolboxAgentError maps a "Use with agents" failure to the contract
@@ -801,35 +933,35 @@ func (s *Server) writeToolboxError(w http.ResponseWriter, operation string, err 
 // the MCP servers lana created for installed packages (REQ-TB-011).
 const toolboxManagedMCPFile = ".managed-mcp.json"
 
-// applyToolboxMCP makes config.toml match the MCP servers of the installed
-// packages (REQ-TB-011). For every server it adds or updates [mcp.<id>] through
-// the same rewrite, validate, write, and apply path the MCP save handler uses.
-// A name lana recorded earlier but that is no longer provided (the package was
-// uninstalled) is dropped from every agent's mcp list and then removed from
-// config. A server lana did not create is never touched. On any failure the
-// function logs and returns; the next toolbox event retries.
+// applyToolboxMCP keeps the managed MCP servers in config.toml in step with the
+// installed packages (REQ-TB-011). It never adds an entry: a server is added
+// only by the owner's actions (the agent switch or a successful install). It
+// re-renders a recorded [mcp.<id>] when the package's command or args changed,
+// and a recorded name that is no longer provided (the package was uninstalled)
+// is dropped from every agent's mcp list and then removed from config. A server
+// lana did not create is never touched. On any failure the function logs and
+// returns; the next toolbox event retries.
 func (s *Server) applyToolboxMCP(ctx context.Context, backend ToolboxBackend, store ConfigStore) {
 	if backend == nil || store == nil {
 		return
 	}
 	servers := backend.MCPServers()
 	desired := make(map[string]toolbox.MCPServer, len(servers))
-	names := make([]string, 0, len(servers))
 	for _, srv := range servers {
-		if srv.Package == "" {
-			continue
+		if srv.Package != "" {
+			desired[srv.Package] = srv
 		}
-		desired[srv.Package] = srv
-		names = append(names, srv.Package)
 	}
-	sort.Strings(names)
 
 	path := s.toolboxManagedMCPPath(store)
-	managed := s.readManagedMCP(path)
-	sort.Strings(managed)
 
 	configWriteMu.Lock()
 	defer configWriteMu.Unlock()
+
+	// The managed record is read and written under the same lock the add paths
+	// take, so an in-flight add is never overwritten (REQ-TB-011).
+	managed := s.readManagedMCP(path)
+	sort.Strings(managed)
 
 	file, err := store.ConfigFile(ctx)
 	if err != nil {
@@ -841,10 +973,36 @@ func (s *Server) applyToolboxMCP(ctx context.Context, backend ToolboxBackend, st
 	}
 	candidate := file.Raw
 	changed := false
+	kept := make([]string, 0, len(managed))
 
-	// Add or update the server of every installed MCP package.
-	for _, name := range names {
-		next, wrote, err := toolboxEnsureMCPTable(ctx, store, candidate, desired[name])
+	for _, name := range managed {
+		srv, ok := desired[name]
+		if !ok {
+			// The package that provided this server is gone: drop it from
+			// every agent's mcp list first so each candidate stays valid, then
+			// remove the server (REQ-TB-011).
+			next, wrote, err := toolboxRemoveMCPFromAgents(ctx, store, candidate, name)
+			if err != nil {
+				s.logger.Error("web: toolbox mcp: drop server from agents", "package", name, "error", err)
+				return
+			}
+			if wrote {
+				candidate = next
+				changed = true
+			}
+			next, wrote, err = toolboxRemoveMCPTable(ctx, store, candidate, name)
+			if err != nil {
+				s.logger.Error("web: toolbox mcp: remove server", "package", name, "error", err)
+				return
+			}
+			if wrote {
+				candidate = next
+				changed = true
+			}
+			continue
+		}
+		// Re-render a recorded server whose command or args changed.
+		next, wrote, err := toolboxEnsureMCPTable(ctx, store, candidate, srv)
 		if err != nil {
 			s.logger.Error("web: toolbox mcp: ensure server", "package", name, "error", err)
 			return
@@ -853,32 +1011,7 @@ func (s *Server) applyToolboxMCP(ctx context.Context, backend ToolboxBackend, st
 			candidate = next
 			changed = true
 		}
-	}
-
-	// Drop the server of every managed package that is gone. The agent mcp
-	// lists go first so every intermediate candidate stays valid (REQ-TB-011).
-	for _, name := range managed {
-		if _, ok := desired[name]; ok {
-			continue
-		}
-		next, wrote, err := toolboxRemoveMCPFromAgents(ctx, store, candidate, name)
-		if err != nil {
-			s.logger.Error("web: toolbox mcp: drop server from agents", "package", name, "error", err)
-			return
-		}
-		if wrote {
-			candidate = next
-			changed = true
-		}
-		next, wrote, err = toolboxRemoveMCPTable(ctx, store, candidate, name)
-		if err != nil {
-			s.logger.Error("web: toolbox mcp: remove server", "package", name, "error", err)
-			return
-		}
-		if wrote {
-			candidate = next
-			changed = true
-		}
+		kept = append(kept, name)
 	}
 
 	if changed {
@@ -888,8 +1021,8 @@ func (s *Server) applyToolboxMCP(ctx context.Context, backend ToolboxBackend, st
 		}
 		s.applyLiveConfig(ctx, store, candidate)
 	}
-	if !slices.Equal(managed, names) {
-		if err := s.writeManagedMCP(path, names); err != nil {
+	if !slices.Equal(managed, kept) {
+		if err := s.writeManagedMCP(path, kept); err != nil {
 			s.logger.Error("web: toolbox mcp: write managed list", "error", err)
 		}
 	}

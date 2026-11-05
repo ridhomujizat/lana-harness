@@ -164,6 +164,9 @@ disabled_tools = ` + tc.disabled
 // asks_first, enabled, the MCP "<server>/<tool>" name, and the unknown agent
 // mapping.
 func TestToolCatalog(t *testing.T) {
+	// Keep the test independent of the host: a package installed on PATH (for
+	// example obscura) would add an "installed" group to the catalog.
+	t.Setenv("PATH", "/usr/bin:/bin")
 	table := `[agents.coder]
 provider = "mock"
 model = "m"
@@ -227,6 +230,9 @@ command = "github-mcp"
 // TestToolCatalogRealState covers AC-TTS-001..003: enabled is the state the
 // root turn really offers, and source names why.
 func TestToolCatalogRealState(t *testing.T) {
+	// Keep the test independent of the host: a package installed on PATH (for
+	// example obscura) would add an "installed" group to the catalog.
+	t.Setenv("PATH", "/usr/bin:/bin")
 	table := `[agents.coder]
 provider = "mock"
 model = "m"
