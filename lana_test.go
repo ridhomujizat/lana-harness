@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ridhomujizat/lana-harness/config"
@@ -72,14 +74,61 @@ func TestNewToolConflict(t *testing.T) {
 	}
 }
 
-func TestNewUnknownAgentTool(t *testing.T) {
+// REQ-TB-004, REQ-TB-008: an agent that lists a tool no package registered
+// still starts the runtime. The missing tool is a warning, not a fatal error,
+// and the turn simply does not offer it until something registers it.
+func TestNewUnknownAgentToolWarns(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
+	capture := &logCapture{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(capture))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
 	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"missing_tool\"]\n", srv.URL)
-	_, err := New(context.Background(), Options{Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
-	if err == nil || !strings.Contains(err.Error(), "assistant") || !strings.Contains(err.Error(), "missing_tool") {
-		t.Fatalf("err=%v", err)
+	rt, err := New(context.Background(), Options{Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
+	if err != nil {
+		t.Fatalf("New with an unknown agent tool: %v", err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
+	if log := capture.String(); !strings.Contains(log, "missing_tool") || !strings.Contains(log, "assistant") {
+		t.Fatalf("no warning for the unknown agent tool, log=%q", log)
+	}
+}
+
+// logCapture is a slog.Handler that keeps every record in one buffer. It is
+// safe for concurrent use, so it can back slog.Default during a test.
+type logCapture struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (c *logCapture) Enabled(context.Context, slog.Level) bool { return true }
+
+func (c *logCapture) Handle(_ context.Context, record slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.buf.WriteString(record.Level.String())
+	c.buf.WriteString(" ")
+	c.buf.WriteString(record.Message)
+	record.Attrs(func(attr slog.Attr) bool {
+		c.buf.WriteString(" ")
+		c.buf.WriteString(attr.Key)
+		c.buf.WriteString("=")
+		c.buf.WriteString(attr.Value.String())
+		return true
+	})
+	c.buf.WriteString("\n")
+	return nil
+}
+
+func (c *logCapture) WithAttrs([]slog.Attr) slog.Handler { return c }
+func (c *logCapture) WithGroup(string) slog.Handler      { return c }
+
+func (c *logCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
 }
 
 func TestProfileRows(t *testing.T) {

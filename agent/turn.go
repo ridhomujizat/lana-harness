@@ -873,7 +873,11 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		// payload so display surfaces can hide them (REQ-LTC-001).
 		contextBlocks := 0
 		if !promptBuilt {
-			turnTools = append(turnTools, resolved.tools...)
+			// REQ-TB-004, REQ-TB-008: a tool an agent lists but nothing has
+			// registered (a command of a package that is not installed) is not
+			// offered. A later registration (the toolbox sync) makes it
+			// available on the next turn without a restart.
+			turnTools = append(turnTools, rn.reg.registeredTools(resolved.tools)...)
 			var unavailable map[string]string
 			if len(resolved.mcp) > 0 {
 				if mcp := rn.reg.mcpManager(); mcp != nil {
@@ -1621,6 +1625,22 @@ func mcpToolRef(name string) (string, bool) {
 		return "", false
 	}
 	return rest[:i] + "/" + rest[i+2:], true
+}
+
+// registeredTools keeps the names the tool registry knows. A name an agent
+// lists but nothing registered yet (for example the command of a package that
+// is not installed) is dropped: the turn does not offer it, and a later
+// registration makes it available on the next turn without a restart
+// (REQ-TB-004, REQ-TB-008).
+func (r *Registry) registeredTools(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if _, ok := r.tools.Get(name); !ok {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func runtimeError(err error) *core.ProviderError {

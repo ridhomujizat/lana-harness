@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -51,8 +52,11 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	config := b.Config()
 	for name, agentCfg := range config.Agents {
 		for _, toolName := range agentCfg.Tools {
+			// REQ-TB-004, REQ-TB-008: a command of a package that is not
+			// installed is not registered yet. A missing tool must never stop
+			// lana; the turn simply does not offer it until it is registered.
 			if _, ok := toolReg.Get(toolName); !ok {
-				return fmt.Errorf("agent '%s' uses tool '%s' which is not registered", name, toolName)
+				slog.Warn("agent uses a tool which is not registered", "agent", name, "tool", toolName)
 			}
 		}
 		if agentCfg.Provider != "" {
