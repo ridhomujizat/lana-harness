@@ -150,6 +150,20 @@ output = "json"
 	}
 }
 
+// TestRunJSONOutputTooLarge names the output cap when a JSON output was cut off.
+func TestRunJSONOutputTooLarge(t *testing.T) {
+	svc := runService(t, "#!/bin/sh\nprintf '{\"pad\":\"'\nhead -c 70000 /dev/zero | tr '\\0' a\nprintf '\"}'\n", `
+[[commands]]
+name = "run"
+risk = "read"
+output = "json"
+`)
+	_, err := svc.Run(context.Background(), "faketool", "run", map[string]any{}, "")
+	if err == nil || !strings.Contains(err.Error(), "larger than 64 KiB") {
+		t.Fatalf("err=%v want the 64 KiB cap named", err)
+	}
+}
+
 // TestRunSecretEnv resolves a secret:<NAME> env value.
 func TestRunSecretEnv(t *testing.T) {
 	svc := runService(t, "#!/bin/sh\nprintf '%s' \"$MY_KEY\"\n", `

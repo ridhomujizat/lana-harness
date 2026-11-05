@@ -92,6 +92,9 @@ func (s *Store) Run(ctx context.Context, m Manifest, cmdName string, input map[s
 		return RunResult{}, fmt.Errorf("exit code %d: %s", exitCode, tail(text, errorTail))
 	}
 	if command.Output == "json" && !json.Valid([]byte(strings.TrimSpace(text))) {
+		if out.Truncated() {
+			return RunResult{}, fmt.Errorf("toolbox: command output is larger than %d KiB and was cut off, so it is not valid JSON", maxOutput/1024)
+		}
 		return RunResult{}, errors.New("toolbox: command output is not valid JSON")
 	}
 	return RunResult{Output: text, ExitCode: exitCode, DurationMs: duration}, nil
@@ -345,9 +348,10 @@ func tail(s string, n int) string {
 // cappedBuffer collects at most max bytes and drops the rest. It is safe for
 // concurrent writers because the command copiers write from two goroutines.
 type cappedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-	max int
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	max       int
+	truncated bool
 }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
@@ -356,11 +360,21 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	if room := b.max - b.buf.Len(); room > 0 {
 		if len(p) > room {
 			b.buf.Write(p[:room])
+			b.truncated = true
 		} else {
 			b.buf.Write(p)
 		}
+	} else if len(p) > 0 {
+		b.truncated = true
 	}
 	return len(p), nil
+}
+
+// Truncated reports whether output was dropped at the cap.
+func (b *cappedBuffer) Truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.truncated
 }
 
 func (b *cappedBuffer) String() string {

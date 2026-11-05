@@ -28,8 +28,8 @@ arch = "arm64"
 
 [[commands]]
 name = "info"
-description = "Video title, channel, duration, description and formats as JSON"
-args = ["--dump-json", "--skip-download", "--no-warnings", "{{url}}"]
+description = "Video title, channel, duration, upload date, views, description and tags as JSON"
+args = ["--skip-download", "--no-warnings", "--print", "%(.{id,title,channel,uploader,duration,upload_date,view_count,like_count,description,tags,webpage_url})j", "{{url}}"]
 risk = "read"
 timeout_secs = 60
 output = "json"
