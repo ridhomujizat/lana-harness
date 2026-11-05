@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ridhomujizat/lana-harness/internal/pathenv"
 	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
 
@@ -67,6 +68,10 @@ type Job struct {
 type Registry struct {
 	Root          string
 	MaxPerSession int
+	// ExtraPath returns dirs prepended to a job's PATH when it starts, such as
+	// the bin dirs of programs installed on the Tools page. Nil keeps PATH.
+	// Set it before the first Start.
+	ExtraPath func() []string
 
 	mu   sync.Mutex
 	jobs map[string]*Job
@@ -142,6 +147,7 @@ func (r *Registry) Start(sessionID, workspace, command string) (*Job, error) {
 
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = workspace
+	cmd.Env = pathenv.FromFunc(r.ExtraPath)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

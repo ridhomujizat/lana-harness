@@ -205,3 +205,36 @@ func readPidFile(t *testing.T, path string) int {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// writeHelloTool writes an executable hello-tool script into a new temp dir
+// and returns the dir.
+func writeHelloTool(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho hello from tool\n"
+	if err := os.WriteFile(filepath.Join(dir, "hello-tool"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// Programs in the extra PATH dirs (Tools page installs) run by plain name;
+// without them the command is not found, and the rest of PATH is kept.
+func TestBashExtraPath(t *testing.T) {
+	ws := t.TempDir()
+	bin := writeHelloTool(t)
+	tool := NewBash(&Guard{Workspace: ws})
+	out := callTool(t, tool, ws, `{"command":"hello-tool"}`)
+	if out.Status != core.ToolStatusError {
+		t.Fatalf("hello-tool ran without extra PATH: %+v", out)
+	}
+	setter, ok := tool.(ExtraPathSetter)
+	if !ok {
+		t.Fatal("bash tool does not accept extra PATH dirs")
+	}
+	setter.SetExtraPath(func() []string { return []string{bin} })
+	out = callTool(t, tool, ws, `{"command":"hello-tool && ls >/dev/null"}`)
+	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "hello from tool") {
+		t.Fatalf("out=%+v", out)
+	}
+}

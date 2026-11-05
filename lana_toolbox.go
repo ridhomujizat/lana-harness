@@ -13,6 +13,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
+	"github.com/ridhomujizat/lana-harness/tools"
 )
 
 // The runtime side of the toolbox (spec #34, design §Tools in sessions and
@@ -48,6 +49,42 @@ func (rt *Runtime) toolboxRoot() string {
 		return filepath.Join(rt.home, "tools")
 	}
 	return filepath.Join(os.TempDir(), "lana-tools")
+}
+
+// toolboxPathDirs returns the bin dir of every installed package whose binary
+// was resolved from that bin dir, so shell commands can call it by plain name.
+// A package found on the system PATH needs nothing. It is computed on every
+// call, so installs and uninstalls take effect without a restart.
+func (rt *Runtime) toolboxPathDirs() []string {
+	if rt.toolbox == nil {
+		return nil
+	}
+	store := rt.toolbox.Store()
+	var dirs []string
+	for _, pkg := range rt.toolbox.Installed() {
+		bin := store.BinDir(pkg.Manifest.ID)
+		if pkg.Status.BinaryPath != "" && filepath.Dir(pkg.Status.BinaryPath) == bin {
+			dirs = append(dirs, bin)
+		}
+	}
+	return dirs
+}
+
+// wireToolboxPath puts the installed packages' bin dirs on the PATH of the
+// bash tool and the background jobs. Only PATH changes; the bash risk and
+// approvals stay the same.
+func (rt *Runtime) wireToolboxPath() {
+	if rt.jobs != nil {
+		rt.jobs.ExtraPath = rt.toolboxPathDirs
+	}
+	if rt.coreCtx == nil || rt.coreCtx.Tools == nil {
+		return
+	}
+	if bash, ok := rt.coreCtx.Tools.Get("bash"); ok {
+		if setter, ok := bash.(tools.ExtraPathSetter); ok {
+			setter.SetExtraPath(rt.toolboxPathDirs)
+		}
+	}
 }
 
 // toolboxSecret resolves a manifest "secret:<NAME>" env value through the

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/pathenv"
 )
 
 var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","minLength":1,"description":"Shell command to run with sh -c."},"timeout_secs":{"type":"integer","minimum":1,"maximum":600,"description":"Timeout in seconds (1-600). Defaults to 120."},"run_in_background":{"type":"boolean","description":"Start the command as a background job and return its id without waiting for exit. Use for servers and watchers."}},"required":["command"],"additionalProperties":false}`)
@@ -19,7 +21,7 @@ var bashSpec = json.RawMessage(`{"type":"object","properties":{"command":{"type"
 // commands instead of shell backgrounding (REQ-JOB-016) and to use the
 // dedicated file tools instead of shell commands (REQ-TRL-002).
 const bashDescription = "Runs a shell command (`sh -c`) in the workspace and returns stdout and stderr. " +
-	"Each call starts in the workspace directory. Use it for builds, tests, git, package managers, and running programs. " +
+	"Each call starts in the workspace directory. Programs installed on the Tools page are on PATH. Use it for builds, tests, git, package managers, and running programs. " +
 	"Do not use it to read, search, create, or edit files: use read_file, grep, glob, write_file, and edit_file. " +
 	"Shell commands such as `cat`, `head`, `tail`, `sed`, `awk`, `echo >`, `printf >`, heredocs, `grep`, `find`, and `ls -R` are not substitutes for those tools. " +
 	"For servers, watchers, and anything that does not exit, set run_in_background: true; never use &, nohup, setsid, or disown for that. " +
@@ -41,10 +43,33 @@ const backgroundWait = 3 * time.Second
 // backgroundTailMax is the largest tail a background start returns.
 const backgroundTailMax = 4000
 
-type bashTool struct{ guard *Guard }
+type bashTool struct {
+	guard *Guard
+	// extraPath returns dirs prepended to the command's PATH at call time.
+	// It holds a func() []string; empty means PATH is inherited unchanged.
+	extraPath atomic.Value
+}
+
+// ExtraPathSetter is implemented by the bash tool. The runtime uses it to put
+// the bin dirs of programs installed on the Tools page on the command PATH.
+// It changes only PATH; risk and approvals stay the same.
+type ExtraPathSetter interface {
+	SetExtraPath(fn func() []string)
+}
 
 // NewBash creates the bash tool.
 func NewBash(guard *Guard) core.Tool { return &bashTool{guard: guard} }
+
+// SetExtraPath sets the source of extra PATH dirs. fn runs on every call, so
+// installs and uninstalls take effect without a restart. A nil fn clears it.
+func (t *bashTool) SetExtraPath(fn func() []string) { t.extraPath.Store(fn) }
+
+// env returns the command environment: nil (inherit) or the parent
+// environment with the extra PATH dirs first.
+func (t *bashTool) env() []string {
+	fn, _ := t.extraPath.Load().(func() []string)
+	return pathenv.FromFunc(fn)
+}
 
 func (t *bashTool) Spec() core.ToolSpec {
 	return core.ToolSpec{Name: "bash", Description: bashDescription, InputSchema: bashSpec}
@@ -80,6 +105,7 @@ func (t *bashTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 	}
 	cmd := exec.Command("sh", "-c", in.Command)
 	cmd.Dir = ws
+	cmd.Env = t.env()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A command that leaves a process holding the output pipe must not block
 	// the foreground call: after WaitDelay the pipe is closed and Wait returns

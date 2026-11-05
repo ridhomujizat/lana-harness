@@ -412,6 +412,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		toolbox.WithSecrets(rt.toolboxSecret),
 		toolbox.WithLogger(slog.Default()))
 	rt.syncToolboxTools()
+	rt.wireToolboxPath()
 	rt.toolboxWatch.Add(1)
 	go rt.watchToolbox()
 	return rt, nil

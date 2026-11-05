@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -291,4 +293,19 @@ func TestShutdownKillsAll(t *testing.T) {
 			t.Fatalf("job %s=%+v ok=%v want killed", job.ID, got, ok)
 		}
 	}
+}
+
+// A background job sees the registry's extra PATH dirs (Tools page installs).
+func TestStartExtraPath(t *testing.T) {
+	reg := newTestRegistry(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "hello-tool"), []byte("#!/bin/sh\necho hello from tool\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reg.ExtraPath = func() []string { return []string{bin} }
+	job, err := reg.Start("s1", t.TempDir(), "hello-tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForTail(t, reg, "s1", job.ID, "hello from tool", 5*time.Second)
 }

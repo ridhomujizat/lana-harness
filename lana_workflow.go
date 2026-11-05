@@ -15,6 +15,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/agent"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/pathenv"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	"github.com/ridhomujizat/lana-harness/tools"
 )
@@ -135,6 +136,7 @@ func (d workflowDeps) Bash(ctx context.Context, req workflow.BashRequest) (workf
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, "bash", "-c", req.Command)
 	cmd.Dir = workspace
+	cmd.Env = pathenv.Env(rt.toolboxPathDirs())
 	out, err := cmd.CombinedOutput()
 	result := workflow.BashResult{Output: tailBytes(out, bashOutputLimit)}
 	if runCtx.Err() != nil {

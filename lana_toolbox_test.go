@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
@@ -225,5 +226,54 @@ func TestToolboxSyncKeepsBuiltins(t *testing.T) {
 	}
 	if pkg.Status.State != toolbox.StateInstalled {
 		t.Fatalf("status=%+v, want installed", pkg.Status)
+	}
+}
+
+// An installed package's own bin dir is on PATH for the agent bash tool, the
+// background jobs and the workflow bash node; after uninstall it is not
+// (Tools page installs callable by plain name).
+func TestToolboxBinariesOnBashPath(t *testing.T) {
+	rt := newToolboxRuntime(t)
+	ctx := context.Background()
+	bash, ok := rt.coreCtx.Tools.Get("bash")
+	if !ok {
+		t.Fatal("bash tool is not registered")
+	}
+	ws := t.TempDir()
+	out, err := bash.Call(ctx, core.ToolCtx{Workspace: ws}, json.RawMessage(`{"command":"fakey --version"}`))
+	if err != nil {
+		t.Fatalf("bash: %v", err)
+	}
+	if out.Status != core.ToolStatusSuccess || !strings.Contains(out.Output, "1.2.3") {
+		t.Fatalf("bash out=%+v", out)
+	}
+
+	result, err := rt.WorkflowDeps().Bash(ctx, workflow.BashRequest{WorkflowID: "wf-path", Command: "fakey --version"})
+	if err != nil {
+		t.Fatalf("workflow bash: %v", err)
+	}
+	if result.ExitCode != 0 || !strings.Contains(result.Output, "1.2.3") {
+		t.Fatalf("workflow bash result=%+v", result)
+	}
+
+	job, err := rt.jobs.Start("s-path", ws, "fakey --version")
+	if err != nil {
+		t.Fatalf("job start: %v", err)
+	}
+	waited := rt.jobs.Wait(ctx, "s-path", job.ID, 5*time.Second)
+	tail, _ := rt.jobs.Tail("s-path", job.ID, 4096)
+	if waited.ExitCode != 0 || !strings.Contains(tail, "1.2.3") {
+		t.Fatalf("job=%+v tail=%q", waited, tail)
+	}
+
+	if err := rt.toolbox.Delete(ctx, "fakey", true); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	out, err = bash.Call(ctx, core.ToolCtx{Workspace: ws}, json.RawMessage(`{"command":"fakey --version"}`))
+	if err != nil {
+		t.Fatalf("bash: %v", err)
+	}
+	if out.Status != core.ToolStatusError {
+		t.Fatalf("fakey still runs after uninstall: %+v", out)
 	}
 }
