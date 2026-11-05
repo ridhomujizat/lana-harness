@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { Dashboard } from "../api/dashboard";
 import { EmptyState } from "../ui/gr8r";
 import { bucketLabel, compact, count, share } from "./dashboard-common";
@@ -35,6 +35,7 @@ function niceMax(value: number): number {
 export function TokenColumns({ data }: { data: Dashboard }) {
   const bucketMs = data.bucket_ms || 3600000;
   const [hover, setHover] = useState(-1);
+  const clipBase = "hc" + useId().replace(/[^A-Za-z0-9_-]/g, "");
   const rows = useMemo<ChartRow[]>(
     () =>
       (data.series || []).map((point) => {
@@ -103,17 +104,34 @@ export function TokenColumns({ data }: { data: Dashboard }) {
             { value: row.output, cls: "out" },
           ];
           let acc = 0;
+          const columnTop = y(row.total);
+          const columnH = y(0) - columnTop;
+          const radius = Math.min(4, bar / 2, columnH);
+          const clipId = clipBase + "-" + index;
           return (
             <g key={row.start} onMouseEnter={() => setHover(index)} className={hover === index ? "on" : undefined}>
               <rect className="hc-hit" x={PAD_L + slot * index} y={PAD_T} width={slot} height={plotH} />
-              {segs.map((seg) => {
-                const top = y(acc + seg.value);
-                const height = y(acc) - top;
-                acc += seg.value;
-                return height > 0 ? (
-                  <rect key={seg.cls} className={"hc-bar " + seg.cls} x={x} y={top} width={bar} height={height} rx={Math.min(3, bar / 3)} />
-                ) : null;
-              })}
+              {columnH > 0 ? (
+                <>
+                  {/* One column with a rounded top; the stacked parts are
+                      flat bands clipped to it, so thin parts stay attached. */}
+                  <clipPath id={clipId}>
+                    <path
+                      d={`M${x},${y(0)} V${columnTop + radius} Q${x},${columnTop} ${x + radius},${columnTop} H${x + bar - radius} Q${x + bar},${columnTop} ${x + bar},${columnTop + radius} V${y(0)} Z`}
+                    />
+                  </clipPath>
+                  <g clipPath={`url(#${clipId})`}>
+                    {segs.map((seg) => {
+                      const top = y(acc + seg.value);
+                      const height = y(acc) - top;
+                      acc += seg.value;
+                      return height > 0 ? (
+                        <rect key={seg.cls} className={"hc-bar " + seg.cls} x={x} y={top} width={bar} height={height + 0.5} />
+                      ) : null;
+                    })}
+                  </g>
+                </>
+              ) : null}
               {index % labelEvery === 0 ? (
                 <text className="hc-axis" x={x + bar / 2} y={H - 6} textAnchor="middle">
                   {bucketLabel(row.start, bucketMs)}
