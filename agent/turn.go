@@ -924,14 +924,17 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
 			}
 			// REQ-AMCP-001: skill_load, mcp_manage, and the team tools are
-			// offered without being listed in tools. The dashboard catalog
+			// offered without being listed in tools. REQ-CAL-009: so is the
+			// calendar tool when it is registered. The dashboard catalog
 			// reads the same helper so the two cannot drift.
 			_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
+			_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
 			for _, name := range AutoOfferedTools(AutoOfferState{
 				Root:                !resolved.child,
 				MCPManageRegistered: mcpManageRegistered,
 				VisibleSkills:       len(skills) > 0,
 				Team:                resolved.team != "",
+				CalendarRegistered:  calendarRegistered,
 			}) {
 				if !containsString(turnTools, name) {
 					turnTools = append(turnTools, name)
