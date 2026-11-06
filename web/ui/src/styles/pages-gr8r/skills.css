@@ -1,0 +1,554 @@
+/* Gr8r-style rules for the skills pages (gr8r layer). Use Gr8r tokens and classes. */
+
+/* ------------------------------------------------------------------ */
+/* List toolbar                                                        */
+/* ------------------------------------------------------------------ */
+
+.skills-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+}
+
+.skills-search {
+  flex: 0 1 280px;
+}
+
+.skills-scope-seg {
+  min-width: 0;
+}
+
+.skills-summary {
+  margin: 0 0 0 auto;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* List rows                                                           */
+/* ------------------------------------------------------------------ */
+
+.skills-list {
+  overflow: hidden;
+}
+
+.skills-list-head,
+.skills-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 132px 72px 104px 64px;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+.skills-list-head {
+  height: 32px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.skills-list-head > span:first-child {
+  grid-column: 1 / span 2;
+}
+
+.skills-list .mini {
+  min-height: 52px;
+}
+
+.skills-list-head + .skills-row {
+  border-top: 0;
+}
+
+.skills-row {
+  padding: 0 14px;
+}
+
+.skills-row-skeleton {
+  pointer-events: none;
+}
+
+.skills-tile {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.skills-tile.is-invalid {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.skills-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skills-row-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.skills-name {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.skills-row-desc {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-row-desc.is-error {
+  color: var(--red);
+}
+
+.skills-row-scope,
+.skills-row-size {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.skills-row-updated {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.skills-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.skills-del:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* ------------------------------------------------------------------ */
+/* Pagination                                                          */
+/* ------------------------------------------------------------------ */
+
+.skills-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.skills-pagination-info,
+.skills-pagination-page {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.skills-pagination-page {
+  color: var(--text-4);
+}
+
+.skills-pager {
+  display: flex;
+  gap: var(--s-2);
+  margin-left: auto;
+}
+
+@media (max-width: 760px) {
+  .skills-list-head {
+    display: none;
+  }
+
+  .skills-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s-2);
+    min-height: 0;
+    padding: 10px 14px;
+  }
+
+  .skills-row-main {
+    flex: 1 1 60%;
+  }
+
+  .skills-row-actions {
+    margin-left: auto;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Editor header + feedback                                            */
+/* ------------------------------------------------------------------ */
+
+.page.skills-editor-page {
+  max-width: 900px;
+}
+
+.skills-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  transition: color var(--dur);
+}
+
+.skills-back:hover {
+  color: var(--text);
+}
+
+.skills-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-bottom: var(--s-5);
+}
+
+.skills-feedback .alert,
+.skills-block .alert {
+  align-items: center;
+}
+
+.skills-feedback .alert p,
+.skills-alert-msg {
+  margin: 0;
+}
+
+.err-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.skills-agent-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+}
+
+.skills-result-ok {
+  color: var(--green);
+}
+
+.skills-result-error {
+  color: var(--red);
+}
+
+/* ------------------------------------------------------------------ */
+/* Editor body (Gr8r settings blocks)                                  */
+/* ------------------------------------------------------------------ */
+
+.skills-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.skills-form .skills-block:first-child {
+  margin-top: 0;
+}
+
+.skills-block-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.skills-srow-text {
+  min-width: 0;
+}
+
+.skills-ctl {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.skills-ctl .input,
+.skills-ctl .select {
+  width: 100%;
+}
+
+.skills-readonly {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.skills-folder {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.skills-description {
+  min-height: 96px;
+}
+
+.skills-counter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+
+.skills-counter {
+  flex: 0 0 auto;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.skills-counter.is-over {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.skills-agents-count {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.skills-agents-panel {
+  margin: var(--s-2) 0;
+  overflow: hidden;
+}
+
+.skills-agent-row {
+  min-height: 46px;
+}
+
+.skills-agent-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skills-agent-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-agent-model {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skills-agent-owner {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.skills-agent-remove:hover {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.skills-add-agent {
+  width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  gap: var(--s-3);
+  min-height: 46px;
+  padding: 0 14px;
+  border: 0;
+  border-top: 1px solid var(--divider);
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  text-align: left;
+}
+
+.skills-add-agent:hover {
+  background: var(--surface-2);
+}
+
+.skills-add-agent:disabled {
+  color: var(--text-4);
+  cursor: not-allowed;
+}
+
+.skills-add-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+}
+
+.skills-markdown {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.skills-instructions {
+  min-height: 360px;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+
+.skills-pane-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+}
+
+.skills-editor-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+}
+
+@media (max-width: 640px) {
+  .srow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+    align-items: stretch;
+  }
+
+  .skills-ctl {
+    min-width: 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Add-agents dialog                                                   */
+/* ------------------------------------------------------------------ */
+
+.skills-dialog-subtitle {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.skills-dialog-search {
+  margin: var(--s-3) 0;
+}
+
+.skills-add-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.skills-add-option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur);
+}
+
+.skills-add-option:hover {
+  background: var(--surface-2);
+}
+
+.skills-add-option.is-checked {
+  background: var(--accent-soft);
+}
+
+.skills-add-option.is-added {
+  cursor: default;
+}
+
+.skills-add-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.skills-add-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.skills-add-name {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.skills-add-option.is-added .skills-add-name,
+.skills-add-option.is-added .skills-add-meta {
+  color: var(--text-4);
+}
+
+.skills-add-meta {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.skills-add-state {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.skills-add-empty {
+  margin: var(--s-3) 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}

@@ -1,0 +1,124 @@
+# Settings / Settings – General (frame 11741)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Settings – General" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-primary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Title" col gap=4 f1096xh60
+        text "Settings" 24/32 Semibold color=--text-primary
+        text "Providers, secrets and the daemon. Agents, skills, MCP and channels have their own pages." 16/24 Regular color=--text-tertiary
+    frame "Tabs" row gap=20 f1096xh35 border=--border-secondary
+      frame "General" row gap=0 pad=0,4,12,4 h61xh34 border=--border-brand-solid
+        text "General" 14/20 Semibold color=--text-brand-secondary
+      frame "Providers" row gap=0 pad=0,4,12,4 h73xh32
+        text "Providers" 14/20 Semibold color=--text-quaternary
+      frame "Secrets" row gap=0 pad=0,4,12,4 h60xh32
+        text "Secrets" 14/20 Semibold color=--text-quaternary
+      frame "Config file" row gap=0 pad=0,4,12,4 h79xh32
+        text "Config file" 14/20 Semibold color=--text-quaternary
+      frame "Audit log" row gap=0 pad=0,4,12,4 h69xh32
+        text "Audit log" 14/20 Semibold color=--text-quaternary
+    frame "Form" col gap=0 f1096xh554
+      frame "Daemon" row gap=32 pad=20,0,20,0 f1096xh123 border=--border-secondary
+        frame "Label" col gap=4 f260xh64
+          text "Daemon" 14/20 Semibold color=--text-secondary
+          text "lana daemon runs agents, channels and this dashboard." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh82
+          frame "Card" row gap=16 pad=16,16,16,16 cross=center f804xh82 bg=--bg-primary border=--border-secondary radius=12
+            frame "Text" col gap=4 f620xh48
+              frame "Row" row gap=8 cross=center h144xh24
+                text "Running" 16/24 Semibold color=--text-primary
+                <Badge/Color=Success> {"Label": "Healthy"} row gap=6 pad=2,8,2,8 cross=center h72xh22 bg=--bg-success-primary radius=16
+                  ellipse 6x6 bg=--fg-success-primary
+                  text "Healthy" 12/18 Medium color=--text-success-primary
+              text "pid 48213 · up 2 h 14 min · ~/.lana" 13/20 Regular Menlo color=--text-tertiary
+            <Button/Hierarchy=Secondary, Size=sm> {"Label": "Restart daemon"} row gap=6 pad=8,12,8,12 main=center cross=center h134xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+              text "Restart daemon" 14/20 Semibold color=--text-secondary
+      frame "Web dashboard" row gap=32 pad=20,0,20,0 f1096xh185 border=--border-secondary
+        frame "Label" col gap=4 f260xh84
+          text "Web dashboard" 14/20 Semibold color=--text-secondary
+          text "Where this dashboard listens. Only owners signed in on this browser can use it." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh144
+          frame "Address" col gap=6 f804xh94
+            text "Address" 14/20 Medium color=--text-secondary
+            frame "Field" row gap=8 pad=10,14,10,14 cross=center f804xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+              text "127.0.0.1:18300" 14/20 Regular Menlo color=--text-primary
+            frame "Status" row gap=6 cross=center f804xh20
+              ellipse 8x8 bg=--fg-warning-primary
+              text "Changing the address needs a daemon restart." 14/20 Regular color=--text-tertiary
+          frame "Row" row gap=12 cross=center f804xh38
+            text "2 browsers signed in as owner" 14/20 Regular color=--text-tertiary
+            <Button/Hierarchy=Secondary, Size=sm> {"Label": "Sign out other browsers"} row gap=6 pad=8,12,8,12 main=center cross=center h188xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+              text "Sign out other browsers" 14/20 Semibold color=--text-secondary
+      frame "Appearance" row gap=32 pad=20,0,20,0 f1096xh161 border=--border-secondary
+        frame "Label" col gap=4 f260xh44
+          text "Appearance" 14/20 Semibold color=--text-secondary
+          text "Theme for this browser." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh120
+          frame "Tiles" row gap=12 f804xh120
+            frame "Light" col gap=8 pad=8,8,8,8 f260xh120 bg=--bg-primary border=--border-brand radius=12
+              frame "Preview" row gap=6 pad=8,8,8,8 f240xf72 bg=#FFFFFF border=#EAECF0 radius=8
+                frame "Side" f24xf56 bg=#F2F4F7 radius=4
+              frame "Row" row gap=0 pad=0,4,0,4 cross=center f240xh20
+                text "Light" 14/20 Semibold color=--text-secondary
+            frame "Dark" col gap=8 pad=8,8,8,8 f260xh118 bg=--bg-primary border=--border-secondary radius=12
+              frame "Preview" row gap=6 pad=8,8,8,8 f242xf72 bg=#101828 border=#EAECF0 radius=8
+                frame "Side" f24xf56 bg=#1D2939 radius=4
+              frame "Row" row gap=0 pad=0,4,0,4 cross=center f242xh20
+                text "Dark" 14/20 Semibold color=--text-secondary
+            frame "System" col gap=8 pad=8,8,8,8 f260xh118 bg=--bg-primary border=--border-secondary radius=12
+              frame "Preview" row gap=6 pad=8,8,8,8 f242xf72 border=#EAECF0 radius=8
+                frame "Side" f24xf56 bg=#F2F4F7 radius=4
+              frame "Row" row gap=0 pad=0,4,0,4 cross=center f242xh20
+                text "System" 14/20 Semibold color=--text-secondary
+      frame "About" row gap=32 pad=20,0,20,0 f1096xh85 border=--border-secondary
+        frame "Label" col gap=4 f260xh44
+          text "About" 14/20 Semibold color=--text-secondary
+          text "" 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh20
+          text "lana 0.9.0 · go1.24 · darwin/arm64" 13/20 Regular Menlo color=--text-tertiary

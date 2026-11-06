@@ -1,0 +1,3 @@
+/* The skills views moved to the Gr8r page markup; their rules now live in
+   web/ui/src/styles/pages-gr8r/skills.css (gr8r layer). This legacy sheet is
+   kept only because index.css imports it. */

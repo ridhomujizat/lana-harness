@@ -7,3 +7,17 @@ result
 *.db-shm
 .env
 secrets.env
+dist/
+!web/dist/
+.nix-cache/
+.gocache/
+.gomodcache/
+.gopath/
+.golangci-cache/
+.smoke-home/
+.ghcache/
+/lana
+web/ui/node_modules/
+
+# Local implementer switch for .claude/bin/dsh-implement
+.claude/implementer.local

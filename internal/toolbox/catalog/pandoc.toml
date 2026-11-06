@@ -1,0 +1,27 @@
+id = "pandoc"
+name = "Pandoc"
+description = "Convert documents between Markdown, Word, HTML, PDF and more"
+homepage = "https://pandoc.org"
+icon = "file-text"
+category = "Documents"
+
+[detect]
+binary = "pandoc"
+version_args = ["--version"]
+
+[[install]]
+label = "Homebrew"
+command = "brew install pandoc"
+requires = ["brew"]
+
+[[commands]]
+name = "convert"
+description = "Convert a file in the workspace to another format"
+args = ["{{input}}", "-o", "{{output}}"]
+risk = "write"
+timeout_secs = 120
+workdir = "workspace"
+
+[commands.input]
+input = { type = "string", description = "Input file path", required = true }
+output = { type = "string", description = "Output file path; the extension picks the format", required = true }

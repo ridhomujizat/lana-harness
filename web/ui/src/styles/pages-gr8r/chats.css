@@ -1,0 +1,570 @@
+/* Gr8r-style rules for the chats page (gr8r layer). Use Gr8r tokens and classes. */
+
+/* The chats workspace fills the shell .content box as two columns: the room
+   list (fixed) and the timeline/panel that takes the rest. The height/compat
+   rules for .rooms-page live in gr8r-lana.css. */
+.rooms-page {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- */
+/* Room list column                                                 */
+/* ---------------------------------------------------------------- */
+
+.rooms-list {
+  display: flex;
+  flex: 0 0 340px;
+  flex-direction: column;
+  width: 340px;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  /* Gr8r inbox list: a white column next to the beige sidebar, so the two do
+     not blend into one block. */
+  background: var(--surface);
+}
+
+.rooms-list-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-4) var(--s-4) var(--s-3);
+}
+
+.rooms-list-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.rooms-list-head .btn {
+  margin-left: auto;
+}
+
+.rooms-search {
+  margin: 0 var(--s-4) var(--s-3);
+}
+
+.rooms-filters {
+  margin: 0 var(--s-4) var(--s-1);
+}
+
+.rooms-filters .cnt {
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.rooms-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--s-1) var(--s-2) var(--s-4);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.rooms-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rooms-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--r-sm);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur);
+}
+
+.rooms-row:hover {
+  background: var(--surface-2);
+}
+
+.rooms-row.on {
+  background: var(--surface-3);
+}
+
+.rooms-row.on:hover {
+  background: var(--surface-3);
+}
+
+.rooms-row-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rooms-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.rooms-row-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-time {
+  flex: 0 0 auto;
+  color: var(--text-4);
+  font-size: var(--fs-2xs);
+}
+
+.rooms-row-title {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rooms-row-preview {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-line .presence-label {
+  min-width: 0;
+}
+
+.rooms-row-line .presence-label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-badge {
+  flex: 0 0 auto;
+}
+
+/* The face dot carries the presence state, matching the tints of the timeline. */
+.rooms-page .av.state-waiting::after {
+  background: var(--amber);
+}
+
+.rooms-page .av.state-problem::after {
+  background: var(--red);
+}
+
+.rooms-page .av.state-working::after {
+  background: var(--violet);
+}
+
+.rooms-page .av.state-resting::after {
+  background: var(--gray);
+}
+
+/* The list skeleton mirrors the row grid so the column does not jump. */
+.rooms-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  padding: 0 10px;
+}
+
+.rooms-skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.rooms-skeleton-lines {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------- */
+/* Room panel                                                       */
+/* ---------------------------------------------------------------- */
+
+.rooms-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.rooms-placeholder {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: var(--s-6);
+}
+
+.rooms-placeholder-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: 100%;
+  max-width: 320px;
+}
+
+/* ---------------------------------------------------------------- */
+/* Room header                                                      */
+/* ---------------------------------------------------------------- */
+
+.room-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--gutter);
+  border-bottom: 1px solid var(--border);
+}
+
+.room-head .av,
+.room-head .avs {
+  flex: 0 0 auto;
+}
+
+.room-head-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.room-head-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.room-head-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-head-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--fs-sm);
+}
+
+.room-head-facts {
+  color: var(--text-3);
+}
+
+.room-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.room-notices {
+  margin: var(--s-2) var(--gutter) 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* Timeline chrome (structure stays in rooms.css)                   */
+/* ---------------------------------------------------------------- */
+
+.room-timeline-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.room-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px var(--gutter) var(--s-6);
+}
+
+.room-divider,
+.room-day {
+  color: var(--text-3);
+}
+
+.room-divider-line,
+.room-day::before,
+.room-day::after {
+  background: var(--divider);
+}
+
+.room-divider-light {
+  color: var(--text-4);
+}
+
+.room-summary {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.room-summary-link {
+  color: var(--accent);
+}
+
+.room-learned {
+  color: var(--text-3);
+}
+
+.room-book-icon {
+  color: var(--text-4);
+}
+
+.room-live {
+  color: var(--accent);
+}
+
+.room-empty-title {
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+/* ---------------------------------------------------------------- */
+/* Group room (message block faces + mention chips)                 */
+/* ---------------------------------------------------------------- */
+
+.room-group .av {
+  margin-top: 2px;
+}
+
+.group-msg-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.group-lead-pill {
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+}
+
+.group-msg-time,
+.group-msg-meta {
+  color: var(--text-4);
+  font-size: var(--fs-2xs);
+}
+
+.room-mentions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.room-mention-chip {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.room-mention-chip:hover {
+  background: var(--surface-2);
+}
+
+.room-mention-list {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 12px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  max-height: 220px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+
+.room-mention-option {
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.room-mention-option.is-active,
+.room-mention-option:hover {
+  background: var(--surface-2);
+}
+
+/* ---------------------------------------------------------------- */
+/* Composer (.cbox)                                                 */
+/* ---------------------------------------------------------------- */
+
+.rooms-page .cbox {
+  position: relative;
+}
+
+.room-composer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--gutter) var(--s-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.room-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.room-composer-spacer {
+  flex: 1 1 auto;
+}
+
+.room-newtopic {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 10px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+.room-composer-status {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.rooms-page .cbox textarea {
+  min-height: 44px;
+}
+
+.rooms-page .cbox textarea::placeholder {
+  color: var(--text-3);
+}
+
+.room-attach {
+  display: inline-flex;
+  align-items: center;
+}
+
+.rooms-page .composer-plus {
+  width: var(--h-md);
+  height: var(--h-md);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+}
+
+.rooms-page .composer-plus:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.rooms-page .composer-plus:disabled {
+  opacity: 0.4;
+}
+
+/* ---------------------------------------------------------------- */
+/* Empty room + loading                                             */
+/* ---------------------------------------------------------------- */
+
+.room-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  min-height: 100%;
+  padding: var(--s-12) var(--s-6);
+  text-align: center;
+}
+
+.room-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* Unread counts: solid pills like Gr8r's sidebar counters, readable in both
+   themes (the soft accent tint vanished on the dark navy accent). */
+.rooms-row-badge.badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  justify-content: center;
+  border-radius: var(--r-full);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rooms-row-badge.badge.accent {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.rooms-row-badge.badge.amber {
+  background: var(--amber);
+  color: var(--text-inv);
+}
+
+.rooms-row-badge.badge.red {
+  background: var(--red);
+  color: var(--text-inv);
+}

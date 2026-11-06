@@ -1,0 +1,369 @@
+import { useSyncExternalStore } from "react";
+import type { CSSProperties } from "react";
+import { listRooms, openRoomsStream } from "../api/rooms";
+import type { Presence, RoomRow } from "../api/rooms";
+
+/* The presence kit of REQ-ROOM-006 and REQ-ROOM-013: the agent face, the
+   presence label, skeletons, the typing dots, the unread badge, and the shared
+   useRooms() store. Colors come from the design (rooms-1..4). */
+
+export type FaceSize = 18 | 24 | 32 | 44 | 52 | 96;
+
+/* The tinted background and strong foreground of an agent color come from the
+   theme-aware custom properties of rooms.css, so the faces are dark-tinted with
+   readable letters in dark mode and unchanged in light mode (REQ-ROOM-006). */
+const FACE_TONES = ["brand", "success", "warning", "error", "blue", "gray"] as const;
+
+type FaceTone = (typeof FACE_TONES)[number];
+
+function faceTone(color?: string): FaceTone {
+  return color && (FACE_TONES as readonly string[]).includes(color)
+    ? (color as FaceTone)
+    : "brand";
+}
+
+/* The tinted background and strong foreground of an agent color. The group
+   room uses them for the handoff chips and the message names (REQ-ROOM-008). */
+export function agentFaceColors(color?: string): { bg: string; fg: string } {
+  const tone = faceTone(color);
+  return {
+    bg: "var(--face-" + tone + "-bg)",
+    fg: "var(--face-" + tone + "-fg)",
+  };
+}
+
+/* The agent color as a Gr8r token, so a Gr8r Avatar keeps the same palette as
+   the tinted AgentFace and the roster (REQ-ROOM-006, REQ-ROOM-011). */
+const GR8R_COLORS: Record<string, string> = {
+  brand: "var(--violet)",
+  success: "var(--green)",
+  warning: "var(--amber)",
+  error: "var(--red)",
+  blue: "var(--blue)",
+  gray: "var(--gray)",
+};
+
+export function gr8rColor(color?: string): string {
+  return GR8R_COLORS[faceTone(color)] || "var(--violet)";
+}
+
+/* The presence dot of the face; the label colors of PresenceLabel are a
+   separate, darker set. Both read theme-aware custom properties. */
+const DOT_COLORS: Record<string, string> = {
+  waiting: "var(--presence-dot-waiting)",
+  working: "var(--presence-dot-working)",
+  problem: "var(--presence-dot-problem)",
+  online: "var(--presence-dot-online)",
+  resting: "var(--presence-dot-resting)",
+};
+
+const LABEL_COLORS: Record<string, string> = {
+  waiting: "var(--presence-label-waiting)",
+  working: "var(--presence-label-working)",
+  problem: "var(--presence-label-problem)",
+};
+
+function initialOf(name: string): string {
+  return (Array.from(String(name || "").trim())[0] || "?").toUpperCase();
+}
+
+export interface AgentFaceProps {
+  name: string;
+  color?: string;
+  presence?: Presence | null;
+  size?: FaceSize;
+  className?: string;
+  style?: CSSProperties;
+}
+
+export function AgentFace({
+  name,
+  color,
+  presence,
+  size = 32,
+  className = "",
+  style,
+}: AgentFaceProps) {
+  const face = agentFaceColors(color);
+  const state = presence ? presence.state : "";
+  const label = presence ? name + ", " + state : name;
+  return (
+    <span
+      className={"agent-face size-" + size + (className ? " " + className : "")}
+      role="img"
+      aria-label={label}
+      style={{ background: face.bg, color: face.fg, ...style }}
+    >
+      {initialOf(name)}
+      {state === "working" ? (
+        <span className="agent-face-ring" aria-hidden="true" />
+      ) : null}
+      {presence ? (
+        <span
+          className={"agent-face-dot" + (state ? " state-" + state : "")}
+          aria-hidden="true"
+          style={{ background: DOT_COLORS[state] || DOT_COLORS.resting }}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+export function PresenceLabel({ presence }: { presence?: Presence | null }) {
+  if (!presence) {
+    return null;
+  }
+  const color = LABEL_COLORS[presence.state] || "var(--fg-tertiary)";
+  return (
+    <span className={"presence-label state-" + presence.state}>
+      <span
+        className="presence-label-dot"
+        style={{ background: color }}
+        aria-hidden="true"
+      />
+      <span className="presence-label-text" style={{ color }}>
+        {presence.label}
+      </span>
+    </span>
+  );
+}
+
+export function TypingDots() {
+  return (
+    <span className="typing-dots" role="status" aria-label="Typing">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+export interface SkeletonProps {
+  width?: number | string;
+  height?: number | string;
+  radius?: number | string;
+  className?: string;
+}
+
+export function Skeleton({ width, height, radius, className }: SkeletonProps) {
+  return (
+    <span
+      className={"skeleton" + (className ? " " + className : "")}
+      aria-hidden="true"
+      style={{ width, height, borderRadius: radius }}
+    />
+  );
+}
+
+export function SkeletonRows({ count = 3 }: { count?: number }) {
+  return (
+    <div className="skeleton-rows" aria-hidden="true">
+      {Array.from({ length: count }).map((_, index) => (
+        <Skeleton
+          key={index}
+          className="skeleton-row"
+          height={44}
+          radius={10}
+        />
+      ))}
+    </div>
+  );
+}
+
+export interface FaceRef {
+  name: string;
+  color?: string;
+  presence?: Presence | null;
+}
+
+/* REQ-ROOM-001: the team avatar stacks up to two member faces. The faces are
+   absolutely positioned inside a box the size of the slot, so the cluster never
+   overlaps the text column beside it. */
+export function TeamFace({
+  faces,
+  size = 24,
+}: {
+  faces: FaceRef[];
+  size?: FaceSize;
+}) {
+  const memberSize = Math.round(size * 0.64);
+  return (
+    <span
+      className="team-face"
+      aria-hidden="true"
+      style={{ width: size, height: size }}
+    >
+      {faces.slice(0, 2).map((face) => (
+        <AgentFace
+          key={face.name}
+          name={face.name}
+          color={face.color}
+          presence={face.presence}
+          size={size}
+          className="team-face-member"
+          style={{
+            width: memberSize,
+            height: memberSize,
+            fontSize: Math.round(memberSize * 0.42),
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+export interface RoomsState {
+  rows: RoomRow[];
+  byName: Record<string, RoomRow>;
+  connected: boolean;
+  loading: boolean;
+}
+
+function indexRows(rows: RoomRow[]): Record<string, RoomRow> {
+  const byName: Record<string, RoomRow> = {};
+  for (const row of rows) {
+    byName[row.name] = row;
+  }
+  return byName;
+}
+
+/* One shared stream for the whole app: it opens on the first subscriber and
+   closes when none remain. The first subscriber also loads the rows with
+   listRooms() at once, in parallel with the stream, so the list never waits on
+   the stream. If no `rooms` event arrives within 4 s (a slow server or a
+   browser that cannot read the streamed body) it falls back to a 10 s
+   listRooms() poll until a `rooms` event arrives; a stream error starts the
+   same poll at once (REQ-ROOM-007). */
+let roomsState: RoomsState = {
+  rows: [],
+  byName: {},
+  connected: false,
+  loading: true,
+};
+
+const listeners = new Set<() => void>();
+let stream: { close: () => void } | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let slowTimer: ReturnType<typeof setTimeout> | null = null;
+let roomsEventSeen = false;
+
+const POLL_INTERVAL_MS = 10000;
+const SLOW_STREAM_MS = 4000;
+
+function emit(): void {
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+function setState(patch: Partial<RoomsState>): void {
+  roomsState = { ...roomsState, ...patch };
+  emit();
+}
+
+async function poll(): Promise<void> {
+  try {
+    const rows = await listRooms();
+    setState({ rows, byName: indexRows(rows), loading: false });
+  } catch {
+    /* Keep the last rows; the next tick retries. */
+  }
+}
+
+function startPolling(): void {
+  if (pollTimer !== null) {
+    return;
+  }
+  void poll();
+  pollTimer = setInterval(() => {
+    void poll();
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling(): void {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function clearSlowTimer(): void {
+  if (slowTimer !== null) {
+    clearTimeout(slowTimer);
+    slowTimer = null;
+  }
+}
+
+function ensureStream(): void {
+  if (stream !== null) {
+    return;
+  }
+  roomsEventSeen = false;
+  stream = openRoomsStream({
+    onRooms(rows) {
+      /* The stream delivered. Stop the slow-stream fallback and update. */
+      roomsEventSeen = true;
+      clearSlowTimer();
+      stopPolling();
+      setState({ rows, byName: indexRows(rows), loading: false });
+    },
+    onRoom(row) {
+      const exists = roomsState.rows.some((item) => item.name === row.name);
+      const rows = exists
+        ? roomsState.rows.map((item) => (item.name === row.name ? row : item))
+        : [...roomsState.rows, row];
+      setState({ rows, byName: indexRows(rows), loading: false });
+    },
+    onState(connected) {
+      setState({ connected });
+      /* A stream error starts the fallback poll; only a `rooms` event stops it. */
+      if (!connected) {
+        startPolling();
+      }
+    },
+  });
+  /* The stream is open but may never deliver a `rooms` event. Fall back to the
+     10 s poll when nothing arrived within 4 s. */
+  slowTimer = setTimeout(() => {
+    slowTimer = null;
+    if (!roomsEventSeen) {
+      startPolling();
+    }
+  }, SLOW_STREAM_MS);
+}
+
+function releaseStream(): void {
+  clearSlowTimer();
+  roomsEventSeen = false;
+  if (stream) {
+    stream.close();
+    stream = null;
+  }
+  stopPolling();
+  if (roomsState.connected) {
+    setState({ connected: false });
+  }
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  if (listeners.size === 1) {
+    /* Load the first rows at once, in parallel with the stream. */
+    void poll();
+    ensureStream();
+  }
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      releaseStream();
+    }
+  };
+}
+
+function getSnapshot(): RoomsState {
+  return roomsState;
+}
+
+export function useRooms(): RoomsState {
+  return useSyncExternalStore(subscribe, getSnapshot);
+}

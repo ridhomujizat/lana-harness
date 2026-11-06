@@ -1,0 +1,189 @@
+/* ============================================================
+   MOTION — Gr8r keyframes and entrance choreography.
+   Imported right after app.css.
+   ============================================================ */
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes slideInR {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes growX {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes popCheck {
+  0% {
+    transform: scale(0.55);
+  }
+  55% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOnly {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes tabIn {
+  from {
+    transform: scaleX(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes toastOut {
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes addWash {
+  from {
+    background: var(--accent-soft);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* Route entrance: each top-level block rises in with a light stagger.
+   Chat and stream containers live below these blocks, so they animate once
+   with the page rather than on every update. */
+.page > *,
+.setup-main > *,
+.sessions-empty-pane {
+  animation: riseIn 0.36s var(--ease) both;
+}
+
+.page > *:nth-child(2) {
+  animation-delay: 0.035s;
+}
+
+.page > *:nth-child(3) {
+  animation-delay: 0.07s;
+}
+
+.page > *:nth-child(n + 4) {
+  animation-delay: 0.1s;
+}
+
+/* Utility hooks. */
+.fx-rise {
+  animation: riseIn 0.3s var(--ease) both;
+}
+
+.fx-pop {
+  animation: popCheck 0.42s var(--spring) both;
+}
+
+.fx-added {
+  animation:
+    riseIn 0.3s var(--ease) both,
+    addWash 1.4s var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page > *,
+  .setup-main > *,
+  .sessions-empty-pane,
+  .fx-rise,
+  .fx-pop,
+  .fx-added,
+  .dialog[open],
+  .dialog.dialog-filter[open],
+  .dialog::backdrop,
+  .composer-menu,
+  .agent-picker-menu {
+    animation: fadeOnly 0.12s both !important;
+  }
+
+  button:active:not(:disabled),
+  .button-link:active:not(:disabled),
+  .button-ui:active:not(:disabled),
+  a.card:hover,
+  button.card:hover,
+  .card[role="button"]:hover {
+    transform: none;
+  }
+}

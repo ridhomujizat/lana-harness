@@ -1,0 +1,144 @@
+# Agents / Agents – Detail · General (frame 5498)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Agents – Detail · General" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    text "Agents  /  coder" 14/20 Medium color=--text-tertiary
+    frame "Header" row gap=16 cross=center f1096xh60
+      <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f56xf56 bg=--bg-warning-primary border=--bg-primary radius=16
+        text "C" 12/18 Semibold color=--text-warning-primary
+      frame "Title" col gap=4 f788xh60
+        frame "Name row" row gap=8 cross=center h68xh32
+          text "coder" 24/32 Semibold color=--text-primary
+        text "Writes and fixes code in your workspace. 6 sessions, last active 1 h ago." 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Duplicate"} row gap=6 pad=8,12,8,12 main=center cross=center h91xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Duplicate" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Start session"} row gap=6 pad=8,12,8,12 main=center cross=center h113xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Start session" 14/20 Semibold color=--text-white
+    frame "Tabs" row gap=20 f1096xh35 border=--border-secondary
+      frame "General" row gap=8 pad=0,4,12,4 cross=center h61xh34 border=--border-brand-solid
+        text "General" 14/20 Semibold color=--text-brand-secondary
+      frame "Persona & memory" row gap=8 pad=0,4,12,4 cross=center h137xh32
+        text "Persona & memory" 14/20 Semibold color=--text-quaternary
+      frame "Tools" row gap=8 pad=0,4,12,4 cross=center h45xh32
+        text "Tools" 14/20 Semibold color=--text-quaternary
+      frame "Skills" row gap=8 pad=0,4,12,4 cross=center h44xh32
+        text "Skills" 14/20 Semibold color=--text-quaternary
+      frame "MCP" row gap=8 pad=0,4,12,4 cross=center h41xh32
+        text "MCP" 14/20 Semibold color=--text-quaternary
+      frame "Rules" row gap=8 pad=0,4,12,4 cross=center h46xh32
+        text "Rules" 14/20 Semibold color=--text-quaternary
+      frame "Workspace" row gap=8 pad=0,4,12,4 cross=center h85xh32
+        text "Workspace" 14/20 Semibold color=--text-quaternary
+    frame "Form" col gap=0 f1096xh423
+      frame "Model" row gap=32 pad=20,0,20,0 f1096xh179 border=--border-secondary
+        frame "Label" col gap=4 f260xh64
+          text "Model" 14/20 Semibold color=--text-secondary
+          text "The model this agent uses. Fallbacks run when the main model fails." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh138
+          frame "Row" row gap=12 f804xh72
+            frame "Provider" col gap=6 f396xh72
+              text "Provider" 14/20 Medium color=--text-secondary
+              frame "Field" row gap=8 pad=10,14,10,14 cross=center f396xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+                text "Anthropic" 16/24 Regular color=--text-primary
+                <Icon/Chevron down> f20xf20
+            frame "Model" col gap=6 f396xh72
+              text "Model" 14/20 Medium color=--text-secondary
+              frame "Field" row gap=8 pad=10,14,10,14 cross=center f396xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+                text "claude-sonnet-5-5" 16/24 Regular color=--text-primary
+                <Icon/Chevron down> f20xf20
+          frame "Fallback" col gap=6 f804xh54
+            text "Fallback" 14/20 Medium color=--text-secondary
+            frame "Tags" row gap=8 cross=center f804xh28
+              frame "Tag" row gap=4 pad=3,6,3,8 cross=center h168xh28 bg=--bg-primary border=--border-primary radius=6
+                text "openai / gpt-5-mini" 14/20 Medium color=--text-secondary
+                <Icon/Close> f20xf20
+              frame "Add" row gap=4 pad=3,8,3,8 cross=center h114xh26 radius=6
+                text "+ Add fallback" 14/20 Semibold color=--text-brand-secondary
+      frame "Permission" row gap=32 pad=20,0,20,0 f1096xh135 border=--border-secondary
+        frame "Label" col gap=4 f260xh84
+          text "Permission" 14/20 Semibold color=--text-secondary
+          text "What happens when the agent wants to run a risky tool, such as bash or write_file." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh94
+          frame "Tiles" row gap=12 f804xh94
+            frame "Ask" row gap=10 pad=14,14,14,14 f260xh94 bg=--bg-primary border=--border-brand radius=12
+              frame "Text" col gap=2 f200xh62
+                text "Ask" 14/20 Semibold color=--text-secondary
+                text "Ask me before each risky tool." 14/20 Regular color=--text-tertiary
+              frame "Radio" row gap=0 main=center cross=center f18xf18 bg=--bg-brand-solid radius=9
+                ellipse 6x6 bg=--fg-white
+            frame "Trust" row gap=10 pad=14,14,14,14 f260xh72 bg=--bg-primary border=--border-secondary radius=12
+              frame "Text" col gap=2 f202xh42
+                text "Trust" 14/20 Semibold color=--text-secondary
+                text "Run every tool without asking." 14/20 Regular color=--text-tertiary
+              frame "Radio" row gap=0 main=center cross=center f18xf18 bg=--bg-primary border=--border-primary radius=9
+            frame "Never" row gap=10 pad=14,14,14,14 f260xh92 bg=--bg-primary border=--border-secondary radius=12
+              frame "Text" col gap=2 f202xh62
+                text "Never" 14/20 Semibold color=--text-secondary
+                text "Block risky tools. Read-only work only." 14/20 Regular color=--text-tertiary
+              frame "Radio" row gap=0 main=center cross=center f18xf18 bg=--bg-primary border=--border-primary radius=9
+      frame "Limits" row gap=32 pad=20,0,20,0 f1096xh109 border=--border-secondary
+        frame "Label" col gap=4 f260xh44
+          text "Limits" 14/20 Semibold color=--text-secondary
+          text "How long one turn can run." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh68
+          frame "Row" row gap=12 f804xh68
+            frame "Max steps per turn" col gap=6 f396xh68
+              text "Max steps per turn" 14/20 Medium color=--text-secondary
+              frame "Field" row gap=8 pad=10,14,10,14 cross=center f396xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+                text "40" 14/20 Regular Menlo color=--text-primary
+            frame "Context window" col gap=6 f396xh68
+              text "Context window" 14/20 Medium color=--text-secondary
+              frame "Field" row gap=8 pad=10,14,10,14 cross=center f396xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+                text "200000" 14/20 Regular Menlo color=--text-primary
+    frame "Save bar" row gap=12 cross=center f1096xh38
+      text "Changes apply to new turns. Running turns keep the old settings." 14/20 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Cancel"} row gap=6 pad=8,12,8,12 main=center cross=center h74xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Cancel" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Save changes"} row gap=6 pad=8,12,8,12 main=center cross=center h119xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Save changes" 14/20 Semibold color=--text-white

@@ -1,0 +1,413 @@
+package compaction
+
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
+)
+
+// unit is one balanced piece of derived history: a user message, or an
+// assistant message plus all tool results answering its calls. A cut is only
+// allowed between units (REQ-LTC-013).
+type unit struct {
+	kind     string // "user", "assistant", or "summary"
+	startSeq int64
+	endSeq   int64
+	messages []core.Message
+	tools    []unitTool
+	chars    int
+}
+
+// unitTool is one tool result inside a unit, kept so the pruner can cite its
+// source seq.
+type unitTool struct {
+	seq    int64
+	callID string
+	output string
+}
+
+// buildUnits groups the derived history into units. A prior summary becomes a
+// leading synthetic unit so a later compaction can merge it (REQ-LTC-015).
+func buildUnits(events []core.SessionEvent, prunes map[string]string) ([]unit, error) {
+	var units []unit
+
+	var sum core.CompactionSummary
+	sumSeq := int64(0)
+	hasSum := false
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != core.KindCompactionSummary {
+			continue
+		}
+		if err := json.Unmarshal(events[i].Payload, &sum); err != nil {
+			return nil, err
+		}
+		sumSeq = events[i].Seq
+		hasSum = true
+		break
+	}
+	cutoff := int64(0)
+	if hasSum {
+		cutoff = sum.UptoSeq
+		if sum.RetainedFromSeq == 0 {
+			cutoff = sumSeq
+		}
+		text := sum.Summary
+		if sum.RetainedFromSeq > 0 {
+			text = checkpointText(sum.Summary)
+		}
+		units = append(units, unit{
+			kind:     "summary",
+			startSeq: sumSeq,
+			endSeq:   sumSeq,
+			messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{{Kind: core.BlockText, Text: text}}}},
+		})
+	}
+
+	for _, event := range events {
+		if event.Seq <= cutoff {
+			continue
+		}
+		switch event.Kind {
+		case core.KindUserMessage:
+			var payload core.UserMessage
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return nil, err
+			}
+			units = append(units, unit{
+				kind:     "user",
+				startSeq: event.Seq,
+				endSeq:   event.Seq,
+				messages: []core.Message{{Role: core.RoleUser, Content: imagePlaceholders(payload.Content)}},
+			})
+		case core.KindAssistantMessage:
+			var payload core.AssistantMessage
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return nil, err
+			}
+			units = append(units, unit{
+				kind:     "assistant",
+				startSeq: event.Seq,
+				endSeq:   event.Seq,
+				messages: []core.Message{{Role: core.RoleAssistant, Content: append([]core.ContentBlock(nil), payload.Content...)}},
+			})
+		case core.KindToolResult:
+			var payload core.ToolResultPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return nil, err
+			}
+			output, ok := prunes[payload.CallID]
+			if !ok {
+				// The raw payload output is used only when not pruned; a pruned
+				// output already carries the placeholder lines the prune step
+				// wrote (REQ-ATT-007).
+				output = appendImagePlaceholders(payload.Output, payload.Images)
+			}
+			block := core.ContentBlock{
+				Kind:    core.BlockToolResult,
+				ID:      payload.CallID,
+				Output:  output,
+				IsError: payload.Status != core.ToolStatusSuccess,
+			}
+			tool := unitTool{seq: event.Seq, callID: payload.CallID, output: output}
+			if n := len(units); n > 0 && units[n-1].kind == "assistant" {
+				target := &units[n-1]
+				target.endSeq = event.Seq
+				if k := len(target.messages); k > 0 && target.messages[k-1].Role == core.RoleUser && allToolResults(target.messages[k-1].Content) {
+					target.messages[k-1].Content = append(target.messages[k-1].Content, block)
+				} else {
+					target.messages = append(target.messages, core.Message{Role: core.RoleUser, Content: []core.ContentBlock{block}})
+				}
+				target.tools = append(target.tools, tool)
+			} else {
+				units = append(units, unit{
+					kind:     "user",
+					startSeq: event.Seq,
+					endSeq:   event.Seq,
+					messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{block}}},
+					tools:    []unitTool{tool},
+				})
+			}
+		}
+	}
+	for i := range units {
+		units[i].chars = messagesChars(units[i].messages)
+	}
+	return units, nil
+}
+
+// flatten concatenates the messages of the given units.
+func flatten(units []unit) []core.Message {
+	var out []core.Message
+	for _, u := range units {
+		out = append(out, u.messages...)
+	}
+	return out
+}
+
+// onlySummary reports whether a span holds nothing but a prior summary, which
+// cannot be condensed further (REQ-LTC-016).
+func onlySummary(units []unit) bool {
+	if len(units) == 0 {
+		return false
+	}
+	for _, u := range units {
+		if u.kind != "summary" {
+			return false
+		}
+	}
+	return true
+}
+
+// tailIndex returns the index of the first retained unit. The tail walks units
+// from the newest back while their estimated token count fits the token budget
+// (REQ-LTC-011), always keeping at least the newest unit. A unit's estimate is
+// its char count divided by 4, rounded up, the same chars/4 rule the rest of the
+// package uses. With newestOnly the tail is the newest unit alone (REQ-LTC-013,
+// REQ-LTC-016).
+func tailIndex(units []unit, budget int64, newestOnly bool) int {
+	if len(units) == 0 {
+		return 0
+	}
+	if newestOnly {
+		return len(units) - 1
+	}
+	start := len(units) - 1
+	sum := estimateUnitTokens(units[start])
+	for i := start - 1; i >= 0; i-- {
+		tokens := estimateUnitTokens(units[i])
+		if sum+tokens > budget {
+			break
+		}
+		sum += tokens
+		start = i
+	}
+	return start
+}
+
+// estimateUnitTokens estimates a unit's token count from its char count with the
+// package rule, chars/4 rounded up.
+func estimateUnitTokens(u unit) int64 {
+	return (int64(u.chars) + 3) / 4
+}
+
+// pruneIndex maps a tool call id to the newest pruned output recorded for it.
+func pruneIndex(events []core.SessionEvent) (map[string]string, error) {
+	out := map[string]string{}
+	for _, event := range events {
+		if event.Kind != core.KindToolResultPruned {
+			continue
+		}
+		var payload core.ToolResultPruned
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, err
+		}
+		out[payload.CallID] = payload.Output
+	}
+	return out, nil
+}
+
+// estimateTokens estimates the request size. With a usable step/end after the
+// latest compaction it anchors on that step's real usage and adds the chars of
+// the model surface the measured request did not include. The measured surface
+// is rebuilt from the events that existed when that request was sent, so the
+// newest step's tool results are counted once and later prunes relieve the
+// estimate exactly as core.DeriveMessages applies them to the turn request.
+// Without usage it falls back to a char estimate of system, tools, and messages
+// (REQ-LTC-010, REQ-LTC-012).
+func estimateTokens(events []core.SessionEvent, req core.CompactRequest, derived []core.Message, _ map[string]string) int64 {
+	sumSeq := int64(0)
+	for _, event := range events {
+		if event.Kind == core.KindCompactionSummary {
+			sumSeq = event.Seq
+		}
+	}
+	var usage core.Usage
+	var stepStartSeq, stepSeq int64
+	start := int64(0)
+	for _, event := range events {
+		if event.Seq <= sumSeq {
+			continue
+		}
+		switch event.Kind {
+		case core.KindStepStart:
+			start = event.Seq
+		case core.KindStepEnd:
+			var payload core.StepEnd
+			if json.Unmarshal(event.Payload, &payload) != nil {
+				continue
+			}
+			if payload.Usage.InputTokens > 0 {
+				usage = payload.Usage
+				stepSeq = event.Seq
+				stepStartSeq = start
+			}
+		}
+	}
+	if stepSeq > 0 {
+		covered := measuredSurfaceChars(events, stepStartSeq, stepSeq)
+		delta := int64(messagesChars(derived)) - covered
+		return usage.InputTokens + usage.OutputTokens + delta/4
+	}
+	chars := int64(len(req.System)) + int64(len(toolsJSON(req.Tools))) + int64(messagesChars(derived))
+	return chars / 4
+}
+
+// measuredSurfaceChars is the char count of the model surface a step/end usage
+// measured: the request prefix plus that step's assistant output, with only the
+// prunes that existed when the request was built. Tool results produced after
+// the assistant output are excluded because the measured request did not carry
+// them yet.
+func measuredSurfaceChars(events []core.SessionEvent, stepStartSeq, stepSeq int64) int64 {
+	if stepStartSeq == 0 || stepSeq == 0 {
+		return 0
+	}
+	assistantSeq := int64(0)
+	for _, event := range events {
+		if event.Seq <= stepStartSeq || event.Seq >= stepSeq {
+			continue
+		}
+		if event.Kind == core.KindAssistantMessage {
+			assistantSeq = event.Seq
+		}
+	}
+	if assistantSeq == 0 {
+		// No assistant output was recorded for the step; the usage measured
+		// only the request prefix.
+		assistantSeq = stepStartSeq
+	}
+	prefix := make([]core.SessionEvent, 0, len(events))
+	for _, event := range events {
+		if event.Seq > assistantSeq {
+			break
+		}
+		switch event.Kind {
+		case core.KindToolResultPruned, core.KindCompactionSummary:
+			if event.Seq >= stepStartSeq {
+				continue
+			}
+		}
+		prefix = append(prefix, event)
+	}
+	messages, err := core.DeriveMessages(prefix)
+	if err != nil {
+		return 0
+	}
+	return int64(messagesChars(messages))
+}
+
+// imagePlaceholders returns a copy of blocks with every image block replaced by
+// its placeholder text, so a summary request carries no image bytes
+// (REQ-ATT-007). The input slice is not changed.
+func imagePlaceholders(blocks []core.ContentBlock) []core.ContentBlock {
+	out := make([]core.ContentBlock, len(blocks))
+	copy(out, blocks)
+	for i := range out {
+		if out[i].Kind == core.BlockImage {
+			out[i] = core.ContentBlock{Kind: core.BlockText, Text: attach.Placeholder(out[i])}
+		}
+	}
+	return out
+}
+
+// hasImageData reports whether any message content block carries image bytes,
+// at the top level or inside a tool result. It mirrors what core.TextForImages
+// replaces, so a request can be checked before it is rewritten (REQ-ATT-003).
+func hasImageData(messages []core.Message) bool {
+	for _, message := range messages {
+		for _, block := range message.Content {
+			if block.Kind == core.BlockImage || (block.Kind == core.BlockToolResult && len(block.Images) > 0) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// appendImagePlaceholders adds one placeholder line per image to output,
+// newline-separated, with no leading newline when output is empty
+// (REQ-ATT-007).
+func appendImagePlaceholders(output string, images []core.ContentBlock) string {
+	if len(images) == 0 {
+		return output
+	}
+	lines := make([]string, 0, len(images))
+	for _, image := range images {
+		lines = append(lines, attach.Placeholder(image))
+	}
+	extra := strings.Join(lines, "\n")
+	if output == "" {
+		return extra
+	}
+	return output + "\n" + extra
+}
+
+func contentChars(blocks []core.ContentBlock) int {
+	var n int
+	for _, block := range blocks {
+		n += len(block.Text) + len(block.Output) + len(block.Input)
+	}
+	return n
+}
+
+func messagesChars(messages []core.Message) int {
+	var n int
+	for _, message := range messages {
+		n += contentChars(message.Content)
+	}
+	return n
+}
+
+// toolsJSON is a stable string form of the tool declarations.
+func toolsJSON(tools []core.ToolSpec) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(tools)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// headText is the latest system/message text, the head prompt used to frame a
+// manual summary request.
+func headText(events []core.SessionEvent) string {
+	text := ""
+	for _, event := range events {
+		if event.Kind != core.KindSystemMessage {
+			continue
+		}
+		var payload core.SystemMessage
+		if json.Unmarshal(event.Payload, &payload) == nil {
+			text = payload.Text
+		}
+	}
+	return text
+}
+
+// checkpointText frames a summary for the model view (REQ-LTC-014).
+func checkpointText(summary string) string {
+	return core.CheckpointPreamble + "\n\n<compacted-summary>\n" + summary + "\n</compacted-summary>"
+}
+
+func allToolResults(blocks []core.ContentBlock) bool {
+	if len(blocks) == 0 {
+		return false
+	}
+	for _, block := range blocks {
+		if block.Kind != core.BlockToolResult {
+			return false
+		}
+	}
+	return true
+}
+
+func runeCount(text string) int {
+	n := 0
+	for range text {
+		n++
+	}
+	return n
+}

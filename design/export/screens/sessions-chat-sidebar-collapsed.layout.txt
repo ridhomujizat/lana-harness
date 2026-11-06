@@ -1,0 +1,213 @@
+# Session / Sessions – Chat · sidebar collapsed (frame 3190)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Sessions – Chat · sidebar collapsed" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar collapsed" col gap=0 pad=24,16,24,16 main=spaceBetween cross=center f80xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 cross=center h48xh368
+      frame "Mark" row gap=0 main=center cross=center f40xf40
+        <Logo mark> f32xf32
+          vector 18x22 bg=--fg-primary
+          vector 18x22 bg=--fg-primary
+      frame "Nav" col gap=4 cross=center h48xh304
+        <Nav item collapsed/State=Default> {"Icon": 1728} row gap=0 main=center cross=center f48xf40 radius=6
+          <Icon/Home> f20xf20
+        <Nav item collapsed/State=Active> {"Icon": 1730} row gap=0 main=center cross=center f48xf40 bg=--bg-active radius=6
+          <Icon/Sessions> f20xf20
+        <Nav item collapsed/State=Hover> {"Icon": 1732} row gap=0 main=center cross=center f48xf40 bg=--bg-primary-hover radius=6
+          <Icon/Agents> f20xf20
+        <Nav item collapsed/State=Default> {"Icon": 1734} row gap=0 main=center cross=center f48xf40 radius=6
+          <Icon/Skills> f20xf20
+        <Nav item collapsed/State=Default> {"Icon": 9092} row gap=0 main=center cross=center f48xf40 radius=6
+          <Icon/MCP> f20xf20
+        <Nav item collapsed/State=Default> {"Icon": 1736} row gap=0 main=center cross=center f48xf40 radius=6
+          <Icon/Channels> f20xf20
+        <Nav item collapsed/State=Default> {"Icon": 1738} row gap=0 main=center cross=center f48xf40 radius=6
+          <Icon/Settings> f20xf20
+    frame "Bottom" col gap=16 cross=center h40xh144
+      frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+        <Icon/Sidebar expand> f20xf20
+      frame "Daemon" row gap=0 main=center cross=center f40xf40 bg=--bg-success-primary radius=20
+        ellipse 10x10 bg=--fg-success-primary
+      frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+        text "OW" 14/20 Semibold color=--text-tertiary
+  frame "Session list" col gap=0 f360xf1024 bg=--bg-primary border=--border-secondary
+    frame "List header" col gap=16 pad=24,20,16,20 f359xh140
+      frame "Title row" row gap=0 main=spaceBetween cross=center f319xh38
+        frame "Title" row gap=8 cross=center h132xh28
+          text "Sessions" 18/28 Semibold color=--text-primary
+          <Badge/Color=Gray> {"Label": "24"} row gap=6 pad=2,8,2,8 cross=center h45xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "24" 12/18 Medium color=--text-secondary
+        <Button/Hierarchy=Secondary, Size=sm> {"Label": "+ New"} row gap=6 pad=8,12,8,12 main=center cross=center h70xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "+ New" 14/20 Semibold color=--text-secondary
+      frame "Search" row gap=8 pad=6,6,6,12 cross=center f319xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+        <Icon/Search> f20xf20
+        text "Search sessions" 16/24 Regular color=--text-placeholder
+        frame "Filter button" row gap=4 pad=6,8,6,8 cross=center h36xh32 radius=6
+          <Icon/Filter> f20xf20
+    frame "Items" col gap=0 f359xh605
+      frame "Weekly research digest" col gap=6 pad=16,20,16,20 f359xh109 bg=--bg-active border=--border-secondary
+        frame "Top" row gap=8 cross=center f319xh20
+          ellipse 8x8 bg=--fg-warning-primary
+          text "Weekly research digest" 14/20 Semibold color=--text-primary
+          text "5 min" 12/18 Regular color=--text-tertiary
+        text "Waiting for your approval: bash go test ./..." 14/20 Regular color=--text-tertiary
+        frame "Meta" row gap=6 cross=center f319xh24
+          <Badge/Color=Gray> {"Label": "Web"} row gap=6 pad=2,8,2,8 cross=center h56xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Web" 12/18 Medium color=--text-secondary
+          text "· default" 12/18 Medium color=--text-tertiary
+      frame "Fix daemon lease bug" col gap=6 pad=16,20,16,20 f359xh109 border=--border-secondary
+        frame "Top" row gap=8 cross=center f319xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Fix daemon lease bug" 14/20 Semibold color=--text-primary
+          text "2 min" 12/18 Regular color=--text-tertiary
+        text "Running: edit_file store/store.go" 14/20 Regular color=--text-tertiary
+        frame "Meta" row gap=6 cross=center f319xh24
+          <Badge/Color=Brand> {"Label": "Telegram"} row gap=6 pad=2,8,2,8 cross=center h83xh24 bg=--bg-brand-primary border=--border-brand radius=16
+            ellipse 6x6 bg=--fg-brand-primary
+            text "Telegram" 12/18 Medium color=--text-brand-secondary
+          text "· coder" 12/18 Medium color=--text-tertiary
+      frame "Refactor config check" col gap=6 pad=16,20,16,20 f359xh129 border=--border-secondary
+        frame "Top" row gap=8 cross=center f319xh20
+          text "Refactor config check" 14/20 Semibold color=--text-primary
+          text "1 h" 12/18 Regular color=--text-tertiary
+        text "Done. config.Check now runs the same validators as Load." 14/20 Regular color=--text-tertiary
+        frame "Meta" row gap=6 cross=center f319xh24
+          <Badge/Color=Gray> {"Label": "CLI"} row gap=6 pad=2,8,2,8 cross=center h49xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "CLI" 12/18 Medium color=--text-secondary
+          text "· coder" 12/18 Medium color=--text-tertiary
+      frame "Plan Q4 roadmap" col gap=6 pad=16,20,16,20 f359xh129 border=--border-secondary
+        frame "Top" row gap=8 cross=center f319xh20
+          text "Plan Q4 roadmap" 14/20 Semibold color=--text-primary
+          text "3 h" 12/18 Regular color=--text-tertiary
+        text "Here is a draft with three milestones and owners." 14/20 Regular color=--text-tertiary
+        frame "Meta" row gap=6 cross=center f319xh24
+          <Badge/Color=Brand> {"Label": "Telegram"} row gap=6 pad=2,8,2,8 cross=center h83xh24 bg=--bg-brand-primary border=--border-brand radius=16
+            ellipse 6x6 bg=--fg-brand-primary
+            text "Telegram" 12/18 Medium color=--text-brand-secondary
+          text "· default" 12/18 Medium color=--text-tertiary
+      frame "Translate README" col gap=6 pad=16,20,16,20 f359xh129 border=--border-secondary
+        frame "Top" row gap=8 cross=center f319xh20
+          ellipse 8x8 bg=--fg-error-primary
+          text "Translate README" 14/20 Semibold color=--text-primary
+          text "Yesterday" 12/18 Regular color=--text-tertiary
+        text "Error: provider returned 429 Too Many Requests." 14/20 Regular color=--text-tertiary
+        frame "Meta" row gap=6 cross=center f319xh24
+          <Badge/Color=Gray> {"Label": "Web"} row gap=6 pad=2,8,2,8 cross=center h56xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Web" 12/18 Medium color=--text-secondary
+          text "· default" 12/18 Medium color=--text-tertiary
+  frame "Chat" col gap=0 f1000xf1024 bg=--bg-primary
+    frame "Chat header" row gap=16 pad=20,24,20,24 main=spaceBetween cross=center f1000xh99 border=--border-secondary
+      frame "Title" col gap=6 f801xh58
+        text "Weekly research digest" 18/28 Semibold color=--text-primary
+        frame "Meta" row gap=8 cross=center f801xh24
+          <Badge/Color=Gray> {"Label": "Web"} row gap=6 pad=2,8,2,8 cross=center h56xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "Web" 12/18 Medium color=--text-secondary
+          text "6 turns" 12/18 Regular color=--text-tertiary
+      frame "Actions" row gap=8 cross=center h151xh38
+        <Button/Hierarchy=Tertiary, Size=sm> {"Label": "Compact"} row gap=6 pad=8,12,8,12 main=center cross=center h86xh36 radius=8
+          text "Compact" 14/20 Semibold color=--text-tertiary
+        <Button/Hierarchy=Secondary, Size=sm> {"Label": "Fork"} row gap=6 pad=8,12,8,12 main=center cross=center h57xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Fork" 14/20 Semibold color=--text-secondary
+    frame "Messages" col gap=0 pad=32,32,16,32 cross=center f1000xf671
+      frame "Thread" col gap=28 f720xh536
+        frame "User message" row gap=0 main=max f720xh44
+          frame "Bubble" col gap=0 pad=10,16,10,16 h328xh44 bg=--bg-tertiary radius=20
+            text "Which notes do we have for this week?" 16/24 Regular color=--text-primary
+        frame "Agent turn" col gap=12 f720xh96
+          frame "Turn header" row gap=8 cross=center f720xh20
+            <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f20xf20 bg=--bg-brand-primary border=--bg-primary radius=16
+              text "D" 12/18 Semibold color=--text-brand-secondary
+            text "default" 14/20 Semibold color=--text-secondary
+            text "worked for 9s" 14/20 Regular color=--text-tertiary
+            frame "Spacer" f499xf1
+            text "10:01" 12/18 Regular color=--text-quaternary
+          frame "Activity" col gap=6 f720xh28
+            frame "Activity header" row gap=8 pad=4,0,4,0 cross=center f720xh28
+              <Icon/Activity> f20xf20
+              text "Searched the project · 1 tool" 14/20 Medium color=--text-tertiary
+              <Icon/Chevron right> f20xf20
+          text "Five notes, from Oct 23 to Oct 29. The longest one is 2026-10-27-agents.md." 16/24 Regular color=--text-primary
+        frame "User message" row gap=0 main=max f720xh68
+          frame "Bubble" col gap=0 pad=10,16,10,16 f460xh68 bg=--bg-tertiary radius=20
+            text "Write a short digest from them. Run the tests first so we know the repo is green." 16/24 Regular color=--text-primary
+        frame "Agent turn" col gap=12 f720xh244
+          frame "Turn header" row gap=8 cross=center f720xh20
+            <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f20xf20 bg=--bg-brand-primary border=--bg-primary radius=16
+              text "D" 12/18 Semibold color=--text-brand-secondary
+            text "default" 14/20 Semibold color=--text-secondary
+            text "working for 48s" 14/20 Regular color=--text-tertiary
+            frame "Spacer" f484xf1
+            text "10:02" 12/18 Regular color=--text-quaternary
+          text "I'll read the notes first, then run the test suite before I write the digest." 16/24 Regular color=--text-primary
+          frame "Activity" col gap=6 f720xh176
+            frame "Activity header" row gap=8 pad=4,0,4,0 cross=center f720xh28
+              <Icon/Activity> f20xf20
+              text "Read 5 files · Running 1 command" 14/20 Medium color=--text-tertiary
+              <Icon/Chevron down> f20xf20
+            frame "Steps wrap" col gap=0 pad=0,0,0,9 f720xh142
+              frame "Steps" col gap=2 pad=2,0,2,12 f711xh142 border=--border-secondary
+                frame "Step" row gap=8 pad=6,8,6,8 cross=center f698xh36 radius=6
+                  text "Find this week's notes" 14/20 Medium color=--text-secondary
+                  frame "Chip" row gap=4 pad=1,6,1,6 cross=center h166xh24 bg=--bg-secondary border=--border-secondary radius=6
+                    text "research/2026-10-*.md" 12/20 Regular Menlo color=--text-secondary
+                  frame "Chip" row gap=4 pad=1,6,1,6 cross=center h43xh24 bg=--bg-secondary border=--border-secondary radius=6
+                    text "glob" 12/20 Regular Menlo color=--text-tertiary
+                  frame "Spacer" f273xf1
+                  <Icon/Chevron right> f20xf20
+                frame "Note" row gap=0 pad=0,8,6,8 f698xh26
+                  text "Found 5 notes from Oct 23 to Oct 29. Reading all of them before the tests." 14/20 Regular color=--text-tertiary
+                frame "Step" row gap=8 pad=6,8,6,8 cross=center f698xh36 radius=6
+                  text "Read the notes" 14/20 Medium color=--text-secondary
+                  frame "Chip" row gap=4 pad=1,6,1,6 cross=center h159xh24 bg=--bg-secondary border=--border-secondary radius=6
+                    text "2026-10-27-agents.md" 12/20 Regular Menlo color=--text-secondary
+                  frame "Chip" row gap=4 pad=1,6,1,6 cross=center h29xh24 bg=--bg-secondary border=--border-secondary radius=6
+                    text "+4" 12/20 Regular Menlo color=--text-secondary
+                  frame "Chip" row gap=4 pad=1,6,1,6 cross=center h80xh24 bg=--bg-secondary border=--border-secondary radius=6
+                    text "read_file" 12/20 Regular Menlo color=--text-tertiary
+                  frame "Spacer" f254xf1
+                  <Icon/Chevron right> f20xf20
+                frame "Command" row gap=8 pad=6,8,6,8 cross=center f698xh34 radius=6
+                  text "$ go test ./..." 13/20 Regular Menlo color=--text-secondary
+                  <Badge/Color=Warning> {"Label": "Waiting"} row gap=6 pad=2,8,2,8 cross=center h71xh22 bg=--bg-warning-primary radius=16
+                    ellipse 6x6 bg=--fg-warning-primary
+                    text "Waiting" 12/18 Medium color=--text-warning-primary
+    frame "Composer" col gap=0 pad=8,32,24,32 cross=center f1000xh254
+      frame "Composer column" col gap=0 cross=center f720xh222
+        frame "Approval wrap" col gap=0 pad=0,12,0,12 f720xh124
+          frame "Approval" col gap=10 pad=10,12,12,16 f696xh124 bg=--bg-secondary border=--border-primary radius=12,12,0,0
+            frame "Head" row gap=8 cross=center f666xh38
+              <Icon/Lock> f20xf20
+              text "Allow bash?" 14/20 Semibold color=--text-primary
+              text "exec · expires in 9 min" 12/18 Regular color=--text-tertiary
+              frame "Spacer" f60xf1
+              <Button/Hierarchy=Tertiary, Size=sm> {"Label": "Deny"} row gap=6 pad=8,12,8,12 main=center cross=center h59xh36 radius=8
+                text "Deny" 14/20 Semibold color=--text-tertiary
+              <Button/Hierarchy=Secondary, Size=sm> {"Label": "Allow for this session"} row gap=6 pad=8,12,8,12 main=center cross=center h171xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+                text "Allow for this session" 14/20 Semibold color=--text-secondary
+              <Button/Hierarchy=Primary, Size=sm> {"Label": "Allow once"} row gap=6 pad=8,12,8,12 main=center cross=center h99xh36 bg=--bg-brand-solid radius=8 shadow
+                text "Allow once" 14/20 Semibold color=--text-white
+            rectangle 666x1 bg=--border-secondary
+            frame "Code" col gap=2 f666xh42
+              text "$ go test ./..." 13/20 Regular Menlo color=--text-primary
+              text "cwd  ~/code/lana-harness" 13/20 Regular Menlo color=--text-tertiary
+        frame "Box" col gap=14 pad=14,14,10,16 f720xh98 bg=--bg-primary border=--border-primary radius=16 shadow
+          text "Message default…" 16/24 Regular color=--text-placeholder
+          frame "Bar" row gap=8 cross=center f688xh34
+            frame "Attach" row gap=0 main=center cross=center f34xf34 border=--border-secondary radius=8
+              <Icon/Plus> f20xf20
+            frame "Pill" row gap=6 pad=6,8,6,10 cross=center h116xh34 bg=--bg-secondary border=--border-secondary radius=8
+              text "gpt-5-mini" 14/20 Medium color=--text-secondary
+              <Icon/Chevron down> f20xf20
+            frame "Pill" row gap=6 pad=6,8,6,10 cross=center h97xh34 bg=--bg-secondary border=--border-secondary radius=8
+              <Icon/Lock> f20xf20
+              text "Ask" 14/20 Medium color=--text-secondary
+              <Icon/Chevron down> f20xf20
+            frame "Spacer" f375xf1
+            frame "Stop" row gap=0 main=center cross=center f34xf34 bg=--bg-brand-solid radius=8
+              rectangle 10x10 bg=--fg-white
+  frame "Tooltip" row gap=0 pad=8,12,8,12 cross=center h66xh34 absolute bg=--900 radius=8 shadow
+    text "Agents" 12/18 Semibold color=--text-white

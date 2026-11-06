@@ -1,0 +1,231 @@
+# Channels / Channels – Telegram · Add chat (frame 11085)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Channels – Telegram · Add chat" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    text "Channels  /  Telegram" 14/20 Medium color=--text-tertiary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Telegram" row gap=0 main=center cross=center f56xf56 bg=#229ED9 radius=28
+        vector 28x28
+      frame "Title" col gap=4 f770xh60
+        frame "Name row" row gap=8 cross=center h208xh32
+          text "Telegram" 24/32 Semibold color=--text-primary
+          <Badge/Color=Success> {"Label": "Connected"} row gap=6 pad=2,8,2,8 cross=center h91xh22 bg=--bg-success-primary radius=16
+            ellipse 6x6 bg=--fg-success-primary
+            text "Connected" 12/18 Medium color=--text-success-primary
+        text "@lana_helper_bot · polling for 2 h · last message 4 min ago" 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Disconnect"} row gap=6 pad=8,12,8,12 main=center cross=center h103xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Disconnect" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Save changes"} row gap=6 pad=8,12,8,12 main=center cross=center h119xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Save changes" 14/20 Semibold color=--text-white
+    frame "Form" col gap=0 f1096xh675
+      frame "Bot token" row gap=32 pad=20,0,20,0 f1096xh135 border=--border-secondary
+        frame "Label" col gap=4 f260xh64
+          text "Bot token" 14/20 Semibold color=--text-secondary
+          text "The env variable that holds the token from @BotFather." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh94
+          frame "Token variable" col gap=6 f804xh94
+            text "Token variable" 14/20 Medium color=--text-secondary
+            frame "Field" row gap=8 pad=10,14,10,14 cross=center f804xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+              text "TELEGRAM_BOT_TOKEN" 14/20 Regular Menlo color=--text-primary
+            frame "Status" row gap=6 cross=center f804xh20
+              ellipse 8x8 bg=--fg-success-primary
+              text "Token found. Bot is @lana_helper_bot." 14/20 Regular color=--text-tertiary
+      frame "Owners" row gap=32 pad=20,0,20,0 f1096xh128 border=--border-secondary
+        frame "Label" col gap=4 f260xh64
+          text "Owners" 14/20 Semibold color=--text-secondary
+          text "Owners approve tools, and run /new, /agent, /compact and /cancel in groups." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh87
+          frame "List" col gap=0 f804xh87 bg=--bg-primary border=--border-secondary radius=10
+            frame "Owner" row gap=10 pad=9,12,9,12 cross=center f802xh47 border=--border-secondary
+              frame "Avatar" row gap=0 main=center cross=center f28xf28 bg=--bg-tertiary radius=14
+                text "R" 12/18 Semibold color=--text-tertiary
+              frame "Text" row gap=8 cross=center f710xh20
+                text "Ridho" 14/20 Semibold color=--text-primary
+                text "483920117" 13/20 Regular Menlo color=--text-tertiary
+              <Icon/Close> f20xf20
+            frame "Add" row gap=8 pad=9,12,9,12 cross=center f802xh38
+              <Icon/Plus> f20xf20
+              text "Add owner" 14/20 Semibold color=--text-brand-secondary
+      frame "Chats" col gap=12 pad=20,0,20,0 f1096xh303
+        frame "Head" row gap=12 cross=center f1096xh46
+          frame "Text" col gap=2 f984xh46
+            text "Chats" 16/24 Semibold color=--text-secondary
+            text "Only these chats reach the bot. In groups the bot answers only when someone mentions it." 14/20 Regular color=--text-tertiary
+          <Button/Hierarchy=Secondary, Size=sm> {"Label": "+ Add chat"} row gap=6 pad=8,12,8,12 main=center cross=center h100xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "+ Add chat" 14/20 Semibold color=--text-secondary
+        frame "Table" col gap=0 f1096xh205 bg=--bg-primary border=--border-secondary radius=12 shadow
+          frame "Head" row gap=0 pad=10,12,10,12 cross=center f1094xh39 bg=--bg-secondary border=--border-secondary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f542xh18
+              text "Chat" 12/18 Medium color=--text-quaternary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f110xh18
+              text "Type" 12/18 Medium color=--text-quaternary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f170xh18
+              text "Chat ID" 12/18 Medium color=--text-quaternary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh18
+              text "Agent" 12/18 Medium color=--text-quaternary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh18
+              text "" 12/18 Medium color=--text-quaternary
+          frame "Ridho" row gap=0 pad=10,12,10,12 cross=center f1094xh55 border=--border-secondary
+            frame "Cell" row gap=12 pad=0,12,0,12 cross=center f542xh32
+              frame "Avatar" row gap=0 main=center cross=center f32xf32 bg=--bg-tertiary radius=16
+                text "R" 14/20 Semibold color=--text-tertiary
+              text "Ridho" 14/20 Semibold color=--text-primary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f110xh24
+              <Badge/Color=Gray> {"Label": "Private"} row gap=6 pad=2,8,2,8 cross=center h70xh24 bg=--bg-secondary border=--border-secondary radius=16
+                ellipse 6x6 bg=--fg-quaternary
+                text "Private" 12/18 Medium color=--text-secondary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f170xh20
+              text "483920117" 13/20 Regular Menlo color=--text-tertiary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh34
+              frame "Agent select" row gap=8 pad=6,8,6,8 cross=center f176xh34 border=--border-primary radius=8
+                <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f20xf20 bg=--bg-brand-primary border=--bg-primary radius=16
+                  text "D" 12/18 Semibold color=--text-brand-secondary
+                text "default" 14/20 Medium color=--text-secondary
+                <Icon/Chevron down> f20xf20
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+              <Icon/Close> f20xf20
+          frame "Dev team" row gap=0 pad=10,12,10,12 cross=center f1094xh55 border=--border-secondary
+            frame "Cell" row gap=12 pad=0,12,0,12 cross=center f542xh32
+              frame "Avatar" row gap=0 main=center cross=center f32xf32 bg=--bg-tertiary radius=16
+                text "D" 14/20 Semibold color=--text-tertiary
+              text "Dev team" 14/20 Semibold color=--text-primary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f110xh24
+              <Badge/Color=Gray> {"Label": "Group"} row gap=6 pad=2,8,2,8 cross=center h65xh24 bg=--bg-secondary border=--border-secondary radius=16
+                ellipse 6x6 bg=--fg-quaternary
+                text "Group" 12/18 Medium color=--text-secondary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f170xh20
+              text "-1001849302211" 13/20 Regular Menlo color=--text-tertiary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh34
+              frame "Agent select" row gap=8 pad=6,8,6,8 cross=center f176xh34 border=--border-primary radius=8
+                <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f20xf20 bg=--bg-warning-primary border=--bg-primary radius=16
+                  text "C" 12/18 Semibold color=--text-warning-primary
+                text "coder" 14/20 Medium color=--text-secondary
+                <Icon/Chevron down> f20xf20
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+              <Icon/Close> f20xf20
+          frame "Ops alerts" row gap=0 pad=10,12,10,12 cross=center f1094xh54
+            frame "Cell" row gap=12 pad=0,12,0,12 cross=center f542xh32
+              frame "Avatar" row gap=0 main=center cross=center f32xf32 bg=--bg-tertiary radius=16
+                text "O" 14/20 Semibold color=--text-tertiary
+              text "Ops alerts" 14/20 Semibold color=--text-primary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f110xh24
+              <Badge/Color=Gray> {"Label": "Group"} row gap=6 pad=2,8,2,8 cross=center h65xh24 bg=--bg-secondary border=--border-secondary radius=16
+                ellipse 6x6 bg=--fg-quaternary
+                text "Group" 12/18 Medium color=--text-secondary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f170xh20
+              text "-1002210448391" 13/20 Regular Menlo color=--text-tertiary
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh34
+              frame "Agent select" row gap=8 pad=6,8,6,8 cross=center f176xh34 border=--border-primary radius=8
+                <Agent avatar/Color=Success> {"Initials": "O"} row gap=0 main=center cross=center f20xf20 bg=--bg-success-primary border=--bg-primary radius=16
+                  text "O" 12/18 Semibold color=--text-success-primary
+                text "ops" 14/20 Medium color=--text-secondary
+                <Icon/Chevron down> f20xf20
+            frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+              <Icon/Close> f20xf20
+      frame "Advanced" row gap=32 pad=20,0,20,0 f1096xh109 border=--border-secondary
+        frame "Label" col gap=4 f260xh44
+          text "Advanced" 14/20 Semibold color=--text-secondary
+          text "Change only for a local Bot API server." 14/20 Regular color=--text-tertiary
+        frame "Controls" col gap=12 f804xh68
+          frame "API base" col gap=6 f804xh68
+            text "API base" 14/20 Medium color=--text-secondary
+            frame "Field" row gap=8 pad=10,14,10,14 cross=center f804xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+              text "https://api.telegram.org" 14/20 Regular Menlo color=--text-primary
+  frame "Overlay" row gap=0 main=center cross=center f1440xf1024 absolute bg=--bg-overlay
+    frame "Modal" col gap=0 f560xh535 bg=--bg-primary radius=16 shadow
+      frame "Header" row gap=16 pad=24,24,16,24 f560xh112
+        frame "Telegram" row gap=0 main=center cross=center f48xf48 bg=#229ED9 radius=24
+          vector 24x24
+        frame "Text" col gap=4 f412xh72
+          text "Add a Telegram chat" 18/28 Semibold color=--text-primary
+          text "Send any message to @lana_helper_bot from the chat or group. It shows up below." 14/20 Regular color=--text-tertiary
+        <Icon/Close> f20xf20
+      frame "Body" col gap=16 pad=0,24,20,24 f560xh344
+        frame "Chats waiting for access" col gap=6 f512xh190
+          text "Chats waiting for access" 14/20 Medium color=--text-secondary
+          frame "List" col gap=4 f512xh138
+            frame "Budi" row gap=12 pad=10,12,10,12 cross=center f512xh66 border=--border-secondary radius=10
+              frame "Avatar" row gap=0 main=center cross=center f32xf32 bg=--bg-tertiary radius=16
+                text "B" 14/20 Semibold color=--text-tertiary
+              frame "Text" col gap=0 f412xh44
+                frame "Row" row gap=8 cross=center h109xh24
+                  text "Budi" 14/20 Semibold color=--text-primary
+                  <Badge/Color=Gray> {"Label": "Private"} row gap=6 pad=2,8,2,8 cross=center h70xh24 bg=--bg-secondary border=--border-secondary radius=16
+                    ellipse 6x6 bg=--fg-quaternary
+                    text "Private" 12/18 Medium color=--text-secondary
+                text "771203455 · wrote 2 min ago" 12/20 Regular Menlo color=--text-tertiary
+              frame "Radio" row gap=0 main=center cross=center f18xf18 bg=--bg-primary border=--border-primary radius=9
+            frame "Research club" row gap=12 pad=10,12,10,12 cross=center f512xh68 bg=--bg-secondary border=--border-brand radius=10
+              frame "Avatar" row gap=0 main=center cross=center f32xf32 bg=--bg-tertiary radius=16
+                text "R" 14/20 Semibold color=--text-tertiary
+              frame "Text" col gap=0 f410xh44
+                frame "Row" row gap=8 cross=center h170xh24
+                  text "Research club" 14/20 Semibold color=--text-primary
+                  <Badge/Color=Gray> {"Label": "Group"} row gap=6 pad=2,8,2,8 cross=center h65xh24 bg=--bg-secondary border=--border-secondary radius=16
+                    ellipse 6x6 bg=--fg-quaternary
+                    text "Group" 12/18 Medium color=--text-secondary
+                text "-1001992003114 · wrote 2 min ago" 12/20 Regular Menlo color=--text-tertiary
+              frame "Radio" row gap=0 main=center cross=center f18xf18 bg=--bg-brand-solid radius=9
+                ellipse 6x6 bg=--fg-white
+          text "Not listed? Enter the chat ID by hand." 14/20 Semibold color=--text-brand-secondary
+        frame "Agent" col gap=6 f512xh118
+          text "Agent" 14/20 Medium color=--text-secondary
+          frame "Field" row gap=8 pad=10,14,10,14 cross=center f512xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+            <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f24xf24 bg=--bg-brand-primary border=--bg-primary radius=16
+              text "D" 12/18 Semibold color=--text-brand-secondary
+            text "default" 16/24 Medium color=--text-primary
+            text "gpt-5-mini" 16/24 Regular color=--text-tertiary
+            <Icon/Chevron down> f20xf20
+          text "New messages from this chat go to this agent. People can switch with /agent." 14/20 Regular color=--text-tertiary
+      frame "Footer" row gap=12 pad=16,24,20,24 cross=center f560xh79 border=--border-secondary
+        frame "Spacer" f321xf1
+        <Button/Hierarchy=Secondary, Size=md> {"Label": "Cancel"} row gap=6 pad=10,14,10,14 main=center cross=center h78xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Cancel" 14/20 Semibold color=--text-secondary
+        <Button/Hierarchy=Primary, Size=md> {"Label": "Add chat"} row gap=6 pad=10,14,10,14 main=center cross=center h89xh40 bg=--bg-brand-solid radius=8 shadow
+          text "Add chat" 14/20 Semibold color=--text-white

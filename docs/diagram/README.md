@@ -18,11 +18,11 @@ runtime topology quickly.
 
 | #  | Title | ADR |
 |----|-------|-----|
-| [0001](0001-system-context-dan-roadmap.md) | System Context Dan Roadmap | [0013](../adr/0013-gunakan-go-sebagai-single-binary.md), [0014](../adr/0014-integrasi-sebagai-agentic-tool.md), [0002](../adr/0002-core-dari-modul-service-dan-hook.md), [0008](../adr/0008-interface-cli-channel-http-dan-web-dashboard.md) |
-| [0002](0002-agent-loop-dan-approval.md) | Agent Loop Dan Approval | [0002](../adr/0002-core-dari-modul-service-dan-hook.md), [0004](../adr/0004-permission-mode-per-agent.md), [0009](../adr/0009-session-sebagai-event-log-append-only.md) |
-| [0003](0003-data-model-dan-scheduler.md) | Data Model Dan Scheduler | [0005](../adr/0005-sqlite-sebagai-storage-tunggal.md), [0007](../adr/0007-scheduler-cron-di-dalam-daemon.md), [0009](../adr/0009-session-sebagai-event-log-append-only.md) |
-| [0004](0004-profile-fork-subagent-dan-protokol.md) | Profile, Fork, Subagent, Dan Protokol | [0010](../adr/0010-profile-dan-config-patch.md), [0011](../adr/0011-subagent-sebagai-child-session.md), [0012](../adr/0012-acp-dan-sdk-json-rpc.md) |
-| [0005](0005-integrasi-agentic-tool.md) | Integrasi Agentic Tool | [0014](../adr/0014-integrasi-sebagai-agentic-tool.md) |
+| [0001](0001-system-context-and-roadmap.md) | System Context and Roadmap | [0013](../adr/0013-use-go-as-single-binary.md), [0014](../adr/0014-integration-as-agentic-tool.md), [0002](../adr/0002-core-from-modules-services-and-hooks.md), [0008](../adr/0008-cli-channel-http-and-web-dashboard-interfaces.md) |
+| [0002](0002-agent-loop-and-approval.md) | Agent Loop and Approval | [0002](../adr/0002-core-from-modules-services-and-hooks.md), [0004](../adr/0004-permission-mode-per-agent.md), [0009](../adr/0009-session-as-append-only-event-log.md) |
+| [0003](0003-data-model-and-scheduler.md) | Data Model and Scheduler | [0005](../adr/0005-sqlite-as-single-storage.md), [0007](../adr/0007-cron-scheduler-inside-daemon.md), [0009](../adr/0009-session-as-append-only-event-log.md) |
+| [0004](0004-profile-fork-subagent-and-protocols.md) | Profile, Fork, Subagent, and Protocols | [0010](../adr/0010-profile-and-config-patch.md), [0011](../adr/0011-subagent-as-child-session.md), [0012](../adr/0012-acp-and-sdk-json-rpc.md) |
+| [0005](0005-agentic-tool-integration.md) | Agentic Tool Integration | [0014](../adr/0014-integration-as-agentic-tool.md) |
 
 ## How to add a diagram
 

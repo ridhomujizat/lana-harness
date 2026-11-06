@@ -1,0 +1,51 @@
+id = "yt-dlp"
+name = "yt-dlp"
+description = "Read video details and transcripts from YouTube and many other sites"
+homepage = "https://github.com/yt-dlp/yt-dlp"
+icon = "video"
+category = "Media"
+
+[detect]
+binary = "yt-dlp"
+version_args = ["--version"]
+
+[[install]]
+label = "Download (macOS)"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+os = "darwin"
+
+[[install]]
+label = "Download (Linux, x86-64)"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux"
+os = "linux"
+arch = "amd64"
+
+[[install]]
+label = "Download (Linux, ARM64)"
+url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux_aarch64"
+os = "linux"
+arch = "arm64"
+
+[[commands]]
+name = "info"
+description = "Video title, channel, duration, upload date, views, description and tags as JSON"
+args = ["--skip-download", "--no-warnings", "--print", "%(.{id,title,channel,uploader,duration,upload_date,view_count,like_count,description,tags,webpage_url})j", "{{url}}"]
+risk = "read"
+timeout_secs = 60
+output = "json"
+
+[commands.input]
+url = { type = "string", description = "Video URL", required = true }
+
+[[commands]]
+name = "transcript"
+description = "Video transcript (subtitles or auto captions) as plain text"
+args = ["--skip-download", "--no-warnings", "--write-subs", "--write-auto-subs", "--sub-langs", "{{lang}}", "--sub-format", "vtt/best", "-o", "{{out}}/%(id)s.%(ext)s", "{{url}}"]
+risk = "read"
+timeout_secs = 120
+output_from = "files"
+transform = "subtitles"
+
+[commands.input]
+url = { type = "string", description = "Video URL", required = true }
+lang = { type = "string", description = "Subtitle languages (yt-dlp --sub-langs: comma-separated codes or regexes, a leading - excludes). The default .*-orig is YouTube's auto captions in the spoken language. Pass a code such as en or es for uploaded subtitles in that language. Auto-translated captions often fail with HTTP 429.", default = ".*-orig" }

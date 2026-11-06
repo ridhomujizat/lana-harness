@@ -1,0 +1,173 @@
+# Settings / Settings – Providers (frame 11992)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Settings – Providers" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-primary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Title" col gap=4 f1096xh60
+        text "Settings" 24/32 Semibold color=--text-primary
+        text "Providers, secrets and the daemon. Agents, skills, MCP and channels have their own pages." 16/24 Regular color=--text-tertiary
+    frame "Tabs" row gap=20 f1096xh35 border=--border-secondary
+      frame "General" row gap=0 pad=0,4,12,4 h61xh32
+        text "General" 14/20 Semibold color=--text-quaternary
+      frame "Providers" row gap=0 pad=0,4,12,4 h73xh34 border=--border-brand-solid
+        text "Providers" 14/20 Semibold color=--text-brand-secondary
+      frame "Secrets" row gap=0 pad=0,4,12,4 h60xh32
+        text "Secrets" 14/20 Semibold color=--text-quaternary
+      frame "Config file" row gap=0 pad=0,4,12,4 h79xh32
+        text "Config file" 14/20 Semibold color=--text-quaternary
+      frame "Audit log" row gap=0 pad=0,4,12,4 h69xh32
+        text "Audit log" 14/20 Semibold color=--text-quaternary
+    frame "Toolbar" row gap=12 cross=center f1096xh42
+      frame "Search" row gap=8 pad=8,12,8,12 cross=center f320xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+        <Icon/Search> f20xf20
+        text "Search providers" 16/24 Regular color=--text-placeholder
+      frame "Spacer" f627xf1
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "+ Add provider"} row gap=6 pad=8,12,8,12 main=center cross=center h125xh36 bg=--bg-brand-solid radius=8 shadow
+        text "+ Add provider" 14/20 Semibold color=--text-white
+    frame "Table" col gap=0 f1096xh284 bg=--bg-primary border=--border-secondary radius=12 shadow
+      frame "Head" row gap=0 pad=10,12,10,12 cross=center f1094xh39 bg=--bg-secondary border=--border-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f522xh18
+          text "Provider" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh18
+          text "Kind" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh18
+          text "API key" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh18
+          text "Used by" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh18
+          text "" 12/18 Medium color=--text-quaternary
+      frame "openai" row gap=0 pad=10,12,10,12 cross=center f1094xh61 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f522xh40
+          frame "Tile" row gap=0 main=center cross=center f36xf36 bg=--bg-secondary border=--border-secondary radius=8
+            text "O" 14/20 Semibold color=--text-tertiary
+          frame "Text" col gap=0 f450xh40
+            text "openai" 14/20 Semibold color=--text-primary
+            text "https://api.openai.com/v1" 12/20 Regular Menlo color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          <Badge/Color=Gray> {"Label": "openai_compat"} row gap=6 pad=2,8,2,8 cross=center h117xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "openai_compat" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh40
+          frame "Key" col gap=0 f102xh40
+            text "OPENAI_API_KEY" 12/20 Regular Menlo color=--text-secondary
+            frame "Status" row gap=6 cross=center f102xh20
+              ellipse 8x8 bg=--fg-success-primary
+              text "Set" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          frame "Avatar group" row gap=2 cross=center h50xh24
+            <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f24xf24 bg=--bg-brand-primary border=--bg-primary radius=16
+              text "D" 12/18 Semibold color=--text-brand-secondary
+            <Agent avatar/Color=Brand> {"Initials": "D"} row gap=0 main=center cross=center f24xf24 bg=--bg-brand-primary border=--bg-primary radius=16
+              text "D" 12/18 Semibold color=--text-brand-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Chevron right> f20xf20
+      frame "anthropic" row gap=0 pad=10,12,10,12 cross=center f1094xh61 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f522xh40
+          frame "Tile" row gap=0 main=center cross=center f36xf36 bg=--bg-secondary border=--border-secondary radius=8
+            text "A" 14/20 Semibold color=--text-tertiary
+          frame "Text" col gap=0 f450xh40
+            text "anthropic" 14/20 Semibold color=--text-primary
+            text "https://api.anthropic.com" 12/20 Regular Menlo color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          <Badge/Color=Gray> {"Label": "anthropic"} row gap=6 pad=2,8,2,8 cross=center h84xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "anthropic" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh40
+          frame "Key" col gap=0 f123xh40
+            text "ANTHROPIC_API_KEY" 12/20 Regular Menlo color=--text-secondary
+            frame "Status" row gap=6 cross=center f123xh20
+              ellipse 8x8 bg=--fg-success-primary
+              text "Set" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          frame "Avatar group" row gap=2 cross=center h24xh24
+            <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f24xf24 bg=--bg-warning-primary border=--bg-primary radius=16
+              text "C" 12/18 Semibold color=--text-warning-primary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Chevron right> f20xf20
+      frame "openrouter" row gap=0 pad=10,12,10,12 cross=center f1094xh61 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f522xh40
+          frame "Tile" row gap=0 main=center cross=center f36xf36 bg=--bg-secondary border=--border-secondary radius=8
+            text "O" 14/20 Semibold color=--text-tertiary
+          frame "Text" col gap=0 f450xh40
+            text "openrouter" 14/20 Semibold color=--text-primary
+            text "https://openrouter.ai/api/v1" 12/20 Regular Menlo color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          <Badge/Color=Gray> {"Label": "openai_compat"} row gap=6 pad=2,8,2,8 cross=center h117xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "openai_compat" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh40
+          frame "Key" col gap=0 f131xh40
+            text "OPENROUTER_API_KEY" 12/20 Regular Menlo color=--text-secondary
+            frame "Status" row gap=6 cross=center f131xh20
+              ellipse 8x8 bg=--fg-success-primary
+              text "Set" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          frame "Avatar group" row gap=2 cross=center h24xh24
+            <Agent avatar/Color=Success> {"Initials": "O"} row gap=0 main=center cross=center f24xf24 bg=--bg-success-primary border=--bg-primary radius=16
+              text "O" 12/18 Semibold color=--text-success-primary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Chevron right> f20xf20
+      frame "local" row gap=0 pad=10,12,10,12 cross=center f1094xh60
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f522xh40
+          frame "Tile" row gap=0 main=center cross=center f36xf36 bg=--bg-secondary border=--border-secondary radius=8
+            text "L" 14/20 Semibold color=--text-tertiary
+          frame "Text" col gap=0 f450xh40
+            text "local" 14/20 Semibold color=--text-primary
+            text "http://127.0.0.1:11434/v1" 12/20 Regular Menlo color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh24
+          <Badge/Color=Gray> {"Label": "openai_compat"} row gap=6 pad=2,8,2,8 cross=center h117xh24 bg=--bg-secondary border=--border-secondary radius=16
+            ellipse 6x6 bg=--fg-quaternary
+            text "openai_compat" 12/18 Medium color=--text-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f200xh20
+          text "No key needed" 14/20 Regular color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f150xh20
+          text "No agents" 14/20 Regular color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Chevron right> f20xf20
+    text "Agents pick a provider and model on their General tab. Keys live in Secrets." 14/20 Regular color=--text-tertiary

@@ -1,0 +1,56 @@
+id = "obscura"
+name = "Obscura"
+description = "Headless browser agents can drive: open pages, click, type, log in, take screenshots"
+homepage = "https://github.com/h4ckf0r0day/obscura"
+icon = "globe"
+category = "Browser"
+
+[detect]
+binary = "obscura"
+version_args = ["--version"]
+
+[[install]]
+label = "Download (macOS, Apple silicon)"
+url = "https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.6/obscura-aarch64-macos-stealth.tar.gz"
+sha256 = "01a29bb9eb3a7eda89c036db187bbdd9a01b76d3d8e4860117c00fc881ac40bf"
+os = "darwin"
+arch = "arm64"
+extract = "*"
+
+[[install]]
+label = "Download (macOS, Intel)"
+url = "https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.6/obscura-x86_64-macos-stealth.tar.gz"
+sha256 = "23ececed3162e337f4cce97eb3c69611b253fc32f383753bee40f817a1220953"
+os = "darwin"
+arch = "amd64"
+extract = "*"
+
+[[install]]
+label = "Download (Linux, x86-64)"
+url = "https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.6/obscura-x86_64-linux-stealth.tar.gz"
+sha256 = "ac8057374ec1b5cabb78ea2d08b2ed890d21d156a42b1ac23357fd049edc08c5"
+os = "linux"
+arch = "amd64"
+extract = "*"
+
+[[install]]
+label = "Download (Linux, ARM64)"
+url = "https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.6/obscura-aarch64-linux-stealth.tar.gz"
+sha256 = "403b4c8e3bcf777748a870fbb32c9281e997a6c30c5f8377c17305287fc3811f"
+os = "linux"
+arch = "arm64"
+extract = "*"
+
+[mcp]
+args = ["--stealth", "--storage-dir", "{{data}}/profile", "mcp"]
+
+[[commands]]
+name = "fetch"
+description = "Load a page in a real browser and return its content"
+args = ["--stealth", "fetch", "--dump", "{{format}}", "{{url}}"]
+risk = "read"
+timeout_secs = 60
+
+[commands.input]
+url = { type = "string", description = "Page URL", required = true }
+format = { type = "string", enum = ["markdown", "text", "html"], default = "markdown" }

@@ -1,0 +1,1218 @@
+/* Gr8r-style rules for the agent-detail page (gr8r layer). Use Gr8r tokens and
+   classes. The General tab and the Overview tab render Gr8r markup; the agent
+   sub-tabs (Persona, Tools, Skills, MCP, Rules, Workspace) keep their legacy
+   markup, so a few rules here align it with the same look. */
+
+/* ------------------------------------------------------------------ */
+/* Page + header                                                       */
+/* ------------------------------------------------------------------ */
+
+.page.agent-detail-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  max-width: 1160px;
+  padding: 28px var(--gutter) 72px;
+}
+
+/* The header is a Gr8r `.ph`; keep the Gr8r gutter and drop the legacy
+   flex-centering so the avatar sits on the first text line. */
+.agent-detail-header {
+  align-items: flex-start;
+}
+
+.agent-detail-identity {
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.agent-detail-heading {
+  min-width: 0;
+}
+
+.agent-detail-name-row {
+  gap: var(--s-2);
+}
+
+.agent-detail-description {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.agent-detail-meta {
+  margin: 2px 0 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.agent-detail-header .acts {
+  align-items: center;
+}
+
+.agent-state-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tabs                                                                */
+/* ------------------------------------------------------------------ */
+
+.agent-detail-tabbar {
+  min-width: 0;
+}
+
+.agent-tab-panel {
+  min-height: 12rem;
+}
+
+.agent-tab-panel:focus-visible {
+  border-radius: var(--r-sm);
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* General tab: Gr8r settings rows                                    */
+/* ------------------------------------------------------------------ */
+
+.agent-general-form {
+  display: flex;
+  flex-direction: column;
+  max-width: 840px;
+}
+
+.agent-general-form .sblock:first-child {
+  margin-top: 0;
+}
+
+.agent-srow-text {
+  min-width: 0;
+}
+
+/* A fixed label column keeps every control's left edge on one line (the Gr8r
+   settings default column is `auto`, which right-aligns controls of different
+   widths). */
+.agent-general-form .srow {
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: var(--s-4);
+}
+
+.agent-ctl {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  max-width: 460px;
+}
+
+.agent-ctl-wide {
+  max-width: none;
+}
+
+.agent-ctl .input,
+.agent-ctl .select,
+.agent-ctl .select-btn {
+  width: 100%;
+}
+
+/* The Gr8r Select trigger carries .btn, whose centering would centre the
+   label; keep it left aligned with the chevron on the right. */
+.agent-ctl .select-btn {
+  justify-content: space-between;
+  text-align: left;
+}
+
+.agent-ctl .err {
+  margin-top: 0;
+}
+
+.agent-counter {
+  align-self: flex-end;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-number-input {
+  font-family: var(--mono);
+}
+
+/* Color picker */
+
+.agent-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.agent-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.agent-swatch:hover {
+  border-color: var(--border-strong);
+}
+
+.agent-swatch.is-on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.agent-swatch .radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.agent-swatch-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sw, var(--gray));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.color-brand {
+  --sw: var(--violet);
+}
+
+.color-success {
+  --sw: var(--green);
+}
+
+.color-warning {
+  --sw: var(--amber);
+}
+
+.color-error {
+  --sw: var(--red);
+}
+
+.color-blue {
+  --sw: var(--blue);
+}
+
+.color-gray {
+  --sw: var(--gray);
+}
+
+/* Legacy-model banner */
+
+.agent-legacy-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--amber-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.agent-legacy-banner .i {
+  color: var(--amber);
+}
+
+.agent-legacy-banner .grow {
+  min-width: 0;
+}
+
+/* Fallbacks */
+
+.agent-fallbacks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.agent-fallback-draft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.agent-fallback-draft-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+/* Permission tiles */
+
+.agent-permission-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.agent-permission-tile {
+  position: relative;
+  display: flex;
+  flex: 1 1 200px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color var(--dur),
+    box-shadow var(--dur);
+}
+
+.agent-permission-tile:hover {
+  border-color: var(--border-strong);
+}
+
+.agent-permission-tile.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.agent-permission-tile .radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.agent-permission-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-permission-title {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.agent-permission-note {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* Save bar + notices */
+
+.agent-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--border);
+}
+
+.agent-save-note {
+  flex: 1 1 320px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.agent-save-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.agent-save-notice {
+  margin: 0;
+}
+
+.agent-save-error .empty-state {
+  align-items: flex-start;
+  padding: 16px;
+  text-align: left;
+}
+
+.agent-team-readonly {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+/* ------------------------------------------------------------------ */
+/* Overview tab                                                        */
+/* ------------------------------------------------------------------ */
+
+.ov-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+/* The hero is a Gr8r panel. Neutralise the legacy flex/padding and lay the
+   Gr8r avatar, the body, and the actions out on one row. */
+.ov-hero {
+  display: block;
+  padding: 0;
+}
+
+.ov-hero-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--s-4);
+  padding: var(--s-4);
+}
+
+.ov-hero-body {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ov-hero-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.ov-hero-name {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.ov-hero-persona {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.ov-hero-facts {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.ov-hero-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.ov-grid {
+  margin-top: 0;
+}
+
+/* Right now: Gr8r checklist rows */
+
+.ov-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.ov-step.status-running {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.ov-step-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-step-time {
+  flex: 0 0 auto;
+  color: var(--text-4);
+  font-size: var(--fs-2xs);
+}
+
+.ov-step-done,
+.ov-step-failed,
+.ov-step-ring,
+.ov-step-pending {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-full);
+}
+
+.ov-step-done {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.ov-step-failed {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.ov-step-ring {
+  border: 2px solid var(--accent);
+}
+
+.ov-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  animation: presence-pulse 1.8s ease-in-out infinite;
+}
+
+.ov-step-pending {
+  border: 2px solid var(--border-strong);
+}
+
+.ov-idle {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+/* Activity feed */
+
+.ov-activity.feed.lined .fitem:not(:last-child)::before {
+  left: 12px;
+  top: 30px;
+}
+
+.ov-activity-row {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ov-activity-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  color: var(--c);
+}
+
+.ov-activity-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ov-activity-title {
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.ov-activity-detail {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.ov-activity-time {
+  flex: 0 0 auto;
+  color: var(--text-4);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+
+/* Memory chips */
+
+.ov-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.ov-chip-more {
+  text-decoration: none;
+}
+
+/* This week: a small bar chart and Gr8r stat tiles */
+
+.ov-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 80px;
+  margin-bottom: var(--s-3);
+}
+
+.ov-bar {
+  flex: 1 1 0;
+  min-height: 6px;
+  border-radius: 4px 4px 0 0;
+  background: var(--surface-3);
+}
+
+.ov-bar.is-today {
+  background: var(--accent);
+}
+
+/* The Gr8r .stat is a <button>; drop the legacy button chrome while keeping
+   the panels.css layout, then lay the four tiles out two by two. */
+.ov-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ov-page .stat {
+  background: none;
+  color: inherit;
+  font-weight: inherit;
+  align-items: stretch;
+  justify-content: normal;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.ov-page .stat .v {
+  font-size: var(--fs-xl);
+}
+
+.ov-job {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* Looks after */
+
+.ov-look {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-look-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-look-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.ov-look-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ov-look-name {
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.ov-look-detail {
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}
+
+/* Team members */
+
+.ov-members {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-member-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ov-member-name {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.ov-member-status {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-skeleton-hero {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 760px) {
+  .agent-srow-text {
+    max-width: none;
+  }
+
+  .agent-ctl,
+  .agent-ctl-wide {
+    width: 100%;
+  }
+
+  .agent-save-actions {
+    width: 100%;
+  }
+
+  .agent-save-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  .ov-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .srow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-step-dot {
+    animation: fadeOnly 0.12s both !important;
+  }
+}
+
+/* Overview: the hero sits above the tab bar, like the page header on the
+   other tabs. */
+.ov-page > .agent-detail-tabbar {
+  margin: var(--s-4) 0;
+}
+
+/* Memory chips: one line each, sans, ellipsis (were monospace and wrapping
+   over each other). */
+.ov-chips .chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: var(--h-sm);
+  padding: 0 8px;
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* This week: 2x2 stat grid with inner dividers only. */
+.ov-stats .stat + .stat {
+  border-left: 0;
+}
+
+.ov-stats .stat:nth-child(even) {
+  border-left: 1px solid var(--border);
+}
+
+.ov-stats .stat:nth-child(n + 3) {
+  border-top: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------- */
+/* Persona & memory tab: file list (Gr8r nav rows) + editor panel    */
+/* ---------------------------------------------------------------- */
+
+.persona {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--s-5);
+  align-items: start;
+}
+
+.persona-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+}
+
+.pfile {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: none;
+  border: 0;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.pfile > .i {
+  margin-top: 1px;
+  color: var(--text-3);
+}
+
+.pfile:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.pfile.on {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.pfile.on > .i {
+  color: var(--text);
+}
+
+.pfile:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.pfile-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pfile-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+
+.pfile-name {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: inherit;
+}
+
+.pfile-count {
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pfile-note {
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.persona-editor .panel-h {
+  align-items: flex-start;
+}
+
+.persona-editor h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.persona-help {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.persona-textarea {
+  width: 100%;
+  min-height: 420px;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.persona-over {
+  margin: var(--s-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--red);
+}
+
+.persona-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 10px 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.persona-count {
+  margin: 0 auto 0 0;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.persona-count.is-over {
+  color: var(--red);
+}
+
+@media (max-width: 900px) {
+  .persona {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .persona-files {
+    position: static;
+  }
+}
+.persona-editor .panel-h > .lbl { margin-left: auto; }
+
+/* ---------------------------------------------------------------- */
+/* Shared agent tabs (Tools, Skills, MCP, Rules, Workspace)          */
+/* Gr8r toolbar, search, perm-t table, toggles and tiles.            */
+/* ---------------------------------------------------------------- */
+
+.agent-tabs-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.agent-tabs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+}
+
+.agent-tabs-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.agent-tabs-summary {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.agent-tabs-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 280px;
+  max-width: 100%;
+  margin: 0;
+}
+
+.agent-tabs-search > .i {
+  position: absolute;
+  left: 9px;
+  color: var(--text-4);
+  pointer-events: none;
+}
+
+.agent-tabs-search input {
+  width: 100%;
+  height: var(--h-md);
+  margin: 0;
+  padding: 0 10px 0 30px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--fs);
+  transition: border-color var(--dur), box-shadow var(--dur);
+}
+
+.agent-tabs-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.agent-tabs-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.agent-tabs-table.perm-t {
+  margin: 0;
+}
+
+.agent-tabs-table.perm-t th,
+.agent-tabs-table.perm-t td {
+  padding: 10px 14px;
+  vertical-align: middle;
+  text-align: left;
+  background: none;
+}
+
+.agent-tabs-table.perm-t thead th {
+  height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.agent-tabs-table.perm-t tbody tr {
+  transition: background var(--dur);
+}
+
+.agent-tabs-table.perm-t tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.agent-tabs-table.perm-t tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.agent-tabs-table.perm-t tbody th {
+  font-weight: 400;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.agent-tabs-col-action,
+.agent-tabs-switch-cell,
+.agent-tabs-col-switch {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.agent-tabs-namecell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-tabs-tile {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.agent-mcp-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.agent-mcp-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.agent-mcp-command {
+  max-width: 560px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-mcp-tools {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.agent-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.agent-switch .toggle {
+  margin: 0;
+}
+
+.agent-switch-text {
+  min-width: 22px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.agent-tabs-row-link,
+.agent-tabs-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background var(--dur), color var(--dur);
+}
+
+.agent-tabs-row-link:hover,
+.agent-tabs-icon-button:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.agent-tabs-empty {
+  margin: 0;
+  padding: 40px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.agent-tabs-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-4) 0;
+}
+
+.agent-tabs-live:empty {
+  display: none;
+}
+
+.agent-tabs-notice,
+.agent-tabs-error {
+  margin: 0;
+}
+
+.agent-tabs-count.badge {
+  margin-left: 6px;
+}
+
+.agent-skills-name,
+.agent-tabs-tool-name {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.agent-skills-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.agent-tabs-group-action {
+  text-align: right;
+}
+
+.agent-tabs-table.perm-t tbody tr.agent-tabs-group-row > *,
+.agent-tabs-table.perm-t tbody tr:has(.agent-tabs-group-action) > * {
+  background: var(--surface);
+  font-weight: 500;
+}
+
+.agent-rules-add.btn {
+  align-self: flex-start;
+  margin-top: 2px;
+}

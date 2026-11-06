@@ -1,0 +1,155 @@
+# Agents / Agents – Detail · Skills (frame 8062)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Agents – Detail · Skills" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    text "Agents  /  coder" 14/20 Medium color=--text-tertiary
+    frame "Header" row gap=16 cross=center f1096xh60
+      <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f56xf56 bg=--bg-warning-primary border=--bg-primary radius=16
+        text "C" 12/18 Semibold color=--text-warning-primary
+      frame "Title" col gap=4 f788xh60
+        frame "Name row" row gap=8 cross=center h68xh32
+          text "coder" 24/32 Semibold color=--text-primary
+        text "Writes and fixes code in your workspace. 6 sessions, last active 1 h ago." 16/24 Regular color=--text-tertiary
+      <Button/Hierarchy=Secondary, Size=sm> {"Label": "Duplicate"} row gap=6 pad=8,12,8,12 main=center cross=center h91xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Duplicate" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "Start session"} row gap=6 pad=8,12,8,12 main=center cross=center h113xh36 bg=--bg-brand-solid radius=8 shadow
+        text "Start session" 14/20 Semibold color=--text-white
+    frame "Tabs" row gap=20 f1096xh35 border=--border-secondary
+      frame "General" row gap=8 pad=0,4,12,4 cross=center h61xh32
+        text "General" 14/20 Semibold color=--text-quaternary
+      frame "Persona & memory" row gap=8 pad=0,4,12,4 cross=center h137xh32
+        text "Persona & memory" 14/20 Semibold color=--text-quaternary
+      frame "Tools" row gap=8 pad=0,4,12,4 cross=center h45xh32
+        text "Tools" 14/20 Semibold color=--text-quaternary
+      frame "Skills" row gap=8 pad=0,4,12,4 cross=center h44xh34 border=--border-brand-solid
+        text "Skills" 14/20 Semibold color=--text-brand-secondary
+      frame "MCP" row gap=8 pad=0,4,12,4 cross=center h41xh32
+        text "MCP" 14/20 Semibold color=--text-quaternary
+      frame "Rules" row gap=8 pad=0,4,12,4 cross=center h46xh32
+        text "Rules" 14/20 Semibold color=--text-quaternary
+      frame "Workspace" row gap=8 pad=0,4,12,4 cross=center h85xh32
+        text "Workspace" 14/20 Semibold color=--text-quaternary
+    frame "Toolbar" row gap=12 cross=center f1096xh42
+      frame "Search" row gap=8 pad=8,12,8,12 cross=center f320xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+        <Icon/Search> f20xf20
+        text "Search skills" 16/24 Regular color=--text-placeholder
+      frame "Spacer" f599xf1
+      text "4 skills" 14/20 Regular color=--text-tertiary
+      <Button/Hierarchy=Primary, Size=sm> {"Label": "+ Add skill"} row gap=6 pad=8,12,8,12 main=center cross=center h95xh36 bg=--bg-brand-solid radius=8 shadow
+        text "+ Add skill" 14/20 Semibold color=--text-white
+    frame "Table" col gap=0 f1096xh284 bg=--bg-primary border=--border-secondary radius=12 shadow
+      frame "Head" row gap=0 pad=10,12,10,12 cross=center f1094xh39 bg=--bg-secondary border=--border-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f732xh18
+          text "Skill" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f160xh18
+          text "Scope" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f130xh18
+          text "Updated" 12/18 Medium color=--text-quaternary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh18
+          text "" 12/18 Medium color=--text-quaternary
+      frame "go-testing" row gap=0 pad=10,12,10,12 cross=center f1094xh61 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f732xh40
+          frame "Tile" row gap=0 main=center cross=center f32xf32 bg=--bg-secondary border=--border-secondary radius=8
+            <Icon/Skills> f20xf20
+          frame "Text" col gap=0 f664xh40
+            text "go-testing" 14/20 Regular Menlo color=--text-primary
+            text "Run go test, read the failures and fix the code." 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f160xh24
+          <Badge/Color=Brand> {"Label": "Global"} row gap=6 pad=2,8,2,8 cross=center h67xh24 bg=--bg-brand-primary border=--border-brand radius=16
+            ellipse 6x6 bg=--fg-brand-primary
+            text "Global" 12/18 Medium color=--text-brand-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f130xh20
+          text "2 days ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Close> f20xf20
+      frame "release-notes" row gap=0 pad=10,12,10,12 cross=center f1094xh61 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f732xh40
+          frame "Tile" row gap=0 main=center cross=center f32xf32 bg=--bg-secondary border=--border-secondary radius=8
+            <Icon/Skills> f20xf20
+          frame "Text" col gap=0 f664xh40
+            text "release-notes" 14/20 Regular Menlo color=--text-primary
+            text "Draft release notes from the git log since the last tag." 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f160xh24
+          <Badge/Color=Brand> {"Label": "Global"} row gap=6 pad=2,8,2,8 cross=center h67xh24 bg=--bg-brand-primary border=--border-brand radius=16
+            ellipse 6x6 bg=--fg-brand-primary
+            text "Global" 12/18 Medium color=--text-brand-secondary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f130xh20
+          text "1 week ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Close> f20xf20
+      frame "sql-review" row gap=0 pad=10,12,10,12 cross=center f1094xh61 border=--border-secondary
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f732xh40
+          frame "Tile" row gap=0 main=center cross=center f32xf32 bg=--bg-secondary border=--border-secondary radius=8
+            <Icon/Skills> f20xf20
+          frame "Text" col gap=0 f664xh40
+            text "sql-review" 14/20 Regular Menlo color=--text-primary
+            text "Check a SQL migration for locks, missing indexes and data loss." 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f160xh20
+          <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f20xf20 bg=--bg-warning-primary border=--bg-primary radius=16
+            text "C" 12/18 Semibold color=--text-warning-primary
+          text "Only coder" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f130xh20
+          text "Yesterday" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Close> f20xf20
+      frame "changelog" row gap=0 pad=10,12,10,12 cross=center f1094xh60
+        frame "Cell" row gap=12 pad=0,12,0,12 cross=center f732xh40
+          frame "Tile" row gap=0 main=center cross=center f32xf32 bg=--bg-secondary border=--border-secondary radius=8
+            <Icon/Skills> f20xf20
+          frame "Text" col gap=0 f664xh40
+            text "changelog" 14/20 Regular Menlo color=--text-primary
+            text "Keep CHANGELOG.md in the Keep a Changelog format." 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f160xh20
+          <Agent avatar/Color=Warning> {"Initials": "C"} row gap=0 main=center cross=center f20xf20 bg=--bg-warning-primary border=--bg-primary radius=16
+            text "C" 12/18 Semibold color=--text-warning-primary
+          text "Only coder" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f130xh20
+          text "3 days ago" 14/20 Regular color=--text-tertiary
+        frame "Cell" row gap=8 pad=0,12,0,12 cross=center f48xh20
+          <Icon/Close> f20xf20

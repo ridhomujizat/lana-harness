@@ -1,0 +1,3 @@
+/* The monitoring-dashboard sheet is empty now. The Knowledge page (its only
+   consumer) moved to the Gr8r layer, and no view uses the dash-/knowledge-
+   classes it defined. Kept as a file so the index.css import stays valid. */

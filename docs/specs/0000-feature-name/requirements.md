@@ -1,128 +1,128 @@
-# Requirements: <Nama Fitur>
+# Requirements: <Feature Name>
 
-- **Issue**: `#<nomor>`
+- **Issue**: `#<number>`
 - **Status**: Draft
-- **Revisi**: <integer, mulai 1>
-- **Pemilik**: <nama>
-- **Contract**: [api-contract.md](api-contract.md) — Diperlukan / Tidak diperlukan
-- **ADR terkait**: [Index ADR](../../adr/README.md) — <link atau `—`>
-- **Diagram terkait**: [Index diagram](../../diagram/README.md) — <link atau `—`>
+- **Revision**: <integer, starting at 1>
+- **Owner**: <name>
+- **Contract**: [api-contract.md](api-contract.md) — Required / Not required
+- **Related ADR**: [ADR Index](../../adr/README.md) — <link or `—`>
+- **Related diagram**: [Diagram index](../../diagram/README.md) — <link or `—`>
 
-## Sumber
+## Sources
 
-| Sumber | Referensi | Dipakai untuk |
+| Source | Reference | Used for |
 |---|---|---|
-| Issue | `#<nomor>` | cerita user, scope |
-| ADR | <link atau `—`> | keputusan yang mengikat |
-| Referensi luar | <link atau `—`> | perilaku pembanding |
+| Issue | `#<number>` | user story, scope |
+| ADR | <link or `—`> | binding decisions |
+| External reference | <link or `—`> | comparison behavior |
 
-Hal yang tidak didukung sumber atau approval eksplisit masuk ke Blocking Open Questions. Jangan
-menyajikan asumsi agent sebagai requirement.
+Anything not supported by a source or an explicit approval goes into Blocking Open Questions. Do not
+present agent assumptions as requirements.
 
-## Tujuan
+## Goal
 
-Satu paragraf tentang hasil untuk user. Jangan jelaskan solusinya.
+One paragraph about the outcome for the user. Do not describe the solution.
 
-## Aktor
+## Actors
 
-- **<Aktor>** — <tujuan dan batas izinnya>.
+- **<Actor>** — <purpose and permission boundary>.
 
-## Definisi
+## Definitions
 
-- **<Istilah>** — <satu arti stabil untuk fitur ini>.
+- **<Term>** — <one stable meaning for this feature>.
 
 ## Scope
 
-### Termasuk
+### Included
 
-- <kapabilitas yang terlihat>
+- <observable capability>
 
-### Tidak termasuk
+### Not included
 
-- <perilaku yang dikecualikan atau fitur lanjutan>
+- <excluded behavior or follow-up feature>
 
-## Asumsi
+## Assumptions
 
-- <asumsi yang sudah dikonfirmasi> — Sumber: <issue/ADR/keputusan>.
+- <confirmed assumption> — Source: <issue/ADR/decision>.
 
-## Aturan perilaku
+## Behavior rules
 
-### REQ-<KAPABILITAS>-001: <Judul aturan>
+### REQ-<CAPABILITY>-001: <Rule title>
 
-Sistem harus <perilaku yang terlihat>.
+The system shall <observable behavior>.
 
 #### Acceptance criteria
 
-- `AC-<KAPABILITAS>-001`: Given <state>, when <aksi>, then <hasil terukur>.
+- `AC-<CAPABILITY>-001`: Given <state>, when <action>, then <measurable result>.
 
-## Komitmen contract
+## Contract commitments
 
-Hapus bagian ini jika fitur tidak mengubah antarmuka luar.
+Delete this section if the feature does not change the external interface.
 
-| Requirement | Komitmen yang terlihat | Operasi contract |
+| Requirement | Observable commitment | Contract operation |
 |---|---|---|
-| `REQ-...` | <perilaku, exit code, atau jaminan kompatibilitas> | `API-...` |
+| `REQ-...` | <behavior, exit code, or compatibility guarantee> | `API-...` |
 
-## Matriks state dan operasi
+## State and operation matrix
 
-Hapus bagian ini jika tidak ada perilaku yang bergantung pada state.
+Delete this section if no behavior depends on state.
 
-| State saat ini | Operasi | Hasil | Boleh |
+| Current state | Operation | Result | Allowed |
 |---|---|---|---:|
-| <state> | <operasi> | <state baru atau efek> | Ya/Tidak |
+| <state> | <operation> | <new state or effect> | Yes/No |
 
-## Kasus gagal
+## Failure cases
 
-| Kondisi | Perilaku yang diharapkan | Kode hasil |
+| Condition | Expected behavior | Result code |
 |---|---|---|
-| <kondisi> | <hasil aman yang terlihat> | <exit code, error code, atau pertanyaan> |
+| <condition> | <safe, observable result> | <exit code, error code, or question> |
 
-## Otorisasi dan keamanan
+## Authorization and security
 
-- <siapa boleh melakukan apa; cara penegakannya>
+- <who may do what; how it is enforced>
 
-## Integritas data dan konkurensi
+## Data integrity and concurrency
 
-- <invariant yang harus bertahan saat retry, race, atau gagal sebagian>
+- <invariant that must hold during retry, race, or partial failure>
 
-## Aksesibilitas
+## Accessibility
 
-- <keyboard, fokus, tanpa ketergantungan warna, atau `Tidak berlaku`>
+- <keyboard, focus, no reliance on color, or `Not applicable`>
 
-## Skenario
+## Scenarios
 
-### SC-001: <Judul>
+### SC-001: <Title>
 
-**Given** <state awal>
-**When** <aksi>
-**Then** <hasil yang terlihat>
+**Given** <initial state>
+**When** <action>
+**Then** <observable result>
 
 ## Blocking Open Questions
 
-| ID | Pertanyaan | Mengendalikan | Referensi yang diminta | Pemilik | Status | Resolusi |
+| ID | Question | Controls | Requested reference | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|
-| `Q-001` | <keputusan yang dibutuhkan> | <perilaku atau contract> | <contoh, screenshot, arah> | <nama> | Open | — |
+| `Q-001` | <decision needed> | <behavior or contract> | <example, screenshot, direction> | <name> | Open | — |
 
-Tulis `None` hanya jika semua pertanyaan yang memengaruhi perilaku sudah terjawab. Agent wajib
-menanyakan setiap pertanyaan Open dan menunggu jawaban sebelum approval atau design.
+Write `None` only if all questions that affect behavior have been answered. The agent must
+ask every Open question and wait for an answer before approval or design.
 
-## Cakupan requirement
+## Requirement coverage
 
-| Requirement | Acceptance criteria | Sumber |
+| Requirement | Acceptance criteria | Source |
 |---|---|---|
-| `REQ-<KAPABILITAS>-001` | `AC-<KAPABILITAS>-001` | <issue/ADR/keputusan> |
+| `REQ-<CAPABILITY>-001` | `AC-<CAPABILITY>-001` | <issue/ADR/decision> |
 
-Setiap requirement dan acceptance criterion muncul tepat satu kali.
+Each requirement and acceptance criterion appears exactly once.
 
 ## Approval
 
-- [ ] Scope dan pengecualian eksplisit.
-- [ ] Perilaku sukses dan gagal terukur.
-- [ ] Otorisasi eksplisit atau dinyatakan tidak berlaku.
-- [ ] Transisi state dan efek destruktif eksplisit atau tidak berlaku.
-- [ ] Default, urutan, retry, dan idempotensi eksplisit jika berlaku.
-- [ ] Setiap requirement dan acceptance criterion punya ID stabil dan sumber.
-- [ ] Keberlakuan contract eksplisit.
-- [ ] Blocking Open Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- [ ] Scope and exclusions are explicit.
+- [ ] Success and failure behavior is measurable.
+- [ ] Authorization is explicit or stated as not applicable.
+- [ ] State transitions and destructive effects are explicit or not applicable.
+- [ ] Defaults, ordering, retry, and idempotency are explicit where applicable.
+- [ ] Every requirement and acceptance criterion has a stable ID and a source.
+- [ ] Contract applicability is explicit.
+- [ ] Blocking Open Questions is `None`.
+- **Approved by**: —
+- **Approved on**: —

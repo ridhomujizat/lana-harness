@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Run one implementation task headless, through DeepSeek Harness (dsh) or
+# Command Code (cmd).
+# Usage: .claude/bin/dsh-implement < task.txt
+# The task text comes from stdin so long prompts need no shell quoting.
+#
+# Pick the implementer with IMPLEMENTER=dsh|cmd, or put "cmd" in
+# .claude/implementer.local (gitignored) to switch without touching the env.
+# The default is dsh. CMD_MODEL overrides the Command Code model
+# (default deepseek/deepseek-v4-flash).
+set -euo pipefail
+
+task="$(cat)"
+if [ -z "$task" ]; then
+  echo "dsh-implement: empty task on stdin" >&2
+  exit 2
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+implementer="${IMPLEMENTER:-}"
+if [ -z "$implementer" ] && [ -f .claude/implementer.local ]; then
+  implementer="$(tr -d '[:space:]' < .claude/implementer.local)"
+fi
+implementer="${implementer:-dsh}"
+
+# Claude Code snapshots the environment at session start, so a key added to
+# ~/.zshrc later is not visible yet. Read it from an interactive zsh instead.
+read_zshrc_var() {
+  zsh -ic "printf '\n__VAR=%s\n' \"\$$1\"" 2>/dev/null | sed -n 's/^__VAR=//p'
+}
+
+# Both agents read CLAUDE.md as project instructions. Its delegation rule
+# targets Claude Code, so tell the agent it is the implementer.
+preamble="You are the implementer for this task. The \"Code implementation\" section of CLAUDE.md is for the Claude Code orchestrator, not for you: ignore it, do not delegate, and write the code yourself."
+
+case "$implementer" in
+  dsh)
+    if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+      DEEPSEEK_API_KEY="$(read_zshrc_var DEEPSEEK_API_KEY)"
+      export DEEPSEEK_API_KEY
+    fi
+    if [ -z "$DEEPSEEK_API_KEY" ]; then
+      echo "dsh-implement: DEEPSEEK_API_KEY is not set" >&2
+      exit 3
+    fi
+
+    dsh_bin="${DSH_BIN:-$(command -v dsh || true)}"
+    dsh_bin="${dsh_bin:-/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh}"
+
+    exec "$dsh_bin" --profile headless "$preamble
+
+$task"
+    ;;
+  cmd)
+    # Optional: an API key overrides the `cmd login` session.
+    if [ -z "${COMMAND_CODE_API_KEY:-}" ]; then
+      key="$(read_zshrc_var COMMAND_CODE_API_KEY)"
+      if [ -n "$key" ]; then
+        export COMMAND_CODE_API_KEY="$key"
+      fi
+    fi
+
+    # Use an installed cmd if there is one, else run the npm package with
+    # the Node version from flake.nix (no global install).
+    if [ -n "${CMD_BIN:-}" ]; then
+      cmd_run=("$CMD_BIN")
+    elif command -v cmd >/dev/null 2>&1; then
+      cmd_run=(cmd)
+    else
+      cmd_run=(nix develop -c npx -y command-code)
+    fi
+
+    args=(-p --yolo --trust --skip-onboarding --skill .claude/skills
+      --model "${CMD_MODEL:-deepseek/deepseek-v4-flash}")
+
+    printf '%s\n\n%s\n' "$preamble" "$task" | exec "${cmd_run[@]}" "${args[@]}"
+    ;;
+  *)
+    echo "dsh-implement: unknown IMPLEMENTER \"$implementer\" (use dsh or cmd)" >&2
+    exit 2
+    ;;
+esac

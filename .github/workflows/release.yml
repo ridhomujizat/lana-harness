@@ -1,0 +1,48 @@
+name: Release
+
+# A pushed v* tag builds the binaries and publishes a GitHub Release with
+# SHA256SUMS. A tag with a pre-release part (v0.1.0-beta.1) is published as a
+# prerelease. install.sh downloads from these releases.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Check the tag matches VERSION
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          file="$(cat VERSION)"
+          if [ "$tag" != "$file" ]; then
+            echo "tag $GITHUB_REF_NAME does not match VERSION $file" >&2
+            exit 1
+          fi
+      - name: Test
+        run: nix develop -c go test -count=1 ./...
+      - name: Build
+        run: nix develop -c make release checksums
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          notes="$(awk -v v="${GITHUB_REF_NAME#v}" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }' CHANGELOG.md)"
+          gh release create "$GITHUB_REF_NAME" dist/lana-* dist/SHA256SUMS \
+            --title "lana ${GITHUB_REF_NAME#v}" --notes "${notes:-See CHANGELOG.md}" $prerelease

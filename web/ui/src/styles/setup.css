@@ -1,0 +1,3 @@
+/* The setup wizard, unlock, and auth pages moved to the Gr8r layer
+   (pages-gr8r/setup.css and pages-gr8r/login.css). This legacy sheet is kept
+   empty so the import order in index.css stays unchanged. */

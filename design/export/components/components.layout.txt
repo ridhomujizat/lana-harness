@@ -1,0 +1,391 @@
+# Components / Components (frame 699)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Components" col gap=64 pad=64,64,64,64 f1440xh4917 bg=--bg-primary
+  frame "Header" col gap=8 f1312xh136
+    text "lana · Design system" 14/20 Semibold color=--text-brand-secondary
+    text "Components" 36/44 Semibold color=--text-primary
+    text "Base components in the Untitled UI pattern. Every layer is bound to semantic tokens, so each variant works in light and dark mode." 18/28 Regular color=--text-tertiary
+  frame "Icons" col gap=24 f1312xh187
+    frame "Section header" col gap=4 f1312xh52
+      text "Icons" 18/28 Semibold color=--text-primary
+      text "20 px line icons, 1.67 stroke, color fg-quaternary. Swap them in Nav item with the Icon property." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Icon set" row gap=32 pad=32,32,32,32 f1312xh86 border=#9E77ED radius=16
+      component "Icon/Home" f20xf20
+        vector 14x14
+      component "Icon/Sessions" f20xf20
+        vector 14x12
+      component "Icon/Agents" f20xf20
+        vector 15x15
+      component "Icon/Skills" f20xf20
+        vector 15x15
+      component "Icon/Channels" f20xf20
+        vector 15x15
+      component "Icon/Settings" f20xf20
+        vector 14x14
+      component "Icon/Plus" f20xf20
+        vector 12x12
+      component "Icon/Logout" f20xf20
+        vector 13x14
+      component "Icon/Sidebar collapse" f20xf20
+        rectangle 15x13
+        vector 0x13
+        vector 2x4
+      component "Icon/Sidebar expand" f20xf20
+        rectangle 15x13
+        vector 0x13
+        vector 2x4
+      component "Icon/Search" f20xf20
+        vector 13x13
+      component "Icon/Chevron down" f20xf20
+        vector 10x5
+      component "Icon/Filter" f20xf20
+        vector 14x8
+      component "Icon/Lock" f20xf20
+        vector 9x13
+      component "Icon/Arrow up" f20xf20
+        vector 10x12
+      component "Icon/Chevron right" f20xf20
+        vector 5x10
+      component "Icon/Activity" f20xf20
+        vector 13x9
+      component "Icon/Chevron left" f20xf20
+        vector 5x10
+      component "Icon/Close" f20xf20
+        vector 10x10
+      component "Icon/Edit" f20xf20
+        vector 11x11
+      component "Icon/Check" f20xf20
+        vector 11x8
+      component "Icon/Folder" f20xf20
+        vector 15x10
+      component "Icon/Terminal" f20xf20
+        vector 12x8
+      component "Icon/Globe" f20xf20
+        vector 15x15
+      component "Icon/MCP" f20xf20
+        vector 10x15
+  frame "Logo" col gap=24 f1312xh198
+    frame "Section header" col gap=4 f1312xh52
+      text "Logo" 18/28 Semibold color=--text-primary
+      text "Mark, lockup, and app icon. The mark and wordmark follow fg-primary and text-primary, so they turn white in dark mode." 14/20 Regular color=--text-tertiary
+    frame "Logos" row gap=48 pad=32,32,32,32 cross=center f1312xh122 border=#9E77ED radius=16
+      component "Logo mark" f32xf32
+        vector 18x22 bg=--fg-primary
+        vector 18x22 bg=--fg-primary
+      component "Logo lockup" row gap=12 cross=center h114xh32
+        <Logo mark> f32xf32
+          vector 18x22 bg=--fg-primary
+          vector 18x22 bg=--fg-primary
+        text "LΛNΛ" 16/20 Regular color=--text-primary
+      component "App icon" row gap=0 main=center cross=center f56xf56 bg=#0B0F14 radius=14 shadow
+        <Logo mark> f32xf32
+          vector 18x22 bg=--fg-primary
+          vector 18x22 bg=--fg-primary
+  frame "Button" col gap=24 f1312xh267
+    frame "Section header" col gap=4 f1312xh52
+      text "Button" 18/28 Semibold color=--text-primary
+      text "Hierarchy: Primary for the main action of a view, Secondary for the rest, Tertiary for low emphasis, Destructive for delete and reject." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Button holder" col gap=0 f1312xh166
+      componentSet "Button" row gap=24 pad=32,32,32,32 f1312xh166 border=#9E77ED radius=16
+        component "Hierarchy=Primary, Size=sm" row gap=6 pad=8,12,8,12 main=center cross=center h101xh36 bg=--bg-brand-solid radius=8 shadow
+          text "Button CTA" 14/20 Semibold color=--text-white
+        component "Hierarchy=Secondary, Size=sm" row gap=6 pad=8,12,8,12 main=center cross=center h103xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Button CTA" 14/20 Semibold color=--text-secondary
+        component "Hierarchy=Tertiary, Size=sm" row gap=6 pad=8,12,8,12 main=center cross=center h101xh36 radius=8
+          text "Button CTA" 14/20 Semibold color=--text-tertiary
+        component "Hierarchy=Destructive, Size=sm" row gap=6 pad=8,12,8,12 main=center cross=center h101xh36 bg=--bg-error-solid radius=8 shadow
+          text "Button CTA" 14/20 Semibold color=--text-white
+        component "Hierarchy=Primary, Size=md" row gap=6 pad=10,14,10,14 main=center cross=center h105xh40 bg=--bg-brand-solid radius=8 shadow
+          text "Button CTA" 14/20 Semibold color=--text-white
+        component "Hierarchy=Secondary, Size=md" row gap=6 pad=10,14,10,14 main=center cross=center h107xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Button CTA" 14/20 Semibold color=--text-secondary
+        component "Hierarchy=Tertiary, Size=md" row gap=6 pad=10,14,10,14 main=center cross=center h105xh40 radius=8
+          text "Button CTA" 14/20 Semibold color=--text-tertiary
+        component "Hierarchy=Destructive, Size=md" row gap=6 pad=10,14,10,14 main=center cross=center h105xh40 bg=--bg-error-solid radius=8 shadow
+          text "Button CTA" 14/20 Semibold color=--text-white
+        component "Hierarchy=Primary, Size=lg" row gap=6 pad=10,16,10,16 main=center cross=center h120xh44 bg=--bg-brand-solid radius=8 shadow
+          text "Button CTA" 16/24 Semibold color=--text-white
+        component "Hierarchy=Secondary, Size=lg" row gap=6 pad=10,16,10,16 main=center cross=center h122xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Button CTA" 16/24 Semibold color=--text-secondary
+        component "Hierarchy=Tertiary, Size=lg" row gap=6 pad=10,16,10,16 main=center cross=center h120xh44 radius=8
+          text "Button CTA" 16/24 Semibold color=--text-tertiary
+        component "Hierarchy=Destructive, Size=lg" row gap=6 pad=10,16,10,16 main=center cross=center h120xh44 bg=--bg-error-solid radius=8 shadow
+          text "Button CTA" 16/24 Semibold color=--text-white
+  frame "Badge" col gap=24 f1312xh191
+    frame "Section header" col gap=4 f1312xh52
+      text "Badge" 18/28 Semibold color=--text-primary
+      text "Status of a session, a channel, or an approval. Pill with a dot." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Badge holder" col gap=0 f1312xh90
+      componentSet "Badge" row gap=24 pad=32,32,32,32 f1312xh90 border=#9E77ED radius=16
+        component "Color=Gray" row gap=6 pad=2,8,2,8 cross=center h51xh24 bg=--bg-secondary border=--border-secondary radius=16
+          ellipse 6x6 bg=--fg-quaternary
+          text "Idle" 12/18 Medium color=--text-secondary
+        component "Color=Brand" row gap=6 pad=2,8,2,8 cross=center h83xh24 bg=--bg-brand-primary border=--border-brand radius=16
+          ellipse 6x6 bg=--fg-brand-primary
+          text "Telegram" 12/18 Medium color=--text-brand-secondary
+        component "Color=Success" row gap=6 pad=2,8,2,8 cross=center h75xh22 bg=--bg-success-primary radius=16
+          ellipse 6x6 bg=--fg-success-primary
+          text "Running" 12/18 Medium color=--text-success-primary
+        component "Color=Warning" row gap=6 pad=2,8,2,8 cross=center h123xh22 bg=--bg-warning-primary radius=16
+          ellipse 6x6 bg=--fg-warning-primary
+          text "Waiting approval" 12/18 Medium color=--text-warning-primary
+        component "Color=Error" row gap=6 pad=2,8,2,8 cross=center h62xh22 bg=--bg-error-primary radius=16
+          ellipse 6x6 bg=--fg-error-primary
+          text "Failed" 12/18 Medium color=--text-error-primary
+  frame "Input field" col gap=24 f1312xh373
+    frame "Section header" col gap=4 f1312xh52
+      text "Input field" 18/28 Semibold color=--text-primary
+      text "Label, input, and hint. Focus shows the brand border and focus ring. Error replaces the hint with the message." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Input holder" col gap=0 f1312xh272
+      componentSet "Input field" row gap=24 pad=32,32,32,32 f1312xh272 border=#9E77ED radius=16
+        component "State=Default" col gap=6 f320xh98
+          text "Owner token" 14/20 Medium color=--text-secondary
+          frame "Input" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "Paste the token" 16/24 Regular color=--text-placeholder
+          text "Owner token from the daemon log." 14/20 Regular color=--text-tertiary
+        component "State=Focused" col gap=6 f320xh98
+          text "Owner token" 14/20 Medium color=--text-secondary
+          frame "Input" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-primary border=--border-brand radius=8 shadow
+            text "lana_tok_…" 16/24 Regular color=--text-primary
+          text "Owner token from the daemon log." 14/20 Regular color=--text-tertiary
+        component "State=Error" col gap=6 f320xh98
+          text "Owner token" 14/20 Medium color=--text-secondary
+          frame "Input" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-primary border=--border-error radius=8 shadow
+            text "lana_tok_…" 16/24 Regular color=--text-primary
+          text "The token is not valid." 14/20 Regular color=--text-error-primary
+        component "State=Disabled" col gap=6 f320xh98
+          text "Owner token" 14/20 Medium color=--text-secondary
+          frame "Input" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-disabled border=--border-disabled radius=8 shadow
+            text "Paste the token" 16/24 Regular color=--text-disabled
+          text "Owner token from the daemon log." 14/20 Regular color=--text-tertiary
+  frame "Sidebar nav item" col gap=24 f1312xh207
+    frame "Section header" col gap=4 f1312xh52
+      text "Sidebar nav item" 18/28 Semibold color=--text-primary
+      text "Main navigation: Sessions, New session, Settings." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Nav holder" col gap=0 f1312xh106
+      componentSet "Nav item" row gap=24 pad=32,32,32,32 f1312xh106 border=#9E77ED radius=16
+        component "State=Default" row gap=12 pad=8,12,8,12 cross=center f399xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        component "State=Hover" row gap=12 pad=8,12,8,12 cross=center f399xh40 bg=--bg-primary-hover radius=6
+          <Icon/Home> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        component "State=Active" row gap=12 pad=8,12,8,12 cross=center f399xh40 bg=--bg-active radius=6
+          <Icon/Home> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-primary
+  frame "Nav item collapsed" col gap=24 f1312xh207
+    frame "Section header" col gap=4 f1312xh52
+      text "Nav item collapsed" 18/28 Semibold color=--text-primary
+      text "Icon-only nav for the collapsed sidebar (80 px). Show the label in a tooltip on hover." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Holder" col gap=0 f1312xh106
+      componentSet "Nav item collapsed" row gap=16 pad=32,32,32,32 f1312xh106 border=#9E77ED radius=16
+        component "State=Default" row gap=0 main=center cross=center f48xf40 radius=6
+          <Icon/Home> f20xf20
+        component "State=Hover" row gap=0 main=center cross=center f48xf40 bg=--bg-primary-hover radius=6
+          <Icon/Home> f20xf20
+        component "State=Active" row gap=0 main=center cross=center f48xf40 bg=--bg-active radius=6
+          <Icon/Home> f20xf20
+  frame "Alert" col gap=24 f1312xh333
+    frame "Section header" col gap=4 f1312xh52
+      text "Alert" 18/28 Semibold color=--text-primary
+      text "Inline notice: restart required, config missing, validation failed, saved." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Alert holder" col gap=0 f1312xh232
+      componentSet "Alert" row gap=24 pad=32,32,32,32 f1312xh232 border=#9E77ED radius=16
+        component "Type=Info" row gap=16 pad=16,16,16,16 f520xh78 bg=--bg-primary border=--border-primary radius=12 shadow
+          frame "Featured icon" row gap=0 main=center cross=center f32xf32 border=--fg-brand-primary radius=16
+            ellipse 12x12 bg=--fg-brand-primary
+          frame "Content" col gap=4 f438xh44
+            text "Config saved" 14/20 Semibold color=--text-primary
+            text "The daemon reads config.toml on the next restart." 14/20 Regular color=--text-tertiary
+        component "Type=Warning" row gap=16 pad=16,16,16,16 f520xh78 bg=--bg-primary border=--border-primary radius=12 shadow
+          frame "Featured icon" row gap=0 main=center cross=center f32xf32 border=--fg-warning-primary radius=16
+            ellipse 12x12 bg=--fg-warning-primary
+          frame "Content" col gap=4 f438xh44
+            text "Restart required" 14/20 Semibold color=--text-primary
+            text "config.toml on disk differs from the config the daemon loaded." 14/20 Regular color=--text-tertiary
+        component "Type=Error" row gap=16 pad=16,16,16,16 f520xh78 bg=--bg-primary border=--border-primary radius=12 shadow
+          frame "Featured icon" row gap=0 main=center cross=center f32xf32 border=--fg-error-primary radius=16
+            ellipse 12x12 bg=--fg-error-primary
+          frame "Content" col gap=4 f438xh44
+            text "Validation failed" 14/20 Semibold color=--text-primary
+            text "agents.default.model: unknown provider." 14/20 Regular color=--text-tertiary
+        component "Type=Success" row gap=16 pad=16,16,16,16 f520xh78 bg=--bg-primary border=--border-primary radius=12 shadow
+          frame "Featured icon" row gap=0 main=center cross=center f32xf32 border=--fg-success-primary radius=16
+            ellipse 12x12 bg=--fg-success-primary
+          frame "Content" col gap=4 f438xh44
+            text "Approval sent" 14/20 Semibold color=--text-primary
+            text "The tool call continues in the session." 14/20 Regular color=--text-tertiary
+  frame "Progress step" col gap=24 f1312xh255
+    frame "Section header" col gap=4 f1312xh52
+      text "Progress step" 18/28 Semibold color=--text-primary
+      text "Vertical steps for onboarding. Complete, Current, Incomplete. Turn off Connector on the last step." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Step holder" col gap=0 f1312xh154
+      componentSet "Progress step" row gap=24 pad=32,32,32,32 f1312xh154 border=#9E77ED radius=16
+        component "State=Complete" row gap=12 f320xh88
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f284xh88
+            text "Choose a provider" 14/20 Semibold color=--text-secondary
+            text "OpenAI, OpenRouter, DeepSeek, or your own" 14/20 Regular color=--text-tertiary
+        component "State=Current" row gap=12 f320xh88
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12 shadow
+              ellipse 8x8 bg=--fg-white
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f284xh88
+            text "Choose a provider" 14/20 Semibold color=--text-brand-secondary
+            text "OpenAI, OpenRouter, DeepSeek, or your own" 14/20 Regular color=--text-brand-tertiary
+        component "State=Incomplete" row gap=12 f320xh88
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-primary border=--border-secondary radius=12
+              ellipse 8x8 bg=--fg-quaternary
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f284xh88
+            text "Choose a provider" 14/20 Semibold color=--text-secondary
+            text "OpenAI, OpenRouter, DeepSeek, or your own" 14/20 Regular color=--text-tertiary
+  frame "Provider card" col gap=24 f1312xh245
+    frame "Section header" col gap=4 f1312xh52
+      text "Provider card" 18/28 Semibold color=--text-primary
+      text "Radio card for choosing a model provider." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Provider holder" col gap=0 f1312xh144
+      componentSet "Provider card" row gap=24 pad=32,32,32,32 f1312xh144 border=#9E77ED radius=16
+        component "State=Default" row gap=12 pad=16,16,16,16 f440xh76 bg=--bg-primary border=--border-secondary radius=12
+          frame "Logo" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=8
+            text "AI" 14/20 Semibold color=--text-secondary
+          frame "Content" col gap=2 f326xh42
+            text "OpenAI" 14/20 Semibold color=--text-secondary
+            text "GPT models through api.openai.com." 14/20 Regular color=--text-tertiary
+          frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+        component "State=Selected" row gap=12 pad=16,16,16,16 f440xh78 bg=--bg-primary border=--border-brand-solid radius=12
+          frame "Logo" row gap=0 main=center cross=center f40xf40 bg=--bg-brand-primary border=--border-secondary radius=8
+            text "AI" 14/20 Semibold color=--text-brand-secondary
+          frame "Content" col gap=2 f324xh42
+            text "OpenAI" 14/20 Semibold color=--text-brand-secondary
+            text "GPT models through api.openai.com." 14/20 Regular color=--text-brand-tertiary
+          frame "Radio" row gap=0 main=center cross=center f16xf16 bg=--bg-brand-solid radius=8
+            ellipse 6x6 bg=--fg-white
+  frame "Radio tile" col gap=24 f1312xh257
+    frame "Section header" col gap=4 f1312xh52
+      text "Radio tile" 18/28 Semibold color=--text-primary
+      text "Compact radio card for a row of 2 to 3 choices: agent template, tool permission." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Tile holder" col gap=0 f1312xh156
+      componentSet "Radio tile" row gap=24 pad=32,32,32,32 f1312xh156 border=#9E77ED radius=16
+        component "State=Default" col gap=4 pad=12,14,14,14 f140xh88 bg=--bg-primary border=--border-secondary radius=12
+          frame "Top" row gap=8 main=spaceBetween cross=center f110xh20
+            text "Assistant" 14/20 Semibold color=--text-secondary
+            frame "Radio" f16xf16 bg=--bg-primary border=--border-primary radius=8
+          text "Everyday help and research." 12/18 Regular color=--text-tertiary
+        component "State=Selected" col gap=4 pad=12,14,14,14 f140xh90 bg=--bg-brand-primary border=--border-brand-solid radius=12
+          frame "Top" row gap=8 main=spaceBetween cross=center f108xh20
+            text "Assistant" 14/20 Semibold color=--text-brand-primary
+            frame "Radio" row gap=0 main=center cross=center f16xf16 bg=--bg-brand-solid radius=8
+              ellipse 6x6 bg=--fg-white
+          text "Everyday help and research." 12/18 Regular color=--text-brand-tertiary
+  frame "Textarea" col gap=24 f1312xh379
+    frame "Section header" col gap=4 f1312xh52
+      text "Textarea" 18/28 Semibold color=--text-primary
+      text "Multi-line field for agent files: persona (AGENT.md) and user profile (USER.md). Label action on the right, counter under the box." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Textarea holder" col gap=0 f1312xh278
+      componentSet "Textarea" row gap=24 pad=32,32,32,32 f1312xh278 border=#9E77ED radius=16
+        component "State=Default" col gap=6 f480xh212
+          frame "Label row" row gap=0 main=spaceBetween cross=center f480xh20
+            text "Persona" 14/20 Medium color=--text-secondary
+            text "Reset to template" 14/20 Semibold color=--text-brand-secondary
+          frame "Box" col gap=0 pad=12,14,12,14 f480xf160 bg=--bg-primary border=--border-primary radius=8 shadow
+            text "Write here…" 14/20 Regular color=--text-primary
+          frame "Hint row" row gap=12 main=spaceBetween f480xh20
+            text "Markdown." 14/20 Regular color=--text-tertiary
+            text "0 / 2,000" 14/20 Regular color=--text-tertiary
+        component "State=Focused" col gap=6 f480xh212
+          frame "Label row" row gap=0 main=spaceBetween cross=center f480xh20
+            text "Persona" 14/20 Medium color=--text-secondary
+            text "Reset to template" 14/20 Semibold color=--text-brand-secondary
+          frame "Box" col gap=0 pad=12,14,12,14 f480xf160 bg=--bg-primary border=--border-brand radius=8 shadow
+            text "Write here…" 14/20 Regular color=--text-primary
+          frame "Hint row" row gap=12 main=spaceBetween f480xh20
+            text "Markdown." 14/20 Regular color=--text-tertiary
+            text "0 / 2,000" 14/20 Regular color=--text-tertiary
+  frame "Agent avatar" col gap=24 f1312xh199
+    frame "Section header" col gap=4 f1312xh52
+      text "Agent avatar" 18/28 Semibold color=--text-primary
+      text "Every agent has an identity color. Messages, team threads, and pickers all show it, so a single agent is just a team of one." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Avatar holder" col gap=0 f1312xh98
+      componentSet "Agent avatar" row gap=16 pad=32,32,32,32 f1312xh98 border=#9E77ED radius=16
+        component "Color=Brand" row gap=0 main=center cross=center f32xf32 bg=--bg-brand-primary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-brand-secondary
+        component "Color=Success" row gap=0 main=center cross=center f32xf32 bg=--bg-success-primary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-success-primary
+        component "Color=Warning" row gap=0 main=center cross=center f32xf32 bg=--bg-warning-primary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-warning-primary
+        component "Color=Error" row gap=0 main=center cross=center f32xf32 bg=--bg-error-primary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-error-primary
+        component "Color=Gray" row gap=0 main=center cross=center f32xf32 bg=--bg-tertiary border=--bg-primary radius=16
+          text "L" 12/18 Semibold color=--text-secondary
+  frame "Dark mode check" col gap=24 f1312xh459
+    frame "Section header" col gap=4 f1312xh52
+      text "Dark mode check" 18/28 Semibold color=--text-primary
+      text "The same instances inside a frame set to the Dark mode." 14/20 Regular color=--text-tertiary
+    rectangle 1312x1 bg=--border-secondary
+    frame "Dark preview" row gap=24 pad=32,32,32,32 cross=center f1312xh358 bg=--bg-primary radius=16
+      <Button/Hierarchy=Primary, Size=md> {"Label": "Button CTA"} row gap=6 pad=10,14,10,14 main=center cross=center h105xh40 bg=--bg-brand-solid radius=8 shadow
+        text "Button CTA" 14/20 Semibold color=--text-white
+      <Button/Hierarchy=Secondary, Size=md> {"Label": "Button CTA"} row gap=6 pad=10,14,10,14 main=center cross=center h107xh42 bg=--bg-primary border=--border-primary radius=8 shadow
+        text "Button CTA" 14/20 Semibold color=--text-secondary
+      <Button/Hierarchy=Tertiary, Size=md> {"Label": "Button CTA"} row gap=6 pad=10,14,10,14 main=center cross=center h105xh40 radius=8
+        text "Button CTA" 14/20 Semibold color=--text-tertiary
+      <Button/Hierarchy=Destructive, Size=md> {"Label": "Button CTA"} row gap=6 pad=10,14,10,14 main=center cross=center h105xh40 bg=--bg-error-solid radius=8 shadow
+        text "Button CTA" 14/20 Semibold color=--text-white
+      <Badge/Color=Gray> {"Label": "Idle"} row gap=6 pad=2,8,2,8 cross=center h51xh24 bg=--bg-secondary border=--border-secondary radius=16
+        ellipse 6x6 bg=--fg-quaternary
+        text "Idle" 12/18 Medium color=--text-secondary
+      <Badge/Color=Brand> {"Label": "Idle"} row gap=6 pad=2,8,2,8 cross=center h51xh24 bg=--bg-brand-primary border=--border-brand radius=16
+        ellipse 6x6 bg=--fg-brand-primary
+        text "Idle" 12/18 Medium color=--text-brand-secondary
+      <Badge/Color=Success> {"Label": "Idle"} row gap=6 pad=2,8,2,8 cross=center h49xh22 bg=--bg-success-primary radius=16
+        ellipse 6x6 bg=--fg-success-primary
+        text "Idle" 12/18 Medium color=--text-success-primary
+      <Badge/Color=Warning> {"Label": "Idle"} row gap=6 pad=2,8,2,8 cross=center h49xh22 bg=--bg-warning-primary radius=16
+        ellipse 6x6 bg=--fg-warning-primary
+        text "Idle" 12/18 Medium color=--text-warning-primary
+      <Badge/Color=Error> {"Label": "Idle"} row gap=6 pad=2,8,2,8 cross=center h49xh22 bg=--bg-error-primary radius=16
+        ellipse 6x6 bg=--fg-error-primary
+        text "Idle" 12/18 Medium color=--text-error-primary
+      <Input field/State=Focused> {"Hint": "Owner token from the daemon log.", "Label": "Owner token", "Value": "Paste the token"} col gap=6 f320xh98
+        text "Owner token" 14/20 Medium color=--text-secondary
+        frame "Input" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-primary border=--border-brand radius=8 shadow
+          text "Paste the token" 16/24 Regular color=--text-primary
+        text "Owner token from the daemon log." 14/20 Regular color=--text-tertiary
+      <Input field/State=Error> {"Hint": "Owner token from the daemon log.", "Label": "Owner token", "Value": "Paste the token"} col gap=6 f320xh98
+        text "Owner token" 14/20 Medium color=--text-secondary
+        frame "Input" row gap=8 pad=10,14,10,14 cross=center f320xh46 bg=--bg-primary border=--border-error radius=8 shadow
+          text "Paste the token" 16/24 Regular color=--text-primary
+        text "Owner token from the daemon log." 14/20 Regular color=--text-error-primary
+      <Nav item/State=Active> {"Icon": 1728, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f272xh40 bg=--bg-active radius=6
+        <Icon/Home> f20xf20
+        text "Sessions" 16/24 Semibold color=--text-primary
+      <Alert/Type=Warning> {"Body": "The daemon reads config.toml on the next restart.", "Title": "Config saved"} row gap=16 pad=16,16,16,16 f520xh78 bg=--bg-primary border=--border-primary radius=12 shadow
+        frame "Featured icon" row gap=0 main=center cross=center f32xf32 border=--fg-warning-primary radius=16
+          ellipse 12x12 bg=--fg-warning-primary
+        frame "Content" col gap=4 f438xh44
+          text "Config saved" 14/20 Semibold color=--text-primary
+          text "The daemon reads config.toml on the next restart." 14/20 Regular color=--text-tertiary
+      <Alert/Type=Error> {"Body": "The daemon reads config.toml on the next restart.", "Title": "Config saved"} row gap=16 pad=16,16,16,16 f520xh78 bg=--bg-primary border=--border-primary radius=12 shadow
+        frame "Featured icon" row gap=0 main=center cross=center f32xf32 border=--fg-error-primary radius=16
+          ellipse 12x12 bg=--fg-error-primary
+        frame "Content" col gap=4 f438xh44
+          text "Config saved" 14/20 Semibold color=--text-primary
+          text "The daemon reads config.toml on the next restart." 14/20 Regular color=--text-tertiary

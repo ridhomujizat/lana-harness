@@ -1,0 +1,85 @@
+# Onboarding / 04b Persona and profile (frame 1630)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "04b Persona and profile" row gap=0 f1440xf960 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,32,32,32 main=spaceBetween f400xf960 bg=--bg-secondary
+    frame "Top" col gap=64 f336xh436
+      frame "Logo" row gap=0 h114xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+      frame "Steps" col gap=0 f336xh340
+        <Progress step/State=Complete> {"Connector": true, "Description": "Paste the owner token from the daemon", "Title": "Unlock the dashboard"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Unlock the dashboard" 14/20 Semibold color=--text-secondary
+            text "Paste the owner token from the daemon" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Complete> {"Connector": true, "Description": "OpenAI, Anthropic, or OpenRouter", "Title": "Choose a provider"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Choose a provider" 14/20 Semibold color=--text-secondary
+            text "OpenAI, Anthropic, or OpenRouter" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Complete> {"Connector": true, "Description": "API key, base URL, and model", "Title": "Connect your model"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12
+              vector 12x9
+            rectangle 2x34 bg=--fg-brand-primary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Connect your model" 14/20 Semibold color=--text-secondary
+            text "API key, base URL, and model" 14/20 Regular color=--text-tertiary
+        <Progress step/State=Current> {"Connector": true, "Description": "Persona and your profile", "Title": "Set up your agent"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh66
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-brand-solid radius=12 shadow
+              ellipse 8x8 bg=--fg-white
+            rectangle 2x34 bg=--border-secondary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Set up your agent" 14/20 Semibold color=--text-brand-secondary
+            text "Persona and your profile" 14/20 Regular color=--text-brand-tertiary
+        <Progress step/State=Incomplete> {"Connector": false, "Description": "Open your first session", "Title": "Start chatting"} row gap=12 f336xh68
+          frame "Indicator" col gap=4 pad=0,0,4,0 cross=center f24xh28
+            frame "Icon" row gap=0 main=center cross=center f24xf24 bg=--bg-primary border=--border-secondary radius=12
+              ellipse 8x8 bg=--fg-quaternary
+          frame "Content" col gap=2 pad=2,0,24,0 f300xh68
+            text "Start chatting" 14/20 Semibold color=--text-secondary
+            text "Open your first session" 14/20 Regular color=--text-tertiary
+    frame "Footer" row gap=0 main=spaceBetween f336xh20
+      text "Local only · 127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      text "Help" 14/20 Semibold color=--text-brand-secondary
+  frame "Main" col gap=0 pad=32,32,32,32 main=center cross=center f1040xf960
+    frame "Content" col gap=28 f520xh802
+      frame "Heading" col gap=12 f520xh154
+        text "Step 4 of 5 · Persona" 14/20 Semibold color=--text-brand-secondary
+        text "Make it yours" 30/38 Semibold color=--text-primary
+        text "Edit how the agent behaves and tell it about you. Both are plain Markdown files in the agent home, so you can change them any time." 16/24 Regular color=--text-tertiary
+      <Textarea/State=Focused> {"Action": "Reset to template", "Counter": "612 characters", "Hint": "From the Assistant template. Write any tone, rules, or role.", "Label": "Persona · AGENT.md", "Value": "You are default, a persona col gap=6 f520xh212
+        frame "Label row" row gap=0 main=spaceBetween cross=center f520xh20
+          text "Persona · AGENT.md" 14/20 Medium color=--text-secondary
+          text "Reset to template" 14/20 Semibold color=--text-brand-secondary
+        frame "Box" col gap=0 pad=12,14,12,14 f520xf160 bg=--bg-primary border=--border-brand radius=8 shadow
+          text "You are default, a personal assistant for one user.\n\n- Be warm, direct, and concise. Answer in the user's preferred language.\n- Help with planning, research, wr" 14/20 Regular color=--text-primary
+        frame "Hint row" row gap=12 main=spaceBetween f520xh20
+          text "From the Assistant template. Write any tone, rules, or role." 14/20 Regular color=--text-tertiary
+          text "612 characters" 14/20 Regular color=--text-tertiary
+      <Textarea/State=Default> {"Action": "Optional", "Counter": "168 / 2,000", "Hint": "The agent reads this on every turn. It adds facts it learns later.", "Label": "About you · USER.md", "Value": "Name: Ridho\nLanguage: Indonesi col gap=6 f520xh212
+        frame "Label row" row gap=0 main=spaceBetween cross=center f520xh20
+          text "About you · USER.md" 14/20 Medium color=--text-secondary
+          text "Optional" 14/20 Semibold color=--text-brand-secondary
+        frame "Box" col gap=0 pad=12,14,12,14 f520xf160 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Name: Ridho\nLanguage: Indonesian, English for code\nTimezone: Asia/Jakarta (UTC+7)\nWork: building lana, an agent harness in Go\nAnswers: short and direct, code fi" 14/20 Regular color=--text-primary
+        frame "Hint row" row gap=12 main=spaceBetween f520xh20
+          text "The agent reads this on every turn. It adds facts it learns later." 14/20 Regular color=--text-tertiary
+          text "168 / 2,000" 14/20 Regular color=--text-tertiary
+      frame "Tip" row gap=12 pad=12,14,12,14 cross=center f520xh66 bg=--bg-secondary border=--border-secondary radius=10
+        text "Memory (MEMORY.md) fills itself as you chat. You can review and edit it in Settings › Agents." 14/20 Regular color=--text-tertiary
+      frame "Actions" row gap=12 f520xh46
+        <Button/Hierarchy=Secondary, Size=lg> {"Label": "Back"} row gap=6 pad=10,16,10,16 main=center cross=center f254xh46 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Back" 16/24 Semibold color=--text-secondary
+        <Button/Hierarchy=Primary, Size=lg> {"Label": "Save and continue"} row gap=6 pad=10,16,10,16 main=center cross=center f254xh44 bg=--bg-brand-solid radius=8 shadow
+          text "Save and continue" 16/24 Semibold color=--text-white

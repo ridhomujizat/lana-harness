@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15
+          - ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Format
+        run: test -z "$(nix develop -c gofmt -l .)"
+      - name: Lint
+        run: nix develop -c golangci-lint run ./...
+      - name: Test
+        run: nix develop -c sh -c 'CGO_ENABLED=1 go test -race ./...'
+      - name: Release
+        run: nix develop -c make release
+      - name: Static Linux check
+        if: runner.os == 'Linux'
+        run: file dist/lana-linux-amd64 | grep -q 'statically linked'
+      - name: Binary size summary
+        if: success()
+        run: |
+          {
+            echo '### Binary sizes'
+            echo ''
+            echo '| platform | bytes |'
+            echo '|---|---:|'
+            for f in dist/lana-*; do
+              name=$(basename "$f")
+              size=$(wc -c < "$f" | tr -d ' ')
+              echo "| $name | $size |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

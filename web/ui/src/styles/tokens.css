@@ -1,0 +1,194 @@
+/* Gr8r-aligned tokens. Colors, radius, and spacing are regenerated from
+   design/export/lana-gr8r-tokens.css with the collection prefix stripped, so the
+   variable names stay unchanged. Surface/elevation/motion tokens come from the
+   Gr8r token set. Light lives on :root, dark on [data-theme="dark"]. */
+
+:root {
+  --bg-active: #F6F5F2;
+  --bg-brand-primary: #EEF0FB;
+  --bg-brand-secondary: #E3E6F9;
+  --bg-brand-solid: #4B5BD6;
+  --bg-brand-solid-hover: #4352C2;
+  --bg-disabled: #F6F5F2;
+  --bg-error-primary: #F8ECEA;
+  --bg-error-solid: #B23C30;
+  --bg-overlay: #181613;
+  --bg-primary: #FFFFFF;
+  --bg-primary-hover: #F6F5F2;
+  --bg-quaternary: #EEEDE9;
+  --bg-secondary: #F7F6F3;
+  --bg-secondary-hover: #EEEDE9;
+  --bg-success-primary: #E8F1EC;
+  --bg-tertiary: #F4F3F0;
+  --bg-warning-primary: #F5EFE4;
+  --border-brand: #A9B0EA;
+  --border-brand-solid: #4B5BD6;
+  --border-disabled: #DAD7D0;
+  --border-error: #E0A39C;
+  --border-error-solid: #B23C30;
+  --border-primary: #DAD7D0;
+  --border-secondary: #E9E7E2;
+  --border-tertiary: #F0EEEA;
+  --fg-brand-primary: #4B5BD6;
+  --fg-error-primary: #B23C30;
+  --fg-primary: #1D1C1A;
+  --fg-quaternary: #8C8880;
+  --fg-secondary: #57544E;
+  --fg-success-primary: #25754B;
+  --fg-tertiary: #6B6760;
+  --fg-warning-primary: #8F5E0E;
+  --fg-white: #FFFFFF;
+  --text-brand-primary: #3B47B0;
+  --text-brand-secondary: #4B5BD6;
+  --text-brand-tertiary: #4B5BD6;
+  --text-disabled: #8C8880;
+  --text-error-primary: #B23C30;
+  --text-placeholder: #8C8880;
+  --text-primary: #1D1C1A;
+  --text-quaternary: #8C8880;
+  --text-secondary: #57544E;
+  --text-success-primary: #25754B;
+  --text-tertiary: #6B6760;
+  --text-warning-primary: #8F5E0E;
+  --text-white: #FFFFFF;
+  --radius-2xl: 12px;
+  --radius-full: 9999px;
+  --radius-lg: 10px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+  --radius-xl: 10px;
+  --radius-xs: 4px;
+  --radius-xxs: 2px;
+  --spacing-2xl: 20px;
+  --spacing-3xl: 24px;
+  --spacing-4xl: 32px;
+  --spacing-5xl: 40px;
+  --spacing-6xl: 48px;
+  --spacing-7xl: 64px;
+  --spacing-lg: 12px;
+  --spacing-md: 8px;
+  --spacing-sm: 6px;
+  --spacing-xl: 16px;
+  --spacing-xs: 4px;
+  --spacing-xxs: 2px;
+
+  /* Gr8r surfaces and lines. */
+  --surface-2: #F6F5F2;
+  --surface-3: #EEEDE9;
+  --border-strong: #DAD7D0;
+  --divider: #F0EEEA;
+  --overlay: rgba(24, 22, 19, 0.28);
+
+  /* Raw tone seeds used by the soft variants below. */
+  --green: #25754B;
+  --amber: #8F5E0E;
+  --red: #B23C30;
+
+  /* Tone washes. --accent comes from app.css (var(--bg-brand-solid)). */
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 38%, transparent);
+  --green-soft: color-mix(in srgb, var(--green) 11%, transparent);
+  --amber-soft: color-mix(in srgb, var(--amber) 12%, transparent);
+  --red-soft: color-mix(in srgb, var(--red) 10%, transparent);
+
+  /* Gr8r elevation. */
+  --shadow-sm: 0 1px 2px rgba(28, 25, 20, 0.05);
+  --shadow-card: 0 1px 2px rgba(28, 25, 20, 0.04), 0 0 0 1px var(--border);
+  --shadow-pop: 0 12px 32px -8px rgba(28, 25, 20, 0.16), 0 2px 6px -2px rgba(28, 25, 20, 0.06), 0 0 0 1px var(--border);
+  --shadow-drag: 0 16px 36px -10px rgba(28, 25, 20, 0.28), 0 0 0 1px var(--border-strong);
+
+  /* Gr8r motion and type. */
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur: 140ms;
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg-active: #252524;
+  --bg-brand-primary: #1E2033;
+  --bg-brand-secondary: #262A45;
+  --bg-brand-solid: #8E9AF3;
+  --bg-brand-solid-hover: #A3ADF5;
+  --bg-disabled: #252524;
+  --bg-error-primary: #3A1F1C;
+  --bg-error-solid: #C2493D;
+  --bg-overlay: #000000;
+  --bg-primary: #1D1D1C;
+  --bg-primary-hover: #252524;
+  --bg-quaternary: #2D2D2B;
+  --bg-secondary: #181817;
+  --bg-secondary-hover: #2D2D2B;
+  --bg-success-primary: #1C2C23;
+  --bg-tertiary: #252524;
+  --bg-warning-primary: #33281A;
+  --border-brand: #4E5590;
+  --border-brand-solid: #8E9AF3;
+  --border-disabled: #3A3936;
+  --border-error: #8A3D35;
+  --border-error-solid: #E57D70;
+  --border-primary: #3A3936;
+  --border-secondary: #2C2B29;
+  --border-tertiary: #252523;
+  --fg-brand-primary: #8E9AF3;
+  --fg-error-primary: #E57D70;
+  --fg-primary: #ECEAE5;
+  --fg-quaternary: #6F6C66;
+  --fg-secondary: #B5B2AB;
+  --fg-success-primary: #5CBA86;
+  --fg-tertiary: #9A968F;
+  --fg-warning-primary: #D8A443;
+  --fg-white: #FFFFFF;
+  --text-brand-primary: #E4E6FB;
+  --text-brand-secondary: #B9C0F7;
+  --text-brand-tertiary: #8E9AF3;
+  --text-disabled: #6F6C66;
+  --text-error-primary: #E57D70;
+  --text-placeholder: #6F6C66;
+  --text-primary: #ECEAE5;
+  --text-quaternary: #6F6C66;
+  --text-secondary: #B5B2AB;
+  --text-success-primary: #5CBA86;
+  --text-tertiary: #9A968F;
+  --text-warning-primary: #D8A443;
+  --text-white: #FFFFFF;
+
+  /* Gr8r surfaces and lines. */
+  --surface-2: #252524;
+  --surface-3: #2D2D2B;
+  --border-strong: #3A3936;
+  --divider: #252523;
+  --overlay: rgba(0, 0, 0, 0.55);
+
+  /* Raw tone seeds used by the soft variants below. */
+  --green: #5CBA86;
+  --amber: #D8A443;
+  --red: #E57D70;
+
+  /* Tone washes. --accent comes from app.css (var(--bg-brand-solid)). */
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 38%, transparent);
+  --green-soft: color-mix(in srgb, var(--green) 11%, transparent);
+  --amber-soft: color-mix(in srgb, var(--amber) 12%, transparent);
+  --red-soft: color-mix(in srgb, var(--red) 10%, transparent);
+
+  /* Gr8r elevation. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 0 0 1px var(--border);
+  --shadow-pop: 0 16px 40px -10px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-strong);
+  --shadow-drag: 0 18px 40px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--border-strong);
+
+  /* Gr8r motion and type. */
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur: 140ms;
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}

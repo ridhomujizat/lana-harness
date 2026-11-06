@@ -2,424 +2,424 @@
 
 - **Issue**: [`#4`](https://github.com/ridhomujizat/lana-harness/issues/4)
 - **Requirements**: [requirements.md](requirements.md)
-- **Contract**: [api-contract.md](api-contract.md) — Diperlukan
-- **Revisi requirements**: 2
-- **Revisi contract**: 2
-- **Status requirements**: Approved
-- **Status contract**: Approved
+- **Contract**: [api-contract.md](api-contract.md) — Required
+- **Requirements revision**: 3
+- **Contract revision**: 2
+- **Requirements status**: Approved
+- **Contract status**: Approved
 - **Status**: Approved
-- **Revisi design**: 2 (rekonsiliasi: `core.DeriveMessages` di `core`, `internal/pattern`, penjawab library, signature store, lihat `DQ-011` sampai `DQ-015`)
+- **Design revision**: 2 (reconciliation: `core.DeriveMessages` in `core`, `internal/pattern`, library answerer, store signatures; see `DQ-011` to `DQ-015`)
 
-Jangan membuat design terhadap requirements atau contract yang belum di-approve.
+Do not create a design against requirements or a contract that have not been approved.
 
-## Referensi arsitektur
+## Architecture References
 
-- **Index ADR**: [docs/adr](../../adr/README.md)
-- **Index diagram**: [docs/diagram](../../diagram/README.md)
-- **ADR**: [0002](../../adr/0002-core-dari-modul-service-dan-hook.md), [0004](../../adr/0004-permission-mode-per-agent.md), [0005](../../adr/0005-sqlite-sebagai-storage-tunggal.md), [0009](../../adr/0009-session-sebagai-event-log-append-only.md), [0010](../../adr/0010-profile-dan-config-patch.md), [0011](../../adr/0011-subagent-sebagai-child-session.md), [0013](../../adr/0013-gunakan-go-sebagai-single-binary.md), [0014](../../adr/0014-integrasi-sebagai-agentic-tool.md). Semua Accepted.
-- **Diagram lokal fitur**: [Komponen](#komponen-dan-dependency), [Topologi writer](#topologi-writer-dan-read-pool), [Resume repair](#resume-repair), [Derive](#derive-dengan-fork-dan-compaction), [Keputusan permission](#keputusan-permission), [Rantai approval](#rantai-approval)
-- **Diagram tahan lama**: [0002. Agent Loop Dan Approval](../../diagram/0002-agent-loop-dan-approval.md), [0003. Data Model Dan Scheduler](../../diagram/0003-data-model-dan-scheduler.md), [0004. Profile, Fork, Subagent, Dan Protokol](../../diagram/0004-profile-fork-subagent-dan-protokol.md)
-- **Lease**: diagram alur lease ada di [spec #1 design, bagian Lock session](../1-cli-tui/design.md#lock-session). Spec ini tidak menggambar ulang.
+- **ADR Index**: [docs/adr](../../adr/README.md)
+- **Diagram Index**: [docs/diagram](../../diagram/README.md)
+- **ADR**: [0002](../../adr/0002-core-from-modules-services-and-hooks.md), [0004](../../adr/0004-permission-mode-per-agent.md), [0005](../../adr/0005-sqlite-as-single-storage.md), [0009](../../adr/0009-session-as-append-only-event-log.md), [0010](../../adr/0010-profile-and-config-patch.md), [0011](../../adr/0011-subagent-as-child-session.md), [0013](../../adr/0013-use-go-as-single-binary.md), [0014](../../adr/0014-integration-as-agentic-tool.md). All Accepted.
+- **Feature-local diagrams**: [Components](#components-and-dependencies), [Writer topology](#writer-topology-and-read-pool), [Resume repair](#resume-repair), [Derive](#derive-with-fork-and-compaction), [Permission decision](#permission-decision), [Approval chain](#approval-chain)
+- **Durable diagrams**: [0002. Agent Loop and Approval](../../diagram/0002-agent-loop-and-approval.md), [0003. Data Model and Scheduler](../../diagram/0003-data-model-and-scheduler.md), [0004. Profile, Fork, Subagent, and Protocol](../../diagram/0004-profile-fork-subagent-and-protocols.md)
+- **Lease**: the lease flow diagram is in [spec #1 design, section Lock session](../1-cli-tui/design.md#session-lock). This spec does not redraw it.
 
-## Scan keputusan arsitektur
+## Architecture Decision Scan
 
-| Topik | Otoritas yang ada | Lokasi keputusan | Aksi |
+| Topic | Existing authority | Decision location | Action |
 |---|---|---|---|
-| Antarmuka publik | Contract spec #4, `core` dari spec #2 | contract | Pakai ulang. Method baca di `SessionStore` (`Info`, `ChainEvents`, `DeriveMessages`) ditambah di spec #2 (`API-CORE-009`) |
-| Persistence | ADR 0005 dan 0009 | ADR | Pakai ulang. Tambahan kolom projection `workspace` dan `turn_count` (contract `CQ-008`) |
-| State dan lifecycle turn | Diagram 0002 dan 0004 | diagram | Pakai ulang. Resume repair dari diagram 0004 |
-| Konkurensi | ADR 0005 (writer tunggal), spec #1 (`BEGIN IMMEDIATE`) | ADR dan spec #1 | Pakai ulang. Writer per proses, `BEGIN IMMEDIATE` lintas proses |
-| Arah dependency | ADR 0013 | ADR | Pakai ulang. Package implementasi hanya meng-import `core` |
-| Permission | ADR 0004 | ADR | Pakai ulang urutan 1 sampai 7 |
-| Compaction | ADR 0005, 0009, diagram 0002 | ADR dan diagram | Pakai ulang ambang 70% dan retry sekali |
-| Pola rule dan wildcard | Tidak ada | design | Lokal. Didefinisikan di contract `API-PERM-001` |
+| Public interface | Contract of spec #4, `core` from spec #2 | contract | Reuse. Read methods on `SessionStore` (`Info`, `ChainEvents`, `DeriveMessages`) added in spec #2 (`API-CORE-009`) |
+| Persistence | ADR 0005 and 0009 | ADR | Reuse. Additional projection columns `workspace` and `turn_count` (contract `CQ-008`) |
+| Turn state and lifecycle | Diagrams 0002 and 0004 | diagram | Reuse. Resume repair from diagram 0004 |
+| Concurrency | ADR 0005 (single writer), spec #1 (`BEGIN IMMEDIATE`) | ADR and spec #1 | Reuse. Writer per process, `BEGIN IMMEDIATE` across processes |
+| Dependency direction | ADR 0013 | ADR | Reuse. Implementation packages import only `core` |
+| Permission | ADR 0004 | ADR | Reuse steps 1 to 7 |
+| Compaction | ADR 0005, 0009, diagram 0002 | ADR and diagram | Reuse the 70% threshold and one retry |
+| Rule patterns and wildcards | None | design | Local. Defined in contract `API-PERM-001` |
 
 ## Visual Architecture Check
 
-| Pemicu | Ada? | Tampilan yang dibutuhkan |
+| Trigger | Present? | Required view |
 |---|---:|---|
-| Batas modul atau package | Ya | Komponen dan dependency |
-| Interaksi dengan aktor atau sistem luar | Ya | Rantai approval (sequence) |
-| Alur multi-komponen | Ya | Keputusan permission, derive, resume |
-| Lifecycle atau transisi state | Ya | Resume repair (flowchart) |
-| Relasi entity | Ya | ERD di diagram 0003 (tidak digambar ulang) |
-| Konkurensi, retry, atau alur gagal | Ya | Topologi writer, rantai approval |
-| Arah dependency atau topologi runtime | Ya | Topologi writer dan read pool |
+| Module or package boundary | Yes | Components and dependencies |
+| Interaction with an actor or external system | Yes | Approval chain (sequence) |
+| Multi-component flow | Yes | Permission decision, derive, resume |
+| Lifecycle or state transition | Yes | Resume repair (flowchart) |
+| Entity relationships | Yes | ERD in diagram 0003 (not redrawn) |
+| Concurrency, retry, or failure flow | Yes | Writer topology, approval chain |
+| Dependency direction or runtime topology | Yes | Writer topology and read pool |
 
-## Tampilan lokal fitur
+## Feature-Local Views
 
-### Komponen dan dependency
+### Components and dependencies
 
 ```mermaid
 flowchart TD
-  AgentLoop["agent loop spec 3"] -- "agent.pre_step dan llm.stream" --> Comp["compaction"]
+  AgentLoop["agent loop spec 3"] -- "agent.pre_step and llm.stream" --> Comp["compaction"]
   AgentLoop -- "tools.pre_execute" --> Perm["permission listener"]
   Perm -- "Request" --> Appr["approval service"]
-  Appr -- "approval.request" --> Ans["penjawab channel"]
-  Perm -- "Info dan ChainEvents" --> Store["store sessions"]
+  Appr -- "approval.request" --> Ans["channel answerer"]
+  Perm -- "Info and ChainEvents" --> Store["store sessions"]
   Appr -- "Append" --> Store
-  Comp -- "ChainEvents dan Append" --> Store
-  Comp -- "adapter provider langsung" --> Llm["provider llm"]
+  Comp -- "ChainEvents and Append" --> Store
+  Comp -- "direct provider adapter" --> Llm["llm provider"]
   Store --> Writer["writer goroutine"]
   Store --> Reads["read pool"]
   Writer --> DB[("lana.db WAL")]
   Reads --> DB
-  Writer -. "session.event setelah commit" .-> Subs["subscriber channel dan web"]
+  Writer -. "session.event after commit" .-> Subs["channel and web subscribers"]
 ```
 
-### Topologi writer dan read pool
+### Writer topology and read pool
 
 ```mermaid
 flowchart LR
-  Callers["pemanggil tulis"] --> Queue["antrean permintaan"]
-  Queue --> Writer["writer goroutine satu per proses"]
-  Writer --> Tx["BEGIN IMMEDIATE lalu COMMIT atau ROLLBACK"]
+  Callers["write callers"] --> Queue["request queue"]
+  Queue --> Writer["writer goroutine one per process"]
+  Writer --> Tx["BEGIN IMMEDIATE then COMMIT or ROLLBACK"]
   Tx --> DB[("lana.db WAL")]
-  Readers["pemanggil baca"] --> Pool["read pool mode ro maks 4"]
+  Readers["read callers"] --> Pool["read pool mode ro max 4"]
   Pool --> DB
-  Tx -. "setelah commit" .-> Hook["hook session.event"]
+  Tx -. "after commit" .-> Hook["session.event hook"]
 ```
 
 ### Resume repair
 
 ```mermaid
 flowchart TD
-  A["Open session dengan lease dipegang"] --> B{"Ada turn/start tanpa turn/end?"}
-  B -- "Tidak" --> Z["Selesai tanpa event baru"]
-  B -- "Ya" --> C["Tulis approval/decided unavailable untuk tiap approval/asked yatim"]
-  C --> D["Tulis tool/result error untuk tiap call yatim"]
-  D --> E["Tulis turn/end reason interrupted"]
+  A["Open session with lease held"] --> B{"Is there a turn/start without turn/end?"}
+  B -- "No" --> Z["Done with no new events"]
+  B -- "Yes" --> C["Write approval/decided unavailable for each orphan approval/asked"]
+  C --> D["Write tool/result error for each orphan call"]
+  D --> E["Write turn/end reason interrupted"]
   E --> F["Projection status idle"]
   F --> Z
 ```
 
-### Derive dengan fork dan compaction
+### Derive with fork and compaction
 
 ```mermaid
 flowchart TD
-  A["ChainEvents untuk leaf"] --> B["Event induk sudah dipotong di inherited_seq"]
-  B --> C{"Ada compaction/summary di rantai?"}
-  C -- "Tidak" --> D["Pakai semua event"]
-  C -- "Ya" --> E["Ambil summary terakhir S dengan upto_seq U"]
-  E --> F["Buang event segmen sebelum S dan event sesi S dengan seq sampai U"]
-  F --> G["Pakai event sisa"]
-  D --> H["Petakan kind ke pesan"]
+  A["ChainEvents for leaf"] --> B["Parent events already cut at inherited_seq"]
+  B --> C{"Is there a compaction/summary in the chain?"}
+  C -- "No" --> D["Use all events"]
+  C -- "Yes" --> E["Take latest summary S with upto_seq U"]
+  E --> F["Drop events of segments before S and session events of S with seq up to U"]
+  F --> G["Use remaining events"]
+  D --> H["Map kind to message"]
   G --> H
-  H --> I["system/message terakhir jadi ChatRequest.System, bukan riwayat"]
-  I --> J["Riwayat untuk request model"]
+  H --> I["Last system/message becomes ChatRequest.System, not history"]
+  I --> J["History for the model request"]
 ```
 
-### Keputusan permission
+### Permission decision
 
 ```mermaid
 flowchart TD
-  A["tools.pre_execute: tool, input, workspace, policy"] --> B{"Cocok rule deny?"}
-  B -- "Ya" --> X1["Tolak: rule deny"]
-  B -- "Tidak" --> C{"Argumen path di luar workspace?"}
-  C -- "Ya" --> X2["Tolak: di luar workspace"]
-  C -- "Tidak" --> D{"Cocok allow atau grant sesi?"}
-  D -- "Ya" --> OK["Izinkan"]
-  D -- "Tidak" --> E{"Policy trust?"}
-  E -- "Ya" --> OK
-  E -- "Tidak" --> F{"Risk Read?"}
-  F -- "Ya" --> OK
-  F -- "Tidak" --> G{"Policy never?"}
-  G -- "Ya" --> X3["Tolak: policy never"]
-  G -- "Tidak" --> H["ApprovalService Request"]
+  A["tools.pre_execute: tool, input, workspace, policy"] --> B{"Matches deny rule?"}
+  B -- "Yes" --> X1["Reject: deny rule"]
+  B -- "No" --> C{"Path argument outside workspace?"}
+  C -- "Yes" --> X2["Reject: outside workspace"]
+  C -- "No" --> D{"Matches allow or session grant?"}
+  D -- "Yes" --> OK["Allow"]
+  D -- "No" --> E{"Policy trust?"}
+  E -- "Yes" --> OK
+  E -- "No" --> F{"Risk Read?"}
+  F -- "Yes" --> OK
+  F -- "No" --> G{"Policy never?"}
+  G -- "Yes" --> X3["Reject: policy never"]
+  G -- "No" --> H["ApprovalService Request"]
   H --> I{"Outcome"}
-  I -- "allowed_once atau allowed_session" --> OK
-  I -- "rejected cancelled unavailable" --> X4["Tolak dengan alasan outcome"]
+  I -- "allowed_once or allowed_session" --> OK
+  I -- "rejected cancelled unavailable" --> X4["Reject with outcome reason"]
 ```
 
-### Rantai approval
+### Approval chain
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant Perm as "listener permission"
+  participant Perm as "permission listener"
   participant Appr as "approval service"
   participant Log as "store writer"
   participant Chain as "waterfall approval.request"
-  participant Ans as "penjawab channel"
-  Perm->>Appr: Request dengan CallID tanpa argumen
+  participant Ans as "channel answerer"
+  Perm->>Appr: Request with CallID, no arguments
   Appr->>Log: Append approval/asked
-  Log-->>Appr: seq asked
-  Appr->>Chain: Call dengan context batas 10 menit
-  Chain->>Ans: listener memeriksa session miliknya
-  alt Penjawab memiliki session
-    Ans-->>Chain: outcome tertutup
+  Log-->>Appr: asked seq
+  Appr->>Chain: Call with 10 minute deadline context
+  Chain->>Ans: listener checks whether it owns the session
+  alt Answerer owns the session
+    Ans-->>Chain: closed outcome
     Chain-->>Appr: outcome
-  else Tidak ada penjawab
-    Chain-->>Appr: unavailable dari default
+  else No answerer
+    Chain-->>Appr: unavailable from default
   end
-  Note over Appr: batas 10 menit lewat berarti unavailable, cancel berarti cancelled
+  Note over Appr: 10 minute deadline passed means unavailable, cancel means cancelled
   Appr->>Log: Append approval/decided
-  Log-->>Appr: seq decided
-  Appr-->>Perm: outcome dan error
+  Log-->>Appr: decided seq
+  Appr-->>Perm: outcome and error
 ```
 
-## Kesesuaian dengan repository
+## Repository Conformance
 
-Layout mengikuti ADR 0013 dan ARCHITECTURE §4. Satu package baru di luar layout: `internal/pattern` (`DQ-013`).
+The layout follows ADR 0013 and ARCHITECTURE §4. One new package outside the layout: `internal/pattern` (`DQ-013`).
 
-| Package | Isi | Boleh meng-import |
+| Package | Contents | May import |
 |---|---|---|
 | `store/` | `Open`, writer, migrator, projection, derive, lease, repair, prune, payload, `migrations/*.sql` | `core` |
-| `internal/pattern/` | `ParsePattern`, `Match`, `Argument` (grammar pola) | `core`. Dipakai `config` (spec #2) dan `tools/permission` |
-| `tools/permission/` | workspace, evaluator, grant, approval service, penjawab library, modul `permission` dan `approval` | `core`, `internal/pattern` |
-| `agent/compaction/` | compaction service, modul `compaction` | `core` |
+| `internal/pattern/` | `ParsePattern`, `Match`, `Argument` (pattern grammar) | `core`. Used by `config` (spec #2) and `tools/permission` |
+| `tools/permission/` | workspace, evaluator, grant, approval service, library answerer, modules `permission` and `approval` | `core`, `internal/pattern` |
+| `agent/compaction/` | compaction service, module `compaction` | `core` |
 
-- Pemakaian antar-modul hanya lewat interface di `core` (`SessionStore`, `ApprovalService`, `Compactor`), sesuai ADR 0013.
-- Fungsi murni (pattern, derive, policy, grant, batas izin subagent) ditulis tanpa I/O agar bisa diuji tanpa database.
-- Penambahan method di `core.SessionStore` (`Info`, `ChainEvents`, `DeriveMessages`) dan tipe di `core` dicatat di contract dan di spec #2 (`API-CORE-009`, `API-CORE-015`). Lihat `DQ-005` dan `DQ-012`.
+- Cross-module use goes only through interfaces in `core` (`SessionStore`, `ApprovalService`, `Compactor`), consistent with ADR 0013.
+- Pure functions (pattern, derive, policy, grant, subagent permission bound) are written without I/O so they can be tested without a database.
+- Additions of methods to `core.SessionStore` (`Info`, `ChainEvents`, `DeriveMessages`) and types in `core` are recorded in the contract and in spec #2 (`API-CORE-009`, `API-CORE-015`). See `DQ-005` and `DQ-012`.
 
-## Design yang diusulkan
+## Proposed Design
 
-### Komponen
+### Components
 
-- **Store** (`store/store.go`) — membuka `lana.db`, memasang writer dan read pool, dan mengimplementasikan `core.SessionStore`. Invariant: semua tulis lewat writer.
-- **Writer** (`store/writer.go`) — satu goroutine per proses. Menerima `writeReq` berisi fungsi yang berjalan di dalam `BEGIN IMMEDIATE`. Setelah `COMMIT`, mengirim event ke hook `session.event`. Saat `Close`, menolak permintaan baru dengan `ErrStoreClosed`.
-- **Migrator** (`store/migrate.go`) — membaca `user_version`, lalu menjalankan file SQL berurutan dari `embed.FS`. Setiap migrasi di satu transaksi.
-- **Projection** (`store/projection.go`) — memperbarui baris `sessions` di transaksi yang sama dengan event. `RebuildProjections` membangun ulang dari `session_events`.
-- **Chain dan derive** (`store/chain.go`) — `ChainEvents` membaca rantai dalam satu read transaction dan memotong induk di `inherited_seq`. `DeriveMessages` (store) memanggil `core.DeriveMessages` (`API-CORE-015`) atas hasil `ChainEvents`. Fungsi murni itu ada di `core` dan memuat aturan compaction dari spec ini (`DQ-011`).
-- **Lease** (`store/lease.go`) — `TryLease` mengembalikan `release func() error` (`API-CORE-009`). Cek PID lewat `syscall.Kill(pid, 0)`. Host dibandingkan dengan `os.Hostname()`.
-- **Repair** (`store/repair.go`) — dijalankan di transaksi writer saat `Open`. Lihat diagram [Resume repair](#resume-repair).
-- **Prune** (`store/prune.go`) — mengisi `session_prune_allow`, menghapus event dan projection, lalu menghapus baris allow di transaksi yang sama.
-- **Payload** (`store/payload.go`) — menulis `v` = 1. `NormalizePayload` men-decode versi lama ke versi sekarang di memori.
-- **Pattern** (`internal/pattern/pattern.go`) — `ParsePattern` dan `Match`. Pure function. Dipakai `config` untuk validasi `rules` dan `tools/permission` untuk evaluasi.
-- **Workspace** (`tools/permission/workspace.go`) — menyelesaikan path, `~` dan relatif, `filepath.Clean`, `filepath.EvalSymlinks`. Untuk path belum ada, memakai induk terdekat yang ada.
-- **Evaluator** (`tools/permission/evaluator.go`) — listener `tools.pre_execute`. Mengikuti urutan 1 sampai 7 di diagram [Keputusan permission](#keputusan-permission). Tidak punya state; aman dipakai paralel untuk tool `Read`.
-- **Grant dan policy** (`tools/permission/grant.go`) — fungsi murni atas `ChainEvents`: `EffectivePolicy(events, default)`, `Grants(events)`. Grant dihitung dari `tool/call` yang dirujuk `call_id`.
-- **Approval service** (`tools/permission/approval.go`) — implementasi `core.ApprovalService`. Menulis audit lewat `Append`, memanggil hook `approval.request`, mengelola timeout dan cancel.
-- **Penjawab library** (`tools/permission/library.go`, dipasang lewat `lana.ApproveWith`) — listener `approval.request` untuk session channel `library`. Session channel lain memanggil `next` (`API-APPR-005`, `DQ-014`).
-- **Batas izin subagent** (`tools/permission/grant.go`) — `ChildPolicy(parent, child)`, `MergeDeny(parent, child)`. Dipakai tool `task` di M4.
-- **Compaction** (`agent/compaction/compaction.go`) — implementasi `core.Compactor`. `CompactNow`, pengecekan ambang, dan retry `ErrContextTooLong`.
-- **Modul** — `sqlite_store` (`store/module.go`), `approval` dan `permission` (`tools/permission/module.go`), `compaction` (`agent/compaction/module.go`). Urutan install: `sqlite_store`, `approval`, `permission`, `compaction`. Keempat modul ada di base profile (`API-CONF-009` spec #2).
+- **Store** (`store/store.go`) — opens `lana.db`, installs the writer and read pool, and implements `core.SessionStore`. Invariant: all writes go through the writer.
+- **Writer** (`store/writer.go`) — one goroutine per process. Receives `writeReq` containing a function that runs inside `BEGIN IMMEDIATE`. After `COMMIT`, sends events to the `session.event` hook. On `Close`, rejects new requests with `ErrStoreClosed`.
+- **Migrator** (`store/migrate.go`) — reads `user_version`, then runs SQL files in order from `embed.FS`. Each migration in one transaction.
+- **Projection** (`store/projection.go`) — updates `sessions` rows in the same transaction as the events. `RebuildProjections` rebuilds from `session_events`.
+- **Chain and derive** (`store/chain.go`) — `ChainEvents` reads the chain in one read transaction and cuts the parent at `inherited_seq`. `DeriveMessages` (store) calls `core.DeriveMessages` (`API-CORE-015`) on the result of `ChainEvents`. That pure function lives in `core` and contains the compaction rules of this spec (`DQ-011`).
+- **Lease** (`store/lease.go`) — `TryLease` returns `release func() error` (`API-CORE-009`). PID check via `syscall.Kill(pid, 0)`. Host is compared with `os.Hostname()`.
+- **Repair** (`store/repair.go`) — runs in the writer transaction on `Open`. See the [Resume repair](#resume-repair) diagram.
+- **Prune** (`store/prune.go`) — fills `session_prune_allow`, deletes events and projection, then deletes the allow row in the same transaction.
+- **Payload** (`store/payload.go`) — writes `v` = 1. `NormalizePayload` decodes older versions to the current version in memory.
+- **Pattern** (`internal/pattern/pattern.go`) — `ParsePattern` and `Match`. Pure functions. Used by `config` to validate `rules` and by `tools/permission` for evaluation.
+- **Workspace** (`tools/permission/workspace.go`) — resolves paths, `~` and relative, `filepath.Clean`, `filepath.EvalSymlinks`. For paths that do not yet exist, uses the nearest existing parent.
+- **Evaluator** (`tools/permission/evaluator.go`) — listener on `tools.pre_execute`. Follows steps 1 to 7 in the [Permission decision](#permission-decision) diagram. Stateless; safe for parallel use for `Read` tools.
+- **Grant and policy** (`tools/permission/grant.go`) — pure functions over `ChainEvents`: `EffectivePolicy(events, default)`, `Grants(events)`. Grants are computed from the `tool/call` referenced by `call_id`.
+- **Approval service** (`tools/permission/approval.go`) — implementation of `core.ApprovalService`. Writes audit through `Append`, calls the `approval.request` hook, and manages timeout and cancel.
+- **Library answerer** (`tools/permission/library.go`, installed through `lana.ApproveWith`) — `approval.request` listener for channel `library` sessions. Sessions on other channels call `next` (`API-APPR-005`, `DQ-014`).
+- **Subagent permission bound** (`tools/permission/grant.go`) — `ChildPolicy(parent, child)`, `MergeDeny(parent, child)`. Used by the `task` tool in M4.
+- **Compaction** (`agent/compaction/compaction.go`) — implementation of `core.Compactor`. `CompactNow`, threshold check, and `ErrContextTooLong` retry.
+- **Modules** — `sqlite_store` (`store/module.go`), `approval` and `permission` (`tools/permission/module.go`), `compaction` (`agent/compaction/module.go`). Install order: `sqlite_store`, `approval`, `permission`, `compaction`. All four are in the base profile (`API-CONF-009` of spec #2).
 
-### Pemetaan contract
+### Contract mapping
 
-| Operasi contract | Komponen | Input | Hasil | Requirements |
+| Contract operation | Component | Input | Result | Requirements |
 |---|---|---|---|---|
-| `API-STORE-001` | Store, migrator, writer | path | `*Store` siap | `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016` |
+| `API-STORE-001` | Store, migrator, writer | path | `*Store` ready | `REQ-STORE-001`, `REQ-STORE-002`, `REQ-STORE-004`, `REQ-STORE-016` |
 | `API-STORE-002` | Writer, projection | `core.NewSession` | `core.SessionInfo` | `REQ-STORE-006` |
-| `API-STORE-003` | Writer, repair | ID session | `SessionInfo` | `REQ-STORE-006` |
+| `API-STORE-003` | Writer, repair | session ID | `SessionInfo` | `REQ-STORE-006` |
 | `API-STORE-004` | Writer, projection, hook | `[]core.EventDraft` | `[]SessionEvent` | `REQ-STORE-003`, `REQ-STORE-005`, `REQ-STORE-015` |
 | `API-STORE-005` | Read pool | ID, from | event | `REQ-STORE-008` |
-| `API-STORE-006` | Read pool | `core.SessionFilter` | daftar session | `REQ-STORE-008` |
-| `API-STORE-007` | Read pool | prefix | daftar session, lalu `core.ResolvePrefix` | `REQ-STORE-009` |
+| `API-STORE-006` | Read pool | `core.SessionFilter` | list of sessions | `REQ-STORE-008` |
+| `API-STORE-007` | Read pool | prefix | list of sessions, then `core.ResolvePrefix` | `REQ-STORE-009` |
 | `API-STORE-008` | Writer | parent, atSeq | `core.SessionInfo` | `REQ-STORE-007` |
-| `API-STORE-009` | Lease | ID session | `release func() error` | `REQ-STORE-010` |
-| `API-STORE-010` | Chain, derive | ID session | pesan model, rantai | `REQ-STORE-011` |
-| `API-STORE-011` | Prune | ID session | session dihapus | `REQ-STORE-014` |
-| `API-STORE-012` | Projection | — | tabel `sessions` | `REQ-STORE-012` |
-| `API-STORE-013` | Payload | kind, raw | payload v1 | `REQ-STORE-013` |
+| `API-STORE-009` | Lease | session ID | `release func() error` | `REQ-STORE-010` |
+| `API-STORE-010` | Chain, derive | session ID | model messages, chain | `REQ-STORE-011` |
+| `API-STORE-011` | Prune | session ID | session deleted | `REQ-STORE-014` |
+| `API-STORE-012` | Projection | — | `sessions` table | `REQ-STORE-012` |
+| `API-STORE-013` | Payload | kind, raw | v1 payload | `REQ-STORE-013` |
 | `API-PERM-001` | Pattern | string | `Pattern` | `REQ-PERM-001` |
-| `API-PERM-002` | Config validation (spec #2) | config | error validasi | `REQ-PERM-001` |
-| `API-PERM-003` | Evaluator, workspace, grant | `core.ToolsPreExecuteInput` | `core.ToolDecision` | `REQ-PERM-002` sampai `REQ-PERM-006` |
-| `API-APPR-005` | Penjawab library | `ApproveWith(fn)` | outcome dari fn | `REQ-APPR-007` |
+| `API-PERM-002` | Config validation (spec #2) | config | validation error | `REQ-PERM-001` |
+| `API-PERM-003` | Evaluator, workspace, grant | `core.ToolsPreExecuteInput` | `core.ToolDecision` | `REQ-PERM-002` to `REQ-PERM-006` |
+| `API-APPR-005` | Library answerer | `ApproveWith(fn)` | outcome from fn | `REQ-APPR-007` |
 | `API-APPR-001` | Approval service | session, policy | event, policy | `REQ-APPR-001` |
 | `API-APPR-002` | Approval service | `ApprovalRequest` | outcome | `REQ-APPR-002`, `REQ-APPR-004`, `REQ-APPR-005` |
 | `API-APPR-003` | Waterfall approval.request | `ApprovalRequest` | outcome | `REQ-APPR-003` |
-| `API-APPR-004` | `ChildPolicy`, `MergeDeny` | policy dan deny | policy child | `REQ-APPR-006` |
+| `API-APPR-004` | `ChildPolicy`, `MergeDeny` | parent and deny policy | child policy | `REQ-APPR-006` |
 | `API-COMP-001` | Compaction service | session | `CompactionResult` | `REQ-COMP-002` |
 | `API-COMP-002` | Compaction listener | `agent.pre_step`, `ErrContextTooLong` | summary, retry | `REQ-COMP-001`, `REQ-COMP-003` |
 
 ### Persistence
 
-- Skema, DDL, dan trigger ada di contract (`Skema SQL`). Design tidak mengulang DDL.
-- Setiap event ditulis dengan `created_at` = waktu saat transaksi commit (milidetik).
-- `turn_count` bertambah saat `turn/start`. `last_seq` = seq event terakhir. `updated_at` = `created_at` event terakhir.
-- Judul diisi saat `user/message` pertama masuk dan `title` masih kosong: 40 rune pertama teks pesan itu (`Q-011`).
-- Status `running` saat ada `turn/start` tanpa `turn/end`, `idle` sebaliknya.
-- Event `session/created` untuk fork berisi `parent_session_id` dan `inherited_seq`. Event lain tidak menyalin data induk.
+- Schema, DDL, and triggers are in the contract (`Skema SQL`). The design does not repeat the DDL.
+- Every event is written with `created_at` = the time the transaction commits (milliseconds).
+- `turn_count` increases on `turn/start`. `last_seq` = seq of the last event. `updated_at` = `created_at` of the last event.
+- The title is set when the first `user/message` arrives and `title` is still empty: the first 40 runes of that message text (`Q-011`).
+- Status is `running` while there is a `turn/start` without a `turn/end`, otherwise `idle`.
+- The `session/created` event for a fork contains `parent_session_id` and `inherited_seq`. Other events do not copy parent data.
 
 ### Failure handling
 
-| Kegagalan | Error internal | Hasil yang terlihat |
+| Failure | Internal error | Visible result |
 |---|---|---|
-| Database tidak bisa dibuka | error dari `sql.Open` atau `Ping` | Boot gagal, pesan menyebut path |
-| Schema terlalu baru | `ErrSchemaTooNew` | Boot gagal, database tidak diubah |
-| Migrasi gagal | error dan rollback | Boot gagal, `user_version` tetap |
-| `SQLITE_BUSY` lebih dari 5 detik | error driver | Pemanggil menerima error. Tidak ada event parsial |
-| Store ditutup | `ErrStoreClosed` | Tulis tertunda gagal |
-| Lease dipegang proses hidup | `*core.LeaseHeldError` | CLI keluar dengan pesan PID (spec #1) |
-| `approval/asked` gagal | error biasa | Penjawab tidak dipanggil. Tool ditolak |
-| `approval/decided` gagal | error biasa | Tool tidak berjalan (`Allowed` false) |
-| Penjawab error | error dari waterfall | Outcome `unavailable`, listener berikutnya tidak berjalan |
-| `EvalSymlinks` gagal (bukan `ENOENT`) | error OS | `Allowed` false, alasan menyebut path |
-| Ringkasan otomatis gagal | error provider | Log `warn`, turn lanjut |
-| Ringkasan manual gagal | error provider | Error ke pemanggil, session tidak berubah |
-| `ErrContextTooLong` dua kali | `core.ErrContextTooLong` | `turn/end` reason `error` |
-| Proses mati saat turn | tidak ada error. Terdeteksi saat `Open` | Resume repair (`turn/end` `interrupted`) |
+| Database cannot be opened | error from `sql.Open` or `Ping` | Boot fails, message names the path |
+| Schema too new | `ErrSchemaTooNew` | Boot fails, database unchanged |
+| Migration fails | error and rollback | Boot fails, `user_version` unchanged |
+| `SQLITE_BUSY` for more than 5 seconds | driver error | Caller receives an error. No partial events |
+| Store closed | `ErrStoreClosed` | Pending write fails |
+| Lease held by a live process | `*core.LeaseHeldError` | CLI exits with a PID message (spec #1) |
+| `approval/asked` fails | plain error | Answerer not called. Tool rejected |
+| `approval/decided` fails | plain error | Tool does not run (`Allowed` false) |
+| Answerer errors | error from waterfall | Outcome `unavailable`, next listener does not run |
+| `EvalSymlinks` fails (not `ENOENT`) | OS error | `Allowed` false, reason names the path |
+| Automatic summary fails | provider error | `warn` log, turn continues |
+| Manual summary fails | provider error | Error to caller, session unchanged |
+| `ErrContextTooLong` twice | `core.ErrContextTooLong` | `turn/end` reason `error` |
+| Process dies during a turn | no error. Detected on `Open` | Resume repair (`turn/end` `interrupted`) |
 
-### Konkurensi
+### Concurrency
 
-- **Writer tunggal per proses**: satu goroutine memegang koneksi tulis. Permintaan diproses berurutan. Ini menghilangkan `SQLITE_BUSY` di dalam proses.
-- **Lintas proses**: setiap transaksi tulis memakai `BEGIN IMMEDIATE`. `busy_timeout` 5000 ms. Dua proses tidak bisa menghitung seq yang sama karena penulisan terkunci.
-- **Read pool**: `sql.DB` dengan DSN `mode=ro` dan `MaxOpenConns` 4. Derive dan `ChainEvents` memakai satu read transaction supaya snapshot konsisten.
-- **Lease**: `TryLease` lewat writer. Pemeriksaan PID dan penulisan baris dalam satu transaksi.
-- **Approval**: satu permintaan = satu goroutine turn. Timeout dengan `context.WithTimeout`. Penulisan `approval/decided` memakai context tanpa pembatalan dengan batas 5 detik (lihat contract `API-APPR-002`).
-- **Permission paralel**: tool `Read` boleh paralel (ADR 0002). Evaluator tidak punya state. Setiap evaluasi membaca `ChainEvents` dan `Info` sendiri.
-- **Compaction**: dijalankan di goroutine turn. Pemanggilan manual ditolak saat turn terbuka (`ErrTurnActive`). Verifikasi `last_seq` optimistic di transaksi append.
-- **Pembatalan**: `ctx` turn dibatalkan saat `Ctrl+C` (spec #1). Approval menjadi `cancelled`. Tool yang berjalan dibatalkan oleh spec #3.
+- **Single writer per process**: one goroutine holds the write connection. Requests are processed in order. This removes `SQLITE_BUSY` inside the process.
+- **Across processes**: every write transaction uses `BEGIN IMMEDIATE`. `busy_timeout` 5000 ms. Two processes cannot compute the same seq because writes are locked.
+- **Read pool**: `sql.DB` with DSN `mode=ro` and `MaxOpenConns` 4. Derive and `ChainEvents` use one read transaction so the snapshot is consistent.
+- **Lease**: `TryLease` goes through the writer. PID check and row write happen in one transaction.
+- **Approval**: one request = one turn goroutine. Timeout with `context.WithTimeout`. Writing `approval/decided` uses a non-cancelling context with a 5 second limit (see contract `API-APPR-002`).
+- **Parallel permission**: `Read` tools may run in parallel (ADR 0002). The evaluator has no state. Each evaluation reads `ChainEvents` and `Info` itself.
+- **Compaction**: runs in the turn goroutine. Manual calls are rejected while a turn is open (`ErrTurnActive`). Optimistic verification of `last_seq` in the append transaction.
+- **Cancellation**: the turn `ctx` is cancelled on `Ctrl+C` (spec #1). Approval becomes `cancelled`. Running tools are cancelled by spec #3.
 
-### Keamanan
+### Security
 
-- **Urutan keputusan** mengikuti ADR 0004. `deny` diperiksa pertama, sehingga tidak bisa dilewati oleh `trust` atau grant.
-- **Batas workspace** memakai path hasil `EvalSymlinks`. Symlink keluar workspace ditolak. Path belum ada memakai induk terdekat yang ada, supaya `write_file` file baru tetap bisa.
-- **Rule deny dicocokkan dua kali** untuk path: path lexical dan path hasil `EvalSymlinks`. Salah satu cocok, tolak. Rule allow harus cocok keduanya.
-- **Fail-closed**: error baca store, error `EvalSymlinks`, error audit, error penjawab, dan outcome tidak dikenal semuanya menghasilkan tidak diizinkan.
-- **Audit tanpa argumen**: `approval/asked` dan `approval/decided` tidak menyimpan argumen. Penjawab mengambil argumen dari `tool/call` lewat `call_id`.
-- **File**: `lana.db`, `-wal`, dan `-shm` mode `0600` (`Q-019`).
-- **Secret**: tidak masuk database (ADR 0005). Argumen tool yang mengandung secret tetap ada di `tool/call` (lihat risiko).
+- **Decision order** follows ADR 0004. `deny` is checked first, so it cannot be bypassed by `trust` or grants.
+- **Workspace boundary** uses the path returned by `EvalSymlinks`. Symlinks leaving the workspace are rejected. Paths that do not yet exist use the nearest existing parent, so `write_file` for a new file still works.
+- **Deny rules are matched twice** for paths: the lexical path and the path returned by `EvalSymlinks`. If either matches, reject. Allow rules must match both.
+- **Fail-closed**: store read errors, `EvalSymlinks` errors, audit errors, answerer errors, and unknown outcomes all produce not allowed.
+- **Audit without arguments**: `approval/asked` and `approval/decided` do not store arguments. The answerer gets arguments from `tool/call` through `call_id`.
+- **Files**: `lana.db`, `-wal`, and `-shm` have mode `0600` (`Q-019`).
+- **Secrets**: not stored in the database (ADR 0005). Tool arguments containing secrets still appear in `tool/call` (see risks).
 
 ### Observability
 
-- `slog` level `info`: session dibuka (ID, agent), repair ditulis (jumlah call yatim, jumlah approval yatim), compaction selesai (`tokens_before`, `tokens_after`), approval selesai (`call_id`, outcome).
-- Level `warn`: ringkasan otomatis gagal, `EvalSymlinks` gagal.
-- Level `debug`: pola yang cocok (tanpa argumen penuh), grant yang dipakai.
-- Tidak ada isi argumen tool, isi pesan, atau isi ringkasan di level `info`.
+- `slog` level `info`: session opened (ID, agent), repair written (number of orphan calls, number of orphan approvals), compaction finished (`tokens_before`, `tokens_after`), approval finished (`call_id`, outcome).
+- Level `warn`: automatic summary failed, `EvalSymlinks` failed.
+- Level `debug`: matched patterns (without full arguments), grants used.
+- No tool argument contents, message contents, or summary contents at level `info`.
 
 ## Migration strategy
 
-- Migrasi berupa file SQL bernomor di `store/migrations/` yang di-embed (`0001_session_log.sql`, `0002_session_leases.sql`).
-- Setiap migrasi berjalan di satu transaksi. `user_version` diatur di transaksi yang sama.
-- Hanya maju. Tidak ada migrasi turun. Rollback dilakukan dengan menyalin file database sebelum upgrade (ADR 0005).
-- Migrasi tidak boleh mengubah isi `session_events`. Perubahan format payload memakai `v`, bukan migrasi SQL.
-- Fitur M5 (memory, cron) menambah migrasi `0003` dan seterusnya. Tidak ada perubahan pada `0001` dan `0002`.
-- Migrasi tidak memakai library pihak ketiga (`DQ-003`).
+- Migrations are numbered SQL files in `store/migrations/` that are embedded (`0001_session_log.sql`, `0002_session_leases.sql`).
+- Each migration runs in one transaction. `user_version` is set in the same transaction.
+- Forward only. There are no down migrations. Rollback is done by copying the database file before upgrading (ADR 0005).
+- Migrations must not change the contents of `session_events`. Payload format changes use `v`, not SQL migrations.
+- Features of M5 (memory, cron) add migration `0003` and onward. No changes to `0001` and `0002`.
+- Migrations do not use third-party libraries (`DQ-003`).
 
 ## Traceability requirement
 
-| Requirement | Operasi contract | Komponen design | Level verifikasi |
+| Requirement | Contract operation | Design component | Verification level |
 |---|---|---|---|
-| `REQ-STORE-001` | `API-STORE-001` | Store, migrator | integrasi |
-| `REQ-STORE-002` | `API-STORE-001` | Migrator | integrasi |
-| `REQ-STORE-003` | `API-STORE-004` | Writer, read pool | integrasi (concurrency) |
-| `REQ-STORE-004` | `API-STORE-001` | DDL, trigger | integrasi |
-| `REQ-STORE-005` | `API-STORE-004` | Writer, projection | integrasi |
-| `REQ-STORE-006` | `API-STORE-002`, `API-STORE-003` | Projection, repair | integrasi, simulasi crash |
-| `REQ-STORE-007` | `API-STORE-008` | Writer | integrasi |
-| `REQ-STORE-008` | `API-STORE-005`, `API-STORE-006` | Read pool | integrasi |
-| `REQ-STORE-009` | `API-STORE-007` | Read pool | unit dan integrasi |
-| `REQ-STORE-010` | `API-STORE-009` | Lease | integrasi (PID palsu) |
+| `REQ-STORE-001` | `API-STORE-001` | Store, migrator | integration |
+| `REQ-STORE-002` | `API-STORE-001` | Migrator | integration |
+| `REQ-STORE-003` | `API-STORE-004` | Writer, read pool | integration (concurrency) |
+| `REQ-STORE-004` | `API-STORE-001` | DDL, trigger | integration |
+| `REQ-STORE-005` | `API-STORE-004` | Writer, projection | integration |
+| `REQ-STORE-006` | `API-STORE-002`, `API-STORE-003` | Projection, repair | integration, crash simulation |
+| `REQ-STORE-007` | `API-STORE-008` | Writer | integration |
+| `REQ-STORE-008` | `API-STORE-005`, `API-STORE-006` | Read pool | integration |
+| `REQ-STORE-009` | `API-STORE-007` | Read pool | unit and integration |
+| `REQ-STORE-010` | `API-STORE-009` | Lease | integration (fake PID) |
 | `REQ-STORE-011` | `API-STORE-010` | Chain, derive | unit (golden) |
-| `REQ-STORE-012` | `API-STORE-012` | Projection | integrasi |
+| `REQ-STORE-012` | `API-STORE-012` | Projection | integration |
 | `REQ-STORE-013` | `API-STORE-013` | Payload | unit |
-| `REQ-STORE-014` | `API-STORE-011` | Prune | integrasi |
-| `REQ-STORE-015` | `API-STORE-004` | Writer, hook | integrasi |
-| `REQ-STORE-016` | `API-STORE-001` | Modul `sqlite_store` | integrasi (boot) |
-| `REQ-PERM-001` | `API-PERM-001`, `API-PERM-002` | Pattern, config | unit dan property test |
-| `REQ-PERM-002` | `API-PERM-003` | Evaluator | unit dan integrasi |
-| `REQ-PERM-003` | `API-PERM-003` | Workspace | unit (filesystem sementara) |
-| `REQ-PERM-004` | `API-PERM-003`, `API-APPR-002` | Grant, evaluator | integrasi |
-| `REQ-PERM-005` | `API-PERM-003` | Modul `permission` | integrasi (boot) |
+| `REQ-STORE-014` | `API-STORE-011` | Prune | integration |
+| `REQ-STORE-015` | `API-STORE-004` | Writer, hook | integration |
+| `REQ-STORE-016` | `API-STORE-001` | Module `sqlite_store` | integration (boot) |
+| `REQ-PERM-001` | `API-PERM-001`, `API-PERM-002` | Pattern, config | unit and property test |
+| `REQ-PERM-002` | `API-PERM-003` | Evaluator | unit and integration |
+| `REQ-PERM-003` | `API-PERM-003` | Workspace | unit (temporary filesystem) |
+| `REQ-PERM-004` | `API-PERM-003`, `API-APPR-002` | Grant, evaluator | integration |
+| `REQ-PERM-005` | `API-PERM-003` | Module `permission` | integration (boot) |
 | `REQ-PERM-006` | `API-PERM-003` | Evaluator | unit |
-| `REQ-APPR-001` | `API-APPR-001` | Grant dan policy, approval | integrasi |
-| `REQ-APPR-002` | `API-APPR-002` | Approval service | integrasi |
+| `REQ-APPR-001` | `API-APPR-001` | Grant and policy, approval | integration |
+| `REQ-APPR-002` | `API-APPR-002` | Approval service | integration |
 | `REQ-APPR-003` | `API-APPR-003` | Waterfall | unit |
-| `REQ-APPR-004` | `API-APPR-002` | Approval service, jam uji | unit |
-| `REQ-APPR-005` | `API-APPR-002` | Approval service | unit (store palsu gagal) |
+| `REQ-APPR-004` | `API-APPR-002` | Approval service, test clock | unit |
+| `REQ-APPR-005` | `API-APPR-002` | Approval service | unit (fake store fails) |
 | `REQ-APPR-006` | `API-APPR-004` | `ChildPolicy`, `MergeDeny` | unit |
-| `REQ-APPR-007` | `API-APPR-005` | Penjawab library | integrasi |
-| `REQ-COMP-001` | `API-COMP-002` | Compaction listener | unit dan integrasi |
-| `REQ-COMP-002` | `API-COMP-001` | Compaction service | integrasi |
-| `REQ-COMP-003` | `API-COMP-002` | Compaction listener, `llm` palsu | integrasi |
+| `REQ-APPR-007` | `API-APPR-005` | Library answerer | integration |
+| `REQ-COMP-001` | `API-COMP-002` | Compaction listener | unit and integration |
+| `REQ-COMP-002` | `API-COMP-001` | Compaction service | integration |
+| `REQ-COMP-003` | `API-COMP-002` | Compaction listener, fake `llm` | integration |
 
-## Peta verifikasi acceptance
+## Acceptance verification map
 
-Setiap acceptance criterion muncul tepat satu kali. Nama test adalah nama yang direncanakan.
+Every acceptance criterion appears exactly once. Test names are the planned names.
 
-| Acceptance criterion | Metode verifikasi | Bukti yang direncanakan |
+| Acceptance criterion | Verification method | Planned evidence |
 |---|---|---|
-| `AC-STORE-001`, `AC-STORE-002` | integrasi | `TestOpenCreatesWALDatabase` (cek pragma dan mode), `TestOpenRelativePath` |
-| `AC-STORE-003`, `AC-STORE-004` | integrasi | `TestMigrateIdempotent`, `TestSchemaTooNew` |
-| `AC-STORE-005`, `AC-STORE-006` | integrasi | `TestConcurrentAppendNoBusy` (50 goroutine, `-race`), `TestTwoInstancesSeqUnique` |
-| `AC-STORE-007`, `AC-STORE-008` | integrasi | `TestRawUpdateDeleteRejected` |
-| `AC-STORE-009`, `AC-STORE-010`, `AC-STORE-011` | integrasi | `TestAppendSeq`, `TestAppendBatchAtomic`, `TestTurnStartRejectedWhileOpen` |
-| `AC-STORE-012` | integrasi | `TestCreateWritesSessionCreated` |
-| `AC-STORE-013`, `AC-STORE-014`, `AC-STORE-015`, `AC-STORE-016` | integrasi dan simulasi crash | `TestResumeRepairOrphanCall`, `TestResumeRepairOrphanApproval`, `TestOpenIdempotent`, `TestOpenWithoutLease`. Simulasi crash: lihat [Strategi verifikasi](#strategi-verifikasi) |
-| `AC-STORE-017`, `AC-STORE-018` | integrasi | `TestForkAtTurnEnd`, `TestForkNotBoundary` |
-| `AC-STORE-019`, `AC-STORE-020` | integrasi | `TestEventsFromSeq`, `TestListOrderAndLimit` |
-| `AC-STORE-021`, `AC-STORE-022`, `AC-STORE-023` | integrasi dan unit | `TestFindPrefixCaseInsensitive`, `TestFindPrefixAmbiguous`, `TestFindPrefixErrors` |
-| `AC-STORE-024`, `AC-STORE-025`, `AC-STORE-026`, `AC-STORE-027` | integrasi | `TestLeaseFree`, `TestLeaseLiveHeld` (PID proses tes), `TestLeaseDeadReplaced` (PID 999999), `TestLeaseOtherHost` |
+| `AC-STORE-001`, `AC-STORE-002` | integration | `TestOpenCreatesWALDatabase` (checks pragmas and mode), `TestOpenRelativePath` |
+| `AC-STORE-003`, `AC-STORE-004` | integration | `TestMigrateIdempotent`, `TestSchemaTooNew` |
+| `AC-STORE-005`, `AC-STORE-006` | integration | `TestConcurrentAppendNoBusy` (50 goroutines, `-race`), `TestTwoInstancesSeqUnique` |
+| `AC-STORE-007`, `AC-STORE-008` | integration | `TestRawUpdateDeleteRejected` |
+| `AC-STORE-009`, `AC-STORE-010`, `AC-STORE-011` | integration | `TestAppendSeq`, `TestAppendBatchAtomic`, `TestTurnStartRejectedWhileOpen` |
+| `AC-STORE-012` | integration | `TestCreateWritesSessionCreated` |
+| `AC-STORE-013`, `AC-STORE-014`, `AC-STORE-015`, `AC-STORE-016` | integration and crash simulation | `TestResumeRepairOrphanCall`, `TestResumeRepairOrphanApproval`, `TestOpenIdempotent`, `TestOpenWithoutLease`. Crash simulation: see [Verification strategy](#verification-strategy) |
+| `AC-STORE-017`, `AC-STORE-018` | integration | `TestForkAtTurnEnd`, `TestForkNotBoundary` |
+| `AC-STORE-019`, `AC-STORE-020` | integration | `TestEventsFromSeq`, `TestListOrderAndLimit` |
+| `AC-STORE-021`, `AC-STORE-022`, `AC-STORE-023` | integration and unit | `TestFindPrefixCaseInsensitive`, `TestFindPrefixAmbiguous`, `TestFindPrefixErrors` |
+| `AC-STORE-024`, `AC-STORE-025`, `AC-STORE-026`, `AC-STORE-027` | integration | `TestLeaseFree`, `TestLeaseLiveHeld` (test process PID), `TestLeaseDeadReplaced` (PID 999999), `TestLeaseOtherHost` |
 | `AC-STORE-028`, `AC-STORE-029`, `AC-STORE-030` | unit (golden) | `TestDeriveGolden` (`testdata/derive/*.golden`, flag `-update`), `TestDeriveForkCut`, `TestDeriveCompactionCut` |
-| `AC-STORE-031` | integrasi | `TestRebuildProjectionsIdentical` |
+| `AC-STORE-031` | integration | `TestRebuildProjectionsIdentical` |
 | `AC-STORE-032`, `AC-STORE-033` | unit | `TestUnknownPayloadVersion`, `TestOldPayloadMigratedInMemory` (fixture `v` 0) |
-| `AC-STORE-034`, `AC-STORE-035` | integrasi | `TestPruneWholeSession`, `TestPruneWithChildren` |
-| `AC-STORE-036`, `AC-STORE-037` | integrasi | `TestNoBroadcastOnFailure`, `TestBroadcastAfterCommit` |
-| `AC-STORE-038` | integrasi | `TestModuleStoreDefaultPath` |
-| `AC-PERM-001`, `AC-PERM-002`, `AC-PERM-003` | unit dan property test | `TestPatternExamples`, `TestPatternPropertyNoPanic`, `TestPatternRoundTrip` (`testing/quick`) |
+| `AC-STORE-034`, `AC-STORE-035` | integration | `TestPruneWholeSession`, `TestPruneWithChildren` |
+| `AC-STORE-036`, `AC-STORE-037` | integration | `TestNoBroadcastOnFailure`, `TestBroadcastAfterCommit` |
+| `AC-STORE-038` | integration | `TestModuleStoreDefaultPath` |
+| `AC-PERM-001`, `AC-PERM-002`, `AC-PERM-003` | unit and property test | `TestPatternExamples`, `TestPatternPropertyNoPanic`, `TestPatternRoundTrip` (`testing/quick`) |
 | `AC-PERM-004` | unit | `TestConfigRejectsBadPattern` |
-| `AC-PERM-005` sampai `AC-PERM-010` | unit dan integrasi | `TestEvaluateOrder` (tabel: deny, workspace, allow, trust, read, never, ask) |
-| `AC-PERM-011`, `AC-PERM-012`, `AC-PERM-013` | unit (filesystem sementara) | `TestWorkspaceSymlinkEscape`, `TestWorkspaceDotDot`, `TestWorkspaceNewFile` |
-| `AC-PERM-014`, `AC-PERM-015`, `AC-PERM-016` | integrasi | `TestGrantReused`, `TestGrantInheritedByFork`, `TestGrantArgsMismatch` |
-| `AC-PERM-017`, `AC-PERM-018` | integrasi | `TestPermissionListenerReplacesDefault`, `TestNoPermissionModuleFailsClosed` |
+| `AC-PERM-005` to `AC-PERM-010` | unit and integration | `TestEvaluateOrder` (table: deny, workspace, allow, trust, read, never, ask) |
+| `AC-PERM-011`, `AC-PERM-012`, `AC-PERM-013` | unit (temporary filesystem) | `TestWorkspaceSymlinkEscape`, `TestWorkspaceDotDot`, `TestWorkspaceNewFile` |
+| `AC-PERM-014`, `AC-PERM-015`, `AC-PERM-016` | integration | `TestGrantReused`, `TestGrantInheritedByFork`, `TestGrantArgsMismatch` |
+| `AC-PERM-017`, `AC-PERM-018` | integration | `TestPermissionListenerReplacesDefault`, `TestNoPermissionModuleFailsClosed` |
 | `AC-PERM-019` | unit | `TestRejectionDecisionShape` |
-| `AC-APPR-001` sampai `AC-APPR-004` | integrasi | `TestEffectivePolicyDefaults`, `TestSetPolicyLastWins`, `TestSetPolicyInvalid`, `TestPolicyChangeMidTurn` |
-| `AC-APPR-005`, `AC-APPR-006` | integrasi | `TestApprovalAuditPair`, `TestOutcomeToDecision` |
-| `AC-APPR-007` sampai `AC-APPR-010` | unit | `TestWaterfallFirstOwner`, `TestNoAnswererUnavailable`, `TestAnswererErrorUnavailable`, `TestInvalidOutcomeUnavailable` |
-| `AC-APPR-011`, `AC-APPR-012` | unit dengan jam uji | `TestApprovalTimeout10Min`, `TestApprovalCancelled` |
-| `AC-APPR-013`, `AC-APPR-014` | unit dengan store palsu | `TestAskedWriteFailsNoAnswerer`, `TestDecidedWriteFailsNotAllowed` |
-| `AC-APPR-015`, `AC-APPR-016` | unit dan integrasi | `TestChildPolicyMin`, `TestChildInheritsDenyFromParent` |
-| `AC-APPR-017` | integrasi | `TestApproveWithLibraryChannel` |
-| `AC-COMP-001`, `AC-COMP-002`, `AC-COMP-003` | unit dan integrasi | `TestAutoCompactThreshold` (7001 dan 7000 dengan window 10000), `TestDefaultContextWindow` |
-| `AC-COMP-004`, `AC-COMP-005` | integrasi dengan `llm` palsu | `TestCompactNowSummary`, `TestCompactNowRejects` |
-| `AC-COMP-006`, `AC-COMP-007` | integrasi dengan `llm` palsu | `TestContextTooLongRetryOnce`, `TestContextTooLongTwiceEndsTurn` |
+| `AC-APPR-001` to `AC-APPR-004` | integration | `TestEffectivePolicyDefaults`, `TestSetPolicyLastWins`, `TestSetPolicyInvalid`, `TestPolicyChangeMidTurn` |
+| `AC-APPR-005`, `AC-APPR-006` | integration | `TestApprovalAuditPair`, `TestOutcomeToDecision` |
+| `AC-APPR-007` to `AC-APPR-010` | unit | `TestWaterfallFirstOwner`, `TestNoAnswererUnavailable`, `TestAnswererErrorUnavailable`, `TestInvalidOutcomeUnavailable` |
+| `AC-APPR-011`, `AC-APPR-012` | unit with test clock | `TestApprovalTimeout10Min`, `TestApprovalCancelled` |
+| `AC-APPR-013`, `AC-APPR-014` | unit with fake store | `TestAskedWriteFailsNoAnswerer`, `TestDecidedWriteFailsNotAllowed` |
+| `AC-APPR-015`, `AC-APPR-016` | unit and integration | `TestChildPolicyMin`, `TestChildInheritsDenyFromParent` |
+| `AC-APPR-017` | integration | `TestApproveWithLibraryChannel` |
+| `AC-COMP-001`, `AC-COMP-002`, `AC-COMP-003` | unit and integration | `TestAutoCompactThreshold` (7001 and 7000 with window 10000), `TestDefaultContextWindow` |
+| `AC-COMP-004`, `AC-COMP-005` | integration with fake `llm` | `TestCompactNowSummary`, `TestCompactNowRejects` |
+| `AC-COMP-006`, `AC-COMP-007` | integration with fake `llm` | `TestContextTooLongRetryOnce`, `TestContextTooLongTwiceEndsTurn` |
 
-## Strategi verifikasi
+## Verification strategy
 
-- **Unit (fungsi murni)**: `ParsePattern`, `Match` (`internal/pattern`), `core.DeriveMessages`, `EffectivePolicy`, `Grants`, `ChildPolicy`, `MergeDeny`, ambang compaction, dan pemetaan outcome. Tidak ada I/O.
-- **Golden derive**: fixture event di `core/testdata/derive/` (satu file per skenario: turn lengkap, fork, compaction, attempt, approval). Test di package `core` (`DQ-011`). Hasil `DeriveMessages` dibandingkan dengan `*.golden`. Update lewat flag `-update`, diff ditinjau manual.
-- **Property test pola**: `testing/quick` (stdlib, tanpa dependency baru) untuk `ParsePattern`: tidak panic untuk string acak, `String()` lalu `ParsePattern` menghasilkan pola setara, dan `*` dengan argumen yang sama selalu cocok.
-- **Integrasi store**: SQLite di `t.TempDir()`. Setiap test membuka store baru. Tidak ada database bersama antar test.
-- **Simulasi crash**: untuk setiap skenario golden, tulis prefix event sampai seq N (N dari 1 sampai panjang log), tutup store tanpa `turn/end`, buka ulang dengan lease, lalu periksa tiga hal: tidak ada call atau approval yatim, `turn/end` `interrupted` tepat satu, dan `Open` kedua tidak menulis apa pun. Ini cara "truncating log" yang dipakai karena trigger melarang penghapusan.
-- **Concurrency**: `go test -race ./store/...` dengan 50 goroutine dan dua instance store.
-- **Integrasi permission**: store dan approval nyata, penjawab palsu yang memiliki atau tidak memiliki session, filesystem sementara untuk workspace dan symlink.
-- **Integrasi compaction**: `llm` palsu dari spec #3 (`MockLlm`) yang bisa mengembalikan `ErrContextTooLong`.
-- **Runtime**: smoke test manual lewat CLI setelah spec #1 selesai (SC-001 sampai SC-003).
+- **Unit (pure functions)**: `ParsePattern`, `Match` (`internal/pattern`), `core.DeriveMessages`, `EffectivePolicy`, `Grants`, `ChildPolicy`, `MergeDeny`, compaction threshold, and outcome mapping. No I/O.
+- **Golden derive**: event fixtures in `core/testdata/derive/` (one file per scenario: complete turn, fork, compaction, attempt, approval). Tests in package `core` (`DQ-011`). `DeriveMessages` results are compared with `*.golden`. Updated with the `-update` flag, diff reviewed manually.
+- **Pattern property test**: `testing/quick` (stdlib, no new dependency) for `ParsePattern`: does not panic for random strings, `String()` followed by `ParsePattern` yields an equivalent pattern, and `*` always matches the same argument.
+- **Store integration**: SQLite in `t.TempDir()`. Each test opens a new store. No shared database between tests.
+- **Crash simulation**: for each golden scenario, write the event prefix up to seq N (N from 1 to the length of the log), close the store without `turn/end`, reopen with the lease, then check three things: no orphan call or approval, exactly one `turn/end` `interrupted`, and a second `Open` writes nothing. This is the "truncating log" approach used because the triggers forbid deletion.
+- **Concurrency**: `go test -race ./store/...` with 50 goroutines and two store instances.
+- **Permission integration**: real store and approval, fake answerers that own or do not own the session, temporary filesystem for workspace and symlinks.
+- **Compaction integration**: fake `llm` from spec #3 (`MockLlm`) that can return `ErrContextTooLong`.
+- **Runtime**: manual smoke test through the CLI after spec #1 is done (SC-001 to SC-003).
 
-## Risiko dan tradeoff
+## Risks and tradeoffs
 
-- **Derive membaca rantai setiap step.** Biaya tumbuh dengan panjang log. Compaction membatasi riwayat yang dikirim, tetapi tidak membatasi jumlah baris yang dibaca. Cache tidak dibuat di v1 (`DQ-010`).
-- **Pemeriksaan path tidak atomik dengan eksekusi tool.** Symlink bisa diganti antara pemeriksaan dan eksekusi. Mitigasi di v1: tidak ada. Sandbox OS ada di ADR 0004 sebagai langkah berikutnya.
-- **Pola bisa diakali.** `bash(git status*)` tetap bisa menjalankan perintah lain lewat `;`. ADR 0004 mencatat ini sebagai tradeoff. Pola dipakai sebagai izin cepat, bukan sandbox.
-- **Argumen tool tersimpan di log.** Argumen yang berisi secret masuk `tool/call`. Redaksi di spec #3 adalah prasyarat.
-- **Approval menahan turn.** Tanpa pemilik aktif, turn menunggu 10 menit lalu gagal. Ini sesuai ADR 0004.
-- **Lease lintas host tidak bisa dicek.** Host lain dianggap hidup. Lease yang tertinggal harus dibersihkan manual dari `session_leases`.
-- **`modernc.org/sqlite` lebih lambat dari SQLite C.** Diterima sesuai ADR 0013.
-- **Writer tunggal membatasi throughput tulis.** Cukup untuk pemakaian pribadi (ADR 0005).
+- **Derive reads the chain on every step.** Cost grows with log length. Compaction limits the history sent, but not the number of rows read. No cache in v1 (`DQ-010`).
+- **The path check is not atomic with tool execution.** A symlink can be swapped between check and execution. Mitigation in v1: none. The OS sandbox is in ADR 0004 as the next step.
+- **Patterns can be bypassed.** `bash(git status*)` can still run other commands through `;`. ADR 0004 records this as a tradeoff. Patterns are used as a fast permission, not as a sandbox.
+- **Tool arguments are stored in the log.** Arguments containing secrets go into `tool/call`. Redaction in spec #3 is a prerequisite.
+- **Approval holds the turn.** Without an active owner, the turn waits 10 minutes and then fails. This is consistent with ADR 0004.
+- **Cross-host lease cannot be checked.** Another host is considered alive. Stale leases must be cleaned up manually from `session_leases`.
+- **`modernc.org/sqlite` is slower than C SQLite.** Accepted per ADR 0013.
+- **A single writer limits write throughput.** Enough for personal use (ADR 0005).
 
 ## Blocking Design Questions
 
-| ID | Pertanyaan | Mengendalikan | Referensi yang diminta | Pemilik | Status | Resolusi |
+| ID | Question | Controls | Requested reference | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|
-| `DQ-001` | Topologi writer | Konkurensi | Tidak ada | Ridho | Resolved | Rekomendasi agent: satu writer goroutine per proses, `BEGIN IMMEDIATE` untuk lintas proses, read pool 4 koneksi `mode=ro`. Ini sesuai ADR 0005 dan lock di spec #1. |
-| `DQ-002` | Bentuk DSN dan pragma driver `modernc.org/sqlite` | Persistence | Tidak ada | Ridho | Resolved | Rekomendasi agent: DSN `file:` dengan parameter `_pragma` untuk `journal_mode`, `synchronous`, `foreign_keys`, dan `busy_timeout`. Writer memakai koneksi tunggal. Pragma diverifikasi di `AC-STORE-001`. |
-| `DQ-003` | Alat migrasi | Migration strategy | Tidak ada | Ridho | Resolved | Rekomendasi agent: `embed.FS` dengan `PRAGMA user_version`, tanpa library migrasi. Paling sedikit dependency. |
-| `DQ-004` | Lokasi kode `permission`, `approval`, `compaction` | Kesesuaian repository | Tidak ada | Ridho | Resolved | Rekomendasi agent: `tools/permission/` untuk permission dan approval, `agent/compaction/` untuk compaction. Sesuai layout ARCHITECTURE §4 dan ADR 0013. |
-| `DQ-005` | Method tambahan di `core.SessionStore` | Antarmuka | Konfirmasi spec #2 | Ridho | Resolved | Rekomendasi agent: tambah `Info`, `ChainEvents`, dan `DeriveMessages`. Tanpa `DeriveMessages` di interface, spec #3 tidak bisa membuat riwayat model lewat `core`. |
-| `DQ-006` | Sumber waktu untuk timeout approval | Test approval | Tidak ada | Ridho | Resolved | Rekomendasi agent: interface `Clock` kecil (`Now`, `NewTimer`) yang disuntikkan. Produksi memakai `time`, test memakai jam palsu. |
-| `DQ-007` | Cek PID dan host | Lease | Tidak ada | Ridho | Resolved | Rekomendasi agent: `syscall.Kill(pid, 0)`. `nil` atau `EPERM` berarti hidup, `ESRCH` berarti mati. Host dari `os.Hostname()`. Sesuai tabel ADR 0013. |
-| `DQ-008` | Library property test | Verifikasi | Tidak ada | Ridho | Resolved | Rekomendasi agent: `testing/quick` dari stdlib. Tidak menambah dependency. |
-| `DQ-009` | Tempat prompt ringkasan dan adapter | Compaction | Tidak ada | Ridho | Resolved | Rekomendasi agent: prompt ringkasan konstanta di kode. Pemanggilan lewat adapter provider langsung, tanpa hook `llm.stream`, supaya tidak rekursif (`Q-009`). Isi prompt tidak mengubah perilaku terlihat. |
-| `DQ-010` | Cache riwayat atau derive setiap step | Kinerja | Tidak ada | Ridho | Resolved | Rekomendasi agent: derive penuh setiap step tanpa cache di v1. Dikendalikan compaction. Cache hanya jika pengukuran menunjukkan perlu. |
-| `DQ-011` | Lokasi `DeriveMessages` dan potongan fork | `REQ-STORE-011`, `CQ-013`, `CQ-028` spec #2 | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `core.DeriveMessages` di `core` (`API-CORE-015`). Store membungkusnya: `ChainEvents` memotong induk di `inherited_seq`, lalu fungsi itu. Aturan compaction ada di fungsi core. Fixture golden di `core/testdata/derive/`. |
-| `DQ-012` | Signature `SessionStore` dan `Fork` | `API-STORE-002` sampai `API-STORE-009`, `CQ-012` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): signature di `API-CORE-009` (spec #2). `Fork` tanpa argumen agent. Child subagent (M4) memakai `Create` dengan `ParentSessionID` dan `ParentCallID`. |
-| `DQ-013` | Lokasi grammar pola `rules` | `API-PERM-001`, `API-PERM-002`, `CQ-017` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): paket `internal/pattern`. Aturan impor `config` (spec #2) mengizinkan `internal/...`. `tools/permission` juga memakainya. Grammar tidak berubah. |
-| `DQ-014` | Bentuk penjawab library | `API-APPR-005`, `CQ-019` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): fungsi `ApproveWith(fn)` di package `lana` menjadi `Option` (spec #3). Penjawab ini listener `approval.request` yang hanya menjawab channel `library`. |
-| `DQ-015` | `system/message` di riwayat model | `REQ-STORE-011`, `Q-028`, `CQ-013` | Ridho | Resolved | Rekomendasi agent (rekonsiliasi): `system/message` tidak masuk `DeriveMessages`. Pesan terakhirnya dipakai sebagai `ChatRequest.System` oleh spec #3. Ini sesuai `Q-028` spec #3 dan memperbaiki contoh di tabel event (sebelumnya "Ya, hanya yang terakhir"). |
+| `DQ-001` | Writer topology | Concurrency | None | Ridho | Resolved | Agent recommendation: one writer goroutine per process, `BEGIN IMMEDIATE` across processes, read pool of 4 connections `mode=ro`. This is consistent with ADR 0005 and the lock in spec #1. |
+| `DQ-002` | DSN form and pragmas for the `modernc.org/sqlite` driver | Persistence | None | Ridho | Resolved | Agent recommendation: `file:` DSN with `_pragma` parameters for `journal_mode`, `synchronous`, `foreign_keys`, and `busy_timeout`. The writer uses a single connection. Pragmas are verified in `AC-STORE-001`. |
+| `DQ-003` | Migration tool | Migration strategy | None | Ridho | Resolved | Agent recommendation: `embed.FS` with `PRAGMA user_version`, no migration library. Fewest dependencies. |
+| `DQ-004` | Code location for `permission`, `approval`, `compaction` | Repository conformance | None | Ridho | Resolved | Agent recommendation: `tools/permission/` for permission and approval, `agent/compaction/` for compaction. Consistent with the ARCHITECTURE §4 layout and ADR 0013. |
+| `DQ-005` | Additional methods on `core.SessionStore` | Interface | Confirmation from spec #2 | Ridho | Resolved | Agent recommendation: add `Info`, `ChainEvents`, and `DeriveMessages`. Without `DeriveMessages` in the interface, spec #3 cannot build model history through `core`. |
+| `DQ-006` | Time source for approval timeout | Approval tests | None | Ridho | Resolved | Agent recommendation: a small injected `Clock` interface (`Now`, `NewTimer`). Production uses `time`, tests use a fake clock. |
+| `DQ-007` | PID and host check | Lease | None | Ridho | Resolved | Agent recommendation: `syscall.Kill(pid, 0)`. `nil` or `EPERM` means alive, `ESRCH` means dead. Host from `os.Hostname()`. Consistent with the ADR 0013 table. |
+| `DQ-008` | Property test library | Verification | None | Ridho | Resolved | Agent recommendation: `testing/quick` from stdlib. No new dependency. |
+| `DQ-009` | Location of the summary prompt and adapter | Compaction | None | Ridho | Resolved | Agent recommendation: summary prompt is a constant in code. Calls go through the direct provider adapter, without the `llm.stream` hook, so it is not recursive (`Q-009`). Changing the prompt text does not change visible behavior. |
+| `DQ-010` | Cache of history or derive on every step | Performance | None | Ridho | Resolved | Agent recommendation: full derive on every step with no cache in v1. Controlled by compaction. Add a cache only if measurements show it is needed. |
+| `DQ-011` | Location of `DeriveMessages` and the fork cut | `REQ-STORE-011`, `CQ-013`, `CQ-028` of spec #2 | Ridho | Resolved | Agent recommendation (reconciliation): `core.DeriveMessages` in `core` (`API-CORE-015`). The store wraps it: `ChainEvents` cuts the parent at `inherited_seq`, then that function runs. Compaction rules live in the core function. Golden fixtures in `core/testdata/derive/`. |
+| `DQ-012` | `SessionStore` signature and `Fork` | `API-STORE-002` to `API-STORE-009`, `CQ-012` | Ridho | Resolved | Agent recommendation (reconciliation): signatures in `API-CORE-009` (spec #2). `Fork` without an agent argument. A subagent child (M4) uses `Create` with `ParentSessionID` and `ParentCallID`. |
+| `DQ-013` | Location of the `rules` pattern grammar | `API-PERM-001`, `API-PERM-002`, `CQ-017` | Ridho | Resolved | Agent recommendation (reconciliation): package `internal/pattern`. The import rule for `config` (spec #2) allows `internal/...`. `tools/permission` also uses it. The grammar does not change. |
+| `DQ-014` | Shape of the library answerer | `API-APPR-005`, `CQ-019` | Ridho | Resolved | Agent recommendation (reconciliation): function `ApproveWith(fn)` in package `lana` becomes an `Option` (spec #3). This answerer is an `approval.request` listener that answers only channel `library`. |
+| `DQ-015` | `system/message` in model history | `REQ-STORE-011`, `Q-028`, `CQ-013` | Ridho | Resolved | Agent recommendation (reconciliation): `system/message` is not in `DeriveMessages`. Its last message is used as `ChatRequest.System` by spec #3. This is consistent with `Q-028` of spec #3 and fixes the example in the event table (previously "Yes, only the last one"). |
 
 None.
 
 ## Approval
 
-- [x] Requirements sudah Approved dan revisinya dicatat.
-- [x] Contract sudah Approved.
-- [x] Scan keputusan arsitektur dan Visual Architecture Check selesai.
-- [x] ADR yang dibutuhkan sudah Accepted.
-- [x] Setiap requirement terpetakan ke satu komponen design.
-- [x] Setiap acceptance criterion punya metode verifikasi.
-- [x] Blocking Design Questions bernilai `None`.
-- **Di-approve oleh**: Ridho (gate dilepas 2026-10-29)
-- **Di-approve pada**: 2026-10-29 (revisi 1). Revisi 2 rekonsiliasi oleh agent atas nama pemilik (gate dilepas 2026-10-29).
+- [x] Requirements are Approved and their revisions are recorded.
+- [x] Contract is Approved.
+- [x] Architecture decision scan and Visual Architecture Check are done.
+- [x] Required ADRs are Accepted.
+- [x] Every requirement maps to one design component.
+- [x] Every acceptance criterion has a verification method.
+- [x] Blocking Design Questions is `None`.
+- **Approved by**: Ridho (gate released 2026-10-29)
+- **Approved on**: 2026-10-29 (revision 1). Revision 2 reconciled by the agent on behalf of the owner (gate released 2026-10-29).

@@ -1,103 +1,103 @@
-# Contract: <Nama Fitur>
+# Contract: <Feature Name>
 
-- **Issue**: `#<nomor>`
+- **Issue**: `#<number>`
 - **Requirements**: [requirements.md](requirements.md)
-- **Revisi requirements**: <integer>
-- **Status requirements**: Draft
-- **Revisi contract**: <integer, mulai 1>
-- **Berlaku untuk**: CLI / config / HTTP / JSON-RPC / ACP / event / Tidak diperlukan
+- **Requirements revision**: <integer>
+- **Requirements status**: Draft
+- **Contract revision**: <integer, starting at 1>
+- **Applies to**: CLI / config / HTTP / JSON-RPC / ACP / events / Not required
 - **Status**: Draft
 
-Jangan mendefinisikan perilaku baru di sini. Requirements memiliki perilaku; file ini memiliki
-bentuk persis antarmuka. Jangan menulis contract terhadap requirements yang belum di-approve.
+Do not define new behavior here. Requirements own behavior; this file owns the exact form of the
+interface. Do not write a contract against requirements that are not yet approved.
 
-Jika fitur tidak mengubah antarmuka luar, set **Berlaku untuk** ke `Tidak diperlukan`, tulis
-alasannya, dan hapus bagian operasi.
+If the feature does not change the external interface, set **Applies to** to `Not required`, write
+the reason, and delete the operations section.
 
-## Aturan contract
+## Contract rules
 
-- Dokumentasikan hanya operasi baru atau yang berubah. Tautkan konvensi bersama, jangan salin.
-- Setiap operasi punya ID stabil `API-<KAPABILITAS>-NNN`.
-- Setiap operasi ditautkan ke minimal satu `REQ-*` dan `AC-*`.
-- Tulis input, output sukses, kode gagal, otorisasi, dan kompatibilitas.
-- Pakai contoh hanya jika bentuk atau edge case tidak jelas dari tabel.
+- Document only new or changed operations. Link shared conventions, do not copy them.
+- Every operation has a stable ID `API-<CAPABILITY>-NNN`.
+- Every operation is linked to at least one `REQ-*` and `AC-*`.
+- Write the input, successful output, failure codes, authorization, and compatibility.
+- Use examples only if the shape or edge case is not clear from the tables.
 
-## Konvensi bersama
+## Shared conventions
 
-| Hal | Keputusan atau otoritas |
+| Topic | Decision or authority |
 |---|---|
-| Exit code CLI | <tabel atau `Tidak berlaku`> |
-| Output stdout dan stderr | <aturan atau `Tidak berlaku`> |
-| Format config | <file dan section atau `Tidak berlaku`> |
-| Autentikasi | <token, socket permission, atau `Tidak berlaku`> |
-| Versi | <aturan versi atau `Tidak berlaku`> |
-| Serialisasi | <JSON, waktu, ID, atau `Konvensi repository`> |
+| CLI exit codes | <table or `Not applicable`> |
+| stdout and stderr output | <rule or `Not applicable`> |
+| Config format | <file and section or `Not applicable`> |
+| Authentication | <token, socket permission, or `Not applicable`> |
+| Versioning | <versioning rule or `Not applicable`> |
+| Serialization | <JSON, time, IDs, or `Repository convention`> |
 
-## Index operasi
+## Operation index
 
-| ID operasi | Jenis | Perintah/method | Path/flag/topik | Requirements | Acceptance criteria |
+| Operation ID | Type | Command/method | Path/flag/topic | Requirements | Acceptance criteria |
 |---|---|---|---|---|---|
-| `API-<KAPABILITAS>-001` | CLI | `lana <subcommand>` | `--flag` | `REQ-...` | `AC-...` |
+| `API-<CAPABILITY>-001` | CLI | `lana <subcommand>` | `--flag` | `REQ-...` | `AC-...` |
 
-## API-<KAPABILITAS>-001: <Judul operasi>
+## API-<CAPABILITY>-001: <Operation title>
 
-- **Tujuan**: <satu kalimat>
+- **Goal**: <one sentence>
 - **Requirements**: `REQ-...`
 - **Acceptance criteria**: `AC-...`
-- **Stabilitas**: Baru / Sudah ada / Sensitif kompatibilitas
-- **Otorisasi**: <izin dan cara penegakan>
+- **Stability**: New / Existing / Compatibility-sensitive
+- **Authorization**: <permission and how it is enforced>
 
 ### Input
 
-| Lokasi | Nama | Tipe | Wajib | Validasi dan arti |
+| Location | Name | Type | Required | Validation and meaning |
 |---|---|---|---:|---|
-| Argumen/flag/env/config/body | `<nama>` | `<tipe>` | Ya/Tidak | <batasan dan arti> |
+| Argument/flag/env/config/body | `<name>` | `<type>` | Yes/No | <limits and meaning> |
 
-### Sukses
+### Success
 
-| Kondisi | Exit code atau status | Output |
+| Condition | Exit code or status | Output |
 |---|---:|---|
-| <kondisi> | `<kode>` | <stdout, payload, atau efek> |
+| <condition> | `<code>` | <stdout, payload, or effect> |
 
-### Gagal
+### Failure
 
-| Kondisi | Exit code atau status | Kode stabil | Bisa diulang | Perilaku yang terlihat |
+| Condition | Exit code or status | Stable code | Retryable | Observable behavior |
 |---|---:|---|---:|---|
-| <kondisi> | `<kode>` | `<kode>` | Ya/Tidak | <hasil aman> |
+| <condition> | `<code>` | `<code>` | Yes/No | <safe result> |
 
-### Efek samping dan jaminan
+### Side effects and guarantees
 
-- **Transisi state**: <perubahan atau `Tidak ada`>
-- **Idempotensi**: <perilaku retry atau `Tidak berlaku`>
-- **Konkurensi**: <aturan atau `Tidak berlaku`>
-- **Paparan data**: <yang disembunyikan atau di-redact>
+- **State transition**: <change or `None`>
+- **Idempotency**: <retry behavior or `Not applicable`>
+- **Concurrency**: <rule or `Not applicable`>
+- **Data exposure**: <what is hidden or redacted>
 
-### Kompatibilitas
+### Compatibility
 
-- **Breaking change**: Ya/Tidak — <alasan>
-- **Deprecation**: <pengganti atau `Tidak berlaku`>
+- **Breaking change**: Yes/No — <reason>
+- **Deprecation**: <replacement or `Not applicable`>
 
-## Traceability contract
+## Contract traceability
 
-| Operasi | Requirements | Acceptance criteria | Komponen design | Verifikasi |
+| Operation | Requirements | Acceptance criteria | Design component | Verification |
 |---|---|---|---|---|
-| `API-...` | `REQ-...` | `AC-...` | <komponen> | <test atau probe> |
+| `API-...` | `REQ-...` | `AC-...` | <component> | <test or probe> |
 
 ## Blocking Contract Questions
 
-| ID | Pertanyaan | Mengendalikan | Referensi yang diminta | Pemilik | Status | Resolusi |
+| ID | Question | Controls | Requested reference | Owner | Status | Resolution |
 |---|---|---|---|---|---|---|
-| `CQ-001` | <keputusan antarmuka> | <flag/exit code/format> | <contoh atau arah> | <nama> | Open | — |
+| `CQ-001` | <interface decision> | <flag/exit code/format> | <example or direction> | <name> | Open | — |
 
-Tulis `None` hanya jika contract lengkap atau `Tidak diperlukan`.
+Write `None` only if the contract is complete or the contract is `Not required`.
 
 ## Approval
 
-- [ ] Requirements sudah Approved dan revisinya dicatat di atas.
-- [ ] Keberlakuan contract sudah ditentukan.
-- [ ] Setiap operasi punya ID stabil dan tertaut ke requirement dan acceptance criteria.
-- [ ] Input, sukses, gagal, otorisasi, dan kompatibilitas eksplisit.
-- [ ] Tidak ada perilaku yang hanya ada di file ini.
-- [ ] Blocking Contract Questions bernilai `None`.
-- **Di-approve oleh**: —
-- **Di-approve pada**: —
+- [ ] Requirements are Approved and their revision is recorded above.
+- [ ] Contract applicability has been determined.
+- [ ] Every operation has a stable ID and is linked to requirements and acceptance criteria.
+- [ ] Input, success, failure, authorization, and compatibility are explicit.
+- [ ] No behavior exists only in this file.
+- [ ] Blocking Contract Questions is `None`.
+- **Approved by**: —
+- **Approved on**: —

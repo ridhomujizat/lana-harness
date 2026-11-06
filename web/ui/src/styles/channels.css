@@ -1,0 +1,4 @@
+/* Styles for the channels views.
+   The channels and Telegram pages were migrated to the Gr8r markup and
+   components, so the rules here moved to pages-gr8r/channels.css (gr8r layer).
+   The file is kept because index.css imports it. */

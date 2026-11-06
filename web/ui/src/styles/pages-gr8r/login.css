@@ -1,0 +1,120 @@
+/* Gr8r-style rules for the login, welcome, and forgot pages (gr8r layer). The
+   `.auth` shell, `.auth-card`, `.link` and `.auth-foot` come from
+   gr8r/pages/auth.css; these are the Lana bindings (password reveal, one-time
+   code field, reset options). */
+
+/* ------------------------------------------------------------------ */
+/* Password / secret field with the reveal button                     */
+/* ------------------------------------------------------------------ */
+
+.pw-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pw-field .input {
+  padding-right: 38px;
+}
+
+.pw-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ------------------------------------------------------------------ */
+/* One-time code                                                      */
+/* ------------------------------------------------------------------ */
+
+.auth .code-input {
+  width: 12em;
+  height: 54px;
+  padding: 0 16px;
+  font-family: var(--mono);
+  font-size: 22px;
+  letter-spacing: 0.42em;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset options (forgot): text left, action right                    */
+/* ------------------------------------------------------------------ */
+
+.reset-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reset-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 16px 0;
+}
+
+.reset-list li + li {
+  border-top: 1px solid var(--divider);
+}
+
+.reset-list h2 {
+  margin: 0 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.reset-list p {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.reset-list .btn {
+  flex: 0 0 auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Secondary links                                                    */
+/* ------------------------------------------------------------------ */
+
+/* The legacy `button` rules would render a `.link` button as a filled button;
+   keep it a plain accent link instead. */
+.auth .link {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: inherit;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.auth .link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                         */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 520px) {
+  .reset-list li {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .auth .code-input {
+    width: 100%;
+  }
+}

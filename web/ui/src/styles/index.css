@@ -1,0 +1,56 @@
+/* The single stylesheet the dashboard loads. Cascade layers keep the legacy
+   Lana CSS working while pages migrate to the Gr8r markup: gr8r-base holds the
+   element resets, legacy holds every existing sheet (declared in the order
+   main.tsx used to import them), and gr8r holds the ported Gr8r styles plus the
+   Lana additions in gr8r-lana.css. fonts.css is unlayered so the @font-face
+   rules apply whatever layer they would otherwise land in. */
+@layer gr8r-base, legacy, gr8r;
+
+@import "./fonts.css";
+
+@import "./gr8r/base.css" layer(gr8r-base);
+
+@import "./tokens.css" layer(legacy);
+@import "./app.css" layer(legacy);
+@import "./motion.css" layer(legacy);
+@import "./setup.css" layer(legacy);
+@import "./agent-tabs.css" layer(legacy);
+@import "./skills.css" layer(legacy);
+@import "./mcp.css" layer(legacy);
+@import "./channels.css" layer(legacy);
+@import "./settings.css" layer(legacy);
+@import "./team.css" layer(legacy);
+@import "./rooms.css" layer(legacy);
+@import "./question.css" layer(legacy);
+@import "./markdown.css" layer(legacy);
+@import "./trajectory.css" layer(legacy);
+@import "./dashboard.css" layer(legacy);
+
+@import "./gr8r/tokens.css" layer(gr8r);
+@import "./gr8r/components.css" layer(gr8r);
+@import "./gr8r/shell.css" layer(gr8r);
+@import "./gr8r/panels.css" layer(gr8r);
+@import "./gr8r/views/list.css" layer(gr8r);
+@import "./gr8r/views/table.css" layer(gr8r);
+@import "./gr8r/overlays.css" layer(gr8r);
+@import "./gr8r/states.css" layer(gr8r);
+@import "./gr8r/pages/settings.css" layer(gr8r);
+@import "./gr8r/pages/auth.css" layer(gr8r);
+@import "./gr8r/motion.css" layer(gr8r);
+@import "./gr8r/responsive.css" layer(gr8r);
+@import "./gr8r-lana.css" layer(gr8r);
+@import "./pages-gr8r/home.css" layer(gr8r);
+@import "./pages-gr8r/agents.css" layer(gr8r);
+@import "./pages-gr8r/chats.css" layer(gr8r);
+@import "./pages-gr8r/sessions.css" layer(gr8r);
+@import "./pages-gr8r/agent-detail.css" layer(gr8r);
+@import "./pages-gr8r/skills.css" layer(gr8r);
+@import "./pages-gr8r/mcp.css" layer(gr8r);
+@import "./pages-gr8r/knowledge.css" layer(gr8r);
+@import "./pages-gr8r/channels.css" layer(gr8r);
+@import "./pages-gr8r/settings.css" layer(gr8r);
+@import "./pages-gr8r/setup.css" layer(gr8r);
+@import "./pages-gr8r/login.css" layer(gr8r);
+@import "./pages-gr8r/workflows.css" layer(gr8r);
+@import "./pages-gr8r/observe.css" layer(gr8r);
+@import "./pages-gr8r/tools.css" layer(gr8r);

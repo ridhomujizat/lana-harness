@@ -14,21 +14,23 @@ If you are a new engineer, read the ADR index below before diving into code or a
 
 | #    | Title                                                                                     | Status   | Date       |
 |------|-------------------------------------------------------------------------------------------|----------|------------|
-| [0001](0001-gunakan-rust-single-binary-daemon.md) | Gunakan Rust sebagai single binary daemon | Superseded by 0013 | 2026-10-29 |
-| [0002](0002-core-dari-modul-service-dan-hook.md) | Bangun core dari modul, service, dan hook dalam Cargo workspace | Accepted | 2026-10-29 |
-| [0003](0003-multi-agent-dengan-routing-channel.md) | Jalankan multi-agent ringan dengan routing dari channel | Accepted | 2026-10-29 |
-| [0004](0004-permission-mode-per-agent.md) | Atur permission per agent dan putuskan approval lewat hook | Accepted | 2026-10-29 |
-| [0005](0005-sqlite-sebagai-storage-tunggal.md) | Pakai SQLite sebagai storage tunggal | Accepted | 2026-10-29 |
-| [0006](0006-ekstensi-lewat-mcp-client-dan-skills.md) | Tambah kemampuan lewat MCP client dan Skills | Accepted | 2026-10-29 |
-| [0007](0007-scheduler-cron-di-dalam-daemon.md) | Jalankan scheduler cron di dalam daemon | Accepted | 2026-10-29 |
-| [0008](0008-interface-cli-channel-http-dan-web-dashboard.md) | Sediakan interface CLI, channel chat, HTTP API, dan web dashboard | Accepted | 2026-10-29 |
-| [0009](0009-session-sebagai-event-log-append-only.md) | Simpan session sebagai event log append-only di SQLite | Accepted | 2026-10-29 |
-| [0010](0010-profile-dan-config-patch.md) | Susun runtime dengan profile dan config patch | Accepted | 2026-10-29 |
-| [0011](0011-subagent-sebagai-child-session.md) | Jalankan subagent sebagai child session | Accepted | 2026-10-29 |
-| [0012](0012-acp-dan-sdk-json-rpc.md) | Sediakan server ACP dan SDK JSON-RPC | Accepted | 2026-10-29 |
-| [0013](0013-gunakan-go-sebagai-single-binary.md) | Gunakan Go sebagai single binary dan library | Accepted | 2026-10-29 |
-| [0014](0014-integrasi-sebagai-agentic-tool.md) | Sediakan lana sebagai agentic tool untuk service lain | Accepted | 2026-10-29 |
-| [0015](0015-runtime-embeddable-untuk-service.md) | Jadikan lana runtime yang bisa di-embed di service | Accepted | 2026-10-29 |
+| [0001](0001-use-rust-single-binary-daemon.md) | Use Rust as a single-binary daemon | Superseded by 0013 | 2026-10-29 |
+| [0002](0002-core-from-modules-services-and-hooks.md) | Build the core from modules, services, and hooks in a Cargo workspace | Accepted | 2026-10-29 |
+| [0003](0003-multi-agent-with-channel-routing.md) | Run lightweight multi-agent with routing from channels | Accepted | 2026-10-29 |
+| [0004](0004-permission-mode-per-agent.md) | Set permissions per agent and decide approvals through hooks | Accepted | 2026-10-29 |
+| [0005](0005-sqlite-as-single-storage.md) | Use SQLite as the single storage | Accepted | 2026-10-29 |
+| [0006](0006-extend-via-mcp-client-and-skills.md) | Add capabilities through an MCP client and Skills | Accepted | 2026-10-29 |
+| [0007](0007-cron-scheduler-inside-daemon.md) | Run the cron scheduler inside the daemon | Accepted | 2026-10-29 |
+| [0008](0008-cli-channel-http-and-web-dashboard-interfaces.md) | Provide CLI, chat channels, HTTP API, and web dashboard interfaces | Accepted | 2026-10-29 |
+| [0009](0009-session-as-append-only-event-log.md) | Store sessions as an append-only event log in SQLite | Accepted | 2026-10-29 |
+| [0010](0010-profile-and-config-patch.md) | Compose the runtime with profiles and config patches | Accepted | 2026-10-29 |
+| [0011](0011-subagent-as-child-session.md) | Run subagents as child sessions | Accepted | 2026-10-29 |
+| [0012](0012-acp-and-sdk-json-rpc.md) | Provide an ACP server and an SDK JSON-RPC server | Accepted | 2026-10-29 |
+| [0013](0013-use-go-as-single-binary.md) | Use Go as a single binary and library | Accepted | 2026-10-29 |
+| [0014](0014-integration-as-agentic-tool.md) | Provide lana as an agentic tool for other services | Accepted | 2026-10-29 |
+| [0015](0015-embeddable-runtime-for-services.md) | Make lana an embeddable runtime for services | Accepted | 2026-10-29 |
+| [0016](0016-owner-auth-for-browser.md) | Authenticate the browser with an owner token and a session cookie | Accepted | 2026-10-30 |
+| [0017](0017-agent-teams-as-roster-over-subagents.md) | Model agent teams as a roster of agents over subagent child sessions | Accepted | 2026-10-30 |
 
 ## How to add an ADR
 

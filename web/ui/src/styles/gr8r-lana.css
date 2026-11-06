@@ -1,0 +1,170 @@
+/* Lana additions to the Gr8r layer. Keep this small; prefer Gr8r classes. */
+
+/* Neutralise the legacy element rules (button/a/input) that would otherwise
+   leak into Gr8r components on properties Gr8r does not set. A later layer wins
+   over the legacy layer regardless of specificity, so this zero-specificity
+   reset (gr8r layer) drops those inherited values and lets the Gr8r component
+   rules — same layer, higher specificity — take over. Extend the class list
+   whenever a Gr8r class is applied to a <button>/<a>/<input>. */
+:where(.btn, .ibtn, .sitem, .ws, .topsearch, .seg button, .tab, .pillbtn, .mi, .chip, .crumbs button, .bottomnav button, .lbl, .badge, .panel) {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+  border-radius: 0;
+  font-weight: inherit;
+  color: inherit;
+  box-shadow: none;
+}
+
+/* The search wrapper is a plain <div>, so legacy wrapper classes would leak
+   their padding/min-height onto it and push the icon out of the field. Drop
+   those here so SearchInput stays one Gr8r box. */
+:where(.input, .select, .textarea, .check, .radio, .toggle, .inwrap) {
+  padding: 0;
+  min-height: 0;
+  max-width: none;
+}
+
+:where(.input, .select, .textarea) {
+  margin: 0;
+  width: 100%;
+}
+
+/* lana: the shell port puts pages inside Gr8r's .content scroll box. The
+   full-height Lana workspaces (Chats, the sessions workspace, the session
+   chat) used to size themselves against the viewport via .app-content; size
+   them against .content instead, so they fill it and scroll internally. */
+.content:has(> .rooms-page) {
+  overflow: hidden;
+}
+
+.content > .rooms-page {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (min-width: 40.01rem) {
+  .content > .sessions-workspace {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .content > .sessions-workspace .sessions-pane,
+  .content > .sessions-workspace .sessions-chat-pane,
+  .content > .sessions-workspace .chat-view {
+    height: 100%;
+  }
+}
+
+/* lana: the sidebar brand carries the daemon address as a faint second line. */
+.ws-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+.ws-sub {
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+
+.collapsed .ws-text {
+  display: none;
+}
+
+/* lana: brand mark and wordmark, as in the pre-Gr8r sidebar. */
+.lana-mark {
+  display: block;
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .lana-mark {
+  filter: invert(1);
+}
+
+.lana-word {
+  letter-spacing: 0.45em;
+  font-weight: 500;
+}
+
+/* lana: keep Lana's own button colour instead of the Gr8r indigo. These are
+   the pre-Gr8r brand values (bg-brand-solid / -hover); Gr8r derives --accent,
+   --accent-soft and --accent-line from --acc-l / --acc-d. */
+:root {
+  --acc-l: #1a1831;
+  --acc-d: #49447e;
+  --bg-brand-solid: #1a1831;
+  --bg-brand-solid-hover: #262348;
+}
+
+:root[data-theme="dark"] {
+  --on-accent: #ffffff;
+  --bg-brand-solid: #49447e;
+  --bg-brand-solid-hover: #625ca3;
+}
+
+/* lana: breadcrumb links share the Gr8r crumb-button styling. */
+.crumbs a {
+  padding: 3px 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  text-decoration: none;
+  transition: color var(--dur);
+}
+
+.crumbs a:hover {
+  color: var(--text);
+}
+
+/* lana: the topbar menu button opens the mobile sidebar drawer (Gr8r hides it
+   with an inline style/media query; here it is a class). */
+.mnav-btn {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .mnav-btn {
+    display: inline-flex;
+  }
+}
+
+/* lana: the legacy `button` / `a` base rules (legacy layer) set height,
+   white-space, line-height, flex alignment and font size. Gr8r components put on
+   <button>/<a> do not always set those, so the legacy values leaked (stat tiles
+   clipped to 30px, add-card text on one line). This list is every Gr8r class the
+   Gr8r source puts on an interactive element; :where keeps it zero-specificity so
+   each component's own rules (same layer) still win. */
+:where(
+    .btn, .ibtn, .sitem, .ws, .topsearch, .seg button, .tab, .pillbtn, .mi,
+    .chip, .crumbs button, .crumbs a, .bottomnav button, .stat, .addcard,
+    .addrow, .cev, .cmore, .dropzone, .react, .tcard, .wcard, .valbtn, .skip,
+    .pcard, .kcard, .trow, .mini, .select-btn, .lbl, .badge, .panel, .picon,
+    .pfile
+  ) {
+  height: auto;
+  min-height: 0;
+  line-height: inherit;
+  white-space: normal;
+  justify-content: normal;
+  align-items: normal;
+  gap: normal;
+  font-size: inherit;
+  text-align: inherit;
+  display: revert;
+  margin: 0;
+}
+
+/* lana: an empty or error state fills its container, so it centres even when
+   the parent panel is a flex row (Skills, MCP and other list panels). */
+.empty-state {
+  flex: 1 1 auto;
+  width: 100%;
+  /* The legacy sheet caps it at 360px, which pinned it to the left edge. */
+  max-width: none;
+  align-self: stretch;
+}

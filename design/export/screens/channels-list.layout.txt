@@ -1,0 +1,119 @@
+# Channels / Channels – List (frame 10583)
+# Notation: row/col = flex direction; gap; pad=top,right,bottom,left; size f=fixed h=hug f=fill (first letter); bg/border use tokens from ../tokens.css
+frame "Channels – List" row gap=0 f1440xf1024 bg=--bg-primary
+  frame "Sidebar" col gap=0 pad=32,16,24,16 main=spaceBetween f280xf1024 bg=--bg-primary border=--border-secondary
+    frame "Top" col gap=24 f247xh360
+      frame "Logo" row gap=0 pad=0,8,0,8 main=spaceBetween cross=center f247xh32
+        <Logo lockup> row gap=12 cross=center h114xh32
+          <Logo mark> f32xf32
+            vector 18x22 bg=--fg-primary
+            vector 18x22 bg=--fg-primary
+          text "LΛNΛ" 16/20 Regular color=--text-primary
+        frame "Toggle sidebar" row gap=0 main=center cross=center f32xf32 radius=6
+          <Icon/Sidebar collapse> f20xf20
+      frame "Nav" col gap=4 f247xh304
+        <Nav item/State=Default> {"Icon": 1728, "Label": "Home"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Home> f20xf20
+          text "Home" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1730, "Label": "Sessions"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Sessions> f20xf20
+          text "Sessions" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1732, "Label": "Agents"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Agents> f20xf20
+          text "Agents" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 1734, "Label": "Skills"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Skills> f20xf20
+          text "Skills" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Default> {"Icon": 9092, "Label": "MCP"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/MCP> f20xf20
+          text "MCP" 16/24 Semibold color=--text-secondary
+        <Nav item/State=Active> {"Icon": 1736, "Label": "Channels"} row gap=12 pad=8,12,8,12 cross=center f247xh40 bg=--bg-active radius=6
+          <Icon/Channels> f20xf20
+          text "Channels" 16/24 Semibold color=--text-primary
+        <Nav item/State=Default> {"Icon": 1738, "Label": "Settings"} row gap=12 pad=8,12,8,12 cross=center f247xh40 radius=6
+          <Icon/Settings> f20xf20
+          text "Settings" 16/24 Semibold color=--text-secondary
+    frame "Bottom" col gap=20 f247xh157
+      frame "Daemon" col gap=4 pad=16,16,16,16 f247xh76 bg=--bg-secondary radius=12
+        frame "Status" row gap=8 cross=center f215xh20
+          ellipse 8x8 bg=--fg-success-primary
+          text "Daemon running" 14/20 Semibold color=--text-primary
+        text "127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+      rectangle 247x1 bg=--border-secondary
+      frame "Owner" row gap=12 pad=0,8,0,8 cross=center f247xh40
+        frame "Avatar" row gap=0 main=center cross=center f40xf40 bg=--bg-tertiary border=--border-secondary radius=20
+          text "OW" 14/20 Semibold color=--text-tertiary
+        frame "Text" col gap=0 f147xh40
+          text "Owner" 14/20 Semibold color=--text-primary
+          text "This browser" 14/20 Regular color=--text-tertiary
+        <Icon/Logout> f20xf20
+  frame "Main" col gap=24 pad=32,32,32,32 f1160xf1024 bg=--bg-primary
+    frame "Header" row gap=16 cross=center f1096xh60
+      frame "Title" col gap=4 f1096xh60
+        text "Channels" 24/32 Semibold color=--text-primary
+        text "Where people reach your agents. Each chat goes to one agent." 16/24 Regular color=--text-tertiary
+    frame "List" col gap=0 f1096xh475 bg=--bg-primary border=--border-secondary radius=12 shadow
+      frame "Telegram" row gap=16 pad=16,20,16,20 cross=center f1094xh79 border=--border-secondary
+        frame "Telegram" row gap=0 main=center cross=center f40xf40 bg=#229ED9 radius=20
+          vector 20x20
+        frame "Text" col gap=2 f901xh46
+          frame "Name row" row gap=8 cross=center h172xh24
+            text "Telegram" 16/24 Semibold color=--text-primary
+            <Badge/Color=Success> {"Label": "Connected"} row gap=6 pad=2,8,2,8 cross=center h91xh22 bg=--bg-success-primary radius=16
+              ellipse 6x6 bg=--fg-success-primary
+              text "Connected" 12/18 Medium color=--text-success-primary
+          text "@lana_helper_bot · 3 chats · 1 owner" 14/20 Regular color=--text-tertiary
+        <Button/Hierarchy=Secondary, Size=sm> {"Label": "Manage"} row gap=6 pad=8,12,8,12 main=center cross=center h81xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Manage" 14/20 Semibold color=--text-secondary
+      frame "Web" row gap=16 pad=16,20,16,20 cross=center f1094xh79 border=--border-secondary
+        frame "Tile" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=10
+          <Icon/Globe> f20xf20
+        frame "Text" col gap=2 f900xh46
+          frame "Name row" row gap=8 cross=center h88xh24
+            text "Web" 16/24 Semibold color=--text-primary
+            <Badge/Color=Success> {"Label": "On"} row gap=6 pad=2,8,2,8 cross=center h45xh22 bg=--bg-success-primary radius=16
+              ellipse 6x6 bg=--fg-success-primary
+              text "On" 12/18 Medium color=--text-success-primary
+          text "This dashboard · 127.0.0.1:18300" 14/20 Regular color=--text-tertiary
+        <Button/Hierarchy=Secondary, Size=sm> {"Label": "Settings"} row gap=6 pad=8,12,8,12 main=center cross=center h82xh38 bg=--bg-primary border=--border-primary radius=8 shadow
+          text "Settings" 14/20 Semibold color=--text-secondary
+      frame "CLI" row gap=16 pad=16,20,16,20 cross=center f1094xh79 border=--border-secondary
+        frame "Tile" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=10
+          <Icon/Terminal> f20xf20
+        frame "Text" col gap=2 f998xh46
+          frame "Name row" row gap=8 cross=center h103xh24
+            text "CLI" 16/24 Semibold color=--text-primary
+            <Badge/Color=Gray> {"Label": "Built in"} row gap=6 pad=2,8,2,8 cross=center h69xh24 bg=--bg-secondary border=--border-secondary radius=16
+              ellipse 6x6 bg=--fg-quaternary
+              text "Built in" 12/18 Medium color=--text-secondary
+          text "lana chat in your terminal" 14/20 Regular color=--text-tertiary
+      frame "Discord" row gap=16 pad=16,20,16,20 cross=center f1094xh79 border=--border-secondary
+        frame "Tile" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=10
+          text "D" 14/20 Semibold color=--text-quaternary
+        frame "Text" col gap=2 f998xh46
+          frame "Name row" row gap=8 cross=center h174xh24
+            text "Discord" 16/24 Semibold color=--text-quaternary
+            <Badge/Color=Gray> {"Label": "Coming soon"} row gap=6 pad=2,8,2,8 cross=center h106xh24 bg=--bg-secondary border=--border-secondary radius=16
+              ellipse 6x6 bg=--fg-quaternary
+              text "Coming soon" 12/18 Medium color=--text-secondary
+          text "Talk to agents in a server or DM." 14/20 Regular color=--text-quaternary
+      frame "Slack" row gap=16 pad=16,20,16,20 cross=center f1094xh79 border=--border-secondary
+        frame "Tile" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=10
+          text "S" 14/20 Semibold color=--text-quaternary
+        frame "Text" col gap=2 f998xh46
+          frame "Name row" row gap=8 cross=center h157xh24
+            text "Slack" 16/24 Semibold color=--text-quaternary
+            <Badge/Color=Gray> {"Label": "Coming soon"} row gap=6 pad=2,8,2,8 cross=center h106xh24 bg=--bg-secondary border=--border-secondary radius=16
+              ellipse 6x6 bg=--fg-quaternary
+              text "Coming soon" 12/18 Medium color=--text-secondary
+          text "Mention an agent in a channel." 14/20 Regular color=--text-quaternary
+      frame "WhatsApp" row gap=16 pad=16,20,16,20 cross=center f1094xh78
+        frame "Tile" row gap=0 main=center cross=center f40xf40 bg=--bg-secondary border=--border-secondary radius=10
+          text "W" 14/20 Semibold color=--text-quaternary
+        frame "Text" col gap=2 f998xh46
+          frame "Name row" row gap=8 cross=center h196xh24
+            text "WhatsApp" 16/24 Semibold color=--text-quaternary
+            <Badge/Color=Gray> {"Label": "Coming soon"} row gap=6 pad=2,8,2,8 cross=center h106xh24 bg=--bg-secondary border=--border-secondary radius=16
+              ellipse 6x6 bg=--fg-quaternary
+              text "Coming soon" 12/18 Medium color=--text-secondary
+          text "Chat with an agent from your phone." 14/20 Regular color=--text-quaternary
