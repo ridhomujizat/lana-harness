@@ -45,6 +45,7 @@ import { KnowledgePage } from "../views/knowledge";
 import { McpPage, McpDetailPage } from "../views/mcp";
 import { SetupWizard, setupNeeded } from "../views/setup";
 import { ChannelsPage, TelegramPage } from "../views/channels";
+import { UpdateCard } from "../views/update-card";
 
 type AuthState = "checking" | "loggedIn" | "loggedOut";
 
@@ -534,6 +535,8 @@ export function App() {
           {routeContent(route, theme, changeTheme)}
         </div>
       </div>
+      {/* Spec 36: the self-update card floats over every signed-in page. */}
+      <UpdateCard />
     </div>
   );
 }
