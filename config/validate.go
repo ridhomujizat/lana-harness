@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
@@ -17,7 +18,41 @@ import (
 var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+
+// claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
+// API-CCR-001).
+const claudeCodeRuntime = "claude-code"
+
+// runtimeForbiddenKeys are the agent keys a claude-code agent may not set: the
+// runtime owns its tools, context, and loop (REQ-CCR-001).
+var runtimeForbiddenKeys = []string{"compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "provider", "skills", "subagents", "tools", "vision"}
+
+// runtimeOnlyKeys are the agent keys only a runtime agent may set.
+var runtimeOnlyKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary"}
+
+// runtimeAuthModes are the accepted agents.<name>.auth values.
+var runtimeAuthModes = []string{core.RuntimeAuthAPIKey, core.RuntimeAuthSubscription}
+
+// runtimeEfforts are the reasoning_effort values of a claude-code agent,
+// passed to --effort (API-CCR-001).
+var runtimeEfforts = []string{"high", "low", "max", "medium", "xhigh"}
+
+// nativeEfforts are the reasoning_effort values of a lana agent (REQ-MDL-001).
+var nativeEfforts = []string{"off", "low", "high", "max"}
+
+// runtimeNames are the accepted agents.<name>.runtime values: claude-code and
+// any runtime registered with core.RegisterRuntime.
+func runtimeNames() []string {
+	names := []string{claudeCodeRuntime}
+	for _, name := range core.RuntimeNames() {
+		if !contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
@@ -375,11 +410,16 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			add(path+"."+key, unknownKeyMsg(key, agentKeys))
 		}
 	}
-	for _, key := range []string{"provider", "model", "prompt_file", "workspace", "permission"} {
+	for _, key := range []string{"provider", "model", "prompt_file", "workspace", "permission", "runtime", "auth", "api_key_env", "binary"} {
 		if val, ok := v[key]; ok {
 			if _, ok := val.(string); !ok {
 				add(path+"."+key, typeMsg("string", val))
 			}
+		}
+	}
+	if val, ok := v["allow_scheduled"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".allow_scheduled", typeMsg("boolean", val))
 		}
 	}
 	for _, key := range []string{"fallback", "tools", "subagents", "mcp", "skills"} {
@@ -494,10 +534,13 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 	}
 	if val, ok := v["reasoning_effort"]; ok {
 		s, ok := val.(string)
+		// A runtime agent's effort values differ; validateEffective checks
+		// them against the merged runtime key (API-CCR-001).
+		runtime, _ := v["runtime"].(string)
 		if !ok {
 			add(path+".reasoning_effort", typeMsg("string", val))
-		} else if s != "" && !contains([]string{"off", "low", "high", "max"}, s) {
-			add(path+".reasoning_effort", enumMsg(s, []string{"off", "low", "high", "max"}))
+		} else if runtime == "" && s != "" && !contains(nativeEfforts, s) {
+			add(path+".reasoning_effort", enumMsg(s, nativeEfforts))
 		}
 	}
 	if raw, ok := v["rules"]; ok {
@@ -829,6 +872,9 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		if name, ok := k["agent"].(string); ok && name != "" {
 			if !contains(agentNames, name) {
 				add("knowledge.agent", fmt.Sprintf("unknown agent %q", name))
+			} else if agent, _ := asMap(agents[name]); agentRuntime(agent) != "" {
+				// REQ-CCR-007: background passes never use a runtime agent.
+				add("knowledge.agent", fmt.Sprintf("agent %q is a claude-code agent; background passes cannot use it", name))
 			}
 		}
 	}
@@ -884,6 +930,11 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	for _, name := range agentNames {
 		agent, _ := asMap(agents[name])
 		path := "agents." + name
+		if validateRuntimeAgent(agent, path, add) {
+			// A runtime agent has no provider, model address, fallback,
+			// subagents, or MCP servers to resolve (API-CCR-001).
+			continue
+		}
 		provider, _ := agent["provider"].(string)
 		if raw, ok := agent["provider"]; ok {
 			if p, ok := raw.(string); ok && p != "" && !contains(providerNames, p) {
@@ -941,6 +992,12 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 				add(path+".lead", "is a team; a team lead must be an agent")
 			case !contains(agentNames, lead):
 				add(path+".lead", fmt.Sprintf("agent '%s' is not registered (available: %s)", lead, strings.Join(agentNames, ", ")))
+			default:
+				// A lead delegates through task, which a runtime agent does
+				// not have (ADR 0018).
+				if leadAgent, _ := asMap(agents[lead]); agentRuntime(leadAgent) != "" {
+					add(path+".lead", fmt.Sprintf("agent '%s' is a claude-code agent and cannot lead a team", lead))
+				}
 			}
 		}
 		members, _ := asStringSlice(team["members"])
@@ -1168,4 +1225,50 @@ func enumMsg(value string, choices []string) string {
 	sorted := append([]string{}, choices...)
 	sort.Strings(sorted)
 	return fmt.Sprintf("invalid value '%s' (choices: %s)", value, strings.Join(sorted, ", "))
+}
+
+// agentRuntime returns the merged runtime key of an agent table.
+func agentRuntime(agent map[string]any) string {
+	runtime, _ := agent["runtime"].(string)
+	return runtime
+}
+
+// validateRuntimeAgent checks the runtime keys of one merged agent table
+// (REQ-CCR-001, API-CCR-001). It reports whether the agent is a runtime agent;
+// the caller then skips the provider and model address checks.
+func validateRuntimeAgent(agent map[string]any, path string, add func(string, string)) bool {
+	runtime, isString := agent["runtime"].(string)
+	if !isString || runtime == "" {
+		// The runtime-only keys need runtime = "claude-code".
+		for _, key := range runtimeOnlyKeys {
+			if _, ok := agent[key]; ok {
+				add(path+"."+key, fmt.Sprintf("only a claude-code agent can set %s (set runtime = %q)", key, claudeCodeRuntime))
+			}
+		}
+		return false
+	}
+	names := runtimeNames()
+	if !contains(names, runtime) {
+		add(path+".runtime", fmt.Sprintf("unknown runtime %q (available: %s)", runtime, strings.Join(names, ", ")))
+		return true
+	}
+	for _, key := range runtimeForbiddenKeys {
+		if _, ok := agent[key]; ok {
+			add(path+"."+key, fmt.Sprintf("a %s agent cannot set %s", runtime, key))
+		}
+	}
+	auth, _ := agent["auth"].(string)
+	if auth != "" && !contains(runtimeAuthModes, auth) {
+		add(path+".auth", enumMsg(auth, runtimeAuthModes))
+	}
+	if keyEnv, _ := agent["api_key_env"].(string); auth == core.RuntimeAuthAPIKey && keyEnv == "" {
+		add(path+".api_key_env", "required when auth is api_key")
+	}
+	if model, _ := agent["model"].(string); strings.HasPrefix(model, "-") {
+		add(path+".model", "must not start with '-'")
+	}
+	if effort, ok := agent["reasoning_effort"].(string); ok && effort != "" && !contains(runtimeEfforts, effort) {
+		add(path+".reasoning_effort", enumMsg(effort, runtimeEfforts))
+	}
+	return true
 }

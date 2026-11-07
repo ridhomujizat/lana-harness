@@ -125,6 +125,11 @@ func usedProviders(config core.Config) map[string]bool {
 		}
 	}
 	markModel := func(agent core.AgentConfig) {
+		// A runtime agent (ADR 0018) uses no provider; its model is the
+		// runtime's own and is never a router address.
+		if agent.Runtime != "" {
+			return
+		}
 		if agent.Provider != "" {
 			used[agent.Provider] = true
 			return
@@ -140,6 +145,9 @@ func usedProviders(config core.Config) map[string]bool {
 		}
 	}
 	for _, agent := range config.Agents {
+		if agent.Runtime != "" {
+			continue
+		}
 		markModel(agent)
 		for _, fallback := range agent.Fallback {
 			markAddress(fallback)

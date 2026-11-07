@@ -107,6 +107,13 @@ type Registry struct {
 	cfgMu sync.RWMutex
 	// applyMu serializes ApplyConfig so two saves cannot race on the MCP diff.
 	applyMu sync.Mutex
+
+	// runtimeMu guards the external agent runtimes (ADR 0018), built on first
+	// use by name, and the hooks their turns report usage and limits through.
+	runtimeMu      sync.Mutex
+	runtimes       map[string]core.AgentRuntime
+	runtimesClosed bool
+	externalHooks  ExternalHooks
 }
 
 // NewRegistry creates a registry.
@@ -617,6 +624,8 @@ func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 		// stays "cancelled" and is not an interrupt (API-TFB-001).
 		cancel(nil)
 	}
+	// REQ-CCR-006: an external runtime turn gets its interrupt at once.
+	runner.interruptExternal()
 	return nil
 }
 
@@ -638,6 +647,7 @@ func (r *Registry) Interrupt(ctx context.Context, sessionID string, cause error)
 	if cancel != nil {
 		cancel(cause)
 	}
+	runner.interruptExternal()
 	return nil
 }
 
@@ -905,6 +915,13 @@ func (r *Registry) Close(ctx context.Context) error {
 	go func() {
 		r.wg.Wait()
 		close(done)
+	}()
+	// The external runtime processes stop once the turns ended, or when the
+	// wait gives up (ADR 0018: processes exit at daemon shutdown).
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		r.shutdownRuntimes(sctx)
 	}()
 	select {
 	case <-done:

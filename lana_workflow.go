@@ -62,6 +62,11 @@ type workflowDeps struct{ rt *Runtime }
 // until the turn ends (REQ-WF-005).
 func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (workflow.AgentResult, error) {
 	rt := d.rt
+	// REQ-CCR-007: a workflow node runs a Claude Agent only with
+	// allow_scheduled = true.
+	if err := rt.scheduledRunAllowed(req.Agent); err != nil {
+		return workflow.AgentResult{}, err
+	}
 	session, err := rt.CreateChannelSession(ctx, "workflow", req.WorkflowID, req.Agent)
 	if err != nil {
 		return workflow.AgentResult{}, err

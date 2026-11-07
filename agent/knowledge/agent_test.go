@@ -66,3 +66,20 @@ func TestHasKnowledgeTool(t *testing.T) {
 		t.Fatal("hasKnowledgeTool accepted an agent without a knowledge tool")
 	}
 }
+
+// REQ-CCR-007: the knowledge upkeep agent is never a runtime agent, whether
+// picked by default or named in knowledge.agent.
+func TestKnowledgeAgentSkipsRuntimeAgents(t *testing.T) {
+	cfg := core.Config{Agents: map[string]core.AgentConfig{
+		"alpha": {Runtime: "claude-code", Tools: []string{"knowledge_read"}},
+		"beta":  {Tools: []string{"knowledge_read"}},
+	}}
+	if name, _ := knowledgeAgent(cfg); name != "beta" {
+		t.Fatalf("knowledgeAgent = %q, want beta", name)
+	}
+	cfg.Knowledge.Agent = "alpha"
+	name, reason := knowledgeAgent(cfg)
+	if name != "" || reason == "" {
+		t.Fatalf("knowledgeAgent = %q, %q", name, reason)
+	}
+}

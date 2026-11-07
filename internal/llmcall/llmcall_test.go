@@ -180,3 +180,15 @@ func TestEmbedderRoutes(t *testing.T) {
 		t.Fatal("plain registry embedder not found")
 	}
 }
+
+// REQ-CCR-007: background passes never resolve an agent on an external
+// runtime.
+func TestAgentChainRefusesRuntimeAgent(t *testing.T) {
+	_, _, err := AgentChain(nil, core.AgentConfig{Runtime: "claude-code", Model: "opus"})
+	if !errors.Is(err, ErrRuntimeAgent) {
+		t.Fatalf("err = %v", err)
+	}
+	if got := RuntimeProvider("claude-code"); got != "claude-agent" {
+		t.Fatalf("RuntimeProvider = %q", got)
+	}
+}

@@ -16,6 +16,10 @@ var knowledgeToolNames = []string{"knowledge_search", "knowledge_read", "knowled
 // and a reason for the status.
 func knowledgeAgent(cfg core.Config) (name string, reason string) {
 	if cfg.Knowledge.Agent != "" {
+		// REQ-CCR-007: background passes never use a runtime agent.
+		if agent, ok := cfg.Agents[cfg.Knowledge.Agent]; ok && agent.Runtime != "" {
+			return "", "knowledge.agent '" + cfg.Knowledge.Agent + "' is a Claude Agent; background passes cannot use it"
+		}
 		return cfg.Knowledge.Agent, ""
 	}
 	names := make([]string, 0, len(cfg.Agents))
@@ -24,7 +28,7 @@ func knowledgeAgent(cfg core.Config) (name string, reason string) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if hasKnowledgeTool(cfg.Agents[name]) {
+		if agent := cfg.Agents[name]; agent.Runtime == "" && hasKnowledgeTool(agent) {
 			return name, ""
 		}
 	}

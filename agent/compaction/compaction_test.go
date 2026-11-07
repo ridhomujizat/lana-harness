@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
 )
 
@@ -894,5 +895,22 @@ func TestOnCompactedObserverNotCalledOnAppendFailure(t *testing.T) {
 	case <-called:
 		t.Fatal("observer was called after a failed summary append")
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// REQ-CCR-007: a manual compaction of a Claude Agent session is refused; the
+// runtime owns its context and lana calls no model for it.
+func TestCompactNowRefusesRuntimeAgent(t *testing.T) {
+	provider := &recordProvider{text: "summary"}
+	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
+		"coder": {Runtime: "claude-code", Model: "opus"},
+	}})
+	seedTurn(t, store, info.ID)
+	_, err := service.CompactNow(context.Background(), info.ID)
+	if !errors.Is(err, llmcall.ErrRuntimeAgent) {
+		t.Fatalf("err = %v", err)
+	}
+	if provider.calls != 0 {
+		t.Fatalf("provider calls = %d", provider.calls)
 	}
 }
