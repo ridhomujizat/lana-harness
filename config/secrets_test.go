@@ -160,3 +160,45 @@ func TestMissingVarError(t *testing.T) {
 		t.Fatalf("wrong message: %v", err)
 	}
 }
+
+// A key written to secrets.env after Load is visible to the loaded secret
+// source without a restart; the environment still wins (REQ-RTR-008).
+func TestSecretsFileReloadsOnChange(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, "secrets.env")
+	writeFile(t, path, "A_KEY=one\n")
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Load(context.Background(), Options{Home: home, Env: envMap(map[string]string{"ENV_KEY": "from-env"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secret, ok := res.Secrets.Lookup("A_KEY"); !ok || secret.Reveal() != "one" {
+		t.Fatalf("A_KEY = %q, %v", secret.Reveal(), ok)
+	}
+	if _, ok := res.Secrets.Lookup("B_KEY"); ok {
+		t.Fatal("B_KEY found before it was written")
+	}
+	writeFile(t, path, "A_KEY=two-longer\nB_KEY=new\nENV_KEY=from-file\n")
+	if secret, ok := res.Secrets.Lookup("A_KEY"); !ok || secret.Reveal() != "two-longer" {
+		t.Fatalf("A_KEY after write = %q, %v", secret.Reveal(), ok)
+	}
+	if secret, ok := res.Secrets.Lookup("B_KEY"); !ok || secret.Reveal() != "new" {
+		t.Fatalf("B_KEY after write = %q, %v", secret.Reveal(), ok)
+	}
+	if secret, ok := res.Secrets.Lookup("ENV_KEY"); !ok || secret.Reveal() != "from-env" {
+		t.Fatalf("ENV_KEY = %q, want the environment value", secret.Reveal())
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := res.Secrets.Lookup("B_KEY"); ok {
+		t.Fatal("B_KEY still found after secrets.env was removed")
+	}
+	// A secrets.env created after boot is read too.
+	writeFile(t, path, "C_KEY=late\n")
+	if secret, ok := res.Secrets.Lookup("C_KEY"); !ok || secret.Reveal() != "late" {
+		t.Fatalf("C_KEY = %q, %v", secret.Reveal(), ok)
+	}
+}

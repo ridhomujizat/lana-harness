@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -56,9 +57,12 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := checkSecrets(config, b.Secrets()); err != nil {
-		_ = r.Close()
-		return err
+	// A provider in use without a key does not stop boot: its targets fail
+	// with missing_secret and the chain moves on (spec 37 failure table). The
+	// key may be added later from the dashboard without a restart.
+	for _, miss := range missingSecrets(config, b.Secrets()) {
+		slog.Warn("router: provider in use has no API key; its calls fail with missing_secret until the key is set",
+			"provider", miss.Provider, "env", miss.Env)
 	}
 	m.router = r
 	return b.Provide(core.ServiceLLM, r)
@@ -88,9 +92,17 @@ func ConfigFromCore(config core.Config) (Config, error) {
 	return out, nil
 }
 
-// checkSecrets fails boot when a provider in use has an empty API key env.
-func checkSecrets(config core.Config, secrets core.Secrets) error {
+// missingSecret names a provider in use whose API key env is empty.
+type missingSecret struct {
+	Provider string
+	Env      string
+}
+
+// missingSecrets returns the providers in use (see usedProviders) whose
+// effective API key env is empty, in name order.
+func missingSecrets(config core.Config, secrets core.Secrets) []missingSecret {
 	used := usedProviders(config)
+	var out []missingSecret
 	for _, name := range sortedKeys(config.Providers) {
 		if !used[name] {
 			continue
@@ -99,18 +111,16 @@ func checkSecrets(config core.Config, secrets core.Secrets) error {
 		if env == "" {
 			continue
 		}
-		secret, ok := core.NewSecret(""), false
+		var secret core.Secret
+		ok := false
 		if secrets != nil {
 			secret, ok = secrets.Lookup(env)
 		}
 		if !ok || secret.Reveal() == "" {
-			return &core.ProviderError{
-				Class:   "missing_secret",
-				Message: fmt.Sprintf("env %s for provider %s is empty", env, name),
-			}
+			out = append(out, missingSecret{Provider: name, Env: env})
 		}
 	}
-	return nil
+	return out
 }
 
 // usedProviders returns the providers an agent, a fallback, a combo used by

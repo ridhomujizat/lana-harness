@@ -116,6 +116,9 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 	if !ok {
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is not configured", target.Provider)}
 	}
+	if pe := r.missingKey(entry); pe != nil {
+		return nil, pe
+	}
 	one := req
 	one.Model = target.Model
 	stream, err := entry.adapter.Stream(ctx, one)
@@ -134,6 +137,27 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 	base := r.baseRecord(requested, target, n, start, meta)
 	base.TTFTMs = r.now().Sub(start).Milliseconds()
 	return r.recordedStream(snap, first, pump, base, start), nil
+}
+
+// missingKey returns a missing_secret error when a configured provider has an
+// API key env whose value is empty, so the chain moves on without calling
+// the provider (spec 37 failure table). Providers added with WithProviders
+// and routers without a secret source are not checked.
+func (r *Router) missingKey(entry *providerEntry) *core.ProviderError {
+	if entry.custom || r.opts.secrets == nil {
+		return nil
+	}
+	env := EffectiveKeyEnv(entry.cfg, entry.name)
+	if env == "" {
+		return nil
+	}
+	if secret, ok := r.opts.secrets.Lookup(env); ok && secret.Reveal() != "" {
+		return nil
+	}
+	return &core.ProviderError{
+		Class:   "missing_secret",
+		Message: fmt.Sprintf("env %s for provider %s is empty", env, entry.name),
+	}
 }
 
 func (r *Router) backoff(n int, pe *core.ProviderError) time.Duration {

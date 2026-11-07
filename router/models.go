@@ -143,6 +143,23 @@ func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]M
 	return out, fetchErr
 }
 
+// ModelsFetchedAt returns when the model list of provider was last fetched
+// from its models endpoint (successfully or not); ok is false when it never
+// was, or the provider's config changed since.
+func (r *Router) ModelsFetchedAt(provider string) (time.Time, bool) {
+	entry, ok := r.snap.Load().providers[provider]
+	if !ok {
+		return time.Time{}, false
+	}
+	r.models.mu.Lock()
+	defer r.models.mu.Unlock()
+	cached, ok := r.models.entries[provider]
+	if !ok || cached.entry != entry {
+		return time.Time{}, false
+	}
+	return cached.at, true
+}
+
 func (r *Router) listModels(ctx context.Context, entry *providerEntry, refresh bool) ([]ModelInfo, error) {
 	now := r.now()
 	c := &r.models
