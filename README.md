@@ -174,7 +174,25 @@ See [spec 30](docs/specs/30-knowledge/requirements.md) and
 
 ## Upgrade
 
-With the prebuilt binary, run the install command again. From source:
+When a newer release is out, the web dashboard shows a card in the corner. Click **Update now**:
+lana downloads the new binary, checks its checksum, tries it on a copy of your data, waits for
+running turns, backs up the databases, `config.toml`, and the old binary to
+`~/.lana/updates/backups/`, and restarts on the new version. If the new version fails to start,
+lana puts the old binary and the old data back by itself and the card says why. To go back by
+hand, stop the daemon and run `lana update rollback`.
+
+The card offers stable releases. To get betas too, set it in Settings → Updates, or:
+
+```toml
+[update]
+channel = "beta"   # default "stable"
+check = true       # check every 6 hours
+```
+
+Self-update needs a binary lana can replace, such as `~/.local/bin/lana` from the install script.
+For a binary in the Nix store or Homebrew, the card shows the manual command.
+
+With the prebuilt binary, you can also run the install command again. From source:
 
 ```sh
 cd lana-harness
