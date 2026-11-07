@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 // defaultResponseHeaderTimeout is the provider [timeout] default: the wait
@@ -22,8 +23,11 @@ const defaultResponseHeaderTimeout = 300 * time.Second
 // gap between two body reads before the stream is cut.
 const defaultStreamIdleTimeout = 120 * time.Second
 
-// Config is the configuration of one openai_compat provider.
+// Config is the configuration of one OpenAI-wire provider.
 type Config struct {
+	// Kind is the provider kind: openai, deepseek, openrouter, or
+	// openai_compat. Empty means openai_compat.
+	Kind              string
 	BaseURL           string
 	APIKeyEnv         string
 	Headers           map[string]string
@@ -31,6 +35,12 @@ type Config struct {
 	StreamIdleTimeout string
 	// ThinkingFormat is the resolved thinking format: deepseek or none.
 	ThinkingFormat string
+	// HTTPClient replaces the adapter's own client when set (router
+	// WithHTTPClient). Timeout then does not apply.
+	HTTPClient *http.Client
+	// Limits receives the rate limits read from response headers
+	// (REQ-RTR-012). Nil drops them.
+	Limits func(router.LimitUpdate)
 }
 
 // Adapter is a core.Provider for one provider.
@@ -41,6 +51,8 @@ type Adapter struct {
 	client         *http.Client
 	streamIdle     time.Duration
 	thinkingFormat string
+	kind           string
+	limits         func(router.LimitUpdate)
 }
 
 // NewAdapter creates an adapter.
@@ -84,12 +96,28 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets) (*Adapter, error)
 			return nil
 		},
 	}
-	return &Adapter{Name: name, cfg: cfg, secrets: secrets, client: client, streamIdle: streamIdle, thinkingFormat: cfg.ThinkingFormat}, nil
+	if cfg.HTTPClient != nil {
+		client = cfg.HTTPClient
+	}
+	kind := cfg.Kind
+	if kind == "" {
+		kind = kindCompat
+	}
+	return &Adapter{
+		Name:           name,
+		cfg:            cfg,
+		secrets:        secrets,
+		client:         client,
+		streamIdle:     streamIdle,
+		thinkingFormat: cfg.ThinkingFormat,
+		kind:           kind,
+		limits:         cfg.Limits,
+	}, nil
 }
 
 // Stream sends the request and returns an event iterator.
 func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
-	body, err := buildRequestBody(req, a.thinkingFormat)
+	body, err := buildKindRequestBody(req, a.kind, a.thinkingFormat)
 	if err != nil {
 		return nil, err
 	}
@@ -98,20 +126,13 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatSt
 	if err != nil {
 		return nil, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
-	for key, value := range a.cfg.Headers {
-		httpReq.Header.Set(key, value)
-	}
-	if a.cfg.APIKeyEnv != "" && a.secrets != nil {
-		if secret, ok := a.secrets.Lookup(a.cfg.APIKeyEnv); ok && secret.Reveal() != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+secret.Reveal())
-		}
-	}
+	a.setHeaders(httpReq)
 	resp, err := a.client.Do(httpReq)
 	if err != nil {
 		return nil, classifyNetwork(err)
 	}
+	a.reportLimits(resp.Header)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer func() { _ = resp.Body.Close() }()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
