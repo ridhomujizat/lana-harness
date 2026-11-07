@@ -674,7 +674,7 @@ func cmdRun(args []string) int {
 		approve = lineAnswerer
 		questionOpts = append(questionOpts, lana.AskWith(lineQuestioner), lana.AskChannels("cli"))
 	}
-	rt, providerName, model, missingEnv, err := runtimeFor(ctx, home, agentName, approve, questionOpts...)
+	rt, _, _, missingEnv, err := runtimeFor(ctx, home, agentName, approve, questionOpts...)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -711,7 +711,14 @@ func cmdRun(args []string) int {
 	if result.StopReason == lana.StopCancelled && exitCode == 0 {
 		exitCode = 130
 	}
-	value := runOutput{Type: "result", SessionID: result.SessionID, Agent: agentName, Model: providerName + ":" + model, Cwd: cwd, StopReason: result.StopReason, Text: result.Text, Usage: usageOutput{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}, DurationMS: duration, ExitCode: exitCode, Error: payloadError}
+	// The served model: "provider:model" for a legacy agent, the router target
+	// "provider/model" that answered, or "claude-agent/<model>" for a Claude
+	// Agent (lana.Result.Model).
+	runModel := result.Model
+	if runModel == "" {
+		runModel = rt.AgentModel(agentName)
+	}
+	value := runOutput{Type: "result", SessionID: result.SessionID, Agent: agentName, Model: runModel, Cwd: cwd, StopReason: result.StopReason, Text: result.Text, Usage: usageOutput{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}, DurationMS: duration, ExitCode: exitCode, Error: payloadError}
 	switch *output {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)

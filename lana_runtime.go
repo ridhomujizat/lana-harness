@@ -2,6 +2,7 @@ package lana
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -140,4 +141,92 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n])
+}
+
+// turnModel returns the model that served a turn as `lana run` shows it: a
+// legacy agent as "provider:model", a router agent as the "provider/model"
+// target that answered (else the combo or address it asked for), and an
+// external runtime agent as "<provider>/<model>", for example
+// "claude-agent/claude-haiku-5-5", with the model the runtime reported, else
+// the configured one. An empty turnID or a turn with no step reports the
+// requested model.
+func (rt *Runtime) turnModel(ctx context.Context, sessionID, turnID, agentName string) string {
+	var chain []core.SessionEvent
+	if sessionID != "" {
+		chain, _ = rt.store.ChainEvents(ctx, sessionID)
+	}
+	var selection core.ModelSelection
+	hasSelection := false
+	for _, event := range chain {
+		if event.Kind != core.KindModelSelection {
+			continue
+		}
+		var payload core.ModelSelection
+		if json.Unmarshal(event.Payload, &payload) != nil {
+			continue
+		}
+		if payload.Agent != "" {
+			agentName = payload.Agent
+		}
+		selection, hasSelection = payload, true
+	}
+	cfg, ok := rt.agentConfig(agentName)
+	if !ok {
+		return ""
+	}
+	_, isAgent := rt.agents()[agentName]
+
+	// The served target is the last step/end of the turn, else its last
+	// step/start; runtime meta names the model an external runtime runs.
+	var served core.StepEnd
+	stepEnded := false
+	runtimeModel := ""
+	for _, event := range chain {
+		switch {
+		case event.Kind == core.KindSystemMessage && cfg.Runtime != "":
+			var meta core.SystemMessage
+			if json.Unmarshal(event.Payload, &meta) == nil && meta.Subtype == core.SystemSubtypeRuntime && meta.Runtime == cfg.Runtime && meta.Model != "" {
+				runtimeModel = meta.Model
+			}
+		case turnID == "" || event.TurnID != turnID:
+		case event.Kind == core.KindStepEnd:
+			var end core.StepEnd
+			if json.Unmarshal(event.Payload, &end) == nil && end.Model != "" {
+				served, stepEnded = end, true
+			}
+		case event.Kind == core.KindStepStart && !stepEnded:
+			var start core.StepStart
+			if json.Unmarshal(event.Payload, &start) == nil && start.Model != "" {
+				served = core.StepEnd{Provider: start.Provider, Model: start.Model}
+			}
+		}
+	}
+
+	if cfg.Runtime != "" {
+		provider := llmcall.RuntimeProvider(cfg.Runtime)
+		model := ""
+		if served.Provider == provider {
+			model = served.Model
+		}
+		for _, candidate := range []string{runtimeModel, cfg.Model, "default"} {
+			if model == "" {
+				model = candidate
+			}
+		}
+		return provider + "/" + model
+	}
+	provider, model := cfg.Provider, cfg.Model
+	if hasSelection && isAgent {
+		provider, model = llmcall.Select(provider, model, selection)
+	}
+	if served.Model == "" {
+		return llmcall.Display(provider, model)
+	}
+	if provider != "" {
+		return llmcall.Display(served.Provider, served.Model)
+	}
+	if served.Provider == "" {
+		return served.Model
+	}
+	return served.Provider + "/" + served.Model
 }

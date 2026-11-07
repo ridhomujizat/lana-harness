@@ -120,7 +120,8 @@ func TestRouterTurnFallsBackOnAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Text != "from b" {
+	// The result names the target that answered, not the combo's first.
+	if result.Text != "from b" || result.Model != "b/y" {
 		t.Fatalf("result=%+v", result)
 	}
 	if a.requests.Load() != 1 || b.requests.Load() != 1 {
@@ -167,7 +168,8 @@ func TestRouterTurnClientErrorStops(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Class != "client" {
 		t.Fatalf("err=%v", err)
 	}
-	if result.StopReason != StopError {
+	// No target answered: the result names the address the turn asked for.
+	if result.StopReason != StopError || result.Model != "a/x" {
 		t.Fatalf("result=%+v", result)
 	}
 	if a.requests.Load() != 1 || b.requests.Load() != 0 {

@@ -131,7 +131,7 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 		_ = rt.Close()
 		t.Fatalf("run: %v", err)
 	}
-	if result.StopReason != StopEndTurn || !strings.Contains(result.Text, "notes.txt") {
+	if result.StopReason != StopEndTurn || !strings.Contains(result.Text, "notes.txt") || result.Model != "claude-agent/claude-haiku-5-5" {
 		_ = rt.Close()
 		t.Fatalf("result = %+v", result)
 	}

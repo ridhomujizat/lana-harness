@@ -773,6 +773,11 @@ type Result struct {
 	SessionID  string
 	StopReason string
 	Usage      Usage
+	// Model is the model that served the turn as `lana run` shows it: the
+	// legacy "provider:model", the router target "provider/model" that
+	// answered (else the requested combo or address), or "claude-agent/<model>"
+	// for a Claude Agent. It is empty when no agent was resolved.
+	Model string
 }
 
 const (
@@ -800,11 +805,11 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	}
 	info, err := rt.openSession(ctx, req, agentName)
 	if err != nil {
-		return Result{}, err
+		return Result{Model: rt.turnModel(ctx, "", "", agentName)}, err
 	}
 	turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt, req.Attachments...)
 	if err != nil {
-		return Result{}, err
+		return Result{SessionID: info.ID, Model: rt.turnModel(ctx, info.ID, "", info.Agent)}, err
 	}
 	stopWatch := make(chan struct{})
 	go func() {
@@ -822,6 +827,7 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	result := Result{
 		Text: turnResult.Text, SessionID: info.ID, StopReason: turnResult.StopReason,
 		Usage: Usage{InputTokens: int(turnResult.Usage.InputTokens), OutputTokens: int(turnResult.Usage.OutputTokens)},
+		Model: rt.turnModel(context.WithoutCancel(ctx), info.ID, turnID, info.Agent),
 	}
 	if turnResult.Err != nil {
 		return result, turnResult.Err
@@ -893,6 +899,7 @@ func (rt *Runtime) Continue(ctx context.Context, sessionID string) (Result, erro
 	result := Result{
 		Text: turnResult.Text, SessionID: info.ID, StopReason: turnResult.StopReason,
 		Usage: Usage{InputTokens: int(turnResult.Usage.InputTokens), OutputTokens: int(turnResult.Usage.OutputTokens)},
+		Model: rt.turnModel(context.WithoutCancel(ctx), info.ID, turnID, info.Agent),
 	}
 	if turnResult.Err != nil {
 		return result, turnResult.Err
