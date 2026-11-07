@@ -68,6 +68,18 @@ func allowed(from, to string) bool {
 	if from == "config" || from == "internal" || strings.HasPrefix(from, "internal/") {
 		return isInternal(to)
 	}
+	// The router is an embeddable library (ADR 0019): router imports only
+	// core and internal; router/* may also import router.
+	if from == "router" {
+		return isInternal(to)
+	}
+	if strings.HasPrefix(from, "router/") {
+		return to == "router" || isInternal(to)
+	}
+	// Provider adapters register their kinds with the router.
+	if strings.HasPrefix(from, "providers/") && to == "router" {
+		return true
+	}
 	// Implementation and library packages may only import core or internal.
 	if !isInternal(to) {
 		return false
@@ -90,7 +102,7 @@ func isLibrary(pkg string) bool {
 	if pkg == "" || pkg == "." || pkg == "lana" {
 		return true
 	}
-	for _, prefix := range []string{"agent", "providers/", "tools", "store/", "observability/"} {
+	for _, prefix := range []string{"agent", "providers/", "tools", "store/", "observability/", "router"} {
 		if pkg == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(pkg, prefix) {
 			return true
 		}
@@ -154,5 +166,30 @@ func TestRuleViolationMessage(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("violation message does not contain %q: %s", want, joined)
 		}
+	}
+}
+
+// ADR 0019: router imports only core and internal; router/* may import
+// router; providers may import router; nothing else may.
+func TestRouterRules(t *testing.T) {
+	ok := checkRules(map[string][]string{
+		"router":             {modulePath + "/core", modulePath + "/internal/models"},
+		"router/openaiproxy": {modulePath + "/router", modulePath + "/core"},
+		"providers/openai":   {modulePath + "/router", modulePath + "/core"},
+		"":                   {modulePath + "/router"},
+		"examples/router":    {modulePath + "/router", modulePath + "/providers/mock"},
+	})
+	if len(ok) > 0 {
+		t.Fatalf("unexpected violations: %v", ok)
+	}
+	bad := checkRules(map[string][]string{
+		"router":             {modulePath + "/agent", modulePath + "/web", modulePath + "/providers/openai"},
+		"router/openaiproxy": {modulePath + "/web", modulePath + "/store/sqlite"},
+		"agent":              {modulePath + "/router"},
+		"core":               {modulePath + "/router"},
+		"config":             {modulePath + "/router"},
+	})
+	if len(bad) != 8 {
+		t.Fatalf("violations = %d, want 8:\n%s", len(bad), strings.Join(bad, "\n"))
 	}
 }

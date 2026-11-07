@@ -16,6 +16,23 @@ type Config struct {
 	Web       WebConfig                 `toml:"web"`
 	Knowledge KnowledgeConfig           `toml:"knowledge"`
 	Update    UpdateConfig              `toml:"update"`
+	Combos    map[string]ComboConfig    `toml:"combos"`
+	Router    RouterConfig              `toml:"router"`
+}
+
+// ComboConfig is one [combos.<name>] table: a named, ordered list of model
+// addresses tried in order (API-RTR-002).
+type ComboConfig struct {
+	Description string   `toml:"description"`
+	Models      []string `toml:"models"`
+}
+
+// RouterConfig is the [router] table (API-RTR-004).
+type RouterConfig struct {
+	// Proxy serves the OpenAI-compatible proxy when the web server runs.
+	Proxy bool `toml:"proxy"`
+	// Cooldown is a duration string; "" means 5m and "0s" turns cooldown off.
+	Cooldown string `toml:"cooldown"`
 }
 
 // KnowledgeConfig is the [knowledge] table (API-KNW-001, API-KNU-001).

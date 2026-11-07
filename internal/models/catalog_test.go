@@ -165,3 +165,73 @@ func TestVision(t *testing.T) {
 		})
 	}
 }
+
+// REQ-RTR-003, REQ-RTR-010: Lookup resolves addresses and OpenRouter-style
+// IDs by suffix, and carries kinds and prices.
+func TestLookupAddressesAndPrices(t *testing.T) {
+	tests := []struct {
+		in   string
+		id   string
+		kind string
+	}{
+		{in: "gpt-5-mini", id: "gpt-5-mini", kind: "openai"},
+		{in: "oa/gpt-5-mini", id: "gpt-5-mini", kind: "openai"},
+		{in: "openai/gpt-5-mini", id: "gpt-5-mini", kind: "openai"},
+		{in: "openrouter/openai/gpt-5-mini", id: "gpt-5-mini", kind: "openai"},
+		{in: "anthropic/claude-sonnet-5-5", id: "claude-sonnet-5-5", kind: "anthropic"},
+		{in: "openrouter/anthropic/claude-sonnet-4.6", id: "claude-sonnet-4-6", kind: "anthropic"},
+		{in: "ds/deepseek-flash", id: "deepseek-flash", kind: "deepseek"},
+		{in: "gpt-5.1", id: "gpt-5.1", kind: "openai"},
+	}
+	for _, tc := range tests {
+		got, ok := Lookup(tc.in)
+		if !ok || got.ID != tc.id || got.Kind != tc.kind {
+			t.Fatalf("Lookup(%q) = %q/%q ok=%v, want %q/%q", tc.in, got.ID, got.Kind, ok, tc.id, tc.kind)
+		}
+	}
+	for _, in := range []string{"", "x/unknown", "unknown/", "/"} {
+		if _, ok := Lookup(in); ok {
+			t.Fatalf("Lookup(%q) found an entry", in)
+		}
+	}
+	opus, _ := Lookup("claude-opus-5-5")
+	if opus.Price == nil || *opus.Price != (Price{Input: 4, CachedInput: 0.2, Output: 20}) {
+		t.Fatalf("opus price = %+v", opus.Price)
+	}
+	if opus.ContextWindow != 1000000 || opus.MaxOutput != 128000 || opus.Thinking == "" || !opus.Vision {
+		t.Fatalf("opus = %+v", opus)
+	}
+	flash, _ := Lookup("deepseek-flash")
+	if flash.Price != nil {
+		t.Fatalf("deepseek-flash price = %+v, want unknown", flash.Price)
+	}
+	if PricesAsOf == "" {
+		t.Fatal("PricesAsOf is empty")
+	}
+}
+
+// REQ-RTR-013: ForKind returns the picker list of a kind.
+func TestForKind(t *testing.T) {
+	for _, kind := range []string{"openai", "anthropic", "deepseek"} {
+		list := ForKind(kind)
+		if len(list) == 0 {
+			t.Fatalf("ForKind(%q) is empty", kind)
+		}
+		for _, model := range list {
+			if model.Kind != kind || model.ID == "" || model.Embedding {
+				t.Fatalf("ForKind(%q) has %+v", kind, model)
+			}
+		}
+	}
+	if got := ForKind("deepseek"); !reflect.DeepEqual(got, ForProviderKind("https://api.deepseek.com/v1")) {
+		t.Fatal("ForKind(deepseek) differs from ForProviderKind")
+	}
+	for _, kind := range []string{"openrouter", "openai_compat", ""} {
+		if got := ForKind(kind); got != nil {
+			t.Fatalf("ForKind(%q) = %+v, want nil", kind, got)
+		}
+	}
+	if first := ForKind("anthropic")[0]; first.ID != "claude-opus-5-5" {
+		t.Fatalf("first anthropic model = %q", first.ID)
+	}
+}
