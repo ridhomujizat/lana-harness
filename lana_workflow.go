@@ -310,6 +310,17 @@ func (rt *Runtime) IsWorkflowSession(id string) bool {
 // nil after New.
 func (rt *Runtime) Workflows() *workflow.Service { return rt.workflows }
 
+// registerWorkflowTool registers the workflow agent tool (spec #33). It is
+// skipped when the runtime has no tool registry.
+func (rt *Runtime) registerWorkflowTool() {
+	if rt.coreCtx == nil || rt.coreCtx.Tools == nil {
+		return
+	}
+	if err := rt.coreCtx.Tools.Register(tools.NewWorkflow(rt.workflows)); err != nil {
+		slog.Warn("workflow: register tool", "error", err)
+	}
+}
+
 // StartWorkflows resumes durable runs, starts the scheduler, and bridges
 // session events to the engine (REQ-WF-003, REQ-WF-007, design §Runtime glue).
 // It is a no-op after the first call. The engine stops with ctx.

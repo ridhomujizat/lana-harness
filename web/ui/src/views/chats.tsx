@@ -81,6 +81,11 @@ function RowFace({ row }: { row: RoomRow }) {
   );
 }
 
+/* Matches the phone breakpoint in chats.css. */
+function isPhoneWidth(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches;
+}
+
 export function ChatsPage({ roomName }: ChatsPageProps) {
   const { rows, loading } = useRooms();
   const [query, setQuery] = useState("");
@@ -125,10 +130,11 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
     ? rows.find((row) => row.name === roomName) || null
     : null;
 
-  /* REQ-ROOM-001: with no room in the URL, open the first room. */
+  /* REQ-ROOM-001: with no room in the URL, open the first room. On a phone
+     the list is its own screen, so it stays on the list. */
   useEffect(() => {
     const first = rows[0];
-    if (roomName || !first) {
+    if (roomName || !first || isPhoneWidth()) {
       return;
     }
     window.location.hash = "#/chats/" + encodeURIComponent(first.name);
@@ -142,7 +148,7 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
   }
 
   return (
-    <main id="main" className="rooms-page">
+    <main id="main" className={"rooms-page" + (roomName ? " has-room" : "")}>
       <aside className="rooms-list" aria-label="Chats">
         <header className="rooms-list-head">
           <h1 className="rooms-list-title">Chats</h1>

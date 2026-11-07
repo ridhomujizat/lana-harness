@@ -21,6 +21,7 @@ import type { SessionEvent } from "../api/sessions";
 import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
 import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
+import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import { Avatar, AvatarStack, Badge, Button, Skeleton } from "../ui/gr8r";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
@@ -711,6 +712,8 @@ export function RoomView({ room }: RoomViewProps) {
     return withDays;
   }, [segments, events, newestId, turnRunning, liveTurnId, liveStartedAt]);
 
+  useStickToBottom(scrollRef, stickRef);
+
   /* The timeline is bottom anchored: new content scrolls into view unless the
      owner has scrolled up (AC-ROOM-002, AC-ROOM-003). */
   useLayoutEffect(() => {
@@ -913,6 +916,7 @@ export function RoomView({ room }: RoomViewProps) {
     setActionDetails([]);
     setCommandReply("");
     setDraft("");
+    pinToBottom(scrollRef, stickRef);
     const topic = newTopic;
     try {
       let paths: string[] = [];
@@ -1120,6 +1124,9 @@ export function RoomView({ room }: RoomViewProps) {
   return (
     <div className="room-view">
       <header className="room-head">
+        <a className="ibtn ibtn-sm room-back" href="#/chats" aria-label="All chats">
+          <Ic name="chevron-left" size={18} />
+        </a>
         {team ? (
           <AvatarStack
             size="lg"

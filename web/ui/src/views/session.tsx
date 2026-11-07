@@ -51,6 +51,7 @@ import {
 import { holderText, stopReasonWords } from "../lib/format";
 import { ErrorNotice, Loading, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
+import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import {
   Button,
   IconButton,
@@ -2084,6 +2085,8 @@ export function SessionPage({ id, view }: SessionPageProps) {
     }
   }, [thread, pendingText, pendingFiles, streamText]);
 
+  useStickToBottom(messagesRef, stickRef);
+
   function handleScroll() {
     const node = messagesRef.current;
     if (!node) {
@@ -2103,6 +2106,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
     /* Show the bubble before the request so a fast turn that logs the user
        message before the response cannot leave a duplicate pending bubble. */
     setDraft("");
+    pinToBottom(messagesRef, stickRef);
     pendingRef.current = text || "(attachments)";
     setPendingText(text);
     pendingFilesRef.current = files;

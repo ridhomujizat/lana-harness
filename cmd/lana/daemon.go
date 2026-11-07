@@ -226,8 +226,12 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		// REQ-WF-005, REQ-WF-008, API-WF-022: the owner answers workflow
 		// decisions and commands in Telegram; the workflow notice tells them an
 		// approval is waiting on the web.
-		channel.SetWorkflowHooks(workflowHooks(rt))
+		// API-CAL-017: /agenda is answered before the workflow chat commands.
+		channel.SetWorkflowHooks(withAgendaCommand(rt, workflowHooks(rt), time.Now))
 		rt.Workflows().SetNotifier(telegramWorkflowNotifier{ch: channel})
+		// REQ-CAL-006, REQ-CAL-007, REQ-CAL-011: calendar messages, missed and
+		// failed notices and the daily agenda go to the Telegram owner chat.
+		rt.SetCalendarTelegram(calendarTelegramSender(channel))
 		router.workflowNotice = telegramWorkflowNotice(channel)
 		bot, err := channel.Start(runCtx)
 		if errors.Is(err, telegram.ErrUnauthorized) {
@@ -251,6 +255,12 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		// REQ-WF-011, API-WF-001: the Workflows page reads the service and lists
 		// its approval decisions under Needs attention.
 		webServer.SetWorkflows(rt.Workflows())
+		// Spec #35: the Calendar page reads and changes the calendar service.
+		webServer.SetCalendar(rt.Calendar())
+		// REQ-CAL-012, API-CAL-012 … API-CAL-014: the Google Calendar link.
+		if google := rt.CalendarGoogle(); google != nil {
+			webServer.SetCalendarGoogle(google)
+		}
 		webServer.SetToolbox(rt.Toolbox())
 		webServer.SetDaemonStore(backend)
 		webServer.SetSecretStore(backend)
@@ -299,6 +309,10 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 	// resume and event-trigger bridge. They start after the channels and stop
 	// with runCtx when the daemon does.
 	rt.StartWorkflows(runCtx)
+
+	// Spec #35, REQ-CAL-006, REQ-CAL-007: the daemon owns the calendar
+	// scheduler. It starts after the workflows, so moved slots can start runs.
+	rt.StartCalendar(runCtx)
 
 	// restartNow runs the same shutdown as SIGTERM and then replaces the
 	// process image. The daemon lock stays held (REQ-WEB-035).
