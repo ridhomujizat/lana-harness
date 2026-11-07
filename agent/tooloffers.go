@@ -10,7 +10,8 @@ type AutoOfferState struct {
 	MCPManageRegistered bool
 	// VisibleSkills is true when the agent has at least one visible skill.
 	VisibleSkills bool
-	// Team is true when the turn runs as a team.
+	// Team is true when the turn can delegate: it runs as a team, or the agent
+	// lists at least one subagent. Either way the task tools are offered.
 	Team bool
 	// CalendarRegistered is true when the registry has the calendar tool.
 	CalendarRegistered bool

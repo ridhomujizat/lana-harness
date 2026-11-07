@@ -243,9 +243,13 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		return resolvedAgent{}, err
 	}
 	delegates := append([]string{}, cfg.Subagents...)
-	var roster []agenthome.RosterEntry
 	if teamName != "" {
 		delegates = mergeDelegates(team.Members, cfg.Subagents)
+	}
+	// Every agent with delegates gets the roster, not only a team lead: the
+	// model needs the names the task tool accepts and their roles.
+	var roster []agenthome.RosterEntry
+	if len(delegates) > 0 {
 		roster = make([]agenthome.RosterEntry, 0, len(delegates))
 		for _, name := range delegates {
 			entry := agenthome.RosterEntry{Name: name}
@@ -933,7 +937,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				Root:                !resolved.child,
 				MCPManageRegistered: mcpManageRegistered,
 				VisibleSkills:       len(skills) > 0,
-				Team:                resolved.team != "",
+				Team:                resolved.team != "" || len(resolved.delegates) > 0,
 				CalendarRegistered:  calendarRegistered,
 			}) {
 				if !containsString(turnTools, name) {
