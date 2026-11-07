@@ -15,6 +15,7 @@ type Config struct {
 	Modules   []ModuleRow               `toml:"modules"`
 	Web       WebConfig                 `toml:"web"`
 	Knowledge KnowledgeConfig           `toml:"knowledge"`
+	Update    UpdateConfig              `toml:"update"`
 }
 
 // KnowledgeConfig is the [knowledge] table (API-KNW-001, API-KNU-001).
@@ -32,6 +33,15 @@ type KnowledgeConfig struct {
 	// ConsolidateAt is the local HH:MM time of the nightly consolidation run.
 	// Nil means "03:00"; "" turns nightly runs off (API-KNU-001).
 	ConsolidateAt *string `toml:"consolidate_at"`
+}
+
+// UpdateConfig is the [update] table (API-UPD-001). config.Load fills the
+// defaults: channel "stable" and check true.
+type UpdateConfig struct {
+	// Channel is "stable" or "beta".
+	Channel string `toml:"channel"`
+	// Check turns the periodic release check on.
+	Check bool `toml:"check"`
 }
 
 // WebConfig is the [web] table.

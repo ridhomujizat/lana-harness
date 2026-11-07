@@ -203,6 +203,7 @@ func load(ctx context.Context, opts Options, candidate *[]byte) (*Result, error)
 		return nil, Errors{{Msg: err.Error()}}
 	}
 	applyWebDefaults(&cfg, st.value)
+	applyUpdateDefaults(&cfg, st.value)
 	return &Result{
 		Profile:  profile,
 		Home:     home,
@@ -264,6 +265,22 @@ func applyWebDefaults(cfg *core.Config, value map[string]any) {
 	}
 	if v, ok := table["addr"].(string); ok && v != "" {
 		cfg.Web.Addr = v
+	}
+}
+
+// applyUpdateDefaults fills [update] defaults: channel "stable" and check true
+// (API-UPD-001).
+func applyUpdateDefaults(cfg *core.Config, value map[string]any) {
+	cfg.Update = core.UpdateConfig{Channel: "stable", Check: true}
+	table, ok := asMap(value["update"])
+	if !ok {
+		return
+	}
+	if v, ok := table["channel"].(string); ok && v != "" {
+		cfg.Update.Channel = v
+	}
+	if v, ok := table["check"].(bool); ok {
+		cfg.Update.Check = v
 	}
 }
 

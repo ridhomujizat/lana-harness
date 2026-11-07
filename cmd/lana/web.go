@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,9 @@ type webBackend struct {
 	restart *restartController
 	// drain waits for running turns before a restart (REQ-TFB-002).
 	drain *drainController
+	// update is the self-update service; a config save applies its [update]
+	// table live (spec 36). Nil outside the daemon.
+	update *updateService
 	// logs holds the daemon's recent WARN+ records for the dashboard; nil means
 	// the daemon log section is empty (REQ-DSH-008, REQ-DSH-009).
 	logs *logring.Buffer
@@ -259,12 +263,87 @@ func startupNonLiveConfig(home string, rt *lana.Runtime) core.Config {
 	return core.Config{}
 }
 
-// nonLiveConfig clears the sections a live apply replaces.
+// nonLiveConfig clears the sections a live apply replaces. [update] always
+// applies live (API-UPD-008).
 func nonLiveConfig(cfg core.Config) core.Config {
 	cfg.Agents = nil
 	cfg.Teams = nil
 	cfg.MCP = nil
+	cfg.Update = core.UpdateConfig{}
 	return cfg
+}
+
+// SetUpdateService installs the self-update service (spec 36).
+func (b *webBackend) SetUpdateService(service *updateService) {
+	b.update = service
+}
+
+// writeUpdateConfig writes channel and check into [update] of config.toml
+// through the shared config writer, appending the table when it is missing
+// (API-UPD-008). Every other byte stays the same. When the runtime had loaded
+// the file before this write, the loaded version moves with it, because
+// [update] applies live and must not raise the restart banner.
+func (b *webBackend) writeUpdateConfig(ctx context.Context, channel *string, check *bool) error {
+	webfiles.ConfigWriteMu.Lock()
+	defer webfiles.ConfigWriteMu.Unlock()
+	path := filepath.Join(b.home, "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	type entry struct{ key, value string }
+	var entries []entry
+	if channel != nil {
+		entries = append(entries, entry{"channel", strconv.Quote(*channel)})
+	}
+	if check != nil {
+		entries = append(entries, entry{"check", strconv.FormatBool(*check)})
+	}
+	candidate := data
+	for i, item := range entries {
+		next, err := webfiles.SetTableKey(candidate, "[update]", item.key, item.value)
+		if errors.Is(err, webfiles.ErrTableNotFound) {
+			table := "[update]\n"
+			for _, rest := range entries[i:] {
+				table += rest.key + " = " + rest.value + "\n"
+			}
+			next, _, err = webfiles.RewriteTable(ctx, func(context.Context, []byte) error { return nil }, candidate, "[update]", table)
+			if err != nil {
+				return err
+			}
+			candidate = next
+			break
+		}
+		if err != nil {
+			return err
+		}
+		candidate = next
+	}
+	if _, err := config.Check(ctx, b.home, candidate); err != nil {
+		return err
+	}
+	if err := webfiles.AtomicWrite(path, candidate); err != nil {
+		return err
+	}
+	b.versionMu.Lock()
+	if b.loadedSHA256 == webfiles.ConfigVersion(data) {
+		b.loadedSHA256 = webfiles.ConfigVersion(candidate)
+	}
+	b.versionMu.Unlock()
+	return nil
+}
+
+// applyUpdateSection hands the [update] table of a written config.toml to the
+// update service, so a raw config save changes the channel live.
+func (b *webBackend) applyUpdateSection(ctx context.Context, data []byte) {
+	if b.update == nil {
+		return
+	}
+	result, err := config.Check(ctx, b.home, data)
+	if err != nil {
+		return
+	}
+	b.update.applyConfigAsync(result.Config.Update)
 }
 
 // SetRestartController installs the in-place restart scheduler (API-WEB-023).
@@ -838,7 +917,11 @@ func (b *webBackend) ConfigWrite(ctx context.Context, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return webfiles.AtomicWrite(filepath.Join(b.home, "config.toml"), data)
+	if err := webfiles.AtomicWrite(filepath.Join(b.home, "config.toml"), data); err != nil {
+		return err
+	}
+	b.applyUpdateSection(ctx, data)
+	return nil
 }
 
 // ConfigLoadedVersion implements web.ConfigStore. It is the version the runtime
