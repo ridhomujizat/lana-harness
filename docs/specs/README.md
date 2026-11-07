@@ -66,6 +66,9 @@ Order of work: approve requirements, then the contract (if applicable), then des
 Implementation must not start while there are still blocking open questions or earlier artifacts
 have not been approved.
 
+> **Gate lifted (2026-11-08)** for specs #37 (LLM router) and #38 (Claude Agent runtime). The owner answered the
+> interview and said "ya ikuti rekomendasimu". Remaining details use `Rekomendasi agent:`.
+>
 > **Gate lifted (2026-11-05)** for spec #35 (calendar). The owner answered the interview and said "tulis spec dulu lalu
 > implementasi FEnya". Remaining details use `Rekomendasi agent:` in its resolution table.
 >
@@ -153,3 +156,5 @@ it is reversible and does not change observable behavior.
 | — | Workflows: guarded automation graphs, durable runs, error ladder | [Approved r1](33-workflows/requirements.md) | [Approved r1](33-workflows/api-contract.md) | [Approved r1](33-workflows/design.md) | [Completed r1](33-workflows/tasks.md) |
 | — | Calendar: scheduler calendar, items, habits, workflow slots and runs, Google, ICS | [Approved r1](35-calendar/requirements.md) | [Approved r1](35-calendar/api-contract.md) | [Approved r1](35-calendar/design.md) | [Completed r1](35-calendar/tasks.md) |
 | — | Self-update: update card, one-click update, trial boot and rollback | [Approved r1](36-self-update/requirements.md) | [Approved r1](36-self-update/api-contract.md) | [Approved r1](36-self-update/design.md) | [Completed r1](36-self-update/tasks.md) |
+| — | LLM router: provider kinds, combos, fallback, usage and limits, proxy, Router page | [Approved r1](37-llm-router/requirements.md) | [Approved r1](37-llm-router/api-contract.md) | [Approved r1](37-llm-router/design.md) | [In Progress r1](37-llm-router/tasks.md) |
+| — | Claude Agent runtime: Claude Code over headless stream-json (ADR 0018) | [Approved r1](38-claude-agent-runtime/requirements.md) | [Approved r1](38-claude-agent-runtime/api-contract.md) | [Approved r1](38-claude-agent-runtime/design.md) | [In Progress r1](38-claude-agent-runtime/tasks.md) |
