@@ -13,7 +13,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-var topKeys = []string{"agents", "channels", "knowledge", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
+var topKeys = []string{"agents", "channels", "knowledge", "mcp", "modules", "providers", "routes", "teams", "update", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
@@ -22,6 +22,9 @@ var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
 var webKeys = []string{"addr", "enabled", "open_browser"}
+
+// updateKeys are the keys of [update] (API-UPD-001).
+var updateKeys = []string{"channel", "check"}
 
 // maxAgentDescription is the longest accepted agents.<name>.description, in
 // characters (runes).
@@ -196,6 +199,14 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 			add("knowledge", typeMsg("table", raw))
 		} else {
 			validateKnowledge(table, "knowledge", add)
+		}
+	}
+	if raw, ok := m["update"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add("update", typeMsg("table", raw))
+		} else {
+			validateUpdate(table, "update", add)
 		}
 	}
 	return errs
@@ -616,6 +627,26 @@ func validateWeb(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["addr"]; ok {
 		if _, ok := val.(string); !ok {
 			add(path+".addr", typeMsg("string", val))
+		}
+	}
+}
+
+// validateUpdate checks the [update] table (API-UPD-001): channel is "stable"
+// or "beta", check is a boolean.
+func validateUpdate(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(updateKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, updateKeys))
+		}
+	}
+	if val, ok := v["channel"]; ok {
+		if s, ok := val.(string); !ok || (s != "stable" && s != "beta") {
+			add(path+".channel", `must be "stable" or "beta"`)
+		}
+	}
+	if val, ok := v["check"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".check", typeMsg("boolean", val))
 		}
 	}
 }

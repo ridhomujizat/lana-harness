@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/browser"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
+	"github.com/ridhomujizat/lana-harness/internal/selfupdate"
 	"github.com/ridhomujizat/lana-harness/web"
 )
 
@@ -78,7 +80,7 @@ func runDaemonSignals(ctx context.Context, stderr io.Writer, signals <-chan os.S
 
 // runDaemonWithLogs runs the daemon. logBuffer collects the daemon's WARN+
 // records for the dashboard; nil disables the daemon log section.
-func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.Signal, logBuffer *logring.Buffer) int {
+func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.Signal, logBuffer *logring.Buffer) (code int) {
 	errorf := func(code int, format string, args ...any) int {
 		_, _ = fmt.Fprintf(stderr, "error: "+format+"\n", args...)
 		return code
@@ -92,6 +94,60 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		return errorf(1, "%v", err)
 	}
 	defer lock.release()
+
+	// REQ-UPD-004: the first start after an update is a trial boot. A trial
+	// boot that fails before it reports healthy, or a previous one that never
+	// did, restores the backup and execs the previous binary.
+	paths := selfupdate.Paths{Home: home}
+	trial, pending, action := beginTrialBoot(paths, version, time.Now)
+	switch action {
+	case trialRollback:
+		return rollbackUpdate(lock, stderr, paths, *pending, "the previous start of "+pending.To+" never reported healthy")
+	case trialBusy:
+		return errorf(1, "an update rollback is in progress; try again in a few seconds")
+	}
+	defer func() {
+		if !trial.active() {
+			return
+		}
+		if r := recover(); r != nil {
+			code = rollbackUpdate(lock, stderr, paths, trial.pending, fmt.Sprintf("panic during start: %v", r))
+		}
+	}()
+	var startup bytes.Buffer
+	daemonStderr := stderr
+	if trial != nil {
+		// Keep the startup errors for the rollback reason.
+		daemonStderr = io.MultiWriter(stderr, &startup)
+	}
+	code = runDaemonLocked(ctx, daemonStderr, signals, logBuffer, home, lock, trial)
+	if code != 0 && trial.active() {
+		reason := strings.TrimSpace(startup.String())
+		if reason == "" {
+			reason = fmt.Sprintf("the daemon exited with code %d", code)
+		}
+		return rollbackUpdate(lock, stderr, paths, trial.pending, lastLines(reason, 5))
+	}
+	return code
+}
+
+// lastLines keeps the last n lines of text.
+func lastLines(text string, n int) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// runDaemonLocked runs the daemon once the lock is held. trial is the running
+// trial boot, or nil; it is marked healthy once the web server serves and the
+// channels run (REQ-UPD-004).
+func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Signal, logBuffer *logring.Buffer, home string, lock *daemonLock, trial *trialBoot) int {
+	errorf := func(code int, format string, args ...any) int {
+		_, _ = fmt.Fprintf(stderr, "error: "+format+"\n", args...)
+		return code
+	}
 	restart := newRestartController(lock)
 
 	// runCtx cancels turns and channels when the daemon stops or restarts.
@@ -246,6 +302,7 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		_, _ = fmt.Fprintf(stderr, "telegram: polling as @%s\n", bot.Username)
 	}
 
+	var updates *updateService
 	if webServer != nil {
 		backend := newWebBackend(rt, home, leases, runCtx)
 		backend.SetLogBuffer(logBuffer)
@@ -263,6 +320,19 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		}
 		webServer.SetToolbox(rt.Toolbox())
 		webServer.SetDaemonStore(backend)
+		// Spec 36: the dashboard checks for, downloads, and installs updates.
+		updates = newUpdateService(updateServiceOptions{
+			Home:        home,
+			Current:     version,
+			Config:      result.Config.Update,
+			Restarter:   backend,
+			RestartCtl:  restart,
+			Drain:       drain.status,
+			WriteConfig: backend.writeUpdateConfig,
+			Root:        runCtx,
+		})
+		backend.SetUpdateService(updates)
+		webServer.SetUpdateStore(updates)
 		webServer.SetSecretStore(backend)
 		webServer.SetAgentFileStore(backend)
 		webServer.SetSkillStore(backend)
@@ -332,7 +402,9 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 		if err := rt.Close(); err != nil {
 			slog.Warn("daemon: runtime did not stop cleanly", "error", err)
 		}
-		return restartInPlace(lock, stderr)
+		// An update restart installs the new binary here, with the store
+		// idle, before the exec (spec 36).
+		return restartExec(restart, lock, stderr)
 	}
 
 	// handleSignal starts a stop drain, forces a running one, and turns a
@@ -357,6 +429,14 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 	if telegramActive {
 		done = make(chan error, 1)
 		go func() { done <- channel.Run(runCtx) }()
+	}
+
+	// REQ-UPD-004: the web server serves (or web is off) and the channels run,
+	// so a trial boot is healthy now.
+	trial.markHealthy()
+	// REQ-UPD-001: the periodic release check stops with runCtx.
+	if updates != nil {
+		go updates.runPeriodic(runCtx)
 	}
 
 	// The web server and the channel keep running during a drain so new

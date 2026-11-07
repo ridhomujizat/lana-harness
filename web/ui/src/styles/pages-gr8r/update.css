@@ -1,0 +1,326 @@
+/* The floating self-update card (spec 36) and the Settings > Updates rows.
+   Gr8r tokens only. Desktop: fixed bottom-right, 360 px wide, above the page
+   and below drawers (49/50), modals (60/61), and toasts (100). Phone: a bottom
+   sheet with 16 px side gutters. */
+
+.upd-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 48;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 40px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+}
+
+.upd-h {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 10px 8px 14px;
+}
+
+.upd-ic {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.upd-ic.green {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.upd-ic.amber {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+.upd-ic.red {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.upd-ht {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.upd-title {
+  margin: 0;
+  font-size: var(--fs);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.upd-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.upd-b {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 14px 12px;
+}
+
+.upd-f {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--divider);
+  background: var(--surface-2);
+}
+
+.upd-alert {
+  font-size: var(--fs-xs);
+  padding: 8px 10px;
+}
+
+.upd-notes-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.upd-notes {
+  width: 100%;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.upd-notes .md {
+  color: inherit;
+  line-height: 1.5;
+}
+.upd-notes .md h1,
+.upd-notes .md h2,
+.upd-notes .md h3,
+.upd-notes .md h4 {
+  margin: 8px 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.upd-notes .md p,
+.upd-notes .md ul,
+.upd-notes .md ol {
+  margin: 0 0 6px;
+}
+.upd-notes .md ul,
+.upd-notes .md ol {
+  padding-left: 18px;
+}
+.upd-notes.clamped {
+  max-height: 84px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.upd-notes.open {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.upd-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.upd-more {
+  margin-left: -8px;
+}
+
+.upd-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+}
+.upd-link:hover {
+  text-decoration: underline;
+}
+
+.upd-text {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.upd-reason {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--sunken);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.upd-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.upd-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--sunken);
+}
+.upd-cmd code {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  font-size: var(--fs-2xs);
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.upd-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.upd-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text-4);
+}
+.upd-step.done {
+  color: var(--text-3);
+}
+.upd-step.on {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.upd-step-ic {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+.upd-step.done .upd-step-ic {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.upd-step.on .upd-step-ic {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.upd-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+.upd-live {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.upd-prog {
+  display: block;
+  flex: none;
+  width: 100%;
+}
+
+.upd-badge {
+  font-size: var(--fs-2xs);
+}
+
+@media (max-width: 640px) {
+  .upd-card {
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-width: none;
+    max-height: 70dvh;
+  }
+  .upd-f .btn {
+    min-height: 34px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upd-spin {
+    animation: none;
+  }
+}
+:root[data-motion='reduce'] .upd-spin {
+  animation: none;
+}
+
+/* Settings > General > Updates. */
+.settings-update-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+}
+
+.settings-update-error {
+  margin: var(--s-1) 0 0;
+  color: var(--amber);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.settings-update-manual {
+  margin-top: var(--s-2);
+  max-width: 520px;
+}
+
+@media (max-width: 640px) {
+  .settings-update-control {
+    justify-content: flex-start;
+  }
+}

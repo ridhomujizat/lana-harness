@@ -83,6 +83,7 @@ type Server struct {
 	// (spec #35) and the pending Google OAuth states.
 	calendar       calendarPort
 	daemon         DaemonStore
+	update         UpdateStore
 	telegramStatus func() TelegramStatus
 	telegramReset  TelegramResetSender
 	approvals      *Approvals
@@ -193,6 +194,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerOverviewRoutes()
 	s.registerSkillRoutes()
 	s.registerDaemonRoutes()
+	s.registerUpdateRoutes()
 	s.registerSetupRoutes()
 	s.registerToolRoutes()
 	s.registerWebRoutes()

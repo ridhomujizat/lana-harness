@@ -9,6 +9,13 @@ but their config keys, events, and tools may still change between betas.
 
 ### Added
 
+- Self-update (spec #36): the dashboard shows a floating card when a newer release is out, and
+  one click installs it. The daemon verifies the checksum, probes the new binary on a copy of the
+  data, waits for running turns, backs up the databases, config, and binary, and restarts in place.
+  A new version that fails to start is rolled back on its own. `[update] channel` (`stable` by
+  default, or `beta`), Settings → Updates, and `lana update rollback`.
+- `install.sh` works without GitHub auth, now that the repository is public.
+
 - Workflows (spec #33): n8n-style automation graphs guarded by one bot. Triggers (run button,
   schedule, interval, webhook, lana events, `/command` in web chat and Telegram), AI, tool, flow
   and state nodes, `{{ }}` templates, durable runs, per-workflow state, the error ladder with

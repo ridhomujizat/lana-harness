@@ -1,5 +1,6 @@
 import { mockToolbox } from "./toolbox-fixtures";
 import { mockWorkflows } from "./workflow-fixtures";
+import { mockUpdate } from "./update-fixtures";
 import { mockCalendar } from "./calendar-fixtures";
 import type {
   Agent,
@@ -1866,6 +1867,8 @@ export function mockApi(method: string, url: URL, body?: unknown): MockResult {
       return mockCalendar(m, parts, url, body);
     case "toolbox":
       return mockToolbox(m, parts);
+    case "update":
+      return mockUpdate(m, parts);
     case "auth": {
       if (at(2) === "state" && isGet) return { status: 200, body: authStateFixture };
       if (at(2) === "session" && isGet) {

@@ -21,6 +21,7 @@ import {
   StatusLine,
   markSettingsSaved,
 } from "./settings-pages";
+import { SettingsUpdatesSection } from "./settings-updates";
 
 /* Settings > General (REQ-WEB-054). The theme choice of REQ-WEB-031 stays here;
    the daemon, web dashboard, and about sections come from API-WEB-022,
@@ -413,6 +414,8 @@ export function SettingsGeneralPage({
             </p>
           ) : null}
         </section>
+
+        <SettingsUpdatesSection />
 
         <section className="sblock" aria-labelledby="settings-web-title">
           <h2 id="settings-web-title">Web dashboard</h2>
