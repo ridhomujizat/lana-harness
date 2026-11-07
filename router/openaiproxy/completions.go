@@ -114,7 +114,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, req *http.Request, keyI
 	}
 
 	id := newCompletionID()
-	meta := router.CallMeta{Source: "proxy", Agent: "proxy:" + keyID, TurnID: id}
+	meta := router.CallMeta{Source: "proxy", Agent: "proxy:" + keyID, TurnID: id, Requested: in.Model}
 	ctx := req.Context()
 	onAttempt := func(a router.Attempt) {
 		h.cfg.logger.Warn("router proxy attempt failed",

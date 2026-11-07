@@ -24,7 +24,7 @@ func init() {
 func newKindAdapter(name string, provider core.ProviderConfig, deps router.Deps) (router.Adapter, error) {
 	return NewAdapter(name, Config{
 		BaseURL:           provider.BaseURL,
-		APIKeyEnv:         provider.APIKeyEnv,
+		APIKeyEnv:         router.EffectiveKeyEnv(provider, name),
 		Headers:           provider.Headers,
 		Timeout:           provider.Timeout,
 		StreamIdleTimeout: provider.StreamIdleTimeout,
