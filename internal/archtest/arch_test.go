@@ -90,7 +90,8 @@ func isLibrary(pkg string) bool {
 	if pkg == "" || pkg == "." || pkg == "lana" {
 		return true
 	}
-	for _, prefix := range []string{"agent", "providers/", "tools", "store/", "observability/"} {
+	// runtime/* holds external agent runtimes such as runtime/claudecode (ADR 0018).
+	for _, prefix := range []string{"agent", "providers/", "tools", "store/", "observability/", "runtime/"} {
 		if pkg == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(pkg, prefix) {
 			return true
 		}
@@ -154,5 +155,24 @@ func TestRuleViolationMessage(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("violation message does not contain %q: %s", want, joined)
 		}
+	}
+}
+
+// runtime/* packages are libraries: they may import core and internal only.
+func TestRuntimeRules(t *testing.T) {
+	ok := checkRules(map[string][]string{
+		"runtime/claudecode": {modulePath + "/core", modulePath + "/internal/pattern"},
+	})
+	if len(ok) > 0 {
+		t.Fatalf("allowed imports rejected: %v", ok)
+	}
+	for _, imp := range []string{"agent", "config", "channels/telegram", "web", "protocol", "tools"} {
+		got := checkRules(map[string][]string{"runtime/claudecode": {modulePath + "/" + imp}})
+		if len(got) != 1 {
+			t.Fatalf("runtime/claudecode importing %s: violations = %v", imp, got)
+		}
+	}
+	if !isLibrary("runtime/claudecode") {
+		t.Fatal("runtime/claudecode is not a library package")
 	}
 }
