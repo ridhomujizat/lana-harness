@@ -31,6 +31,10 @@ export interface Agent {
   workspace: string;
   disabled_tools: string[];
   reasoning_effort?: string;
+  /* Spec 38 (API-CCR-004): "claude-code" for a Claude Agent, "lana" or empty
+     for lana's own loop; engine_label is the name to show ("Claude Agent"). */
+  runtime?: string;
+  engine_label?: string;
   tools_count: number;
   sessions_count: number;
   last_active_at: number | null;
@@ -43,6 +47,12 @@ export interface ListAgentsResponse {
 /* AgentWriteFields is the editable part of [agents.<name>]. Every key is
    optional because PUT accepts a subset (API-WEB-025). */
 export interface AgentWriteFields {
+  /* Spec 38 (API-CCR-001): "claude-code" or "" (lana). */
+  runtime?: string;
+  auth?: string;
+  api_key_env?: string;
+  binary?: string;
+  allow_scheduled?: boolean;
   provider?: string;
   model?: string;
   title?: string;
@@ -70,10 +80,23 @@ export interface AgentWriteFields {
    picks the starting tools, prompt, and limits. */
 export interface CreateAgentRequest {
   name: string;
-  template: string;
+  /* lana agents start from a template; a Claude Agent has none. */
+  template?: string;
   workspace?: string;
   permission?: string;
   description?: string;
+  /* Spec 38 (API-CCR-001): the Claude Agent keys. A Claude Agent never
+     sends provider. */
+  runtime?: string;
+  model?: string;
+  reasoning_effort?: string;
+  auth?: string;
+  api_key_env?: string;
+  binary?: string;
+  allow_scheduled?: boolean;
+  rules?: { allow?: string[]; deny?: string[] };
+  title?: string;
+  color?: string;
 }
 
 export interface AgentCreatedResponse {

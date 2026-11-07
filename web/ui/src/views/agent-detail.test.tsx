@@ -17,6 +17,10 @@ vi.mock("../api/settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/settings")>();
   return { ...actual, getConfig: vi.fn(), listProviders: vi.fn() };
 });
+vi.mock("../api/router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/router")>();
+  return { ...actual, getRouter: vi.fn() };
+});
 vi.mock("../api/models", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/models")>();
   return { ...actual, getModels: vi.fn() };
@@ -41,8 +45,10 @@ import { getModels } from "../api/models";
 import type { ModelsResponse } from "../api/models";
 import { getAgentOverview, openRoomsStream } from "../api/rooms";
 import type { AgentOverview as AgentOverviewData } from "../api/rooms";
-import { getConfig, listProviders } from "../api/settings";
-import type { GetConfigResponse, ListProvidersResponse } from "../api/settings";
+import { getConfig } from "../api/settings";
+import type { GetConfigResponse } from "../api/settings";
+import { getRouter } from "../api/router";
+import type { RouterOverview } from "../api/router";
 import { AgentDetailPage } from "./agent-detail";
 
 function baseAgent(overrides: Partial<Agent>): Agent {
@@ -120,25 +126,27 @@ function configFor(model: string): GetConfigResponse {
   };
 }
 
-const PROVIDERS: ListProvidersResponse = {
+/* GET /v1/router (API-RTR-008): two combos and three providers. */
+const ROUTER: RouterOverview = {
   version: "v1",
-  providers: [
-    {
-      name: "deepseek",
-      kind: "openai_compat",
-      base_url: "https://api.deepseek.com/v1",
-      api_key_env: "DEEPSEEK_API_KEY",
-      key_state: "unset",
-      used_by: [],
-    },
+  providers: [],
+  combos: [],
+  cooling: [],
+  proxy: { enabled: false, base_url: "" },
+  choices: [
+    { value: "anthropic/claude-sonnet-5-5", label: "Claude Sonnet 5.5", group: "anthropic" },
+    { value: "coding", label: "coding", group: "Combos" },
+    { value: "deepseek/deepseek-flash", label: "DeepSeek Flash", group: "deepseek" },
+    { value: "deepseek/deepseek-chat", label: "DeepSeek Chat", group: "deepseek" },
+    { value: "fast", label: "fast", group: "Combos" },
+    { value: "openrouter/openai/gpt-5-mini", label: "GPT-5 mini", group: "openrouter" },
   ],
-  restart_required: false,
 };
 
 function mockAgent(model: string): void {
   vi.mocked(listAgents).mockResolvedValue({ agents: [baseAgent({ model })] });
   vi.mocked(getConfig).mockResolvedValue(configFor(model));
-  vi.mocked(listProviders).mockResolvedValue(PROVIDERS);
+  vi.mocked(getRouter).mockResolvedValue(ROUTER);
   vi.mocked(getModels).mockResolvedValue(CATALOG);
 }
 
@@ -211,13 +219,161 @@ describe("agent model settings", () => {
     expect(screen.queryByRole("combobox", { name: "Thinking" })).toBeNull();
   });
 
-  /* REQ-MDL-020: a model outside the catalog stays selected in the free-text
-     field instead of being dropped. */
+  /* REQ-MDL-020: a model outside the router choices stays selected in the
+     free-text field instead of being dropped. */
   it("keeps an unknown model in the free-text field", async () => {
-    load("my-custom-model");
+    mockRouterAgent("my-custom-model");
+    render(<AgentDetailPage name="coder" tab="general" />);
 
     const input = (await screen.findByLabelText("Custom model id")) as HTMLInputElement;
     expect(input.value).toBe("my-custom-model");
+  });
+
+  /* A legacy agent (provider + raw model) keeps showing its saved pair. */
+  it("shows a legacy provider and model as the current choice", async () => {
+    load("my-custom-model");
+
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(model.textContent).toContain("my-custom-model · deepseek");
+  });
+});
+
+function mockRouterAgent(model: string): void {
+  vi.mocked(listAgents).mockResolvedValue({
+    agents: [baseAgent({ model, provider: "" })],
+  });
+  vi.mocked(getConfig).mockResolvedValue({
+    ...configFor(model),
+    settings: { ...configFor(model).settings, agents: { coder: { model } } },
+  });
+  vi.mocked(getRouter).mockResolvedValue(ROUTER);
+  vi.mocked(getModels).mockResolvedValue(CATALOG);
+}
+
+/* Spec 37 (AC-RTR-024): combos first, then models grouped by provider; the
+   save writes model with no provider key. */
+describe("agent router model picker (AC-RTR-024)", () => {
+  it("lists combos first, then models grouped by provider", async () => {
+    mockRouterAgent("coding");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(model.textContent).toContain("coding");
+    fireEvent.click(model);
+    const listbox = await screen.findByRole("listbox");
+    const groups = Array.from(listbox.querySelectorAll('[role="group"]')).map(
+      (node) => node.getAttribute("aria-label")
+    );
+    expect(groups).toEqual(["Combos", "anthropic", "deepseek", "openrouter"]);
+    const options = screen
+      .getAllByRole("option")
+      .map((node) => node.getAttribute("data-value"));
+    expect(options.slice(0, 2)).toEqual(["coding", "fast"]);
+    expect(options.indexOf("deepseek/deepseek-flash")).toBeGreaterThan(
+      options.indexOf("anthropic/claude-sonnet-5-5")
+    );
+  });
+
+  it("saves the picked address without a provider key", async () => {
+    mockRouterAgent("coding");
+    vi.mocked(updateAgent).mockResolvedValue({
+      name: "coder",
+      version: "v2",
+      restart_required: false,
+    });
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "DeepSeek Flash" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith(
+        "coder",
+        { model: "deepseek/deepseek-flash" },
+        "v1"
+      );
+    });
+    const patch = vi.mocked(updateAgent).mock.calls[0]?.[1] ?? {};
+    expect("provider" in patch).toBe(false);
+  });
+
+  it("clears the provider of a legacy agent that picks a combo", async () => {
+    load("deepseek-flash");
+    vi.mocked(updateAgent).mockResolvedValue({
+      name: "coder",
+      version: "v2",
+      restart_required: false,
+    });
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "fast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith(
+        "coder",
+        { provider: "", model: "fast" },
+        "v1"
+      );
+    });
+  });
+});
+
+/* Spec 38 (AC-CCR-010, UI side): switching the runtime to Claude Agent writes
+   runtime = "claude-code" and the Claude model, with no provider. */
+describe("agent runtime switch (AC-CCR-010)", () => {
+  it("writes runtime claude-code and the model without a provider", async () => {
+    mockRouterAgent("coding");
+    vi.mocked(updateAgent).mockResolvedValue({
+      name: "coder",
+      version: "v2",
+      restart_required: false,
+    });
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Claude Agent" }));
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Claude model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Opus" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalled();
+    });
+    const patch = vi.mocked(updateAgent).mock.calls[0]?.[1] ?? {};
+    expect(patch).toMatchObject({ runtime: "claude-code", model: "opus" });
+    expect("provider" in patch).toBe(false);
+    expect(screen.queryByText(/Login with Claude/i)).toBeNull();
+  });
+
+  it("shows the Claude Agent engine and hides the lana-only tabs", async () => {
+    vi.mocked(listAgents).mockResolvedValue({
+      agents: [
+        baseAgent({
+          model: "opus",
+          provider: "",
+          runtime: "claude-code",
+          engine_label: "Claude Agent",
+        }),
+      ],
+    });
+    vi.mocked(getConfig).mockResolvedValue({
+      ...configFor("opus"),
+      settings: {
+        ...configFor("opus").settings,
+        agents: { coder: { runtime: "claude-code", model: "opus" } },
+      },
+    });
+    vi.mocked(getRouter).mockResolvedValue(ROUTER);
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    expect(await screen.findByText("Claude Agent", { selector: ".badge" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Rules" })).toBeTruthy();
+    expect(
+      (screen.getByRole("combobox", { name: "Claude model" }) as HTMLElement).textContent
+    ).toContain("Opus");
   });
 });
 

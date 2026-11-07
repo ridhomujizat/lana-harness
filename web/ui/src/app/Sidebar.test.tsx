@@ -87,3 +87,31 @@ describe("sidebar collapse and logout", () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 });
+
+/* Spec 37 (API-RTR-017): Router leads the Configure group, before Agents. */
+describe("sidebar router item", () => {
+  it("links Router before Agents in Configure", () => {
+    renderSidebar();
+    const router = screen.getByRole("link", { name: "Router" });
+    expect(router.getAttribute("href")).toBe("#/router");
+    const configure = screen.getByText("Configure").parentElement as HTMLElement;
+    const labels = Array.from(configure.querySelectorAll("a.sitem")).map(
+      (node) => node.getAttribute("aria-label")
+    );
+    expect(labels.indexOf("Router")).toBe(0);
+    expect(labels.indexOf("Agents")).toBe(1);
+  });
+
+  it("marks Router current on a router tab", () => {
+    render(
+      <Sidebar
+        route={{ view: "router", section: "router", params: { tab: "logs" }, path: "#/router/logs" }}
+        collapsed={false}
+        onToggle={() => {}}
+        onLogout={() => {}}
+        daemon={{ state: "running", title: "Daemon running", meta: "127.0.0.1" }}
+      />
+    );
+    expect(screen.getByRole("link", { name: "Router" }).getAttribute("aria-current")).toBe("page");
+  });
+});

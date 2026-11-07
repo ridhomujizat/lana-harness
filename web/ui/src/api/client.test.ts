@@ -55,6 +55,38 @@ describe("api client", () => {
     expect(errorMessage(apiError)).toBe("config.toml changed");
   });
 
+  /* Spec 37 (API-RTR-006/007): the router answers a flat error shape. */
+  it("maps the flat router error shape with issues", async () => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValueOnce(
+      response(409, { error: "in_use", message: "used by agents: lana" })
+    );
+    let failure: unknown = null;
+    try {
+      await request("DELETE", "/v1/router/combos/coding", {});
+    } catch (error) {
+      failure = error;
+    }
+    expect((failure as ApiError).code).toBe("in_use");
+    expect((failure as ApiError).message).toBe("used by agents: lana");
+
+    fetchMock.mockResolvedValueOnce(
+      response(422, {
+        error: "invalid",
+        issues: [{ path: "models[0]", message: "unknown provider" }],
+      })
+    );
+    try {
+      await request("PUT", "/v1/router/combos/coding", {});
+    } catch (error) {
+      failure = error;
+    }
+    expect((failure as ApiError).code).toBe("invalid");
+    expect((failure as ApiError).details).toEqual([
+      { path: "models[0]", message: "unknown provider" },
+    ]);
+  });
+
   it("maps a status without an envelope", async () => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockResolvedValueOnce(response(500, "plain failure"));

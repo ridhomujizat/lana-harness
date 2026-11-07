@@ -17,14 +17,31 @@ export const AGENT_TABS = [
 /* REQ-ROOM-010: the Overview tab is the first tab and the default when a name
    is opened without a tab segment. */
 export const DEFAULT_AGENT_TAB = AGENT_TABS[0];
+/* Spec 37 (API-RTR-017): Providers moved from Settings to the Router page;
+   #/settings/providers redirects to #/router/providers. */
 export const SETTINGS_TABS = [
   "general",
-  "providers",
   "secrets",
   "config",
   "audit",
 ] as const;
 export const LEGACY_SETTINGS_TABS = ["agents", "skills"] as const;
+
+/* The Router page tabs of API-RTR-017. #/router is the Overview. */
+export const ROUTER_TABS = [
+  "providers",
+  "models",
+  "combos",
+  "logs",
+  "proxy",
+] as const;
+export const DEFAULT_ROUTER_TAB = "overview";
+
+/* Old hashes that now live elsewhere. The App replaces the hash with the
+   target so the address bar shows the new place. */
+export const ROUTE_REDIRECTS: Record<string, string> = {
+  "#/settings/providers": "#/router/providers",
+};
 export const SETUP_STEPS = [
   "unlock",
   "provider",
@@ -52,6 +69,7 @@ export type RouteView =
   | "sessions"
   | "new-session"
   | "session"
+  | "router"
   | "agents"
   | "agent"
   | "skills"
@@ -103,6 +121,13 @@ export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/history", view: "sessions", section: "sessions" },
   { path: "#/sessions/new", view: "new-session", section: "sessions" },
   { path: "#/sessions/{id}", view: "session", section: "sessions" },
+  { path: "#/router", view: "router", section: "router" },
+  {
+    path: "#/router/{tab}",
+    view: "router",
+    section: "router",
+    tabs: ROUTER_TABS,
+  },
   { path: "#/agents", view: "agents", section: "agents" },
   { path: "#/agents/{name}", view: "agent", section: "agents" },
   {
@@ -214,11 +239,19 @@ export function parseRoute(hash: string): Route {
       path: "#/sessions/new",
     };
   }
+  const redirect = ROUTE_REDIRECTS["#/" + parts.join("/")];
+  if (redirect) {
+    const target = parseRoute(redirect);
+    return { ...target, params: { ...target.params, ...queryParams } };
+  }
   for (const entry of ROUTE_TABLE) {
     const params = matchRoute(parts, entry);
     if (params !== null) {
       if (entry.view === "agent" && !params.tab) {
         params.tab = DEFAULT_AGENT_TAB;
+      }
+      if (entry.view === "router" && !params.tab) {
+        params.tab = DEFAULT_ROUTER_TAB;
       }
       return {
         view: entry.view,
