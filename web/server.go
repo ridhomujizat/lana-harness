@@ -81,7 +81,11 @@ type Server struct {
 	toolboxMu sync.RWMutex
 	// calendar holds the calendar and Google ports of the /v1/calendar routes
 	// (spec #35) and the pending Google OAuth states.
-	calendar       calendarPort
+	calendar calendarPort
+	// routerBackend is the Router page and proxy port (spec 37). It is
+	// guarded by routerMu because the proxy reads it on every request.
+	routerBackend  RouterBackend
+	routerMu       sync.RWMutex
 	daemon         DaemonStore
 	update         UpdateStore
 	telegramStatus func() TelegramStatus
@@ -203,6 +207,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerWorkflowRoutes()
 	s.registerToolboxRoutes()
 	s.registerCalendarRoutes()
+	s.registerRouterRoutes()
 	s.handler = securityHeaders(s.mux)
 	return s, nil
 }

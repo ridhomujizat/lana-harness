@@ -396,11 +396,11 @@ model = "gpt-5-mini"
 
 	usedBody := `{"expected_version":"` + shaHex([]byte(raw)) + `"}`
 	used := serveProvider(t, s, http.MethodDelete, "/v1/providers/openai", usedBody, cookie, csrf)
-	if used.code != http.StatusUnprocessableEntity {
+	if used.code != http.StatusConflict {
 		t.Fatalf("used delete status = %d, body = %q", used.code, used.body)
 	}
-	if !strings.Contains(string(used.body), "agents.coder.provider") {
-		t.Fatalf("used delete does not list the agent: %q", used.body)
+	if envelope := decodeError(t, used); envelope.Error.Code != "in_use" || envelope.Error.Message != "used by agents: coder" {
+		t.Fatalf("used delete error = %+v", envelope.Error)
 	}
 	unchanged, err := os.ReadFile(store.path)
 	if err != nil {

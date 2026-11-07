@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/router"
 )
@@ -302,6 +303,14 @@ func (rt *Runtime) closeRouterStores() {
 // Router returns the LLM router, or nil when the llm service is not a
 // router (spec 37, T-RTR-06).
 func (rt *Runtime) Router() *router.Router { return rt.router }
+
+// RouterConfig returns the [router] table the runtime has applied; a live
+// config apply replaces it (REQ-RTR-008).
+func (rt *Runtime) RouterConfig() core.RouterConfig {
+	rt.cfgMu.RLock()
+	defer rt.cfgMu.RUnlock()
+	return rt.result.Config.Router
+}
 
 // RouterStore returns the session store's router persistence, or nil when
 // the store keeps no router records.

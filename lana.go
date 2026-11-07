@@ -518,6 +518,10 @@ func (rt *Runtime) NonLiveConfig() core.Config {
 	cfg.Agents = nil
 	cfg.Teams = nil
 	cfg.MCP = nil
+	// Spec 37 REQ-RTR-008: providers, combos, and [router] apply live.
+	cfg.Providers = nil
+	cfg.Combos = nil
+	cfg.Router = core.RouterConfig{}
 	return cfg
 }
 

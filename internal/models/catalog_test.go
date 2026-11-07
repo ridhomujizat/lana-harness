@@ -235,3 +235,19 @@ func TestForKind(t *testing.T) {
 		t.Fatalf("first anthropic model = %q", first.ID)
 	}
 }
+
+func TestDefaultBaseURLAndTestModel(t *testing.T) {
+	if got := DefaultBaseURL("deepseek"); got != "https://api.deepseek.com/v1" {
+		t.Fatalf("deepseek base = %q", got)
+	}
+	if got := DefaultBaseURL("openai_compat"); got != "" {
+		t.Fatalf("openai_compat base = %q", got)
+	}
+	// Every test model is a catalog model of its kind.
+	for _, kind := range []string{"deepseek", "openai", "anthropic", "openrouter"} {
+		id := TestModel(kind)
+		if _, ok := Lookup(id); !ok {
+			t.Fatalf("TestModel(%q) = %q is not in the catalog", kind, id)
+		}
+	}
+}

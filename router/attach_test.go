@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -92,17 +91,14 @@ func TestEffectiveKeyEnv(t *testing.T) {
 
 // The boot key check uses the default env of a preset kind.
 func TestModuleMissingDefaultKeyEnv(t *testing.T) {
-	err := checkSecrets(core.Config{
+	cfg := core.Config{
 		Providers: map[string]core.ProviderConfig{"ds": {Kind: "deepseek"}},
 		Agents:    map[string]core.AgentConfig{"a": {Model: "ds/deepseek-flash"}},
-	}, mapSecrets{})
-	if err == nil || !strings.Contains(err.Error(), "DS_API_KEY") {
-		t.Fatalf("err = %v", err)
 	}
-	if err := checkSecrets(core.Config{
-		Providers: map[string]core.ProviderConfig{"ds": {Kind: "deepseek"}},
-		Agents:    map[string]core.AgentConfig{"a": {Model: "ds/deepseek-flash"}},
-	}, mapSecrets{"DS_API_KEY": "k"}); err != nil {
-		t.Fatalf("err = %v", err)
+	if got := missingSecrets(cfg, mapSecrets{}); len(got) != 1 || got[0].Env != "DS_API_KEY" {
+		t.Fatalf("missing = %+v", got)
+	}
+	if got := missingSecrets(cfg, mapSecrets{"DS_API_KEY": "k"}); len(got) != 0 {
+		t.Fatalf("missing = %+v", got)
 	}
 }

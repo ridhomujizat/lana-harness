@@ -32,12 +32,22 @@ func TestUnregisteredKindRejected(t *testing.T) {
 	}
 }
 
+// A provider in use with an empty key no longer fails boot (spec 37 failure
+// table): the router reports missing_secret for its target instead.
 func TestMissingSecretAtBoot(t *testing.T) {
 	cfg := core.Config{
 		Providers: map[string]core.ProviderConfig{"openai": {Kind: "openai_compat", BaseURL: "https://example.com", APIKeyEnv: "OPENAI_API_KEY"}},
 		Agents:    map[string]core.AgentConfig{"a": {Provider: "openai", Model: "m"}},
 	}
-	_, err := bootLLM(t, cfg, emptySecrets{})
+	ctx, err := bootLLM(t, cfg, emptySecrets{})
+	if err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	llm, ok := ctx.LLM.(core.LLMRouter)
+	if !ok {
+		t.Fatalf("LLM is %T", ctx.LLM)
+	}
+	_, _, err = llm.StreamChain(context.Background(), []core.LLMTarget{{Provider: "openai", Model: "m"}}, core.ChatRequest{}, core.LLMCallMeta{Source: "test"}, nil)
 	var pe *core.ProviderError
 	if !errors.As(err, &pe) || pe.Class != "missing_secret" {
 		t.Fatalf("err=%v", err)

@@ -253,6 +253,9 @@ func (s *Server) SetBackend(backend Backend) {
 	if port, ok := backend.(KnowledgeBackend); ok {
 		s.knowledgeBackend = port
 	}
+	if port, ok := backend.(RouterBackend); ok {
+		s.SetRouterBackend(port)
+	}
 }
 
 // registerSessionRoutes registers the T-003 routes through Handle so the

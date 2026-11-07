@@ -575,6 +575,13 @@ func TestModels(t *testing.T) {
 		t.Fatalf("cost = %v", rec.CostUSD)
 	}
 
+	if at, ok := h.r.ModelsFetchedAt("oa"); !ok || at.IsZero() {
+		t.Fatalf("ModelsFetchedAt(oa) = %v, %v", at, ok)
+	}
+	if _, ok := h.r.ModelsFetchedAt("nope"); ok {
+		t.Fatal("ModelsFetchedAt(nope) reported a fetch")
+	}
+
 	plain, err := h.r.Models(context.Background(), "plain", false)
 	if err != nil || len(plain) != 0 {
 		t.Fatalf("plain = %+v, %v", plain, err)
@@ -660,4 +667,36 @@ func TestApplyKeepsCustomProviders(t *testing.T) {
 	if names := h.r.Names(); len(names) != 1 || names[0] != "plain" {
 		t.Fatalf("names = %v", names)
 	}
+}
+
+// Spec 37 failure table: a provider whose API key env is empty fails with
+// missing_secret without being called, and the chain moves on; a key that
+// appears later (secrets.env written from the dashboard) is used at once.
+func TestMissingKeyMovesOn(t *testing.T) {
+	a := &fakeBehavior{}
+	cfg := fakeProvider(t, "a", a)
+	cfg.APIKeyEnv = "A_KEY"
+	b := &fakeBehavior{text: "from b"}
+	secrets := mapSecrets{}
+	h := newHarness(t, Config{Providers: map[string]core.ProviderConfig{"a": cfg, "b": fakeProvider(t, "b", b)}}, WithSecrets(secrets))
+	var attempts []Attempt
+	stream, served, err := h.r.StreamChain(context.Background(), chain("a/x", "b/y"), core.ChatRequest{}, CallMeta{}, func(at Attempt) { attempts = append(attempts, at) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _ := drain(stream); text != "from b" || served.Provider != "b" {
+		t.Fatalf("served = %v, text = %q", served, text)
+	}
+	if len(attempts) != 1 || attempts[0].Err.Class != "missing_secret" || !strings.Contains(attempts[0].Err.Message, "A_KEY") {
+		t.Fatalf("attempts = %+v", attempts)
+	}
+	if a.callCount() != 0 {
+		t.Fatalf("provider a was called %d times without a key", a.callCount())
+	}
+	secrets["A_KEY"] = "k"
+	stream, served, err = h.r.StreamChain(context.Background(), chain("a/x", "b/y"), core.ChatRequest{}, CallMeta{}, nil)
+	if err != nil || served.Provider != "a" {
+		t.Fatalf("served = %v, err = %v", served, err)
+	}
+	_, _ = drain(stream)
 }

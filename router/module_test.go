@@ -1,8 +1,9 @@
 package router
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +85,9 @@ func TestModuleRejectsUnknownKind(t *testing.T) {
 	}
 }
 
-// Boot fails when a provider used through a combo has an empty key.
+// Boot warns, and does not fail, when a provider used through a combo has an
+// empty key; the target then fails with missing_secret and the chain moves on
+// (spec 37 failure table).
 func TestModuleMissingSecretThroughCombo(t *testing.T) {
 	b := fakeProvider(t, "b", &fakeBehavior{})
 	b.APIKeyEnv = "B_API_KEY"
@@ -95,14 +98,27 @@ func TestModuleMissingSecretThroughCombo(t *testing.T) {
 		Combos:    map[string]core.ComboConfig{"coding": {Models: []string{"a/x", "b/y"}}, "spare": {Models: []string{"u/z"}}},
 		Agents:    map[string]core.AgentConfig{"lana": {Model: "coding"}},
 	}
-	_, err := bootLLM(t, cfg, mapSecrets{}, nil)
-	var pErr *core.ProviderError
-	if !errors.As(err, &pErr) || pErr.Class != "missing_secret" || !strings.Contains(pErr.Message, "B_API_KEY") {
-		t.Fatalf("err = %v", err)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	if _, err := bootLLM(t, cfg, mapSecrets{}, nil); err != nil {
+		t.Fatalf("boot with a missing key failed: %v", err)
 	}
-	// With b's key set, the unused combo's provider u does not block boot.
-	if _, err := bootLLM(t, cfg, mapSecrets{"B_API_KEY": "k"}, nil); err != nil {
-		t.Fatalf("boot with b's key: %v", err)
+	line := logs.String()
+	if !strings.Contains(line, "level=WARN") || !strings.Contains(line, "provider=b") || !strings.Contains(line, "env=B_API_KEY") {
+		t.Fatalf("missing-key warning = %q", line)
+	}
+	// The unused combo's provider u is not in use, so it is not reported.
+	if strings.Contains(line, "U_API_KEY") {
+		t.Fatalf("unused provider reported: %q", line)
+	}
+	got := missingSecrets(cfg, mapSecrets{})
+	if len(got) != 1 || got[0].Provider != "b" || got[0].Env != "B_API_KEY" {
+		t.Fatalf("missingSecrets = %+v", got)
+	}
+	if got := missingSecrets(cfg, mapSecrets{"B_API_KEY": "k"}); len(got) != 0 {
+		t.Fatalf("missingSecrets with b's key = %+v", got)
 	}
 }
 

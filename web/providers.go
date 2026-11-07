@@ -17,6 +17,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -29,8 +30,13 @@ var providerNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 // providerEnvRE is the env name rule of API-WEB-019 and API-WEB-020.
 var providerEnvRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// providerKinds are the kinds a provider form may save.
-var providerKinds = map[string]bool{"openai_compat": true, "anthropic": true}
+// providerKinds are the kinds a provider form may save (API-RTR-001).
+var providerKinds = map[string]bool{
+	"openai": true, "deepseek": true, "openrouter": true, "anthropic": true, "openai_compat": true,
+}
+
+// providerKindsMessage is the error text for a kind outside providerKinds.
+const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, openai_compat"
 
 // ProviderTest is one connection test. APIKey carries an inline key for this
 // call only: the handler never writes it and the type prints "***" when it is
@@ -68,12 +74,19 @@ func (s *Server) registerProviderRoutes() {
 }
 
 type providerJSON struct {
-	Name      string   `json:"name"`
-	Kind      string   `json:"kind"`
-	BaseURL   string   `json:"base_url"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	BaseURL string `json:"base_url"`
+	// DefaultBaseURL is the preset base URL of the kind, "" for
+	// openai_compat (API-RTR-006).
+	DefaultBaseURL string `json:"default_base_url"`
+	// APIKeyEnv is the effective key env: api_key_env, or <NAME>_API_KEY
+	// for a preset kind.
 	APIKeyEnv string   `json:"api_key_env"`
 	KeyState  string   `json:"key_state"`
 	UsedBy    []string `json:"used_by"`
+	// ModelsCount is the number of models the router lists for the provider.
+	ModelsCount int `json:"models_count"`
 }
 
 type listProvidersResponse struct {
@@ -110,11 +123,13 @@ type providerTestFailResponse struct {
 // providerRecord is the [providers.<name>] table as the form edits it.
 // Timeout stays raw: the form never sends it, so a save keeps the current value.
 type providerRecord struct {
-	Kind      string
-	BaseURL   string
-	APIKeyEnv string
-	Headers   map[string]string
-	Timeout   string
+	Kind              string
+	BaseURL           string
+	APIKeyEnv         string
+	Headers           map[string]string
+	Timeout           string
+	StreamIdleTimeout string
+	ThinkingFormat    string
 }
 
 // providerValidationError carries config.Check issues through the section
@@ -125,10 +140,14 @@ type providerValidationError struct {
 
 func (e *providerValidationError) Error() string { return "config.toml is not valid" }
 
-// providerDocument is the part of config.toml the provider handlers read.
+// providerDocument is the part of config.toml the provider and router
+// handlers read.
 type providerDocument struct {
 	Providers map[string]map[string]any `toml:"providers"`
 	Agents    map[string]map[string]any `toml:"agents"`
+	Combos    map[string]map[string]any `toml:"combos"`
+	Knowledge map[string]any            `toml:"knowledge"`
+	Router    map[string]any            `toml:"router"`
 }
 
 func (s *Server) providerTesterOrError(w http.ResponseWriter) ProviderTester {
@@ -189,26 +208,20 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			secretValues = values
 		}
 	}
-	usedBy := providerUsage(document.Agents)
-
-	names := make([]string, 0, len(document.Providers))
-	for name := range document.Providers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := sortedMapKeys(document.Providers)
+	modelLists := s.routerProviderModels(r.Context(), document, names)
 	for _, name := range names {
 		record := providerRecordFromMap(document.Providers[name])
-		used := usedBy[name]
-		if used == nil {
-			used = []string{}
-		}
+		keyEnv := providerEffectiveKeyEnv(record, name)
 		response.Providers = append(response.Providers, providerJSON{
-			Name:      name,
-			Kind:      record.Kind,
-			BaseURL:   record.BaseURL,
-			APIKeyEnv: record.APIKeyEnv,
-			KeyState:  providerKeyState(record.APIKeyEnv, secretValues),
-			UsedBy:    used,
+			Name:           name,
+			Kind:           record.Kind,
+			BaseURL:        record.BaseURL,
+			DefaultBaseURL: models.DefaultBaseURL(record.Kind),
+			APIKeyEnv:      keyEnv,
+			KeyState:       providerKeyState(keyEnv, secretValues),
+			UsedBy:         document.providerUsedBy(name),
+			ModelsCount:    len(modelLists[name]),
 		})
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -228,36 +241,26 @@ func providerKeyState(envName string, fileValues map[string]string) string {
 	return "unset"
 }
 
-// providerUsage maps each provider name to the sorted agents that use it.
-func providerUsage(agents map[string]map[string]any) map[string][]string {
-	usage := map[string][]string{}
-	names := make([]string, 0, len(agents))
-	for name := range agents {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		provider := mapProviderString(agents[name], "provider")
-		if provider == "" {
-			continue
-		}
-		usage[provider] = append(usage[provider], "agents."+name)
-	}
-	return usage
-}
-
 func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	var body providerTestRequest
 	if !decodeJSONObject(w, r, providerBodyLimit, &body) {
 		return
 	}
 	if !providerKinds[body.Kind] {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "kind must be openai_compat or anthropic")
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", providerKindsMessage)
 		return
 	}
-	if err := validateProviderBaseURL(body.BaseURL); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+	// base_url may be omitted for a preset kind; the adapter then uses the
+	// kind's public API URL (API-RTR-006).
+	if body.BaseURL == "" && models.DefaultBaseURL(body.Kind) == "" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "base_url is required for kind "+body.Kind)
 		return
+	}
+	if body.BaseURL != "" {
+		if err := validateProviderBaseURL(body.BaseURL); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 	}
 	if strings.TrimSpace(body.Model) == "" || strings.ContainsAny(body.Model, "\r\n") {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "model is required and must be one line")
@@ -293,7 +296,7 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	// The log line carries the host and latency only; the inline key never
 	// reaches it.
 	s.logger.Debug("web: provider test",
-		"host", providerHost(body.BaseURL),
+		"host", providerHost(providerBaseURLOrDefault(body.Kind, body.BaseURL)),
 		"latency_ms", result.LatencyMS,
 		"ok", result.OK,
 		"status", result.Status,
@@ -336,17 +339,21 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !providerKinds[kind] {
-		writeProviderIssue(w, "providers."+name+".kind", "kind must be openai_compat or anthropic")
+		writeProviderIssue(w, "providers."+name+".kind", providerKindsMessage)
 		return
 	}
-	baseURL, present, err := providerStringField(body, "base_url")
-	if err != nil || !present || baseURL == "" {
-		writeProviderIssue(w, "providers."+name+".base_url", "base_url is required")
+	// base_url is optional for the preset kinds; config validation decides
+	// per kind (openai_compat needs it).
+	baseURL, _, err := providerStringField(body, "base_url")
+	if err != nil {
+		writeProviderIssue(w, "providers."+name+".base_url", "base_url must be a string")
 		return
 	}
-	if err := validateProviderBaseURL(baseURL); err != nil {
-		writeProviderIssue(w, "providers."+name+".base_url", err.Error())
-		return
+	if baseURL != "" {
+		if err := validateProviderBaseURL(baseURL); err != nil {
+			writeProviderIssue(w, "providers."+name+".base_url", err.Error())
+			return
+		}
 	}
 	expected, present, err := providerStringField(body, "expected_version")
 	if err != nil || !present || expected == "" {
@@ -432,7 +439,7 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		result, err := tester.TestProvider(r.Context(), ProviderTest{
 			Kind:      record.Kind,
 			BaseURL:   record.BaseURL,
-			Model:     providerTestModel(name, record.Kind, document.Agents),
+			Model:     providerTestModel(name, record, document),
 			APIKeyEnv: apiKeyEnv,
 			APIKey:    core.NewSecret(apiKey),
 		})
@@ -482,7 +489,11 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 			// update time.
 			s.logger.Warn("web: write secrets meta for provider", "error", err)
 		}
-		s.setSecretsChanged()
+		// A live store reads secrets.env on lookup, so the key reaches the
+		// running router without a restart (REQ-RTR-008).
+		if !isLiveStore(store) {
+			s.setSecretsChanged()
+		}
 	}
 	if configChanged || apiKey != "" {
 		auditKeys := changed
@@ -491,11 +502,15 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		}
 		s.auditSave("provider.save", providerConfigPath(file, s.providerHome()), name, auditKeys)
 	}
+	restartRequired := !isLiveStore(store)
+	if configChanged {
+		restartRequired = s.applyLiveRestartRequired(r.Context(), store, candidate)
+	}
 	version := webfiles.ConfigVersion(candidate)
 	writeJSON(w, http.StatusOK, providerSaveResponse{
 		Name:            name,
 		Version:         version,
-		RestartRequired: true,
+		RestartRequired: restartRequired,
 	})
 }
 
@@ -547,15 +562,8 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "provider is not configured")
 		return
 	}
-	if used := providerUsage(document.Agents)[name]; len(used) > 0 {
-		issues := make([]ConfigIssue, 0, len(used))
-		for _, agent := range used {
-			issues = append(issues, ConfigIssue{
-				Key:     agent + ".provider",
-				Message: "provider '" + name + "' is used by " + agent,
-			})
-		}
-		writeProviderIssues(w, issues)
+	if message := document.providerInUse(name); message != "" {
+		writeAPIError(w, http.StatusConflict, "in_use", message)
 		return
 	}
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), providerChecker(store), file.Raw, "[providers."+name+"]", "")
@@ -573,7 +581,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, providerSaveResponse{
 		Name:            name,
 		Version:         version,
-		RestartRequired: true,
+		RestartRequired: s.applyLiveRestartRequired(r.Context(), store, candidate),
 	})
 }
 
@@ -594,6 +602,9 @@ func providerRecordFromMap(table map[string]any) providerRecord {
 		BaseURL:   mapProviderString(table, "base_url"),
 		APIKeyEnv: mapProviderString(table, "api_key_env"),
 		Timeout:   mapProviderString(table, "timeout"),
+
+		StreamIdleTimeout: mapProviderString(table, "stream_idle_timeout"),
+		ThinkingFormat:    mapProviderString(table, "thinking_format"),
 	}
 	if headers, ok := table["headers"].(map[string]any); ok {
 		record.Headers = make(map[string]string, len(headers))
@@ -651,6 +662,8 @@ func renderProviderTable(name string, record providerRecord) string {
 		fmt.Fprintf(&b, "headers = { %s }\n", strings.Join(parts, ", "))
 	}
 	writeProviderString(&b, "timeout", record.Timeout)
+	writeProviderString(&b, "stream_idle_timeout", record.StreamIdleTimeout)
+	writeProviderString(&b, "thinking_format", record.ThinkingFormat)
 	return b.String()
 }
 
@@ -697,37 +710,62 @@ func defaultProviderKeyEnv(name string) string {
 }
 
 // providerTestModel picks the model the save-time connection test uses. The
-// provider form has no model field, so it uses the model of an agent that
-// already points at the provider and otherwise the provider's default model.
-func providerTestModel(name, kind string, agents map[string]map[string]any) string {
-	names := make([]string, 0, len(agents))
-	for agent := range agents {
-		names = append(names, agent)
-	}
-	sort.Strings(names)
-	for _, agent := range names {
-		table := agents[agent]
-		if mapProviderString(table, "provider") != name {
-			continue
-		}
-		if model := mapProviderString(table, "model"); model != "" {
+// provider form has no model field, so it uses the model of an agent or combo
+// that already points at the provider, then the kind's cheapest catalog model
+// (internal/models.TestModel), then the base URL's catalog.
+func providerTestModel(name string, record providerRecord, document providerDocument) string {
+	for _, agent := range sortedMapKeys(document.Agents) {
+		table := document.Agents[agent]
+		legacy := mapProviderString(table, "provider")
+		model := mapProviderString(table, "model")
+		if legacy == name && model != "" {
 			return model
 		}
+		if legacy != "" {
+			continue
+		}
+		if _, isCombo := document.Combos[model]; isCombo {
+			continue
+		}
+		if provider, id, ok := parseModelAddress(model); ok && provider == name {
+			return id
+		}
 	}
-	switch name {
-	case "openai":
-		return "gpt-5-mini"
-	case "openrouter":
-		return "openai/gpt-5-mini"
-	case "deepseek":
-		return "deepseek-flash"
-	case "anthropic":
-		return "claude-sonnet-4-5"
+	for _, combo := range sortedMapKeys(document.Combos) {
+		for _, address := range mapProviderStrings(document.Combos[combo], "models") {
+			if provider, id, ok := parseModelAddress(address); ok && provider == name {
+				return id
+			}
+		}
 	}
-	if kind == "anthropic" {
-		return "claude-sonnet-4-5"
+	if model := models.TestModel(record.Kind); model != "" {
+		return model
+	}
+	if catalog := models.ForProviderKind(record.BaseURL); len(catalog) > 0 {
+		return catalog[0].ID
 	}
 	return "gpt-5-mini"
+}
+
+// providerBaseURLOrDefault returns baseURL, or the kind's preset URL when it
+// is empty.
+func providerBaseURLOrDefault(kind, baseURL string) string {
+	if baseURL != "" {
+		return baseURL
+	}
+	return models.DefaultBaseURL(kind)
+}
+
+// providerEffectiveKeyEnv mirrors router.EffectiveKeyEnv, which web cannot
+// import: api_key_env, else <NAME>_API_KEY for a preset kind, else "".
+func providerEffectiveKeyEnv(record providerRecord, name string) string {
+	if record.APIKeyEnv != "" {
+		return record.APIKeyEnv
+	}
+	if models.DefaultBaseURL(record.Kind) != "" {
+		return defaultProviderKeyEnv(name)
+	}
+	return ""
 }
 
 func validateProviderBaseURL(value string) error {
