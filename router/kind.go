@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -37,6 +38,12 @@ type Deps struct {
 	// Limits pushes limit values read from response headers. Provider and
 	// Kind are filled in by the router when empty.
 	Limits func(LimitUpdate)
+}
+
+// DefaultKeyEnv returns the default api_key_env of a provider: its name in
+// upper case with "-" replaced by "_", plus "_API_KEY" (API-RTR-001).
+func DefaultKeyEnv(name string) string {
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
 }
 
 // Factory builds the adapter of one provider.

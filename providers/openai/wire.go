@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // ErrUnsupported is returned for content that cannot be mapped to OpenAI.
@@ -19,15 +20,20 @@ const (
 )
 
 type wireRequest struct {
-	Model           string            `json:"model"`
-	Stream          bool              `json:"stream"`
-	StreamOptions   map[string]bool   `json:"stream_options"`
-	Messages        []map[string]any  `json:"messages"`
-	Tools           []wireTool        `json:"tools,omitempty"`
-	MaxTokens       int               `json:"max_tokens,omitempty"`
-	Temperature     *float64          `json:"temperature,omitempty"`
-	Thinking        map[string]string `json:"thinking,omitempty"`
-	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	Model         string           `json:"model"`
+	Stream        bool             `json:"stream"`
+	StreamOptions map[string]bool  `json:"stream_options"`
+	Messages      []map[string]any `json:"messages"`
+	Tools         []wireTool       `json:"tools,omitempty"`
+	MaxTokens     int              `json:"max_tokens,omitempty"`
+	// MaxCompletionTokens replaces max_tokens on kind openai: OpenAI rejects
+	// max_tokens on reasoning models.
+	MaxCompletionTokens int               `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64          `json:"temperature,omitempty"`
+	Thinking            map[string]string `json:"thinking,omitempty"`
+	ReasoningEffort     string            `json:"reasoning_effort,omitempty"`
+	// Reasoning is OpenRouter's unified reasoning object.
+	Reasoning map[string]any `json:"reasoning,omitempty"`
 }
 
 type wireTool struct {
@@ -41,11 +47,18 @@ type wireFunction struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-// buildRequestBody renders a ChatRequest for the OpenAI-compatible endpoint.
-// format is the provider's thinking format: deepseek adds the thinking and
-// reasoning_effort fields and round-trips reasoning_content; none sends
-// neither and drops thinking blocks (REQ-MDL-002, REQ-MDL-004).
+// buildRequestBody renders a ChatRequest for an openai_compat provider.
 func buildRequestBody(req core.ChatRequest, format string) ([]byte, error) {
+	return buildKindRequestBody(req, kindCompat, format)
+}
+
+// buildKindRequestBody renders a ChatRequest for the OpenAI-compatible
+// endpoint of a provider kind. format is the provider's thinking format:
+// deepseek adds the thinking and reasoning_effort fields and round-trips
+// reasoning_content; none sends neither and drops thinking blocks
+// (REQ-MDL-002, REQ-MDL-004). Without the deepseek format, kind openai maps
+// the effort to reasoning_effort and kind openrouter to its reasoning object.
+func buildKindRequestBody(req core.ChatRequest, kind, format string) ([]byte, error) {
 	out := wireRequest{
 		Model:         req.Model,
 		Stream:        true,
@@ -53,7 +66,19 @@ func buildRequestBody(req core.ChatRequest, format string) ([]byte, error) {
 		MaxTokens:     req.MaxTokens,
 		Temperature:   req.Temperature,
 	}
+	if kind == kindOpenAI {
+		out.MaxTokens = 0
+		out.MaxCompletionTokens = req.MaxTokens
+	}
 	thinkingOn := applyThinking(req, format, &out)
+	if format != formatDeepSeek {
+		switch kind {
+		case kindOpenAI:
+			applyOpenAIEffort(req, &out)
+		case kindOpenRouter:
+			applyOpenRouterReasoning(req, &out)
+		}
+	}
 	if req.System != "" {
 		out.Messages = append(out.Messages, map[string]any{"role": "system", "content": req.System})
 	}
@@ -212,4 +237,39 @@ func historyHasThinking(messages []core.Message) bool {
 		}
 	}
 	return false
+}
+
+// openAIEfforts maps lana efforts to OpenAI reasoning_effort values.
+var openAIEfforts = map[string]string{"off": "minimal", "low": "low", "high": "high", "max": "xhigh"}
+
+// applyOpenAIEffort sets reasoning_effort on a kind openai request. An empty
+// effort sends nothing (the model default applies). A catalog model without
+// thinking never gets it, since OpenAI rejects the field there; a catalog
+// thinking model and an unknown model get it when the agent sets an effort.
+// Catalog thinking models also drop temperature, which OpenAI reasoning
+// models reject.
+func applyOpenAIEffort(req core.ChatRequest, out *wireRequest) {
+	entry, known := models.Lookup(req.Model)
+	if known && entry.Thinking != "" {
+		out.Temperature = nil
+	}
+	effort, ok := openAIEfforts[req.ReasoningEffort]
+	if !ok || (known && entry.Thinking == "") {
+		return
+	}
+	out.ReasoningEffort = effort
+}
+
+// applyOpenRouterReasoning sets OpenRouter's reasoning object: off disables
+// reasoning, low and high pass through, and max maps to high. An empty
+// effort sends nothing.
+func applyOpenRouterReasoning(req core.ChatRequest, out *wireRequest) {
+	switch req.ReasoningEffort {
+	case "off":
+		out.Reasoning = map[string]any{"enabled": false}
+	case "low":
+		out.Reasoning = map[string]any{"effort": "low"}
+	case "high", "max":
+		out.Reasoning = map[string]any{"effort": "high"}
+	}
 }

@@ -18,6 +18,9 @@ import (
 type chunkDelta struct {
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content"`
+	// Reasoning and ReasoningDetails are OpenRouter's reasoning fields.
+	Reasoning        string            `json:"reasoning"`
+	ReasoningDetails []reasoningDetail `json:"reasoning_details"`
 	ToolCalls        []struct {
 		Index    int    `json:"index"`
 		ID       string `json:"id"`
@@ -26,6 +29,37 @@ type chunkDelta struct {
 			Arguments string `json:"arguments"`
 		} `json:"function"`
 	} `json:"tool_calls"`
+}
+
+// reasoningDetail is one OpenRouter reasoning_details entry. Encrypted
+// entries carry no readable text.
+type reasoningDetail struct {
+	Type    string `json:"type"`
+	Text    string `json:"text"`
+	Summary string `json:"summary"`
+}
+
+// thinkingText returns the reasoning text of a delta: DeepSeek's
+// reasoning_content, else OpenRouter's reasoning, else the text of its
+// reasoning_details. Providers that send both OpenRouter fields repeat the
+// same text, so only one is read.
+func (d chunkDelta) thinkingText() string {
+	if d.ReasoningContent != "" {
+		return d.ReasoningContent
+	}
+	if d.Reasoning != "" {
+		return d.Reasoning
+	}
+	var b strings.Builder
+	for _, detail := range d.ReasoningDetails {
+		switch detail.Type {
+		case "reasoning.text":
+			b.WriteString(detail.Text)
+		case "reasoning.summary":
+			b.WriteString(detail.Summary)
+		}
+	}
+	return b.String()
 }
 
 type chunkChoice struct {
@@ -98,9 +132,9 @@ func (a *Adapter) readSSE(ctx context.Context, body io.ReadCloser) core.ChatStre
 				usage = c.Usage
 			}
 			for _, choice := range c.Choices {
-				if choice.Delta.ReasoningContent != "" {
-					reasoning.WriteString(choice.Delta.ReasoningContent)
-					if !yield(core.ChatEvent{Kind: core.ChatThinkingDelta, Text: choice.Delta.ReasoningContent}, nil) {
+				if thinking := choice.Delta.thinkingText(); thinking != "" {
+					reasoning.WriteString(thinking)
+					if !yield(core.ChatEvent{Kind: core.ChatThinkingDelta, Text: thinking}, nil) {
 						return
 					}
 				}

@@ -49,6 +49,7 @@ func (a *Adapter) Embed(ctx context.Context, model string, inputs []string) ([][
 		return nil, classifyNetwork(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	a.reportLimits(resp.Header)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		pe := classifyHTTP(resp.StatusCode, data)
