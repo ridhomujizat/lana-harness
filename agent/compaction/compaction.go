@@ -620,7 +620,12 @@ func (s *Service) resolveChain(req core.CompactRequest, agentName string, events
 		}
 		return req.Targets, requested, nil
 	}
-	provider, model, fallback := s.resolveModel(agentName, events)
+	provider, model, fallback, runtime := s.resolveModel(agentName, events)
+	// REQ-CCR-007: an external runtime owns its own context; lana never
+	// compacts it or calls a model for it.
+	if runtime != "" {
+		return nil, "", fmt.Errorf("%w: %s", llmcall.ErrRuntimeAgent, runtime)
+	}
 	if req.Provider != "" {
 		provider = req.Provider
 	}
@@ -637,13 +642,13 @@ func (s *Service) resolveChain(req core.CompactRequest, agentName string, events
 	return chain, llmcall.Requested(provider, model), nil
 }
 
-// resolveModel returns the provider, model, and fallback of the session's
-// agent after its model/selection events.
-func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (string, string, []string) {
-	provider, model := "", ""
+// resolveModel returns the provider, model, fallback, and runtime of the
+// session's agent after its model/selection events.
+func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (string, string, []string, string) {
+	provider, model, runtime := "", "", ""
 	var fallback []string
 	if agent, ok := s.agentConfig(agentName); ok {
-		provider, model, fallback = agent.Provider, agent.Model, agent.Fallback
+		provider, model, fallback, runtime = agent.Provider, agent.Model, agent.Fallback, agent.Runtime
 	}
 	for _, event := range events {
 		if event.Kind != core.KindModelSelection {
@@ -655,12 +660,12 @@ func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (st
 		}
 		if payload.Agent != "" {
 			if agent, ok := s.agentConfig(payload.Agent); ok {
-				provider, model, fallback = agent.Provider, agent.Model, agent.Fallback
+				provider, model, fallback, runtime = agent.Provider, agent.Model, agent.Fallback, agent.Runtime
 			}
 		}
 		provider, model = llmcall.Select(provider, model, payload)
 	}
-	return provider, model, fallback
+	return provider, model, fallback, runtime
 }
 
 // Install installs the llm.stream overflow listener. The turn loop calls

@@ -32,6 +32,20 @@ const (
 // a model address with a known provider (AC-RTR-005).
 var ErrUnknownModel = errors.New("unknown provider or combo")
 
+// ErrRuntimeAgent is returned when a background pass resolves an agent that
+// runs on an external runtime such as Claude Code: those agents never serve
+// lana's own LLM calls (ADR 0018, REQ-CCR-007).
+var ErrRuntimeAgent = errors.New("agent runs on an external runtime")
+
+// RuntimeProvider is the provider name of a call record for a turn of an
+// external runtime: "claude-agent" for runtime "claude-code" (REQ-CCR-008).
+func RuntimeProvider(runtime string) string {
+	if runtime == "claude-code" {
+		return "claude-agent"
+	}
+	return runtime
+}
+
 // ParseTarget splits "provider/model" or the legacy "provider:model" at the
 // first "/" or ":", whichever comes first. Both parts must be non-empty.
 func ParseTarget(value string) (core.LLMTarget, bool) {
@@ -125,8 +139,12 @@ func Chain(llm core.LLMRegistry, provider, model string, fallback []string) ([]c
 // and the requested value for call records. The background passes that run
 // for an agent outside a turn (knowledge compile, journal, lint; memory
 // capture without the turn's chain) resolve the agent through it, so a rule
-// about which agents may call the router lives in one place.
+// about which agents may call the router lives in one place: an agent on an
+// external runtime is refused with ErrRuntimeAgent (REQ-CCR-007).
 func AgentChain(llm core.LLMRegistry, cfg core.AgentConfig) ([]core.LLMTarget, string, error) {
+	if cfg.Runtime != "" {
+		return nil, "", fmt.Errorf("%w: %s", ErrRuntimeAgent, cfg.Runtime)
+	}
 	chain, err := Chain(llm, cfg.Provider, cfg.Model, cfg.Fallback)
 	if err != nil {
 		return nil, "", err

@@ -238,6 +238,11 @@ func (a calendarActions) AgentExists(name string) bool {
 // queued in its inbox. It blocks until the turn ends.
 func (a calendarActions) AgentPrompt(ctx context.Context, agentName, prompt, title string) (string, error) {
 	rt := a.rt
+	// REQ-CCR-007, AC-CCR-008: a Claude Agent runs on a schedule only with
+	// allow_scheduled = true.
+	if err := rt.scheduledRunAllowed(agentName); err != nil {
+		return "", err
+	}
 	session, err := rt.roomSession(ctx, agentName)
 	if err != nil {
 		return "", err

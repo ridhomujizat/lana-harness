@@ -119,6 +119,21 @@ type AgentConfig struct {
 	// gray; "" derives a stable color from the name (REQ-ROOM-009, API-ROOM-006).
 	Color string     `toml:"color"`
 	Rules AgentRules `toml:"rules"`
+	// Runtime names an external agent runtime such as "claude-code" (ADR
+	// 0018, API-CCR-001). Empty runs lana's own loop. A runtime agent sets no
+	// provider; Model and ReasoningEffort are passed to the runtime as is.
+	Runtime string `toml:"runtime"`
+	// Auth is the runtime's credential mode: "subscription" (the default when
+	// empty) or "api_key" (REQ-CCR-003).
+	Auth string `toml:"auth"`
+	// APIKeyEnv names the secret that holds the API key when Auth is
+	// "api_key".
+	APIKeyEnv string `toml:"api_key_env"`
+	// Binary is the runtime executable. Empty looks it up on PATH.
+	Binary string `toml:"binary"`
+	// AllowScheduled lets calendar items and workflow nodes run the runtime
+	// agent (REQ-CCR-007). The default is false.
+	AllowScheduled bool `toml:"allow_scheduled"`
 }
 
 type AgentRules struct {

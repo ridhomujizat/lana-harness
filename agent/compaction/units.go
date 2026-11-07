@@ -380,7 +380,8 @@ func headText(events []core.SessionEvent) string {
 			continue
 		}
 		var payload core.SystemMessage
-		if json.Unmarshal(event.Payload, &payload) == nil {
+		// A runtime session meta is not a prompt head (API-CCR-002).
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.Subtype != core.SystemSubtypeRuntime {
 			text = payload.Text
 		}
 	}

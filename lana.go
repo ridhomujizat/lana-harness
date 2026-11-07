@@ -429,6 +429,8 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		toolboxNames: map[string]bool{},
 	}
 	rt.attachRouterStores()
+	// Spec 38: Claude Agent turns report usage and plan windows to the router.
+	registry.SetExternalHooks(rt.externalHooks())
 	// REQ-WF-009, AC-WF-016: the workflow tool gate is prepended so a worker's
 	// tool list, step budget and lock are decided before the permission engine
 	// asks the owner. It only acts on sessions a workflow run registered.

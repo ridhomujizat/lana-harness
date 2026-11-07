@@ -138,6 +138,16 @@ func (r *Router) recordedStream(snap *snapshot, first core.ChatEvent, pump *stre
 	}
 }
 
+// RecordExternal hands a call record made outside the router to the attached
+// recorder, such as the one call record of a Claude Agent turn (REQ-CCR-008).
+// A zero At is set to now. It is a no-op without a recorder and never blocks.
+func (r *Router) RecordExternal(rec CallRecord) {
+	if rec.At.IsZero() {
+		rec.At = r.now().UTC()
+	}
+	r.emit(rec)
+}
+
 func (r *Router) emit(rec CallRecord) {
 	box := r.recorder.Load()
 	if box == nil || box.rec == nil {

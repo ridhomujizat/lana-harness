@@ -102,7 +102,22 @@ type SystemMessage struct {
 	V        int             `json:"v"`
 	Text     string          `json:"text"`
 	Sections []PromptSection `json:"sections,omitempty"`
+	// Subtype is "" for the prompt head. SystemSubtypeRuntime marks the
+	// session meta of an external runtime process (API-CCR-002); such an event
+	// is not a prompt head and carries the fields below instead of Text.
+	Subtype string `json:"subtype,omitempty"`
+	// Runtime is the runtime name, for example "claude-code".
+	Runtime string `json:"runtime,omitempty"`
+	// ClaudeSessionID is the runtime's own session ID, resumed on later turns.
+	ClaudeSessionID string   `json:"claude_session_id,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Tools           []string `json:"tools,omitempty"`
+	Version         string   `json:"version,omitempty"`
 }
+
+// SystemSubtypeRuntime is the system/message subtype of an external runtime's
+// session meta (API-CCR-002).
+const SystemSubtypeRuntime = "runtime"
 
 type UserMessage struct {
 	V       int            `json:"v"`
@@ -146,6 +161,9 @@ type ToolCallPayload struct {
 	CallID string          `json:"call_id"`
 	Name   string          `json:"name"`
 	Input  json.RawMessage `json:"input"`
+	// External marks a call an external runtime ran itself, such as a Claude
+	// Code tool (API-CCR-002). lana did not run it.
+	External bool `json:"external,omitempty"`
 }
 
 type ToolResultPayload struct {

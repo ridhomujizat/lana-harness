@@ -37,6 +37,9 @@ type Runner struct {
 	// block this session (REQ-KNW-050). It is in memory, so a restart forgets
 	// it.
 	knowledgeShown map[string]bool
+	// externalRT is the runtime of the running external turn, nil otherwise
+	// (ADR 0018). Cancel interrupts it.
+	externalRT core.AgentRuntime
 }
 
 // inboxItem is one queued owner message: its text and the workspace-relative
@@ -577,6 +580,11 @@ func (rn *Runner) promptHead(ctx context.Context) (promptHead, error) {
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				return promptHead{}, err
 			}
+			// An external runtime's session meta is not a prompt head
+			// (API-CCR-002).
+			if payload.Subtype == core.SystemSubtypeRuntime {
+				continue
+			}
 			head.exists = true
 			head.text = payload.Text
 			head.compacted = false
@@ -644,6 +652,10 @@ func removedHeading(text string) string {
 }
 
 func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) (result TurnResult) {
+	// ADR 0018: an agent on an external runtime runs the whole turn there.
+	if ext, ok := rn.externalAgent(ctx); ok {
+		return rn.runExternalTurn(ctx, initial, turnID, continueReason, ext)
+	}
 	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
