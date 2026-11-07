@@ -47,7 +47,7 @@ export const baseUpdateStatus: UpdateStatus = {
   can_apply: true,
   manual_reason: "",
   manual_command:
-    "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/development/install.sh | bash",
+    "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash",
   checked_at: NOW - 12 * MIN,
   check_error: "",
   available: null,

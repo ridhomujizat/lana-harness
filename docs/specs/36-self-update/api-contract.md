@@ -37,7 +37,7 @@ Returned by every endpoint below unless stated otherwise.
   "supported": true,
   "can_apply": true,
   "manual_reason": "",
-  "manual_command": "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/development/install.sh | bash",
+  "manual_command": "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash",
   "checked_at": 1762600000000,
   "check_error": "",
   "available": {

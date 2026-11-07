@@ -10,7 +10,7 @@ import (
 
 // ManualCommand is the install one-liner the dashboard shows when the daemon
 // cannot replace its own binary (REQ-UPD-005, API-UPD-002).
-const ManualCommand = "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/development/install.sh | bash"
+const ManualCommand = "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash"
 
 // Eligibility says whether this process can update itself (design.md,
 // Eligibility).

@@ -4,7 +4,7 @@
 #
 # The repository is public, so no GitHub login is needed:
 #
-#   curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/development/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash
 #
 # An authenticated `gh` CLI or a GITHUB_TOKEN is used when present (for the
 # API rate limit or a private fork); otherwise plain curl reads the public API

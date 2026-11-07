@@ -25,9 +25,20 @@ A plain `go build` without `make` reports `lana dev`.
 A change that needs action from the owner, such as a schema migration that old binaries refuse, a
 renamed config key, or a removed tool, goes under "Upgrade notes" in `CHANGELOG.md`.
 
+## Branches
+
+- `development` holds the work in progress. Pushing it publishes nothing.
+- `main` is the stable branch. A push to `main` publishes a release when `VERSION` has no
+  `v<VERSION>` tag yet (`.github/workflows/release.yml`): it runs the tests, builds the binaries
+  and `SHA256SUMS`, tags the commit, and creates the GitHub Release with the `CHANGELOG.md`
+  section as notes. A push to `main` whose version is already released does nothing.
+- A version with `-beta.N` is published as a prerelease. The dashboard update card offers it only
+  on the `beta` channel; the default `stable` channel offers only versions without a pre-release
+  part.
+
 ## Steps
 
-1. Move the entries under `## [Unreleased]` in `CHANGELOG.md` to a new
+1. On `development`, move the entries under `## [Unreleased]` in `CHANGELOG.md` to a new
    `## [<version>] - <YYYY-MM-DD>` section and update the compare links at the bottom.
 2. Write the new version to `VERSION`.
 3. Run the checks:
@@ -38,11 +49,12 @@ renamed config key, or a removed tool, goes under "Upgrade notes" in `CHANGELOG.
    make web-check
    ```
 
-4. Commit with `chore(release): <version>`.
-5. Run `make tag`. It refuses a dirty tree and an existing tag.
-6. Run `make build` for the daily binary `./lana`. Run `make release` for the cross-platform
-   binaries in `dist/`.
-7. Push when you want the tag on GitHub: `git push origin development --follow-tags`.
+4. Commit with `chore(release): <version>` and push `development`.
+5. Merge `development` into `main` and push `main`. The release workflow tags and publishes it;
+   dashboards on the matching channel show the update card within 6 hours, or at once with
+   **Check now**.
+6. Locally, `make build` gives the daily binary `./lana` and `make release` the cross-platform
+   binaries in `dist/`. Do not run `make tag` for a release; the workflow creates the tag.
 
 ## Daily use
 

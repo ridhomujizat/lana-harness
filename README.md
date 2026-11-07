@@ -25,12 +25,10 @@ No C compiler is needed: lana builds with `CGO_ENABLED=0`.
 
 ### Option A: prebuilt binary (recommended)
 
-The repository is private, so the installer needs GitHub access: log in once with
-`gh auth login`, or export a `GITHUB_TOKEN` that can read the repository.
+The repository is public, so no GitHub login is needed:
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  'repos/ridhomujizat/lana-harness/contents/install.sh?ref=development' | bash
+curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash
 ```
 
 The script picks the binary for your OS and CPU (macOS arm64/amd64, Linux amd64/arm64) from the
@@ -43,8 +41,9 @@ LANA_INSTALL_DIR=/usr/local/bin bash install.sh # another folder
 LANA_FROM_DIR=dist bash install.sh              # binaries from a local `make release checksums`
 ```
 
-Run the same command again to upgrade. Releases are published by
-`.github/workflows/release.yml` when a `v*` tag is pushed.
+Run the same command again to upgrade, or use the update card in the dashboard (see
+[Upgrade](#upgrade)). `main` is the stable branch: every push to `main` whose `VERSION` has no
+release yet publishes one through `.github/workflows/release.yml`.
 
 ### Option B: build from source
 
@@ -53,7 +52,7 @@ Run the same command again to upgrade. Releases are published by
    ```sh
    git clone https://github.com/ridhomujizat/lana-harness.git
    cd lana-harness
-   git checkout v0.1.0-beta.1   # or stay on development for the latest beta work
+   git checkout main             # stable; development has the work in progress
    ```
 
 2. Build and install. With Nix:
@@ -197,7 +196,7 @@ With the prebuilt binary, you can also run the install command again. From sourc
 ```sh
 cd lana-harness
 git fetch --tags
-git checkout v<new-version>     # or: git pull on development
+git pull origin main            # or: git checkout v<new-version>
 nix develop -c make install
 ```
 

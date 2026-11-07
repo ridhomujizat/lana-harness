@@ -91,7 +91,7 @@ func sampleUpdateStatus() UpdateStatus {
 		Check:         true,
 		Supported:     true,
 		CanApply:      true,
-		ManualCommand: "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/development/install.sh | bash",
+		ManualCommand: "curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash",
 		CheckedAt:     &checked,
 		Available: &UpdateRelease{
 			Version: "0.1.0", Tag: "v0.1.0", Name: "lana 0.1.0", PublishedAt: 1762590000000,
