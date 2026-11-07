@@ -1078,6 +1078,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			toolBlocks []core.ContentBlock
 			usage      core.Usage
 			stop       string
+			ordered    []core.ContentBlock
 		)
 		// REQ-LTC-032: a retryable failure after the first stream event, but
 		// before the assistant message is stored, repeats the step. The partial
@@ -1099,7 +1100,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				seen      int
 				streamErr error
 			)
-			text, thinking, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID)
+			text, thinking, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID, &ordered)
 			if streamErr == nil {
 				break
 			}
@@ -1128,15 +1129,20 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CachedInputTokens += usage.CachedInputTokens
 		// REQ-MDL-003: the thinking block is stored first, then the answer text,
-		// then the tool calls.
+		// then the tool calls. Signed thinking (Anthropic) is stored in response
+		// order instead: the API checks it against the exact content around it.
 		content := make([]core.ContentBlock, 0, 2+len(toolBlocks))
-		if thinking != "" {
-			content = append(content, core.ContentBlock{Kind: core.BlockThinking, Text: thinking})
+		if ordered != nil {
+			content = ordered
+		} else {
+			if thinking != "" {
+				content = append(content, core.ContentBlock{Kind: core.BlockThinking, Text: thinking})
+			}
+			if text != "" {
+				content = append(content, core.ContentBlock{Kind: core.BlockText, Text: text})
+			}
+			content = append(content, toolBlocks...)
 		}
-		if text != "" {
-			content = append(content, core.ContentBlock{Kind: core.BlockText, Text: text})
-		}
-		content = append(content, toolBlocks...)
 		if stop == "" {
 			stop = "end_turn"
 		}
@@ -1390,7 +1396,27 @@ finished:
 // the explicit thinking block when the provider sends one, else the joined
 // thinking deltas. seen is the number of events read before a failure, which
 // tells a pre-first-event failure from a mid-stream one (REQ-LTC-032).
-func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string) (string, string, []core.ContentBlock, core.Usage, string, int, error) {
+// ordered is set to the blocks in response order (text deltas joined per
+// run) when the stream carried a signed thinking block, else to nil.
+func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string, ordered *[]core.ContentBlock) (string, string, []core.ContentBlock, core.Usage, string, int, error) {
+	*ordered = nil
+	var inOrder []core.ContentBlock
+	signed := false
+	appendText := func(s string) {
+		if s == "" {
+			return
+		}
+		if n := len(inOrder); n > 0 && inOrder[n-1].Kind == core.BlockText {
+			inOrder[n-1].Text += s
+			return
+		}
+		inOrder = append(inOrder, core.ContentBlock{Kind: core.BlockText, Text: s})
+	}
+	defer func() {
+		if signed {
+			*ordered = inOrder
+		}
+	}()
 	var text strings.Builder
 	var reasoning strings.Builder
 	thinkingBlock := ""
@@ -1412,6 +1438,7 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 		switch event.Kind {
 		case core.ChatTextDelta:
 			text.WriteString(event.Text)
+			appendText(event.Text)
 			rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "text_delta", Text: event.Text})
 		case core.ChatThinkingDelta:
 			reasoning.WriteString(event.Text)
@@ -1420,10 +1447,16 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 			switch event.Block.Kind {
 			case core.BlockText:
 				text.WriteString(event.Block.Text)
+				appendText(event.Block.Text)
 			case core.BlockThinking:
 				thinkingBlock = event.Block.Text
+				if event.Block.Signature != "" {
+					signed = true
+					inOrder = append(inOrder, event.Block)
+				}
 			default:
 				blocks = append(blocks, event.Block)
+				inOrder = append(inOrder, event.Block)
 			}
 		case core.ChatUsage:
 			usage = event.Usage

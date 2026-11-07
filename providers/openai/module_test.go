@@ -19,13 +19,15 @@ func bootLLM(t *testing.T, config core.Config, secrets core.Secrets) (*core.Cont
 	return core.Boot(context.Background(), core.BootInput{Config: config, Secrets: secrets, Profile: "test"})
 }
 
-func TestAnthropicKindRejected(t *testing.T) {
+// A kind no adapter registered is rejected at boot. (The anthropic kind is
+// registered by providers/anthropic, which this test binary does not link.)
+func TestUnregisteredKindRejected(t *testing.T) {
 	cfg := core.Config{
-		Providers: map[string]core.ProviderConfig{"anthropic": {Kind: "anthropic", BaseURL: "https://example.com"}},
-		Agents:    map[string]core.AgentConfig{"a": {Provider: "anthropic", Model: "m"}},
+		Providers: map[string]core.ProviderConfig{"other": {Kind: "unregistered_kind", BaseURL: "https://example.com"}},
+		Agents:    map[string]core.AgentConfig{"a": {Provider: "other", Model: "m"}},
 	}
 	_, err := bootLLM(t, cfg, nil)
-	if err == nil || !strings.Contains(err.Error(), "anthropic") || !strings.Contains(err.Error(), "not supported") {
+	if err == nil || !strings.Contains(err.Error(), "unregistered_kind") || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("err=%v", err)
 	}
 }

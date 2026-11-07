@@ -33,6 +33,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
+	_ "github.com/ridhomujizat/lana-harness/providers/anthropic"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
