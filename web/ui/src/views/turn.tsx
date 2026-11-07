@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { SessionContentBlock, SessionEvent } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
+import { Ic } from "../ui/icons";
 import { AgentFace } from "./presence";
 import { TeamBlock } from "./team";
 import type { TeamChildRequest } from "./team";
@@ -427,100 +428,250 @@ function Icon({ name, className = "icon-20" }: { name: string; className?: strin
   );
 }
 
+const CATEGORY_ICONS: Record<string, string> = {
+  read: "file-text",
+  search: "search",
+  write: "pencil",
+  command: "terminal",
+  fetch: "globe",
+  delegate: "users",
+  other: "wrench",
+};
+
+function stepStatusIcon(step: TurnStep): { icon: string; tone: string; word: string } {
+  if (step.approval && !step.approval.decided) {
+    return { icon: "hand", tone: "warn", word: "waiting for approval" };
+  }
+  const status = toolStatusWord(step.status);
+  if (status === "ok") {
+    return { icon: "check", tone: "ok", word: "done" };
+  }
+  if (status === "error") {
+    return { icon: "x", tone: "err", word: "error" };
+  }
+  if (status === "rejected" || status === "cancelled") {
+    return { icon: "ban", tone: "muted", word: status };
+  }
+  return stepIsRunning(step)
+    ? { icon: "loader", tone: "run", word: "running" }
+    : { icon: "check", tone: "ok", word: "done" };
+}
+
+function inputText(step: TurnStep): string {
+  const input = step.input;
+  if (input === undefined || input === null || input === "") {
+    return "";
+  }
+  if (typeof input === "string") {
+    return input;
+  }
+  if (typeof input === "object") {
+    const record = input as Record<string, unknown>;
+    if (typeof record.command === "string" && Object.keys(record).length <= 2) {
+      return record.command;
+    }
+  }
+  try {
+    return JSON.stringify(input, null, 2);
+  } catch {
+    return String(input);
+  }
+}
+
+/* One tool call in the process timeline: icon, what it did, the main argument
+   on one line, and its status. Opening it shows the full input and output. */
 function StepRow({ step }: { step: TurnStep }) {
   const [open, setOpen] = useState(false);
-  const waiting = Boolean(step.approval && !step.approval.decided);
-  const argument = cut(primaryArg(step.name, step.input), 80);
+  const status = stepStatusIcon(step);
+  const argument = cut(primaryArg(step.name, step.input), 120);
   const detailId =
     "step-detail-" + String(step.key).replace(/[^a-zA-Z0-9_-]/g, "-");
-
+  const full = inputText(step);
   return (
-    <div className="step">
+    <li className={"tp-step tone-" + status.tone}>
       <button
         type="button"
-        className="step-row"
+        className="tp-row"
         aria-expanded={open}
         aria-controls={detailId}
-        aria-label={
-          stepIntent(step.name) +
-          ", " +
-          (step.name || "tool") +
-          ", " +
-          (waiting ? "waiting for approval" : toolStatusWord(step.status))
-        }
+        aria-label={stepIntent(step.name) + ", " + (step.name || "tool") + ", " + status.word}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="step-intent">{stepIntent(step.name)}</span>
+        <span className="tp-ico" aria-hidden="true">
+          <Ic name={CATEGORY_ICONS[toolCategory(step.name)] || "wrench"} size={14} />
+        </span>
+        <span className="tp-label">{stepIntent(step.name)}</span>
         {argument ? (
-          <span className="chip chip-arg" title={argument}>
+          <code className="tp-arg" title={argument}>
             {argument}
-          </span>
+          </code>
         ) : null}
-        <span className="chip chip-tool">{step.name || "tool"}</span>
-        {waiting ? (
-          <span className="badge-ui badge-ui-warning step-waiting">
-            <span className="badge-ui-dot" aria-hidden="true"></span>Waiting
-          </span>
-        ) : null}
-        <span className="step-spacer"></span>
-        <Icon
-          name="chevron-right"
-          className={"icon-20 chevron" + (open ? " is-open" : "")}
-        />
+        <span className="tp-status" title={status.word}>
+          <Ic name={status.icon} size={13} className={status.icon === "loader" ? "spin" : ""} />
+        </span>
       </button>
-      <div className="step-detail" id={detailId} hidden={!open}>
-        <p className="step-detail-status">{stepStatusText(step)}</p>
-        {step.output ? (
-          <pre className="step-output">{cut(step.output, 2000)}</pre>
-        ) : null}
-      </div>
-    </div>
+      {open ? (
+        <div className="tp-detail" id={detailId}>
+          <p className="tp-detail-status">
+            <span className="tp-tool">{step.name || "tool"}</span> {stepStatusText(step)}
+          </p>
+          {full ? (
+            <>
+              <span className="tp-detail-k">Input</span>
+              <pre className="tp-pre">{cut(full, 4000)}</pre>
+            </>
+          ) : null}
+          {step.output ? (
+            <>
+              <span className="tp-detail-k">Output</span>
+              <pre className="tp-pre">{cut(step.output, 4000)}</pre>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
-function ActivityGroup({ group }: { group: TurnGroup }) {
+/* A thinking block in the timeline: one quiet line, the reasoning on open. */
+function ThoughtRow({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const summary = turnSummary(group.steps);
-  if (!summary) {
+  const first = text.replace(/\s+/g, " ").trim();
+  return (
+    <li className="tp-step tp-thought">
+      <button type="button" className="tp-row" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className="tp-ico" aria-hidden="true">
+          <Ic name="brain" size={14} />
+        </span>
+        <span className="tp-label">Thought</span>
+        <span className="tp-arg tp-arg-text">{cut(first, 120)}</span>
+      </button>
+      {open ? (
+        <div className="tp-detail turn-text">
+          <Markdown text={text} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/* Text the agent wrote between tool calls ("Let me check the config…"). It is
+   part of the process, not the answer. */
+function NoteRow({ text }: { text: string }) {
+  return (
+    <li className="tp-step tp-note">
+      <span className="tp-row tp-row-static">
+        <span className="tp-ico" aria-hidden="true">
+          <Ic name="message-square" size={14} />
+        </span>
+        <span className="tp-note-text">
+          <Markdown text={text} />
+        </span>
+      </span>
+    </li>
+  );
+}
+
+/* Splits a turn's groups into the process (thinking, tool calls and the text
+   between them) and the answer: the text after the last process group. */
+export function splitTurn(groups: TurnGroup[] | undefined): { process: TurnGroup[]; answer: TurnGroup[] } {
+  const list = groups || [];
+  let last = -1;
+  list.forEach((group, index) => {
+    if (group.kind !== "text") {
+      last = index;
+    }
+  });
+  return { process: list.slice(0, last + 1), answer: list.slice(last + 1) };
+}
+
+/* The live line while a turn runs: what is happening right now. */
+function liveText(steps: TurnStep[], thinking: boolean, waitingForInput: boolean): string {
+  if (waitingForInput) {
+    return "Waiting for your answer";
+  }
+  const running = [...steps].reverse().find(stepIsRunning);
+  if (running) {
+    if (running.approval && !running.approval.decided) {
+      return "Waiting for your approval: " + (running.name || "tool");
+    }
+    const arg = cut(primaryArg(running.name, running.input), 80);
+    return stepIntent(running.name) + (arg ? ": " + arg : "");
+  }
+  return thinking ? "Thinking…" : "Working…";
+}
+
+/* The whole process of a turn as one line (owner decision 2026-11-05): the
+   answer stays the main thing; the steps open on demand as a timeline. */
+function TurnProcess({
+  groups,
+  running,
+  thinking,
+  streaming,
+  waitingForInput,
+  turnKey,
+}: {
+  groups: TurnGroup[];
+  running: boolean;
+  thinking: boolean;
+  streaming: boolean;
+  waitingForInput: boolean;
+  turnKey: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const steps = groups.flatMap((group) => (group.kind === "activity" ? group.steps || [] : []));
+  const thoughts = groups.filter((group) => group.kind === "thinking").length;
+  const waitingApproval = steps.some((step) => step.approval && !step.approval.decided);
+  const live = (running || thinking) && !streaming;
+  if (steps.length === 0 && thoughts === 0 && !live) {
     return null;
   }
-  const listId =
-    "activity-" + String(group.key).replace(/[^a-zA-Z0-9_-]/g, "-");
+  const parts: string[] = [];
+  const summary = turnSummary(steps);
+  if (summary) {
+    parts.push(summary);
+  }
+  if (thoughts > 0) {
+    parts.push("thought " + thoughts + "×");
+  }
+  const done = steps.filter((step) => !stepIsRunning(step)).length;
+  const listId = "process-" + turnKey.replace(/[^a-zA-Z0-9_-]/g, "-");
   return (
-    <div className="activity">
+    <div className={"turn-process" + (live ? " is-live" : "") + (open ? " is-open" : "") + (waitingApproval ? " is-waiting" : "")}>
       <button
         type="button"
-        className="activity-head"
+        className="tp-head"
         aria-expanded={open}
         aria-controls={listId}
         onClick={() => setOpen((value) => !value)}
       >
-        <Icon name="activity" className="icon-20 activity-icon" />
-        <span className="activity-summary">{summary}</span>
-        <Icon
-          name="chevron-right"
-          className={"icon-20 chevron" + (open ? " is-open" : "")}
-        />
+        <Ic name="chevron-right" size={14} className={"tp-chev" + (open ? " is-open" : "")} />
+        {live ? (
+          <>
+            <span className="tp-live-dot" aria-hidden="true" />
+            <span className="tp-head-text tp-head-live" role="status">
+              {liveText(steps, thinking, waitingForInput)}
+            </span>
+            {done > 0 ? <span className="tp-head-meta">{plural(done, "step")} done</span> : null}
+          </>
+        ) : (
+          <span className="tp-head-text">{parts.join(" · ")}</span>
+        )}
       </button>
-      <div className="activity-steps" id={listId} hidden={!open}>
-        {(group.steps || []).map((step) => (
-          <StepRow key={step.key} step={step} />
-        ))}
-      </div>
+      {open ? (
+        <ol className="tp-list" id={listId}>
+          {groups.map((group) =>
+            group.kind === "thinking" ? (
+              <ThoughtRow key={group.key} text={group.text || ""} />
+            ) : group.kind === "activity" ? (
+              (group.steps || []).map((step) => <StepRow key={step.key} step={step} />)
+            ) : (
+              <NoteRow key={group.key} text={group.text || ""} />
+            )
+          )}
+        </ol>
+      ) : null}
     </div>
-  );
-}
-
-/* REQ-MDL-006: an assistant thinking block renders as a collapsed section above
-   the answer. Its text is model reasoning, not the reply. */
-function ThinkingBlock({ text }: { text: string }) {
-  return (
-    <details className="turn-thinking">
-      <summary className="turn-thinking-summary">Thinking</summary>
-      <div className="turn-text">
-        <Markdown text={text} />
-      </div>
-    </details>
   );
 }
 
@@ -618,6 +769,7 @@ export function TurnBlock({
   }
 
   const statusCard = showStatusCard ? turnEndCard(turn) : null;
+  const parts = splitTurn(turn.groups);
 
   return (
     <article className="turn">
@@ -637,17 +789,19 @@ export function TurnBlock({
         <span className="turn-spacer"></span>
         <span className="turn-time">{formatClock(startedAt)}</span>
       </div>
-      {(turn.groups || []).map((segment) =>
-        segment.kind === "text" ? (
-          <div className="turn-text" key={segment.key}>
-            <Markdown text={segment.text} />
-          </div>
-        ) : segment.kind === "thinking" ? (
-          <ThinkingBlock key={segment.key} text={segment.text || ""} />
-        ) : (
-          <ActivityGroup key={segment.key} group={segment} />
-        )
-      )}
+      <TurnProcess
+        groups={parts.process}
+        running={Boolean(turn.running)}
+        thinking={thinking}
+        streaming={Boolean(streamingText) || (Boolean(turn.running) && parts.answer.length > 0)}
+        waitingForInput={waitingForInput}
+        turnKey={String(turn.key || turn.id || "turn")}
+      />
+      {parts.answer.map((segment) => (
+        <div className="turn-text turn-answer" key={segment.key}>
+          <Markdown text={segment.text || ""} />
+        </div>
+      ))}
       {(turn.notes || []).length > 0 ? (
         <div>
           {(turn.notes || []).map((note, index) => (
@@ -658,13 +812,9 @@ export function TurnBlock({
         </div>
       ) : null}
       {streamingText ? (
-        <div className="turn-text turn-text-streaming">
+        <div className="turn-text turn-answer turn-text-streaming">
           <Markdown text={streamingText} />
         </div>
-      ) : thinking ? (
-        <p className="turn-thinking-live muted" role="status">
-          Thinking…
-        </p>
       ) : null}
       {statusCard && !cardDismissed ? (
         <div className="card" role="status" aria-live="polite">

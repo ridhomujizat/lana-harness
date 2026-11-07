@@ -3,7 +3,6 @@ import type {
   DragEvent as ReactDragEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
-  WheelEvent as ReactWheelEvent,
 } from "react";
 import type { Graph, WfEdge, WfNode } from "../api/workflows";
 import { Ic } from "../ui/icons";
@@ -444,21 +443,73 @@ export function WorkflowCanvas({
     }
   }
 
-  function onWheel(event: ReactWheelEvent<HTMLDivElement>) {
-    if (event.ctrlKey || event.metaKey) {
-      const rect = wrapRef.current?.getBoundingClientRect();
-      const cx = event.clientX - (rect ? rect.left : 0);
-      const cy = event.clientY - (rect ? rect.top : 0);
-      const next = Math.max(0.3, Math.min(2, zoom * (event.deltaY < 0 ? 1.1 : 0.9)));
-      setPan({
-        x: cx - ((cx - pan.x) * next) / zoom,
-        y: cy - ((cy - pan.y) * next) / zoom,
-      });
-      setZoom(next);
-      return;
+  /* Trackpad pinch and ctrl/cmd + wheel zoom the canvas only, never the page
+     (owner report 2026-11-05). React registers wheel listeners as passive, so
+     preventDefault there cannot stop the browser zoom: these are native
+     listeners with passive: false. Safari sends pinch as gesture* events. */
+  const viewRef = useRef({ zoom, pan });
+  viewRef.current = { zoom, pan };
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) {
+      return undefined;
     }
-    setPan({ x: pan.x - event.deltaX, y: pan.y - event.deltaY });
-  }
+    const zoomAround = (target: number, clientX: number, clientY: number) => {
+      const current = viewRef.current;
+      const rect = wrap.getBoundingClientRect();
+      const cx = clientX - rect.left;
+      const cy = clientY - rect.top;
+      const next = Math.max(0.3, Math.min(2, target));
+      const nextPan = {
+        x: cx - ((cx - current.pan.x) * next) / current.zoom,
+        y: cy - ((cy - current.pan.y) * next) / current.zoom,
+      };
+      viewRef.current = { zoom: next, pan: nextPan };
+      setPan(nextPan);
+      setZoom(next);
+    };
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (event.ctrlKey || event.metaKey) {
+        /* Pinch deltas are small and fine-grained; a mouse wheel notch is
+           about 100. exp keeps both smooth and symmetric. */
+        const delta = Math.max(-50, Math.min(50, event.deltaY));
+        zoomAround(viewRef.current.zoom * Math.exp(-delta * 0.01), event.clientX, event.clientY);
+        return;
+      }
+      const current = viewRef.current;
+      const nextPan = { x: current.pan.x - event.deltaX, y: current.pan.y - event.deltaY };
+      viewRef.current = { zoom: current.zoom, pan: nextPan };
+      setPan(nextPan);
+    };
+    let gestureZoom = 1;
+    type GestureLike = Event & { scale?: number; clientX?: number; clientY?: number };
+    const onGestureStart = (event: Event) => {
+      event.preventDefault();
+      gestureZoom = viewRef.current.zoom;
+    };
+    const onGestureChange = (event: Event) => {
+      event.preventDefault();
+      const gesture = event as GestureLike;
+      const rect = wrap.getBoundingClientRect();
+      zoomAround(
+        gestureZoom * (gesture.scale || 1),
+        gesture.clientX ?? rect.left + rect.width / 2,
+        gesture.clientY ?? rect.top + rect.height / 2
+      );
+    };
+    const stop = (event: Event) => event.preventDefault();
+    wrap.addEventListener("wheel", onWheel, { passive: false });
+    wrap.addEventListener("gesturestart", onGestureStart, { passive: false });
+    wrap.addEventListener("gesturechange", onGestureChange, { passive: false });
+    wrap.addEventListener("gestureend", stop, { passive: false });
+    return () => {
+      wrap.removeEventListener("wheel", onWheel);
+      wrap.removeEventListener("gesturestart", onGestureStart);
+      wrap.removeEventListener("gesturechange", onGestureChange);
+      wrap.removeEventListener("gestureend", stop);
+    };
+  }, []);
 
   function zoomBy(factor: number) {
     const wrap = wrapRef.current;
@@ -508,7 +559,6 @@ export function WorkflowCanvas({
       onPointerDown={onBackgroundDown}
       onPointerMove={onMove}
       onPointerUp={onUp}
-      onWheel={onWheel}
       onDragOver={onDragOver}
       onDrop={onDrop}
       style={{

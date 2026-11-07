@@ -579,8 +579,8 @@ func TestMigrateFreshAddsWorkflows(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 {
-		t.Fatalf("version=%d, want 6", version)
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
 	}
 	for _, table := range []string{"workflows", "workflow_versions", "workflow_runs", "workflow_node_runs", "workflow_decisions", "workflow_state", "workflow_chat"} {
 		if n := countRows(t, s, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table); n != 1 {
@@ -654,8 +654,8 @@ func TestMigrateV5ToV6Workflows(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 {
-		t.Fatalf("version=%d, want 6", version)
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
 	}
 
 	// The migrated database still persists room reads and accepts workflows.

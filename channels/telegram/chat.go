@@ -41,12 +41,15 @@ type chat struct {
 	routeAgent string
 	updates    chan Update
 
-	mu          sync.Mutex
-	agent       string
-	session     string
-	running     bool
-	cancelTurn  context.CancelFunc
-	liveID      int64
+	mu         sync.Mutex
+	agent      string
+	session    string
+	running    bool
+	cancelTurn context.CancelFunc
+	liveID     int64
+	// turnStarted is when the running turn began; the live status line shows
+	// the time elapsed since then.
+	turnStarted time.Time
 	tools       []*toolLine
 	step        int
 	afterResult bool
@@ -529,7 +532,7 @@ func (w *chat) launchTurn(ctx context.Context, trigger int64, session string, ru
 	turnCtx, cancel := context.WithCancel(ctx)
 	w.mu.Lock()
 	w.running, w.cancelTurn = true, cancel
-	w.liveID, w.tools = 0, nil
+	w.liveID, w.tools, w.turnStarted = 0, nil, w.ch.now()
 	w.step, w.afterResult, w.calls = 1, false, 0
 	w.stepTextLen, w.stepTools = 0, 0
 	w.bubbleID, w.approvalQueue = 0, nil
@@ -570,7 +573,7 @@ func (w *chat) turn(ctx context.Context, trigger int64, session string, run func
 	started := time.Now()
 	api := w.ch.api
 	_ = api.SendChatAction(ctx, w.id, "typing")
-	liveID, err := api.SendMessage(ctx, w.id, "…", SendOptions{ReplyTo: trigger})
+	liveID, err := api.SendMessage(ctx, w.id, html.EscapeString(liveStart), SendOptions{ReplyTo: trigger})
 	if err != nil {
 		w.ch.apiErr("sendMessage", err)
 	}
@@ -679,19 +682,20 @@ func (w *chat) turn(ctx context.Context, trigger int64, session string, run func
 	defer edit.Stop()
 	typing := time.NewTicker(w.ch.TypingInterval)
 	defer typing.Stop()
-	dirty, lastSent := false, ""
+	// The live message starts as liveStart. Every edit tick re-renders it, even
+	// without a new frame, so the spinner and the elapsed time move; an edit is
+	// sent only when the text changed.
+	lastSent := html.EscapeString(liveStart)
 	var out turnOutcome
 loop:
 	for {
 		select {
 		case frame := <-frames:
 			apply(frame)
-			dirty = true
 		case <-edit.C:
-			if !dirty || liveID == 0 {
+			if liveID == 0 {
 				continue
 			}
-			dirty = false
 			body := tgfmt.Split(w.render(text.String(), "", true), tgfmt.Limit)
 			if len(body) > 0 && body[0] != lastSent {
 				lastSent = body[0]
@@ -788,22 +792,66 @@ func continueKeyboard(sessionID string) *Keyboard {
 	return &Keyboard{Rows: [][]Button{{{Text: "Continue", Data: "c:" + sessionID}}}}
 }
 
-// statusLine returns the live status line: the running tool and step, or the
-// writing step when no tool runs (REQ-TGL-001).
-func (w *chat) statusLine() string {
+// liveStart is the text of the live message when a turn starts, before the
+// first edit tick replaces it with the animated status line.
+const liveStart = "⏳ Thinking…"
+
+// spinnerFrames are the frames of the live status spinner. The frame follows
+// the elapsed time in edit intervals, so it moves on every edit tick.
+var spinnerFrames = []string{"◐", "◓", "◑", "◒"}
+
+// statusArgLimit is the most runes of a tool argument the status line shows.
+const statusArgLimit = 40
+
+// statusLine returns the live status line: a spinner frame, the activity, the
+// step and the time elapsed since the turn started (REQ-TGL-001). The activity
+// is the running tool and its short argument, "Writing…" while the answer of
+// the current step streams, or "Thinking…" before it does.
+func (w *chat) statusLine(writing bool) string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	step := w.step
 	if step < 1 {
 		step = 1
 	}
+	elapsed := time.Duration(0)
+	if !w.turnStarted.IsZero() {
+		elapsed = max(w.ch.now().Sub(w.turnStarted), 0)
+	}
+	spinner := spinnerFrames[0]
+	if interval := w.ch.EditInterval; interval > 0 {
+		spinner = spinnerFrames[int(elapsed/interval)%len(spinnerFrames)]
+	}
+	activity := "Thinking…"
+	if writing && !w.afterResult {
+		activity = "Writing…"
+	}
 	for i := len(w.tools) - 1; i >= 0; i-- {
 		if w.tools[i].done {
 			continue
 		}
-		return fmt.Sprintf("⏳ %s · step %d", displayTool(w.tools[i].agent, w.tools[i].name), step)
+		activity = displayTool(w.tools[i].agent, w.tools[i].name)
+		// A tool without a known primary argument shows its raw JSON input;
+		// the status line leaves that out.
+		if arg := strings.Join(strings.Fields(w.tools[i].arg), " "); arg != "" && !strings.HasPrefix(arg, "{") && !strings.HasPrefix(arg, "[") {
+			activity += " · " + toolfmt.Cut(arg, statusArgLimit)
+		}
+		break
 	}
-	return fmt.Sprintf("✍️ step %d", step)
+	return fmt.Sprintf("%s %s · step %d · %s", spinner, activity, step, formatElapsed(elapsed))
+}
+
+// formatElapsed renders a turn duration for the status line: "12s", "1m 05s"
+// or "1h 02m".
+func formatElapsed(d time.Duration) string {
+	seconds := int(d / time.Second)
+	switch {
+	case seconds < 60:
+		return fmt.Sprintf("%ds", seconds)
+	case seconds < 3600:
+		return fmt.Sprintf("%dm %02ds", seconds/60, seconds%60)
+	}
+	return fmt.Sprintf("%dh %02dm", seconds/3600, seconds%3600/60)
 }
 
 // render builds the message HTML. While running it is the status line and the
@@ -812,7 +860,7 @@ func (w *chat) statusLine() string {
 func (w *chat) render(answer, end string, running bool) string {
 	sections := []string{}
 	if running {
-		sections = append(sections, html.EscapeString(w.statusLine()))
+		sections = append(sections, html.EscapeString(w.statusLine(strings.TrimSpace(answer) != "")))
 	}
 	if body := tgfmt.ToHTML(answer); body != "" {
 		sections = append(sections, body)
@@ -981,7 +1029,7 @@ func (w *chat) editBubble(ctx context.Context, text string) {
 // resetTurn clears the per-turn layout state.
 func (w *chat) resetTurn() {
 	w.mu.Lock()
-	w.liveID, w.tools = 0, nil
+	w.liveID, w.tools, w.turnStarted = 0, nil, time.Time{}
 	w.step, w.afterResult, w.calls = 0, false, 0
 	w.stepTextLen, w.stepTools = 0, 0
 	w.bubbleID, w.approvalQueue = 0, nil

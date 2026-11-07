@@ -66,6 +66,9 @@ Order of work: approve requirements, then the contract (if applicable), then des
 Implementation must not start while there are still blocking open questions or earlier artifacts
 have not been approved.
 
+> **Gate lifted (2026-11-05)** for spec #35 (calendar). The owner answered the interview and said "tulis spec dulu lalu
+> implementasi FEnya". Remaining details use `Rekomendasi agent:` in its resolution table.
+>
 > **Gate lifted (2026-11-02)** for spec #32 (agent rooms). The owner approved the design and said
 > "implement approve dengan rekomendasi kamu". Same rules as below.
 >
@@ -148,4 +151,5 @@ it is reversible and does not change observable behavior.
 | — | Knowledge upkeep | [Approved r1](31-knowledge-upkeep/requirements.md) | [Approved r1](31-knowledge-upkeep/api-contract.md) | [Approved r1](31-knowledge-upkeep/design.md) | [Completed r1](31-knowledge-upkeep/tasks.md) |
 | — | Agent rooms, presence, alive profile and roster | [Approved r1](32-agent-rooms/requirements.md) | [Approved r1](32-agent-rooms/api-contract.md) | [Approved r1](32-agent-rooms/design.md) | [Completed r1](32-agent-rooms/tasks.md) |
 | — | Workflows: guarded automation graphs, durable runs, error ladder | [Approved r1](33-workflows/requirements.md) | [Approved r1](33-workflows/api-contract.md) | [Approved r1](33-workflows/design.md) | [Completed r1](33-workflows/tasks.md) |
+| — | Calendar: scheduler calendar, items, habits, workflow slots and runs, Google, ICS | [Approved r1](35-calendar/requirements.md) | [Approved r1](35-calendar/api-contract.md) | [Approved r1](35-calendar/design.md) | [Completed r1](35-calendar/tasks.md) |
 | — | Self-update: update card, one-click update, trial boot and rollback | [Approved r1](36-self-update/requirements.md) | [Approved r1](36-self-update/api-contract.md) | [Approved r1](36-self-update/design.md) | [In Progress r1](36-self-update/tasks.md) |

@@ -1,6 +1,7 @@
 import { mockToolbox } from "./toolbox-fixtures";
 import { mockWorkflows } from "./workflow-fixtures";
 import { mockUpdate } from "./update-fixtures";
+import { mockCalendar } from "./calendar-fixtures";
 import type {
   Agent,
   AgentCreatedResponse,
@@ -1848,7 +1849,7 @@ function unknownRoute(method: string, path: string): MockResult {
   return { status: 200, body: {} };
 }
 
-export function mockApi(method: string, url: URL): MockResult {
+export function mockApi(method: string, url: URL, body?: unknown): MockResult {
   const m = method.toUpperCase();
   const parts = url.pathname.split("/").filter(Boolean);
   const at = (index: number): string => parts[index] || "";
@@ -1862,6 +1863,8 @@ export function mockApi(method: string, url: URL): MockResult {
   switch (at(1)) {
     case "workflows":
       return mockWorkflows(m, parts);
+    case "calendar":
+      return mockCalendar(m, parts, url, body);
     case "toolbox":
       return mockToolbox(m, parts);
     case "update":
