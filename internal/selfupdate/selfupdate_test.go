@@ -512,3 +512,74 @@ func TestBackupFailureCleansUp(t *testing.T) {
 		t.Fatalf("partial backups left: %+v", backups)
 	}
 }
+
+// TestClaimPending: one claimer wins the rename of pending.json; a claim left
+// by a dead process can be taken over; Release removes the claim.
+func TestClaimPending(t *testing.T) {
+	p := Paths{Home: t.TempDir()}
+	if _, ok, err := ClaimPending(p, 1); ok || err != nil {
+		t.Fatalf("claim without pending = %v, %v", ok, err)
+	}
+	if pids, err := ClaimPIDs(p); len(pids) != 0 || err != nil {
+		t.Fatalf("pids = %v, %v", pids, err)
+	}
+	for round := 0; round < 50; round++ {
+		if err := WritePending(p, Pending{From: "0.1.0", To: "0.2.0", Boots: 1}); err != nil {
+			t.Fatal(err)
+		}
+		results := make(chan Claim, 8)
+		done := make(chan struct{})
+		for pid := 10; pid < 18; pid++ {
+			go func(pid int) {
+				defer func() { done <- struct{}{} }()
+				if claim, ok, err := ClaimPending(p, pid); ok && err == nil {
+					results <- claim
+				}
+			}(pid)
+		}
+		for i := 0; i < 8; i++ {
+			<-done
+		}
+		close(results)
+		if len(results) != 1 {
+			t.Fatalf("round %d: %d winners", round, len(results))
+		}
+		claim := <-results
+		if claim.Pending.To != "0.2.0" || claim.Pending.Boots != 1 || claim.Path != p.Claim(claim.PID) {
+			t.Fatalf("claim = %+v", claim)
+		}
+		if pending, _ := ReadPending(p); pending != nil {
+			t.Fatal("pending.json still there")
+		}
+		if pids, _ := ClaimPIDs(p); len(pids) != 1 || pids[0] != claim.PID {
+			t.Fatalf("pids = %v", pids)
+		}
+		// The watchdog takes over the claim of a dead claimer.
+		taken, ok, err := TakeOverClaim(p, claim.PID, 99)
+		if !ok || err != nil || taken.Pending.To != "0.2.0" {
+			t.Fatalf("take over = %+v, %v, %v", taken, ok, err)
+		}
+		if _, ok, _ := TakeOverClaim(p, claim.PID, 98); ok {
+			t.Fatal("second take over won")
+		}
+		if err := taken.Release(); err != nil {
+			t.Fatal(err)
+		}
+		if err := taken.Release(); err != nil {
+			t.Fatalf("second release: %v", err)
+		}
+		if pids, _ := ClaimPIDs(p); len(pids) != 0 {
+			t.Fatalf("pids after release = %v", pids)
+		}
+	}
+	// An unreadable pending.json is dropped by the claim.
+	if err := os.WriteFile(p.Pending(), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := ClaimPending(p, 5); ok || err == nil {
+		t.Fatalf("corrupt claim = %v, %v", ok, err)
+	}
+	if pids, _ := ClaimPIDs(p); len(pids) != 0 {
+		t.Fatalf("pids = %v", pids)
+	}
+}

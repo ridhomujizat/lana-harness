@@ -827,6 +827,12 @@ func (s *updateService) install(job *updateJob, lock *daemonLock, stderr io.Writ
 	s.mu.Lock()
 	job.state = web.UpdateStateRestarting
 	s.mu.Unlock()
+	// The watchdog runs from the backup copy of this binary, since exe is the
+	// new one now. It rolls back when the new binary dies or hangs before its
+	// trial boot reports healthy (design.md, Trial boot and rollback).
+	if err := spawnUpdateWatch(s.home, backupDir, os.Getpid(), os.Args[1:]); err != nil {
+		_, _ = fmt.Fprintf(stderr, "warning: update: start the update watchdog: %v\n", err)
+	}
 	_, _ = fmt.Fprintf(stderr, "update: installed %s; restarting\n", to)
 	code := execRestart(lock, stderr, exe)
 	// The exec failed: put the old binary back and run it.

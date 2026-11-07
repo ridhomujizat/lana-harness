@@ -100,8 +100,11 @@ func runDaemonWithLogs(ctx context.Context, stderr io.Writer, signals <-chan os.
 	// did, restores the backup and execs the previous binary.
 	paths := selfupdate.Paths{Home: home}
 	trial, pending, action := beginTrialBoot(paths, version, time.Now)
-	if action == trialRollback {
+	switch action {
+	case trialRollback:
 		return rollbackUpdate(lock, stderr, paths, *pending, "the previous start of "+pending.To+" never reported healthy")
+	case trialBusy:
+		return errorf(1, "an update rollback is in progress; try again in a few seconds")
 	}
 	defer func() {
 		if !trial.active() {

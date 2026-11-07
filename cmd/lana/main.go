@@ -90,6 +90,10 @@ func run(args []string) int {
 		// Hidden: the update job runs it against a copy of the data
 		// (API-UPD-010).
 		return cmdUpdateProbe(args[1:])
+	case "update-watch":
+		// Hidden: the old binary starts it to guard the first start of a new
+		// one (API-UPD-010).
+		return cmdUpdateWatch(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command: %s\n", args[0])
 		return 2

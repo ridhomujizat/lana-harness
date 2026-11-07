@@ -131,6 +131,7 @@ Clears `last_result`. 204.
 |---|---|---|
 | `lana update rollback` | Restores the newest backup in `$LANA_HOME/updates/backups/` (binary, databases, config). Refuses while the daemon holds its lock. | 0 restored; 1 no backup or failure; 3 daemon running |
 | `lana update-probe --home <dir>` | Hidden. Loads config from `<dir>` and opens and migrates the databases in `<dir>`, then exits. Starts no channels, web server, or turns. | 0 ok; nonzero with the reason on stderr |
+| `lana update-watch --home <dir> --pid <pid> -- <daemon args...>` | Hidden. The old binary runs it from `<backup_dir>/lana` right before it execs the new one. It detaches a copy of itself, waits for the update of daemon `<pid>` to end, and rolls back when the pid dies or 90 s pass without healthy, then starts `exe_path` with `<daemon args>` when the daemon lock is free (design.md, Trial boot and rollback). | 0 healthy, handled, or rolled back; 1 rollback failed; 2 usage |
 
 `lana --version` output stays as it is.
 
@@ -140,6 +141,7 @@ Clears `last_result`. 204.
 $LANA_HOME/updates/
 ├── state.json              # {"skipped": "...", "last_result": {...}|null}
 ├── pending.json            # present only during a trial boot
+├── pending.claim-<pid>.json # pending.json claimed by <pid> while it records the outcome
 ├── lana-<version>.download # partial or verified download
 └── backups/
     └── <from>-to-<to>-<yyyymmddThhmmssZ>/

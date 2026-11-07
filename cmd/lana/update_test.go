@@ -124,6 +124,8 @@ type updateFixture struct {
 	restart  *fakeRestarter
 	ctl      *restartController
 	svc      *updateService
+	// watches records the update watchdog spawns of the install hook.
+	watches *[]string
 }
 
 func sha256Hex(data []byte) string {
@@ -134,6 +136,7 @@ func sha256Hex(data []byte) string {
 func newUpdateFixture(t *testing.T, current string, sumsFor []byte) *updateFixture {
 	t.Helper()
 	f := &updateFixture{home: t.TempDir(), payload: []byte("new-binary-0.1.0")}
+	f.watches = stubUpdateWatch(t)
 	if sumsFor == nil {
 		sumsFor = f.payload
 	}
@@ -224,6 +227,20 @@ func waitJob(t *testing.T, svc *updateService, states ...string) web.UpdateStatu
 	status := svc.UpdateStatus(context.Background())
 	t.Fatalf("job = %+v, want one of %v", status.Job, states)
 	return status
+}
+
+// stubUpdateWatch replaces spawnUpdateWatch for the test and records its
+// calls as "home backup pid args".
+func stubUpdateWatch(t *testing.T) *[]string {
+	t.Helper()
+	var calls []string
+	old := spawnUpdateWatch
+	spawnUpdateWatch = func(home, backupDir string, pid int, daemonArgs []string) error {
+		calls = append(calls, fmt.Sprintf("%s %s %d %s", home, backupDir, pid, strings.Join(daemonArgs, " ")))
+		return nil
+	}
+	t.Cleanup(func() { spawnUpdateWatch = old })
+	return &calls
 }
 
 // errExecStub stands for an exec that replaced the process image.
@@ -477,6 +494,11 @@ func TestUpdateJobInstalls(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(pending.BackupDir, "lana")); string(data) != "old-binary" {
 		t.Fatalf("backed-up binary = %q", data)
+	}
+	// The watchdog runs from the backup copy before the exec.
+	wantWatch := fmt.Sprintf("%s %s %d %s", f.home, pending.BackupDir, os.Getpid(), strings.Join(os.Args[1:], " "))
+	if len(*f.watches) != 1 || (*f.watches)[0] != wantWatch {
+		t.Fatalf("watchdog spawns = %q, want [%q]", *f.watches, wantWatch)
 	}
 	if got := f.svc.UpdateStatus(context.Background()).Job.State; got != web.UpdateStateRestarting {
 		t.Fatalf("state = %s", got)
@@ -886,6 +908,10 @@ func TestTrialBootRollbackOnStartError(t *testing.T) {
 	if state.LastResult == nil || state.LastResult.Outcome != selfupdate.OutcomeRolledBack || !strings.Contains(state.LastResult.Reason, "update.channel") {
 		t.Fatalf("last_result = %+v", state.LastResult)
 	}
+	// The failed version is skipped (REQ-UPD-004).
+	if state.Skipped != "0.1.0" {
+		t.Fatalf("skipped = %q", state.Skipped)
+	}
 }
 
 // TestTrialBootRollbackAfterKill covers AC-UPD-012: a trial boot that never
@@ -904,6 +930,9 @@ func TestTrialBootRollbackAfterKill(t *testing.T) {
 	state, _ := selfupdate.ReadState(selfupdate.Paths{Home: home})
 	if state.LastResult == nil || state.LastResult.Outcome != selfupdate.OutcomeRolledBack || !strings.Contains(state.LastResult.Reason, "never reported healthy") {
 		t.Fatalf("last_result = %+v", state.LastResult)
+	}
+	if state.Skipped != "0.1.0" {
+		t.Fatalf("skipped = %q", state.Skipped)
 	}
 }
 
@@ -939,6 +968,9 @@ func TestUpdateRollbackCommand(t *testing.T) {
 	}
 	if pending, _ := selfupdate.ReadPending(selfupdate.Paths{Home: home}); pending != nil {
 		t.Fatal("pending left")
+	}
+	if state, _ := selfupdate.ReadState(selfupdate.Paths{Home: home}); state.Skipped != "0.1.0" || state.LastResult == nil || state.LastResult.Outcome != selfupdate.OutcomeRolledBack {
+		t.Fatalf("state = %+v", state)
 	}
 }
 

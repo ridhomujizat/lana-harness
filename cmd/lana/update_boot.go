@@ -34,6 +34,9 @@ const (
 	trialStart
 	// trialRollback: a previous trial boot never reported healthy.
 	trialRollback
+	// trialBusy: another live process (the update watchdog) holds a claim on
+	// pending.json and is restoring the backup; the daemon does not start.
+	trialBusy
 )
 
 // trialDecision maps pending.json and the running version to the action.
@@ -69,18 +72,33 @@ func (t *trialBoot) markHealthy() {
 	if t == nil || !t.healthy.CompareAndSwap(false, true) {
 		return
 	}
-	if err := selfupdate.RemovePending(t.paths); err != nil {
-		slog.Warn("update: remove pending.json", "error", err)
+	// Claim pending.json first: when the update watchdog already claimed it
+	// (it timed out), the watchdog records the outcome and rolls back.
+	claim, ok, err := selfupdate.ClaimPending(t.paths, os.Getpid())
+	if err != nil {
+		slog.Warn("update: claim pending.json", "error", err)
+		return
+	}
+	if !ok {
+		slog.Warn("update: pending.json was claimed by the update watchdog; not recording healthy", "to", t.pending.To)
+		return
 	}
 	writeUpdateResult(t.paths, selfupdate.Result{
 		Outcome: selfupdate.OutcomeUpdated, From: t.pending.From, To: t.pending.To, At: t.now().UnixMilli(),
 	})
+	if err := claim.Release(); err != nil {
+		slog.Warn("update: remove pending.json", "error", err)
+	}
 	slog.Info("update: healthy", "from", t.pending.From, "to", t.pending.To)
 }
 
 // beginTrialBoot reads pending.json at daemon start. It returns the trial boot
 // for trialStart, the pending update for trialRollback, and nil otherwise.
 func beginTrialBoot(paths selfupdate.Paths, running string, now func() time.Time) (*trialBoot, *selfupdate.Pending, trialAction) {
+	if busy := reviveClaims(paths, processAlive); busy != 0 {
+		slog.Warn("update: a rollback is in progress", "pid", busy)
+		return nil, nil, trialBusy
+	}
 	pending, err := selfupdate.ReadPending(paths)
 	if err != nil {
 		slog.Warn("update: unreadable pending.json; ignoring it", "error", err)
@@ -107,22 +125,98 @@ func beginTrialBoot(paths selfupdate.Paths, running string, now func() time.Time
 // config.toml, previous binary), deletes pending.json, records last_result
 // rolled_back, and execs the previous binary with the lock held (design.md,
 // Rollback). It returns only when the restore or the exec failed.
+//
+// It claims pending.json first. When the claim fails, the update watchdog
+// already took it and restores the backup itself, so this returns 1 without
+// touching any file.
 func rollbackUpdate(lock *daemonLock, stderr io.Writer, paths selfupdate.Paths, pending selfupdate.Pending, reason string) int {
-	_, _ = fmt.Fprintf(stderr, "update: %s failed its trial boot: %s; rolling back to %s\n", pending.To, reason, pending.From)
-	if err := selfupdate.Restore(pending.BackupDir, paths.Home, pending.ExePath); err != nil {
-		_, _ = fmt.Fprintf(stderr, "error: update rollback: %v\n", err)
-		_ = selfupdate.RemovePending(paths)
-		writeUpdateResult(paths, selfupdate.Result{
-			Outcome: selfupdate.OutcomeFailed, From: pending.From, To: pending.To,
-			Reason: reason + "; rollback failed: " + err.Error(), At: time.Now().UnixMilli(),
-		})
+	claim, ok, err := selfupdate.ClaimPending(paths, os.Getpid())
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "error: update rollback: claim pending.json: %v\n", err)
 		return 1
 	}
-	_ = selfupdate.RemovePending(paths)
-	writeUpdateResult(paths, selfupdate.Result{
-		Outcome: selfupdate.OutcomeRolledBack, From: pending.From, To: pending.To, Reason: reason, At: time.Now().UnixMilli(),
-	})
+	if !ok {
+		_, _ = fmt.Fprintf(stderr, "update: %s failed its trial boot: %s; the update watchdog is rolling back\n", pending.To, reason)
+		return 1
+	}
+	pending = claim.Pending
+	_, _ = fmt.Fprintf(stderr, "update: %s failed its trial boot: %s; rolling back to %s\n", pending.To, reason, pending.From)
+	if err := restoreClaimed(paths, claim, reason, time.Now); err != nil {
+		_, _ = fmt.Fprintf(stderr, "error: update rollback: %v\n", err)
+		return 1
+	}
 	return execRestart(lock, stderr, pending.ExePath)
+}
+
+// restoreClaimed restores the backup of a claimed pending.json, records
+// last_result rolled_back (or failed when the restore failed), skips the
+// failed version, and releases the claim (design.md, Rollback).
+func restoreClaimed(paths selfupdate.Paths, claim selfupdate.Claim, reason string, now func() time.Time) error {
+	pending := claim.Pending
+	defer func() { _ = claim.Release() }()
+	if err := selfupdate.Restore(pending.BackupDir, paths.Home, pending.ExePath); err != nil {
+		writeRollbackResult(paths, selfupdate.Result{
+			Outcome: selfupdate.OutcomeFailed, From: pending.From, To: pending.To,
+			Reason: reason + "; rollback failed: " + err.Error(), At: now().UnixMilli(),
+		})
+		return err
+	}
+	writeRollbackResult(paths, selfupdate.Result{
+		Outcome: selfupdate.OutcomeRolledBack, From: pending.From, To: pending.To, Reason: reason, At: now().UnixMilli(),
+	})
+	return nil
+}
+
+// writeRollbackResult records the result of a rollback and skips the version
+// that failed, so the dashboard offers only a newer release (REQ-UPD-004).
+func writeRollbackResult(paths selfupdate.Paths, result selfupdate.Result) {
+	if _, err := selfupdate.UpdateState(paths, func(state *selfupdate.State) {
+		state.LastResult = &result
+		if to := strings.TrimPrefix(strings.TrimSpace(result.To), "v"); to != "" {
+			state.Skipped = to
+		}
+	}); err != nil {
+		slog.Warn("update: write state.json", "error", err)
+	}
+}
+
+// reviveClaims handles claim files left in updates/ at daemon start. A claim
+// of a live process other than this one means a rollback is running: its pid
+// is returned and the daemon does not start. A claim of a dead process (or of
+// this pid, from an image before an exec) is turned back into pending.json
+// with boots 1, so the trial boot logic rolls it back.
+func reviveClaims(paths selfupdate.Paths, alive func(int) bool) int {
+	pids, err := selfupdate.ClaimPIDs(paths)
+	if err != nil {
+		slog.Warn("update: list claims", "error", err)
+		return 0
+	}
+	self := os.Getpid()
+	for _, pid := range pids {
+		if pid != self && alive(pid) {
+			return pid
+		}
+	}
+	for _, pid := range pids {
+		claim := selfupdate.Claim{Path: paths.Claim(pid), PID: pid}
+		pending, err := selfupdate.ReadClaim(claim.Path)
+		if err != nil {
+			slog.Warn("update: unreadable claim; removing it", "path", claim.Path, "error", err)
+			_ = claim.Release()
+			continue
+		}
+		if current, _ := selfupdate.ReadPending(paths); current == nil {
+			if pending.Boots < 1 {
+				pending.Boots = 1
+			}
+			if err := selfupdate.WritePending(paths, pending); err != nil {
+				slog.Warn("update: revive claim", "error", err)
+				continue
+			}
+		}
+		_ = claim.Release()
+	}
+	return 0
 }
 
 // cmdUpdate runs `lana update rollback` (API-UPD-010).
@@ -167,7 +261,7 @@ func runUpdateRollback(home string, stdout, stderr io.Writer) int {
 	}
 	_ = selfupdate.RemovePending(paths)
 	manifest := backup.Manifest
-	writeUpdateResult(paths, selfupdate.Result{
+	writeRollbackResult(paths, selfupdate.Result{
 		Outcome: selfupdate.OutcomeRolledBack, From: manifest.From, To: manifest.To,
 		Reason: "rolled back with lana update rollback", At: time.Now().UnixMilli(),
 	})

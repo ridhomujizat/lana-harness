@@ -125,6 +125,7 @@ The new binary shall treat its first start after an update as a trial boot. If i
 before the web server serves and channels run, or a previous trial boot of the same version never
 reported healthy, it shall restore the backed-up databases and the previous binary and restart into
 it. The old version then shows "Update to <version> failed and was rolled back" with the reason.
+The failed version is skipped; a newer release is offered again.
 
 - `AC-UPD-011`: Given a new binary that exits with a config error at start, then the old binary is
   running again within 30 seconds, the databases match the backup, and the card reports the rollback.

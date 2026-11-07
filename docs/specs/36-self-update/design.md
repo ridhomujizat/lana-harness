@@ -87,14 +87,41 @@ At the top of `runDaemonWithLogs`, after the daemon lock is held:
    - else write `boots = 1` and start in trial mode.
 4. In trial mode, any error return from startup, or a panic (deferred `recover`) before healthy →
    **rollback** with the error text as reason.
-5. Healthy = the web server is serving (or web is disabled) and channels started. Then delete
-   `pending.json` and write `last_result = {updated, from, to}`.
+5. Healthy = the web server is serving (or web is disabled) and channels started. Then claim
+   `pending.json`, write `last_result = {updated, from, to}`, and delete the claim. When the claim
+   fails, the watchdog already took the update and records nothing here.
 
-**Rollback**: copy each backed-up `*.db` over the live one (remove its `-wal` and `-shm` first), copy
-the backed-up `config.toml` back, copy the previous binary over `exe_path` (temp file + rename),
-delete `pending.json`, write `last_result = {rolled_back, from, to, reason}`, and exec `exe_path`
+**Rollback**: claim `pending.json` (see Claim below; back off when the claim fails), copy each
+backed-up `*.db` over the live one (remove its `-wal` and `-shm` first), copy the backed-up
+`config.toml` back, copy the previous binary over `exe_path` (temp file + rename),
+write `last_result = {rolled_back, from, to, reason}`, delete the claim file, and exec `exe_path`
 with the same args, keeping the lock FD as `restartInPlace` does. The rolled-back old binary starts
 normally (step 2).
+
+Every rollback (this one, the watchdog's, and `lana update rollback`) also sets `skipped` to the
+failed version, so the dashboard offers only a newer release.
+
+**Watchdog.** The trial boot runs inside the new binary, so it cannot catch a binary that dies before
+`main`, has the wrong architecture, is killed, or hangs. Right before the install hook execs the new
+binary, the old binary starts `<backup_dir>/lana update-watch --home <home> --pid <daemon pid> --
+<daemon args>` in its own session (stdin `/dev/null`, the daemon's stdout and stderr, every other
+descriptor close-on-exec, no `LANA_RESTART_LOCK_FD`). That command starts a detached copy of itself
+and exits, so the daemon reaps it before the exec. The watchdog polls every 250 ms until
+`pending.json` and every claim file are gone (the trial boot recorded `updated`, `rolled_back` or
+`failed`: exit). When the daemon pid is gone (`kill(pid, 0)` fails or it is a zombie), or 90 s pass
+without healthy, it claims `pending.json`, stops the daemon on timeout (SIGTERM, SIGKILL after 10 s),
+runs the same restore, records `rolled_back` with the reason ("<to> stopped during its first start
+before it reported healthy" or "<to> did not report healthy within 90s"; the exit code is not known,
+since the watchdog is not the parent), and then starts `exe_path` with the daemon args, detached,
+once the daemon lock is free within 5 s. When another process (launchd KeepAlive) holds the lock, it
+starts nothing. A failed spawn is a warning; the trial boot still covers Go-level failures.
+
+**Claim.** Whoever records the outcome first renames `pending.json` to
+`pending.claim-<pid>.json`; a failed rename (the file is gone) means another process owns the
+outcome and backs off. The trial rollback, `markHealthy`, and the watchdog all claim, so they never
+both restore or record `updated` after a rollback started. The watchdog also takes over the claim of
+the dead daemon pid. At daemon start, a claim of another live process stops the start ("an update
+rollback is in progress"); a claim of a dead process turns back into `pending.json` with `boots = 1`.
 
 `lana update rollback` runs the same restore from the newest backup without exec, after taking the
 daemon lock (exit 3 when it is held).

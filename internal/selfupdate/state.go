@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +31,18 @@ func (p Paths) State() string { return filepath.Join(p.Dir(), "state.json") }
 
 // Pending is updates/pending.json, present only during a trial boot.
 func (p Paths) Pending() string { return filepath.Join(p.Dir(), "pending.json") }
+
+// Claim is updates/pending.claim-<pid>.json: pending.json taken by the
+// process pid while it records the outcome of the update (design.md, Trial
+// boot and rollback).
+func (p Paths) Claim(pid int) string {
+	return filepath.Join(p.Dir(), claimPrefix+strconv.Itoa(pid)+claimSuffix)
+}
+
+const (
+	claimPrefix = "pending.claim-"
+	claimSuffix = ".json"
+)
 
 // Backups is updates/backups.
 func (p Paths) Backups() string { return filepath.Join(p.Dir(), "backups") }
@@ -124,6 +138,83 @@ func RemovePending(p Paths) error {
 	return err
 }
 
+// Claim is pending.json taken by one process. Only the process whose rename
+// of pending.json succeeded holds it, so a trial boot, its rollback, and the
+// update watchdog never record an outcome twice.
+type Claim struct {
+	Path    string
+	PID     int
+	Pending Pending
+}
+
+// Release deletes the claim file once the outcome is recorded.
+func (c Claim) Release() error {
+	err := os.Remove(c.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// ClaimPending renames pending.json to pending.claim-<pid>.json. ok is false
+// when pending.json does not exist: another process claimed it or the update
+// already ended. A claim whose content is unreadable is deleted and returned
+// as an error.
+func ClaimPending(p Paths, pid int) (Claim, bool, error) {
+	return claimFrom(p, p.Pending(), pid)
+}
+
+// TakeOverClaim renames the claim of fromPID to a claim of pid, for a claim
+// left behind by a process that died before it released it. ok is false when
+// that claim does not exist.
+func TakeOverClaim(p Paths, fromPID, pid int) (Claim, bool, error) {
+	if fromPID == pid {
+		return Claim{}, false, nil
+	}
+	return claimFrom(p, p.Claim(fromPID), pid)
+}
+
+func claimFrom(p Paths, src string, pid int) (Claim, bool, error) {
+	dst := p.Claim(pid)
+	if err := os.Rename(src, dst); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Claim{}, false, nil
+		}
+		return Claim{}, false, err
+	}
+	claim := Claim{Path: dst, PID: pid}
+	if err := readJSON(dst, &claim.Pending); err != nil {
+		_ = os.Remove(dst)
+		return Claim{}, false, err
+	}
+	return claim, true, nil
+}
+
+// ClaimPIDs returns the pids of the claim files in updates/, sorted.
+func ClaimPIDs(p Paths) ([]int, error) {
+	entries, err := os.ReadDir(p.Dir())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var pids []int
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, claimPrefix) || !strings.HasSuffix(name, claimSuffix) {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, claimPrefix), claimSuffix))
+		if err != nil || pid <= 0 {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	return pids, nil
+}
+
 func readJSON(path string, dst any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -191,4 +282,11 @@ func safeName(s string) string {
 		}
 		return '_'
 	}, s)
+}
+
+// ReadClaim reads the pending update inside a claim file.
+func ReadClaim(path string) (Pending, error) {
+	var pending Pending
+	err := readJSON(path, &pending)
+	return pending, err
 }
