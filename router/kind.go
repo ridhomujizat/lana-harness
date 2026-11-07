@@ -46,6 +46,24 @@ func DefaultKeyEnv(name string) string {
 	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
 }
 
+// presetKinds are the kinds whose api_key_env defaults to DefaultKeyEnv.
+// openai_compat has no default: a custom host must never get a key the owner
+// did not name for it (API-RTR-001).
+var presetKinds = map[string]bool{"openai": true, "deepseek": true, "openrouter": true, "anthropic": true}
+
+// EffectiveKeyEnv returns the env name that holds the API key of provider
+// name: the explicit api_key_env, else DefaultKeyEnv(name) for the preset
+// kinds openai, deepseek, openrouter, and anthropic, else "" (no key).
+func EffectiveKeyEnv(cfg core.ProviderConfig, name string) string {
+	if cfg.APIKeyEnv != "" {
+		return cfg.APIKeyEnv
+	}
+	if presetKinds[cfg.Kind] {
+		return DefaultKeyEnv(name)
+	}
+	return ""
+}
+
 // Factory builds the adapter of one provider.
 type Factory func(name string, cfg core.ProviderConfig, deps Deps) (Adapter, error)
 

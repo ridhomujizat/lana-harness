@@ -17,6 +17,11 @@ type CaptureRequest struct {
 	Home      string
 	Provider  string
 	Model     string
+	// Targets is the agent's chain (primary first). When set it wins over
+	// Provider and Model.
+	Targets []LLMTarget
+	// Requested is the combo or address the agent asked for.
+	Requested string
 	System    string
 	Tools     []ToolSpec
 	// ReasoningEffort matches the turn so the pass shares its prefix (REQ-MDL-005).

@@ -217,11 +217,21 @@ func TestResolvePolicyCatalog(t *testing.T) {
 		{"thinking model on a small window", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 24000}, 0, "", 24000, 6000, 15000},
 		{"window below the floor is raised", core.AgentConfig{Model: "deepseek-flash", ContextWindow: 1000}, 0, "", 4096, 1024, 2560},
 	}
+	// Spec 37: a chain's window is the smallest known window across it.
+	t.Run("chain uses the smallest catalog window", func(t *testing.T) {
+		provider := &recordProvider{text: "x"}
+		_, _, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{"coder": {Model: "coding"}}})
+		chain := []core.LLMTarget{{Provider: "a", Model: "deepseek-flash"}, {Provider: "b", Model: "deepseek-chat"}, {Provider: "c", Model: "unknown"}}
+		if pol := service.resolvePolicy("coder", chain, 0, ""); pol.window != 128000 || pol.output != 32000 {
+			t.Fatalf("window=%d output=%d, want 128000/32000", pol.window, pol.output)
+		}
+	})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := &recordProvider{text: "x"}
 			_, _, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{"coder": tc.agent}})
-			pol := service.resolvePolicy("coder", tc.maxToken, tc.effort)
+			chain := []core.LLMTarget{{Provider: "p", Model: tc.agent.Model}}
+			pol := service.resolvePolicy("coder", chain, tc.maxToken, tc.effort)
 			if pol.window != tc.window || pol.output != tc.output {
 				t.Fatalf("window=%d output=%d, want %d/%d", pol.window, pol.output, tc.window, tc.output)
 			}

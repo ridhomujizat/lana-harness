@@ -17,7 +17,7 @@ import (
 func TestOriginsTableAndLeaf(t *testing.T) {
 	home := t.TempDir()
 	configPath := filepath.Join(home, "config.toml")
-	writeFile(t, configPath, "[providers.openai]\nkind = \"openai_compat\"\n")
+	writeFile(t, configPath, "[providers.openai]\nkind = \"openai_compat\"\nbase_url = \"https://example.com/v1\"\n")
 	patch := filepath.Join(t.TempDir(), "p.toml")
 	writeFile(t, patch, "[agents.x]\nmodel = \"m\"\n")
 	res, err := loadWith(t, home, patch)

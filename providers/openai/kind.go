@@ -72,9 +72,7 @@ func withKindDefaults(name, kind string, provider core.ProviderConfig) core.Prov
 	if provider.BaseURL == "" {
 		provider.BaseURL = preset
 	}
-	if provider.APIKeyEnv == "" {
-		provider.APIKeyEnv = router.DefaultKeyEnv(name)
-	}
+	provider.APIKeyEnv = router.EffectiveKeyEnv(provider, name)
 	return provider
 }
 

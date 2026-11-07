@@ -30,6 +30,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/internal/stats"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
@@ -945,7 +946,9 @@ func (b *webBackend) ApplyLive(ctx context.Context, candidate []byte) error {
 		return err
 	}
 	if b.rt != nil {
-		b.rt.ApplyConfig(result.Config)
+		if err := b.rt.ApplyConfig(result.Config); err != nil {
+			return err
+		}
 	}
 	if reflect.DeepEqual(nonLiveConfig(result.Config), b.nonLive) {
 		b.versionMu.Lock()
@@ -1853,7 +1856,10 @@ func (b *webBackend) sessionModel(ctx context.Context, info core.SessionInfo) (s
 			return "", err
 		}
 		switch {
-		case selection.Provider != "" || selection.Model != "":
+		case selection.Model != "":
+			// A combo or address selection has no provider (API-RTR-003).
+			model = llmcall.Display(selection.Provider, selection.Model)
+		case selection.Provider != "":
 			model = selection.Provider + ":" + selection.Model
 		case selection.Agent != "":
 			// SetAgent records only the agent; the model stays the agent's

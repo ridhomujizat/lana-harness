@@ -16,6 +16,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	kv "github.com/ridhomujizat/lana-harness/internal/knowledge"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // Compile-pass bounds (design §5).
@@ -107,12 +108,9 @@ func (s *Service) compile(ctx context.Context, in compileInput) (compileResult, 
 	if !ok {
 		return compileResult{}, fmt.Errorf("unknown agent %q", in.Agent)
 	}
-	if s.llm == nil {
-		return compileResult{}, errors.New("no llm registry")
-	}
-	provider, ok := s.llm.Provider(agentCfg.Provider)
-	if !ok {
-		return compileResult{}, fmt.Errorf("unknown provider %q", agentCfg.Provider)
+	call, err := s.agentCall(in.Agent, agentCfg)
+	if err != nil {
+		return compileResult{}, err
 	}
 
 	parts, cut := splitParts(in.Text)
@@ -132,7 +130,7 @@ func (s *Service) compile(ctx context.Context, in compileInput) (compileResult, 
 		}
 	}()
 	for i, part := range parts {
-		reply, u, err := s.compilePart(ctx, vault, idx, provider, agentCfg, in, i+1, len(parts), part)
+		reply, u, err := s.compilePart(ctx, vault, idx, call, in, i+1, len(parts), part)
 		res.Usage = addUsage(res.Usage, u)
 		if err != nil {
 			return res, err
@@ -163,6 +161,35 @@ func (s *Service) compile(ctx context.Context, in compileInput) (compileResult, 
 		}
 	}
 	return res, nil
+}
+
+// agentCall is the resolved chain of the agent a knowledge pass runs for.
+type agentCall struct {
+	agent     string
+	chain     []core.LLMTarget
+	requested string
+}
+
+// agentCall resolves the chain of an agent's model and fallback, so a pass
+// for a combo agent gets the combo's fallback (REQ-RTR-007).
+func (s *Service) agentCall(name string, cfg core.AgentConfig) (agentCall, error) {
+	if s.llm == nil {
+		return agentCall{}, errors.New("no llm registry")
+	}
+	chain, requested, err := llmcall.AgentChain(s.llm, cfg)
+	if err != nil {
+		return agentCall{}, err
+	}
+	return agentCall{agent: name, chain: chain, requested: requested}, nil
+}
+
+// stream makes one knowledge call through the router with source
+// "knowledge".
+func (s *Service) stream(ctx context.Context, call agentCall, sessionID string, req core.ChatRequest) (core.ChatStream, error) {
+	stream, _, err := llmcall.Stream(ctx, s.llm, call.chain, req, core.LLMCallMeta{
+		Source: llmcall.SourceKnowledge, Agent: call.agent, SessionID: sessionID, Requested: call.requested,
+	}, nil)
+	return stream, err
 }
 
 // compileSource is the queue worker's compile of one ingested source: it reads
@@ -251,12 +278,11 @@ func (s *Service) finishSource(idx *kv.Index, st kv.SourceState, ops []core.Know
 
 // compilePart makes one provider call for a part of the source and returns its
 // reply text and usage (design §5 step 3).
-func (s *Service) compilePart(ctx context.Context, vault *kv.Vault, idx *kv.Index, provider core.Provider, agentCfg core.AgentConfig, in compileInput, part, total int, text string) (string, core.Usage, error) {
+func (s *Service) compilePart(ctx context.Context, vault *kv.Vault, idx *kv.Index, call agentCall, in compileInput, part, total int, text string) (string, core.Usage, error) {
 	callCtx, cancel := context.WithTimeout(ctx, compileCallTimeout)
 	defer cancel()
 	instruction := s.compileInstruction(callCtx, vault, idx, in, part, total, text)
-	stream, err := provider.Stream(callCtx, core.ChatRequest{
-		Model:  agentCfg.Model,
+	stream, err := s.stream(callCtx, call, "", core.ChatRequest{
 		System: compileSystemFor(in.SourcePage),
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: instruction},

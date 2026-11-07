@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
-var topKeys = []string{"agents", "channels", "knowledge", "mcp", "modules", "providers", "routes", "teams", "update", "version", "web"}
+var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
@@ -22,6 +23,28 @@ var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
 var webKeys = []string{"addr", "enabled", "open_browser"}
+
+// providerKinds are the accepted providers.<name>.kind values (API-RTR-001).
+var providerKinds = []string{"anthropic", "deepseek", "openai", "openai_compat", "openrouter"}
+
+// embeddingKinds are the provider kinds that can serve knowledge embeddings
+// (REQ-RTR-007).
+var embeddingKinds = []string{"deepseek", "openai", "openai_compat", "openrouter"}
+
+// comboKeys are the keys of [combos.<name>] (API-RTR-002).
+var comboKeys = []string{"description", "models"}
+
+// routerKeys are the keys of [router] (API-RTR-004).
+var routerKeys = []string{"cooldown", "proxy"}
+
+// maxComboModels is the longest accepted combos.<name>.models list.
+const maxComboModels = 10
+
+// maxRouterCooldown is the longest accepted [router] cooldown.
+const maxRouterCooldown = time.Hour
+
+// comboNameRE is the accepted combo name (API-RTR-002).
+var comboNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // updateKeys are the keys of [update] (API-UPD-001).
 var updateKeys = []string{"channel", "check"}
@@ -209,7 +232,86 @@ func validateLayer(ld layerData, file string, modules []string) []Error {
 			validateUpdate(table, "update", add)
 		}
 	}
+	if raw, ok := m["combos"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add("combos", typeMsg("table", raw))
+		} else {
+			for _, name := range sortedKeys(table) {
+				path := "combos." + name
+				if !comboNameRE.MatchString(name) {
+					add(path, "name must match [a-z0-9][a-z0-9_-]{0,63}")
+				}
+				val, ok := asMap(table[name])
+				if !ok {
+					add(path, typeMsg("table", table[name]))
+					continue
+				}
+				validateCombo(val, path, add)
+			}
+		}
+	}
+	if raw, ok := m["router"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add("router", typeMsg("table", raw))
+		} else {
+			validateRouter(table, "router", add)
+		}
+	}
 	return errs
+}
+
+// validateCombo checks the keys and types of one [combos.<name>] table
+// (API-RTR-002). References to providers and combos are checked in
+// validateEffective.
+func validateCombo(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(comboKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, comboKeys))
+		}
+	}
+	if val, ok := v["description"]; ok {
+		if _, ok := val.(string); !ok {
+			add(path+".description", typeMsg("string", val))
+		}
+	}
+	if val, ok := v["models"]; ok {
+		if _, ok := asStringSlice(val); !ok {
+			add(path+".models", typeMsg("array string", val))
+		}
+	}
+}
+
+// validateRouter checks the [router] table (API-RTR-004): proxy is a
+// boolean, cooldown a duration from 0s to 1h.
+func validateRouter(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(routerKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, routerKeys))
+		}
+	}
+	if val, ok := v["proxy"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".proxy", typeMsg("boolean", val))
+		}
+	}
+	if val, ok := v["cooldown"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".cooldown", typeMsg("string", val))
+			return
+		}
+		d, err := time.ParseDuration(s)
+		switch {
+		case err != nil:
+			add(path+".cooldown", "invalid duration: "+s)
+		case d < 0:
+			add(path+".cooldown", "must not be negative, got "+s)
+		case d > maxRouterCooldown:
+			add(path+".cooldown", "must be at most 1h, got "+s)
+		}
+	}
 }
 
 func validateProvider(v map[string]any, path string, add func(string, string)) {
@@ -223,8 +325,8 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 		add(path+".kind", "is required")
 	} else if s, ok := kind.(string); !ok {
 		add(path+".kind", typeMsg("string", kind))
-	} else if !contains([]string{"openai_compat", "anthropic"}, s) {
-		add(path+".kind", enumMsg(s, []string{"anthropic", "openai_compat"}))
+	} else if !contains(providerKinds, s) {
+		add(path+".kind", enumMsg(s, providerKinds))
 	}
 	for _, key := range []string{"base_url", "api_key_env"} {
 		if val, ok := v[key]; ok {
@@ -705,6 +807,8 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	teams, _ := asMap(m["teams"])
 	providers, _ := asMap(m["providers"])
 	mcps, _ := asMap(m["mcp"])
+	combos, _ := asMap(m["combos"])
+	comboNames := sortedKeys(combos)
 	providerNames := sortedKeys(providers)
 	agentNames := sortedKeys(agents)
 	teamNames := sortedKeys(teams)
@@ -714,8 +818,8 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			if raw, ok := providers[name]; ok {
 				pm, _ := asMap(raw)
 				kind, _ := pm["kind"].(string)
-				if kind != "" && kind != "openai_compat" {
-					add("knowledge.embedding_provider", fmt.Sprintf("provider %q must have kind openai_compat", name))
+				if kind != "" && !contains(embeddingKinds, kind) {
+					add("knowledge.embedding_provider", fmt.Sprintf("provider %q must have kind openai, deepseek, openrouter, or openai_compat", name))
 				}
 			} else {
 				add("knowledge.embedding_provider", fmt.Sprintf("unknown provider %q", name))
@@ -728,12 +832,83 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			}
 		}
 	}
+	// API-RTR-001: base_url is required only for openai_compat; the other
+	// kinds default to their public API URL.
+	for _, name := range providerNames {
+		provider, _ := asMap(providers[name])
+		kind, _ := provider["kind"].(string)
+		if kind != "openai_compat" {
+			continue
+		}
+		if url, _ := provider["base_url"].(string); url == "" {
+			add("providers."+name+".base_url", "is required for kind openai_compat")
+		}
+	}
+	// API-RTR-002: combo names do not shadow providers; models are known
+	// provider/model addresses, never combos, without duplicates.
+	for _, name := range comboNames {
+		combo, _ := asMap(combos[name])
+		path := "combos." + name
+		if contains(providerNames, name) {
+			add(path, "name is already used by a provider")
+		}
+		raw, hasModels := combo["models"]
+		list, ok := asStringSlice(raw)
+		switch {
+		case !hasModels:
+			add(path+".models", "is required")
+			continue
+		case !ok:
+			continue
+		case len(list) == 0:
+			add(path+".models", "must list at least one model")
+		case len(list) > maxComboModels:
+			add(path+".models", fmt.Sprintf("must list at most %d models", maxComboModels))
+		}
+		seen := map[string]bool{}
+		for i, item := range list {
+			itemPath := fmt.Sprintf("%s.models[%d]", path, i)
+			switch {
+			case contains(comboNames, item):
+				add(itemPath, fmt.Sprintf("%q is a combo; a combo must not list another combo", item))
+			case !isAddress(item):
+				add(itemPath, fmt.Sprintf("%q is not a provider/model address", item))
+			case !contains(providerNames, addressProvider(item)):
+				add(itemPath, fmt.Sprintf("unknown provider %q", addressProvider(item)))
+			case seen[item]:
+				add(itemPath, fmt.Sprintf("model %q is listed twice", item))
+			}
+			seen[item] = true
+		}
+	}
 	for _, name := range agentNames {
 		agent, _ := asMap(agents[name])
 		path := "agents." + name
+		provider, _ := agent["provider"].(string)
 		if raw, ok := agent["provider"]; ok {
 			if p, ok := raw.(string); ok && p != "" && !contains(providerNames, p) {
 				add(path+".provider", fmt.Sprintf("provider '%s' is not registered (available: %s)", p, strings.Join(providerNames, ", ")))
+			}
+		}
+		// API-RTR-003, AC-RTR-005: without provider, a model address must
+		// name a known provider. A bare name that is not a combo is left to
+		// the turn, which fails with "unknown provider or combo", so configs
+		// written before combos keep loading.
+		if model, _ := agent["model"].(string); provider == "" && isModelRef(model) && !contains(providerNames, addressProvider(model)) {
+			add(path+".model", fmt.Sprintf("unknown provider or combo %q", model))
+		}
+		// API-RTR-003: fallback entries are provider:model or provider/model
+		// of a known provider; a combo is not allowed.
+		fallback, _ := asStringSlice(agent["fallback"])
+		for i, item := range fallback {
+			itemPath := fmt.Sprintf("%s.fallback.%d", path, i)
+			switch {
+			case contains(comboNames, item):
+				add(itemPath, fmt.Sprintf("%q is a combo; fallback takes provider:model or provider/model", item))
+			case !isModelRef(item):
+				add(itemPath, fmt.Sprintf("%q is not provider:model or provider/model", item))
+			case !contains(providerNames, addressProvider(item)):
+				add(itemPath, fmt.Sprintf("unknown provider %q", addressProvider(item)))
 			}
 		}
 		for _, key := range []string{"subagents", "mcp"} {
@@ -818,6 +993,27 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		}
 	}
 	_ = positions
+}
+
+// isModelRef reports whether s is "provider/model" or "provider:model",
+// split at the first "/" or ":", with both parts non-empty.
+func isModelRef(s string) bool {
+	i := strings.IndexAny(s, "/:")
+	return i > 0 && i < len(s)-1
+}
+
+// isAddress reports whether s is a "provider/model" address: the first
+// separator is "/".
+func isAddress(s string) bool {
+	return isModelRef(s) && s[strings.IndexAny(s, "/:")] == '/'
+}
+
+// addressProvider returns the provider part of a model reference.
+func addressProvider(s string) string {
+	if i := strings.IndexAny(s, "/:"); i > 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func unknownKeyMsg(key string, known []string) string {

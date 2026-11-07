@@ -104,9 +104,11 @@ type Router struct {
 	opts    options
 	applyMu sync.Mutex
 	snap    atomic.Pointer[snapshot]
-	cool    cooldowns
-	limits  limitState
-	models  modelCache
+	// recorder is the call recorder: WithRecorder, or AttachStores later.
+	recorder atomic.Pointer[recorderBox]
+	cool     cooldowns
+	limits   limitState
+	models   modelCache
 }
 
 type providerEntry struct {
@@ -140,6 +142,7 @@ func New(cfg Config, opts ...Option) (*Router, error) {
 		r.opts.jitter = randomJitter
 	}
 	r.cool.until = map[Target]time.Time{}
+	r.recorder.Store(&recorderBox{rec: r.opts.recorder})
 	r.limits.init(r.opts.limitStore)
 	r.models.entries = map[string]modelCacheEntry{}
 	next, err := r.build(cfg, nil)
@@ -163,6 +166,21 @@ func (r *Router) Apply(cfg Config) error {
 	}
 	r.snap.Store(next)
 	return nil
+}
+
+type recorderBox struct{ rec Recorder }
+
+// AttachStores sets the call recorder and the limit store after New, for a
+// host whose store opens after the router (lana boots the llm module before
+// the session store). A nil argument keeps the current one. Snapshots the
+// limit store holds are loaded under the ones already reported.
+func (r *Router) AttachStores(rec Recorder, limits LimitStore) {
+	if rec != nil {
+		r.recorder.Store(&recorderBox{rec: rec})
+	}
+	if limits != nil {
+		r.limits.attach(limits)
+	}
 }
 
 // Config returns the configuration currently applied.

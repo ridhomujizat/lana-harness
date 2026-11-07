@@ -117,6 +117,25 @@ func (l *limitState) init(store LimitStore) {
 	}
 }
 
+// attach sets the store after init and loads its snapshots for providers
+// that have not reported since boot.
+func (l *limitState) attach(store LimitStore) {
+	loaded := store.Load()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.store = store
+	reported := len(l.snaps) > 0
+	for _, snap := range loaded {
+		if _, ok := l.snaps[snap.Provider]; !ok && snap.Provider != "" {
+			l.snaps[snap.Provider] = snap
+		}
+	}
+	// Values reported before the store was attached are saved too.
+	if reported {
+		l.scheduleSaveLocked()
+	}
+}
+
 // UpdateLimits merges u into the provider's snapshot. Adapters call it
 // through Deps.Limits; external sources such as the Claude Agent runtime
 // call it directly.

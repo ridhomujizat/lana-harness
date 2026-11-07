@@ -24,6 +24,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 var version = "dev"
@@ -315,7 +316,7 @@ func cmdConfig(args []string) int {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			env := result.Config.Providers[name].APIKeyEnv
+			env := router.EffectiveKeyEnv(result.Config.Providers[name], name)
 			if env == "" {
 				continue
 			}
@@ -377,7 +378,7 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	}
 	providerName, model := "", ""
 	if agent, ok := result.Config.Agents[agentName]; ok {
-		providerName, model = agent.Provider, agent.Model
+		providerName, model = primaryTarget(result.Config, agent)
 	}
 	opts := lana.Options{Home: home}
 	var options []lana.Option
@@ -386,8 +387,8 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	}
 	missingEnv := ""
 	if providerName != "" {
-		if provider, ok := result.Config.Providers[providerName]; ok && provider.APIKeyEnv != "" {
-			if os.Getenv(provider.APIKeyEnv) == "" && !secretInFile(home, provider.APIKeyEnv) {
+		if env := router.EffectiveKeyEnv(result.Config.Providers[providerName], providerName); env != "" {
+			if os.Getenv(env) == "" && !secretInFile(home, env) {
 				text := "Hello from MockLlm. The provider is not configured, so this is a sample answer. Set the provider's API key to use a real model."
 				layer := fmt.Sprintf("[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.%s]\nprovider = \"mock\"\nmodel = \"mock\"\n\n[[routes]]\nchannel = \"cli\"\nagent = %q\n\n[[routes]]\nchannel = \"library\"\nagent = %q\n", agentName, agentName, agentName)
 				opts.Layers = []config.Layer{{Name: "mock", TOML: []byte(layer)}}
@@ -397,13 +398,30 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 				}
 				opts.Providers = map[string]core.Provider{"mock": mock.New(mock.Script{Responses: responses})}
 				providerName, model = "mock", "mock"
-				missingEnv = provider.APIKeyEnv
+				missingEnv = env
 			}
 		}
 	}
 	options = append(options, extra...)
 	rt, err := lana.New(ctx, opts, options...)
 	return rt, providerName, model, missingEnv, err
+}
+
+// primaryTarget returns the provider and model of an agent's first target:
+// the legacy provider and model, the first model of its combo, or its
+// provider/model address.
+func primaryTarget(cfg core.Config, agent core.AgentConfig) (string, string) {
+	if agent.Provider != "" {
+		return agent.Provider, agent.Model
+	}
+	value := agent.Model
+	if combo, ok := cfg.Combos[value]; ok && len(combo.Models) > 0 {
+		value = combo.Models[0]
+	}
+	if target, ok := router.ParseAddress(value); ok {
+		return target.Provider, target.Model
+	}
+	return "", agent.Model
 }
 
 func secretInFile(home, name string) bool {

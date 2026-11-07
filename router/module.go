@@ -95,18 +95,18 @@ func checkSecrets(config core.Config, secrets core.Secrets) error {
 		if !used[name] {
 			continue
 		}
-		provider := config.Providers[name]
-		if provider.APIKeyEnv == "" {
+		env := EffectiveKeyEnv(config.Providers[name], name)
+		if env == "" {
 			continue
 		}
 		secret, ok := core.NewSecret(""), false
 		if secrets != nil {
-			secret, ok = secrets.Lookup(provider.APIKeyEnv)
+			secret, ok = secrets.Lookup(env)
 		}
 		if !ok || secret.Reveal() == "" {
 			return &core.ProviderError{
 				Class:   "missing_secret",
-				Message: fmt.Sprintf("env %s for provider %s is empty", provider.APIKeyEnv, name),
+				Message: fmt.Sprintf("env %s for provider %s is empty", env, name),
 			}
 		}
 	}

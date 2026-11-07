@@ -12,6 +12,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/id"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // TurnResult is the result of one turn.
@@ -136,7 +137,7 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 		r.mcpApplied[name] = serverCfg
 	}
 	r.pipeline = NewToolRunner(hooks, toolReg)
-	installDefaults(hooks, llm)
+	installDefaults(hooks, llm, store)
 	return r
 }
 
@@ -249,15 +250,18 @@ func (r *Registry) AgentConfig(name string) (core.AgentConfig, bool) {
 }
 
 // providersConfig returns the loaded provider map for validation lookups.
-func (r *Registry) providersConfig() map[string]core.ProviderConfig {
+// modelConfig returns the live providers and combos.
+func (r *Registry) modelConfig() (map[string]core.ProviderConfig, map[string]core.ComboConfig) {
 	r.cfgMu.RLock()
 	defer r.cfgMu.RUnlock()
-	return r.config.Providers
+	return r.config.Providers, r.config.Combos
 }
 
-// ApplyConfig swaps the agent and team config and applies the [mcp.*] diff to
-// the running manager. Providers, routes, channels, web, and secrets are not
-// applied here (REQ-TFB-006).
+// ApplyConfig swaps the agent, team, provider, and combo config and applies
+// the [mcp.*] diff to the running manager. The router applies providers and
+// combos itself (REQ-RTR-008); the registry keeps them to check session model
+// switches. Routes, channels, web, and secrets are not applied here
+// (REQ-TFB-006).
 func (r *Registry) ApplyConfig(cfg core.Config) {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
@@ -273,6 +277,8 @@ func (r *Registry) ApplyConfig(cfg core.Config) {
 	r.cfgMu.Lock()
 	r.config.Agents = agents
 	r.config.Teams = teams
+	r.config.Providers = cfg.Providers
+	r.config.Combos = cfg.Combos
 	r.cfgMu.Unlock()
 
 	// The config now owns these agents, so its mcp list wins over the overlay
@@ -362,26 +368,47 @@ func (r *Registry) ServerStatus(name string) (state string, tools int, reason st
 	return status.State, status.Tools, status.Reason, true
 }
 
-func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {
+func installDefaults(hooks *core.Hooks, llm core.LLMRegistry, store core.SessionStore) {
 	hooks.AgentPreStep.SetDefault(func(_ context.Context, in core.PreStepInput) (core.PreStepDecision, error) {
 		return core.PreStepDecision{Input: in.Input}, nil
 	})
 	hooks.AgentRequest.SetDefault(func(_ context.Context, in core.RequestControl) (core.RequestControl, error) {
 		return in, nil
 	})
+	// REQ-RTR-005, REQ-RTR-007: the router owns retry, backoff, fallback,
+	// and cooldown. Each failed attempt becomes an assistant/attempt event.
 	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
-		if len(in.Targets) == 0 {
-			return nil, &core.ProviderError{Class: "client", Message: "provider target is empty"}
+		meta := core.LLMCallMeta{
+			Source: llmcall.SourceTurn, Agent: in.AgentName,
+			SessionID: in.SessionID, TurnID: in.TurnID, Requested: in.Requested,
 		}
-		target := in.Targets[0]
-		provider, ok := llm.Provider(target.Provider)
-		if !ok {
-			return nil, &core.ProviderError{Class: "client", Message: "unknown provider: " + target.Provider}
+		stream, served, err := llmcall.Stream(ctx, llm, in.Targets, in.Request, meta, func(attempt core.LLMAttempt) {
+			writeAttempt(ctx, store, in, attempt)
+		})
+		if err != nil {
+			return nil, err
 		}
-		req := in.Request
-		req.Model = target.Model
-		return provider.Stream(ctx, req)
+		if in.OnServed != nil {
+			in.OnServed(served)
+		}
+		return stream, nil
 	})
+}
+
+// writeAttempt records one failed attempt of a step before the router
+// retries or moves to the next target.
+func writeAttempt(ctx context.Context, store core.SessionStore, in core.LLMStreamInput, attempt core.LLMAttempt) {
+	if store == nil || attempt.Err == nil {
+		return
+	}
+	events := &Events{Store: store, SessionID: in.SessionID}
+	pe := attempt.Err
+	payload := core.AssistantAttempt{
+		V: core.PayloadVersion, Step: in.Step, Attempt: attempt.N,
+		Provider: attempt.Target.Provider, Model: attempt.Target.Model,
+		Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message},
+	}
+	_, _ = events.Append(context.WithoutCancel(ctx), core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: in.TurnID, Payload: payload})
 }
 
 func (r *Registry) runnerLocked(sessionID string) *Runner {
@@ -678,7 +705,10 @@ func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) er
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 }
 
-// SetModel selects the provider:model for the session.
+// SetModel selects the session's model: a combo name, a "provider/model"
+// address, or the legacy "provider:model" (API-RTR-003). provider:model is
+// stored as provider and model as before; a combo or an address is stored
+// in model with no provider, so old sessions read the same.
 func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
@@ -691,15 +721,9 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	if _, ok := teams[agentName]; ok {
 		return ErrTeamModel
 	}
-	providerName, modelName, ok := strings.Cut(model, ":")
-	if !ok || providerName == "" {
-		return fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
-	}
-	if modelName == "" {
-		return ErrEmptyModel
-	}
-	if _, exists := r.providersConfig()[providerName]; !exists {
-		return fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+	providerName, modelName, err := r.parseModelChoice(model)
+	if err != nil {
+		return err
 	}
 	selection, err := r.sessionSelection(ctx, sessionID)
 	if err != nil {
@@ -713,6 +737,46 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 		ReasoningEffort: selection.ReasoningEffort,
 	}
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
+}
+
+// parseModelChoice checks a session model value and returns the selection's
+// provider and model: ("p", "m") for "p:m", ("", value) for a combo name or a
+// "provider/model" address.
+func (r *Registry) parseModelChoice(value string) (string, string, error) {
+	providers, combos := r.modelConfig()
+	if _, ok := combos[value]; ok {
+		return "", value, nil
+	}
+	sep := strings.IndexAny(value, "/:")
+	if sep < 0 {
+		// Neither a combo in config nor an address: the router may still know
+		// it as a combo (an embedder's router config).
+		if rtr, ok := r.llm.(core.LLMRouter); ok {
+			if _, err := rtr.Resolve(value); err == nil {
+				return "", value, nil
+			}
+		}
+		return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, value)
+	}
+	providerName, modelName := value[:sep], value[sep+1:]
+	if providerName == "" {
+		return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+	}
+	if modelName == "" {
+		return "", "", ErrEmptyModel
+	}
+	if _, exists := providers[providerName]; !exists {
+		if r.llm == nil {
+			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+		}
+		if _, known := r.llm.Provider(providerName); !known {
+			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+		}
+	}
+	if value[sep] == ':' {
+		return providerName, modelName, nil
+	}
+	return "", value, nil
 }
 
 // SetReasoningEffort sets the session's thinking effort. The provider:model

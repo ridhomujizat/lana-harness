@@ -62,7 +62,7 @@ func TestProviderThinkingFormatValidation(t *testing.T) {
 	accepted := []string{"", "deepseek", "none"}
 	for _, value := range accepted {
 		t.Run("accept "+value, func(t *testing.T) {
-			table := "[providers.p]\nkind = \"openai_compat\"\nthinking_format = \"" + value + "\"\n"
+			table := "[providers.p]\nkind = \"openai_compat\"\nbase_url = \"https://example.com/v1\"\nthinking_format = \"" + value + "\"\n"
 			if err := loadSettingsTable(t, table); err != nil {
 				t.Fatalf("thinking_format %q rejected: %v", value, err)
 			}
@@ -71,7 +71,7 @@ func TestProviderThinkingFormatValidation(t *testing.T) {
 	rejected := []string{"openai", "DeepSeek", "auto"}
 	for _, value := range rejected {
 		t.Run("reject "+value, func(t *testing.T) {
-			table := "[providers.p]\nkind = \"openai_compat\"\nthinking_format = \"" + value + "\"\n"
+			table := "[providers.p]\nkind = \"openai_compat\"\nbase_url = \"https://example.com/v1\"\nthinking_format = \"" + value + "\"\n"
 			err := loadSettingsTable(t, table)
 			if !errorKey(t, err, "providers.p.thinking_format") {
 				t.Fatalf("thinking_format %q not rejected: %v", value, err)
@@ -79,7 +79,7 @@ func TestProviderThinkingFormatValidation(t *testing.T) {
 		})
 	}
 	t.Run("reject non string", func(t *testing.T) {
-		err := loadSettingsTable(t, "[providers.p]\nkind = \"openai_compat\"\nthinking_format = 1\n")
+		err := loadSettingsTable(t, "[providers.p]\nkind = \"openai_compat\"\nbase_url = \"https://example.com/v1\"\nthinking_format = 1\n")
 		if !errorKey(t, err, "providers.p.thinking_format") {
 			t.Fatalf("integer thinking_format not rejected: %v", err)
 		}

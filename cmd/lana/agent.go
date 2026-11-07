@@ -16,6 +16,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 func cmdAgent(args []string) int {
@@ -147,7 +148,7 @@ func agentNew(args []string, interactive bool) int {
 		return fail(err, 1)
 	}
 	fmt.Printf("created agent %s\n  home:   %s\n  model:  %s\n  tools:  %s\nnext: lana chat --agent %s\n",
-		name, paths.Dir, providerName+":"+modelName, strings.Join(tpl.Tools, ", "), name)
+		name, paths.Dir, llmcall.Display(providerName, modelName), strings.Join(tpl.Tools, ", "), name)
 	if startChat {
 		return cmdChat([]string{"--agent", name})
 	}
@@ -169,17 +170,21 @@ func defaultModel(cfg core.Config) string {
 		return ""
 	}
 	a := cfg.Agents[agent]
-	if a.Provider == "" || a.Model == "" {
-		return ""
-	}
-	return a.Provider + ":" + a.Model
+	return llmcall.Display(a.Provider, a.Model)
 }
 
+// checkModel checks an agent model value: provider:model returns the legacy
+// provider and model; a combo name or a provider/model address returns ""
+// and the value, written as model with no provider (API-RTR-003).
 func checkModel(cfg core.Config, model string) (string, string, error) {
-	providerName, modelName, ok := strings.Cut(model, ":")
-	if !ok || providerName == "" || modelName == "" {
-		return "", "", errors.New("use provider:model")
+	if _, ok := cfg.Combos[model]; ok {
+		return "", model, nil
 	}
+	sep := strings.IndexAny(model, "/:")
+	if sep <= 0 || sep == len(model)-1 {
+		return "", "", errors.New("use provider:model, provider/model, or a combo name")
+	}
+	providerName, modelName := model[:sep], model[sep+1:]
 	if _, ok := cfg.Providers[providerName]; !ok {
 		names := make([]string, 0, len(cfg.Providers))
 		for name := range cfg.Providers {
@@ -187,6 +192,9 @@ func checkModel(cfg core.Config, model string) (string, string, error) {
 		}
 		sort.Strings(names)
 		return "", "", fmt.Errorf("unknown provider %q (available: %s)", providerName, strings.Join(names, ", "))
+	}
+	if model[sep] == '/' {
+		return "", model, nil
 	}
 	return providerName, modelName, nil
 }
@@ -224,8 +232,12 @@ func appendAgentConfig(home, name, providerName, model string, tools []string, p
 	if makeDefault {
 		text = setCLIRoute(text, name)
 	}
-	text += fmt.Sprintf("\n\n[agents.%s]\nprovider = %q\nmodel = %q\ntools = [%s]\npermission = %q\n",
-		name, providerName, model, strings.Join(quoted, ", "), permission)
+	providerLine := ""
+	if providerName != "" {
+		providerLine = fmt.Sprintf("provider = %q\n", providerName)
+	}
+	text += fmt.Sprintf("\n\n[agents.%s]\n%smodel = %q\ntools = [%s]\npermission = %q\n",
+		name, providerLine, model, strings.Join(quoted, ", "), permission)
 	text = strings.TrimLeft(text, "\n")
 	if err := atomicWrite(path, []byte(text), mode); err != nil {
 		return err

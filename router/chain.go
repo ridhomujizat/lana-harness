@@ -42,10 +42,11 @@ func (r *Router) Stream(ctx context.Context, address string, req core.ChatReques
 // the first one that produced an event, with that target (REQ-RTR-005).
 // Targets cooling down are skipped unless all of them are (REQ-RTR-006).
 // onAttempt, when set, gets every failed attempt before the router retries
-// or moves on. The record's requested field is the first target's address.
+// or moves on. The record's requested field is meta.Requested, or the first
+// target's address when that is empty.
 func (r *Router) StreamChain(ctx context.Context, chain []Target, req core.ChatRequest, meta CallMeta, onAttempt func(Attempt)) (core.ChatStream, Target, error) {
-	requested := ""
-	if len(chain) > 0 {
+	requested := meta.Requested
+	if requested == "" && len(chain) > 0 {
 		requested = Address(chain[0])
 	}
 	return r.streamChain(ctx, r.snap.Load(), requested, chain, req, meta, onAttempt)

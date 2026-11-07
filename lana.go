@@ -28,12 +28,14 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/calendar"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
+	"github.com/ridhomujizat/lana-harness/router"
 	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
 	"github.com/ridhomujizat/lana-harness/tools"
@@ -186,8 +188,14 @@ type Runtime struct {
 	jobs   *jobs.Registry
 	closed atomic.Bool
 	// cfgMu guards the live-applied sections of result.Config: Agents, Teams,
-	// and MCP. Providers, routes, channels, web, and secrets stay fixed.
+	// MCP, Providers, Combos, and Router. Routes, channels, web, and secrets
+	// stay fixed.
 	cfgMu sync.RWMutex
+	// router is the LLM router of the llm module (spec 37); nil when the llm
+	// service is not a *router.Router. routerRec is its async call recorder
+	// over the session store, nil when the store keeps no router records.
+	router    *router.Router
+	routerRec *routerRecorder
 	// draining refuses new turns while the daemon waits for running turns
 	// (REQ-TFB-002).
 	draining atomic.Bool
@@ -419,6 +427,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		jobs: jobsRegistry, wfSessions: map[string]*workflowSession{},
 		toolboxNames: map[string]bool{},
 	}
+	rt.attachRouterStores()
 	// REQ-WF-009, AC-WF-016: the workflow tool gate is prepended so a worker's
 	// tool list, step budget and lock are decided before the permission engine
 	// asks the owner. It only acts on sessions a workflow run registered.
@@ -452,9 +461,19 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 }
 
 // ApplyConfig replaces the live sections of the loaded config: agents, teams,
-// and MCP. Providers, routes, channels, web, and secrets are not applied
-// (REQ-TFB-006).
-func (rt *Runtime) ApplyConfig(cfg core.Config) {
+// MCP, and the router's providers, combos, and cooldown (REQ-RTR-008). Routes,
+// channels, web, and secrets are not applied (REQ-TFB-006). A router config
+// the router rejects returns the error and changes nothing.
+func (rt *Runtime) ApplyConfig(cfg core.Config) error {
+	if rt.router != nil {
+		rcfg, err := router.ConfigFromCore(cfg)
+		if err != nil {
+			return err
+		}
+		if err := rt.router.Apply(rcfg); err != nil {
+			return err
+		}
+	}
 	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
 	for name, agentCfg := range cfg.Agents {
 		agents[name] = agentCfg
@@ -471,6 +490,9 @@ func (rt *Runtime) ApplyConfig(cfg core.Config) {
 	rt.result.Config.Agents = agents
 	rt.result.Config.Teams = teams
 	rt.result.Config.MCP = mcpCfg
+	rt.result.Config.Providers = cfg.Providers
+	rt.result.Config.Combos = cfg.Combos
+	rt.result.Config.Router = cfg.Router
 	live := rt.result.Config
 	rt.cfgMu.Unlock()
 	if rt.registry != nil {
@@ -482,6 +504,7 @@ func (rt *Runtime) ApplyConfig(cfg core.Config) {
 	if applier, ok := rt.coreCtx.Approval.(interface{ ApplyConfig(core.Config) }); ok {
 		applier.ApplyConfig(live)
 	}
+	return nil
 }
 
 // NonLiveConfig returns the loaded config with the live-applied sections
@@ -1109,6 +1132,9 @@ func (rt *Runtime) Close() error {
 	if err := rt.registry.Close(ctx); err != nil {
 		rt.closeErr = err
 	}
+	// Spec 37: the turns have stopped; flush the router's limit snapshots and
+	// the buffered call records while the store is still open.
+	rt.closeRouterStores()
 	if err := rt.coreCtx.Shutdown(context.Background()); err != nil && rt.closeErr == nil {
 		rt.closeErr = err
 	}
@@ -1196,10 +1222,12 @@ func (rt *Runtime) agentConfig(name string) (core.AgentConfig, bool) {
 	return rt.teamLead(name)
 }
 
-// AgentModel returns the agent's "provider:model".
+// AgentModel returns the agent's model as lana shows it. The legacy provider + model form shows as "provider:model"; the router form
+// shows the combo name or "provider/model" address as written. Both are
+// values a session model switch accepts (API-RTR-003).
 func (rt *Runtime) AgentModel(agentName string) string {
 	if agentCfg, ok := rt.agentConfig(agentName); ok {
-		return agentCfg.Provider + ":" + agentCfg.Model
+		return llmcall.Display(agentCfg.Provider, agentCfg.Model)
 	}
 	return ""
 }

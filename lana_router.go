@@ -267,6 +267,49 @@ func runRouterPrune(ctx context.Context, stop <-chan struct{}, st routerdb.CallS
 	}
 }
 
+// attachRouterStores gives the router its call recorder and limit store over
+// the session store when the store keeps router records (spec 37). The llm
+// module boots before the store module, so they are attached after boot.
+func (rt *Runtime) attachRouterStores() {
+	rt.router, _ = rt.coreCtx.LLM.(*router.Router)
+	if rt.router == nil {
+		return
+	}
+	var rec router.Recorder
+	if st, ok := rt.store.(routerdb.CallStore); ok {
+		rt.routerRec = newRouterRecorder(st, routerRecorderOptions{})
+		rec = rt.routerRec
+	}
+	var limits router.LimitStore
+	if st, ok := rt.store.(routerdb.KVStore); ok {
+		limits = newRouterLimitStore(st)
+	}
+	rt.router.AttachStores(rec, limits)
+}
+
+// closeRouterStores flushes the router's limit snapshots and the buffered
+// call records. Close calls it after the turns stopped and before the store
+// closes; records made later (a draining background pass) are dropped.
+func (rt *Runtime) closeRouterStores() {
+	if rt.router != nil {
+		_ = rt.router.Close()
+	}
+	if rt.routerRec != nil {
+		rt.routerRec.Close()
+	}
+}
+
+// Router returns the LLM router, or nil when the llm service is not a
+// router (spec 37, T-RTR-06).
+func (rt *Runtime) Router() *router.Router { return rt.router }
+
+// RouterStore returns the session store's router persistence, or nil when
+// the store keeps no router records.
+func (rt *Runtime) RouterStore() routerdb.Store {
+	st, _ := rt.store.(routerdb.Store)
+	return st
+}
+
 // StartRouterUpkeep starts the hourly prune of router call records older than
 // 30 days (REQ-RTR-009) when the session store keeps router records. It is a
 // no-op after the first call and stops with ctx or Close.

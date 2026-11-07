@@ -11,6 +11,9 @@ type LLMCallMeta struct {
 	Agent     string
 	SessionID string
 	TurnID    string
+	// Requested is the combo or address the caller asked for. When empty,
+	// StreamChain records the first target's address.
+	Requested string
 }
 
 // LLMAttempt is one failed attempt of a chain, reported to the caller before

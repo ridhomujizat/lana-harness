@@ -139,11 +139,12 @@ func (r *Router) recordedStream(snap *snapshot, first core.ChatEvent, pump *stre
 }
 
 func (r *Router) emit(rec CallRecord) {
-	if r.opts.recorder == nil {
+	box := r.recorder.Load()
+	if box == nil || box.rec == nil {
 		return
 	}
 	defer func() { _ = recover() }()
-	r.opts.recorder.Record(rec)
+	box.rec.Record(rec)
 }
 
 // priceFor returns the price of a target: the provider's own model list
@@ -162,10 +163,14 @@ func (r *Router) priceFor(snap *snapshot, target Target) *Price {
 // apiKey returns the API key of a provider, or "" when it has none.
 func (s *snapshot) apiKey(secrets core.Secrets, provider string) string {
 	entry, ok := s.providers[provider]
-	if !ok || secrets == nil || entry.cfg.APIKeyEnv == "" {
+	if !ok || secrets == nil {
 		return ""
 	}
-	secret, ok := secrets.Lookup(entry.cfg.APIKeyEnv)
+	env := EffectiveKeyEnv(entry.cfg, provider)
+	if env == "" {
+		return ""
+	}
+	secret, ok := secrets.Lookup(env)
 	if !ok {
 		return ""
 	}

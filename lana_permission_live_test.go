@@ -69,7 +69,9 @@ func TestApplyConfigUpdatesPermissionEngine(t *testing.T) {
 		edit(&agentCfg)
 		agents["assistant"] = agentCfg
 		cfg.Agents = agents
-		rt.ApplyConfig(cfg)
+		if err := rt.ApplyConfig(cfg); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	run()

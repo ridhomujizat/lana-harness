@@ -353,8 +353,10 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if row.Provider == "" {
-			if provider, _, ok := strings.Cut(model, ":"); ok {
-				row.Provider = provider
+			// "provider:model" (legacy) or a "provider/model" address; a combo
+			// name has no single provider (API-RTR-003).
+			if i := strings.IndexAny(model, "/:"); i > 0 {
+				row.Provider = model[:i]
 			}
 		}
 		if row.Permission == "" {

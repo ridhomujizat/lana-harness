@@ -17,7 +17,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
-	"github.com/ridhomujizat/lana-harness/internal/models"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // Runner holds the state of one session.
@@ -127,12 +127,19 @@ func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, conti
 }
 
 type resolvedAgent struct {
-	name       string
-	team       string
-	delegates  []string
-	roster     []agenthome.RosterEntry
-	provider   string
-	model      string
+	name      string
+	team      string
+	delegates []string
+	roster    []agenthome.RosterEntry
+	// provider and model are the chain's first target, the primary.
+	provider string
+	model    string
+	// chain is the primary followed by the combo's other models or the
+	// agent's fallback entries (REQ-RTR-003).
+	chain []core.LLMTarget
+	// requested is the combo or address the agent asked for, recorded by
+	// the router.
+	requested  string
 	promptFile string
 	channel    string
 	workspace  string
@@ -140,7 +147,6 @@ type resolvedAgent struct {
 	disabled   []string
 	mcp        []string
 	skills     []string
-	fallback   []core.LLMTarget
 	maxSteps   int
 	child      bool
 	// vision reports whether the model can see images. The agent key wins over
@@ -195,16 +201,18 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	}
 	provider, model := cfg.Provider, cfg.Model
 	if hasSelection && teamName == "" {
-		if selection.Provider != "" {
-			provider = selection.Provider
-		}
-		if selection.Model != "" {
-			model = selection.Model
-		}
+		provider, model = llmcall.Select(provider, model, selection)
 	}
-	if provider == "" || model == "" {
+	if model == "" {
 		return resolvedAgent{}, fmt.Errorf("agent %s has no provider or model set", cfgName)
 	}
+	// REQ-RTR-003: the legacy provider + model, or a combo or address,
+	// followed by the agent's fallback entries.
+	targets, err := llmcall.Chain(rn.reg.llm, provider, model, cfg.Fallback)
+	if err != nil {
+		return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
+	}
+	requested := llmcall.Requested(provider, model)
 	workspace := info.Workspace
 	if workspace == "" {
 		workspace = cfg.Workspace
@@ -225,22 +233,18 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if hasSelection && selection.ReasoningEffort != "" {
 		effort = selection.ReasoningEffort
 	}
-	if effort == "" {
-		if known, ok := models.Lookup(model); ok {
-			effort = known.DefaultEffort
-		}
+	// The effort default and the vision flag come from the first target.
+	known, knownOK := llmcall.Lookup(targets)
+	if effort == "" && knownOK {
+		effort = known.DefaultEffort
 	}
 	// REQ-ATT-003: the agent key wins over the catalog flag; an unknown model
 	// is not a vision model unless the agent sets vision = true.
 	vision := false
 	if cfg.Vision != nil {
 		vision = *cfg.Vision
-	} else if known, ok := models.Lookup(model); ok {
+	} else if knownOK {
 		vision = known.Vision
-	}
-	fallback, err := parseFallback(cfg.Fallback)
-	if err != nil {
-		return resolvedAgent{}, err
 	}
 	delegates := append([]string{}, cfg.Subagents...)
 	if teamName != "" {
@@ -268,8 +272,10 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		team:            teamName,
 		delegates:       delegates,
 		roster:          roster,
-		provider:        provider,
-		model:           model,
+		provider:        targets[0].Provider,
+		model:           targets[0].Model,
+		chain:           targets,
+		requested:       requested,
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
 		workspace:       workspace,
@@ -277,7 +283,6 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		disabled:        cfg.DisabledTools,
 		mcp:             mcpServers,
 		skills:          cfg.Skills,
-		fallback:        fallback,
 		maxSteps:        maxSteps,
 		child:           info.ParentSessionID != "",
 		vision:          vision,
@@ -300,18 +305,6 @@ func mergeDelegates(groups ...[]string) []string {
 		}
 	}
 	return out
-}
-
-func parseFallback(list []string) ([]core.LLMTarget, error) {
-	out := make([]core.LLMTarget, 0, len(list))
-	for _, item := range list {
-		provider, model, ok := strings.Cut(item, ":")
-		if !ok || provider == "" || model == "" {
-			return nil, fmt.Errorf("invalid fallback: %s", item)
-		}
-		out = append(out, core.LLMTarget{Provider: provider, Model: model})
-	}
-	return out, nil
 }
 
 func normalizePath(path string) (string, error) {
@@ -1048,7 +1041,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		if c := rn.reg.compactor(); c != nil {
 			if _, cerr := c.CompactIfNeeded(ctx, core.CompactRequest{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name,
-				Provider: resolved.provider, Model: resolved.model, System: prompt,
+				Provider: resolved.provider, Model: resolved.model,
+				Targets: resolved.chain, Requested: resolved.requested, System: prompt,
 				Tools: specs, MaxTokens: control.MaxTokens,
 				ReasoningEffort: resolved.reasoningEffort, Trigger: "pressure",
 			}); cerr != nil {
@@ -1071,7 +1065,10 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		req.Temperature = control.Temperature
 		req.ReasoningEffort = resolved.reasoningEffort
 
-		targets := append([]core.LLMTarget{{Provider: resolved.provider, Model: resolved.model}}, resolved.fallback...)
+		targets := append([]core.LLMTarget(nil), resolved.chain...)
+		// served is the target that answered the step; the router may fall
+		// back past the primary (AC-RTR-007).
+		served := targets[0]
 		var (
 			text       string
 			thinking   string
@@ -1085,6 +1082,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		for attempt := 1; ; attempt++ {
 			stream, err := rn.reg.hooks.LLMStream.Call(ctx, core.LLMStreamInput{
 				SessionID: rn.sessionID, TurnID: turnID, Step: step, AgentName: resolved.name, Targets: targets, Request: req,
+				Requested: resolved.requested,
+				OnServed:  func(target core.LLMTarget) { served = target },
 			})
 			if err != nil {
 				if ctx.Err() != nil {
@@ -1108,9 +1107,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				goto finished
 			}
 			pe := providerError(streamErr)
-			rn.writeStepAttempt(writeCtx, events, step, resolved, turnID, attempt, *pe)
+			rn.writeStepAttempt(writeCtx, events, step, served, turnID, attempt, *pe)
 			// Only a mid-stream failure is repeated here; a failure before the
-			// first event is the llm.stream retry hook's job (REQ-LTC-031).
+			// first event is the router's job (REQ-LTC-031, REQ-RTR-005).
 			if seen == 0 || !retryable(pe.Class) || attempt > maxStepRetries {
 				runErr = pe
 				reason = "error"
@@ -1285,14 +1284,14 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				}
 			}
 		}
-		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Usage: usage}}); err != nil {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: served.Provider, Model: served.Model, Usage: usage}}); err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished
 		}
 		// REQ-LTC-005: the step log line reports the cache hit share.
 		slog.Info("step finished", "session_id", rn.sessionID, "turn_id", turnID, "step", step,
-			"provider", resolved.provider, "model", resolved.model,
+			"provider", served.Provider, "model", served.Model,
 			"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens,
 			"cached_input_tokens", usage.CachedInputTokens,
 			"cache_hit_pct", cacheHitPct(usage.InputTokens, usage.CachedInputTokens))
@@ -1375,6 +1374,7 @@ finished:
 			c.Capture(core.CaptureRequest{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: lastResolved.name,
 				Home: rn.reg.home, Provider: lastResolved.provider, Model: lastResolved.model,
+				Targets: lastResolved.chain, Requested: lastResolved.requested,
 				System: prompt, Tools: lastSpecs, ReasoningEffort: lastResolved.reasoningEffort,
 			})
 		}
@@ -1439,8 +1439,8 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 
 // writeStepAttempt records one failed stream attempt of a step. attempt counts
 // from 1 (REQ-LTC-032).
-func (rn *Runner) writeStepAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string, attempt int, pe core.ProviderError) {
-	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: attempt, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
+func (rn *Runner) writeStepAttempt(ctx context.Context, events *Events, step int, target core.LLMTarget, turnID string, attempt int, pe core.ProviderError) {
+	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: attempt, Provider: target.Provider, Model: target.Model, Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
 }
 
@@ -1541,7 +1541,7 @@ const reportToolsDisabledText = "Tools are disabled for this final report; answe
 const maxStepRetries = 2
 
 // stepRetryDelays is the backoff between mid-stream step retries. It mirrors
-// the first delays of NewRetry (agent/retry.go) and is a variable so tests can
+// the first delays of the router's backoff and is a variable so tests can
 // replace it and run fast.
 var stepRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
 
