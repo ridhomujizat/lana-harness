@@ -568,3 +568,60 @@
   background: var(--red);
   color: var(--text-inv);
 }
+
+/* ---------------------------------------------------------------- */
+/* Phones: the list and the room are separate screens               */
+/* ---------------------------------------------------------------- */
+
+.room-back {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .rooms-list {
+    flex: 1 1 auto;
+    width: 100%;
+    border-right: 0;
+  }
+  .rooms-page.has-room .rooms-list,
+  .rooms-page:not(.has-room) .rooms-panel {
+    display: none;
+  }
+  .room-back {
+    display: inline-grid;
+    flex: 0 0 auto;
+    margin-left: -6px;
+  }
+  .room-head {
+    gap: var(--s-2);
+    padding: var(--s-2) var(--gutter);
+  }
+}
+
+/* The legacy `textarea:focus` ring (app.css) and hover border must not show
+   inside the composer box: the .cbox draws the one focus ring. */
+.cbox textarea,
+.cbox textarea:hover,
+.cbox textarea:focus,
+.cbox textarea:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+}
+
+@media (max-width: 760px) {
+  /* Room header: name and presence on one line each, no extra facts row. */
+  .room-head-facts {
+    display: none;
+  }
+  .room-head-sub {
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .room-head .btn {
+    flex-shrink: 0;
+  }
+}

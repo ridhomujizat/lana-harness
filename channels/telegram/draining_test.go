@@ -27,7 +27,7 @@ func TestDrainingReply(t *testing.T) {
 		t.Fatalf("queued messages = %v, want none", sent)
 	}
 	for _, call := range api.snapshot() {
-		if call.Method == "sendMessage" && call.Params["text"] == "…" {
+		if call.Method == "sendMessage" && call.Params["text"] == liveStart {
 			t.Fatalf("a turn started while draining: %v", call)
 		}
 	}

@@ -26,6 +26,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
+	"github.com/ridhomujizat/lana-harness/internal/calendar"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
@@ -162,11 +163,14 @@ var toolCatalogGroupOrder = []struct {
 }{
 	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep"}},
 	{ID: "shell", Label: "Shell", Names: []string{"bash"}},
-	{ID: "web", Label: "Web", Names: []string{"web_fetch"}},
+	{ID: "web", Label: "Web", Names: []string{"web_search", "web_fetch"}},
 	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write", "session_search"}},
 	{ID: "knowledge", Label: "Knowledge", Names: []string{"knowledge_search", "knowledge_read", "knowledge_write", "knowledge_ingest"}},
 	{ID: "skills", Label: "Skills", Names: []string{"skill_load", "skill_write"}},
 	{ID: "mcp-admin", Label: "MCP", Names: []string{"mcp_manage"}},
+	{ID: "calendar", Label: "Calendar", Names: []string{"calendar"}},
+	{ID: "workflows", Label: "Workflows", Names: []string{"workflow"}},
+	{ID: "stats", Label: "Stats", Names: []string{"usage_stats"}},
 	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
 }
 
@@ -213,6 +217,16 @@ type Runtime struct {
 	// workflowsOnce makes StartWorkflows start the service at most once, like
 	// StartKnowledgeUpkeep.
 	workflowsOnce sync.Once
+	// calendar is the calendar service (spec #35, design §Runtime glue). It is
+	// never nil after New.
+	calendar *calendar.Service
+	// calendarGoogle is the Google Calendar link of the calendar (REQ-CAL-012).
+	calendarGoogle *calendar.Google
+	// calendarOnce makes StartCalendar start the scheduler at most once.
+	calendarOnce sync.Once
+	// calSender is the Telegram owner sender of calendar messages and notices
+	// (SetCalendarTelegram).
+	calSender calendarSender
 	// toolbox is the installable-tools service (REQ-TB-001). It is never nil
 	// after New.
 	toolbox *toolbox.Service
@@ -413,6 +427,12 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	rt.workflows = workflow.NewService(wfStore, rt.WorkflowDeps(),
 		workflow.WithSessionCheck(rt.IsWorkflowSession),
 		workflow.WithLogger(slog.Default()))
+	// Spec #35: the calendar service shares the session store when it
+	// implements calendar.Store and reads workflow slots and runs from wfStore.
+	rt.newCalendar(wfStore)
+	// The workflow and usage_stats agent tools read the services built above.
+	rt.registerWorkflowTool()
+	rt.registerUsageStatsTool()
 	// REQ-TB-001, REQ-TB-004: one toolbox service per runtime, over
 	// <LANA_HOME>/tools, with the secret store as its env resolver. The
 	// installed commands are registered at once and refreshed on every change.
@@ -1055,7 +1075,14 @@ func (rt *Runtime) Close() error {
 	}
 	// REQ-WF-007: stop the workflow engine and scheduler before the agent
 	// registry closes, so a run goroutine waiting on an agent turn ends first.
-	// Close cancels the engine context, which cancels its turns.
+	// Close cancels the engine context, which cancels its turns. The calendar
+	// stops first, since its actions start agent turns and workflow runs.
+	if rt.calendarGoogle != nil {
+		rt.calendarGoogle.Close()
+	}
+	if rt.calendar != nil {
+		rt.calendar.Close()
+	}
 	if rt.workflows != nil {
 		rt.workflows.Close()
 	}
@@ -1233,11 +1260,13 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 		visibleSkills = len(skills) > 0
 	}
 	_, mcpManageRegistered := registry.Get("mcp_manage")
+	_, calendarRegistered := registry.Get(agent.CalendarTool)
 	autoOffered := agent.AutoOfferedTools(agent.AutoOfferState{
 		Root:                true,
 		MCPManageRegistered: mcpManageRegistered,
 		VisibleSkills:       visibleSkills,
-		Team:                inTeam,
+		Team:                inTeam || len(agentCfg.Subagents) > 0,
+		CalendarRegistered:  calendarRegistered,
 	})
 	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
 	for _, group := range toolCatalogGroupOrder {

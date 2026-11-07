@@ -32,6 +32,9 @@ function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
 }
 
 function jsonResponse(status: number, body: unknown): Response {
+  if (status === 204) {
+    return new Response(null, { status });
+  }
   return new Response(JSON.stringify(body ?? null), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -78,7 +81,15 @@ function installMockApi(): void {
     init?: RequestInit
   ): Promise<Response> => {
     const url = resolveURL(input);
-    const result = mockApi(methodOf(input, init), url);
+    let body: unknown;
+    if (init && typeof init.body === "string") {
+      try {
+        body = JSON.parse(init.body);
+      } catch {
+        body = undefined;
+      }
+    }
+    const result = mockApi(methodOf(input, init), url, body);
     if (result.stream !== undefined) {
       return streamResponse(result.stream, init ? init.signal : null);
     }

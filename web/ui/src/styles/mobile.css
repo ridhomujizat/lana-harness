@@ -1,0 +1,107 @@
+/* Phone fixes across the dashboard (owner request 2026-11-05: every page must
+   work on a phone, not only the calendar). Loaded last in the gr8r layer so it
+   wins over page rules of the same specificity. Breakpoint: 760px, the same
+   as the calendar, chats and sessions split screens. */
+
+@media (max-width: 760px) {
+  /* Settings-style rows (agent General tab, settings pages): label above the
+     control, the control full width. */
+  .srow,
+  .agent-general-form .srow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-2);
+    align-items: stretch;
+  }
+  .srow > :last-child {
+    min-width: 0;
+  }
+
+  /* Tool detail hero: icon + text, actions under them. */
+  .tl-hero {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .tl-hero-text {
+    flex: 1 1 calc(100% - 72px);
+  }
+  .tl-hero-text h1 {
+    flex-wrap: wrap;
+    font-size: var(--fs-xl);
+  }
+  .tl-hero-acts {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+  }
+
+  /* Schedules: when + trigger + run; the header row goes. */
+  .sch-th {
+    display: none;
+  }
+  .sch-tr {
+    grid-template-columns: 84px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+  .sch-tr > :nth-child(3),
+  .sch-tr > :nth-child(4) {
+    display: none;
+  }
+  .sch-run {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  /* Workflow editor: the canvas empty state and footer span the stage. */
+  .wf-editor .wf-empty {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+  }
+  .wf-foot,
+  .wf-editor .wf-foot {
+    max-width: calc(100% - 24px);
+  }
+  .wf-empty-card {
+    max-width: calc(100% - 8px);
+  }
+  .wf-head-row {
+    flex-wrap: wrap;
+  }
+
+  /* Wide tables scroll inside their card instead of clipping. */
+  .tbl-wrap,
+  .table-wrap,
+  .panel:has(> table) {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Session detail header: title on its own row, the view tabs and actions
+     under it. */
+  .chat-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    height: auto;
+    padding: 8px var(--gutter);
+  }
+  .chat-header-title {
+    flex: 1 0 100%;
+    min-width: 0;
+  }
+  .chat-title {
+    white-space: normal;
+  }
+}
+
+/* After the page-enter animation, content that mounts later (a switched tab
+   panel, table rows, stat cards) appears at once instead of rising in again. */
+.fx-route.settled > .page > *,
+.fx-route.settled > .page > * > *,
+.fx-route.settled .agent-tabs-table tbody tr,
+.fx-route.settled .wf-stat,
+.fx-route.settled .wf-runs .wf-node,
+.fx-route.settled .grid2 > *,
+.fx-route.settled .grid2 > * > * {
+  animation: none;
+}

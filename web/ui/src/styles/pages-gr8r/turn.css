@@ -1,0 +1,250 @@
+/* One assistant turn (owner request 2026-11-05: the answer is the main thing).
+   Thinking, tool calls and the text between them fold into one process line
+   above the answer; it opens into a quiet timeline. Shared by chat rooms and
+   the session view. */
+
+.turn-process {
+  margin: 2px 0 6px;
+}
+
+.tp-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 3px 10px 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--r-full);
+  background: transparent;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur),
+    border-color var(--dur),
+    color var(--dur);
+}
+.tp-head:hover,
+.turn-process.is-open .tp-head {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-2);
+}
+.tp-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.tp-chev {
+  flex-shrink: 0;
+  transition: transform var(--dur) var(--ease);
+}
+.tp-chev.is-open {
+  transform: rotate(90deg);
+}
+.tp-head-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tp-head-live {
+  color: var(--text-2);
+}
+.tp-head-meta {
+  flex-shrink: 0;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+.tp-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: tpPulse 1.2s var(--ease) infinite;
+}
+.turn-process.is-waiting .tp-live-dot {
+  background: var(--amber);
+}
+@keyframes tpPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* The timeline. */
+.tp-list {
+  list-style: none;
+  margin: 6px 0 4px 13px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: riseIn 0.2s var(--ease) both;
+}
+.tp-step {
+  min-width: 0;
+}
+.tp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.tp-row:hover {
+  background: var(--surface-2);
+}
+.tp-row-static {
+  cursor: default;
+  align-items: flex-start;
+}
+.tp-row-static:hover {
+  background: transparent;
+}
+.tp-ico {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+.tp-label {
+  flex-shrink: 0;
+  color: var(--text);
+  font-weight: 500;
+}
+.tp-arg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  background: none;
+  padding: 0;
+}
+.tp-arg-text {
+  font-family: inherit;
+  font-size: var(--fs-sm);
+}
+.tp-status {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+.tone-ok .tp-status {
+  color: var(--green);
+}
+.tone-err .tp-status,
+.tone-err .tp-label {
+  color: var(--red);
+}
+.tone-warn .tp-status {
+  color: var(--amber);
+}
+.tone-run .tp-status,
+.tone-muted .tp-status {
+  color: var(--text-3);
+}
+.tp-thought .tp-label {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.tp-note-text {
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.tp-note-text p {
+  margin: 0;
+}
+.spin {
+  animation: tpSpin 1s linear infinite;
+}
+@keyframes tpSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* An opened step: full input and output. */
+.tp-detail {
+  margin: 2px 0 8px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.tp-detail-status {
+  margin: 0;
+}
+.tp-tool {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.tp-detail-k {
+  margin-top: 4px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+.tp-pre {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  border: 1px solid var(--divider);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+/* The answer is the reply: full contrast, normal size. */
+.turn-answer {
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tp-live-dot,
+  .spin {
+    animation: none;
+  }
+}

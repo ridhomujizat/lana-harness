@@ -96,6 +96,12 @@ type Service struct {
 
 	lastFiredMu sync.Mutex
 	lastFired   map[string]int64
+	// intervalConsumed holds each interval trigger's last suppressed slot
+	// (spec #35, REQ-CAL-004), guarded by lastFiredMu.
+	intervalConsumed map[string]time.Time
+
+	slotMu     sync.RWMutex
+	slotFilter SlotFilter
 
 	ctxMu      sync.Mutex
 	rootCtx    context.Context
@@ -116,6 +122,8 @@ func NewService(st Store, deps Deps, opts ...Option) *Service {
 		subs:         map[int]chan Change{},
 		runLocks:     map[string]*sync.Mutex{},
 		lastFired:    map[string]int64{},
+
+		intervalConsumed: map[string]time.Time{},
 	}
 	s.rootCtx, s.rootCancel = context.WithCancel(context.Background())
 	for _, opt := range opts {

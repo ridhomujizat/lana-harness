@@ -25,12 +25,10 @@ No C compiler is needed: lana builds with `CGO_ENABLED=0`.
 
 ### Option A: prebuilt binary (recommended)
 
-The repository is private, so the installer needs GitHub access: log in once with
-`gh auth login`, or export a `GITHUB_TOKEN` that can read the repository.
+The repository is public, so no GitHub login is needed:
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  'repos/ridhomujizat/lana-harness/contents/install.sh?ref=development' | bash
+curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash
 ```
 
 The script picks the binary for your OS and CPU (macOS arm64/amd64, Linux amd64/arm64) from the
@@ -43,8 +41,9 @@ LANA_INSTALL_DIR=/usr/local/bin bash install.sh # another folder
 LANA_FROM_DIR=dist bash install.sh              # binaries from a local `make release checksums`
 ```
 
-Run the same command again to upgrade. Releases are published by
-`.github/workflows/release.yml` when a `v*` tag is pushed.
+Run the same command again to upgrade, or use the update card in the dashboard (see
+[Upgrade](#upgrade)). `main` is the stable branch: every push to `main` whose `VERSION` has no
+release yet publishes one through `.github/workflows/release.yml`.
 
 ### Option B: build from source
 
@@ -53,7 +52,7 @@ Run the same command again to upgrade. Releases are published by
    ```sh
    git clone https://github.com/ridhomujizat/lana-harness.git
    cd lana-harness
-   git checkout v0.1.0-beta.1   # or stay on development for the latest beta work
+   git checkout main             # stable; development has the work in progress
    ```
 
 2. Build and install. With Nix:
@@ -174,12 +173,30 @@ See [spec 30](docs/specs/30-knowledge/requirements.md) and
 
 ## Upgrade
 
-With the prebuilt binary, run the install command again. From source:
+When a newer release is out, the web dashboard shows a card in the corner. Click **Update now**:
+lana downloads the new binary, checks its checksum, tries it on a copy of your data, waits for
+running turns, backs up the databases, `config.toml`, and the old binary to
+`~/.lana/updates/backups/`, and restarts on the new version. If the new version fails to start,
+lana puts the old binary and the old data back by itself and the card says why. To go back by
+hand, stop the daemon and run `lana update rollback`.
+
+The card offers stable releases. To get betas too, set it in Settings → Updates, or:
+
+```toml
+[update]
+channel = "beta"   # default "stable"
+check = true       # check every 6 hours
+```
+
+Self-update needs a binary lana can replace, such as `~/.local/bin/lana` from the install script.
+For a binary in the Nix store or Homebrew, the card shows the manual command.
+
+With the prebuilt binary, you can also run the install command again. From source:
 
 ```sh
 cd lana-harness
 git fetch --tags
-git checkout v<new-version>     # or: git pull on development
+git pull origin main            # or: git checkout v<new-version>
 nix develop -c make install
 ```
 

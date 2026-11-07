@@ -82,9 +82,12 @@ function delay(milliseconds: number): Promise<void> {
    GET /v1/daemon. The timeout keeps a failed restart from polling forever. */
 export async function waitForDaemonRestart(
   previousStartedAt: number,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  timeoutMs: number = RESTART_TIMEOUT_MS
 ): Promise<DaemonInfo> {
-  const deadline = Date.now() + RESTART_TIMEOUT_MS;
+  /* A self-update restart may run a trial boot and a rollback first, so its
+     caller passes a longer timeout (spec 36). */
+  const deadline = Date.now() + timeoutMs;
   const previous = startedAtOf(previousStartedAt);
   let sawDown = false;
   let lastFailure: unknown = null;
@@ -138,6 +141,9 @@ export async function waitForDaemonRestart(
   throw new ApiError(
     0,
     "timeout",
-    "The daemon did not come back within 30 seconds." + suffix
+    "The daemon did not come back within " +
+      Math.round(timeoutMs / 1000) +
+      " seconds." +
+      suffix
   );
 }

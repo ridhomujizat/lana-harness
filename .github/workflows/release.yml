@@ -1,15 +1,23 @@
 name: Release
 
-# A pushed v* tag builds the binaries and publishes a GitHub Release with
-# SHA256SUMS. A tag with a pre-release part (v0.1.0-beta.1) is published as a
-# prerelease. install.sh downloads from these releases.
+# main is the stable branch. A push to main publishes the version in VERSION
+# when it has no tag yet: test, build, tag v<VERSION> on that commit, and
+# publish a GitHub Release with SHA256SUMS. A push whose VERSION is already
+# released does nothing. A version with a pre-release part (0.2.0-beta.1) is
+# published as a prerelease, so the dashboard's stable update channel skips
+# it. install.sh and the dashboard update card download from these releases.
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -18,31 +26,54 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Read VERSION
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "VERSION '$version' is not a semantic version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: cachix/install-nix-action@v30
+        if: steps.version.outputs.release == 'true'
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-      - name: Check the tag matches VERSION
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          file="$(cat VERSION)"
-          if [ "$tag" != "$file" ]; then
-            echo "tag $GITHUB_REF_NAME does not match VERSION $file" >&2
-            exit 1
-          fi
       - name: Test
+        if: steps.version.outputs.release == 'true'
         run: nix develop -c go test -count=1 ./...
       - name: Build
+        if: steps.version.outputs.release == 'true'
         run: nix develop -c make release checksums
+      - name: Tag
+        if: steps.version.outputs.release == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "lana ${TAG#v}"
+          git push origin "$TAG"
       - name: Publish
+        if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          notes="$(awk -v v="${GITHUB_REF_NAME#v}" '
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          notes="$(awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" { on = 1; next }
             on && /^## \[/ { exit }
             on { print }' CHANGELOG.md)"
-          gh release create "$GITHUB_REF_NAME" dist/lana-* dist/SHA256SUMS \
-            --title "lana ${GITHUB_REF_NAME#v}" --notes "${notes:-See CHANGELOG.md}" $prerelease
+          gh release create "$TAG" dist/lana-* dist/SHA256SUMS \
+            --title "lana $VERSION" --notes "${notes:-See CHANGELOG.md}" $prerelease

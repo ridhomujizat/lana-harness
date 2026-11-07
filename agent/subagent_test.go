@@ -114,6 +114,54 @@ func TestSubagentNoDelegates(t *testing.T) {
 	}
 }
 
+// An agent that lists subagents but is not a team still gets the roster and
+// the task tools, so the model knows the names task accepts.
+func TestSubagentRosterAndTaskToolsWithoutTeam(t *testing.T) {
+	h := newSubagentHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}},
+		map[string]core.AgentConfig{
+			"coder":    {Provider: "mock", Model: "m", Subagents: []string{"explorer", "writer"}},
+			"explorer": {Provider: "mock", Model: "m", Description: "Finds sources"},
+			"writer":   {Provider: "mock", Model: "m", Description: "Writes clearly"},
+		})
+	newSubagentParent(t, h, "coder")
+	var names []string
+	h.hooks.LLMStream.Use(func(ctx context.Context, in core.LLMStreamInput, next core.Next[core.LLMStreamInput, core.ChatStream]) (core.ChatStream, error) {
+		names = specNames(in.Request.Tools)
+		return next(ctx, in)
+	})
+	h.run(t, "hi")
+	prompt := h.systemPrompts(t)[0]
+	for _, want := range []string{"# Your team", "- explorer: Finds sources", "- writer: Writes clearly"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("system prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	for _, want := range []string{"task", "task_continue"} {
+		if !containsString(names, want) {
+			t.Fatalf("tool %q not offered: %v", want, names)
+		}
+	}
+}
+
+// An agent with neither a team nor subagents gets no roster and no task tools.
+func TestSubagentPlainAgentNoRosterOrTaskTools(t *testing.T) {
+	h := newSubagentHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, nil)
+	var names []string
+	h.hooks.LLMStream.Use(func(ctx context.Context, in core.LLMStreamInput, next core.Next[core.LLMStreamInput, core.ChatStream]) (core.ChatStream, error) {
+		names = specNames(in.Request.Tools)
+		return next(ctx, in)
+	})
+	h.run(t, "hi")
+	if prompt := h.systemPrompts(t)[0]; strings.Contains(prompt, "# Your team") {
+		t.Fatalf("prompt of a plain agent carries a roster:\n%s", prompt)
+	}
+	for _, name := range names {
+		if name == "task" || name == "task_continue" {
+			t.Fatalf("tool %q offered to a plain agent: %v", name, names)
+		}
+	}
+}
+
 func TestSubagentChildSessionFields(t *testing.T) {
 	h := newSubagentHarness(t, mock.Script{Responses: []mock.Response{textResponse("child answer")}},
 		map[string]core.AgentConfig{

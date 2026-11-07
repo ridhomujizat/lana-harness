@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
+
+// liveStatus matches a live status line with the given activity and step: a
+// spinner frame, the activity, then the elapsed time.
+func liveStatus(activity string) *regexp.Regexp {
+	return regexp.MustCompile(`^[◐◓◑◒] ` + regexp.QuoteMeta(activity) + ` · (\d+s|\d+m \d\ds|\d+h \d\dm)$`)
+}
 
 func publishText(backend *fakeBackend, session, text string) {
 	backend.obs.Publish(core.LiveFrame{SessionID: session, Kind: "text_delta", Text: text})
@@ -87,10 +94,10 @@ func TestLayoutAC001LiveStatusMCPTool(t *testing.T) {
 	startChannel(t, api, backend)
 
 	api.text(ownerChat, "private", ownerID, "run")
-	live := api.waitCall("editMessageText", textHas("⏳ dbx_execute_query · step 3"))
+	live := api.waitCall("editMessageText", textHas(" dbx_execute_query · step 3 · "))
 	text, _ := live.Params["text"].(string)
 	first, rest, _ := strings.Cut(text, "\n")
-	if first != "⏳ dbx_execute_query · step 3" {
+	if !liveStatus("dbx_execute_query · step 3").MatchString(first) {
 		t.Fatalf("first line = %q", first)
 	}
 	for _, line := range strings.Split(rest, "\n") {
@@ -98,8 +105,8 @@ func TestLayoutAC001LiveStatusMCPTool(t *testing.T) {
 			t.Fatalf("live message has a tool line: %q", text)
 		}
 	}
-	child := api.waitCall("editMessageText", textHas("⏳ researcher · read_file · step 3"))
-	if first, _, _ := strings.Cut(child.Params["text"].(string), "\n"); first != "⏳ researcher · read_file · step 3" {
+	child := api.waitCall("editMessageText", textHas(" researcher · read_file · x.md · step 3 · "))
+	if first, _, _ := strings.Cut(child.Params["text"].(string), "\n"); !liveStatus("researcher · read_file · x.md · step 3").MatchString(first) {
 		t.Fatalf("child status = %q", first)
 	}
 }
@@ -116,9 +123,9 @@ func TestLayoutAC002LiveWritingStatus(t *testing.T) {
 	startChannel(t, api, backend)
 
 	api.text(ownerChat, "private", ownerID, "hi")
-	live := api.waitCall("editMessageText", textHas("✍️ step 1"))
+	live := api.waitCall("editMessageText", textHas(" Writing… · step 1 · "))
 	lines := strings.Split(live.Params["text"].(string), "\n")
-	if len(lines) < 3 || lines[0] != "✍️ step 1" || lines[1] != "" || lines[2] != "Hello <b>there</b>" {
+	if len(lines) < 3 || !liveStatus("Writing… · step 1").MatchString(lines[0]) || lines[1] != "" || lines[2] != "Hello <b>there</b>" {
 		t.Fatalf("live text = %q", live.Params["text"])
 	}
 }
@@ -338,7 +345,7 @@ func TestLayoutAC006SummaryAndFooter(t *testing.T) {
 		t.Fatalf("footer mismatch vs answer: %v", footer.Params)
 	}
 	del := api.waitCall("deleteMessage", nil)
-	live := api.waitCall("sendMessage", textIs("…"))
+	live := api.waitCall("sendMessage", textIs(liveStart))
 	if del.Params["message_id"].(float64) != float64(live.MessageID) {
 		t.Fatalf("deleted message %v, live message %d", del.Params["message_id"], live.MessageID)
 	}
@@ -504,7 +511,7 @@ func TestLayoutFinalSendFallsBackToLive(t *testing.T) {
 	pressApproval(t, api, bubble, "once")
 
 	api.waitCall("editMessageText", textIs("🔐 1 approval: 1 allowed"))
-	live := api.waitCall("sendMessage", textIs("…"))
+	live := api.waitCall("sendMessage", textIs(liveStart))
 	final := api.waitCall("editMessageText", textIs("done"))
 	if final.Params["message_id"].(float64) != float64(live.MessageID) {
 		t.Fatalf("fallback edited message %v, live message %d", final.Params["message_id"], live.MessageID)
@@ -518,5 +525,102 @@ func TestLayoutFinalSendFallsBackToLive(t *testing.T) {
 	}
 	if n := api.count("deleteMessage", nil); n != 0 {
 		t.Fatalf("deletes = %d\n%s", n, api.dump())
+	}
+}
+
+// TestLiveStatusAnimates checks the loading state of the live message: it
+// starts as the status line, not "…"; with no frames each edit tick moves the
+// spinner and the elapsed time; unchanged text is not sent again; the final
+// answer has no status line.
+func TestLiveStatusAnimates(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	release := make(chan struct{})
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return TurnResult{Text: "done", StopReason: "end_turn"}, nil
+	}
+	base := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	clock := newFakeClock(base)
+	ch := startStatusChannel(t, api, backend, clock.Now)
+
+	api.text(ownerChat, "private", ownerID, "hi")
+	api.waitCall("sendMessage", textIs(liveStart))
+	for _, call := range api.snapshot() {
+		if call.Method == "sendMessage" && call.Params["text"] == "…" {
+			t.Fatalf("live message started as a bare ellipsis: %v", call)
+		}
+	}
+	api.waitCall("editMessageText", textIs("◐ Thinking… · step 1 · 0s"))
+
+	// 65 s and one edit interval later: frame 3251 % 4 = 3.
+	clock.Advance(65*time.Second + ch.EditInterval)
+	api.waitCall("editMessageText", textIs("◒ Thinking… · step 1 · 1m 05s"))
+	// One more interval: the spinner moves while the elapsed text stays.
+	clock.Advance(ch.EditInterval)
+	api.waitCall("editMessageText", textIs("◐ Thinking… · step 1 · 1m 05s"))
+
+	// The clock stands still: the ticks render the same text and send nothing.
+	edits := api.count("editMessageText", nil)
+	time.Sleep(10 * ch.EditInterval)
+	if n := api.count("editMessageText", nil); n != edits {
+		t.Fatalf("unchanged status re-sent: %d edits, want %d\n%s", n, edits, api.dump())
+	}
+
+	close(release)
+	api.waitCall("editMessageText", textIs("done"))
+	last := api.snapshot()
+	for i := len(last) - 1; i >= 0; i-- {
+		if last[i].Method != "editMessageText" {
+			continue
+		}
+		if last[i].Params["text"] != "done" {
+			t.Fatalf("final edit = %q, want the answer alone", last[i].Params["text"])
+		}
+		break
+	}
+}
+
+// TestLiveStatusWithAnswer checks that the status line with the spinner and
+// elapsed time stays above the streamed answer until the turn finishes.
+func TestLiveStatusWithAnswer(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	release := make(chan struct{})
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		publishText(backend, session, "Hello")
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return TurnResult{Text: "Hello", StopReason: "end_turn"}, nil
+	}
+	base := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
+	clock := newFakeClock(base)
+	ch := startStatusChannel(t, api, backend, clock.Now)
+
+	api.text(ownerChat, "private", ownerID, "hi")
+	api.waitCall("editMessageText", textIs("◐ Writing… · step 1 · 0s\n\nHello"))
+	clock.Advance(12*time.Second + ch.EditInterval)
+	// 12 s and one interval: frame 601 % 4 = 1.
+	api.waitCall("editMessageText", textIs("◓ Writing… · step 1 · 12s\n\nHello"))
+	close(release)
+	api.waitCall("editMessageText", textIs("Hello"))
+}
+
+func TestFormatElapsed(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		0:                                     "0s",
+		12*time.Second + 900*time.Millisecond: "12s",
+		65 * time.Second:                      "1m 05s",
+		59*time.Minute + 59*time.Second:       "59m 59s",
+		62 * time.Minute:                      "1h 02m",
+	} {
+		if got := formatElapsed(d); got != want {
+			t.Errorf("formatElapsed(%v) = %q, want %q", d, got, want)
+		}
 	}
 }

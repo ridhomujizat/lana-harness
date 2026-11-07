@@ -169,13 +169,20 @@ func (s *Service) tickSchedule(ctx context.Context, wf Workflow, g Graph, now ti
 		s.lastFired[key] = minute
 		s.lastFiredMu.Unlock()
 
+		// A calendar override may suppress this one fire (REQ-CAL-004); the
+		// minute stays recorded so it is not retried.
+		if !s.allowSlot(ctx, wf.ID, n.ID, local.Truncate(time.Minute)) {
+			continue
+		}
+
 		input, _ := json.Marshal(map[string]any{"fired_at": now.UnixMilli()})
 		s.startIgnoringActive(ctx, wf.ID, "schedule", input)
 	}
 }
 
 // tickIntervals fires an interval trigger when it has no interval run or its
-// newest one started at least N minutes ago (REQ-WF-003).
+// newest one started at least N minutes ago (REQ-WF-003). A slot the filter
+// suppressed counts as the newest fire.
 func (s *Service) tickIntervals(ctx context.Context, wf Workflow, g Graph, now time.Time) {
 	var runs []Run
 	loaded := false
@@ -191,16 +198,20 @@ func (s *Service) tickIntervals(ctx context.Context, wf Workflow, g Graph, now t
 			runs, _ = s.store.ListRuns(ctx, RunFilter{WorkflowID: wf.ID, Limit: 20})
 			loaded = true
 		}
-		var last *Run
-		for i := range runs {
-			if runs[i].Trigger == "interval" {
-				copied := runs[i]
-				last = &copied
-				break
-			}
+		every := time.Duration(minutes) * time.Minute
+		last, ok := s.intervalLast(wf.ID, n.ID, runs)
+		if ok && last.After(now.Add(-every)) {
+			continue
 		}
-		cutoff := now.Add(-time.Duration(minutes) * time.Minute).UnixMilli()
-		if last != nil && last.StartedAt > cutoff {
+		// The planned fire time is the last fire plus N minutes, or now for a
+		// first fire. A suppressed slot counts as a fire, so the cadence
+		// continues from it instead of retrying every tick (REQ-CAL-004).
+		at := now.Truncate(time.Minute)
+		if ok {
+			at = last.Add(every).Truncate(time.Minute)
+		}
+		if !s.allowSlot(ctx, wf.ID, n.ID, at) {
+			s.consumeIntervalSlot(wf.ID, n.ID, at)
 			continue
 		}
 		input, _ := json.Marshal(map[string]any{"fired_at": now.UnixMilli()})

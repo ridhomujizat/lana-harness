@@ -2,12 +2,14 @@
 # install.sh installs a prebuilt lana binary from the GitHub Releases of
 # ridhomujizat/lana-harness.
 #
-# The repository is private, so the download needs GitHub access: an
-# authenticated `gh` CLI (gh auth login) or a GITHUB_TOKEN with read access to
-# the repository.
+# The repository is public, so no GitHub login is needed:
 #
-#   gh api -H 'Accept: application/vnd.github.raw' \
-#     'repos/ridhomujizat/lana-harness/contents/install.sh?ref=development' | bash
+#   curl -fsSL https://raw.githubusercontent.com/ridhomujizat/lana-harness/main/install.sh | bash
+#
+# An authenticated `gh` CLI or a GITHUB_TOKEN is used when present (for the
+# API rate limit or a private fork); otherwise plain curl reads the public API
+# and downloads the asset from its browser_download_url. The SHA256SUMS check
+# runs either way.
 #
 # Environment:
 #   LANA_VERSION      tag to install, e.g. v0.1.0-beta.1 (default: newest
@@ -16,7 +18,7 @@
 #   LANA_REPO         owner/name (default: ridhomujizat/lana-harness)
 #   LANA_FROM_DIR     install from a local folder holding lana-<os>-<arch> and
 #                     SHA256SUMS (output of `make release`) instead of GitHub
-#   GITHUB_TOKEN      token used when gh is not available
+#   GITHUB_TOKEN      optional token used when gh is not available
 
 set -euo pipefail
 
@@ -63,7 +65,9 @@ api() {
     curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
       -H 'Accept: application/vnd.github+json' "https://api.github.com/$1"
   else
-    fail "no GitHub access: run 'gh auth login' or set GITHUB_TOKEN (the repository is private)"
+    # The repository is public: the API answers without auth.
+    curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/$1" ||
+      fail "cannot reach the GitHub API (rate limited? set GITHUB_TOKEN or run 'gh auth login')"
   fi
 }
 
@@ -78,6 +82,17 @@ download_asset() {
   local tag="$1" name="$2" dest="$3"
   if gh_ready; then
     gh release download "$tag" -R "$REPO" -p "$name" -O "$dest" --clobber
+    return
+  fi
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    # No auth: download the public asset from its browser_download_url.
+    local url
+    url="$(api "repos/$REPO/releases/tags/$tag" |
+      grep -o '"browser_download_url": *"[^"]*"' |
+      sed 's/.*"\(https[^"]*\)"$/\1/' |
+      awk -v want="/$name" 'substr($0, length($0) - length(want) + 1) == want { print; exit }')"
+    [ -n "$url" ] || fail "release $tag has no asset $name"
+    curl -fsSL -o "$dest" "$url"
     return
   fi
   local id

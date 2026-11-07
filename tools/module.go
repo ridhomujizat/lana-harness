@@ -34,6 +34,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewJobList(),
 		NewJobKill(),
 		NewWebFetch(guard),
+		NewWebSearch(),
 		NewMemoryRead(),
 		NewMemoryWrite(),
 		NewSessionSearch(),

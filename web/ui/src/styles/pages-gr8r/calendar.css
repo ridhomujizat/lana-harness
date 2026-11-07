@@ -1,0 +1,1152 @@
+/* Calendar (spec #35). The month grid, week columns, chips and cards are
+   gr8r-studio's src/styles/views/calendar.css, ported as-is; the Day
+   timeline, Agenda, banners, habit strip, popover and forms are Lana's. */
+
+.cal-page {
+  min-height: 100%;
+}
+
+/* ---------- banners, habits, toolbar ---------- */
+.cal-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 var(--gutter) 10px;
+  padding: 8px 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.cal-banner.warn {
+  border-color: color-mix(in srgb, var(--amber) 35%, transparent);
+  background: var(--amber-soft);
+  color: var(--text);
+}
+.cal-banner.warn .i {
+  color: var(--amber);
+}
+.cal-banner.info .i {
+  color: var(--accent);
+}
+
+.cal-habits {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 var(--gutter) 10px;
+}
+.cal-habits-k {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-right: 4px;
+}
+.cal-habit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  max-width: 260px;
+  transition:
+    background var(--dur),
+    border-color var(--dur);
+}
+.cal-habit:hover {
+  border-color: var(--border-strong);
+}
+.cal-habit.on {
+  background: var(--green-soft);
+  border-color: color-mix(in srgb, var(--green) 35%, transparent);
+  color: var(--text);
+}
+.cal-habit.on .i {
+  color: var(--green);
+}
+.cal-habit-s {
+  font-size: var(--fs-xs);
+}
+
+.cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px var(--gutter);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.cal-toolbar .sp {
+  flex: 1;
+}
+.cal-label {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 4px;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.cal-filter-n {
+  margin-left: 2px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-2xs);
+  line-height: 18px;
+}
+.cal-new {
+  display: inline-flex;
+}
+
+.cal-body {
+  /* Grows with its content (agenda, tall weeks); the main area scrolls. */
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.cal-body.loading {
+  opacity: 0.6;
+}
+.cal-body.cal-month {
+  min-height: 640px;
+}
+.cal-body.cal-week {
+  min-height: 560px;
+}
+.cal-foot {
+  padding: 8px var(--gutter) 24px;
+  font-size: var(--fs-xs);
+}
+
+/* ---------- gr8r calendar (ported) ---------- */
+.cal {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.cal-h {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+.cal-h div {
+  padding: 8px 10px;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  font-weight: 500;
+}
+.cal-g {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: minmax(112px, 1fr);
+  flex: 1;
+}
+.cday {
+  border-right: 1px solid var(--divider);
+  border-bottom: 1px solid var(--divider);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  transition: background var(--dur);
+  position: relative;
+}
+.cday:nth-child(7n) {
+  border-right: 0;
+}
+.cday.out {
+  background: var(--sunken);
+}
+.cday.out .dn {
+  color: var(--text-3);
+}
+.cday.over {
+  background: var(--accent-soft);
+}
+.cday .dn {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.cday .dn:hover {
+  background: var(--surface-3);
+}
+.cday.today .dn {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.cday .add {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  opacity: 0;
+}
+.cday:hover .add,
+.cday .add:focus-visible {
+  opacity: 1;
+}
+.cev {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: var(--fs-xs);
+  background: color-mix(in srgb, var(--c) 11%, var(--surface));
+  color: var(--text);
+  cursor: pointer;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--c) 22%, transparent);
+  text-align: left;
+  width: 100%;
+  flex-shrink: 0;
+}
+.cev:hover {
+  background: color-mix(in srgb, var(--c) 18%, var(--surface));
+}
+.cev > .i {
+  color: var(--c);
+  flex-shrink: 0;
+}
+.cev .trunc {
+  flex: 1;
+}
+.cev.done {
+  opacity: 0.55;
+}
+.cev.done .trunc {
+  text-decoration: line-through;
+}
+.cev.event {
+  background: transparent;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+}
+.cev.missed {
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+}
+.cev .av {
+  --sz: 16px;
+  font-size: 7.5px;
+}
+.cev-t {
+  font-size: 11px;
+}
+.cev-streak {
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+.cmore {
+  font-size: var(--fs-2xs);
+  color: var(--text-2);
+  padding: 0 6px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.cmore:hover {
+  color: var(--text);
+}
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  flex: 1;
+  min-height: 0;
+}
+.wcol {
+  border-right: 1px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.wcol:last-child {
+  border-right: 0;
+}
+.wcol-h {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.wcol-h .sp {
+  flex: 1;
+}
+.wcol-h .n {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.wcol-h.today .n {
+  color: var(--accent);
+}
+.wcol-d {
+  font-size: 12px;
+}
+.wcol-b {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  overflow-y: auto;
+  transition: background var(--dur);
+}
+.wcol-b.over {
+  background: var(--accent-soft);
+}
+.wcol-all {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--divider);
+}
+.wcol-empty {
+  font-size: var(--fs-2xs);
+  color: var(--text-4);
+  padding: 2px;
+}
+.wcard {
+  border-radius: var(--r-sm);
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+}
+.wcard:hover {
+  border-color: var(--border-strong);
+}
+.wcard .t {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-weight: 500;
+  line-height: 1.3;
+  min-width: 0;
+}
+.wcard .t .pdot {
+  transform: translateY(-1px);
+}
+.wcard.event {
+  background: color-mix(in srgb, var(--c) 8%, var(--surface));
+}
+.wcard.slot {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--c) 45%, transparent);
+  background: var(--surface);
+}
+.wcard.done {
+  opacity: 0.6;
+}
+.wcard.done .t .trunc {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.wcard.missed {
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+}
+.wcard .m {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  min-width: 0;
+}
+.wcard .m > .i {
+  color: var(--c);
+  flex-shrink: 0;
+}
+.wcard .av {
+  --sz: 16px;
+  font-size: 7.5px;
+}
+
+/* ---------- day timeline ---------- */
+.cday-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.cday-all {
+  display: flex;
+  gap: 8px;
+  padding: 8px var(--gutter);
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+}
+.cday-all-k {
+  width: 52px;
+  flex-shrink: 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  padding-top: 4px;
+}
+.cday-all-b {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 4px;
+  min-height: 24px;
+  border-radius: var(--r-sm);
+  transition: background var(--dur);
+}
+.cday-all-b.over {
+  background: var(--accent-soft);
+}
+.cday-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 420px;
+  max-height: calc(100vh - 260px);
+}
+.cday-grid {
+  position: relative;
+  display: flex;
+  padding: 0 var(--gutter) 0 0;
+}
+.cday-hours {
+  position: relative;
+  width: calc(52px + var(--gutter));
+  flex-shrink: 0;
+}
+.cday-hours span {
+  position: absolute;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.cday-hours span:first-child {
+  transform: none;
+}
+.cday-lane {
+  position: relative;
+  flex: 1;
+  border-left: 1px solid var(--divider);
+  transition: background var(--dur);
+}
+.cday-lane.over {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.cday-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--divider);
+  pointer-events: none;
+}
+.cday-now {
+  position: absolute;
+  left: -4px;
+  right: 0;
+  border-top: 2px solid var(--red);
+  pointer-events: none;
+  z-index: 2;
+}
+.cday-now::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+}
+.cday-slot {
+  position: absolute;
+  display: flex;
+  z-index: 1;
+}
+.cday-slot .wcard {
+  height: 100%;
+  overflow: hidden;
+  padding: 4px 7px;
+  gap: 2px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- agenda ---------- */
+.cagenda {
+  padding: 8px var(--gutter) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cag-day {
+  display: flex;
+  flex-direction: column;
+}
+.cag-h {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+  margin: 0 0 4px;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--divider);
+}
+.cag-h.today {
+  color: var(--accent);
+}
+.cag-day.missed .cag-h {
+  color: var(--red);
+}
+.cag-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  width: 100%;
+}
+.cag-row:hover {
+  background: var(--surface-2);
+}
+.cag-row > .i {
+  color: var(--c);
+  flex-shrink: 0;
+}
+.cag-row.done .cag-title {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.cag-when {
+  width: 110px;
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.cag-src {
+  font-size: var(--fs-xs);
+}
+.cag-empty {
+  padding: 24px 0;
+}
+
+/* ---------- popover ---------- */
+.cpop {
+  padding: 0;
+}
+.cpop-h {
+  display: flex;
+  gap: 10px;
+  padding: 12px 12px 8px;
+  align-items: flex-start;
+}
+.cpop-ico {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--c) 14%, var(--surface));
+  color: var(--c);
+  flex-shrink: 0;
+}
+.cpop-t {
+  font-weight: 600;
+  font-size: var(--fs-md);
+  line-height: 1.3;
+  word-break: break-word;
+}
+.cpop-t.done {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.cpop-w {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin-top: 2px;
+}
+.cpop-b {
+  padding: 0 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cpop-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.cpop-line {
+  margin: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.cpop-line > .i {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.cpop-line .av {
+  --sz: 16px;
+  font-size: 7.5px;
+}
+.cpop-acts {
+  border-top: 1px solid var(--divider);
+  padding: 4px;
+}
+
+/* ---------- item editor ---------- */
+.cform .modal-b {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cform-kinds {
+  align-self: flex-start;
+}
+.cform-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.cform-row .field {
+  min-width: 120px;
+}
+.cform-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cform-action {
+  padding: 10px;
+  border-radius: var(--r);
+  background: var(--sunken);
+  border: 1px solid var(--divider);
+}
+.cform-err {
+  color: var(--red);
+  font-size: var(--fs-sm);
+  margin: 0;
+}
+.cform-toggle {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+.cform-days {
+  display: flex;
+  gap: 4px;
+}
+.cform-day {
+  width: 34px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.cform-day.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.cform-colors {
+  display: flex;
+  gap: 6px;
+  height: 32px;
+  align-items: center;
+}
+.cform-color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--c);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.cform-color.on {
+  box-shadow: 0 0 0 2px var(--c);
+}
+
+/* ---------- settings drawer ---------- */
+.cset-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.cset-sec:last-child {
+  border-bottom: 0;
+}
+.cset-sec p {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.cset-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cset-time {
+  width: 110px;
+}
+.cset-box {
+  padding: 10px;
+  border-radius: var(--r);
+  background: var(--sunken);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.cset-box .field {
+  width: 100%;
+}
+.cset-acc {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cset-cals {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.cset-cal {
+  display: grid;
+  grid-template-columns: 48px 1fr 130px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--divider);
+  font-size: var(--fs-sm);
+}
+.cset-cal-h {
+  border-top: 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+  background: var(--sunken);
+}
+
+/* ---------- phones ---------- */
+.cal-mday {
+  display: none;
+}
+
+/* ---------- phones ---------- */
+@media (max-width: 760px) {
+  /* Header: title and actions on one row; the subtitle goes. */
+  .cal-page > .ph {
+    flex-wrap: nowrap;
+    align-items: center;
+    padding-bottom: 8px;
+  }
+  .cal-page > .ph p {
+    display: none;
+  }
+  .cal-page > .ph .acts {
+    margin-left: auto;
+    width: auto;
+    flex-wrap: nowrap;
+  }
+  .cal-banner {
+    font-size: var(--fs-xs);
+    padding: 6px 10px;
+    gap: 8px;
+  }
+  .cal-habits {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-top: 2px;
+    min-height: 42px;
+    scrollbar-width: none;
+  }
+  .cal-habits-k {
+    display: none;
+  }
+  .cal-habit {
+    flex-shrink: 0;
+  }
+
+  /* Toolbar: period on top, then Today / arrows / Filter, then the views. */
+  .cal-toolbar {
+    row-gap: 6px;
+  }
+  .cal-label {
+    order: -1;
+    flex: 1 0 100%;
+    margin: 0;
+    font-size: var(--fs-md);
+  }
+  .cal-toolbar > .seg {
+    order: 10;
+    flex: 1 0 100%;
+    display: flex;
+  }
+  .cal-toolbar > .seg button {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Month: gr8r's colour bars; a tap picks the day, listed under the grid. */
+  .cal-body.cal-month {
+    min-height: 0;
+  }
+  .cal-g {
+    grid-auto-rows: minmax(64px, auto);
+  }
+  .cday {
+    padding: 4px 3px;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .cday .add {
+    display: none;
+  }
+  .cday .dn {
+    align-self: center;
+  }
+  .cday.picked {
+    background: var(--accent-soft);
+  }
+  .cal-g .cev {
+    height: 6px;
+    min-height: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 3px;
+    background: var(--c);
+    pointer-events: none;
+  }
+  .cal-g .cev > * {
+    display: none;
+  }
+  .cal-g .cev.done {
+    opacity: 0.35;
+  }
+  .cal-g .cmore {
+    font-size: 10px;
+    padding: 0;
+    text-align: center;
+    pointer-events: none;
+  }
+  .cal-mday {
+    display: block;
+    padding: 10px var(--gutter) 24px;
+  }
+  .cal-mday .cag-h .sp {
+    flex: 1;
+  }
+
+  /* Day and week keep the chip text that gr8r's phone rule hides. */
+  .cday-all-b .cev,
+  .wcol-all .cev {
+    height: 26px;
+    padding: 0 8px;
+  }
+  .cday-all-b .cev .trunc,
+  .wcol-all .cev .trunc {
+    display: block;
+  }
+  .cday-all-b .cev .av,
+  .wcol-all .cev .av {
+    display: inline-grid;
+  }
+  .cday-all-b {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cday-all-k {
+    width: 44px;
+  }
+  .cday-hours {
+    width: calc(44px + var(--gutter));
+  }
+  .cday-scroll {
+    max-height: calc(100dvh - 180px);
+    min-height: 360px;
+  }
+
+  /* Week: one day under the other; empty days stay short. */
+  .week {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wcol {
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+  }
+  .wcol-h {
+    padding: 8px var(--gutter);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+  }
+  .wcol-h .n {
+    font-size: var(--fs-lg);
+  }
+  .wcol-b {
+    padding: 6px var(--gutter) 10px;
+    overflow: visible;
+  }
+  .wcol-empty {
+    display: none;
+  }
+  .wcol-b:empty,
+  .wcol-b:not(:has(> *:not(.wcol-empty))) {
+    padding: 0;
+  }
+
+  /* Agenda rows. */
+  .cag-when {
+    width: 72px;
+  }
+  .cag-src {
+    display: none;
+  }
+
+  /* Drawer: full screen, narrower labels, controls wrap. */
+  .cdr .drawer-b {
+    padding: 16px 16px 28px;
+  }
+  .cdr .kv {
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+  .cdr-kv .cdr-sel {
+    min-width: 0;
+    width: 100%;
+  }
+  .cdr-bar {
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .cdr-kind {
+    max-width: 50vw;
+  }
+  .cset-cal {
+    grid-template-columns: 40px 1fr 90px;
+  }
+}
+
+.cset-h {
+  font-size: var(--fs);
+  font-weight: 600;
+  margin: 0;
+}
+
+/* ---------- entry drawer (gr8r task drawer) ---------- */
+.kv {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  row-gap: 2px;
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+.kv > dt {
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  margin: 0;
+}
+.kv > dd {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-height: 30px;
+}
+.kv > dt .i {
+  color: var(--text-4);
+}
+.drawer.full .cdr-kv {
+  grid-template-columns: 112px minmax(0, 1fr) 112px minmax(0, 1fr);
+}
+.cdr-kind {
+  font-size: 12.5px;
+}
+.cdr-kind .pdot {
+  background: var(--c);
+}
+.cdr-kind .i {
+  color: var(--c);
+}
+.cdr-done {
+  color: var(--green);
+}
+.cdr-alert {
+  margin-bottom: 12px;
+}
+.cdr-ttl {
+  margin: 0 -6px;
+  cursor: default;
+}
+.cdr-ttl:hover {
+  background: transparent;
+}
+.cdr-ttl.done {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+.cdr-kv {
+  margin-top: 12px;
+}
+.cdr-kv dd .av {
+  --sz: 18px;
+  font-size: 8px;
+}
+.cdr-notes {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+}
+.cdr-hint {
+  margin: 0 0 10px;
+  font-size: var(--fs-sm);
+}
+.cdr-open {
+  margin-left: 8px;
+  font-size: var(--fs-xs);
+}
+.cdr .act-line time {
+  font-size: 11.5px;
+}
+.cal-body .sel {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 3.5px var(--c, var(--accent));
+}
+.cdr button.link,
+.cdr a.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cdr .link:hover {
+  text-decoration: underline;
+}
+.cdr textarea.ttl-edit {
+  field-sizing: content;
+  min-height: 0;
+}
+
+/* ---------- inline editing in the drawer ---------- */
+.cdr-form {
+  display: flex;
+  flex-direction: column;
+}
+.cdr-kv .input.cdr-in {
+  height: 28px;
+  width: auto;
+  padding: 0 8px;
+  font-size: var(--fs-sm);
+}
+.cdr-kv .cdr-time {
+  width: 104px;
+}
+.cdr-kv .cdr-sel {
+  min-width: 180px;
+  width: auto;
+}
+.cdr-kv > dd {
+  padding: 2px 0;
+  gap: 6px;
+}
+.cdr-allday {
+  margin-left: 6px;
+}
+.cdr-err {
+  width: 100%;
+  font-size: var(--fs-xs);
+}
+.cdr-action {
+  margin-top: 10px;
+}
+.cdr-series {
+  margin-top: 10px;
+}
+.cdr-notes-ro {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: var(--fs-sm);
+}
+/* The save bar sits on the drawer's bottom edge (the drawer is fixed, so it
+   is the containing block); the body gets room so nothing hides under it. */
+.cdr-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 24px -18px rgba(0, 0, 0, 0.35);
+  font-size: var(--fs-sm);
+  z-index: 3;
+  animation: riseIn 0.2s var(--ease) both;
+}
+.drawer.full .cdr-bar {
+  padding: 10px 48px;
+  border-radius: 0 0 12px 12px;
+}
+.cdr:has(.cdr-bar) .drawer-b {
+  padding-bottom: 80px;
+}

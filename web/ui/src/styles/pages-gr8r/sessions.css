@@ -143,3 +143,48 @@
   color: var(--text-3);
   font-size: var(--fs-xs);
 }
+
+/* Phones: the list and the open session are separate screens. */
+.sessions-back {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .sessions-workspace.has-detail > .sessions-pane,
+  .sessions-workspace:not(.has-detail) > .sessions-chat-pane {
+    display: none;
+  }
+  .sessions-workspace.has-detail > .sessions-chat-pane {
+    min-height: calc(100dvh - var(--topbar-h, 48px));
+  }
+  .sessions-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px var(--gutter) 0;
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    text-decoration: none;
+  }
+  .sessions-items-scroll {
+    max-height: none;
+  }
+}
+
+/* Agent picker (new session): the Gr8r search input draws its own border and
+   focus ring, so the legacy wrapper keeps only the spacing and divider. The
+   count sat beside the old bare input; with the boxed input it fell onto its
+   own line, so it is dropped (the list shows the groups and items). */
+.agent-picker-search,
+.agent-picker-search:focus-within {
+  outline: none;
+}
+.agent-picker-search {
+  padding: 8px;
+}
+.agent-picker-search .input {
+  width: 100%;
+}
+.agent-picker-count {
+  display: none;
+}
