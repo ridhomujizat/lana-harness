@@ -45,7 +45,8 @@ interface NavSection {
 /* Home and Chats sit under "Workspace" (owner request 2026-11-02, replacing
    the untitled group of REQ-ROOM-012); Observe and Configure group the rest.
    History is the existing Sessions page. Workflows (spec #33) and Calendar
-   (spec #35) sit in the Workspace group. Settings lives in the sidebar footer. */
+   (spec #35) sit in the Workspace group. Router (spec 37, API-RTR-017) leads
+   the Configure group. Settings lives in the sidebar footer. */
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Workspace",
@@ -67,6 +68,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Configure",
     items: [
+      { key: "router", label: "Router", icon: "route", href: "#/router" },
       { key: "agents", label: "Agents", icon: "bot", href: "#/agents" },
       { key: "knowledge", label: "Knowledge", icon: "book-open", href: "#/knowledge" },
       { key: "skills", label: "Skills", icon: "sparkles", href: "#/skills" },

@@ -6,7 +6,9 @@ import { duplicateAgent, listAgents, updateAgent } from "../api/agents";
 import type { Agent, AgentWriteFields } from "../api/agents";
 import { getModels } from "../api/models";
 import type { CatalogEffort, CatalogModel } from "../api/models";
-import { getConfig, listProviders } from "../api/settings";
+import { getConfig } from "../api/settings";
+import { getRouter } from "../api/router";
+import type { RouterChoice } from "../api/router";
 import type { ConfigAgent } from "../api/settings";
 import { createSession } from "../api/sessions";
 import { Dialog, detailText, useAnnounce } from "../ui/ui";
@@ -16,14 +18,23 @@ import {
   rosterNames,
   splitModel,
   splitTarget,
+  CLAUDE_RUNTIME,
+  engineLabel,
   normalizePermission,
-  providerLabel,
   agentHref,
   sessionSummary,
   presenceTone,
 } from "./agent-common";
 import type { AgentLike, Permission } from "./agent-common";
 import { AgentOverview } from "./agent-overview";
+import {
+  CLAUDE_AUTH,
+  CLAUDE_EFFORTS,
+  ClaudeModelControl,
+  RuntimeChoice,
+  choiceOptions,
+} from "./agent-runtime";
+import type { RuntimeValue } from "./agent-runtime";
 import { gr8rColor, useRooms } from "./presence";
 import { DEFAULT_AGENT_TAB } from "../app/router";
 import { PersonaTab } from "./agent-tabs/persona";
@@ -44,8 +55,10 @@ import {
   Select,
   Skeleton,
   Tabs,
+  Textarea,
   Toggle,
 } from "../ui/gr8r";
+import type { SelectOption } from "../ui/gr8r";
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
    tab. The other tabs show a placeholder until their slices land (T-030). */
@@ -77,6 +90,12 @@ const TABS: readonly TabEntry[] = [
 ];
 
 type GeneralKey =
+  | "runtime"
+  | "auth"
+  | "api_key_env"
+  | "binary"
+  | "allow_scheduled"
+  | "description"
   | "title"
   | "color"
   | "provider"
@@ -90,6 +109,12 @@ type GeneralKey =
   | "workspace_only";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
+  "runtime",
+  "auth",
+  "api_key_env",
+  "binary",
+  "allow_scheduled",
+  "description",
   "title",
   "color",
   "provider",
@@ -139,7 +164,23 @@ const PERMISSIONS: readonly PermissionOption[] = [
   },
 ];
 
+/* Spec 38: tabs that do not apply to a Claude Agent (its tools, skills, and
+   MCP come from Claude Code itself). */
+const CLAUDE_HIDDEN_TABS: readonly TabId[] = ["persona", "tools", "skills", "mcp"];
+
+/* Spec 37: the model picker values that are not router choices. */
+const OTHER_MODEL = "__other__";
+const LEGACY_MODEL = "__legacy__";
+
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 interface AgentValues {
+  runtime: RuntimeValue;
+  auth: string;
+  api_key_env: string;
+  binary: string;
+  allow_scheduled: boolean;
+  description: string;
   title: string;
   color: string;
   provider: string;
@@ -154,6 +195,12 @@ interface AgentValues {
 }
 
 interface AgentForm {
+  runtime: RuntimeValue;
+  auth: string;
+  api_key_env: string;
+  binary: string;
+  allow_scheduled: boolean;
+  description: string;
   title: string;
   color: string;
   provider: string;
@@ -175,7 +222,8 @@ interface FallbackDraft {
 interface AgentDetailData {
   agent: Agent | null;
   agents: Agent[];
-  providers: string[];
+  /* GET /v1/router choices: combos, then models by provider (spec 37). */
+  choices: RouterChoice[];
   /* The configured tool list, so General can gate the memory toggle. */
   tools: string[];
 }
@@ -240,15 +288,25 @@ function sessionModel(agent: AgentLike | null | undefined): string {
   return "";
 }
 
+function normalizeRuntime(value: unknown): RuntimeValue {
+  return value === CLAUDE_RUNTIME ? CLAUDE_RUNTIME : "";
+}
+
 function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
   const record = configAgent || {};
   const parts = splitModel(agent);
   return {
+    runtime: normalizeRuntime(pickText(record.runtime, agent.runtime)),
+    auth: pickText(record.auth) || "subscription",
+    api_key_env: pickText(record.api_key_env),
+    binary: pickText(record.binary),
+    allow_scheduled: record.allow_scheduled === true,
+    description: pickText(record.description, agent.description),
     title: pickText(record.title, agent.title),
     color: normalizeColor(pickText(record.color, agent.color)),
     provider: pickText(record.provider, agent.provider, parts.provider),
     model: pickText(record.model, parts.model),
-    reasoning_effort: pickText(agent.reasoning_effort),
+    reasoning_effort: pickText(record.reasoning_effort, agent.reasoning_effort),
     fallback: Array.isArray(record.fallback)
       ? record.fallback.map((target) => String(target))
       : [],
@@ -266,6 +324,12 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
 
 function formValues(initial: AgentValues): AgentForm {
   return {
+    runtime: initial.runtime,
+    auth: initial.auth || "subscription",
+    api_key_env: initial.api_key_env || "",
+    binary: initial.binary || "",
+    allow_scheduled: initial.allow_scheduled === true,
+    description: initial.description || "",
     title: initial.title || "",
     color: normalizeColor(initial.color),
     provider: initial.provider || "",
@@ -282,6 +346,12 @@ function formValues(initial: AgentValues): AgentForm {
 
 function canonical(form: AgentForm): AgentValues {
   return {
+    runtime: normalizeRuntime(form.runtime),
+    auth: form.auth || "subscription",
+    api_key_env: String(form.api_key_env || "").trim(),
+    binary: String(form.binary || "").trim(),
+    allow_scheduled: form.allow_scheduled === true,
+    description: String(form.description || "").trim(),
     title: String(form.title || "").trim(),
     color: normalizeColor(form.color),
     provider: form.provider || "",
@@ -342,6 +412,13 @@ function validateForm(form: AgentForm, baseline: AgentValues): string {
     }
   }
 
+  if (form.runtime === CLAUDE_RUNTIME) {
+    if (form.auth === "api_key" && !ENV_NAME_RE.test(String(form.api_key_env || "").trim())) {
+      return "Enter the env variable that holds the API key, for example ANTHROPIC_API_KEY.";
+    }
+    return "";
+  }
+
   for (const target of form.fallback) {
     const parts = splitTarget(target);
     if (!parts.provider || !parts.model) {
@@ -363,7 +440,19 @@ function nextDuplicateName(source: string, agents: AgentLike[]): string {
 function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
   const patch: AgentWriteFields = {};
   for (const key of keys) {
-    if (key === "title") {
+    if (key === "runtime") {
+      patch.runtime = current.runtime;
+    } else if (key === "auth") {
+      patch.auth = current.auth;
+    } else if (key === "api_key_env") {
+      patch.api_key_env = current.api_key_env;
+    } else if (key === "binary") {
+      patch.binary = current.binary;
+    } else if (key === "allow_scheduled") {
+      patch.allow_scheduled = current.allow_scheduled;
+    } else if (key === "description") {
+      patch.description = current.description;
+    } else if (key === "title") {
       patch.title = current.title;
     } else if (key === "color") {
       patch.color = current.color;
@@ -555,9 +644,9 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     Promise.all([
       listAgents(),
       getConfig().catch(() => null),
-      listProviders().catch(() => null),
+      getRouter().catch(() => null),
     ])
-      .then(([agentPage, config, providerPage]) => {
+      .then(([agentPage, config, routerPage]) => {
         if (!alive) {
           return;
         }
@@ -566,15 +655,12 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         const agent = rows.find((row) => row.name === agentName) || null;
         const settings = config && config.settings ? config.settings : null;
         const configAgent: ConfigAgent = settings?.agents?.[agentName] ?? {};
-        const providers = (providerPage?.providers ?? [])
-          .map((provider) => provider && provider.name)
-          .filter((value): value is string => Boolean(value))
-          .sort();
+        const choices = routerPage ? routerPage.choices : [];
         const initial = agent ? initialValues(agent, configAgent) : null;
         const tools = Array.isArray(configAgent.tools)
           ? configAgent.tools.map((tool) => String(tool))
           : [];
-        setPage({ agent, agents: rows, providers, tools });
+        setPage({ agent, agents: rows, choices, tools });
         setVersion(config && config.version ? String(config.version) : "");
         if (initial) {
           const values = formValues(initial);
@@ -598,8 +684,19 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     };
   }, [agentName, reloadToken, announce]);
 
+  /* Spec 38: a Claude Agent has no persona, tools, skills, or MCP tabs. */
+  const claudeAgent = Boolean(
+    page && page.agent && page.agent.runtime === CLAUDE_RUNTIME
+  );
+  const tabs = useMemo(
+    () =>
+      claudeAgent
+        ? TABS.filter((item) => !CLAUDE_HIDDEN_TABS.includes(item.id))
+        : TABS,
+    [claudeAgent]
+  );
   const activeTab: TabId =
-    TABS.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
+    tabs.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
 
   /* The tab bar keeps its focus when a hash change reloads the route. */
   useEffect(() => {
@@ -617,15 +714,29 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
 
   const dirty = useMemo(() => dirtyKeys(form, baseline), [form, baseline]);
 
-  const providerOptions = useMemo(() => {
-    const names = new Set<string>(page && page.providers ? page.providers : []);
-    if (baseline && baseline.provider) {
-      names.add(baseline.provider);
-    }
-    return Array.from(names).sort();
-  }, [page, baseline]);
-
-  const provider = form && form.provider ? form.provider : "";
+  const choices = useMemo(() => (page ? page.choices : []), [page]);
+  const isClaudeForm = Boolean(form && form.runtime === CLAUDE_RUNTIME);
+  const legacy = Boolean(form && form.provider);
+  const formModel = form ? form.model : "";
+  const knownChoice = choices.some((choice) => choice.value === formModel);
+  const isCombo = choices.some(
+    (choice) => choice.group === "Combos" && choice.value === formModel
+  );
+  /* A router address names its provider before the first slash; a combo
+     has none, so it shows no catalog (REQ-MDL-020 keeps the Thinking menu). */
+  const slash = formModel.indexOf("/");
+  const addressProvider =
+    !legacy && !isCombo && slash > 0 ? formModel.slice(0, slash) : "";
+  const provider = isClaudeForm
+    ? ""
+    : legacy && form
+      ? form.provider
+      : addressProvider;
+  const catalogId = legacy
+    ? formModel
+    : addressProvider
+      ? formModel.slice(slash + 1)
+      : "";
 
   /* REQ-MDL-020: the model picker lists the catalog of the agent's provider.
      The provider's base URL decides the catalog on the daemon side. */
@@ -658,11 +769,13 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
 
   /* A model that is not in the catalog stays selected through the free-text
      field, so a save never drops it. */
-  const selectedCatalogModel = form
-    ? catalog.find((model) => model.id === form.model) || null
+  const selectedCatalogModel = catalogId
+    ? catalog.find((model) => model.id === catalogId) || null
     : null;
+  /* A non-legacy model that is not a router choice stays in the free-text
+     field, so a save never drops it. */
   const customModel = Boolean(
-    otherModel || (form && form.model !== "" && !selectedCatalogModel)
+    !legacy && (otherModel || (formModel !== "" && !knownChoice))
   );
   const thinkingModel = Boolean(selectedCatalogModel && selectedCatalogModel.thinking);
   const legacyReplacement =
@@ -693,6 +806,53 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setReloadToken((current) => current + 1);
   }
 
+  /* Spec 37 (AC-RTR-024): picking a router choice writes model and clears a
+     legacy provider; the legacy entry restores the saved pair. */
+  function pickModel(value: string) {
+    if (!form || !baseline) {
+      return;
+    }
+    setSaveNotice("");
+    if (!stale) {
+      setError("");
+      setDetails([]);
+    }
+    if (value === OTHER_MODEL) {
+      setOtherModel(true);
+      setForm({ ...form, provider: "" });
+      return;
+    }
+    setOtherModel(false);
+    if (value === LEGACY_MODEL) {
+      setForm({ ...form, provider: baseline.provider, model: baseline.model });
+      return;
+    }
+    setForm({ ...form, provider: "", model: value });
+  }
+
+  /* Spec 38: switching the runtime starts the model from the saved value of
+     that runtime, or empty (Claude Code's default). */
+  function pickRuntime(next: RuntimeValue) {
+    if (!form || !baseline) {
+      return;
+    }
+    const back = next === baseline.runtime;
+    setOtherModel(false);
+    setForm({
+      ...form,
+      runtime: next,
+      provider: back ? baseline.provider : "",
+      model: back ? baseline.model : "",
+      reasoning_effort: back ? baseline.reasoning_effort : "",
+      fallback:
+        next === CLAUDE_RUNTIME
+          ? []
+          : back
+            ? baseline.fallback.slice()
+            : form.fallback,
+    });
+  }
+
   function resetForm() {
     if (!baseline) {
       return;
@@ -707,7 +867,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   }
 
   function activateTab(id: string, focus: boolean) {
-    const next = TABS.find((item) => item.id === id);
+    const next = tabs.find((item) => item.id === id);
     if (!next) {
       return;
     }
@@ -753,7 +913,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       next = nodes.length - 1;
     }
     event.preventDefault();
-    const target = TABS[next];
+    const target = tabs[next];
     if (!target) {
       return;
     }
@@ -1014,13 +1174,32 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const row = byName[agent.name];
   const presence = row ? row.presence : null;
   const activeLabel =
-    TABS.find((item) => item.id === activeTab)?.label || "Agent";
+    tabs.find((item) => item.id === activeTab)?.label || "Agent";
 
-  const modelOptions = [
-    { value: "", label: "Provider default" },
-    ...catalog.map((model) => ({ value: model.id, label: model.name })),
-    { value: "__other__", label: "Other…" },
+  const legacyName = selectedCatalogModel
+    ? selectedCatalogModel.name
+    : form
+      ? form.model
+      : "";
+  const modelOptions: SelectOption[] = [
+    ...(form && !form.model && !legacy ? [{ value: "", label: "Not set" }] : []),
+    ...(legacy && form
+      ? [
+          {
+            value: LEGACY_MODEL,
+            label: (legacyName || "Provider default") + " · " + form.provider,
+            group: "Current",
+          },
+        ]
+      : []),
+    ...choiceOptions(choices),
+    { value: OTHER_MODEL, label: "Other…" },
   ];
+  const modelValue = legacy
+    ? LEGACY_MODEL
+    : customModel
+      ? OTHER_MODEL
+      : formModel;
   const thinkingOptions = [
     { value: "", label: "Model default" },
     ...efforts.map((effort) => ({
@@ -1037,7 +1216,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         value={activeTab}
         onChange={(value) => activateTab(value, false)}
         onKeyDown={handleTabKeyDown}
-        items={TABS.map((item) => ({ value: item.id, label: item.label }))}
+        items={tabs.map((item) => ({ value: item.id, label: item.label }))}
       />
     </div>
   );
@@ -1071,6 +1250,11 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               <div className="agent-detail-name-row">
                 <h1 className="agent-detail-name">{agent.name}</h1>
                 <Badge>{agent.title || "Agent"}</Badge>
+                {engineLabel(agent) ? (
+                  <Badge tone="violet" className="rt-engine">
+                    {engineLabel(agent)}
+                  </Badge>
+                ) : null}
                 {agent.default ? (
                   <Badge tone="accent" dot>
                     Default
@@ -1240,62 +1424,197 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                   ) : null}
                 </div>
               </div>
+              {isClaudeForm ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-description">
+                      Description
+                    </label>
+                    <div className="d">What this agent is for.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Textarea
+                      id="agent-description"
+                      rows={2}
+                      value={form.description}
+                      disabled={saving}
+                      onChange={(event) =>
+                        updateField("description", event.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+              ) : null}
             </section>
 
-            <section className="sblock" aria-labelledby="agent-model-title">
-              <h2 id="agent-model-title">Model</h2>
+            <section className="sblock" aria-labelledby="agent-runtime-title">
+              <h2 id="agent-runtime-title">Runtime</h2>
               <div className="srow">
                 <div className="agent-srow-text">
-                  <label className="t" htmlFor="agent-provider">
-                    Provider
-                  </label>
-                  <div className="d">Where the model is served from.</div>
+                  <span className="t" id="agent-runtime-label">
+                    Engine
+                  </span>
+                  <div className="d">
+                    Who runs the turns: lana&rsquo;s own loop, or Claude Code on
+                    this machine.
+                  </div>
                 </div>
-                <div className="agent-ctl">
-                  <Select
-                    id="agent-provider"
-                    aria-label="Provider"
-                    value={form.provider}
+                <div className="agent-ctl agent-ctl-wide">
+                  <RuntimeChoice
+                    name="agent-runtime"
+                    labelledBy="agent-runtime-label"
+                    value={form.runtime}
                     disabled={saving}
-                    options={[
-                      { value: "", label: "Not set" },
-                      ...providerOptions.map((name) => ({
-                        value: name,
-                        label: providerLabel(name),
-                      })),
-                    ]}
-                    onChange={(value) => {
-                      setOtherModel(false);
-                      updateField("provider", value);
-                    }}
+                    onChange={pickRuntime}
                   />
                 </div>
               </div>
+            </section>
 
+            {isClaudeForm ? (
+              <section className="sblock" aria-labelledby="agent-claude-title">
+                <h2 id="agent-claude-title">Claude Code</h2>
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-claude-model">
+                      Model
+                    </label>
+                    <div className="d">Passed to Claude Code as --model.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <ClaudeModelControl
+                      id="agent-claude-model"
+                      value={form.model}
+                      disabled={saving}
+                      onChange={(value) => updateField("model", value)}
+                    />
+                  </div>
+                </div>
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-claude-effort">
+                      Reasoning effort
+                    </label>
+                    <div className="d">Passed to Claude Code as --effort.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Select
+                      id="agent-claude-effort"
+                      aria-label="Reasoning effort"
+                      value={form.reasoning_effort}
+                      disabled={saving}
+                      options={CLAUDE_EFFORTS}
+                      onChange={(value) => updateField("reasoning_effort", value)}
+                    />
+                  </div>
+                </div>
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-claude-auth">
+                      Sign-in
+                    </label>
+                    <div className="d">
+                      {CLAUDE_AUTH.find((entry) => entry.value === form.auth)?.note ||
+                        "How Claude Code is billed."}
+                    </div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Select
+                      id="agent-claude-auth"
+                      aria-label="Sign-in"
+                      value={form.auth}
+                      disabled={saving}
+                      options={CLAUDE_AUTH.map((entry) => ({
+                        value: entry.value,
+                        label: entry.title,
+                      }))}
+                      onChange={(value) => updateField("auth", value)}
+                    />
+                    {form.auth === "api_key" ? (
+                      <Input
+                        className="mono"
+                        aria-label="API key variable"
+                        placeholder="ANTHROPIC_API_KEY"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={form.api_key_env}
+                        disabled={saving}
+                        onChange={(event) =>
+                          updateField("api_key_env", event.target.value)
+                        }
+                      />
+                    ) : null}
+                  </div>
+                </div>
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-claude-binary">
+                      Binary
+                    </label>
+                    <div className="d">Leave empty to use claude from PATH.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Input
+                      id="agent-claude-binary"
+                      className="mono"
+                      placeholder="claude"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={form.binary}
+                      disabled={saving}
+                      onChange={(event) => updateField("binary", event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <span className="t" id="agent-claude-scheduled-label">
+                      Allow scheduled runs
+                    </span>
+                    <div className="d">
+                      When off, schedules and workflows cannot start this agent
+                      unattended.
+                    </div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Toggle
+                      aria-labelledby="agent-claude-scheduled-label"
+                      checked={form.allow_scheduled}
+                      disabled={saving}
+                      onChange={(checked) => updateField("allow_scheduled", checked)}
+                    />
+                  </div>
+                </div>
+                <p className="hint agent-claude-login">
+                  Claude Code signs in on its own: run <code>claude</code> in a
+                  terminal, then <code>/login</code>. The Router page shows the
+                  login state.
+                </p>
+              </section>
+            ) : null}
+
+            {!isClaudeForm ? (
+            <section className="sblock" aria-labelledby="agent-model-title">
+              <h2 id="agent-model-title">Model</h2>
               <div className="srow">
                 <div className="agent-srow-text">
                   <label className="t" htmlFor="agent-model-select">
                     Model
                   </label>
                   <div className="d">
-                    The model this agent uses. Fallbacks run when it fails.
+                    A combo or a model from the{" "}
+                    <a href="#/router/models">router</a>. Fallbacks run when it
+                    fails.
                   </div>
                 </div>
                 <div className="agent-ctl">
                   <Select
                     id="agent-model-select"
                     aria-label="Model"
-                    value={customModel ? "__other__" : form.model}
+                    value={modelValue}
                     disabled={saving}
                     options={modelOptions}
-                    onChange={(value) => {
-                      if (value === "__other__") {
-                        setOtherModel(true);
-                        return;
-                      }
-                      setOtherModel(false);
-                      updateField("model", value);
-                    }}
+                    onChange={pickModel}
                   />
                   {customModel ? (
                     <Input
@@ -1303,7 +1622,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                       className="mono"
                       type="text"
                       aria-label="Custom model id"
-                      placeholder="model id"
+                      placeholder="combo or provider/model"
                       autoComplete="off"
                       spellCheck={false}
                       value={form.model}
@@ -1357,7 +1676,12 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                         disabled={saving}
                         onClick={() => {
                           setOtherModel(false);
-                          updateField("model", legacyReplacement);
+                          updateField(
+                            "model",
+                            legacy
+                              ? legacyReplacement
+                              : provider + "/" + legacyReplacement
+                          );
                         }}
                       >
                         {"Switch to " + legacyReplacement}
@@ -1478,6 +1802,8 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
+            ) : null}
+
             <section
               className="sblock"
               aria-labelledby="agent-permission-title"
@@ -1534,6 +1860,8 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
+            {!isClaudeForm ? (
+            <>
             <section className="sblock" aria-labelledby="agent-limits-title">
               <h2 id="agent-limits-title">Limits</h2>
               <div className="srow">
@@ -1611,7 +1939,10 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
-            {page && page.tools.includes("memory_write") ? (
+            </>
+            ) : null}
+
+            {!isClaudeForm && page && page.tools.includes("memory_write") ? (
               <section
                 className="sblock"
                 aria-labelledby="agent-memory-title"

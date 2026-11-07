@@ -13,6 +13,8 @@ import type {
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
+import { COMBOS_GROUP, getRouter } from "../api/router";
+import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
 import type { ApprovalEvent } from "../api/approvals";
@@ -352,18 +354,25 @@ function ModelMenuContent({
   agentModel,
   provider,
   models,
+  choices,
   onPick,
 }: {
   current: string;
   agentModel: string;
   provider: string;
   models: CatalogModel[];
+  /* Spec 37 (REQ-RTR-018): the router choices, combos first. When they are
+     known they replace the one-provider catalog list. */
+  choices: RouterChoice[];
   onPick: (value: string) => void;
 }) {
+  const routed = choices.length > 0;
   const [custom, setCustom] = useState("");
   const options: { value: string; label: string; meta: string }[] = [];
   const currentId = shortModel(current);
-  const currentInCatalog = models.some((model) => model.id === currentId);
+  const currentInCatalog = routed
+    ? choices.some((choice) => choice.value === current)
+    : models.some((model) => model.id === currentId);
   if (current && !currentInCatalog) {
     options.push({
       value: current,
@@ -415,7 +424,8 @@ function ModelMenuContent({
           ) : null}
         </button>
       ))}
-      {models.map((model) => {
+      {routed ? <RouterChoiceItems choices={choices} current={current} onPick={onPick} /> : null}
+      {(routed ? [] : models).map((model) => {
         const value = provider ? provider + ":" + model.id : model.id;
         return (
           <button
@@ -445,8 +455,8 @@ function ModelMenuContent({
         <Input
           type="text"
           className="mi-custom-input"
-          aria-label="Custom model as provider:model"
-          placeholder="provider:model"
+          aria-label={routed ? "Custom model: a combo, provider/model, or provider:model" : "Custom model as provider:model"}
+          placeholder={routed ? "combo or provider/model" : "provider:model"}
           value={custom}
           onChange={(event) => setCustom(event.target.value)}
         />
@@ -454,6 +464,63 @@ function ModelMenuContent({
           Set
         </Button>
       </form>
+    </>
+  );
+}
+
+/* The router choices grouped as the agent picker shows them: combos, then
+   each provider's models under its name. */
+function RouterChoiceItems({
+  choices,
+  current,
+  onPick,
+}: {
+  choices: RouterChoice[];
+  current: string;
+  onPick: (value: string) => void;
+}) {
+  const groups: string[] = [];
+  if (choices.some((choice) => choice.group === COMBOS_GROUP)) {
+    groups.push(COMBOS_GROUP);
+  }
+  for (const choice of choices) {
+    if (!groups.includes(choice.group)) {
+      groups.push(choice.group);
+    }
+  }
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group} role="group" aria-label={group}>
+          <p className="mh" aria-hidden="true">
+            {group}
+          </p>
+          {choices
+            .filter((choice) => choice.group === group)
+            .map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                role="menuitemradio"
+                className="mi"
+                aria-checked={choice.value === current}
+                onClick={() => onPick(choice.value)}
+              >
+                <span className="mi-text">
+                  <span className="mi-name">{choice.label || choice.value}</span>
+                  {choice.label && choice.label !== choice.value ? (
+                    <span className="mi-meta">{choice.value}</span>
+                  ) : null}
+                </span>
+                {choice.value === current ? (
+                  <span className="ck">
+                    <Ic name="check" size={14} />
+                  </span>
+                ) : null}
+              </button>
+            ))}
+        </div>
+      ))}
     </>
   );
 }
@@ -653,6 +720,7 @@ function Composer({
     models: CatalogModel[];
     efforts: CatalogEffort[];
   }>({ provider: "", models: [], efforts: [] });
+  const [choices, setChoices] = useState<RouterChoice[]>([]);
   const plusRef = useRef<HTMLSpanElement>(null);
   const modelRef = useRef<HTMLSpanElement>(null);
   const thinkingRef = useRef<HTMLSpanElement>(null);
@@ -680,15 +748,45 @@ function Composer({
     teamSession && team && team.name ? String(team.name) : agent || "agent";
   const busySession = readOnly || turnRunning;
 
+  /* Spec 37: the session model menu offers the router choices. */
+  useEffect(() => {
+    let cancelled = false;
+    getRouter()
+      .then((data) => {
+        if (!cancelled) {
+          setChoices(Array.isArray(data.choices) ? data.choices : []);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   /* The provider of the current model, or the agent's provider when the
-     session has none. It keys the catalog fetch of REQ-MDL-020. */
+     session has none. It keys the catalog fetch of REQ-MDL-020. A router
+     address "provider/model" names its provider before the slash; a combo
+     names none. */
   const modelProvider = useMemo(() => {
-    const fromModel = modelValue ? String(modelValue).split(":")[0] : "";
+    const text = modelValue ? String(modelValue) : "";
+    const colon = text.indexOf(":");
+    const slash = text.indexOf("/");
+    const isCombo = choices.some(
+      (choice) => choice.group === COMBOS_GROUP && choice.value === text
+    );
+    const fromModel =
+      colon > 0
+        ? text.slice(0, colon)
+        : slash > 0 && !isCombo
+          ? text.slice(0, slash)
+          : isCombo
+            ? ""
+            : text;
     if (fromModel) {
       return fromModel;
     }
     return agentEntry && agentEntry.provider ? agentEntry.provider : "";
-  }, [modelValue, agentEntry]);
+  }, [modelValue, agentEntry, choices]);
 
   useEffect(() => {
     if (!modelProvider) {
@@ -724,8 +822,12 @@ function Composer({
   const efforts =
     catalogState.provider === modelProvider ? catalogState.efforts : [];
 
+  const catalogId =
+    modelProvider && String(modelValue || "").startsWith(modelProvider + "/")
+      ? String(modelValue).slice(modelProvider.length + 1)
+      : shortModel(modelValue);
   const currentEntry =
-    catalog.find((entry) => entry.id === shortModel(modelValue)) || null;
+    catalog.find((entry) => entry.id === catalogId) || null;
   const thinksModel = Boolean(!teamSession && currentEntry && currentEntry.thinking);
   const effortLabel = reasoningEffort
     ? "Thinking: " + effortName(reasoningEffort)
@@ -927,6 +1029,7 @@ function Composer({
                       agentModel={agentModel}
                       provider={modelProvider}
                       models={catalog}
+                      choices={choices}
                       onPick={pickModel}
                     />
                   </Menu>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TABS,
   LEGACY_SETTINGS_TABS,
+  ROUTER_TABS,
   ROUTE_TABLE,
   SETTINGS_TABS,
   SETUP_STEPS,
@@ -16,6 +17,8 @@ const ROUTES = [
   "#/sessions",
   "#/sessions/new",
   "#/sessions/{id}",
+  "#/router",
+  "#/router/{tab}",
   "#/agents",
   "#/agents/{name}/{tab}",
   "#/skills",
@@ -137,5 +140,30 @@ describe("route table", () => {
     const history = parseRoute("#/history");
     expect(history.view).toBe("sessions");
     expect(history.section).toBe("sessions");
+  });
+
+  /* Spec 37 (API-RTR-017): the Router page and its tabs. */
+  it("resolves the router page and its tabs", () => {
+    const overview = parseRoute("#/router");
+    expect(overview.view).toBe("router");
+    expect(overview.section).toBe("router");
+    expect(overview.params).toEqual({ tab: "overview" });
+
+    for (const tab of ["providers", "models", "combos", "logs", "proxy"]) {
+      const route = parseRoute("#/router/" + tab);
+      expect(route.view).toBe("router");
+      expect(route.params.tab).toBe(tab);
+    }
+    expect(ROUTER_TABS).toEqual(["providers", "models", "combos", "logs", "proxy"]);
+    expect(parseRoute("#/router/bogus").view).toBe("not-found");
+  });
+
+  it("redirects the old settings providers tab to the router", () => {
+    const route = parseRoute("#/settings/providers");
+    expect(route.view).toBe("router");
+    expect(route.params.tab).toBe("providers");
+    expect(route.path).toBe("#/router/providers");
+    expect(SETTINGS_TABS).not.toContain("providers");
+    expect(parseRoute("#/settings/secrets").view).toBe("settings");
   });
 });

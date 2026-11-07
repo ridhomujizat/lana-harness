@@ -4,7 +4,6 @@ import {
   SettingsAuditPage,
   SettingsConfigPage,
   SettingsPanel,
-  SettingsProvidersPage,
   SettingsRestartDialog,
   SettingsSecretsPage,
   SettingsTabs,
@@ -12,7 +11,7 @@ import {
 } from "./settings-pages";
 import * as settingsApi from "../api/settings";
 import * as daemonApi from "../api/daemon";
-import type { GetConfigResponse, ProviderRow } from "../api/settings";
+import type { GetConfigResponse } from "../api/settings";
 import type { SecretRow } from "../api/secrets";
 import type { AuditEntry } from "../api/audit";
 import type { DaemonInfo } from "../api/daemon";
@@ -82,15 +81,6 @@ const config: GetConfigResponse = {
   },
 };
 
-const provider: ProviderRow = {
-  name: "openai",
-  kind: "openai_compat",
-  base_url: "provider.invalid/v1",
-  api_key_env: "OPENAI_API_KEY",
-  key_state: "set",
-  used_by: ["agents.coder"],
-};
-
 const secret: SecretRow = {
   name: "OPENAI_API_KEY",
   state: "set",
@@ -112,12 +102,14 @@ describe("settings shell", () => {
   it("marks the active section and moves focus with the arrow keys", () => {
     render(
       <>
-        <SettingsTabs active="providers" />
-        <SettingsPanel active="providers">Panel body</SettingsPanel>
+        <SettingsTabs active="secrets" />
+        <SettingsPanel active="secrets">Panel body</SettingsPanel>
       </>
     );
 
-    const active = screen.getByRole("link", { name: "Providers" });
+    /* Spec 37: Providers moved to the Router page. */
+    expect(screen.queryByRole("link", { name: "Providers" })).toBeNull();
+    const active = screen.getByRole("link", { name: "Secrets" });
     expect(active.getAttribute("aria-current")).toBe("page");
     expect(active.className).toContain("on");
     expect(screen.getByText("Panel body")).toBeTruthy();
@@ -125,7 +117,7 @@ describe("settings shell", () => {
     active.focus();
     fireEvent.keyDown(active, { key: "ArrowDown" });
     expect(document.activeElement).toBe(
-      screen.getByRole("link", { name: "Secrets" })
+      screen.getByRole("link", { name: "Config file" })
     );
   });
 
@@ -151,11 +143,6 @@ describe("settings pages", () => {
     vi.mocked(settingsApi.getConfig).mockResolvedValue(config);
     vi.mocked(settingsApi.getDaemon).mockResolvedValue(daemon);
     vi.mocked(daemonApi.daemonInfo).mockResolvedValue(daemon);
-    vi.mocked(settingsApi.listProviders).mockResolvedValue({
-      version: "v1",
-      providers: [provider],
-      restart_required: false,
-    });
     vi.mocked(settingsApi.listSecrets).mockResolvedValue({
       version: "v1",
       secrets: [secret],
@@ -165,14 +152,6 @@ describe("settings pages", () => {
       entries: [auditEntry],
       next_before: null,
     });
-  });
-
-  it("renders the provider row with its key state", async () => {
-    render(<SettingsProvidersPage />);
-    expect(await screen.findByText("openai")).toBeTruthy();
-    expect(screen.getByText("openai_compat")).toBeTruthy();
-    expect(screen.getByText("OPENAI_API_KEY")).toBeTruthy();
-    expect(screen.getByText("Set")).toBeTruthy();
   });
 
   it("renders the secret row and its usage", async () => {
@@ -238,31 +217,5 @@ describe("settings pages", () => {
     expect(vi.mocked(daemonApi.waitForDaemonRestart)).toHaveBeenCalledWith(
       daemon.started_at
     );
-  });
-
-  /* The connection test defaults its model from the base URL host. */
-  it("suggests a test model from the base URL host", async () => {
-    render(<SettingsProvidersPage />);
-    const add = await screen.findByRole("button", { name: /Add provider/ });
-    await waitFor(() => {
-      expect((add as HTMLButtonElement).disabled).toBe(false);
-    });
-    fireEvent.click(add);
-
-    const base = (await screen.findByLabelText(/Base URL/)) as HTMLInputElement;
-    const model = screen.getByLabelText("Test model") as HTMLInputElement;
-
-    fireEvent.change(base, {
-      target: { value: "https://api.deepseek.com/v1" },
-    });
-    expect(model.placeholder).toBe("deepseek-flash");
-
-    fireEvent.change(base, {
-      target: { value: "https://openrouter.ai/api/v1" },
-    });
-    expect(model.placeholder).toBe("openai/gpt-5-mini");
-
-    fireEvent.change(base, { target: { value: "https://example.com/v1" } });
-    expect(model.placeholder).toBe("gpt-5-mini");
   });
 });

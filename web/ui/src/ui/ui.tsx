@@ -175,6 +175,9 @@ export function detailText(detail: unknown): string {
   if (record.field) {
     location.push(String(record.field));
   }
+  if (record.path) {
+    location.push(String(record.path));
+  }
   const head = location.join(" ");
   if (record.characters !== undefined && record.limit !== undefined) {
     return (
