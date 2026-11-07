@@ -238,6 +238,11 @@ type Runtime struct {
 	// toolboxWatch tracks the goroutine that refreshes the registered toolbox
 	// tools on every toolbox change (REQ-TB-004).
 	toolboxWatch sync.WaitGroup
+	// routerUpkeepOnce makes StartRouterUpkeep start the call-record prune at
+	// most once; routerUpkeep tracks that loop so Close joins it before the
+	// store closes (spec 37, REQ-RTR-009).
+	routerUpkeepOnce sync.Once
+	routerUpkeep     sync.WaitGroup
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
@@ -1090,6 +1095,8 @@ func (rt *Runtime) Close() error {
 	// Join the in-flight nightly consolidation before the store closes, so it
 	// cannot write to a store Shutdown has already closed (REQ-KNU-041).
 	rt.consolidateWG.Wait()
+	// The router prune loop stops with rt.ctx; join it before the store closes.
+	rt.routerUpkeep.Wait()
 	// REQ-TB-003, REQ-TB-004: stop the toolbox jobs and the tool refresh loop
 	// before the registry closes, so no toolbox change touches a closing
 	// registry.

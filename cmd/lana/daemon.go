@@ -384,6 +384,10 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 	// scheduler. It starts after the workflows, so moved slots can start runs.
 	rt.StartCalendar(runCtx)
 
+	// Spec 37, REQ-RTR-009: the daemon prunes router call records older than
+	// 30 days, hourly. It stops with runCtx.
+	rt.StartRouterUpkeep(runCtx)
+
 	// restartNow runs the same shutdown as SIGTERM and then replaces the
 	// process image. The daemon lock stays held (REQ-WEB-035).
 	restartNow := func(done <-chan error) int {
