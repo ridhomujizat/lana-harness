@@ -163,12 +163,14 @@ var toolCatalogGroupOrder = []struct {
 }{
 	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep"}},
 	{ID: "shell", Label: "Shell", Names: []string{"bash"}},
-	{ID: "web", Label: "Web", Names: []string{"web_fetch"}},
+	{ID: "web", Label: "Web", Names: []string{"web_search", "web_fetch"}},
 	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write", "session_search"}},
 	{ID: "knowledge", Label: "Knowledge", Names: []string{"knowledge_search", "knowledge_read", "knowledge_write", "knowledge_ingest"}},
 	{ID: "skills", Label: "Skills", Names: []string{"skill_load", "skill_write"}},
 	{ID: "mcp-admin", Label: "MCP", Names: []string{"mcp_manage"}},
 	{ID: "calendar", Label: "Calendar", Names: []string{"calendar"}},
+	{ID: "workflows", Label: "Workflows", Names: []string{"workflow"}},
+	{ID: "stats", Label: "Stats", Names: []string{"usage_stats"}},
 	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
 }
 
@@ -428,6 +430,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	// Spec #35: the calendar service shares the session store when it
 	// implements calendar.Store and reads workflow slots and runs from wfStore.
 	rt.newCalendar(wfStore)
+	// The workflow and usage_stats agent tools read the services built above.
+	rt.registerWorkflowTool()
+	rt.registerUsageStatsTool()
 	// REQ-TB-001, REQ-TB-004: one toolbox service per runtime, over
 	// <LANA_HOME>/tools, with the secret store as its env resolver. The
 	// installed commands are registered at once and refreshed on every change.
@@ -1260,7 +1265,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 		Root:                true,
 		MCPManageRegistered: mcpManageRegistered,
 		VisibleSkills:       visibleSkills,
-		Team:                inTeam,
+		Team:                inTeam || len(agentCfg.Subagents) > 0,
 		CalendarRegistered:  calendarRegistered,
 	})
 	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
