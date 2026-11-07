@@ -15,11 +15,18 @@ func TestLookupProvider(t *testing.T) {
 	if !ok {
 		t.Fatal("deepseek not found")
 	}
-	if preset.baseURL != "https://api.deepseek.com/v1" || preset.keyEnv != "DEEPSEEK_API_KEY" || preset.model != "deepseek-flash" {
+	if preset.name != "deepseek" || preset.keyEnv != "DEEPSEEK_API_KEY" || preset.model != "deepseek-flash" {
 		t.Fatalf("preset = %+v", preset)
 	}
-	if _, ok := lookupProvider("anthropic"); ok {
-		t.Fatal("anthropic not supported yet")
+	anthropic, ok := lookupProvider("anthropic")
+	if !ok {
+		t.Fatal("anthropic not found")
+	}
+	if anthropic.keyEnv != "ANTHROPIC_API_KEY" || !strings.HasPrefix(anthropic.model, "claude-sonnet-") {
+		t.Fatalf("anthropic preset = %+v", anthropic)
+	}
+	if _, ok := lookupProvider("mistral"); ok {
+		t.Fatal("mistral has no preset")
 	}
 }
 
@@ -42,10 +49,13 @@ func TestInitDeepSeekYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[providers.deepseek]", "https://api.deepseek.com/v1", "DEEPSEEK_API_KEY", "model = \"deepseek-flash\""} {
+	for _, want := range []string{"[providers.deepseek]", "kind = \"deepseek\"", "api_key_env = \"DEEPSEEK_API_KEY\"", "model = \"deepseek-flash\""} {
 		if !strings.Contains(string(cfg), want) {
 			t.Fatalf("config does not contain %q:\n%s", want, cfg)
 		}
+	}
+	if strings.Contains(string(cfg), "base_url") || strings.Contains(string(cfg), "openai_compat") {
+		t.Fatalf("a preset kind needs no base_url:\n%s", cfg)
 	}
 	secrets, err := os.ReadFile(filepath.Join(home, "secrets.env"))
 	if err != nil {
@@ -62,13 +72,52 @@ func TestInitDeepSeekYes(t *testing.T) {
 	}
 }
 
+// TestInitPresetKinds writes each preset provider with its own kind and no
+// base_url, and the result loads.
+func TestInitPresetKinds(t *testing.T) {
+	for _, tc := range []struct{ provider, keyEnv, model string }{
+		{"openai", "OPENAI_API_KEY", "gpt-5-mini"},
+		{"openrouter", "OPENROUTER_API_KEY", "openai/gpt-5-mini"},
+		{"anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5-5"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("LANA_HOME", home)
+			if code := cmdInit([]string{"--yes", "--provider", tc.provider}); code != 0 {
+				t.Fatalf("exit = %d", code)
+			}
+			cfg, err := os.ReadFile(filepath.Join(home, "config.toml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"[providers." + tc.provider + "]",
+				"kind = \"" + tc.provider + "\"",
+				"api_key_env = \"" + tc.keyEnv + "\"",
+				"model = \"" + tc.model + "\"",
+			} {
+				if !strings.Contains(string(cfg), want) {
+					t.Fatalf("config does not contain %q:\n%s", want, cfg)
+				}
+			}
+			if strings.Contains(string(cfg), "base_url") {
+				t.Fatalf("a preset kind needs no base_url:\n%s", cfg)
+			}
+			if _, err := config.Load(context.Background(), config.Options{Home: home}); err != nil {
+				t.Fatalf("config is invalid: %v", err)
+			}
+		})
+	}
+}
+
 func TestInitUnknownProvider(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LANA_HOME", home)
-	if code := cmdInit([]string{"--yes", "--provider", "anthropic"}); code != 2 {
+	if code := cmdInit([]string{"--yes", "--provider", "mistral"}); code != 2 {
 		t.Fatalf("exit = %d", code)
 	}
 }
+
 func withStdin(t *testing.T, input string) {
 	t.Helper()
 	old := os.Stdin

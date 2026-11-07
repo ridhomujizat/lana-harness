@@ -15,6 +15,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -37,35 +38,35 @@ type setupConfigDocument struct {
 
 // setupProviderPreset is one provider card of the setup wizard.
 type setupProviderPreset struct {
-	name    string
-	kind    string
-	baseURL string
-	keyEnv  string
+	name   string
+	kind   string
+	keyEnv string
 }
 
-// setupProviderPresets maps the setup provider cards to config provider tables.
-// Only the openai_compat provider adapter exists in this repo, so every card
-// uses it (owner decision Q-029). Anthropic is reached through its
-// OpenAI-compatible endpoint until a native adapter exists.
+// setupProviderPresets maps the setup provider cards to config provider
+// tables. Each card uses its preset kind (API-RTR-001), so the table needs no
+// base_url: the router knows the URL of every preset kind.
 var setupProviderPresets = map[string]setupProviderPreset{
-	"openai": {
-		name:    "openai",
-		kind:    "openai_compat",
-		baseURL: "https://api.openai.com/v1",
-		keyEnv:  "OPENAI_API_KEY",
-	},
-	"anthropic": {
-		name:    "anthropic",
-		kind:    "openai_compat",
-		baseURL: "https://api.anthropic.com/v1",
-		keyEnv:  "ANTHROPIC_API_KEY",
-	},
-	"openrouter": {
-		name:    "openrouter",
-		kind:    "openai_compat",
-		baseURL: "https://openrouter.ai/api/v1",
-		keyEnv:  "OPENROUTER_API_KEY",
-	},
+	"openai":     {name: "openai", kind: "openai", keyEnv: "OPENAI_API_KEY"},
+	"anthropic":  {name: "anthropic", kind: "anthropic", keyEnv: "ANTHROPIC_API_KEY"},
+	"deepseek":   {name: "deepseek", kind: "deepseek", keyEnv: "DEEPSEEK_API_KEY"},
+	"openrouter": {name: "openrouter", kind: "openrouter", keyEnv: "OPENROUTER_API_KEY"},
+}
+
+// setupBaseURL returns the base_url a setup card writes: "" when the typed
+// URL is the kind's preset URL (or empty), the typed URL otherwise. The old
+// OpenAI-compatible Anthropic URL (…/v1) counts as the preset, since the
+// native adapter adds /v1 itself.
+func setupBaseURL(kind, typed string) string {
+	typed = strings.TrimRight(strings.TrimSpace(typed), "/")
+	preset := strings.TrimRight(models.DefaultBaseURL(kind), "/")
+	if typed == "" || strings.EqualFold(typed, preset) {
+		return ""
+	}
+	if kind == "anthropic" && strings.EqualFold(typed, preset+"/v1") {
+		return ""
+	}
+	return typed
 }
 
 // setupRequest is the POST /v1/setup body of API-WEB-021.
@@ -359,7 +360,7 @@ func (s *Server) handleSaveSetup(w http.ResponseWriter, r *http.Request) {
 func validateSetup(body *setupRequest) (*setupPlan, *setupInputError) {
 	preset, ok := setupProviderPresets[body.Provider.Name]
 	if !ok {
-		return nil, setupFieldError("provider.name", "name must be openai, anthropic, or openrouter")
+		return nil, setupFieldError("provider.name", "name must be openai, anthropic, deepseek, or openrouter")
 	}
 	apiKey := strings.TrimSpace(body.Provider.APIKey)
 	if apiKey == "" {
@@ -372,12 +373,11 @@ func validateSetup(body *setupRequest) (*setupPlan, *setupInputError) {
 	if model == "" || strings.ContainsAny(model, "\r\n") {
 		return nil, setupFieldError("provider.model", "model is required and must be one line")
 	}
-	baseURL := strings.TrimSpace(body.Provider.BaseURL)
-	if baseURL == "" {
-		baseURL = preset.baseURL
-	}
-	if err := validateProviderBaseURL(baseURL); err != nil {
-		return nil, setupFieldError("provider.base_url", err.Error())
+	baseURL := setupBaseURL(preset.kind, body.Provider.BaseURL)
+	if baseURL != "" {
+		if err := validateProviderBaseURL(baseURL); err != nil {
+			return nil, setupFieldError("provider.base_url", err.Error())
+		}
 	}
 
 	agentName := body.Agent.Name

@@ -22,6 +22,39 @@ but their config keys, events, and tools may still change between betas.
   guardian decisions, the permission lock, and the guardian assistant in the editor. Web pages:
   list, editor canvas, executions and settings.
 
+- LLM router (spec #37): every model call (turns, compaction, memory, knowledge, embeddings) goes
+  through one router. Provider kinds `openai`, `anthropic` (native Messages API adapter),
+  `deepseek`, `openrouter`, and `openai_compat`; the preset kinds need no `base_url`. Combos
+  (`[combos.<name>]`) are ordered fallback chains; an agent's `model` takes a combo name or a
+  `provider/model` address. Fallback with backoff, a cooldown for models that hit a rate limit or a
+  bad key (`[router] cooldown`), and a record of every attempt with tokens, cost at list price,
+  time to first token, and duration.
+- Router page in the dashboard: Overview (tokens and cost over time, by provider, model, and
+  source, limits and balances), Providers, Models (with a connection test), Combos, Logs, and
+  Proxy.
+- OpenAI-compatible proxy at `/router/v1` (`chat/completions` with streaming, `models`) behind
+  named proxy keys, so other apps can use lana's providers and combos (`[router] proxy`).
+- The `router` package can be embedded in other Go services (`examples/router`).
+- Claude Agent runtime (spec #38, ADR 0018): an agent with `runtime = "claude-code"` runs the
+  owner's own installed and logged-in Claude Code. Tool calls go through lana's approvals and deny
+  rules, cancel stops the turn, sessions resume, usage and cost are recorded, and the Router page
+  shows its install, login, and plan-window state. `allow_scheduled` lets calendar items and
+  workflows use it. lana never reads or stores Claude credentials.
+- `lana init --provider anthropic`, and DeepSeek in the dashboard setup wizard.
+
+### Changed
+
+- Settings → Providers moved to the Router page (Providers tab).
+- Agent retries moved into the router: the same backoff, now per target before falling back.
+- A bad or missing API key (`auth`) now falls back to the next model in the chain instead of
+  failing the turn.
+- Changes to providers, combos, `[router]`, and keys in `secrets.env` apply without a restart.
+- A missing API key for a provider in use now logs a warning at boot instead of stopping the
+  daemon; calls to that provider fail (or fall back) until the key is set.
+- `lana run --output json` reports as `model` the target that answered, which may be a fallback.
+- `lana init` and the setup wizard write the preset kinds (`kind = "deepseek"` and so on) without
+  `base_url`. Existing `openai_compat` providers keep working.
+
 ## [0.1.0-beta.1] - 2026-11-02
 
 First tagged build, for daily use.

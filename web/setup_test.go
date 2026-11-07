@@ -308,7 +308,7 @@ func TestSetupSaveWritesFiles(t *testing.T) {
 	if len(seen) != 1 {
 		t.Fatalf("provider tests = %d, want 1", len(seen))
 	}
-	if seen[0].Kind != "openai_compat" || seen[0].BaseURL != "https://api.openai.com/v1" ||
+	if seen[0].Kind != "openai" || seen[0].BaseURL != "" ||
 		seen[0].Model != "gpt-5-mini" || seen[0].APIKeyEnv != "OPENAI_API_KEY" ||
 		seen[0].APIKey.Reveal() != key {
 		t.Fatalf("provider test = %+v", seen[0])
@@ -328,7 +328,7 @@ func TestSetupSaveWritesFiles(t *testing.T) {
 	if !ok {
 		t.Fatalf("providers = %+v, want openai", config.Providers)
 	}
-	if provider.Kind != "openai_compat" || provider.BaseURL != "https://api.openai.com/v1" || provider.APIKeyEnv != "OPENAI_API_KEY" {
+	if provider.Kind != "openai" || provider.BaseURL != "" || provider.APIKeyEnv != "OPENAI_API_KEY" {
 		t.Fatalf("provider = %+v", provider)
 	}
 	agent, ok := config.Agents["coder"]
@@ -378,18 +378,22 @@ func TestSetupSaveWritesFiles(t *testing.T) {
 	}
 }
 
-// TestSetupProviderMapping pins the owner-approved mapping of Q-029: every
-// provider card writes an openai_compat table with its own base URL and key env.
+// TestSetupProviderMapping pins the provider cards to their preset kinds
+// (API-RTR-001): each card writes its kind and key env and no base_url, since
+// the router knows the URL of every preset kind. A typed preset URL (the old
+// Anthropic …/v1 one included) is dropped; another URL is kept.
 func TestSetupProviderMapping(t *testing.T) {
 	cases := []struct {
 		name    string
 		kind    string
+		typed   string
 		baseURL string
 		keyEnv  string
 	}{
-		{name: "openai", kind: "openai_compat", baseURL: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY"},
-		{name: "anthropic", kind: "openai_compat", baseURL: "https://api.anthropic.com/v1", keyEnv: "ANTHROPIC_API_KEY"},
-		{name: "openrouter", kind: "openai_compat", baseURL: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY"},
+		{name: "openai", kind: "openai", keyEnv: "OPENAI_API_KEY"},
+		{name: "anthropic", kind: "anthropic", typed: "https://api.anthropic.com/v1", keyEnv: "ANTHROPIC_API_KEY"},
+		{name: "deepseek", kind: "deepseek", typed: "https://api.deepseek.com/v1/", keyEnv: "DEEPSEEK_API_KEY"},
+		{name: "openrouter", kind: "openrouter", typed: "https://gateway.example.com/v1", baseURL: "https://gateway.example.com/v1", keyEnv: "OPENROUTER_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -404,7 +408,11 @@ func TestSetupProviderMapping(t *testing.T) {
 			provider := setupPart(body, "provider")
 			provider["name"] = tc.name
 			provider["api_key"] = "sk-mapping"
-			delete(provider, "base_url")
+			if tc.typed == "" {
+				delete(provider, "base_url")
+			} else {
+				provider["base_url"] = tc.typed
+			}
 			response := serveSetup(t, s, http.MethodPost, setupBodyJSON(t, body), cookie, csrf)
 			if response.code != http.StatusAccepted {
 				t.Fatalf("status = %d, body = %q", response.code, response.body)

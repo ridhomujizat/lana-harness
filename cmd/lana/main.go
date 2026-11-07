@@ -23,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/channels/cli/tui"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
 	"github.com/ridhomujizat/lana-harness/router"
 )
@@ -106,23 +107,36 @@ func help() {
 	if term.IsTerminal(os.Stdout.Fd()) {
 		fmt.Print("\n" + tui.LogoText() + "\n")
 	}
-	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana update rollback\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek|anthropic]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana update rollback\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
 
-// providerPreset holds the wizard's default values for one provider.
+// providerPreset holds the wizard's default values for one provider. The
+// provider table uses the preset kind of the same name (API-RTR-001), so it
+// needs no base_url.
 type providerPreset struct {
-	name    string
-	baseURL string
-	keyEnv  string
-	model   string
+	name   string
+	keyEnv string
+	model  string
 }
 
 var providerPresets = []providerPreset{
-	{name: "openai", baseURL: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY", model: "gpt-5-mini"},
-	{name: "openrouter", baseURL: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "openai/gpt-5-mini"},
-	{name: "deepseek", baseURL: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY", model: "deepseek-flash"},
+	{name: "openai", keyEnv: "OPENAI_API_KEY", model: models.TestModel("openai")},
+	{name: "openrouter", keyEnv: "OPENROUTER_API_KEY", model: models.TestModel("openrouter")},
+	{name: "deepseek", keyEnv: "DEEPSEEK_API_KEY", model: models.TestModel("deepseek")},
+	{name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", model: defaultAnthropicModel()},
+}
+
+// defaultAnthropicModel is the first Sonnet model of the Anthropic picker:
+// a capable default for a coding agent, cheaper than Opus.
+func defaultAnthropicModel() string {
+	for _, model := range models.ForKind("anthropic") {
+		if strings.HasPrefix(model.ID, "claude-sonnet-") {
+			return model.ID
+		}
+	}
+	return models.TestModel("anthropic")
 }
 
 func lookupProvider(name string) (providerPreset, bool) {
@@ -210,7 +224,7 @@ func cmdInit(args []string) int {
 }
 
 func initConfig(preset providerPreset, keyEnv, model string) string {
-	return fmt.Sprintf("[providers.%s]\nkind = \"openai_compat\"\nbase_url = %q\napi_key_env = %q\n\n[agents.default]\nprovider = %q\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"cli\"\nagent = \"default\"\n", preset.name, preset.baseURL, keyEnv, preset.name, model)
+	return fmt.Sprintf("[providers.%s]\nkind = %q\napi_key_env = %q\n\n[agents.default]\nprovider = %q\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"cli\"\nagent = \"default\"\n", preset.name, preset.name, keyEnv, preset.name, model)
 }
 
 func secretsText(keyEnv, key string) string {

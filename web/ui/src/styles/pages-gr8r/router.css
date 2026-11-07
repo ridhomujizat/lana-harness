@@ -173,14 +173,20 @@ g.on .rt-cost-bar { opacity: 0.85; }
 .rt-test.bad { color: var(--red); }
 
 /* Logs */
-.rt-calls-table { min-width: 960px; }
+/* The table fits its card: every column but the route keeps its width on one
+   line, and the route wraps (at "/" and "-" first) instead of truncating. The
+   card scrolls sideways only below the table's minimum width. */
+.rt-calls { padding: 4px 14px 12px; }
+.rt-calls-table { min-width: 720px; }
+.rt-calls-table th, .rt-calls-table td { padding: 7px 8px; white-space: nowrap; }
+.rt-calls-table td.rt-route-cell { width: 100%; min-width: 180px; white-space: normal; }
+.rt-agent { display: block; max-width: 160px; }
 .rt-call-row { cursor: pointer; }
 .rt-call-row:hover td, .rt-call-row:focus-visible td { background: var(--surface-2); }
 .rt-call-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.rt-route-cell { max-width: 320px; }
-.rt-route-cell > * { vertical-align: middle; }
-.rt-route-cell .i { margin: 0 4px; color: var(--text-4); }
-.rt-route-cell .mono { display: inline-block; max-width: 140px; }
+.rt-route { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; min-width: 0; max-width: 100%; }
+.rt-route .mono { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-xs); line-height: 1.4; }
+.rt-route .i { flex: none; color: var(--text-4); }
 .rt-more { display: flex; justify-content: center; padding: 12px 0 2px; }
 .rt-detail {
   display: grid;

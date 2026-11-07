@@ -324,6 +324,7 @@ export interface UsageModelRow extends UsageStats {
 export interface UsageSourceRow {
   source: string;
   calls: number;
+  errors?: number;
   cost_usd: number | null;
   cost_partial?: boolean;
   input_tokens?: number;

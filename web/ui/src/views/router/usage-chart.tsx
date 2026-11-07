@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { RouterRange, UsagePoint } from "../../api/router";
 import { EmptyState } from "../../ui/gr8r";
 import { compact, count, parseTime, usd } from "./router-common";
@@ -6,9 +6,17 @@ import { compact, count, parseTime, usd } from "./router-common";
 /* Tokens and cost over time (REQ-RTR-011). Two measures of different scale
    never share an axis, so the chart is two small multiples on one time axis:
    stacked token columns above, cost columns below, one hover readout for
-   both. Plain SVG coloured with the Gr8r tokens of the Home chart. */
+   both. Plain SVG coloured with the Gr8r tokens of the Home chart.
 
-const W = 760;
+   The viewBox follows the measured width of the card, so one SVG unit is one
+   CSS pixel and the 10px axis text stays 10px on a phone instead of being
+   scaled down with the drawing; narrow cards get fewer time ticks. */
+
+const DEFAULT_W = 760;
+const MIN_W = 280;
+/* The room one time tick needs ("Nov 12", "14:00") plus a gap. */
+const TICK_SPACE = 56;
+const MAX_TICKS = 8;
 const PAD_L = 44;
 const PAD_R = 8;
 const TOKENS_H = 168;
@@ -17,6 +25,36 @@ const GAP = 20;
 const AXIS_H = 18;
 const PAD_T = 8;
 const H = PAD_T + TOKENS_H + GAP + COST_H + AXIS_H;
+
+/* The content width of the element, kept up to date with a ResizeObserver
+   (which reports once on observe). Without one (tests, old browsers) it is
+   the default width and the SVG scales as before. */
+function useWidth(fallback: number) {
+  /* A callback ref, so the observer starts when the chart first mounts even
+     if the first render was the empty state. */
+  const [node, ref] = useState<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(fallback);
+  useEffect(() => {
+    if (!node || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const next = Math.round(entries[0]?.contentRect.width || 0);
+      if (next > 0) {
+        setWidth((current) => (current === next ? current : next));
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node]);
+  return [ref, width] as const;
+}
+
+/* Every n-th bucket gets a time tick so the ticks fit the plot width. */
+export function tickEvery(buckets: number, plotWidth: number): number {
+  const fit = Math.max(2, Math.min(MAX_TICKS, Math.floor(plotWidth / TICK_SPACE)));
+  return Math.max(1, Math.ceil(buckets / fit));
+}
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -62,6 +100,8 @@ function columnPath(x: number, width: number, top: number, bottom: number): stri
 
 export function UsageChart({ series, range }: { series: UsagePoint[]; range: RouterRange }) {
   const [hover, setHover] = useState(-1);
+  const [wrapRef, measured] = useWidth(DEFAULT_W);
+  const W = Math.max(MIN_W, measured);
   const clipBase = "rc" + useId().replace(/[^A-Za-z0-9_-]/g, "");
   const rows = useMemo<Row[]>(
     () =>
@@ -70,7 +110,13 @@ export function UsageChart({ series, range }: { series: UsagePoint[]; range: Rou
         const inputAll = Math.max(0, Number(point.input_tokens) || 0);
         const input = Math.max(0, inputAll - cached);
         const output = Math.max(0, Number(point.output_tokens) || 0);
-        const costKnown = point.cost_usd !== null && point.cost_usd !== undefined;
+        const calls = Number(point.calls) || 0;
+        const errors = Number(point.errors) || 0;
+        /* A bucket of failed calls only has no price, not a $0 one. */
+        const costKnown =
+          point.cost_usd !== null &&
+          point.cost_usd !== undefined &&
+          !(calls > 0 && errors >= calls && !Number(point.cost_usd));
         return {
           at: parseTime(point.t),
           input,
@@ -79,8 +125,8 @@ export function UsageChart({ series, range }: { series: UsagePoint[]; range: Rou
           tokens: input + Math.min(cached, inputAll) + output,
           cost: costKnown ? Math.max(0, Number(point.cost_usd) || 0) : 0,
           costKnown,
-          calls: Number(point.calls) || 0,
-          errors: Number(point.errors) || 0,
+          calls,
+          errors,
         };
       }),
     [series]
@@ -102,11 +148,11 @@ export function UsageChart({ series, range }: { series: UsagePoint[]; range: Rou
   const costBase = costTop + COST_H;
   const yTok = (value: number) => tokensBase - (value / tokenMax) * TOKENS_H;
   const yCost = (value: number) => costBase - (value / costMax) * COST_H;
-  const labelEvery = Math.max(1, Math.ceil(rows.length / 8));
+  const labelEvery = tickEvery(rows.length, plotW);
   const focus = hover >= 0 ? rows[hover] : undefined;
 
   return (
-    <div className="hc-wrap rt-chart">
+    <div className="hc-wrap rt-chart" ref={wrapRef}>
       <div className="hc-readout" aria-live="polite">
         {focus ? (
           <>

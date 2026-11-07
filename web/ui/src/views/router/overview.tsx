@@ -21,11 +21,11 @@ import { ClaudeAgentCard, LimitCard } from "./limits";
 import { UsageChart } from "./usage-chart";
 import {
   compact,
-  costText,
   count,
   ms,
   percent,
   sourceLabel,
+  statsCostText,
   timeLabel,
   failureOf,
 } from "./router-common";
@@ -43,7 +43,7 @@ export const RANGES: Array<{ value: RouterRange; label: string }> = [
 function CostValue({ stats }: { stats: UsageStats }) {
   return (
     <span className="rt-cost">
-      {costText(stats.cost_usd, stats.cost_partial)}
+      {statsCostText(stats)}
       {stats.cost_partial ? (
         <Badge tone="amber" className="rt-partial" title="Some calls used a model with no known price.">
           partial
@@ -313,7 +313,7 @@ export function RouterOverview() {
                   .map((row) => ({
                     key: row.source,
                     label: sourceLabel(row.source),
-                    sub: costText(row.cost_usd, row.cost_partial) + " cost",
+                    sub: statsCostText(row) + " cost",
                     value: row.calls,
                   }))}
               />

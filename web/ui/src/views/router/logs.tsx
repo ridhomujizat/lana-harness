@@ -30,6 +30,14 @@ const OUTCOMES = [
   { value: "error", label: "Errors" },
 ];
 
+/* The requested name is shown before the served target only when it says
+   something new: a combo or another model. "ds/deepseek-flash" requested and
+   served reads once. */
+export function requestedDiffers(requested: string | undefined, served: string): boolean {
+  const asked = String(requested || "").trim();
+  return asked !== "" && asked.toLowerCase() !== served.trim().toLowerCase();
+}
+
 function CallDetail({ call, onClose }: { call: RouterCall; onClose: () => void }) {
   const served = call.provider + "/" + call.model;
   return (
@@ -264,15 +272,21 @@ export function RouterLogs() {
                     >
                       <td className="num">{timeLabel(call.at)}</td>
                       <td>{sourceLabel(call.source)}</td>
-                      <td className="trunc">{call.agent || DASH}</td>
+                      <td>
+                        <span className="trunc rt-agent" title={call.agent || undefined}>
+                          {call.agent || DASH}
+                        </span>
+                      </td>
                       <td className="rt-route-cell">
-                        {call.requested && call.requested !== served ? (
-                          <>
-                            <span className="mono trunc">{call.requested}</span>
-                            <Ic name="arrow-right" size={12} />
-                          </>
-                        ) : null}
-                        <span className="mono trunc">{served}</span>
+                        <span className="rt-route">
+                          {requestedDiffers(call.requested, served) ? (
+                            <>
+                              <span className="mono">{call.requested}</span>
+                              <Ic name="arrow-right" size={12} />
+                            </>
+                          ) : null}
+                          <span className="mono">{served}</span>
+                        </span>
                       </td>
                       <td className="is-num num">{call.attempt}</td>
                       <td>

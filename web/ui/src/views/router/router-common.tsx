@@ -43,6 +43,23 @@ export function costText(cost: number | null | undefined, partial?: boolean): st
   return usd(cost);
 }
 
+/* The cost of an aggregate row: "—" when none of its calls answered with a
+   known price (every call failed, or the ok ones had no price), so a row of
+   failures never reads as a free "$0.00". */
+export function statsCostText(stats: {
+  calls: number;
+  errors?: number;
+  cost_usd: number | null | undefined;
+  cost_partial?: boolean;
+}): string {
+  const cost = stats.cost_usd;
+  const failedOnly = Number(stats.calls) > 0 && Number(stats.errors) >= Number(stats.calls);
+  if (failedOnly && !Number(cost)) {
+    return DASH;
+  }
+  return costText(cost, stats.cost_partial);
+}
+
 export function count(value: number | null | undefined): string {
   return (Number(value) || 0).toLocaleString("en-US");
 }

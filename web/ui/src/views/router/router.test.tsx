@@ -36,7 +36,9 @@ import type {
 import { ApiError } from "../../api/client";
 import { RouterOverview as OverviewTab } from "./overview";
 import { RouterCombos } from "./combos";
-import { RouterLogs, PAGE_SIZE } from "./logs";
+import { RouterLogs, PAGE_SIZE, requestedDiffers } from "./logs";
+import { statsCostText } from "./router-common";
+import { tickEvery } from "./usage-chart";
 import { RouterProxy } from "./proxy";
 import { RouterProviders } from "./providers";
 import { windowText } from "./limits";
@@ -95,6 +97,7 @@ const USAGE: RouterUsage = {
   by_model: [
     { ...STATS, address: "deepseek/deepseek-flash", calls: 100, cost_usd: 1.23 },
     { ...STATS, address: "local/llama-9", calls: 20, cost_usd: 0, cost_partial: true },
+    { ...STATS, address: "down/model-x", calls: 3, errors: 3, cost_usd: 0 },
   ],
   by_source: [{ source: "turn", calls: 120, cost_usd: 1.23 }],
 };
@@ -188,6 +191,24 @@ describe("router overview", () => {
     expect(cost.textContent).toBe("—partial");
     const deepseek = screen.getByText("deepseek/deepseek-flash").closest("tr") as HTMLElement;
     expect(within(deepseek).getByText("$1.23")).toBeTruthy();
+    /* Every call failed: no price was ever known, so no "$0.00". */
+    const down = screen.getByText("down/model-x").closest("tr") as HTMLElement;
+    expect((down.querySelector(".rt-cost") as HTMLElement).textContent).toBe("—");
+  });
+
+  it("shows — for the cost of failed-only rows and the amount otherwise", () => {
+    expect(statsCostText({ calls: 3, errors: 3, cost_usd: 0 })).toBe("—");
+    expect(statsCostText({ calls: 3, errors: 3, cost_usd: 0.002 })).toBe("$0.002");
+    expect(statsCostText({ calls: 3, errors: 1, cost_usd: 0 })).toBe("$0.00");
+    expect(statsCostText({ calls: 3, errors: 0, cost_usd: 0, cost_partial: true })).toBe("—");
+    expect(statsCostText({ calls: 0, errors: 0, cost_usd: 0 })).toBe("$0.00");
+  });
+
+  it("puts fewer time ticks on a narrow chart", () => {
+    expect(tickEvery(24, 708)).toBe(3);
+    expect(tickEvery(24, 300)).toBe(5);
+    expect(tickEvery(4, 300)).toBe(1);
+    expect(tickEvery(30, 100)).toBe(15);
   });
 
   it("loads the chosen range", async () => {
@@ -317,6 +338,23 @@ describe("router logs", () => {
     });
     expect(await screen.findByText("That is every call in the last 30 days.")).toBeTruthy();
     expect(screen.getAllByRole("row")).toHaveLength(4);
+  });
+
+  it("shows the route once when the requested name is the served target", async () => {
+    vi.mocked(api.listRouterCalls).mockResolvedValue({
+      calls: [
+        call(131, { requested: "claude-agent/claude-haiku-5-5", provider: "claude-agent", model: "claude-haiku-5-5" }),
+        call(130, { requested: "duo", provider: "ds", model: "deepseek-flash" }),
+      ],
+      next_before: 0,
+    });
+    render(<RouterLogs />);
+    const same = (await screen.findByRole("row", { name: /Call 131/ })).querySelector(".rt-route") as HTMLElement;
+    expect(same.textContent).toBe("claude-agent/claude-haiku-5-5");
+    const combo = screen.getByRole("row", { name: /Call 130/ }).querySelector(".rt-route") as HTMLElement;
+    expect(combo.textContent).toBe("duods/deepseek-flash");
+    expect(requestedDiffers(" DS/deepseek-flash ", "ds/deepseek-flash")).toBe(false);
+    expect(requestedDiffers("", "ds/deepseek-flash")).toBe(false);
   });
 
   it("filters by outcome and opens the redacted error", async () => {

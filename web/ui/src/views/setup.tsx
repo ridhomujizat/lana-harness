@@ -45,31 +45,41 @@ const PROVIDERS = [
     label: "OpenAI",
     icon: "sparkles",
     description: "GPT models through api.openai.com.",
-    kind: "openai_compat",
+    kind: "openai",
     baseUrl: SECURE + "api.openai.com/v1",
     keyEnv: "OPENAI_API_KEY",
     model: "gpt-5-mini",
-    suggestions: ["gpt-5-mini", "gpt-5", "gpt-4.1"],
+    suggestions: ["gpt-5-mini", "gpt-5.1", "gpt-5"],
   },
   {
     id: "anthropic",
     label: "Anthropic",
     icon: "bot",
     description: "Claude models through api.anthropic.com.",
-    /* Q-029: until a native adapter exists, Anthropic uses the
-       OpenAI-compatible endpoint through the same openai_compat kind. */
-    kind: "openai_compat",
-    baseUrl: SECURE + "api.anthropic.com/v1",
+    /* The native Messages adapter (spec 37); it adds /v1 itself. */
+    kind: "anthropic",
+    baseUrl: SECURE + "api.anthropic.com",
     keyEnv: "ANTHROPIC_API_KEY",
-    model: "claude-sonnet-4-5",
-    suggestions: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+    model: "claude-sonnet-5-5",
+    suggestions: ["claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5"],
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    icon: "waves",
+    description: "DeepSeek models through api.deepseek.com.",
+    kind: "deepseek",
+    baseUrl: SECURE + "api.deepseek.com/v1",
+    keyEnv: "DEEPSEEK_API_KEY",
+    model: "deepseek-flash",
+    suggestions: ["deepseek-flash", "deepseek-v4-pro"],
   },
   {
     id: "openrouter",
     label: "OpenRouter",
     icon: "route",
     description: "Models from many vendors with one key.",
-    kind: "openai_compat",
+    kind: "openrouter",
     baseUrl: SECURE + "openrouter.ai/api/v1",
     keyEnv: "OPENROUTER_API_KEY",
     model: "openai/gpt-5-mini",
@@ -80,6 +90,15 @@ const PROVIDERS = [
     ],
   },
 ] as const satisfies readonly ProviderPreset[];
+
+/* A draft saved before the native Anthropic adapter holds the old
+   OpenAI-compatible URL; the native adapter adds /v1 itself. */
+function currentBaseUrl(preset: ProviderPreset, baseUrl: string): string {
+  if (preset.kind === "anthropic" && baseUrl.replace(/\/+$/, "") === SECURE + "api.anthropic.com/v1") {
+    return preset.baseUrl;
+  }
+  return baseUrl;
+}
 
 const PROVIDER_BY_ID: Record<string, ProviderPreset> = {};
 for (const preset of PROVIDERS) {
@@ -280,7 +299,7 @@ function normalizeDraft(value: unknown): SetupDraft {
     provider,
     connect: {
       apiKey: textValue(connect.apiKey, ""),
-      baseUrl: textValue(connect.baseUrl, preset.baseUrl),
+      baseUrl: currentBaseUrl(preset, textValue(connect.baseUrl, preset.baseUrl)),
       model: textValue(connect.model, preset.model),
     },
     agent: {

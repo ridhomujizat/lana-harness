@@ -83,7 +83,7 @@ lana --version
 ### 3. Create the config
 
 ```sh
-lana init --provider deepseek     # or openai, openrouter
+lana init --provider deepseek     # or openai, openrouter, anthropic
 ```
 
 This creates `~/.lana` (override with `LANA_HOME`):
@@ -137,6 +137,115 @@ your chat id. Set `LANA_LOG=debug` for more detailed logs.
 
 To keep the daemon running after you close the terminal, start it from a terminal multiplexer
 (`tmux`) or a launchd/systemd service that runs `lana daemon`.
+
+## Router
+
+Every model call goes through the router: chat turns, compaction, memory, knowledge, and the proxy
+below. A provider is a `kind` plus a key. Five kinds exist: `openai`, `anthropic`, `deepseek`,
+`openrouter` (each knows its URL), and `openai_compat` for any other OpenAI-compatible server
+(needs `base_url`).
+
+```toml
+[providers.ds]
+kind = "deepseek"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[providers.claude]
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[combos.fast]
+description = "Claude first, DeepSeek when it fails"
+models = ["claude/claude-sonnet-5-5", "ds/deepseek-flash"]
+
+[agents.lana]
+model = "fast"                  # a combo, or one model: "ds/deepseek-flash"
+```
+
+How a call is served:
+
+- The router tries the combo's models in order. A rate limit, server error, or network error is
+  retried with backoff first; a bad key, a missing key, or an unknown model moves on at once.
+- A request error (bad input, context too long) stops the call; no other model is tried.
+- A model that ends with a rate limit or a bad key is skipped for 5 minutes
+  (`[router] cooldown = "5m"`, `"0s"` turns it off).
+- Changes to providers, combos, `[router]`, and keys in `secrets.env` apply without a restart.
+
+The dashboard's **Router** page shows tokens and cost over time, every call with the model that
+answered, the limits and balances each provider reports, and lets you edit providers, combos, and
+models.
+
+### Use the router from other apps
+
+With the web server on, the daemon serves an OpenAI-compatible API at
+`http://127.0.0.1:18300/router/v1`. Turn it on with `[router] proxy = true` or on the Router page
+(Proxy tab), and create a proxy key there. `model` takes a combo or a `provider/model` address,
+so other apps get the same fallback:
+
+```sh
+curl http://127.0.0.1:18300/router/v1/chat/completions \
+  -H "Authorization: Bearer $LANA_PROXY_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "fast", "stream": true, "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+The `X-Lana-Served-By` response header names the model that answered.
+
+### Use the router from another Go service
+
+The `router` package works without the daemon (see [examples/router](examples/router/main.go)):
+
+```go
+import (
+	"github.com/ridhomujizat/lana-harness/core"
+	_ "github.com/ridhomujizat/lana-harness/providers/openai" // openai, deepseek, openrouter, openai_compat
+	"github.com/ridhomujizat/lana-harness/router"
+)
+
+type envSecrets struct{}
+
+func (envSecrets) Lookup(name string) (core.Secret, bool) {
+	value := os.Getenv(name)
+	return core.NewSecret(value), value != ""
+}
+
+r, err := router.New(router.Config{
+	Providers: map[string]core.ProviderConfig{"ds": {Kind: "deepseek", APIKeyEnv: "DEEPSEEK_API_KEY"}},
+	Combos:    map[string]router.Combo{"fast": {Models: []string{"ds/deepseek-flash"}}},
+}, router.WithSecrets(envSecrets{}))
+// handle err; defer r.Close()
+stream, err := r.Stream(ctx, "fast", req, router.CallMeta{Source: "my-service"})
+for event, err := range stream { /* core.ChatTextDelta, core.ChatUsage, ... */ }
+```
+
+`router.WithRecorder` receives one record per attempt, with tokens and cost.
+
+## Claude Agent
+
+A Claude Agent runs your own [Claude Code](https://code.claude.com/docs) as the
+agent's engine, so lana can use your Claude subscription. Install `claude`, run it once, and log in
+with `/login`. lana starts `claude` as a child process and never reads, copies, or stores Claude
+credentials.
+
+```toml
+[agents.claude]
+runtime = "claude-code"
+model = "sonnet"                # passed to claude --model; empty uses Claude Code's default
+workspace = "~/code/my-project"
+permission = "ask"
+# allow_scheduled = true        # let calendar items and workflows run it (off by default)
+```
+
+Create one from the dashboard (Agents → Create agent → Claude Agent) or in `config.toml`, then chat
+with it like any agent.
+
+- Claude Code's tool calls go through lana's approvals: `permission`, `rules.deny`, and the
+  approval cards in web chat and Telegram apply.
+- Claude Code brings its own tools; lana's tools, memory, and knowledge are not used inside it.
+  At most two `claude` processes run at once.
+- The Router page shows a Claude Agent card: install and login state, version, and the 5-hour and
+  weekly plan windows Claude Code reports. Turns are recorded with tokens and cost like other calls.
+
+See [ADR 0018](docs/adr/0018-claude-code-as-external-agent-runtime.md) for the design.
 
 ## Turn on memory and knowledge
 

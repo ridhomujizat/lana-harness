@@ -231,7 +231,7 @@ func TestDaemonSetupSaveRestartsInPlace(t *testing.T) {
 	if !ok {
 		t.Fatalf("providers = %+v, want openai", savedConfig.Providers)
 	}
-	if providerConfig.Kind != "openai_compat" || providerConfig.BaseURL != provider.URL+"/v1" || providerConfig.APIKeyEnv != "OPENAI_API_KEY" {
+	if providerConfig.Kind != "openai" || providerConfig.BaseURL != provider.URL+"/v1" || providerConfig.APIKeyEnv != "OPENAI_API_KEY" {
 		t.Fatalf("provider = %+v", providerConfig)
 	}
 	agentConfig, ok := savedConfig.Agents["coder"]
