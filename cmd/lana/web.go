@@ -1138,6 +1138,12 @@ func settingsFromConfig(cfg core.Config) web.ConfigSettings {
 				Allow: append([]string(nil), agent.Rules.Allow...),
 				Deny:  append([]string(nil), agent.Rules.Deny...),
 			},
+			ReasoningEffort: agent.ReasoningEffort,
+			Runtime:         agent.Runtime,
+			Auth:            agent.Auth,
+			APIKeyEnv:       agent.APIKeyEnv,
+			Binary:          agent.Binary,
+			AllowScheduled:  agent.AllowScheduled,
 		}
 	}
 	for _, route := range cfg.Routes {

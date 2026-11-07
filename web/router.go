@@ -184,9 +184,10 @@ type RouterBalance struct {
 
 // RouterPlanWindow is one plan usage window (the Claude Agent of spec 38).
 type RouterPlanWindow struct {
-	Type        string     `json:"type"`
-	Status      string     `json:"status"`
-	Utilization float64    `json:"utilization"`
+	Type   string `json:"type"`
+	Status string `json:"status"`
+	// Utilization is the used fraction, 0..1; null when not reported.
+	Utilization *float64   `json:"utilization"`
 	ResetsAt    *time.Time `json:"resets_at"`
 }
 

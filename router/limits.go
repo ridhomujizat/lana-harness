@@ -50,9 +50,11 @@ type Balance struct {
 // Window is a usage window of a plan, such as the Claude Agent five-hour
 // window (spec 38).
 type Window struct {
-	Type        string     `json:"type"`
-	Status      string     `json:"status"`
-	Utilization float64    `json:"utilization"`
+	Type   string `json:"type"`
+	Status string `json:"status"`
+	// Utilization is the used fraction, 0..1 (0.42 = 42 %). Nil means the
+	// runtime did not report it (JSON null).
+	Utilization *float64   `json:"utilization"`
 	ResetsAt    *time.Time `json:"resets_at,omitempty"`
 }
 

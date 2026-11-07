@@ -375,8 +375,32 @@ func (b *webBackend) touchProxyKey(id string) {
 	}()
 }
 
-// ClaudeAgentStatus implements web.RouterBackend. The Claude Agent runtime
-// (spec 38, API-CCR-003) is not wired in yet, so it reports not configured.
-func (b *webBackend) ClaudeAgentStatus(context.Context) (web.ClaudeAgentStatus, error) {
-	return web.ClaudeAgentStatus{ConfiguredAgents: []string{}, Error: "not configured"}, nil
+// ClaudeAgentStatus implements web.RouterBackend (API-CCR-003). Without a
+// configured Claude Agent it reports none and starts nothing; otherwise the
+// claude-code runtime probes `claude --version` and `claude auth status`
+// (cached 60 s) and never reads a credential.
+func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStatus, error) {
+	if b.rt == nil {
+		return web.ClaudeAgentStatus{ConfiguredAgents: []string{}}, nil
+	}
+	agents := b.rt.RuntimeAgents(lana.ClaudeCodeRuntime)
+	if len(agents) == 0 {
+		return web.ClaudeAgentStatus{ConfiguredAgents: []string{}}, nil
+	}
+	status, err := b.rt.AgentRuntimeStatus(ctx, lana.ClaudeCodeRuntime)
+	if err != nil {
+		return web.ClaudeAgentStatus{ConfiguredAgents: agents, Error: err.Error()}, nil
+	}
+	return web.ClaudeAgentStatus{
+		ConfiguredAgents: agents,
+		Binary:           status.Binary,
+		Version:          status.Version,
+		VersionOK:        status.VersionOK,
+		LoggedIn:         status.LoggedIn,
+		AuthMethod:       status.AuthMethod,
+		Error:            status.Error,
+		Running:          status.Running,
+		Queued:           status.Queued,
+		MaxConcurrent:    status.MaxConcurrent,
+	}, nil
 }

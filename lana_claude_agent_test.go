@@ -186,7 +186,7 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 	var windows int
 	for _, snap := range rt.Router().Limits(context.Background(), false) {
 		if snap.Provider == "claude-agent" {
-			if snap.Kind != "claude-code" || len(snap.Windows) == 0 || snap.Windows[0].Type != "five_hour" || snap.Windows[0].Utilization != 0.08 || snap.Windows[0].ResetsAt == nil {
+			if snap.Kind != "claude-code" || len(snap.Windows) == 0 || snap.Windows[0].Type != "five_hour" || snap.Windows[0].Utilization == nil || *snap.Windows[0].Utilization != 0.08 || snap.Windows[0].ResetsAt == nil {
 				t.Fatalf("snapshot = %+v", snap)
 			}
 			windows = len(snap.Windows)
@@ -247,4 +247,3 @@ allow_scheduled = true
 		t.Fatalf("allow_scheduled agent refused: %v", err)
 	}
 }
-

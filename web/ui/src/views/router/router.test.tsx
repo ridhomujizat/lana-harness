@@ -247,6 +247,18 @@ describe("limit text", () => {
       "Seven day opus window · 50 % used"
     );
   });
+
+  it("says usage not reported when utilization is null", () => {
+    expect(windowText({ type: "five_hour", status: "allowed", utilization: null })).toBe(
+      "5-hour window · usage not reported"
+    );
+    expect(windowText({ type: "five_hour", status: "rejected", utilization: null })).toBe(
+      "5-hour window · limit reached"
+    );
+    expect(windowText({ type: "five_hour", status: "allowed", utilization: 0 })).toBe(
+      "5-hour window · 0 % used"
+    );
+  });
 });
 
 describe("router combos", () => {
@@ -412,5 +424,37 @@ describe("router providers", () => {
     expect(
       await screen.findByText("Cannot delete deepseek: used by agents: lana; combos: coding.")
     ).toBeTruthy();
+  });
+
+  /* API-RTR-006: the dialog sends no guessed test model; the daemon picks a
+     model it knows unless the owner typed one. */
+  it("tests a provider without a model unless one is typed", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue({ version: "v1", providers: [], restart_required: false });
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: true, latency_ms: 40 });
+    render(<RouterProviders />);
+    const add = await screen.findByRole("button", { name: /Add provider/ });
+    await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(add);
+    fireEvent.click(screen.getByRole("combobox", { name: "Kind" }));
+    fireEvent.click(screen.getByRole("option", { name: "Anthropic" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.testProvider)).toHaveBeenCalledWith({
+        name: "anthropic",
+        kind: "anthropic",
+        base_url: "https://api.anthropic.com",
+        api_key_env: "ANTHROPIC_API_KEY",
+      });
+    });
+    expect(await screen.findByText("Connected · 40 ms.")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Test model"), { target: { value: " claude-opus-5 " } });
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.testProvider)).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "anthropic", model: "claude-opus-5" })
+      );
+    });
   });
 });

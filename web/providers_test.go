@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // testProviderTesterBackend adds the provider port to the in-memory backend.
@@ -476,5 +478,48 @@ model = "gpt-5-mini"
 	}
 	if !strings.Contains(string(missingResponse.body), "X-New") {
 		t.Fatalf("missing mask does not name the header: %q", missingResponse.body)
+	}
+}
+
+// API-RTR-006: a connection test without a model uses the model an agent or
+// combo already uses with the named provider, else the kind's test model
+// (internal/models.TestModel), else the base URL's catalog; a typed model is
+// kept, and a custom provider with no known model must name one.
+func TestProviderTestDefaultModel(t *testing.T) {
+	raw := `[providers.claude]
+kind = "anthropic"
+
+[agents.coder]
+model = "claude/claude-sonnet-5-5"
+`
+	store := newTestConfigStore(t, raw, 0o600, ConfigSettings{})
+	var seen []string
+	s, cookie, csrf, _ := newProviderTestServer(t, store, func(_ context.Context, test ProviderTest) (TestResult, error) {
+		seen = append(seen, test.Model)
+		return TestResult{OK: true}, nil
+	})
+	cases := []struct {
+		body string
+		want string
+	}{
+		{`{"kind":"anthropic","api_key":"sk-x"}`, models.TestModel("anthropic")},
+		{`{"kind":"deepseek","api_key":"sk-x","model":""}`, models.TestModel("deepseek")},
+		{`{"kind":"openai","api_key":"sk-x"}`, models.TestModel("openai")},
+		{`{"kind":"openrouter","api_key":"sk-x"}`, models.TestModel("openrouter")},
+		{`{"name":"claude","kind":"anthropic","api_key":"sk-x"}`, "claude-sonnet-5-5"},
+		{`{"name":"other","kind":"anthropic","api_key":"sk-x"}`, models.TestModel("anthropic")},
+		{`{"kind":"anthropic","api_key":"sk-x","model":"  claude-opus-5 "}`, "claude-opus-5"},
+	}
+	for _, tc := range cases {
+		seen = nil
+		response := serveProvider(t, s, http.MethodPost, "/v1/providers/test", tc.body, cookie, csrf)
+		if response.code != http.StatusOK || len(seen) != 1 || seen[0] != tc.want || tc.want == "" {
+			t.Fatalf("%s = %d %s, tested %v, want %q", tc.body, response.code, response.body, seen, tc.want)
+		}
+	}
+	unknown := serveProvider(t, s, http.MethodPost, "/v1/providers/test",
+		`{"kind":"openai_compat","base_url":"https://llm.example.com/v1","api_key":"sk-x"}`, cookie, csrf)
+	if unknown.code != http.StatusBadRequest || !strings.Contains(string(unknown.body), "enter a test model") {
+		t.Fatalf("custom without model = %d %s", unknown.code, unknown.body)
 	}
 }

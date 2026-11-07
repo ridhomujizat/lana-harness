@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
+
 	lana "github.com/ridhomujizat/lana-harness"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/models"
@@ -247,7 +249,9 @@ func TestRouterBackendEndpoints(t *testing.T) {
 		t.Fatalf("models = %d %s", resp.StatusCode, data)
 	}
 	resp, data = webDo(t, http.MethodGet, ts.URL+"/v1/router/claude-agent", "", cookie, "")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `"error":"not configured"`) {
+	// API-CCR-003: no Claude Agent is configured, so none is listed and the
+	// runtime is not probed.
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `"configured_agents":[]`) || !strings.Contains(string(data), `"error":""`) {
 		t.Fatalf("claude agent = %d %s", resp.StatusCode, data)
 	}
 }
@@ -410,5 +414,160 @@ func TestProviderTestUsesKindAdapter(t *testing.T) {
 	}
 	if result.OK || result.Status != http.StatusUnauthorized || strings.Contains(result.Message, key) {
 		t.Fatalf("result = %+v", result)
+	}
+}
+
+// statusRuntime is a core.AgentRuntime that only answers Status and counts
+// the calls.
+type statusRuntime struct {
+	mu     sync.Mutex
+	calls  int
+	status core.RuntimeStatus
+}
+
+func (s *statusRuntime) RunTurn(context.Context, core.RuntimeTurn) error { return nil }
+func (s *statusRuntime) Interrupt(string) error                          { return nil }
+func (s *statusRuntime) Close(string)                                    {}
+func (s *statusRuntime) Shutdown(context.Context) error                  { return nil }
+func (s *statusRuntime) Status(context.Context) core.RuntimeStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	return s.status
+}
+
+func (s *statusRuntime) statusCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// API-CCR-003: without a Claude Agent the status lists none and never asks
+// the runtime; with Claude Agents it lists them sorted and reports the
+// runtime's status.
+func TestClaudeAgentStatus(t *testing.T) {
+	t.Run("no claude agents", func(t *testing.T) {
+		home := t.TempDir()
+		writeLiveConfig(t, home, routerWebConfig)
+		rt, _ := liveWebRuntime(t, home, routerMockScript(1))
+		fake := &statusRuntime{status: core.RuntimeStatus{Binary: "/bin/claude"}}
+		rt.SetAgentRuntime(lana.ClaudeCodeRuntime, fake)
+		_, ts, cookie, _ := webServer(t, rt, home)
+
+		resp, data := webDo(t, http.MethodGet, ts.URL+"/v1/router/claude-agent", "", cookie, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET claude-agent = %d %s", resp.StatusCode, data)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if agents, ok := got["configured_agents"].([]any); !ok || len(agents) != 0 {
+			t.Fatalf("configured_agents = %s", data)
+		}
+		if got["binary"] != "" || got["error"] != "" {
+			t.Fatalf("status = %s", data)
+		}
+		if n := fake.statusCalls(); n != 0 {
+			t.Fatalf("runtime Status called %d times without a Claude Agent", n)
+		}
+	})
+
+	t.Run("fake runtime", func(t *testing.T) {
+		home := t.TempDir()
+		workspace := t.TempDir()
+		writeLiveConfig(t, home, routerWebConfig+`
+[agents.zeta]
+runtime = "claude-code"
+model = "opus"
+workspace = "`+workspace+`"
+
+[agents.claude]
+runtime = "claude-code"
+binary = "/nonexistent/claude"
+workspace = "`+workspace+`"
+`)
+		rt, _ := liveWebRuntime(t, home, routerMockScript(1))
+		fake := &statusRuntime{status: core.RuntimeStatus{
+			Binary: "/usr/local/bin/claude", Version: "2.1.319", VersionOK: true,
+			LoggedIn: true, AuthMethod: "claude.ai", Running: 1, Queued: 2, MaxConcurrent: 2,
+		}}
+		rt.SetAgentRuntime(lana.ClaudeCodeRuntime, fake)
+		_, ts, cookie, _ := webServer(t, rt, home)
+
+		resp, data := webDo(t, http.MethodGet, ts.URL+"/v1/router/claude-agent", "", cookie, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET claude-agent = %d %s", resp.StatusCode, data)
+		}
+		var got web.ClaudeAgentStatus
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		want := web.ClaudeAgentStatus{
+			ConfiguredAgents: []string{"claude", "zeta"},
+			Binary:           "/usr/local/bin/claude", Version: "2.1.319", VersionOK: true,
+			LoggedIn: true, AuthMethod: "claude.ai", Running: 1, Queued: 2, MaxConcurrent: 2,
+		}
+		if strings.Join(got.ConfiguredAgents, ",") != "claude,zeta" || got.Binary != want.Binary ||
+			got.Version != want.Version || !got.VersionOK || !got.LoggedIn || got.AuthMethod != want.AuthMethod ||
+			got.Running != 1 || got.Queued != 2 || got.MaxConcurrent != 2 || got.Error != "" {
+			t.Fatalf("status = %+v", got)
+		}
+		if fake.statusCalls() != 1 {
+			t.Fatalf("runtime Status calls = %d", fake.statusCalls())
+		}
+	})
+}
+
+// AC-CCR-010 (backend side): creating Claude Agent "claude" with model opus
+// through the daemon writes runtime = "claude-code", model = "opus", and no
+// provider; the agent list and the settings view show the runtime.
+func TestCreateClaudeAgentThroughDaemon(t *testing.T) {
+	home := t.TempDir()
+	writeLiveConfig(t, home, routerWebConfig)
+	rt, _ := liveWebRuntime(t, home, routerMockScript(1))
+	_, ts, cookie, csrf := webServer(t, rt, home)
+
+	resp, data := webDo(t, http.MethodPost, ts.URL+"/v1/agents",
+		`{"name":"claude","runtime":"claude-code","model":"opus","auth":"subscription","permission":"ask","allow_scheduled":false}`, cookie, csrf)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create = %d %s", resp.StatusCode, data)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Agents map[string]map[string]any `toml:"agents"`
+	}
+	if err := toml.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	claude := file.Agents["claude"]
+	if claude["runtime"] != "claude-code" || claude["model"] != "opus" {
+		t.Fatalf("config.toml claude table = %+v\n%s", claude, raw)
+	}
+	if _, ok := claude["provider"]; ok {
+		t.Fatalf("config.toml claude table has a provider: %+v", claude)
+	}
+
+	resp, data = webDo(t, http.MethodGet, ts.URL+"/v1/agents", "", cookie, "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `"engine_label":"Claude Agent"`) {
+		t.Fatalf("agents = %d %s", resp.StatusCode, data)
+	}
+	resp, data = webDo(t, http.MethodGet, ts.URL+"/v1/config", "", cookie, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("config = %d %s", resp.StatusCode, data)
+	}
+	var cfg struct {
+		Settings struct {
+			Agents map[string]web.ConfigAgent `json:"agents"`
+		} `json:"settings"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Settings.Agents["claude"]; got.Runtime != "claude-code" || got.Model != "opus" || got.Provider != "" {
+		t.Fatalf("settings claude = %+v", got)
 	}
 }

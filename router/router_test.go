@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -400,6 +401,49 @@ func TestRedaction(t *testing.T) {
 	}
 }
 
+// An error an adapter yields after the first event is redacted with the
+// provider's key before the consumer and the record see it; a provider error
+// keeps its class and status, and a plain error becomes a network error.
+func TestRedactionMidStream(t *testing.T) {
+	key := "sk-secret-mid-987654"
+	for _, tc := range []struct {
+		name      string
+		midErr    error
+		wantClass string
+	}{
+		{"provider error", pe("server", 502, "upstream said "+key), "server"},
+		{"plain error", errors.New("read tcp: key=" + key + " reset"), "network"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &fakeBehavior{midErr: tc.midErr}
+			cfg := fakeProvider(t, "a", a)
+			cfg.APIKeyEnv = "A_KEY"
+			h := newHarness(t, Config{Providers: map[string]core.ProviderConfig{"a": cfg}}, WithSecrets(mapSecrets{"A_KEY": key}))
+			stream, _, err := h.r.StreamChain(context.Background(), chain("a/x"), core.ChatRequest{}, CallMeta{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got error
+			for _, streamErr := range stream {
+				if streamErr != nil {
+					got = streamErr
+				}
+			}
+			if got == nil || strings.Contains(got.Error(), key) || !strings.Contains(got.Error(), "***") {
+				t.Fatalf("mid-stream error = %v", got)
+			}
+			var perr *core.ProviderError
+			if !errors.As(got, &perr) || perr.Class != tc.wantClass {
+				t.Fatalf("mid-stream error class = %+v, want %s", got, tc.wantClass)
+			}
+			recs := h.rec.all()
+			if len(recs) != 1 || strings.Contains(recs[0].Error, key) || recs[0].Outcome != tc.wantClass {
+				t.Fatalf("records = %+v", recs)
+			}
+		})
+	}
+}
+
 // REQ-RTR-008: Apply swaps atomically; an in-flight call finishes on the old
 // snapshot; unchanged providers keep their adapter; a failed Apply keeps the
 // old config.
@@ -468,7 +512,8 @@ func (s *memLimitStore) Save(v []LimitSnapshot) { s.saved = append(s.saved, v) }
 // minutes, and snapshots load at New and save on Close.
 func TestLimits(t *testing.T) {
 	bal := &fakeBehavior{balance: &Balance{Currency: "USD", Total: 4.2, ToppedUp: 4.2}}
-	store := &memLimitStore{loaded: []LimitSnapshot{{Provider: "claude-agent", Kind: "claude-code", Windows: []Window{{Type: "five_hour", Status: "allowed", Utilization: 0.42}}}}}
+	util := 0.42
+	store := &memLimitStore{loaded: []LimitSnapshot{{Provider: "claude-agent", Kind: "claude-code", Windows: []Window{{Type: "five_hour", Status: "allowed", Utilization: &util}}}}}
 	h := newHarness(t, Config{Providers: map[string]core.ProviderConfig{
 		"ds": fakeProvider(t, "ds", bal),
 	}}, WithLimitStore(store), WithProviders(map[string]core.Provider{"plain": providerFunc(nil)}))
@@ -699,4 +744,21 @@ func TestMissingKeyMovesOn(t *testing.T) {
 		t.Fatalf("served = %v, err = %v", served, err)
 	}
 	_, _ = drain(stream)
+}
+
+// A plan window without a reported utilization encodes it as JSON null, not 0
+// (API-RTR-013).
+func TestWindowUtilizationNull(t *testing.T) {
+	data, err := json.Marshal(Window{Type: "five_hour", Status: "allowed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"utilization":null`) {
+		t.Fatalf("window = %s", data)
+	}
+	util := 0.42
+	data, _ = json.Marshal(Window{Type: "five_hour", Status: "allowed", Utilization: &util})
+	if !strings.Contains(string(data), `"utilization":0.42`) {
+		t.Fatalf("window = %s", data)
+	}
 }

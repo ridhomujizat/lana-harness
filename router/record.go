@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -124,6 +125,9 @@ func (r *Router) recordedStream(snap *snapshot, first core.ChatEvent, pump *stre
 		}
 		for result := range pump.ch {
 			if result.err != nil {
+				// A mid-stream error passes the same key redaction as a chain
+				// error before the consumer or the record sees it.
+				result.err = snap.redactStreamError(r.opts.secrets, base.Provider, result.err)
 				streamErr = result.err
 			} else {
 				observe(result.event)
@@ -198,6 +202,28 @@ func (s *snapshot) redactError(secrets core.Secrets, provider string, pe *core.P
 	out := *pe
 	out.Message = redacted
 	return &out
+}
+
+// redactStreamError returns err with the provider's API key replaced by
+// "***". A provider error keeps its class, status, and retry hint; another
+// error is returned as is when it holds no key, else as a network-class
+// provider error with the redacted text.
+func (s *snapshot) redactStreamError(secrets core.Secrets, provider string, err error) error {
+	var pe *core.ProviderError
+	if errors.As(err, &pe) && pe != nil {
+		out := s.redactError(secrets, provider, pe)
+		if out == pe {
+			return err
+		}
+		return out
+	}
+	key := s.apiKey(secrets, provider)
+	message := err.Error()
+	redacted := Redact(message, key)
+	if redacted == message {
+		return err
+	}
+	return &core.ProviderError{Class: "network", Message: redacted}
 }
 
 // Redact replaces every secret in message with "***". Empty secrets are

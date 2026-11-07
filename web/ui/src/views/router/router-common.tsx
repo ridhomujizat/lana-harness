@@ -137,20 +137,20 @@ export function agoText(value: string | null | undefined): string {
 }
 
 /* The provider kinds of API-RTR-001. The four presets know their base URL;
-   the custom kind needs one. */
+   the custom kind needs one. A connection test without a typed model lets the
+   daemon pick one it knows for the kind (API-RTR-006). */
 export interface KindPreset {
   value: string;
   label: string;
   baseUrl: string;
-  testModel: string;
 }
 
 export const KIND_PRESETS: KindPreset[] = [
-  { value: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", testModel: "gpt-5-mini" },
-  { value: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", testModel: "deepseek-flash" },
-  { value: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", testModel: "claude-sonnet-4" },
-  { value: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", testModel: "openai/gpt-5-mini" },
-  { value: "openai_compat", label: "Custom (OpenAI-compatible)", baseUrl: "", testModel: "gpt-5-mini" },
+  { value: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { value: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
+  { value: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com" },
+  { value: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { value: "openai_compat", label: "Custom (OpenAI-compatible)", baseUrl: "" },
 ];
 
 export function kindLabel(kind: string): string {

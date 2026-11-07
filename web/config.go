@@ -101,6 +101,14 @@ type ConfigAgent struct {
 	MaxSteps      int         `json:"max_steps,omitempty"`
 	ContextWindow int         `json:"context_window,omitempty"`
 	Rules         ConfigRules `json:"rules"`
+	// ReasoningEffort and the runtime keys of a Claude Agent (API-CCR-001).
+	// Runtime is "claude-code" or "" for lana's own loop.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Runtime         string `json:"runtime,omitempty"`
+	Auth            string `json:"auth,omitempty"`
+	APIKeyEnv       string `json:"api_key_env,omitempty"`
+	Binary          string `json:"binary,omitempty"`
+	AllowScheduled  bool   `json:"allow_scheduled,omitempty"`
 }
 
 // ConfigRules is the allow/deny list of an agent.

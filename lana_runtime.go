@@ -1,15 +1,60 @@
 package lana
 
 import (
+	"context"
 	"fmt"
+	"sort"
 
 	"github.com/ridhomujizat/lana-harness/agent"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/router"
 	// ADR 0018: the Claude Agent runtime registers "claude-code".
-	_ "github.com/ridhomujizat/lana-harness/runtime/claudecode"
+	"github.com/ridhomujizat/lana-harness/runtime/claudecode"
 )
+
+// ClaudeCodeRuntime is the runtime key of a Claude Agent (API-CCR-001).
+const ClaudeCodeRuntime = claudecode.Name
+
+// RuntimeAgents returns the configured agents whose runtime key is runtime,
+// sorted.
+func (rt *Runtime) RuntimeAgents(runtime string) []string {
+	names := []string{}
+	if runtime == "" {
+		return names
+	}
+	for name, cfg := range rt.agents() {
+		if cfg.Runtime == runtime {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// AgentRuntimeStatus reports the health of the external runtime registered
+// under name (API-CCR-003). The runtime probes its binary (for Claude Code,
+// `claude --version` and `claude auth status`, cached) and never reads a
+// credential. ConfiguredAgents is left for the caller.
+func (rt *Runtime) AgentRuntimeStatus(ctx context.Context, name string) (core.RuntimeStatus, error) {
+	if rt.registry == nil {
+		return core.RuntimeStatus{}, fmt.Errorf("agent runtime %q is not available", name)
+	}
+	ext, err := rt.registry.Runtime(name)
+	if err != nil {
+		return core.RuntimeStatus{}, err
+	}
+	return ext.Status(ctx), nil
+}
+
+// SetAgentRuntime installs ext as the external runtime used for agents whose
+// runtime key is name, in place of the registered one. Tests and embedders
+// use it; the runtime is shut down with the Runtime.
+func (rt *Runtime) SetAgentRuntime(name string, ext core.AgentRuntime) {
+	if rt.registry != nil {
+		rt.registry.SetRuntime(name, ext)
+	}
+}
 
 // externalHooks routes the usage and plan windows of external runtime turns
 // (Claude Agent, spec 38) into the router: one call record per turn and the
@@ -52,11 +97,21 @@ func (rt *Runtime) updateExternalLimits(provider, runtime string, windows []core
 	if rt.router == nil || len(windows) == 0 {
 		return
 	}
+	rt.router.UpdateLimits(router.LimitUpdate{Provider: provider, Kind: runtime, Windows: externalWindows(windows)})
+}
+
+// externalWindows converts runtime plan windows to router windows. A window
+// without a reported utilization keeps a nil Utilization (JSON null, "usage
+// not reported"), never 0.
+func externalWindows(windows []core.RuntimeLimitWindow) []router.Window {
 	out := make([]router.Window, 0, len(windows))
 	for _, w := range windows {
 		win := router.Window{Type: w.Type, Status: w.Status}
 		if w.Utilization != nil {
-			win.Utilization = *w.Utilization
+			// Copy: the window must not alias the runtime's event. Nil stays
+			// nil (not reported).
+			util := *w.Utilization
+			win.Utilization = &util
 		}
 		if !w.ResetsAt.IsZero() {
 			resets := w.ResetsAt.UTC()
@@ -64,7 +119,7 @@ func (rt *Runtime) updateExternalLimits(provider, runtime string, windows []core
 		}
 		out = append(out, win)
 	}
-	rt.router.UpdateLimits(router.LimitUpdate{Provider: provider, Kind: runtime, Windows: out})
+	return out
 }
 
 // scheduledRunAllowed refuses a calendar or workflow run on a runtime agent

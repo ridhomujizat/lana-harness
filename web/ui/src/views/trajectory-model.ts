@@ -694,6 +694,38 @@ function pushSystem(
   pushRecord(state, record);
 }
 
+/* "Claude Code session · opus · 2.1.319" for the session meta of an external
+   runtime (spec 38). It never touches the system prompt state. */
+export function runtimeSessionTitle(payload: Record<string, unknown>): string {
+  const runtime = stringOf(payload.runtime);
+  const name = runtime === "claude-code" || runtime === "" ? "Claude Code" : runtime;
+  const parts = [name + " session"];
+  const model = stringOf(payload.model);
+  if (model) {
+    parts.push(model);
+  }
+  const version = stringOf(payload.version);
+  if (version) {
+    parts.push(version);
+  }
+  return parts.join(" · ");
+}
+
+function pushRuntimeSession(
+  state: BuildState,
+  event: SessionEvent,
+  payload: Record<string, unknown>
+): void {
+  pushRecord(state, {
+    key: "setting-" + event.seq,
+    kind: "setting",
+    title: runtimeSessionTitle(payload),
+    seqs: [event.seq],
+    events: [event],
+    model: stringOf(payload.model) || undefined,
+  });
+}
+
 function pushUser(
   state: BuildState,
   event: SessionEvent,
@@ -1181,7 +1213,13 @@ function walk(events: SessionEvent[]): BuildState {
         completeStep(state, event, payload);
         break;
       case "system/message":
-        pushSystem(state, event, payload);
+        /* API-CCR-002: subtype "runtime" is an external runtime's session
+           meta, not a prompt head; it shows as a small setting chip. */
+        if (payload.subtype === "runtime") {
+          pushRuntimeSession(state, event, payload);
+        } else {
+          pushSystem(state, event, payload);
+        }
         break;
       case "user/message":
         pushUser(state, event, payload);

@@ -102,6 +102,9 @@ type providerSaveResponse struct {
 }
 
 type providerTestRequest struct {
+	// Name is the provider being edited, optional. With an empty Model, the
+	// model an agent or combo already uses with it is tested.
+	Name      string `json:"name"`
 	Kind      string `json:"kind"`
 	BaseURL   string `json:"base_url"`
 	Model     string `json:"model"`
@@ -262,9 +265,19 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if strings.TrimSpace(body.Model) == "" || strings.ContainsAny(body.Model, "\r\n") {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "model is required and must be one line")
+	if strings.ContainsAny(body.Model, "\r\n") || strings.ContainsAny(body.Name, "\r\n") {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "model and name must be one line")
 		return
+	}
+	body.Model = strings.TrimSpace(body.Model)
+	if body.Model == "" {
+		// The form leaves the test model empty unless the owner typed one;
+		// the daemon picks a model it knows instead of a guess.
+		body.Model = s.defaultProviderTestModel(r.Context(), strings.TrimSpace(body.Name), body.Kind, body.BaseURL)
+		if body.Model == "" {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "model is required for this provider: enter a test model")
+			return
+		}
 	}
 	hasKey := body.APIKey != ""
 	hasEnv := body.APIKeyEnv != ""
@@ -712,8 +725,32 @@ func defaultProviderKeyEnv(name string) string {
 // providerTestModel picks the model the save-time connection test uses. The
 // provider form has no model field, so it uses the model of an agent or combo
 // that already points at the provider, then the kind's cheapest catalog model
-// (internal/models.TestModel), then the base URL's catalog.
+// (internal/models.TestModel), then the base URL's catalog, then gpt-5-mini.
 func providerTestModel(name string, record providerRecord, document providerDocument) string {
+	if model := knownProviderTestModel(name, record, document); model != "" {
+		return model
+	}
+	return "gpt-5-mini"
+}
+
+// defaultProviderTestModel picks the model of a connection test whose body
+// names none (API-RTR-006): the model an agent or combo already uses with the
+// named provider, then the kind's test model, then the base URL's catalog. It
+// returns "" when none is known.
+func (s *Server) defaultProviderTestModel(ctx context.Context, name, kind, baseURL string) string {
+	document := providerDocument{}
+	if name != "" && s.configStore != nil {
+		if file, err := s.configStore.ConfigFile(ctx); err == nil && file.Exists {
+			if parsed, err := parseProviderDocument(file.Raw); err == nil {
+				document = parsed
+			}
+		}
+	}
+	return knownProviderTestModel(name, providerRecord{Kind: kind, BaseURL: baseURL}, document)
+}
+
+// knownProviderTestModel is providerTestModel without the final guess.
+func knownProviderTestModel(name string, record providerRecord, document providerDocument) string {
 	for _, agent := range sortedMapKeys(document.Agents) {
 		table := document.Agents[agent]
 		legacy := mapProviderString(table, "provider")
@@ -744,7 +781,7 @@ func providerTestModel(name string, record providerRecord, document providerDocu
 	if catalog := models.ForProviderKind(record.BaseURL); len(catalog) > 0 {
 		return catalog[0].ID
 	}
-	return "gpt-5-mini"
+	return ""
 }
 
 // providerBaseURLOrDefault returns baseURL, or the kind's preset URL when it

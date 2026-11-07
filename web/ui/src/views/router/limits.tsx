@@ -207,14 +207,22 @@ export function LimitCard({ limit }: { limit: LimitSnapshot }) {
   );
 }
 
+/* Whether Claude Code reported the window's utilization; null means it did
+   not (API-RTR-013). */
+function hasUtilization(window: PlanWindow): boolean {
+  return window.utilization !== null && window.utilization !== undefined;
+}
+
 /* AC-CCR-009: "5-hour window · 42 % used · resets <time>". Utilization is a
-   fraction. */
+   fraction; a window without one says "usage not reported". */
 export function windowText(window: PlanWindow): string {
   const parts = [windowLabel(window.type)];
-  if (window.utilization !== null && window.utilization !== undefined) {
+  if (hasUtilization(window)) {
     parts.push(Math.round(Number(window.utilization) * 100) + " % used");
   } else if (window.status === "rejected") {
     parts.push("limit reached");
+  } else {
+    parts.push("usage not reported");
   }
   if (window.resets_at) {
     parts.push("resets " + timeLabel(window.resets_at));
@@ -288,13 +296,14 @@ export function ClaudeAgentCard({
           </p>
         ) : null}
         {windows.map((window) => {
-          const used = Math.max(0, Math.min(1, Number(window.utilization) || 0));
+          const reported = hasUtilization(window);
+          const used = reported ? Math.max(0, Math.min(1, Number(window.utilization) || 0)) : 0;
           return (
             <Meter
               key={window.type}
               label={windowLabel(window.type)}
               text={windowText(window)}
-              value={window.status === "rejected" && !window.utilization ? 1 : used}
+              value={window.status === "rejected" && (!reported || !used) ? 1 : used}
               tone={window.status === "rejected" ? "red" : usedTone(used)}
             />
           );

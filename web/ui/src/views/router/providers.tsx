@@ -213,11 +213,16 @@ export function ProviderDialog({
     setTesting(true);
     setTestStatus({ tone: "", text: "Testing the connection…" });
     try {
-      const body: ProviderTestRequest = {
-        kind,
-        base_url: effectiveBase,
-        model: testModel.trim() || (preset ? preset.testModel : "gpt-5-mini"),
-      };
+      /* The model is sent only when the owner typed one; otherwise the
+         daemon tests the model an agent or combo already uses with this
+         provider, or a model it knows for the kind (API-RTR-006). */
+      const body: ProviderTestRequest = { kind, base_url: effectiveBase };
+      if (testModel.trim()) {
+        body.model = testModel.trim();
+      }
+      if (PROVIDER_NAME_RE.test(trimmedName)) {
+        body.name = trimmedName;
+      }
       if (apiKey.trim()) {
         body.api_key = apiKey.trim();
       } else {
@@ -457,7 +462,7 @@ export function ProviderDialog({
               disabled={busy || testing}
               autoComplete="off"
               spellCheck={false}
-              placeholder={preset ? preset.testModel : "gpt-5-mini"}
+              placeholder={custom ? "Model ID, for example gpt-5-mini" : "Optional · lana picks a model"}
               onChange={(event) => setTestModel(event.target.value)}
             />
           </Field>

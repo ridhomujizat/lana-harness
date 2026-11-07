@@ -51,8 +51,13 @@ export interface ProviderWriteRequest {
 }
 
 export interface ProviderTestRequest {
+  /* The provider being edited; with no model, the daemon tests the model an
+     agent or combo already uses with it. */
+  name?: string;
   kind: string;
   base_url?: string;
+  /* Omitted unless the owner typed one: the daemon then picks a model it
+     knows for the kind. */
   model?: string;
   api_key?: string;
   api_key_env?: string;
