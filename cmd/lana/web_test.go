@@ -322,12 +322,20 @@ func webLogin(t *testing.T, ts *httptest.Server, token string) (*http.Cookie, st
 
 func webCreateSession(t *testing.T, rt *lana.Runtime, ctx context.Context) core.SessionInfo {
 	t.Helper()
-	info, err := rt.CreateChannelSession(ctx, "web", "owner", "assistant")
+	return webCreateAgentSession(t, rt, ctx, "assistant")
+}
+
+// webCreateAgentSession creates a web session for agent with an owner title.
+// Spec 40: after the first turn of an untitled web session a background title
+// pass calls the same provider with no tools and reasoning "off". The owner
+// title skips that pass, so it neither takes a scripted mock response from the
+// turns under test nor becomes the last request a capture provider records.
+func webCreateAgentSession(t *testing.T, rt *lana.Runtime, ctx context.Context, agent string) core.SessionInfo {
+	t.Helper()
+	info, err := rt.CreateChannelSession(ctx, "web", "owner", agent)
 	if err != nil {
 		t.Fatalf("CreateChannelSession: %v", err)
 	}
-	// Spec 40: an owner title keeps the background title pass from taking a
-	// scripted mock response from the turns under test.
 	if info, err = rt.SetSessionTitle(ctx, info.ID, "Test session"); err != nil {
 		t.Fatalf("SetSessionTitle: %v", err)
 	}
@@ -1327,10 +1335,7 @@ agent = "lana"
 	}})
 	_, ts, cookie, csrf := webServer(t, rt, home)
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatalf("CreateChannelSession: %v", err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	runTurn := func() {
 		t.Helper()
 		if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {

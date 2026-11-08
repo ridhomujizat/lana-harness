@@ -123,10 +123,7 @@ agent = "lana"
 		t.Fatalf("attach answered restart_required true: %q", data)
 	}
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatalf("CreateChannelSession: %v", err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -168,15 +165,7 @@ agent = "lana"
 	}})
 	_, ts, cookie, csrf := webServer(t, rt, home)
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatalf("CreateChannelSession: %v", err)
-	}
-	// Spec 40: an owner title keeps the background title pass from taking a
-	// scripted mock response.
-	if _, err := rt.SetSessionTitle(context.Background(), info.ID, "Test session"); err != nil {
-		t.Fatalf("SetSessionTitle: %v", err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	runTurn := func() {
 		t.Helper()
 		if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {

@@ -330,10 +330,7 @@ func TestRouterProviderAddedLive(t *testing.T) {
 		t.Fatalf("PUT agent = %d %s", resp.StatusCode, data)
 	}
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	result, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
