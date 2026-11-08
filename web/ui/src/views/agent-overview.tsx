@@ -28,6 +28,7 @@ import {
   splitModel,
 } from "./agent-common";
 import { gr8rColor, useRooms } from "./presence";
+import { ChannelLogo, isBrandChannel } from "./channel-logo";
 
 /* REQ-ROOM-010: the alive agent profile. It loads API-ROOM-008 and refreshes
    every 10 s and whenever the live room row changes presence or last activity
@@ -537,9 +538,13 @@ export function AgentOverview({
               <ul className="ov-look">
                 {channels.map((entry, index) => (
                   <li key={"c" + index} className="ov-look-row">
-                    <span className="ov-look-icon" aria-hidden="true">
-                      <Ic name="radio-tower" size={15} />
-                    </span>
+                    {isBrandChannel(entry.channel) ? (
+                      <ChannelLogo channel={entry.channel} size={28} />
+                    ) : (
+                      <span className="ov-look-icon" aria-hidden="true">
+                        <Ic name="radio-tower" size={15} />
+                      </span>
+                    )}
                     <span className="ov-look-body">
                       <span className="ov-look-name">{entry.channel}</span>
                       {entry.match ? (

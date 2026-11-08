@@ -308,7 +308,8 @@ export function AvatarStack({
 export interface SegOption {
   value: string;
   label?: ReactNode;
-  icon?: string;
+  /* A Lucide icon name, or a node such as a brand logo. */
+  icon?: ReactNode;
   count?: number;
   disabled?: boolean;
   title?: string;
@@ -337,7 +338,11 @@ export function Seg({ options, value, onChange, className, ...rest }: SegProps) 
             title={option.title}
             onClick={() => onChange(option.value)}
           >
-            {option.icon ? <Ic name={option.icon} size={13} /> : null}
+            {typeof option.icon === "string" ? (
+              <Ic name={option.icon} size={13} />
+            ) : (
+              option.icon || null
+            )}
             {option.label}
             {option.count !== undefined ? (
               <span className="cnt">{option.count}</span>

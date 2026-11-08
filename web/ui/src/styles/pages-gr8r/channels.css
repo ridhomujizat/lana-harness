@@ -48,16 +48,75 @@
   color: var(--text-3);
 }
 
-/* lana: the Telegram brand colour stays on the tile only. */
-.chan-tile.is-brand {
-  background: #229ed9;
+/* ------------------------------------------------------------------ */
+/* Channel logos (ChannelLogo, src/views/channel-logo.tsx)             */
+/* ------------------------------------------------------------------ */
+/* An app-icon tile: the white brand glyph on the brand color, the same
+   corner radius as the provider logos (.pl). The brand colors stay the same
+   in both themes. Multicolor marks (Slack) sit on the neutral tile. */
+.cl {
+  --cl-size: 36px;
+  --cl-brand: var(--gray);
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--cl-size);
+  height: var(--cl-size);
+  border-radius: calc(var(--cl-size) * 0.24);
+  background: var(--cl-brand);
+  color: #fff;
+  line-height: 1;
+}
+
+.cl svg {
+  display: block;
+  width: 56%;
+  height: 56%;
+}
+
+.cl.cl-multi {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.cl.cl-multi svg {
+  width: 60%;
+  height: 60%;
+}
+
+/* A channel without a logo: a two-letter monogram on the neutral tile, or on
+   the brand color for a known brand. */
+.cl-mono {
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(var(--cl-size) * 0.36);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.cl-mono.cl-brand-mono {
+  background: var(--cl-brand);
   color: #fff;
 }
 
-.chan-mark {
-  display: block;
-  width: 22px;
-  height: 22px;
+/* Inside text rows and tabs: the bare glyph in the brand color, no tile. */
+.cl.cl-sm {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--cl-brand);
+}
+
+.cl.cl-sm svg {
+  width: 100%;
+  height: 100%;
+}
+
+.cl-mono.cl-sm {
+  border-radius: calc(var(--cl-size) * 0.24);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: calc(var(--cl-size) * 0.42);
 }
 
 .chan-card-id {
