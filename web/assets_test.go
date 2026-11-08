@@ -22,6 +22,9 @@ func acceptedAssetContentTypes(name string) []string {
 		return []string{"text/javascript", "application/javascript"}
 	case ".svg":
 		return []string{"image/svg+xml"}
+	case ".png":
+		// The favicon and touch icon fallbacks.
+		return []string{"image/png"}
 	case ".txt":
 		return []string{"text/plain"}
 	case ".woff2":
