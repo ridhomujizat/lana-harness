@@ -549,6 +549,105 @@ func TestRuntimeMetaIsNotPromptHead(t *testing.T) {
 	}
 }
 
+// ownerText returns the owner's text block of a runtime turn's input: the first
+// text block that is not an injected block (<context> or a reply quote).
+func ownerText(t *testing.T, turn core.RuntimeTurn) string {
+	t.Helper()
+	for _, block := range turn.Input {
+		if block.Kind == core.BlockText && !isInjectedInputBlock(block.Text) {
+			return block.Text
+		}
+	}
+	t.Fatalf("no owner text in input: %+v", turn.Input)
+	return ""
+}
+
+// isInjectedInputBlock reports whether a runtime input text block is one lana
+// injected: the <context> block or a reply quote.
+func isInjectedInputBlock(text string) bool {
+	return strings.HasPrefix(text, "<context>") || strings.HasPrefix(text, replyQuoteBlockPrefix)
+}
+
+// replyQuoteBlockPrefix opens the injected block of a reply.
+const replyQuoteBlockPrefix = "[The owner is replying to this message you posted via "
+
+// A reply to an automation message prepends the quoted message as an injected
+// block; the stored user message carries ReplyTo and the quote, and the quote
+// reaches the Claude Code runtime input.
+func TestExternalTurnReplyQuote(t *testing.T) {
+	script := func(_ context.Context, _ *fakeRuntime, turn core.RuntimeTurn) error {
+		turn.Emit(core.RuntimeEvent{Kind: core.RuntimeSessionMeta, ClaudeSessionID: fakeClaudeID, Model: "claude-haiku-5-5"})
+		turn.Emit(core.RuntimeEvent{Kind: core.RuntimeAssistantMessage, Text: "ok"})
+		return end(turn, core.RuntimeEvent{StopReason: core.RuntimeStopEndTurn})
+	}
+	h, rt := newExternalHarness(t, core.AgentConfig{}, script)
+
+	h.run(t, "first")
+	turns := rt.recorded()
+	if len(turns) != 1 {
+		t.Fatalf("turns = %d", len(turns))
+	}
+	if got := ownerText(t, turns[0]); got != "first" {
+		t.Fatalf("plain owner text = %q", got)
+	}
+
+	events, err := h.store.Append(context.Background(), h.info.ID, []core.EventDraft{{
+		Kind: core.KindAssistantMessage,
+		Payload: core.AssistantMessage{
+			V: core.PayloadVersion, StopReason: "end_turn", Source: "workflow", SourceName: "Daily digest",
+			Content: []core.ContentBlock{{Kind: core.BlockText, Text: "Here is your report."}},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := events[0].Seq
+	reply := &core.ReplyRef{Seq: seq, Source: "workflow", SourceName: "Daily digest", Text: "Here is your report."}
+
+	turnID, err := h.reg.StartReply(context.Background(), h.info.ID, "explain item 2", reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.reg.Wait(context.Background(), turnID); err != nil {
+		t.Fatal(err)
+	}
+	turns = rt.recorded()
+	if len(turns) != 2 {
+		t.Fatalf("turns = %d", len(turns))
+	}
+	if turns[1].ResumeID != fakeClaudeID {
+		t.Fatalf("resume = %q", turns[1].ResumeID)
+	}
+	wantQuote := replyQuoteBlockPrefix + "workflow Daily digest]\nHere is your report."
+	found := false
+	for _, block := range turns[1].Input {
+		if block.Kind == core.BlockText && block.Text == wantQuote {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("runtime input lacks the quote block: %+v", turns[1].Input)
+	}
+	if got := ownerText(t, turns[1]); got != "explain item 2" {
+		t.Fatalf("owner text = %q", got)
+	}
+	// The stored user message keeps the quote as a leading injected block and
+	// records ReplyTo.
+	last := h.lastUserMessage(t)
+	if last.ReplyTo == nil || last.ReplyTo.Seq != seq || last.ReplyTo.SourceName != "Daily digest" {
+		t.Fatalf("ReplyTo = %+v", last.ReplyTo)
+	}
+	if last.ContextBlocks != 2 {
+		t.Fatalf("ContextBlocks = %d, want 2", last.ContextBlocks)
+	}
+	if got := last.Content[1].Text; got != wantQuote {
+		t.Fatalf("stored quote block = %q", got)
+	}
+	if got := core.TextContent(last.Content[last.ContextBlocks:]); got != "explain item 2" {
+		t.Fatalf("stored owner text = %q", got)
+	}
+}
+
 // REQ-CCT-006: the tool note lists only the MCP tools the agent actually has,
 // sorted, and an empty list adds no note.
 func TestClaudeToolNote(t *testing.T) {

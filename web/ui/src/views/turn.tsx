@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { SessionContentBlock, SessionEvent } from "../api/sessions";
+import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { Ic } from "../ui/icons";
+import { Button } from "../ui/gr8r";
 import { AgentFace } from "./presence";
 import { useAgentAvatar } from "../lib/avatar-store";
 import { AgentAvatar } from "./agent-avatar";
@@ -59,6 +60,32 @@ export interface TurnUserText {
   continue?: boolean;
   /* API-ATT-004: the image attachments of an owner message, in order. */
   attachments?: UserAttachmentRef[];
+  /* API reply: set when the owner message replies to an automation message. */
+  replyTo?: ReplyTarget;
+}
+
+/* ReplyTarget is a reply the owner is writing or that an owner message already
+   carries: the seq of the automation message, its source and name, and the
+   quoted text. */
+export interface ReplyTarget {
+  seq: number;
+  source: string;
+  sourceName: string;
+  text: string;
+}
+
+/* The label of a reply target, e.g. "Replying to workflow Daily brief". */
+export function replyTargetLabel(source: string, sourceName: string): string {
+  const name = sourceName ? source + " " + sourceName : source;
+  return "Replying to " + (name || "message");
+}
+
+/* The first non-empty line of a quoted message, trimmed and cut short. */
+export function quoteLine(text: string, max = 90): string {
+  const first = String(text || "")
+    .split("\n")
+    .find((line) => line.trim().length > 0);
+  return cut((first || "").trim(), max);
 }
 
 /* UserAttachmentRef is a stored image block of an owner message: the reader
@@ -79,7 +106,18 @@ export interface UserAttachment {
 }
 
 export type TurnSegment =
-  | { kind: "text"; key: string; text: string }
+  | {
+      kind: "text";
+      key: string;
+      text: string;
+      /* API reply: the seq of the assistant/message event, so a sourced message
+         can be replied to. */
+      seq?: number;
+      /* API-WF-005: a message the runtime delivered out of band carries its
+         source ("workflow") and the source's name. */
+      source?: string;
+      sourceName?: string;
+    }
   | { kind: "thinking"; key: string; text: string }
   | { kind: "step"; key: string; step: TurnStep };
 
@@ -88,6 +126,9 @@ export interface TurnGroup {
   key: string;
   text?: string;
   steps?: TurnStep[];
+  seq?: number;
+  source?: string;
+  sourceName?: string;
 }
 
 /* The public turn shape keeps the stub's optional fields and index signature so
@@ -140,6 +181,7 @@ export type ThreadItem =
       text: string;
       continue?: boolean;
       attachments?: UserAttachmentRef[];
+      replyTo?: ReplyTarget;
     }
   | { kind: "turn"; key: string; turn: ChatTurn };
 
@@ -157,6 +199,25 @@ function payloadOf(event: SessionEvent): Record<string, unknown> {
 
 function stringOf(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/* API reply: reads the reply_to of a user/message payload into a ReplyTarget.
+   A payload without one, or with a non-positive seq, returns null. */
+function replyTargetOf(payload: Record<string, unknown>): ReplyTarget | null {
+  const raw = (payload as UserMessagePayload).reply_to;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const seq = Number(raw.seq);
+  if (!Number.isFinite(seq) || seq <= 0) {
+    return null;
+  }
+  return {
+    seq,
+    source: stringOf(raw.source),
+    sourceName: stringOf(raw.source_name),
+    text: stringOf(raw.text),
+  };
 }
 
 /* REQ-MDL-006: an assistant message's thinking blocks are kept separate from
@@ -207,6 +268,21 @@ export function formatClock(ms: number): string {
     return "";
   }
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/* API-WF-005: the muted line above an out-of-band assistant message, e.g.
+   "via workflow Daily brief" or "via workflow" when the source has no name. A
+   message without a source returns "". */
+export function messageSourceLabel(
+  source: unknown,
+  sourceName: unknown
+): string {
+  const from = typeof source === "string" ? source : "";
+  if (!from) {
+    return "";
+  }
+  const name = typeof sourceName === "string" ? sourceName : "";
+  return name ? "via " + from + " " + name : "via " + from;
 }
 
 function errorTextOf(error: unknown): string {
@@ -542,7 +618,16 @@ function ThoughtRow({ text }: { text: string }) {
 
 /* Text the agent wrote between tool calls ("Let me check the config…"). It is
    part of the process, not the answer. */
-function NoteRow({ text }: { text: string }) {
+function NoteRow({
+  text,
+  source,
+  sourceName,
+}: {
+  text: string;
+  source?: string;
+  sourceName?: string;
+}) {
+  const via = messageSourceLabel(source, sourceName);
   return (
     <li className="tp-step tp-note">
       <span className="tp-row tp-row-static">
@@ -550,6 +635,7 @@ function NoteRow({ text }: { text: string }) {
           <Ic name="message-square" size={14} />
         </span>
         <span className="tp-note-text">
+          {via ? <span className="turn-via muted">{via}</span> : null}
           <Markdown text={text} />
         </span>
       </span>
@@ -651,7 +737,12 @@ function TurnProcess({
             ) : group.kind === "activity" ? (
               (group.steps || []).map((step) => <StepRow key={step.key} step={step} />)
             ) : (
-              <NoteRow key={group.key} text={group.text || ""} />
+              <NoteRow
+                key={group.key}
+                text={group.text || ""}
+                source={group.source}
+                sourceName={group.sourceName}
+              />
             )
           )}
         </ol>
@@ -682,6 +773,9 @@ export interface TurnBlockProps {
   continueBusy?: boolean;
   /* API-TFB-003: the refusal text of a failed Continue, shown in the card. */
   continueError?: string;
+  /* API reply: when set, a sourced automation message shows a Reply action that
+     calls this with the message's target. */
+  onReply?: ((target: ReplyTarget) => void) | null;
 }
 
 export function TurnBlock({
@@ -700,6 +794,7 @@ export function TurnBlock({
   onContinue = null,
   continueBusy = false,
   continueError = "",
+  onReply = null,
 }: TurnBlockProps) {
   /* Spec 43: an agent with a generated avatar shows it through AgentFace. */
   const storedAvatar = useAgentAvatar(agent);
@@ -781,6 +876,34 @@ export function TurnBlock({
       />
       {parts.answer.map((segment) => (
         <div className="turn-text turn-answer" key={segment.key}>
+          {segment.source ? (
+            <div className="turn-via muted">
+              <span className="turn-via-label">
+                {messageSourceLabel(segment.source, segment.sourceName)}
+              </span>
+              {onReply && segment.seq ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon="reply"
+                  className="turn-reply"
+                  aria-label={
+                    "Reply to " + (segment.sourceName || segment.source)
+                  }
+                  onClick={() =>
+                    onReply({
+                      seq: Number(segment.seq),
+                      source: segment.source || "",
+                      sourceName: segment.sourceName || "",
+                      text: segment.text || "",
+                    })
+                  }
+                >
+                  Reply
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <Markdown text={segment.text || ""} />
         </div>
       ))}
@@ -837,12 +960,56 @@ export interface UserBubbleProps {
   continue?: boolean;
   /* API-ATT-004: the image thumbnails and file chips of an owner message. */
   attachments?: UserAttachment[];
+  /* API reply: the automation message this owner message replies to, shown as a
+     muted quote line above the text. */
+  replyTo?: ReplyTarget | null;
+}
+
+/* The quote line of an owner reply: "↪ workflow Daily brief: first line". */
+export function replyQuoteLabel(reply: ReplyTarget): string {
+  const name = reply.sourceName
+    ? reply.source + " " + reply.sourceName
+    : reply.source;
+  const line = quoteLine(reply.text, 80);
+  return "↪ " + (name || "message") + (line ? ": " + line : "");
+}
+
+/* The cancelable chip above a composer while a reply target is set. */
+export function ReplyChip({
+  target,
+  onCancel,
+}: {
+  target: ReplyTarget;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="reply-chip" role="status">
+      <Ic name="reply" size={14} className="reply-chip-icon" />
+      <span className="reply-chip-body">
+        <span className="reply-chip-title">
+          {replyTargetLabel(target.source, target.sourceName)}
+        </span>
+        {quoteLine(target.text, 80) ? (
+          <span className="reply-chip-quote">{quoteLine(target.text, 80)}</span>
+        ) : null}
+      </span>
+      <button
+        type="button"
+        className="ibtn ibtn-xs reply-chip-cancel"
+        aria-label="Cancel reply"
+        onClick={onCancel}
+      >
+        <Ic name="x" size={12} />
+      </button>
+    </div>
+  );
 }
 
 export function UserBubble({
   text,
   continue: isContinue = false,
   attachments = [],
+  replyTo = null,
 }: UserBubbleProps) {
   if (isContinue) {
     /* API-TFB-004: a continue request is a chip, not owner text. */
@@ -855,6 +1022,11 @@ export function UserBubble({
   return (
     <div className="chat-user-row">
       <div className="chat-bubble">
+        {replyTo ? (
+          <span className="chat-bubble-quote" title={replyQuoteLabel(replyTo)}>
+            {replyQuoteLabel(replyTo)}
+          </span>
+        ) : null}
         {text ? <span className="chat-bubble-text">{text}</span> : null}
         {attachments.length > 0 ? (
           <div className="chat-bubble-attachments">
@@ -1028,11 +1200,13 @@ export function buildTurns(
           break;
         }
         const turn = turnFor(event, payload);
+        const replyTo = replyTargetOf(payload);
         turn.userTexts.push({
           key: "user-" + event.seq,
           text,
           continue: payload.continue === true,
           ...(attachments.length > 0 ? { attachments } : {}),
+          ...(replyTo ? { replyTo } : {}),
         });
         turn.lastAt = Math.max(turn.lastAt, createdAt);
         break;
@@ -1060,10 +1234,16 @@ export function buildTurns(
         }
         const text = contentText(payload.content);
         if (text) {
+          /* API-WF-005: an out-of-band message names its source, shown as a
+             muted "via …" line above the answer. */
+          const source = stringOf(payload.source);
+          const sourceName = stringOf(payload.source_name);
           turn.segments.push({
             kind: "text",
             key: "text-" + event.seq,
             text,
+            seq: event.seq,
+            ...(source ? { source, sourceName } : {}),
           });
         }
         break;
@@ -1246,6 +1426,7 @@ export function buildTurns(
         ...(message.attachments && message.attachments.length > 0
           ? { attachments: message.attachments }
           : {}),
+        ...(message.replyTo ? { replyTo: message.replyTo } : {}),
       });
     }
     items.push({ kind: "turn", key: turn.key, turn });

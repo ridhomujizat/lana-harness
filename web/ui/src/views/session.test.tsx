@@ -507,3 +507,78 @@ describe("composer thinking chip", () => {
     ).toBeNull();
   });
 });
+
+/* API reply: replying to a workflow message sets the chip, threads reply_to on
+   the send, and clears the chip after a successful send. */
+describe("session reply to a workflow message", () => {
+  it("sets the target, sends reply_to, and clears the chip", async () => {
+    stubFetch([
+      sessionEvent(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "Your brief is ready." }],
+        source: "workflow",
+        source_name: "Daily brief",
+      }),
+      sessionEvent(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    vi.mocked(turnsApi.sendMessage).mockResolvedValue({
+      turn: "started",
+      turn_id: "t2",
+    });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reply to Daily brief" })
+    );
+    expect(await screen.findByText("Replying to workflow Daily brief")).toBeTruthy();
+
+    const input = screen.getByLabelText("Message lana") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "thanks" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(turnsApi.sendMessage)).toHaveBeenCalledWith(
+        "s1",
+        "thanks",
+        [],
+        1
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Replying to workflow Daily brief")).toBeNull();
+    });
+  });
+
+  /* API reply: a refused reply keeps the chip and shows the error inline. */
+  it("keeps the target and shows the error on a 400", async () => {
+    stubFetch([
+      sessionEvent(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "Your brief is ready." }],
+        source: "workflow",
+        source_name: "Daily brief",
+      }),
+      sessionEvent(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    vi.mocked(turnsApi.sendMessage).mockRejectedValue(
+      new ApiError(
+        400,
+        "invalid_request",
+        "reply_to must point at an automation message in this chat"
+      )
+    );
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reply to Daily brief" })
+    );
+    const input = screen.getByLabelText("Message lana") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "thanks" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      await screen.findByText(
+        "reply_to must point at an automation message in this chat"
+      )
+    ).toBeTruthy();
+    expect(screen.getByText("Replying to workflow Daily brief")).toBeTruthy();
+  });
+});

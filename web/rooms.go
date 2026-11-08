@@ -231,6 +231,7 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		Text        *string  `json:"text"`
 		Attachments []string `json:"attachments"`
 		NewTopic    bool     `json:"new_topic"`
+		ReplyTo     *int64   `json:"reply_to"`
 	}
 	if !decodeJSONObject(w, r, roomSendBody, &body) {
 		return
@@ -255,7 +256,7 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		s.writeBackendError(w, "room send", err)
 		return
 	}
-	result, ok := s.sendSessionMessage(w, r, backend, sessionID, messageBody{Text: body.Text, Attachments: body.Attachments}, note)
+	result, ok := s.sendSessionMessage(w, r, backend, sessionID, messageBody{Text: body.Text, Attachments: body.Attachments, ReplyTo: body.ReplyTo}, note)
 	if !ok {
 		return
 	}

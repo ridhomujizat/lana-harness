@@ -1,4 +1,4 @@
-import { createElement as h, useState } from "react";
+import { createElement as h, useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 /* Small, dependency-free markdown renderer for assistant text. It parses a
@@ -257,8 +257,59 @@ function parseInline(
   return nodes;
 }
 
+function glyph(paths: ReactElement[]): ReactElement {
+  return h(
+    "svg",
+    {
+      className: "md-copy-ico",
+      viewBox: "0 0 24 24",
+      width: 14,
+      height: 14,
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 2,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": "true",
+      focusable: "false",
+    },
+    ...paths
+  );
+}
+
+const COPY_GLYPH = glyph([
+  h("rect", { key: "r", x: 8, y: 8, width: 14, height: 14, rx: 2, ry: 2 }),
+  h("path", {
+    key: "p",
+    d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2",
+  }),
+]);
+
+const CHECK_GLYPH = glyph([h("path", { key: "p", d: "M20 6 9 17l-5-5" })]);
+
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (resetTimer.current !== null) {
+        window.clearTimeout(resetTimer.current);
+      }
+    },
+    []
+  );
+
+  function markCopied() {
+    setCopied(true);
+    if (resetTimer.current !== null) {
+      window.clearTimeout(resetTimer.current);
+    }
+    resetTimer.current = window.setTimeout(() => {
+      resetTimer.current = null;
+      setCopied(false);
+    }, 1500);
+  }
 
   function copy() {
     const clipboard =
@@ -269,13 +320,13 @@ function CopyButton({ code }: { code: string }) {
     try {
       const result = clipboard.writeText(code);
       if (result && typeof result.then === "function") {
-        result.then(() => setCopied(true)).catch(() => {});
+        result.then(() => markCopied()).catch(() => {});
       } else {
-        setCopied(true);
+        markCopied();
       }
     } catch {
       /* The clipboard API can reject on an insecure origin; the label then
-         simply stays "Copy". */
+         simply stays "Copy code". */
     }
   }
 
@@ -284,11 +335,11 @@ function CopyButton({ code }: { code: string }) {
     {
       type: "button",
       className: "md-copy",
-      "aria-live": "polite",
-      title: "Copy code",
+      "aria-label": copied ? "Copied" : "Copy code",
+      title: copied ? "Copied" : "Copy code",
       onClick: copy,
     },
-    copied ? "Copied" : "Copy"
+    copied ? CHECK_GLYPH : COPY_GLYPH
   );
 }
 
@@ -296,12 +347,14 @@ function renderCode(code: string, language: string): ReactElement {
   return h(
     "div",
     { className: "md-code" },
-    h(
-      "div",
-      { className: "md-code-head" },
-      language ? h("span", { className: "md-code-lang" }, language) : null,
-      h(CopyButton, { code })
-    ),
+    language
+      ? h(
+          "div",
+          { className: "md-code-head" },
+          h("span", { className: "md-code-lang" }, language)
+        )
+      : null,
+    h(CopyButton, { code }),
     h("pre", { className: "md-pre" }, h("code", { className: "md-code-text" }, code))
   );
 }

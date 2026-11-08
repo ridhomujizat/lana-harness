@@ -526,18 +526,25 @@ func (r *Registry) sessionExists(ctx context.Context, sessionID string) error {
 // Start starts a new turn. attachments are workspace-relative paths of the
 // owner message (REQ-ATT-002).
 func (r *Registry) Start(ctx context.Context, sessionID, text string, attachments ...string) (string, error) {
-	return r.start(ctx, sessionID, text, attachments, "")
+	return r.start(ctx, sessionID, text, attachments, nil, "")
+}
+
+// StartReply starts a new turn whose owner message replies to an automation
+// message. reply is the resolved reference.
+func (r *Registry) StartReply(ctx context.Context, sessionID, text string, reply *core.ReplyRef, attachments ...string) (string, error) {
+	return r.start(ctx, sessionID, text, attachments, reply, "")
 }
 
 // StartContinue starts a new turn whose first user message is marked as a
 // continue; reason is the previous turn/end reason (API-TFB-004, REQ-TFB-005).
 func (r *Registry) StartContinue(ctx context.Context, sessionID, text, reason string) (string, error) {
-	return r.start(ctx, sessionID, text, nil, reason)
+	return r.start(ctx, sessionID, text, nil, nil, reason)
 }
 
 // start starts a new turn. continueReason is non-empty only for a continue turn
-// and marks the turn's first user message.
-func (r *Registry) start(ctx context.Context, sessionID, text string, attachments []string, continueReason string) (string, error) {
+// and marks the turn's first user message. reply is the automation message the
+// owner message replies to, when it is a reply.
+func (r *Registry) start(ctx context.Context, sessionID, text string, attachments []string, reply *core.ReplyRef, continueReason string) (string, error) {
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return "", ErrEmptyText
 	}
@@ -562,7 +569,7 @@ func (r *Registry) start(ctx context.Context, sessionID, text string, attachment
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		runner.runChain(turnCtx, inboxItem{text: text, attachments: append([]string(nil), attachments...)}, turnID, continueReason)
+		runner.runChain(turnCtx, inboxItem{text: text, attachments: append([]string(nil), attachments...), replyTo: reply}, turnID, continueReason)
 	}()
 	return turnID, nil
 }
@@ -599,13 +606,20 @@ func (r *Registry) startTurnAsync(runner *Runner, item inboxItem) {
 
 // Send sends a message; if the session is idle it starts a turn, otherwise it goes to the inbox.
 func (r *Registry) Send(ctx context.Context, sessionID, text string) error {
-	return r.SendWithAttachments(ctx, sessionID, text)
+	return r.SendReply(ctx, sessionID, text, nil)
 }
 
 // SendWithAttachments sends a message with attachments (workspace-relative
 // paths); if the session is idle it starts a turn, otherwise it goes to the
 // inbox (REQ-ATT-002, REQ-ATT-008).
 func (r *Registry) SendWithAttachments(ctx context.Context, sessionID, text string, attachments ...string) error {
+	return r.SendReply(ctx, sessionID, text, nil, attachments...)
+}
+
+// SendReply sends a message that replies to an automation message. reply is the
+// resolved reference; a nil reply is an ordinary message. If the session is
+// idle it starts a turn, otherwise it goes to the inbox.
+func (r *Registry) SendReply(ctx context.Context, sessionID, text string, reply *core.ReplyRef, attachments ...string) error {
 	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
 		return ErrEmptyText
 	}
@@ -618,7 +632,7 @@ func (r *Registry) SendWithAttachments(ctx context.Context, sessionID, text stri
 		return ErrClosed
 	}
 	runner := r.runnerLocked(sessionID)
-	item := inboxItem{text: text, attachments: append([]string(nil), attachments...)}
+	item := inboxItem{text: text, attachments: append([]string(nil), attachments...), replyTo: reply}
 	runner.mu.Lock()
 	if runner.running {
 		runner.inbox = append(runner.inbox, item)

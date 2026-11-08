@@ -132,6 +132,7 @@ func (v *validator) checkNode(n Node, seen map[string]bool) {
 	v.checkParent(n, spec)
 	v.checkTemplates(n)
 	v.checkAgent(n)
+	v.checkMessage(n)
 }
 
 // checkBounds enforces the numeric range of the interval and wait nodes
@@ -224,6 +225,65 @@ func (v *validator) checkAgent(n Node) {
 	if !v.agentExists(name) {
 		v.add(n.ID, "unknown_agent", "node %s uses unknown agent %q", nodeLabel(n), name)
 	}
+}
+
+// checkMessage checks the Message node's channels param and the agent the web
+// channel needs (REQ-WF-002): channels, when present, is a list of non-empty
+// ids, and a "web" channel needs a non-empty agent that exists. An unknown
+// channel id is accepted here and fails at run time, because a channel may be
+// registered later.
+func (v *validator) checkMessage(n Node) {
+	if n.Type != "message" {
+		return
+	}
+	channels, bad := messageChannels(n.Params)
+	if bad {
+		v.add(n.ID, "bad_param", "node %s needs param %q to be a list of channel ids", nodeLabel(n), "channels")
+		return
+	}
+	if !containsString(channels, channelWeb) {
+		return
+	}
+	agent, _ := n.Params["agent"].(string)
+	if strings.TrimSpace(agent) == "" {
+		v.add(n.ID, "missing_param", "node %s needs param %q for the web channel", nodeLabel(n), "agent")
+		return
+	}
+	if v.agentExists != nil && !v.agentExists(agent) {
+		v.add(n.ID, "unknown_agent", "node %s uses unknown agent %q", nodeLabel(n), agent)
+	}
+}
+
+// messageChannels reads the Message node's channels param: it accepts []string
+// and []any, requires every entry to be a non-empty string, and reports bad when
+// the param is present but is not such a list. A missing or nil param is not
+// bad: it defaults to telegram.
+func messageChannels(params map[string]any) ([]string, bool) {
+	raw, ok := params["channels"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	var items []any
+	switch t := raw.(type) {
+	case []string:
+		items = make([]any, len(t))
+		for i, s := range t {
+			items[i] = s
+		}
+	case []any:
+		items = t
+	default:
+		return nil, true
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok || s == "" {
+			return nil, true
+		}
+		out = append(out, s)
+	}
+	return out, false
 }
 
 // checkEdges runs the per-edge rules.

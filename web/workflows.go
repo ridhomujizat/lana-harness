@@ -61,6 +61,8 @@ type WorkflowBackend interface {
 	Webhook(ctx context.Context, id, token string, body []byte) (workflow.Run, error)
 	// Command matches a chat command and starts a run (API-WF-021).
 	Command(ctx context.Context, channel, text string) (workflow.CommandResult, bool)
+	// MessageChannels lists the Message node delivery channels.
+	MessageChannels() []workflow.MessageChannel
 	// IsWorkflowSession reports whether a session runs on channel "workflow".
 	IsWorkflowSession(sessionID string) bool
 }
@@ -98,6 +100,7 @@ func (s *Server) registerWorkflowRoutes() {
 
 	s.Handle("GET /v1/workflows", http.HandlerFunc(s.handleWorkflowList))
 	s.Handle("GET /v1/workflows/stream", http.HandlerFunc(s.handleWorkflowStream))
+	s.Handle("GET /v1/workflows/channels", http.HandlerFunc(s.handleWorkflowChannels))
 	s.Handle("POST /v1/workflows", http.HandlerFunc(s.handleWorkflowCreate))
 	s.Handle("GET /v1/workflows/{id}", http.HandlerFunc(s.handleWorkflowGet))
 	s.Handle("PUT /v1/workflows/{id}", http.HandlerFunc(s.handleWorkflowUpdate))
@@ -142,6 +145,22 @@ func (s *Server) handleWorkflowList(w http.ResponseWriter, r *http.Request) {
 	}
 	mergeWorkflowApprovals(&overview, s.openWorkflowApprovals(), backend.IsWorkflowSession, s.workflowSessionAddress(r.Context()))
 	writeJSON(w, http.StatusOK, overview)
+}
+
+// handleWorkflowChannels serves the Message node channel list. The list is
+// stable: web first, telegram second, then the rest by id.
+func (s *Server) handleWorkflowChannels(w http.ResponseWriter, r *http.Request) {
+	backend := s.workflowsOrError(w)
+	if backend == nil {
+		return
+	}
+	channels := backend.MessageChannels()
+	if channels == nil {
+		channels = []workflow.MessageChannel{}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Channels []workflow.MessageChannel `json:"channels"`
+	}{Channels: channels})
 }
 
 // handleWorkflowCreate serves API-WF-002 (REQ-WF-001, REQ-WF-002).

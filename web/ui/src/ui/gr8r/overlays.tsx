@@ -8,7 +8,16 @@ import type {
 import { createPortal } from "react-dom";
 import { Ic } from "../icons";
 import { IconButton, Kbd } from "./primitives";
-import { cn, focusableElements, placeAnchored } from "./util";
+import {
+  cn,
+  focusableElements,
+  hidePopover,
+  overlayContainer,
+  placeAnchored,
+  showPopover,
+  trackAnchor,
+  useEscapeGuard,
+} from "./util";
 
 /* ------------------------------------------------------------------ */
 /* Popover (Gr8r .pop.floating + placePop)                            */
@@ -34,24 +43,32 @@ export function Popover({
   children,
 }: PopoverProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const escapeGuardRef = useEscapeGuard();
 
   useLayoutEffect(() => {
-    if (!open) {
-      return;
-    }
     const menu = menuRef.current;
-    if (!menu) {
-      return;
+    if (!open || !menu) {
+      return undefined;
     }
-    const anchor = anchorRef.current;
-    if (anchor) {
-      placeAnchored(menu, anchor);
+    showPopover(menu);
+    if (anchorRef.current) {
+      placeAnchored(menu, anchorRef.current);
     }
     const items = menu.querySelectorAll<HTMLElement>(".mi");
     const preferred = menu.querySelector<HTMLElement>(
       '[aria-checked="true"], [aria-selected="true"]'
     );
     (preferred || items[0])?.focus({ preventScroll: true });
+
+    const untrack = trackAnchor(menu, () => {
+      if (anchorRef.current) {
+        placeAnchored(menu, anchorRef.current);
+      }
+    });
+    return () => {
+      untrack();
+      hidePopover(menu);
+    };
   }, [open, anchorRef]);
 
   useEffect(() => {
@@ -70,6 +87,7 @@ export function Popover({
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        escapeGuardRef.current = true;
         event.preventDefault();
         onClose();
       }
@@ -80,7 +98,7 @@ export function Popover({
       document.removeEventListener("pointerdown", onPointer, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, anchorRef]);
+  }, [open, onClose, anchorRef, escapeGuardRef]);
 
   /* Return focus to the trigger when the popover closes or unmounts. */
   useEffect(() => {
@@ -134,12 +152,16 @@ export function Popover({
       ref={menuRef}
       className={cn("pop", "floating", "enter", className)}
       role={role}
+      popover="manual"
       style={{ left: 0, top: 0, width }}
       onKeyDown={handleKeyDown}
     >
       {children}
     </div>,
-    document.body
+    /* The anchor is mounted before the popover opens; it decides whether the
+       menu goes into an open modal dialog (see overlayContainer). */
+    // eslint-disable-next-line react-hooks/refs -- read once per open render, never written
+    overlayContainer(anchorRef.current)
   );
 }
 

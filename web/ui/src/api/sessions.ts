@@ -69,6 +69,35 @@ export interface SessionContentBlock {
   path?: string;
 }
 
+/* API-WF-005: an assistant message delivered out of band in a chat carries its
+   source (e.g. "workflow") and the source's name (e.g. the workflow name). A
+   normal reply omits both. */
+export interface AssistantMessagePayload extends EventPayload {
+  content?: SessionContentBlock[];
+  source?: string;
+  source_name?: string;
+  stop_reason?: string;
+}
+
+/* API reply: the automation message an owner reply points back to (the seq of
+   the assistant/message event, its source and name, and the quoted text). */
+export interface ReplyRef {
+  seq: number;
+  source?: string;
+  source_name?: string;
+  text: string;
+}
+
+/* The user/message payload fields the web surfaces read. reply_to is set when
+   the owner sent the message as a reply to an automation message. */
+export interface UserMessagePayload extends EventPayload {
+  content?: SessionContentBlock[];
+  continue?: boolean;
+  context_blocks?: number;
+  runtime?: boolean;
+  reply_to?: ReplyRef;
+}
+
 export interface SessionEvent {
   seq: number;
   kind: string;

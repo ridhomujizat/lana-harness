@@ -29,14 +29,24 @@ export interface CompactSessionResponse {
 
 /* API-ATT-002: attachments are the workspace-relative paths returned by
    uploadAttachments. The attachments key is sent only when there are paths, so
-   a plain text send keeps its request body unchanged. */
+   a plain text send keeps its request body unchanged. replyTo is the seq of the
+   automation message this send replies to (API-WEB-007); 0 or undefined sends
+   an ordinary message. */
 export function sendMessage(
   id: string,
   text: string,
-  attachments?: string[]
+  attachments?: string[],
+  replyTo?: number
 ): Promise<SendMessageResponse> {
-  const body =
-    attachments && attachments.length > 0 ? { text, attachments } : { text };
+  const body: { text: string; attachments?: string[]; reply_to?: number } = {
+    text,
+  };
+  if (attachments && attachments.length > 0) {
+    body.attachments = attachments;
+  }
+  if (replyTo && replyTo > 0) {
+    body.reply_to = replyTo;
+  }
   return request<SendMessageResponse>(
     "POST",
     "/v1/sessions/" + encodeURIComponent(id) + "/messages",
