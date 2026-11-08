@@ -78,13 +78,13 @@ models = ["claude-work/sonnet", "mock/m"]
 		t.Fatalf("status = %s", data)
 	}
 	builtin, work := got.Accounts[0], got.Accounts[1]
-	if builtin.Name != "claude-code" || !builtin.Builtin || builtin.ConfigDir != "" || builtin.LoginCommand != "claude" ||
+	if builtin.Name != "claude-code" || !builtin.Builtin || builtin.ConfigDir != "" || builtin.LoginCommand != "claude auth login" ||
 		builtin.Email != "claude-code@example.com" || builtin.Windows == nil || len(builtin.Agents) != 0 {
 		t.Fatalf("built-in = %+v (%s)", builtin, data)
 	}
 	dir := filepath.Join(home, "claude", "claude-work")
 	if work.Name != "claude-work" || work.Builtin || work.ConfigDir != dir || !work.AllowScheduled || work.Email != "claude-work@example.com" ||
-		work.Plan != "max" || work.LoginCommand != "CLAUDE_CONFIG_DIR='"+dir+"' claude" ||
+		work.Plan != "max" || work.LoginCommand != "CLAUDE_CONFIG_DIR='"+dir+"' CLAUDE_SECURESTORAGE_CONFIG_DIR='"+dir+"' claude auth login" ||
 		len(work.Windows) != 1 || work.Windows[0].Utilization == nil || *work.Windows[0].Utilization != 0.4 ||
 		strings.Join(work.Agents, ",") != "worker" || strings.Join(work.Combos, ",") != "cw" {
 		t.Fatalf("claude-work = %+v (%s)", work, data)

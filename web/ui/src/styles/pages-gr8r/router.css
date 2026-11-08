@@ -340,6 +340,54 @@ g.on .rt-cost-bar { opacity: 0.85; }
 }
 .rt-login-cmd code { overflow-wrap: anywhere; font-size: var(--fs-xs); }
 .rt-cc-terms { margin: 12px 0 0; }
+
+/* REQ-CCT-012: one-click sign-in. */
+.rt-acct.is-new {
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: var(--r);
+  background: var(--accent-soft, var(--sunken));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.rt-acct-sub { color: var(--text-3, var(--text-2)); font-size: var(--fs-xs); min-width: 0; }
+.rt-acct-sub .mono { font-size: var(--fs-xs); }
+.rt-acct-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rt-acct-rename .input { flex: 1 1 180px; min-width: 0; max-width: 320px; }
+.rt-signin-help { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; }
+.rt-signin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--sunken);
+  font-size: var(--fs-sm);
+}
+.rt-accts-panel > .panel-b > .rt-signin { margin-bottom: 12px; }
+.rt-acct > .rt-signin, .rt-acct > .rt-signin-ok, .rt-acct > .rt-acct-alt { margin-left: 44px; }
+.rt-signin.is-running { border-color: var(--accent); }
+.rt-signin.is-failed { border-color: var(--red, var(--border)); background: var(--red-soft, var(--sunken)); }
+.rt-signin > .i { flex: none; margin-top: 2px; }
+.rt-signin.is-failed > .i { color: var(--red, currentColor); }
+.rt-signin-spin { display: inline-flex; flex: none; margin-top: 2px; color: var(--accent); }
+.rt-signin-spin .i { animation: spin 0.9s linear infinite; }
+.rt-signin-t { display: flex; flex-direction: column; gap: 4px; flex: 1 1 240px; min-width: 0; }
+.rt-signin-t b { font-weight: 500; }
+.rt-signin-err { color: var(--text-2); overflow-wrap: anywhere; }
+.rt-signin-acts { display: inline-flex; gap: 6px; margin-left: auto; }
+.rt-signin-ok { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--green, var(--text)); font-size: var(--fs-sm); }
+.rt-signin-alt { font-size: var(--fs-sm); }
+.rt-signin-alt summary { cursor: pointer; color: var(--text-2); width: fit-content; }
+.rt-signin-alt[open] summary { margin-bottom: 8px; }
+.rt-signin-alt p { margin: 0 0 8px; }
+.rt-confirm-body { margin: 0; line-height: 1.5; }
+@media (max-width: 640px) {
+  .rt-acct > .rt-signin, .rt-acct > .rt-signin-ok, .rt-acct > .rt-acct-alt { margin-left: 0; }
+  .rt-signin-acts { margin-left: 0; }
+}
 .rt-cc-login-step { display: flex; flex-direction: column; gap: 12px; }
 .rt-cc-login-step p { margin: 0; }
 .rt-cc-models-lead { margin: 0 0 12px; }

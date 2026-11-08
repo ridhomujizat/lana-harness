@@ -32,15 +32,21 @@ var scrubbedEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_
 // folder (REQ-CCT-010).
 const configDirEnv = "CLAUDE_CONFIG_DIR"
 
+// secureStorageDirEnv scopes Claude Code's secure credential storage (the
+// macOS Keychain entry) to an account's folder, so each account keeps its own
+// login there too (REQ-CCT-012). Claude Code reads it; lana only sets it.
+const secureStorageDirEnv = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
+
 // buildEnv returns the child environment. It never reads Claude credentials:
 // subscription auth only removes variables, and api_key auth sets the key from
-// the secrets service. A ConfigDir replaces CLAUDE_CONFIG_DIR; without one the
-// daemon's own value (if any) stays, so the built-in account is unchanged.
+// the secrets service. A ConfigDir replaces CLAUDE_CONFIG_DIR and
+// CLAUDE_SECURESTORAGE_CONFIG_DIR; without one the daemon's own values (if
+// any) stay, so the built-in account is unchanged.
 func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]string, string, error) {
-	env := make([]string, 0, len(base)+2)
+	env := make([]string, 0, len(base)+3)
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
-		drop := cfg.ConfigDir != "" && name == configDirEnv
+		drop := cfg.ConfigDir != "" && (name == configDirEnv || name == secureStorageDirEnv)
 		for _, s := range scrubbedEnv {
 			if name == s {
 				drop = true
@@ -52,7 +58,7 @@ func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]st
 		}
 	}
 	if cfg.ConfigDir != "" {
-		env = append(env, configDirEnv+"="+cfg.ConfigDir)
+		env = append(env, configDirEnv+"="+cfg.ConfigDir, secureStorageDirEnv+"="+cfg.ConfigDir)
 	}
 	switch cfg.Auth {
 	case "", core.RuntimeAuthSubscription:

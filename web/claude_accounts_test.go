@@ -29,7 +29,7 @@ func TestClaudeAccountProviderFlow(t *testing.T) {
 	var response providerSaveResponse
 	saved.json(t, &response)
 	dir := filepath.Join(store.home, "claude", "claude-work")
-	if response.ConfigDir != dir || response.LoginCommand != "CLAUDE_CONFIG_DIR='"+dir+"' claude" {
+	if response.ConfigDir != dir || response.LoginCommand != "CLAUDE_CONFIG_DIR='"+dir+"' CLAUDE_SECURESTORAGE_CONFIG_DIR='"+dir+"' claude auth login" {
 		t.Fatalf("response = %+v", response)
 	}
 	info, err := os.Stat(dir)
@@ -67,7 +67,7 @@ func TestClaudeAccountProviderFlow(t *testing.T) {
 	if work.Kind != "claude-code" || work.ConfigDir != custom || !work.AllowScheduled || work.Builtin || work.Disabled {
 		t.Fatalf("claude-work row = %+v", work)
 	}
-	if !builtin.Builtin || builtin.Kind != "claude-code" || builtin.ConfigDir != "" || builtin.LoginCommand != "claude" ||
+	if !builtin.Builtin || builtin.Kind != "claude-code" || builtin.ConfigDir != "" || builtin.LoginCommand != "claude auth login" ||
 		strings.Join(builtin.UsedBy, ",") != "agents.bima,combos.claude" {
 		t.Fatalf("built-in row = %+v", builtin)
 	}

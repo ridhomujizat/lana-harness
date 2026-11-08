@@ -183,14 +183,18 @@ func defaultHome() string {
 	return ""
 }
 
-// ClaudeLoginCommand is the shell command that logs in a Claude Code account
-// once (API-CCT-010): `CLAUDE_CONFIG_DIR='<dir>' claude`, or `claude` for
-// the built-in account (dir ""). The owner then types /login.
+// ClaudeLoginCommand is the shell command that signs in a Claude Code account
+// from a terminal (API-CCT-010, REQ-CCT-012), for a daemon on another machine:
+// `CLAUDE_CONFIG_DIR='<dir>' CLAUDE_SECURESTORAGE_CONFIG_DIR='<dir>' claude
+// auth login`, or `claude auth login` for the built-in account (dir ""). Both
+// variables point at the folder, as in every claude lana runs for the
+// account, so the login lands where lana looks for it.
 func ClaudeLoginCommand(dir string) string {
 	if dir == "" {
-		return "claude"
+		return "claude auth login"
 	}
-	return "CLAUDE_CONFIG_DIR='" + strings.ReplaceAll(dir, "'", `'\''`) + "' claude"
+	quoted := "'" + strings.ReplaceAll(dir, "'", `'\''`) + "'"
+	return "CLAUDE_CONFIG_DIR=" + quoted + " CLAUDE_SECURESTORAGE_CONFIG_DIR=" + quoted + " claude auth login"
 }
 
 // NormalizeAgent maps the deprecated engine key (API-CCT-002): runtime

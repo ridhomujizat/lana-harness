@@ -209,6 +209,9 @@ type Runtime struct {
 	draining atomic.Bool
 	closeMu  sync.Mutex
 	closeErr error
+	// claudeSignIns are the background sign-ins of Claude Code accounts
+	// (REQ-CCT-012).
+	claudeSignIns claudeSignIns
 	// consolidateWG tracks the in-flight nightly knowledge consolidation started
 	// by KnowledgeConsolidate, so Close joins it after cancelling rt.ctx and
 	// before the store is shut down (REQ-KNU-041).
@@ -1116,6 +1119,8 @@ func (rt *Runtime) Close() error {
 		return rt.closeErr
 	}
 	rt.closed.Store(true)
+	// REQ-CCT-012: stop the running Claude Code sign-ins.
+	rt.cancelClaudeSignIns()
 	// REQ-JOB-018: kill every background job's process group on shutdown.
 	if rt.jobs != nil {
 		rt.jobs.Shutdown()

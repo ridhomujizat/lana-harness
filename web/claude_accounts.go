@@ -15,9 +15,10 @@ import (
 )
 
 // Claude Code accounts as provider connections (REQ-CCT-010, API-CCT-010):
-// [providers.<name>] kind = "claude-code". lana never runs a login and never
-// reads the account folder; it creates the folder and shows the command that
-// logs in once.
+// [providers.<name>] kind = "claude-code". lana never reads the account
+// folder; it creates the folder, and signs the account in and out only by
+// starting the official `claude auth login` / `claude auth logout`
+// (REQ-CCT-012, claude_signin.go).
 
 // claudeAccountKeys are the body keys of a Claude Code account save besides
 // kind and expected_version.
@@ -99,6 +100,7 @@ func renderClaudeAccountTable(name string, record providerRecord) string {
 	if record.Disabled {
 		b.WriteString("disabled = true\n")
 	}
+	writeProviderString(&b, "label", record.Label)
 	return b.String()
 }
 
@@ -187,7 +189,7 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 	if stored := providerRecordFromMap(document.Providers[name]); stored.Kind == core.ClaudeCodeKind {
 		record = providerRecord{
 			ConfigDir: stored.ConfigDir, Binary: stored.Binary, Auth: stored.Auth, APIKeyEnv: stored.APIKeyEnv,
-			AllowScheduled: stored.AllowScheduled, Disabled: stored.Disabled,
+			AllowScheduled: stored.AllowScheduled, Disabled: stored.Disabled, Label: stored.Label,
 		}
 	}
 	record.Kind = core.ClaudeCodeKind

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 /* The Router page of spec 37 and the Claude Agent card of spec 38. The API
    module is mocked, so each test states the contract shapes it relies on. */
@@ -25,6 +25,12 @@ vi.mock("../../api/router", async (importOriginal) => {
     testRouterModel: vi.fn(),
     listRouterModels: vi.fn(),
     saveClaudeCodeModels: vi.fn(),
+    createClaudeAccount: vi.fn(),
+    startClaudeSignIn: vi.fn(),
+    getClaudeSignIn: vi.fn(),
+    cancelClaudeSignIn: vi.fn(),
+    signOutClaudeAccount: vi.fn(),
+    setClaudeAccountLabel: vi.fn(),
   };
 });
 
@@ -51,6 +57,9 @@ import { ProviderLogo } from "./provider-logo";
 import { monogram, presetFor } from "./presets";
 import { resetsIn } from "./router-common";
 import { windowText } from "./limits";
+import { SIGN_IN_HELP, SIGN_IN_POLL_MS } from "./claude-code-page";
+
+const RUNNING: api.ClaudeSignIn = { state: "running", error: "", started_at: "2026-11-08T10:00:00Z", finished_at: null };
 
 const ROUTER: RouterOverview = {
   version: "v1",
@@ -155,6 +164,9 @@ function account(overrides: Partial<ClaudeAccount> & { name: string }): ClaudeAc
     windows: [],
     agents: [],
     combos: [],
+    label: "",
+    display_name: "",
+    sign_in: { state: "idle", error: "", started_at: null, finished_at: null },
     ...overrides,
   };
 }
@@ -810,30 +822,38 @@ describe("Claude Code page", () => {
     expect(within(work).getByText(/^80 % used/)).toBeTruthy();
     expect(within(work).getByText(/^55 % used/)).toBeTruthy();
     expect(within(work).getByText(/^3 calls · 9k in/)).toBeTruthy();
-    /* The built-in account cannot be deleted; an added one can. */
-    expect(within(home).queryByRole("button", { name: "Delete claude-code" })).toBeNull();
-    expect(within(work).getByRole("button", { name: "Delete claude-work" })).toBeTruthy();
+    /* The built-in account cannot be removed or renamed; an added one can. */
+    expect(within(home).queryByRole("button", { name: "Remove claude-code" })).toBeNull();
+    expect(within(home).queryByRole("button", { name: "Rename claude-code" })).toBeNull();
+    expect(within(work).getByRole("button", { name: "Remove claude-work" })).toBeTruthy();
+    expect(within(work).getByRole("button", { name: "Rename claude-work" })).toBeTruthy();
+    /* The display name is prominent; the internal name is small and mono. */
+    expect(within(work).getByText("claude-work").className).toContain("mono");
     expect(screen.getByText(/break Anthropic's terms/)).toBeTruthy();
+    expect(screen.getByText(SIGN_IN_HELP)).toBeTruthy();
   });
 
-  it("shows the login command of a logged-out account and never a login button", async () => {
+  /* REQ-CCT-012: a logged-out account offers one-click sign-in; the
+     terminal command stays one click away for a remote daemon. */
+  it("offers Sign in with Claude Code for a logged-out account", async () => {
     vi.mocked(api.getClaudeAgent).mockResolvedValue({
       ...TWO_ACCOUNTS,
       accounts: [
         account({
           name: "claude-work",
           logged_in: false,
-          login_command: "CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-work' claude",
+          login_command: "CLAUDE_CONFIG_DIR='/x/claude-work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/x/claude-work' claude auth login",
         }),
       ],
     });
     render(<ProviderDetail id="claude-code" />);
     const work = await screen.findByRole("listitem", { name: "Account claude-work" });
-    expect(within(work).getByText("Not logged in")).toBeTruthy();
-    expect(within(work).getByText("CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-work' claude")).toBeTruthy();
+    expect(within(work).getByText("Not signed in")).toBeTruthy();
+    expect(within(work).getByRole("button", { name: "Sign in with Claude Code" })).toBeTruthy();
+    expect(within(work).getByText("Sign in from a terminal instead")).toBeTruthy();
     expect(within(work).getByRole("button", { name: "Copy login command" })).toBeTruthy();
-    expect(work.textContent).toContain("then type /login.");
-    expect(screen.queryByRole("button", { name: /^log ?in/i })).toBeNull();
+    expect(work.textContent).not.toContain("/login");
+    expect(screen.queryByText(/Login with Claude/i)).toBeNull();
   });
 
   it("switches scheduled runs per account with kind claude-code", async () => {
@@ -854,47 +874,177 @@ describe("Claude Code page", () => {
     });
   });
 
-  it("adds an account and shows its login command until it is logged in", async () => {
-    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-      this.open = true;
-    };
-    vi.mocked(api.getClaudeAgent).mockResolvedValue(CLAUDE);
-    vi.mocked(api.saveProvider).mockResolvedValue({
-      name: "claude-play",
+  /* REQ-CCT-012: "Add account" is one click: the account is created, the
+     sign-in runs in the background and is polled every 1.5 s, and on success
+     the new row is highlighted with its email and plan. */
+  it("adds an account in one click and follows its sign-in", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.mocked(api.getClaudeAgent).mockResolvedValue(CLAUDE);
+      vi.mocked(api.createClaudeAccount).mockResolvedValue({
+        name: "claude-2",
+        config_dir: "/Users/x/.lana/claude/claude-2",
+        version: "v2",
+        restart_required: false,
+        login_command: "claude auth login --for claude-2",
+        sign_in: { state: "running", error: "", started_at: "2026-11-08T10:00:00Z", finished_at: null },
+      });
+      vi.mocked(api.getClaudeSignIn).mockResolvedValue(RUNNING);
+      render(<ProviderDetail id="claude-code" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Add account" }));
+      const card = await screen.findByRole("status", { name: "Sign-in of claude-2" });
+      expect(vi.mocked(api.createClaudeAccount)).toHaveBeenCalledWith();
+      expect(card.textContent).toContain("Opening Claude Code sign-in in your browser… Finish signing in there.");
+      expect(card.textContent).toContain(SIGN_IN_HELP);
+      expect(screen.queryByRole("dialog")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIGN_IN_POLL_MS);
+      });
+      expect(vi.mocked(api.getClaudeSignIn)).toHaveBeenCalledWith("claude-2");
+      expect(screen.getByRole("status", { name: "Sign-in of claude-2" })).toBeTruthy();
+
+      vi.mocked(api.getClaudeSignIn).mockResolvedValue({ ...RUNNING, state: "succeeded", finished_at: "2026-11-08T10:01:00Z" });
+      vi.mocked(api.getClaudeAgent).mockResolvedValue({
+        ...CLAUDE,
+        accounts: [...CLAUDE.accounts, account({ name: "claude-2", email: "two@work.dev", plan: "pro", display_name: "two@work.dev" })],
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIGN_IN_POLL_MS);
+      });
+      const row = await screen.findByRole("listitem", { name: "Account claude-2" });
+      expect(await within(row).findByText(/Signed in as two@work.dev · Pro/)).toBeTruthy();
+      expect(row.className).toContain("is-new");
+      expect(screen.queryByRole("status", { name: "Sign-in of claude-2" })).toBeNull();
+      const polls = vi.mocked(api.getClaudeSignIn).mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIGN_IN_POLL_MS * 2);
+      });
+      expect(vi.mocked(api.getClaudeSignIn).mock.calls.length).toBe(polls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /* REQ-CCT-012: a failed sign-in shows the daemon's sanitized error, Try
+     again, and the terminal command collapsed. */
+  it("shows a failed sign-in with Try again and the terminal fallback", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.mocked(api.getClaudeAgent).mockResolvedValue({
+        ...TWO_ACCOUNTS,
+        accounts: [account({ name: "claude-work", logged_in: false, login_command: "claude auth login --for work" })],
+      });
+      vi.mocked(api.startClaudeSignIn).mockResolvedValue(RUNNING);
+      vi.mocked(api.getClaudeSignIn).mockResolvedValue({
+        ...RUNNING,
+        state: "failed",
+        error: "Login failed: token exchange refused at sign-in link",
+      });
+      render(<ProviderDetail id="claude-code" />);
+      const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+      fireEvent.click(within(work).getByRole("button", { name: "Sign in with Claude Code" }));
+      await waitFor(() => expect(vi.mocked(api.startClaudeSignIn)).toHaveBeenCalledWith("claude-work"));
+      expect(within(work).getByRole("status", { name: "Sign-in of claude-work" })).toBeTruthy();
+      expect(within(work).queryByRole("button", { name: "Sign in with Claude Code" })).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SIGN_IN_POLL_MS);
+      });
+      const alert = await within(work).findByRole("alert", { name: "Sign-in of claude-work" });
+      expect(alert.textContent).toContain("Login failed: token exchange refused at sign-in link");
+      expect(within(alert).getByText("Sign in from a terminal instead")).toBeTruthy();
+      expect(within(alert).getByText("claude auth login --for work")).toBeTruthy();
+
+      vi.mocked(api.getClaudeSignIn).mockResolvedValue(RUNNING);
+      fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+      await waitFor(() => expect(vi.mocked(api.startClaudeSignIn)).toHaveBeenCalledTimes(2));
+      expect(await within(work).findByRole("status", { name: "Sign-in of claude-work" })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a running sign-in", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue({
+      ...TWO_ACCOUNTS,
+      accounts: [account({ name: "claude-work", logged_in: false })],
+    });
+    vi.mocked(api.startClaudeSignIn).mockResolvedValue(RUNNING);
+    vi.mocked(api.cancelClaudeSignIn).mockResolvedValue({ ...RUNNING, state: "cancelled" });
+    render(<ProviderDetail id="claude-code" />);
+    const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    fireEvent.click(within(work).getByRole("button", { name: "Sign in with Claude Code" }));
+    const card = await within(work).findByRole("status", { name: "Sign-in of claude-work" });
+    fireEvent.click(within(card).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(vi.mocked(api.cancelClaudeSignIn)).toHaveBeenCalledWith("claude-work"));
+    expect(await within(work).findByText("Sign-in cancelled.")).toBeTruthy();
+  });
+
+  /* REQ-CCT-012: sign out asks first; the built-in account warns that it
+     signs the owner out of their own Claude Code and sends confirm. */
+  it("signs an account out after a confirm, with stronger wording for the built-in one", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    vi.mocked(api.signOutClaudeAccount).mockResolvedValue(account({ name: "claude-work", logged_in: false }));
+    render(<ProviderDetail id="claude-code" />);
+    const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    fireEvent.click(within(work).getByRole("button", { name: "Sign out" }));
+    let dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Sign out me@work.dev?");
+    expect(dialog.textContent).not.toContain("on this machine");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(vi.mocked(api.signOutClaudeAccount)).toHaveBeenCalledWith("claude-work", false));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    const home = screen.getByRole("listitem", { name: "Account claude-code" });
+    fireEvent.click(within(home).getByRole("button", { name: "Sign out" }));
+    dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Sign out of your own Claude Code?");
+    expect(dialog.textContent).toContain("signs you out of Claude Code on this machine");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(vi.mocked(api.signOutClaudeAccount)).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(home).getByRole("button", { name: "Sign out" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(vi.mocked(api.signOutClaudeAccount)).toHaveBeenLastCalledWith("claude-code", true));
+  });
+
+  it("removes an account with its folder after a confirm", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    vi.mocked(api.deleteProvider).mockResolvedValue({
+      name: "claude-work",
       version: "v2",
       restart_required: false,
-      login_command: "CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-play' claude",
+      folder_removed: true,
+      message: "The account was signed out and its folder /Users/x/.lana/claude/claude-work was deleted.",
     });
     render(<ProviderDetail id="claude-code" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Add account" }));
+    const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    fireEvent.click(within(work).getByRole("button", { name: "Remove claude-work" }));
     const dialog = screen.getByRole("dialog");
-    expect(dialog.textContent).toContain("Use separate accounts for separate purposes");
-    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "claude-play" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add account" }));
-    await waitFor(() => {
-      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("claude-play", {
-        kind: "claude-code",
-        expected_version: "v1",
-      });
-    });
-    const step = screen.getByRole("dialog");
-    expect(await within(step).findByText("CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-play' claude")).toBeTruthy();
-    expect(within(step).queryByRole("button", { name: /^log ?in/i })).toBeNull();
+    expect(dialog.textContent).toContain("Signs this account out and deletes its folder");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(vi.mocked(api.deleteProvider)).toHaveBeenCalledWith("claude-work", "v1", { removeFolder: true })
+    );
+    expect(await screen.findByText(/its folder \/Users\/x\/.lana\/claude\/claude-work was deleted/)).toBeTruthy();
+  });
 
-    vi.mocked(api.getClaudeAgent).mockResolvedValue({
-      ...CLAUDE,
-      accounts: [...CLAUDE.accounts, account({ name: "claude-play", logged_in: false })],
-    });
-    fireEvent.click(within(step).getByRole("button", { name: "Check again" }));
-    expect(await within(step).findByText(/Not logged in yet/)).toBeTruthy();
+  it("renames an account label inline", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    vi.mocked(api.setClaudeAccountLabel).mockResolvedValue({ name: "claude-work", label: "Work", version: "v2", restart_required: false });
+    render(<ProviderDetail id="claude-code" />);
+    const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    fireEvent.click(within(work).getByRole("button", { name: "Rename claude-work" }));
+    const input = within(work).getByLabelText("Label of claude-work");
+    fireEvent.change(input, { target: { value: "  Work " } });
+    fireEvent.click(within(work).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(vi.mocked(api.setClaudeAccountLabel)).toHaveBeenCalledWith("claude-work", "Work", "v1"));
+    await waitFor(() => expect(within(work).queryByLabelText("Label of claude-work")).toBeNull());
 
-    vi.mocked(api.getClaudeAgent).mockResolvedValue({
-      ...CLAUDE,
-      accounts: [...CLAUDE.accounts, account({ name: "claude-play", email: "me@work.dev", plan: "pro" })],
-    });
-    fireEvent.click(within(step).getByRole("button", { name: "Check again" }));
-    expect(await within(step).findByText(/Logged in as me@work.dev · Pro/)).toBeTruthy();
-    expect(within(step).queryByRole("button", { name: "Check again" })).toBeNull();
+    fireEvent.click(within(work).getByRole("button", { name: "Rename claude-work" }));
+    fireEvent.change(within(work).getByLabelText("Label of claude-work"), { target: { value: "x".repeat(61) } });
+    expect((within(work).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(work).getByRole("button", { name: "Cancel" }));
+    expect(within(work).queryByLabelText("Label of claude-work")).toBeNull();
   });
 
   it("adds and removes a custom model ID with PUT /v1/router/claude-code/models", async () => {

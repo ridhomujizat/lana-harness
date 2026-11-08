@@ -11,6 +11,18 @@
 //	FAKECLAUDE_GATE              file the {"fake":"gate"} directive waits for
 //	FAKECLAUDE_MODELS            JSON models array of the initialize response
 //	                             (default: a recorded, scrubbed list)
+//	FAKECLAUDE_LOGIN             `auth login` behaviour: "" or "ok" succeeds,
+//	                             "fail" writes stderr lines (the last one with
+//	                             a URL) and exits 1, "hang" waits until killed
+//	FAKECLAUDE_LOGIN_MS          `auth login` sleeps this long first
+//	FAKECLAUDE_LOGIN_EMAIL       e-mail the successful login reports
+//	                             (default "new@example.com")
+//
+// `auth login` and `auth logout` log a line with kind "auth", and
+// `auth status` one with kind "status" (argv and env).
+// A successful login writes fakeclaude_auth.json (logged in) into
+// CLAUDE_CONFIG_DIR, and a logout writes a logged-out one, so a later
+// `auth status` of that account sees the change.
 //
 // With CLAUDE_CONFIG_DIR set (a lana Claude Code account), the files
 // fakeclaude_auth.json and fakeclaude_fixture.jsonl in that folder, when
@@ -187,7 +199,12 @@ func main() {
 		fmt.Println(v)
 		return
 	}
+	if len(args) >= 2 && args[0] == "auth" && (args[1] == "login" || args[1] == "logout") {
+		authCommand(args)
+		return
+	}
 	if len(args) >= 2 && args[0] == "auth" && args[1] == "status" {
+		logLine(map[string]any{"kind": "status", "argv": args, "env": os.Environ()})
 		a := os.Getenv("FAKECLAUDE_AUTH")
 		if path, ok := accountFile("fakeclaude_auth.json"); ok {
 			if data, err := os.ReadFile(path); err == nil {
@@ -444,4 +461,42 @@ func loadFixture(path string) [][]string {
 		turns = append(turns, cur)
 	}
 	return turns
+}
+
+// authCommand fakes `auth login` and `auth logout`.
+func authCommand(args []string) {
+	logLine(map[string]any{"kind": "auth", "argv": args, "env": os.Environ()})
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	write := func(content string) {
+		if dir != "" {
+			_ = os.WriteFile(filepath.Join(dir, "fakeclaude_auth.json"), []byte(content), 0o600)
+		}
+	}
+	if args[1] == "logout" {
+		write(`{"loggedIn":false,"authMethod":"none"}`)
+		fmt.Fprintln(os.Stderr, "Successfully logged out from your Anthropic account.")
+		return
+	}
+	if ms := os.Getenv("FAKECLAUDE_LOGIN_MS"); ms != "" {
+		var n int
+		_, _ = fmt.Sscanf(ms, "%d", &n)
+		time.Sleep(time.Duration(n) * time.Millisecond)
+	}
+	switch os.Getenv("FAKECLAUDE_LOGIN") {
+	case "fail":
+		fmt.Fprintln(os.Stderr, "Opening browser to sign in…")
+		fmt.Fprintln(os.Stderr, "If the browser didn't open, visit: https://claude.ai/oauth/authorize?code=true&state=secret-state")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "\x1b[31mLogin failed:\x1b[0m token exchange refused at https://console.anthropic.com/v1/oauth/token?code=private-code")
+		os.Exit(1)
+	case "hang":
+		fmt.Fprintln(os.Stderr, "Opening browser to sign in…")
+		time.Sleep(time.Hour)
+	}
+	email := os.Getenv("FAKECLAUDE_LOGIN_EMAIL")
+	if email == "" {
+		email = "new@example.com"
+	}
+	write(`{"loggedIn":true,"authMethod":"claude.ai","email":"` + email + `","subscriptionType":"pro"}`)
+	fmt.Fprintln(os.Stderr, "Login successful.")
 }

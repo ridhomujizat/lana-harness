@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sort"
 	"sync"
@@ -170,6 +171,26 @@ type RuntimeAccountStatus struct {
 type RuntimeAccountStatuser interface {
 	AccountStatus(ctx context.Context, account RuntimeAccount) RuntimeAccountStatus
 }
+
+// RuntimeAccountAuth is implemented by a runtime that signs one of its
+// accounts in and out with its own official binary (REQ-CCT-012, ADR 0020
+// amendment 2026-11-08). For Claude Code that is `claude auth login` and
+// `claude auth logout` with the account's environment: the binary opens the
+// browser and owns the credentials. The runtime keeps only a short,
+// URL-stripped error line and never stores it.
+type RuntimeAccountAuth interface {
+	// SignIn runs the sign-in and waits for it: nil when it succeeded. It
+	// returns ErrRuntimeSignInRunning while a sign-in or sign-out of the
+	// same account runs, and an error wrapping context.Canceled when ctx was
+	// cancelled.
+	SignIn(ctx context.Context, account RuntimeAccount) error
+	// SignOut runs the sign-out and waits for it.
+	SignOut(ctx context.Context, account RuntimeAccount) error
+}
+
+// ErrRuntimeSignInRunning is the error of a sign-in or sign-out started while
+// another one of the same account runs.
+var ErrRuntimeSignInRunning = errors.New("a sign-in or sign-out of this account is already running")
 
 // RuntimeTurn is one turn handed to an AgentRuntime.
 type RuntimeTurn struct {

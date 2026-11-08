@@ -3,13 +3,14 @@ import type { FormEvent } from "react";
 import * as routerApi from "../../api/router";
 import type {
   ClaudeAccount,
+  ClaudeSignIn,
   ListProvidersResponse,
   ProviderModels,
   ProviderRow,
   ProviderWriteRequest,
   UsageProviderRow,
 } from "../../api/router";
-import { Badge, Button, EmptyState, Field, IconButton, Input, Modal, Panel, Select, Toggle } from "../../ui/gr8r";
+import { Badge, Button, EmptyState, IconButton, Input, Modal, Panel, Select, Toggle } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { CreateAgentDialog } from "../agents";
 import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../settings-pages";
@@ -23,12 +24,20 @@ import { UsedBy, claudeStatus } from "./providers";
 import { DASH, compact, count, failureOf, inUseText, isStale, statsCostText } from "./router-common";
 
 /* Router → Providers → Claude Code (#/router/providers/claude-code), spec 39
-   revision 2 (REQ-CCT-009..011): the Claude Code accounts as connections,
+   revision 3 (REQ-CCT-009..012): the Claude Code accounts as connections,
    each with its email, plan, windows, and usage; then the Claude Code models
-   with custom IDs. lana never logs an account in: a logged-out account shows
-   the command to run once in a terminal. */
+   with custom IDs. Adding or signing in an account is one click: the daemon
+   starts the official `claude auth login`, which opens Claude Code's own
+   sign-in page in the browser; the page polls the sign-in until it ends. */
 
-const NAME_RE = /^[a-z0-9-]+$/;
+/* How often a running sign-in is polled. */
+export const SIGN_IN_POLL_MS = 1500;
+
+export const SIGN_IN_BUTTON = "Sign in with Claude Code";
+
+export const SIGN_IN_HELP = "Claude Code opens its own sign-in page. lana never sees your password or tokens.";
+
+const LABEL_MAX = 60;
 
 function BackLink() {
   return (
@@ -67,9 +76,143 @@ function usageText(usage: UsageProviderRow | undefined): string {
   );
 }
 
+/* The name an account is shown with: its label, else its email, else its
+   name (REQ-CCT-012). */
+export function accountDisplayName(account: ClaudeAccount): string {
+  return account.display_name || account.label || account.email || account.name;
+}
+
+/* "Signed in as me@work.dev · Pro". */
+function signedInText(account: ClaudeAccount | undefined): string {
+  if (!account) {
+    return "Signed in.";
+  }
+  return (
+    "Signed in" +
+    (account.email ? " as " + account.email : "") +
+    (account.plan ? " · " + planLabel(account.plan) : "")
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sign-in flow                                                        */
+/* ------------------------------------------------------------------ */
+
+/* One sign-in the page follows. command is the terminal fallback. */
+interface SignInFlow {
+  name: string;
+  phase: "running" | "succeeded" | "failed" | "cancelled";
+  error: string;
+  command: string;
+}
+
+/* The inline card of a running, failed, or cancelled sign-in. */
+function SignInCard({
+  flow,
+  onCancel,
+  onRetry,
+  onDismiss,
+}: {
+  flow: SignInFlow;
+  onCancel: () => void;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  if (flow.phase === "running") {
+    return (
+      <div className="rt-signin is-running" role="status" aria-label={"Sign-in of " + flow.name}>
+        <span className="rt-signin-spin" aria-hidden="true">
+          <Ic name="loader-circle" size={16} />
+        </span>
+        <div className="rt-signin-t">
+          <b>Opening Claude Code sign-in in your browser… Finish signing in there.</b>
+          <span className="hint">{SIGN_IN_HELP}</span>
+        </div>
+        <Button size="sm" variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+  if (flow.phase === "succeeded") {
+    return null;
+  }
+  const failed = flow.phase === "failed";
+  return (
+    <div className={"rt-signin " + (failed ? "is-failed" : "is-cancelled")} role={failed ? "alert" : "status"} aria-label={"Sign-in of " + flow.name}>
+      <Ic name={failed ? "circle-alert" : "circle-slash"} size={16} />
+      <div className="rt-signin-t">
+        <b>{failed ? "Sign-in did not finish." : "Sign-in cancelled."}</b>
+        {failed && flow.error ? <span className="rt-signin-err">{flow.error}</span> : null}
+        <details className="rt-signin-alt">
+          <summary>Sign in from a terminal instead</summary>
+          <p className="hint">For a lana daemon on another machine: run this where the daemon runs.</p>
+          <LoginCommand command={flow.command} />
+        </details>
+      </div>
+      <span className="rt-signin-acts">
+        <Button size="sm" variant="ghost" onClick={onDismiss}>
+          Dismiss
+        </Button>
+        <Button size="sm" variant="primary" icon="rotate-ccw" onClick={onRetry}>
+          Try again
+        </Button>
+      </span>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Account row                                                         */
 /* ------------------------------------------------------------------ */
+
+function LabelEditor({
+  account,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  account: ClaudeAccount;
+  busy: boolean;
+  onSave: (label: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(account.label);
+  const tooLong = value.trim().length > LABEL_MAX;
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!tooLong) {
+      onSave(value.trim());
+    }
+  }
+  return (
+    <form className="rt-acct-rename" onSubmit={submit}>
+      <Input
+        data-autofocus
+        aria-label={"Label of " + account.name}
+        value={value}
+        disabled={busy}
+        autoFocus
+        maxLength={LABEL_MAX + 20}
+        placeholder={account.email || account.name}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+      />
+      <Button type="submit" size="sm" variant="primary" loading={busy} disabled={busy || tooLong}>
+        Save
+      </Button>
+      <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
+        Cancel
+      </Button>
+      {tooLong ? <span className="rt-warn">At most {LABEL_MAX} characters.</span> : null}
+    </form>
+  );
+}
 
 function AccountRow({
   account,
@@ -77,90 +220,119 @@ function AccountRow({
   windows,
   usage,
   busy,
-  confirming,
+  flow,
+  highlighted,
+  renaming,
   onToggle,
   onScheduled,
-  onAskDelete,
-  onCancelDelete,
-  onDelete,
+  onSignIn,
+  onCancelSignIn,
+  onDismissFlow,
+  onAskSignOut,
+  onAskRemove,
+  onRename,
+  onSaveLabel,
+  onCancelRename,
 }: {
   account: ClaudeAccount;
   row: ProviderRow | undefined;
   windows: routerApi.PlanWindow[];
   usage: UsageProviderRow | undefined;
   busy: boolean;
-  confirming: boolean;
+  flow: SignInFlow | undefined;
+  highlighted: boolean;
+  renaming: boolean;
   onToggle: (enabled: boolean) => void;
   onScheduled: (allowed: boolean) => void;
-  onAskDelete: () => void;
-  onCancelDelete: () => void;
-  onDelete: () => void;
+  onSignIn: () => void;
+  onCancelSignIn: () => void;
+  onDismissFlow: () => void;
+  onAskSignOut: () => void;
+  onAskRemove: () => void;
+  onRename: () => void;
+  onSaveLabel: (label: string) => void;
+  onCancelRename: () => void;
 }) {
   const enabled = !(row && row.disabled);
   const users = account.agents.map((name) => "agents." + name).concat(account.combos.map((name) => "combos." + name));
   const folder = account.config_dir || (row ? row.config_dir || "" : "");
+  const display = accountDisplayName(account);
+  const running = Boolean(flow && flow.phase === "running");
   return (
-    <li className={"rt-acct" + (enabled ? "" : " is-off")} aria-label={"Account " + account.name}>
+    <li
+      className={"rt-acct" + (enabled ? "" : " is-off") + (highlighted ? " is-new" : "")}
+      aria-label={"Account " + account.name}
+    >
       <div className="rt-acct-head">
         <ProviderLogo logo="claude" name="Claude Code" size={32} />
         <div className="rt-acct-id">
-          <span className="rt-acct-name">
+          {renaming ? (
+            <LabelEditor account={account} busy={busy} onSave={onSaveLabel} onCancel={onCancelRename} />
+          ) : (
+            <span className="rt-acct-name">
+              <span className="trunc" title={display}>
+                {display}
+              </span>
+              {account.builtin ? <Badge>Built in</Badge> : null}
+              {account.builtin ? null : (
+                <IconButton icon="pencil" size="xs" label={"Rename " + account.name} disabled={busy} onClick={onRename} />
+              )}
+            </span>
+          )}
+          <span className="rt-acct-sub">
             <span className="mono">{account.name}</span>
-            {account.builtin ? <Badge>Built in</Badge> : null}
-          </span>
-          <span className="rt-acct-email trunc">
-            {account.email || (account.logged_in ? "Email not reported" : "No account yet")}
+            {account.email && display !== account.email ? <span className="trunc"> · {account.email}</span> : null}
+            {!account.email && !account.logged_in ? <span> · Not signed in yet</span> : null}
+            {!account.email && account.logged_in ? <span> · Email not reported</span> : null}
           </span>
         </div>
         <div className="rt-acct-state">
           {account.plan ? <Badge tone="violet">{planLabel(account.plan)}</Badge> : null}
           {account.logged_in ? (
             <Badge tone="green" dot>
-              Logged in
+              Signed in
             </Badge>
           ) : (
             <Badge tone="amber" dot>
-              Not logged in
+              Not signed in
             </Badge>
           )}
         </div>
         <div className="rt-acct-acts">
-          {confirming ? (
-            <>
-              <span className="hint">Delete {account.name}? Its folder stays.</span>
-              <Button size="sm" variant="ghost" disabled={busy} onClick={onCancelDelete}>
-                Keep
-              </Button>
-              <Button size="sm" variant="danger" loading={busy} disabled={busy} onClick={onDelete}>
-                Delete
-              </Button>
-            </>
-          ) : (
-            <>
-              <label className="rt-conn-toggle">
-                <Toggle
-                  aria-label={"Use " + account.name}
-                  checked={enabled}
-                  disabled={busy || !row}
-                  onChange={onToggle}
-                />
-                <span className="hint">{enabled ? "On" : "Off"}</span>
-              </label>
-              {account.builtin ? null : (
-                <IconButton
-                  icon="trash-2"
-                  size="sm"
-                  label={"Delete " + account.name}
-                  disabled={busy}
-                  onClick={onAskDelete}
-                />
-              )}
-            </>
+          {!account.logged_in && !running ? (
+            <Button size="sm" variant="primary" icon="log-in" disabled={busy} onClick={onSignIn}>
+              {SIGN_IN_BUTTON}
+            </Button>
+          ) : null}
+          {account.logged_in ? (
+            <Button size="sm" variant="ghost" icon="log-out" disabled={busy || running} onClick={onAskSignOut}>
+              Sign out
+            </Button>
+          ) : null}
+          <label className="rt-conn-toggle">
+            <Toggle aria-label={"Use " + account.name} checked={enabled} disabled={busy || !row} onChange={onToggle} />
+            <span className="hint">{enabled ? "On" : "Off"}</span>
+          </label>
+          {account.builtin ? null : (
+            <IconButton icon="trash-2" size="sm" label={"Remove " + account.name} disabled={busy} onClick={onAskRemove} />
           )}
         </div>
       </div>
 
-      {!account.logged_in ? <LoginCommand command={account.login_command} /> : null}
+      {flow && flow.phase === "succeeded" ? (
+        <p className="rt-signin-ok" role="status">
+          <Ic name="circle-check" size={14} /> {signedInText(account)}
+        </p>
+      ) : null}
+      {flow ? (
+        <SignInCard flow={flow} onCancel={onCancelSignIn} onRetry={onSignIn} onDismiss={onDismissFlow} />
+      ) : null}
+      {!account.logged_in && !flow ? (
+        <details className="rt-signin-alt rt-acct-alt">
+          <summary>Sign in from a terminal instead</summary>
+          <LoginCommand command={account.login_command} />
+        </details>
+      ) : null}
 
       <div className="rt-acct-body">
         <PlanWindows windows={windows} />
@@ -220,185 +392,57 @@ function AccountRow({
 }
 
 /* ------------------------------------------------------------------ */
-/* Add account                                                         */
+/* Confirm dialogs                                                     */
 /* ------------------------------------------------------------------ */
 
-function AddAccountDialog({
-  version,
-  takenNames,
-  onClose,
-  onSaved,
-  onCheck,
+function ConfirmDialog({
+  title,
+  body,
+  action,
+  busy,
+  onCancel,
+  onConfirm,
 }: {
-  version: string;
-  takenNames: string[];
-  onClose: () => void;
-  onSaved: (name: string) => void;
-  onCheck: (name: string) => Promise<ClaudeAccount | null>;
+  title: string;
+  body: string;
+  action: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [folder, setFolder] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [details, setDetails] = useState<unknown[]>([]);
-  const [saved, setSaved] = useState<{ name: string; command: string } | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [checked, setChecked] = useState<{ account: ClaudeAccount | null } | null>(null);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) {
-      return;
-    }
-    const value = name.trim();
-    if (!NAME_RE.test(value)) {
-      setError("Name the account with lowercase letters, digits, and dashes, for example claude-work.");
-      setDetails([]);
-      return;
-    }
-    if (takenNames.includes(value)) {
-      setError("A provider named " + value + " already exists. Pick another name.");
-      setDetails([]);
-      return;
-    }
-    if (!version) {
-      setError("config.toml is missing. Run lana init before adding accounts.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    setDetails([]);
-    try {
-      const body: ProviderWriteRequest = { kind: CLAUDE_CODE_KIND, expected_version: version };
-      if (folder.trim()) {
-        body.config_dir = folder.trim();
-      }
-      const result = await routerApi.saveProvider(value, body);
-      markSettingsSaved();
-      const command =
-        (result && result.login_command) ||
-        (folder.trim() ? "CLAUDE_CONFIG_DIR='" + folder.trim() + "' claude" : "claude");
-      setSaved({ name: value, command });
-      onSaved(value);
-    } catch (failure) {
-      if (isStale(failure)) {
-        setError("The config changed since this page loaded. Close the dialog and reload the page before saving.");
-        setDetails([]);
-      } else {
-        const info = failureOf(failure);
-        setError(info.message);
-        setDetails(info.details);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function check() {
-    if (!saved) {
-      return;
-    }
-    setChecking(true);
-    try {
-      setChecked({ account: await onCheck(saved.name) });
-    } finally {
-      setChecking(false);
-    }
-  }
-
-  const loggedIn = Boolean(checked && checked.account && checked.account.logged_in);
-
   return (
     <Modal
-      title={
-        <span className="rt-dialog-title">
-          <ProviderLogo logo="claude" name="Claude Code" size={24} />
-          <span>{saved ? "Log in to " + saved.name : "Add Claude Code account"}</span>
-        </span>
-      }
-      subtitle={saved ? undefined : "Each account has its own folder and its own Claude login."}
+      title={title}
+      size="sm"
       dismissible={!busy}
-      onClose={onClose}
+      onClose={onCancel}
       footer={
-        saved ? (
-          <>
-            <span className="sp" />
-            {loggedIn ? null : (
-              <Button variant="secondary" icon="refresh-cw" loading={checking} disabled={checking} onClick={() => void check()}>
-                Check again
-              </Button>
-            )}
-            <Button variant="primary" onClick={onClose}>
-              Done
-            </Button>
-          </>
-        ) : (
-          <>
-            <span className="sp" />
-            <Button variant="secondary" disabled={busy} onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" form="rt-cc-account-form" variant="primary" disabled={busy} loading={busy}>
-              {busy ? "Adding…" : "Add account"}
-            </Button>
-          </>
-        )
+        <>
+          <span className="sp" />
+          <Button variant="secondary" disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button variant="danger" loading={busy} disabled={busy} onClick={onConfirm}>
+            {action}
+          </Button>
+        </>
       }
     >
-      {saved ? (
-        <div className="rt-cc-login-step">
-          <p>
-            Account <b className="mono">{saved.name}</b> is added. Log in once with the Claude account you want it to
-            use.
-          </p>
-          <LoginCommand command={saved.command} />
-          {checked ? (
-            loggedIn ? (
-              <p className="rt-test ok" role="status">
-                <Ic name="circle-check" size={12} /> Logged in
-                {checked.account && checked.account.email ? " as " + checked.account.email : ""}
-                {checked.account && checked.account.plan ? " · " + planLabel(checked.account.plan) : ""}
-              </p>
-            ) : (
-              <p className="rt-test bad" role="status">
-                <Ic name="circle-alert" size={12} /> Not logged in yet. Run the command, type /login, then check again.
-              </p>
-            )
-          ) : null}
-        </div>
-      ) : (
-        <form id="rt-cc-account-form" className="settings-dialog-form" onSubmit={submit}>
-          <Field label="Name" hint="Agents and combos call its models as name/model, for example claude-work/opus.">
-            <Input
-              data-autofocus
-              name="account-name"
-              className="mono"
-              value={name}
-              disabled={busy}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="claude-work"
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Field>
-          <Field label="Folder (optional)" hint="Where this account keeps its Claude Code login. Leave empty for a new folder in lana's home.">
-            <Input
-              name="account-folder"
-              className="mono"
-              value={folder}
-              disabled={busy}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="~/.lana/claude/claude-work"
-              onChange={(event) => setFolder(event.target.value)}
-            />
-          </Field>
-          <Alert tone="danger" message={error} details={details} />
-        </form>
-      )}
-      <p className="hint rt-cc-terms">{ACCOUNTS_TERMS_NOTE}</p>
+      <p className="rt-confirm-body">{body}</p>
     </Modal>
   );
+}
+
+/* The sign-out warning: stronger for the built-in account, which is the
+   owner's own Claude Code login. */
+export function signOutText(account: ClaudeAccount): string {
+  if (account.builtin) {
+    return (
+      "This signs you out of Claude Code on this machine, including the claude you use in a terminal. " +
+      "Agents on this account stop until you sign in again."
+    );
+  }
+  return "Agents that use " + account.name + " stop until you sign in again. The account and its folder stay.";
 }
 
 /* ------------------------------------------------------------------ */
@@ -643,6 +687,7 @@ function ClaudeModelsPanel({
   );
 }
 
+
 /* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
@@ -657,9 +702,13 @@ export function ClaudeCodeDetail() {
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
   const [busyRow, setBusyRow] = useState("");
-  const [confirm, setConfirm] = useState("");
   const [adding, setAdding] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [flows, setFlows] = useState<Record<string, SignInFlow>>({});
+  const [highlight, setHighlight] = useState("");
+  const [renaming, setRenaming] = useState("");
+  const [confirm, setConfirm] = useState<{ kind: "sign-out" | "remove"; account: ClaudeAccount } | null>(null);
+  const [pollTick, setPollTick] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
   const reload = useCallback(() => setReloadToken((current) => current + 1), []);
 
@@ -699,11 +748,91 @@ export function ClaudeCodeDetail() {
     };
   }, [reloadToken]);
 
+  const setFlow = useCallback((name: string, change: Partial<SignInFlow> | null) => {
+    setFlows((current) => {
+      const next = { ...current };
+      if (change === null) {
+        delete next[name];
+      } else {
+        const base: SignInFlow = current[name] || { name, phase: "running", error: "", command: "" };
+        next[name] = { ...base, ...change, name };
+      }
+      return next;
+    });
+  }, []);
+
+  /* A sign-in ended: on success the accounts reload and the row is
+     highlighted with "Signed in as …". */
+  const finish = useCallback(
+    (name: string, state: ClaudeSignIn) => {
+      if (state.state === "succeeded") {
+        setFlow(name, { phase: "succeeded", error: "" });
+        setHighlight(name);
+        reload();
+        void reloadStatus();
+        return;
+      }
+      if (state.state === "cancelled") {
+        setFlow(name, { phase: "cancelled", error: "" });
+        return;
+      }
+      setFlow(name, {
+        phase: "failed",
+        error: state.error || (state.state === "idle" ? "The sign-in stopped. Try again." : ""),
+      });
+    },
+    [reload, reloadStatus, setFlow]
+  );
+
+  /* Poll every running sign-in each SIGN_IN_POLL_MS. */
+  const running = Object.values(flows)
+    .filter((flow) => flow.phase === "running")
+    .map((flow) => flow.name)
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!running) {
+      return undefined;
+    }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        for (const name of running.split(",")) {
+          try {
+            const state = await routerApi.getClaudeSignIn(name);
+            if (!alive) {
+              return;
+            }
+            if (state.state !== "running") {
+              finish(name, state);
+            }
+          } catch (failure) {
+            if (!alive) {
+              return;
+            }
+            finish(name, { state: "failed", error: failureOf(failure).message, started_at: null, finished_at: null });
+          }
+        }
+        if (alive) {
+          setPollTick((tick) => tick + 1);
+        }
+      })();
+    }, SIGN_IN_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [running, pollTick, finish]);
+
   const rows = useMemo(() => (data ? data.providers.filter((row) => row.kind === CLAUDE_CODE_KIND) : []), [data]);
   const rowOf = (name: string) => rows.find((row) => row.name === name);
   const state = claudeStatus(status, failed);
   const installed = Boolean(status && (status.binary || accounts.some((account) => account.binary)));
   const firstAccount = (accounts.find((account) => account.logged_in) || accounts[0] || { name: routerApi.CLAUDE_CODE_PROVIDER }).name;
+  /* Sign-ins of accounts the status does not list yet (just added). */
+  const pending = Object.values(flows).filter(
+    (flow) => flow.phase !== "succeeded" && !accounts.some((account) => account.name === flow.name)
+  );
 
   function limitOf(name: string): routerApi.LimitSnapshot | null {
     return (
@@ -732,10 +861,15 @@ export function ClaudeCodeDetail() {
     setDetails(info.details);
   }
 
+  function clearNotes() {
+    setError("");
+    setDetails([]);
+    setMessage("");
+  }
+
   async function save(account: ClaudeAccount, change: Partial<ProviderWriteRequest>, done: string) {
     setBusyRow(account.name);
-    setError("");
-    setMessage("");
+    clearNotes();
     try {
       const result = await routerApi.saveProvider(account.name, accountBody(rowOf(account.name), version, change));
       markSettingsSaved();
@@ -749,31 +883,123 @@ export function ClaudeCodeDetail() {
     }
   }
 
-  async function remove(account: ClaudeAccount) {
-    setBusyRow(account.name);
-    setError("");
-    setMessage("");
+  /* One click: add the account and start its sign-in. */
+  async function addAccount() {
+    if (adding) {
+      return;
+    }
+    setAdding(true);
+    clearNotes();
     try {
-      const result = await routerApi.deleteProvider(account.name, version);
+      const result = await routerApi.createClaudeAccount();
       markSettingsSaved();
-      const folder = (result && result.config_dir) || account.config_dir;
-      setMessage(
-        "Account " + account.name + " deleted." + (folder ? " Its folder stays at " + folder + "." : "")
-      );
-      setConfirm("");
+      if (result.version) {
+        setVersion(result.version);
+      }
+      setHighlight("");
+      setFlow(result.name, { phase: "running", error: "", command: result.login_command });
+      if (result.sign_in.state !== "running") {
+        finish(result.name, result.sign_in);
+      }
+      if (result.restart_required) {
+        setMessage("Account " + result.name + " added. Restart the daemon for agents to use it.");
+      }
       reload();
       void reloadStatus();
     } catch (failure) {
-      setConfirm("");
+      fail(failure, "the account");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function signIn(account: { name: string; login_command: string }) {
+    clearNotes();
+    setHighlight("");
+    setFlow(account.name, { phase: "running", error: "", command: account.login_command });
+    try {
+      const result = await routerApi.startClaudeSignIn(account.name);
+      if (result.state !== "running") {
+        finish(account.name, result);
+      }
+    } catch (failure) {
+      const info = failureOf(failure);
+      if (info.code === "sign_in_running") {
+        return;
+      }
+      setFlow(account.name, { phase: "failed", error: info.message });
+    }
+  }
+
+  async function cancelSignIn(name: string) {
+    try {
+      const result = await routerApi.cancelClaudeSignIn(name);
+      if (result.state === "succeeded") {
+        finish(name, result);
+        return;
+      }
+      setFlow(name, { phase: "cancelled", error: "" });
+    } catch (failure) {
+      setFlow(name, { phase: "failed", error: failureOf(failure).message });
+    }
+  }
+
+  async function signOut(account: ClaudeAccount) {
+    setBusyRow(account.name);
+    clearNotes();
+    try {
+      await routerApi.signOutClaudeAccount(account.name, account.builtin);
+      setFlow(account.name, null);
+      setConfirm(null);
+      setMessage(accountDisplayName(account) + " is signed out.");
+      void reloadStatus();
+    } catch (failure) {
+      setConfirm(null);
       fail(failure, account.name);
     } finally {
       setBusyRow("");
     }
   }
 
-  async function checkAccount(name: string): Promise<ClaudeAccount | null> {
-    const value = await reloadStatus();
-    return value ? value.accounts.find((account) => account.name === name) || null : null;
+  async function remove(account: ClaudeAccount) {
+    setBusyRow(account.name);
+    clearNotes();
+    try {
+      const result = await routerApi.deleteProvider(account.name, version, { removeFolder: true });
+      markSettingsSaved();
+      setFlow(account.name, null);
+      setConfirm(null);
+      setMessage(
+        (result && result.message) || "Account " + account.name + " removed. It was signed out and its folder deleted."
+      );
+      reload();
+      void reloadStatus();
+    } catch (failure) {
+      setConfirm(null);
+      fail(failure, account.name);
+    } finally {
+      setBusyRow("");
+    }
+  }
+
+  async function saveLabel(account: ClaudeAccount, label: string) {
+    setBusyRow(account.name);
+    clearNotes();
+    try {
+      const result = await routerApi.setClaudeAccountLabel(account.name, label, version);
+      markSettingsSaved();
+      if (result && result.version) {
+        setVersion(result.version);
+      }
+      setRenaming("");
+      setMessage(label ? account.name + " is now shown as " + label + "." : account.name + " has no label now.");
+      reload();
+      void reloadStatus();
+    } catch (failure) {
+      fail(failure, account.name);
+    } finally {
+      setBusyRow("");
+    }
   }
 
   return (
@@ -797,7 +1023,14 @@ export function ClaudeCodeDetail() {
           <Button variant="secondary" size="sm" icon="bot" onClick={() => setCreating(true)}>
             Create agent
           </Button>
-          <Button variant="primary" size="sm" icon="plus" disabled={!version} onClick={() => setAdding(true)}>
+          <Button
+            variant="primary"
+            size="sm"
+            icon="plus"
+            loading={adding}
+            disabled={!version || adding}
+            onClick={() => void addAccount()}
+          >
             Add account
           </Button>
         </div>
@@ -808,11 +1041,23 @@ export function ClaudeCodeDetail() {
       <Alert tone="danger" message={error} details={details} />
       {status && !installed ? (
         <p className="rt-claude-login">
-          Claude Code is not on this machine&apos;s PATH. Install it, then add or log in to an account.
+          Claude Code is not on this machine&apos;s PATH. Install it, then add or sign in to an account.
         </p>
       ) : null}
 
       <Panel title="Accounts" className="rt-conns-panel rt-accts-panel">
+        <p className="hint rt-signin-help">
+          <Ic name="shield-check" size={12} /> {SIGN_IN_HELP}
+        </p>
+        {pending.map((flow) => (
+          <SignInCard
+            key={flow.name}
+            flow={flow}
+            onCancel={() => void cancelSignIn(flow.name)}
+            onRetry={() => void signIn({ name: flow.name, login_command: flow.command })}
+            onDismiss={() => setFlow(flow.name, null)}
+          />
+        ))}
         {failed && !status ? <p className="rt-limit-err">Could not read the Claude Code status.</p> : null}
         {!status && !failed ? <div className="home-empty">Checking Claude Code…</div> : null}
         {status && accounts.length === 0 ? (
@@ -828,7 +1073,9 @@ export function ClaudeCodeDetail() {
                 windows={accountWindows(account, limitOf(account.name))}
                 usage={usage.find((entry) => entry.provider === account.name)}
                 busy={busyRow === account.name}
-                confirming={confirm === account.name}
+                flow={flows[account.name]}
+                highlighted={highlight === account.name}
+                renaming={renaming === account.name}
                 onToggle={(enabled) =>
                   void save(
                     account,
@@ -845,14 +1092,19 @@ export function ClaudeCodeDetail() {
                       : "Scheduled runs no longer use " + account.name + "."
                   )
                 }
-                onAskDelete={() => setConfirm(account.name)}
-                onCancelDelete={() => setConfirm("")}
-                onDelete={() => void remove(account)}
+                onSignIn={() => void signIn(account)}
+                onCancelSignIn={() => void cancelSignIn(account.name)}
+                onDismissFlow={() => setFlow(account.name, null)}
+                onAskSignOut={() => setConfirm({ kind: "sign-out", account })}
+                onAskRemove={() => setConfirm({ kind: "remove", account })}
+                onRename={() => setRenaming(account.name)}
+                onSaveLabel={(label) => void saveLabel(account, label)}
+                onCancelRename={() => setRenaming("")}
               />
             ))}
           </ul>
         ) : null}
-        {accounts.length > 1 ? <p className="hint rt-conn-note">{ACCOUNTS_TERMS_NOTE}</p> : null}
+        <p className="hint rt-conn-note">{ACCOUNTS_TERMS_NOTE}</p>
       </Panel>
 
       <ClaudeModelsPanel
@@ -864,17 +1116,34 @@ export function ClaudeCodeDetail() {
         }}
       />
 
-      {adding ? (
-        <AddAccountDialog
-          version={version}
-          takenNames={data ? data.providers.map((row) => row.name) : []}
-          onClose={() => setAdding(false)}
-          onSaved={(name) => {
-            setMessage("Account " + name + " added. Log in once to use it.");
-            reload();
-            void reloadStatus();
-          }}
-          onCheck={checkAccount}
+      {confirm && confirm.kind === "sign-out" ? (
+        <ConfirmDialog
+          title={
+            confirm.account.builtin
+              ? "Sign out of your own Claude Code?"
+              : "Sign out " + accountDisplayName(confirm.account) + "?"
+          }
+          body={signOutText(confirm.account)}
+          action="Sign out"
+          busy={busyRow === confirm.account.name}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void signOut(confirm.account)}
+        />
+      ) : null}
+      {confirm && confirm.kind === "remove" ? (
+        <ConfirmDialog
+          title={"Remove " + accountDisplayName(confirm.account) + "?"}
+          body={
+            "Signs this account out and deletes its folder" +
+            (confirm.account.config_dir ? " " + confirm.account.config_dir : "") +
+            ". Agents and combos that use " +
+            confirm.account.name +
+            " must be changed first."
+          }
+          action="Remove"
+          busy={busyRow === confirm.account.name}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void remove(confirm.account)}
         />
       ) : null}
 

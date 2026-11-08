@@ -260,6 +260,12 @@ type ClaudeCodeAccountStatus struct {
 	Windows        []RouterPlanWindow `json:"windows"`
 	Agents         []string           `json:"agents"`
 	Combos         []string           `json:"combos"`
+	// Label, DisplayName, and SignIn are filled by the handler
+	// (REQ-CCT-012): the stored label, the label else the e-mail else the
+	// name, and the account's last sign-in.
+	Label       string              `json:"label"`
+	DisplayName string              `json:"display_name"`
+	SignIn      *ClaudeSignInStatus `json:"sign_in"`
 }
 
 // SetRouterBackend installs the Router port directly. SetBackend also
@@ -302,6 +308,7 @@ func (s *Server) registerRouterRoutes() {
 	s.Handle("DELETE /v1/router/keys/{id}", http.HandlerFunc(s.handleRevokeRouterKey))
 	s.Handle("GET /v1/router/claude-agent", http.HandlerFunc(s.handleClaudeAgentStatus))
 	s.Handle("PUT /v1/router/claude-code/models", http.HandlerFunc(s.handlePutClaudeCodeModels))
+	s.registerClaudeSignInRoutes()
 	s.mux.Handle(RouterProxyPrefix+"/", s.checkHost(http.HandlerFunc(s.serveRouterProxy)))
 }
 
@@ -1202,6 +1209,7 @@ func (s *Server) handleClaudeAgentStatus(w http.ResponseWriter, r *http.Request)
 			account.Combos = []string{}
 		}
 	}
+	s.decorateClaudeAccounts(r.Context(), status.Accounts)
 	writeJSON(w, http.StatusOK, status)
 }
 

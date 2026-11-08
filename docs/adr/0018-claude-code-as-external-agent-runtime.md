@@ -73,6 +73,11 @@ for `--resume` after a restart. Cancel sends an `interrupt` control request, the
   `auth = "api_key"`, lana passes the key from `api_key_env` through the secrets service.
 - When the user is not logged in, the turn fails with: "Claude Code is not logged in. Run `claude`,
   then `/login`." lana never runs a login flow itself.
+  - *Amended 2026-11-08 by [0020](0020-claude-code-as-router-target-with-lana-context.md#amendment-2026-11-08-one-click-sign-in):*
+    lana may start the official `claude auth login` / `claude auth logout` for an account folder when
+    the owner clicks Sign in or Sign out. The unmodified binary opens the browser and reads and writes the
+    credentials; lana still never reads, copies, or stores them, and keeps only a URL-stripped last
+    stderr line to report a failure. The other rules above are unchanged.
 
 **Event mapping** (the [0009](0009-session-as-append-only-event-log.md) log mirrors the stream):
 

@@ -271,10 +271,13 @@ export function PlanWindows({ windows }: { windows: PlanWindow[] }) {
   );
 }
 
-/* REQ-CCT-010: lana never logs in. A logged-out account shows the command
-   that logs it in once, with a copy button, and never a login button. */
+/* REQ-CCT-010/012: the command that signs an account in from a terminal,
+   with a copy button, for a daemon on another machine. The current command
+   is `… claude auth login`, which opens the browser itself; the older
+   `claude` form needs /login typed after it. */
 export function LoginCommand({ command }: { command: string }) {
-  const text = command || "claude";
+  const text = command || "claude auth login";
+  const needsSlashLogin = !/\bauth login$/.test(text.trim());
   return (
     <div className="rt-login" role="note">
       <span className="rt-login-k">Log in once in a terminal:</span>
@@ -282,9 +285,11 @@ export function LoginCommand({ command }: { command: string }) {
         <code className="mono">{text}</code>
         <CopyButton text={text} label="Copy login command" />
       </span>
-      <span className="rt-login-k">
-        then type <code className="mono">/login</code>.
-      </span>
+      {needsSlashLogin ? (
+        <span className="rt-login-k">
+          then type <code className="mono">/login</code>.
+        </span>
+      ) : null}
     </div>
   );
 }

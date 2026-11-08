@@ -16,11 +16,11 @@ import (
 )
 
 var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
-var providerKeys = []string{"allow_scheduled", "api_key_env", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
+var providerKeys = []string{"allow_scheduled", "api_key_env", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "kind", "label", "stream_idle_timeout", "thinking_format", "timeout"}
 
 // claudeAccountKeys are the keys of a [providers.<name>] table of kind
 // "claude-code", a Claude Code account (API-CCT-010).
-var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind"}
+var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 
@@ -487,7 +487,23 @@ func validateClaudeAccount(v map[string]any, path string, add func(string, strin
 	if bin, ok := v["binary"].(string); ok && strings.HasPrefix(bin, "-") {
 		add(path+".binary", "must not start with '-'")
 	}
+	// REQ-CCT-012: the display label.
+	if val, ok := v["label"]; ok {
+		label, ok := val.(string)
+		switch {
+		case !ok:
+			add(path+".label", typeMsg("string", val))
+		case strings.ContainsAny(label, "\x00\r\n"):
+			add(path+".label", "must be one line")
+		case utf8.RuneCountInString(label) > MaxClaudeAccountLabel:
+			add(path+".label", fmt.Sprintf("must be at most %d characters (got %d)", MaxClaudeAccountLabel, utf8.RuneCountInString(label)))
+		}
+	}
 }
+
+// MaxClaudeAccountLabel is the longest label of a Claude Code account
+// (REQ-CCT-012).
+const MaxClaudeAccountLabel = 60
 
 func validateAgent(v map[string]any, path string, add func(string, string)) {
 	for _, key := range sortedKeys(v) {

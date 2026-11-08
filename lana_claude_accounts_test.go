@@ -151,13 +151,13 @@ permission = "trust"
 	}
 	work, homeAcct, builtin := byName["claude-work"], byName["claude-home"], byName["claude-code"]
 	if work.Status.Email != "work@example.com" || work.Status.Plan != "max" || !work.Status.LoggedIn || work.ConfigDir != workDir ||
-		work.LoginCommand != "CLAUDE_CONFIG_DIR='"+workDir+"' claude" || work.Builtin {
+		work.LoginCommand != "CLAUDE_CONFIG_DIR='"+workDir+"' CLAUDE_SECURESTORAGE_CONFIG_DIR='"+workDir+"' claude auth login" || work.Builtin {
 		t.Fatalf("claude-work = %+v", work)
 	}
 	if homeAcct.Status.Email != "home@example.com" || homeAcct.Status.Plan != "pro" || homeAcct.ConfigDir != homeDir {
 		t.Fatalf("claude-home = %+v", homeAcct)
 	}
-	if !builtin.Builtin || builtin.ConfigDir != "" || builtin.LoginCommand != "claude" || builtin.Status.Email != "user@example.com" {
+	if !builtin.Builtin || builtin.ConfigDir != "" || builtin.LoginCommand != "claude auth login" || builtin.Status.Email != "user@example.com" {
 		t.Fatalf("claude-code = %+v", builtin)
 	}
 	five := func(account ClaudeCodeAccount) float64 {

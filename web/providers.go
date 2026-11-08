@@ -103,8 +103,10 @@ type providerJSON struct {
 	ConfigDir string `json:"config_dir"`
 	// AllowScheduled is the allow_scheduled key of a Claude Code account.
 	AllowScheduled bool `json:"allow_scheduled"`
-	// LoginCommand logs a Claude Code account in once (then /login).
+	// LoginCommand signs a Claude Code account in from a terminal.
 	LoginCommand string `json:"login_command,omitempty"`
+	// Label is the display label of a Claude Code account (REQ-CCT-012).
+	Label string `json:"label,omitempty"`
 }
 
 type listProvidersResponse struct {
@@ -122,6 +124,8 @@ type providerSaveResponse struct {
 	ConfigDir    string `json:"config_dir,omitempty"`
 	LoginCommand string `json:"login_command,omitempty"`
 	Message      string `json:"message,omitempty"`
+	// FolderRemoved answers a delete with remove_folder (REQ-CCT-012).
+	FolderRemoved bool `json:"folder_removed,omitempty"`
 }
 
 type providerTestRequest struct {
@@ -163,6 +167,7 @@ type providerRecord struct {
 	Binary         string
 	Auth           string
 	AllowScheduled bool
+	Label          string
 }
 
 // providerValidationError carries config.Check issues through the section
@@ -269,6 +274,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			row.ConfigDir = s.claudeConfigDir(name, record)
 			row.AllowScheduled = record.AllowScheduled
 			row.LoginCommand = llmcall.ClaudeLoginCommand(row.ConfigDir)
+			row.Label = record.Label
 		}
 		response.Providers = append(response.Providers, row)
 	}
@@ -634,6 +640,24 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "builtin", "claude-code is built in and cannot be deleted")
 		return
 	}
+	// REQ-CCT-012: ?remove_folder=1 on a Claude Code account signs it out
+	// and deletes its folder before the table goes.
+	removeFolder := false
+	switch r.URL.Query().Get("remove_folder") {
+	case "", "0", "false":
+	case "1", "true":
+		removeFolder = true
+	default:
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "remove_folder must be 1 or 0")
+		return
+	}
+	var signOutNote string
+	if removeFolder {
+		var ok bool
+		if signOutNote, ok = s.signOutClaudeAccountForRemoval(w, r, store, name, body.ExpectedVersion); !ok {
+			return
+		}
+	}
 
 	configWriteMu.Lock()
 	defer configWriteMu.Unlock()
@@ -666,10 +690,30 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "in_use", message)
 		return
 	}
+	record := providerRecordFromMap(document.Providers[name])
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), providerChecker(store), file.Raw, "[providers."+name+"]", "")
 	if err != nil {
 		s.writeProviderSaveError(w, "delete provider", err)
 		return
+	}
+	folderRemoved := false
+	if record.Kind == core.ClaudeCodeKind {
+		if auth := s.claudeAuthPort(); auth != nil {
+			auth.ForgetClaudeSignIn(name)
+		}
+		if removeFolder {
+			dir := s.claudeConfigDir(name, record)
+			if !s.claudeFolderRemovable(dir) {
+				writeClaudeFolderOutside(w, dir)
+				return
+			}
+			if err := os.RemoveAll(dir); err != nil {
+				s.logger.Error("web: remove claude account folder", "error", err)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "cannot delete the account folder")
+				return
+			}
+			folderRemoved = true
+		}
 	}
 	if err := store.ConfigWrite(r.Context(), candidate); err != nil {
 		s.logger.Error("web: write config for provider delete", "error", err)
@@ -683,11 +727,19 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		Version:         version,
 		RestartRequired: s.applyLiveRestartRequired(r.Context(), store, candidate),
 	}
-	// API-CCT-010: only the table goes; the account's folder (and its login)
-	// stays where it is.
-	if record := providerRecordFromMap(document.Providers[name]); record.Kind == core.ClaudeCodeKind {
+	// API-CCT-010: without remove_folder only the table goes; the account's
+	// folder (and its login) stays where it is.
+	if record.Kind == core.ClaudeCodeKind {
 		response.ConfigDir = s.claudeConfigDir(name, record)
-		response.Message = "The account folder " + response.ConfigDir + " was kept; delete it yourself to remove its login."
+		if folderRemoved {
+			response.FolderRemoved = true
+			response.Message = "The account was signed out and its folder " + response.ConfigDir + " was deleted."
+			if signOutNote != "" {
+				response.Message = "The account folder " + response.ConfigDir + " was deleted. Sign-out failed: " + signOutNote
+			}
+		} else {
+			response.Message = "The account folder " + response.ConfigDir + " was kept; delete it yourself to remove its login."
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -718,6 +770,7 @@ func providerRecordFromMap(table map[string]any) providerRecord {
 	record.Binary = mapProviderString(table, "binary")
 	record.Auth = mapProviderString(table, "auth")
 	record.AllowScheduled, _ = table["allow_scheduled"].(bool)
+	record.Label = mapProviderString(table, "label")
 	if headers, ok := table["headers"].(map[string]any); ok {
 		record.Headers = make(map[string]string, len(headers))
 		for key, value := range headers {

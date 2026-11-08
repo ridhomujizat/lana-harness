@@ -350,6 +350,9 @@ function claudeAccount(name: string, email: string): ClaudeAccount {
     windows: [],
     agents: [],
     combos: [],
+    label: "",
+    display_name: email || name,
+    sign_in: { state: "idle", error: "", started_at: null, finished_at: null },
   };
 }
 

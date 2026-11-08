@@ -65,6 +65,10 @@ type Options struct {
 	// TempDir holds the --mcp-config files (API-CCT-014); "" is
 	// os.TempDir().
 	TempDir string
+	// SignInTimeout and SignOutTimeout bound `claude auth login` and
+	// `claude auth logout` (REQ-CCT-012).
+	SignInTimeout  time.Duration
+	SignOutTimeout time.Duration
 }
 
 // Runtime is the claude-code AgentRuntime.
@@ -83,6 +87,9 @@ type Runtime struct {
 	mcpFiles map[string]bool
 	// accounts are the running and queued turns per account (API-CCT-011).
 	accounts map[string]*accountCounts
+	// authRuns cancel the running sign-in or sign-out per account
+	// (REQ-CCT-012).
+	authRuns map[string]context.CancelFunc
 
 	accountStatusMu sync.Mutex
 	accountStatus   map[string]cachedAccountStatus
@@ -172,6 +179,12 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 	if opts.Environ == nil {
 		opts.Environ = os.Environ
 	}
+	if opts.SignInTimeout <= 0 {
+		opts.SignInTimeout = DefaultSignInTimeout
+	}
+	if opts.SignOutTimeout <= 0 {
+		opts.SignOutTimeout = DefaultSignOutTimeout
+	}
 	log := deps.Logger
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -180,7 +193,7 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 		deps: deps, log: log, opts: opts, sem: newFIFOSem(opts.MaxConcurrent),
 		procs: map[string]*process{}, starting: map[string]bool{}, claudeIDs: map[string]claudeRef{},
 		versions: map[string]versionInfo{}, mcpFiles: map[string]bool{}, accounts: map[string]*accountCounts{},
-		accountStatus: map[string]cachedAccountStatus{},
+		accountStatus: map[string]cachedAccountStatus{}, authRuns: map[string]context.CancelFunc{},
 	}
 }
 
@@ -876,6 +889,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	}
 	r.procs = map[string]*process{}
 	r.mu.Unlock()
+	r.cancelAuthRuns()
 	for _, p := range procs {
 		r.interrupt(p)
 		p.stop(0, r.opts.KillGrace)

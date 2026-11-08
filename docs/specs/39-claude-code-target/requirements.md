@@ -2,7 +2,7 @@
 
 - **Issue**: — (owner request 2026-11-08)
 - **Status**: Approved (owner: "ya saya ingin tidak ada pilih engine lagi, cuman pakai lana aja"; remaining details are agent recommendations under the owner's standing "ikuti rekomendasimu")
-- **Revision**: 2
+- **Revision**: 3 (2026-11-08: REQ-CCT-012 one-click sign-in)
 - **Owner**: ridho
 - **Contract**: [api-contract.md](api-contract.md) — Required
 - **Related ADR**: [0020](../../adr/0020-claude-code-as-router-target-with-lana-context.md), [0018](../../adr/0018-claude-code-as-external-agent-runtime.md), [0019](../../adr/0019-llm-router-as-embeddable-core.md)
@@ -14,6 +14,8 @@
 | Owner | "engine ini bisa cuman lana aja? … saya ingin claude bisa digunakan di semua service lana, termasuk workflow"; "tetep lewat binary claude code tapi jalanin engine lana, seperti monocode di bot monos"; "tidak ada pilih engine lagi, cuman pakai lana aja" | goal |
 | MonoCode docs | `docs/agent-access.md`: the agent CLI runs the turn; MonoCode supplies instructions and a local `app` CLI | pattern |
 | Claude Code 2.1.319 | `--append-system-prompt`, `--mcp-config`, `--strict-mcp-config` | flags |
+| Owner (revision 3) | adding a Claude Code account is too hard; "make it like MonoCode" | REQ-CCT-012 |
+| MonoCode (MIT) | `login.rs`: spawn `claude auth login` with the account env, keep a URL-stripped last stderr line; `harness.rs`: `CLAUDE_CONFIG_DIR` + `CLAUDE_SECURESTORAGE_CONFIG_DIR` | REQ-CCT-012 |
 
 ## Goal
 
@@ -143,8 +145,10 @@ The owner shall be able to add Claude Code accounts as connections: `[providers.
 "claude-code"` with `config_dir` (default `$LANA_HOME/claude/<name>`), optional `binary`, `auth`
 (`subscription` | `api_key`), `api_key_env`, `allow_scheduled`. The built-in `claude-code` provider is the
 default account (`~/.claude`, no `config_dir`). Each account runs `claude` with `CLAUDE_CONFIG_DIR` set to
-its folder; lana never runs a login and never reads the folder's credential files. Adding an account
-creates the folder and shows the command to log in once: `CLAUDE_CONFIG_DIR=<dir> claude`, then `/login`.
+its folder; lana never reads the folder's credential files. Adding an account creates the folder.
+*(Revision 3: the login itself is REQ-CCT-012; the terminal command is now
+`CLAUDE_CONFIG_DIR=<dir> CLAUDE_SECURESTORAGE_CONFIG_DIR=<dir> claude auth login` and is kept as a
+fallback.)*
 Addresses are `<account>/<model>` (for example `claude-work/claude-opus-5-5`). lana does not rotate
 between accounts automatically; a combo may list several accounts, and the UI warns that using several
 personal accounts to get around plan limits can break Anthropic's terms.
@@ -163,6 +167,39 @@ agents and combos that use it.
 - `AC-CCT-013`: Given two logged-in accounts, when the owner opens `#/router/providers/claude-code`, then
   each account row shows its email and plan, its own 5-hour and weekly windows, and its own usage.
 
+### REQ-CCT-012: One-click sign-in, sign-out, and removal (owner request 2026-11-08, revision 3)
+
+Adding a Claude Code account shall be one click: the dashboard creates the account (name `claude-2`,
+`claude-3`, … unless given), creates its folder (0700), and starts the official `claude auth login` for
+it; Claude Code opens its own sign-in page in the browser and writes the credentials (ADR 0020 amendment
+2026-11-08). The dashboard polls the sign-in and shows the result. Each account row can sign in (when
+signed out), sign out (after a confirm; the built-in account needs an explicit confirm because it signs
+the owner out of their normal Claude Code), be removed (sign out, delete the folder when it lies inside
+`$LANA_HOME/claude/`, delete the table), and get a display label (at most 60 characters). Every `claude`
+lana runs for a named account gets `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` set to its
+folder and none of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`. lana keeps
+only the last stderr line of a failed run, with URLs replaced by "sign-in link" (at most 240
+characters), and never relays URLs, OAuth codes, or tokens. One sign-in per account runs at a time;
+sign-in stops after 10 minutes or on Cancel (the whole process group), sign-out after 30 s; the
+account's cached status is dropped afterwards.
+
+- `AC-CCT-014`: Given the Claude Code page, when the owner clicks "Add account", then
+  `[providers.claude-2] kind = "claude-code"` is written, `$LANA_HOME/claude/claude-2` exists with mode
+  0700, the fake `claude` runs `auth login` with `CLAUDE_CONFIG_DIR` and
+  `CLAUDE_SECURESTORAGE_CONFIG_DIR` = that folder and no token variables, the page shows "Opening Claude
+  Code sign-in in your browser…" and polls every 1.5 s, and on success the new row is highlighted with
+  "Signed in as <email> · <plan>".
+- `AC-CCT-015`: Given a sign-in whose `claude auth login` exits 1 with a stderr line containing a URL,
+  then the state is `failed` with that line and the URL replaced by "sign-in link", and the page shows
+  it with "Try again" and a collapsed "Sign in from a terminal instead" holding the copyable command.
+- `AC-CCT-016`: Given a running sign-in, a second start answers 409 and Cancel ends the process group
+  with state `cancelled`; a sign-in past its deadline ends as `failed` ("timed out").
+- `AC-CCT-017`: Given `DELETE /v1/providers/claude-2?remove_folder=1`, then the account is signed out,
+  its folder is deleted, and the table removed; given an account whose `config_dir` is outside
+  `$LANA_HOME/claude/`, the same call answers 409 `folder_outside_home` and deletes nothing.
+- `AC-CCT-018`: Given the built-in account, a sign-out without `{"confirm": true}` answers 400
+  `confirm_required` and runs nothing.
+
 ## Failure cases
 
 | Condition | Behavior |
@@ -170,6 +207,8 @@ agents and combos that use it.
 | Claude Code fails before output and no next target | Turn fails with the Claude error (spec 38 messages) |
 | MCP server cannot bind | Claude turn runs without lana tools; warning in log and a `system/message` note |
 | Background pass has no non-Claude model | Skipped, warning |
+| `claude auth login` fails, times out (10 min), or is cancelled | Sign-in state `failed` (URL-stripped last stderr line) or `cancelled`; the account stays signed out |
+| Remove with a folder outside `$LANA_HOME/claude/` | 409 `folder_outside_home`; nothing is signed out or deleted |
 
 ## Blocking Open Questions
 
@@ -180,3 +219,4 @@ REQ-CCT-008.
 ## Approval
 
 - **Approved by**: ridho (direction) + agent recommendations · **Approved on**: 2026-11-08
+- **Revision 3** (REQ-CCT-012): owner request "make adding an account like MonoCode", 2026-11-08

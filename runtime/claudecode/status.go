@@ -236,18 +236,10 @@ func (r *Runtime) AccountStatus(ctx context.Context, account core.RuntimeAccount
 
 func (r *Runtime) probeAccount(ctx context.Context, account core.RuntimeAccount) core.RuntimeAccountStatus {
 	var st core.RuntimeAccountStatus
-	bin := account.Binary
-	if bin == "" {
-		path, err := r.opts.LookPath("claude")
-		if err != nil {
-			st.Error = errNotInstalled
-			return st
-		}
-		bin = path
-	} else if strings.HasPrefix(bin, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			bin = home + bin[1:]
-		}
+	bin, err := r.accountBinary(account)
+	if err != nil {
+		st.Error = err.Error()
+		return st
 	}
 	st.Binary = bin
 	version, err := r.checkVersion(ctx, bin)

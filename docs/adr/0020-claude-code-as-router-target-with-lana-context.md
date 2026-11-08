@@ -4,6 +4,7 @@
 - **Date**: 2026-11-08
 - **Deciders**: Ridho
 - **Related ADRs**: [0018](0018-claude-code-as-external-agent-runtime.md) (amended), [0019](0019-llm-router-as-embeddable-core.md), [0012](0012-acp-and-sdk-json-rpc.md)
+- **Amended**: 2026-11-08 (one-click sign-in, below)
 
 ## Context
 
@@ -60,3 +61,35 @@ The terms that shaped ADR 0018 still apply. The subscription may only be used th
   it is fragile.
 - **A local CLI plus instructions, as MonoCode does.** Works, but Claude Code supports MCP natively, which
   gives typed tools and no prompt overhead.
+
+## Amendment 2026-11-08: one-click sign-in
+
+The owner found adding a Claude Code account too hard: create the account, copy a
+`CLAUDE_CONFIG_DIR=… claude` command into a terminal, type `/login`. MonoCode signs agent CLIs in by
+starting their own login command, and the terms allow *"an end user signing in to the unmodified Claude
+Code binary with their own Claude subscription"* (ADR 0018).
+
+1. **lana may start the official `claude auth login` and `claude auth logout`** for an account folder
+   (the built-in account uses the owner's own `~/.claude`), when the owner clicks Sign in, Sign out, or
+   Remove in the dashboard. Each run has the account's environment (rule 3), stdin closed, stdout
+   discarded, and its own process group. Sign-in waits at most 10 minutes and can be cancelled; sign-out
+   waits at most 30 s. One sign-in or sign-out runs per account at a time. Success is exit code 0.
+2. **The binary owns the credentials.** It opens the browser, talks to Anthropic, and writes the login
+   into the account folder or the Keychain. lana never reads, copies, refreshes, or stores them, and
+   still never calls Anthropic endpoints.
+3. **Account environment.** Every `claude` lana runs for a named account (turns, status probes, test
+   turns, sign-in, sign-out) gets `CLAUDE_CONFIG_DIR=<folder>` and `CLAUDE_SECURESTORAGE_CONFIG_DIR=<folder>`
+   (so the macOS Keychain entry is per account too), without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+   and `CLAUDE_CODE_OAUTH_TOKEN`. The built-in account keeps the daemon's folder variables. New folders
+   are created with mode 0700.
+4. **Nothing secret is relayed.** lana keeps only the last non-empty stderr line of a failed run, with
+   every URL replaced by "sign-in link", ANSI and control characters removed, and at most 240
+   characters, in memory, to show the owner why the sign-in failed. URLs, OAuth codes, and tokens never
+   reach a log, an API answer, or storage.
+5. **Removal** signs the account out first, then deletes its folder only when the folder lies inside
+   `$LANA_HOME/claude/`; a folder configured elsewhere is never deleted.
+6. The terminal command stays available (`CLAUDE_CONFIG_DIR=… CLAUDE_SECURESTORAGE_CONFIG_DIR=… claude
+   auth login`) for a daemon on another machine, where the browser would open on the wrong computer.
+
+Consequence: signing out the built-in account signs the owner out of their normal Claude Code, so the
+dashboard asks for an explicit confirm and the API needs `{"confirm": true}`.

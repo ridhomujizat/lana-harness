@@ -34,6 +34,8 @@ export interface ProviderRow {
   builtin?: boolean;
   config_dir?: string;
   allow_scheduled?: boolean;
+  /* REQ-CCT-012: the display label of an added Claude Code account. */
+  label?: string;
 }
 
 export interface ListProvidersResponse {
@@ -47,11 +49,13 @@ export interface ProviderSaveResponse {
   version: string;
   restart_required: boolean;
   /* Spec 39 (API-CCT-010): a saved Claude Code account answers the command
-     that logs it in once: CLAUDE_CONFIG_DIR='<dir>' claude, then /login. */
+     that signs it in from a terminal. */
   login_command?: string;
-  /* A deleted Claude Code account keeps its folder; the answer says where. */
+  /* A deleted Claude Code account keeps its folder unless remove_folder was
+     asked (REQ-CCT-012); the answer says where. */
   config_dir?: string;
   message?: string;
+  folder_removed?: boolean;
 }
 
 export interface ProviderWriteRequest {
@@ -105,14 +109,17 @@ export function saveProvider(
   );
 }
 
-/* A provider in use answers 409 {"error":"in_use","message":"used by …"}. */
+/* A provider in use answers 409 {"error":"in_use","message":"used by …"}.
+   removeFolder (REQ-CCT-012) signs a Claude Code account out and deletes its
+   folder when it lies in lana's claude folder. */
 export function deleteProvider(
   name: string,
-  expectedVersion: string
+  expectedVersion: string,
+  options?: { removeFolder?: boolean }
 ): Promise<ProviderSaveResponse> {
   return request<ProviderSaveResponse>(
     "DELETE",
-    "/v1/providers/" + encodeURIComponent(name),
+    "/v1/providers/" + encodeURIComponent(name) + (options && options.removeFolder ? "?remove_folder=1" : ""),
     { expected_version: expectedVersion }
   );
 }
@@ -517,6 +524,17 @@ export async function getRouterLimits(refresh?: boolean): Promise<LimitSnapshot[
 /* The built-in Claude Code account and address prefix (API-CCT-001). */
 export const CLAUDE_CODE_PROVIDER = "claude-code";
 
+/* The last sign-in of one account (REQ-CCT-012). error is set for failed
+   only and never holds a URL or token. */
+export type ClaudeSignInState = "idle" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface ClaudeSignIn {
+  state: ClaudeSignInState;
+  error: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 /* One Claude Code account (API-CCT-011). email and plan come from that
    account's `claude auth status`; they are never stored. */
 export interface ClaudeAccount {
@@ -537,6 +555,11 @@ export interface ClaudeAccount {
   windows: PlanWindow[];
   agents: string[];
   combos: string[];
+  /* REQ-CCT-012: the stored label, the name to show (label, else email,
+     else name), and the last sign-in. */
+  label: string;
+  display_name: string;
+  sign_in: ClaudeSignIn;
 }
 
 export interface ClaudeAgentStatus {
@@ -561,17 +584,33 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item || "")).filter(Boolean) : [];
 }
 
+const SIGN_IN_STATES: ClaudeSignInState[] = ["idle", "running", "succeeded", "failed", "cancelled"];
+
+export function normalizeSignIn(value: Partial<ClaudeSignIn> | null | undefined): ClaudeSignIn {
+  const entry = value || {};
+  const state = SIGN_IN_STATES.includes(entry.state as ClaudeSignInState) ? (entry.state as ClaudeSignInState) : "idle";
+  return {
+    state,
+    error: String(entry.error || ""),
+    started_at: entry.started_at ? String(entry.started_at) : null,
+    finished_at: entry.finished_at ? String(entry.finished_at) : null,
+  };
+}
+
 function normalizeAccount(value: Partial<ClaudeAccount> | null | undefined): ClaudeAccount {
   const entry = value || {};
+  const name = String(entry.name || CLAUDE_CODE_PROVIDER);
+  const email = String(entry.email || "");
+  const label = String(entry.label || "");
   return {
-    name: String(entry.name || CLAUDE_CODE_PROVIDER),
+    name,
     builtin: entry.builtin === true,
     config_dir: String(entry.config_dir || ""),
     binary: String(entry.binary || ""),
     version: String(entry.version || ""),
     version_ok: entry.version_ok !== false,
     logged_in: entry.logged_in === true,
-    email: String(entry.email || ""),
+    email,
     plan: String(entry.plan || ""),
     auth_method: String(entry.auth_method || ""),
     error: String(entry.error || ""),
@@ -581,6 +620,9 @@ function normalizeAccount(value: Partial<ClaudeAccount> | null | undefined): Cla
     windows: Array.isArray(entry.windows) ? entry.windows : [],
     agents: strings(entry.agents),
     combos: strings(entry.combos),
+    label,
+    display_name: String(entry.display_name || "") || label || email || name,
+    sign_in: normalizeSignIn(entry.sign_in),
   };
 }
 
@@ -626,6 +668,79 @@ export async function getClaudeAgent(): Promise<ClaudeAgentStatus> {
     ];
   }
   return status;
+}
+
+/* REQ-CCT-012: one-click sign-in. The daemon starts the official
+   `claude auth login` for the account; Claude Code opens its own sign-in page
+   in the browser. lana never sees the password or tokens. */
+export interface ClaudeAccountCreated {
+  name: string;
+  config_dir: string;
+  version: string;
+  restart_required: boolean;
+  login_command: string;
+  sign_in: ClaudeSignIn;
+}
+
+const ACCOUNTS_PATH = "/v1/router/claude-code/accounts";
+
+function accountPath(name: string, rest: string): string {
+  return ACCOUNTS_PATH + "/" + encodeURIComponent(name) + rest;
+}
+
+/* Adds an account (name default claude-2, claude-3, …) and starts its
+   sign-in. */
+export async function createClaudeAccount(name?: string): Promise<ClaudeAccountCreated> {
+  const data = await request<Partial<ClaudeAccountCreated> | null>("POST", ACCOUNTS_PATH, name ? { name } : {});
+  const value = data || {};
+  return {
+    name: String(value.name || ""),
+    config_dir: String(value.config_dir || ""),
+    version: String(value.version || ""),
+    restart_required: value.restart_required === true,
+    login_command: String(value.login_command || ""),
+    sign_in: normalizeSignIn(value.sign_in),
+  };
+}
+
+/* Starts a sign-in; 409 sign_in_running while one runs. */
+export async function startClaudeSignIn(name: string): Promise<ClaudeSignIn> {
+  return normalizeSignIn(await request<Partial<ClaudeSignIn> | null>("POST", accountPath(name, "/sign-in"), {}));
+}
+
+export async function getClaudeSignIn(name: string): Promise<ClaudeSignIn> {
+  return normalizeSignIn(await request<Partial<ClaudeSignIn> | null>("GET", accountPath(name, "/sign-in")));
+}
+
+export async function cancelClaudeSignIn(name: string): Promise<ClaudeSignIn> {
+  return normalizeSignIn(await request<Partial<ClaudeSignIn> | null>("DELETE", accountPath(name, "/sign-in")));
+}
+
+/* Signs the account out and answers its refreshed row. The built-in account
+   needs confirm, since it signs the owner out of their own Claude Code. */
+export async function signOutClaudeAccount(name: string, confirm?: boolean): Promise<ClaudeAccount> {
+  const data = await request<Partial<ClaudeAccount> | null>(
+    "POST",
+    accountPath(name, "/sign-out"),
+    confirm ? { confirm: true } : {}
+  );
+  return normalizeAccount(data);
+}
+
+export interface ClaudeLabelResponse {
+  name: string;
+  label: string;
+  version: string;
+  restart_required: boolean;
+}
+
+/* Sets the display label of an added account; "" removes it. */
+export function setClaudeAccountLabel(name: string, label: string, expectedVersion?: string): Promise<ClaudeLabelResponse> {
+  const body: { label: string; expected_version?: string } = { label };
+  if (expectedVersion) {
+    body.expected_version = expectedVersion;
+  }
+  return request<ClaudeLabelResponse>("PUT", accountPath(name, "/label"), body);
 }
 
 /* API-CCT-013: the custom Claude Code model IDs ([router] claude_code_models).

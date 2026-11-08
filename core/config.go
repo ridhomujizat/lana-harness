@@ -103,6 +103,9 @@ type ProviderConfig struct {
 	// AllowScheduled lets calendar items and workflow nodes run the
 	// account's targets (REQ-CCT-008).
 	AllowScheduled bool `toml:"allow_scheduled"`
+	// Label is the account's display name in the dashboard (REQ-CCT-012),
+	// at most 60 characters. "" shows the account's e-mail, else its name.
+	Label string `toml:"label"`
 }
 
 // ClaudeCodeKind is the provider kind of a Claude Code account

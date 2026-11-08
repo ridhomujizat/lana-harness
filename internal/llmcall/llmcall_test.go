@@ -260,10 +260,10 @@ func TestClaudeConfigDir(t *testing.T) {
 	if got := ClaudeConfigDir("", "w", core.ProviderConfig{}); got != "/env/lana/claude/w" {
 		t.Errorf("empty home = %q", got)
 	}
-	if got := ClaudeLoginCommand(""); got != "claude" {
+	if got := ClaudeLoginCommand(""); got != "claude auth login" {
 		t.Errorf("built-in login = %q", got)
 	}
-	if got := ClaudeLoginCommand("/a/it's"); got != `CLAUDE_CONFIG_DIR='/a/it'\''s' claude` {
+	if got := ClaudeLoginCommand("/a/it's"); got != `CLAUDE_CONFIG_DIR='/a/it'\''s' CLAUDE_SECURESTORAGE_CONFIG_DIR='/a/it'\''s' claude auth login` {
 		t.Errorf("login = %q", got)
 	}
 	providers := map[string]core.ProviderConfig{"cw": {Kind: core.ClaudeCodeKind}, "ds": {Kind: "deepseek"}}

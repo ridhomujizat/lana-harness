@@ -90,8 +90,9 @@ type ClaudeCodeAccount struct {
 	AllowScheduled bool
 	Disabled       bool
 	Status         core.RuntimeAccountStatus
-	// LoginCommand logs the account in once: CLAUDE_CONFIG_DIR='<dir>' claude
-	// (claude for the built-in account), then /login.
+	// LoginCommand signs the account in from a terminal (REQ-CCT-012):
+	// CLAUDE_CONFIG_DIR='<dir>' CLAUDE_SECURESTORAGE_CONFIG_DIR='<dir>'
+	// claude auth login (claude auth login for the built-in account).
 	LoginCommand string
 	// Windows are the plan windows of the account's own limit snapshot.
 	Windows []router.Window

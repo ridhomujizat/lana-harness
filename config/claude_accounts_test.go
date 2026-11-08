@@ -20,6 +20,7 @@ binary = "/bin/claude"
 auth = "api_key"
 api_key_env = "WORK_KEY"
 allow_scheduled = true
+label = "Work"
 
 [providers.claude-home]
 kind = "claude-code"
@@ -42,7 +43,7 @@ model = "c"
 	}
 	work := res.Config.Providers["claude-work"]
 	if work.Kind != core.ClaudeCodeKind || work.ConfigDir != "$LANA_HOME/claude/work" || work.Binary != "/bin/claude" ||
-		work.Auth != "api_key" || work.APIKeyEnv != "WORK_KEY" || !work.AllowScheduled {
+		work.Auth != "api_key" || work.APIKeyEnv != "WORK_KEY" || !work.AllowScheduled || work.Label != "Work" {
 		t.Fatalf("claude-work = %+v", work)
 	}
 	if !res.Config.Providers["claude-home"].Disabled {
@@ -64,6 +65,9 @@ func TestClaudeCodeAccountRules(t *testing.T) {
 		{"dir type", account + "config_dir = 3\n", "providers.cw.config_dir", "string"},
 		{"allow type", account + "allow_scheduled = \"yes\"\n", "providers.cw.allow_scheduled", "boolean"},
 		{"binary flag", account + "binary = \"-x\"\n", "providers.cw.binary", "must not start with '-'"},
+		{"label length", account + "label = \"" + strings.Repeat("x", 61) + "\"\n", "providers.cw.label", "at most 60 characters"},
+		{"label type", account + "label = 3\n", "providers.cw.label", "string"},
+		{"label on other kind", "[providers.ds]\nkind = \"deepseek\"\nlabel = \"x\"\n", "providers.ds.label", "only for kind claude-code"},
 		{"account key on other kind", "[providers.ds]\nkind = \"deepseek\"\nconfig_dir = \"/x\"\n", "providers.ds.config_dir", "only for kind claude-code"},
 		{"reserved name", "[providers.claude-code]\nkind = \"claude-code\"\n", "providers.claude-code", "claude-code is built in"},
 		{"model flag", account + "\n[agents.a]\nmodel = \"cw/-x\"\n", "agents.a.model", "must not start with '-'"},
