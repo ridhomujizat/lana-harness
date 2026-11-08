@@ -35,6 +35,66 @@ type AgentRuntime interface {
 type RuntimeDeps struct {
 	Secrets Secrets
 	Logger  *slog.Logger
+	// OnModels, when set, receives the model list the runtime learned from
+	// its binary (for Claude Code, the initialize response). It may be nil.
+	OnModels func([]RuntimeModel)
+}
+
+// ClaudeCodeProvider is the built-in provider name of Claude Code router
+// targets: "claude-code/<model>" runs the turn in the Claude Code runtime
+// (ADR 0020, API-CCT-001). It is also the runtime name.
+const ClaudeCodeProvider = "claude-code"
+
+// RuntimeModel is one model an external runtime offers, as its binary
+// reports it (for Claude Code, an entry of the initialize response's models).
+type RuntimeModel struct {
+	// Value is the model value passed to --model, for example
+	// "claude-opus-5-5" or "opus".
+	Value string `json:"value"`
+	// DisplayName is the runtime's label, for example "Opus 5.5".
+	DisplayName string `json:"display_name"`
+	// Description is the runtime's one-line description, when given.
+	Description string `json:"description,omitempty"`
+}
+
+// RuntimeModelLister is implemented by a runtime that knows the models its
+// binary offers. ok is false when no list was captured yet.
+type RuntimeModelLister interface {
+	Models() (models []RuntimeModel, ok bool)
+}
+
+// RuntimeEarlyError is the error AgentRuntime.RunTurn returns when the turn
+// failed before its first content event (text, thinking, tool call, or tool
+// result): the binary is missing, too old, not logged in, the plan window
+// rejected the request, or the process exited (REQ-CCT-004). Nothing was
+// shown, so the caller may run the turn on another target.
+type RuntimeEarlyError struct {
+	// Class is the router outcome class of the failure, for example "auth",
+	// "rate_limit", "not_found", "missing_secret", "client", or "runtime".
+	Class   string
+	Message string
+}
+
+func (e *RuntimeEarlyError) Error() string { return e.Message }
+
+// RuntimeToolFunc runs one lana tool for an external runtime turn. callID is
+// the runtime's tool call ID when it sent one, else a generated one.
+type RuntimeToolFunc func(ctx context.Context, callID, name string, input json.RawMessage) ToolOutput
+
+// RuntimeToolHost serves lana's tools to external runtime turns over a
+// loopback MCP server (ADR 0020, REQ-CCT-006).
+type RuntimeToolHost interface {
+	// Bind sets the tools and the call handler of a session's running turn.
+	// It starts the host on first use; an error means it cannot serve.
+	Bind(sessionID string, tools []ToolSpec, call RuntimeToolFunc) error
+	// Unbind clears the call handler of a session after its turn.
+	Unbind(sessionID string)
+	// Open issues a bearer token for a session and returns the runtime's MCP
+	// config (for Claude Code, the --mcp-config JSON). release revokes the
+	// token; the runtime calls it when its process exits.
+	Open(sessionID string) (config string, release func(), err error)
+	// Close stops the host.
+	Close() error
 }
 
 // Auth modes of RuntimeConfig.Auth.
@@ -59,6 +119,13 @@ type RuntimeConfig struct {
 	// Workspace is the working directory of the process. A leading ~ is
 	// expanded. Empty inherits the daemon's working directory.
 	Workspace string
+	// AppendSystemPrompt is appended to the runtime's system prompt
+	// (--append-system-prompt): lana's prompt head for the agent (REQ-CCT-005).
+	// A change starts a new process that resumes the runtime session.
+	AppendSystemPrompt string
+	// MCPKey names the lana tool set served to the process (REQ-CCT-006). A
+	// change starts a new process that resumes the runtime session.
+	MCPKey string
 }
 
 // RuntimeTurn is one turn handed to an AgentRuntime.
@@ -82,6 +149,10 @@ type RuntimeTurn struct {
 	// cancelled or ends. A nil Approve, a panic, or a cancelled ctx denies
 	// (fail-closed). message is shown to the agent when the request is denied.
 	Approve func(ctx context.Context, req RuntimeApproval) (allow bool, message string)
+	// OpenMCP, when set, is called once per new runtime process for the MCP
+	// config that serves lana's tools (REQ-CCT-006). release runs when the
+	// process exits. An error starts the process without lana's tools.
+	OpenMCP func() (config string, release func(), err error)
 }
 
 // RuntimeApproval is a permission request from an external runtime.

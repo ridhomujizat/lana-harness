@@ -114,11 +114,17 @@ type Registry struct {
 	runtimes       map[string]core.AgentRuntime
 	runtimesClosed bool
 	externalHooks  ExternalHooks
+	// toolHost serves lana's tools to Claude Code turns (ADR 0020).
+	toolHost core.RuntimeToolHost
+	// scheduled counts the scheduled-run marks per session (REQ-CCT-008).
+	scheduled map[string]int
 }
 
 // NewRegistry creates a registry.
 func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.ToolRegistry, hooks *core.Hooks, cfg core.Config, secrets core.Secrets, home, defaultWorkspace string) *Registry {
 	root, cancel := context.WithCancel(context.Background())
+	// API-CCT-002: a legacy runtime agent is its claude-code address.
+	cfg.Agents = llmcall.NormalizeAgents(cfg.Agents)
 	if hooks == nil {
 		hooks = core.NewHooks()
 	}
@@ -275,7 +281,7 @@ func (r *Registry) ApplyConfig(cfg core.Config) {
 
 	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
 	for name, agentCfg := range cfg.Agents {
-		agents[name] = agentCfg
+		agents[name] = llmcall.NormalizeAgent(agentCfg)
 	}
 	teams := make(map[string]core.TeamConfig, len(cfg.Teams))
 	for name, teamCfg := range cfg.Teams {
@@ -755,6 +761,13 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 func (r *Registry) parseModelChoice(value string) (string, string, error) {
 	providers, combos := r.modelConfig()
 	if _, ok := combos[value]; ok {
+		return "", value, nil
+	}
+	// AC-CCT-004: a claude-code address switches the session to Claude Code.
+	if llmcall.IsClaudeCodeAddress(value) {
+		if !llmcall.ValidClaudeCodeModel(strings.TrimPrefix(value, llmcall.ClaudeCode+"/")) {
+			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, value)
+		}
 		return "", value, nil
 	}
 	sep := strings.IndexAny(value, "/:")

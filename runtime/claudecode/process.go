@@ -78,8 +78,10 @@ var baseArgs = []string{
 }
 
 // buildArgs returns the argv after the binary. resume selects --resume over
-// --session-id.
-func buildArgs(cfg core.RuntimeConfig, sessionID string, resume bool) ([]string, error) {
+// --session-id. mcpConfig, when set, is passed to --mcp-config; lana does not
+// pass --strict-mcp-config, so the owner's own Claude MCP servers still load
+// (REQ-CCT-006).
+func buildArgs(cfg core.RuntimeConfig, sessionID string, resume bool, mcpConfig string) ([]string, error) {
 	args := append([]string(nil), baseArgs...)
 	if cfg.Model != "" {
 		if strings.HasPrefix(cfg.Model, "-") {
@@ -92,6 +94,14 @@ func buildArgs(cfg core.RuntimeConfig, sessionID string, resume bool) ([]string,
 			return nil, fmt.Errorf("invalid reasoning_effort %q", cfg.Effort)
 		}
 		args = append(args, "--effort", cfg.Effort)
+	}
+	// REQ-CCT-005: lana's prompt head for the agent. The value is one argv
+	// element, so it is never read as a flag.
+	if cfg.AppendSystemPrompt != "" {
+		args = append(args, "--append-system-prompt", cfg.AppendSystemPrompt)
+	}
+	if mcpConfig != "" {
+		args = append(args, "--mcp-config", mcpConfig)
 	}
 	if !isUUID(sessionID) {
 		return nil, fmt.Errorf("invalid Claude session ID %q", sessionID)

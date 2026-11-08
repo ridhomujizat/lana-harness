@@ -30,6 +30,12 @@ type Config struct {
 	// Cooldown is how long a target that failed with rate_limit or auth is
 	// skipped: 0 means DefaultCooldown, negative turns cooldown off.
 	Cooldown time.Duration
+	// BackgroundModel is the address or combo background passes use when an
+	// agent's chain has only Claude Code targets (API-CCT-003).
+	BackgroundModel string
+	// ClaudeCodeModels are Claude Code model IDs the owner added by hand;
+	// Models("claude-code") lists them with source "custom".
+	ClaudeCodeModels []string
 }
 
 // Combo is a named, ordered list of model addresses (REQ-RTR-004).
@@ -109,6 +115,8 @@ type Router struct {
 	cool     cooldowns
 	limits   limitState
 	models   modelCache
+	// claudeModels is the model list Claude Code reported (nil: none yet).
+	claudeModels atomic.Pointer[[]core.RuntimeModel]
 }
 
 type providerEntry struct {
@@ -183,6 +191,12 @@ func (r *Router) AttachStores(rec Recorder, limits LimitStore) {
 	}
 }
 
+// BackgroundModel returns [router] background_model (API-CCT-003). It
+// implements llmcall.BackgroundModeler.
+func (r *Router) BackgroundModel() string {
+	return r.snap.Load().cfg.BackgroundModel
+}
+
 // Config returns the configuration currently applied.
 func (r *Router) Config() Config {
 	return r.snap.Load().cfg
@@ -203,6 +217,9 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 	// Work on the copy so a caller that changes its maps later cannot
 	// change the snapshot or the change detection of the next Apply.
 	cfg = next.cfg
+	if _, ok := cfg.Providers[ClaudeCode]; ok {
+		return nil, fmt.Errorf("providers.%s: claude-code is built in", ClaudeCode)
+	}
 	for name, p := range r.opts.providers {
 		kind := "custom"
 		if pc, ok := cfg.Providers[name]; ok && pc.Kind != "" {
@@ -266,7 +283,7 @@ func validateCombo(name string, combo Combo, providers map[string]*providerEntry
 		return fmt.Errorf("combos: a combo name is empty")
 	case strings.ContainsAny(name, "/:"):
 		return fmt.Errorf("%s: a combo name must not contain '/' or ':'", path)
-	case providers[name] != nil:
+	case providers[name] != nil || name == ClaudeCode:
 		return fmt.Errorf("%s: a combo name must not equal a provider name", path)
 	case len(combo.Models) == 0:
 		return fmt.Errorf("%s.models: a combo needs at least one model", path)
@@ -281,7 +298,11 @@ func validateCombo(name string, combo Combo, providers map[string]*providerEntry
 		if !ok || strings.IndexAny(address, ":/") != strings.Index(address, "/") {
 			return fmt.Errorf("%s: %q is not a provider/model address", item, address)
 		}
-		if providers[target.Provider] == nil {
+		if target.Provider == ClaudeCode {
+			if err := claudeCodeTarget(target); err != nil {
+				return fmt.Errorf("%s: %w", item, err)
+			}
+		} else if providers[target.Provider] == nil {
 			return fmt.Errorf("%s: unknown provider %q", item, target.Provider)
 		}
 		if seen[address] {
@@ -367,7 +388,7 @@ func randomJitter() float64 {
 }
 
 func cloneConfig(cfg Config) Config {
-	out := Config{Cooldown: cfg.Cooldown}
+	out := Config{Cooldown: cfg.Cooldown, BackgroundModel: cfg.BackgroundModel, ClaudeCodeModels: append([]string(nil), cfg.ClaudeCodeModels...)}
 	if cfg.Providers != nil {
 		out.Providers = make(map[string]core.ProviderConfig, len(cfg.Providers))
 		for name, pc := range cfg.Providers {

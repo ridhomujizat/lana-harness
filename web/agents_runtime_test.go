@@ -30,9 +30,9 @@ func putAgentJSON(t *testing.T, s *Server, store *testConfigStore, cookie *http.
 	return rr.Code, rr.Body.String()
 }
 
-// AC-CCR-010 (backend side), API-CCR-004: creating a Claude Agent with model
-// opus writes runtime = "claude-code" and model = "opus" with no provider,
-// template tools, or persona, and its row shows the engine label.
+// AC-CCT-003 (backend side, amends AC-CCR-010): a create with the legacy
+// Claude Agent body writes model = "claude-code/opus" and no runtime, with no
+// provider, template tools, or persona; its row has claude_code: true.
 func TestAgentsCreateClaudeAgentCoversACCCR010(t *testing.T) {
 	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
 
@@ -47,10 +47,10 @@ func TestAgentsCreateClaudeAgentCoversACCCR010(t *testing.T) {
 	}
 	tables := t016ReadAgentTables(t, store.path)
 	table := tables["claude"]
-	if table["runtime"] != "claude-code" || table["model"] != "opus" || table["reasoning_effort"] != "xhigh" {
+	if table["model"] != "claude-code/opus" || table["reasoning_effort"] != "xhigh" {
 		t.Fatalf("claude table = %+v\n%s", table, raw)
 	}
-	for _, key := range []string{"provider", "tools", "fallback", "allow_scheduled"} {
+	for _, key := range []string{"runtime", "provider", "tools", "fallback", "allow_scheduled"} {
 		if _, ok := table[key]; ok {
 			t.Fatalf("claude table has %s: %+v", key, table)
 		}
@@ -59,39 +59,54 @@ func TestAgentsCreateClaudeAgentCoversACCCR010(t *testing.T) {
 		t.Fatalf("claude table = %+v", table)
 	}
 	if _, err := os.Stat(agenthome.Paths(store.home, "claude").Agent); !os.IsNotExist(err) {
-		t.Fatalf("a Claude Agent got a persona file: %v", err)
+		t.Fatalf("a legacy body create got a persona file: %v", err)
 	}
 
 	row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "claude")
-	if row.Runtime != "claude-code" || row.EngineLabel != "Claude Agent" || row.Auth != "subscription" ||
-		row.AllowScheduled == nil || *row.AllowScheduled || row.Provider != "" || row.Model == nil || *row.Model != "opus" {
+	if row.Runtime != "" || !row.ClaudeCode || row.Auth != "subscription" ||
+		row.AllowScheduled == nil || *row.AllowScheduled || row.Model == nil || *row.Model != "claude-code/opus" {
 		t.Fatalf("claude row = %+v", row)
 	}
 	coder := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
-	if coder.Runtime != "" || coder.EngineLabel != "lana" || coder.Auth != "" || coder.AllowScheduled != nil {
+	if coder.Runtime != "" || coder.ClaudeCode || coder.Auth != "" || coder.AllowScheduled != nil {
 		t.Fatalf("coder row = %+v", coder)
 	}
 	list := serveAuth(s, settingsRequest(http.MethodGet, "/v1/agents", "", cookie, ""))
-	if !strings.Contains(list.Body.String(), `"engine_label":"Claude Agent"`) || !strings.Contains(list.Body.String(), `"runtime":"claude-code"`) {
+	if !strings.Contains(list.Body.String(), `"claude_code":true`) {
 		t.Fatalf("list body = %s", list.Body.String())
 	}
 
-	// A full model ID is free-form; no provider or address check applies.
+	// A full model ID is free-form; the Claude-only keys are kept.
 	rr = serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents",
 		`{"name":"claude-2","runtime":"claude-code","model":"claude-opus-4-1","auth":"api_key","api_key_env":"ANTHROPIC_API_KEY","binary":"/opt/claude","allow_scheduled":true}`, cookie, csrf))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("create claude-2 status = %d, body = %q", rr.Code, rr.Body.String())
 	}
 	table = t016ReadAgentTables(t, store.path)["claude-2"]
-	if table["model"] != "claude-opus-4-1" || table["auth"] != "api_key" || table["api_key_env"] != "ANTHROPIC_API_KEY" ||
+	if table["model"] != "claude-code/claude-opus-4-1" || table["auth"] != "api_key" || table["api_key_env"] != "ANTHROPIC_API_KEY" ||
 		table["binary"] != "/opt/claude" || table["allow_scheduled"] != true {
 		t.Fatalf("claude-2 table = %+v", table)
 	}
+
+	// The new form: a template agent on a claude-code address with a Claude
+	// Code effort and the Claude-only keys.
+	rr = serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents",
+		`{"name":"bima","template":"assistant","model":"claude-code/sonnet","reasoning_effort":"medium","allow_scheduled":true}`, cookie, csrf))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create bima = %d %s", rr.Code, rr.Body.String())
+	}
+	table = t016ReadAgentTables(t, store.path)["bima"]
+	if table["model"] != "claude-code/sonnet" || table["allow_scheduled"] != true || table["tools"] == nil {
+		t.Fatalf("bima table = %+v", table)
+	}
+	if row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "bima"); !row.ClaudeCode {
+		t.Fatalf("bima row = %+v", row)
+	}
 }
 
-// API-CCR-004: a Claude Agent create rejects a template and a lana agent
-// create rejects the runtime-only keys; a lana effort is rejected for a
-// Claude Agent.
+// The legacy body still gets its rules checked: a template with the legacy
+// body, a lana-only effort on it, a missing api_key_env, and an unknown
+// runtime are rejected.
 func TestAgentsCreateClaudeAgentRejects(t *testing.T) {
 	s, _, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
 	for _, tc := range []struct {
@@ -99,21 +114,25 @@ func TestAgentsCreateClaudeAgentRejects(t *testing.T) {
 		key  string
 	}{
 		{`{"name":"a","runtime":"claude-code","template":"coder"}`, "template"},
-		{`{"name":"b","template":"coder","auth":"api_key"}`, "auth"},
 		{`{"name":"c","runtime":"claude-code","reasoning_effort":"off"}`, "agents.c.reasoning_effort"},
 		{`{"name":"d","runtime":"claude-code","auth":"api_key"}`, "agents.d.api_key_env"},
 		{`{"name":"e","runtime":"nope"}`, "agents.e.runtime"},
+		{`{"name":"f","template":"coder","model":"claude-code/opus","reasoning_effort":"huge"}`, "reasoning_effort"},
 	} {
 		rr := serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents", tc.body, cookie, csrf))
-		if rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), `"key":"`+tc.key+`"`) {
+		if rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), tc.key) {
 			t.Fatalf("%s = %d %s, want 422 at %s", tc.body, rr.Code, rr.Body.String(), tc.key)
 		}
 	}
+	// ADR 0020: the Claude-only keys are accepted on any agent.
+	rr := serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents", `{"name":"b","template":"coder","auth":"subscription","allow_scheduled":true}`, cookie, csrf))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("claude-only keys on a lana agent = %d %s", rr.Code, rr.Body.String())
+	}
 }
 
-// API-CCR-004: switching a lana agent to Claude Agent removes the lana-only
-// keys; switching back removes the runtime keys. Each write passes config
-// validation.
+// AC-CCT-003: saving a legacy agent writes model = "claude-code/<M>" and no
+// runtime; lana's keys stay. A legacy "runtime" body is still accepted.
 func TestAgentsSwitchRuntimeRoundTrip(t *testing.T) {
 	const config = `version = 1
 
@@ -124,15 +143,9 @@ base_url = "mock://local"
 [agents.coder]
 provider = "mock"
 model = "coder"
-fallback = ["mock:other"]
 tools = ["read_file", "bash"]
-disabled_tools = ["bash"]
 skills = ["review"]
 max_steps = 9
-context_window = 64000
-compaction_threshold = 0.7
-memory_capture = false
-vision = true
 reasoning_effort = "off"
 permission = "ask"
 workspace = "/tmp/coder"
@@ -140,82 +153,72 @@ description = "Builds things"
 title = "Builder"
 rules = { deny = ["bash(rm *)"] }
 
+[agents.legacy]
+runtime = "claude-code"
+model = "haiku"
+binary = "/opt/claude"
+
 [[routes]]
 channel = "cli"
 agent = "coder"
 `
 	s, store, cookie, csrf := newT016AgentsServer(t, config)
 
-	// The body the dashboard sends on the switch: runtime, the cleared
-	// provider and fallback, and the new model.
-	code, body := putAgentJSON(t, s, store, cookie, csrf, "coder", map[string]any{
-		"runtime": "claude-code", "provider": "", "fallback": []string{}, "model": "sonnet",
+	// AC-CCT-003: a legacy file lists with runtime, then a save migrates it.
+	row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "legacy")
+	if row.Runtime != "claude-code" || !row.ClaudeCode || row.Model == nil || *row.Model != "claude-code/haiku" || row.Binary != "/opt/claude" {
+		t.Fatalf("legacy row = %+v", row)
+	}
+	code, body := putAgentJSON(t, s, store, cookie, csrf, "legacy", map[string]any{"title": "Pair"})
+	if code != http.StatusOK {
+		t.Fatalf("save legacy = %d %s", code, body)
+	}
+	table := t016ReadAgentTables(t, store.path)["legacy"]
+	if _, ok := table["runtime"]; ok || table["model"] != "claude-code/haiku" || table["binary"] != "/opt/claude" || table["title"] != "Pair" {
+		t.Fatalf("legacy table = %+v", table)
+	}
+	if row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "legacy"); row.Runtime != "" || !row.ClaudeCode {
+		t.Fatalf("saved legacy row = %+v", row)
+	}
+
+	// The old dashboard body for a switch to Claude: runtime and model.
+	code, body = putAgentJSON(t, s, store, cookie, csrf, "coder", map[string]any{
+		"runtime": "claude-code", "provider": "", "model": "sonnet", "reasoning_effort": "medium",
 	})
 	if code != http.StatusOK {
 		t.Fatalf("switch to claude = %d %s", code, body)
 	}
-	table := t016ReadAgentTables(t, store.path)["coder"]
-	if table["runtime"] != "claude-code" || table["model"] != "sonnet" {
+	table = t016ReadAgentTables(t, store.path)["coder"]
+	if _, ok := table["runtime"]; ok || table["model"] != "claude-code/sonnet" || table["reasoning_effort"] != "medium" {
 		t.Fatalf("claude table = %+v", table)
 	}
-	for _, key := range lanaOnlyAgentKeys {
-		if _, ok := table[key]; ok {
-			t.Fatalf("claude table keeps %s: %+v", key, table)
-		}
-	}
-	if _, ok := table["reasoning_effort"]; ok {
-		t.Fatalf("lana effort carried over: %+v", table)
-	}
-	if table["permission"] != "ask" || table["workspace"] != "/tmp/coder" || table["description"] != "Builds things" || table["title"] != "Builder" {
-		t.Fatalf("shared keys lost: %+v", table)
-	}
-	if rules, _ := table["rules"].(map[string]any); rules == nil {
-		t.Fatalf("rules lost: %+v", table)
-	}
-	row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
-	if row.EngineLabel != "Claude Agent" || row.Provider != "" {
-		t.Fatalf("row = %+v", row)
+	if table["tools"] == nil || table["max_steps"] == nil || table["permission"] != "ask" || table["title"] != "Builder" {
+		t.Fatalf("lana keys lost: %+v", table)
 	}
 
-	// Claude Agent edits keep the runtime keys.
+	// Claude-only keys on the claude-code agent; then back to a lana model.
 	code, body = putAgentJSON(t, s, store, cookie, csrf, "coder", map[string]any{
-		"auth": "api_key", "api_key_env": "ANTHROPIC_API_KEY", "binary": "/opt/claude", "allow_scheduled": true, "reasoning_effort": "medium",
+		"auth": "api_key", "api_key_env": "ANTHROPIC_API_KEY", "binary": "/opt/claude", "allow_scheduled": true,
 	})
 	if code != http.StatusOK {
 		t.Fatalf("edit claude = %d %s", code, body)
 	}
-	table = t016ReadAgentTables(t, store.path)["coder"]
-	if table["auth"] != "api_key" || table["binary"] != "/opt/claude" || table["allow_scheduled"] != true || table["reasoning_effort"] != "medium" || table["runtime"] != "claude-code" {
-		t.Fatalf("claude edit table = %+v", table)
-	}
-
-	// A lana-only key on a Claude Agent is a validation error, not dropped.
-	code, body = putAgentJSON(t, s, store, cookie, csrf, "coder", map[string]any{"tools": []string{"bash"}})
-	if code != http.StatusUnprocessableEntity || !strings.Contains(body, "agents.coder.tools") {
-		t.Fatalf("tools on claude = %d %s", code, body)
-	}
-
-	// Back to lana: the runtime keys go; the new model is a router address.
-	code, body = putAgentJSON(t, s, store, cookie, csrf, "coder", map[string]any{"runtime": "", "model": "mock/coder"})
+	code, body = putAgentJSON(t, s, store, cookie, csrf, "coder", map[string]any{"model": "mock/coder", "reasoning_effort": "off"})
 	if code != http.StatusOK {
 		t.Fatalf("switch to lana = %d %s", code, body)
 	}
 	table = t016ReadAgentTables(t, store.path)["coder"]
-	for _, key := range append([]string{"runtime", "reasoning_effort"}, runtimeOnlyAgentKeys...) {
-		if _, ok := table[key]; ok {
-			t.Fatalf("lana table keeps %s: %+v", key, table)
-		}
-	}
-	if table["model"] != "mock/coder" || table["permission"] != "ask" || table["title"] != "Builder" {
+	if table["model"] != "mock/coder" || table["auth"] != "api_key" {
 		t.Fatalf("lana table = %+v", table)
 	}
 	row = t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder")
-	if row.Runtime != "" || row.EngineLabel != "lana" || row.Provider != "mock" {
+	if row.Runtime != "" || row.ClaudeCode || row.Provider != "mock" {
 		t.Fatalf("row = %+v", row)
 	}
 }
 
-// Duplicating a Claude Agent keeps its runtime keys.
+// Duplicating a legacy Claude Agent writes the claude-code address and keeps
+// the Claude-only keys.
 func TestAgentsDuplicateClaudeAgent(t *testing.T) {
 	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig+`
 [agents.claude]
@@ -230,7 +233,7 @@ allow_scheduled = true
 		t.Fatalf("duplicate = %d %s", rr.Code, rr.Body.String())
 	}
 	table := t016ReadAgentTables(t, store.path)["claude-2"]
-	if table["runtime"] != "claude-code" || table["auth"] != "api_key" || table["api_key_env"] != "ANTHROPIC_API_KEY" || table["allow_scheduled"] != true {
+	if _, ok := table["runtime"]; ok || table["model"] != "claude-code/opus" || table["auth"] != "api_key" || table["api_key_env"] != "ANTHROPIC_API_KEY" || table["allow_scheduled"] != true {
 		t.Fatalf("duplicate table = %+v", table)
 	}
 }

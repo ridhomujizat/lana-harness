@@ -19,6 +19,7 @@ type fakeRuntime struct {
 	mu         sync.Mutex
 	turns      []core.RuntimeTurn
 	interrupts []string
+	closes     []string
 	shutdown   bool
 	interrupt  chan string
 	script     func(ctx context.Context, rt *fakeRuntime, turn core.RuntimeTurn) error
@@ -46,7 +47,17 @@ func (f *fakeRuntime) Interrupt(sessionID string) error {
 	return nil
 }
 
-func (f *fakeRuntime) Close(string) {}
+func (f *fakeRuntime) Close(sessionID string) {
+	f.mu.Lock()
+	f.closes = append(f.closes, sessionID)
+	f.mu.Unlock()
+}
+
+func (f *fakeRuntime) closedSessions() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.closes...)
+}
 
 func (f *fakeRuntime) Shutdown(context.Context) error {
 	f.mu.Lock()
@@ -173,7 +184,7 @@ func TestExternalTurnEvents(t *testing.T) {
 			}
 		case core.KindStepStart:
 			step := payloadOf[core.StepStart](t, event)
-			if step.Provider != "claude-agent" || step.Model != "claude-haiku-5-5" {
+			if step.Provider != "claude-code" || step.Model != "claude-haiku-5-5" {
 				t.Fatalf("step/start = %+v", step)
 			}
 		case core.KindToolCall:
@@ -188,7 +199,7 @@ func TestExternalTurnEvents(t *testing.T) {
 			}
 		case core.KindStepEnd:
 			step := payloadOf[core.StepEnd](t, event)
-			if step.Provider != "claude-agent" || step.Usage.InputTokens != 100 || step.Usage.OutputTokens != 20 || step.Usage.CachedInputTokens != 60 {
+			if step.Provider != "claude-code" || step.Usage.InputTokens != 100 || step.Usage.OutputTokens != 20 || step.Usage.CachedInputTokens != 60 {
 				t.Fatalf("step/end = %+v", step)
 			}
 		case core.KindTurnEnd:
@@ -221,7 +232,8 @@ func TestExternalTurnEvents(t *testing.T) {
 	if turn.ResumeID != "" || turn.Config.Model != "haiku" || turn.Config.Effort != "high" || turn.Config.Workspace != ws || turn.AgentName != "assistant" {
 		t.Fatalf("turn = %+v", turn)
 	}
-	if len(turn.Input) != 1 || turn.Input[0].Text != "list files" {
+	// REQ-CCT-005: the <context> block goes in front of the owner message.
+	if len(turn.Input) != 2 || !strings.HasPrefix(turn.Input[0].Text, "<context>") || turn.Input[1].Text != "list files" {
 		t.Fatalf("input = %+v", turn.Input)
 	}
 
@@ -231,11 +243,11 @@ func TestExternalTurnEvents(t *testing.T) {
 		t.Fatalf("usages = %+v", usages)
 	}
 	u := usages[0]
-	if u.Provider != "claude-agent" || u.Runtime != "claude-code" || u.Model != "claude-haiku-5-5" || u.Outcome != "ok" ||
+	if u.Provider != "claude-code" || u.Runtime != "claude-code" || u.Model != "claude-haiku-5-5" || u.Outcome != "ok" ||
 		u.CostUSD != 0.0037 || u.DurationMS != 4428 || u.Usage.InputTokens != 100 || u.Agent != "assistant" || u.SessionID != h.info.ID || u.TurnID != result.TurnID {
 		t.Fatalf("usage = %+v", u)
 	}
-	if len(limits) != 1 || limitProvider != "claude-agent" || limitKind != "claude-code" || limits[0][0].Type != "five_hour" || *limits[0][0].Utilization != 0.42 {
+	if len(limits) != 1 || limitProvider != "claude-code" || limitKind != "claude-code" || limits[0][0].Type != "five_hour" || *limits[0][0].Utilization != 0.42 {
 		t.Fatalf("limits = %+v %s %s", limits, limitProvider, limitKind)
 	}
 
@@ -475,11 +487,13 @@ func TestExternalTurnError(t *testing.T) {
 	}
 }
 
-// A runtime that is not registered fails the turn with a clear error.
+// API-CCT-002: only runtime = "claude-code" maps to a Claude Code address; an
+// unknown runtime key (config validation rejects it) leaves an agent with no
+// model, and the turn fails with that error.
 func TestExternalTurnUnknownRuntime(t *testing.T) {
 	h := newHarness(t, mock.Script{}, map[string]core.AgentConfig{"assistant": {Runtime: "no-such-runtime"}})
 	result := h.run(t, "hi")
-	if result.StopReason != "error" || result.Err == nil || !strings.Contains(result.Err.Message, `"no-such-runtime" is not available`) {
+	if result.StopReason != "error" || result.Err == nil || !strings.Contains(result.Err.Message, "has no provider or model set") {
 		t.Fatalf("result = %+v", result)
 	}
 }
@@ -534,4 +548,3 @@ func TestRuntimeMetaIsNotPromptHead(t *testing.T) {
 		t.Fatalf("head = %+v", head)
 	}
 }
-

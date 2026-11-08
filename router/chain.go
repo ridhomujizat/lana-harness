@@ -112,6 +112,11 @@ targets:
 
 // attempt makes one call to one target and waits for its first event.
 func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, target Target, n int, start time.Time, req core.ChatRequest, meta CallMeta) (core.ChatStream, error) {
+	if target.Provider == ClaudeCode {
+		// ADR 0020: a Claude Code target runs in the Claude Code runtime; the
+		// agent dispatches it before the router, so this is never reached.
+		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "claude-code targets run in the Claude Code runtime, not through the router"}
+	}
 	entry, ok := snap.providers[target.Provider]
 	if !ok {
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is not configured", target.Provider)}

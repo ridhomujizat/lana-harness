@@ -44,6 +44,14 @@ func (s *snapshot) resolve(address string) ([]Target, error) {
 		return chain, nil
 	}
 	target, ok := ParseAddress(address)
+	if ok && target.Provider == ClaudeCode && address[len(ClaudeCode)] == '/' {
+		// ADR 0020: claude-code is built in; the agent runs it in the Claude
+		// Code runtime.
+		if err := claudeCodeTarget(target); err != nil {
+			return nil, err
+		}
+		return []Target{target}, nil
+	}
 	if !ok || s.providers[target.Provider] == nil {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownAddress, address)
 	}

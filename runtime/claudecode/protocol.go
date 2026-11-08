@@ -221,6 +221,27 @@ type mapper struct {
 	// authFailed is set when Claude Code reports it is not logged in.
 	authFailed bool
 	apiError   string
+	// content is set by the first text, thinking, or tool event of the turn.
+	content bool
+	// rejected names the plan window of a rate_limit_event with status
+	// "rejected" ("" when none), and rejectedAt its reset time.
+	rejected   string
+	rejectedAt time.Time
+}
+
+// rejectedEarly reports whether the plan window rejected the turn before its
+// first content event (REQ-CCT-004).
+func (m *mapper) rejectedEarly() bool {
+	return m.rejected != "" && !m.content
+}
+
+// rejectedText is the turn error of a rejected plan window.
+func (m *mapper) rejectedText() string {
+	text := "Claude Code usage limit reached (" + m.rejected + ")"
+	if !m.rejectedAt.IsZero() {
+		text += "; resets " + m.rejectedAt.UTC().Format(time.RFC3339)
+	}
+	return text
 }
 
 // procState is the state of one Claude process that outlives a turn.
@@ -263,10 +284,12 @@ func (m *mapper) handle(line []byte) lineResult {
 		switch ev.Event.Delta.Type {
 		case "text_delta":
 			if ev.Event.Delta.Text != "" {
+				m.content = true
 				m.emit(core.RuntimeEvent{Kind: core.RuntimeTextDelta, Text: ev.Event.Delta.Text})
 			}
 		case "thinking_delta":
 			if ev.Event.Delta.Thinking != "" {
+				m.content = true
 				m.emit(core.RuntimeEvent{Kind: core.RuntimeThinkingDelta, Text: ev.Event.Delta.Thinking})
 			}
 		}
@@ -364,6 +387,9 @@ func (m *mapper) handleAssistant(line []byte) {
 			})
 		}
 	}
+	if len(text) > 0 || len(calls) > 0 {
+		m.content = true
+	}
 	if len(text) > 0 {
 		m.emit(core.RuntimeEvent{Kind: core.RuntimeAssistantMessage, Text: strings.Join(text, "\n\n"), Model: msg.Message.Model})
 	}
@@ -385,6 +411,7 @@ func (m *mapper) handleUser(line []byte) {
 		if b.Type != "tool_result" {
 			continue
 		}
+		m.content = true
 		m.emit(core.RuntimeEvent{
 			Kind: core.RuntimeToolResult, ID: b.ToolUseID, Output: toolResultText(b.Content), IsError: b.IsError,
 		})
@@ -421,6 +448,11 @@ func toolResultText(raw json.RawMessage) string {
 }
 
 func (m *mapper) handleRateLimit(line []byte) {
+	var ev rateLimitLine
+	if json.Unmarshal(line, &ev) == nil && ev.Info.Status == "rejected" && m.rejected == "" {
+		m.rejected = firstNonEmpty(ev.Info.RateLimitType, "plan window")
+		m.rejectedAt = unixTime(ev.Info.ResetsAt)
+	}
 	windows := parseRateLimit(line)
 	if len(windows) > 0 {
 		m.emit(core.RuntimeEvent{Kind: core.RuntimeLimits, Windows: windows})

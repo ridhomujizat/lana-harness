@@ -91,6 +91,25 @@ type RouterBackend interface {
 	ClaudeAgentStatus(ctx context.Context) (ClaudeAgentStatus, error)
 }
 
+// ClaudeCodeBackend is the optional part of a RouterBackend for Claude Code
+// router targets (spec 39). RouterModels and RouterTest of such a backend
+// accept the provider "claude-code" and "claude-code/<model>" addresses.
+type ClaudeCodeBackend interface {
+	// ClaudeCodeInstalled reports whether the claude binary is found; the
+	// model pickers list Claude Code models only then (API-CCT-004).
+	ClaudeCodeInstalled(ctx context.Context) bool
+}
+
+// ClaudeCodeProvider is the built-in provider of Claude Code router targets.
+const ClaudeCodeProvider = "claude-code"
+
+// claudeCodeChoiceGroup is the picker group of Claude Code models.
+const claudeCodeChoiceGroup = "Claude Code"
+
+// maxClaudeCodeModels mirrors the config rule on [router]
+// claude_code_models.
+const maxClaudeCodeModels = 50
+
 // RouterStatus is the live router state of GET /v1/router.
 type RouterStatus struct {
 	Cooling      []RouterCooling
@@ -254,6 +273,7 @@ func (s *Server) registerRouterRoutes() {
 	s.Handle("POST /v1/router/keys", http.HandlerFunc(s.handleCreateRouterKey))
 	s.Handle("DELETE /v1/router/keys/{id}", http.HandlerFunc(s.handleRevokeRouterKey))
 	s.Handle("GET /v1/router/claude-agent", http.HandlerFunc(s.handleClaudeAgentStatus))
+	s.Handle("PUT /v1/router/claude-code/models", http.HandlerFunc(s.handlePutClaudeCodeModels))
 	s.mux.Handle(RouterProxyPrefix+"/", s.checkHost(http.HandlerFunc(s.serveRouterProxy)))
 }
 
@@ -417,7 +437,34 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 			response.Choices = append(response.Choices, routerChoiceJSON{Value: model.Address, Label: label, Group: name})
 		}
 	}
+	// API-CCT-004: Claude Code models in their own group when the binary is
+	// found.
+	response.Choices = append(response.Choices, s.claudeCodeChoices(r.Context())...)
 	writeJSON(w, http.StatusOK, response)
+}
+
+// claudeCodeChoices returns the picker entries of Claude Code models, or none
+// when the backend has no Claude Code or the binary is not found.
+func (s *Server) claudeCodeChoices(ctx context.Context) []routerChoiceJSON {
+	port := s.routerPort()
+	cc, ok := port.(ClaudeCodeBackend)
+	if !ok || !cc.ClaudeCodeInstalled(ctx) {
+		return nil
+	}
+	list, err := port.RouterModels(ctx, ClaudeCodeProvider, false)
+	if err != nil {
+		s.logger.Warn("web: claude code models", "error", err)
+		return nil
+	}
+	out := make([]routerChoiceJSON, 0, len(list.Models))
+	for _, model := range list.Models {
+		label := model.Name
+		if label == "" {
+			label = "Claude Code · " + model.ID
+		}
+		out = append(out, routerChoiceJSON{Value: model.Address, Label: label, Group: claudeCodeChoiceGroup})
+	}
+	return out
 }
 
 // routerProviderModels lists the models of each provider, in parallel and
@@ -841,6 +888,97 @@ func (s *Server) handlePutRouterProxy(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type claudeCodeModelsRequest struct {
+	Models          []string `json:"models"`
+	ExpectedVersion string   `json:"expected_version"`
+}
+
+type claudeCodeModelsResponse struct {
+	Models          []string `json:"models"`
+	Version         string   `json:"version"`
+	RestartRequired bool     `json:"restart_required"`
+}
+
+// handlePutClaudeCodeModels writes [router] claude_code_models, the Claude
+// Code model IDs the owner adds by hand, and applies it live. The config
+// check answers 422 for an invalid list.
+func (s *Server) handlePutClaudeCodeModels(w http.ResponseWriter, r *http.Request) {
+	store := s.configStoreOrError(w)
+	if store == nil {
+		return
+	}
+	var body claudeCodeModelsRequest
+	if !decodeJSONObject(w, r, routerBodyLimit, &body) {
+		return
+	}
+	if body.ExpectedVersion == "" {
+		writeRouterInvalid(w, []ConfigIssue{{Key: "expected_version", Message: "expected_version is required"}})
+		return
+	}
+	if body.Models == nil {
+		writeRouterInvalid(w, []ConfigIssue{{Key: "models", Message: "models is required"}})
+		return
+	}
+	models := make([]string, 0, len(body.Models))
+	seen := map[string]bool{}
+	for i, model := range body.Models {
+		model = strings.TrimSpace(model)
+		key := "router.claude_code_models[" + strconv.Itoa(i) + "]"
+		switch {
+		case model == "" || strings.ContainsAny(model, " \t\r\n"):
+			writeRouterInvalid(w, []ConfigIssue{{Key: key, Message: "a model ID is one word"}})
+			return
+		case strings.HasPrefix(model, "-"):
+			writeRouterInvalid(w, []ConfigIssue{{Key: key, Message: "a claude-code model must not start with '-'"}})
+			return
+		case seen[model]:
+			continue
+		}
+		seen[model] = true
+		models = append(models, model)
+	}
+	if len(models) > maxClaudeCodeModels {
+		writeRouterInvalid(w, []ConfigIssue{{Key: "router.claude_code_models", Message: "must list at most " + strconv.Itoa(maxClaudeCodeModels) + " models"}})
+		return
+	}
+
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
+	file, ok := s.readConfigForRouterWrite(w, r, store, body.ExpectedVersion)
+	if !ok {
+		return
+	}
+	quoted := make([]string, 0, len(models))
+	for _, model := range models {
+		quoted = append(quoted, providerTOMLString(model))
+	}
+	value := "[" + strings.Join(quoted, ", ") + "]"
+	candidate, err := webfiles.SetTableKey(file.Raw, "[router]", "claude_code_models", value)
+	if errors.Is(err, webfiles.ErrTableNotFound) {
+		candidate, _, err = webfiles.RewriteTable(r.Context(), func(context.Context, []byte) error { return nil },
+			file.Raw, "[router]", "[router]\nclaude_code_models = "+value+"\n")
+	}
+	if err != nil {
+		s.logger.Error("web: set claude code models", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if err := providerChecker(store)(r.Context(), candidate); err != nil {
+		s.writeRouterSaveError(w, "save claude code models", err)
+		return
+	}
+	if !s.writeRouterCandidate(w, r, store, file, candidate) {
+		return
+	}
+	s.auditSave("router.claude_code_models", providerConfigPath(file, s.providerHome()), "", []string{"router.claude_code_models"})
+	writeJSON(w, http.StatusOK, claudeCodeModelsResponse{
+		Models:          models,
+		Version:         webfiles.ConfigVersion(candidate),
+		RestartRequired: s.applyLiveRestartRequired(r.Context(), store, candidate),
+	})
+}
+
 // readConfigForRouterWrite reads config.toml under the write lock and checks
 // expected_version (409 version_conflict on a mismatch).
 func (s *Server) readConfigForRouterWrite(w http.ResponseWriter, r *http.Request, store ConfigStore, expected string) (ConfigFile, bool) {
@@ -1196,6 +1334,16 @@ func (d providerDocument) modelUsers(address string) RouterModelUsers {
 		table := d.Agents[agent]
 		legacy := mapProviderString(table, "provider")
 		model := mapProviderString(table, "model")
+		// API-CCT-002: a legacy runtime agent uses its claude-code address.
+		if mapProviderString(table, "runtime") == ClaudeCodeProvider {
+			legacy = ""
+			if model == "" {
+				model = "default"
+			}
+			if !strings.HasPrefix(model, ClaudeCodeProvider+"/") {
+				model = ClaudeCodeProvider + "/" + model
+			}
+		}
 		uses := false
 		if legacy != "" {
 			uses = sameAddress(legacy+"/"+model, address)

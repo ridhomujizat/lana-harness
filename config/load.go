@@ -11,6 +11,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // Options controls how config is read.
@@ -202,6 +203,9 @@ func load(ctx context.Context, opts Options, candidate *[]byte) (*Result, error)
 	if err != nil {
 		return nil, Errors{{Msg: err.Error()}}
 	}
+	// API-CCT-002: runtime = "claude-code" with model "M" is model
+	// "claude-code/M" in the effective config.
+	cfg.Agents = llmcall.NormalizeAgents(cfg.Agents)
 	applyWebDefaults(&cfg, st.value)
 	applyUpdateDefaults(&cfg, st.value)
 	return &Result{

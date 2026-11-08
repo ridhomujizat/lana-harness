@@ -33,6 +33,13 @@ type RouterConfig struct {
 	Proxy bool `toml:"proxy"`
 	// Cooldown is a duration string; "" means 5m and "0s" turns cooldown off.
 	Cooldown string `toml:"cooldown"`
+	// BackgroundModel is the address or combo background passes use when an
+	// agent's chain has no target outside Claude Code (API-CCT-003). "" means
+	// none.
+	BackgroundModel string `toml:"background_model"`
+	// ClaudeCodeModels are model IDs the owner adds to the Claude Code model
+	// list by hand, each usable as "claude-code/<id>".
+	ClaudeCodeModels []string `toml:"claude_code_models"`
 }
 
 // KnowledgeConfig is the [knowledge] table (API-KNW-001, API-KNU-001).
@@ -123,9 +130,9 @@ type AgentConfig struct {
 	// gray; "" derives a stable color from the name (REQ-ROOM-009, API-ROOM-006).
 	Color string     `toml:"color"`
 	Rules AgentRules `toml:"rules"`
-	// Runtime names an external agent runtime such as "claude-code" (ADR
-	// 0018, API-CCR-001). Empty runs lana's own loop. A runtime agent sets no
-	// provider; Model and ReasoningEffort are passed to the runtime as is.
+	// Runtime is the deprecated engine key (API-CCT-002): "claude-code" with
+	// model "M" means model "claude-code/M". config.Load rewrites it that way,
+	// so the effective config leaves it empty.
 	Runtime string `toml:"runtime"`
 	// Auth is the runtime's credential mode: "subscription" (the default when
 	// empty) or "api_key" (REQ-CCR-003).
@@ -135,8 +142,8 @@ type AgentConfig struct {
 	APIKeyEnv string `toml:"api_key_env"`
 	// Binary is the runtime executable. Empty looks it up on PATH.
 	Binary string `toml:"binary"`
-	// AllowScheduled lets calendar items and workflow nodes run the runtime
-	// agent (REQ-CCR-007). The default is false.
+	// AllowScheduled lets calendar items and workflow nodes run the agent's
+	// Claude Code targets (REQ-CCT-008). The default is false.
 	AllowScheduled bool `toml:"allow_scheduled"`
 }
 

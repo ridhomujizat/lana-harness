@@ -64,13 +64,15 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 	rt := d.rt
 	// REQ-CCR-007: a workflow node runs a Claude Agent only with
 	// allow_scheduled = true.
-	if err := rt.scheduledRunAllowed(req.Agent); err != nil {
+	if err := rt.scheduledRunAllowed(req.Agent, req.Model); err != nil {
 		return workflow.AgentResult{}, err
 	}
 	session, err := rt.CreateChannelSession(ctx, "workflow", req.WorkflowID, req.Agent)
 	if err != nil {
 		return workflow.AgentResult{}, err
 	}
+	// REQ-CCT-008: the run's turns skip Claude Code unless allow_scheduled.
+	defer rt.registry.MarkScheduled(session.ID)()
 	entry := &workflowSession{lock: toolSet(req.Lock), maxSteps: req.MaxSteps}
 	if req.Tools != nil {
 		entry.tools = toolSet(req.Tools)

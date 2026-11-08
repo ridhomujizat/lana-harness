@@ -9,7 +9,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/models"
@@ -32,18 +35,98 @@ const (
 // a model address with a known provider (AC-RTR-005).
 var ErrUnknownModel = errors.New("unknown provider or combo")
 
-// ErrRuntimeAgent is returned when a background pass resolves an agent that
-// runs on an external runtime such as Claude Code: those agents never serve
-// lana's own LLM calls (ADR 0018, REQ-CCR-007).
-var ErrRuntimeAgent = errors.New("agent runs on an external runtime")
+// ErrNoBackgroundModel is returned by BackgroundChain when an agent's chain
+// has no target outside Claude Code and [router] background_model is empty
+// (REQ-CCT-007). The pass is skipped.
+var ErrNoBackgroundModel = errors.New("no background model: the chain has only claude-code targets and [router] background_model is empty")
+
+// ClaudeCode is the built-in provider of Claude Code targets (ADR 0020).
+const ClaudeCode = core.ClaudeCodeProvider
+
+// ClaudeCodeAliases are the model aliases of Claude Code targets, in picker
+// order (API-CCT-004).
+var ClaudeCodeAliases = []string{"opus", "sonnet", "haiku"}
 
 // RuntimeProvider is the provider name of a call record for a turn of an
-// external runtime: "claude-agent" for runtime "claude-code" (REQ-CCR-008).
+// external runtime: "claude-code" (API-CCT-008; spec 38 records used
+// "claude-agent").
 func RuntimeProvider(runtime string) string {
-	if runtime == "claude-code" {
-		return "claude-agent"
-	}
 	return runtime
+}
+
+// IsClaudeCode reports whether a target runs in Claude Code (ADR 0020).
+func IsClaudeCode(t core.LLMTarget) bool {
+	return t.Provider == ClaudeCode
+}
+
+// IsClaudeCodeAddress reports whether value is a "claude-code/<model>"
+// address.
+func IsClaudeCodeAddress(value string) bool {
+	t, ok := ParseTarget(value)
+	return ok && IsClaudeCode(t) && value[len(ClaudeCode)] == '/'
+}
+
+// ValidClaudeCodeModel reports whether model may follow "claude-code/": a
+// non-empty value that does not start with "-", so it is never read as a
+// flag of the claude binary (REQ-CCT-001).
+func ValidClaudeCodeModel(model string) bool {
+	return model != "" && !strings.HasPrefix(model, "-") && strings.TrimSpace(model) == model
+}
+
+// WithoutClaudeCode returns chain without its Claude Code targets: the part
+// lana's own loop and the background passes can call.
+func WithoutClaudeCode(chain []core.LLMTarget) []core.LLMTarget {
+	out := make([]core.LLMTarget, 0, len(chain))
+	for _, t := range chain {
+		if !IsClaudeCode(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// HasClaudeCode reports whether chain has a Claude Code target.
+func HasClaudeCode(chain []core.LLMTarget) bool {
+	for _, t := range chain {
+		if IsClaudeCode(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// NormalizeAgent maps the deprecated engine key (API-CCT-002): runtime
+// "claude-code" with model "M" becomes model "claude-code/M" ("default" when
+// M is empty) with no provider and no runtime. Other agents are returned as
+// they are.
+func NormalizeAgent(cfg core.AgentConfig) core.AgentConfig {
+	if cfg.Runtime != ClaudeCode {
+		return cfg
+	}
+	model := cfg.Model
+	if model == "" {
+		model = "default"
+	}
+	if !IsClaudeCodeAddress(model) {
+		model = ClaudeCode + "/" + model
+	}
+	cfg.Model = model
+	cfg.Provider = ""
+	cfg.Runtime = ""
+	return cfg
+}
+
+// NormalizeAgents applies NormalizeAgent to every agent of a config map and
+// returns a new map; nil stays nil.
+func NormalizeAgents(agents map[string]core.AgentConfig) map[string]core.AgentConfig {
+	if agents == nil {
+		return nil
+	}
+	out := make(map[string]core.AgentConfig, len(agents))
+	for name, cfg := range agents {
+		out[name] = NormalizeAgent(cfg)
+	}
+	return out
 }
 
 // ParseTarget splits "provider/model" or the legacy "provider:model" at the
@@ -136,20 +219,91 @@ func Chain(llm core.LLMRegistry, provider, model string, fallback []string) ([]c
 }
 
 // AgentChain is the chain of an agent's configured model with its fallback,
-// and the requested value for call records. The background passes that run
-// for an agent outside a turn (knowledge compile, journal, lint; memory
-// capture without the turn's chain) resolve the agent through it, so a rule
-// about which agents may call the router lives in one place: an agent on an
-// external runtime is refused with ErrRuntimeAgent (REQ-CCR-007).
+// and the requested value for call records. A legacy runtime agent is read
+// as its claude-code address (API-CCT-002). The chain may hold Claude Code
+// targets; background passes use AgentBackgroundChain instead.
 func AgentChain(llm core.LLMRegistry, cfg core.AgentConfig) ([]core.LLMTarget, string, error) {
-	if cfg.Runtime != "" {
-		return nil, "", fmt.Errorf("%w: %s", ErrRuntimeAgent, cfg.Runtime)
-	}
+	cfg = NormalizeAgent(cfg)
 	chain, err := Chain(llm, cfg.Provider, cfg.Model, cfg.Fallback)
 	if err != nil {
 		return nil, "", err
 	}
 	return chain, Requested(cfg.Provider, cfg.Model), nil
+}
+
+// BackgroundModeler is implemented by a router that knows [router]
+// background_model (API-CCT-003).
+type BackgroundModeler interface {
+	BackgroundModel() string
+}
+
+// BackgroundChain returns the chain a background pass (compaction, memory
+// capture, knowledge passes) uses for an agent whose turn chain is chain
+// (REQ-CCT-007): chain without its Claude Code targets, else [router]
+// background_model resolved through llm, else ErrNoBackgroundModel. requested
+// is kept when targets of chain remain, else it is the background model.
+func BackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested string) ([]core.LLMTarget, string, error) {
+	if !HasClaudeCode(chain) {
+		return chain, requested, nil
+	}
+	if rest := WithoutClaudeCode(chain); len(rest) > 0 {
+		if IsClaudeCodeAddress(requested) {
+			requested = Address(rest[0])
+		}
+		return rest, requested, nil
+	}
+	background := ""
+	if bm, ok := llm.(BackgroundModeler); ok {
+		background = strings.TrimSpace(bm.BackgroundModel())
+	}
+	if background == "" {
+		return nil, "", ErrNoBackgroundModel
+	}
+	resolved, err := Chain(llm, "", background, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("[router] background_model: %w", err)
+	}
+	resolved = WithoutClaudeCode(resolved)
+	if len(resolved) == 0 {
+		return nil, "", ErrNoBackgroundModel
+	}
+	return resolved, background, nil
+}
+
+// AgentBackgroundChain is BackgroundChain over the agent's configured chain.
+func AgentBackgroundChain(llm core.LLMRegistry, cfg core.AgentConfig) ([]core.LLMTarget, string, error) {
+	chain, requested, err := AgentChain(llm, cfg)
+	if err != nil {
+		return nil, "", err
+	}
+	return BackgroundChain(llm, chain, requested)
+}
+
+// backgroundWarnEvery is how often a skipped background pass is logged per
+// agent (REQ-CCT-007).
+const backgroundWarnEvery = time.Hour
+
+var (
+	backgroundWarnMu sync.Mutex
+	backgroundWarned = map[string]time.Time{}
+)
+
+// WarnNoBackground logs that a background pass of agent was skipped because
+// it has no model outside Claude Code, at most once per agent per hour
+// (REQ-CCT-007). It reports whether it logged.
+func WarnNoBackground(agent, pass string) bool {
+	now := time.Now()
+	backgroundWarnMu.Lock()
+	last, ok := backgroundWarned[agent]
+	if ok && now.Sub(last) < backgroundWarnEvery {
+		backgroundWarnMu.Unlock()
+		return false
+	}
+	backgroundWarned[agent] = now
+	backgroundWarnMu.Unlock()
+	slog.Warn("background pass skipped: the agent uses only Claude Code and [router] background_model is empty",
+		"agent", agent, "pass", pass)
+	return true
 }
 
 // Stream calls chain. When llm is a core.LLMRouter it goes through

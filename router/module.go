@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 func init() {
@@ -72,7 +73,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 // [combos], and [router] cooldown ("" means the default, "0s" turns
 // cooldown off).
 func ConfigFromCore(config core.Config) (Config, error) {
-	out := Config{Providers: config.Providers}
+	out := Config{Providers: config.Providers, BackgroundModel: strings.TrimSpace(config.Router.BackgroundModel), ClaudeCodeModels: config.Router.ClaudeCodeModels}
 	if len(config.Combos) > 0 {
 		out.Combos = make(map[string]Combo, len(config.Combos))
 		for name, combo := range config.Combos {
@@ -130,17 +131,18 @@ func usedProviders(config core.Config) map[string]bool {
 	used := map[string]bool{}
 	markAddress := func(value string) {
 		if target, ok := ParseAddress(value); ok {
+			if target.Provider == ClaudeCode {
+				return
+			}
 			used[target.Provider] = true
 		} else if value != "" {
 			used[value] = true
 		}
 	}
 	markModel := func(agent core.AgentConfig) {
-		// A runtime agent (ADR 0018) uses no provider; its model is the
-		// runtime's own and is never a router address.
-		if agent.Runtime != "" {
-			return
-		}
+		// ADR 0020: a legacy runtime agent is its claude-code address, which
+		// uses no configured provider.
+		agent = llmcall.NormalizeAgent(agent)
 		if agent.Provider != "" {
 			used[agent.Provider] = true
 			return
@@ -151,14 +153,11 @@ func usedProviders(config core.Config) map[string]bool {
 			}
 			return
 		}
-		if target, ok := ParseAddress(agent.Model); ok {
+		if target, ok := ParseAddress(agent.Model); ok && target.Provider != ClaudeCode {
 			used[target.Provider] = true
 		}
 	}
 	for _, agent := range config.Agents {
-		if agent.Runtime != "" {
-			continue
-		}
 		markModel(agent)
 		for _, fallback := range agent.Fallback {
 			markAddress(fallback)

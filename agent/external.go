@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -23,8 +24,10 @@ import (
 type ExternalUsage struct {
 	// Runtime is the agent's runtime key, for example "claude-code".
 	Runtime string
-	// Provider is the call record provider, for example "claude-agent".
-	Provider  string
+	// Provider is the call record provider, "claude-code" (API-CCT-008).
+	Provider string
+	// Requested is the combo or address the turn's chain asked for.
+	Requested string
 	Agent     string
 	SessionID string
 	TurnID    string
@@ -50,8 +53,53 @@ type ExternalHooks struct {
 	// Usage receives one record per turn that reached the runtime.
 	Usage func(ExternalUsage)
 	// Limits receives the plan windows a runtime reported, with the call
-	// record provider ("claude-agent") and the runtime key ("claude-code").
+	// record provider and the runtime key (both "claude-code").
 	Limits func(provider, runtime string, windows []core.RuntimeLimitWindow)
+	// Models receives the model list a runtime learned from its binary.
+	Models func(runtime string, models []core.RuntimeModel)
+}
+
+// SetToolHost installs the loopback MCP host that serves lana's tools to
+// Claude Code turns (ADR 0020, REQ-CCT-006). The root package sets it at
+// boot; nil turns lana tools off for those turns.
+func (r *Registry) SetToolHost(h core.RuntimeToolHost) {
+	r.runtimeMu.Lock()
+	r.toolHost = h
+	r.runtimeMu.Unlock()
+}
+
+func (r *Registry) toolHostFor() core.RuntimeToolHost {
+	r.runtimeMu.Lock()
+	defer r.runtimeMu.Unlock()
+	return r.toolHost
+}
+
+// MarkScheduled marks the session's turns as scheduled runs until the
+// returned func is called (REQ-CCT-008): a Claude Code target then runs only
+// when the agent sets allow_scheduled. Marks nest.
+func (r *Registry) MarkScheduled(sessionID string) func() {
+	r.runtimeMu.Lock()
+	if r.scheduled == nil {
+		r.scheduled = map[string]int{}
+	}
+	r.scheduled[sessionID]++
+	r.runtimeMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.runtimeMu.Lock()
+			if r.scheduled[sessionID]--; r.scheduled[sessionID] <= 0 {
+				delete(r.scheduled, sessionID)
+			}
+			r.runtimeMu.Unlock()
+		})
+	}
+}
+
+func (r *Registry) isScheduled(sessionID string) bool {
+	r.runtimeMu.Lock()
+	defer r.runtimeMu.Unlock()
+	return r.scheduled[sessionID] > 0
 }
 
 // SetExternalHooks installs the usage and limits hooks of external runtime
@@ -95,7 +143,12 @@ func (r *Registry) Runtime(name string) (core.AgentRuntime, error) {
 	if !ok {
 		return nil, fmt.Errorf("agent runtime %q is not available", name)
 	}
-	rt, err := factory(core.RuntimeDeps{Secrets: r.secrets, Logger: slog.Default()})
+	onModels := func(models []core.RuntimeModel) {
+		if h := r.hooksExternal(); h.Models != nil {
+			h.Models(name, models)
+		}
+	}
+	rt, err := factory(core.RuntimeDeps{Secrets: r.secrets, Logger: slog.Default(), OnModels: onModels})
 	if err != nil {
 		return nil, fmt.Errorf("agent runtime %q: %w", name, err)
 	}
@@ -123,102 +176,70 @@ func (r *Registry) shutdownRuntimes(ctx context.Context) {
 	}
 }
 
-// hasRuntimeAgents reports whether any configured agent runs on an external
-// runtime, so native turns skip the external lookup otherwise.
-func hasRuntimeAgents(agents map[string]core.AgentConfig) bool {
-	for _, cfg := range agents {
-		if cfg.Runtime != "" {
-			return true
-		}
-	}
-	return false
+// isClaudeProvider reports whether a step's provider is Claude Code; spec 38
+// steps used "claude-agent".
+func isClaudeProvider(provider string) bool {
+	return provider == llmcall.ClaudeCode || provider == "claude-agent"
 }
 
-// externalAgent is the resolved runtime agent of a session.
-type externalAgent struct {
-	name      string
-	cfg       core.AgentConfig
-	workspace string
-	effort    string
-	child     bool
-}
-
-// externalAgent resolves the session's agent and reports whether it runs on an
-// external runtime. Any lookup error reports false; the native turn then
-// reports it.
-func (rn *Runner) externalAgent(ctx context.Context) (externalAgent, bool) {
-	agents, teams := rn.reg.configSnapshot()
-	if !hasRuntimeAgents(agents) {
-		return externalAgent{}, false
-	}
-	info, err := rn.reg.store.Info(ctx, rn.sessionID)
-	if err != nil {
-		return externalAgent{}, false
-	}
-	chain, err := rn.reg.store.ChainEvents(ctx, rn.sessionID)
-	if err != nil {
-		return externalAgent{}, false
-	}
-	agentName := info.Agent
-	effort := ""
-	for _, event := range chain {
-		if event.Kind != core.KindModelSelection {
-			continue
-		}
-		var payload core.ModelSelection
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			continue
-		}
-		if payload.Agent != "" {
-			agentName = payload.Agent
-		}
-		effort = payload.ReasoningEffort
-	}
-	cfgName := agentName
-	if team, ok := teams[agentName]; ok {
-		cfgName = team.Lead
-	}
-	cfg, ok := agents[cfgName]
-	if !ok || cfg.Runtime == "" {
-		return externalAgent{}, false
-	}
-	workspace := info.Workspace
-	if workspace == "" {
-		workspace = cfg.Workspace
-	}
-	if workspace == "" {
-		workspace = rn.reg.defaultWS
-	}
-	if normalized, err := normalizePath(workspace); err == nil {
-		workspace = normalized
-	}
-	// The session's reasoning effort wins over the agent's; "off" has no
-	// --effort value, so it leaves the agent's (API-CCR-001).
-	if effort == "" || effort == "off" {
-		effort = cfg.ReasoningEffort
-	}
-	return externalAgent{name: cfgName, cfg: cfg, workspace: workspace, effort: effort, child: info.ParentSessionID != ""}, true
-}
-
-// latestRuntimeMeta returns the newest runtime session meta of the session for
-// runtime, the system/message of subtype "runtime" (API-CCR-002).
-func latestRuntimeMeta(events []core.SessionEvent, runtime string) (core.SystemMessage, bool) {
-	var meta core.SystemMessage
-	found := false
+// claudeResume returns the Claude session to resume for the next Claude Code
+// turn: the newest runtime session meta (API-CCR-002), unless a turn ran in
+// lana's loop after it (REQ-CCT-003: an engine switch starts a new Claude
+// session). switched reports that a stored Claude session was dropped. The
+// model is the one the meta names.
+func claudeResume(events []core.SessionEvent) (resumeID, model string, switched bool) {
 	for _, event := range events {
-		if event.Kind != core.KindSystemMessage {
-			continue
+		switch event.Kind {
+		case core.KindSystemMessage:
+			var payload core.SystemMessage
+			if json.Unmarshal(event.Payload, &payload) != nil || payload.Subtype != core.SystemSubtypeRuntime {
+				continue
+			}
+			if payload.Runtime != llmcall.ClaudeCode || payload.ClaudeSessionID == "" {
+				continue
+			}
+			resumeID, model, switched = payload.ClaudeSessionID, payload.Model, false
+		case core.KindStepStart:
+			var payload core.StepStart
+			if json.Unmarshal(event.Payload, &payload) != nil || isClaudeProvider(payload.Provider) {
+				continue
+			}
+			if resumeID != "" {
+				resumeID, model, switched = "", "", true
+			}
 		}
-		var payload core.SystemMessage
-		if json.Unmarshal(event.Payload, &payload) != nil || payload.Subtype != core.SystemSubtypeRuntime {
-			continue
-		}
-		if payload.Runtime != runtime || payload.ClaudeSessionID == "" {
-			continue
-		}
-		meta, found = payload, true
 	}
-	return meta, found
+	return resumeID, model, switched
+}
+
+// claudeToolNote tells Claude how lana's tools are named over MCP.
+const claudeToolNote = "## lana tools\nlana's own tools (memory, knowledge, calendar, workflows, sessions, delegation, and the agent's MCP servers) are available as MCP tools named mcp__lana__<tool>. The tool notes above use the plain names. Use your own tools for files and shell commands."
+
+// claudeOwnTools are the lana tools Claude Code has itself: they are not
+// served over MCP (REQ-CCT-006).
+var claudeOwnTools = []string{"bash", "edit_file", "glob", "grep", "read_file", "write_file"}
+
+// claudeMCPTools returns the offered lana tools served to Claude Code: all of
+// them except the file and shell tools and the job tools that come with bash.
+func claudeMCPTools(offered []string) []string {
+	out := make([]string, 0, len(offered))
+	for _, name := range offered {
+		if containsString(claudeOwnTools, name) || containsString(companionTools, name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// mcpToolName returns the lana tool name of a Claude tool call to the lana MCP
+// server ("mcp__lana__memory_write" -> "memory_write").
+func mcpToolName(name string) (string, bool) {
+	const prefix = "mcp__lana__"
+	if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+		return name[len(prefix):], true
+	}
+	return "", false
 }
 
 // externalTurn is the state of one external runtime turn while its events are
@@ -228,9 +249,14 @@ type externalTurn struct {
 	events   *Events
 	writeCtx context.Context
 	turnID   string
-	agent    externalAgent
+	agent    resolvedAgent
 	provider string
 	model    string
+	// requested is the chain's requested value (API-CCT-008).
+	requested string
+	// content is set by the first text, thinking, or tool event.
+	content  bool
+	recorded bool
 
 	started     time.Time
 	stepStarted bool
@@ -315,7 +341,7 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 		}
 		if ev.ClaudeSessionID != "" {
 			x.append(core.KindSystemMessage, core.SystemMessage{
-				V: core.PayloadVersion, Subtype: core.SystemSubtypeRuntime, Runtime: x.agent.cfg.Runtime,
+				V: core.PayloadVersion, Subtype: core.SystemSubtypeRuntime, Runtime: llmcall.ClaudeCode,
 				ClaudeSessionID: ev.ClaudeSessionID, Model: ev.Model, Tools: ev.Tools, Version: ev.Version,
 			})
 		}
@@ -326,10 +352,19 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 		return
 	case core.RuntimeLimits:
 		if h := x.rn.reg.hooksExternal(); h.Limits != nil && len(ev.Windows) > 0 {
-			h.Limits(llmcall.RuntimeProvider(x.agent.cfg.Runtime), x.agent.cfg.Runtime, ev.Windows)
+			h.Limits(llmcall.ClaudeCode, llmcall.ClaudeCode, ev.Windows)
+		}
+		return
+	case core.RuntimeUsage:
+		x.flushText()
+		x.usage, x.usageSeen = ev.Usage, true
+		x.costUSD, x.durationMS = ev.CostUSD, ev.DurationMS
+		if ev.Model != "" {
+			x.usageModel = ev.Model
 		}
 		return
 	}
+	x.content = true
 	x.ensureStep()
 	switch ev.Kind {
 	case core.RuntimeTextDelta:
@@ -348,13 +383,19 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 		if len(input) == 0 {
 			input = json.RawMessage("{}")
 		}
-		block := core.ContentBlock{Kind: core.BlockToolUse, ID: ev.ID, Name: ev.Name, Input: input}
+		// REQ-CCT-006: a call to lana's MCP server is a lana tool call: lana
+		// ran it through its tool runner, so the log shows the plain name.
+		name, external := ev.Name, true
+		if lanaName, ok := mcpToolName(ev.Name); ok {
+			name, external = lanaName, false
+		}
+		block := core.ContentBlock{Kind: core.BlockToolUse, ID: ev.ID, Name: name, Input: input}
 		text := x.pendingText
 		x.pendingText = ""
 		x.append(core.KindAssistantMessage, core.AssistantMessage{V: core.PayloadVersion, Content: x.assistantContent(text, &block), StopReason: "tool_use"})
-		x.append(core.KindToolCall, core.ToolCallPayload{V: core.PayloadVersion, CallID: ev.ID, Name: ev.Name, Input: input, External: true})
-		x.toolNames[ev.ID] = ev.Name
-		x.publish(core.LiveFrame{Kind: "tool_call", CallID: ev.ID, Name: ev.Name, Input: input})
+		x.append(core.KindToolCall, core.ToolCallPayload{V: core.PayloadVersion, CallID: ev.ID, Name: name, Input: input, External: external})
+		x.toolNames[ev.ID] = name
+		x.publish(core.LiveFrame{Kind: "tool_call", CallID: ev.ID, Name: name, Input: input})
 	case core.RuntimeToolResult:
 		x.flushText()
 		status := core.ToolStatusSuccess
@@ -364,13 +405,6 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 		output := x.storedOutput(ev.ID, ev.Output)
 		x.append(core.KindToolResult, core.ToolResultPayload{V: core.PayloadVersion, CallID: ev.ID, Status: status, Output: output})
 		x.publish(core.LiveFrame{Kind: "tool_result", CallID: ev.ID, Name: x.toolNames[ev.ID], Status: string(status), Output: output})
-	case core.RuntimeUsage:
-		x.flushText()
-		x.usage, x.usageSeen = ev.Usage, true
-		x.costUSD, x.durationMS = ev.CostUSD, ev.DurationMS
-		if ev.Model != "" {
-			x.usageModel = ev.Model
-		}
 	}
 }
 
@@ -407,6 +441,11 @@ func (rn *Runner) externalApprove(turnID, agentName string) func(context.Context
 				allow, message = false, "lana could not decide this tool call"
 			}
 		}()
+		// REQ-CCT-006: a lana MCP tool is gated when lana runs it, by the
+		// same permission engine, so Claude's own ask is answered allow here.
+		if _, ok := mcpToolName(req.ToolName); ok {
+			return true, ""
+		}
 		name := req.PermTool
 		if name == "" {
 			name = strings.ToLower(req.ToolName)
@@ -437,12 +476,16 @@ func (rn *Runner) externalApprove(turnID, agentName string) func(context.Context
 	}
 }
 
-// runExternalTurn runs one turn on an external agent runtime (ADR 0018). It
-// writes the same events as a native turn: turn/start, user/message, one
-// step/start, assistant/message, tool/call (external), tool/result, step/end
-// with the usage, and turn/end. lana's tools, compaction, loop guard, step cap,
-// and memory capture do not run (REQ-CCR-004).
-func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID, continueReason string, ext externalAgent) (result TurnResult) {
+// runExternalTurn runs one turn in the Claude Code runtime (ADR 0018, ADR
+// 0020). It writes the same events as a native turn: turn/start,
+// user/message, one step/start, assistant/message, tool/call, tool/result,
+// step/end with the usage, and turn/end. Claude gets lana's prompt head and
+// tools (REQ-CCT-005, REQ-CCT-006); lana's compaction, loop guard, and step cap
+// do not run. When Claude Code fails before any output and the chain has a
+// target outside Claude Code, it writes the attempt and reports fallback
+// without ending the turn; runTurn then continues it in lana's loop
+// (REQ-CCT-004).
+func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID, continueReason string, res resolvedAgent) (result TurnResult, fallback bool) {
 	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
@@ -450,17 +493,30 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 		slog.Error("failed to write turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 		result.StopReason = "error"
 		result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
-		return result
+		return result, false
 	}
+	target := res.fullChain[0]
 	x := &externalTurn{
-		rn: rn, events: events, writeCtx: writeCtx, turnID: turnID, agent: ext,
-		provider: llmcall.RuntimeProvider(ext.cfg.Runtime), model: ext.cfg.Model,
+		rn: rn, events: events, writeCtx: writeCtx, turnID: turnID, agent: res,
+		provider: llmcall.ClaudeCode, model: target.Model, requested: res.requested,
 		toolNames: map[string]string{},
 	}
 	reason := "end_turn"
-	runErr, stop := rn.externalRun(ctx, x, initial, continueReason)
-	if stop != "" {
-		reason = stop
+	run := rn.externalRun(ctx, x, initial, continueReason, target)
+	runErr := run.err
+	if run.stop != "" {
+		reason = run.stop
+	}
+	if early := run.early; early != nil {
+		pe := core.ProviderError{Class: early.Class, Message: early.Message}
+		rn.writeStepAttempt(writeCtx, events, 1, target, turnID, 1, pe)
+		rn.recordExternalUsage(x, "error", &pe)
+		if len(res.chain) > 0 && ctx.Err() == nil {
+			slog.Info("claude code failed before output; the turn continues in lana's loop",
+				"session_id", rn.sessionID, "turn_id", turnID, "target", llmcall.Address(target), "class", early.Class, "next", llmcall.Address(res.chain[0]))
+			return result, true
+		}
+		runErr = &core.ProviderError{Class: "runtime", Message: early.Message}
 	}
 
 	if x.stepStarted {
@@ -498,16 +554,40 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 	if err := writeTurnEnd(writeCtx, events, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
 		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 	}
+	// REQ-MEM-010, REQ-CCT-007: memory capture runs after a Claude Code turn
+	// too, over the mirrored transcript, with the agent's background chain.
+	if captureEligible(reason, res.child, run.owner, run.specs, res.cfg) {
+		if c := rn.reg.memoryCapturer(); c != nil {
+			c.Capture(core.CaptureRequest{
+				SessionID: rn.sessionID, TurnID: turnID, AgentName: res.name,
+				Home: rn.reg.home, Targets: res.fullChain, Requested: res.requested,
+				System: run.system, Tools: run.specs, ReasoningEffort: res.reasoningEffort,
+			})
+		}
+	}
 	result.StopReason = reason
 	result.Text = x.lastText
 	result.Usage = x.usage
 	result.Err = runErr
-	return result
+	return result, false
 }
 
-// externalRun stores the owner message and runs the turn on the runtime. It
-// returns the turn error, or the stop reason ("" = end_turn).
-func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inboxItem, continueReason string) (*core.ProviderError, string) {
+// externalOutcome is what externalRun hands back to runExternalTurn.
+type externalOutcome struct {
+	err   *core.ProviderError
+	stop  string // "" = end_turn
+	early *core.RuntimeEarlyError
+	// owner reports that the owner message was stored; specs and system are
+	// the lana tools and prompt head of the turn, for memory capture.
+	owner  bool
+	specs  []core.ToolSpec
+	system string
+}
+
+// externalRun stores the owner message with its <context> block, builds
+// Claude's prompt head and lana tool set, and runs the turn on the runtime.
+func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inboxItem, continueReason string, target core.LLMTarget) externalOutcome {
+	res := x.agent
 	text := initial.text
 	// REQ-ATT-002: an owner message with attachments and no text is stored
 	// with the text "(attachments)".
@@ -520,18 +600,18 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, core.RuntimeStopCancelled
+			return externalOutcome{stop: core.RuntimeStopCancelled}
 		}
-		return runtimeError(err), ""
+		return externalOutcome{err: runtimeError(err)}
 	}
 	if decision.Reject {
 		slog.Info("agent.pre_step rejected message", "session_id", rn.sessionID, "turn_id", x.turnID, "reason", decision.Reason)
-		return nil, ""
+		return externalOutcome{}
 	}
 	if len(decision.Input.Content) > 0 {
 		input = decision.Input
 	}
-	if ws := x.agent.workspace; ws != "" {
+	if ws := res.workspace; ws != "" {
 		if _, statErr := os.Stat(ws); statErr != nil {
 			if mkErr := os.MkdirAll(ws, 0o700); mkErr != nil {
 				slog.Warn("workspace create failed", "workspace", ws, "error", mkErr)
@@ -541,63 +621,126 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	// REQ-ATT-002: one block per attachment after the text; images reach the
 	// runtime as image blocks.
 	if len(initial.attachments) > 0 {
-		input.Content = append(input.Content, ownerAttachmentBlocks(x.agent.workspace, initial.attachments)...)
+		input.Content = append(input.Content, ownerAttachmentBlocks(res.workspace, initial.attachments)...)
 	}
-	payload := core.UserMessage{V: core.PayloadVersion, Content: input.Content}
+
+	// REQ-CCT-005, REQ-CCT-006: the prompt head and the lana tools of a
+	// native turn of this agent, without the tools Claude Code has itself.
+	offered, unavailable, skills := rn.offeredTools(ctx, res)
+	tools := claudeMCPTools(offered)
+	specs, err := rn.reg.tools.Specs(tools)
+	if err != nil {
+		slog.Warn("lana tools for claude code", "session_id", rn.sessionID, "error", err)
+		specs, tools = nil, nil
+	}
+	built, err := rn.buildPrompt(res, skills, unavailable, rn.toolNotes(tools), len(res.mcp) > 0, text, tools)
+	if err != nil {
+		return externalOutcome{err: runtimeError(err)}
+	}
+	system := built.text
+	if len(specs) > 0 {
+		system += "\n\n" + claudeToolNote
+	}
+	out := externalOutcome{specs: specs, system: system}
+
+	// REQ-CCT-005: the <context> block (time, relevant memory, knowledge
+	// recall, jobs) goes in front of the owner message, as in native turns.
+	contextBlocks := 0
+	if built.context != "" {
+		input.Content = append([]core.ContentBlock{{Kind: core.BlockText, Text: built.context}}, input.Content...)
+		contextBlocks = 1
+	}
+	payload := core.UserMessage{V: core.PayloadVersion, Content: input.Content, ContextBlocks: contextBlocks}
 	if continueReason != "" {
 		payload.Continue = true
 		payload.ContinueReason = continueReason
 	}
 	if _, err := x.events.Append(x.writeCtx, core.EventDraft{Kind: core.KindUserMessage, TurnID: x.turnID, Payload: payload}); err != nil {
-		return runtimeError(err), ""
+		out.err = runtimeError(err)
+		return out
 	}
+	out.owner = true
 
-	rt, err := rn.reg.Runtime(x.agent.cfg.Runtime)
+	rt, err := rn.reg.Runtime(llmcall.ClaudeCode)
 	if err != nil {
-		return runtimeError(err), ""
+		out.early = &core.RuntimeEarlyError{Class: "runtime", Message: err.Error()}
+		return out
 	}
 	chain, err := rn.reg.store.ChainEvents(x.writeCtx, rn.sessionID)
 	if err != nil {
-		return runtimeError(err), ""
+		out.err = runtimeError(err)
+		return out
 	}
-	resumeID := ""
-	if meta, ok := latestRuntimeMeta(chain, x.agent.cfg.Runtime); ok {
-		resumeID = meta.ClaudeSessionID
+	resumeID, metaModel, switched := claudeResume(chain)
+	if switched {
+		// REQ-CCT-003: a turn ran in lana's loop since the stored Claude
+		// session, so this turn starts a new one.
+		rt.Close(rn.sessionID)
+	}
+	if resumeID != "" && metaModel != "" {
 		// A live process sends no new session meta, so the stored one names
 		// the model; a new process sends its own before the step starts.
-		if meta.Model != "" {
-			x.model = meta.Model
-		}
+		x.model = metaModel
 	}
 	if x.model == "" {
 		x.model = "default"
 	}
-	cfg := x.agent.cfg
+
+	// REQ-CCT-006: lana's tools over the loopback MCP host. A host that
+	// cannot serve leaves Claude without lana's tools, with a note.
+	var openMCP func() (string, func(), error)
+	mcpKey := ""
+	if host := rn.reg.toolHostFor(); host != nil && len(specs) > 0 {
+		if err := host.Bind(rn.sessionID, specs, rn.claudeToolCall(ctx, x.turnID, res, tools)); err != nil {
+			slog.Warn("lana tools are not available to claude code", "session_id", rn.sessionID, "error", err)
+			x.append(core.KindSystemMessage, core.SystemMessage{V: core.PayloadVersion, Subtype: core.SystemSubtypeNote,
+				Text: "lana's tools are not available to Claude Code in this turn: " + err.Error()})
+		} else {
+			defer host.Unbind(rn.sessionID)
+			sessionID := rn.sessionID
+			openMCP = func() (string, func(), error) { return host.Open(sessionID) }
+			mcpKey = strings.Join(tools, ",")
+		}
+	}
+
+	model := target.Model
+	if model == "default" {
+		model = ""
+	}
+	cfg := res.cfg
 	turn := core.RuntimeTurn{
 		SessionID: rn.sessionID,
 		TurnID:    x.turnID,
-		AgentName: x.agent.name,
+		AgentName: res.name,
 		Config: core.RuntimeConfig{
-			Auth: cfg.Auth, APIKeyEnv: cfg.APIKeyEnv, Model: cfg.Model, Effort: x.agent.effort,
-			Binary: cfg.Binary, Workspace: x.agent.workspace,
+			Auth: cfg.Auth, APIKeyEnv: cfg.APIKeyEnv, Model: model, Effort: res.claudeEffort,
+			Binary: cfg.Binary, Workspace: res.workspace,
+			AppendSystemPrompt: system, MCPKey: mcpKey,
 		},
 		ResumeID: resumeID,
 		Input:    input.Content,
 		Emit:     x.handle,
-		Approve:  rn.externalApprove(x.turnID, x.agent.name),
+		Approve:  rn.externalApprove(x.turnID, res.name),
+		OpenMCP:  openMCP,
 	}
 	rn.setExternal(rt)
 	defer rn.setExternal(nil)
 	runErr := rt.RunTurn(ctx, turn)
+	var early *core.RuntimeEarlyError
+	if errors.As(runErr, &early) && !x.content && ctx.Err() == nil {
+		out.early = early
+		return out
+	}
 	if !x.ended {
 		// The contract promises an end event; a runtime that broke it still
 		// ends the turn.
 		x.flushText()
 		if runErr == nil && ctx.Err() == nil {
-			return nil, ""
+			return out
 		}
 		if ctx.Err() != nil && runErr == nil {
-			return nil, core.RuntimeStopCancelled
+			out.stop = core.RuntimeStopCancelled
+			return out
 		}
 	}
 	switch {
@@ -609,11 +752,33 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		if message == "" {
 			message = "the agent runtime failed"
 		}
-		return &core.ProviderError{Class: "runtime", Message: message}, ""
+		out.err = &core.ProviderError{Class: "runtime", Message: message}
 	case x.end.StopReason == core.RuntimeStopCancelled:
-		return nil, core.RuntimeStopCancelled
+		out.stop = core.RuntimeStopCancelled
 	}
-	return nil, ""
+	return out
+}
+
+// claudeToolCall runs one lana tool for a Claude Code turn through the tool
+// runner, so the permission engine, approvals, input checks, and spill apply
+// (REQ-CCT-006). The call ends when the turn ends or Claude drops the request.
+// The tool/call and tool/result events come from Claude's own stream.
+func (rn *Runner) claudeToolCall(turnCtx context.Context, turnID string, res resolvedAgent, allowed []string) core.RuntimeToolFunc {
+	return func(reqCtx context.Context, callID, name string, input json.RawMessage) core.ToolOutput {
+		ctx, cancel := context.WithCancel(turnCtx)
+		defer cancel()
+		stop := context.AfterFunc(reqCtx, cancel)
+		defer stop()
+		if !containsString(allowed, name) {
+			return core.ToolOutput{Status: core.ToolStatusError, Output: "tool " + name + " is not offered to this agent"}
+		}
+		call := core.ToolCall{SessionID: rn.sessionID, TurnID: turnID, CallID: callID, Name: name, Input: input}
+		outs := rn.reg.pipeline.Run(ctx, []core.ToolCall{call}, allowed, rn.toolCtx(ctx, res, turnID))
+		if len(outs) == 0 {
+			return core.ToolOutput{Status: core.ToolStatusError, Output: "tool produced no output"}
+		}
+		return outs[0]
+	}
 }
 
 // recordExternalUsage hands the turn's one call record to the host
@@ -642,8 +807,12 @@ func (rn *Runner) recordExternalUsage(x *externalTurn, reason string, runErr *co
 	case reason == "cancelled" || reason == "interrupted":
 		outcome = "cancelled"
 	}
+	if x.recorded {
+		return
+	}
+	x.recorded = true
 	h.Usage(ExternalUsage{
-		Runtime: x.agent.cfg.Runtime, Provider: x.provider, Agent: x.agent.name,
+		Runtime: llmcall.ClaudeCode, Provider: x.provider, Requested: x.requested, Agent: x.agent.name,
 		SessionID: rn.sessionID, TurnID: x.turnID, Model: model,
 		Usage: x.usage, CostUSD: x.costUSD, Started: started, DurationMS: duration,
 		Outcome: outcome, Error: message,
