@@ -113,6 +113,10 @@ type SystemMessage struct {
 	Model           string   `json:"model,omitempty"`
 	Tools           []string `json:"tools,omitempty"`
 	Version         string   `json:"version,omitempty"`
+	// Account is the Claude Code account the runtime session belongs to
+	// (REQ-CCT-010). Empty means the built-in account "claude-code"; a
+	// session of one account is never resumed on another.
+	Account string `json:"account,omitempty"`
 }
 
 // SystemSubtypeRuntime is the system/message subtype of an external runtime's

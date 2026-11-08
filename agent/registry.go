@@ -764,8 +764,8 @@ func (r *Registry) parseModelChoice(value string) (string, string, error) {
 		return "", value, nil
 	}
 	// AC-CCT-004: a claude-code address switches the session to Claude Code.
-	if llmcall.IsClaudeCodeAddress(value) {
-		if !llmcall.ValidClaudeCodeModel(strings.TrimPrefix(value, llmcall.ClaudeCode+"/")) {
+	if llmcall.IsClaudeCodeAddress(r.llm, value) {
+		if target, _ := llmcall.ParseTarget(value); !llmcall.ValidClaudeCodeModel(target.Model) {
 			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, value)
 		}
 		return "", value, nil

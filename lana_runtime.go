@@ -26,43 +26,127 @@ const ClaudeCodeRuntime = claudecode.Name
 
 // RuntimeAgents returns the users of Claude Code for the Router's Claude Code
 // card (API-CCT-005): the agents whose chain (model, combo, or fallback)
-// holds a claude-code target, by name, then the combos that list one, as
-// "combo:<name>". runtime other than "claude-code" lists nothing.
+// holds a target of any Claude Code account, by name, then the combos that
+// list one, as "combo:<name>". runtime other than "claude-code" lists
+// nothing.
 func (rt *Runtime) RuntimeAgents(runtime string) []string {
 	names := []string{}
 	if runtime != ClaudeCodeRuntime {
 		return names
 	}
+	agents, combos := rt.claudeCodeUsers(func(string) bool { return true })
+	for _, combo := range combos {
+		agents = append(agents, "combo:"+combo)
+	}
+	return append(names, agents...)
+}
+
+// claudeCodeUsers returns the agents whose chain holds a target of a Claude
+// Code account that match accepts, and the combos that list one, each sorted.
+func (rt *Runtime) claudeCodeUsers(match func(account string) bool) (agentNames, comboNames []string) {
 	rt.cfgMu.RLock()
-	agents, combos := rt.result.Config.Agents, rt.result.Config.Combos
+	agents, combos, providers := rt.result.Config.Agents, rt.result.Config.Combos, rt.result.Config.Providers
 	rt.cfgMu.RUnlock()
+	uses := func(address string) bool {
+		target, ok := llmcall.ParseTarget(address)
+		return ok && llmcall.IsClaudeCodeAddressIn(providers, address) && match(target.Provider)
+	}
 	comboUses := func(name string) bool {
 		for _, model := range combos[name].Models {
-			if llmcall.IsClaudeCodeAddress(model) {
+			if uses(model) {
 				return true
 			}
 		}
 		return false
 	}
+	agentNames, comboNames = []string{}, []string{}
 	for name, cfg := range agents {
 		cfg = llmcall.NormalizeAgent(cfg)
-		uses := cfg.Provider == "" && (llmcall.IsClaudeCodeAddress(cfg.Model) || comboUses(cfg.Model))
+		used := cfg.Provider == "" && (uses(cfg.Model) || comboUses(cfg.Model))
 		for _, fallback := range cfg.Fallback {
-			uses = uses || llmcall.IsClaudeCodeAddress(fallback)
+			used = used || uses(fallback)
 		}
-		if uses {
-			names = append(names, name)
+		if used {
+			agentNames = append(agentNames, name)
 		}
 	}
-	sort.Strings(names)
-	var comboNames []string
+	sort.Strings(agentNames)
 	for name := range combos {
 		if comboUses(name) {
-			comboNames = append(comboNames, "combo:"+name)
+			comboNames = append(comboNames, name)
 		}
 	}
 	sort.Strings(comboNames)
-	return append(names, comboNames...)
+	return agentNames, comboNames
+}
+
+// ClaudeCodeAccount is one Claude Code account of the Router's Claude Code
+// page (API-CCT-011).
+type ClaudeCodeAccount struct {
+	Name    string
+	Builtin bool
+	// ConfigDir is the account's CLAUDE_CONFIG_DIR; "" for the built-in one.
+	ConfigDir      string
+	AllowScheduled bool
+	Disabled       bool
+	Status         core.RuntimeAccountStatus
+	// LoginCommand logs the account in once: CLAUDE_CONFIG_DIR='<dir>' claude
+	// (claude for the built-in account), then /login.
+	LoginCommand string
+	// Windows are the plan windows of the account's own limit snapshot.
+	Windows []router.Window
+	Agents  []string
+	Combos  []string
+}
+
+// ClaudeCodeAccounts reports every Claude Code account (API-CCT-011): the
+// built-in "claude-code" first, then the providers of kind "claude-code" in
+// name order. Each status runs `claude auth status` with the account's
+// CLAUDE_CONFIG_DIR (cached 60 s by the runtime, never stored).
+func (rt *Runtime) ClaudeCodeAccounts(ctx context.Context) ([]ClaudeCodeAccount, error) {
+	if rt.registry == nil || rt.router == nil {
+		return nil, fmt.Errorf("agent runtime %q is not available", ClaudeCodeRuntime)
+	}
+	ext, err := rt.registry.Runtime(ClaudeCodeRuntime)
+	if err != nil {
+		return nil, err
+	}
+	statuser, _ := ext.(core.RuntimeAccountStatuser)
+	windows := map[string][]router.Window{}
+	for _, snap := range rt.router.Limits(ctx, false) {
+		windows[snap.Provider] = snap.Windows
+	}
+	names := append([]string{ClaudeCodeRuntime}, rt.router.ClaudeCodeAccounts()...)
+	out := make([]ClaudeCodeAccount, 0, len(names))
+	for _, name := range names {
+		cfg, _ := rt.router.ClaudeCodeAccount(name)
+		account := rt.claudeAccountSpec(name, cfg)
+		row := ClaudeCodeAccount{
+			Name: name, Builtin: name == ClaudeCodeRuntime, ConfigDir: account.ConfigDir,
+			AllowScheduled: cfg.AllowScheduled, Disabled: cfg.Disabled,
+			LoginCommand: llmcall.ClaudeLoginCommand(account.ConfigDir),
+			Windows:      windows[name],
+		}
+		row.Agents, row.Combos = rt.claudeCodeUsers(func(account string) bool { return account == name })
+		if statuser != nil {
+			row.Status = statuser.AccountStatus(ctx, account)
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// claudeAccountSpec returns the runtime keys of a Claude Code account: the
+// built-in one uses the first agent's binary and the daemon's
+// CLAUDE_CONFIG_DIR; another account its own keys and folder.
+func (rt *Runtime) claudeAccountSpec(name string, cfg core.ProviderConfig) core.RuntimeAccount {
+	if name == ClaudeCodeRuntime {
+		return core.RuntimeAccount{Name: name, Binary: rt.claudeCodeBinary()}
+	}
+	return core.RuntimeAccount{
+		Name: name, ConfigDir: llmcall.ClaudeConfigDir(rt.home, name, cfg),
+		Binary: cfg.Binary, Auth: cfg.Auth, APIKeyEnv: cfg.APIKeyEnv,
+	}
 }
 
 // AgentRuntimeStatus reports the health of the external runtime registered
@@ -217,6 +301,7 @@ func (rt *Runtime) scheduledRunAllowed(agentName, model string) error {
 	if !ok || cfg.AllowScheduled {
 		return nil
 	}
+	llm := rt.coreCtx.LLM
 	cfg = llmcall.NormalizeAgent(cfg)
 	if model != "" {
 		cfg.Provider, cfg.Model = "", model
@@ -224,11 +309,15 @@ func (rt *Runtime) scheduledRunAllowed(agentName, model string) error {
 			cfg.Provider, cfg.Model = target.Provider, target.Model
 		}
 	}
-	chain, _, err := llmcall.AgentChain(rt.coreCtx.LLM, cfg)
-	if err != nil || len(chain) == 0 || !llmcall.IsClaudeCode(chain[0]) {
+	chain, _, err := llmcall.AgentChain(llm, cfg)
+	if err != nil || len(chain) == 0 || !llmcall.IsClaudeCode(llm, chain[0]) {
 		return nil
 	}
-	if len(llmcall.WithoutClaudeCode(chain)) == 0 {
+	// REQ-CCT-010: the account's allow_scheduled lets it run too.
+	if account, _ := llmcall.ClaudeCodeAccount(llm, chain[0].Provider); account.AllowScheduled {
+		return nil
+	}
+	if len(llmcall.WithoutClaudeCode(llm, chain)) == 0 {
 		return fmt.Errorf("claude-code is not allowed for scheduled runs of agent '%s'", cfgName)
 	}
 	return nil
@@ -242,16 +331,23 @@ const claudeCodeTestTimeout = 60 * time.Second
 const claudeCodeTestPrompt = "Reply with OK"
 
 // TestClaudeCode runs one tiny Claude Code turn on address
-// ("claude-code/<model>") for the Router test (spec 39 scope addition): the
+// ("<account>/<model>") for the Router test (spec 39 scope addition): the
 // prompt "Reply with OK" in an empty temporary workspace, with no lana tools,
 // no approver (tool calls are denied), and a 60-second limit. It records the
-// call with source "test" and returns the latency, or a *core.ProviderError.
-// The binary is the first agent's binary setting, else claude on PATH.
+// call with source "test" and provider = the account, and returns the
+// latency, or a *core.ProviderError. The built-in account uses the first
+// agent's binary setting, else claude on PATH; another account its own keys
+// and CLAUDE_CONFIG_DIR (REQ-CCT-010).
 func (rt *Runtime) TestClaudeCode(ctx context.Context, address string) (int64, error) {
 	target, ok := llmcall.ParseTarget(address)
-	if !ok || !llmcall.IsClaudeCodeAddress(address) || !llmcall.ValidClaudeCodeModel(target.Model) {
+	if !ok || !llmcall.IsClaudeCodeAddress(rt.coreCtx.LLM, address) || !llmcall.ValidClaudeCodeModel(target.Model) {
 		return 0, &core.ProviderError{Class: "client", Message: "not a claude-code address: " + address}
 	}
+	accountCfg, _ := llmcall.ClaudeCodeAccount(rt.coreCtx.LLM, target.Provider)
+	if accountCfg.Disabled {
+		return 0, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is disabled", target.Provider)}
+	}
+	account := rt.claudeAccountSpec(target.Provider, accountCfg)
 	if rt.registry == nil {
 		return 0, &core.ProviderError{Class: "runtime", Message: "the Claude Code runtime is not available"}
 	}
@@ -277,8 +373,11 @@ func (rt *Runtime) TestClaudeCode(ctx context.Context, address string) (int64, e
 	var cost float64
 	turn := core.RuntimeTurn{
 		SessionID: sessionID, TurnID: id.New(), AgentName: "",
-		Config: core.RuntimeConfig{Model: model, Binary: rt.claudeCodeBinary(), Workspace: dir},
-		Input:  []core.ContentBlock{{Kind: core.BlockText, Text: claudeCodeTestPrompt}},
+		Config: core.RuntimeConfig{
+			Model: model, Binary: account.Binary, Workspace: dir, Account: target.Provider,
+			ConfigDir: account.ConfigDir, Auth: account.Auth, APIKeyEnv: account.APIKeyEnv,
+		},
+		Input: []core.ContentBlock{{Kind: core.BlockText, Text: claudeCodeTestPrompt}},
 		Emit: func(ev core.RuntimeEvent) {
 			switch ev.Kind {
 			case core.RuntimeSessionMeta:
@@ -317,7 +416,7 @@ func (rt *Runtime) TestClaudeCode(ctx context.Context, address string) (int64, e
 	}
 	if rt.router != nil {
 		rt.router.RecordExternal(router.CallRecord{
-			At: start.UTC(), Source: "test", Requested: address, Provider: ClaudeCodeRuntime, Model: served,
+			At: start.UTC(), Source: "test", Requested: address, Provider: target.Provider, Model: served,
 			Attempt: 1, Outcome: outcome, InputTokens: int64(usage.InputTokens), OutputTokens: int64(usage.OutputTokens),
 			CachedTokens: int64(usage.CachedInputTokens), CostUSD: &cost, DurationMs: latency, Error: truncateRunes(message, 500),
 		})

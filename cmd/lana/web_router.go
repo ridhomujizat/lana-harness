@@ -90,8 +90,9 @@ func (b *webBackend) RouterModels(ctx context.Context, provider string, refresh 
 	if err != nil {
 		return web.RouterModelList{}, err
 	}
-	// Spec 39: claude-code is built in, not a configured provider.
-	if _, ok := r.Kind(provider); !ok && provider != router.ClaudeCode {
+	// Spec 39: claude-code is built in, not a configured provider; Kind
+	// knows it and every Claude Code account.
+	if _, ok := r.Kind(provider); !ok {
 		return web.RouterModelList{}, web.ErrRouterUnknownProvider
 	}
 	infos, fetchErr := r.Models(ctx, provider, refresh)
@@ -126,7 +127,7 @@ func (b *webBackend) RouterTest(ctx context.Context, address string) (web.Router
 		return web.RouterTestResult{}, err
 	}
 	// Spec 39: a Claude Code address runs one tiny Claude Code turn.
-	if llmcall.IsClaudeCodeAddress(address) {
+	if llmcall.IsClaudeCodeAddress(r, address) {
 		if _, err := r.Resolve(address); err != nil {
 			return web.RouterTestResult{}, web.ErrRouterUnknownAddress
 		}
@@ -409,7 +410,7 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 	if err != nil {
 		return web.ClaudeAgentStatus{ConfiguredAgents: agents, Error: err.Error()}, nil
 	}
-	return web.ClaudeAgentStatus{
+	out := web.ClaudeAgentStatus{
 		ConfiguredAgents: agents,
 		Binary:           status.Binary,
 		Version:          status.Version,
@@ -420,5 +421,35 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 		Running:          status.Running,
 		Queued:           status.Queued,
 		MaxConcurrent:    status.MaxConcurrent,
-	}, nil
+		Accounts:         []web.ClaudeCodeAccountStatus{},
+	}
+	// API-CCT-011: one row per account.
+	accounts, err := b.rt.ClaudeCodeAccounts(ctx)
+	if err != nil {
+		slog.Warn("web: claude code accounts", "error", err)
+		return out, nil
+	}
+	for _, account := range accounts {
+		row := web.ClaudeCodeAccountStatus{
+			Name: account.Name, Builtin: account.Builtin, ConfigDir: account.ConfigDir,
+			AllowScheduled: account.AllowScheduled, Disabled: account.Disabled,
+			Binary: account.Status.Binary, Version: account.Status.Version, VersionOK: account.Status.VersionOK,
+			LoggedIn: account.Status.LoggedIn, Email: account.Status.Email, Plan: account.Status.Plan,
+			AuthMethod: account.Status.AuthMethod, Error: account.Status.Error,
+			Running: account.Status.Running, Queued: account.Status.Queued,
+			LoginCommand: account.LoginCommand,
+			Windows:      make([]web.RouterPlanWindow, 0, len(account.Windows)),
+			Agents:       account.Agents, Combos: account.Combos,
+		}
+		for _, w := range account.Windows {
+			window := web.RouterPlanWindow{Type: w.Type, Status: w.Status, Utilization: w.Utilization}
+			if w.ResetsAt != nil {
+				at := w.ResetsAt.UTC()
+				window.ResetsAt = &at
+			}
+			row.Windows = append(row.Windows, window)
+		}
+		out.Accounts = append(out.Accounts, row)
+	}
+	return out, nil
 }

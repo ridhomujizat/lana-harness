@@ -126,6 +126,49 @@ type RuntimeConfig struct {
 	// MCPKey names the lana tool set served to the process (REQ-CCT-006). A
 	// change starts a new process that resumes the runtime session.
 	MCPKey string
+	// Account is the Claude Code account of the turn (REQ-CCT-010): "" or
+	// ClaudeCodeProvider for the built-in one. A process and a runtime
+	// session belong to one account and are never reused for another.
+	Account string
+	// ConfigDir is set as CLAUDE_CONFIG_DIR of the process. Empty keeps the
+	// daemon's environment as it is (the built-in account).
+	ConfigDir string
+}
+
+// RuntimeAccount names one Claude Code account for a status probe
+// (API-CCT-011).
+type RuntimeAccount struct {
+	// Name is the account (provider) name; ClaudeCodeProvider is built in.
+	Name string
+	// ConfigDir is the account's CLAUDE_CONFIG_DIR; "" keeps the daemon's.
+	ConfigDir string
+	// Binary is the executable; "" looks claude up on PATH.
+	Binary    string
+	Auth      string
+	APIKeyEnv string
+}
+
+// RuntimeAccountStatus is the health of one Claude Code account
+// (API-CCT-011). Email and Plan come from `claude auth status` and are never
+// stored.
+type RuntimeAccountStatus struct {
+	Binary     string
+	Version    string
+	VersionOK  bool
+	LoggedIn   bool
+	AuthMethod string
+	Email      string
+	// Plan is subscriptionType, else planTier.
+	Plan    string
+	Error   string
+	Running int
+	Queued  int
+}
+
+// RuntimeAccountStatuser is implemented by a runtime that reports the status
+// of one account (the Claude Code runtime).
+type RuntimeAccountStatuser interface {
+	AccountStatus(ctx context.Context, account RuntimeAccount) RuntimeAccountStatus
 }
 
 // RuntimeTurn is one turn handed to an AgentRuntime.

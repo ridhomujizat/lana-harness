@@ -28,14 +28,19 @@ const maxLineBytes = 10 << 20
 // subscription auth, so Claude Code uses its own login (REQ-CCR-003).
 var scrubbedEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"}
 
+// configDirEnv is the variable that points Claude Code at an account's
+// folder (REQ-CCT-010).
+const configDirEnv = "CLAUDE_CONFIG_DIR"
+
 // buildEnv returns the child environment. It never reads Claude credentials:
 // subscription auth only removes variables, and api_key auth sets the key from
-// the secrets service.
+// the secrets service. A ConfigDir replaces CLAUDE_CONFIG_DIR; without one the
+// daemon's own value (if any) stays, so the built-in account is unchanged.
 func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]string, string, error) {
-	env := make([]string, 0, len(base)+1)
+	env := make([]string, 0, len(base)+2)
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
-		drop := false
+		drop := cfg.ConfigDir != "" && name == configDirEnv
 		for _, s := range scrubbedEnv {
 			if name == s {
 				drop = true
@@ -45,6 +50,9 @@ func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]st
 		if !drop {
 			env = append(env, kv)
 		}
+	}
+	if cfg.ConfigDir != "" {
+		env = append(env, configDirEnv+"="+cfg.ConfigDir)
 	}
 	switch cfg.Auth {
 	case "", core.RuntimeAuthSubscription:
@@ -100,6 +108,8 @@ func buildArgs(cfg core.RuntimeConfig, sessionID string, resume bool, mcpConfig 
 	if cfg.AppendSystemPrompt != "" {
 		args = append(args, "--append-system-prompt", cfg.AppendSystemPrompt)
 	}
+	// API-CCT-014: mcpConfig is the path of a 0600 file, so the session
+	// token is not in the process list.
 	if mcpConfig != "" {
 		args = append(args, "--mcp-config", mcpConfig)
 	}

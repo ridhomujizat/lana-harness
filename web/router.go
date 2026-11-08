@@ -232,6 +232,34 @@ type ClaudeAgentStatus struct {
 	Running          int      `json:"running"`
 	Queued           int      `json:"queued"`
 	MaxConcurrent    int      `json:"max_concurrent"`
+	// Accounts are the Claude Code accounts, the built-in one first
+	// (API-CCT-011). The fields above describe the built-in account.
+	Accounts []ClaudeCodeAccountStatus `json:"accounts"`
+}
+
+// ClaudeCodeAccountStatus is one account row of GET /v1/router/claude-agent
+// (API-CCT-011). Email and Plan come from the account's `claude auth status`
+// and are never stored.
+type ClaudeCodeAccountStatus struct {
+	Name           string             `json:"name"`
+	Builtin        bool               `json:"builtin"`
+	ConfigDir      string             `json:"config_dir"`
+	AllowScheduled bool               `json:"allow_scheduled"`
+	Disabled       bool               `json:"disabled"`
+	Binary         string             `json:"binary"`
+	Version        string             `json:"version"`
+	VersionOK      bool               `json:"version_ok"`
+	LoggedIn       bool               `json:"logged_in"`
+	Email          string             `json:"email"`
+	Plan           string             `json:"plan"`
+	AuthMethod     string             `json:"auth_method"`
+	Error          string             `json:"error"`
+	Running        int                `json:"running"`
+	Queued         int                `json:"queued"`
+	LoginCommand   string             `json:"login_command"`
+	Windows        []RouterPlanWindow `json:"windows"`
+	Agents         []string           `json:"agents"`
+	Combos         []string           `json:"combos"`
 }
 
 // SetRouterBackend installs the Router port directly. SetBackend also
@@ -421,9 +449,16 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 		response.Choices = append(response.Choices, routerChoiceJSON{Value: name, Label: name, Group: "Combos"})
 	}
 	// A disabled provider is no agent model choice (API-RTR-001 revision 2).
+	// Claude Code accounts are listed with the Claude Code group below.
 	enabled := make([]string, 0, len(providers))
+	var accounts []string
 	for _, name := range providers {
-		if !providerRecordFromMap(document.Providers[name]).Disabled {
+		record := providerRecordFromMap(document.Providers[name])
+		switch {
+		case record.Disabled:
+		case record.Kind == core.ClaudeCodeKind:
+			accounts = append(accounts, name)
+		default:
 			enabled = append(enabled, name)
 		}
 	}
@@ -438,31 +473,39 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// API-CCT-004: Claude Code models in their own group when the binary is
-	// found.
-	response.Choices = append(response.Choices, s.claudeCodeChoices(r.Context())...)
+	// found, the built-in account first, then each enabled account
+	// (REQ-CCT-010).
+	response.Choices = append(response.Choices, s.claudeCodeChoices(r.Context(), accounts)...)
 	writeJSON(w, http.StatusOK, response)
 }
 
-// claudeCodeChoices returns the picker entries of Claude Code models, or none
-// when the backend has no Claude Code or the binary is not found.
-func (s *Server) claudeCodeChoices(ctx context.Context) []routerChoiceJSON {
+// claudeCodeChoices returns the picker entries of Claude Code models of the
+// built-in account and of accounts, all in the group "Claude Code", or none
+// when the backend has no Claude Code or the binary is not found. A named
+// account's labels read "Claude Code (<account>) · <model>".
+func (s *Server) claudeCodeChoices(ctx context.Context, accounts []string) []routerChoiceJSON {
 	port := s.routerPort()
 	cc, ok := port.(ClaudeCodeBackend)
 	if !ok || !cc.ClaudeCodeInstalled(ctx) {
 		return nil
 	}
-	list, err := port.RouterModels(ctx, ClaudeCodeProvider, false)
-	if err != nil {
-		s.logger.Warn("web: claude code models", "error", err)
-		return nil
-	}
-	out := make([]routerChoiceJSON, 0, len(list.Models))
-	for _, model := range list.Models {
-		label := model.Name
-		if label == "" {
-			label = "Claude Code · " + model.ID
+	var out []routerChoiceJSON
+	for _, account := range append([]string{ClaudeCodeProvider}, accounts...) {
+		list, err := port.RouterModels(ctx, account, false)
+		if err != nil {
+			s.logger.Warn("web: claude code models", "account", account, "error", err)
+			continue
 		}
-		out = append(out, routerChoiceJSON{Value: model.Address, Label: label, Group: claudeCodeChoiceGroup})
+		for _, model := range list.Models {
+			label := model.Name
+			if label == "" {
+				label = "Claude Code · " + model.ID
+			}
+			if account != ClaudeCodeProvider {
+				label = "Claude Code (" + account + ") · " + strings.TrimPrefix(label, "Claude Code · ")
+			}
+			out = append(out, routerChoiceJSON{Value: model.Address, Label: label, Group: claudeCodeChoiceGroup})
+		}
 	}
 	return out
 }
@@ -1143,6 +1186,21 @@ func (s *Server) handleClaudeAgentStatus(w http.ResponseWriter, r *http.Request)
 	}
 	if status.ConfiguredAgents == nil {
 		status.ConfiguredAgents = []string{}
+	}
+	if status.Accounts == nil {
+		status.Accounts = []ClaudeCodeAccountStatus{}
+	}
+	for i := range status.Accounts {
+		account := &status.Accounts[i]
+		if account.Windows == nil {
+			account.Windows = []RouterPlanWindow{}
+		}
+		if account.Agents == nil {
+			account.Agents = []string{}
+		}
+		if account.Combos == nil {
+			account.Combos = []string{}
+		}
 	}
 	writeJSON(w, http.StatusOK, status)
 }

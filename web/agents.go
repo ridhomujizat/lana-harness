@@ -278,6 +278,8 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	// comboFirst is the first model of each combo, for the claude_code flag
 	// (API-CCT-006).
 	comboFirst := map[string]string{}
+	// accounts are the Claude Code accounts (REQ-CCT-010).
+	accounts := map[string]bool{claudeCodeRuntime: true}
 	defaultAgent := ""
 	hasCLIRoute := false
 	if store != nil {
@@ -295,6 +297,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if document, err := parseProviderDocument(file.Raw); err == nil {
+				accounts = document.claudeAccounts()
 				for name, table := range document.Combos {
 					if models := mapProviderStrings(table, "models"); len(models) > 0 {
 						comboFirst[name] = models[0]
@@ -403,7 +406,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			row.Runtime = record.Runtime
 			legacy := record.Runtime != ""
 			migrateLegacyRuntime(&record)
-			if legacy || isClaudeCodeModel(record.Model) || isClaudeCodeModel(comboFirst[record.Model]) {
+			if legacy || isClaudeAccountModel(record.Model, accounts) || isClaudeAccountModel(comboFirst[record.Model], accounts) {
 				row.EngineLabel = engineLabelFor(claudeCodeRuntime)
 				row.Auth = record.Auth
 				if row.Auth == "" {
@@ -439,7 +442,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// API-CCT-006: the agent's first target runs in Claude Code.
-		row.ClaudeCode = row.Kind == "agent" && (isClaudeCodeModel(model) || isClaudeCodeModel(comboFirst[model]))
+		row.ClaudeCode = row.Kind == "agent" && (isClaudeAccountModel(model, accounts) || isClaudeAccountModel(comboFirst[model], accounts))
 		if row.Permission == "" {
 			row.Permission = row.Policy
 		}
@@ -592,7 +595,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if problem := checkAgentEffort(record); problem != "" {
+	if problem := checkAgentEffort(record, s.claudeAccountSet(r.Context())); problem != "" {
 		writeAgentIssue(w, "agents."+name+".reasoning_effort", problem)
 		return
 	}
@@ -780,7 +783,7 @@ func (s *Server) handlePutAgent(w http.ResponseWriter, r *http.Request) {
 	switchAgentRuntime(&record, previousRuntime, body)
 	// API-CCT-002: a save writes the claude-code address and no runtime.
 	migrateLegacyRuntime(&record)
-	if problem := checkAgentEffort(record); problem != "" {
+	if problem := checkAgentEffort(record, claudeAccountsOf(file.Raw)); problem != "" {
 		writeAgentIssue(w, "agents."+name+".reasoning_effort", problem)
 		return
 	}
@@ -1287,7 +1290,7 @@ func clearAgentField(record *agentRecord, key string) {
 // checkAgentEffort checks reasoning_effort against the agent's runtime: off,
 // low, high, max for lana (REQ-MDL-001); low, medium, high, xhigh, max for a
 // Claude Agent (API-CCR-001). It returns "" when the value is valid.
-func checkAgentEffort(record agentRecord) string {
+func checkAgentEffort(record agentRecord, accounts map[string]bool) string {
 	effort := record.ReasoningEffort
 	if effort == "" {
 		return ""
@@ -1298,8 +1301,9 @@ func checkAgentEffort(record agentRecord) string {
 		}
 		return ""
 	}
-	// An agent on a claude-code address takes Claude Code's efforts and lana's.
-	if isClaudeCodeModel(record.Model) {
+	// An agent on a Claude Code address (any account) takes Claude Code's
+	// efforts and lana's.
+	if isClaudeAccountModel(record.Model, accounts) {
 		if !validReasoningEffort(effort) && !containsString(runtimeAgentEfforts, effort) {
 			return "reasoning_effort must be one of off, low, medium, high, xhigh, max"
 		}

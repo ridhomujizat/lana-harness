@@ -228,7 +228,7 @@ func TestNormalizeAgent(t *testing.T) {
 	if err == nil {
 		t.Fatalf("stub router resolved claude-code without knowing it: %v %q", chain, requested)
 	}
-	if !IsClaudeCodeAddress("claude-code/opus") || IsClaudeCodeAddress("claude-code:opus") || IsClaudeCodeAddress("ds/x") {
+	if !IsClaudeCodeAddress(nil, "claude-code/opus") || IsClaudeCodeAddress(nil, "claude-code:opus") || IsClaudeCodeAddress(nil, "ds/x") {
 		t.Fatal("IsClaudeCodeAddress")
 	}
 	if got := RuntimeProvider("claude-code"); got != "claude-code" {
@@ -236,5 +236,39 @@ func TestNormalizeAgent(t *testing.T) {
 	}
 	if !WarnNoBackground("agent-x", "test") || WarnNoBackground("agent-x", "test") {
 		t.Fatal("WarnNoBackground is not rate limited")
+	}
+}
+
+// REQ-CCT-010: the account folder and its login command.
+func TestClaudeConfigDir(t *testing.T) {
+	t.Setenv("HOME", "/users/me")
+	cases := []struct{ name, dir, want string }{
+		{"claude-code", "/ignored", ""},
+		{"claude-work", "", "/lana/claude/claude-work"},
+		{"claude-work", "$LANA_HOME/claude/w", "/lana/claude/w"},
+		{"claude-work", "${LANA_HOME}", "/lana"},
+		{"claude-work", "~/claude-w", "/users/me/claude-w"},
+		{"claude-work", "/abs/dir/", "/abs/dir"},
+		{"claude-work", "rel", "/lana/rel"},
+	}
+	for _, tc := range cases {
+		if got := ClaudeConfigDir("/lana", tc.name, core.ProviderConfig{ConfigDir: tc.dir}); got != tc.want {
+			t.Errorf("ClaudeConfigDir(%q, %q) = %q, want %q", tc.name, tc.dir, got, tc.want)
+		}
+	}
+	t.Setenv("LANA_HOME", "/env/lana")
+	if got := ClaudeConfigDir("", "w", core.ProviderConfig{}); got != "/env/lana/claude/w" {
+		t.Errorf("empty home = %q", got)
+	}
+	if got := ClaudeLoginCommand(""); got != "claude" {
+		t.Errorf("built-in login = %q", got)
+	}
+	if got := ClaudeLoginCommand("/a/it's"); got != `CLAUDE_CONFIG_DIR='/a/it'\''s' claude` {
+		t.Errorf("login = %q", got)
+	}
+	providers := map[string]core.ProviderConfig{"cw": {Kind: core.ClaudeCodeKind}, "ds": {Kind: "deepseek"}}
+	if !IsClaudeCodeAddressIn(providers, "cw/opus") || IsClaudeCodeAddressIn(providers, "ds/x") || !IsClaudeCodeAddressIn(providers, "claude-code/opus") ||
+		IsClaudeCodeAddressIn(providers, "cw:opus") {
+		t.Error("IsClaudeCodeAddressIn")
 	}
 }

@@ -229,7 +229,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// ADR 0020: Claude Code targets run in the Claude Code runtime, never in
 	// lana's loop; runTurn dispatches them.
 	fullChain := targets
-	targets = llmcall.WithoutClaudeCode(fullChain)
+	targets = llmcall.WithoutClaudeCode(rn.reg.llm, fullChain)
 	workspace := info.Workspace
 	if workspace == "" {
 		workspace = cfg.Workspace
@@ -768,6 +768,14 @@ func scheduledClaudeMessage(agent string) string {
 	return fmt.Sprintf("claude-code is not allowed for scheduled runs of agent '%s'", agent)
 }
 
+// allowScheduled reports whether a scheduled run may use the Claude Code
+// target (REQ-CCT-008, REQ-CCT-010): the account's allow_scheduled or the
+// agent's legacy key.
+func allowScheduled(llm core.LLMRegistry, target core.LLMTarget, cfg core.AgentConfig) bool {
+	account, _ := llmcall.ClaudeCodeAccount(llm, target.Provider)
+	return account.AllowScheduled || cfg.AllowScheduled
+}
+
 // runTurn picks the engine of one turn (REQ-CCT-003): when the first
 // available target of the chain is a Claude Code address, the turn runs in
 // the Claude Code runtime; otherwise, or after a Claude Code failure before
@@ -775,10 +783,11 @@ func scheduledClaudeMessage(agent string) string {
 // (REQ-CCT-004).
 func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) TurnResult {
 	resolved, err := rn.resolve(ctx)
-	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(resolved.fullChain[0]) {
+	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(rn.reg.llm, resolved.fullChain[0]) {
 		// REQ-CCT-008: a scheduled run uses Claude Code only with
-		// allow_scheduled; else the next target outside Claude Code runs.
-		if rn.reg.isScheduled(rn.sessionID) && !resolved.cfg.AllowScheduled {
+		// allow_scheduled (the account's or the agent's); else the next
+		// target outside Claude Code runs.
+		if rn.reg.isScheduled(rn.sessionID) && !allowScheduled(rn.reg.llm, resolved.fullChain[0], resolved.cfg) {
 			if len(resolved.chain) == 0 {
 				return rn.failTurn(ctx, turnID, &core.ProviderError{Class: "client", Message: scheduledClaudeMessage(resolved.name)})
 			}

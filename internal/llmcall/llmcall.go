@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -54,16 +56,57 @@ func RuntimeProvider(runtime string) string {
 	return runtime
 }
 
-// IsClaudeCode reports whether a target runs in Claude Code (ADR 0020).
-func IsClaudeCode(t core.LLMTarget) bool {
-	return t.Provider == ClaudeCode
+// ClaudeCodeAccounts is implemented by an LLM registry (the router) that
+// knows the Claude Code accounts (REQ-CCT-010): the built-in "claude-code"
+// and every [providers.<name>] table of kind "claude-code".
+type ClaudeCodeAccounts interface {
+	// ClaudeCodeAccount returns the config of a Claude Code account. The
+	// built-in account has an empty config with Kind set.
+	ClaudeCodeAccount(name string) (core.ProviderConfig, bool)
 }
 
-// IsClaudeCodeAddress reports whether value is a "claude-code/<model>"
-// address.
-func IsClaudeCodeAddress(value string) bool {
+// ClaudeCodeAccount returns the config of the Claude Code account name
+// through llm. Without a registry that knows accounts, only the built-in
+// "claude-code" is one.
+func ClaudeCodeAccount(llm core.LLMRegistry, name string) (core.ProviderConfig, bool) {
+	if a, ok := llm.(ClaudeCodeAccounts); ok {
+		return a.ClaudeCodeAccount(name)
+	}
+	if name == ClaudeCode {
+		return core.ProviderConfig{Kind: core.ClaudeCodeKind}, true
+	}
+	return core.ProviderConfig{}, false
+}
+
+// IsClaudeCodeProvider reports whether name is a Claude Code account in a
+// config's providers: the built-in "claude-code" or a table of kind
+// "claude-code".
+func IsClaudeCodeProvider(providers map[string]core.ProviderConfig, name string) bool {
+	if name == ClaudeCode {
+		return true
+	}
+	cfg, ok := providers[name]
+	return ok && cfg.Kind == core.ClaudeCodeKind
+}
+
+// IsClaudeCode reports whether a target runs in Claude Code (ADR 0020): its
+// provider is a Claude Code account of llm (REQ-CCT-010).
+func IsClaudeCode(llm core.LLMRegistry, t core.LLMTarget) bool {
+	_, ok := ClaudeCodeAccount(llm, t.Provider)
+	return ok
+}
+
+// IsClaudeCodeAddress reports whether value is a "<account>/<model>"
+// address of a Claude Code account of llm.
+func IsClaudeCodeAddress(llm core.LLMRegistry, value string) bool {
 	t, ok := ParseTarget(value)
-	return ok && IsClaudeCode(t) && value[len(ClaudeCode)] == '/'
+	return ok && value[len(t.Provider)] == '/' && IsClaudeCode(llm, t)
+}
+
+// IsClaudeCodeAddressIn is IsClaudeCodeAddress over a config's providers.
+func IsClaudeCodeAddressIn(providers map[string]core.ProviderConfig, value string) bool {
+	t, ok := ParseTarget(value)
+	return ok && value[len(t.Provider)] == '/' && IsClaudeCodeProvider(providers, t.Provider)
 }
 
 // ValidClaudeCodeModel reports whether model may follow "claude-code/": a
@@ -75,10 +118,10 @@ func ValidClaudeCodeModel(model string) bool {
 
 // WithoutClaudeCode returns chain without its Claude Code targets: the part
 // lana's own loop and the background passes can call.
-func WithoutClaudeCode(chain []core.LLMTarget) []core.LLMTarget {
+func WithoutClaudeCode(llm core.LLMRegistry, chain []core.LLMTarget) []core.LLMTarget {
 	out := make([]core.LLMTarget, 0, len(chain))
 	for _, t := range chain {
-		if !IsClaudeCode(t) {
+		if !IsClaudeCode(llm, t) {
 			out = append(out, t)
 		}
 	}
@@ -86,13 +129,68 @@ func WithoutClaudeCode(chain []core.LLMTarget) []core.LLMTarget {
 }
 
 // HasClaudeCode reports whether chain has a Claude Code target.
-func HasClaudeCode(chain []core.LLMTarget) bool {
+func HasClaudeCode(llm core.LLMRegistry, chain []core.LLMTarget) bool {
 	for _, t := range chain {
-		if IsClaudeCode(t) {
+		if IsClaudeCode(llm, t) {
 			return true
 		}
 	}
 	return false
+}
+
+// ClaudeConfigDir returns the CLAUDE_CONFIG_DIR of the Claude Code account
+// name (REQ-CCT-010): "" for the built-in account (the daemon's environment
+// stays as it is), else config_dir with a leading ~ or $LANA_HOME expanded,
+// or $LANA_HOME/claude/<name> when config_dir is empty. A relative result is
+// taken from home. An empty home is $LANA_HOME, else ~/.lana (as
+// config.HomeDir).
+func ClaudeConfigDir(home, name string, cfg core.ProviderConfig) string {
+	if name == ClaudeCode || name == "" {
+		return ""
+	}
+	if home == "" {
+		home = defaultHome()
+	}
+	dir := strings.TrimSpace(cfg.ConfigDir)
+	if dir == "" {
+		return filepath.Clean(filepath.Join(home, "claude", name))
+	}
+	for _, prefix := range []string{"$LANA_HOME", "${LANA_HOME}"} {
+		if rest, ok := strings.CutPrefix(dir, prefix); ok && (rest == "" || rest[0] == '/') {
+			dir = home + rest
+			break
+		}
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") {
+		if userHome, err := os.UserHomeDir(); err == nil {
+			dir = userHome + dir[1:]
+		}
+	}
+	if !filepath.IsAbs(dir) && home != "" {
+		dir = filepath.Join(home, dir)
+	}
+	return filepath.Clean(dir)
+}
+
+// defaultHome is LANA_HOME, else ~/.lana.
+func defaultHome() string {
+	if v := strings.TrimSpace(os.Getenv("LANA_HOME")); v != "" {
+		return v
+	}
+	if userHome, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(userHome, ".lana")
+	}
+	return ""
+}
+
+// ClaudeLoginCommand is the shell command that logs in a Claude Code account
+// once (API-CCT-010): `CLAUDE_CONFIG_DIR='<dir>' claude`, or `claude` for
+// the built-in account (dir ""). The owner then types /login.
+func ClaudeLoginCommand(dir string) string {
+	if dir == "" {
+		return "claude"
+	}
+	return "CLAUDE_CONFIG_DIR='" + strings.ReplaceAll(dir, "'", `'\''`) + "' claude"
 }
 
 // NormalizeAgent maps the deprecated engine key (API-CCT-002): runtime
@@ -107,7 +205,7 @@ func NormalizeAgent(cfg core.AgentConfig) core.AgentConfig {
 	if model == "" {
 		model = "default"
 	}
-	if !IsClaudeCodeAddress(model) {
+	if t, ok := ParseTarget(model); !ok || t.Provider != ClaudeCode || model[len(ClaudeCode)] != '/' {
 		model = ClaudeCode + "/" + model
 	}
 	cfg.Model = model
@@ -243,11 +341,11 @@ type BackgroundModeler interface {
 // background_model resolved through llm, else ErrNoBackgroundModel. requested
 // is kept when targets of chain remain, else it is the background model.
 func BackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested string) ([]core.LLMTarget, string, error) {
-	if !HasClaudeCode(chain) {
+	if !HasClaudeCode(llm, chain) {
 		return chain, requested, nil
 	}
-	if rest := WithoutClaudeCode(chain); len(rest) > 0 {
-		if IsClaudeCodeAddress(requested) {
+	if rest := WithoutClaudeCode(llm, chain); len(rest) > 0 {
+		if IsClaudeCodeAddress(llm, requested) {
 			requested = Address(rest[0])
 		}
 		return rest, requested, nil
@@ -263,7 +361,7 @@ func BackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested str
 	if err != nil {
 		return nil, "", fmt.Errorf("[router] background_model: %w", err)
 	}
-	resolved = WithoutClaudeCode(resolved)
+	resolved = WithoutClaudeCode(llm, resolved)
 	if len(resolved) == 0 {
 		return nil, "", ErrNoBackgroundModel
 	}

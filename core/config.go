@@ -89,7 +89,26 @@ type ProviderConfig struct {
 	// with not_found so a chain moves on, and it is left out of model lists
 	// and boot key checks (API-RTR-001 revision 2).
 	Disabled bool `toml:"disabled"`
+
+	// The keys below belong to kind "claude-code", a Claude Code account
+	// (REQ-CCT-010, API-CCT-010). APIKeyEnv and Disabled apply to it too.
+
+	// ConfigDir is the account's CLAUDE_CONFIG_DIR. "" means
+	// $LANA_HOME/claude/<name>; a leading ~ and $LANA_HOME are expanded.
+	ConfigDir string `toml:"config_dir"`
+	// Binary is the claude executable of the account; "" is claude on PATH.
+	Binary string `toml:"binary"`
+	// Auth is "subscription" (the default when empty) or "api_key".
+	Auth string `toml:"auth"`
+	// AllowScheduled lets calendar items and workflow nodes run the
+	// account's targets (REQ-CCT-008).
+	AllowScheduled bool `toml:"allow_scheduled"`
 }
+
+// ClaudeCodeKind is the provider kind of a Claude Code account
+// (REQ-CCT-010): [providers.<name>] kind = "claude-code". Its targets run in
+// the Claude Code runtime, never through the router.
+const ClaudeCodeKind = "claude-code"
 
 type AgentConfig struct {
 	Provider      string   `toml:"provider"`

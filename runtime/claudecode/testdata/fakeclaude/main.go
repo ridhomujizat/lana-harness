@@ -12,6 +12,15 @@
 //	FAKECLAUDE_MODELS            JSON models array of the initialize response
 //	                             (default: a recorded, scrubbed list)
 //
+// With CLAUDE_CONFIG_DIR set (a lana Claude Code account), the files
+// fakeclaude_auth.json and fakeclaude_fixture.jsonl in that folder, when
+// present, win over FAKECLAUDE_AUTH and FAKECLAUDE_FIXTURE, so two accounts
+// can answer differently in one test.
+//
+// --mcp-config takes JSON or the path of a JSON file; the start log line has
+// the file's content as "mcp_config" and its permission bits as
+// "mcp_config_mode".
+//
 // Fixture lines with a "fake" key are directives:
 //
 //	{"fake":"sleep","ms":100}                 sleep (interrupts still handled)
@@ -35,6 +44,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,14 +81,46 @@ func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-// mcpSession connects to the named server of the --mcp-config argv.
-func mcpSession(args []string, server string) (*mcp.ClientSession, error) {
-	raw := ""
+// mcpConfigArg returns the --mcp-config JSON of argv: the value itself, or
+// the content of the file it names, with the file's permission bits ("" for
+// inline JSON).
+func mcpConfigArg(args []string) (string, string) {
+	value := ""
 	for i, a := range args {
 		if a == "--mcp-config" && i+1 < len(args) {
-			raw = args[i+1]
+			value = args[i+1]
 		}
 	}
+	if value == "" || strings.HasPrefix(strings.TrimSpace(value), "{") {
+		return value, ""
+	}
+	info, err := os.Stat(value)
+	if err != nil {
+		return "", ""
+	}
+	data, err := os.ReadFile(value)
+	if err != nil {
+		return "", ""
+	}
+	return string(data), fmt.Sprintf("%#o", info.Mode().Perm())
+}
+
+// accountFile returns the path of name in CLAUDE_CONFIG_DIR when both exist.
+func accountFile(name string) (string, bool) {
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if dir == "" {
+		return "", false
+	}
+	path := filepath.Join(dir, name)
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
+}
+
+// mcpSession connects to the named server of the --mcp-config argv.
+func mcpSession(args []string, server string) (*mcp.ClientSession, error) {
+	raw, _ := mcpConfigArg(args)
 	if raw == "" {
 		return nil, fmt.Errorf("no --mcp-config")
 	}
@@ -147,6 +189,11 @@ func main() {
 	}
 	if len(args) >= 2 && args[0] == "auth" && args[1] == "status" {
 		a := os.Getenv("FAKECLAUDE_AUTH")
+		if path, ok := accountFile("fakeclaude_auth.json"); ok {
+			if data, err := os.ReadFile(path); err == nil {
+				a = strings.TrimSpace(string(data))
+			}
+		}
 		if a == "" {
 			a = `{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"user@example.com"}`
 		}
@@ -157,13 +204,18 @@ func main() {
 		return
 	}
 	cwd, _ := os.Getwd()
-	logLine(map[string]any{"kind": "start", "argv": args, "env": os.Environ(), "cwd": cwd})
+	mcpCfg, mcpMode := mcpConfigArg(args)
+	logLine(map[string]any{"kind": "start", "argv": args, "env": os.Environ(), "cwd": cwd, "mcp_config": mcpCfg, "mcp_config_mode": mcpMode})
 	for i, a := range args {
 		if (a == "--session-id" || a == "--resume") && i+1 < len(args) {
 			session = args[i+1]
 		}
 	}
-	turns := loadFixture(os.Getenv("FAKECLAUDE_FIXTURE"))
+	fixture := os.Getenv("FAKECLAUDE_FIXTURE")
+	if path, ok := accountFile("fakeclaude_fixture.jsonl"); ok {
+		fixture = path
+	}
+	turns := loadFixture(fixture)
 	ignoreInterrupt := os.Getenv("FAKECLAUDE_IGNORE_INTERRUPT") == "1"
 
 	stdin := make(chan map[string]any, 64)
