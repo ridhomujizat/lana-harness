@@ -145,6 +145,24 @@ func Sanitize(raw string) (string, error) {
 	return svg, nil
 }
 
+// bodyBounds is the bounding box of the currentColor body of a canonical
+// avatar. It reuses the walker and bounds code of Sanitize.
+func bodyBounds(svg string) ([4]float64, error) {
+	root, err := parseXML(svg)
+	if err != nil {
+		return [4]float64{}, err
+	}
+	w := &walker{}
+	w.children(root.children, identity, fillClass(root.attrs["fill"]), 0)
+	if w.err != nil {
+		return [4]float64{}, w.err
+	}
+	if len(w.bodies) == 0 {
+		return [4]float64{}, invalid("no body shape filled with currentColor")
+	}
+	return union(w.bodies), nil
+}
+
 // parseXML parses src into an element tree. Processing instructions,
 // directives, and active content are refused while parsing.
 func parseXML(src string) (*element, error) {
