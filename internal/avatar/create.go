@@ -145,6 +145,11 @@ func ask(ctx context.Context, llm core.LLMRegistry, chain []core.LLMTarget, requ
 	if err != nil {
 		return "", "", err
 	}
+	// A model drawing smaller than the frame still gets enlarged, like a
+	// generated one; on error the sanitized SVG is kept.
+	if enlarged, err := Enlarge(svg); err == nil {
+		svg = enlarged
+	}
 	return svg, llmcall.Address(target), nil
 }
 
@@ -163,7 +168,7 @@ const SystemPrompt = `You draw tiny mascot avatars as SVG. Output ONLY the SVG m
 
 Style guide, follow it exactly:
 - Root: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">. No width, height, style, class, id, defs, gradients, filters, text, or comments.
-- Body: ONE closed shape with fill="currentColor" that fills about 70–85% of the box and is roughly centered. A friendly, soft, organic silhouette with rounded corners; slightly imperfect is good. Draw it as a <path> (or an <ellipse>, <circle>, or <rect> with rx). No outline, no stroke.
+- Body: ONE closed shape with fill="currentColor" that fills about 85–95% of the box and is roughly centered. A friendly, soft, organic silhouette with rounded corners; slightly imperfect is good. Draw it as a <path> (or an <ellipse>, <circle>, or <rect> with rx). No outline, no stroke.
 - Eyes: EXACTLY two eye holes with fill="#FFFFFF", drawn as <ellipse> or as <rect> with rx equal to half the width (a pill). Each eye is about 7–11 units wide and 9–22 units tall. Place both fully on the body, near each other (centers 12–22 units apart), usually a little above or off the body's center so the character looks to one side. Vary them naturally: tilt both eyes the same way with transform="rotate(angle cx cy)", sometimes make one slightly smaller or higher.
 - Nothing else: no mouth, no nose, no cheeks, no pupils, no highlights, no shadows, no other colors.
 - Allowed elements: svg, g, path, ellipse, circle, rect. Allowed attributes: xmlns, viewBox, d, cx, cy, rx, ry, r, x, y, width, height, fill, transform (rotate, translate, scale only). Keep every coordinate between 0 and 100 and the whole SVG under 2000 characters.`

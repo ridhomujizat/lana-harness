@@ -103,6 +103,13 @@ configured MCP servers. Calls run through lana's tool runner with the session's 
 approvals, and appear in the session log as normal `tool/call` / `tool/result` events. A token is valid
 only while its session's Claude process lives; other requests get 401.
 
+Every `claude` lana runs for a turn shall be isolated from the owner's own Claude Code setup: the runtime
+passes `--strict-mcp-config` and `--setting-sources project,local` and sets
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and `ENABLE_CLAUDEAI_MCP_SERVERS=false`, so Claude sees only lana's MCP
+server and the agent's workspace settings, and the owner's hooks, plugins, user `CLAUDE.md`, auto-memory,
+and claude.ai connectors (Gmail, Drive, Calendar, Postman) do not load. *(2026-11-08: full isolation; the
+owner's own Claude MCP servers no longer load.)*
+
 - `AC-CCT-007`: Given an agent with the `memory` tool, when Claude Code calls `mcp__lana__memory` to save
   a fact, then lana's memory has it and the session log shows the call.
 - `AC-CCT-008`: Given a request to the MCP server without a valid token, then it gets 401.

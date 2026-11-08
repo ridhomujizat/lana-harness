@@ -28,6 +28,16 @@ const maxLineBytes = 10 << 20
 // subscription auth, so Claude Code uses its own login (REQ-CCR-003).
 var scrubbedEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL"}
 
+// isolatedEnv is the environment lana pins for the child, overriding any
+// inherited value (owner decision 2026-11-08, REQ-CCT-006): auto-memory and the
+// claude.ai connectors (Gmail, Drive, Calendar, Postman) are off, since a
+// headless run cannot complete their OAuth. An inherited value of the same name
+// is dropped first, like scrubbedEnv.
+var isolatedEnv = []string{
+	"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+	"ENABLE_CLAUDEAI_MCP_SERVERS=false",
+}
+
 // configDirEnv is the variable that points Claude Code at an account's
 // folder (REQ-CCT-010).
 const configDirEnv = "CLAUDE_CONFIG_DIR"
@@ -39,11 +49,13 @@ const secureStorageDirEnv = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
 
 // buildEnv returns the child environment. It never reads Claude credentials:
 // subscription auth only removes variables, and api_key auth sets the key from
-// the secrets service. A ConfigDir replaces CLAUDE_CONFIG_DIR and
-// CLAUDE_SECURESTORAGE_CONFIG_DIR; without one the daemon's own values (if
-// any) stay, so the built-in account is unchanged.
+// the secrets service. It also drops any inherited isolation variable and pins
+// the values of isolatedEnv (owner decision 2026-11-08, REQ-CCT-006). A
+// ConfigDir replaces CLAUDE_CONFIG_DIR and CLAUDE_SECURESTORAGE_CONFIG_DIR;
+// without one the daemon's own values (if any) stay, so the built-in account is
+// unchanged.
 func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]string, string, error) {
-	env := make([]string, 0, len(base)+3)
+	env := make([]string, 0, len(base)+len(isolatedEnv)+3)
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
 		drop := cfg.ConfigDir != "" && (name == configDirEnv || name == secureStorageDirEnv)
@@ -53,10 +65,17 @@ func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]st
 				break
 			}
 		}
+		for _, s := range isolatedEnv {
+			if n, _, _ := strings.Cut(s, "="); name == n {
+				drop = true
+				break
+			}
+		}
 		if !drop {
 			env = append(env, kv)
 		}
 	}
+	env = append(env, isolatedEnv...)
 	if cfg.ConfigDir != "" {
 		env = append(env, configDirEnv+"="+cfg.ConfigDir, secureStorageDirEnv+"="+cfg.ConfigDir)
 	}
@@ -80,7 +99,12 @@ func buildEnv(base []string, cfg core.RuntimeConfig, secrets core.Secrets) ([]st
 	}
 }
 
-// baseArgs are the flags of every Claude process (REQ-CCR-002).
+// baseArgs are the flags of every Claude process (REQ-CCR-002). The last two
+// isolate lana's Claude Code runtime from the owner's own Claude Code setup
+// (owner decision 2026-11-08, REQ-CCT-006): --strict-mcp-config loads only the
+// servers of --mcp-config (none without it), and --setting-sources
+// project,local drops the user-level settings (hooks, enabled plugins, and the
+// user CLAUDE.md) while the agent workspace's project settings still load.
 var baseArgs = []string{
 	"-p",
 	"--input-format", "stream-json",
@@ -89,12 +113,15 @@ var baseArgs = []string{
 	"--include-partial-messages",
 	"--permission-prompts", "host",
 	"--permission-prompt-tool", "stdio",
+	"--strict-mcp-config",
+	"--setting-sources", "project,local",
 }
 
 // buildArgs returns the argv after the binary. resume selects --resume over
-// --session-id. mcpConfig, when set, is passed to --mcp-config; lana does not
-// pass --strict-mcp-config, so the owner's own Claude MCP servers still load
-// (REQ-CCT-006).
+// --session-id. mcpConfig, when set, is passed to --mcp-config. baseArgs always
+// passes --strict-mcp-config and --setting-sources project,local, so Claude
+// sees only lana's MCP server and the agent workspace's settings, never the
+// owner's own (owner decision 2026-11-08, REQ-CCT-006).
 func buildArgs(cfg core.RuntimeConfig, sessionID string, resume bool, mcpConfig string) ([]string, error) {
 	args := append([]string(nil), baseArgs...)
 	if cfg.Model != "" {

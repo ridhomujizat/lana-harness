@@ -122,7 +122,7 @@ func TestLocalEventsStreamAndResume(t *testing.T) {
 	}
 	first, _ := bus.Publish(notify.Reply("coder", "Fix", "s1", "t1", "**done**"))
 	got := decodeNotify(t, waitSSE(t, reader, "notify"))
-	if got.ID != first.ID || got.Kind != notify.KindReply || got.Body != "done" || got.URL != "#/sessions/s1" || got.Title != "coder · Fix" {
+	if got.ID != first.ID || got.Kind != notify.KindReply || got.Body != "done" || got.URL != "#/chats/coder" || got.Title != "coder · Fix" {
 		t.Fatalf("notify = %+v", got)
 	}
 	waitSSE(t, reader, "ping")

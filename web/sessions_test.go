@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -614,6 +615,9 @@ func (f *fakeWebBackend) ListAgentSessions(_ context.Context, filter core.Sessio
 			continue
 		}
 		if filter.Channel != "" && info.Channel != filter.Channel {
+			continue
+		}
+		if len(filter.ExcludeChannels) > 0 && slices.Contains(filter.ExcludeChannels, info.Channel) {
 			continue
 		}
 		if filter.Address != "" && info.Address != filter.Address {

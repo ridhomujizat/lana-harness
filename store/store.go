@@ -842,6 +842,14 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 		query += " AND agent = ?"
 		args = append(args, f.Agent)
 	}
+	if len(f.ExcludeChannels) > 0 {
+		placeholders := make([]string, len(f.ExcludeChannels))
+		for i, channel := range f.ExcludeChannels {
+			placeholders[i] = "?"
+			args = append(args, channel)
+		}
+		query += " AND channel NOT IN (" + strings.Join(placeholders, ", ") + ")"
+	}
 	if f.TopLevelOnly {
 		query += " AND (parent_session_id IS NULL OR parent_session_id = '')"
 	}

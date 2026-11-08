@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -257,8 +258,19 @@ func claudeResume(events []core.SessionEvent, account string, isClaude func(stri
 	return resumeID, model, switched
 }
 
-// claudeToolNote tells Claude how lana's tools are named over MCP.
-const claudeToolNote = "## lana tools\nlana's own tools (memory, knowledge, calendar, workflows, sessions, delegation, and the agent's MCP servers) are available as MCP tools named mcp__lana__<tool>. The tool notes above use the plain names. Use your own tools for files and shell commands."
+// claudeToolNote tells Claude how lana's tools are named over MCP. tools are
+// the MCP tool names actually served (the result of claudeMCPTools), listed
+// sorted so the prompt is stable and only names the tools this agent has. An
+// empty list returns "" and the caller appends no note.
+func claudeToolNote(tools []string) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	names := append([]string(nil), tools...)
+	sort.Strings(names)
+	return "## lana tools\nlana's own tools are available as MCP tools named mcp__lana__<tool>: " +
+		strings.Join(names, ", ") + ". The tool notes above use the plain names. Use your own tools for files and shell commands."
+}
 
 // claudeOwnTools are the lana tools Claude Code has itself: they are not
 // served over MCP (REQ-CCT-006).
@@ -701,8 +713,8 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		return externalOutcome{err: runtimeError(err)}
 	}
 	system := built.text
-	if len(specs) > 0 {
-		system += "\n\n" + claudeToolNote
+	if note := claudeToolNote(tools); note != "" {
+		system += "\n\n" + note
 	}
 	out := externalOutcome{specs: specs, system: system}
 

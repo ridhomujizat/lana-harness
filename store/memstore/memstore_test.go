@@ -380,3 +380,43 @@ func TestMemstoreListFilters(t *testing.T) {
 		t.Fatalf("before=%+v", before)
 	}
 }
+
+// Bug 3: memstore List honors ExcludeChannels, and Limit applies after the
+// exclusion so a page still returns up to Limit kept sessions.
+func TestMemstoreListExcludeChannels(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	dana, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	karin, err := s.Create(ctx, core.NewSession{Agent: "karin", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := s.Create(ctx, core.NewSession{Agent: "lana", Channel: "workflow", Address: "wf1", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.sessions[dana.ID].info.CreatedAt, s.sessions[dana.ID].info.UpdatedAt = 100, 300
+	s.sessions[karin.ID].info.CreatedAt, s.sessions[karin.ID].info.UpdatedAt = 200, 200
+	s.sessions[wf.ID].info.CreatedAt, s.sessions[wf.ID].info.UpdatedAt = 300, 400
+	s.mu.Unlock()
+
+	kept, err := s.List(ctx, core.SessionFilter{ExcludeChannels: []string{"workflow"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 2 || kept[0].ID != dana.ID || kept[1].ID != karin.ID {
+		t.Fatalf("kept=%+v want dana=%s karin=%s", kept, dana.ID, karin.ID)
+	}
+
+	limited, err := s.List(ctx, core.SessionFilter{ExcludeChannels: []string{"workflow"}, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 1 || limited[0].ID != dana.ID {
+		t.Fatalf("limited=%+v want dana=%s", limited, dana.ID)
+	}
+}

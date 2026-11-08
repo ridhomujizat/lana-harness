@@ -3,6 +3,7 @@ package avatar
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -127,6 +128,35 @@ func TestGenerateValidForManySeeds(t *testing.T) {
 	}
 	if len(families) != len(Families) {
 		t.Fatalf("families drawn = %v", families)
+	}
+}
+
+// The fitted body fills 87–95% of the box and stays inside [1, 99] for every
+// family and seed (spec 43, larger bodies). The fitted box is the generator's
+// contract: b.size is the target and pathBox(b.cmds) is what the drawn path
+// measures (formatNumber rounds it, so the stored SVG can differ by a few
+// hundredths).
+func TestGenerateBodyFillsBox(t *testing.T) {
+	const eps = 1e-6
+	for _, family := range Families {
+		for seed := int64(1); seed <= 500; seed++ {
+			b := drawBody(family, newRand(seed^0x5bd1e995))
+			if b.size < 87 || b.size > 95 {
+				t.Fatalf("%s seed %d: fitted size = %g", family, seed, b.size)
+			}
+			box := pathBox(b.cmds)
+			side := math.Max(box[2]-box[0], box[3]-box[1])
+			if math.Abs(side-b.size) > 0.01 {
+				t.Fatalf("%s seed %d: fitted side %g != size %g", family, seed, side, b.size)
+			}
+			if box[0] < 1-eps || box[1] < 1-eps || box[2] > 99+eps || box[3] > 99+eps {
+				t.Fatalf("%s seed %d: fitted box = %v", family, seed, box)
+			}
+			svg := GenerateFamily(family, seed)
+			if again, err := Sanitize(svg); err != nil || again != svg {
+				t.Fatalf("%s seed %d: Generate is not canonical: %v", family, seed, err)
+			}
+		}
 	}
 }
 

@@ -548,3 +548,22 @@ func TestRuntimeMetaIsNotPromptHead(t *testing.T) {
 		t.Fatalf("head = %+v", head)
 	}
 }
+
+// REQ-CCT-006: the tool note lists only the MCP tools the agent actually has,
+// sorted, and an empty list adds no note.
+func TestClaudeToolNote(t *testing.T) {
+	if got := claudeToolNote(nil); got != "" {
+		t.Fatalf("empty list note = %q", got)
+	}
+	note := claudeToolNote([]string{"memory_write", "knowledge_search"})
+	want := "## lana tools\nlana's own tools are available as MCP tools named mcp__lana__<tool>: " +
+		"knowledge_search, memory_write. The tool notes above use the plain names. Use your own tools for files and shell commands."
+	if note != want {
+		t.Fatalf("note = %q, want %q", note, want)
+	}
+	for _, absent := range []string{"workflow", "task", "delegation"} {
+		if strings.Contains(note, absent) {
+			t.Fatalf("note mentions %q: %q", absent, note)
+		}
+	}
+}

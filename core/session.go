@@ -46,6 +46,9 @@ type SessionFilter struct {
 	ParentSessionID string
 	// Agent matches sessions.agent exactly; empty means no filter (REQ-ROOM-002).
 	Agent string
+	// ExcludeChannels leaves out sessions on these channels; empty means no
+	// filter (REQ-ROOM-002).
+	ExcludeChannels []string
 	// TopLevelOnly excludes child sessions.
 	TopLevelOnly bool
 	// Before, when > 0, keeps only sessions last updated before this Unix ms
