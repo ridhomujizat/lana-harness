@@ -105,6 +105,79 @@ func TestDeriveSummaryFraming(t *testing.T) {
 	}
 }
 
+// An out-of-band assistant message (Source != "") is skipped entirely: it is
+// not part of the model history unless the owner replied to it.
+func TestDeriveSkipsSourcedAssistantMessage(t *testing.T) {
+	events := []SessionEvent{
+		seqEvent(t, 1, KindUserMessage, UserMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "hi"}}}),
+		seqEvent(t, 2, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "hello"}}, StopReason: "end_turn"}),
+		seqEvent(t, 3, KindAssistantMessage, AssistantMessage{V: 1, StopReason: "end_turn", Source: "workflow", SourceName: "Daily digest",
+			Content: []ContentBlock{{Kind: BlockText, Text: "Daily report"}}}),
+	}
+	messages, err := DeriveMessages(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want 2: %+v", len(messages), messages)
+	}
+	if messages[0].Role != RoleUser || messages[0].Content[0].Text != "hi" {
+		t.Fatalf("user = %+v", messages[0])
+	}
+	if messages[1].Role != RoleAssistant || len(messages[1].Content) != 1 || messages[1].Content[0].Text != "hello" {
+		t.Fatalf("assistant = %+v", messages[1])
+	}
+}
+
+// A sourced message that would open the history derives as absent: the history
+// stays empty.
+func TestDeriveSourcedFirstMessageAbsent(t *testing.T) {
+	events := []SessionEvent{
+		seqEvent(t, 1, KindAssistantMessage, AssistantMessage{V: 1, StopReason: "end_turn", Source: "workflow", SourceName: "Daily digest",
+			Content: []ContentBlock{{Kind: BlockText, Text: "Daily report"}}}),
+	}
+	messages, err := DeriveMessages(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("messages = %d, want 0: %+v", len(messages), messages)
+	}
+}
+
+// A sourced message after a user message is skipped: only the user message
+// remains.
+func TestDeriveSourcedAfterUser(t *testing.T) {
+	events := []SessionEvent{
+		seqEvent(t, 1, KindUserMessage, UserMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "hi"}}}),
+		seqEvent(t, 2, KindAssistantMessage, AssistantMessage{V: 1, StopReason: "end_turn", Source: "workflow", SourceName: "wf",
+			Content: []ContentBlock{{Kind: BlockText, Text: "report"}}}),
+	}
+	messages, err := DeriveMessages(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Role != RoleUser || messages[0].Content[0].Text != "hi" {
+		t.Fatalf("messages = %+v", messages)
+	}
+}
+
+// A normal assistant message (Source empty) keeps its own message even after
+// another assistant message.
+func TestDeriveNormalAssistantNotMerged(t *testing.T) {
+	events := []SessionEvent{
+		seqEvent(t, 1, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "a"}}, StopReason: "end_turn"}),
+		seqEvent(t, 2, KindAssistantMessage, AssistantMessage{V: 1, Content: []ContentBlock{{Kind: BlockText, Text: "b"}}, StopReason: "end_turn"}),
+	}
+	messages, err := DeriveMessages(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].Content[0].Text != "a" || messages[1].Content[0].Text != "b" {
+		t.Fatalf("messages = %+v", messages)
+	}
+}
+
 // REQ-MEM-014: memory/captured is not part of the model history.
 func TestDeriveIgnoresMemoryCaptured(t *testing.T) {
 	events := []SessionEvent{

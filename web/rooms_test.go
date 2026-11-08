@@ -121,6 +121,29 @@ func TestRoomSendCreatesWebSession(t *testing.T) {
 	}
 }
 
+// API-ROOM-003: the room send threads reply_to to the backend.
+func TestRoomSendReplyTo(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agentNames["dana"] = true
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/messages", `{"text":"halo","reply_to":9}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body roomSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	backend.mu.Lock()
+	replyTo := backend.sentReplyTo[body.SessionID]
+	backend.mu.Unlock()
+	if replyTo != 9 {
+		t.Fatalf("reply_to = %d, want 9", replyTo)
+	}
+}
+
 // AC-ROOM-005: new_topic creates a web session before sending.
 func TestRoomSendNewTopic(t *testing.T) {
 	backend := newFakeWebBackend()
@@ -372,6 +395,32 @@ func TestRoomSegmentsOrderByLastActivity(t *testing.T) {
 	}
 	if page.Segments[0].SessionID != byUpdated[800] || page.Segments[1].SessionID != byUpdated[900] {
 		t.Fatalf("page = %+v, want the newest-active segment last", page.Segments)
+	}
+}
+
+// Bug: a workflow session of an agent belongs to the Workflows page, so it is
+// neither a chat segment nor the room's last message, while its web session is.
+func TestRoomSegmentsExcludeWorkflow(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	wf := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "workflow", Address: "wf1", CreatedAt: 1000, UpdatedAt: 3000})
+	addSessionEvent(t, backend, wf.ID, core.KindUserMessage, core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "Here is the raw content of a scraped page"}}})
+	web := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 500, UpdatedAt: 2000})
+	addSessionEvent(t, backend, web.ID, core.KindAssistantMessage, core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello from web"}}})
+
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	page := segmentsForTest(t, s, cookie, "/v1/rooms/dana/segments")
+	if len(page.Segments) != 1 || page.Segments[0].SessionID != web.ID {
+		t.Fatalf("segments = %+v, want only the web session %s", page.Segments, web.ID)
+	}
+
+	row := roomRowForTest(t, s, cookie, "dana")
+	if row.LastActiveAt != 2000 {
+		t.Fatalf("last_active_at = %d, want the web session 2000", row.LastActiveAt)
+	}
+	if row.LastMessage == nil || row.LastMessage.Preview != "hello from web" || row.LastMessage.Channel != "web" {
+		t.Fatalf("last_message = %+v, want the web message", row.LastMessage)
 	}
 }
 

@@ -39,6 +39,9 @@ const (
 	roomSubscriberBuffer = 16
 	roomSendBody         = 1 << 20
 	roomWeekMS           = int64(7 * 24 * 60 * 60 * 1000)
+	// channelWorkflow is the session channel of a workflow run; its sessions
+	// belong to the Workflows page, not to an agent's chat room (REQ-ROOM-002).
+	channelWorkflow = "workflow"
 )
 
 // presenceJSON is the shared presence object of API-ROOM-001 (REQ-ROOM-006).
@@ -165,10 +168,11 @@ func (s *Server) handleRoomSegments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessions, err := backend.ListAgentSessions(r.Context(), core.SessionFilter{
-		Agent:        name,
-		TopLevelOnly: true,
-		Before:       before,
-		Limit:        limit + 1,
+		Agent:           name,
+		TopLevelOnly:    true,
+		ExcludeChannels: []string{channelWorkflow},
+		Before:          before,
+		Limit:           limit + 1,
 	})
 	if err != nil {
 		s.writeBackendError(w, "room segments", err)
@@ -227,6 +231,7 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		Text        *string  `json:"text"`
 		Attachments []string `json:"attachments"`
 		NewTopic    bool     `json:"new_topic"`
+		ReplyTo     *int64   `json:"reply_to"`
 	}
 	if !decodeJSONObject(w, r, roomSendBody, &body) {
 		return
@@ -251,7 +256,7 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		s.writeBackendError(w, "room send", err)
 		return
 	}
-	result, ok := s.sendSessionMessage(w, r, backend, sessionID, messageBody{Text: body.Text, Attachments: body.Attachments}, note)
+	result, ok := s.sendSessionMessage(w, r, backend, sessionID, messageBody{Text: body.Text, Attachments: body.Attachments, ReplyTo: body.ReplyTo}, note)
 	if !ok {
 		return
 	}
@@ -392,7 +397,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 // roomNewestSession returns the newest top-level session of an agent and its
 // events (API-ROOM-001). The second result is nil when the room has no session.
 func (s *Server) roomNewestSession(ctx context.Context, backend Backend, name string) (*core.SessionInfo, []core.SessionEvent, error) {
-	sessions, err := backend.ListAgentSessions(ctx, core.SessionFilter{Agent: name, TopLevelOnly: true, Limit: 1})
+	sessions, err := backend.ListAgentSessions(ctx, core.SessionFilter{Agent: name, TopLevelOnly: true, ExcludeChannels: []string{channelWorkflow}, Limit: 1})
 	if err != nil {
 		return nil, nil, err
 	}

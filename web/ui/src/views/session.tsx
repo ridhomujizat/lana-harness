@@ -75,8 +75,8 @@ import type { ApprovalItem } from "./approval";
 import { isTeam, rosterNames } from "./agent-common";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
-import { buildTurns, TurnBlock, UserBubble } from "./turn";
-import type { UserAttachment, UserAttachmentRef } from "./turn";
+import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
+import type { ReplyTarget, UserAttachment, UserAttachmentRef } from "./turn";
 import { TrajectoryView } from "./trajectory";
 import {
   NAMING_SESSION,
@@ -705,11 +705,14 @@ interface ComposerProps {
   turnRunning: boolean;
   cancelling: boolean;
   sending: boolean;
+  /* API reply: the automation message the next send replies to, if any. */
+  replyTarget: ReplyTarget | null;
   onDraft: (value: string) => void;
   onFiles: (files: File[]) => void;
   onRemoveAttachment: (id: string) => void;
   onSend: () => void;
   onStop: () => void;
+  onCancelReply: () => void;
   onAgent: (name: string) => void;
   onModel: (value: string) => void;
   onEffort: (value: string) => void;
@@ -732,11 +735,13 @@ function Composer({
   turnRunning,
   cancelling,
   sending,
+  replyTarget,
   onDraft,
   onFiles,
   onRemoveAttachment,
   onSend,
   onStop,
+  onCancelReply,
   onAgent,
   onModel,
   onEffort,
@@ -770,6 +775,13 @@ function Composer({
     node.rows = next;
     setRows(next);
   }, [draft]);
+
+  /* API reply: clicking Reply sets a target and focuses the composer input. */
+  useEffect(() => {
+    if (replyTarget) {
+      inputRef.current?.focus();
+    }
+  }, [replyTarget]);
 
   const agentEntry = agents.find((entry) => entry.name === agent) || null;
   const agentModel = agentEntry && agentEntry.model ? agentEntry.model : "";
@@ -935,6 +947,11 @@ function Composer({
   }
 
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape" && replyTarget) {
+      event.preventDefault();
+      onCancelReply();
+      return;
+    }
     if (readOnly || questionOpen || turnRunning) {
       return;
     }
@@ -952,6 +969,9 @@ function Composer({
         </p>
       ) : null}
       <div className="cbox">
+        {replyTarget ? (
+          <ReplyChip target={replyTarget} onCancel={onCancelReply} />
+        ) : null}
         <AttachmentChips items={attachments} onRemove={onRemoveAttachment} />
         {(attachmentNotice || uploading) ? (
           <p className="composer-status" role="status">
@@ -1427,6 +1447,8 @@ export function SessionPage({ id, view }: SessionPageProps) {
   const [holder, setHolder] = useState("none");
   const [holderPid, setHolderPid] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
+  /* API reply: the automation message the next send replies to. */
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [continueBusy, setContinueBusy] = useState(false);
@@ -1888,6 +1910,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
     lastRunningRef.current = false;
     lastHolderRef.current = null;
     stickRef.current = true;
+    setReplyTarget(null);
 
     Promise.all([getSession(id), listEvents(id, 0)])
       .then(([session, page]) => {
@@ -2330,10 +2353,14 @@ export function SessionPage({ id, view }: SessionPageProps) {
         paths = uploaded.map((item) => item.path);
         setUploading(false);
       }
-      const result =
-        paths.length > 0
+      const result = replyTarget
+        ? await sendMessageRequest(id, text, paths, replyTarget.seq)
+        : paths.length > 0
           ? await sendMessageRequest(id, text, paths)
           : await sendMessageRequest(id, text);
+      /* API reply: a successful send clears the target; the stored message now
+         carries its own reply_to. */
+      setReplyTarget(null);
       if (result.command) {
         /* API-WF-021: a workflow chat command started a run, not a turn. */
         pendingRef.current = "";
@@ -2605,6 +2632,11 @@ export function SessionPage({ id, view }: SessionPageProps) {
     }, 0);
   }, []);
 
+  /* API reply: the Reply action of a sourced message sets the composer target. */
+  const handleReply = useCallback((target: ReplyTarget) => {
+    setReplyTarget(target);
+  }, []);
+
   if (loading) {
     return (
       <main id="main" className="chat-view chat-state">
@@ -2814,6 +2846,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
                   text={item.text}
                   continue={item.continue === true}
                   attachments={storedAttachments(id, item.attachments)}
+                  replyTo={item.replyTo || null}
                 />
               ) : (
                 <TurnBlock
@@ -2821,6 +2854,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
                   turn={item.turn}
                   agent={agent}
                   team={team}
+                  onReply={readOnly ? null : handleReply}
                   rootEvents={turnEvents.get(item.turn.id) || []}
                   childEvents={childEvents}
                   childLive={childLive}
@@ -2907,11 +2941,13 @@ export function SessionPage({ id, view }: SessionPageProps) {
             turnRunning={turnRunning}
             cancelling={cancelling}
             sending={sending}
+            replyTarget={replyTarget}
             onDraft={setDraft}
             onFiles={attachmentDraft.addFiles}
             onRemoveAttachment={attachmentDraft.remove}
             onSend={sendMessage}
             onStop={cancelTurn}
+            onCancelReply={() => setReplyTarget(null)}
             onAgent={changeAgent}
             onModel={changeModel}
             onEffort={changeEffort}

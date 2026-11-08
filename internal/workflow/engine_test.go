@@ -168,9 +168,9 @@ func (n *noticeLog) notify(_ context.Context, nt Notice) {
 	n.mu.Unlock()
 }
 
-func (n *noticeLog) sendOwner(_ context.Context, text string) error {
+func (n *noticeLog) sendMessage(_ context.Context, req MessageRequest) error {
 	n.mu.Lock()
-	n.sent = append(n.sent, text)
+	n.sent = append(n.sent, req.Text)
 	n.mu.Unlock()
 	return nil
 }
@@ -325,6 +325,38 @@ func hasLog(logs []string, line string) bool {
 		}
 	}
 	return false
+}
+
+// ---- paramString ----------------------------------------------------------
+
+// TestParamString covers a string, a node output map, a map without a primary
+// text key, a list and nil.
+func TestParamString(t *testing.T) {
+	params := map[string]any{
+		"s":     "hi",
+		"agent": map[string]any{"text": "the answer"},
+		"fetch": map[string]any{"url": "u", "markdown": "md"},
+		"trap":  map[string]any{"count": 1.0},
+		"list":  []any{"a", "b"},
+		"nil":   nil,
+	}
+	cases := []struct {
+		key  string
+		want string
+	}{
+		{"s", "hi"},
+		{"agent", "the answer"},
+		{"fetch", "md"},
+		{"trap", `{"count":1}`},
+		{"list", `["a","b"]`},
+		{"nil", ""},
+		{"missing", ""},
+	}
+	for _, tc := range cases {
+		if got := paramString(params, tc.key); got != tc.want {
+			t.Fatalf("paramString(%q) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
 }
 
 // ---- AC-WF-006 ------------------------------------------------------------
@@ -760,7 +792,7 @@ func TestEngineResumeSkipsFinishedNodes(t *testing.T) {
 	}
 
 	notices := &noticeLog{}
-	eng := testEngine(st, deps, EngineOptions{SendOwner: notices.sendOwner, Notify: notices.notify})
+	eng := testEngine(st, deps, EngineOptions{SendMessage: notices.sendMessage, Notify: notices.notify})
 	eng.Launch(ctx, run.ID)
 	eng.Wait()
 

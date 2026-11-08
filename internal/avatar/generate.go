@@ -75,7 +75,7 @@ func signed(rng *rand.Rand, lo, hi float64) float64 {
 }
 
 // drawBody builds the body in a local frame, then scales it so it fills
-// 74–86% of the box and centers it.
+// 87–95% of the box and centers it, keeping the fitted box inside [1, 99].
 func drawBody(family string, rng *rand.Rand) body {
 	var b body
 	sx, sy, tilt := 1.0, 1.0, 0.0
@@ -125,10 +125,13 @@ func drawBody(family string, rng *rand.Rand) body {
 	b = transformBody(b, sx, sy, tilt, 1, 0, 0)
 	box := pathBox(b.cmds)
 	size := math.Max(box[2]-box[0], box[3]-box[1])
-	target := uniform(rng, 76, 86)
+	target := uniform(rng, 87, 95)
 	s := target / size
-	tx := 50 + uniform(rng, -1.5, 1.5) - s*(box[0]+box[2])/2
-	ty := 50 + uniform(rng, -1, 2) - s*(box[1]+box[3])/2
+	cx := 50 + uniform(rng, -1.5, 1.5)
+	cy := 50 + uniform(rng, -1, 2)
+	// Clamp the translation so the fitted box stays inside [1, 99].
+	tx := clamp(cx-s*(box[0]+box[2])/2, 1-s*box[0], 99-s*box[2])
+	ty := clamp(cy-s*(box[1]+box[3])/2, 1-s*box[1], 99-s*box[3])
 	b = transformBody(b, 1, 1, 0, s, tx, ty)
 	b.size = target
 	return b
@@ -219,16 +222,20 @@ func roundedPolygon(k int, apothem, cornerR, edgeR, vertexDeg float64) body {
 	step := 360 / float64(k)
 	half := math.Pi / float64(k)
 	if cornerR >= apothem {
-		// A circle of radius apothem.
+		// A circle of radius apothem, drawn as four quarter arcs so the
+		// rounded path stays well-conditioned (a two-arc circle loses
+		// up to a unit of its box when the arcs are rounded).
 		r := apothem
-		top, bottom := [2]float64{0, -r}, [2]float64{0, r}
 		origin := [2]float64{0, 0}
-		cmds := []pathCmd{
-			{op: 'M', args: []float64{top[0], top[1]}},
-			arcTo(origin, r, top, bottom, [2]float64{r, 0}),
-			arcTo(origin, r, bottom, top, [2]float64{-r, 0}),
-			{op: 'Z'},
+		pts := make([][2]float64, 4)
+		for i := range pts {
+			pts[i] = polar(r, float64(90*i))
 		}
+		cmds := []pathCmd{{op: 'M', args: []float64{pts[0][0], pts[0][1]}}}
+		for i := 0; i < 4; i++ {
+			cmds = append(cmds, arcTo(origin, r, pts[i], pts[(i+1)%4], polar(r, float64(90*i)+45)))
+		}
+		cmds = append(cmds, pathCmd{op: 'Z'})
 		return body{cmds: cmds, fr: r * 0.86}
 	}
 	// The corner circle center sits on the vertex ray at distance d with

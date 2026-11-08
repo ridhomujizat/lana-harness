@@ -37,7 +37,16 @@ describe("markdown", () => {
     expect(document.querySelector(".md-code-text")?.textContent).toBe(
       "lana daemon"
     );
-    expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
+  });
+
+  it("omits the header row for a block without a language", () => {
+    render(<Markdown text={"```\nplain text\n```"} />);
+    expect(document.querySelector(".md-code-head")).toBeNull();
+    expect(document.querySelector(".md-code-text")?.textContent).toBe(
+      "plain text"
+    );
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
   });
 
   it("renders a table", () => {

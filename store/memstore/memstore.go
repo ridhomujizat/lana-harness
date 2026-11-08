@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -403,6 +404,9 @@ func (s *Store) List(ctx context.Context, filter core.SessionFilter) ([]core.Ses
 			continue
 		}
 		if filter.Agent != "" && info.Agent != filter.Agent {
+			continue
+		}
+		if len(filter.ExcludeChannels) > 0 && slices.Contains(filter.ExcludeChannels, info.Channel) {
 			continue
 		}
 		if filter.TopLevelOnly && info.ParentSessionID != "" {

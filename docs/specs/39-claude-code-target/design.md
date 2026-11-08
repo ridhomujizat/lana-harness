@@ -42,9 +42,12 @@ sequenceDiagram
   builder used by native turns is reused to produce `AppendSystemPrompt`; a hash of it triggers a process
   restart with `--resume`. Knowledge recall prepended to the input like native turns.
 - **runtime/claudecode** — `RuntimeConfig` gains `AppendSystemPrompt`, `MCPConfig` (JSON string); args add
-  `--append-system-prompt` and `--mcp-config` (not `--strict-mcp-config`, so the owner's own Claude MCP
-  servers still load). `RunTurn` returns a typed `EarlyError` when it fails before the first content event
-  (and treats `rate_limit_event` status `rejected` before output as early).
+  `--append-system-prompt`, `--mcp-config`, and (2026-11-08, REQ-CCT-006) `--strict-mcp-config` and
+  `--setting-sources project,local`, and the child env pins `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+  `ENABLE_CLAUDEAI_MCP_SERVERS=false`, so Claude sees only lana's MCP server and the agent's workspace
+  settings (the owner's own Claude MCP servers and user settings no longer load; the agent workspace's own
+  project settings still do). `RunTurn` returns a typed `EarlyError` when it fails before the first content
+  event (and treats `rate_limit_event` status `rejected` before output as early).
 - **mcphost** (new library package `internal/mcphost` or `runtime/mcphost`, imports core + internal +
   the MCP go-sdk already in go.mod) — one loopback listener per lana Runtime, started lazily on the first
   Claude Code turn; per-session tokens (`crypto/rand`, 32 bytes) registered for the life of the Claude

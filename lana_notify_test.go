@@ -83,7 +83,7 @@ func TestNotificationsReplyOfWebTurn(t *testing.T) {
 	if !ok {
 		t.Fatal("no reply notification for a web turn")
 	}
-	if e.Title != "coder · Bug hunt" || e.Body != "Here is the fix: [code] See PR." || e.SessionID != web.ID || e.URL != "#/sessions/"+web.ID || e.Thread != web.ID {
+	if e.Title != "coder · Bug hunt" || e.Body != "Here is the fix: [code] See PR." || e.SessionID != web.ID || e.URL != "#/chats/coder" || e.Thread != web.ID {
 		t.Fatalf("reply = %+v", e)
 	}
 
@@ -286,5 +286,63 @@ func TestWorkflowRunNotifier(t *testing.T) {
 	set(guard, workflow.Decision{ID: "d2", Kind: "guardian", Status: "pending", Reason: "Retry with a smaller page?"})
 	if e := next(); e.Kind != notify.KindWorkflowWaiting || e.ApprovalID != "" {
 		t.Fatalf("guardian waiting = %+v", e)
+	}
+}
+
+func TestWorkflowFinishedShowsLastMessage(t *testing.T) {
+	start := time.UnixMilli(1_700_000_000_000)
+	source := &fakeRunSource{
+		runs:      map[string]workflow.RunDetail{},
+		workflows: map[string]workflow.Detail{"wf1": {Workflow: workflow.Workflow{ID: "wf1", Name: "Daily digest"}}},
+	}
+	bus := notify.NewBus()
+	_, events, cancel := bus.Subscribe("")
+	defer cancel()
+	n := newWorkflowRunNotifier(bus, source, start)
+	ctx := context.Background()
+	next := func() notify.Event {
+		select {
+		case e := <-events:
+			return e
+		case <-time.After(time.Second):
+			t.Fatal("no notification")
+			return notify.Event{}
+		}
+	}
+	succeeded := func(id string, nodes ...workflow.NodeRun) notify.Event {
+		run := workflow.Run{
+			ID: id, WorkflowID: "wf1", Number: 4, Trigger: "manual",
+			Status: workflow.RunSucceeded, Summary: "3 nodes ok",
+			StartedAt: start.UnixMilli() - 60_000, EndedAt: start.UnixMilli() + 1000,
+		}
+		source.runs[id] = workflow.RunDetail{Run: run, Nodes: nodes}
+		n.handle(ctx, workflow.Change{WorkflowID: "wf1", RunID: id})
+		return next()
+	}
+
+	e := succeeded("r1", workflow.NodeRun{
+		NodeID: "msg", Status: workflow.NodeSucceeded,
+		Output:  json.RawMessage(`{"sent":true,"text":"Top repo: foo/bar"}`),
+		EndedAt: start.UnixMilli() + 1000,
+	})
+	if e.Kind != notify.KindWorkflowFinished || e.Body != "Top repo: foo/bar" {
+		t.Fatalf("message run = %+v", e)
+	}
+
+	e = succeeded("r2",
+		workflow.NodeRun{NodeID: "a", Status: workflow.NodeSucceeded, Output: json.RawMessage(`{"text":"First message"}`), EndedAt: start.UnixMilli() + 1000},
+		workflow.NodeRun{NodeID: "b", Status: workflow.NodeSucceeded, Output: json.RawMessage(`{"text":""}`), EndedAt: start.UnixMilli() + 2000},
+	)
+	if e.Kind != notify.KindWorkflowFinished || e.Body != "First message" {
+		t.Fatalf("fallback run = %+v", e)
+	}
+
+	e = succeeded("r3", workflow.NodeRun{
+		NodeID: "bash", Status: workflow.NodeSucceeded,
+		Output:  json.RawMessage(`{"exit_code":0,"output":""}`),
+		EndedAt: start.UnixMilli() + 1000,
+	})
+	if e.Kind != notify.KindWorkflowFinished || e.Body != "3 nodes ok" {
+		t.Fatalf("no-text run = %+v", e)
 	}
 }

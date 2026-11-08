@@ -1,6 +1,7 @@
 import { queryString, request } from "./client";
 import { rememberAvatar, rememberAvatars } from "../lib/avatar-store";
 import type { WorkflowCommandReply } from "./turns";
+import { watchVisibility } from "./visibility";
 
 /* Room calls of API-ROOM-001 to API-ROOM-005 and API-ROOM-008. Types are
    written by hand from the Go JSON structs. */
@@ -130,6 +131,8 @@ export interface SendRoomRequest {
   text: string;
   attachments?: string[];
   new_topic?: boolean;
+  /* API-ROOM-003: the seq of the automation message this send replies to. */
+  reply_to?: number;
 }
 
 export interface SendRoomResponse {
@@ -177,6 +180,9 @@ export function sendToRoom(
   if (body.new_topic) {
     payload.new_topic = true;
   }
+  if (body.reply_to && body.reply_to > 0) {
+    payload.reply_to = body.reply_to;
+  }
   return request<SendRoomResponse>(
     "POST",
     "/v1/rooms/" + encodeURIComponent(name) + "/messages",
@@ -220,8 +226,23 @@ export function openRoomsStream(handlers: RoomsStreamHandlers): RoomsStream {
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /* A hidden tab releases its connection; the server sends a fresh `rooms`
+     snapshot on the next connect, so the list is complete when it returns. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      void connect();
+    },
+  });
+
   function scheduleReconnect(): void {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     if (handlers.onState) {
@@ -307,7 +328,7 @@ export function openRoomsStream(handlers: RoomsStreamHandlers): RoomsStream {
         }
       }
     } catch {
-      if (!closed && handlers.onState) {
+      if (!closed && !visibility.blocked() && handlers.onState) {
         handlers.onState(false);
       }
     } finally {
@@ -323,7 +344,7 @@ export function openRoomsStream(handlers: RoomsStreamHandlers): RoomsStream {
   }
 
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -356,6 +377,7 @@ export function openRoomsStream(handlers: RoomsStreamHandlers): RoomsStream {
   return {
     close() {
       closed = true;
+      visibility.close();
       if (retryTimer !== null) {
         clearTimeout(retryTimer);
         retryTimer = null;

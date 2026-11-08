@@ -107,7 +107,9 @@ export function WorkflowSettings({
     loadState();
   }, [loadState]);
   useWorkflowStream((change) => {
-    if (change.workflow_id === workflow.id && change.run_id) {
+    /* A refresh arrives when the stream reconnects after a hidden pause: the
+       changes made while the tab was gone were missed. */
+    if (change.refresh || (change.workflow_id === workflow.id && change.run_id)) {
       loadState();
     }
   });

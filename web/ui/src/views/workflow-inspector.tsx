@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import type { Graph, NodeRun, WfNode } from "../api/workflows";
-import { getRun, listRuns } from "../api/workflows";
+import type { Graph, MessageChannel, NodeRun, WfNode } from "../api/workflows";
+import { getRun, getWorkflowChannels, listRuns } from "../api/workflows";
+import { errorMessage } from "../api/client";
 import { Ic } from "../ui/icons";
 import {
   Button,
+  Checkbox,
   Field,
   Input,
   Select,
@@ -11,7 +13,7 @@ import {
   Textarea,
   Toggle,
 } from "../ui/gr8r";
-import { nodeMeta } from "./workflow-catalog";
+import { messageChannelIds, nodeMeta } from "./workflow-catalog";
 import type { FieldSpec } from "./workflow-catalog";
 import { prettyValue } from "./workflow-common";
 import { agentOptionIcon } from "./agent-avatar";
@@ -159,6 +161,108 @@ function ToolsField({
   );
 }
 
+/* The Message node's "Send to" checklist (spec #33). The channel list is read
+   once from the endpoint; an old node without a channels param starts on the
+   run-time default (telegram) and the first change writes the explicit list.
+   A selected channel that needs an agent reveals the agent picker, and at
+   least one channel must stay selected. */
+function MessageChannelsField({
+  node,
+  agents,
+  set,
+}: {
+  node: WfNode;
+  agents: string[];
+  set: (name: string, value: unknown) => void;
+}) {
+  const [channels, setChannels] = useState<MessageChannel[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    getWorkflowChannels()
+      .then((list) => {
+        if (live) {
+          setChannels(list);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (live) {
+          setError(errorMessage(failure));
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const selected = messageChannelIds(node.params);
+  const agent = typeof node.params.agent === "string" ? node.params.agent : "";
+  const rows = channels || [];
+  const needsAgent = rows.filter(
+    (channel) => selected.includes(channel.id) && channel.needs_agent
+  );
+
+  const toggle = (id: string, checked: boolean) => {
+    let next = selected.filter((value) => value !== id);
+    if (checked) {
+      next = next.concat([id]);
+    }
+    if (next.length === 0) {
+      return;
+    }
+    const order = rows.map((channel) => channel.id);
+    next.sort((left, right) => order.indexOf(left) - order.indexOf(right));
+    set("channels", next);
+  };
+
+  return (
+    <>
+      <Field label="Send to">
+        <div className="wf-channels">
+          {rows.map((channel) => {
+            const checked = selected.includes(channel.id);
+            const disabled =
+              (!channel.available && !checked) ||
+              (checked && selected.length === 1);
+            return (
+              <div className="wf-channel" key={channel.id}>
+                <label className="wf-channel-row">
+                  <Checkbox
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(nextChecked) => toggle(channel.id, nextChecked)}
+                  />
+                  <span>{channel.label}</span>
+                </label>
+                {!channel.available && channel.reason ? (
+                  <span className="wf-channel-why muted">{channel.reason}</span>
+                ) : null}
+              </div>
+            );
+          })}
+          {error ? <span className="wf-field-err">{error}</span> : null}
+        </div>
+      </Field>
+      {needsAgent.length > 0 ? (
+        <Field
+          label="Agent"
+          hint="The channel posts as this agent."
+          error={agent ? undefined : "Pick an agent for " + needsAgent[0]!.label + "."}
+          htmlFor={"wf-f-" + node.id + "-agent"}
+        >
+          <Select
+            id={"wf-f-" + node.id + "-agent"}
+            value={agent}
+            placeholder="Pick a bot"
+            options={agents.map((name) => ({ value: name, label: name, icon: agentOptionIcon(name) }))}
+            onChange={(next) => set("agent", next || undefined)}
+          />
+        </Field>
+      ) : null}
+    </>
+  );
+}
+
 function ParamField({
   spec,
   node,
@@ -170,6 +274,9 @@ function ParamField({
   agents: string[];
   set: (name: string, value: unknown) => void;
 }) {
+  if (spec.kind === "channels") {
+    return <MessageChannelsField node={node} agents={agents} set={set} />;
+  }
   const id = "wf-f-" + node.id + "-" + spec.name;
   const value = node.params[spec.name];
   let control;

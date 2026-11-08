@@ -7,6 +7,39 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.3.0-beta.2] - 2026-11-09
+
+### Added
+- Workflow Message node channels: pick one or more of **Web chat** and **Telegram** (more channels
+  can register later). Web chat posts the message into the chosen agent's chat as that agent, with a
+  "via workflow" label and a desktop notification. Old nodes keep sending to Telegram.
+- **Reply** on a workflow message: workflow messages stay out of the agent's context until you reply
+  to one; the reply carries the quoted message, so the agent knows what you mean.
+- `GET /v1/workflows/channels` lists the Message node channels and whether each is available.
+- Lana favicon for the dashboard tab.
+
+### Changed
+- Workflow notifications show the run's last message instead of "N nodes ok", and a reply
+  notification opens the agent's chat page.
+- Generated avatars draw the body about 15% larger.
+- Agents on Claude Code run isolated from your own Claude Code setup: no personal hooks, plugins,
+  claude.ai connectors, auto-memory, or global CLAUDE.md. The lana tools note lists only the tools
+  the agent has.
+- Workflow edges are deleted from a button on the hovered edge; code blocks have an icon-only copy
+  button.
+- The calendar Day view stacks short entries in one column, grows busy hours, and merges nearby runs
+  of one workflow into one card.
+
+### Fixed
+- The dashboard no longer hangs after several notification clicks: hidden tabs release their
+  streams, so the browser's six-connection limit is not used up.
+- Selects and menus inside dialogs (for example Create agent → Model) open above the dialog and can
+  be scrolled and clicked.
+- `{{ nodes.<id>.output }}` inside text renders the node's text instead of JSON.
+- Edges with empty ids no longer all show a delete button or get deleted together.
+- Switching the calendar's week start no longer shows an empty day until a refresh.
+- Workflow sessions no longer show up in the agent's chat.
+
 ## [0.3.0-beta.1] - 2026-11-08
 
 ### Added

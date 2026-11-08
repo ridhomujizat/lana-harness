@@ -323,3 +323,48 @@ describe("Last message change (BUG 2)", () => {
     });
   });
 });
+
+/* API reply: replying to a workflow message threads reply_to on the room send
+   and clears the chip after a successful send. */
+describe("Reply to a workflow message (API reply)", () => {
+  it("sends reply_to and clears the chip", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [
+        ev(1, "assistant/message", "t1", {
+          content: [{ type: "text", text: "Your brief is ready." }],
+          source: "workflow",
+          source_name: "Daily brief",
+        }),
+        ev(2, "turn/end", "t1", { reason: "end_turn" }),
+      ],
+      last_seq: 2,
+    });
+    installRows([room({ name: "dana" })]);
+
+    render(<ChatsPage roomName="dana" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reply to Daily brief" })
+    );
+    expect(await screen.findByText("Replying to workflow Daily brief")).toBeTruthy();
+
+    const input = (await screen.findByLabelText(
+      "Message dana"
+    )) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "thanks" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(sendToRoom)).toHaveBeenCalledWith(
+        "dana",
+        expect.objectContaining({ text: "thanks", reply_to: 1 })
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Replying to workflow Daily brief")).toBeNull();
+    });
+  });
+});

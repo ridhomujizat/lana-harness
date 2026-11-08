@@ -117,6 +117,7 @@ var (
 	ErrEmptyPrompt     = errors.New("prompt is empty")
 	ErrNoRoute         = errors.New("library route not found")
 	ErrUnknownAgent    = agent.ErrUnknownAgent
+	ErrEmptyText       = agent.ErrEmptyText
 	ErrSessionBusy     = agent.ErrSessionBusy
 	ErrSessionNotFound = agent.ErrSessionNotFound
 	ErrClosed          = agent.ErrClosed
@@ -140,6 +141,10 @@ var (
 	// session store does not implement core.AgentEventCounter or
 	// core.RoomReadStore (REQ-ROOM-002, REQ-ROOM-005).
 	ErrRoomStoreUnsupported = errors.New("session store does not support room queries")
+	// ErrInvalidReplyTo refuses a send whose reply_to does not name an
+	// automation message in the session's chain. Its text is the user-facing
+	// message.
+	ErrInvalidReplyTo = errors.New("reply_to must point at an automation message in this chat")
 )
 
 // ProviderError is an alias for core.ProviderError.
@@ -470,6 +475,13 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	rt.workflows = workflow.NewService(wfStore, rt.WorkflowDeps(),
 		workflow.WithSessionCheck(rt.IsWorkflowSession),
 		workflow.WithLogger(slog.Default()))
+	// Spec #33: the Message node's "web" channel posts into the agent's web
+	// chat, so a workflow report lands where the owner reads the agent. It is
+	// always available.
+	rt.workflows.RegisterChannel("web", "Web chat", true, func(ctx context.Context, req workflow.MessageRequest) error {
+		_, err := rt.PostAgentMessage(ctx, req.Agent, req.Text, "workflow", req.WorkflowName)
+		return err
+	}, nil)
 	// Spec #35: the calendar service shares the session store when it
 	// implements calendar.Store and reads workflow slots and runs from wfStore.
 	rt.newCalendar(wfStore)
@@ -786,6 +798,11 @@ type Request struct {
 	// the message (API-ATT-006, REQ-ATT-008). Each must be a file under the
 	// session workspace's attachments/ directory.
 	Attachments []string
+	// ReplyTo names the seq of an automation message (an assistant/message
+	// with a source) in the session's chain that the prompt replies to; 0 means
+	// an ordinary message. An invalid value fails the send with
+	// ErrInvalidReplyTo.
+	ReplyTo int64
 }
 
 // Usage is the token count of one turn.
@@ -834,7 +851,11 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{Model: rt.turnModel(ctx, "", "", agentName)}, err
 	}
-	turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt, req.Attachments...)
+	reply, err := rt.resolveReplyRef(ctx, info.ID, req.ReplyTo)
+	if err != nil {
+		return Result{SessionID: info.ID, Model: rt.turnModel(ctx, info.ID, "", info.Agent)}, err
+	}
+	turnID, err := rt.registry.StartReply(ctx, info.ID, req.Prompt, reply, req.Attachments...)
 	if err != nil {
 		return Result{SessionID: info.ID, Model: rt.turnModel(ctx, info.ID, "", info.Agent)}, err
 	}
@@ -1043,7 +1064,12 @@ func (rt *Runtime) Stream(ctx context.Context, req Request) iter.Seq2[Event, err
 			yield(nil, err)
 			return
 		}
-		turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt, req.Attachments...)
+		reply, err := rt.resolveReplyRef(ctx, info.ID, req.ReplyTo)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		turnID, err := rt.registry.StartReply(ctx, info.ID, req.Prompt, reply, req.Attachments...)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -1643,10 +1669,22 @@ func (rt *Runtime) TurnActive(sessionID string) bool {
 // message starts or queues a turn (REQ-ATT-008). While draining it refuses the
 // message (REQ-TFB-002, API-TFB-008).
 func (rt *Runtime) Send(ctx context.Context, sessionID, text string, attachments ...string) error {
+	return rt.SendReply(ctx, sessionID, text, 0, attachments...)
+}
+
+// SendReply is Send with a reply_to: an owner message that replies to the
+// automation message with seq replyTo (REQ-...). replyTo 0 is an ordinary
+// message. A replyTo that does not name an automation message in the session's
+// chain fails with ErrInvalidReplyTo.
+func (rt *Runtime) SendReply(ctx context.Context, sessionID, text string, replyTo int64, attachments ...string) error {
 	if err := rt.closedError(); err != nil {
 		return err
 	}
 	if err := rt.drainError(); err != nil {
+		return err
+	}
+	reply, err := rt.ResolveReply(ctx, sessionID, replyTo)
+	if err != nil {
 		return err
 	}
 	if len(attachments) > 0 {
@@ -1658,7 +1696,58 @@ func (rt *Runtime) Send(ctx context.Context, sessionID, text string, attachments
 			return err
 		}
 	}
-	return rt.registry.SendWithAttachments(ctx, sessionID, text, attachments...)
+	return rt.registry.SendReply(ctx, sessionID, text, reply, attachments...)
+}
+
+// ResolveReply resolves the automation message a reply_to names. seq 0 returns
+// nil (an ordinary message). A seq that does not name an assistant/message
+// event with a source in the session's chain returns ErrInvalidReplyTo.
+func (rt *Runtime) ResolveReply(ctx context.Context, sessionID string, seq int64) (*core.ReplyRef, error) {
+	if seq <= 0 {
+		return nil, nil
+	}
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	info, err := rt.SessionInfo(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return rt.resolveReplyRef(ctx, info.ID, seq)
+}
+
+// resolveReplyRef builds the ReplyRef of a reply_to from the session's chain
+// (the session id is already resolved).
+func (rt *Runtime) resolveReplyRef(ctx context.Context, sessionID string, seq int64) (*core.ReplyRef, error) {
+	if seq <= 0 {
+		return nil, nil
+	}
+	chain, err := rt.store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, event := range chain {
+		if event.Seq != seq {
+			continue
+		}
+		if event.Kind != core.KindAssistantMessage {
+			return nil, ErrInvalidReplyTo
+		}
+		var msg core.AssistantMessage
+		if err := json.Unmarshal(event.Payload, &msg); err != nil {
+			return nil, err
+		}
+		if msg.Source == "" {
+			return nil, ErrInvalidReplyTo
+		}
+		return &core.ReplyRef{
+			Seq:        seq,
+			Source:     msg.Source,
+			SourceName: msg.SourceName,
+			Text:       core.ReplyQuoteText(core.TextContent(msg.Content)),
+		}, nil
+	}
+	return nil, ErrInvalidReplyTo
 }
 
 // Cancel cancels the turn that is currently running.

@@ -455,7 +455,22 @@
   transform-origin: top left;
   max-height: min(420px, 70vh);
   overflow-y: auto;
+  /* A wheel at the end of the list must not scroll the page or dialog
+     underneath, which would move the anchor out from under the menu. */
+  overscroll-behavior: contain;
   font-size: var(--fs);
+}
+/* The menus ride the HTML Popover API so they sit in the top layer above an
+   open modal <dialog>. Reset the user-agent popover box so they look exactly
+   as before. */
+.pop[popover] {
+  inset: auto;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  overflow-y: auto;
+  color: inherit;
+  background: var(--surface);
 }
 @keyframes popIn {
   from {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -46,6 +47,10 @@ type fakeWebBackend struct {
 	sentAttachments map[string][]string
 	// sentText records every text accepted by Send per session (REQ-ROOM-003).
 	sentText map[string][]string
+	// sentReplyTo records the reply_to of the last Send per session.
+	sentReplyTo map[string]int64
+	// replyErr forces a Send error per session, for the reply_to mapping.
+	replyErr map[string]error
 	// sentNotes records the last runtime note per session (REQ-ROOM-008).
 	sentNotes map[string]string
 	// roomReads holds the room read marks (REQ-ROOM-005).
@@ -75,6 +80,8 @@ func newFakeWebBackend() *fakeWebBackend {
 		continueErr:     map[string]error{},
 		sentAttachments: map[string][]string{},
 		sentText:        map[string][]string{},
+		sentReplyTo:     map[string]int64{},
+		replyErr:        map[string]error{},
 		sentNotes:       map[string]string{},
 		roomReads:       map[string]int64{},
 		attachmentPaths: map[string]string{},
@@ -303,7 +310,7 @@ func (f *fakeWebBackend) leaseError(sessionID string) error {
 	return nil
 }
 
-func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string, attachments []string) (SendResult, error) {
+func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string, attachments []string, replyTo int64) (SendResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.find(sessionID); !ok {
@@ -312,8 +319,12 @@ func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string, attachm
 	if err := f.leaseError(sessionID); err != nil {
 		return SendResult{}, err
 	}
+	if err := f.replyErr[sessionID]; err != nil {
+		return SendResult{}, err
+	}
 	f.sentAttachments[sessionID] = append([]string(nil), attachments...)
 	f.sentText[sessionID] = append(f.sentText[sessionID], text)
+	f.sentReplyTo[sessionID] = replyTo
 	if f.turnActive[sessionID] {
 		f.inbox[sessionID] = append(f.inbox[sessionID], text)
 		return SendResult{Turn: "queued"}, nil
@@ -324,11 +335,11 @@ func (f *fakeWebBackend) Send(_ context.Context, sessionID, text string, attachm
 
 // SendNote implements the optional noteSender extension (API-ROOM-003,
 // REQ-ROOM-008): it records the runtime note and then sends the message.
-func (f *fakeWebBackend) SendNote(ctx context.Context, sessionID, text string, attachments []string, note string) (SendResult, error) {
+func (f *fakeWebBackend) SendNote(ctx context.Context, sessionID, text string, attachments []string, replyTo int64, note string) (SendResult, error) {
 	f.mu.Lock()
 	f.sentNotes[sessionID] = note
 	f.mu.Unlock()
-	return f.Send(ctx, sessionID, text, attachments)
+	return f.Send(ctx, sessionID, text, attachments, replyTo)
 }
 
 // SaveAttachment records the uploaded bytes and returns an Info with a fixed
@@ -614,6 +625,9 @@ func (f *fakeWebBackend) ListAgentSessions(_ context.Context, filter core.Sessio
 			continue
 		}
 		if filter.Channel != "" && info.Channel != filter.Channel {
+			continue
+		}
+		if len(filter.ExcludeChannels) > 0 && slices.Contains(filter.ExcludeChannels, info.Channel) {
 			continue
 		}
 		if filter.Address != "" && info.Address != filter.Address {

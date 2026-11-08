@@ -16,7 +16,15 @@ import type {
 import { createPortal } from "react-dom";
 import { Ic } from "../icons";
 import { FieldContext } from "./primitives";
-import { cn, placeAnchored } from "./util";
+import {
+  cn,
+  hidePopover,
+  overlayContainer,
+  placeAnchored,
+  showPopover,
+  trackAnchor,
+  useEscapeGuard,
+} from "./util";
 
 /* Gr8r renders every dropdown as a button + .pop menu instead of the browser's
    native list (ui/select.js). This port follows the WAI-ARIA select-only
@@ -77,6 +85,9 @@ export function Select({
   ...rest
 }: SelectProps) {
   const [open, setOpen] = useState(false);
+  /* Where the menu is portaled: the open dialog holding the trigger, else
+     <body>. Chosen when the menu opens. */
+  const [host, setHost] = useState<HTMLElement | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const typeahead = useRef({ query: "", at: 0 });
@@ -84,21 +95,32 @@ export function Select({
   const menuId = "select-menu-" + useId().replace(/[^A-Za-z0-9_-]/g, "");
   const selected = options.find((option) => option.value === value);
   const label = selected ? selected.label : placeholder ?? "";
+  const escapeGuardRef = useEscapeGuard();
 
   const optionEls = (menu: HTMLElement) =>
     Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="option"]'));
 
-  /* Place the popup and move focus to the current option when it opens. */
+  /* Show the menu in the top layer, place it under the trigger and move focus
+     to the current option when it opens. */
   useLayoutEffect(() => {
-    if (!open || !menuRef.current || !btnRef.current) {
-      return;
+    const menu = menuRef.current;
+    const anchor = btnRef.current;
+    if (!open || !menu || !anchor) {
+      return undefined;
     }
-    placeAnchored(menuRef.current, btnRef.current);
-    const items = optionEls(menuRef.current);
+    showPopover(menu);
+    placeAnchored(menu, anchor);
+    const items = optionEls(menu);
     const preferred =
       items.find((item) => item.getAttribute("aria-selected") === "true") ||
       items[0];
     preferred?.focus({ preventScroll: true });
+
+    const untrack = trackAnchor(menu, () => placeAnchored(menu, anchor));
+    return () => {
+      untrack();
+      hidePopover(menu);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -136,6 +158,7 @@ export function Select({
 
   function openMenu() {
     if (!disabled) {
+      setHost(overlayContainer(btnRef.current));
       setOpen(true);
     }
   }
@@ -146,6 +169,7 @@ export function Select({
       event.preventDefault();
       openMenu();
     } else if (key === "Escape" && open) {
+      escapeGuardRef.current = true;
       event.preventDefault();
       close(true);
     }
@@ -182,6 +206,7 @@ export function Select({
         pick(option.dataset.value);
       }
     } else if (key === "Escape") {
+      escapeGuardRef.current = true;
       event.preventDefault();
       close(true);
     } else if (key === "Tab") {
@@ -239,13 +264,14 @@ export function Select({
         <span className="trunc grow">{label}</span>
         <Ic name="chevron-down" size={size === "sm" ? 13 : 14} />
       </button>
-      {open
+      {open && host
         ? createPortal(
             <div
               ref={menuRef}
               id={menuId}
               className="pop select-menu enter"
               role="listbox"
+              popover="manual"
               style={{ left: 0, top: 0 }}
               onKeyDown={handleMenuKeyDown}
             >
@@ -283,7 +309,7 @@ export function Select({
                 );
               })}
             </div>,
-            document.body
+            host
           )
         : null}
     </>

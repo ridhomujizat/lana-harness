@@ -3,6 +3,7 @@ package lana
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -285,8 +286,64 @@ func (n *workflowRunNotifier) handle(ctx context.Context, change workflow.Change
 
 	switch run.Status {
 	case workflow.RunSucceeded:
+		if msg := lastRunMessage(detail.Nodes); msg != "" {
+			info.Summary = msg
+		}
 		n.bus.Publish(notify.WorkflowFinished(info))
 	case workflow.RunFailed:
 		n.bus.Publish(notify.WorkflowFailed(info))
 	}
+}
+
+// lastRunMessage returns a short text from the last successful output of a run,
+// so a "Workflow done" banner shows the run's final message instead of just
+// "N nodes ok". It considers succeeded and fallback rows with a non-empty
+// output, ordered by EndedAt descending (ties: later in the slice first), and
+// returns the first non-empty string among the text, output, markdown, content
+// and result keys of the output object. It returns "" when there is none.
+func lastRunMessage(nodes []workflow.NodeRun) string {
+	order := make([]int, 0, len(nodes))
+	for i := range nodes {
+		n := nodes[i]
+		if n.Status != workflow.NodeSucceeded && n.Status != workflow.NodeFallback {
+			continue
+		}
+		if len(n.Output) == 0 {
+			continue
+		}
+		order = append(order, i)
+	}
+	sort.Slice(order, func(a, b int) bool {
+		ia, ib := order[a], order[b]
+		if nodes[ia].EndedAt != nodes[ib].EndedAt {
+			return nodes[ia].EndedAt > nodes[ib].EndedAt
+		}
+		return ia > ib
+	})
+	for _, i := range order {
+		if msg := nodeMessage(nodes[i].Output); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// nodeMessage decodes one node output as a JSON object and returns the first
+// non-empty trimmed string among its text, output, markdown, content and result
+// keys. A non-string value is skipped.
+func nodeMessage(out json.RawMessage) string {
+	var obj map[string]any
+	if json.Unmarshal(out, &obj) != nil {
+		return ""
+	}
+	for _, key := range []string{"text", "output", "markdown", "content", "result"} {
+		s, ok := obj[key].(string)
+		if !ok {
+			continue
+		}
+		if s = strings.TrimSpace(s); s != "" {
+			return s
+		}
+	}
+	return ""
 }

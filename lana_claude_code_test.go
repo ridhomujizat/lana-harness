@@ -144,10 +144,16 @@ agent = "bima"
 		startLog[0]["mcp_config_mode"] != "0600" {
 		t.Fatalf("--mcp-config = %q, file = %q mode %v", mcpPath, mcpCfg, startLog[0]["mcp_config_mode"])
 	}
+	// REQ-CCT-006 (owner decision 2026-11-08): the runtime is isolated from the
+	// owner's own Claude Code setup.
+	strict := false
 	for _, a := range argv {
 		if a == "--strict-mcp-config" {
-			t.Fatal("--strict-mcp-config passed")
+			strict = true
 		}
+	}
+	if !strict || argAfter(argv, "--setting-sources") != "project,local" {
+		t.Fatalf("isolation argv = %v", argv)
 	}
 	lists := fakeClaudeLog(t, logPath, "mcp_list")
 	if len(lists) != 1 || lists[0]["error"] != nil || !strings.Contains(strings.ReplaceAll(jsonString(lists[0]["tools"]), " ", ""), `"memory_write"`) ||

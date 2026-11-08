@@ -42,11 +42,24 @@ type Runner struct {
 	externalRT core.AgentRuntime
 }
 
-// inboxItem is one queued owner message: its text and the workspace-relative
-// paths of its attachments (REQ-ATT-002).
+// inboxItem is one queued owner message: its text, the workspace-relative
+// paths of its attachments (REQ-ATT-002), and the automation message it
+// replies to, when it is a reply.
 type inboxItem struct {
 	text        string
 	attachments []string
+	replyTo     *core.ReplyRef
+}
+
+// replyQuoteBlock is the injected text block of a reply: the note naming the
+// automation message the owner replied to, then its quoted text. Being a normal
+// user-message block, it stays in history for later turns.
+func replyQuoteBlock(reply *core.ReplyRef) string {
+	via := reply.Source
+	if reply.SourceName != "" {
+		via = "workflow " + reply.SourceName
+	}
+	return "[The owner is replying to this message you posted via " + via + "]\n" + reply.Text
 }
 
 func (rn *Runner) popInbox() (inboxItem, bool) {
@@ -1142,10 +1155,15 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			}
 			// REQ-LTC-001: the first user message of the turn carries the
 			// <context> block, and a <system-update> when sections changed.
+			// A reply adds the quoted automation message as one more injected
+			// block before the owner's text.
 			if claimed {
 				prefix := []core.ContentBlock{{Kind: core.BlockText, Text: built.context}}
 				if update != "" {
 					prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: update})
+				}
+				if !runtimeNote && claimedItem.replyTo != nil {
+					prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: replyQuoteBlock(claimedItem.replyTo)})
 				}
 				inputMsg.Content = append(prefix, inputMsg.Content...)
 				contextBlocks = len(prefix)
@@ -1154,6 +1172,9 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 		}
 		if claimed {
 			payload := core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content, PromptSections: storedSections, ContextBlocks: contextBlocks, Runtime: runtimeNote}
+			if !runtimeNote && claimedItem.replyTo != nil {
+				payload.ReplyTo = claimedItem.replyTo
+			}
 			if continueMsg {
 				payload.Continue = true
 				payload.ContinueReason = continueReason

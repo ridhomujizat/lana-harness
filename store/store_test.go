@@ -1575,6 +1575,61 @@ func TestListFilterAgentAndBefore(t *testing.T) {
 	}
 }
 
+// REQ-ROOM-002: ExcludeChannels drops sessions on the listed channels, and the
+// Limit applies after the exclusion so a page still returns up to Limit kept
+// sessions.
+func TestListExcludeChannels(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	dana, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	karin, err := s.Create(ctx, core.NewSession{Agent: "karin", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := s.Create(ctx, core.NewSession{Agent: "lana", Channel: "workflow", Address: "wf1", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTimes := func(id string, created, updated int64) {
+		t.Helper()
+		if _, err := s.db.Exec("UPDATE sessions SET created_at = ?, updated_at = ? WHERE id = ?", created, updated, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The workflow session is the most recently active, so it would lead every
+	// page were it not excluded.
+	setTimes(dana.ID, 100, 300)
+	setTimes(karin.ID, 200, 200)
+	setTimes(wf.ID, 300, 400)
+
+	all, err := s.List(ctx, core.SessionFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 || all[0].ID != wf.ID {
+		t.Fatalf("all=%+v want wf=%s first", all, wf.ID)
+	}
+
+	kept, err := s.List(ctx, core.SessionFilter{ExcludeChannels: []string{"workflow"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 2 || kept[0].ID != dana.ID || kept[1].ID != karin.ID {
+		t.Fatalf("kept=%+v want dana=%s karin=%s", kept, dana.ID, karin.ID)
+	}
+
+	limited, err := s.List(ctx, core.SessionFilter{ExcludeChannels: []string{"workflow"}, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 1 || limited[0].ID != dana.ID {
+		t.Fatalf("limited=%+v want dana=%s", limited, dana.ID)
+	}
+}
+
 // REQ-ROOM-002, REQ-ROOM-005: CountAgentEvents counts the events of one agent,
 // counts top-level sessions only on request, filters by kind and by creation
 // time, and returns 0 for an empty kinds slice without querying.
