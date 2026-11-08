@@ -2,6 +2,7 @@ package notify
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,15 @@ const NewChatTitle = "New chat"
 // SessionURL is the dashboard hash of a session page.
 func SessionURL(sessionID string) string {
 	return "#/sessions/" + sessionID
+}
+
+// ChatURL is the dashboard hash of a chat page: "#/chats/{name}" where name is
+// the agent name. An empty agent falls back to the chats list.
+func ChatURL(agent string) string {
+	if strings.TrimSpace(agent) == "" {
+		return "#/chats"
+	}
+	return "#/chats/" + url.PathEscape(agent)
 }
 
 // WorkflowURL is the dashboard hash of a workflow page.
@@ -56,7 +66,8 @@ func WorkflowThread(workflowID, runID string) string {
 }
 
 // Reply is the event of an agent reply: "<agent> · <session title>" over the
-// excerpt of the final assistant text. turnID dedupes the publish.
+// excerpt of the final assistant text. It opens the agent's chat page. turnID
+// dedupes the publish.
 func Reply(agent, sessionTitle, sessionID, turnID, text string) Event {
 	title := strings.TrimSpace(sessionTitle)
 	if title == "" {
@@ -68,7 +79,7 @@ func Reply(agent, sessionTitle, sessionID, turnID, text string) Event {
 		Agent:     agent,
 		Title:     joinTitle(agentLabel(agent), OneLine(title, titlePartMax)),
 		Body:      Excerpt(text, ReplyMax),
-		URL:       SessionURL(sessionID),
+		URL:       ChatURL(agent),
 		Thread:    sessionID,
 		Key:       "reply:" + sessionID + ":" + turnID,
 	}

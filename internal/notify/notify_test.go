@@ -189,7 +189,7 @@ func TestExcerptCutsAtWordWithEllipsis(t *testing.T) {
 
 func TestEventMapping(t *testing.T) {
 	r := Reply("coder", "", "s1", "t1", "**Done** — see [PR](http://x)\n\n```\nlog\n```")
-	if r.Title != "coder · New chat" || r.Body != "Done — see PR [code]" || r.URL != "#/sessions/s1" || r.Thread != "s1" {
+	if r.Title != "coder · New chat" || r.Body != "Done — see PR [code]" || r.URL != "#/chats/coder" || r.Thread != "s1" {
 		t.Fatalf("reply = %+v", r)
 	}
 
@@ -233,6 +233,23 @@ func TestEventMapping(t *testing.T) {
 	}
 	if _, _, ok := ParseWorkflowApprovalID("abc"); ok {
 		t.Fatal("a broker id parsed as a workflow id")
+	}
+}
+
+func TestChatURL(t *testing.T) {
+	cases := []struct{ agent, want string }{
+		{"coder", "#/chats/coder"},
+		{"", "#/chats"},
+		{"   ", "#/chats"},
+		{"my agent/one", "#/chats/my%20agent%2Fone"},
+	}
+	for _, c := range cases {
+		if got := ChatURL(c.agent); got != c.want {
+			t.Errorf("ChatURL(%q) = %q, want %q", c.agent, got, c.want)
+		}
+	}
+	if got := Reply("my agent/one", "t", "s", "turn", "x").URL; got != "#/chats/my%20agent%2Fone" {
+		t.Errorf("reply URL = %q", got)
 	}
 }
 
