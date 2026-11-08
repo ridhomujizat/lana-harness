@@ -359,6 +359,9 @@
   transition: background var(--dur);
   flex-shrink: 0;
   margin: 0;
+  /* Global input rules add a 1px border; the knob is placed inside it, which
+     left 3px of room on the left and top but only 1px on the right and bottom. */
+  border: 0;
 }
 .toggle::after {
   content: '';
