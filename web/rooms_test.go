@@ -375,6 +375,32 @@ func TestRoomSegmentsOrderByLastActivity(t *testing.T) {
 	}
 }
 
+// Bug: a workflow session of an agent belongs to the Workflows page, so it is
+// neither a chat segment nor the room's last message, while its web session is.
+func TestRoomSegmentsExcludeWorkflow(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	wf := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "workflow", Address: "wf1", CreatedAt: 1000, UpdatedAt: 3000})
+	addSessionEvent(t, backend, wf.ID, core.KindUserMessage, core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "Here is the raw content of a scraped page"}}})
+	web := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 500, UpdatedAt: 2000})
+	addSessionEvent(t, backend, web.ID, core.KindAssistantMessage, core.AssistantMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "hello from web"}}})
+
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	page := segmentsForTest(t, s, cookie, "/v1/rooms/dana/segments")
+	if len(page.Segments) != 1 || page.Segments[0].SessionID != web.ID {
+		t.Fatalf("segments = %+v, want only the web session %s", page.Segments, web.ID)
+	}
+
+	row := roomRowForTest(t, s, cookie, "dana")
+	if row.LastActiveAt != 2000 {
+		t.Fatalf("last_active_at = %d, want the web session 2000", row.LastActiveAt)
+	}
+	if row.LastMessage == nil || row.LastMessage.Preview != "hello from web" || row.LastMessage.Channel != "web" {
+		t.Fatalf("last_message = %+v, want the web message", row.LastMessage)
+	}
+}
+
 // REQ-ROOM-002, AC-ROOM-003: paging by last activity returns the next older
 // page with no overlap and no missing segment.
 func TestRoomSegmentsPageByLastActivity(t *testing.T) {
