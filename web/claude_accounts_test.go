@@ -208,7 +208,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
-// API-CCT-022 (spec 39 revision 5): PUT /v1/providers/claude-code with kind
+// API-CCT-027 (spec 39 revision 5): PUT /v1/providers/claude-code with kind
 // claude-code stores the built-in account's settings in
 // [providers.claude-code] without a folder or a new login command; GET
 // reflects them; DELETE stays 409 builtin.

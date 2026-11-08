@@ -96,7 +96,7 @@ type providerJSON struct {
 	// Disabled is the disabled key of the entry (API-RTR-006 revision 2).
 	Disabled bool `json:"disabled"`
 	// Builtin marks the built-in Claude Code account "claude-code", whose
-	// optional table holds only its settings (API-CCT-010, API-CCT-022).
+	// optional table holds only its settings (API-CCT-010, API-CCT-027).
 	Builtin bool `json:"builtin"`
 	// ConfigDir is the CLAUDE_CONFIG_DIR of a Claude Code account; "" for the
 	// built-in one (Claude Code's own default, ~/.claude) and other kinds.
@@ -187,7 +187,7 @@ type providerDocument struct {
 	Knowledge map[string]any            `toml:"knowledge"`
 	Router    map[string]any            `toml:"router"`
 	// Builtin is the optional [providers.claude-code] table of the built-in
-	// Claude Code account (API-CCT-022). parseProviderDocument moves it out
+	// Claude Code account (API-CCT-027). parseProviderDocument moves it out
 	// of Providers, so it is never listed as a configured provider.
 	Builtin map[string]any `toml:"-"`
 }
@@ -246,7 +246,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	builtin.UsedBy = document.providerUsedBy(core.ClaudeCodeProvider)
-	// API-CCT-022: the built-in row shows its stored settings.
+	// API-CCT-027: the built-in row shows its stored settings.
 	if stored := providerRecordFromMap(document.Builtin); stored.Kind == core.ClaudeCodeKind {
 		builtin.AllowScheduled = stored.AllowScheduled
 		builtin.Disabled = stored.Disabled

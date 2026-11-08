@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import * as routerApi from "../../api/router";
 import type {
@@ -15,7 +15,8 @@ import { Ic } from "../../ui/icons";
 import { CreateAgentDialog } from "../agents";
 import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../settings-pages";
 import { ACCOUNTS_TERMS_NOTE, useClaudeAccounts } from "./claude-code";
-import { LoginCommand, PlanWindows, accountWindows, planLabel } from "./limits";
+import { LoginCommand, PlanWindows, UsageProbeError, accountWindows, planLabel } from "./limits";
+import { RefreshControl, claudeLimitsStale, claudeUpdatedAt } from "./limits-refresh";
 import { TestResult, usedByText } from "./models";
 import type { TestState } from "./models";
 import { CLAUDE_AGENT_PROVIDER_NAME, CLAUDE_CODE_KIND } from "./presets";
@@ -218,6 +219,7 @@ function AccountRow({
   account,
   row,
   windows,
+  limit,
   usage,
   busy,
   flow,
@@ -237,6 +239,8 @@ function AccountRow({
   account: ClaudeAccount;
   row: ProviderRow | undefined;
   windows: routerApi.PlanWindow[];
+  /* The account's limit snapshot: its usage probe error shows inline. */
+  limit: routerApi.LimitSnapshot | null;
   usage: UsageProviderRow | undefined;
   busy: boolean;
   flow: SignInFlow | undefined;
@@ -335,7 +339,10 @@ function AccountRow({
       ) : null}
 
       <div className="rt-acct-body">
-        <PlanWindows windows={windows} />
+        <div className="rt-acct-windows">
+          <PlanWindows windows={windows} />
+          <UsageProbeError limit={limit} />
+        </div>
         <dl className="rt-facts rt-acct-facts">
           <dt>Last 24 h</dt>
           <dd className="num">{usageText(usage)}</dd>
@@ -698,6 +705,9 @@ export function ClaudeCodeDetail() {
   const [version, setVersion] = useState("");
   const [usage, setUsage] = useState<UsageProviderRow[]>([]);
   const [limits, setLimits] = useState<routerApi.LimitSnapshot[]>([]);
+  const [limitsLoaded, setLimitsLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const autoChecked = useRef(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
@@ -740,6 +750,7 @@ export function ClaudeCodeDetail() {
       .then((value) => {
         if (alive && Array.isArray(value)) {
           setLimits(value);
+          setLimitsLoaded(true);
         }
       })
       .catch(() => {});
@@ -747,6 +758,34 @@ export function ClaudeCodeDetail() {
       alive = false;
     };
   }, [reloadToken]);
+
+  /* Spec 39 Revision 4: probe every account's plan usage (claude /usage,
+     no model call); the daemon probes an account at most once a minute. */
+  const refreshUsage = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const value = await routerApi.refreshRouterLimits();
+      setLimits(value);
+      void reloadStatus();
+    } catch (failure) {
+      setError(failureOf(failure).message);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [reloadStatus]);
+
+  /* Once per mount: refresh when a signed-in account's windows are over
+     five minutes old. */
+  useEffect(() => {
+    if (autoChecked.current || !limitsLoaded || (!status && !failed)) {
+      return;
+    }
+    autoChecked.current = true;
+    const names = accounts.filter((account) => account.logged_in).map((account) => account.name);
+    if (claudeLimitsStale(limits, names)) {
+      void Promise.resolve().then(refreshUsage);
+    }
+  }, [limitsLoaded, status, failed, accounts, limits, refreshUsage]);
 
   const setFlow = useCallback((name: string, change: Partial<SignInFlow> | null) => {
     setFlows((current) => {
@@ -1045,7 +1084,20 @@ export function ClaudeCodeDetail() {
         </p>
       ) : null}
 
-      <Panel title="Accounts" className="rt-conns-panel rt-accts-panel">
+      <Panel
+        title="Accounts"
+        className="rt-conns-panel rt-accts-panel"
+        actions={
+          <RefreshControl
+            refreshing={refreshing}
+            updatedAt={claudeUpdatedAt(
+              limits,
+              accounts.map((account) => account.name)
+            )}
+            onRefresh={() => void refreshUsage()}
+          />
+        }
+      >
         <p className="hint rt-signin-help">
           <Ic name="shield-check" size={12} /> {SIGN_IN_HELP}
         </p>
@@ -1071,6 +1123,7 @@ export function ClaudeCodeDetail() {
                 account={account}
                 row={rowOf(account.name)}
                 windows={accountWindows(account, limitOf(account.name))}
+                limit={limitOf(account.name)}
                 usage={usage.find((entry) => entry.provider === account.name)}
                 busy={busyRow === account.name}
                 flow={flows[account.name]}

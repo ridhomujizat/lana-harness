@@ -837,7 +837,7 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 
 // applyAccount sets the account keys of a Claude Code turn (REQ-CCT-010): the
 // built-in account takes the binary, auth, and api_key_env of its optional
-// [providers.claude-code] table (API-CCT-022), else the agent's (the keys of
+// [providers.claude-code] table (API-CCT-027), else the agent's (the keys of
 // spec 38 agents), and keeps the daemon's CLAUDE_CONFIG_DIR; another account
 // takes its own keys and folder.
 func applyAccount(cfg *core.RuntimeConfig, home, name string, account core.ProviderConfig, agent core.AgentConfig) {

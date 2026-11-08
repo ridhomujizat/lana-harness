@@ -10,6 +10,7 @@ vi.mock("../../api/router", async (importOriginal) => {
     getRouter: vi.fn(),
     getRouterUsage: vi.fn(),
     getRouterLimits: vi.fn(),
+    refreshRouterLimits: vi.fn(),
     getClaudeAgent: vi.fn(),
     listRouterCalls: vi.fn(),
     saveCombo: vi.fn(),
@@ -57,6 +58,7 @@ import { ProviderLogo } from "./provider-logo";
 import { monogram, presetFor } from "./presets";
 import { resetsIn } from "./router-common";
 import { windowText } from "./limits";
+import { claudeLimitsStale } from "./limits-refresh";
 import { SIGN_IN_HELP, SIGN_IN_POLL_MS } from "./claude-code-page";
 
 const RUNNING: api.ClaudeSignIn = { state: "running", error: "", started_at: "2026-11-08T10:00:00Z", finished_at: null };
@@ -253,6 +255,7 @@ beforeEach(() => {
   vi.mocked(api.getRouter).mockResolvedValue(ROUTER);
   vi.mocked(api.getRouterUsage).mockResolvedValue(USAGE);
   vi.mocked(api.getRouterLimits).mockResolvedValue(LIMITS);
+  vi.mocked(api.refreshRouterLimits).mockResolvedValue(LIMITS);
   vi.mocked(api.getClaudeAgent).mockResolvedValue(CLAUDE);
   vi.mocked(api.listRouterModels).mockResolvedValue([]);
 });
@@ -420,13 +423,16 @@ describe("router quota", () => {
     expect(within(screen.getByLabelText("Limits of local")).getByText("Not reported by this provider")).toBeTruthy();
   });
 
-  it("refreshes the limits with refresh=1", async () => {
+  /* Spec 39 Revision 4: Refresh posts /v1/router/limits/refresh. */
+  it("refreshes the limits and the Claude Code plans", async () => {
     render(<RouterQuota />);
     await screen.findByLabelText("Limits of openai");
+    const before = vi.mocked(api.refreshRouterLimits).mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => {
-      expect(vi.mocked(api.getRouterLimits)).toHaveBeenLastCalledWith(true);
+      expect(vi.mocked(api.refreshRouterLimits).mock.calls.length).toBe(before + 1);
     });
+    expect((await screen.findAllByText(/^Updated /)).length).toBeGreaterThan(0);
   });
 
   /* AC-CCR-009 and REQ-CCT-010: the plan window from the old claude-agent
@@ -1198,5 +1204,106 @@ describe("provider presets and logos", () => {
     expect(brand?.querySelector("svg")).toBeTruthy();
     expect(brand?.querySelector("title")).toBeNull();
     expect(brand?.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
+  });
+});
+
+/* Spec 39 Revision 4: the plan usage refresh of the Quota, Usage, and Claude
+   Code pages. */
+describe("plan usage refresh", () => {
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60000).toISOString();
+  const claudeLimit = (provider: string, updated: string, extra: Partial<LimitSnapshot> = {}): LimitSnapshot => ({
+    provider,
+    kind: "claude-code",
+    updated_at: updated,
+    error: "",
+    windows: [{ type: "five_hour", status: "allowed", utilization: 0.43, resets_at: "2026-11-08T08:39:00Z", source: "usage_probe" }],
+    ...extra,
+  });
+  const LOGGED_IN: ClaudeAgentStatus = {
+    ...CLAUDE,
+    logged_in: true,
+    accounts: [account({ name: "claude-code", builtin: true, logged_in: true })],
+  };
+
+  it("is due for an old, untimed, or missing Claude Code snapshot only", () => {
+    const fresh = claudeLimit("claude-code", minutesAgo(1));
+    expect(claudeLimitsStale([fresh], ["claude-code"])).toBe(false);
+    expect(claudeLimitsStale([claudeLimit("claude-code", minutesAgo(6))], ["claude-code"])).toBe(true);
+    expect(claudeLimitsStale([{ ...fresh, updated_at: undefined }], [])).toBe(true);
+    expect(claudeLimitsStale([fresh], ["claude-code", "claude-work"])).toBe(true);
+    expect(claudeLimitsStale([fresh, { provider: "openai", kind: "openai", updated_at: minutesAgo(60) }], [])).toBe(false);
+  });
+
+  it("refreshes the Quota page on mount only when a plan is over five minutes old", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(LOGGED_IN);
+    vi.mocked(api.getRouterLimits).mockResolvedValue([claudeLimit("claude-code", minutesAgo(1))]);
+    const fresh = render(<RouterQuota />);
+    await screen.findByLabelText("Claude Code plan of claude-code");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(vi.mocked(api.refreshRouterLimits)).not.toHaveBeenCalled();
+    fresh.unmount();
+
+    vi.mocked(api.getRouterLimits).mockResolvedValue([claudeLimit("claude-code", minutesAgo(10))]);
+    render(<RouterQuota />);
+    await waitFor(() => {
+      expect(vi.mocked(api.refreshRouterLimits)).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows the extra weekly windows and the probe error on the Quota card", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(LOGGED_IN);
+    vi.mocked(api.getRouterLimits).mockResolvedValue([
+      claudeLimit("claude-code", minutesAgo(1), {
+        error: "Claude Code /usage timed out after 45s",
+        windows: [
+          { type: "five_hour", status: "allowed", utilization: 0.43, resets_at: "2026-11-08T08:39:00Z" },
+          { type: "seven_day_fable", status: "allowed", utilization: 0, label: "Weekly · Fable", source: "usage_probe" },
+        ],
+      }),
+    ]);
+    render(<RouterQuota />);
+    const card = await screen.findByLabelText("Claude Code plan of claude-code");
+    expect(within(card).getByText("Weekly · Fable")).toBeTruthy();
+    expect(within(card).getByText("Claude Code /usage timed out after 45s")).toBeTruthy();
+    expect(windowText({ type: "seven_day_fable", status: "allowed", utilization: 0, label: "Weekly · Fable" })).toBe(
+      "Weekly · Fable · 0 % used"
+    );
+  });
+
+  it("refreshes from the Claude Code page and shows the probe error under the account", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([row({ name: "claude-code", kind: "claude-code", api_key_env: "", builtin: true })])
+    );
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(LOGGED_IN);
+    vi.mocked(api.getRouterLimits).mockResolvedValue([claudeLimit("claude-code", minutesAgo(1))]);
+    vi.mocked(api.refreshRouterLimits).mockResolvedValue([
+      claudeLimit("claude-code", minutesAgo(0), {
+        error: "Not a subscription: Claude Code /usage shows no plan windows for this account.",
+        windows: [{ type: "seven_day_fable", status: "allowed", utilization: 0.2, label: "Weekly · Fable" }],
+      }),
+    ]);
+    render(<ProviderDetail id="claude-code" />);
+    const home = await screen.findByRole("listitem", { name: "Account claude-code" });
+    expect(await within(home).findByText(/^43 % used/)).toBeTruthy();
+    expect(vi.mocked(api.refreshRouterLimits)).not.toHaveBeenCalled();
+    const panel = screen.getByRole("heading", { name: "Accounts" }).closest("section") as HTMLElement;
+    fireEvent.click(within(panel).getByRole("button", { name: "Refresh" }));
+    expect(await within(home).findByText("Weekly · Fable")).toBeTruthy();
+    expect(within(home).getByText(/^Not a subscription/)).toBeTruthy();
+    expect(vi.mocked(api.refreshRouterLimits)).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the plans and reloads the usage from the Usage page", async () => {
+    render(<OverviewTab />);
+    await screen.findByLabelText("Totals");
+    const usageCalls = vi.mocked(api.getRouterUsage).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.refreshRouterLimits)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.getRouterUsage).mock.calls.length).toBe(usageCalls + 1);
+    });
+    expect(await screen.findByText(/^Updated /)).toBeTruthy();
   });
 });

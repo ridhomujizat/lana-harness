@@ -56,7 +56,19 @@ type Window struct {
 	// runtime did not report it (JSON null).
 	Utilization *float64   `json:"utilization"`
 	ResetsAt    *time.Time `json:"resets_at,omitempty"`
+	// Label names a window the UI has no fixed name for ("Weekly · Fable");
+	// "" for the known windows.
+	Label string `json:"label,omitempty"`
+	// Source is where the values came from: WindowSourceStream (a turn's
+	// rate_limit_event) or WindowSourceUsageProbe (`claude -p /usage`).
+	Source string `json:"source,omitempty"`
 }
+
+// Sources of Window.Source (spec 39 Revision 4).
+const (
+	WindowSourceStream     = "stream"
+	WindowSourceUsageProbe = "usage_probe"
+)
 
 // LimitSnapshot is the latest limits one provider reported (API-RTR-013).
 type LimitSnapshot struct {
@@ -81,10 +93,16 @@ type LimitUpdate struct {
 	Credit *Credit     `json:"credit,omitempty"`
 	// Balance replaces the stored balance.
 	Balance *Balance `json:"balance,omitempty"`
-	// Windows replaces the stored windows when non-nil.
-	Windows []Window `json:"windows,omitempty"`
+	// Windows replaces the stored windows when non-nil, or, with
+	// MergeWindows, replaces the stored windows of the same types and keeps
+	// the others. A merged window without a label keeps the stored one.
+	Windows      []Window `json:"windows,omitempty"`
+	MergeWindows bool     `json:"merge_windows,omitempty"`
 	// Error sets the error when non-nil; a pointer to "" clears it.
 	Error *string `json:"error,omitempty"`
+	// KeepTime leaves UpdatedAt as it was: an error that keeps the old
+	// values does not make them look fresh.
+	KeepTime bool `json:"keep_time,omitempty"`
 }
 
 // LimitStore keeps limit snapshots across restarts.
@@ -157,7 +175,9 @@ func (r *Router) UpdateLimits(u LimitUpdate) {
 	if u.Kind != "" {
 		snap.Kind = u.Kind
 	}
-	snap.UpdatedAt = at.UTC()
+	if !u.KeepTime {
+		snap.UpdatedAt = at.UTC()
+	}
 	if u.Rate != nil {
 		// Copy on write: snapshots handed out share the old pointers.
 		rate := RateLimits{}
@@ -185,13 +205,41 @@ func (r *Router) UpdateLimits(u LimitUpdate) {
 		snap.Balance = u.Balance
 	}
 	if u.Windows != nil {
-		snap.Windows = append([]Window(nil), u.Windows...)
+		if u.MergeWindows {
+			snap.Windows = mergeWindows(snap.Windows, u.Windows)
+		} else {
+			snap.Windows = append([]Window(nil), u.Windows...)
+		}
 	}
 	if u.Error != nil {
 		snap.Error = *u.Error
 	}
 	l.snaps[u.Provider] = snap
 	l.scheduleSaveLocked()
+}
+
+// mergeWindows returns old with each window of update replacing the old
+// window of its type (in place) or appended; a new window without a label
+// keeps the old window's label.
+func mergeWindows(old, update []Window) []Window {
+	out := append([]Window(nil), old...)
+	for _, w := range update {
+		replaced := false
+		for i := range out {
+			if out[i].Type == w.Type {
+				if w.Label == "" {
+					w.Label = out[i].Label
+				}
+				out[i] = w
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func (l *limitState) scheduleSaveLocked() {

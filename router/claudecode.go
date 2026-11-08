@@ -38,7 +38,7 @@ func (s *snapshot) isClaude(name string) bool {
 
 // ClaudeCodeAccount returns the config of a Claude Code account (REQ-CCT-010):
 // a provider of kind "claude-code", or the built-in "claude-code" with the
-// settings of its optional [providers.claude-code] table (API-CCT-022; empty
+// settings of its optional [providers.claude-code] table (API-CCT-027; empty
 // without one). It implements llmcall.ClaudeCodeAccounts.
 func (r *Router) ClaudeCodeAccount(name string) (core.ProviderConfig, bool) {
 	if name == ClaudeCode {

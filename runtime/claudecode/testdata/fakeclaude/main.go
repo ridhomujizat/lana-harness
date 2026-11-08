@@ -18,6 +18,16 @@
 //	FAKECLAUDE_LOGIN_EMAIL       e-mail the successful login reports
 //	                             (default "new@example.com")
 //
+//	FAKECLAUDE_USAGE             text `-p /usage` answers (default: a recorded
+//	                             subscription answer); fakeclaude_usage.txt in
+//	                             CLAUDE_CONFIG_DIR wins
+//	FAKECLAUDE_USAGE_MODE        `-p /usage` behaviour: "" answers with 0
+//	                             tokens, "tokens" reports a model call,
+//	                             "error" an error result, "noresult" exits 1
+//	                             with a stderr line, "hang" waits until killed
+//
+// `-p /usage` logs a line with kind "usage" (argv, env, cwd, and whether
+// stdin was at EOF).
 // `auth login` and `auth logout` log a line with kind "auth", and
 // `auth status` one with kind "status" (argv and env).
 // A successful login writes fakeclaude_auth.json (logged in) into
@@ -218,6 +228,10 @@ func main() {
 		if os.Getenv("FAKECLAUDE_AUTH_EXIT") == "1" {
 			os.Exit(1)
 		}
+		return
+	}
+	if len(args) >= 2 && args[0] == "-p" && args[1] == "/usage" {
+		usageCommand(args)
 		return
 	}
 	cwd, _ := os.Getwd()
@@ -499,4 +513,59 @@ func authCommand(args []string) {
 	}
 	write(`{"loggedIn":true,"authMethod":"claude.ai","email":"` + email + `","subscriptionType":"pro"}`)
 	fmt.Fprintln(os.Stderr, "Login successful.")
+}
+
+// defaultUsage is a recorded `/usage` answer of a subscription account.
+const defaultUsage = "You are currently using your subscription to power your Claude Code usage\n\n" +
+	"Current session: 43% used · resets Nov 8 at 3:39pm (Asia/Jakarta)\n" +
+	"Current week (all models): 42% used · resets Nov 12 at 11:59am (Asia/Jakarta)\n" +
+	"Current week (Fable): 0% used · resets Nov 12 at 12pm (Asia/Jakarta)\n\n" +
+	"What's contributing to your usage?\n"
+
+// usageCommand answers `-p /usage` like Claude Code 2.1.319: an init line, a
+// synthetic assistant text, and a result with 0 tokens.
+func usageCommand(args []string) {
+	cwd, _ := os.Getwd()
+	eof := make(chan bool, 1)
+	go func() {
+		buf := make([]byte, 1)
+		n, _ := os.Stdin.Read(buf)
+		eof <- n == 0
+	}()
+	atEOF := false
+	select {
+	case atEOF = <-eof:
+	case <-time.After(2 * time.Second):
+	}
+	logLine(map[string]any{"kind": "usage", "argv": args, "env": os.Environ(), "cwd": cwd, "stdin_eof": atEOF})
+	text := os.Getenv("FAKECLAUDE_USAGE")
+	if path, ok := accountFile("fakeclaude_usage.txt"); ok {
+		if data, err := os.ReadFile(path); err == nil {
+			text = string(data)
+		}
+	}
+	if text == "" {
+		text = defaultUsage
+	}
+	mode := os.Getenv("FAKECLAUDE_USAGE_MODE")
+	switch mode {
+	case "hang":
+		time.Sleep(time.Hour)
+		return
+	case "noresult":
+		fmt.Fprintln(os.Stderr, "Error: something broke, see https://example.com/help")
+		os.Exit(1)
+	}
+	in, outTokens, isError := 0, 0, false
+	switch mode {
+	case "tokens":
+		in, outTokens = 12, 3
+	case "error":
+		isError = true
+	}
+	outJSON(map[string]any{"type": "system", "subtype": "init", "session_id": session, "cwd": cwd})
+	outJSON(map[string]any{"type": "assistant", "message": map[string]any{"model": "<synthetic>", "role": "assistant",
+		"content": []any{map[string]any{"type": "text", "text": text}}}})
+	outJSON(map[string]any{"type": "result", "subtype": "success", "is_error": isError, "num_turns": 0,
+		"result": text, "usage": map[string]any{"input_tokens": in, "output_tokens": outTokens}})
 }

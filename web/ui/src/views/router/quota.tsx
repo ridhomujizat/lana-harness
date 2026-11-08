@@ -1,9 +1,17 @@
 /* eslint-disable react-hooks/set-state-in-effect -- the page loads its data on mount, like the other pages. */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CLAUDE_AGENT_PROVIDER, CLAUDE_CODE_PROVIDER, getClaudeAgent, getRouter, getRouterLimits } from "../../api/router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CLAUDE_AGENT_PROVIDER,
+  CLAUDE_CODE_PROVIDER,
+  getClaudeAgent,
+  getRouter,
+  getRouterLimits,
+  refreshRouterLimits,
+} from "../../api/router";
 import type { ClaudeAgentStatus, LimitSnapshot, RouterProvider } from "../../api/router";
-import { Button, EmptyState } from "../../ui/gr8r";
+import { EmptyState } from "../../ui/gr8r";
 import { ClaudeAccountCard, LimitCard } from "./limits";
+import { RefreshControl, claudeLimitsStale, claudeUpdatedAt, newestUpdatedAt, useTick } from "./limits-refresh";
 import { rememberClaudeAccounts } from "./presets";
 import { providerIndex } from "./provider-logo";
 import { failureOf } from "./router-common";
@@ -11,19 +19,9 @@ import { failureOf } from "./router-common";
 /* Router → Quota (REQ-RTR-012, REQ-CCR-008, REQ-CCT-011), like 9router's
    Quota Tracker: one Claude Code card per account with its email, plan, and
    windows first, then one card per provider with its rate limits, credit, or
-   balance. Reset countdowns tick every 30 seconds. */
-
-const TICK_MS = 30000;
-
-/* Re-renders the page on an interval so "resets in 3m" stays current. */
-function useTick(interval: number): number {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick((value) => value + 1), interval);
-    return () => window.clearInterval(timer);
-  }, [interval]);
-  return tick;
-}
+   balance. Reset countdowns tick every 30 seconds. Refresh (and a mount
+   whose Claude Code snapshots are over five minutes old) fetches the
+   balances and probes each account's plan usage (spec 39 Revision 4). */
 
 export function RouterQuota() {
   const [limits, setLimits] = useState<LimitSnapshot[] | null>(null);
@@ -31,17 +29,25 @@ export function RouterQuota() {
   const [claude, setClaude] = useState<ClaudeAgentStatus | null>(null);
   const [providers, setProviders] = useState<RouterProvider[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  useTick(TICK_MS);
+  const autoChecked = useRef(false);
+  useTick();
 
+  /* A refresh runs first, so the account rows read the new windows. */
   const load = useCallback(async (refresh: boolean) => {
+    const refreshed = refresh ? await Promise.allSettled([refreshRouterLimits()]) : null;
     const [limitResult, claudeResult, routerResult] = await Promise.allSettled([
-      getRouterLimits(refresh),
+      refreshed && refreshed[0].status === "fulfilled" ? Promise.resolve(refreshed[0].value) : getRouterLimits(false),
       getClaudeAgent(),
       getRouter(),
     ]);
+    if (refreshed && refreshed[0].status === "rejected") {
+      setError(failureOf(refreshed[0].reason).message);
+    }
     if (limitResult.status === "fulfilled") {
       setLimits(limitResult.value);
-      setError("");
+      if (!refreshed || refreshed[0].status === "fulfilled") {
+        setError("");
+      }
     } else {
       setError(failureOf(limitResult.reason).message);
     }
@@ -53,20 +59,30 @@ export function RouterQuota() {
     if (routerResult.status === "fulfilled") {
       setProviders(routerResult.value.providers);
     }
+    return {
+      limits: limitResult.status === "fulfilled" ? limitResult.value : null,
+      names: status ? status.accounts.filter((account) => account.logged_in).map((account) => account.name) : [],
+    };
   }, []);
 
-  useEffect(() => {
-    void load(false);
-  }, [load]);
-
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
       await load(true);
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [load]);
+
+  useEffect(() => {
+    void load(false).then((loaded) => {
+      if (!autoChecked.current && loaded.limits && claudeLimitsStale(loaded.limits, loaded.names)) {
+        autoChecked.current = true;
+        void refresh();
+      }
+      autoChecked.current = true;
+    });
+  }, [load, refresh]);
 
   const index = useMemo(() => providerIndex(providers), [providers]);
   /* One snapshot per account, named by the account (API-CCT-012); the
@@ -101,6 +117,11 @@ export function RouterQuota() {
     [limits, claudeNames]
   );
   const showClaude = accounts.length > 0;
+  /* The Claude Code plans first: they are what goes stale between turns. */
+  const updatedAt = useMemo(
+    () => claudeUpdatedAt(limits || [], claudeNames) || newestUpdatedAt(limits || []),
+    [limits, claudeNames]
+  );
 
   return (
     <div className="rt-quota">
@@ -108,16 +129,7 @@ export function RouterQuota() {
         <h2>Limits</h2>
         <p className="muted">What each provider reported with its last answer.</p>
         <span className="sp" />
-        <Button
-          variant="secondary"
-          size="sm"
-          icon="refresh-cw"
-          loading={refreshing}
-          disabled={refreshing}
-          onClick={() => void refresh()}
-        >
-          Refresh
-        </Button>
+        <RefreshControl refreshing={refreshing} updatedAt={updatedAt} onRefresh={() => void refresh()} />
       </div>
       {error ? (
         <p className="rt-limit-err" role="alert">

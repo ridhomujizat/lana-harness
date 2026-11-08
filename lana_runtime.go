@@ -142,7 +142,7 @@ func (rt *Runtime) ClaudeCodeAccounts(ctx context.Context) ([]ClaudeCodeAccount,
 // CLAUDE_CONFIG_DIR; another account its own keys and folder.
 func (rt *Runtime) claudeAccountSpec(name string, cfg core.ProviderConfig) core.RuntimeAccount {
 	if name == ClaudeCodeRuntime {
-		// API-CCT-022: the built-in account's table sets binary, auth, and
+		// API-CCT-027: the built-in account's table sets binary, auth, and
 		// api_key_env; it never sets the folder.
 		return core.RuntimeAccount{Name: name, Binary: rt.claudeCodeBinary(), Auth: cfg.Auth, APIKeyEnv: cfg.APIKeyEnv}
 	}
@@ -264,16 +264,21 @@ func (rt *Runtime) updateExternalLimits(provider, runtime string, windows []core
 	if rt.router == nil || len(windows) == 0 {
 		return
 	}
-	rt.router.UpdateLimits(router.LimitUpdate{Provider: provider, Kind: runtime, Windows: externalWindows(windows)})
+	// Fresh windows from a turn clear an older usage probe error.
+	noError := ""
+	rt.router.UpdateLimits(router.LimitUpdate{
+		Provider: provider, Kind: runtime, Windows: externalWindows(windows, router.WindowSourceStream),
+		MergeWindows: true, Error: &noError,
+	})
 }
 
-// externalWindows converts runtime plan windows to router windows. A window
-// without a reported utilization keeps a nil Utilization (JSON null, "usage
-// not reported"), never 0.
-func externalWindows(windows []core.RuntimeLimitWindow) []router.Window {
+// externalWindows converts runtime plan windows to router windows with the
+// given source. A window without a reported utilization keeps a nil
+// Utilization (JSON null, "usage not reported"), never 0.
+func externalWindows(windows []core.RuntimeLimitWindow, source string) []router.Window {
 	out := make([]router.Window, 0, len(windows))
 	for _, w := range windows {
-		win := router.Window{Type: w.Type, Status: w.Status}
+		win := router.Window{Type: w.Type, Status: w.Status, Label: w.Label, Source: source}
 		if w.Utilization != nil {
 			// Copy: the window must not alias the runtime's event. Nil stays
 			// nil (not reported).
@@ -433,7 +438,7 @@ func (rt *Runtime) TestClaudeCode(ctx context.Context, address string) (int64, e
 // claudeCodeBinary returns the binary setting of the first agent (in name
 // order) that sets one, else "" (claude on PATH).
 func (rt *Runtime) claudeCodeBinary() string {
-	// API-CCT-022: the built-in account's own binary setting wins.
+	// API-CCT-027: the built-in account's own binary setting wins.
 	if rt.router != nil {
 		if cfg, _ := rt.router.ClaudeCodeAccount(ClaudeCodeRuntime); cfg.Binary != "" {
 			return cfg.Binary

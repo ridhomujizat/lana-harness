@@ -107,7 +107,7 @@ func renderClaudeAccountTable(name string, record providerRecord) string {
 // putClaudeAccount saves a Claude Code account (API-CCT-010): it writes the
 // table, creates the account folder (0700), and answers the command that logs
 // the account in once. An absent key keeps its stored value. The built-in
-// account "claude-code" stores only its settings (API-CCT-022): no
+// account "claude-code" stores only its settings (API-CCT-027): no
 // config_dir or label, no folder is created, and its login command stays
 // `claude auth login`.
 func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store ConfigStore, name string, body map[string]json.RawMessage) {

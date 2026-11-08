@@ -315,6 +315,25 @@ type RuntimeLimitWindow struct {
 	Utilization *float64 `json:"utilization,omitempty"`
 	// ResetsAt is when the window resets; zero when not reported.
 	ResetsAt time.Time `json:"resets_at"`
+	// Label names a window the UI has no fixed name for, for example
+	// "Weekly · Fable" for seven_day_fable; "" for the known windows.
+	Label string `json:"label,omitempty"`
+}
+
+// RuntimeUsageReport is what a usage probe read for one account
+// (spec 39 Revision 4): the plan windows of a subscription.
+type RuntimeUsageReport struct {
+	// Subscription is false when the account does not use a subscription
+	// (an API key or Console login); Windows is then empty.
+	Subscription bool
+	Windows      []RuntimeLimitWindow
+}
+
+// RuntimeUsageProber is implemented by a runtime that reads an account's
+// plan usage on demand. For Claude Code that is `claude -p /usage`, a local
+// command that makes no model call (ADR 0020 amendment, spec 39 Revision 4).
+type RuntimeUsageProber interface {
+	UsageProbe(ctx context.Context, account RuntimeAccount) (RuntimeUsageReport, error)
 }
 
 // RuntimeStatus is the health of a runtime (API-CCR-003).

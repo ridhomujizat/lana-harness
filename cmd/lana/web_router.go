@@ -223,13 +223,25 @@ func (b *webBackend) RouterCalls(ctx context.Context, filter routerdb.CallFilter
 	return st.ListRouterCalls(ctx, filter)
 }
 
-// RouterLimits implements web.RouterBackend (API-RTR-013).
+// RouterLimits implements web.RouterBackend (API-RTR-013). A refresh fetches
+// the API providers' balances and, in parallel, probes the plan usage of the
+// Claude Code accounts (spec 39 Revision 4); both are throttled per provider.
 func (b *webBackend) RouterLimits(ctx context.Context, refresh bool) ([]web.RouterLimit, error) {
 	r, err := b.llmRouter()
 	if err != nil {
 		return nil, err
 	}
-	snapshots := r.Limits(ctx, refresh)
+	if refresh {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b.rt.RefreshClaudeUsage(ctx)
+		}()
+		r.Limits(ctx, true)
+		wg.Wait()
+	}
+	snapshots := r.Limits(ctx, false)
 	out := make([]web.RouterLimit, 0, len(snapshots))
 	for _, snap := range snapshots {
 		out = append(out, webRouterLimit(snap))
@@ -268,6 +280,7 @@ func webRouterLimit(snap router.LimitSnapshot) web.RouterLimit {
 	for _, window := range snap.Windows {
 		out.Windows = append(out.Windows, web.RouterPlanWindow{
 			Type: window.Type, Status: window.Status, Utilization: window.Utilization, ResetsAt: window.ResetsAt,
+			Label: window.Label, Source: window.Source,
 		})
 	}
 	return out
@@ -442,7 +455,9 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 			Agents:       account.Agents, Combos: account.Combos,
 		}
 		for _, w := range account.Windows {
-			window := web.RouterPlanWindow{Type: w.Type, Status: w.Status, Utilization: w.Utilization}
+			window := web.RouterPlanWindow{
+				Type: w.Type, Status: w.Status, Utilization: w.Utilization, Label: w.Label, Source: w.Source,
+			}
 			if w.ResetsAt != nil {
 				at := w.ResetsAt.UTC()
 				window.ResetsAt = &at

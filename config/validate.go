@@ -24,7 +24,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 
 // builtinAccountRejectedKeys are the account keys the [providers.claude-code]
 // table of the built-in account must not set (spec 39 revision 5,
-// API-CCT-022): it always uses the owner's own Claude Code folder and has no
+// API-CCT-027): it always uses the owner's own Claude Code folder and has no
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
@@ -961,7 +961,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	mcps, _ := asMap(m["mcp"])
 	combos, _ := asMap(m["combos"])
 	comboNames := sortedKeys(combos)
-	// The built-in account's optional table (API-CCT-022) is no configured
+	// The built-in account's optional table (API-CCT-027) is no configured
 	// provider: claude-code addresses are checked as Claude Code accounts.
 	providerNames := withoutString(sortedKeys(providers), core.ClaudeCodeProvider)
 	agentNames := sortedKeys(agents)
@@ -989,7 +989,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		}
 	}
 	// API-CCT-001: claude-code is a built-in provider. Spec 39 revision 5
-	// (API-CCT-022): an optional [providers.claude-code] table of kind
+	// (API-CCT-027): an optional [providers.claude-code] table of kind
 	// "claude-code" holds the built-in account's settings only; it never
 	// moves the account off the owner's own Claude Code login.
 	if raw, ok := providers[core.ClaudeCodeProvider]; ok {

@@ -164,6 +164,8 @@ type logEntry struct {
 	Cwd           string          `json:"cwd"`
 	Line          json.RawMessage `json:"line"`
 	Pid           int             `json:"pid"`
+	// StdinEOF is set by `-p /usage`: stdin was at EOF.
+	StdinEOF bool `json:"stdin_eof"`
 }
 
 func (h *harness) log() []logEntry {

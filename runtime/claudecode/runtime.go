@@ -69,6 +69,8 @@ type Options struct {
 	// `claude auth logout` (REQ-CCT-012).
 	SignInTimeout  time.Duration
 	SignOutTimeout time.Duration
+	// UsageProbeTimeout bounds `claude -p /usage` (spec 39 Revision 4).
+	UsageProbeTimeout time.Duration
 }
 
 // Runtime is the claude-code AgentRuntime.
@@ -90,6 +92,9 @@ type Runtime struct {
 	// authRuns cancel the running sign-in or sign-out per account
 	// (REQ-CCT-012).
 	authRuns map[string]context.CancelFunc
+	// usageRuns cancel the running usage probes (spec 39 Revision 4).
+	usageRuns map[uint64]context.CancelFunc
+	usageSeq  uint64
 
 	accountStatusMu sync.Mutex
 	accountStatus   map[string]cachedAccountStatus
@@ -185,6 +190,9 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 	if opts.SignOutTimeout <= 0 {
 		opts.SignOutTimeout = DefaultSignOutTimeout
 	}
+	if opts.UsageProbeTimeout <= 0 {
+		opts.UsageProbeTimeout = DefaultUsageProbeTimeout
+	}
 	log := deps.Logger
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -194,6 +202,7 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 		procs: map[string]*process{}, starting: map[string]bool{}, claudeIDs: map[string]claudeRef{},
 		versions: map[string]versionInfo{}, mcpFiles: map[string]bool{}, accounts: map[string]*accountCounts{},
 		accountStatus: map[string]cachedAccountStatus{}, authRuns: map[string]context.CancelFunc{},
+		usageRuns: map[uint64]context.CancelFunc{},
 	}
 }
 
@@ -890,6 +899,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	r.procs = map[string]*process{}
 	r.mu.Unlock()
 	r.cancelAuthRuns()
+	r.cancelUsageRuns()
 	for _, p := range procs {
 		r.interrupt(p)
 		p.stop(0, r.opts.KillGrace)

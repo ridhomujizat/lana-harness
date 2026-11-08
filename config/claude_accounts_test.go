@@ -51,7 +51,7 @@ model = "c"
 	}
 }
 
-// API-CCT-022 (spec 39 revision 5): an optional [providers.claude-code]
+// API-CCT-027 (spec 39 revision 5): an optional [providers.claude-code]
 // table of kind "claude-code" holds the built-in account's settings; it is
 // not a configured provider, so claude-code addresses stay Claude Code ones.
 func TestBuiltinClaudeAccountTable(t *testing.T) {

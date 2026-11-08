@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- each tab loads its data on mount and on a filter change, like the other pages. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getRouter, getRouterUsage } from "../../api/router";
+import { getRouter, getRouterLimits, getRouterUsage, refreshRouterLimits } from "../../api/router";
 import type {
   RouterCooling,
   RouterProvider,
@@ -12,6 +12,7 @@ import { Badge, Button, EmptyState, ErrorState, Panel, Seg, Stat } from "../../u
 import { ShareBars } from "../home-charts";
 import { ProviderMark, providerIndex } from "./provider-logo";
 import { useClaudeAccounts } from "./claude-code";
+import { RefreshControl, claudeLimitsStale } from "./limits-refresh";
 import { UsageChart } from "./usage-chart";
 import {
   compact,
@@ -25,7 +26,9 @@ import {
 } from "./router-common";
 
 /* Router → Usage (REQ-RTR-011): what the router did in the chosen range and
-   what it cost. Limits live on the Quota page. */
+   what it cost. Limits live on the Quota page. Refresh reloads the usage and
+   probes the Claude Code plans (spec 39 Revision 4); a mount whose Claude
+   Code snapshots are over five minutes old refreshes on its own. */
 
 export const RANGES: Array<{ value: RouterRange; label: string }> = [
   { value: "24h", label: "24 hours" },
@@ -139,7 +142,10 @@ export function RouterUsagePage() {
   const [usageError, setUsageError] = useState("");
   const [cooling, setCooling] = useState<RouterCooling[]>([]);
   const [providers, setProviders] = useState<RouterProvider[]>([]);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const usageRequest = useRef(0);
+  const autoChecked = useRef(false);
 
   const loadUsage = useCallback(async (next: RouterRange) => {
     const id = ++usageRequest.current;
@@ -148,6 +154,7 @@ export function RouterUsagePage() {
       if (id === usageRequest.current) {
         setUsage(result);
         setUsageError("");
+        setLoadedAt(new Date().toISOString());
       }
     } catch (failure) {
       if (id === usageRequest.current) {
@@ -160,24 +167,54 @@ export function RouterUsagePage() {
     void loadUsage(range);
   }, [loadUsage, range]);
 
-  useEffect(() => {
-    let alive = true;
-    getRouter()
-      .then((data) => {
-        if (alive) {
-          setCooling(data.cooling);
-          setProviders(data.providers);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
+  const loadRouter = useCallback(async () => {
+    try {
+      const data = await getRouter();
+      setCooling(data.cooling);
+      setProviders(data.providers);
+    } catch {
+      /* The cooling list and logos are optional. */
+    }
   }, []);
+
+  useEffect(() => {
+    void loadRouter();
+  }, [loadRouter]);
 
   /* Spec 39: Claude Code rows name their account; knowing the accounts
      gives them the Claude logo. */
-  useClaudeAccounts();
+  const { status: claudeStatus, failed: claudeFailed, accounts: claudeAccounts } = useClaudeAccounts();
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      /* The plan probe and the usage reload run together; a failed probe
+         still reloads the usage. */
+      await Promise.allSettled([refreshRouterLimits(), loadUsage(range), loadRouter()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadUsage, loadRouter, range]);
+
+  /* Once per mount, when the account status is known: refresh if a Claude
+     Code snapshot is over five minutes old. */
+  useEffect(() => {
+    if (autoChecked.current || (!claudeStatus && !claudeFailed)) {
+      return;
+    }
+    autoChecked.current = true;
+    const names = claudeAccounts.filter((account) => account.logged_in).map((account) => account.name);
+    if (names.length === 0) {
+      return;
+    }
+    getRouterLimits(false)
+      .then((limits) => {
+        if (claudeLimitsStale(limits, names)) {
+          void refresh();
+        }
+      })
+      .catch(() => {});
+  }, [claudeStatus, claudeFailed, claudeAccounts, refresh]);
   const index = useMemo(() => providerIndex(providers), [providers]);
   const totals = usage?.totals;
 
@@ -190,6 +227,8 @@ export function RouterUsagePage() {
           value={range}
           onChange={(next) => setRange(next as RouterRange)}
         />
+        <span className="sp" />
+        <RefreshControl refreshing={refreshing} updatedAt={loadedAt} onRefresh={() => void refresh()} />
       </div>
 
       {usageError ? (

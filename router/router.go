@@ -136,7 +136,7 @@ type snapshot struct {
 	// They have no adapter: their targets run in the Claude Code runtime.
 	claude map[string]core.ProviderConfig
 	// builtin is the optional [providers.claude-code] table of the built-in
-	// account (spec 39 revision 5, API-CCT-022): allow_scheduled, disabled,
+	// account (spec 39 revision 5, API-CCT-027): allow_scheduled, disabled,
 	// binary, auth, api_key_env. Kind is always set.
 	builtin core.ProviderConfig
 	combos  map[string]Combo
@@ -227,7 +227,7 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 	// change the snapshot or the change detection of the next Apply.
 	cfg = next.cfg
 	if pc, ok := cfg.Providers[ClaudeCode]; ok {
-		// API-CCT-022: the built-in account's settings, never its folder.
+		// API-CCT-027: the built-in account's settings, never its folder.
 		switch {
 		case pc.Kind != core.ClaudeCodeKind:
 			return nil, fmt.Errorf("providers.%s: claude-code is built in", ClaudeCode)

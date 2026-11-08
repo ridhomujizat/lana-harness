@@ -8,6 +8,15 @@ but their config keys, events, and tools may still change between betas.
 ## [Unreleased]
 
 ### Added
+- Refresh for Claude Code plan usage (spec 39 Revision 4): the Quota page, the Usage page, and the
+  Claude Code page have a **Refresh** button with "Updated <time>", and refresh on their own when a
+  Claude Code plan is over five minutes old. A refresh runs `claude -p /usage` for each enabled
+  subscription account (a local command, no model call; at most once a minute per account) and shows
+  the session, weekly, and per-model weekly windows (for example "Weekly · Fable"). A failed probe shows
+  its error under the account and keeps the last values. New `POST /v1/router/limits/refresh`;
+  `GET /v1/router/limits?refresh=1` does the same. Plan windows gain `label` and `source`
+  (`stream` or `usage_probe`), and a turn's windows now merge with the stored ones instead of
+  replacing them.
 - Router onboarding: the setup wizard now matches the Router. **Connect your models** shows the Router's provider
   cards with real logos: Claude Code on top (signed in with email and plan, one-click **Sign in with Claude Code**
   with the terminal fallback, or a "Not installed" note), then OpenAI, Anthropic, DeepSeek, OpenRouter, and the

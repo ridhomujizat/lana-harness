@@ -492,6 +492,11 @@ export interface PlanWindow {
   /* A fraction: 0.42 is 42 %. */
   utilization?: number | null;
   resets_at?: string;
+  /* A name for a window the UI has no fixed name for, such as
+     "Weekly · Fable" (spec 39 Revision 4). */
+  label?: string;
+  /* "stream" (a turn's rate_limit_event) or "usage_probe" (claude /usage). */
+  source?: string;
 }
 
 export interface LimitSnapshot {
@@ -514,6 +519,15 @@ export async function getRouterLimits(refresh?: boolean): Promise<LimitSnapshot[
     "GET",
     "/v1/router/limits" + queryString({ refresh: refresh ? 1 : undefined })
   );
+  return data && Array.isArray(data.limits) ? data.limits : [];
+}
+
+/* Spec 39 Revision 4: refresh the providers' balances and probe the plan
+   usage of every Claude Code account (claude /usage, no model call). The
+   daemon probes an account at most once a minute and answers with the
+   snapshots either way. */
+export async function refreshRouterLimits(): Promise<LimitSnapshot[]> {
+  const data = await request<{ limits?: LimitSnapshot[] } | null>("POST", "/v1/router/limits/refresh");
   return data && Array.isArray(data.limits) ? data.limits : [];
 }
 

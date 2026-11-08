@@ -172,7 +172,7 @@ func TestClaudeCodeAccounts(t *testing.T) {
 		t.Fatalf("stream chain: served=%v err=%v", served, err)
 	}
 	_, _ = drain(stream)
-	// API-CCT-022: a claude-code table of another kind is refused; one of
+	// API-CCT-027: a claude-code table of another kind is refused; one of
 	// kind claude-code holds the built-in settings (TestBuiltinClaudeAccountSettings).
 	if _, err := New(Config{Providers: map[string]core.ProviderConfig{ClaudeCode: {Kind: "openai"}}}); err == nil {
 		t.Fatal("a claude-code table of another kind was accepted")
@@ -185,7 +185,7 @@ func TestClaudeCodeAccounts(t *testing.T) {
 	}
 }
 
-// API-CCT-022 (spec 39 revision 5): a [providers.claude-code] table of kind
+// API-CCT-027 (spec 39 revision 5): a [providers.claude-code] table of kind
 // "claude-code" holds the built-in account's settings. It is not a
 // configured account, it never takes a folder, and Apply updates it.
 func TestBuiltinClaudeAccountSettings(t *testing.T) {

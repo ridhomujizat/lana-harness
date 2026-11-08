@@ -213,6 +213,9 @@ type Runtime struct {
 	// claudeSignIns are the background sign-ins of Claude Code accounts
 	// (REQ-CCT-012).
 	claudeSignIns claudeSignIns
+	// claudeUsage throttles the usage probes of Claude Code accounts
+	// (spec 39 Revision 4).
+	claudeUsage claudeUsageThrottle
 	// consolidateWG tracks the in-flight nightly knowledge consolidation started
 	// by KnowledgeConsolidate, so Close joins it after cancelling rt.ctx and
 	// before the store is shut down (REQ-KNU-041).

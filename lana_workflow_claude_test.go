@@ -170,7 +170,7 @@ models = ["claude-code/haiku", "ds/deepseek-flash"]
 	}
 }
 
-// REQ-CCT-008, API-CCT-022: a workflow agent node on a Claude Code agent runs
+// REQ-CCT-008, API-CCT-027: a workflow agent node on a Claude Code agent runs
 // in Claude Code when the built-in account's stored allow_scheduled is set,
 // and is refused without it.
 func TestWorkflowAgentNodeOnClaudeCodeAccount(t *testing.T) {
@@ -213,7 +213,7 @@ allow_scheduled = true
 	}
 }
 
-// API-CCT-022: a disabled built-in account fails its Claude Code targets
+// API-CCT-027: a disabled built-in account fails its Claude Code targets
 // before output, and the chain falls back to the next target.
 func TestBuiltinClaudeAccountDisabledFallsBack(t *testing.T) {
 	bin := buildFakeClaude(t)

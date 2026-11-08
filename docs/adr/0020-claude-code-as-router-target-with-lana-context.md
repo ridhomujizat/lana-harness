@@ -4,7 +4,7 @@
 - **Date**: 2026-11-08
 - **Deciders**: Ridho
 - **Related ADRs**: [0018](0018-claude-code-as-external-agent-runtime.md) (amended), [0019](0019-llm-router-as-embeddable-core.md), [0012](0012-acp-and-sdk-json-rpc.md)
-- **Amended**: 2026-11-08 (one-click sign-in, below)
+- **Amended**: 2026-11-08 (one-click sign-in and usage probe, below)
 
 ## Context
 
@@ -90,6 +90,15 @@ Code binary with their own Claude subscription"* (ADR 0018).
    `$LANA_HOME/claude/`; a folder configured elsewhere is never deleted.
 6. The terminal command stays available (`CLAUDE_CONFIG_DIR=… CLAUDE_SECURESTORAGE_CONFIG_DIR=… claude
    auth login`) for a daemon on another machine, where the browser would open on the wrong computer.
+7. **Usage probe** (spec 39 Revision 4). lana may run `claude -p /usage` for an account when the owner
+   refreshes the Quota, Usage, or Claude Code page (or a page mounts with plan windows over five minutes
+   old), at most once a minute per account. `/usage` is a local command of the unmodified binary: it
+   reads the plan usage the binary already knows and makes **no model call** (the result reports 0
+   input and 0 output tokens; any other answer is a failed probe). The run has the account's
+   environment (rule 3), stdin closed, `--no-session-persistence`, `--setting-sources project` in an
+   empty temp folder (no user hook or plugin runs), a 45 s deadline, and its own process group. lana
+   keeps only the parsed plan lines (percent used and reset time per window), never the rest of the
+   text.
 
 Consequence: signing out the built-in account signs the owner out of their normal Claude Code, so the
 dashboard asks for an explicit confirm and the API needs `{"confirm": true}`.
