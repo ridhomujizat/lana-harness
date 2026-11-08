@@ -34,6 +34,7 @@ import {
 } from "../ui/gr8r";
 import type { BadgeTone } from "../ui/gr8r";
 import { AgentFace, ago } from "./workflow-common";
+import { ChannelLogo } from "./channel-logo";
 import { dayKey, dayTitle, instantOf, isTimed, parseDay, timeOf } from "./calendar-model";
 import { entryColor, entryIcon, entryWhen } from "./calendar-views";
 
@@ -1158,7 +1159,7 @@ export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose
                 value={form.target}
                 onChange={(value) => set("target", value as FormState["target"])}
                 options={[
-                  { value: "telegram", label: "Telegram", icon: "send" },
+                  { value: "telegram", label: "Telegram", icon: <ChannelLogo channel="telegram" size={13} /> },
                   { value: "web", label: "Web", icon: "monitor" },
                 ]}
               />
@@ -1453,7 +1454,7 @@ function ItemDrawerForm({
                 value={form.target}
                 onChange={(value) => set("target", value as FormState["target"])}
                 options={[
-                  { value: "telegram", label: "Telegram", icon: "send" },
+                  { value: "telegram", label: "Telegram", icon: <ChannelLogo channel="telegram" size={13} /> },
                   { value: "web", label: "Web", icon: "monitor" },
                 ]}
               />
