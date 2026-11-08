@@ -188,3 +188,162 @@
 .agent-picker-count {
   display: none;
 }
+
+/* Spec 40: session titles. The row actions (rename, more) appear over the
+   row's right edge on hover or keyboard focus; touch screens always show the
+   more button, which holds Rename and Regenerate title. */
+.session-row {
+  position: relative;
+}
+
+.session-row-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm, 6px);
+  background: var(--surface-2);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity var(--dur);
+}
+
+.session-row.is-selected .session-row-actions {
+  background: var(--accent-soft);
+}
+
+.session-row:hover .session-row-actions,
+.session-row:focus-within .session-row-actions,
+.session-row-actions.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.session-row-title.is-untitled {
+  color: var(--text-2);
+}
+
+/* "Naming…" while the first title is being made: a soft shimmer over the
+   text, still at once readable. */
+.session-row-title.is-naming,
+.chat-title-text.is-naming {
+  color: var(--text-3);
+  background: linear-gradient(90deg, var(--text-3) 0%, var(--text) 45%, var(--text-3) 90%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-row-title.is-naming,
+  .chat-title-text.is-naming {
+    animation: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+.session-row.is-editing .session-row-link {
+  background: var(--surface-2);
+}
+
+.title-input.input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+@media (hover: none) {
+  .session-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+    top: 8px;
+    transform: none;
+    background: transparent;
+  }
+  .session-row-rename {
+    display: none;
+  }
+  .session-row-head {
+    padding-right: 26px;
+  }
+}
+
+/* The session header title: a button that turns into the title editor. */
+.chat-title-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border: 0;
+  border-radius: var(--r-sm, 6px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.chat-title-button:hover {
+  background: var(--surface-2);
+}
+
+.chat-title-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chat-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-title-text.is-untitled {
+  color: var(--text-2);
+}
+
+.chat-title-edit {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--dur);
+}
+
+.chat-title-button:hover .chat-title-edit,
+.chat-title-button:focus-visible .chat-title-edit {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-title-edit {
+    opacity: 1;
+  }
+}
+
+.chat-title .title-input.input {
+  max-width: 520px;
+  height: 30px;
+  font-size: var(--font-size-section, 16px);
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .chat-title-text {
+    white-space: normal;
+  }
+  .chat-title .title-input.input {
+    max-width: none;
+  }
+}

@@ -177,6 +177,9 @@ export interface StreamHandlers {
   onQuestion?: (payload: QuestionEvent) => void;
   onApprovalClosed?: (payload: StreamFrame) => void;
   onShutdown?: (payload: StreamFrame) => void;
+  /* Spec 40, REQ-TTL-011: the session title, its source, or the pending flag
+     changed. */
+  onTitle?: (payload: StreamFrame) => void;
   onState?: (state: StreamState) => void;
   onUnauthorized?: () => void;
   onError?: (status: number) => void;
@@ -276,6 +279,12 @@ function dispatchBlock(
   if (eventName === "approval_closed") {
     if (handlers.onApprovalClosed) {
       handlers.onApprovalClosed(payload as StreamFrame);
+    }
+    return;
+  }
+  if (eventName === "title") {
+    if (handlers.onTitle) {
+      handlers.onTitle(payload as StreamFrame);
     }
     return;
   }

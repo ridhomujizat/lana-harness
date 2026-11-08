@@ -15,6 +15,11 @@ export interface Session {
   address: string;
   agent: string;
   title: string;
+  /* Spec 40: "" (no title yet), "auto", "owner", or "system". Older daemons
+     omit both title fields. */
+  title_source?: string;
+  /* True while the daemon is naming the session (REQ-TTL-012). */
+  title_pending?: boolean;
   status: string;
   preview: string;
   turn_count: number;
@@ -101,6 +106,8 @@ export interface PatchSessionRequest {
   policy?: string;
   reasoning_effort?: string;
   confirm_trust?: boolean;
+  /* Spec 40: a new title; "" goes back to an automatic one. */
+  title?: string;
 }
 
 export function listSessions(
@@ -150,5 +157,20 @@ export function patchSession(
     "PATCH",
     "/v1/sessions/" + encodeURIComponent(id),
     patch
+  );
+}
+
+/* Spec 40, REQ-TTL-008: renames a session. An empty title goes back to an
+   automatic one. */
+export function renameSession(id: string, title: string): Promise<SessionDetail> {
+  return patchSession(id, { title });
+}
+
+/* Spec 40, REQ-TTL-010: names the session again now and answers the session
+   with its new title. 409 title_busy while a title is being made. */
+export function regenerateSessionTitle(id: string): Promise<SessionDetail> {
+  return request<SessionDetail>(
+    "POST",
+    "/v1/sessions/" + encodeURIComponent(id) + "/title/regenerate"
   );
 }

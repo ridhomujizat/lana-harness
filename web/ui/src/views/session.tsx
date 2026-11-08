@@ -39,7 +39,12 @@ import { listSessionJobs, stopSessionJob } from "../api/jobs";
 import type { BackgroundJob } from "../api/jobs";
 import { answerQuestion, skipAllQuestions } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
-import { getSession, listEvents, patchSession } from "../api/sessions";
+import {
+  getSession,
+  listEvents,
+  patchSession,
+  renameSession,
+} from "../api/sessions";
 import type {
   PatchSessionRequest,
   SessionDetail,
@@ -72,6 +77,15 @@ import type { OpenQuestion } from "./question";
 import { buildTurns, TurnBlock, UserBubble } from "./turn";
 import type { UserAttachment, UserAttachmentRef } from "./turn";
 import { TrajectoryView } from "./trajectory";
+import {
+  NAMING_SESSION,
+  TitleInput,
+  UNTITLED_SESSION,
+  publishSessionTitle,
+  titleUpdateFrom,
+  useSessionTitleUpdates,
+} from "./session-title";
+import type { SessionTitleUpdate } from "./session-title";
 import {
   AttachmentChips,
   AttachmentDropOverlay,
@@ -1386,6 +1400,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
     tabFromValue(view !== undefined ? view : viewFromHash())
   );
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  /* Spec 40: the header title is being edited. */
+  const [editingTitle, setEditingTitle] = useState(false);
+  const titleButtonRef = useRef<HTMLButtonElement>(null);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1530,6 +1547,59 @@ export function SessionPage({ id, view }: SessionPageProps) {
       announce(prefix + " " + message);
     },
     [announce]
+  );
+
+  /* Spec 40: a title change from the stream, a rename here, or one made in
+     the History list. */
+  const applyTitle = useCallback(
+    (update: SessionTitleUpdate) => {
+      if (update.id !== id) {
+        return;
+      }
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              title: update.title,
+              title_source: update.title_source,
+              title_pending: update.title_pending,
+            }
+          : current
+      );
+    },
+    [id]
+  );
+  const applyTitleRef = useRef(applyTitle);
+  useEffect(() => {
+    applyTitleRef.current = applyTitle;
+  }, [applyTitle]);
+  useSessionTitleUpdates(applyTitle);
+
+  const endTitleEdit = useCallback(() => {
+    setEditingTitle(false);
+    window.setTimeout(() => titleButtonRef.current?.focus(), 0);
+  }, []);
+
+  /* REQ-TTL-008, REQ-TTL-009: Enter saves; an empty title goes back to an
+     automatic one. */
+  const saveTitle = useCallback(
+    async (value: string) => {
+      try {
+        const updated = await renameSession(id, value);
+        const update = titleUpdateFrom(id, updated as unknown as Record<string, unknown>);
+        applyTitle(update);
+        publishSessionTitle(update);
+        endTitleEdit();
+        announce(value ? "Session renamed." : "The session will get an automatic title.");
+      } catch (failure) {
+        const message = errorMessage(failure);
+        setActionError("Could not rename the session. " + message);
+        setActionDetails([]);
+        announce("Could not rename the session. " + message);
+        throw failure;
+      }
+    },
+    [id, applyTitle, endTitleEdit, announce]
   );
 
   const refreshDetail = useCallback(async (): Promise<SessionDetail | null> => {
@@ -2140,6 +2210,12 @@ export function SessionPage({ id, view }: SessionPageProps) {
           );
         }
       },
+      onTitle: (frame: StreamFrame) => {
+        /* REQ-TTL-011: the automatic title arrived or a rename elsewhere. */
+        const update = titleUpdateFrom(id, frame);
+        applyTitleRef.current(update);
+        publishSessionTitle(update);
+      },
       onShutdown: () => {
         setStreamState("closed");
         announce("The daemon is shutting down.");
@@ -2583,7 +2659,41 @@ export function SessionPage({ id, view }: SessionPageProps) {
       <AttachmentDropOverlay active={fileDrop.active} />
       <header className="chat-header">
         <div className="chat-header-title">
-          <h1 className="chat-title">{detail.title || "Untitled session"}</h1>
+          <h1 className="chat-title">
+            {editingTitle ? (
+              <TitleInput
+                initial={detail.title || ""}
+                label="Session title"
+                onSave={saveTitle}
+                onCancel={endTitleEdit}
+              />
+            ) : (
+              <button
+                type="button"
+                ref={titleButtonRef}
+                className="chat-title-button"
+                title="Rename session"
+                aria-label={
+                  "Rename session: " +
+                  (detail.title ||
+                    (detail.title_pending ? NAMING_SESSION : UNTITLED_SESSION))
+                }
+                onClick={() => setEditingTitle(true)}
+              >
+                <span
+                  className={
+                    "chat-title-text" +
+                    (!detail.title && detail.title_pending ? " is-naming" : "") +
+                    (!detail.title && !detail.title_pending ? " is-untitled" : "")
+                  }
+                >
+                  {detail.title ||
+                    (detail.title_pending ? NAMING_SESSION : UNTITLED_SESSION)}
+                </span>
+                <Ic name="pencil" size={14} className="chat-title-edit" />
+              </button>
+            )}
+          </h1>
           <div className="chat-meta">
             <span
               className={

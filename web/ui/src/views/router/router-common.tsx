@@ -252,6 +252,7 @@ const SOURCE_LABELS: Record<string, string> = {
   turn: "Chat turn",
   compaction: "Compaction",
   memory_capture: "Memory capture",
+  title: "Session title",
   knowledge: "Knowledge",
   embed: "Embedding",
   workflow: "Workflow",

@@ -40,7 +40,7 @@ var (
 	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 var validKinds = map[string]bool{
 	core.KindSessionCreated: true, core.KindTurnStart: true, core.KindTurnEnd: true,
@@ -105,7 +105,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return ErrSchemaTooNew
 	}
-	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads", 6: "workflows", 7: "calendar", 8: "router"}
+	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads", 6: "workflows", 7: "calendar", 8: "router", 9: "session_title"}
 	for v := version + 1; v <= schemaVersion; v++ {
 		name := fmt.Sprintf("migrations/%04d_%s.sql", v, names[v])
 		data, err := migrationFS.ReadFile(name)
@@ -431,7 +431,11 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 	if in.InheritedSeq > 0 {
 		firstSeq = in.InheritedSeq + 1
 	}
-	info := core.SessionInfo{ID: sessionID, Agent: in.Agent, Channel: in.Channel, Address: in.Address, Workspace: workspace, Status: "idle", ParentSessionID: in.ParentSessionID, InheritedSeq: in.InheritedSeq, CreatedAt: now, UpdatedAt: now}
+	title, titleSource := in.Title, in.TitleSource
+	if title == "" || !validTitleSource(titleSource) || titleSource == "" {
+		title, titleSource = "", ""
+	}
+	info := core.SessionInfo{ID: sessionID, Agent: in.Agent, Channel: in.Channel, Address: in.Address, Workspace: workspace, Title: title, TitleSource: titleSource, Status: "idle", ParentSessionID: in.ParentSessionID, InheritedSeq: in.InheritedSeq, CreatedAt: now, UpdatedAt: now}
 	err := s.withWrite(ctx, func(conn *sql.Conn) error {
 		if in.ParentSessionID != "" {
 			var count int
@@ -447,7 +451,7 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 		if err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', NULLIF(?, ''), ?, ?, 0, ?, ?)", sessionID, in.Agent, in.Channel, in.Address, workspace, in.ParentSessionID, in.InheritedSeq, firstSeq, now, now); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, title, title_source, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', NULLIF(?, ''), ?, ?, 0, ?, ?)", sessionID, in.Agent, in.Channel, in.Address, workspace, title, titleSource, in.ParentSessionID, in.InheritedSeq, firstSeq, now, now); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", sessionID, firstSeq, core.KindSessionCreated, string(payload), now); err != nil {
@@ -474,8 +478,8 @@ func (s *Store) info(ctx context.Context, sessionID string) (core.SessionInfo, e
 	var info core.SessionInfo
 	var parent sql.NullString
 	var inherited sql.NullInt64
-	err := s.db.QueryRowContext(ctx, "SELECT id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at FROM sessions WHERE id = ?", sessionID).
-		Scan(&info.ID, &info.Agent, &info.Channel, &info.Address, &info.Workspace, &info.Title, &info.Status, &parent, &inherited, &info.LastSeq, &info.TurnCount, &info.CreatedAt, &info.UpdatedAt)
+	err := s.db.QueryRowContext(ctx, "SELECT id, agent, channel, address, workspace, title, title_source, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at FROM sessions WHERE id = ?", sessionID).
+		Scan(&info.ID, &info.Agent, &info.Channel, &info.Address, &info.Workspace, &info.Title, &info.TitleSource, &info.Status, &parent, &inherited, &info.LastSeq, &info.TurnCount, &info.CreatedAt, &info.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return core.SessionInfo{}, ErrSessionNotFound
 	}
@@ -485,6 +489,58 @@ func (s *Store) info(ctx context.Context, sessionID string) (core.SessionInfo, e
 	info.ParentSessionID = parent.String
 	info.InheritedSeq = inherited.Int64
 	return info, nil
+}
+
+// validTitleSource reports whether source is a stored title source (spec 40).
+func validTitleSource(source string) bool {
+	switch source {
+	case "", core.TitleSourceAuto, core.TitleSourceOwner, core.TitleSourceSystem:
+		return true
+	}
+	return false
+}
+
+// SetSessionTitle implements core.SessionTitleStore (spec 40, REQ-TTL-005).
+// It changes only the title projection; updated_at stays, so a rename does
+// not move the session in the list.
+func (s *Store) SetSessionTitle(ctx context.Context, sessionID, title, source string, onlyIfUntitled bool) (bool, error) {
+	if err := s.assertOpen(); err != nil {
+		return false, err
+	}
+	if !validTitleSource(source) {
+		return false, fmt.Errorf("invalid title source %q", source)
+	}
+	if title == "" {
+		source = ""
+	}
+	changed := false
+	err := s.withWrite(ctx, func(conn *sql.Conn) error {
+		query := "UPDATE sessions SET title = ?, title_source = ? WHERE id = ?"
+		if onlyIfUntitled {
+			query += " AND title_source = ''"
+		}
+		res, err := conn.ExecContext(ctx, query, title, source, sessionID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			changed = true
+			return nil
+		}
+		var count int
+		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions WHERE id = ?", sessionID).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			return ErrSessionNotFound
+		}
+		return nil
+	})
+	return changed, err
 }
 
 // Append writes a batch of events atomically.
@@ -768,7 +824,7 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 	if f.Limit < 0 {
 		return nil, errors.New("negative limit")
 	}
-	query := "SELECT id, agent, channel, address, workspace, title, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at FROM sessions WHERE 1=1"
+	query := "SELECT id, agent, channel, address, workspace, title, title_source, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at FROM sessions WHERE 1=1"
 	args := []any{}
 	if f.Channel != "" {
 		query += " AND channel = ?"
@@ -808,7 +864,7 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 		var info core.SessionInfo
 		var parent sql.NullString
 		var inherited sql.NullInt64
-		if err := rows.Scan(&info.ID, &info.Agent, &info.Channel, &info.Address, &info.Workspace, &info.Title, &info.Status, &parent, &inherited, &info.LastSeq, &info.TurnCount, &info.CreatedAt, &info.UpdatedAt); err != nil {
+		if err := rows.Scan(&info.ID, &info.Agent, &info.Channel, &info.Address, &info.Workspace, &info.Title, &info.TitleSource, &info.Status, &parent, &inherited, &info.LastSeq, &info.TurnCount, &info.CreatedAt, &info.UpdatedAt); err != nil {
 			return nil, err
 		}
 		info.ParentSessionID = parent.String
@@ -867,7 +923,7 @@ func (s *Store) Fork(ctx context.Context, parentID string, atSeq int64) (core.Se
 	created := core.SessionCreated{V: core.PayloadVersion, Agent: parent.Agent, Channel: parent.Channel, Address: parent.Address, Workspace: parent.Workspace, ParentSessionID: parentID, InheritedSeq: atSeq}
 	payload, _ := json.Marshal(created)
 	err = s.withWrite(ctx, func(conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?, ?, 0, ?, ?)", childID, parent.Agent, parent.Channel, parent.Address, parent.Workspace, parentID, atSeq, firstSeq, now, now); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO sessions (id, agent, channel, address, workspace, title, title_source, status, parent_session_id, inherited_seq, last_seq, turn_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?, 0, ?, ?)", childID, parent.Agent, parent.Channel, parent.Address, parent.Workspace, parent.Title, parent.TitleSource, parentID, atSeq, firstSeq, now, now); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, "INSERT INTO session_events (session_id, seq, kind, payload, turn_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)", childID, firstSeq, core.KindSessionCreated, string(payload), now)

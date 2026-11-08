@@ -172,6 +172,11 @@ agent = "lana"
 	if err != nil {
 		t.Fatalf("CreateChannelSession: %v", err)
 	}
+	// Spec 40: an owner title keeps the background title pass from taking a
+	// scripted mock response.
+	if _, err := rt.SetSessionTitle(context.Background(), info.ID, "Test session"); err != nil {
+		t.Fatalf("SetSessionTitle: %v", err)
+	}
 	runTurn := func() {
 		t.Helper()
 		if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {

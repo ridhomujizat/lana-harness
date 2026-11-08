@@ -67,7 +67,7 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 	if err := rt.scheduledRunAllowed(req.Agent, req.Model); err != nil {
 		return workflow.AgentResult{}, err
 	}
-	session, err := rt.CreateChannelSession(ctx, "workflow", req.WorkflowID, req.Agent)
+	session, err := rt.createChannelSession(ctx, "workflow", req.WorkflowID, req.Agent, rt.workflowSessionTitle(ctx, req.WorkflowID))
 	if err != nil {
 		return workflow.AgentResult{}, err
 	}

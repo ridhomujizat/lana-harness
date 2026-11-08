@@ -326,6 +326,11 @@ func webCreateSession(t *testing.T, rt *lana.Runtime, ctx context.Context) core.
 	if err != nil {
 		t.Fatalf("CreateChannelSession: %v", err)
 	}
+	// Spec 40: an owner title keeps the background title pass from taking a
+	// scripted mock response from the turns under test.
+	if info, err = rt.SetSessionTitle(ctx, info.ID, "Test session"); err != nil {
+		t.Fatalf("SetSessionTitle: %v", err)
+	}
 	return info
 }
 
