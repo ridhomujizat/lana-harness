@@ -314,12 +314,19 @@ func TestBuildArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages " +
-		"--permission-prompts host --permission-prompt-tool stdio --model opus --effort high --session-id " + id
+		"--permission-prompts host --permission-prompt-tool stdio --strict-mcp-config --setting-sources project,local " +
+		"--model opus --effort high --session-id " + id
 	if got := strings.Join(args, " "); got != want {
 		t.Fatalf("args = %s", got)
 	}
+	// REQ-CCT-006 (owner decision 2026-11-08): the runtime is isolated from the
+	// owner's own Claude Code setup.
+	if argValue(args, "--setting-sources") != "project,local" ||
+		!strings.Contains(strings.Join(args, " "), " --strict-mcp-config") {
+		t.Fatalf("isolation args = %v", args)
+	}
 	args, _ = buildArgs(core.RuntimeConfig{AppendSystemPrompt: "-You are Bima"}, id, true, `{"mcpServers":{}}`)
-	if got := strings.Join(args, "|"); !strings.Contains(got, "|--append-system-prompt|-You are Bima|--mcp-config|{\"mcpServers\":{}}|") || strings.Contains(got, "strict-mcp-config") {
+	if got := strings.Join(args, "|"); !strings.Contains(got, "|--append-system-prompt|-You are Bima|--mcp-config|{\"mcpServers\":{}}|") || !strings.Contains(got, "strict-mcp-config") {
 		t.Fatalf("prompt and mcp args = %v", args)
 	}
 	if got := strings.Join(args[len(args)-2:], " "); got != "--resume "+id {
@@ -374,6 +381,29 @@ func TestEnvScrubbing(t *testing.T) {
 	events, err := h2.run(context.Background(), turn)
 	if err == nil || !strings.Contains(err.Error(), "MISSING_KEY is not set") || !endOf(t, events).IsError {
 		t.Fatalf("missing secret: err = %v", err)
+	}
+}
+
+// REQ-CCT-006 (owner decision 2026-11-08): the child env pins the isolation
+// variables, overriding the values the base env carries.
+func TestEnvIsolation(t *testing.T) {
+	base := []string{"CLAUDE_CODE_DISABLE_AUTO_MEMORY=0", "ENABLE_CLAUDEAI_MCP_SERVERS=true"}
+	h := newHarness(t, "hi.jsonl", Options{}, base...)
+	if _, err := h.run(context.Background(), h.turn("s1")); err != nil {
+		t.Fatal(err)
+	}
+	env := h.starts()[0].Env
+	for _, want := range isolatedEnv {
+		name, _, _ := strings.Cut(want, "=")
+		var got []string
+		for _, kv := range env {
+			if strings.HasPrefix(kv, name+"=") {
+				got = append(got, kv)
+			}
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("%s = %v, want [%s]", name, got, want)
+		}
 	}
 }
 
