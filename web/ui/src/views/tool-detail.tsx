@@ -16,6 +16,7 @@ import { Ic } from "../ui/icons";
 import { Badge, Button, ErrorState, Input, Modal, Panel, Select, Textarea, Toggle, useToast } from "../ui/gr8r";
 import { AppIcon, StateBadge, isInstalled, manifestIssues, useToolboxStream } from "./tools";
 import type { ManifestIssue } from "./tools";
+import { AgentAvatar } from "./agent-avatar";
 
 /* Tool detail (spec #34 r2): install with one click, turn the tool on for
    agents, try its commands; methods and the manifest sit under Advanced. */
@@ -326,7 +327,7 @@ export function ToolDetailPage({ id }: { id: string }) {
         <ul className="tl-agents">
           {agents.map((agent) => (
             <li key={agent.name}>
-              <span className="tl-agent-face">{agent.name.slice(0, 1).toUpperCase()}</span>
+              <AgentAvatar name={agent.name} size="md" />
               <span className="tl-agent-name">{agent.name}</span>
               <Toggle
                 checked={agent.enabled}
@@ -483,3 +484,4 @@ export function ToolDetailPage({ id }: { id: string }) {
     </main>
   );
 }
+

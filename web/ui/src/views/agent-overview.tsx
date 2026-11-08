@@ -7,8 +7,6 @@ import type { Agent } from "../api/agents";
 import { detailText } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   Chip,
@@ -19,6 +17,8 @@ import {
   Skeleton,
   Stat,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
+import { GenerateAvatarButton } from "./avatar-dialog";
 import {
   agentHref,
   permissionMeta,
@@ -327,12 +327,22 @@ export function AgentOverview({
     <div className="ov-page">
       <section className="panel ov-hero">
         <div className="ov-hero-in">
-          <Avatar
-            size="xl"
-            name={data.name}
-            color={gr8rColor(data.color)}
-            presence={presenceState === "online" || presenceState === "working"}
-          />
+          <span className="avatar-edit-wrap">
+            <AgentAvatar
+              size="xl"
+              name={data.name}
+              color={gr8rColor(data.color)}
+              presence={presenceState === "online" || presenceState === "working"}
+            />
+            <GenerateAvatarButton
+              compact
+              name={data.name}
+              color={data.color}
+              svg={data.avatar_svg}
+              source={data.avatar_source}
+              onSaved={() => setToken((value) => value + 1)}
+            />
+          </span>
           <div className="ov-hero-body">
             <div className="ov-hero-name-row">
               <h1 className="ov-hero-name">{data.name}</h1>
@@ -615,7 +625,7 @@ function TeamOverview({
       <section className="panel ov-hero">
         <div className="ov-hero-in">
           {names.length > 0 ? (
-            <AvatarStack
+            <AgentAvatarStack
               size="lg"
               max={4}
               items={names.map((member) => ({
@@ -624,7 +634,7 @@ function TeamOverview({
               }))}
             />
           ) : (
-            <Avatar size="xl" name={data.name} color="var(--violet)" />
+            <AgentAvatar size="xl" name={data.name} color="var(--violet)" />
           )}
           <div className="ov-hero-body">
             <div className="ov-hero-name-row">
@@ -668,7 +678,7 @@ function TeamOverview({
               const isLead = member === lead;
               return (
                 <li key={member} className="ov-member">
-                  <Avatar
+                  <AgentAvatar
                     size="lg"
                     name={member}
                     color={gr8rColor(memberRow ? memberRow.color : undefined)}

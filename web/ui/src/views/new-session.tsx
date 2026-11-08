@@ -15,7 +15,8 @@ import { createSession } from "../api/sessions";
 import { sendMessage } from "../api/turns";
 import { ErrorDetails, useAnnounce } from "../ui/ui";
 import { Ic, LanaMark } from "../ui/icons";
-import { Avatar, AvatarStack, Button, SearchInput } from "../ui/gr8r";
+import { Avatar, Button, SearchInput } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 import { gr8rColor } from "./presence";
 import { CreateAgentDialog } from "./agents";
 import {
@@ -141,7 +142,7 @@ function TeamAvatars({ agent, byName }: { agent: Agent; byName: Map<string, Agen
     names.push(agent.name);
   }
   return (
-    <AvatarStack
+    <AgentAvatarStack
       size="sm"
       max={3}
       items={names.map((name) => ({
@@ -185,7 +186,7 @@ function AgentOption({
       {team ? (
         <TeamAvatars agent={agent} byName={byName} />
       ) : (
-        <Avatar name={agent.name} color={gr8rColor(agent.color)} size="md" />
+        <AgentAvatar name={agent.name} color={gr8rColor(agent.color)} size="md" />
       )}
       <span className="agent-option-text">
         <span className="agent-option-name">{agent.name}</span>
@@ -398,7 +399,7 @@ function AgentPicker({
           onClick={togglePicker}
         >
           {selected ? (
-            <Avatar
+            <AgentAvatar
               name={selected.name}
               color={gr8rColor(selected.color)}
               size="sm"

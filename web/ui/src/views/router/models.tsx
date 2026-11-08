@@ -4,6 +4,7 @@ import type { ModelTestResponse, ProviderModels, RouterModel } from "../../api/r
 import { Badge, Button, EmptyState } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { DASH, agoText, compact, failureOf, ms } from "./router-common";
+import { UsedBy } from "./providers";
 
 /* The models of one provider connection (REQ-RTR-013, API-RTR-009/010), shown
    on the provider's page: the catalog and the provider's own model list, with
@@ -39,6 +40,14 @@ export function usedByText(model: RouterModel): string {
     parts.push("combo " + combo);
   }
   return parts.join(", ");
+}
+
+/* The users of a model in the "<kind>.<name>" form UsedBy reads, so agents
+   show their avatars (spec 43). */
+export function usedByList(model: RouterModel): string[] {
+  const agents = (model.used_by?.agents || []).map((name) => "agents." + name);
+  const combos = (model.used_by?.combos || []).map((name) => "combos." + name);
+  return agents.concat(combos);
 }
 
 export type TestState = { busy: boolean; result?: ModelTestResponse; error?: string };
@@ -190,7 +199,11 @@ export function ProviderModelsPanel({ provider, title }: { provider: string; tit
                       </Badge>
                     </td>
                     <td className="rt-used-cell trunc" title={usedByText(model)}>
-                      {usedByText(model) || <span className="faint">{DASH}</span>}
+                      {usedByText(model) ? (
+                        <UsedBy usedBy={usedByList(model)} />
+                      ) : (
+                        <span className="faint">{DASH}</span>
+                      )}
                     </td>
                     <td className="rt-test-cell">
                       <Button

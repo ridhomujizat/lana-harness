@@ -3,8 +3,6 @@ import type { RoomRow } from "../api/rooms";
 import { gr8rColor, PresenceLabel, useRooms } from "./presence";
 import { relativeShort, RoomView } from "./room-timeline";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   EmptyState,
@@ -12,6 +10,7 @@ import {
   Seg,
   Skeleton,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 
 /* The Chats page of REQ-ROOM-001 to REQ-ROOM-005: the room list column and the
@@ -67,11 +66,11 @@ function RowFace({ row }: { row: RoomRow }) {
     const items = [row.lead, ...(row.members || [])]
       .filter(Boolean)
       .map((name) => ({ name: String(name), color: gr8rColor(row.color) }));
-    return <AvatarStack items={items} max={2} size="lg" />;
+    return <AgentAvatarStack items={items} max={2} size="lg" />;
   }
   const state = rowState(row);
   return (
-    <Avatar
+    <AgentAvatar
       name={row.name}
       color={gr8rColor(row.color)}
       size="lg"

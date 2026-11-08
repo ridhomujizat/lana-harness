@@ -97,6 +97,7 @@ import {
   useFileDrop,
 } from "./attachments";
 import type { DraftAttachment } from "./attachments";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 
 /* Chat view of the sessions screen (REQ-WEB-038, REQ-WEB-039, REQ-WEB-040).
    It replaces the rev 1 history list and keeps the turn block and the approval
@@ -346,6 +347,11 @@ function AgentMenuContent({
               disabled={disabled}
               onClick={() => onPick(entry.name)}
             >
+              {team ? (
+                <AgentAvatarStack size="sm" max={2} items={rosterNames(entry).map((name) => ({ name }))} />
+              ) : (
+                <AgentAvatar name={entry.name} size="sm" aria-hidden="true" />
+              )}
               <span className="mi-text">
                 <span className="mi-name">{entry.name}</span>
                 <span className="mi-meta">

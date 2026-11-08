@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { buildTurns, turnEndCard, turnSummary, TurnBlock } from "./turn";
+import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
 import type { TurnStep } from "./turn";
 import type { SessionEvent, EventPayload } from "../api/sessions";
 
@@ -366,5 +367,39 @@ describe("turn header avatar", () => {
     rerender(<TurnBlock turn={turnItem.turn} agent="lana" />);
     expect(container.querySelector(".turn-head .agent-face")).toBeNull();
     expect(container.querySelector(".turn-head .agent-avatar")).not.toBeNull();
+    /* Spec 43: no letter; the server-rendered avatar until the store knows. */
+    expect(
+      container.querySelector(".turn-head .agent-avatar img.av-img")?.getAttribute("src")
+    ).toBe("/v1/agents/lana/avatar.svg?theme=light");
+  });
+
+  /* Spec 43: the timeline speaker shows the generated avatar. */
+  it("shows the stored svg for the speaker", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "the answer" }],
+      }),
+      event(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    setAgentAvatar(
+      "lana",
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+        '<circle cx="50" cy="50" r="38" fill="currentColor"/>' +
+        '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
+        '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>',
+      "#9b5cff"
+    );
+    try {
+      const { container } = render(<TurnBlock turn={turnItem.turn} agent="lana" />);
+      const face = container.querySelector(".turn-head .agent-face.has-svg") as HTMLElement;
+      expect(face.querySelector("svg circle")).not.toBeNull();
+      expect(face.textContent).toBe("");
+    } finally {
+      resetAvatarStore();
+    }
   });
 });

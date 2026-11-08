@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { Dashboard } from "../api/dashboard";
 import { EmptyState } from "../ui/gr8r";
 import { bucketLabel, compact, count, share } from "./dashboard-common";
@@ -218,6 +219,8 @@ export interface ShareRow {
   label: string;
   sub?: string;
   value: number;
+  /* A mark before the label, such as an agent avatar (spec 43). */
+  icon?: ReactNode;
 }
 
 /* Horizontal share bars, e.g. tokens by model, agent or source. */
@@ -232,7 +235,14 @@ export function ShareBars({ rows, empty, unit = "tok" }: { rows: ShareRow[]; emp
       {rows.map((row) => (
         <li key={row.key}>
           <div className="hc-bars-top">
-            <span className="trunc">{row.label}</span>
+            {row.icon ? (
+              <span className="hc-bars-label">
+                {row.icon}
+                <span className="trunc">{row.label}</span>
+              </span>
+            ) : (
+              <span className="trunc">{row.label}</span>
+            )}
             <b className="num">
               {compact(row.value)} {unit}
             </b>

@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- the detail load resets its state before each request, as in agent-detail.js */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
+import type { CSSProperties, FormEvent, KeyboardEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import { duplicateAgent, listAgents, updateAgent } from "../api/agents";
 import type { Agent, AgentWriteFields } from "../api/agents";
@@ -44,8 +44,6 @@ import { McpTab } from "./agent-tabs/mcp";
 import { RulesTab } from "./agent-tabs/rules";
 import { WorkspaceTab } from "./agent-tabs/workspace";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   Chip,
@@ -57,6 +55,9 @@ import {
   Tabs,
   Toggle,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
+import { GenerateAvatarButton } from "./avatar-dialog";
+import type { AvatarSavedResult } from "./avatar-dialog";
 import type { SelectOption } from "../ui/gr8r";
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
@@ -224,9 +225,13 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/* REQ-ROOM-009: an agent color is one of the six names; anything else is brand. */
+/* REQ-ROOM-009: an agent color is one of the six names; since spec 43 it may
+   also be a "#rrggbb" hex set in the avatar dialog. Anything else is brand. */
 function normalizeColor(value: unknown): string {
-  const name = String(value || "").toLowerCase();
+  const name = String(value || "").trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(name)) {
+    return name;
+  }
   return AGENT_COLORS.some((entry) => entry.value === name) ? name : "brand";
 }
 
@@ -786,6 +791,35 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setReloadToken((current) => current + 1);
   }
 
+  /* Spec 43: the avatar dialog writes the agent color too. The form and its
+     baseline follow the saved color, and the config version is read again
+     so the next General save does not trip the version check. */
+  function avatarSaved(result: AvatarSavedResult) {
+    const savedColor = normalizeColor(result.color);
+    setPage((current) =>
+      current && current.agent
+        ? {
+            ...current,
+            agent: { ...current.agent, color: savedColor, avatar_svg: result.svg },
+          }
+        : current
+    );
+    setForm((current) => (current ? { ...current, color: savedColor } : current));
+    setBaseline((current) => (current ? { ...current, color: savedColor } : current));
+    if (result.restartRequired) {
+      setRestartNotice(true);
+    }
+    getConfig()
+      .then((config) => {
+        if (config && config.version) {
+          setVersion(String(config.version));
+        }
+      })
+      .catch(() => {
+        /* The next save reports a stale version and offers a reload. */
+      });
+  }
+
   /* Spec 37 (AC-RTR-024): picking a router choice writes model and clears a
      legacy provider; the legacy entry restores the saved pair. */
   function pickModel(value: string) {
@@ -1085,7 +1119,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       <main id="main" className="page agent-detail-page">
         <header className="ph agent-detail-header">
           <div className="agent-detail-identity">
-            <AvatarStack
+            <AgentAvatarStack
               size="lg"
               max={3}
               items={rosterNames(agent).map((member) => ({
@@ -1206,16 +1240,26 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       {activeTab !== "overview" ? (
         <header className="ph agent-detail-header">
           <div className="agent-detail-identity">
-            <Avatar
-              size="lg"
-              name={agent.name}
-              color={gr8rColor(agent.color)}
-              presence={
-                presence
-                  ? presence.state === "online" || presence.state === "working"
-                  : false
-              }
-            />
+            <span className="avatar-edit-wrap">
+              <AgentAvatar
+                size="lg"
+                name={agent.name}
+                color={gr8rColor(agent.color)}
+                presence={
+                  presence
+                    ? presence.state === "online" || presence.state === "working"
+                    : false
+                }
+              />
+              <GenerateAvatarButton
+                compact
+                name={agent.name}
+                color={agent.color}
+                svg={agent.avatar_svg}
+                source={agent.avatar_source}
+                onSaved={avatarSaved}
+              />
+            </span>
             <div className="agent-detail-heading">
               <div className="agent-detail-name-row">
                 <h1 className="agent-detail-name">{agent.name}</h1>
@@ -1337,6 +1381,35 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
 
               <div className="srow">
                 <div className="agent-srow-text">
+                  <span className="t" id="agent-avatar-label">
+                    Avatar
+                  </span>
+                  <div className="d">
+                    A blob character in the agent&rsquo;s color. Every agent starts
+                    with one drawn from its name; generate a new one with a model.
+                  </div>
+                </div>
+                <div className="agent-ctl">
+                  <div className="agent-avatar-edit" aria-labelledby="agent-avatar-label" role="group">
+                    <AgentAvatar
+                      name={agent.name}
+                      color={gr8rColor(form.color)}
+                      size="xl"
+                    />
+                    <GenerateAvatarButton
+                      name={agent.name}
+                      color={form.color}
+                      svg={agent.avatar_svg}
+                      source={agent.avatar_source}
+                      disabled={saving}
+                      onSaved={avatarSaved}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="srow">
+                <div className="agent-srow-text">
                   <span className="t" id="agent-color-label">
                     Color
                   </span>
@@ -1350,7 +1423,10 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     role="radiogroup"
                     aria-labelledby="agent-color-label"
                   >
-                    {AGENT_COLORS.map((entry) => {
+                    {(form.color.startsWith("#")
+                      ? [...AGENT_COLORS, { value: form.color, label: "Custom" }]
+                      : AGENT_COLORS
+                    ).map((entry) => {
                       const selected = form.color === entry.value;
                       return (
                         <label
@@ -1371,7 +1447,15 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                           />
                           <span
                             className={
-                              "agent-swatch-dot color-" + entry.value
+                              "agent-swatch-dot" +
+                              (entry.value.startsWith("#")
+                                ? ""
+                                : " color-" + entry.value)
+                            }
+                            style={
+                              entry.value.startsWith("#")
+                                ? ({ "--sw": entry.value } as CSSProperties)
+                                : undefined
                             }
                             aria-hidden="true"
                           />

@@ -13,6 +13,7 @@ import {
   nodePorts,
   nodeSubtitle,
 } from "./workflow-catalog";
+import { AgentAvatar } from "./agent-avatar";
 
 /* The workflow canvas of REQ-WF-011 (design workflows-2/3/5/7): node cards on a
    dot grid, orthogonal edges with port labels, dashed loop bodies, pan, zoom
@@ -687,9 +688,15 @@ export function WorkflowCanvas({
               data-node={node.id}
             >
               {!isTrigger(node.type) ? <span className="wf-port in" /> : null}
-              <span className={"wf-ico tint-" + meta.tint}>
-                <Ic name={meta.icon} size={18} />
-              </span>
+              {node.type === "bot" && typeof node.params?.agent === "string" && node.params.agent ? (
+                <span className="wf-ico wf-ico-agent">
+                  <AgentAvatar name={node.params.agent} size="lg" aria-hidden="true" />
+                </span>
+              ) : (
+                <span className={"wf-ico tint-" + meta.tint}>
+                  <Ic name={meta.icon} size={18} />
+                </span>
+              )}
               <span className="wf-node-text">
                 <span className="wf-node-name trunc">{node.name || meta.label}</span>
                 <span className="wf-node-sub trunc">{nodeSubtitle(node)}</span>

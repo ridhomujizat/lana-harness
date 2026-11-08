@@ -17,7 +17,7 @@ import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../
 import { ACCOUNTS_TERMS_NOTE, useClaudeAccounts } from "./claude-code";
 import { LoginCommand, PlanWindows, UsageProbeError, accountWindows, planLabel } from "./limits";
 import { RefreshControl, claudeLimitsStale, claudeUpdatedAt } from "./limits-refresh";
-import { TestResult, usedByText } from "./models";
+import { TestResult, usedByList, usedByText } from "./models";
 import type { TestState } from "./models";
 import { CLAUDE_AGENT_PROVIDER_NAME, CLAUDE_CODE_KIND } from "./presets";
 import { ProviderLogo } from "./provider-logo";
@@ -638,7 +638,11 @@ function ClaudeModelsPanel({
                       <Badge tone={sourceTone(model.source)}>{SOURCE_LABELS[model.source] || model.source || DASH}</Badge>
                     </td>
                     <td className="rt-used-cell trunc" title={usedByText(model)}>
-                      {usedByText(model) || <span className="faint">{DASH}</span>}
+                      {usedByText(model) ? (
+                        <UsedBy usedBy={usedByList(model)} />
+                      ) : (
+                        <span className="faint">{DASH}</span>
+                      )}
                     </td>
                     <td className="rt-test-cell">
                       <Button

@@ -2,6 +2,7 @@ import { Button, ErrorState, Panel, Stat } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { DashboardFilters, count, share, useDashboard } from "./dashboard-common";
 import { OutcomeDonut, ShareBars, TokenColumns, ToolBars } from "./home-charts";
+import { AgentAvatar } from "./agent-avatar";
 
 /* The monitoring dashboard (spec 28). On owner request (2026-11-05) Home shows
    only graphics: a KPI strip, token usage over time, turn outcomes, the busiest
@@ -155,6 +156,7 @@ export function HomePage() {
                 rows={(data.by_agent || []).map((row) => ({
                   key: row.agent,
                   label: row.agent,
+                  icon: <AgentAvatar name={row.agent} size="sm" aria-hidden="true" />,
                   sub: count(row.turns) + " turns",
                   value: tokensOf(row),
                 }))}

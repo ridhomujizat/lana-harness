@@ -22,12 +22,9 @@ import type {
 import type { Agent } from "../api/agents";
 import { Dialog, detailText, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
-import { avatarFor } from "../lib/avatar";
 import { agoLabel, isTeam, rosterNames, splitModel } from "./agent-common";
 import type { AgentLike } from "./agent-common";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   Checkbox,
@@ -41,6 +38,7 @@ import {
   Skeleton,
   Textarea,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack, agentFallbackColor } from "./agent-avatar";
 
 /* REQ-WEB-048, REQ-WEB-049; AC-WEB-051, AC-WEB-052: the skills list and the
    skill editor. Skills are markdown files with a small frontmatter block. The
@@ -66,18 +64,8 @@ function scopeAgent(scope: string | undefined): string {
     : "";
 }
 
-/* The agent identity colors (lib/avatar.ts) map onto the Gr8r status tokens so
-   one agent keeps one color in the picker, the roster and the skills editor. */
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 function ScopeBadge({ scope }: { scope: string }) {
@@ -871,7 +859,7 @@ function AddAgentsDialog({
                 disabled={added}
                 onChange={() => toggleAgent(agent.name)}
               />
-              <Avatar
+              <AgentAvatar
                 name={agent.name}
                 color={agentColor(agent.name)}
                 size="lg"
@@ -907,7 +895,7 @@ function AddAgentsDialog({
                 disabled={allAdded || members.length === 0}
                 onChange={() => toggleTeam(team)}
               />
-              <AvatarStack
+              <AgentAvatarStack
                 size="sm"
                 max={3}
                 items={rosterNames(team).map((member) => ({
@@ -980,7 +968,7 @@ function AgentPickerRow({
   const model = agentModelLabel(agent);
   return (
     <div className="mini skills-agent-row">
-      <Avatar name={agent.name} color={agentColor(agent.name)} size="md" />
+      <AgentAvatar name={agent.name} color={agentColor(agent.name)} size="md" />
       <span className="skills-agent-text">
         <span className="skills-agent-name">{agent.name}</span>
         {model ? <span className="skills-agent-model">{model}</span> : null}

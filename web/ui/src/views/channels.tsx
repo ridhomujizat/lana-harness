@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { ApiError, errorMessage } from "../api/client";
-import { avatarFor } from "../lib/avatar";
 import {
   checkTelegram,
   connectTelegram,
@@ -47,6 +46,7 @@ import {
   Skeleton,
   Toggle,
 } from "../ui/gr8r";
+import { AgentAvatar, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
 import { ChannelLogo } from "./channel-logo";
@@ -95,18 +95,8 @@ const COMING_SOON = [
   },
 ];
 
-/* The agent identity colors (lib/avatar.ts) map onto the Gr8r status tokens so
-   one agent keeps one color in the roster, the list and the detail page. */
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 function telegramStatus(status: string | undefined): {
@@ -332,7 +322,7 @@ function ChannelRow({
       </div>
       {agent ? (
         <div className="chan-card-agent">
-          <Avatar name={agent} color={agentColor(agent)} size="sm" />
+          <AgentAvatar name={agent} color={agentColor(agent)} size="sm" />
           <span>{agent}</span>
         </div>
       ) : null}
@@ -1927,7 +1917,7 @@ export function TelegramPage() {
                           <td>
                             <span className="chan-agent">
                               {chat.agent ? (
-                                <Avatar
+                                <AgentAvatar
                                   name={chat.agent}
                                   color={agentColor(chat.agent)}
                                   size="sm"

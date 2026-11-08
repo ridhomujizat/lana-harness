@@ -10,6 +10,7 @@ import {
   share,
   useDashboard,
 } from "./dashboard-common";
+import { AgentName } from "./agent-avatar";
 
 /* Observe → Logs (moved out of Home on owner request 2026-11-05): the error
    log of spec 28 (REQ-DSH-005) and the tool health table, with the same range
@@ -85,7 +86,9 @@ function ErrorLogRow({
           {row.agent ? (
             <>
               <dt>Agent</dt>
-              <dd>{row.agent}</dd>
+              <dd>
+                <AgentName name={row.agent} />
+              </dd>
             </>
           ) : null}
           {row.turn_id ? (

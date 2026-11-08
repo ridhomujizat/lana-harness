@@ -37,6 +37,7 @@ import { AgentFace, ago } from "./workflow-common";
 import { ChannelLogo } from "./channel-logo";
 import { dayKey, dayTitle, instantOf, isTimed, parseDay, timeOf } from "./calendar-model";
 import { entryColor, entryIcon, entryWhen } from "./calendar-views";
+import { agentOptionIcon } from "./agent-avatar";
 
 /* The entry popover, the item editor and the small move/scope dialogs of the
    Calendar page (spec #35 REQ-CAL-001, -003, -004, -005, -006, -010). */
@@ -923,7 +924,7 @@ export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose
     }
   }
 
-  const agentOptions = [{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: name }))];
+  const agentOptions = [{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: name, icon: agentOptionIcon(name) }))];
   const repeatOptions = repeatOptionsFor(form);
 
   let when: ReactNode;
@@ -1123,7 +1124,7 @@ export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose
                 <Select
                   value={form.agent}
                   placeholder="Pick an agent"
-                  options={agents.map((name) => ({ value: name, label: name }))}
+                  options={agents.map((name) => ({ value: name, label: name, icon: agentOptionIcon(name) }))}
                   onChange={(value) => set("agent", value)}
                 />
               </Field>
@@ -1368,7 +1369,7 @@ function ItemDrawerForm({
             className="cdr-sel"
             aria-label="For"
             value={form.assignee}
-            options={[{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: name }))]}
+            options={[{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: name, icon: agentOptionIcon(name) }))]}
             onChange={(value) => set("assignee", value)}
           />
         )}
@@ -1424,7 +1425,7 @@ function ItemDrawerForm({
                 <Select
                   value={form.agent}
                   placeholder="Pick an agent"
-                  options={agents.map((name) => ({ value: name, label: name }))}
+                  options={agents.map((name) => ({ value: name, label: name, icon: agentOptionIcon(name) }))}
                   onChange={(value) => set("agent", value)}
                 />
               </Field>

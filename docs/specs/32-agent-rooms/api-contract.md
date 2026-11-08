@@ -170,6 +170,7 @@ data: {"name":"dana","kind":"agent", ... same object as one API-ROOM-001 row ...
 | `[agents.<name>] title` | string | `""` | at most 60 characters, single line |
 | `[agents.<name>] color` | string | `""` (derived) | one of `brand`, `success`, `warning`, `error`, `blue`, `gray` |
 
+- Spec 43 (REQ-AVT-010) also accepts a `#RRGGBB` hex color, used as it is.
 - A derived color is `["brand","success","warning","error","blue","gray"][fnv32(name) % 6]`.
 - `lana config check` reports invalid values with the key path `agents.<name>.title` / `.color`.
 

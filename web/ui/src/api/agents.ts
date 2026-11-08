@@ -1,4 +1,5 @@
 import { request } from "./client";
+import { rememberAvatars } from "../lib/avatar-store";
 import type { ConfigAgent, GetConfigResponse } from "./settings";
 
 /* Agent calls of API-WEB-012, API-WEB-016, API-WEB-025, and the tab loader of
@@ -16,7 +17,13 @@ export interface Agent {
   name: string;
   kind: string;
   title: string;
+  /* A color token (brand, success, warning, error, blue, gray) or, since
+     spec 43, a "#rrggbb" hex. */
   color: string;
+  /* Spec 43: the sanitized avatar of every agent and team: a saved one or
+     the default seeded from the name. Missing on an older server. */
+  avatar_svg?: string;
+  avatar_source?: AvatarSource;
   model: string | null;
   policy: string;
   lead?: string;
@@ -118,7 +125,10 @@ export interface AgentTabData {
 }
 
 export function listAgents(): Promise<ListAgentsResponse> {
-  return request<ListAgentsResponse>("GET", "/v1/agents");
+  return request<ListAgentsResponse>("GET", "/v1/agents").then((page) => {
+    rememberAvatars(page && Array.isArray(page.agents) ? page.agents : []);
+    return page;
+  });
 }
 
 export function createAgent(
@@ -195,4 +205,70 @@ export async function loadAgentTab(name: string): Promise<AgentTabData> {
     agent: agents[name] || {},
     row: rows.find((item) => item && item.name === name) || {},
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Generated avatars (spec 43)                                        */
+/* ------------------------------------------------------------------ */
+
+export interface GenerateAvatarRequest {
+  /* A router combo or "provider/model" address; omitted uses the agent's
+     background model. Never a Claude Code model. */
+  model?: string;
+  seed?: number;
+}
+
+export interface GenerateAvatarResponse {
+  svg: string;
+  /* "" when the built-in generator ran. */
+  model: string;
+  seed: number;
+  /* "local" when no model was available or its output was invalid. */
+  source: "model" | "local";
+}
+
+/* "saved" for a chosen avatar, "default" for the one seeded from the name. */
+export type AvatarSource = "saved" | "default";
+
+export interface PutAvatarResponse {
+  name: string;
+  avatar_svg: string;
+  avatar_source?: AvatarSource;
+  color: string;
+  restart_required: boolean;
+}
+
+/* DELETE puts the agent back on its default avatar and returns it. */
+export interface DeleteAvatarResponse {
+  name: string;
+  avatar_svg: string;
+  avatar_source?: AvatarSource;
+  color: string;
+}
+
+/* The server-rendered avatar for an <img>, colors baked in for the theme. */
+export function agentAvatarSvgUrl(name: string, theme: "light" | "dark"): string {
+  return avatarPath(name) + ".svg?theme=" + theme;
+}
+
+function avatarPath(name: string): string {
+  return "/v1/agents/" + encodeURIComponent(name) + "/avatar";
+}
+
+export function generateAgentAvatar(
+  name: string,
+  body: GenerateAvatarRequest = {}
+): Promise<GenerateAvatarResponse> {
+  return request<GenerateAvatarResponse>("POST", avatarPath(name) + "/generate", body);
+}
+
+export function putAgentAvatar(
+  name: string,
+  body: { svg: string; color?: string }
+): Promise<PutAvatarResponse> {
+  return request<PutAvatarResponse>("PUT", avatarPath(name), body);
+}
+
+export function deleteAgentAvatar(name: string): Promise<DeleteAvatarResponse> {
+  return request<DeleteAvatarResponse>("DELETE", avatarPath(name));
 }
