@@ -1,0 +1,117 @@
+/* eslint-disable react-hooks/set-state-in-effect -- the page loads its data on mount, like the other pages. */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CLAUDE_AGENT_PROVIDER, getClaudeAgent, getRouter, getRouterLimits } from "../../api/router";
+import type { ClaudeAgentStatus, LimitSnapshot, RouterProvider } from "../../api/router";
+import { Button, EmptyState } from "../../ui/gr8r";
+import { ClaudeAgentCard, LimitCard } from "./limits";
+import { providerIndex } from "./provider-logo";
+import { failureOf } from "./router-common";
+
+/* Router → Quota (REQ-RTR-012, REQ-CCR-008), like 9router's Quota Tracker:
+   the Claude Code plan windows first, then one card per provider with its
+   rate limits, credit, or balance. Reset countdowns tick every 30 seconds. */
+
+const TICK_MS = 30000;
+
+/* Re-renders the page on an interval so "resets in 3m" stays current. */
+function useTick(interval: number): number {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick((value) => value + 1), interval);
+    return () => window.clearInterval(timer);
+  }, [interval]);
+  return tick;
+}
+
+export function RouterQuota() {
+  const [limits, setLimits] = useState<LimitSnapshot[] | null>(null);
+  const [error, setError] = useState("");
+  const [claude, setClaude] = useState<ClaudeAgentStatus | null>(null);
+  const [providers, setProviders] = useState<RouterProvider[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  useTick(TICK_MS);
+
+  const load = useCallback(async (refresh: boolean) => {
+    const [limitResult, claudeResult, routerResult] = await Promise.allSettled([
+      getRouterLimits(refresh),
+      getClaudeAgent(),
+      getRouter(),
+    ]);
+    if (limitResult.status === "fulfilled") {
+      setLimits(limitResult.value);
+      setError("");
+    } else {
+      setError(failureOf(limitResult.reason).message);
+    }
+    setClaude(claudeResult.status === "fulfilled" ? claudeResult.value : null);
+    if (routerResult.status === "fulfilled") {
+      setProviders(routerResult.value.providers);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(false);
+  }, [load]);
+
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      await load(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  const index = useMemo(() => providerIndex(providers), [providers]);
+  const claudeLimit = useMemo(
+    () => (limits || []).find((limit) => limit.provider === CLAUDE_AGENT_PROVIDER) || null,
+    [limits]
+  );
+  const providerLimits = useMemo(
+    () => (limits || []).filter((limit) => limit.provider !== CLAUDE_AGENT_PROVIDER),
+    [limits]
+  );
+  const showClaude = Boolean(claudeLimit || (claude && (claude.configured_agents.length > 0 || claude.binary)));
+
+  return (
+    <div className="rt-quota">
+      <div className="rt-section-h">
+        <h2>Limits</h2>
+        <p className="muted">What each provider reported with its last answer.</p>
+        <span className="sp" />
+        <Button
+          variant="secondary"
+          size="sm"
+          icon="refresh-cw"
+          loading={refreshing}
+          disabled={refreshing}
+          onClick={() => void refresh()}
+        >
+          Refresh
+        </Button>
+      </div>
+      {error ? (
+        <p className="rt-limit-err" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {limits === null && !error ? (
+        <div className="home-empty">Loading limits…</div>
+      ) : (
+        <div className="rt-limit-grid">
+          {showClaude ? <ClaudeAgentCard status={claude} limit={claudeLimit} usage={null} /> : null}
+          {providerLimits.map((limit) => (
+            <LimitCard key={limit.provider} limit={limit} provider={index[limit.provider]} />
+          ))}
+          {providerLimits.length === 0 && !showClaude && limits !== null ? (
+            <EmptyState
+              size="sm"
+              icon="gauge"
+              text="No provider has reported limits yet. Limits appear after the first call."
+            />
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -14,7 +14,7 @@ import { Ic } from "../../ui/icons";
 import { Alert, StatusLine } from "../settings-pages";
 import { CopyButton, agoText, dateLabel, failureOf, isStale } from "./router-common";
 
-/* Router → Proxy (REQ-RTR-015, REQ-RTR-016, API-RTR-014): an OpenAI-compatible
+/* Router → Endpoint (REQ-RTR-015, REQ-RTR-016, API-RTR-014): an OpenAI-compatible
    endpoint other tools can point at, guarded by proxy keys. A new key is
    shown once. */
 

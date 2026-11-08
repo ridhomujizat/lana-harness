@@ -523,3 +523,105 @@ model = "claude/claude-sonnet-5-5"
 		t.Fatalf("custom without model = %d %s", unknown.code, unknown.body)
 	}
 }
+
+// API-RTR-006 revision 2: PUT accepts disabled, GET reports it, and a PUT
+// without the key keeps the stored value.
+func TestProvidersPutDisabledRoundTrip(t *testing.T) {
+	store := newTestConfigStore(t, providerTestConfig, 0o600, ConfigSettings{})
+	s, cookie, csrf, _ := newProviderTestServer(t, store, nil)
+	list := func() providerJSON {
+		t.Helper()
+		response := serveProvider(t, s, http.MethodGet, "/v1/providers", "", cookie, csrf)
+		if response.code != http.StatusOK {
+			t.Fatalf("list status = %d, body = %q", response.code, response.body)
+		}
+		var body listProvidersResponse
+		response.json(t, &body)
+		if len(body.Providers) != 1 {
+			t.Fatalf("providers = %+v", body.Providers)
+		}
+		return body.Providers[0]
+	}
+	put := func(body string) {
+		t.Helper()
+		data, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		full := `{"kind":"openai_compat","base_url":"https://api.openai.com/v1"` + body + `,"expected_version":"` + shaHex(data) + `"}`
+		response := serveProvider(t, s, http.MethodPut, "/v1/providers/openai", full, cookie, csrf)
+		if response.code != http.StatusOK {
+			t.Fatalf("put status = %d, body = %q", response.code, response.body)
+		}
+	}
+	if list().Disabled {
+		t.Fatal("a new provider is disabled")
+	}
+	put(`,"disabled":true`)
+	data, _ := os.ReadFile(store.path)
+	if !strings.Contains(string(data), "disabled = true\n") {
+		t.Fatalf("config does not hold disabled = true:\n%s", data)
+	}
+	if !list().Disabled {
+		t.Fatal("GET does not report disabled")
+	}
+	put(``)
+	if !list().Disabled {
+		t.Fatal("a PUT without disabled turned the provider back on")
+	}
+	put(`,"disabled":false`)
+	data, _ = os.ReadFile(store.path)
+	if strings.Contains(string(data), "disabled") || list().Disabled {
+		t.Fatalf("disabled = false was not saved:\n%s", data)
+	}
+
+	data, _ = os.ReadFile(store.path)
+	bad := `{"kind":"openai_compat","base_url":"https://api.openai.com/v1","disabled":"yes","expected_version":"` + shaHex(data) + `"}`
+	if response := serveProvider(t, s, http.MethodPut, "/v1/providers/openai", bad, cookie, csrf); response.code == http.StatusOK {
+		t.Fatalf("a string disabled was accepted: %q", response.body)
+	}
+}
+
+// A save of a compat preset tests the host's known model; a custom server
+// with no known model is tested with a guess, and a 404 for that guess still
+// saves the key (the server took it), while a 401 does not.
+func TestProvidersPutTestModelForCompatHosts(t *testing.T) {
+	raw := "[web]\n"
+	store := newTestConfigStore(t, raw, 0o600, ConfigSettings{})
+	var seen []ProviderTest
+	s, cookie, csrf, _ := newProviderTestServer(t, store, func(_ context.Context, test ProviderTest) (TestResult, error) {
+		seen = append(seen, test)
+		switch test.APIKey.Reveal() {
+		case "sk-unknown-model":
+			return TestResult{OK: false, Status: 404, Message: "model not found"}, nil
+		case "sk-bad":
+			return TestResult{OK: false, Status: 401, Message: "bad key"}, nil
+		}
+		return TestResult{OK: true, LatencyMS: 3}, nil
+	})
+	put := func(name, base, key string) int {
+		t.Helper()
+		data, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := `{"kind":"openai_compat","base_url":"` + base + `","api_key":"` + key + `","expected_version":"` + shaHex(data) + `"}`
+		response := serveProvider(t, s, http.MethodPut, "/v1/providers/"+name, body, cookie, csrf)
+		if response.code != http.StatusOK {
+			t.Logf("%s: %s", name, response.body)
+		}
+		return response.code
+	}
+	if code := put("groq", "https://api.groq.com/openai/v1", "sk-good"); code != http.StatusOK {
+		t.Fatalf("groq save status = %d", code)
+	}
+	if got := seen[len(seen)-1].Model; got != "llama-3.1-8b-instant" {
+		t.Fatalf("groq test model = %q", got)
+	}
+	if code := put("local", "http://127.0.0.1:9/v1", "sk-unknown-model"); code != http.StatusOK {
+		t.Fatalf("a 404 for a guessed model refused the save: %d", code)
+	}
+	if code := put("local-2", "http://127.0.0.1:9/v1", "sk-bad"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("a 401 saved the key: %d", code)
+	}
+}

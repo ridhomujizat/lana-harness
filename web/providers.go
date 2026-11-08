@@ -87,6 +87,8 @@ type providerJSON struct {
 	UsedBy    []string `json:"used_by"`
 	// ModelsCount is the number of models the router lists for the provider.
 	ModelsCount int `json:"models_count"`
+	// Disabled is the disabled key of the entry (API-RTR-006 revision 2).
+	Disabled bool `json:"disabled"`
 }
 
 type listProvidersResponse struct {
@@ -133,6 +135,7 @@ type providerRecord struct {
 	Timeout           string
 	StreamIdleTimeout string
 	ThinkingFormat    string
+	Disabled          bool
 }
 
 // providerValidationError carries config.Check issues through the section
@@ -225,6 +228,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			KeyState:       providerKeyState(keyEnv, secretValues),
 			UsedBy:         document.providerUsedBy(name),
 			ModelsCount:    len(modelLists[name]),
+			Disabled:       record.Disabled,
 		})
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -396,6 +400,17 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// disabled is optional: an absent key keeps the stored value, so an edit
+	// that does not know the switch never turns a provider back on.
+	var disabled *bool
+	if raw, ok := body["disabled"]; ok {
+		var value bool
+		if err := json.Unmarshal(raw, &value); err != nil {
+			writeProviderIssue(w, "providers."+name+".disabled", "disabled must be a boolean")
+			return
+		}
+		disabled = &value
+	}
 	var newHeaders map[string]string
 	headersPresent := false
 	if raw, ok := body["headers"]; ok {
@@ -433,6 +448,9 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	record.Kind = kind
 	record.BaseURL = baseURL
 	record.APIKeyEnv = apiKeyEnv
+	if disabled != nil {
+		record.Disabled = *disabled
+	}
 	if headersPresent {
 		record.Headers, err = mergeProviderHeaders(record.Headers, newHeaders)
 		if err != nil {
@@ -449,6 +467,7 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		if tester == nil {
 			return
 		}
+		guessed := knownProviderTestModel(name, record, document) == ""
 		result, err := tester.TestProvider(r.Context(), ProviderTest{
 			Kind:      record.Kind,
 			BaseURL:   record.BaseURL,
@@ -461,7 +480,9 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 			return
 		}
-		if !result.OK {
+		// With a guessed model, a 404 means the server took the key and does
+		// not serve that model: the key works, so it is saved.
+		if !result.OK && (!guessed || result.Status != http.StatusNotFound) {
 			message := redactProviderKey(result.Message, apiKey)
 			if message == "" {
 				message = "provider connection test failed"
@@ -619,6 +640,7 @@ func providerRecordFromMap(table map[string]any) providerRecord {
 		StreamIdleTimeout: mapProviderString(table, "stream_idle_timeout"),
 		ThinkingFormat:    mapProviderString(table, "thinking_format"),
 	}
+	record.Disabled, _ = table["disabled"].(bool)
 	if headers, ok := table["headers"].(map[string]any); ok {
 		record.Headers = make(map[string]string, len(headers))
 		for key, value := range headers {
@@ -677,6 +699,9 @@ func renderProviderTable(name string, record providerRecord) string {
 	writeProviderString(&b, "timeout", record.Timeout)
 	writeProviderString(&b, "stream_idle_timeout", record.StreamIdleTimeout)
 	writeProviderString(&b, "thinking_format", record.ThinkingFormat)
+	if record.Disabled {
+		b.WriteString("disabled = true\n")
+	}
 	return b.String()
 }
 
@@ -778,6 +803,9 @@ func knownProviderTestModel(name string, record providerRecord, document provide
 	if model := models.TestModel(record.Kind); model != "" {
 		return model
 	}
+	if model := models.TestModelForBaseURL(record.BaseURL); model != "" {
+		return model
+	}
 	if catalog := models.ForProviderKind(record.BaseURL); len(catalog) > 0 {
 		return catalog[0].ID
 	}
@@ -837,6 +865,7 @@ func unknownProviderKeys(body map[string]json.RawMessage) []ConfigIssue {
 		"api_key_env":      true,
 		"api_key":          true,
 		"headers":          true,
+		"disabled":         true,
 		"expected_version": true,
 	}
 	keys := make([]string, 0, len(body))

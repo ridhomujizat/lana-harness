@@ -251,3 +251,26 @@ func TestDefaultBaseURLAndTestModel(t *testing.T) {
 		}
 	}
 }
+
+// The OpenAI-compatible presets of the Router Providers page have a test
+// model by host; other hosts have none.
+func TestTestModelForBaseURL(t *testing.T) {
+	for _, base := range []string{
+		"https://generativelanguage.googleapis.com/v1beta/openai",
+		"https://api.x.ai/v1",
+		"https://api.groq.com/openai/v1",
+		"https://api.mistral.ai/v1",
+		"https://api.together.xyz/v1",
+		"https://api.fireworks.ai/inference/v1",
+		"https://API.CEREBRAS.AI/v1",
+	} {
+		if TestModelForBaseURL(base) == "" {
+			t.Fatalf("TestModelForBaseURL(%q) is empty", base)
+		}
+	}
+	for _, base := range []string{"", "http://127.0.0.1:9/v1", "::bad"} {
+		if got := TestModelForBaseURL(base); got != "" {
+			t.Fatalf("TestModelForBaseURL(%q) = %q, want empty", base, got)
+		}
+	}
+}

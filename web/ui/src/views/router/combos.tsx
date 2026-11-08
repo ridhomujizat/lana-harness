@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { COMBOS_GROUP, deleteCombo, getRouter, saveCombo } from "../../api/router";
-import type { RouterCombo, RouterOverview, ValidationIssue } from "../../api/router";
+import type { RouterCombo, RouterOverview, RouterProvider, ValidationIssue } from "../../api/router";
 import {
   Button,
   EmptyState,
@@ -18,10 +18,34 @@ import type { SelectOption } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { Alert, StatusLine } from "../settings-pages";
 import { UsedBy } from "./providers";
+import { ProviderMark, providerIndex } from "./provider-logo";
 import { failureOf, inUseText, isStale } from "./router-common";
 
-/* Router → Combos (REQ-RTR-004, REQ-RTR-014, API-RTR-007): an ordered list of
-   models tried in turn. The first model that answers serves the call. */
+/* Router → Combos (REQ-RTR-004, REQ-RTR-014, API-RTR-007), laid out like
+   9router's Combos page: one card per combo with its models as an ordered
+   chain of chips. The first model that answers serves the call. */
+
+/* The provider of a "provider/model" address. */
+export function addressProvider(address: string): string {
+  const index = address.search(/[/:]/);
+  return index > 0 ? address.slice(0, index) : "";
+}
+
+function AddressChip({
+  address,
+  providers,
+}: {
+  address: string;
+  providers: Record<string, RouterProvider>;
+}) {
+  const provider = addressProvider(address);
+  return (
+    <span className="rt-chip" title={address}>
+      <ProviderMark provider={providers[provider]} name={provider || address} size={16} />
+      <span className="mono trunc">{address}</span>
+    </span>
+  );
+}
 
 const COMBO_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MAX_MODELS = 10;
@@ -45,12 +69,21 @@ interface ComboDialogProps {
   combo: RouterCombo | null;
   version: string;
   addresses: SelectOption[];
+  providers?: Record<string, RouterProvider>;
   takenNames: string[];
   onClose: () => void;
   onSaved: (text: string) => void;
 }
 
-export function ComboDialog({ combo, version, addresses, takenNames, onClose, onSaved }: ComboDialogProps) {
+export function ComboDialog({
+  combo,
+  version,
+  addresses,
+  providers = {},
+  takenNames,
+  onClose,
+  onSaved,
+}: ComboDialogProps) {
   const editing = Boolean(combo);
   const [name, setName] = useState(combo ? combo.name : "");
   const [description, setDescription] = useState(combo ? combo.description : "");
@@ -232,8 +265,13 @@ export function ComboDialog({ combo, version, addresses, takenNames, onClose, on
                 return (
                   <li key={address} className={problems.length ? "is-invalid" : undefined}>
                     <span className="rt-combo-n num">{index + 1}</span>
-                    <span className="rt-combo-addr mono trunc" title={address}>
-                      {address}
+                    <span className="rt-combo-addr" title={address}>
+                      <ProviderMark
+                        provider={providers[addressProvider(address)]}
+                        name={addressProvider(address) || address}
+                        size={18}
+                      />
+                      <span className="mono trunc">{address}</span>
                     </span>
                     <span className="rt-combo-acts">
                       <IconButton
@@ -351,6 +389,7 @@ export function RouterCombos() {
     void load();
   }, [load]);
 
+  const index = useMemo(() => providerIndex(data?.providers || []), [data]);
   const addresses = useMemo(
     () =>
       (data?.choices || [])
@@ -362,28 +401,33 @@ export function RouterCombos() {
               ? choice.label + " (" + choice.value + ")"
               : choice.value,
           group: choice.group,
+          icon: <ProviderMark provider={index[choice.group]} name={choice.group} size={16} />,
         })),
-    [data]
+    [data, index]
   );
   const combos = data?.combos || [];
 
   return (
     <div className="rt-combos">
-      <div className="settings-toolbar">
-        <p className="muted rt-lead">
-          A combo is a fallback chain. Point an agent at it and the router moves down the list when a
-          model fails.
-        </p>
-        <span className="settings-toolbar-spacer" />
-        <Button
-          variant="primary"
-          size="sm"
-          icon="plus"
-          disabled={!data || !data.version}
-          onClick={() => setDialog({ combo: null })}
-        >
-          New combo
-        </Button>
+      <div className="rt-ps-h">
+        <div className="rt-ps-t">
+          <h2>Your combos</h2>
+          <p className="muted">
+            Point an agent at a combo and the router moves down the list when a model fails or is
+            cooling down.
+          </p>
+        </div>
+        <div className="rt-ps-acts">
+          <Button
+            variant="primary"
+            size="sm"
+            icon="plus"
+            disabled={!data || !data.version}
+            onClick={() => setDialog({ combo: null })}
+          >
+            New combo
+          </Button>
+        </div>
       </div>
       <StatusLine text={message} />
       {error ? (
@@ -402,43 +446,48 @@ export function RouterCombos() {
         </div>
       ) : null}
       {combos.length > 0 ? (
-        <section className="panel rt-combo-list" aria-label="Combos">
+        <div className="rt-combo-grid" aria-label="Combos">
           {combos.map((combo) => (
-            <div key={combo.name} className="mini rt-combo-row">
-              <span className="settings-cell">
-                <span className="settings-cell-t">
-                  <span className="settings-name mono">{combo.name}</span>
+            <article key={combo.name} className="rt-combo-card" aria-label={"Combo " + combo.name}>
+              <header className="rt-combo-h">
+                <span className="rt-combo-icon" aria-hidden="true">
+                  <Ic name="layers" size={16} />
                 </span>
-                {combo.description ? <span className="settings-cell-s">{combo.description}</span> : null}
-                <span className="rt-chain">
-                  {combo.models.map((address, index) => (
-                    <span key={address} className="rt-chain-item">
-                      {index > 0 ? <Ic name="chevron-right" size={12} /> : null}
-                      <span className="mono trunc">{address}</span>
-                    </span>
-                  ))}
+                <span className="rt-combo-t">
+                  <span className="rt-combo-name mono trunc">{combo.name}</span>
+                  {combo.description ? <span className="rt-combo-d">{combo.description}</span> : null}
                 </span>
-              </span>
-              <span className="settings-provider-users">
-                <UsedBy usedBy={combo.used_by} />
-              </span>
-              <span className="settings-row-actions">
                 <IconButton
                   icon="pencil"
                   size="sm"
                   label={"Edit " + combo.name}
                   onClick={() => setDialog({ combo })}
                 />
-              </span>
-            </div>
+              </header>
+              <ol className="rt-chain" aria-label={"Models of " + combo.name}>
+                {combo.models.map((address, position) => (
+                  <li key={address} className="rt-chain-item">
+                    <span className="rt-chain-n num" aria-hidden="true">
+                      {position + 1}
+                    </span>
+                    <AddressChip address={address} providers={index} />
+                  </li>
+                ))}
+              </ol>
+              <footer className="rt-combo-f">
+                <span className="hint">Used by</span>
+                <UsedBy usedBy={combo.used_by} />
+              </footer>
+            </article>
           ))}
-        </section>
+        </div>
       ) : null}
       {dialog && data ? (
         <ComboDialog
           combo={dialog.combo}
           version={data.version}
           addresses={addresses}
+          providers={index}
           takenNames={combos.map((combo) => combo.name).concat(data.providers.map((provider) => provider.name))}
           onClose={() => setDialog(null)}
           onSaved={(text) => {

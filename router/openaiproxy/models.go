@@ -24,7 +24,7 @@ type modelObject struct {
 }
 
 // models serves GET /models: the combos first (owned_by "combo"), then every
-// provider's models as "provider/model" addresses. A provider whose model
+// enabled provider's models as "provider/model" addresses. A provider whose model
 // list cannot be fetched still lists its catalog models.
 func (h *handler) models(w http.ResponseWriter, req *http.Request) {
 	out := modelList{Object: "list", Data: []modelObject{}}
@@ -42,7 +42,13 @@ func (h *handler) models(w http.ResponseWriter, req *http.Request) {
 
 	ctx, cancel := context.WithTimeout(req.Context(), modelListTimeout)
 	defer cancel()
-	providers := h.r.Names()
+	var providers []string
+	for _, name := range h.r.Names() {
+		// A disabled provider serves no calls, so it lists no models.
+		if !h.r.Disabled(name) {
+			providers = append(providers, name)
+		}
+	}
 	lists := make([][]string, len(providers))
 	var wg sync.WaitGroup
 	for i, provider := range providers {

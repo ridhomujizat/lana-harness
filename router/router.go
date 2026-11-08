@@ -323,6 +323,13 @@ func (r *Router) Names() []string {
 	return sortedKeys(r.snap.Load().providers)
 }
 
+// Disabled reports whether a configured provider is switched off with
+// disabled = true. An unknown provider is not disabled.
+func (r *Router) Disabled(provider string) bool {
+	entry, ok := r.snap.Load().providers[provider]
+	return ok && entry.cfg.Disabled
+}
+
 // Kind returns the kind of a provider ("custom" for one added with
 // WithProviders and not in the config).
 func (r *Router) Kind(provider string) (string, bool) {

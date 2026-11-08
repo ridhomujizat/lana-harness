@@ -1,9 +1,10 @@
 import { useState } from "react";
-import type { RouterChoice } from "../api/router";
+import type { RouterChoice, RouterProvider } from "../api/router";
 import { COMBOS_GROUP } from "../api/router";
 import { Input, Radio, Select } from "../ui/gr8r";
 import type { SelectOption } from "../ui/gr8r";
 import { CLAUDE_RUNTIME } from "./agent-common";
+import { ProviderMark, providerIndex } from "./router/provider-logo";
 
 /* Spec 38 (REQ-CCR-009): the runtime choice of the agent forms and the
    Claude Agent controls, plus the router model options of spec 37
@@ -152,8 +153,10 @@ export function ClaudeModelControl({
 }
 
 /* Router choices as Select options: combos first, then the models of each
-   provider under its name (AC-RTR-024). */
-export function choiceOptions(choices: RouterChoice[]): SelectOption[] {
+   provider under its name (AC-RTR-024). With the provider list, each model
+   carries its provider's logo. */
+export function choiceOptions(choices: RouterChoice[], providers?: RouterProvider[]): SelectOption[] {
+  const index = providers ? providerIndex(providers) : null;
   const combos = choices.filter((choice) => choice.group === COMBOS_GROUP);
   const groups: string[] = [];
   for (const choice of choices) {
@@ -166,5 +169,9 @@ export function choiceOptions(choices: RouterChoice[]): SelectOption[] {
     value: choice.value,
     label: choice.label || choice.value,
     group: choice.group === COMBOS_GROUP ? "Combos" : choice.group,
+    icon:
+      index && choice.group !== COMBOS_GROUP ? (
+        <ProviderMark provider={index[choice.group]} name={choice.group} size={16} />
+      ) : undefined,
   }));
 }

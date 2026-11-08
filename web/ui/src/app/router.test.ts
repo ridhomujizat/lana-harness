@@ -3,6 +3,7 @@ import {
   AGENT_TABS,
   LEGACY_SETTINGS_TABS,
   ROUTER_TABS,
+  ROUTE_REDIRECTS,
   ROUTE_TABLE,
   SETTINGS_TABS,
   SETUP_STEPS,
@@ -19,6 +20,7 @@ const ROUTES = [
   "#/sessions/{id}",
   "#/router",
   "#/router/{tab}",
+  "#/router/providers/{provider}",
   "#/agents",
   "#/agents/{name}/{tab}",
   "#/skills",
@@ -142,20 +144,36 @@ describe("route table", () => {
     expect(history.section).toBe("sessions");
   });
 
-  /* Spec 37 (API-RTR-017): the Router page and its tabs. */
-  it("resolves the router page and its tabs", () => {
-    const overview = parseRoute("#/router");
-    expect(overview.view).toBe("router");
-    expect(overview.section).toBe("router");
-    expect(overview.params).toEqual({ tab: "overview" });
+  /* API-RTR-017 revision 2: the Router pages, Providers by default, and one
+     provider's page. */
+  it("resolves the router pages and a provider page", () => {
+    const home = parseRoute("#/router");
+    expect(home.view).toBe("router");
+    expect(home.section).toBe("router");
+    expect(home.params).toEqual({ tab: "providers" });
 
-    for (const tab of ["providers", "models", "combos", "logs", "proxy"]) {
+    for (const tab of ["providers", "combos", "usage", "quota", "logs", "endpoint"]) {
       const route = parseRoute("#/router/" + tab);
       expect(route.view).toBe("router");
       expect(route.params.tab).toBe(tab);
     }
-    expect(ROUTER_TABS).toEqual(["providers", "models", "combos", "logs", "proxy"]);
+    expect(ROUTER_TABS).toEqual(["providers", "combos", "usage", "quota", "logs", "endpoint"]);
     expect(parseRoute("#/router/bogus").view).toBe("not-found");
+
+    const detail = parseRoute("#/router/providers/gemini");
+    expect(detail.view).toBe("router");
+    expect(detail.params).toEqual({ tab: "providers", provider: "gemini" });
+  });
+
+  it("redirects the old router tabs", () => {
+    expect(ROUTE_REDIRECTS["#/router/overview"]).toBe("#/router/usage");
+    expect(ROUTE_REDIRECTS["#/router/proxy"]).toBe("#/router/endpoint");
+    expect(ROUTE_REDIRECTS["#/router/models"]).toBe("#/router/providers");
+    const overview = parseRoute("#/router/overview");
+    expect(overview.params.tab).toBe("usage");
+    expect(overview.path).toBe("#/router/usage");
+    expect(parseRoute("#/router/proxy").params.tab).toBe("endpoint");
+    expect(parseRoute("#/router/models").params.tab).toBe("providers");
   });
 
   it("redirects the old settings providers tab to the router", () => {

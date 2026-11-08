@@ -78,6 +78,10 @@ type ProviderConfig struct {
 	// ThinkingFormat is "deepseek" or "none"; "" means the format is inferred
 	// from the base URL host (REQ-MDL-002).
 	ThinkingFormat string `toml:"thinking_format"`
+	// Disabled keeps the entry but takes it out of routing: its targets fail
+	// with not_found so a chain moves on, and it is left out of model lists
+	// and boot key checks (API-RTR-001 revision 2).
+	Disabled bool `toml:"disabled"`
 }
 
 type AgentConfig struct {

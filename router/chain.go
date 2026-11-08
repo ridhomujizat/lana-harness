@@ -116,6 +116,11 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 	if !ok {
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is not configured", target.Provider)}
 	}
+	// A disabled provider is treated as not configured: the chain moves on
+	// (API-RTR-001 revision 2).
+	if entry.cfg.Disabled {
+		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is disabled", target.Provider)}
+	}
 	if pe := r.missingKey(entry); pe != nil {
 		return nil, pe
 	}

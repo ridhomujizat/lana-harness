@@ -99,12 +99,13 @@ type missingSecret struct {
 }
 
 // missingSecrets returns the providers in use (see usedProviders) whose
-// effective API key env is empty, in name order.
+// effective API key env is empty, in name order. A disabled provider is
+// never called, so its key is not checked.
 func missingSecrets(config core.Config, secrets core.Secrets) []missingSecret {
 	used := usedProviders(config)
 	var out []missingSecret
 	for _, name := range sortedKeys(config.Providers) {
-		if !used[name] {
+		if !used[name] || config.Providers[name].Disabled {
 			continue
 		}
 		env := EffectiveKeyEnv(config.Providers[name], name)

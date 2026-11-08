@@ -285,6 +285,7 @@ type routerProviderJSON struct {
 	DefaultBaseURL string   `json:"default_base_url"`
 	KeyState       string   `json:"key_state"`
 	UsedBy         []string `json:"used_by"`
+	Disabled       bool     `json:"disabled"`
 }
 
 // routerComboJSON is one combo row of GET /v1/router.
@@ -386,6 +387,7 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 			DefaultBaseURL: models.DefaultBaseURL(record.Kind),
 			KeyState:       providerKeyState(providerEffectiveKeyEnv(record, name), secretValues),
 			UsedBy:         document.agentsUsingProvider(name),
+			Disabled:       record.Disabled,
 		})
 	}
 	for _, name := range sortedMapKeys(document.Combos) {
@@ -398,8 +400,15 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 		})
 		response.Choices = append(response.Choices, routerChoiceJSON{Value: name, Label: name, Group: "Combos"})
 	}
-	lists := s.routerProviderModels(r.Context(), document, providers)
+	// A disabled provider is no agent model choice (API-RTR-001 revision 2).
+	enabled := make([]string, 0, len(providers))
 	for _, name := range providers {
+		if !providerRecordFromMap(document.Providers[name]).Disabled {
+			enabled = append(enabled, name)
+		}
+	}
+	lists := s.routerProviderModels(r.Context(), document, enabled)
+	for _, name := range enabled {
 		for _, model := range lists[name] {
 			label := model.Name
 			if label == "" {

@@ -134,6 +134,9 @@ function memberCount(row: RoomRow | undefined): number {
 export interface CreateAgentDialogProps {
   onClose: () => void;
   onCreated?: (name: string) => void;
+  /* The runtime picked when the dialog opens, for example Claude Agent from
+     the Router's Claude Code page. */
+  initialRuntime?: RuntimeValue;
 }
 
 const PERMISSION_OPTIONS = [
@@ -164,10 +167,11 @@ function lines(text: string): string[] {
 export function CreateAgentDialog({
   onClose,
   onCreated,
+  initialRuntime,
 }: CreateAgentDialogProps) {
   const announce = useAnnounce();
   const [name, setName] = useState("");
-  const [runtime, setRuntime] = useState<RuntimeValue>("");
+  const [runtime, setRuntime] = useState<RuntimeValue>(initialRuntime || "");
   const [template, setTemplate] = useState<string>(TEMPLATES[0].value);
   const [workspace, setWorkspace] = useState("");
   const [claude, setClaude] = useState<ClaudeValues>(DEFAULT_CLAUDE);

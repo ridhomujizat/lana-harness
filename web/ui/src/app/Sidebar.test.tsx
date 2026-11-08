@@ -88,30 +88,50 @@ describe("sidebar collapse and logout", () => {
   });
 });
 
-/* Spec 37 (API-RTR-017): Router leads the Configure group, before Agents. */
-describe("sidebar router item", () => {
-  it("links Router before Agents in Configure", () => {
-    renderSidebar();
-    const router = screen.getByRole("link", { name: "Router" });
-    expect(router.getAttribute("href")).toBe("#/router");
-    const configure = screen.getByText("Configure").parentElement as HTMLElement;
-    const labels = Array.from(configure.querySelectorAll("a.sitem")).map(
-      (node) => node.getAttribute("aria-label")
+/* API-RTR-017 revision 2: the Router pages are their own sidebar group, in
+   9router's order, between Observe and Configure. */
+describe("sidebar router group", () => {
+  function groupLabels(title: string): string[] {
+    const group = screen.getByText(title).parentElement as HTMLElement;
+    return Array.from(group.querySelectorAll("a.sitem")).map(
+      (node) => node.getAttribute("aria-label") || ""
     );
-    expect(labels.indexOf("Router")).toBe(0);
-    expect(labels.indexOf("Agents")).toBe(1);
+  }
+
+  it("lists the router pages in their own group", () => {
+    renderSidebar();
+    expect(groupLabels("Router")).toEqual([
+      "Providers",
+      "Combos",
+      "Usage",
+      "Quota",
+      "Router logs",
+      "Endpoint",
+    ]);
+    expect(screen.getByRole("link", { name: "Providers" }).getAttribute("href")).toBe("#/router/providers");
+    expect(screen.getByRole("link", { name: "Quota" }).getAttribute("href")).toBe("#/router/quota");
+    expect(screen.getByRole("link", { name: "Endpoint" }).getAttribute("href")).toBe("#/router/endpoint");
+    expect(screen.getByRole("link", { name: "Router logs" }).getAttribute("href")).toBe("#/router/logs");
+    /* The app's own Logs page keeps its item and name. */
+    expect(screen.getByRole("link", { name: "Logs" }).getAttribute("href")).toBe("#/logs");
+    expect(groupLabels("Configure")[0]).toBe("Agents");
+    expect(screen.queryByRole("link", { name: "Router" })).toBeNull();
+    const titles = Array.from(document.querySelectorAll(".sgroup-h")).map((node) => node.textContent);
+    expect(titles).toEqual(["Workspace", "Observe", "Router", "Configure"]);
   });
 
-  it("marks Router current on a router tab", () => {
+  it("marks the current router page only", () => {
     render(
       <Sidebar
-        route={{ view: "router", section: "router", params: { tab: "logs" }, path: "#/router/logs" }}
+        route={{ view: "router", section: "router", params: { tab: "providers", provider: "gemini" }, path: "#/router/providers/gemini" }}
         collapsed={false}
         onToggle={() => {}}
         onLogout={() => {}}
         daemon={{ state: "running", title: "Daemon running", meta: "127.0.0.1" }}
       />
     );
-    expect(screen.getByRole("link", { name: "Router" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Providers" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Combos" }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("link", { name: "Logs" }).getAttribute("aria-current")).toBeNull();
   });
 });

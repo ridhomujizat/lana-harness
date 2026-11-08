@@ -22,6 +22,8 @@ vi.mock("../../api/router", async (importOriginal) => {
     saveProvider: vi.fn(),
     deleteProvider: vi.fn(),
     testProvider: vi.fn(),
+    testRouterModel: vi.fn(),
+    listRouterModels: vi.fn(),
   };
 });
 
@@ -34,13 +36,18 @@ import type {
   RouterCall,
 } from "../../api/router";
 import { ApiError } from "../../api/client";
-import { RouterOverview as OverviewTab } from "./overview";
+import { RouterUsagePage as OverviewTab } from "./overview";
+import { RouterQuota } from "./quota";
 import { RouterCombos } from "./combos";
 import { RouterLogs, PAGE_SIZE, requestedDiffers } from "./logs";
 import { statsCostText } from "./router-common";
 import { tickEvery } from "./usage-chart";
 import { RouterProxy } from "./proxy";
 import { RouterProviders } from "./providers";
+import { ProviderDetail } from "./provider-detail";
+import { ProviderLogo } from "./provider-logo";
+import { monogram, presetFor } from "./presets";
+import { resetsIn } from "./router-common";
 import { windowText } from "./limits";
 
 const ROUTER: RouterOverview = {
@@ -169,13 +176,14 @@ beforeEach(() => {
   vi.mocked(api.getRouterUsage).mockResolvedValue(USAGE);
   vi.mocked(api.getRouterLimits).mockResolvedValue(LIMITS);
   vi.mocked(api.getClaudeAgent).mockResolvedValue(CLAUDE);
+  vi.mocked(api.listRouterModels).mockResolvedValue([]);
 });
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("router overview", () => {
+describe("router usage", () => {
   /* AC-RTR-014: an unknown price shows "—" and the total says partial. */
   it("renders the totals, the partial cost marker, and — for an unknown cost", async () => {
     render(<OverviewTab />);
@@ -220,9 +228,23 @@ describe("router overview", () => {
     });
   });
 
+  it("lists the cooling-down targets", async () => {
+    render(<OverviewTab />);
+    expect(await screen.findByText("anthropic/claude-sonnet-5-5")).toBeTruthy();
+  });
+
+  it("leaves the limits to the Quota page", async () => {
+    render(<OverviewTab />);
+    await screen.findByLabelText("Totals");
+    expect(screen.queryByLabelText("Limits of openai")).toBeNull();
+    expect(vi.mocked(api.getRouterLimits)).not.toHaveBeenCalled();
+  });
+});
+
+describe("router quota", () => {
   /* AC-RTR-016, AC-RTR-017, and the empty card of REQ-RTR-012. */
   it("renders the limit cards with rate, credit, balance, and nothing reported", async () => {
-    render(<OverviewTab />);
+    render(<RouterQuota />);
     const openai = await screen.findByLabelText("Limits of openai");
     expect(within(openai).getByText(/149,000 of 150,000 tokens left · resets/)).toBeTruthy();
     expect(within(openai).getByText("499 of 500 requests left")).toBeTruthy();
@@ -232,7 +254,7 @@ describe("router overview", () => {
   });
 
   it("refreshes the limits with refresh=1", async () => {
-    render(<OverviewTab />);
+    render(<RouterQuota />);
     await screen.findByLabelText("Limits of openai");
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => {
@@ -242,9 +264,9 @@ describe("router overview", () => {
 
   /* AC-CCR-009 and REQ-CCR-008: the plan window line, the login hint, and
      never a login button. */
-  it("renders the Claude Agent card", async () => {
-    render(<OverviewTab />);
-    const card = await screen.findByLabelText("Claude Agent");
+  it("renders the Claude Code plan card", async () => {
+    render(<RouterQuota />);
+    const card = await screen.findByLabelText("Claude Code plan");
     expect(within(card).getByText(/^5-hour window · 42 % used · resets /)).toBeTruthy();
     expect(within(card).getByText("Not logged in")).toBeTruthy();
     expect(card.textContent).toContain("Run claude, then /login.");
@@ -253,9 +275,22 @@ describe("router overview", () => {
     expect(screen.queryByText(/Login with Claude/i)).toBeNull();
   });
 
-  it("lists the cooling-down targets", async () => {
-    render(<OverviewTab />);
-    expect(await screen.findByText("anthropic/claude-sonnet-5-5")).toBeTruthy();
+  it("counts down to the reset", () => {
+    const now = Date.parse("2026-11-08T10:00:00Z");
+    expect(resetsIn("2026-11-08T10:03:00Z", now)).toBe("resets in 3m");
+    expect(resetsIn("2026-11-08T11:32:30Z", now)).toBe("resets in 1h 32m");
+    expect(resetsIn("2026-11-10T14:00:00Z", now)).toBe("resets in 2d 4h");
+    expect(resetsIn("2026-11-08T09:00:00Z", now)).toBe("resets now");
+    expect(resetsIn("", now)).toBe("");
+  });
+
+  it("shows provider logos on the cards", async () => {
+    render(<RouterQuota />);
+    const openai = await screen.findByLabelText("Limits of openai");
+    expect(openai.querySelector('[data-logo="openai"]')).toBeTruthy();
+    const local = screen.getByLabelText("Limits of local");
+    expect(local.querySelector("[data-monogram]")).toBeTruthy();
+    expect((await screen.findByLabelText("Claude Code plan")).querySelector('[data-logo="claude"]')).toBeTruthy();
   });
 });
 
@@ -407,92 +442,270 @@ describe("router proxy", () => {
   });
 });
 
-describe("router providers", () => {
-  it("offers the presets and saves a preset without a base URL", async () => {
-    vi.mocked(api.listProviders).mockResolvedValue({ version: "v1", providers: [], restart_required: false });
-    vi.mocked(api.saveProvider).mockResolvedValue({ name: "deepseek", version: "v2", restart_required: false });
+
+/* Router Providers revision 2: 9router-style cards per preset, a provider
+   page per card, connections with an enable switch. */
+function row(overrides: Partial<api.ProviderRow> & { name: string; kind: string }): api.ProviderRow {
+  return {
+    base_url: "",
+    api_key_env: overrides.name.toUpperCase().replace(/-/g, "_") + "_API_KEY",
+    key_state: "set",
+    used_by: [],
+    ...overrides,
+  };
+}
+
+function providersResponse(rows: api.ProviderRow[]): api.ListProvidersResponse {
+  return { version: "v1", providers: rows, restart_required: false };
+}
+
+function card(name: string): HTMLElement {
+  return screen.getByRole("article", { name });
+}
+
+describe("router providers grid", () => {
+  it("shows every preset with No connections when nothing is configured", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(providersResponse([]));
     render(<RouterProviders />);
-    const add = await screen.findByRole("button", { name: /Add provider/ });
-    await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(add);
+    await screen.findByRole("article", { name: "OpenAI" });
+    for (const name of [
+      "OpenAI",
+      "Anthropic",
+      "DeepSeek",
+      "OpenRouter",
+      "Google Gemini",
+      "xAI Grok",
+      "Groq",
+      "Mistral",
+      "Together AI",
+      "Fireworks AI",
+      "Cerebras",
+    ]) {
+      expect(within(card(name)).getByText("No connections")).toBeTruthy();
+    }
+    expect(card("OpenAI").querySelector('[data-logo="openai"]')).toBeTruthy();
+    expect(card("Google Gemini").querySelector('[data-logo="gemini"]')).toBeTruthy();
+    expect(within(card("Groq")).getByRole("link").getAttribute("href")).toBe("#/router/providers/groq");
+    expect(screen.getByRole("button", { name: "Add OpenAI Compatible" })).toBeTruthy();
+  });
 
-    fireEvent.click(screen.getByRole("combobox", { name: "Kind" }));
-    const options = screen.getAllByRole("option").map((node) => node.textContent);
-    expect(options).toEqual(["OpenAI", "DeepSeek", "Anthropic", "OpenRouter", "Custom (OpenAI-compatible)"]);
-    fireEvent.click(screen.getByRole("option", { name: "DeepSeek" }));
+  it("counts connections by kind and by compat host, and flags keys and switches", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([
+        row({ name: "ds", kind: "deepseek" }),
+        row({ name: "deepseek", kind: "openai_compat", base_url: "https://api.deepseek.com/v1" }),
+        row({ name: "gemini", kind: "openai_compat", base_url: "https://generativelanguage.googleapis.com/v1beta/openai" }),
+        row({ name: "groq", kind: "openai_compat", base_url: "https://api.groq.com/openai/v1", key_state: "unset" }),
+        row({ name: "openai", kind: "openai", disabled: true }),
+        row({ name: "local", kind: "openai_compat", base_url: "http://127.0.0.1:11434/v1", api_key_env: "" }),
+      ])
+    );
+    render(<RouterProviders />);
+    await waitFor(() => expect(within(card("DeepSeek")).getByText("2 Connected")).toBeTruthy());
+    expect(within(card("Google Gemini")).getByText("1 Connected")).toBeTruthy();
+    expect(within(card("Groq")).getByText("Missing key")).toBeTruthy();
+    expect(within(card("OpenAI")).getByText("Off")).toBeTruthy();
+    expect(within(card("Anthropic")).getByText("No connections")).toBeTruthy();
+    const local = card("local");
+    expect(within(local).getByText("1 Connected")).toBeTruthy();
+    expect(local.querySelector("[data-monogram]")?.textContent).toBe("LO");
+    expect(within(local).getByRole("link").getAttribute("href")).toBe("#/router/providers/local");
+  });
 
-    const base = screen.getByLabelText(/Base URL/) as HTMLInputElement;
-    expect(base.placeholder).toBe("https://api.deepseek.com/v1");
-    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+  it("tests one model of each connected card with Test All", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([
+        row({ name: "deepseek", kind: "deepseek" }),
+        row({ name: "openrouter", kind: "openrouter" }),
+      ])
+    );
+    vi.mocked(api.testRouterModel).mockImplementation(async (address: string) =>
+      address.startsWith("deepseek/")
+        ? { ok: true, latency_ms: 320 }
+        : { ok: false, class: "auth", status: 401, message: "bad key" }
+    );
+    render(<RouterProviders />);
+    await waitFor(() => expect(within(card("DeepSeek")).getByText("1 Connected")).toBeTruthy());
+    const section = screen.getByRole("heading", { name: "API Key Providers" }).closest("section") as HTMLElement;
+    fireEvent.click(within(section).getByRole("button", { name: "Test All" }));
+    expect(await within(card("DeepSeek")).findByText(/OK · 320 ms/)).toBeTruthy();
+    expect(await within(card("OpenRouter")).findByText(/Failed: auth · HTTP 401 · bad key/)).toBeTruthy();
+    expect(vi.mocked(api.testRouterModel)).toHaveBeenCalledWith("deepseek/deepseek-flash");
+    expect(vi.mocked(api.testRouterModel)).toHaveBeenCalledWith("openrouter/openai/gpt-5-mini");
+    expect(vi.mocked(api.testRouterModel)).toHaveBeenCalledTimes(2);
+    expect(within(card("OpenAI")).queryByRole("status")).toBeNull();
+  });
+
+  it("shows the Claude Code states", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(providersResponse([]));
+    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce({ ...CLAUDE, binary: "" });
+    const first = render(<RouterProviders />);
+    expect(await within(card("Claude Code")).findByText("Not installed")).toBeTruthy();
+    expect(card("Claude Code").querySelector('[data-logo="claude"]')).toBeTruthy();
+    first.unmount();
+
+    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce(CLAUDE);
+    const second = render(<RouterProviders />);
+    expect(await within(card("Claude Code")).findByText("Not logged in")).toBeTruthy();
+    second.unmount();
+
+    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce({ ...CLAUDE, logged_in: true, configured_agents: ["claude", "cody"] });
+    render(<RouterProviders />);
+    expect(await within(card("Claude Code")).findByText("Logged in · 2 agents")).toBeTruthy();
+    expect(within(card("Claude Code")).getByRole("link").getAttribute("href")).toBe("#/router/providers/claude-code");
+  });
+});
+
+describe("router provider page", () => {
+  it("adds a connection to a compat preset with its kind, base URL, and key variable", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(providersResponse([]));
+    vi.mocked(api.saveProvider).mockResolvedValue({ name: "groq", version: "v2", restart_required: false });
+    render(<ProviderDetail id="groq" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Groq" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: " gsk-test " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("deepseek", {
-        kind: "deepseek",
-        api_key_env: "DEEPSEEK_API_KEY",
+      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("groq", {
+        kind: "openai_compat",
+        base_url: "https://api.groq.com/openai/v1",
+        api_key_env: "GROQ_API_KEY",
+        api_key: "gsk-test",
         expected_version: "v1",
       });
     });
-    expect(await screen.findByText("Provider deepseek saved. It applies now.")).toBeTruthy();
-    expect(screen.queryByText(/Restart the daemon/)).toBeNull();
+    expect(await screen.findByText("Connection groq saved. It applies now.")).toBeTruthy();
   });
 
-  it("shows who uses a provider when the delete is refused", async () => {
-    vi.mocked(api.listProviders).mockResolvedValue({
-      version: "v1",
-      restart_required: false,
-      providers: [
-        {
-          name: "deepseek",
-          kind: "deepseek",
-          base_url: "https://api.deepseek.com/v1",
-          default_base_url: "https://api.deepseek.com/v1",
-          api_key_env: "DEEPSEEK_API_KEY",
-          key_state: "set",
-          used_by: ["agents.lana"],
-        },
-      ],
-    });
-    vi.mocked(api.deleteProvider).mockRejectedValue(
-      new ApiError(409, "in_use", "used by agents: lana; combos: coding")
-    );
-    render(<RouterProviders />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit deepseek" }));
-    expect((screen.getByLabelText(/Base URL/) as HTMLInputElement).value).toBe("");
-    fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete provider" }).at(-1) as HTMLElement);
-    expect(
-      await screen.findByText("Cannot delete deepseek: used by agents: lana; combos: coding.")
-    ).toBeTruthy();
-  });
-
-  /* API-RTR-006: the dialog sends no guessed test model; the daemon picks a
-     model it knows unless the owner typed one. */
-  it("tests a provider without a model unless one is typed", async () => {
-    vi.mocked(api.listProviders).mockResolvedValue({ version: "v1", providers: [], restart_required: false });
-    vi.mocked(api.testProvider).mockResolvedValue({ ok: true, latency_ms: 40 });
-    render(<RouterProviders />);
-    const add = await screen.findByRole("button", { name: /Add provider/ });
-    await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(add);
-    fireEvent.click(screen.getByRole("combobox", { name: "Kind" }));
-    fireEvent.click(screen.getByRole("option", { name: "Anthropic" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  it("saves a native preset without a base URL and names a second connection id-2", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(providersResponse([row({ name: "deepseek", kind: "deepseek" })]));
+    vi.mocked(api.saveProvider).mockResolvedValue({ name: "deepseek-2", version: "v2", restart_required: false });
+    render(<ProviderDetail id="deepseek" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add connection" }));
+    const dialog = screen.getByRole("dialog");
+    expect((within(dialog).getByLabelText("Connection name") as HTMLInputElement).placeholder).toBe("deepseek-2");
+    expect((within(dialog).getByLabelText("Base URL") as HTMLInputElement).placeholder).toBe("https://api.deepseek.com/v1");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => {
-      expect(vi.mocked(api.testProvider)).toHaveBeenCalledWith({
-        name: "anthropic",
-        kind: "anthropic",
-        base_url: "https://api.anthropic.com",
-        api_key_env: "ANTHROPIC_API_KEY",
+      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("deepseek-2", {
+        kind: "deepseek",
+        api_key_env: "DEEPSEEK_2_API_KEY",
+        expected_version: "v1",
       });
     });
-    expect(await screen.findByText("Connected · 40 ms.")).toBeTruthy();
+  });
 
-    fireEvent.change(screen.getByLabelText("Test model"), { target: { value: " claude-opus-5 " } });
-    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  it("switches a connection off with disabled in the PUT", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([
+        row({ name: "gemini", kind: "openai_compat", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", api_key_env: "GEMINI_API_KEY" }),
+      ])
+    );
+    vi.mocked(api.saveProvider).mockResolvedValue({ name: "gemini", version: "v2", restart_required: false });
+    render(<ProviderDetail id="gemini" />);
+    const toggle = await screen.findByRole("checkbox", { name: "Use gemini" });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
     await waitFor(() => {
-      expect(vi.mocked(api.testProvider)).toHaveBeenLastCalledWith(
-        expect.objectContaining({ kind: "anthropic", model: "claude-opus-5" })
-      );
+      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("gemini", {
+        kind: "openai_compat",
+        base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+        api_key_env: "GEMINI_API_KEY",
+        disabled: true,
+        expected_version: "v1",
+      });
     });
+    expect(await screen.findByText("gemini is off. The router skips it.")).toBeTruthy();
+  });
+
+  it("tests a connection and shows who uses it when a delete is refused", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([row({ name: "deepseek", kind: "deepseek", used_by: ["agents.lana"] })])
+    );
+    vi.mocked(api.testProvider).mockResolvedValue({ ok: true, latency_ms: 40 });
+    vi.mocked(api.deleteProvider).mockRejectedValue(new ApiError(409, "in_use", "used by agents: lana; combos: coding"));
+    render(<ProviderDetail id="deepseek" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Test deepseek" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.testProvider)).toHaveBeenCalledWith({
+        name: "deepseek",
+        kind: "deepseek",
+        api_key_env: "DEEPSEEK_API_KEY",
+      });
+    });
+    expect(await screen.findByText(/Connected · 40 ms/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete deepseek" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Cannot delete deepseek: used by agents: lana; combos: coding.")).toBeTruthy();
+    expect(vi.mocked(api.deleteProvider)).toHaveBeenCalledWith("deepseek", "v1");
+  });
+
+  it("lists the models of each connection", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(providersResponse([row({ name: "ds", kind: "deepseek" })]));
+    vi.mocked(api.listRouterModels).mockResolvedValue([
+      {
+        provider: "ds",
+        fetched_at: "",
+        fetch_error: "",
+        models: [
+          {
+            id: "deepseek-flash",
+            address: "ds/deepseek-flash",
+            name: "DeepSeek Flash",
+            context_window: 128000,
+            max_output: 8000,
+            vision: false,
+            thinking: true,
+            price: { input: 0.1, cached_input: 0.01, output: 0.4 },
+            source: "both",
+          },
+        ],
+      },
+    ]);
+    render(<ProviderDetail id="deepseek" />);
+    expect(await screen.findByText("DeepSeek Flash")).toBeTruthy();
+    expect(vi.mocked(api.listRouterModels)).toHaveBeenCalledWith("ds", false);
+  });
+
+  it("shows Claude Code with a create button and never a login button", async () => {
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.open = false;
+    };
+    render(<ProviderDetail id="claude-code" />);
+    expect((await screen.findAllByText("Not logged in")).length).toBeGreaterThan(0);
+    expect(document.body.textContent).toContain("Run claude, then /login.");
+    expect(screen.queryByRole("button", { name: /log ?in/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create Claude Agent" }));
+    const radio = (await screen.findByRole("radio", { name: "Claude Agent" })) as HTMLInputElement;
+    expect(radio.checked).toBe(true);
+  });
+});
+
+describe("provider presets and logos", () => {
+  it("matches compat entries by host and native entries by kind", () => {
+    expect(presetFor({ name: "x", kind: "openai_compat", base_url: "https://api.x.ai/v1" })?.id).toBe("xai");
+    expect(presetFor({ name: "x", kind: "anthropic" })?.id).toBe("anthropic");
+    expect(presetFor({ name: "x", kind: "openai_compat", base_url: "http://127.0.0.1:9/v1" })).toBeUndefined();
+  });
+
+  it("falls back to a two-letter monogram", () => {
+    expect(monogram("Local LLM")).toBe("LL");
+    expect(monogram("DeepSeek")).toBe("DS");
+    expect(monogram("my-proxy")).toBe("MP");
+    expect(monogram("groq")).toBe("GR");
+    const { container } = render(
+      <>
+        <ProviderLogo logo="" name="Local LLM" />
+        <ProviderLogo logo="openai" name="OpenAI" size={24} />
+      </>
+    );
+    const [mono, brand] = Array.from(container.querySelectorAll(".pl"));
+    expect(mono?.textContent).toBe("LL");
+    expect(brand?.querySelector("svg")).toBeTruthy();
+    expect(brand?.querySelector("title")).toBeNull();
+    expect(brand?.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
   });
 });

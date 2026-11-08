@@ -27,6 +27,8 @@ export interface ProviderRow {
   /* Spec 37: the preset base URL of the kind, and how many models it lists. */
   default_base_url?: string;
   models_count?: number;
+  /* Revision 2: a disabled entry is skipped by the router. */
+  disabled?: boolean;
 }
 
 export interface ListProvidersResponse {
@@ -47,6 +49,8 @@ export interface ProviderWriteRequest {
   api_key_env?: string;
   api_key?: string;
   headers?: Record<string, string>;
+  /* Revision 2: absent keeps the stored value. */
+  disabled?: boolean;
   expected_version: string;
 }
 
@@ -113,6 +117,7 @@ export interface RouterProvider {
   base_url: string;
   key_state: string;
   used_by: string[];
+  disabled?: boolean;
 }
 
 export interface RouterCombo {

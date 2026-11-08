@@ -1,5 +1,10 @@
 package models
 
+import (
+	"net/url"
+	"strings"
+)
+
 // defaultBaseURLs are the public API base URLs of the preset provider kinds
 // (API-RTR-001). openai_compat has none: it needs base_url. The adapters in
 // providers/openai and providers/anthropic apply the same values.
@@ -29,4 +34,28 @@ var testModels = map[string]string{
 // when nothing better is known, or "" for a kind without one.
 func TestModel(kind string) string {
 	return testModels[kind]
+}
+
+// hostTestModels are cheap chat models of the OpenAI-compatible services the
+// dashboard offers as presets (Router Providers, revision 2), keyed by base
+// URL host. They are used for a connection test only when nothing better is
+// known; the owner can always test another model from the Models list.
+var hostTestModels = map[string]string{
+	"generativelanguage.googleapis.com": "gemini-2.5-flash",
+	"api.x.ai":                          "grok-3-mini",
+	"api.groq.com":                      "llama-3.1-8b-instant",
+	"api.mistral.ai":                    "mistral-small-latest",
+	"api.together.xyz":                  "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+	"api.fireworks.ai":                  "accounts/fireworks/models/llama-v3p3-70b-instruct",
+	"api.cerebras.ai":                   "llama3.1-8b",
+}
+
+// TestModelForBaseURL returns the connection test model of a known
+// OpenAI-compatible host, or "" for any other base URL.
+func TestModelForBaseURL(baseURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return ""
+	}
+	return hostTestModels[strings.ToLower(parsed.Hostname())]
 }

@@ -16,13 +16,17 @@ import {
   count,
   costText,
   kindLabel,
-  timeLabel,
+  resetsIn,
   usd,
   windowLabel,
 } from "./router-common";
+import { ProviderLogo, ProviderMark } from "./provider-logo";
+import { familyLabel } from "./presets";
+import type { ProviderShape } from "./presets";
 
-/* The Limits section of the Overview (REQ-RTR-012, REQ-CCR-008): one card per
-   provider with what it last reported, and the Claude Agent card. */
+/* The quota cards (REQ-RTR-012, REQ-CCR-008): one card per provider with
+   what it last reported, and the Claude Code card with its plan windows.
+   Shown on the Quota page and on each provider's page. */
 
 const RATE_ROWS: Array<{ key: "requests" | "tokens" | "input_tokens" | "output_tokens"; unit: string }> = [
   { key: "requests", unit: "requests" },
@@ -80,7 +84,7 @@ function Meter({
 }
 
 function rateText(value: RateLimitValue, unit: string): string {
-  const reset = value.reset_at ? " · resets " + timeLabel(value.reset_at) : "";
+  const reset = value.reset_at ? " · " + resetsIn(value.reset_at) : "";
   return count(value.remaining) + " of " + count(value.limit) + " " + unit + " left" + reset;
 }
 
@@ -145,7 +149,7 @@ function CardFoot({ limit }: { limit: LimitSnapshot }) {
   );
 }
 
-export function LimitCard({ limit }: { limit: LimitSnapshot }) {
+export function LimitCard({ limit, provider }: { limit: LimitSnapshot; provider?: ProviderShape | null }) {
   const rate = limit.rate || {};
   const rows = RATE_ROWS.filter((row) => {
     const value = rate[row.key];
@@ -154,7 +158,13 @@ export function LimitCard({ limit }: { limit: LimitSnapshot }) {
   return (
     <article className="rt-limit" aria-label={"Limits of " + limit.provider}>
       <header className="rt-limit-h">
-        <span className="rt-limit-name mono trunc">{limit.provider}</span>
+        <ProviderMark provider={provider || { name: limit.provider, kind: limit.kind || "" }} size={28} />
+        <span className="rt-limit-title">
+          <span className="rt-limit-name trunc">
+            {familyLabel(provider || { name: limit.provider, kind: limit.kind || "" })}
+          </span>
+          <span className="rt-limit-sub mono trunc">{limit.provider}</span>
+        </span>
         {limit.kind ? <Badge>{kindLabel(limit.kind)}</Badge> : null}
       </header>
       <div className="rt-limit-b">
@@ -225,7 +235,7 @@ export function windowText(window: PlanWindow): string {
     parts.push("usage not reported");
   }
   if (window.resets_at) {
-    parts.push("resets " + timeLabel(window.resets_at));
+    parts.push(resetsIn(window.resets_at));
   }
   return parts.join(" · ");
 }
@@ -246,9 +256,13 @@ export function ClaudeAgentCard({
   const windows = limit && Array.isArray(limit.windows) ? limit.windows : [];
   const plan = status ? authIsPlan(status.auth_method) : true;
   return (
-    <article className="rt-limit rt-claude" aria-label="Claude Agent">
+    <article className="rt-limit rt-claude" aria-label="Claude Code plan">
       <header className="rt-limit-h">
-        <span className="rt-limit-name">Claude Agent</span>
+        <ProviderLogo logo="claude" name="Claude Code" size={28} />
+        <span className="rt-limit-title">
+          <span className="rt-limit-name trunc">Claude Code</span>
+          <span className="rt-limit-sub trunc">Claude Agent runtime</span>
+        </span>
         {status ? (
           status.logged_in ? (
             <Badge tone="green" dot>

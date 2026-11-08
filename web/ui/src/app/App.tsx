@@ -33,7 +33,7 @@ import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
 import { SessionsWorkspace } from "../views/sessions";
-import { RouterPage, ROUTER_TAB_LABELS } from "../views/router/router-page";
+import { RouterPage, routerCrumbs } from "../views/router/router-page";
 import {
   SettingsSecretsPage,
   SettingsConfigPage,
@@ -135,7 +135,7 @@ function routeContent(
     case "session":
       return <SessionsWorkspace selectedId={params.id} />;
     case "router":
-      return <RouterPage tab={params.tab || "overview"} />;
+      return <RouterPage tab={params.tab || "providers"} provider={params.provider} />;
     case "agents":
       return <AgentsPage />;
     case "agent":
@@ -231,13 +231,7 @@ export function crumbsFor(route: Route): Crumb[] {
     case "session":
       return [{ label: "History" }];
     case "router":
-      if (!params.tab || params.tab === "overview") {
-        return [{ label: "Router" }];
-      }
-      return [
-        { label: "Router", href: "#/router" },
-        { label: ROUTER_TAB_LABELS[params.tab] || titleCase(params.tab) },
-      ];
+      return routerCrumbs(params.tab || "providers", params.provider);
     case "agents":
       return [{ label: "Agents" }];
     case "agent":
@@ -341,7 +335,7 @@ export function pageKey(route: Route): string {
     case "settings":
       return "settings";
     case "router":
-      return "router";
+      return "router:" + (params.tab || "providers") + (params.provider ? "/" + params.provider : "");
     case "chats":
     case "chat":
       return "chats";

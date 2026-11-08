@@ -4,7 +4,7 @@
 - **Requirements**: [requirements.md](requirements.md)
 - **Requirements revision**: 1
 - **Requirements status**: Approved
-- **Contract revision**: 1
+- **Contract revision**: 2
 - **Applies to**: config / Go library / HTTP
 - **Status**: Approved (agent recommendation on the owner's instruction, 2026-11-08)
 
@@ -52,6 +52,12 @@
 
 Existing `kind = "openai_compat"` entries keep working unchanged. `thinking_format` defaults to
 `deepseek` for kind `deepseek` as well as for the `api.deepseek.com` host.
+
+**Revision 2 (2026-11-08, owner request: 9router-style Providers page).** New key:
+
+| Key | Type | Default | Rule |
+|---|---|---|---|
+| `disabled` | boolean | `false` | `true` keeps the entry but takes it out of routing: a chain target on it fails with `not_found` (no call is made) and the chain moves on; it is left out of `GET /router/v1/models`, the agent model choices of `GET /v1/router`, and the boot key check. Combos and agents may still name it. |
 
 ### API-RTR-002: `[combos.<name>]`
 
@@ -143,6 +149,15 @@ The existing `GET /v1/providers`, `POST /v1/providers/test`, `PUT /v1/providers/
 - `DELETE` is refused with 409 `{"error":"in_use","message":"used by agents: a; combos: c"}` when used
   by an agent, a fallback, a combo, or `knowledge.embedding_provider`.
 - `GET` items gain `default_base_url` and `models_count`.
+
+**Revision 2 (2026-11-08).** `GET` items gain `disabled` (boolean). `PUT` accepts an optional
+boolean `disabled`; when the key is absent the stored value is kept, so an edit that does not send
+it never switches a provider back on. It applies live like the other keys. `GET /v1/router`
+provider rows gain `disabled` too. When a `PUT` with `api_key` tests the key, a base URL host of a
+dashboard preset (`generativelanguage.googleapis.com`, `api.x.ai`, `api.groq.com`,
+`api.mistral.ai`, `api.together.xyz`, `api.fireworks.ai`, `api.cerebras.ai`) supplies a known test
+model; with no known model the test model is a guess, and a 404 for that guess saves the key (the
+server accepted it).
 
 ### API-RTR-007: combos
 
@@ -251,3 +266,10 @@ string or content parts `text|image_url` data URLs), `tools` (function), `tool_c
 `#/router` (Overview), `#/router/providers`, `#/router/models`, `#/router/combos`, `#/router/logs`,
 `#/router/proxy`. `#/settings/providers` redirects to `#/router/providers`. Sidebar item
 `{key:"router", label:"Router", icon:"route"}` in the Configure group, before Agents.
+
+**Revision 2 (2026-11-08).** The tabs became their own pages in a sidebar group "Router", between
+Observe and Configure: Providers `#/router/providers` (the default for `#/router`), Combos
+`#/router/combos`, Usage `#/router/usage`, Quota `#/router/quota`, Logs `#/router/logs`, Endpoint
+`#/router/endpoint`. One provider's page is `#/router/providers/<preset id or provider name>`
+(`claude-code` for Claude Code). Old hashes redirect: `#/router/overview` → `#/router/usage`,
+`#/router/proxy` → `#/router/endpoint`, `#/router/models` → `#/router/providers`.

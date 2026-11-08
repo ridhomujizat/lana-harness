@@ -34,6 +34,10 @@ interface NavItem {
   label: string;
   icon: string;
   href: string;
+  /* The accessible name when the label alone repeats another item's. */
+  ariaLabel?: string;
+  /* The Router pages share one section; each item matches its own tab. */
+  tab?: string;
 }
 
 interface NavSection {
@@ -45,8 +49,9 @@ interface NavSection {
 /* Home and Chats sit under "Workspace" (owner request 2026-11-02, replacing
    the untitled group of REQ-ROOM-012); Observe and Configure group the rest.
    History is the existing Sessions page. Workflows (spec #33) and Calendar
-   (spec #35) sit in the Workspace group. Router (spec 37, API-RTR-017) leads
-   the Configure group. Settings lives in the sidebar footer. */
+   (spec #35) sit in the Workspace group. The Router pages (spec 37,
+   API-RTR-017 revision 2) are their own group, laid out like 9router's
+   sidebar. Settings lives in the sidebar footer. */
 export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Workspace",
@@ -66,9 +71,19 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    title: "Router",
+    items: [
+      { key: "router-providers", label: "Providers", icon: "server", href: "#/router/providers", tab: "providers" },
+      { key: "router-combos", label: "Combos", icon: "layers", href: "#/router/combos", tab: "combos" },
+      { key: "router-usage", label: "Usage", icon: "chart-column", href: "#/router/usage", tab: "usage" },
+      { key: "router-quota", label: "Quota", icon: "gauge", href: "#/router/quota", tab: "quota" },
+      { key: "router-logs", label: "Logs", ariaLabel: "Router logs", icon: "logs", href: "#/router/logs", tab: "logs" },
+      { key: "router-endpoint", label: "Endpoint", icon: "waypoints", href: "#/router/endpoint", tab: "endpoint" },
+    ],
+  },
+  {
     title: "Configure",
     items: [
-      { key: "router", label: "Router", icon: "route", href: "#/router" },
       { key: "agents", label: "Agents", icon: "bot", href: "#/agents" },
       { key: "knowledge", label: "Knowledge", icon: "book-open", href: "#/knowledge" },
       { key: "skills", label: "Skills", icon: "sparkles", href: "#/skills" },
@@ -86,6 +101,13 @@ const SETTINGS_ITEM: NavItem = {
   href: "#/settings/general",
 };
 
+function isActive(item: NavItem, route: Route): boolean {
+  if (item.tab) {
+    return route.section === "router" && (route.params || {}).tab === item.tab;
+  }
+  return route.section === item.key;
+}
+
 function SItem({
   item,
   active,
@@ -102,7 +124,7 @@ function SItem({
       className={"sitem" + (active ? " on" : "")}
       href={item.href}
       aria-current={active ? "page" : undefined}
-      aria-label={item.label}
+      aria-label={item.ariaLabel || item.label}
       data-tip={collapsed ? item.label : undefined}
       data-tip-pos={collapsed ? "right" : undefined}
       onClick={onNavigate}
@@ -188,7 +210,7 @@ export function Sidebar({
             <SItem
               key={item.key}
               item={item}
-              active={route.section === item.key}
+              active={isActive(item, route)}
               collapsed={collapsed}
               onNavigate={onNavigate}
             />

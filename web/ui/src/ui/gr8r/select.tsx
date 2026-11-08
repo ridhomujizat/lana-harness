@@ -11,6 +11,7 @@ import {
 import type {
   ButtonHTMLAttributes,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { Ic } from "../icons";
@@ -26,10 +27,16 @@ export interface SelectOption {
   label: string;
   /* Consecutive options with the same group render under one heading. */
   group?: string;
+  /* A small mark before the label, such as a provider logo. */
+  icon?: ReactNode;
+  /* A small mark before the group heading; the first option of a group
+     sets it. */
+  groupIcon?: ReactNode;
 }
 
 interface OptionGroup {
   group: string;
+  icon?: ReactNode;
   options: SelectOption[];
 }
 
@@ -41,7 +48,7 @@ function groupOptions(options: SelectOption[]): OptionGroup[] {
     if (last && last.group === group) {
       last.options.push(option);
     } else {
-      groups.push({ group, options: [option] });
+      groups.push({ group, icon: option.groupIcon, options: [option] });
     }
   }
   return groups;
@@ -228,6 +235,7 @@ export function Select({
         }}
         onKeyDown={handleTriggerKeyDown}
       >
+        {selected && selected.icon ? <span className="select-icon">{selected.icon}</span> : null}
         <span className="trunc grow">{label}</span>
         <Ic name="chevron-down" size={size === "sm" ? 13 : 14} />
       </button>
@@ -252,6 +260,7 @@ export function Select({
                     className="mi"
                     onClick={() => pick(option.value)}
                   >
+                    {option.icon ? <span className="select-icon">{option.icon}</span> : null}
                     <span className="trunc grow">{option.label}</span>
                     {option.value === value ? (
                       <span className="ck">
@@ -266,6 +275,7 @@ export function Select({
                 return (
                   <div key={"g" + groupIndex} role="group" aria-label={entry.group}>
                     <div className="mh" aria-hidden="true">
+                      {entry.icon ? <span className="select-icon">{entry.icon}</span> : null}
                       {entry.group}
                     </div>
                     {items}

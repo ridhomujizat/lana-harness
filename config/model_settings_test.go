@@ -85,3 +85,17 @@ func TestProviderThinkingFormatValidation(t *testing.T) {
 		}
 	})
 }
+
+// API-RTR-001 revision 2: [providers.<name>] disabled is a boolean.
+func TestProviderDisabledValidation(t *testing.T) {
+	for _, value := range []string{"true", "false"} {
+		table := "[providers.p]\nkind = \"openai\"\ndisabled = " + value + "\n"
+		if err := loadSettingsTable(t, table); err != nil {
+			t.Fatalf("disabled = %s rejected: %v", value, err)
+		}
+	}
+	err := loadSettingsTable(t, "[providers.p]\nkind = \"openai\"\ndisabled = \"yes\"\n")
+	if !errorKey(t, err, "providers.p.disabled") {
+		t.Fatalf("string disabled not rejected: %v", err)
+	}
+}

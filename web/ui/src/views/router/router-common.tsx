@@ -149,6 +149,36 @@ export function dateLabel(value: string | null | undefined): string {
   return MONTHS[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear();
 }
 
+/* "<1m", "3m", "1h 32m", "2d 4h": a compact span for reset countdowns. */
+export function spanText(milliseconds: number): string {
+  const minutes = Math.floor(Math.max(0, milliseconds) / 60000);
+  if (minutes < 1) {
+    return "<1m";
+  }
+  if (minutes < 60) {
+    return minutes + "m";
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const rest = minutes % 60;
+    return rest ? hours + "h " + rest + "m" : hours + "h";
+  }
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours ? days + "d " + restHours + "h" : days + "d";
+}
+
+/* "resets in 1h 32m", "resets now" once the time has passed, "" without a
+   time. Quota meters show it next to what is left. */
+export function resetsIn(value: string | null | undefined, now: number = Date.now()): string {
+  const at = parseTime(value);
+  if (!at) {
+    return "";
+  }
+  const left = at - now;
+  return left <= 0 ? "resets now" : "resets in " + spanText(left);
+}
+
 export function agoText(value: string | null | undefined): string {
   return agoLabel(parseTime(value)) || DASH;
 }

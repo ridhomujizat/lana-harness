@@ -8,7 +8,7 @@ import { getModels } from "../api/models";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { getConfig } from "../api/settings";
 import { getRouter } from "../api/router";
-import type { RouterChoice } from "../api/router";
+import type { RouterChoice, RouterProvider } from "../api/router";
 import type { ConfigAgent } from "../api/settings";
 import { createSession } from "../api/sessions";
 import { Dialog, detailText, useAnnounce } from "../ui/ui";
@@ -224,6 +224,8 @@ interface AgentDetailData {
   agents: Agent[];
   /* GET /v1/router choices: combos, then models by provider (spec 37). */
   choices: RouterChoice[];
+  /* GET /v1/router providers, for the logos of the model picker. */
+  providers: RouterProvider[];
   /* The configured tool list, so General can gate the memory toggle. */
   tools: string[];
 }
@@ -660,7 +662,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         const tools = Array.isArray(configAgent.tools)
           ? configAgent.tools.map((tool) => String(tool))
           : [];
-        setPage({ agent, agents: rows, choices, tools });
+        setPage({ agent, agents: rows, choices, providers: routerPage ? routerPage.providers : [], tools });
         setVersion(config && config.version ? String(config.version) : "");
         if (initial) {
           const values = formValues(initial);
@@ -1192,7 +1194,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
           },
         ]
       : []),
-    ...choiceOptions(choices),
+    ...choiceOptions(choices, page ? page.providers : undefined),
     { value: OTHER_MODEL, label: "Other…" },
   ];
   const modelValue = legacy

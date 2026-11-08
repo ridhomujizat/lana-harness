@@ -16,7 +16,7 @@ import (
 )
 
 var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
-var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
+var providerKeys = []string{"api_key_env", "base_url", "disabled", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 
@@ -380,6 +380,11 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 					add(path+".headers."+key, typeMsg("string", table[key]))
 				}
 			}
+		}
+	}
+	if val, ok := v["disabled"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".disabled", typeMsg("boolean", val))
 		}
 	}
 	if val, ok := v["thinking_format"]; ok {

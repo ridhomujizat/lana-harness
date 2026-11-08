@@ -762,3 +762,40 @@ func TestWindowUtilizationNull(t *testing.T) {
 		t.Fatalf("window = %s", data)
 	}
 }
+
+// API-RTR-001 revision 2: a disabled provider is treated as not configured.
+// Its targets fail with not_found without a call, and the chain moves on.
+func TestDisabledProviderMovesOn(t *testing.T) {
+	a := &fakeBehavior{}
+	cfg := fakeProvider(t, "a", a)
+	cfg.Disabled = true
+	b := &fakeBehavior{text: "from b"}
+	h := newHarness(t, Config{Providers: map[string]core.ProviderConfig{"a": cfg, "b": fakeProvider(t, "b", b)}})
+	if !h.r.Disabled("a") || h.r.Disabled("b") || h.r.Disabled("missing") {
+		t.Fatalf("Disabled: a=%v b=%v missing=%v", h.r.Disabled("a"), h.r.Disabled("b"), h.r.Disabled("missing"))
+	}
+	var attempts []Attempt
+	stream, served, err := h.r.StreamChain(context.Background(), chain("a/x", "b/y"), core.ChatRequest{}, CallMeta{}, func(at Attempt) { attempts = append(attempts, at) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _ := drain(stream); text != "from b" || served.Provider != "b" {
+		t.Fatalf("served = %v, text = %q", served, text)
+	}
+	if a.callCount() != 0 {
+		t.Fatalf("disabled provider a was called %d times", a.callCount())
+	}
+	if len(attempts) != 1 || attempts[0].Err.Class != core.ErrorClassNotFound || !strings.Contains(attempts[0].Err.Message, "disabled") {
+		t.Fatalf("attempts = %+v", attempts)
+	}
+	// Turning it back on applies live.
+	cfg.Disabled = false
+	if err := h.r.Apply(Config{Providers: map[string]core.ProviderConfig{"a": cfg, "b": fakeProvider(t, "b", b)}}); err != nil {
+		t.Fatal(err)
+	}
+	stream, served, err = h.r.StreamChain(context.Background(), chain("a/x", "b/y"), core.ChatRequest{}, CallMeta{}, nil)
+	if err != nil || served.Provider != "a" {
+		t.Fatalf("served = %v, err = %v", served, err)
+	}
+	_, _ = drain(stream)
+}

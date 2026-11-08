@@ -1,23 +1,16 @@
 /* eslint-disable react-hooks/set-state-in-effect -- each tab loads its data on mount and on a filter change, like the other pages. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  CLAUDE_AGENT_PROVIDER,
-  getClaudeAgent,
-  getRouter,
-  getRouterLimits,
-  getRouterUsage,
-} from "../../api/router";
+import { getRouter, getRouterUsage } from "../../api/router";
 import type {
-  ClaudeAgentStatus,
-  LimitSnapshot,
   RouterCooling,
+  RouterProvider,
   RouterRange,
   RouterUsage,
   UsageStats,
 } from "../../api/router";
 import { Badge, Button, EmptyState, ErrorState, Panel, Seg, Stat } from "../../ui/gr8r";
 import { ShareBars } from "../home-charts";
-import { ClaudeAgentCard, LimitCard } from "./limits";
+import { ProviderMark, providerIndex } from "./provider-logo";
 import { UsageChart } from "./usage-chart";
 import {
   compact,
@@ -30,9 +23,8 @@ import {
   failureOf,
 } from "./router-common";
 
-/* Router → Overview (REQ-RTR-011, REQ-RTR-012, REQ-CCR-008): what the
-   router did in the chosen range, what it cost, and how much room each
-   provider has left. */
+/* Router → Usage (REQ-RTR-011): what the router did in the chosen range and
+   what it cost. Limits live on the Quota page. */
 
 export const RANGES: Array<{ value: RouterRange; label: string }> = [
   { value: "24h", label: "24 hours" },
@@ -53,14 +45,16 @@ function CostValue({ stats }: { stats: UsageStats }) {
   );
 }
 
-function StatsTable({
+export function StatsTable({
   rows,
   head,
   empty,
+  providers,
 }: {
-  rows: Array<{ key: string; label: string; stats: UsageStats }>;
+  rows: Array<{ key: string; label: string; provider?: string; stats: UsageStats }>;
   head: string;
   empty: string;
+  providers?: Record<string, RouterProvider>;
 }) {
   if (rows.length === 0) {
     return <EmptyState size="sm" icon="table" text={empty} />;
@@ -83,7 +77,14 @@ function StatsTable({
         <tbody>
           {rows.map((row) => (
             <tr key={row.key}>
-              <td className="mono rt-cell-name" title={row.label}>{row.label}</td>
+              <td className="rt-cell-name" title={row.label}>
+                <span className="rt-name-logo">
+                  {row.provider !== undefined ? (
+                    <ProviderMark provider={providers ? providers[row.provider] : null} name={row.provider} size={18} />
+                  ) : null}
+                  <span className="mono trunc">{row.label}</span>
+                </span>
+              </td>
               <td className="is-num num">{count(row.stats.calls)}</td>
               <td className={"is-num num" + (row.stats.errors ? " rt-bad" : "")}>
                 {count(row.stats.errors)}
@@ -125,15 +126,18 @@ function Cooling({ rows }: { rows: RouterCooling[] }) {
   );
 }
 
-export function RouterOverview() {
+/* The provider of a "provider/model" address. */
+function providerOf(address: string): string {
+  const index = address.search(/[/:]/);
+  return index > 0 ? address.slice(0, index) : address;
+}
+
+export function RouterUsagePage() {
   const [range, setRange] = useState<RouterRange>("24h");
   const [usage, setUsage] = useState<RouterUsage | null>(null);
   const [usageError, setUsageError] = useState("");
-  const [limits, setLimits] = useState<LimitSnapshot[] | null>(null);
-  const [limitsError, setLimitsError] = useState("");
-  const [claude, setClaude] = useState<ClaudeAgentStatus | null>(null);
   const [cooling, setCooling] = useState<RouterCooling[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+  const [providers, setProviders] = useState<RouterProvider[]>([]);
   const usageRequest = useRef(0);
 
   const loadUsage = useCallback(async (next: RouterRange) => {
@@ -151,55 +155,27 @@ export function RouterOverview() {
     }
   }, []);
 
-  const loadSide = useCallback(async (refresh: boolean) => {
-    const [limitResult, claudeResult, routerResult] = await Promise.allSettled([
-      getRouterLimits(refresh),
-      getClaudeAgent(),
-      getRouter(),
-    ]);
-    if (limitResult.status === "fulfilled") {
-      setLimits(limitResult.value);
-      setLimitsError("");
-    } else {
-      setLimitsError(failureOf(limitResult.reason).message);
-    }
-    setClaude(claudeResult.status === "fulfilled" ? claudeResult.value : null);
-    if (routerResult.status === "fulfilled") {
-      setCooling(routerResult.value.cooling);
-    }
-  }, []);
-
   useEffect(() => {
     void loadUsage(range);
   }, [loadUsage, range]);
 
   useEffect(() => {
-    void loadSide(false);
-  }, [loadSide]);
+    let alive = true;
+    getRouter()
+      .then((data) => {
+        if (alive) {
+          setCooling(data.cooling);
+          setProviders(data.providers);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-  async function refreshLimits() {
-    setRefreshing(true);
-    try {
-      await loadSide(true);
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
+  const index = useMemo(() => providerIndex(providers), [providers]);
   const totals = usage?.totals;
-  const claudeLimit = useMemo(
-    () => (limits || []).find((limit) => limit.provider === CLAUDE_AGENT_PROVIDER) || null,
-    [limits]
-  );
-  const providerLimits = useMemo(
-    () => (limits || []).filter((limit) => limit.provider !== CLAUDE_AGENT_PROVIDER),
-    [limits]
-  );
-  const claudeUsage =
-    (usage?.by_provider || []).find((row) => row.provider === CLAUDE_AGENT_PROVIDER) || null;
-  const showClaude = Boolean(
-    claudeLimit || claudeUsage || (claude && (claude.configured_agents.length > 0 || claude.binary))
-  );
 
   return (
     <div className="rt-overview">
@@ -284,9 +260,11 @@ export function RouterOverview() {
             <StatsTable
               head="Provider"
               empty="No calls in this range."
+              providers={index}
               rows={usage.by_provider.map((row) => ({
                 key: row.provider,
                 label: row.provider,
+                provider: row.provider,
                 stats: row,
               }))}
             />
@@ -297,9 +275,11 @@ export function RouterOverview() {
               <StatsTable
                 head="Model"
                 empty="No calls in this range."
+                providers={index}
                 rows={usage.by_model.map((row) => ({
                   key: row.address,
                   label: row.address,
+                  provider: row.provider || providerOf(row.address),
                   stats: row,
                 }))}
               />
@@ -321,48 +301,6 @@ export function RouterOverview() {
           </div>
         </>
       )}
-
-      <section className="rt-limits" aria-labelledby="rt-limits-title">
-        <div className="rt-section-h">
-          <h2 id="rt-limits-title">Limits</h2>
-          <p className="muted">What each provider last reported about your quota and balance.</p>
-          <span className="sp" />
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="refresh-cw"
-            loading={refreshing}
-            disabled={refreshing}
-            onClick={() => void refreshLimits()}
-          >
-            Refresh
-          </Button>
-        </div>
-        {limitsError ? (
-          <p className="rt-limit-err" role="alert">
-            {limitsError}
-          </p>
-        ) : null}
-        {limits === null && !limitsError ? (
-          <div className="home-empty">Loading limits…</div>
-        ) : (
-          <div className="rt-limit-grid">
-            {showClaude ? (
-              <ClaudeAgentCard status={claude} limit={claudeLimit} usage={claudeUsage} />
-            ) : null}
-            {providerLimits.map((limit) => (
-              <LimitCard key={limit.provider} limit={limit} />
-            ))}
-            {providerLimits.length === 0 && !showClaude && limits !== null ? (
-              <EmptyState
-                size="sm"
-                icon="gauge"
-                text="No provider has reported limits yet. Limits appear after the first call."
-              />
-            ) : null}
-          </div>
-        )}
-      </section>
 
       <Cooling rows={cooling} />
     </div>

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { getRouter, listRouterCalls } from "../../api/router";
-import type { CallsQuery, RouterCall } from "../../api/router";
+import type { CallsQuery, RouterCall, RouterProvider } from "../../api/router";
 import { Badge, Button, Drawer, EmptyState, ErrorState, Seg, Select } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import {
@@ -18,6 +18,7 @@ import {
   sourceLabel,
   timeLabel,
 } from "./router-common";
+import { ProviderMark, providerIndex } from "./provider-logo";
 
 /* Router → Logs (REQ-RTR-009, API-RTR-012): every attempt, newest first.
    "Load more" passes the last id as `before`, which is exclusive. */
@@ -38,7 +39,15 @@ export function requestedDiffers(requested: string | undefined, served: string):
   return asked !== "" && asked.toLowerCase() !== served.trim().toLowerCase();
 }
 
-function CallDetail({ call, onClose }: { call: RouterCall; onClose: () => void }) {
+function CallDetail({
+  call,
+  provider,
+  onClose,
+}: {
+  call: RouterCall;
+  provider?: RouterProvider;
+  onClose: () => void;
+}) {
   const served = call.provider + "/" + call.model;
   return (
     <Drawer
@@ -50,6 +59,7 @@ function CallDetail({ call, onClose }: { call: RouterCall; onClose: () => void }
           <Badge tone={outcomeTone(call.outcome)} dot>
             {outcomeLabel(call.outcome)}
           </Badge>
+          <ProviderMark provider={provider} name={call.provider} size={18} />
           <b className="mono trunc">{served}</b>
         </span>
       }
@@ -100,7 +110,7 @@ function CallDetail({ call, onClose }: { call: RouterCall; onClose: () => void }
 }
 
 export function RouterLogs() {
-  const [providers, setProviders] = useState<string[]>([]);
+  const [providers, setProviders] = useState<RouterProvider[]>([]);
   const [provider, setProvider] = useState("");
   const [status, setStatus] = useState<"" | "ok" | "error">("");
   const [source, setSource] = useState("");
@@ -116,7 +126,7 @@ export function RouterLogs() {
     getRouter()
       .then((data) => {
         if (alive) {
-          setProviders(data.providers.map((entry) => entry.name));
+          setProviders(data.providers);
         }
       })
       .catch(() => {});
@@ -125,6 +135,7 @@ export function RouterLogs() {
     };
   }, []);
 
+  const index = useMemo(() => providerIndex(providers), [providers]);
   const query = useMemo<CallsQuery>(
     () => ({ limit: PAGE_SIZE, provider, status, source }),
     [provider, status, source]
@@ -199,7 +210,14 @@ export function RouterLogs() {
           <Select
             id="rt-logs-provider"
             size="sm"
-            options={[{ value: "", label: "All providers" }, ...providers.map((name) => ({ value: name, label: name }))]}
+            options={[
+              { value: "", label: "All providers" },
+              ...providers.map((entry) => ({
+                value: entry.name,
+                label: entry.name,
+                icon: <ProviderMark provider={entry} size={16} />,
+              })),
+            ]}
             value={provider}
             onChange={setProvider}
           />
@@ -278,6 +296,8 @@ export function RouterLogs() {
                         </span>
                       </td>
                       <td className="rt-route-cell">
+                        <span className="rt-route-wrap">
+                        <ProviderMark provider={index[call.provider]} name={call.provider} size={18} />
                         <span className="rt-route">
                           {requestedDiffers(call.requested, served) ? (
                             <>
@@ -286,6 +306,7 @@ export function RouterLogs() {
                             </>
                           ) : null}
                           <span className="mono">{served}</span>
+                        </span>
                         </span>
                       </td>
                       <td className="is-num num">{call.attempt}</td>
@@ -318,7 +339,7 @@ export function RouterLogs() {
         </section>
       ) : null}
 
-      {open ? <CallDetail call={open} onClose={() => setOpen(null)} /> : null}
+      {open ? <CallDetail call={open} provider={index[open.provider]} onClose={() => setOpen(null)} /> : null}
     </div>
   );
 }

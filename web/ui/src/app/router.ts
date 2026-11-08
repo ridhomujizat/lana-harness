@@ -27,20 +27,27 @@ export const SETTINGS_TABS = [
 ] as const;
 export const LEGACY_SETTINGS_TABS = ["agents", "skills"] as const;
 
-/* The Router page tabs of API-RTR-017. #/router is the Overview. */
+/* The Router pages (API-RTR-017 revision 2): each is its own sidebar item
+   under the Router group. #/router opens Providers; one provider's page is
+   #/router/providers/<preset or name>. */
 export const ROUTER_TABS = [
   "providers",
-  "models",
   "combos",
+  "usage",
+  "quota",
   "logs",
-  "proxy",
+  "endpoint",
 ] as const;
-export const DEFAULT_ROUTER_TAB = "overview";
+export const DEFAULT_ROUTER_TAB = "providers";
 
 /* Old hashes that now live elsewhere. The App replaces the hash with the
-   target so the address bar shows the new place. */
+   target so the address bar shows the new place. The Router's first layout
+   had Overview, Models, and Proxy tabs. */
 export const ROUTE_REDIRECTS: Record<string, string> = {
   "#/settings/providers": "#/router/providers",
+  "#/router/overview": "#/router/usage",
+  "#/router/proxy": "#/router/endpoint",
+  "#/router/models": "#/router/providers",
 };
 export const SETUP_STEPS = [
   "unlock",
@@ -128,6 +135,7 @@ export const ROUTE_TABLE: RouteEntry[] = [
     section: "router",
     tabs: ROUTER_TABS,
   },
+  { path: "#/router/providers/{provider}", view: "router", section: "router" },
   { path: "#/agents", view: "agents", section: "agents" },
   { path: "#/agents/{name}", view: "agent", section: "agents" },
   {
