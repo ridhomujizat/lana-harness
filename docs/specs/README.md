@@ -162,3 +162,4 @@ it is reversible and does not change observable behavior.
 | — | Session titles: automatic titles after the first turn, rename, regenerate | [Approved r1](40-session-titles/requirements.md) | In requirements | Not required | [Completed r1](40-session-titles/tasks.md) |
 | — | macOS menu bar app: status, usage, pages, start and stop, sign-in link `next` | [Approved r1](41-macos-menubar/requirements.md) | In requirements | Not required | [Completed r1](41-macos-menubar/tasks.md) |
 | — | macOS notifications: replies, approvals with actions, questions, workflow runs; presence | [Approved r1](42-macos-notifications/requirements.md) | In requirements | Not required | [Completed r1](42-macos-notifications/tasks.md) |
+| — | Generated agent avatars: blob faces with two eye holes, model or local generator, default per name | [Approved r1](43-agent-avatars/requirements.md) | In requirements | Not required | [Completed r1](43-agent-avatars/tasks.md) |

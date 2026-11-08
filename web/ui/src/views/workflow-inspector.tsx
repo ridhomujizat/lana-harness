@@ -14,6 +14,7 @@ import {
 import { nodeMeta } from "./workflow-catalog";
 import type { FieldSpec } from "./workflow-catalog";
 import { prettyValue } from "./workflow-common";
+import { agentOptionIcon } from "./agent-avatar";
 
 /* The node inspector of design workflows-2: Parameters, Last output and On
    failure. Edits go straight into the draft graph; the editor saves. */
@@ -225,7 +226,7 @@ function ParamField({
           placeholder="Pick a bot"
           options={[
             ...(spec.required ? [] : [{ value: "", label: "—" }]),
-            ...agents.map((agent) => ({ value: agent, label: agent })),
+            ...agents.map((agent) => ({ value: agent, label: agent, icon: agentOptionIcon(agent) })),
           ]}
           onChange={(next) => set(spec.name, next || undefined)}
         />

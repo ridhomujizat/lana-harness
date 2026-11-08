@@ -23,7 +23,8 @@ import { useSessionPresence } from "../lib/session-presence";
 import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
-import { Avatar, AvatarStack, Badge, Button, Skeleton } from "../ui/gr8r";
+import { Badge, Button, Skeleton } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
 import {
@@ -1131,7 +1132,7 @@ export function RoomView({ room }: RoomViewProps) {
           <Ic name="chevron-left" size={18} />
         </a>
         {team ? (
-          <AvatarStack
+          <AgentAvatarStack
             size="lg"
             max={3}
             items={teamFaces.map((face) => ({
@@ -1140,7 +1141,7 @@ export function RoomView({ room }: RoomViewProps) {
             }))}
           />
         ) : (
-          <Avatar
+          <AgentAvatar
             name={room.name}
             color={gr8rColor(room.color)}
             size="lg"
@@ -1350,7 +1351,7 @@ function RoomEmpty({
   return (
     <div className="room-empty">
       {team && teamFaces.length > 0 ? (
-        <AvatarStack
+        <AgentAvatarStack
           size="xl"
           max={3}
           items={teamFaces.map((face) => ({
@@ -1359,7 +1360,7 @@ function RoomEmpty({
           }))}
         />
       ) : (
-        <Avatar
+        <AgentAvatar
           name={room.name}
           color={gr8rColor(room.color)}
           size="xl"

@@ -25,6 +25,7 @@ import {
   writeSummary,
 } from "./setup-draft";
 import type { SetupAgentDraft, SetupDraft, SetupPersonaDraft } from "./setup-draft";
+import { AgentAvatar } from "./agent-avatar";
 
 export { SetupShell } from "./setup-shell";
 export type { SetupShellProps } from "./setup-shell";
@@ -681,7 +682,8 @@ function ReadyStep() {
         <a className="link" href="#/router/providers">
           Open Router
         </a>
-        <a className="link" href={"#/agents/" + encodeURIComponent(agentName)}>
+        <a className="link setup-agent-link" href={"#/agents/" + encodeURIComponent(agentName)}>
+          <AgentAvatar name={agentName} size="sm" aria-hidden="true" />
           Open agent {agentName}
         </a>
       </div>

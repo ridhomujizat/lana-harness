@@ -8,7 +8,6 @@ import { getRouter } from "../api/router";
 import type { RouterOverview } from "../api/router";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
-import { avatarFor } from "../lib/avatar";
 import {
   isTeam,
   rosterNames,
@@ -28,8 +27,6 @@ import type { AgentLike } from "./agent-common";
 import { useRooms } from "./presence";
 import type { RoomRow } from "../api/rooms";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   EmptyState,
@@ -39,6 +36,7 @@ import {
   Select,
   Skeleton,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 
 /* REQ-ROOM-011: the alive roster. The Agents page shows a team pulse and one
@@ -70,18 +68,8 @@ const STATE_FALLBACK: Record<string, string> = {
   resting: "Idle",
 };
 
-/* The agent identity colors of lib/avatar.ts map onto the Gr8r status tokens,
-   so one agent keeps one color in the picker, the chat, and the roster. */
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 /* green active / gray idle / amber waiting / red error (page mapping). */
@@ -449,7 +437,7 @@ function AgentCard({
     <article className="pcard" onClick={(event) => onOpen(event, agent.name)}>
       <div className="agent-card-head">
         {team ? (
-          <AvatarStack
+          <AgentAvatarStack
             size="md"
             max={3}
             items={rosterNames(agent).map((name) => ({
@@ -458,7 +446,7 @@ function AgentCard({
             }))}
           />
         ) : (
-          <Avatar
+          <AgentAvatar
             name={agent.name}
             color={agentColor(agent.name)}
             size="md"

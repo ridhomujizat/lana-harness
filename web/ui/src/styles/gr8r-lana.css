@@ -302,3 +302,61 @@
     padding: 5px 6px;
   }
 }
+
+/* Generated agent avatars (spec 43). The blob SVG fills the avatar box; its
+   body uses currentColor (the agent color) and the eyes stay white. No tinted
+   circle sits behind it, and the presence dot (::after) keeps working because
+   the box stays position: relative where it was. */
+.av.has-svg,
+.agent-avatar.has-svg,
+.agent-face.has-svg {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.av.has-svg {
+  color: var(--c);
+}
+.av-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* The server-rendered avatar (GET /v1/agents/{name}/avatar.svg) for names the
+   avatar store has not seen yet; its colors are baked in for the theme. */
+.av-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+/* An agent name with its avatar (logs, history rows, detail lists). */
+.agent-name-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.agent-name-chip > .av {
+  flex: 0 0 auto;
+}
+.hc-bars-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* A bot node of the workflow canvas shows the agent's avatar as its icon. */
+.wf-ico.wf-ico-agent {
+  background: transparent;
+}
+.setup-agent-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

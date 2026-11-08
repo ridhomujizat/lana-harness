@@ -149,7 +149,8 @@ type AgentConfig struct {
 	// (REQ-ROOM-009, API-ROOM-006).
 	Title string `toml:"title"`
 	// Color is the avatar color, one of brand, success, warning, error, blue,
-	// gray; "" derives a stable color from the name (REQ-ROOM-009, API-ROOM-006).
+	// gray, or a "#RRGGBB" hex color (spec 43); "" derives a stable color
+	// from the name (REQ-ROOM-009, API-ROOM-006).
 	Color string     `toml:"color"`
 	Rules AgentRules `toml:"rules"`
 	// Runtime is the deprecated engine key (API-CCT-002): "claude-code" with

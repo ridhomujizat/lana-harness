@@ -203,6 +203,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerChannelRoutes()
 	s.registerAgentFileRoutes()
 	s.registerOverviewRoutes()
+	s.registerAvatarRoutes()
 	s.registerSkillRoutes()
 	s.registerDaemonRoutes()
 	s.registerUpdateRoutes()

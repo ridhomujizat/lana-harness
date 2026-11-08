@@ -1,4 +1,5 @@
 import { queryString, request } from "./client";
+import { rememberAvatar, rememberAvatars } from "../lib/avatar-store";
 import type { WorkflowCommandReply } from "./turns";
 
 /* Room calls of API-ROOM-001 to API-ROOM-005 and API-ROOM-008. Types are
@@ -18,6 +19,9 @@ export interface RoomRow {
   kind: string;
   title: string;
   color: string;
+  /* Spec 43: the saved or default avatar of the agent or team. */
+  avatar_svg?: string;
+  avatar_source?: "saved" | "default";
   members: string[];
   lead: string;
   presence: Presence;
@@ -108,6 +112,9 @@ export interface AgentOverview {
   kind: string;
   title: string;
   color: string;
+  /* Spec 43: the saved or default avatar of the agent or team. */
+  avatar_svg?: string;
+  avatar_source?: "saved" | "default";
   persona_line: string;
   created_at: number;
   presence: Presence;
@@ -139,9 +146,11 @@ export interface MarkRoomReadResponse {
 }
 
 export function listRooms(): Promise<RoomRow[]> {
-  return request<{ rooms: RoomRow[] }>("GET", "/v1/rooms").then(
-    (response) => (response && response.rooms) || []
-  );
+  return request<{ rooms: RoomRow[] }>("GET", "/v1/rooms").then((response) => {
+    const rows = (response && response.rooms) || [];
+    rememberAvatars(rows);
+    return rows;
+  });
 }
 
 export function roomSegments(
@@ -186,7 +195,10 @@ export function getAgentOverview(name: string): Promise<AgentOverview> {
   return request<AgentOverview>(
     "GET",
     "/v1/agents/" + encodeURIComponent(name) + "/overview"
-  );
+  ).then((data) => {
+    rememberAvatar(data);
+    return data;
+  });
 }
 
 export interface RoomsStreamHandlers {
@@ -254,12 +266,14 @@ export function openRoomsStream(handlers: RoomsStreamHandlers): RoomsStream {
           ? (payload as { rooms?: RoomRow[] }).rooms
           : undefined;
       if (Array.isArray(rows)) {
+        rememberAvatars(rows);
         handlers.onRooms(rows);
       }
       return;
     }
     if (eventName === "room") {
       if (payload && typeof payload === "object") {
+        rememberAvatar(payload as RoomRow);
         handlers.onRoom(payload as RoomRow);
       }
       return;

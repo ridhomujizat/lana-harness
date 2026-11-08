@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/avatar"
 	"github.com/ridhomujizat/lana-harness/internal/toolfmt"
 )
 
@@ -60,12 +61,16 @@ type roomMessageJSON struct {
 
 // roomJSON is one row of API-ROOM-001.
 type roomJSON struct {
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Title   string   `json:"title"`
-	Color   string   `json:"color"`
-	Members []string `json:"members"`
-	Lead    string   `json:"lead"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	Color string `json:"color"`
+	// AvatarSVG is the avatar the room shows, never empty, and AvatarSource
+	// "saved" or "default" (spec 43, API-AVT-005).
+	AvatarSVG    string   `json:"avatar_svg"`
+	AvatarSource string   `json:"avatar_source"`
+	Members      []string `json:"members"`
+	Lead         string   `json:"lead"`
 	// Presence is derived, never stored (REQ-ROOM-006).
 	Presence     presenceJSON     `json:"presence"`
 	LastMessage  *roomMessageJSON `json:"last_message"`
@@ -343,9 +348,13 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 		row.Color = "brand"
 		row.Lead = agent.Lead
 		row.Members = nonNilStrings(agent.Members)
-	} else if m, ok := meta[agent.Name]; ok {
-		row.Title = m.title
-		row.Color = core.ResolveAgentColor(agent.Name, m.color)
+		row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(agent.Name), avatar.Default
+	} else {
+		if m, ok := meta[agent.Name]; ok {
+			row.Title = m.title
+			row.Color = core.ResolveAgentColor(agent.Name, m.color)
+		}
+		row.AvatarSVG, row.AvatarSource = s.agentAvatar(agent.Name)
 	}
 
 	newest, events, err := s.roomNewestSession(ctx, s.backend, agent.Name)

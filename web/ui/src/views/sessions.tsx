@@ -33,6 +33,7 @@ import {
   visibleTitle,
 } from "./session-title";
 import type { SessionTitleUpdate } from "./session-title";
+import { AgentAvatar, agentOptionIcon } from "./agent-avatar";
 
 /* The rev 1 route target stays exported so older callers keep working; the
    view itself now lives in new-session.js. */
@@ -349,6 +350,7 @@ function SessionItem({
           aria-hidden="true"
         />
       ) : null}
+      {agent ? <AgentAvatar name={agent} size="sm" aria-hidden="true" /> : null}
       <span className="session-row-agent trunc">{agent}</span>
       <Lbl color={CHANNEL_COLORS[channel] || "var(--gray)"}>
         {channelLabel(channel)}
@@ -1092,6 +1094,7 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
                   { value: "", label: "Any agent or team" },
                   ...agentNames.map((name) => ({
                     value: name,
+                    icon: agentOptionIcon(name),
                     label: agentFacetLabel(
                       name,
                       facets.agentKinds[name],

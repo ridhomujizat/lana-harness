@@ -104,9 +104,6 @@ const maxAgentDescription = 120
 // (runes) (REQ-ROOM-009, API-ROOM-006).
 const maxAgentTitle = 60
 
-// agentColors are the accepted agents.<name>.color values (API-ROOM-006).
-var agentColors = []string{"brand", "success", "warning", "error", "blue", "gray"}
-
 // maxTeamDescription is the longest accepted teams.<name>.description, in
 // characters (runes).
 const maxTeamDescription = 120
@@ -566,8 +563,9 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 		s, ok := val.(string)
 		if !ok {
 			add(path+".color", typeMsg("string", val))
-		} else if s != "" && !contains(agentColors, s) {
-			add(path+".color", enumMsg(s, agentColors))
+		} else if !core.ValidAgentColor(s) {
+			// A palette token or a #RRGGBB hex color (API-ROOM-006, spec 43).
+			add(path+".color", fmt.Sprintf("%q is not valid: %s", s, core.AgentColorMessage))
 		}
 	}
 	if val, ok := v["disabled_tools"]; ok {

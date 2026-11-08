@@ -91,6 +91,10 @@ type overviewResponse struct {
 	Kind  string `json:"kind"`
 	Title string `json:"title"`
 	Color string `json:"color"`
+	// AvatarSVG is the avatar the room shows, never empty, and AvatarSource
+	// "saved" or "default" (spec 43, API-AVT-005).
+	AvatarSVG    string `json:"avatar_svg"`
+	AvatarSource string `json:"avatar_source"`
 	// Members and Lead are set for a team room only (API-ROOM-008).
 	Members     []string               `json:"members,omitempty"`
 	Lead        string                 `json:"lead,omitempty"`
@@ -142,14 +146,16 @@ func (s *Server) buildOverview(ctx context.Context, backend Backend, room Agent,
 		return overviewResponse{}, err
 	}
 	out := overviewResponse{
-		Name:       row.Name,
-		Kind:       row.Kind,
-		Title:      row.Title,
-		Color:      row.Color,
-		Presence:   row.Presence,
-		Activity:   []overviewActivityJSON{},
-		Memory:     overviewMemoryJSON{Entries: []string{}},
-		LooksAfter: overviewLooksAfterJSON{Channels: []overviewChannelJSON{}, Teams: []string{}},
+		Name:         row.Name,
+		Kind:         row.Kind,
+		Title:        row.Title,
+		Color:        row.Color,
+		AvatarSVG:    row.AvatarSVG,
+		AvatarSource: row.AvatarSource,
+		Presence:     row.Presence,
+		Activity:     []overviewActivityJSON{},
+		Memory:       overviewMemoryJSON{Entries: []string{}},
+		LooksAfter:   overviewLooksAfterJSON{Channels: []overviewChannelJSON{}, Teams: []string{}},
 	}
 	if row.Kind == "team" {
 		out.Members = row.Members

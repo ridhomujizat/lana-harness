@@ -66,6 +66,8 @@ type Home struct {
 	Memory string
 	// Job is JOB.md, the agent job description (API-ROOM-007).
 	Job string
+	// Avatar is avatar.svg, the generated avatar (spec 43, REQ-AVT-006).
+	Avatar string
 }
 
 // Paths returns the paths of agent name under lanaHome.
@@ -76,6 +78,7 @@ func Paths(lanaHome, name string) Home {
 		Agent:  filepath.Join(dir, "AGENT.md"),
 		Memory: filepath.Join(dir, "MEMORY.md"),
 		Job:    filepath.Join(dir, "JOB.md"),
+		Avatar: filepath.Join(dir, "avatar.svg"),
 	}
 }
 

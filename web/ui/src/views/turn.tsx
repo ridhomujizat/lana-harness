@@ -4,6 +4,8 @@ import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, tool
 import { Markdown } from "../lib/markdown";
 import { Ic } from "../ui/icons";
 import { AgentFace } from "./presence";
+import { useAgentAvatar } from "../lib/avatar-store";
+import { AgentAvatar } from "./agent-avatar";
 import { TeamBlock } from "./team";
 import type { TeamChildRequest } from "./team";
 
@@ -11,7 +13,6 @@ import type { TeamChildRequest } from "./team";
    separate from the session view so a team block (spec #10) can wrap or
    replace it later without rewriting the chat view. */
 
-const TONES = ["brand", "success", "warning", "error", "gray"];
 
 const READ_TOOLS = new Set(["read_file", "skill_load", "memory_read"]);
 const SEARCH_TOOLS = new Set(["glob", "grep"]);
@@ -179,22 +180,6 @@ function thinkingText(content: unknown): string {
     }
   }
   return pieces.join("\n\n");
-}
-
-/* The avatar color follows the agent name, so one agent keeps one identity
-   across sessions and team threads. */
-export function agentTone(name: string | null | undefined): string {
-  const text = String(name || "agent");
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-  return TONES[hash % TONES.length] || "brand";
-}
-
-export function agentInitial(name: string | null | undefined): string {
-  const text = String(name || "").trim();
-  return text ? (Array.from(text)[0] || "").toUpperCase() : "?";
 }
 
 export function formatDuration(milliseconds: number): string {
@@ -716,6 +701,8 @@ export function TurnBlock({
   continueBusy = false,
   continueError = "",
 }: TurnBlockProps) {
+  /* Spec 43: an agent with a generated avatar shows it through AgentFace. */
+  const storedAvatar = useAgentAvatar(agent);
   const [now, setNow] = useState(() => Date.now());
   const [cardDismissed, setCardDismissed] = useState(false);
 
@@ -774,15 +761,10 @@ export function TurnBlock({
   return (
     <article className="turn">
       <div className="turn-head">
-        {agentColor ? (
-          <AgentFace name={agent} color={agentColor} size={32} />
+        {agentColor || (storedAvatar && storedAvatar.svg) ? (
+          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
         ) : (
-          <span
-            className={"agent-avatar tone-" + agentTone(agent)}
-            aria-hidden="true"
-          >
-            {agentInitial(agent)}
-          </span>
+          <AgentAvatar name={agent || "agent"} size="auto" />
         )}
         <span className="turn-agent">{agent}</span>
         <span className="turn-status">{statusText}</span>

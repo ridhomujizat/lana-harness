@@ -7,6 +7,20 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+- Generated agent avatars (spec 43): every agent now has a face, a solid blob in its color with two
+  white eye holes, instead of a letter. **Generate avatar** on the agent profile and General tab asks
+  the chosen model (or the agent's background model, never Claude Code) for a new one, with a recent
+  results strip, undo and redo, color swatches and a custom hex color, **Reset to default**, and
+  **Save**. The SVG is sanitized strictly; when the model fails or draws something invalid, a local
+  generator draws one. Agents without a saved avatar show a default avatar seeded from their name,
+  everywhere the dashboard shows an agent. New `POST /v1/agents/{name}/avatar/generate`,
+  `PUT`/`DELETE /v1/agents/{name}/avatar`, and `GET /v1/agents/{name}/avatar.svg`; agent, room, and
+  overview rows gain `avatar_svg` and `avatar_source`; router call records use the source `avatar`.
+
+### Changed
+- `[agents.<name>] color` accepts a `#RRGGBB` hex color as well as the palette tokens.
+
 ## [0.2.0-beta.1] - 2026-11-08
 
 ### Added

@@ -258,6 +258,7 @@ const SOURCE_LABELS: Record<string, string> = {
   workflow: "Workflow",
   proxy: "Proxy",
   test: "Test",
+  avatar: "Avatar",
 };
 
 export function sourceLabel(source: string): string {

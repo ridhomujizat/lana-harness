@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import * as routerApi from "../../api/router";
 import type { ClaudeAgentStatus, ListProvidersResponse, ProviderRow, RouterChoice } from "../../api/router";
-import { avatarFor } from "../../lib/avatar";
-import { AvatarStack, Badge, Button, Skeleton } from "../../ui/gr8r";
+import { Badge, Button, Skeleton } from "../../ui/gr8r";
+import { AgentAvatarStack, agentFallbackColor } from "../agent-avatar";
 import type { BadgeTone } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { Alert, SettingsRestartBanner, StatusLine } from "../settings-pages";
@@ -49,16 +49,8 @@ export function splitUsers(usedBy: string[] | undefined): { agents: string[]; ot
   return { agents, others };
 }
 
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 export function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 export function UsedBy({ usedBy }: { usedBy: string[] | undefined }) {
@@ -69,7 +61,7 @@ export function UsedBy({ usedBy }: { usedBy: string[] | undefined }) {
   return (
     <span className="rt-used-by" title={agents.concat(others).join(", ")}>
       {agents.length > 0 ? (
-        <AvatarStack
+        <AgentAvatarStack
           size="sm"
           max={3}
           items={agents.map((name) => ({ name, color: agentColor(name) }))}

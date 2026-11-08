@@ -31,6 +31,8 @@ const (
 	SourceMemoryCapture = "memory_capture"
 	SourceKnowledge     = "knowledge"
 	SourceEmbedding     = "embedding"
+	// SourceAvatar is a generated agent avatar (spec 43, REQ-AVT-002).
+	SourceAvatar = "avatar"
 )
 
 // ErrUnknownModel is wrapped when an agent's model names neither a combo nor

@@ -19,6 +19,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/avatar"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -30,9 +31,6 @@ const maxAgentDescription = 120
 
 // maxAgentTitle mirrors the config validation limit (REQ-ROOM-009, API-ROOM-006).
 const maxAgentTitle = 60
-
-// agentColors are the accepted agent color values (API-ROOM-006, API-ROOM-007).
-var agentColors = []string{"brand", "success", "warning", "error", "blue", "gray"}
 
 // agentNameRE is the create and duplicate name rule of API-WEB-025.
 var agentNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -148,8 +146,14 @@ type agentJSON struct {
 	Description string          `json:"description"`
 	// Title is the agent role, "" when unset (API-ROOM-007).
 	Title string `json:"title"`
-	// Color is the resolved avatar color, never empty (API-ROOM-007).
-	Color           string   `json:"color"`
+	// Color is the resolved avatar color, never empty (API-ROOM-007): a
+	// palette token or a #RRGGBB hex color (spec 43).
+	Color string `json:"color"`
+	// AvatarSVG is the avatar the row shows, never empty: the saved one or
+	// the default seeded from the name (spec 43, API-AVT-005). AvatarSource
+	// is "saved" or "default"; a team is always "default".
+	AvatarSVG       string   `json:"avatar_svg"`
+	AvatarSource    string   `json:"avatar_source"`
 	Default         bool     `json:"default"`
 	Provider        string   `json:"provider"`
 	Permission      string   `json:"permission"`
@@ -366,6 +370,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				// brand color (API-ROOM-007).
 				row.Title = agent.Description
 				row.Color = "brand"
+				row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(name), avatar.Default
 				if stat, ok := stats[name]; ok && stat.count > 0 {
 					row.SessionsCount = stat.count
 					lastActive := stat.lastActive
@@ -454,6 +459,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		} else {
 			row.ToolsCount = configTools
 		}
+		row.AvatarSVG, row.AvatarSource = s.agentAvatar(name)
 		row.Default = defaultAgent != "" && name == defaultAgent
 		if stat, ok := stats[name]; ok && stat.count > 0 {
 			row.SessionsCount = stat.count
@@ -1164,8 +1170,8 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return err
 		}
-		if !validAgentColor(value) {
-			return errors.New("color must be one of brand, success, warning, error, blue, gray")
+		if !core.ValidAgentColor(value) {
+			return errors.New(core.AgentColorMessage)
 		}
 		record.Color = value
 		return nil
@@ -1335,20 +1341,6 @@ func validateAgentTitle(value string) string {
 		return fmt.Sprintf("must be at most %d characters (got %d)", maxAgentTitle, n)
 	}
 	return ""
-}
-
-// validAgentColor reports whether value is one of the palette values; "" is
-// allowed and removes the key (API-ROOM-006).
-func validAgentColor(value string) bool {
-	if value == "" {
-		return true
-	}
-	for _, allowed := range agentColors {
-		if value == allowed {
-			return true
-		}
-	}
-	return false
 }
 
 func validAgentPermission(value string) bool {

@@ -10,6 +10,7 @@ import type {
 } from "react";
 import { Ic } from "../icons";
 import { cn, initials } from "./util";
+import { parseAvatarSvg } from "../../lib/avatar-svg";
 
 /* ------------------------------------------------------------------ */
 /* Button                                                             */
@@ -231,6 +232,9 @@ export interface AvatarProps extends HTMLAttributes<HTMLSpanElement> {
   size?: AvatarSize;
   presence?: boolean;
   empty?: boolean;
+  /* Spec 43: a sanitized generated avatar. It replaces the letter when it
+     passes the allowlist of lib/avatar-svg; the body takes `color`. */
+  svg?: string;
 }
 
 export function Avatar({
@@ -239,12 +243,14 @@ export function Avatar({
   size,
   presence,
   empty,
+  svg,
   className,
   style,
   children,
   ...rest
 }: AvatarProps) {
   const label = (name ?? "").trim();
+  const shape = svg && !children ? parseAvatarSvg(svg) : null;
   if (empty || !label) {
     return (
       <span
@@ -258,19 +264,19 @@ export function Avatar({
   }
   return (
     <span
-      className={cn("av", size, presence && "presence", className)}
+      className={cn("av", shape && "has-svg", size, presence && "presence", className)}
       style={{ ...style, "--c": color } as CSSProperties}
       data-tip={label}
       aria-label={label}
       {...rest}
     >
-      {children ?? initials(label)}
+      {children ?? shape ?? initials(label)}
     </span>
   );
 }
 
 export interface AvatarStackProps extends HTMLAttributes<HTMLSpanElement> {
-  items: Array<{ name?: string | null; color?: string }>;
+  items: Array<{ name?: string | null; color?: string; svg?: string }>;
   max?: number;
   size?: AvatarSize;
 }
@@ -287,7 +293,13 @@ export function AvatarStack({
   return (
     <span className={cn("avs", className)} {...rest}>
       {shown.map((item, index) => (
-        <Avatar key={index} name={item.name} color={item.color} size={size} />
+        <Avatar
+          key={index}
+          name={item.name}
+          color={item.color}
+          svg={item.svg}
+          size={size}
+        />
       ))}
       {extra > 0 ? (
         <span

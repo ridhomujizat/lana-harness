@@ -1,4 +1,5 @@
-import { avatarFor } from "../lib/avatar";
+import { AgentAvatar } from "./agent-avatar";
+import type { LegacyAvatarSize } from "./agent-avatar";
 import { Icon as SharedIcon } from "../ui/ui";
 import { DEFAULT_AGENT_TAB } from "../app/router";
 import type { BadgeTone } from "../ui/gr8r";
@@ -44,22 +45,9 @@ export interface AgentLike {
   last_active_at?: number | null;
 }
 
-export interface AgentAvatarProps {
-  name: string;
-  size?: string;
-}
-
-export function AgentAvatar({ name, size = "36" }: AgentAvatarProps) {
-  const avatar = avatarFor(name);
-  return (
-    <span
-      className={"agent-avatar avatar-" + size + " " + avatar.colorClass}
-      aria-hidden="true"
-    >
-      {avatar.initial}
-    </span>
-  );
-}
+/* The agent avatar moved to agent-avatar.tsx (spec 43): it shows the
+   generated SVG when the agent has one. Re-exported for the older views. */
+export { AgentAvatar };
 
 export function isTeam(agent: AgentLike | null | undefined): boolean {
   return agent != null && agent.kind === "team";
@@ -88,7 +76,7 @@ export function rosterNames(agent: AgentLike | null | undefined): string[] {
 
 export interface TeamAvatarsProps {
   agent: AgentLike | null;
-  size?: string;
+  size?: LegacyAvatarSize;
 }
 
 export function TeamAvatars({ agent, size = "24" }: TeamAvatarsProps) {

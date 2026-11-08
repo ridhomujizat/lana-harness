@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 /* The presence kit reads one module. The stream and the list are mocked so the
    face, the label, the skeleton, and the listRooms fallback can be observed
@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("AgentFace (REQ-ROOM-006)", () => {
-  it("shows the initial and names the presence in the label", () => {
+  it("shows the avatar and names the presence in the label", () => {
     render(
       <AgentFace
         name="dana"
@@ -51,7 +51,11 @@ describe("AgentFace (REQ-ROOM-006)", () => {
       />
     );
 
+    /* Spec 43: the server-rendered avatar, then the initial if it fails. */
     const face = screen.getByRole("img", { name: "dana, working" });
+    const image = face.querySelector("img.av-img") as HTMLImageElement;
+    expect(image.getAttribute("src")).toBe("/v1/agents/dana/avatar.svg?theme=light");
+    fireEvent.error(image);
     expect(face.textContent).toContain("D");
   });
 });

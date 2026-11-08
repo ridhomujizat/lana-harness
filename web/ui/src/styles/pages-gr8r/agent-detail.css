@@ -1216,3 +1216,236 @@
   align-self: flex-start;
   margin-top: 2px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Generate avatar dialog (spec 43)                                   */
+/* ------------------------------------------------------------------ */
+
+.avatar-dialog-top {
+  display: flex;
+  gap: var(--s-4, 16px);
+  align-items: flex-start;
+}
+
+.avatar-dialog-stage {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 128px;
+  height: 128px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 50% 40%, var(--surface) 0, var(--surface-2) 100%);
+}
+
+.avatar-dialog-preview.av {
+  --sz: 104px;
+  font-size: 40px;
+}
+
+.avatar-dialog-drawing {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.avatar-dialog-drawing::after {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--text-2);
+  border-right-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+
+.avatar-dialog-side {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--s-2, 8px);
+  min-width: 0;
+}
+
+.avatar-dialog-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  min-height: 2.6em;
+}
+
+.avatar-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.avatar-dialog-label {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.avatar-dialog-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px;
+}
+
+.avatar-dialog-thumb {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.avatar-dialog-thumb:hover {
+  border-color: var(--border-strong);
+}
+
+.avatar-dialog-thumb.is-on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.avatar-dialog-thumb:focus-visible,
+.avatar-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.avatar-dialog-colors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2, 8px);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.avatar-dialog-colors legend {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.avatar-dialog-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.avatar-swatch {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sw, var(--gray));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+  cursor: pointer;
+}
+
+.avatar-swatch.is-on {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--accent);
+}
+
+.avatar-dialog-custom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.avatar-dialog-custom .avatar-dialog-hex {
+  width: 110px;
+  font-family: var(--mono);
+}
+
+.avatar-dialog-picker {
+  width: 34px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.avatar-dialog-current {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.avatar-dialog-error {
+  margin: 0;
+}
+
+/* The avatar of the profile header and the General tab with its button. */
+.agent-avatar-edit {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s-3, 12px);
+  align-items: center;
+}
+
+.agent-avatar-edit .av {
+  --sz: 56px;
+  font-size: 22px;
+}
+
+@media (max-width: 760px) {
+  .avatar-dialog-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .avatar-dialog-stage {
+    align-self: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-dialog-drawing::after {
+    animation-duration: 2s;
+  }
+}
+
+/* The header avatar with its small "Generate avatar" button in the corner. */
+.avatar-edit-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.avatar-edit-wrap .avatar-edit-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.08));
+}
+
+.avatar-edit-wrap .avatar-edit-badge:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}

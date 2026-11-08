@@ -32,6 +32,7 @@ import {
   useWorkflowStream,
 } from "./workflow-common";
 import { WorkflowHeader } from "./workflow-page";
+import { agentOptionIcon } from "./agent-avatar";
 
 /* REQ-WF-011 settings (design workflows-4): general, guardian, triggers,
    locked permissions, state (REQ-WF-006), failure default and delete. */
@@ -515,7 +516,11 @@ export function WorkflowSettings({
           <Select
             value={guardian}
             onChange={setGuardian}
-            options={agents.map((agent) => ({ value: agent.name, label: agent.name }))}
+            options={agents.map((agent) => ({
+              value: agent.name,
+              label: agent.name,
+              icon: agentOptionIcon(agent.name),
+            }))}
             aria-label="Guardian"
           />
         </Modal>

@@ -21,6 +21,7 @@ import {
 import { ProviderMark, providerIndex } from "./provider-logo";
 import { useClaudeAccounts } from "./claude-code";
 import { CLAUDE_CODE_KIND } from "./presets";
+import { AgentName } from "../agent-avatar";
 
 /* Router → Logs (REQ-RTR-009, API-RTR-012): every attempt, newest first.
    "Load more" passes the last id as `before`, which is exclusive. */
@@ -72,7 +73,7 @@ function CallDetail({
         <dt>Source</dt>
         <dd>{sourceLabel(call.source)}</dd>
         <dt>Agent</dt>
-        <dd>{call.agent || DASH}</dd>
+        <dd>{call.agent ? <AgentName name={call.agent} /> : DASH}</dd>
         <dt>Requested</dt>
         <dd className="mono">{call.requested || DASH}</dd>
         <dt>Served by</dt>
@@ -306,7 +307,7 @@ export function RouterLogs() {
                       <td>{sourceLabel(call.source)}</td>
                       <td>
                         <span className="trunc rt-agent" title={call.agent || undefined}>
-                          {call.agent || DASH}
+                          {call.agent ? <AgentName name={call.agent} /> : DASH}
                         </span>
                       </td>
                       <td className="rt-route-cell">
