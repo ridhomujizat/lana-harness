@@ -13,8 +13,14 @@ import type {
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
+import { COMBOS_GROUP, getRouter } from "../api/router";
+import { groupClaudeChoices, useClaudeAccounts } from "./router/claude-code";
+import { CLAUDE_CODE_GROUP } from "./router/presets";
+import { ProviderLogo } from "./router/provider-logo";
+import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
+import { useSessionPresence } from "../lib/session-presence";
 import type { ApprovalEvent } from "../api/approvals";
 import {
   attachmentName,
@@ -34,7 +40,12 @@ import { listSessionJobs, stopSessionJob } from "../api/jobs";
 import type { BackgroundJob } from "../api/jobs";
 import { answerQuestion, skipAllQuestions } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
-import { getSession, listEvents, patchSession } from "../api/sessions";
+import {
+  getSession,
+  listEvents,
+  patchSession,
+  renameSession,
+} from "../api/sessions";
 import type {
   PatchSessionRequest,
   SessionDetail,
@@ -67,6 +78,15 @@ import type { OpenQuestion } from "./question";
 import { buildTurns, TurnBlock, UserBubble } from "./turn";
 import type { UserAttachment, UserAttachmentRef } from "./turn";
 import { TrajectoryView } from "./trajectory";
+import {
+  NAMING_SESSION,
+  TitleInput,
+  UNTITLED_SESSION,
+  publishSessionTitle,
+  titleUpdateFrom,
+  useSessionTitleUpdates,
+} from "./session-title";
+import type { SessionTitleUpdate } from "./session-title";
 import {
   AttachmentChips,
   AttachmentDropOverlay,
@@ -352,18 +372,25 @@ function ModelMenuContent({
   agentModel,
   provider,
   models,
+  choices,
   onPick,
 }: {
   current: string;
   agentModel: string;
   provider: string;
   models: CatalogModel[];
+  /* Spec 37 (REQ-RTR-018): the router choices, combos first. When they are
+     known they replace the one-provider catalog list. */
+  choices: RouterChoice[];
   onPick: (value: string) => void;
 }) {
+  const routed = choices.length > 0;
   const [custom, setCustom] = useState("");
   const options: { value: string; label: string; meta: string }[] = [];
   const currentId = shortModel(current);
-  const currentInCatalog = models.some((model) => model.id === currentId);
+  const currentInCatalog = routed
+    ? choices.some((choice) => choice.value === current)
+    : models.some((model) => model.id === currentId);
   if (current && !currentInCatalog) {
     options.push({
       value: current,
@@ -415,7 +442,8 @@ function ModelMenuContent({
           ) : null}
         </button>
       ))}
-      {models.map((model) => {
+      {routed ? <RouterChoiceItems choices={choices} current={current} onPick={onPick} /> : null}
+      {(routed ? [] : models).map((model) => {
         const value = provider ? provider + ":" + model.id : model.id;
         return (
           <button
@@ -445,8 +473,8 @@ function ModelMenuContent({
         <Input
           type="text"
           className="mi-custom-input"
-          aria-label="Custom model as provider:model"
-          placeholder="provider:model"
+          aria-label={routed ? "Custom model: a combo, provider/model, or provider:model" : "Custom model as provider:model"}
+          placeholder={routed ? "combo or provider/model" : "provider:model"}
           value={custom}
           onChange={(event) => setCustom(event.target.value)}
         />
@@ -454,6 +482,70 @@ function ModelMenuContent({
           Set
         </Button>
       </form>
+    </>
+  );
+}
+
+/* The router choices grouped as the agent picker shows them: combos, then
+   each provider's models under its name. */
+function RouterChoiceItems({
+  choices,
+  current,
+  onPick,
+}: {
+  choices: RouterChoice[];
+  current: string;
+  onPick: (value: string) => void;
+}) {
+  const groups: string[] = [];
+  if (choices.some((choice) => choice.group === COMBOS_GROUP)) {
+    groups.push(COMBOS_GROUP);
+  }
+  for (const choice of choices) {
+    if (!groups.includes(choice.group)) {
+      groups.push(choice.group);
+    }
+  }
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group} role="group" aria-label={group}>
+          <p className="mh" aria-hidden="true">
+            {group === CLAUDE_CODE_GROUP || group.startsWith(CLAUDE_CODE_GROUP + " · ") ? (
+              <span className="mh-logo">
+                <ProviderLogo logo="claude" name="Claude Code" size={14} />
+                {group}
+              </span>
+            ) : (
+              group
+            )}
+          </p>
+          {choices
+            .filter((choice) => choice.group === group)
+            .map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                role="menuitemradio"
+                className="mi"
+                aria-checked={choice.value === current}
+                onClick={() => onPick(choice.value)}
+              >
+                <span className="mi-text">
+                  <span className="mi-name">{choice.label || choice.value}</span>
+                  {choice.label && choice.label !== choice.value ? (
+                    <span className="mi-meta">{choice.value}</span>
+                  ) : null}
+                </span>
+                {choice.value === current ? (
+                  <span className="ck">
+                    <Ic name="check" size={14} />
+                  </span>
+                ) : null}
+              </button>
+            ))}
+        </div>
+      ))}
     </>
   );
 }
@@ -653,6 +745,7 @@ function Composer({
     models: CatalogModel[];
     efforts: CatalogEffort[];
   }>({ provider: "", models: [], efforts: [] });
+  const [choices, setChoices] = useState<RouterChoice[]>([]);
   const plusRef = useRef<HTMLSpanElement>(null);
   const modelRef = useRef<HTMLSpanElement>(null);
   const thinkingRef = useRef<HTMLSpanElement>(null);
@@ -680,15 +773,52 @@ function Composer({
     teamSession && team && team.name ? String(team.name) : agent || "agent";
   const busySession = readOnly || turnRunning;
 
+  /* Spec 39 (REQ-CCT-009): Claude Code models sit in one group per account. */
+  const { accounts: claudeAccounts } = useClaudeAccounts();
+  const menuChoices = useMemo(
+    () => groupClaudeChoices(choices, null, claudeAccounts),
+    [choices, claudeAccounts]
+  );
+
+  /* Spec 37: the session model menu offers the router choices. */
+  useEffect(() => {
+    let cancelled = false;
+    getRouter()
+      .then((data) => {
+        if (!cancelled) {
+          setChoices(Array.isArray(data.choices) ? data.choices : []);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   /* The provider of the current model, or the agent's provider when the
-     session has none. It keys the catalog fetch of REQ-MDL-020. */
+     session has none. It keys the catalog fetch of REQ-MDL-020. A router
+     address "provider/model" names its provider before the slash; a combo
+     names none. */
   const modelProvider = useMemo(() => {
-    const fromModel = modelValue ? String(modelValue).split(":")[0] : "";
+    const text = modelValue ? String(modelValue) : "";
+    const colon = text.indexOf(":");
+    const slash = text.indexOf("/");
+    const isCombo = choices.some(
+      (choice) => choice.group === COMBOS_GROUP && choice.value === text
+    );
+    const fromModel =
+      colon > 0
+        ? text.slice(0, colon)
+        : slash > 0 && !isCombo
+          ? text.slice(0, slash)
+          : isCombo
+            ? ""
+            : text;
     if (fromModel) {
       return fromModel;
     }
     return agentEntry && agentEntry.provider ? agentEntry.provider : "";
-  }, [modelValue, agentEntry]);
+  }, [modelValue, agentEntry, choices]);
 
   useEffect(() => {
     if (!modelProvider) {
@@ -724,8 +854,12 @@ function Composer({
   const efforts =
     catalogState.provider === modelProvider ? catalogState.efforts : [];
 
+  const catalogId =
+    modelProvider && String(modelValue || "").startsWith(modelProvider + "/")
+      ? String(modelValue).slice(modelProvider.length + 1)
+      : shortModel(modelValue);
   const currentEntry =
-    catalog.find((entry) => entry.id === shortModel(modelValue)) || null;
+    catalog.find((entry) => entry.id === catalogId) || null;
   const thinksModel = Boolean(!teamSession && currentEntry && currentEntry.thinking);
   const effortLabel = reasoningEffort
     ? "Thinking: " + effortName(reasoningEffort)
@@ -927,6 +1061,7 @@ function Composer({
                       agentModel={agentModel}
                       provider={modelProvider}
                       models={catalog}
+                      choices={menuChoices}
                       onPick={pickModel}
                     />
                   </Menu>
@@ -1266,6 +1401,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
     tabFromValue(view !== undefined ? view : viewFromHash())
   );
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  /* Spec 40: the header title is being edited. */
+  const [editingTitle, setEditingTitle] = useState(false);
+  const titleButtonRef = useRef<HTMLButtonElement>(null);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1327,6 +1465,8 @@ export function SessionPage({ id, view }: SessionPageProps) {
   const attachmentDraft = useAttachmentDraft();
   const pendingFilesRef = useRef<DraftAttachment[]>([]);
   const fileDrop = useFileDrop(attachmentDraft.addFiles);
+  /* Spec #42: no macOS reply notification while this page is in front. */
+  useSessionPresence(id);
 
   const readOnly = holder === "other";
   const busySession = readOnly || turnRunning;
@@ -1410,6 +1550,59 @@ export function SessionPage({ id, view }: SessionPageProps) {
       announce(prefix + " " + message);
     },
     [announce]
+  );
+
+  /* Spec 40: a title change from the stream, a rename here, or one made in
+     the History list. */
+  const applyTitle = useCallback(
+    (update: SessionTitleUpdate) => {
+      if (update.id !== id) {
+        return;
+      }
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              title: update.title,
+              title_source: update.title_source,
+              title_pending: update.title_pending,
+            }
+          : current
+      );
+    },
+    [id]
+  );
+  const applyTitleRef = useRef(applyTitle);
+  useEffect(() => {
+    applyTitleRef.current = applyTitle;
+  }, [applyTitle]);
+  useSessionTitleUpdates(applyTitle);
+
+  const endTitleEdit = useCallback(() => {
+    setEditingTitle(false);
+    window.setTimeout(() => titleButtonRef.current?.focus(), 0);
+  }, []);
+
+  /* REQ-TTL-008, REQ-TTL-009: Enter saves; an empty title goes back to an
+     automatic one. */
+  const saveTitle = useCallback(
+    async (value: string) => {
+      try {
+        const updated = await renameSession(id, value);
+        const update = titleUpdateFrom(id, updated as unknown as Record<string, unknown>);
+        applyTitle(update);
+        publishSessionTitle(update);
+        endTitleEdit();
+        announce(value ? "Session renamed." : "The session will get an automatic title.");
+      } catch (failure) {
+        const message = errorMessage(failure);
+        setActionError("Could not rename the session. " + message);
+        setActionDetails([]);
+        announce("Could not rename the session. " + message);
+        throw failure;
+      }
+    },
+    [id, applyTitle, endTitleEdit, announce]
   );
 
   const refreshDetail = useCallback(async (): Promise<SessionDetail | null> => {
@@ -2020,6 +2213,12 @@ export function SessionPage({ id, view }: SessionPageProps) {
           );
         }
       },
+      onTitle: (frame: StreamFrame) => {
+        /* REQ-TTL-011: the automatic title arrived or a rename elsewhere. */
+        const update = titleUpdateFrom(id, frame);
+        applyTitleRef.current(update);
+        publishSessionTitle(update);
+      },
       onShutdown: () => {
         setStreamState("closed");
         announce("The daemon is shutting down.");
@@ -2463,7 +2662,41 @@ export function SessionPage({ id, view }: SessionPageProps) {
       <AttachmentDropOverlay active={fileDrop.active} />
       <header className="chat-header">
         <div className="chat-header-title">
-          <h1 className="chat-title">{detail.title || "Untitled session"}</h1>
+          <h1 className="chat-title">
+            {editingTitle ? (
+              <TitleInput
+                initial={detail.title || ""}
+                label="Session title"
+                onSave={saveTitle}
+                onCancel={endTitleEdit}
+              />
+            ) : (
+              <button
+                type="button"
+                ref={titleButtonRef}
+                className="chat-title-button"
+                title="Rename session"
+                aria-label={
+                  "Rename session: " +
+                  (detail.title ||
+                    (detail.title_pending ? NAMING_SESSION : UNTITLED_SESSION))
+                }
+                onClick={() => setEditingTitle(true)}
+              >
+                <span
+                  className={
+                    "chat-title-text" +
+                    (!detail.title && detail.title_pending ? " is-naming" : "") +
+                    (!detail.title && !detail.title_pending ? " is-untitled" : "")
+                  }
+                >
+                  {detail.title ||
+                    (detail.title_pending ? NAMING_SESSION : UNTITLED_SESSION)}
+                </span>
+                <Ic name="pencil" size={14} className="chat-title-edit" />
+              </button>
+            )}
+          </h1>
           <div className="chat-meta">
             <span
               className={

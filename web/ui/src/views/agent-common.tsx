@@ -25,6 +25,8 @@ export function Icon({ name, className = "icon-20" }: IconProps) {
 
 export interface AgentLike {
   name?: string;
+  runtime?: string;
+  claude_code?: boolean;
   kind?: string;
   provider?: string | null;
   model?: string | null;
@@ -120,7 +122,9 @@ export function splitModel(agent: AgentLike | null | undefined): {
   return { provider: explicitProvider, model: value };
 }
 
-/* A fallback target is "<provider>:<model>" (config/validate.go). */
+/* A fallback target is "<provider>:<model>" or, since spec 37, the address
+   "<provider>/<model>" (API-RTR-003). The colon form wins when both appear,
+   so "openrouter:openai/gpt-5" keeps its model whole. */
 export function splitTarget(target: unknown): {
   provider: string;
   model: string;
@@ -130,7 +134,26 @@ export function splitTarget(target: unknown): {
   if (index > 0) {
     return { provider: value.slice(0, index), model: value.slice(index + 1) };
   }
+  const slash = value.indexOf("/");
+  if (slash > 0) {
+    return { provider: value.slice(0, slash), model: value.slice(slash + 1) };
+  }
   return { provider: "", model: value };
+}
+
+/* Spec 38's legacy runtime key: a file may still say runtime = "claude-code"
+   (spec 39, API-CCT-002). The dashboard never writes it. */
+export const CLAUDE_RUNTIME = "claude-code";
+
+export interface RuntimeLike {
+  runtime?: string;
+  claude_code?: boolean;
+}
+
+/* Spec 39 (API-CCT-006): whether the agent's first target runs in Claude
+   Code. Every agent is a lana agent; this only adds the Claude mark. */
+export function usesClaudeCode(agent: RuntimeLike | null | undefined): boolean {
+  return Boolean(agent && (agent.claude_code === true || agent.runtime === CLAUDE_RUNTIME));
 }
 
 export function providerLabel(value: unknown): string {

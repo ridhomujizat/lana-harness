@@ -857,6 +857,12 @@ None.
 
 `reasons` holds any of `config_missing`, `no_provider`, `no_agent`. It is `[]` when `needed` is `false`. The file is read at call time.
 
+Router onboarding revision: `no_provider` is not reported when an agent or combo uses the built-in Claude Code account
+(`claude-code/<model>`, spec #39), which needs no provider table. The body also carries the model picker catalog:
+`"models": {"openai": [{"id", "name"}], "anthropic": [...], "deepseek": [...], "openrouter": [...]}` (the built-in
+picker models of each preset kind) and `"claude_code_models": [{"id": "opus", "name": "Opus"}, ...]` (the Claude Code
+aliases). Clients ignore both when absent.
+
 ### Failure
 
 | Condition | Exit code or status | Stable code | Retryable | Observable behavior |
@@ -998,6 +1004,27 @@ The HTTP status of the test is not the status of this call. A refused key is `20
 | Body | `persona.agent_md` | string | Yes | Text of `AGENT.md`; prefilled from the template |
 | Body | `persona.user_md` | string | No | Text of the shared `USER.md`; at most 2,000 characters. Used only when the file is missing |
 | Body | `expected_version` | string | Yes | `""` when `config.toml` is missing, else its `version` |
+
+**Router onboarding revision (revision 3).** The body may instead carry several providers and router addresses; the
+`provider` object above is still accepted (one provider) and is saved in the same router form. Sending both shapes is
+`validation_failed` at `provider`.
+
+| Location | Name | Type | Required | Validation and meaning |
+|---|---|---|---:|---|
+| Body | `providers[]` | array | No | At most 16. Empty only when `model` is a Claude Code address |
+| Body | `providers[].name` | string | Yes | `[a-z0-9-]+`, unique, not `claude-code` |
+| Body | `providers[].kind` | string | Yes | `openai`, `anthropic`, `deepseek`, `openrouter`, or `openai_compat` (the compatible presets) |
+| Body | `providers[].api_key` | string | Yes, unless `api_key_env` is given | Written to `secrets.env` under the key variable |
+| Body | `providers[].api_key_env` | string | No | Default `<NAME>_API_KEY` |
+| Body | `providers[].base_url` | string | `openai_compat` only | A preset kind's own URL is dropped |
+| Body | `model` | string | Yes | `provider/model` address; `claude-code/<model>` for Claude Code |
+| Body | `fallback` | string | No | Address on another provider. Writes `[combos.default] models = [model, fallback]` and the agent uses `model = "default"` |
+| Body | `background_model` | string | No | Address, never `claude-code`; written as `[router] background_model` (spec #39 `REQ-CCT-007`) |
+
+The agent is written in router form (`model`, no `provider` key) for both shapes. Each provider is tested before any
+write, with the model the agent uses on it, else its kind's or host's test model; `connection_failed` names the
+provider in `details[0].provider`. The candidate config passes `config.Check`; its issues answer `validation_failed`
+with the config key.
 
 ### Success
 

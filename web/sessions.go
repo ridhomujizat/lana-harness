@@ -253,6 +253,9 @@ func (s *Server) SetBackend(backend Backend) {
 	if port, ok := backend.(KnowledgeBackend); ok {
 		s.knowledgeBackend = port
 	}
+	if port, ok := backend.(RouterBackend); ok {
+		s.SetRouterBackend(port)
+	}
 }
 
 // registerSessionRoutes registers the T-003 routes through Handle so the
@@ -266,6 +269,7 @@ func (s *Server) registerSessionRoutes() {
 	s.Handle("GET /v1/sessions/{id}/usage", http.HandlerFunc(s.handleSessionUsage))
 	s.Handle("POST /v1/sessions/{id}/compact", http.HandlerFunc(s.handleCompactSession))
 	s.Handle("POST /v1/sessions/{id}/fork", http.HandlerFunc(s.handleForkSession))
+	s.Handle("POST /v1/sessions/{id}/title/regenerate", http.HandlerFunc(s.handleRegenerateTitle))
 	s.registerJobRoutes()
 }
 
@@ -284,6 +288,11 @@ type sessionJSON struct {
 	HolderPID *int   `json:"holder_pid,omitempty"`
 	// Team is null unless the session's agent is a team (API-TEAM-005).
 	Team *Team `json:"team"`
+	// TitleSource is "", auto, owner, or system (spec 40, REQ-TTL-005).
+	TitleSource string `json:"title_source"`
+	// TitlePending is true while a title pass runs for the session in the
+	// daemon (REQ-TTL-012).
+	TitlePending bool `json:"title_pending"`
 }
 
 type sessionDetailJSON struct {
@@ -377,6 +386,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		row := sessionJSONFromInfo(view.info, holder, view.status)
 		row.Preview = view.preview
+		row.TitlePending = s.titlePending(view.info.ID)
 		row.Team = view.team
 		response.Sessions = append(response.Sessions, row)
 	}
@@ -397,7 +407,9 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionDetailFromSession(session, holder))
+	detail := sessionDetailFromSession(session, holder)
+	detail.TitlePending = s.titlePending(session.ID)
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
@@ -524,13 +536,24 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		Policy          *string `json:"policy"`
 		ReasoningEffort *string `json:"reasoning_effort"`
 		ConfirmTrust    bool    `json:"confirm_trust"`
+		// Title renames the session; "" goes back to an automatic title
+		// (spec 40, REQ-TTL-008, REQ-TTL-009).
+		Title *string `json:"title"`
 	}
 	if !decodeJSONObject(w, r, createSessionBody, &body) {
 		return
 	}
-	if body.Agent == nil && body.Model == nil && body.Policy == nil && body.ReasoningEffort == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "at least one of agent, model, policy, reasoning_effort is required")
+	if body.Agent == nil && body.Model == nil && body.Policy == nil && body.ReasoningEffort == nil && body.Title == nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "at least one of agent, model, policy, reasoning_effort, title is required")
 		return
+	}
+	if body.Title != nil {
+		title, ok := normalizeSessionTitle(*body.Title)
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "title must be at most 80 characters")
+			return
+		}
+		body.Title = &title
 	}
 	if body.Agent != nil {
 		agent := strings.TrimSpace(*body.Agent)
@@ -598,16 +621,24 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	session, err := backend.Session(r.Context(), id)
-	if err != nil {
-		s.writeBackendError(w, "get session", err)
-		return
+	if body.Title != nil {
+		port := s.titleBackend()
+		if port == nil {
+			s.writeBackendError(w, "set session title", errors.New("session titles are not available"))
+			return
+		}
+		session, err := backend.Session(r.Context(), id)
+		if err != nil {
+			s.writeBackendError(w, "get session", err)
+			return
+		}
+		if err := port.SetSessionTitle(r.Context(), session.ID, *body.Title); err != nil {
+			s.writeBackendError(w, "set session title", err)
+			return
+		}
+		id = session.ID
 	}
-	holder, ok := s.sessionHolder(w, r, backend, session.ID)
-	if !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, sessionDetailFromSession(session, holder))
+	s.writeSessionDetail(w, r, backend, id, http.StatusOK)
 }
 
 func (s *Server) handleCompactSession(w http.ResponseWriter, r *http.Request) {
@@ -676,6 +707,13 @@ func (s *Server) writeBackendError(w http.ResponseWriter, operation string, err 
 	case errors.Is(err, ErrTurnRunning):
 		// API-TFB-003: Continue is refused while a turn runs.
 		writeAPIError(w, http.StatusConflict, "turn_running", "a turn is already running")
+	case errors.Is(err, ErrTitleBusy):
+		// REQ-TTL-010: one title pass per session at a time.
+		writeAPIError(w, http.StatusConflict, "title_busy", "a title is already being generated")
+	case errors.Is(err, ErrNothingToTitle):
+		writeAPIError(w, http.StatusConflict, "nothing_to_title", "the session has no message to name it from yet")
+	case errors.Is(err, ErrInvalidTitle):
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "title must be at most 80 characters")
 	case errors.Is(err, ErrNothingToContinue):
 		// API-TFB-003: the last turn ended normally.
 		writeAPIError(w, http.StatusConflict, "nothing_to_continue", "the last turn ended normally")
@@ -1105,16 +1143,17 @@ func (s *Server) sessionHolder(w http.ResponseWriter, r *http.Request, backend B
 
 func sessionJSONFromInfo(info core.SessionInfo, holder Holder, status string) sessionJSON {
 	row := sessionJSON{
-		ID:        info.ID,
-		Channel:   info.Channel,
-		Address:   info.Address,
-		Agent:     info.Agent,
-		Title:     info.Title,
-		Status:    status,
-		TurnCount: info.TurnCount,
-		CreatedAt: info.CreatedAt,
-		UpdatedAt: info.UpdatedAt,
-		InUse:     holder.State,
+		ID:          info.ID,
+		Channel:     info.Channel,
+		Address:     info.Address,
+		Agent:       info.Agent,
+		Title:       info.Title,
+		TitleSource: info.TitleSource,
+		Status:      status,
+		TurnCount:   info.TurnCount,
+		CreatedAt:   info.CreatedAt,
+		UpdatedAt:   info.UpdatedAt,
+		InUse:       holder.State,
 	}
 	if holder.State == HolderOther {
 		pid := holder.PID

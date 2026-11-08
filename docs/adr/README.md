@@ -31,6 +31,9 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0015](0015-embeddable-runtime-for-services.md) | Make lana an embeddable runtime for services | Accepted | 2026-10-29 |
 | [0016](0016-owner-auth-for-browser.md) | Authenticate the browser with an owner token and a session cookie | Accepted | 2026-10-30 |
 | [0017](0017-agent-teams-as-roster-over-subagents.md) | Model agent teams as a roster of agents over subagent child sessions | Accepted | 2026-10-30 |
+| [0018](0018-claude-code-as-external-agent-runtime.md) | Run Claude Code as an external agent runtime over headless stream-json | Accepted | 2026-11-08 |
+| [0019](0019-llm-router-as-embeddable-core.md) | Route all LLM calls through an embeddable router package | Accepted | 2026-11-08 |
+| [0020](0020-claude-code-as-router-target-with-lana-context.md) | Offer Claude Code as a router target that runs with lana's context and tools | Accepted | 2026-11-08 |
 
 ## How to add an ADR
 

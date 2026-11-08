@@ -12,7 +12,7 @@ import {
   watchSystemTheme,
 } from "./theme";
 import type { ThemeChoice } from "./theme";
-import { DEFAULT_ROUTE, parseRoute } from "./router";
+import { DEFAULT_ROUTE, ROUTE_REDIRECTS, parseRoute, safeNextHash } from "./router";
 import type { Route } from "./router";
 import { Sidebar, readCollapsed, saveCollapsed } from "./Sidebar";
 import type { DaemonCard } from "./Sidebar";
@@ -33,8 +33,8 @@ import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
 import { SessionsWorkspace } from "../views/sessions";
+import { RouterPage, routerCrumbs } from "../views/router/router-page";
 import {
-  SettingsProvidersPage,
   SettingsSecretsPage,
   SettingsConfigPage,
   SettingsAuditPage,
@@ -58,7 +58,22 @@ function useRoute(): Route {
     parseRoute(window.location.hash)
   );
   useEffect(() => {
-    const update = () => setRoute(parseRoute(window.location.hash));
+    const update = () => {
+      /* API-RTR-017: an old hash (#/settings/providers) is replaced by its
+         new place without adding a history entry. */
+      const hash = window.location.hash || "";
+      const queryIndex = hash.indexOf("?");
+      const path = queryIndex >= 0 ? hash.slice(0, queryIndex) : hash;
+      const target = ROUTE_REDIRECTS[path];
+      if (target) {
+        window.history.replaceState(
+          null,
+          "",
+          target + (queryIndex >= 0 ? hash.slice(queryIndex) : "")
+        );
+      }
+      setRoute(parseRoute(window.location.hash));
+    };
     window.addEventListener("hashchange", update);
     if (!window.location.hash || window.location.hash === "#") {
       window.location.hash = DEFAULT_ROUTE;
@@ -119,6 +134,8 @@ function routeContent(
       return <SessionsWorkspace newSession={true} />;
     case "session":
       return <SessionsWorkspace selectedId={params.id} />;
+    case "router":
+      return <RouterPage tab={params.tab || "providers"} provider={params.provider} />;
     case "agents":
       return <AgentsPage />;
     case "agent":
@@ -151,8 +168,6 @@ function routeContent(
           return (
             <SettingsGeneralPage theme={theme} onThemeChange={onThemeChange} />
           );
-        case "providers":
-          return <SettingsProvidersPage />;
         case "secrets":
           return <SettingsSecretsPage />;
         case "config":
@@ -215,6 +230,8 @@ export function crumbsFor(route: Route): Crumb[] {
     case "new-session":
     case "session":
       return [{ label: "History" }];
+    case "router":
+      return routerCrumbs(params.tab || "providers", params.provider);
     case "agents":
       return [{ label: "Agents" }];
     case "agent":
@@ -317,6 +334,8 @@ export function pageKey(route: Route): string {
       return "workflow:" + (params.id || "");
     case "settings":
       return "settings";
+    case "router":
+      return "router:" + (params.tab || "providers") + (params.provider ? "/" + params.provider : "");
     case "chats":
     case "chat":
       return "chats";
@@ -400,9 +419,12 @@ export function App() {
         route.view === "welcome" ||
         route.view === "forgot")
     ) {
-      window.location.hash = DEFAULT_ROUTE;
+      /* A signed-in browser that opens a sign-in link with next (spec #41)
+         goes straight to that page. */
+      const next = route.view === "welcome" ? safeNextHash(route.params.next) : "";
+      window.location.hash = next || DEFAULT_ROUTE;
     }
-  }, [auth, route.view]);
+  }, [auth, route.view, route.params.next]);
 
   useEffect(() => {
     if (
@@ -425,7 +447,7 @@ export function App() {
     setupNeeded()
       .then((needed) => {
         if (alive && needed && !window.location.hash.startsWith("#/setup/")) {
-          window.location.hash = "#/setup/provider";
+          window.location.hash = "#/setup/connect";
         }
       })
       .catch(() => {});
@@ -471,8 +493,12 @@ export function App() {
   function authenticated(csrf: string) {
     setCSRF(csrf);
     setAuth("loggedIn");
-    if (window.location.hash !== DEFAULT_ROUTE) {
-      window.location.hash = DEFAULT_ROUTE;
+    /* After the claim, a sign-in link with a safe next (spec #41) opens that
+       page instead of the default one. */
+    const target =
+      (route.view === "welcome" && safeNextHash(route.params.next)) || DEFAULT_ROUTE;
+    if (window.location.hash !== target) {
+      window.location.hash = target;
     }
   }
 

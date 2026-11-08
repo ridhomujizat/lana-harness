@@ -16,6 +16,30 @@ type Config struct {
 	Web       WebConfig                 `toml:"web"`
 	Knowledge KnowledgeConfig           `toml:"knowledge"`
 	Update    UpdateConfig              `toml:"update"`
+	Combos    map[string]ComboConfig    `toml:"combos"`
+	Router    RouterConfig              `toml:"router"`
+}
+
+// ComboConfig is one [combos.<name>] table: a named, ordered list of model
+// addresses tried in order (API-RTR-002).
+type ComboConfig struct {
+	Description string   `toml:"description"`
+	Models      []string `toml:"models"`
+}
+
+// RouterConfig is the [router] table (API-RTR-004).
+type RouterConfig struct {
+	// Proxy serves the OpenAI-compatible proxy when the web server runs.
+	Proxy bool `toml:"proxy"`
+	// Cooldown is a duration string; "" means 5m and "0s" turns cooldown off.
+	Cooldown string `toml:"cooldown"`
+	// BackgroundModel is the address or combo background passes use when an
+	// agent's chain has no target outside Claude Code (API-CCT-003). "" means
+	// none.
+	BackgroundModel string `toml:"background_model"`
+	// ClaudeCodeModels are model IDs the owner adds to the Claude Code model
+	// list by hand, each usable as "claude-code/<id>".
+	ClaudeCodeModels []string `toml:"claude_code_models"`
 }
 
 // KnowledgeConfig is the [knowledge] table (API-KNW-001, API-KNU-001).
@@ -61,7 +85,33 @@ type ProviderConfig struct {
 	// ThinkingFormat is "deepseek" or "none"; "" means the format is inferred
 	// from the base URL host (REQ-MDL-002).
 	ThinkingFormat string `toml:"thinking_format"`
+	// Disabled keeps the entry but takes it out of routing: its targets fail
+	// with not_found so a chain moves on, and it is left out of model lists
+	// and boot key checks (API-RTR-001 revision 2).
+	Disabled bool `toml:"disabled"`
+
+	// The keys below belong to kind "claude-code", a Claude Code account
+	// (REQ-CCT-010, API-CCT-010). APIKeyEnv and Disabled apply to it too.
+
+	// ConfigDir is the account's CLAUDE_CONFIG_DIR. "" means
+	// $LANA_HOME/claude/<name>; a leading ~ and $LANA_HOME are expanded.
+	ConfigDir string `toml:"config_dir"`
+	// Binary is the claude executable of the account; "" is claude on PATH.
+	Binary string `toml:"binary"`
+	// Auth is "subscription" (the default when empty) or "api_key".
+	Auth string `toml:"auth"`
+	// AllowScheduled lets calendar items and workflow nodes run the
+	// account's targets (REQ-CCT-008).
+	AllowScheduled bool `toml:"allow_scheduled"`
+	// Label is the account's display name in the dashboard (REQ-CCT-012),
+	// at most 60 characters. "" shows the account's e-mail, else its name.
+	Label string `toml:"label"`
 }
+
+// ClaudeCodeKind is the provider kind of a Claude Code account
+// (REQ-CCT-010): [providers.<name>] kind = "claude-code". Its targets run in
+// the Claude Code runtime, never through the router.
+const ClaudeCodeKind = "claude-code"
 
 type AgentConfig struct {
 	Provider      string   `toml:"provider"`
@@ -102,6 +152,21 @@ type AgentConfig struct {
 	// gray; "" derives a stable color from the name (REQ-ROOM-009, API-ROOM-006).
 	Color string     `toml:"color"`
 	Rules AgentRules `toml:"rules"`
+	// Runtime is the deprecated engine key (API-CCT-002): "claude-code" with
+	// model "M" means model "claude-code/M". config.Load rewrites it that way,
+	// so the effective config leaves it empty.
+	Runtime string `toml:"runtime"`
+	// Auth is the runtime's credential mode: "subscription" (the default when
+	// empty) or "api_key" (REQ-CCR-003).
+	Auth string `toml:"auth"`
+	// APIKeyEnv names the secret that holds the API key when Auth is
+	// "api_key".
+	APIKeyEnv string `toml:"api_key_env"`
+	// Binary is the runtime executable. Empty looks it up on PATH.
+	Binary string `toml:"binary"`
+	// AllowScheduled lets calendar items and workflow nodes run the agent's
+	// Claude Code targets (REQ-CCT-008). The default is false.
+	AllowScheduled bool `toml:"allow_scheduled"`
 }
 
 type AgentRules struct {

@@ -30,10 +30,12 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/stats"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
-	"github.com/ridhomujizat/lana-harness/providers/openai"
+	"github.com/ridhomujizat/lana-harness/router"
 	"github.com/ridhomujizat/lana-harness/tools/permission"
 	"github.com/ridhomujizat/lana-harness/web"
 )
@@ -75,6 +77,10 @@ type webBackend struct {
 	root context.Context
 	// active holds the sessions whose turn this process started.
 	active map[string]struct{}
+
+	// proxy is the router proxy handler and its key last-use throttle
+	// (spec 37, REQ-RTR-015).
+	proxy routerProxyState
 }
 
 var _ web.Backend = (*webBackend)(nil)
@@ -98,10 +104,12 @@ const (
 	providerTestKeyEnv = "LANA_PROVIDER_TEST_KEY"
 	// providerTestPrompt is the smallest possible chat message.
 	providerTestPrompt = "ping"
+	// providerTestName is the provider name of the throwaway test router.
+	providerTestName = "provider-test"
 )
 
 // TestProvider implements web.ProviderTester with the same adapter the runtime
-// uses (providers/openai). It sends exactly one chat request with one output
+// uses for the kind, built through the router's kind registry. It sends exactly one chat request with one output
 // token and a 15-second timeout. The key of the request is only passed to the
 // adapter; it is never written, logged, or returned.
 func (b *webBackend) TestProvider(ctx context.Context, test web.ProviderTest) (web.TestResult, error) {
@@ -124,13 +132,28 @@ func (b *webBackend) TestProvider(ctx context.Context, test web.ProviderTest) (w
 			}, nil
 		}
 	}
-	adapter, err := openai.NewAdapter("provider-test", openai.Config{
-		BaseURL:   test.BaseURL,
-		APIKeyEnv: envName,
-		Timeout:   providerTestTimeout.String(),
-	}, secrets)
+	// The adapter comes from the router's kind registry, so every kind is
+	// tested with the adapter the runtime uses for it (anthropic with the
+	// Messages adapter, the OpenAI-wire kinds with providers/openai).
+	baseURL := test.BaseURL
+	if baseURL == "" {
+		baseURL = models.DefaultBaseURL(test.Kind)
+	}
+	tester, err := router.New(router.Config{Providers: map[string]core.ProviderConfig{
+		providerTestName: {
+			Kind:      test.Kind,
+			BaseURL:   test.BaseURL,
+			APIKeyEnv: envName,
+			Timeout:   providerTestTimeout.String(),
+		},
+	}}, router.WithSecrets(secrets))
 	if err != nil {
-		return web.TestResult{OK: false, Message: err.Error()}, nil
+		return web.TestResult{OK: false, Message: redactProviderTestKey(err.Error(), key)}, nil
+	}
+	defer func() { _ = tester.Close() }()
+	adapter, ok := tester.Provider(providerTestName)
+	if !ok {
+		return web.TestResult{OK: false, Message: "provider kind " + test.Kind + " is not available"}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, providerTestTimeout)
@@ -148,11 +171,11 @@ func (b *webBackend) TestProvider(ctx context.Context, test web.ProviderTest) (w
 		MaxTokens: 1,
 	})
 	if err != nil {
-		return providerTestFailure(err, test.BaseURL, key), nil
+		return providerTestFailure(err, baseURL, key), nil
 	}
 	for _, streamErr := range stream {
 		if streamErr != nil {
-			return providerTestFailure(streamErr, test.BaseURL, key), nil
+			return providerTestFailure(streamErr, baseURL, key), nil
 		}
 	}
 	return web.TestResult{OK: true, LatencyMS: time.Since(start).Milliseconds()}, nil
@@ -264,12 +287,16 @@ func startupNonLiveConfig(home string, rt *lana.Runtime) core.Config {
 }
 
 // nonLiveConfig clears the sections a live apply replaces. [update] always
-// applies live (API-UPD-008).
+// applies live (API-UPD-008); providers, combos, and [router] apply live
+// through the router (REQ-RTR-008).
 func nonLiveConfig(cfg core.Config) core.Config {
 	cfg.Agents = nil
 	cfg.Teams = nil
 	cfg.MCP = nil
 	cfg.Update = core.UpdateConfig{}
+	cfg.Providers = nil
+	cfg.Combos = nil
+	cfg.Router = core.RouterConfig{}
 	return cfg
 }
 
@@ -945,7 +972,9 @@ func (b *webBackend) ApplyLive(ctx context.Context, candidate []byte) error {
 		return err
 	}
 	if b.rt != nil {
-		b.rt.ApplyConfig(result.Config)
+		if err := b.rt.ApplyConfig(result.Config); err != nil {
+			return err
+		}
 	}
 	if reflect.DeepEqual(nonLiveConfig(result.Config), b.nonLive) {
 		b.versionMu.Lock()
@@ -1109,6 +1138,12 @@ func settingsFromConfig(cfg core.Config) web.ConfigSettings {
 				Allow: append([]string(nil), agent.Rules.Allow...),
 				Deny:  append([]string(nil), agent.Rules.Deny...),
 			},
+			ReasoningEffort: agent.ReasoningEffort,
+			Runtime:         agent.Runtime,
+			Auth:            agent.Auth,
+			APIKeyEnv:       agent.APIKeyEnv,
+			Binary:          agent.Binary,
+			AllowScheduled:  agent.AllowScheduled,
 		}
 	}
 	for _, route := range cfg.Routes {
@@ -1853,7 +1888,10 @@ func (b *webBackend) sessionModel(ctx context.Context, info core.SessionInfo) (s
 			return "", err
 		}
 		switch {
-		case selection.Provider != "" || selection.Model != "":
+		case selection.Model != "":
+			// A combo or address selection has no provider (API-RTR-003).
+			model = llmcall.Display(selection.Provider, selection.Model)
+		case selection.Provider != "":
 			model = selection.Provider + ":" + selection.Model
 		case selection.Agent != "":
 			// SetAgent records only the agent; the model stays the agent's

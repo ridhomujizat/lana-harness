@@ -511,7 +511,9 @@ export function buildHistory(
         });
         break;
       case "system/message":
-        if (payload.text) {
+        /* A runtime session meta (subtype "runtime", API-CCR-002) has no
+           text and is not shown in the timeline. */
+        if (payload.subtype !== "runtime" && payload.text) {
           items.push({
             key,
             type: "system",

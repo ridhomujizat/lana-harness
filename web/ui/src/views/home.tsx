@@ -12,6 +12,7 @@ const BREAKDOWN_SOURCE_LABELS: Record<string, string> = {
   turn: "Chat turns",
   compaction: "Compaction",
   memory_capture: "Memory capture",
+  title: "Session titles",
 };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

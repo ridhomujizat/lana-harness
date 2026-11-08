@@ -855,6 +855,14 @@ func TestEngineGuardianSkip(t *testing.T) {
 	if d.Kind != "guardian" || d.Action != "skip" || d.Tokens != 42 || d.Status != "applied" {
 		t.Fatalf("decision=%+v", d)
 	}
+	// Spec 39 revision 5: the failure decision is a structured call on the
+	// guardian's background chain.
+	deps.mu.Lock()
+	calls := append([]AgentRequest(nil), deps.agentCalls...)
+	deps.mu.Unlock()
+	if len(calls) != 1 || calls[0].Agent != "g" || !calls[0].Background {
+		t.Fatalf("guardian calls=%+v want one background call", calls)
+	}
 }
 
 // TestEngineGuardianSkipContinuesDownstream covers AC-WF-013: a skip lets the

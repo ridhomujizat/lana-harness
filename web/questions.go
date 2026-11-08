@@ -83,6 +83,22 @@ type Questions struct {
 	// a stream installs it, so a broker used alone treats every session as its
 	// own root.
 	rootOf sessionRootResolver
+	// observer hears every request open and close, for the notification bus
+	// (spec #42). It is called outside the lock; nil means none.
+	observer questionObserver
+}
+
+// questionObserver hears the life of each broker question (spec #42).
+type questionObserver interface {
+	questionOpened(id string, req core.QuestionRequest)
+	questionClosed(id, sessionID string)
+}
+
+// setObserver installs the request observer.
+func (q *Questions) setObserver(o questionObserver) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.observer = o
 }
 
 // Questions satisfies the question service the turn runner uses.
@@ -161,7 +177,14 @@ func (q *Questions) Ask(ctx context.Context, req core.QuestionRequest) (core.Que
 			// questions when it reconnects.
 		}
 	}
+	observer := q.observer
 	q.mu.Unlock()
+	if observer != nil {
+		opened := req
+		opened.RequestID = id
+		opened.Questions = questions
+		observer.questionOpened(id, opened)
+	}
 
 	select {
 	case outcome := <-pending.reply:
@@ -200,13 +223,19 @@ func (q *Questions) sessionRootResolver() sessionRootResolver {
 // path already closed it, resolve returns that decision instead.
 func (q *Questions) resolve(pending *pendingQuestion, outcome core.QuestionOutcome) core.QuestionOutcome {
 	q.mu.Lock()
+	closed := false
 	if current, ok := q.open[pending.id]; ok && current == pending {
 		delete(q.open, pending.id)
 		q.markClosedLocked(pending.id)
 		pending.timer.Stop()
 		pending.reply <- outcome
+		closed = true
 	}
+	observer := q.observer
 	q.mu.Unlock()
+	if closed && observer != nil {
+		observer.questionClosed(pending.id, pending.sessionID)
+	}
 	return <-pending.reply
 }
 
@@ -215,6 +244,16 @@ func (q *Questions) resolve(pending *pendingQuestion, outcome core.QuestionOutco
 // errQuestionNotFound. A body that violates the answer rules returns
 // errQuestionInvalidAnswers and leaves the request open.
 func (q *Questions) answer(id string, body questionAnswerRequest) (core.QuestionOutcome, error) {
+	outcome, observer, sessionID, err := q.answerLocked(id, body)
+	if err == nil && observer != nil {
+		observer.questionClosed(id, sessionID)
+	}
+	return outcome, err
+}
+
+// answerLocked is answer under the broker lock. It returns the observer and
+// the session of a closed request so answer can tell it outside the lock.
+func (q *Questions) answerLocked(id string, body questionAnswerRequest) (core.QuestionOutcome, questionObserver, string, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := q.clock.Now()
@@ -222,20 +261,20 @@ func (q *Questions) answer(id string, body questionAnswerRequest) (core.Question
 	pending, ok := q.open[id]
 	if !ok {
 		if _, seen := q.closed[id]; seen {
-			return core.QuestionOutcome{}, errQuestionClosed
+			return core.QuestionOutcome{}, nil, "", errQuestionClosed
 		}
-		return core.QuestionOutcome{}, errQuestionNotFound
+		return core.QuestionOutcome{}, nil, "", errQuestionNotFound
 	}
 	answers, err := validateQuestionAnswers(pending.questions, body)
 	if err != nil {
-		return core.QuestionOutcome{}, err
+		return core.QuestionOutcome{}, nil, "", err
 	}
 	outcome := core.QuestionOutcome{Status: core.QuestionStatusAnswered, Answers: answers}
 	delete(q.open, id)
 	q.closed[id] = now
 	pending.timer.Stop()
 	pending.reply <- outcome
-	return outcome, nil
+	return outcome, q.observer, pending.sessionID, nil
 }
 
 func (q *Questions) markClosedLocked(id string) {

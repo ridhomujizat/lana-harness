@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -348,6 +349,37 @@ func TestAssistInvalidGraph(t *testing.T) {
 	}
 	if res.Message.Text != "I could not apply that change." {
 		t.Fatalf("text=%q", res.Message.Text)
+	}
+}
+
+// Spec 39 revision 5: the assistant turn is a structured call on the
+// guardian's background chain, and a guardian on Claude Code without a
+// background model answers its own error, not ErrGuardianUnavailable.
+func TestAssistGuardianBackground(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	svc := newTestService(t, st, deps, &testClock{})
+	ctx := context.Background()
+
+	g := Graph{Nodes: []Node{wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true})}}
+	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "bima"}, g)
+
+	deps.replies = []fakeReply{{contains: "You are the guardian of workflow", text: `{"reply":"ok","graph":null}`}}
+	if _, err := svc.Assist(ctx, "w", 1, "hi"); err != nil {
+		t.Fatalf("assist: %v", err)
+	}
+	if len(deps.agentCalls) != 1 || !deps.agentCalls[0].Background || deps.agentCalls[0].Agent != "bima" {
+		t.Fatalf("calls=%+v want one background call", deps.agentCalls)
+	}
+
+	deps.replies = []fakeReply{{contains: "You are the guardian of workflow", err: &GuardianBackgroundError{Agent: "bima"}}}
+	_, err := svc.Assist(ctx, "w", 1, "hi")
+	var needs *GuardianBackgroundError
+	if !errors.As(err, &needs) || errors.Is(err, ErrGuardianUnavailable) || needs.Agent != "bima" {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "The guardian bima runs on Claude Code. Set a background model in Router") {
+		t.Fatalf("message=%q", err.Error())
 	}
 }
 

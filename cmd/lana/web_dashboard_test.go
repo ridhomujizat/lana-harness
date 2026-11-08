@@ -124,7 +124,9 @@ func TestWebBackendDashboardAgentsIncludeConfigured(t *testing.T) {
 	// events. It becomes the event-only agent after the next config apply.
 	agentCfg := core.AgentConfig{Provider: "mock", Model: "m", Permission: "trust"}
 	cfg := core.Config{Agents: map[string]core.AgentConfig{"assistant": agentCfg, "transient": agentCfg}}
-	rt.ApplyConfig(cfg)
+	if err := rt.ApplyConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
 
 	info, err := rt.CreateChannelSession(ctx, "web", "owner", "transient")
 	if err != nil {
@@ -137,7 +139,9 @@ func TestWebBackendDashboardAgentsIncludeConfigured(t *testing.T) {
 	// default is configured but has no events; transient is no longer
 	// configured but has events in the range.
 	cfg.Agents = map[string]core.AgentConfig{"assistant": agentCfg, "default": agentCfg}
-	rt.ApplyConfig(cfg)
+	if err := rt.ApplyConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
 
 	leases := newLeaseSet(rt)
 	t.Cleanup(leases.releaseAll)

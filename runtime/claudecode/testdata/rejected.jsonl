@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/home/user/project","session_id":"00000000-0000-4000-8000-000000000001","tools":["Task","Bash","Read"],"model":"claude-opus-5-5","permissionMode":"default","claude_code_version":"2.1.319"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1794088200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":1794088200,"status":"rejected"}}},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"fake":"hang"}

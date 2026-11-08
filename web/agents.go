@@ -40,6 +40,11 @@ var agentNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 // agentKeys are the keys a PUT /v1/agents/{name} body may carry. They match
 // the [agents.<name>] table of core.AgentConfig.
 var agentKeys = map[string]bool{
+	"runtime":              true,
+	"auth":                 true,
+	"api_key_env":          true,
+	"binary":               true,
+	"allow_scheduled":      true,
 	"provider":             true,
 	"model":                true,
 	"fallback":             true,
@@ -76,14 +81,39 @@ var putAgentKeys = func() map[string]bool {
 	return keys
 }()
 
-// createAgentKeys are the fields accepted by POST /v1/agents.
+// createAgentKeys are the fields accepted by POST /v1/agents. A lana agent
+// starts from a template; a Claude Agent (runtime "claude-code") has none and
+// takes its runtime keys instead (API-CCR-004).
 var createAgentKeys = map[string]bool{
-	"name":        true,
-	"template":    true,
-	"workspace":   true,
-	"permission":  true,
-	"description": true,
+	"name":             true,
+	"template":         true,
+	"workspace":        true,
+	"permission":       true,
+	"description":      true,
+	"title":            true,
+	"color":            true,
+	"rules":            true,
+	"runtime":          true,
+	"model":            true,
+	"reasoning_effort": true,
+	"auth":             true,
+	"api_key_env":      true,
+	"binary":           true,
+	"allow_scheduled":  true,
 }
+
+// claudeCodeRuntime is the runtime key of a Claude Agent (API-CCR-001).
+const claudeCodeRuntime = "claude-code"
+
+// Engine labels of the agent rows (API-CCR-004).
+const (
+	engineLabelLana   = "lana"
+	engineLabelClaude = "Claude Agent"
+)
+
+// runtimeAgentEfforts are the reasoning_effort values of a claude-code agent,
+// passed to --effort (API-CCR-001).
+var runtimeAgentEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // duplicateAgentKeys are the fields accepted by the duplicate endpoint.
 var duplicateAgentKeys = map[string]bool{"name": true}
@@ -138,6 +168,21 @@ type agentJSON struct {
 	// Vision overrides the model's catalog vision flag (API-ATT-005). nil means
 	// the key is absent and the catalog decides.
 	Vision *bool `json:"vision,omitempty"`
+	// Runtime is the deprecated engine key: "claude-code" only for a legacy
+	// file, "" after a dashboard save (API-CCT-006). EngineLabel is kept for
+	// old clients; the UI no longer uses it.
+	Runtime     string `json:"runtime"`
+	EngineLabel string `json:"engine_label"`
+	// ClaudeCode is true when the agent's first target is a claude-code
+	// address (API-CCT-006).
+	ClaudeCode bool `json:"claude_code"`
+	// Auth, APIKeyEnv, Binary, and AllowScheduled are the Claude-only keys of
+	// an agent that uses Claude Code; they are omitted otherwise. Auth is
+	// never empty for such an agent ("subscription" when the key is absent).
+	Auth           string `json:"auth,omitempty"`
+	APIKeyEnv      string `json:"api_key_env,omitempty"`
+	Binary         string `json:"binary,omitempty"`
+	AllowScheduled *bool  `json:"allow_scheduled,omitempty"`
 }
 
 type listAgentsResponse struct {
@@ -158,6 +203,13 @@ type putAgentResponse struct {
 // agentRecord is the [agents.<name>] table as a form can edit it. Empty values
 // are omitted when the table is rendered.
 type agentRecord struct {
+	// Runtime, Auth, APIKeyEnv, Binary, and AllowScheduled are the runtime
+	// keys of a Claude Agent (API-CCR-001).
+	Runtime             string
+	Auth                string
+	APIKeyEnv           string
+	Binary              string
+	AllowScheduled      bool
 	Provider            string
 	Model               string
 	Fallback            []string
@@ -223,6 +275,11 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tables := map[string]map[string]any{}
+	// comboFirst is the first model of each combo, for the claude_code flag
+	// (API-CCT-006).
+	comboFirst := map[string]string{}
+	// accounts are the Claude Code accounts (REQ-CCT-010).
+	accounts := map[string]bool{claudeCodeRuntime: true}
 	defaultAgent := ""
 	hasCLIRoute := false
 	if store != nil {
@@ -238,6 +295,14 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				s.logger.Error("web: parse config for agent list", "error", err)
 				writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 				return
+			}
+			if document, err := parseProviderDocument(file.Raw); err == nil {
+				accounts = document.claudeAccounts()
+				for name, table := range document.Combos {
+					if models := mapProviderStrings(table, "models"); len(models) > 0 {
+						comboFirst[name] = models[0]
+					}
+				}
 			}
 			routeAgent, ok, err := parseCLIRouteAgent(file.Raw)
 			if err != nil {
@@ -282,6 +347,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			DisabledTools: []string{},
 			MemoryCapture: true,
 			Color:         core.ResolveAgentColor(name, ""),
+			EngineLabel:   engineLabelLana,
 		}
 		model := ""
 		configTools := 0
@@ -335,6 +401,22 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				row.Vision = &vision
 			}
 			row.ReasoningEffort = record.ReasoningEffort
+			// API-CCT-006: runtime stays only for a legacy file; its model
+			// shows as the claude-code address it means.
+			row.Runtime = record.Runtime
+			legacy := record.Runtime != ""
+			migrateLegacyRuntime(&record)
+			if legacy || isClaudeAccountModel(record.Model, accounts) || isClaudeAccountModel(comboFirst[record.Model], accounts) {
+				row.EngineLabel = engineLabelFor(claudeCodeRuntime)
+				row.Auth = record.Auth
+				if row.Auth == "" {
+					row.Auth = core.RuntimeAuthSubscription
+				}
+				row.APIKeyEnv = record.APIKeyEnv
+				row.Binary = record.Binary
+				allow := record.AllowScheduled
+				row.AllowScheduled = &allow
+			}
 			configTools = len(record.Tools)
 			if len(row.Skills) == 0 && len(record.Skills) > 0 {
 				row.Skills = nonNilStrings(record.Skills)
@@ -353,10 +435,14 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if row.Provider == "" {
-			if provider, _, ok := strings.Cut(model, ":"); ok {
-				row.Provider = provider
+			// "provider:model" (legacy) or a "provider/model" address; a combo
+			// name has no single provider (API-RTR-003).
+			if i := strings.IndexAny(model, "/:"); i > 0 {
+				row.Provider = model[:i]
 			}
 		}
+		// API-CCT-006: the agent's first target runs in Claude Code.
+		row.ClaudeCode = row.Kind == "agent" && (isClaudeAccountModel(model, accounts) || isClaudeAccountModel(comboFirst[model], accounts))
 		if row.Permission == "" {
 			row.Permission = row.Policy
 		}
@@ -471,14 +557,46 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAgentIssue(w, "name", "name must match [a-z0-9-]+")
 		return
 	}
-	template, present, err := agentStringField(body, "template")
-	if err != nil || !present || template == "" {
-		writeAgentIssue(w, "template", "template is required")
+	// API-CCR-004: runtime "claude-code" creates a Claude Agent, which has no
+	// template, provider, or lana tools; "" or "lana" creates a lana agent
+	// from a template.
+	var record agentRecord
+	if raw, ok := body["runtime"]; ok {
+		if err := applyAgentField(&record, "runtime", raw); err != nil {
+			writeAgentIssue(w, "runtime", "runtime must be a string")
+			return
+		}
+	}
+	var tpl agenthome.Template
+	permission := "ask"
+	if record.Runtime == "" {
+		template, present, err := agentStringField(body, "template")
+		if err != nil || !present || template == "" {
+			writeAgentIssue(w, "template", "template is required")
+			return
+		}
+		found, ok := agenthome.LookupTemplate(template)
+		if !ok {
+			writeAgentIssue(w, "template", "template must be assistant, coder, or worker")
+			return
+		}
+		tpl, permission = found, found.Permission
+	} else if _, set := body["template"]; set {
+		writeAgentIssue(w, "template", "a "+record.Runtime+" agent has no template")
 		return
 	}
-	tpl, ok := agenthome.LookupTemplate(template)
-	if !ok {
-		writeAgentIssue(w, "template", "template must be assistant, coder, or worker")
+	for _, key := range []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "model", "reasoning_effort", "rules", "title"} {
+		raw, ok := body[key]
+		if !ok {
+			continue
+		}
+		if err := applyAgentField(&record, key, raw); err != nil {
+			writeAgentIssue(w, "agents."+name+"."+key, err.Error())
+			return
+		}
+	}
+	if problem := checkAgentEffort(record, s.claudeAccountSet(r.Context())); problem != "" {
+		writeAgentIssue(w, "agents."+name+".reasoning_effort", problem)
 		return
 	}
 	workspace, _, err := agentStringField(body, "workspace")
@@ -495,7 +613,6 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAgentIssue(w, "agents."+name+".description", problem)
 		return
 	}
-	permission := tpl.Permission
 	if value, present, err := agentStringField(body, "permission"); err != nil {
 		writeAgentIssue(w, "permission", "permission must be a string")
 		return
@@ -540,20 +657,27 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	persona, err := tpl.Persona(name)
-	if err != nil {
-		s.logger.Error("web: render agent template", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
-		return
-	}
-	defaults := defaultAgentRecord(tables)
-	record := agentRecord{
-		Provider:    defaults.Provider,
-		Model:       defaults.Model,
-		Workspace:   workspace,
-		Tools:       append([]string(nil), tpl.Tools...),
-		Permission:  permission,
-		Description: description,
+	record.Workspace = workspace
+	record.Permission = permission
+	record.Description = description
+	persona := ""
+	legacyBody := record.Runtime != ""
+	// API-CCT-002: the dashboard writes only the claude-code address.
+	migrateLegacyRuntime(&record)
+	if !legacyBody {
+		persona, err = tpl.Persona(name)
+		if err != nil {
+			s.logger.Error("web: render agent template", "error", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+			return
+		}
+		// A lana agent without a model starts on the first lana agent's
+		// model.
+		if record.Model == "" {
+			defaults := defaultAgentRecord(tables)
+			record.Provider, record.Model = defaults.Provider, defaults.Model
+		}
+		record.Tools = append([]string(nil), tpl.Tools...)
 	}
 	table := renderAgentTable(name, record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), agentChecker(store), raw, "[agents."+name+"]", table)
@@ -561,11 +685,14 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		s.writeAgentSaveError(w, "create agent", err)
 		return
 	}
-	if err := agenthome.WriteFile(paths.Agent, persona); err != nil {
-		_ = os.RemoveAll(paths.Dir)
-		s.logger.Error("web: write agent home", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
-		return
+	// A legacy Claude Agent body has no template, so no persona file.
+	if !legacyBody {
+		if err := agenthome.WriteFile(paths.Agent, persona); err != nil {
+			_ = os.RemoveAll(paths.Dir)
+			s.logger.Error("web: write agent home", "error", err)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+			return
+		}
 	}
 	if err := store.ConfigWrite(r.Context(), candidate); err != nil {
 		_ = os.RemoveAll(paths.Dir)
@@ -637,6 +764,7 @@ func (s *Server) handlePutAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record := agentRecordFromMap(source)
+	previousRuntime := record.Runtime
 	keys := make([]string, 0, len(agentKeys))
 	for key := range agentKeys {
 		keys = append(keys, key)
@@ -651,6 +779,13 @@ func (s *Server) handlePutAgent(w http.ResponseWriter, r *http.Request) {
 			writeAgentIssue(w, "agents."+name+"."+key, err.Error())
 			return
 		}
+	}
+	switchAgentRuntime(&record, previousRuntime, body)
+	// API-CCT-002: a save writes the claude-code address and no runtime.
+	migrateLegacyRuntime(&record)
+	if problem := checkAgentEffort(record, claudeAccountsOf(file.Raw)); problem != "" {
+		writeAgentIssue(w, "agents."+name+".reasoning_effort", problem)
+		return
 	}
 	table := renderAgentTable(name, record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), agentChecker(store), file.Raw, "[agents."+name+"]", table)
@@ -845,6 +980,52 @@ func agentStringField(body map[string]json.RawMessage, key string) (string, bool
 
 func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error {
 	switch key {
+	case "runtime":
+		// "" or "lana" is lana's own loop; any other name is checked by the
+		// config validation (API-CCR-001).
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		value = strings.TrimSpace(value)
+		if value == engineLabelLana {
+			value = ""
+		}
+		record.Runtime = value
+		return nil
+	case "auth":
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if value != "" && value != core.RuntimeAuthSubscription && value != core.RuntimeAuthAPIKey {
+			return errors.New("auth must be one of subscription, api_key")
+		}
+		record.Auth = value
+		return nil
+	case "api_key_env":
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		value = strings.TrimSpace(value)
+		if value != "" && !providerEnvRE.MatchString(value) {
+			return errors.New("api_key_env must match [A-Za-z_][A-Za-z0-9_]*")
+		}
+		record.APIKeyEnv = value
+		return nil
+	case "binary":
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if strings.ContainsAny(value, "\r\n") {
+			return errors.New("must be one line")
+		}
+		record.Binary = strings.TrimSpace(value)
+		return nil
+	case "allow_scheduled":
+		return json.Unmarshal(raw, &record.AllowScheduled)
 	case "provider":
 		return json.Unmarshal(raw, &record.Provider)
 	case "model":
@@ -902,9 +1083,11 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return err
 		}
-		// REQ-MDL-001: an empty value uses the model's catalog default.
-		if value != "" && !validReasoningEffort(value) {
-			return errors.New("reasoning_effort must be one of off, low, high, max")
+		// REQ-MDL-001: an empty value uses the model's catalog default. The
+		// value is checked against the agent's final runtime once every field
+		// is applied (checkAgentEffort).
+		if value != "" && !validReasoningEffort(value) && !containsString(runtimeAgentEfforts, value) {
+			return errors.New("reasoning_effort must be one of off, low, medium, high, xhigh, max")
 		}
 		record.ReasoningEffort = value
 		return nil
@@ -999,6 +1182,137 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 	default:
 		return fmt.Errorf("unknown key")
 	}
+}
+
+// engineLabelFor returns the engine name of a runtime (API-CCR-004).
+func engineLabelFor(runtime string) string {
+	switch runtime {
+	case "":
+		return engineLabelLana
+	case claudeCodeRuntime:
+		return engineLabelClaude
+	default:
+		return runtime
+	}
+}
+
+// switchAgentRuntime handles a body that still sends the deprecated engine
+// key (API-CCT-002). Going from Claude Code back to lana ("" or "lana") on a
+// legacy agent clears a model and reasoning effort the body does not set:
+// Claude Code's model names do not carry over to lana's router. The
+// Claude-only keys and lana's keys are kept on every agent (ADR 0020).
+func switchAgentRuntime(record *agentRecord, previous string, body map[string]json.RawMessage) {
+	if previous == "" || record.Runtime != "" {
+		return
+	}
+	if _, set := body["runtime"]; !set {
+		return
+	}
+	for _, key := range []string{"model", "reasoning_effort"} {
+		if _, set := body[key]; !set {
+			clearAgentField(record, key)
+		}
+	}
+}
+
+// migrateLegacyRuntime rewrites runtime = "claude-code" with model "M" as
+// model "claude-code/M" ("default" when M is empty), with no runtime or
+// provider (API-CCT-002).
+func migrateLegacyRuntime(record *agentRecord) {
+	if record.Runtime != claudeCodeRuntime {
+		return
+	}
+	model := record.Model
+	if model == "" {
+		model = "default"
+	}
+	if !isClaudeCodeModel(model) {
+		model = claudeCodeRuntime + "/" + model
+	}
+	record.Model = model
+	record.Provider = ""
+	record.Runtime = ""
+}
+
+// isClaudeCodeModel reports whether model is a "claude-code/<model>" address.
+func isClaudeCodeModel(model string) bool {
+	rest, ok := strings.CutPrefix(model, claudeCodeRuntime+"/")
+	return ok && rest != ""
+}
+
+// clearAgentField removes one key from the record, so renderAgentTable leaves
+// it out of the table.
+func clearAgentField(record *agentRecord, key string) {
+	switch key {
+	case "auth":
+		record.Auth = ""
+	case "api_key_env":
+		record.APIKeyEnv = ""
+	case "binary":
+		record.Binary = ""
+	case "allow_scheduled":
+		record.AllowScheduled = false
+	case "provider":
+		record.Provider = ""
+	case "model":
+		record.Model = ""
+	case "reasoning_effort":
+		record.ReasoningEffort = ""
+	case "fallback":
+		record.Fallback = nil
+	case "tools":
+		record.Tools = nil
+	case "disabled_tools":
+		record.DisabledTools = nil
+	case "mcp":
+		record.MCP = nil
+	case "skills":
+		record.Skills = nil
+	case "subagents":
+		record.Subagents = nil
+	case "max_steps":
+		record.MaxSteps = 0
+	case "compaction_headroom":
+		record.CompactionHeadroom = 0
+	case "compaction_threshold":
+		record.CompactionThreshold = 0
+	case "compaction_retain":
+		record.CompactionRetain = 0
+	case "memory_capture":
+		record.MemoryCapture = nil
+	case "context_window":
+		record.ContextWindow = 0
+	case "vision":
+		record.Vision = nil
+	}
+}
+
+// checkAgentEffort checks reasoning_effort against the agent's runtime: off,
+// low, high, max for lana (REQ-MDL-001); low, medium, high, xhigh, max for a
+// Claude Agent (API-CCR-001). It returns "" when the value is valid.
+func checkAgentEffort(record agentRecord, accounts map[string]bool) string {
+	effort := record.ReasoningEffort
+	if effort == "" {
+		return ""
+	}
+	if record.Runtime == claudeCodeRuntime {
+		if !containsString(runtimeAgentEfforts, effort) {
+			return "reasoning_effort must be one of low, medium, high, xhigh, max"
+		}
+		return ""
+	}
+	// An agent on a Claude Code address (any account) takes Claude Code's
+	// efforts and lana's.
+	if isClaudeAccountModel(record.Model, accounts) {
+		if !validReasoningEffort(effort) && !containsString(runtimeAgentEfforts, effort) {
+			return "reasoning_effort must be one of off, low, medium, high, xhigh, max"
+		}
+		return ""
+	}
+	if !validReasoningEffort(effort) {
+		return "reasoning_effort must be one of off, low, high, max"
+	}
+	return ""
 }
 
 func validateAgentDescription(value string) string {
@@ -1136,9 +1450,14 @@ func parseCLIRouteAgent(raw []byte) (string, bool, error) {
 	return "", false, nil
 }
 
+// defaultAgentRecord returns the record of the first lana agent by name; a
+// runtime agent's model is not a lana model and is skipped.
 func defaultAgentRecord(tables map[string]map[string]any) agentRecord {
 	names := make([]string, 0, len(tables))
-	for name := range tables {
+	for name, table := range tables {
+		if mapAgentString(table, "runtime") != "" {
+			continue
+		}
 		names = append(names, name)
 	}
 	if len(names) == 0 {
@@ -1150,6 +1469,11 @@ func defaultAgentRecord(tables map[string]map[string]any) agentRecord {
 
 func agentRecordFromMap(table map[string]any) agentRecord {
 	record := agentRecord{
+		Runtime:             mapAgentString(table, "runtime"),
+		Auth:                mapAgentString(table, "auth"),
+		APIKeyEnv:           mapAgentString(table, "api_key_env"),
+		Binary:              mapAgentString(table, "binary"),
+		AllowScheduled:      mapAgentBool(table, "allow_scheduled"),
 		Provider:            mapAgentString(table, "provider"),
 		Model:               mapAgentString(table, "model"),
 		Fallback:            mapAgentStrings(table, "fallback"),
@@ -1244,10 +1568,17 @@ func mapAgentBool(table map[string]any, key string) bool {
 }
 
 func renderAgentTable(name string, record agentRecord) string {
+	// API-CCT-002: every dashboard write uses the claude-code address.
+	migrateLegacyRuntime(&record)
 	var b strings.Builder
 	fmt.Fprintf(&b, "[agents.%s]\n", name)
+	writeAgentString(&b, "runtime", record.Runtime)
 	writeAgentString(&b, "provider", record.Provider)
 	writeAgentString(&b, "model", record.Model)
+	writeAgentString(&b, "auth", record.Auth)
+	writeAgentString(&b, "api_key_env", record.APIKeyEnv)
+	writeAgentString(&b, "binary", record.Binary)
+	writeAgentBool(&b, "allow_scheduled", record.AllowScheduled)
 	writeAgentStrings(&b, "fallback", record.Fallback)
 	writeAgentString(&b, "prompt_file", record.PromptFile)
 	writeAgentString(&b, "workspace", record.Workspace)

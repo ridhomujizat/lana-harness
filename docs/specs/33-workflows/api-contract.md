@@ -272,6 +272,8 @@ of the workflow is already `running` (409 `run_active`).
 ```
 
 Blocks until the guardian answers (up to 3 minutes). 409 `version_conflict`, 503 `guardian_unavailable`.
+503 `guardian_needs_background_model` when the guardian runs only on Claude Code and has no background
+model (spec 39 revision 5, API-CCT-028); its `message` is the text the assistant shows.
 
 ## API-WF-018: Rotate webhook secret
 

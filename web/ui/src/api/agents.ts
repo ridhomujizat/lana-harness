@@ -31,6 +31,12 @@ export interface Agent {
   workspace: string;
   disabled_tools: string[];
   reasoning_effort?: string;
+  /* Spec 39 (API-CCT-006): runtime is "claude-code" only for a legacy file
+     (model then holds the mapped claude-code address); the UI never shows an
+     engine. claude_code is true when the agent's first target runs in
+     Claude Code. */
+  runtime?: string;
+  claude_code?: boolean;
   tools_count: number;
   sessions_count: number;
   last_active_at: number | null;
@@ -43,6 +49,9 @@ export interface ListAgentsResponse {
 /* AgentWriteFields is the editable part of [agents.<name>]. Every key is
    optional because PUT accepts a subset (API-WEB-025). */
 export interface AgentWriteFields {
+  /* Spec 39 (API-CCT-002): the dashboard never writes runtime; a Claude Code
+     agent is model = "<account>/<model>". provider is only written as "" to
+     clear a legacy provider/model pair. */
   provider?: string;
   model?: string;
   title?: string;
@@ -70,10 +79,13 @@ export interface AgentWriteFields {
    picks the starting tools, prompt, and limits. */
 export interface CreateAgentRequest {
   name: string;
+  /* Every agent is a lana agent and starts from a template (spec 39). */
   template: string;
   workspace?: string;
-  permission?: string;
-  description?: string;
+  /* A router address, combo, or "<account>/<model>" of Claude Code; empty
+     starts on the default agent's model. Never a provider or runtime. */
+  model?: string;
+  reasoning_effort?: string;
 }
 
 export interface AgentCreatedResponse {

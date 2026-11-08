@@ -7,17 +7,30 @@ import type { AuthSession } from "./auth";
 const POLL_INTERVAL_MS = 1000;
 const POLL_TIMEOUT_MS = 30000;
 
+/* One model of the wizard's picker catalog. */
+export interface SetupModel {
+  id: string;
+  name: string;
+}
+
 export interface SetupStatus {
   needed: boolean;
   reasons: string[];
   provider_count: number;
   agent_count: number;
+  /* Revision 3: the built-in models of each preset kind and the Claude Code
+     aliases, so the model picker works before anything is saved. An older
+     daemon sends neither. */
+  models?: Record<string, SetupModel[]>;
+  claude_code_models?: SetupModel[];
 }
 
 export interface SetupTestProviderInput {
   kind: string;
-  baseUrl: string;
-  model: string;
+  /* Empty for a preset kind's own URL. */
+  baseUrl?: string;
+  /* Empty: the daemon picks a model it knows for the kind or host. */
+  model?: string;
   apiKey: string;
 }
 
@@ -28,13 +41,24 @@ export interface SetupTestProviderResponse {
   message?: string;
 }
 
+/* One connected provider of the setup save (API-WEB-021 revision 3). */
+export interface SetupProviderInput {
+  name: string;
+  kind: string;
+  apiKey: string;
+  /* Empty for a preset kind's own URL. */
+  baseUrl: string;
+  apiKeyEnv: string;
+}
+
 export interface SetupInput {
-  provider: {
-    name: string;
-    apiKey: string;
-    baseUrl: string;
-    model: string;
-  };
+  providers: SetupProviderInput[];
+  /* A provider/model address; with a fallback the daemon writes the
+     default combo [model, fallback] and the agent uses "default". */
+  model: string;
+  fallback: string;
+  /* [router] background_model; empty leaves it unset. */
+  backgroundModel: string;
   agent: {
     name: string;
     template: string;
@@ -77,12 +101,14 @@ export function getSetup(): Promise<SetupStatus> {
 export function testProvider(
   input: SetupTestProviderInput
 ): Promise<SetupTestProviderResponse> {
-  return request<SetupTestProviderResponse>("POST", "/v1/providers/test", {
-    kind: input.kind,
-    base_url: input.baseUrl,
-    model: input.model,
-    api_key: input.apiKey,
-  });
+  const body: Record<string, string> = { kind: input.kind, api_key: input.apiKey };
+  if (input.baseUrl) {
+    body.base_url = input.baseUrl;
+  }
+  if (input.model) {
+    body.model = input.model;
+  }
+  return request<SetupTestProviderResponse>("POST", "/v1/providers/test", body);
 }
 
 /* API-WEB-021 requires expected_version, but API-WEB-018 does not return it.
@@ -92,13 +118,20 @@ export async function saveSetup(input: SetupInput): Promise<SetupSaveResponse> {
   const config = await request<GetConfigVersionResponse>("GET", "/v1/config");
   const expectedVersion =
     config && typeof config.version === "string" ? config.version : "";
-  return request<SetupSaveResponse>("POST", "/v1/setup", {
-    provider: {
-      name: input.provider.name,
-      api_key: input.provider.apiKey,
-      base_url: input.provider.baseUrl,
-      model: input.provider.model,
-    },
+  const body: Record<string, unknown> = {
+    providers: input.providers.map((provider) => {
+      const entry: Record<string, string> = {
+        name: provider.name,
+        kind: provider.kind,
+        api_key: provider.apiKey,
+        api_key_env: provider.apiKeyEnv,
+      };
+      if (provider.baseUrl) {
+        entry.base_url = provider.baseUrl;
+      }
+      return entry;
+    }),
+    model: input.model,
     agent: {
       name: input.agent.name,
       template: input.agent.template,
@@ -110,7 +143,14 @@ export async function saveSetup(input: SetupInput): Promise<SetupSaveResponse> {
       user_md: input.persona.userMd,
     },
     expected_version: expectedVersion,
-  });
+  };
+  if (input.fallback) {
+    body.fallback = input.fallback;
+  }
+  if (input.backgroundModel) {
+    body.background_model = input.backgroundModel;
+  }
+  return request<SetupSaveResponse>("POST", "/v1/setup", body);
 }
 
 /* A restart in place drops the listener for a moment, so a failed fetch and a

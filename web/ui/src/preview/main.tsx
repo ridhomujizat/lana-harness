@@ -114,7 +114,7 @@ if (!window.location.hash || window.location.hash === "#") {
   if (requestedState === "login") {
     window.location.hash = "#/login";
   } else if (requestedState === "setup") {
-    window.location.hash = "#/setup/provider";
+    window.location.hash = "#/setup/connect";
   }
 }
 

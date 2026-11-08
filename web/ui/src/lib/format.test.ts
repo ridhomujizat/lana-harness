@@ -89,6 +89,22 @@ describe("buildHistory", () => {
   });
 });
 
+describe("buildHistory runtime meta", () => {
+  /* API-CCR-002: a Claude Code session meta is not an empty system item. */
+  it("skips a system message of subtype runtime", () => {
+    const items = buildHistory([
+      event(1, "system/message", {
+        subtype: "runtime",
+        runtime: "claude-code",
+        claude_session_id: "6f1c0d2e-0000-4000-8000-000000000000",
+        model: "claude-opus-5",
+        version: "2.1.319",
+      }),
+    ]);
+    expect(items).toHaveLength(0);
+  });
+});
+
 describe("memoryOpLine", () => {
   it("names the saved content for add and replace", () => {
     expect(memoryOpLine({ action: "add", content: "Likes tea" })).toBe(

@@ -6,7 +6,9 @@ import { duplicateAgent, listAgents, updateAgent } from "../api/agents";
 import type { Agent, AgentWriteFields } from "../api/agents";
 import { getModels } from "../api/models";
 import type { CatalogEffort, CatalogModel } from "../api/models";
-import { getConfig, listProviders } from "../api/settings";
+import { getConfig } from "../api/settings";
+import { getRouter } from "../api/router";
+import type { RouterChoice, RouterCombo, RouterProvider } from "../api/router";
 import type { ConfigAgent } from "../api/settings";
 import { createSession } from "../api/sessions";
 import { Dialog, detailText, useAnnounce } from "../ui/ui";
@@ -16,14 +18,23 @@ import {
   rosterNames,
   splitModel,
   splitTarget,
+  CLAUDE_RUNTIME,
+  usesClaudeCode,
   normalizePermission,
-  providerLabel,
   agentHref,
   sessionSummary,
   presenceTone,
 } from "./agent-common";
 import type { AgentLike, Permission } from "./agent-common";
 import { AgentOverview } from "./agent-overview";
+import { CLAUDE_EFFORTS, ClaudeCodeNote, choiceOptions } from "./agent-runtime";
+import {
+  CLAUDE_CODE_HREF,
+  ClaudeCodeBadge,
+  claudeAccountNames,
+  claudeTargetAccount,
+  useClaudeAccounts,
+} from "./router/claude-code";
 import { gr8rColor, useRooms } from "./presence";
 import { DEFAULT_AGENT_TAB } from "../app/router";
 import { PersonaTab } from "./agent-tabs/persona";
@@ -46,6 +57,7 @@ import {
   Tabs,
   Toggle,
 } from "../ui/gr8r";
+import type { SelectOption } from "../ui/gr8r";
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
    tab. The other tabs show a placeholder until their slices land (T-030). */
@@ -77,6 +89,7 @@ const TABS: readonly TabEntry[] = [
 ];
 
 type GeneralKey =
+  | "description"
   | "title"
   | "color"
   | "provider"
@@ -90,6 +103,7 @@ type GeneralKey =
   | "workspace_only";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
+  "description",
   "title",
   "color",
   "provider",
@@ -139,7 +153,12 @@ const PERMISSIONS: readonly PermissionOption[] = [
   },
 ];
 
+/* Spec 37: the model picker values that are not router choices. */
+const OTHER_MODEL = "__other__";
+const LEGACY_MODEL = "__legacy__";
+
 interface AgentValues {
+  description: string;
   title: string;
   color: string;
   provider: string;
@@ -154,6 +173,7 @@ interface AgentValues {
 }
 
 interface AgentForm {
+  description: string;
   title: string;
   color: string;
   provider: string;
@@ -175,7 +195,13 @@ interface FallbackDraft {
 interface AgentDetailData {
   agent: Agent | null;
   agents: Agent[];
-  providers: string[];
+  /* GET /v1/router choices: combos, then models by provider (spec 37). */
+  choices: RouterChoice[];
+  /* GET /v1/router providers, for the logos of the model picker. */
+  providers: RouterProvider[];
+  /* GET /v1/router combos: a combo whose first model is Claude Code makes
+     the agent a Claude Code agent (spec 39). */
+  combos: RouterCombo[];
   /* The configured tool list, so General can gate the memory toggle. */
   tools: string[];
 }
@@ -240,15 +266,34 @@ function sessionModel(agent: AgentLike | null | undefined): string {
   return "";
 }
 
+/* Spec 39 (API-CCT-002): a legacy file says runtime = "claude-code" with
+   model "M"; it means model "claude-code/M". The list row already carries
+   the mapped address. */
+function isLegacyRuntime(agent: Agent, configAgent: ConfigAgent): boolean {
+  const record = configAgent || {};
+  return pickText(record.runtime, agent.runtime) === CLAUDE_RUNTIME;
+}
+
+function legacyAddress(agent: Agent, configAgent: ConfigAgent): string {
+  const row = agent.model ? String(agent.model) : "";
+  if (row.startsWith(CLAUDE_RUNTIME + "/")) {
+    return row;
+  }
+  const model = pickText((configAgent || {}).model, row) || "default";
+  return model.startsWith(CLAUDE_RUNTIME + "/") ? model : CLAUDE_RUNTIME + "/" + model;
+}
+
 function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
   const record = configAgent || {};
   const parts = splitModel(agent);
+  const legacy = isLegacyRuntime(agent, configAgent);
   return {
+    description: pickText(record.description, agent.description),
     title: pickText(record.title, agent.title),
     color: normalizeColor(pickText(record.color, agent.color)),
-    provider: pickText(record.provider, agent.provider, parts.provider),
-    model: pickText(record.model, parts.model),
-    reasoning_effort: pickText(agent.reasoning_effort),
+    provider: legacy ? "" : pickText(record.provider, agent.provider, parts.provider),
+    model: legacy ? legacyAddress(agent, configAgent) : pickText(record.model, parts.model),
+    reasoning_effort: pickText(record.reasoning_effort, agent.reasoning_effort),
     fallback: Array.isArray(record.fallback)
       ? record.fallback.map((target) => String(target))
       : [],
@@ -266,6 +311,7 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
 
 function formValues(initial: AgentValues): AgentForm {
   return {
+    description: initial.description || "",
     title: initial.title || "",
     color: normalizeColor(initial.color),
     provider: initial.provider || "",
@@ -282,6 +328,7 @@ function formValues(initial: AgentValues): AgentForm {
 
 function canonical(form: AgentForm): AgentValues {
   return {
+    description: String(form.description || "").trim(),
     title: String(form.title || "").trim(),
     color: normalizeColor(form.color),
     provider: form.provider || "",
@@ -363,7 +410,9 @@ function nextDuplicateName(source: string, agents: AgentLike[]): string {
 function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
   const patch: AgentWriteFields = {};
   for (const key of keys) {
-    if (key === "title") {
+    if (key === "description") {
+      patch.description = current.description;
+    } else if (key === "title") {
       patch.title = current.title;
     } else if (key === "color") {
       patch.color = current.color;
@@ -534,6 +583,9 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const [headerError, setHeaderError] = useState("");
   const [startBusy, setStartBusy] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  /* A legacy runtime = "claude-code" file is rewritten on the next save. */
+  const [legacyRuntime, setLegacyRuntime] = useState(false);
+  const { accounts } = useClaudeAccounts();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const pendingTabFocus = useRef(false);
 
@@ -551,13 +603,14 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setFallbackDraft(null);
     setOtherModel(false);
     setHeaderError("");
+    setLegacyRuntime(false);
 
     Promise.all([
       listAgents(),
       getConfig().catch(() => null),
-      listProviders().catch(() => null),
+      getRouter().catch(() => null),
     ])
-      .then(([agentPage, config, providerPage]) => {
+      .then(([agentPage, config, routerPage]) => {
         if (!alive) {
           return;
         }
@@ -566,15 +619,20 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         const agent = rows.find((row) => row.name === agentName) || null;
         const settings = config && config.settings ? config.settings : null;
         const configAgent: ConfigAgent = settings?.agents?.[agentName] ?? {};
-        const providers = (providerPage?.providers ?? [])
-          .map((provider) => provider && provider.name)
-          .filter((value): value is string => Boolean(value))
-          .sort();
+        const choices = routerPage ? routerPage.choices : [];
         const initial = agent ? initialValues(agent, configAgent) : null;
         const tools = Array.isArray(configAgent.tools)
           ? configAgent.tools.map((tool) => String(tool))
           : [];
-        setPage({ agent, agents: rows, providers, tools });
+        setPage({
+          agent,
+          agents: rows,
+          choices,
+          providers: routerPage ? routerPage.providers : [],
+          combos: routerPage ? routerPage.combos : [],
+          tools,
+        });
+        setLegacyRuntime(Boolean(agent && isLegacyRuntime(agent, configAgent)));
         setVersion(config && config.version ? String(config.version) : "");
         if (initial) {
           const values = formValues(initial);
@@ -598,8 +656,11 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     };
   }, [agentName, reloadToken, announce]);
 
+  /* Spec 39: every agent is a lana agent with every tab; a Claude Code turn
+     gets the persona, memory, and lana tools through MCP. */
+  const tabs = TABS;
   const activeTab: TabId =
-    TABS.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
+    tabs.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
 
   /* The tab bar keeps its focus when a hash change reloads the route. */
   useEffect(() => {
@@ -615,17 +676,47 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     }
   }, [activeTab]);
 
-  const dirty = useMemo(() => dirtyKeys(form, baseline), [form, baseline]);
-
-  const providerOptions = useMemo(() => {
-    const names = new Set<string>(page && page.providers ? page.providers : []);
-    if (baseline && baseline.provider) {
-      names.add(baseline.provider);
+  /* API-CCT-002: saving a legacy runtime file always writes the model
+     address, so the file loses runtime. */
+  const dirty = useMemo(() => {
+    const keys = dirtyKeys(form, baseline);
+    if (legacyRuntime && form && !keys.includes("model")) {
+      keys.push("model");
     }
-    return Array.from(names).sort();
-  }, [page, baseline]);
+    return keys;
+  }, [form, baseline, legacyRuntime]);
 
-  const provider = form && form.provider ? form.provider : "";
+  const choices = useMemo(() => (page ? page.choices : []), [page]);
+  const legacy = Boolean(form && form.provider);
+  const formModel = form ? form.model : "";
+  const claudeNames = useMemo(
+    () => claudeAccountNames(choices, page ? page.providers : null, accounts),
+    [choices, page, accounts]
+  );
+  /* REQ-CCT-009: the Claude Code account the picked model runs on. */
+  const claudeAccount = legacy
+    ? ""
+    : claudeTargetAccount(formModel, choices, page ? page.combos : null, claudeNames);
+  const isClaudeForm = claudeAccount !== "";
+  const knownChoice = choices.some((choice) => choice.value === formModel);
+  const isCombo = choices.some(
+    (choice) => choice.group === "Combos" && choice.value === formModel
+  );
+  /* A router address names its provider before the first slash; a combo
+     has none, so it shows no catalog (REQ-MDL-020 keeps the Thinking menu). */
+  const slash = formModel.indexOf("/");
+  const addressProvider =
+    !legacy && !isCombo && slash > 0 ? formModel.slice(0, slash) : "";
+  const provider = isClaudeForm
+    ? ""
+    : legacy && form
+      ? form.provider
+      : addressProvider;
+  const catalogId = legacy
+    ? formModel
+    : addressProvider
+      ? formModel.slice(slash + 1)
+      : "";
 
   /* REQ-MDL-020: the model picker lists the catalog of the agent's provider.
      The provider's base URL decides the catalog on the daemon side. */
@@ -658,11 +749,13 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
 
   /* A model that is not in the catalog stays selected through the free-text
      field, so a save never drops it. */
-  const selectedCatalogModel = form
-    ? catalog.find((model) => model.id === form.model) || null
+  const selectedCatalogModel = catalogId
+    ? catalog.find((model) => model.id === catalogId) || null
     : null;
+  /* A non-legacy model that is not a router choice stays in the free-text
+     field, so a save never drops it. */
   const customModel = Boolean(
-    otherModel || (form && form.model !== "" && !selectedCatalogModel)
+    !legacy && (otherModel || (formModel !== "" && !knownChoice))
   );
   const thinkingModel = Boolean(selectedCatalogModel && selectedCatalogModel.thinking);
   const legacyReplacement =
@@ -693,6 +786,42 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setReloadToken((current) => current + 1);
   }
 
+  /* Spec 37 (AC-RTR-024): picking a router choice writes model and clears a
+     legacy provider; the legacy entry restores the saved pair. */
+  function pickModel(value: string) {
+    if (!form || !baseline) {
+      return;
+    }
+    setSaveNotice("");
+    if (!stale) {
+      setError("");
+      setDetails([]);
+    }
+    if (value === OTHER_MODEL) {
+      setOtherModel(true);
+      setForm({ ...form, provider: "" });
+      return;
+    }
+    setOtherModel(false);
+    if (value === LEGACY_MODEL) {
+      setForm({ ...form, provider: baseline.provider, model: baseline.model });
+      return;
+    }
+    /* Claude Code and router models take different effort values, so a
+       switch across them starts from the model's default. */
+    const nextClaude =
+      claudeTargetAccount(value, choices, page ? page.combos : null, claudeNames) !== "";
+    const effort =
+      value === baseline.model
+        ? baseline.reasoning_effort
+        : nextClaude !== isClaudeForm
+          ? ""
+          : form.reasoning_effort;
+    /* API-CCT-002: provider is only cleared for a legacy provider/model
+       pair; a Claude Code pick writes the model address alone. */
+    setForm({ ...form, provider: "", model: value, reasoning_effort: effort });
+  }
+
   function resetForm() {
     if (!baseline) {
       return;
@@ -707,7 +836,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   }
 
   function activateTab(id: string, focus: boolean) {
-    const next = TABS.find((item) => item.id === id);
+    const next = tabs.find((item) => item.id === id);
     if (!next) {
       return;
     }
@@ -753,7 +882,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       next = nodes.length - 1;
     }
     event.preventDefault();
-    const target = TABS[next];
+    const target = tabs[next];
     if (!target) {
       return;
     }
@@ -843,6 +972,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         setVersion(String(result.version));
       }
       setBaseline(current);
+      setLegacyRuntime(false);
       setSaveNotice("Changes saved.");
       setRestartNotice(Boolean(result && result.restart_required));
       announce("Saved changes to " + agentName + ".");
@@ -1014,13 +1144,32 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const row = byName[agent.name];
   const presence = row ? row.presence : null;
   const activeLabel =
-    TABS.find((item) => item.id === activeTab)?.label || "Agent";
+    tabs.find((item) => item.id === activeTab)?.label || "Agent";
 
-  const modelOptions = [
-    { value: "", label: "Provider default" },
-    ...catalog.map((model) => ({ value: model.id, label: model.name })),
-    { value: "__other__", label: "Other…" },
+  const legacyName = selectedCatalogModel
+    ? selectedCatalogModel.name
+    : form
+      ? form.model
+      : "";
+  const modelOptions: SelectOption[] = [
+    ...(form && !form.model && !legacy ? [{ value: "", label: "Not set" }] : []),
+    ...(legacy && form
+      ? [
+          {
+            value: LEGACY_MODEL,
+            label: (legacyName || "Provider default") + " · " + form.provider,
+            group: "Current",
+          },
+        ]
+      : []),
+    ...choiceOptions(choices, page ? page.providers : undefined, accounts),
+    { value: OTHER_MODEL, label: "Other…" },
   ];
+  const modelValue = legacy
+    ? LEGACY_MODEL
+    : customModel
+      ? OTHER_MODEL
+      : formModel;
   const thinkingOptions = [
     { value: "", label: "Model default" },
     ...efforts.map((effort) => ({
@@ -1037,7 +1186,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         value={activeTab}
         onChange={(value) => activateTab(value, false)}
         onKeyDown={handleTabKeyDown}
-        items={TABS.map((item) => ({ value: item.id, label: item.label }))}
+        items={tabs.map((item) => ({ value: item.id, label: item.label }))}
       />
     </div>
   );
@@ -1071,6 +1220,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               <div className="agent-detail-name-row">
                 <h1 className="agent-detail-name">{agent.name}</h1>
                 <Badge>{agent.title || "Agent"}</Badge>
+                {usesClaudeCode(agent) ? <ClaudeCodeBadge /> : null}
                 {agent.default ? (
                   <Badge tone="accent" dot>
                     Default
@@ -1246,56 +1396,23 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               <h2 id="agent-model-title">Model</h2>
               <div className="srow">
                 <div className="agent-srow-text">
-                  <label className="t" htmlFor="agent-provider">
-                    Provider
-                  </label>
-                  <div className="d">Where the model is served from.</div>
-                </div>
-                <div className="agent-ctl">
-                  <Select
-                    id="agent-provider"
-                    aria-label="Provider"
-                    value={form.provider}
-                    disabled={saving}
-                    options={[
-                      { value: "", label: "Not set" },
-                      ...providerOptions.map((name) => ({
-                        value: name,
-                        label: providerLabel(name),
-                      })),
-                    ]}
-                    onChange={(value) => {
-                      setOtherModel(false);
-                      updateField("provider", value);
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="srow">
-                <div className="agent-srow-text">
                   <label className="t" htmlFor="agent-model-select">
                     Model
                   </label>
                   <div className="d">
-                    The model this agent uses. Fallbacks run when it fails.
+                    A combo or a model from the{" "}
+                    <a href="#/router/models">router</a>. Fallbacks run when it
+                    fails.
                   </div>
                 </div>
                 <div className="agent-ctl">
                   <Select
                     id="agent-model-select"
                     aria-label="Model"
-                    value={customModel ? "__other__" : form.model}
+                    value={modelValue}
                     disabled={saving}
                     options={modelOptions}
-                    onChange={(value) => {
-                      if (value === "__other__") {
-                        setOtherModel(true);
-                        return;
-                      }
-                      setOtherModel(false);
-                      updateField("model", value);
-                    }}
+                    onChange={pickModel}
                   />
                   {customModel ? (
                     <Input
@@ -1303,7 +1420,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                       className="mono"
                       type="text"
                       aria-label="Custom model id"
-                      placeholder="model id"
+                      placeholder="combo or provider/model"
                       autoComplete="off"
                       spellCheck={false}
                       value={form.model}
@@ -1313,10 +1430,55 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                       }
                     />
                   ) : null}
+                  {isClaudeForm ? <ClaudeCodeNote account={claudeAccount} /> : null}
+                  {legacyRuntime ? (
+                    <span className="hint">
+                      This agent still uses the old engine setting. Saving
+                      writes the model as {form.model}.
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
-              {thinkingModel ? (
+              {isClaudeForm ? (
+                <>
+                  <div className="srow">
+                    <div className="agent-srow-text">
+                      <label className="t" htmlFor="agent-claude-effort">
+                        Reasoning effort
+                      </label>
+                      <div className="d">Passed to Claude Code as --effort.</div>
+                    </div>
+                    <div className="agent-ctl">
+                      <Select
+                        id="agent-claude-effort"
+                        aria-label="Reasoning effort"
+                        value={form.reasoning_effort}
+                        disabled={saving}
+                        options={CLAUDE_EFFORTS}
+                        onChange={(value) => updateField("reasoning_effort", value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="srow">
+                    <div className="agent-srow-text">
+                      <span className="t">Scheduled runs</span>
+                      <div className="d">
+                        Whether workflows and the calendar may start Claude Code
+                        is set per account.
+                      </div>
+                    </div>
+                    <div className="agent-ctl">
+                      <a className="agent-cc-link" href={CLAUDE_CODE_HREF}>
+                        {"Allow scheduled runs on " + claudeAccount}
+                        <Ic name="arrow-up-right" size={12} />
+                      </a>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {!isClaudeForm && thinkingModel ? (
                 <div className="srow">
                   <div className="agent-srow-text">
                     <label className="t" htmlFor="agent-thinking">
@@ -1357,7 +1519,12 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                         disabled={saving}
                         onClick={() => {
                           setOtherModel(false);
-                          updateField("model", legacyReplacement);
+                          updateField(
+                            "model",
+                            legacy
+                              ? legacyReplacement
+                              : provider + "/" + legacyReplacement
+                          );
                         }}
                       >
                         {"Switch to " + legacyReplacement}

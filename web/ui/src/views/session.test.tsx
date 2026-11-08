@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ApiError } from "../api/client";
 import type { ModelsResponse } from "../api/models";
 import type { SessionDetail, SessionEvent } from "../api/sessions";
@@ -387,6 +387,38 @@ describe("composer model catalog", () => {
     expect(
       await screen.findByRole("button", { name: "Model: deepseek:flash" })
     ).toBeTruthy();
+  });
+
+  /* Spec 37 (REQ-RTR-018): with the router, the menu offers the agent picker
+     choices, combos first, and sets the picked value as is. */
+  it("offers the router choices and sets a combo", async () => {
+    const fetchMock = stubFetch([]);
+    const base = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/v1/router")) {
+        return json({
+          version: "v1",
+          choices: [
+            { value: "coding", label: "coding", group: "Combos" },
+            { value: "deepseek/deepseek-flash", label: "DeepSeek Flash", group: "deepseek" },
+          ],
+        });
+      }
+      return base ? base(input, init) : json({});
+    });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model: deepseek:chat" })
+    );
+    const combos = await screen.findByRole("group", { name: "Combos" });
+    expect(within(combos).getByRole("menuitemradio", { name: /coding/ })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "deepseek" })).toBeTruthy();
+    fireEvent.click(within(combos).getByRole("menuitemradio", { name: /coding/ }));
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ model: "coding" });
+    });
   });
 
   it("keeps the free-text provider:model input working", async () => {

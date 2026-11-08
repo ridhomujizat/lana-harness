@@ -175,7 +175,11 @@ func codeFromLink(t *testing.T, link string) string {
 	if i < 0 {
 		t.Fatalf("link %q has no code", link)
 	}
-	return link[i+len("code="):]
+	code := link[i+len("code="):]
+	if j := strings.IndexByte(code, '&'); j >= 0 {
+		code = code[:j]
+	}
+	return code
 }
 
 // setPasswordViaLink creates a sign-in link, claims it, and returns the session

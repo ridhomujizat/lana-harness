@@ -12,6 +12,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/id"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // TurnResult is the result of one turn.
@@ -68,6 +69,7 @@ type Registry struct {
 	questions  core.QuestionService
 	compaction core.Compactor
 	memory     core.MemoryCapturer
+	titler     core.SessionTitler
 	knowledge  core.Knowledge
 	config     core.Config
 	secrets    core.Secrets
@@ -106,11 +108,27 @@ type Registry struct {
 	cfgMu sync.RWMutex
 	// applyMu serializes ApplyConfig so two saves cannot race on the MCP diff.
 	applyMu sync.Mutex
+
+	// runtimeMu guards the external agent runtimes (ADR 0018), built on first
+	// use by name, and the hooks their turns report usage and limits through.
+	runtimeMu      sync.Mutex
+	runtimes       map[string]core.AgentRuntime
+	runtimesClosed bool
+	externalHooks  ExternalHooks
+	// toolHost serves lana's tools to Claude Code turns (ADR 0020).
+	toolHost core.RuntimeToolHost
+	// scheduled counts the scheduled-run marks per session (REQ-CCT-008).
+	scheduled map[string]int
+	// background counts the background-work marks per session (spec 39
+	// revision 5).
+	background map[string]int
 }
 
 // NewRegistry creates a registry.
 func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.ToolRegistry, hooks *core.Hooks, cfg core.Config, secrets core.Secrets, home, defaultWorkspace string) *Registry {
 	root, cancel := context.WithCancel(context.Background())
+	// API-CCT-002: a legacy runtime agent is its claude-code address.
+	cfg.Agents = llmcall.NormalizeAgents(cfg.Agents)
 	if hooks == nil {
 		hooks = core.NewHooks()
 	}
@@ -136,7 +154,7 @@ func NewRegistry(store core.SessionStore, llm core.LLMRegistry, toolReg core.Too
 		r.mcpApplied[name] = serverCfg
 	}
 	r.pipeline = NewToolRunner(hooks, toolReg)
-	installDefaults(hooks, llm)
+	installDefaults(hooks, llm, store)
 	return r
 }
 
@@ -178,6 +196,23 @@ func (r *Registry) SetMemoryCapturer(c core.MemoryCapturer) { r.memory = c }
 // memoryCapturer returns the memory-capture service, or nil when none is
 // installed.
 func (r *Registry) memoryCapturer() core.MemoryCapturer { return r.memory }
+
+// SetSessionTitler installs the session title service used at turn end
+// (spec 40). It is set at boot, before any turn starts; nil disables titles.
+func (r *Registry) SetSessionTitler(t core.SessionTitler) { r.titler = t }
+
+// titleTurnEnd asks the title service to name a session after a completed
+// root turn that stored an owner message (REQ-TTL-001). The service returns
+// at once and skips a session that already has a title.
+func (r *Registry) titleTurnEnd(reason string, child, owner bool, req core.TitleRequest) {
+	if r.titler == nil || child || !owner {
+		return
+	}
+	if reason != "end_turn" && reason != "max_steps" && reason != "loop" {
+		return
+	}
+	r.titler.TurnEnded(req)
+}
 
 // SetKnowledge installs the knowledge service used by the knowledge tools and
 // per-turn recall. It is set at boot, before any turn starts; a nil service
@@ -249,22 +284,25 @@ func (r *Registry) AgentConfig(name string) (core.AgentConfig, bool) {
 }
 
 // providersConfig returns the loaded provider map for validation lookups.
-func (r *Registry) providersConfig() map[string]core.ProviderConfig {
+// modelConfig returns the live providers and combos.
+func (r *Registry) modelConfig() (map[string]core.ProviderConfig, map[string]core.ComboConfig) {
 	r.cfgMu.RLock()
 	defer r.cfgMu.RUnlock()
-	return r.config.Providers
+	return r.config.Providers, r.config.Combos
 }
 
-// ApplyConfig swaps the agent and team config and applies the [mcp.*] diff to
-// the running manager. Providers, routes, channels, web, and secrets are not
-// applied here (REQ-TFB-006).
+// ApplyConfig swaps the agent, team, provider, and combo config and applies
+// the [mcp.*] diff to the running manager. The router applies providers and
+// combos itself (REQ-RTR-008); the registry keeps them to check session model
+// switches. Routes, channels, web, and secrets are not applied here
+// (REQ-TFB-006).
 func (r *Registry) ApplyConfig(cfg core.Config) {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
 
 	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
 	for name, agentCfg := range cfg.Agents {
-		agents[name] = agentCfg
+		agents[name] = llmcall.NormalizeAgent(agentCfg)
 	}
 	teams := make(map[string]core.TeamConfig, len(cfg.Teams))
 	for name, teamCfg := range cfg.Teams {
@@ -273,6 +311,8 @@ func (r *Registry) ApplyConfig(cfg core.Config) {
 	r.cfgMu.Lock()
 	r.config.Agents = agents
 	r.config.Teams = teams
+	r.config.Providers = cfg.Providers
+	r.config.Combos = cfg.Combos
 	r.cfgMu.Unlock()
 
 	// The config now owns these agents, so its mcp list wins over the overlay
@@ -362,26 +402,47 @@ func (r *Registry) ServerStatus(name string) (state string, tools int, reason st
 	return status.State, status.Tools, status.Reason, true
 }
 
-func installDefaults(hooks *core.Hooks, llm core.LLMRegistry) {
+func installDefaults(hooks *core.Hooks, llm core.LLMRegistry, store core.SessionStore) {
 	hooks.AgentPreStep.SetDefault(func(_ context.Context, in core.PreStepInput) (core.PreStepDecision, error) {
 		return core.PreStepDecision{Input: in.Input}, nil
 	})
 	hooks.AgentRequest.SetDefault(func(_ context.Context, in core.RequestControl) (core.RequestControl, error) {
 		return in, nil
 	})
+	// REQ-RTR-005, REQ-RTR-007: the router owns retry, backoff, fallback,
+	// and cooldown. Each failed attempt becomes an assistant/attempt event.
 	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
-		if len(in.Targets) == 0 {
-			return nil, &core.ProviderError{Class: "client", Message: "provider target is empty"}
+		meta := core.LLMCallMeta{
+			Source: llmcall.SourceTurn, Agent: in.AgentName,
+			SessionID: in.SessionID, TurnID: in.TurnID, Requested: in.Requested,
 		}
-		target := in.Targets[0]
-		provider, ok := llm.Provider(target.Provider)
-		if !ok {
-			return nil, &core.ProviderError{Class: "client", Message: "unknown provider: " + target.Provider}
+		stream, served, err := llmcall.Stream(ctx, llm, in.Targets, in.Request, meta, func(attempt core.LLMAttempt) {
+			writeAttempt(ctx, store, in, attempt)
+		})
+		if err != nil {
+			return nil, err
 		}
-		req := in.Request
-		req.Model = target.Model
-		return provider.Stream(ctx, req)
+		if in.OnServed != nil {
+			in.OnServed(served)
+		}
+		return stream, nil
 	})
+}
+
+// writeAttempt records one failed attempt of a step before the router
+// retries or moves to the next target.
+func writeAttempt(ctx context.Context, store core.SessionStore, in core.LLMStreamInput, attempt core.LLMAttempt) {
+	if store == nil || attempt.Err == nil {
+		return
+	}
+	events := &Events{Store: store, SessionID: in.SessionID}
+	pe := attempt.Err
+	payload := core.AssistantAttempt{
+		V: core.PayloadVersion, Step: in.Step, Attempt: attempt.N,
+		Provider: attempt.Target.Provider, Model: attempt.Target.Model,
+		Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message},
+	}
+	_, _ = events.Append(context.WithoutCancel(ctx), core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: in.TurnID, Payload: payload})
 }
 
 func (r *Registry) runnerLocked(sessionID string) *Runner {
@@ -590,6 +651,8 @@ func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 		// stays "cancelled" and is not an interrupt (API-TFB-001).
 		cancel(nil)
 	}
+	// REQ-CCR-006: an external runtime turn gets its interrupt at once.
+	runner.interruptExternal()
 	return nil
 }
 
@@ -611,6 +674,7 @@ func (r *Registry) Interrupt(ctx context.Context, sessionID string, cause error)
 	if cancel != nil {
 		cancel(cause)
 	}
+	runner.interruptExternal()
 	return nil
 }
 
@@ -678,7 +742,10 @@ func (r *Registry) SetAgent(ctx context.Context, sessionID, agentName string) er
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
 }
 
-// SetModel selects the provider:model for the session.
+// SetModel selects the session's model: a combo name, a "provider/model"
+// address, or the legacy "provider:model" (API-RTR-003). provider:model is
+// stored as provider and model as before; a combo or an address is stored
+// in model with no provider, so old sessions read the same.
 func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {
 		return err
@@ -691,15 +758,9 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 	if _, ok := teams[agentName]; ok {
 		return ErrTeamModel
 	}
-	providerName, modelName, ok := strings.Cut(model, ":")
-	if !ok || providerName == "" {
-		return fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
-	}
-	if modelName == "" {
-		return ErrEmptyModel
-	}
-	if _, exists := r.providersConfig()[providerName]; !exists {
-		return fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+	providerName, modelName, err := r.parseModelChoice(model)
+	if err != nil {
+		return err
 	}
 	selection, err := r.sessionSelection(ctx, sessionID)
 	if err != nil {
@@ -713,6 +774,53 @@ func (r *Registry) SetModel(ctx context.Context, sessionID, model string) error 
 		ReasoningEffort: selection.ReasoningEffort,
 	}
 	return r.appendEvent(ctx, sessionID, core.KindModelSelection, "", payload)
+}
+
+// parseModelChoice checks a session model value and returns the selection's
+// provider and model: ("p", "m") for "p:m", ("", value) for a combo name or a
+// "provider/model" address.
+func (r *Registry) parseModelChoice(value string) (string, string, error) {
+	providers, combos := r.modelConfig()
+	if _, ok := combos[value]; ok {
+		return "", value, nil
+	}
+	// AC-CCT-004: a claude-code address switches the session to Claude Code.
+	if llmcall.IsClaudeCodeAddress(r.llm, value) {
+		if target, _ := llmcall.ParseTarget(value); !llmcall.ValidClaudeCodeModel(target.Model) {
+			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, value)
+		}
+		return "", value, nil
+	}
+	sep := strings.IndexAny(value, "/:")
+	if sep < 0 {
+		// Neither a combo in config nor an address: the router may still know
+		// it as a combo (an embedder's router config).
+		if rtr, ok := r.llm.(core.LLMRouter); ok {
+			if _, err := rtr.Resolve(value); err == nil {
+				return "", value, nil
+			}
+		}
+		return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, value)
+	}
+	providerName, modelName := value[:sep], value[sep+1:]
+	if providerName == "" {
+		return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+	}
+	if modelName == "" {
+		return "", "", ErrEmptyModel
+	}
+	if _, exists := providers[providerName]; !exists {
+		if r.llm == nil {
+			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+		}
+		if _, known := r.llm.Provider(providerName); !known {
+			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, providerName)
+		}
+	}
+	if value[sep] == ':' {
+		return providerName, modelName, nil
+	}
+	return "", value, nil
 }
 
 // SetReasoningEffort sets the session's thinking effort. The provider:model
@@ -841,6 +949,13 @@ func (r *Registry) Close(ctx context.Context) error {
 	go func() {
 		r.wg.Wait()
 		close(done)
+	}()
+	// The external runtime processes stop once the turns ended, or when the
+	// wait gives up (ADR 0018: processes exit at daemon shutdown).
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		r.shutdownRuntimes(sctx)
 	}()
 	select {
 	case <-done:

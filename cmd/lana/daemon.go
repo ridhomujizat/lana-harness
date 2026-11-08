@@ -319,6 +319,11 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 			webServer.SetCalendarGoogle(google)
 		}
 		webServer.SetToolbox(rt.Toolbox())
+		// Spec #42: the menu bar app reads the notification bus from GET
+		// /v1/local/events; the runtime feeds it replies and workflow runs,
+		// the web brokers approvals and questions.
+		webServer.SetNotifications(rt.Notifications())
+		rt.StartNotifications(runCtx)
 		webServer.SetDaemonStore(backend)
 		// Spec 36: the dashboard checks for, downloads, and installs updates.
 		updates = newUpdateService(updateServiceOptions{
@@ -383,6 +388,10 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 	// Spec #35, REQ-CAL-006, REQ-CAL-007: the daemon owns the calendar
 	// scheduler. It starts after the workflows, so moved slots can start runs.
 	rt.StartCalendar(runCtx)
+
+	// Spec 37, REQ-RTR-009: the daemon prunes router call records older than
+	// 30 days, hourly. It stops with runCtx.
+	rt.StartRouterUpkeep(runCtx)
 
 	// restartNow runs the same shutdown as SIGTERM and then replaces the
 	// process image. The daemon lock stays held (REQ-WEB-035).

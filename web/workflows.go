@@ -791,6 +791,7 @@ func (s *Server) writeWorkflowError(w http.ResponseWriter, operation string, err
 // route. The run and decision routes name the missing object.
 func (s *Server) writeWorkflowErrorWithNotFound(w http.ResponseWriter, operation string, err error, notFound string) {
 	var invalid *workflow.InvalidGraphError
+	var needsBackground *workflow.GuardianBackgroundError
 	switch {
 	case errors.Is(err, workflow.ErrNotFound):
 		code, message := "workflow_not_found", "workflow not found"
@@ -815,6 +816,8 @@ func (s *Server) writeWorkflowErrorWithNotFound(w http.ResponseWriter, operation
 		writeAPIError(w, http.StatusBadRequest, "invalid_choice", "the choice is not valid for this decision")
 	case errors.Is(err, workflow.ErrLockRequired):
 		writeAPIError(w, http.StatusConflict, "lock_required", "the workflow permissions must be locked again")
+	case errors.As(err, &needsBackground):
+		writeAPIError(w, http.StatusServiceUnavailable, "guardian_needs_background_model", needsBackground.Error())
 	case errors.Is(err, workflow.ErrGuardianUnavailable):
 		writeAPIError(w, http.StatusServiceUnavailable, "guardian_unavailable", "the guardian is not available")
 	case errors.As(err, &invalid):

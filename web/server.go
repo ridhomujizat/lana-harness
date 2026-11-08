@@ -20,6 +20,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/notify"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -81,7 +82,11 @@ type Server struct {
 	toolboxMu sync.RWMutex
 	// calendar holds the calendar and Google ports of the /v1/calendar routes
 	// (spec #35) and the pending Google OAuth states.
-	calendar       calendarPort
+	calendar calendarPort
+	// routerBackend is the Router page and proxy port (spec 37). It is
+	// guarded by routerMu because the proxy reads it on every request.
+	routerBackend  RouterBackend
+	routerMu       sync.RWMutex
 	daemon         DaemonStore
 	update         UpdateStore
 	telegramStatus func() TelegramStatus
@@ -98,6 +103,12 @@ type Server struct {
 	// API-WLG-008 (lana web reset-login, REQ-WLG-006). It is empty until the
 	// daemon calls SetLocalSecret, and an empty secret rejects every request.
 	localSecret string
+
+	// notifications is the notification bus of spec #42; nil until the
+	// daemon calls SetNotifications. localHeartbeat overrides the local event
+	// stream's heartbeat (tests).
+	notifications  *notify.Bus
+	localHeartbeat time.Duration
 
 	// secretsChanged is set after a successful write to secrets.env and stays
 	// set until the daemon restarts.
@@ -200,9 +211,11 @@ func New(cfg Config) (*Server, error) {
 	s.registerWebRoutes()
 	s.registerAuditRoutes()
 	s.registerLocalRoutes()
+	s.registerNotifyRoutes()
 	s.registerWorkflowRoutes()
 	s.registerToolboxRoutes()
 	s.registerCalendarRoutes()
+	s.registerRouterRoutes()
 	s.handler = securityHeaders(s.mux)
 	return s, nil
 }

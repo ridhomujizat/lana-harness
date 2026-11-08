@@ -56,5 +56,6 @@
 @import "./pages-gr8r/tools.css" layer(gr8r);
 @import "./pages-gr8r/calendar.css" layer(gr8r);
 @import "./pages-gr8r/turn.css" layer(gr8r);
+@import "./pages-gr8r/router.css" layer(gr8r);
 @import "./mobile.css" layer(gr8r);
 @import "./pages-gr8r/update.css" layer(gr8r);

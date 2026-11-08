@@ -333,11 +333,11 @@ func (s *Service) lintContradictions(ctx context.Context, l *lintLookup) []strin
 		return nil
 	}
 	agentCfg, ok := s.lookupAgent(agentName)
-	if !ok || s.llm == nil {
+	if !ok {
 		return nil
 	}
-	provider, ok := s.llm.Provider(agentCfg.Provider)
-	if !ok {
+	call, err := s.agentCall(agentName, agentCfg)
+	if err != nil {
 		return nil
 	}
 
@@ -355,7 +355,7 @@ func (s *Service) lintContradictions(ctx context.Context, l *lintLookup) []strin
 		if err := ctx.Err(); err != nil {
 			break
 		}
-		items, err := s.lintPageContradictions(ctx, provider, agentCfg, l, p)
+		items, err := s.lintPageContradictions(ctx, call, l, p)
 		if err != nil {
 			slog.Debug("knowledge lint: contradiction pass skipped page", "page", p.page.Path, "error", err)
 			continue
@@ -382,7 +382,7 @@ func (l *lintLookup) changedSince(sinceMS int64) []lintPage {
 
 // lintPageContradictions makes the one provider call of a page and parses its
 // reply (design §8).
-func (s *Service) lintPageContradictions(ctx context.Context, provider core.Provider, agentCfg core.AgentConfig, l *lintLookup, p lintPage) ([]lintContradiction, error) {
+func (s *Service) lintPageContradictions(ctx context.Context, call agentCall, l *lintLookup, p lintPage) ([]lintContradiction, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## %s\n%s\n", p.page.Title, firstRunes(p.page.Body, lintPageRunes))
 	linked := 0
@@ -401,8 +401,7 @@ func (s *Service) lintPageContradictions(ctx context.Context, provider core.Prov
 
 	callCtx, cancel := context.WithTimeout(ctx, lintCallTimeout)
 	defer cancel()
-	stream, err := provider.Stream(callCtx, core.ChatRequest{
-		Model:  agentCfg.Model,
+	stream, err := s.stream(callCtx, call, "", core.ChatRequest{
 		System: lintSystem,
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: b.String()},

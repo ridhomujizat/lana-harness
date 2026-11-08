@@ -15,6 +15,8 @@ var knowledgeToolNames = []string{"knowledge_search", "knowledge_read", "knowled
 // name order whose tools list has a knowledge tool. Without one it returns ""
 // and a reason for the status.
 func knowledgeAgent(cfg core.Config) (name string, reason string) {
+	// REQ-CCT-007: a Claude Code agent runs the passes with its background
+	// chain.
 	if cfg.Knowledge.Agent != "" {
 		return cfg.Knowledge.Agent, ""
 	}
@@ -24,7 +26,7 @@ func knowledgeAgent(cfg core.Config) (name string, reason string) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if hasKnowledgeTool(cfg.Agents[name]) {
+		if agent := cfg.Agents[name]; hasKnowledgeTool(agent) {
 			return name, ""
 		}
 	}

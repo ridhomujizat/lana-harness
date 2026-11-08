@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 func init() {
@@ -59,6 +60,8 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 				slog.Warn("agent uses a tool which is not registered", "agent", name, "tool", toolName)
 			}
 		}
+		// API-CCT-002: a legacy runtime agent is its claude-code address.
+		agentCfg = llmcall.NormalizeAgent(agentCfg)
 		if agentCfg.Provider != "" {
 			if _, ok := config.Providers[agentCfg.Provider]; !ok {
 				return fmt.Errorf("agent '%s' uses provider '%s' which is not registered", name, agentCfg.Provider)
@@ -66,8 +69,13 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		}
 		for _, fallback := range agentCfg.Fallback {
 			provider := fallback
-			if idx := stringsIndexByte(fallback, ':'); idx >= 0 {
-				provider = fallback[:idx]
+			if target, ok := llmcall.ParseTarget(fallback); ok {
+				provider = target.Provider
+			}
+			// ADR 0020, REQ-CCT-010: a Claude Code account has no router
+			// provider.
+			if llmcall.IsClaudeCodeProvider(config.Providers, provider) {
+				continue
 			}
 			if _, ok := config.Providers[provider]; !ok {
 				return fmt.Errorf("agent '%s' uses fallback provider '%s' which is not registered", name, provider)
@@ -87,8 +95,6 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 			registry.SetMCP(m)
 		}
 	}
-	retry := NewRetry(store)
-	retry.Install(b.Hooks())
 	m.registry = registry
 	return b.Provide(core.ServiceAgents, registry)
 }
@@ -98,13 +104,4 @@ func (m *Module) Stop(ctx context.Context) error {
 		return nil
 	}
 	return m.registry.Close(ctx)
-}
-
-func stringsIndexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }

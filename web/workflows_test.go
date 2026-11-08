@@ -444,6 +444,30 @@ func TestWorkflowInvalidGraph(t *testing.T) {
 	assertAuthError(t, rr, http.StatusBadRequest, "unknown_agent")
 }
 
+// API-WF-017, spec 39 revision 5: a guardian on Claude Code without a
+// background model answers 503 guardian_needs_background_model with the
+// message the assistant shows; another failure stays guardian_unavailable.
+func TestWorkflowAssistGuardianNeedsBackgroundModel(t *testing.T) {
+	backend := newFakeWorkflowBackend()
+	backend.assistErr = &workflow.GuardianBackgroundError{Agent: "bima"}
+	s, cookie, csrf := newWorkflowTestServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi","base_version":1}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "guardian_needs_background_model")
+	var env errorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	const want = "The guardian bima runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes."
+	if env.Error.Message != want {
+		t.Fatalf("message = %q", env.Error.Message)
+	}
+
+	backend.assistErr = workflow.ErrGuardianUnavailable
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi","base_version":1}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "guardian_unavailable")
+}
+
 // API-WF-011, REQ-WF-003: a manual run answers 202 with the run.
 func TestWorkflowStartRun(t *testing.T) {
 	backend := newFakeWorkflowBackend()

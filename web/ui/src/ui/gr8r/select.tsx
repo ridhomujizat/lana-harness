@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -10,6 +11,7 @@ import {
 import type {
   ButtonHTMLAttributes,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { Ic } from "../icons";
@@ -23,6 +25,33 @@ import { cn, placeAnchored } from "./util";
 export interface SelectOption {
   value: string;
   label: string;
+  /* Consecutive options with the same group render under one heading. */
+  group?: string;
+  /* A small mark before the label, such as a provider logo. */
+  icon?: ReactNode;
+  /* A small mark before the group heading; the first option of a group
+     sets it. */
+  groupIcon?: ReactNode;
+}
+
+interface OptionGroup {
+  group: string;
+  icon?: ReactNode;
+  options: SelectOption[];
+}
+
+function groupOptions(options: SelectOption[]): OptionGroup[] {
+  const groups: OptionGroup[] = [];
+  for (const option of options) {
+    const group = option.group || "";
+    const last = groups[groups.length - 1];
+    if (last && last.group === group) {
+      last.options.push(option);
+    } else {
+      groups.push({ group, icon: option.groupIcon, options: [option] });
+    }
+  }
+  return groups;
 }
 
 export interface SelectProps
@@ -206,6 +235,7 @@ export function Select({
         }}
         onKeyDown={handleTriggerKeyDown}
       >
+        {selected && selected.icon ? <span className="select-icon">{selected.icon}</span> : null}
         <span className="trunc grow">{label}</span>
         <Ic name="chevron-down" size={size === "sm" ? 13 : 14} />
       </button>
@@ -219,24 +249,39 @@ export function Select({
               style={{ left: 0, top: 0 }}
               onKeyDown={handleMenuKeyDown}
             >
-              {options.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  data-value={option.value}
-                  aria-selected={option.value === value}
-                  className="mi"
-                  onClick={() => pick(option.value)}
-                >
-                  <span className="trunc grow">{option.label}</span>
-                  {option.value === value ? (
-                    <span className="ck">
-                      <Ic name="check" size={14} />
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+              {groupOptions(options).map((entry, groupIndex) => {
+                const items = entry.options.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="option"
+                    data-value={option.value}
+                    aria-selected={option.value === value}
+                    className="mi"
+                    onClick={() => pick(option.value)}
+                  >
+                    {option.icon ? <span className="select-icon">{option.icon}</span> : null}
+                    <span className="trunc grow">{option.label}</span>
+                    {option.value === value ? (
+                      <span className="ck">
+                        <Ic name="check" size={14} />
+                      </span>
+                    ) : null}
+                  </button>
+                ));
+                if (!entry.group) {
+                  return <Fragment key={"g" + groupIndex}>{items}</Fragment>;
+                }
+                return (
+                  <div key={"g" + groupIndex} role="group" aria-label={entry.group}>
+                    <div className="mh" aria-hidden="true">
+                      {entry.icon ? <span className="select-icon">{entry.icon}</span> : null}
+                      {entry.group}
+                    </div>
+                    {items}
+                  </div>
+                );
+              })}
             </div>,
             document.body
           )

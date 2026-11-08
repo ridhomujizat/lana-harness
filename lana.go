@@ -22,18 +22,24 @@ import (
 	_ "github.com/ridhomujizat/lana-harness/agent/compaction"
 	_ "github.com/ridhomujizat/lana-harness/agent/knowledge"
 	_ "github.com/ridhomujizat/lana-harness/agent/memcapture"
+	"github.com/ridhomujizat/lana-harness/agent/titles"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/calendar"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
+	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
+	_ "github.com/ridhomujizat/lana-harness/providers/anthropic"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
+	"github.com/ridhomujizat/lana-harness/router"
+	"github.com/ridhomujizat/lana-harness/runtime/mcphost"
 	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
 	"github.com/ridhomujizat/lana-harness/tools"
@@ -186,13 +192,30 @@ type Runtime struct {
 	jobs   *jobs.Registry
 	closed atomic.Bool
 	// cfgMu guards the live-applied sections of result.Config: Agents, Teams,
-	// and MCP. Providers, routes, channels, web, and secrets stay fixed.
+	// MCP, Providers, Combos, and Router. Routes, channels, web, and secrets
+	// stay fixed.
 	cfgMu sync.RWMutex
+	// router is the LLM router of the llm module (spec 37); nil when the llm
+	// service is not a *router.Router. routerRec is its async call recorder
+	// over the session store, nil when the store keeps no router records.
+	router    *router.Router
+	routerRec *routerRecorder
+	// routerKV keeps small router state such as the Claude Code model list;
+	// nil when the store keeps no router records.
+	routerKV routerdb.KVStore
+	// toolHost serves lana's tools to Claude Code turns (ADR 0020).
+	toolHost *mcphost.Host
 	// draining refuses new turns while the daemon waits for running turns
 	// (REQ-TFB-002).
 	draining atomic.Bool
 	closeMu  sync.Mutex
 	closeErr error
+	// claudeSignIns are the background sign-ins of Claude Code accounts
+	// (REQ-CCT-012).
+	claudeSignIns claudeSignIns
+	// claudeUsage throttles the usage probes of Claude Code accounts
+	// (spec 39 Revision 4).
+	claudeUsage claudeUsageThrottle
 	// consolidateWG tracks the in-flight nightly knowledge consolidation started
 	// by KnowledgeConsolidate, so Close joins it after cancelling rt.ctx and
 	// before the store is shut down (REQ-KNU-041).
@@ -238,6 +261,16 @@ type Runtime struct {
 	// toolboxWatch tracks the goroutine that refreshes the registered toolbox
 	// tools on every toolbox change (REQ-TB-004).
 	toolboxWatch sync.WaitGroup
+	// routerUpkeepOnce makes StartRouterUpkeep start the call-record prune at
+	// most once; routerUpkeep tracks that loop so Close joins it before the
+	// store closes (spec 37, REQ-RTR-009).
+	routerUpkeepOnce sync.Once
+	routerUpkeep     sync.WaitGroup
+	// titles names sessions after their first turn (spec 40). It is never
+	// nil after New.
+	titles *titles.Service
+	// notify holds the notification bus and its feeders (spec #42).
+	notify notifyState
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
@@ -414,6 +447,16 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		jobs: jobsRegistry, wfSessions: map[string]*workflowSession{},
 		toolboxNames: map[string]bool{},
 	}
+	rt.attachRouterStores()
+	// Spec 40: name sessions in the background after their first turn.
+	rt.startTitles()
+	// Spec 38, spec 39: Claude Code turns report usage, plan windows, and the
+	// model list to the router.
+	registry.SetExternalHooks(rt.externalHooks())
+	// ADR 0020: lana's tools reach Claude Code turns over a loopback MCP
+	// server, which listens on the first Claude Code turn.
+	rt.toolHost = mcphost.New(mcphost.Options{Logger: slog.Default()})
+	registry.SetToolHost(rt.toolHost)
 	// REQ-WF-009, AC-WF-016: the workflow tool gate is prepended so a worker's
 	// tool list, step budget and lock are decided before the permission engine
 	// asks the owner. It only acts on sessions a workflow run registered.
@@ -447,12 +490,23 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 }
 
 // ApplyConfig replaces the live sections of the loaded config: agents, teams,
-// and MCP. Providers, routes, channels, web, and secrets are not applied
-// (REQ-TFB-006).
-func (rt *Runtime) ApplyConfig(cfg core.Config) {
+// MCP, and the router's providers, combos, and cooldown (REQ-RTR-008). Routes,
+// channels, web, and secrets are not applied (REQ-TFB-006). A router config
+// the router rejects returns the error and changes nothing.
+func (rt *Runtime) ApplyConfig(cfg core.Config) error {
+	if rt.router != nil {
+		rcfg, err := router.ConfigFromCore(cfg)
+		if err != nil {
+			return err
+		}
+		if err := rt.router.Apply(rcfg); err != nil {
+			return err
+		}
+	}
 	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
 	for name, agentCfg := range cfg.Agents {
-		agents[name] = agentCfg
+		// API-CCT-002: a legacy runtime agent is its claude-code address.
+		agents[name] = llmcall.NormalizeAgent(agentCfg)
 	}
 	teams := make(map[string]core.TeamConfig, len(cfg.Teams))
 	for name, teamCfg := range cfg.Teams {
@@ -466,6 +520,9 @@ func (rt *Runtime) ApplyConfig(cfg core.Config) {
 	rt.result.Config.Agents = agents
 	rt.result.Config.Teams = teams
 	rt.result.Config.MCP = mcpCfg
+	rt.result.Config.Providers = cfg.Providers
+	rt.result.Config.Combos = cfg.Combos
+	rt.result.Config.Router = cfg.Router
 	live := rt.result.Config
 	rt.cfgMu.Unlock()
 	if rt.registry != nil {
@@ -477,6 +534,7 @@ func (rt *Runtime) ApplyConfig(cfg core.Config) {
 	if applier, ok := rt.coreCtx.Approval.(interface{ ApplyConfig(core.Config) }); ok {
 		applier.ApplyConfig(live)
 	}
+	return nil
 }
 
 // NonLiveConfig returns the loaded config with the live-applied sections
@@ -489,6 +547,10 @@ func (rt *Runtime) NonLiveConfig() core.Config {
 	cfg.Agents = nil
 	cfg.Teams = nil
 	cfg.MCP = nil
+	// Spec 37 REQ-RTR-008: providers, combos, and [router] apply live.
+	cfg.Providers = nil
+	cfg.Combos = nil
+	cfg.Router = core.RouterConfig{}
 	return cfg
 }
 
@@ -738,6 +800,11 @@ type Result struct {
 	SessionID  string
 	StopReason string
 	Usage      Usage
+	// Model is the model that served the turn as `lana run` shows it: the
+	// legacy "provider:model", the router target "provider/model" that
+	// answered (else the requested combo or address), or "claude-agent/<model>"
+	// for a Claude Agent. It is empty when no agent was resolved.
+	Model string
 }
 
 const (
@@ -765,11 +832,11 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	}
 	info, err := rt.openSession(ctx, req, agentName)
 	if err != nil {
-		return Result{}, err
+		return Result{Model: rt.turnModel(ctx, "", "", agentName)}, err
 	}
 	turnID, err := rt.registry.Start(ctx, info.ID, req.Prompt, req.Attachments...)
 	if err != nil {
-		return Result{}, err
+		return Result{SessionID: info.ID, Model: rt.turnModel(ctx, info.ID, "", info.Agent)}, err
 	}
 	stopWatch := make(chan struct{})
 	go func() {
@@ -787,6 +854,7 @@ func (rt *Runtime) Run(ctx context.Context, req Request) (Result, error) {
 	result := Result{
 		Text: turnResult.Text, SessionID: info.ID, StopReason: turnResult.StopReason,
 		Usage: Usage{InputTokens: int(turnResult.Usage.InputTokens), OutputTokens: int(turnResult.Usage.OutputTokens)},
+		Model: rt.turnModel(context.WithoutCancel(ctx), info.ID, turnID, info.Agent),
 	}
 	if turnResult.Err != nil {
 		return result, turnResult.Err
@@ -858,6 +926,7 @@ func (rt *Runtime) Continue(ctx context.Context, sessionID string) (Result, erro
 	result := Result{
 		Text: turnResult.Text, SessionID: info.ID, StopReason: turnResult.StopReason,
 		Usage: Usage{InputTokens: int(turnResult.Usage.InputTokens), OutputTokens: int(turnResult.Usage.OutputTokens)},
+		Model: rt.turnModel(context.WithoutCancel(ctx), info.ID, turnID, info.Agent),
 	}
 	if turnResult.Err != nil {
 		return result, turnResult.Err
@@ -1061,6 +1130,8 @@ func (rt *Runtime) Close() error {
 		return rt.closeErr
 	}
 	rt.closed.Store(true)
+	// REQ-CCT-012: stop the running Claude Code sign-ins.
+	rt.cancelClaudeSignIns()
 	// REQ-JOB-018: kill every background job's process group on shutdown.
 	if rt.jobs != nil {
 		rt.jobs.Shutdown()
@@ -1090,6 +1161,8 @@ func (rt *Runtime) Close() error {
 	// Join the in-flight nightly consolidation before the store closes, so it
 	// cannot write to a store Shutdown has already closed (REQ-KNU-041).
 	rt.consolidateWG.Wait()
+	// The router prune loop stops with rt.ctx; join it before the store closes.
+	rt.routerUpkeep.Wait()
 	// REQ-TB-003, REQ-TB-004: stop the toolbox jobs and the tool refresh loop
 	// before the registry closes, so no toolbox change touches a closing
 	// registry.
@@ -1102,6 +1175,18 @@ func (rt *Runtime) Close() error {
 	if err := rt.registry.Close(ctx); err != nil {
 		rt.closeErr = err
 	}
+	// Spec 40: the turns have stopped, so no new title pass starts; the
+	// running ones stop with rt.ctx. Join them before the store closes.
+	if rt.titles != nil {
+		rt.titles.Wait()
+	}
+	// ADR 0020: the Claude processes have stopped; stop the MCP host.
+	if rt.toolHost != nil {
+		_ = rt.toolHost.Close()
+	}
+	// Spec 37: the turns have stopped; flush the router's limit snapshots and
+	// the buffered call records while the store is still open.
+	rt.closeRouterStores()
 	if err := rt.coreCtx.Shutdown(context.Background()); err != nil && rt.closeErr == nil {
 		rt.closeErr = err
 	}
@@ -1189,10 +1274,12 @@ func (rt *Runtime) agentConfig(name string) (core.AgentConfig, bool) {
 	return rt.teamLead(name)
 }
 
-// AgentModel returns the agent's "provider:model".
+// AgentModel returns the agent's model as lana shows it. The legacy provider + model form shows as "provider:model"; the router form
+// shows the combo name or "provider/model" address as written. Both are
+// values a session model switch accepts (API-RTR-003).
 func (rt *Runtime) AgentModel(agentName string) string {
 	if agentCfg, ok := rt.agentConfig(agentName); ok {
-		return agentCfg.Provider + ":" + agentCfg.Model
+		return llmcall.Display(agentCfg.Provider, agentCfg.Model)
 	}
 	return ""
 }

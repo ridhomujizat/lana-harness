@@ -2,27 +2,33 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/router"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
 )
 
+// The router owns retry, backoff, fallback, and cooldown (REQ-RTR-005); its
+// unit tests cover the policy. These tests cover the agent side of the
+// default llm.stream handler: attempts become assistant/attempt events and
+// the served target is reported.
+
 type failingProvider struct {
-	failures   int32
-	class      string
-	retryAfter time.Duration
-	calls      atomic.Int32
+	failures int32
+	class    string
+	status   int
+	calls    atomic.Int32
 }
 
 func (p *failingProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	n := p.calls.Add(1)
 	if n <= p.failures {
-		return nil, &core.ProviderError{Class: p.class, Message: "failed", RetryAfter: p.retryAfter}
+		return nil, &core.ProviderError{Class: p.class, Status: p.status, Message: "failed"}
 	}
 	return func(yield func(core.ChatEvent, error) bool) {
 		yield(core.ChatEvent{Kind: core.ChatTextDelta, Text: "ok"}, nil)
@@ -30,31 +36,34 @@ func (p *failingProvider) Stream(ctx context.Context, req core.ChatRequest) (cor
 	}, nil
 }
 
-func retryHarness(t *testing.T, providers map[string]core.Provider, targets []core.LLMTarget) (*core.Hooks, *memstore.Store, string) {
+// routedHooks installs the default handlers over a router of providers whose
+// backoff waits are skipped.
+func routedHooks(t *testing.T, providers map[string]core.Provider) (*core.Hooks, *memstore.Store, string) {
 	t.Helper()
 	store := memstore.New()
 	info, err := store.Create(context.Background(), core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	rtr, err := router.New(router.Config{},
+		router.WithProviders(providers),
+		router.WithSleep(func(context.Context, time.Duration) error { return nil }),
+		router.WithJitter(func() float64 { return 1 }),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	hooks := core.NewHooks()
-	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
-		provider := providers[in.Targets[0].Provider]
-		if provider == nil {
-			return nil, &core.ProviderError{Class: "client", Message: "provider not found"}
-		}
-		return provider.Stream(ctx, in.Request)
-	})
-	retry := NewRetry(store)
-	retry.Delays = []time.Duration{5 * time.Millisecond, 10 * time.Millisecond, 15 * time.Millisecond}
-	retry.Jitter = func() float64 { return 1 }
-	retry.Install(hooks)
+	installDefaults(hooks, rtr, store)
 	return hooks, store, info.ID
 }
 
-func callStream(t *testing.T, hooks *core.Hooks, sessionID string, targets []core.LLMTarget) error {
+func callStream(t *testing.T, hooks *core.Hooks, sessionID string, targets []core.LLMTarget, served *core.LLMTarget) error {
 	t.Helper()
-	stream, err := hooks.LLMStream.Call(context.Background(), core.LLMStreamInput{SessionID: sessionID, TurnID: "t", Step: 1, Targets: targets})
+	stream, err := hooks.LLMStream.Call(context.Background(), core.LLMStreamInput{
+		SessionID: sessionID, TurnID: "t", Step: 1, Targets: targets,
+		OnServed: func(target core.LLMTarget) { *served = target },
+	})
 	if err != nil {
 		return err
 	}
@@ -66,52 +75,82 @@ func callStream(t *testing.T, hooks *core.Hooks, sessionID string, targets []cor
 	return nil
 }
 
-func TestRetryBackoff(t *testing.T) {
+func attemptEvents(t *testing.T, store *memstore.Store, sessionID string) []core.AssistantAttempt {
+	t.Helper()
+	events, err := store.ChainEvents(context.Background(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []core.AssistantAttempt
+	for _, event := range events {
+		if event.Kind != core.KindAssistantAttempt {
+			continue
+		}
+		var payload core.AssistantAttempt
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+// Retries of one target are written as numbered assistant/attempt events.
+func TestRoutedRetryWritesAttempts(t *testing.T) {
 	provider := &failingProvider{failures: 2, class: "rate_limit"}
-	hooks, store, sessionID := retryHarness(t, map[string]core.Provider{"p": provider}, nil)
-	start := time.Now()
-	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
+	hooks, store, sessionID := routedHooks(t, map[string]core.Provider{"p": provider})
+	var served core.LLMTarget
+	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}, &served); err != nil {
 		t.Fatal(err)
 	}
 	if provider.calls.Load() != 3 {
 		t.Fatalf("calls=%d", provider.calls.Load())
 	}
-	if elapsed := time.Since(start); elapsed < 15*time.Millisecond {
-		t.Fatalf("backoff did not happen: %v", elapsed)
+	attempts := attemptEvents(t, store, sessionID)
+	if len(attempts) != 2 {
+		t.Fatalf("attempts=%+v", attempts)
 	}
-	var attempts int
-	events, _ := store.ChainEvents(context.Background(), sessionID)
-	for _, event := range events {
-		if event.Kind == core.KindAssistantAttempt {
-			attempts++
+	for i, a := range attempts {
+		if a.Attempt != i+1 || a.Step != 1 || a.Provider != "p" || a.Model != "m" || a.Error.Class != "rate_limit" {
+			t.Fatalf("attempt %d = %+v", i, a)
 		}
 	}
-	if attempts != 2 {
-		t.Fatalf("attempts=%d", attempts)
+	if served != (core.LLMTarget{Provider: "p", Model: "m"}) {
+		t.Fatalf("served=%+v", served)
 	}
 }
 
-func TestFallbackOrder(t *testing.T) {
-	primary := &failingProvider{failures: 100, class: "server"}
-	fallback := &failingProvider{failures: 0}
-	hooks, _, sessionID := retryHarness(t, map[string]core.Provider{"primary": primary, "fallback": fallback}, nil)
-	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "primary", Model: "m"}, {Provider: "fallback", Model: "m"}}); err != nil {
+// AC-RTR-007 (handler side): an auth failure moves to the next target at once
+// and the fallback is reported as served.
+func TestRoutedFallbackReportsServedTarget(t *testing.T) {
+	primary := &failingProvider{failures: 100, class: "auth", status: 401}
+	fallback := &failingProvider{}
+	hooks, store, sessionID := routedHooks(t, map[string]core.Provider{"primary": primary, "fallback": fallback})
+	var served core.LLMTarget
+	err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "primary", Model: "x"}, {Provider: "fallback", Model: "y"}}, &served)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if primary.calls.Load() != 6 {
-		t.Fatalf("primary calls=%d", primary.calls.Load())
+	if primary.calls.Load() != 1 || fallback.calls.Load() != 1 {
+		t.Fatalf("primary=%d fallback=%d", primary.calls.Load(), fallback.calls.Load())
 	}
-	if fallback.calls.Load() != 1 {
-		t.Fatalf("fallback calls=%d", fallback.calls.Load())
+	attempts := attemptEvents(t, store, sessionID)
+	if len(attempts) != 1 || attempts[0].Provider != "primary" || attempts[0].Model != "x" || attempts[0].Error.Class != "auth" {
+		t.Fatalf("attempts=%+v", attempts)
+	}
+	if served != (core.LLMTarget{Provider: "fallback", Model: "y"}) {
+		t.Fatalf("served=%+v", served)
 	}
 }
 
-func TestNoRetryClasses(t *testing.T) {
-	for _, class := range []string{"auth", "client", "context_length"} {
-		primary := &failingProvider{failures: 10, class: class}
-		fallback := &failingProvider{failures: 0}
-		hooks, _, sessionID := retryHarness(t, map[string]core.Provider{"primary": primary, "fallback": fallback}, nil)
-		err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "primary", Model: "m"}, {Provider: "fallback", Model: "m"}})
+// AC-RTR-008 (handler side): client and context_length errors stop the chain.
+func TestRoutedNoFallbackClasses(t *testing.T) {
+	for _, class := range []string{"client", "context_length"} {
+		primary := &failingProvider{failures: 10, class: class, status: 400}
+		fallback := &failingProvider{}
+		hooks, _, sessionID := routedHooks(t, map[string]core.Provider{"primary": primary, "fallback": fallback})
+		var served core.LLMTarget
+		err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "primary", Model: "m"}, {Provider: "fallback", Model: "m"}}, &served)
 		var pe *core.ProviderError
 		if !errors.As(err, &pe) || pe.Class != class {
 			t.Fatalf("class %s err=%v", class, err)
@@ -122,106 +161,20 @@ func TestNoRetryClasses(t *testing.T) {
 	}
 }
 
-func TestNewRetryDefaultDelays(t *testing.T) {
-	retry := NewRetry(nil)
-	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second}
-	if !reflect.DeepEqual(retry.Delays, want) {
-		t.Fatalf("delays=%v", retry.Delays)
-	}
-}
-
-// newRecordingHarness builds a harness whose Retry records the delays it waits
-// through Sleep, so tests never spend wall-clock time.
-func newRecordingHarness(t *testing.T, provider core.Provider, jitter func() float64) (*core.Hooks, *Retry, *[]time.Duration, string) {
-	t.Helper()
+// A plain LLMRegistry (no router) gets one direct call to the first target.
+func TestPlainRegistryCallsFirstTarget(t *testing.T) {
+	primary := &failingProvider{failures: 1, class: "server"}
 	store := memstore.New()
 	info, err := store.Create(context.Background(), core.NewSession{Agent: "a", Channel: "library", Workspace: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	hooks := core.NewHooks()
-	hooks.LLMStream.SetDefault(func(ctx context.Context, in core.LLMStreamInput) (core.ChatStream, error) {
-		return provider.Stream(ctx, in.Request)
-	})
-	slept := &[]time.Duration{}
-	retry := NewRetry(store)
-	if jitter != nil {
-		retry.Jitter = jitter
-	}
-	retry.Sleep = func(ctx context.Context, d time.Duration) error {
-		*slept = append(*slept, d)
-		return nil
-	}
-	retry.Install(hooks)
-	return hooks, retry, slept, info.ID
-}
-
-func TestRetryHonorsRetryAfter(t *testing.T) {
-	provider := &failingProvider{failures: 1, class: "rate_limit", retryAfter: 3 * time.Second}
-	hooks, _, slept, sessionID := newRecordingHarness(t, provider, func() float64 { return 1 })
-	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
-		t.Fatal(err)
-	}
-	if provider.calls.Load() != 2 {
-		t.Fatalf("calls=%d", provider.calls.Load())
-	}
-	if len(*slept) != 1 || (*slept)[0] != 3*time.Second {
-		t.Fatalf("slept=%v", *slept)
-	}
-}
-
-func TestRetryAfterCapped(t *testing.T) {
-	provider := &failingProvider{failures: 1, class: "rate_limit", retryAfter: 200 * time.Second}
-	hooks, _, slept, sessionID := newRecordingHarness(t, provider, func() float64 { return 1 })
-	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(*slept) != 1 || (*slept)[0] != 120*time.Second {
-		t.Fatalf("slept=%v", *slept)
-	}
-}
-
-func TestRetryJitterRange(t *testing.T) {
-	provider := &failingProvider{failures: 2, class: "server"}
-	hooks, retry, slept, sessionID := newRecordingHarness(t, provider, nil)
-	retry.Delays = []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 300 * time.Millisecond}
-	if err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(*slept) != 2 {
-		t.Fatalf("slept=%v", *slept)
-	}
-	for i, d := range *slept {
-		base := retry.Delays[i]
-		lo := time.Duration(float64(base) * 0.8)
-		hi := time.Duration(float64(base) * 1.2)
-		if d < lo || d > hi {
-			t.Fatalf("delay %d = %v not in [%v,%v]", i, d, lo, hi)
-		}
-	}
-}
-
-// nilStreamProvider returns no stream and no error, the broken adapter case.
-type nilStreamProvider struct {
-	calls atomic.Int32
-}
-
-func (p *nilStreamProvider) Stream(context.Context, core.ChatRequest) (core.ChatStream, error) {
-	p.calls.Add(1)
-	return nil, nil
-}
-
-// TestRetryNilStream covers that a provider returning (nil, nil) is treated as
-// a retryable network failure instead of dereferencing a nil iterator.
-func TestRetryNilStream(t *testing.T) {
-	provider := &nilStreamProvider{}
-	hooks, _, sessionID := retryHarness(t, map[string]core.Provider{"p": provider}, nil)
-	err := callStream(t, hooks, sessionID, []core.LLMTarget{{Provider: "p", Model: "m"}})
+	installDefaults(hooks, &testLLM{providers: map[string]core.Provider{"p": primary}}, store)
+	var served core.LLMTarget
+	err = callStream(t, hooks, info.ID, []core.LLMTarget{{Provider: "p", Model: "m"}}, &served)
 	var pe *core.ProviderError
-	if !errors.As(err, &pe) || pe.Class != "network" {
-		t.Fatalf("err=%v want a network ProviderError", err)
-	}
-	if got := provider.calls.Load(); got != maxRetries+1 {
-		t.Fatalf("calls=%d want %d", got, maxRetries+1)
+	if !errors.As(err, &pe) || pe.Class != "server" || primary.calls.Load() != 1 {
+		t.Fatalf("err=%v calls=%d", err, primary.calls.Load())
 	}
 }

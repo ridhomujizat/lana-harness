@@ -112,7 +112,7 @@ describe("AC-WLG-014: no owner token or daemon output in the views", () => {
     welcome.unmount();
 
     const setup = render(<SetupWizard step="provider" />);
-    expect(screen.getByText("Choose a model provider")).toBeTruthy();
+    expect(screen.getByText("Connect your models")).toBeTruthy();
     expectNoLegacyWording();
     setup.unmount();
 

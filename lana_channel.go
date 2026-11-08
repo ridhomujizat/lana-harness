@@ -69,6 +69,13 @@ func (rt *Runtime) lockChannelSession(channel, address, agentName string) func()
 // CreateChannelSession creates a new session for the channel address. The workspace is the
 // agent's workspace, else $LANA_HOME/workspaces/<agent>/.
 func (rt *Runtime) CreateChannelSession(ctx context.Context, channel, address, agentName string) (core.SessionInfo, error) {
+	return rt.createChannelSession(ctx, channel, address, agentName, "")
+}
+
+// createChannelSession is CreateChannelSession with a fixed title. A
+// non-empty title is stored with source "system", so the title pass leaves
+// it alone (spec 40, REQ-TTL-007).
+func (rt *Runtime) createChannelSession(ctx context.Context, channel, address, agentName, title string) (core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {
 		return core.SessionInfo{}, err
 	}
@@ -94,7 +101,11 @@ func (rt *Runtime) CreateChannelSession(ctx context.Context, channel, address, a
 	if err != nil {
 		return core.SessionInfo{}, err
 	}
-	return rt.store.Create(ctx, core.NewSession{Agent: agentName, Channel: channel, Address: address, Workspace: workspace})
+	in := core.NewSession{Agent: agentName, Channel: channel, Address: address, Workspace: workspace}
+	if title != "" {
+		in.Title, in.TitleSource = title, core.TitleSourceSystem
+	}
+	return rt.store.Create(ctx, in)
 }
 
 // LeaseSession takes the session lease so no other process can use the session.

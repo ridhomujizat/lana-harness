@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/ridhomujizat/lana-harness/core"
-	"github.com/ridhomujizat/lana-harness/internal/models"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // ErrTurnActive and ErrNothingToCompact originate from the store package.
@@ -286,16 +286,11 @@ func (s *Service) agentConfig(name string) (core.AgentConfig, bool) {
 	return agent, ok
 }
 
-func (s *Service) resolvePolicy(agentName string, maxTokens int, effort string) policy {
+func (s *Service) resolvePolicy(agentName string, chain []core.LLMTarget, maxTokens int, effort string) policy {
 	p := policy{window: defaultContextWindow, output: defaultMaxTokens, headroom: defaultHeadroom, threshold: defaultThreshold, retain: defaultRetain}
-	modelID := ""
-	agentWindow := false
+	agentWindow := 0
 	if agent, ok := s.agentConfig(agentName); ok {
-		modelID = agent.Model
-		if agent.ContextWindow > 0 {
-			p.window = int64(agent.ContextWindow)
-			agentWindow = true
-		}
+		agentWindow = agent.ContextWindow
 		if agent.CompactionHeadroom > 0 {
 			p.headroom = int64(agent.CompactionHeadroom)
 		}
@@ -309,16 +304,12 @@ func (s *Service) resolvePolicy(agentName string, maxTokens int, effort string) 
 			effort = agent.ReasoningEffort
 		}
 	}
-	known, ok := models.Lookup(modelID)
-	if modelID != "" && ok {
-		// REQ-MDL-010, REQ-MDL-011: the catalog window applies when the agent
-		// sets none.
-		if !agentWindow && known.ContextWindow > 0 {
-			p.window = int64(known.ContextWindow)
-		}
-		if effort == "" {
-			effort = known.DefaultEffort
-		}
+	// REQ-MDL-010, REQ-MDL-011: the agent's context_window wins, else the
+	// smallest catalog window across the chain (spec 37 design, agent).
+	p.window = int64(llmcall.ContextWindow(agentWindow, chain))
+	known, ok := llmcall.Lookup(chain)
+	if ok && effort == "" {
+		effort = known.DefaultEffort
 	}
 	if maxTokens > 0 {
 		// An explicit request max_tokens always wins.
@@ -381,16 +372,12 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 		return zero, err
 	}
 	baseline := info.LastSeq
-	providerName, model := s.resolveTarget(req, info.Agent, events)
-	if providerName == "" || model == "" {
-		return zero, fmt.Errorf("no model found for compaction")
-	}
-	provider, ok := s.LLM.Provider(providerName)
-	if !ok {
-		return zero, fmt.Errorf("unknown provider: %s", providerName)
+	chain, requested, err := s.resolveChain(req, info.Agent, events)
+	if err != nil {
+		return zero, err
 	}
 
-	pol := s.resolvePolicy(req.AgentName, req.MaxTokens, req.ReasoningEffort)
+	pol := s.resolvePolicy(req.AgentName, chain, req.MaxTokens, req.ReasoningEffort)
 	trigger := pol.trigger()
 	if trigger <= 0 {
 		s.warnTrigger(req.SessionID, pol, trigger)
@@ -488,10 +475,19 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 		Role:    core.RoleUser,
 		Content: []core.ContentBlock{{Kind: core.BlockText, Text: compactionInstruction}},
 	})
-	stream, err := provider.Stream(ctx, core.ChatRequest{
-		Model: model, System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: summaryMaxTokens,
+	agentName := req.AgentName
+	if agentName == "" {
+		agentName = info.Agent
+	}
+	// REQ-RTR-007, AC-RTR-010: the summary goes through the agent's chain,
+	// so a combo agent's compaction gets the same fallback as its turns.
+	stream, served, err := llmcall.Stream(ctx, s.LLM, chain, core.ChatRequest{
+		System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: summaryMaxTokens,
 		ReasoningEffort: req.ReasoningEffort,
-	})
+	}, core.LLMCallMeta{
+		Source: llmcall.SourceCompaction, Agent: agentName, SessionID: req.SessionID,
+		TurnID: req.TurnID, Requested: requested,
+	}, nil)
 	if err != nil {
 		record()
 		return zero, err
@@ -537,7 +533,7 @@ func (s *Service) run(ctx context.Context, req core.CompactRequest) (core.Compac
 		RetainedFromSeq: units[tailStart].startSeq,
 		TokensBefore:    tokensBefore,
 		TokensAfter:     tokensAfter,
-		Model:           model,
+		Model:           served.Model,
 		Usage:           usage,
 	}
 	if _, err := s.Store.Append(ctx, req.SessionID, []core.EventDraft{{Kind: core.KindCompactionSummary, Payload: payload}}); err != nil {
@@ -613,23 +609,45 @@ func pruneOutput(text string) string {
 	return head + "\n…[middle pruned: " + strconv.Itoa(middle) + " characters]…\n" + tail
 }
 
-// resolveTarget returns the provider and model of the summary request. It uses
-// the request target when present, else the session's selection.
-func (s *Service) resolveTarget(req core.CompactRequest, agentName string, events []core.SessionEvent) (string, string) {
-	provider, model := s.resolveModel(agentName, events)
+// resolveChain returns the chain of the summary request and its requested
+// value. It uses the request's chain when present (the turn's), else its
+// provider and model, else the session's selection over the agent config.
+func (s *Service) resolveChain(req core.CompactRequest, agentName string, events []core.SessionEvent) ([]core.LLMTarget, string, error) {
+	if len(req.Targets) > 0 {
+		requested := req.Requested
+		if requested == "" {
+			requested = llmcall.Address(req.Targets[0])
+		}
+		// REQ-CCT-007: never a Claude Code target.
+		return llmcall.BackgroundChain(s.LLM, req.Targets, requested)
+	}
+	provider, model, fallback := s.resolveModel(agentName, events)
 	if req.Provider != "" {
 		provider = req.Provider
 	}
 	if req.Model != "" {
 		model = req.Model
 	}
-	return provider, model
+	if model == "" {
+		return nil, "", fmt.Errorf("no model found for compaction")
+	}
+	chain, err := llmcall.Chain(s.LLM, provider, model, fallback)
+	if err != nil {
+		return nil, "", err
+	}
+	// REQ-CCT-007: a background pass never uses a Claude Code target.
+	return llmcall.BackgroundChain(s.LLM, chain, llmcall.Requested(provider, model))
 }
 
-func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (string, string) {
+// resolveModel returns the provider, model, and fallback of the session's
+// agent after its model/selection events. A legacy runtime agent is its
+// claude-code address (API-CCT-002).
+func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (string, string, []string) {
 	provider, model := "", ""
+	var fallback []string
 	if agent, ok := s.agentConfig(agentName); ok {
-		provider, model = agent.Provider, agent.Model
+		agent = llmcall.NormalizeAgent(agent)
+		provider, model, fallback = agent.Provider, agent.Model, agent.Fallback
 	}
 	for _, event := range events {
 		if event.Kind != core.KindModelSelection {
@@ -641,17 +659,13 @@ func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (st
 		}
 		if payload.Agent != "" {
 			if agent, ok := s.agentConfig(payload.Agent); ok {
-				provider, model = agent.Provider, agent.Model
+				agent = llmcall.NormalizeAgent(agent)
+				provider, model, fallback = agent.Provider, agent.Model, agent.Fallback
 			}
 		}
-		if payload.Provider != "" {
-			provider = payload.Provider
-		}
-		if payload.Model != "" {
-			model = payload.Model
-		}
+		provider, model = llmcall.Select(provider, model, payload)
 	}
-	return provider, model
+	return provider, model, fallback
 }
 
 // Install installs the llm.stream overflow listener. The turn loop calls
@@ -671,7 +685,8 @@ func (s *Service) stream(ctx context.Context, in core.LLMStreamInput, next core.
 	}
 	if _, compactErr := s.CompactIfNeeded(ctx, core.CompactRequest{
 		SessionID: in.SessionID, TurnID: in.TurnID, AgentName: in.AgentName,
-		Provider: providerName, Model: in.Request.Model, System: in.Request.System,
+		Provider: providerName, Model: in.Request.Model,
+		Targets: in.Targets, Requested: in.Requested, System: in.Request.System,
 		Tools: in.Request.Tools, MaxTokens: in.Request.MaxTokens,
 		ReasoningEffort: in.Request.ReasoningEffort, Trigger: "overflow",
 	}); compactErr != nil {
