@@ -83,6 +83,20 @@ but their config keys, events, and tools may still change between betas.
 - `lana init` and the setup wizard write the preset kinds (`kind = "deepseek"` and so on) without
   `base_url`. Existing `openai_compat` providers keep working.
 
+### Fixed
+- The Workflow assistant works when the guardian runs on Claude Code. Its structured calls (graph
+  edit proposals and failure decisions) run on the guardian's background model: the first API model
+  of its combo, else `[router] background_model`. Without one the assistant says "The guardian
+  <agent> runs on Claude Code. Set a background model in Router (or add an API model to its combo)
+  so it can plan workflow changes." instead of "the guardian is not available". Workflow agent nodes
+  on Claude Code agents still run in Claude Code when the account allows scheduled runs.
+- The built-in Claude Code account's settings can be saved: **Allow scheduled runs** and On/Off on
+  Router → Providers → Claude Code no longer fail with "claude-code is built in". They are stored
+  in an optional `[providers.claude-code]` table (`kind = "claude-code"` with `allow_scheduled`,
+  `disabled`, `binary`, `auth`, `api_key_env`; `config_dir` and `label` are refused, because the
+  built-in account always uses your normal Claude Code login). Scheduled runs honor its
+  `allow_scheduled`, and a disabled built-in account falls back to the next model.
+
 ## [0.1.0-beta.1] - 2026-11-02
 
 First tagged build, for daily use.

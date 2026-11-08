@@ -15,6 +15,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/agent"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pathenv"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	"github.com/ridhomujizat/lana-harness/tools"
@@ -62,9 +63,15 @@ type workflowDeps struct{ rt *Runtime }
 // until the turn ends (REQ-WF-005).
 func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (workflow.AgentResult, error) {
 	rt := d.rt
-	// REQ-CCR-007: a workflow node runs a Claude Agent only with
-	// allow_scheduled = true.
-	if err := rt.scheduledRunAllowed(req.Agent, req.Model); err != nil {
+	if req.Background {
+		// Spec 39 revision 5: a guardian's structured call is lana
+		// background work on the agent's background chain.
+		if err := rt.backgroundRunAllowed(req.Agent); err != nil {
+			return workflow.AgentResult{}, err
+		}
+	} else if err := rt.scheduledRunAllowed(req.Agent, req.Model); err != nil {
+		// REQ-CCR-007: a workflow node runs a Claude Agent only with
+		// allow_scheduled = true.
 		return workflow.AgentResult{}, err
 	}
 	session, err := rt.createChannelSession(ctx, "workflow", req.WorkflowID, req.Agent, rt.workflowSessionTitle(ctx, req.WorkflowID))
@@ -73,6 +80,9 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 	}
 	// REQ-CCT-008: the run's turns skip Claude Code unless allow_scheduled.
 	defer rt.registry.MarkScheduled(session.ID)()
+	if req.Background {
+		defer rt.registry.MarkBackground(session.ID)()
+	}
 	entry := &workflowSession{lock: toolSet(req.Lock), maxSteps: req.MaxSteps}
 	if req.Tools != nil {
 		entry.tools = toolSet(req.Tools)
@@ -101,6 +111,24 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 		return agentResult, err
 	}
 	return agentResult, nil
+}
+
+// backgroundRunAllowed checks a workflow guardian's structured call before it
+// starts (spec 39 revision 5): the call runs on the agent's background chain
+// (llmcall.AgentBackgroundChain), so an agent whose chain has only Claude
+// Code targets needs [router] background_model; without one the call fails
+// with a *workflow.GuardianBackgroundError the dashboard shows as is. A team
+// is checked by its lead.
+func (rt *Runtime) backgroundRunAllowed(agentName string) error {
+	cfg, ok := rt.agentConfig(agentName)
+	if !ok {
+		return nil
+	}
+	_, _, err := llmcall.AgentBackgroundChain(rt.coreCtx.LLM, cfg)
+	if errors.Is(err, llmcall.ErrNoBackgroundModel) {
+		return &workflow.GuardianBackgroundError{Agent: agentName}
+	}
+	return err
 }
 
 // CallTool runs one registered tool by name and returns its text output

@@ -142,7 +142,9 @@ func (rt *Runtime) ClaudeCodeAccounts(ctx context.Context) ([]ClaudeCodeAccount,
 // CLAUDE_CONFIG_DIR; another account its own keys and folder.
 func (rt *Runtime) claudeAccountSpec(name string, cfg core.ProviderConfig) core.RuntimeAccount {
 	if name == ClaudeCodeRuntime {
-		return core.RuntimeAccount{Name: name, Binary: rt.claudeCodeBinary()}
+		// API-CCT-022: the built-in account's table sets binary, auth, and
+		// api_key_env; it never sets the folder.
+		return core.RuntimeAccount{Name: name, Binary: rt.claudeCodeBinary(), Auth: cfg.Auth, APIKeyEnv: cfg.APIKeyEnv}
 	}
 	return core.RuntimeAccount{
 		Name: name, ConfigDir: llmcall.ClaudeConfigDir(rt.home, name, cfg),
@@ -431,6 +433,12 @@ func (rt *Runtime) TestClaudeCode(ctx context.Context, address string) (int64, e
 // claudeCodeBinary returns the binary setting of the first agent (in name
 // order) that sets one, else "" (claude on PATH).
 func (rt *Runtime) claudeCodeBinary() string {
+	// API-CCT-022: the built-in account's own binary setting wins.
+	if rt.router != nil {
+		if cfg, _ := rt.router.ClaudeCodeAccount(ClaudeCodeRuntime); cfg.Binary != "" {
+			return cfg.Binary
+		}
+	}
 	agents := rt.agents()
 	names := make([]string, 0, len(agents))
 	for name := range agents {

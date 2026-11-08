@@ -172,13 +172,49 @@ func TestClaudeCodeAccounts(t *testing.T) {
 		t.Fatalf("stream chain: served=%v err=%v", served, err)
 	}
 	_, _ = drain(stream)
-	if _, err := New(Config{Providers: map[string]core.ProviderConfig{ClaudeCode: {Kind: core.ClaudeCodeKind}}}); err == nil {
-		t.Fatal("a claude-code table was accepted")
+	// API-CCT-022: a claude-code table of another kind is refused; one of
+	// kind claude-code holds the built-in settings (TestBuiltinClaudeAccountSettings).
+	if _, err := New(Config{Providers: map[string]core.ProviderConfig{ClaudeCode: {Kind: "openai"}}}); err == nil {
+		t.Fatal("a claude-code table of another kind was accepted")
 	}
 	if _, err := New(Config{
 		Providers: map[string]core.ProviderConfig{"cw": {Kind: core.ClaudeCodeKind}},
 		Combos:    map[string]Combo{"cw": {Models: []string{"cw/opus"}}},
 	}); err == nil {
 		t.Fatal("a combo named like an account was accepted")
+	}
+}
+
+// API-CCT-022 (spec 39 revision 5): a [providers.claude-code] table of kind
+// "claude-code" holds the built-in account's settings. It is not a
+// configured account, it never takes a folder, and Apply updates it.
+func TestBuiltinClaudeAccountSettings(t *testing.T) {
+	r, err := New(Config{Providers: map[string]core.ProviderConfig{
+		ClaudeCode: {Kind: core.ClaudeCodeKind, AllowScheduled: true, Binary: "/opt/claude", Label: "ignored"},
+	}})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	account, ok := r.ClaudeCodeAccount(ClaudeCode)
+	if !ok || account.Kind != core.ClaudeCodeKind || !account.AllowScheduled || account.Binary != "/opt/claude" || account.Label != "" {
+		t.Fatalf("built-in = %+v %v", account, ok)
+	}
+	if len(r.ClaudeCodeAccounts()) != 0 || len(r.Names()) != 0 || r.Disabled(ClaudeCode) {
+		t.Fatalf("accounts %v names %v disabled %v", r.ClaudeCodeAccounts(), r.Names(), r.Disabled(ClaudeCode))
+	}
+	if err := r.Apply(Config{Providers: map[string]core.ProviderConfig{ClaudeCode: {Kind: core.ClaudeCodeKind, Disabled: true}}}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if account, _ := r.ClaudeCodeAccount(ClaudeCode); account.AllowScheduled || !r.Disabled(ClaudeCode) {
+		t.Fatalf("after apply = %+v disabled %v", account, r.Disabled(ClaudeCode))
+	}
+	if err := r.Apply(Config{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if account, _ := r.ClaudeCodeAccount(ClaudeCode); account.Kind != core.ClaudeCodeKind || account.AllowScheduled || account.Binary != "" || r.Disabled(ClaudeCode) {
+		t.Fatalf("without the table = %+v", account)
+	}
+	if _, err := New(Config{Providers: map[string]core.ProviderConfig{ClaudeCode: {Kind: core.ClaudeCodeKind, ConfigDir: "/x"}}}); err == nil || !strings.Contains(err.Error(), "config_dir") {
+		t.Fatalf("config_dir: err = %v", err)
 	}
 }

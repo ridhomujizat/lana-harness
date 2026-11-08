@@ -102,6 +102,37 @@ func (r *Registry) isScheduled(sessionID string) bool {
 	return r.scheduled[sessionID] > 0
 }
 
+// MarkBackground marks the session's turns as lana background work until the
+// returned func is called (spec 39 revision 5): they never run in Claude
+// Code; they run in lana's loop on the agent's background chain (the chain
+// without its Claude Code targets, else [router] background_model,
+// REQ-CCT-007). Without one the turn fails with llmcall.ErrNoBackgroundModel.
+// Marks nest.
+func (r *Registry) MarkBackground(sessionID string) func() {
+	r.runtimeMu.Lock()
+	if r.background == nil {
+		r.background = map[string]int{}
+	}
+	r.background[sessionID]++
+	r.runtimeMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.runtimeMu.Lock()
+			if r.background[sessionID]--; r.background[sessionID] <= 0 {
+				delete(r.background, sessionID)
+			}
+			r.runtimeMu.Unlock()
+		})
+	}
+}
+
+func (r *Registry) isBackground(sessionID string) bool {
+	r.runtimeMu.Lock()
+	defer r.runtimeMu.Unlock()
+	return r.background[sessionID] > 0
+}
+
 // SetExternalHooks installs the usage and limits hooks of external runtime
 // turns. The root package sets them at boot.
 func (r *Registry) SetExternalHooks(h ExternalHooks) {
@@ -805,13 +836,16 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 }
 
 // applyAccount sets the account keys of a Claude Code turn (REQ-CCT-010): the
-// built-in account takes the agent's binary, auth, and api_key_env (the keys
-// of spec 38 agents) and keeps the daemon's CLAUDE_CONFIG_DIR; another
-// account takes its own keys and folder.
+// built-in account takes the binary, auth, and api_key_env of its optional
+// [providers.claude-code] table (API-CCT-022), else the agent's (the keys of
+// spec 38 agents), and keeps the daemon's CLAUDE_CONFIG_DIR; another account
+// takes its own keys and folder.
 func applyAccount(cfg *core.RuntimeConfig, home, name string, account core.ProviderConfig, agent core.AgentConfig) {
 	cfg.Account = name
 	if name == llmcall.ClaudeCode {
-		cfg.Binary, cfg.Auth, cfg.APIKeyEnv = agent.Binary, agent.Auth, agent.APIKeyEnv
+		cfg.Binary = firstSet(account.Binary, agent.Binary)
+		cfg.Auth = firstSet(account.Auth, agent.Auth)
+		cfg.APIKeyEnv = firstSet(account.APIKeyEnv, agent.APIKeyEnv)
 		return
 	}
 	cfg.Binary, cfg.Auth, cfg.APIKeyEnv = account.Binary, account.Auth, account.APIKeyEnv
@@ -899,4 +933,12 @@ func (rn *Runner) interruptExternal() {
 	if err := rt.Interrupt(rn.sessionID); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Warn("agent runtime interrupt", "session_id", rn.sessionID, "error", err)
 	}
+}
+
+// firstSet returns a when it is not empty, else b.
+func firstSet(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

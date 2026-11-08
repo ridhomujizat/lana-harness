@@ -135,7 +135,11 @@ type snapshot struct {
 	// claude are the Claude Code accounts of kind "claude-code" (REQ-CCT-010).
 	// They have no adapter: their targets run in the Claude Code runtime.
 	claude map[string]core.ProviderConfig
-	combos map[string]Combo
+	// builtin is the optional [providers.claude-code] table of the built-in
+	// account (spec 39 revision 5, API-CCT-022): allow_scheduled, disabled,
+	// binary, auth, api_key_env. Kind is always set.
+	builtin core.ProviderConfig
+	combos  map[string]Combo
 	// cooldown is the normalized cooldown; 0 means off.
 	cooldown time.Duration
 }
@@ -216,13 +220,22 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 		cfg:       cloneConfig(cfg),
 		providers: map[string]*providerEntry{},
 		claude:    map[string]core.ProviderConfig{},
+		builtin:   core.ProviderConfig{Kind: core.ClaudeCodeKind},
 		combos:    map[string]Combo{},
 	}
 	// Work on the copy so a caller that changes its maps later cannot
 	// change the snapshot or the change detection of the next Apply.
 	cfg = next.cfg
-	if _, ok := cfg.Providers[ClaudeCode]; ok {
-		return nil, fmt.Errorf("providers.%s: claude-code is built in", ClaudeCode)
+	if pc, ok := cfg.Providers[ClaudeCode]; ok {
+		// API-CCT-022: the built-in account's settings, never its folder.
+		switch {
+		case pc.Kind != core.ClaudeCodeKind:
+			return nil, fmt.Errorf("providers.%s: claude-code is built in", ClaudeCode)
+		case strings.TrimSpace(pc.ConfigDir) != "":
+			return nil, fmt.Errorf("providers.%s.config_dir: not allowed for the built-in account", ClaudeCode)
+		}
+		pc.Label = ""
+		next.builtin = pc
 	}
 	for name, p := range r.opts.providers {
 		kind := "custom"
@@ -241,7 +254,7 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 		}
 	}
 	for _, name := range sortedKeys(cfg.Providers) {
-		if _, custom := next.providers[name]; custom {
+		if _, custom := next.providers[name]; custom || name == ClaudeCode {
 			continue
 		}
 		pc := cfg.Providers[name]
@@ -359,6 +372,9 @@ func (r *Router) Names() []string {
 // switched off with disabled = true. An unknown provider is not disabled.
 func (r *Router) Disabled(provider string) bool {
 	snap := r.snap.Load()
+	if provider == ClaudeCode {
+		return snap.builtin.Disabled
+	}
 	if pc, ok := snap.claude[provider]; ok {
 		return pc.Disabled
 	}

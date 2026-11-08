@@ -116,7 +116,8 @@ func TestClaudeAccountProviderRules(t *testing.T) {
 	s, store, _, cookie, csrf := newClaudeRouterServer(t, true)
 	version := shaHex(mustRead(t, store.path))
 	cases := []struct{ name, body, key string }{
-		{"claude-code", `{"kind":"claude-code"}`, "providers.claude-code"},
+		{"claude-code", `{"kind":"deepseek"}`, "providers.claude-code"},
+		{"claude-code", `{"kind":"claude-code","config_dir":"/x"}`, "providers.claude-code.config_dir"},
 		{"cw", `{"kind":"claude-code","base_url":"https://x"}`, "providers.cw.base_url"},
 		{"cw", `{"kind":"claude-code","api_key":"sk-x"}`, "providers.cw.api_key"},
 		{"cw", `{"kind":"claude-code","auth":"oauth"}`, "providers.cw.auth"},
@@ -205,4 +206,77 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// API-CCT-022 (spec 39 revision 5): PUT /v1/providers/claude-code with kind
+// claude-code stores the built-in account's settings in
+// [providers.claude-code] without a folder or a new login command; GET
+// reflects them; DELETE stays 409 builtin.
+func TestBuiltinClaudeAccountSettingsSave(t *testing.T) {
+	s, store, _, cookie, csrf := newClaudeRouterServer(t, true)
+	version := func() string { return shaHex(mustRead(t, store.path)) }
+	builtinRow := func() providerJSON {
+		t.Helper()
+		list := serveMCP(t, s, http.MethodGet, "/v1/providers", "", cookie, csrf)
+		var listed listProvidersResponse
+		list.json(t, &listed)
+		var found []providerJSON
+		for _, row := range listed.Providers {
+			if row.Name == "claude-code" {
+				found = append(found, row)
+			}
+		}
+		if len(found) != 1 || !found[0].Builtin {
+			t.Fatalf("built-in rows = %+v", found)
+		}
+		return found[0]
+	}
+	if row := builtinRow(); row.AllowScheduled || row.Disabled {
+		t.Fatalf("default built-in row = %+v", row)
+	}
+
+	// The UI's toggle body: kind, expected_version, allow_scheduled, disabled.
+	saved := serveMCP(t, s, http.MethodPut, "/v1/providers/claude-code",
+		`{"kind":"claude-code","allow_scheduled":true,"disabled":false,"expected_version":"`+version()+`"}`, cookie, csrf)
+	if saved.code != http.StatusOK {
+		t.Fatalf("save = %d %s", saved.code, saved.body)
+	}
+	var response providerSaveResponse
+	saved.json(t, &response)
+	if response.ConfigDir != "" || response.LoginCommand != "claude auth login" {
+		t.Fatalf("response = %+v", response)
+	}
+	raw := string(mustRead(t, store.path))
+	if !strings.Contains(raw, "[providers.claude-code]\nkind = 'claude-code'\nallow_scheduled = true\n") || strings.Contains(raw, "config_dir") {
+		t.Fatalf("config:\n%s", raw)
+	}
+	if _, err := os.Stat(filepath.Join(store.home, "claude", "claude-code")); err == nil {
+		t.Fatal("a folder was created for the built-in account")
+	}
+	if row := builtinRow(); !row.AllowScheduled || row.Disabled || row.ConfigDir != "" || row.LoginCommand != "claude auth login" {
+		t.Fatalf("built-in row = %+v", row)
+	}
+
+	// Off: an absent key keeps its stored value.
+	saved = serveMCP(t, s, http.MethodPut, "/v1/providers/claude-code",
+		`{"kind":"claude-code","disabled":true,"expected_version":"`+version()+`"}`, cookie, csrf)
+	if saved.code != http.StatusOK {
+		t.Fatalf("save off = %d %s", saved.code, saved.body)
+	}
+	if row := builtinRow(); !row.AllowScheduled || !row.Disabled {
+		t.Fatalf("built-in row after off = %+v", row)
+	}
+	saved = serveMCP(t, s, http.MethodPut, "/v1/providers/claude-code",
+		`{"kind":"claude-code","allow_scheduled":false,"disabled":false,"expected_version":"`+version()+`"}`, cookie, csrf)
+	if saved.code != http.StatusOK {
+		t.Fatalf("save back = %d %s", saved.code, saved.body)
+	}
+	if row := builtinRow(); row.AllowScheduled || row.Disabled {
+		t.Fatalf("built-in row after reset = %+v", row)
+	}
+
+	deleted := serveMCP(t, s, http.MethodDelete, "/v1/providers/claude-code", `{"expected_version":"`+version()+`"}`, cookie, csrf)
+	if deleted.code != http.StatusConflict || !strings.Contains(string(deleted.body), `"builtin"`) {
+		t.Fatalf("delete built-in = %d %s", deleted.code, deleted.body)
+	}
 }

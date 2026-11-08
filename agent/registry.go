@@ -119,6 +119,9 @@ type Registry struct {
 	toolHost core.RuntimeToolHost
 	// scheduled counts the scheduled-run marks per session (REQ-CCT-008).
 	scheduled map[string]int
+	// background counts the background-work marks per session (spec 39
+	// revision 5).
+	background map[string]int
 }
 
 // NewRegistry creates a registry.

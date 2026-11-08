@@ -95,8 +95,8 @@ type providerJSON struct {
 	ModelsCount int `json:"models_count"`
 	// Disabled is the disabled key of the entry (API-RTR-006 revision 2).
 	Disabled bool `json:"disabled"`
-	// Builtin marks the built-in Claude Code account "claude-code", which has
-	// no table (API-CCT-010).
+	// Builtin marks the built-in Claude Code account "claude-code", whose
+	// optional table holds only its settings (API-CCT-010, API-CCT-022).
 	Builtin bool `json:"builtin"`
 	// ConfigDir is the CLAUDE_CONFIG_DIR of a Claude Code account; "" for the
 	// built-in one (Claude Code's own default, ~/.claude) and other kinds.
@@ -186,6 +186,10 @@ type providerDocument struct {
 	Combos    map[string]map[string]any `toml:"combos"`
 	Knowledge map[string]any            `toml:"knowledge"`
 	Router    map[string]any            `toml:"router"`
+	// Builtin is the optional [providers.claude-code] table of the built-in
+	// Claude Code account (API-CCT-022). parseProviderDocument moves it out
+	// of Providers, so it is never listed as a configured provider.
+	Builtin map[string]any `toml:"-"`
 }
 
 func (s *Server) providerTesterOrError(w http.ResponseWriter) ProviderTester {
@@ -242,6 +246,11 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	builtin.UsedBy = document.providerUsedBy(core.ClaudeCodeProvider)
+	// API-CCT-022: the built-in row shows its stored settings.
+	if stored := providerRecordFromMap(document.Builtin); stored.Kind == core.ClaudeCodeKind {
+		builtin.AllowScheduled = stored.AllowScheduled
+		builtin.Disabled = stored.Disabled
+	}
 	secretValues := map[string]string{}
 	if home := s.providerHome(); home != "" {
 		values, readErr := webfiles.ReadSecrets(secretsPath(home))
@@ -412,7 +421,7 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		writeProviderIssue(w, "providers."+name+".kind", providerKindsMessage)
 		return
 	}
-	if name == core.ClaudeCodeProvider {
+	if name == core.ClaudeCodeProvider && kind != core.ClaudeCodeKind {
 		writeProviderIssue(w, "providers."+name, "claude-code is built in")
 		return
 	}
@@ -751,6 +760,10 @@ func parseProviderDocument(raw []byte) (providerDocument, error) {
 	}
 	if err := toml.Unmarshal(raw, &document); err != nil {
 		return providerDocument{}, err
+	}
+	if table, ok := document.Providers[core.ClaudeCodeProvider]; ok {
+		document.Builtin = table
+		delete(document.Providers, core.ClaudeCodeProvider)
 	}
 	return document, nil
 }

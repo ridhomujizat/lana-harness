@@ -24,6 +24,18 @@ import (
 // (API-WF-017; the web maps it to 503 guardian_unavailable).
 var ErrGuardianUnavailable = errors.New("workflow: guardian unavailable")
 
+// GuardianBackgroundError is the error of a guardian structured call
+// (AgentRequest.Background) whose agent runs only on Claude Code and has no
+// background model (spec 39 revision 5, REQ-CCT-007). The web answers it with
+// 503 guardian_needs_background_model and this message.
+type GuardianBackgroundError struct {
+	Agent string
+}
+
+func (e *GuardianBackgroundError) Error() string {
+	return fmt.Sprintf("The guardian %s runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes.", e.Agent)
+}
+
 // Service tuning constants.
 const (
 	defaultTickInterval = 30 * time.Second
@@ -704,9 +716,16 @@ func (s *Service) Assist(ctx context.Context, id string, baseVersion int, messag
 	prompt := BuildAssistantPrompt(wf, old, history, message)
 	actx, cancel := context.WithTimeout(ctx, assistTimeout)
 	defer cancel()
+	// The reply is machine-readable (a graph proposal), so the turn is lana
+	// background work on the guardian's background chain (spec 39 revision 5).
 	res, err := s.deps.RunAgent(actx, AgentRequest{
 		WorkflowID: id, RunID: "", NodeID: "assistant", Agent: wf.Guardian, Prompt: prompt,
+		Background: true,
 	})
+	var background *GuardianBackgroundError
+	if errors.As(err, &background) {
+		return AssistResult{}, background
+	}
 	if err != nil {
 		return AssistResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, err)
 	}

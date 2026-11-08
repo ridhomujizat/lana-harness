@@ -106,13 +106,24 @@ func renderClaudeAccountTable(name string, record providerRecord) string {
 
 // putClaudeAccount saves a Claude Code account (API-CCT-010): it writes the
 // table, creates the account folder (0700), and answers the command that logs
-// the account in once. An absent key keeps its stored value.
+// the account in once. An absent key keeps its stored value. The built-in
+// account "claude-code" stores only its settings (API-CCT-022): no
+// config_dir or label, no folder is created, and its login command stays
+// `claude auth login`.
 func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store ConfigStore, name string, body map[string]json.RawMessage) {
 	path := "providers." + name
+	builtin := name == core.ClaudeCodeProvider
 	var issues []ConfigIssue
 	for _, key := range []string{"base_url", "headers", "api_key"} {
 		if _, ok := body[key]; ok {
 			issues = append(issues, ConfigIssue{Key: path + "." + key, Message: "not allowed for kind claude-code"})
+		}
+	}
+	if builtin {
+		for _, key := range []string{"config_dir", "label"} {
+			if _, ok := body[key]; ok {
+				issues = append(issues, ConfigIssue{Key: path + "." + key, Message: "not allowed for the built-in account: it always uses your normal Claude Code login"})
+			}
 		}
 	}
 	if len(issues) > 0 {
@@ -186,7 +197,11 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 		return
 	}
 	record := providerRecord{}
-	if stored := providerRecordFromMap(document.Providers[name]); stored.Kind == core.ClaudeCodeKind {
+	storedTable := document.Providers[name]
+	if builtin {
+		storedTable = document.Builtin
+	}
+	if stored := providerRecordFromMap(storedTable); stored.Kind == core.ClaudeCodeKind {
 		record = providerRecord{
 			ConfigDir: stored.ConfigDir, Binary: stored.Binary, Auth: stored.Auth, APIKeyEnv: stored.APIKeyEnv,
 			AllowScheduled: stored.AllowScheduled, Disabled: stored.Disabled, Label: stored.Label,
@@ -212,6 +227,9 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 		record.Disabled = *v
 	}
 
+	if builtin {
+		record.ConfigDir, record.Label = "", ""
+	}
 	table := renderClaudeAccountTable(name, record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), providerChecker(store), file.Raw, "[providers."+name+"]", table)
 	if err != nil {
@@ -219,11 +237,14 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 		return
 	}
 	// The folder is created before the table is written, so a saved account
-	// always has one. An existing folder is kept as it is.
+	// always has one. An existing folder is kept as it is. The built-in
+	// account uses the owner's own Claude Code folder: nothing is created.
 	dir := s.claudeConfigDir(name, record)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		writeProviderIssue(w, path+".config_dir", "cannot create the account folder: "+err.Error())
-		return
+	if !builtin {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			writeProviderIssue(w, path+".config_dir", "cannot create the account folder: "+err.Error())
+			return
+		}
 	}
 	configChanged := !bytes.Equal(candidate, file.Raw)
 	restartRequired := !isLiveStore(store)
