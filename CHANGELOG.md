@@ -24,6 +24,13 @@ but their config keys, events, and tools may still change between betas.
   and its child processes (Claude Code included) use on this Mac, opens Chat, Workflows, Calendar,
   the dashboard, and the Router, starts and stops the daemon, and can open at login. The lana binary
   stays CGO-free; the app is a separate Swift package in `apps/macos/LanaMenu`.
+- macOS notifications (spec #42): the menu bar app posts a notification when an agent replies (with an excerpt of
+  the reply), when a tool needs approval (**Allow once** and **Reject** right on the banner), when an agent asks a
+  question, and when a workflow run starts, finishes, fails, or waits for an approval. A click opens the chat or
+  the run. A reply does not notify while its chat is open in a dashboard tab, and Telegram chats do not notify
+  their replies. Settings has a toggle per kind and **Show message preview**. The daemon streams the events on the
+  local-secret endpoint `GET /v1/local/events` and takes the banner answers on `POST /v1/local/approvals/{id}`; the
+  dashboard reports the open chat on `POST /v1/sessions/{id}/presence`.
 - The local sign-in link endpoint accepts `next=#/…`, and the dashboard opens that page after the
   sign-in (used by the menu bar app's ⌥-click).
 
@@ -82,6 +89,10 @@ but their config keys, events, and tools may still change between betas.
 - `lana run --output json` reports as `model` the target that answered, which may be a fallback.
 - `lana init` and the setup wizard write the preset kinds (`kind = "deepseek"` and so on) without
   `base_url`. Existing `openai_compat` providers keep working.
+
+### Fixed
+- A workflow with no edges no longer breaks its page ("t.edges is not iterable"): the API sends empty `nodes` and
+  `edges` lists instead of `null`, and the dashboard treats a missing list as empty.
 
 ## [0.1.0-beta.1] - 2026-11-02
 

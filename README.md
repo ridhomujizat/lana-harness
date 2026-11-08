@@ -185,6 +185,30 @@ What the menu shows:
   output to `~/.lana/menubar-daemon.log`. **Stop lana…** asks first, then stops the daemon the way
   Ctrl-C does.
 
+### Notifications
+
+The menu bar app also shows macOS notifications while lana runs. On its first launch macOS asks
+whether lana may send notifications; if you said no, **Settings…** shows it with a button that opens
+System Settings → Notifications.
+
+- **Replies** — "coder · Fix the login bug" with the start of the answer (markdown removed, code
+  blocks shown as `[code]`). No notification while that chat is open in a dashboard tab, and none for
+  Telegram chats (Telegram already shows them).
+- **Approvals** — "Approval needed · coder" with the tool and its argument, e.g. `bash: npm test`.
+  **Allow once** and **Reject** answer it right from the banner; it disappears when you answer in
+  the dashboard instead. Workflow approval steps show the same buttons.
+- **Questions** — "Question from coder" with the question; click to answer in the dashboard.
+- **Workflows** — "Workflow started" (silent), "Workflow done · Daily digest · 1m 05s" with the run
+  summary, and "Workflow failed" with the error. A click opens the run.
+
+**Settings…** has a toggle for each kind and **Show message preview** (off shows "New message"
+instead of the text). The app reads the events from the daemon's local endpoint with the
+`daemon.secret` value, so it needs no password; the daemon itself never shows a notification.
+
+For debugging, `LanaMenu --watch-events` prints the events as they arrive,
+`LanaMenu --simulate-event '<event JSON>'` posts one notification without the daemon, and
+`--dump-status` includes the notification permission and the event connection.
+
 `dist/Lana.app/Contents/MacOS/LanaMenu --dump-status` prints the same status and usage as JSON.
 
 ## Router

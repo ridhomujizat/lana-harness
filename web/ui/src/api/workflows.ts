@@ -252,6 +252,21 @@ export interface VersionInfo {
 
 const base = "/v1/workflows";
 
+// normalizeGraph turns a missing or null nodes/edges list into an empty one.
+// An older daemon sends "edges": null for a workflow with no edges, and the
+// canvas iterates both lists.
+export function normalizeGraph(graph: Graph | null | undefined): Graph {
+  return {
+    ...(graph ?? {}),
+    nodes: Array.isArray(graph?.nodes) ? graph.nodes : [],
+    edges: Array.isArray(graph?.edges) ? graph.edges : [],
+  } as Graph;
+}
+
+function requestWorkflow(method: string, path: string, body?: unknown): Promise<Workflow> {
+  return request<Workflow>(method, path, body).then((w) => ({ ...w, graph: normalizeGraph(w.graph) }));
+}
+
 function wf(id: string): string {
   return base + "/" + encodeURIComponent(id);
 }
@@ -261,7 +276,7 @@ export function listWorkflows(): Promise<WorkflowList> {
 }
 
 export function getWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("GET", wf(id));
+  return requestWorkflow("GET", wf(id));
 }
 
 export function createWorkflow(body: {
@@ -270,7 +285,7 @@ export function createWorkflow(body: {
   guardian: string;
   graph?: Graph;
 }): Promise<Workflow> {
-  return request<Workflow>("POST", base, body);
+  return requestWorkflow("POST", base, body);
 }
 
 export interface UpdateWorkflowBody {
@@ -287,7 +302,7 @@ export function updateWorkflow(
   id: string,
   body: UpdateWorkflowBody
 ): Promise<Workflow> {
-  return request<Workflow>("PUT", wf(id), body);
+  return requestWorkflow("PUT", wf(id), body);
 }
 
 export function deleteWorkflow(id: string): Promise<void> {
@@ -299,7 +314,7 @@ export function listVersions(id: string): Promise<{ versions: VersionInfo[] }> {
 }
 
 export function restoreVersion(id: string, version: number): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/restore", { version });
+  return requestWorkflow("POST", wf(id) + "/restore", { version });
 }
 
 export function lockPreview(id: string): Promise<{ tools: LockTool[] }> {
@@ -307,15 +322,15 @@ export function lockPreview(id: string): Promise<{ tools: LockTool[] }> {
 }
 
 export function activateWorkflow(id: string, version: number): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/activate", { version });
+  return requestWorkflow("POST", wf(id) + "/activate", { version });
 }
 
 export function pauseWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/pause");
+  return requestWorkflow("POST", wf(id) + "/pause");
 }
 
 export function resumeWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/resume");
+  return requestWorkflow("POST", wf(id) + "/resume");
 }
 
 export function startRun(id: string, input?: unknown): Promise<Run> {
@@ -340,7 +355,7 @@ export function getRun(id: string, run: string | number): Promise<RunDetail> {
   return request<RunDetail>(
     "GET",
     wf(id) + "/runs/" + encodeURIComponent(String(run))
-  );
+  ).then((detail) => ({ ...detail, graph: normalizeGraph(detail.graph) }));
 }
 
 export function cancelRun(id: string, run: string | number): Promise<Run> {

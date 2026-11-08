@@ -104,6 +104,22 @@ type Approvals struct {
 	// a stream installs it, so a broker used alone treats every session as its
 	// own root.
 	rootOf sessionRootResolver
+	// observer hears every request open and close, for the notification bus
+	// (spec #42). It is called outside the lock; nil means none.
+	observer approvalObserver
+}
+
+// approvalObserver hears the life of each broker request (spec #42).
+type approvalObserver interface {
+	approvalOpened(id string, req core.ApprovalRequest, argument string)
+	approvalClosed(id, sessionID string, outcome core.ApprovalOutcome)
+}
+
+// setObserver installs the request observer.
+func (a *Approvals) setObserver(o approvalObserver) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.observer = o
 }
 
 func newApprovals() *Approvals {
@@ -186,7 +202,11 @@ func (a *Approvals) Ask(ctx context.Context, req core.ApprovalRequest) core.Appr
 			// requests when it reconnects.
 		}
 	}
+	observer := a.observer
 	a.mu.Unlock()
+	if observer != nil {
+		observer.approvalOpened(id, req, event.Argument)
+	}
 
 	select {
 	case outcome := <-pending.reply:
@@ -227,13 +247,19 @@ func (a *Approvals) sessionRootResolver() sessionRootResolver {
 // path already closed it, resolve returns that decision instead.
 func (a *Approvals) resolve(pending *pendingApproval, outcome core.ApprovalOutcome) core.ApprovalOutcome {
 	a.mu.Lock()
+	closed := false
 	if current, ok := a.open[pending.id]; ok && current == pending {
 		delete(a.open, pending.id)
 		a.markClosedLocked(pending.id)
 		pending.timer.Stop()
 		pending.reply <- outcome
+		closed = true
 	}
+	observer := a.observer
 	a.mu.Unlock()
+	if closed && observer != nil {
+		observer.approvalClosed(pending.id, pending.sessionID, outcome)
+	}
 	return <-pending.reply
 }
 
@@ -242,10 +268,11 @@ func (a *Approvals) resolve(pending *pendingApproval, outcome core.ApprovalOutco
 // errApprovalNotFound.
 func (a *Approvals) answer(id string, outcome core.ApprovalOutcome) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	pending, ok := a.open[id]
 	if !ok {
-		if _, seen := a.closed[id]; seen {
+		_, seen := a.closed[id]
+		a.mu.Unlock()
+		if seen {
 			return errApprovalClosed
 		}
 		return errApprovalNotFound
@@ -254,6 +281,11 @@ func (a *Approvals) answer(id string, outcome core.ApprovalOutcome) error {
 	a.markClosedLocked(id)
 	pending.timer.Stop()
 	pending.reply <- outcome
+	observer := a.observer
+	a.mu.Unlock()
+	if observer != nil {
+		observer.approvalClosed(id, pending.sessionID, outcome)
+	}
 	return nil
 }
 

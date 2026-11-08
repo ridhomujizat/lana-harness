@@ -19,6 +19,7 @@ import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
 import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
+import { useSessionPresence } from "../lib/session-presence";
 import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
@@ -399,6 +400,8 @@ export function RoomView({ room }: RoomViewProps) {
   const lastSegment =
     segments.length > 0 ? segments[segments.length - 1] : null;
   const newestId = lastSegment ? lastSegment.session_id : "";
+  /* Spec #42: the newest segment is the session this room shows. */
+  useSessionPresence(newestId);
 
   const finishLive = useCallback(() => {
     startedRef.current = false;

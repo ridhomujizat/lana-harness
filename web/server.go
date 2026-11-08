@@ -20,6 +20,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/notify"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -102,6 +103,12 @@ type Server struct {
 	// API-WLG-008 (lana web reset-login, REQ-WLG-006). It is empty until the
 	// daemon calls SetLocalSecret, and an empty secret rejects every request.
 	localSecret string
+
+	// notifications is the notification bus of spec #42; nil until the
+	// daemon calls SetNotifications. localHeartbeat overrides the local event
+	// stream's heartbeat (tests).
+	notifications  *notify.Bus
+	localHeartbeat time.Duration
 
 	// secretsChanged is set after a successful write to secrets.env and stays
 	// set until the daemon restarts.
@@ -204,6 +211,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerWebRoutes()
 	s.registerAuditRoutes()
 	s.registerLocalRoutes()
+	s.registerNotifyRoutes()
 	s.registerWorkflowRoutes()
 	s.registerToolboxRoutes()
 	s.registerCalendarRoutes()

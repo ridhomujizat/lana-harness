@@ -118,6 +118,20 @@ type Graph struct {
 	Edges []Edge `json:"edges"`
 }
 
+// MarshalJSON writes a nil node or edge list as [] instead of null, so a
+// workflow with no edges never reaches the dashboard canvas as "edges": null.
+func (g Graph) MarshalJSON() ([]byte, error) {
+	type plain Graph
+	out := plain(g)
+	if out.Nodes == nil {
+		out.Nodes = []Node{}
+	}
+	if out.Edges == nil {
+		out.Edges = []Edge{}
+	}
+	return json.Marshal(out)
+}
+
 // LockTool is one tool a locked workflow may run without approval.
 type LockTool struct {
 	Tool   string   `json:"tool"`

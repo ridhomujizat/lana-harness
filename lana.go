@@ -266,6 +266,8 @@ type Runtime struct {
 	// titles names sessions after their first turn (spec 40). It is never
 	// nil after New.
 	titles *titles.Service
+	// notify holds the notification bus and its feeders (spec #42).
+	notify notifyState
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
