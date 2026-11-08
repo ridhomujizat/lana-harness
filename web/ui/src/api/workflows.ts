@@ -250,6 +250,90 @@ export interface VersionInfo {
   node_count?: number;
 }
 
+/* Read-side normalization. Older servers sent nil Go slices as JSON null
+   (a new workflow had "edges": null), and versions stored before that fix
+   still can. Every list a view iterates is made an array here, once, so the
+   views can trust the types above. */
+
+/* Loose is T as it may arrive on the wire: any field null or missing. */
+type Loose<T> = { [K in keyof T]?: T[K] | null };
+
+function list<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+export function normalizeGraph(raw: Loose<Graph> | null | undefined): Graph {
+  return {
+    nodes: list(raw?.nodes).map((node) => ({ ...node, params: node.params ?? {} })),
+    edges: list(raw?.edges),
+  };
+}
+
+function normalizeLock(raw: Lock | null | undefined): Lock | null {
+  return raw ? { ...raw, tools: normalizeLockTools(raw.tools) } : null;
+}
+
+function normalizeLockTools(raw: LockTool[] | null | undefined): LockTool[] {
+  return list(raw).map((tool) => ({ ...tool, used_by: list(tool.used_by) }));
+}
+
+export function normalizeWorkflow(raw: Workflow): Workflow {
+  return {
+    ...raw,
+    graph: normalizeGraph(raw.graph),
+    lock: normalizeLock(raw.lock),
+    failure_default: raw.failure_default ?? {},
+  };
+}
+
+export function normalizeRunDetail(raw: RunDetail): RunDetail {
+  return {
+    ...raw,
+    graph: normalizeGraph(raw.graph),
+    nodes: list(raw.nodes).map((row) => ({
+      ...row,
+      attempts: list(row.attempts),
+      logs: list(row.logs),
+    })),
+    decisions: list(raw.decisions),
+  };
+}
+
+export function normalizeWorkflowList(raw: WorkflowList): WorkflowList {
+  return {
+    ...raw,
+    workflows: list(raw.workflows).map((row) => ({
+      ...row,
+      triggers: list(row.triggers),
+      bots: list(row.bots),
+    })),
+    attention: list(raw.attention),
+  };
+}
+
+export function normalizeChatMessage(raw: ChatMessage): ChatMessage {
+  if (!raw.change) {
+    return raw;
+  }
+  return {
+    ...raw,
+    change: {
+      ...raw.change,
+      added: list(raw.change.added),
+      removed: list(raw.change.removed),
+      changed: list(raw.change.changed),
+    },
+  };
+}
+
+function workflowRequest(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<Workflow> {
+  return request<Workflow>(method, path, body).then(normalizeWorkflow);
+}
+
 const base = "/v1/workflows";
 
 function wf(id: string): string {
@@ -257,11 +341,11 @@ function wf(id: string): string {
 }
 
 export function listWorkflows(): Promise<WorkflowList> {
-  return request<WorkflowList>("GET", base);
+  return request<WorkflowList>("GET", base).then(normalizeWorkflowList);
 }
 
 export function getWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("GET", wf(id));
+  return workflowRequest("GET", wf(id));
 }
 
 export function createWorkflow(body: {
@@ -270,7 +354,7 @@ export function createWorkflow(body: {
   guardian: string;
   graph?: Graph;
 }): Promise<Workflow> {
-  return request<Workflow>("POST", base, body);
+  return workflowRequest("POST", base, body);
 }
 
 export interface UpdateWorkflowBody {
@@ -287,7 +371,7 @@ export function updateWorkflow(
   id: string,
   body: UpdateWorkflowBody
 ): Promise<Workflow> {
-  return request<Workflow>("PUT", wf(id), body);
+  return workflowRequest("PUT", wf(id), body);
 }
 
 export function deleteWorkflow(id: string): Promise<void> {
@@ -295,27 +379,31 @@ export function deleteWorkflow(id: string): Promise<void> {
 }
 
 export function listVersions(id: string): Promise<{ versions: VersionInfo[] }> {
-  return request<{ versions: VersionInfo[] }>("GET", wf(id) + "/versions");
+  return request<{ versions: VersionInfo[] }>("GET", wf(id) + "/versions").then(
+    (res) => ({ versions: list(res.versions) })
+  );
 }
 
 export function restoreVersion(id: string, version: number): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/restore", { version });
+  return workflowRequest("POST", wf(id) + "/restore", { version });
 }
 
 export function lockPreview(id: string): Promise<{ tools: LockTool[] }> {
-  return request<{ tools: LockTool[] }>("GET", wf(id) + "/lock");
+  return request<{ tools: LockTool[] }>("GET", wf(id) + "/lock").then((res) => ({
+    tools: normalizeLockTools(res.tools),
+  }));
 }
 
 export function activateWorkflow(id: string, version: number): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/activate", { version });
+  return workflowRequest("POST", wf(id) + "/activate", { version });
 }
 
 export function pauseWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/pause");
+  return workflowRequest("POST", wf(id) + "/pause");
 }
 
 export function resumeWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/resume");
+  return workflowRequest("POST", wf(id) + "/resume");
 }
 
 export function startRun(id: string, input?: unknown): Promise<Run> {
@@ -333,14 +421,14 @@ export function listRuns(
   return request<{ runs: Run[] }>(
     "GET",
     wf(id) + "/runs" + queryString(options)
-  );
+  ).then((res) => ({ runs: list(res.runs) }));
 }
 
 export function getRun(id: string, run: string | number): Promise<RunDetail> {
   return request<RunDetail>(
     "GET",
     wf(id) + "/runs/" + encodeURIComponent(String(run))
-  );
+  ).then(normalizeRunDetail);
 }
 
 export function cancelRun(id: string, run: string | number): Promise<Run> {
@@ -363,7 +451,9 @@ export function answerDecision(
 }
 
 export function getState(id: string): Promise<{ entries: StateEntry[] }> {
-  return request<{ entries: StateEntry[] }>("GET", wf(id) + "/state");
+  return request<{ entries: StateEntry[] }>("GET", wf(id) + "/state").then(
+    (res) => ({ entries: list(res.entries) })
+  );
 }
 
 export function setState(
@@ -386,7 +476,9 @@ export function deleteState(id: string, key?: string): Promise<void> {
 }
 
 export function getChat(id: string): Promise<{ messages: ChatMessage[] }> {
-  return request<{ messages: ChatMessage[] }>("GET", wf(id) + "/assistant");
+  return request<{ messages: ChatMessage[] }>("GET", wf(id) + "/assistant").then(
+    (res) => ({ messages: list(res.messages).map(normalizeChatMessage) })
+  );
 }
 
 export interface AssistResponse {
@@ -403,7 +495,11 @@ export function askAssistant(
   return request<AssistResponse>("POST", wf(id) + "/assistant", {
     message,
     base_version: baseVersion,
-  });
+  }).then((res) => ({
+    ...res,
+    message: normalizeChatMessage(res.message),
+    workflow: normalizeWorkflow(res.workflow),
+  }));
 }
 
 export function rotateWebhook(id: string): Promise<{ token: string }> {

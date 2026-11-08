@@ -490,7 +490,8 @@ func TestChatRoundTrip(t *testing.T) {
 	if first.ID == 0 {
 		t.Fatalf("AppendChat did not set an id")
 	}
-	change := &workflow.GraphChange{FromVersion: 1, ToVersion: 2, Summary: "added", Added: []string{"n3"}}
+	// DiffGraphs never leaves a list nil, and the store writes nil lists as [].
+	change := &workflow.GraphChange{FromVersion: 1, ToVersion: 2, Summary: "added", Added: []string{"n3"}, Removed: []string{}, Changed: []string{}}
 	second, err := s.AppendChat(ctx, workflow.ChatMessage{
 		WorkflowID: w.ID, Role: "guardian", Text: "did it", CreatedAt: 20,
 		Change: change, Issues: []workflow.Issue{{NodeID: "n1", Code: "missing_param", Message: "need x"}},
@@ -665,5 +666,46 @@ func TestMigrateV5ToV6Workflows(t *testing.T) {
 	w := createTestWorkflow(t, s, "wf-migrated")
 	if _, err := s.GetWorkflow(ctx, w.ID); err != nil {
 		t.Fatalf("get workflow after migrate: %v", err)
+	}
+}
+
+// A single-node graph is stored with "edges":[], and a version stored before
+// that fix with "edges":null still loads.
+func TestWorkflowGraphEdgesNeverNull(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	g := workflow.Graph{Nodes: []workflow.Node{{ID: "run-button", Type: "trigger.manual", Name: "Run"}}}
+	w := workflow.Workflow{ID: "hi", Name: "hi", Guardian: "lana", Status: workflow.StatusDraft, WebhookToken: "tok", CreatedAt: 1, UpdatedAt: 1}
+	if _, err := s.CreateWorkflow(ctx, w, g, "owner", "created"); err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := s.db.QueryRow("SELECT graph_json FROM workflow_versions WHERE workflow_id = ? AND version = 1", "hi").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains([]byte(stored), []byte(`"edges":[]`)) {
+		t.Fatalf("stored graph_json=%s, want \"edges\":[]", stored)
+	}
+
+	legacy := `{"nodes":[{"id":"run-button","type":"trigger.manual","name":"Run","position":{"x":0,"y":0},"params":{}}],"edges":null}`
+	if _, err := s.db.Exec("INSERT INTO workflow_versions (workflow_id, version, graph_json, author, summary, created_at) VALUES (?, ?, ?, ?, ?, ?)", "hi", 2, legacy, "owner", "legacy", 2); err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.GetVersion(ctx, "hi", 2)
+	if err != nil {
+		t.Fatalf("GetVersion legacy: %v", err)
+	}
+	if len(v.Graph.Nodes) != 1 {
+		t.Fatalf("legacy graph=%+v", v.Graph)
+	}
+	if _, err := s.ListVersions(ctx, "hi"); err != nil {
+		t.Fatalf("ListVersions legacy: %v", err)
+	}
+	b, err := json.Marshal(v.Graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"edges":[]`)) {
+		t.Fatalf("legacy graph JSON=%s", b)
 	}
 }
