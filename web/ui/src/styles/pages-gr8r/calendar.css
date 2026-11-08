@@ -389,9 +389,48 @@
   color: var(--c);
   flex-shrink: 0;
 }
+.wcard .m > .num {
+  flex-shrink: 0;
+}
 .wcard .av {
   --sz: 16px;
   font-size: 7.5px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+/* One line when the slot is too short for the title and meta rows: dot,
+   title, time + short status, agent face, all vertically centered. */
+.wcard.compact {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 7px;
+  gap: 0;
+}
+.wcard.compact .t {
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+}
+.wcard.compact .t .pdot {
+  transform: none;
+}
+.wcard.compact .t .trunc {
+  flex: 1;
+}
+.wcard.compact .wcard-when {
+  flex-shrink: 0;
+  font-size: var(--fs-2xs);
+}
+.wcard.compact .wcard-status {
+  flex-shrink: 0;
+  font-size: var(--fs-2xs);
+  color: var(--text-3);
+}
+.wcard.compact .av {
+  --sz: 14px;
+  font-size: 7px;
 }
 
 /* ---------- day timeline ---------- */
@@ -496,9 +535,30 @@
 .cday-slot .wcard {
   height: 100%;
   overflow: hidden;
-  padding: 4px 7px;
-  gap: 2px;
+  padding: 3px 7px;
+  gap: 1px;
   box-shadow: var(--shadow-sm);
+}
+/* A one-line card at the 22px minimum slot: the row padding is trimmed so the
+   line (dot, title, time) stays centred and is not clipped. */
+.cday-slot .wcard.compact {
+  padding: 1px 7px;
+  gap: 0;
+}
+.cday-slot .wcard.compact .t {
+  line-height: 1.2;
+}
+/* The opened (and the keyboard-focused) card rings inside its own box, so the
+   ring can never cover a neighbour in the stacked day layout. */
+.cday-slot .wcard.sel {
+  box-shadow: var(--shadow-sm), inset 0 0 0 2px var(--c, var(--accent));
+}
+.cday-slot .wcard:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.cday-all-b .cev.sel {
+  box-shadow: inset 0 0 0 2px var(--c, var(--accent));
 }
 
 /* ---------- agenda ---------- */
