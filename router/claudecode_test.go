@@ -116,3 +116,69 @@ func TestConfigFromCoreBackgroundModel(t *testing.T) {
 		t.Fatalf("claude-code marked as a used provider: %v", used)
 	}
 }
+
+// REQ-CCT-010, API-CCT-012: a provider of kind claude-code is a Claude Code
+// account: its addresses resolve, combos may list it, Models(account) is the
+// Claude Code list with the account's addresses, and the router never
+// streams to it.
+func TestClaudeCodeAccounts(t *testing.T) {
+	h := newHarness(t, Config{
+		Providers: map[string]core.ProviderConfig{
+			"ds":          fakeProvider(t, "ds", &fakeBehavior{}),
+			"claude-work": {Kind: core.ClaudeCodeKind, ConfigDir: "/w", AllowScheduled: true},
+			"claude-off":  {Kind: core.ClaudeCodeKind, Disabled: true},
+		},
+		Combos: map[string]Combo{"c": {Models: []string{"claude-work/opus", "claude-code/opus", "ds/deepseek-flash"}}},
+	})
+	chain, err := h.r.Resolve("claude-work/haiku")
+	if err != nil || len(chain) != 1 || chain[0] != (Target{Provider: "claude-work", Model: "haiku"}) {
+		t.Fatalf("resolve = %v, %v", chain, err)
+	}
+	if _, err := h.r.Resolve("claude-work/-x"); !errors.Is(err, ErrUnknownAddress) {
+		t.Fatalf("flag model: err = %v", err)
+	}
+	pc, ok := h.r.ClaudeCodeAccount("claude-work")
+	if !ok || pc.ConfigDir != "/w" || !pc.AllowScheduled {
+		t.Fatalf("account = %+v %v", pc, ok)
+	}
+	if _, ok := h.r.ClaudeCodeAccount("ds"); ok {
+		t.Fatal("ds is an account")
+	}
+	if builtin, ok := h.r.ClaudeCodeAccount(ClaudeCode); !ok || builtin.Kind != core.ClaudeCodeKind {
+		t.Fatalf("built-in = %+v %v", builtin, ok)
+	}
+	if got := strings.Join(h.r.ClaudeCodeAccounts(), ","); got != "claude-off,claude-work" {
+		t.Fatalf("accounts = %q", got)
+	}
+	if kind, ok := h.r.Kind("claude-work"); !ok || kind != core.ClaudeCodeKind || !h.r.Disabled("claude-off") || h.r.Disabled("claude-work") {
+		t.Fatalf("kind = %q %v", kind, ok)
+	}
+	for _, name := range h.r.Names() {
+		if strings.HasPrefix(name, "claude") {
+			t.Fatalf("names = %v", h.r.Names())
+		}
+	}
+	list, err := h.r.Models(context.Background(), "claude-work", false)
+	builtin, _ := h.r.Models(context.Background(), ClaudeCode, false)
+	if err != nil || len(list) != len(builtin) || list[0].Address != "claude-work/opus" || list[0].ID != builtin[0].ID || list[0].Name != builtin[0].Name {
+		t.Fatalf("models = %+v, %v", list, err)
+	}
+	combo, err := h.r.Resolve("c")
+	if err != nil || len(combo) != 3 {
+		t.Fatalf("combo = %v, %v", combo, err)
+	}
+	stream, served, err := h.r.StreamChain(context.Background(), combo, core.ChatRequest{}, CallMeta{Source: "turn"}, nil)
+	if err != nil || served.Provider != "ds" {
+		t.Fatalf("stream chain: served=%v err=%v", served, err)
+	}
+	_, _ = drain(stream)
+	if _, err := New(Config{Providers: map[string]core.ProviderConfig{ClaudeCode: {Kind: core.ClaudeCodeKind}}}); err == nil {
+		t.Fatal("a claude-code table was accepted")
+	}
+	if _, err := New(Config{
+		Providers: map[string]core.ProviderConfig{"cw": {Kind: core.ClaudeCodeKind}},
+		Combos:    map[string]Combo{"cw": {Models: []string{"cw/opus"}}},
+	}); err == nil {
+		t.Fatal("a combo named like an account was accepted")
+	}
+}

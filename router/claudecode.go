@@ -26,6 +26,34 @@ func claudeCodeTarget(target Target) error {
 	return nil
 }
 
+// isClaude reports whether name is a Claude Code account: the built-in
+// "claude-code" or a provider of kind "claude-code" (REQ-CCT-010).
+func (s *snapshot) isClaude(name string) bool {
+	if name == ClaudeCode {
+		return true
+	}
+	_, ok := s.claude[name]
+	return ok
+}
+
+// ClaudeCodeAccount returns the config of a Claude Code account (REQ-CCT-010):
+// a provider of kind "claude-code", or the built-in "claude-code" with an
+// empty config. It implements llmcall.ClaudeCodeAccounts.
+func (r *Router) ClaudeCodeAccount(name string) (core.ProviderConfig, bool) {
+	if name == ClaudeCode {
+		return core.ProviderConfig{Kind: core.ClaudeCodeKind}, true
+	}
+	pc, ok := r.snap.Load().claude[name]
+	return pc, ok
+}
+
+// ClaudeCodeAccounts returns the names of the configured Claude Code accounts
+// (providers of kind "claude-code"), sorted; the built-in "claude-code" is
+// not listed.
+func (r *Router) ClaudeCodeAccounts() []string {
+	return sortedKeys(r.snap.Load().claude)
+}
+
 // SetClaudeCodeModels sets the models Claude Code reported (the initialize
 // response's models list). Models("claude-code") lists them after the
 // aliases; nil goes back to the catalog fallback.
@@ -56,13 +84,15 @@ const (
 	ClaudeSourceCustom     = "custom"
 )
 
-// claudeCodeModels is Models("claude-code") (API-CCT-004): the aliases opus,
+// claudeCodeModels is Models(account) (API-CCT-004, API-CCT-012): the same
+// list for every Claude Code account, with addresses "<account>/<id>": the
+// aliases opus,
 // sonnet, and haiku; then the models Claude Code reported in its initialize
 // response, else the Claude models of the catalog; then the IDs the owner
 // added in [router] claude_code_models. Model facts (context window, vision,
 // thinking, price) come from the catalog by ID; an alias takes the newest
 // catalog model of its family.
-func (r *Router) claudeCodeModels() []ModelInfo {
+func (r *Router) claudeCodeModels(account string) []ModelInfo {
 	out := make([]ModelInfo, 0, 16)
 	seen := map[string]bool{}
 	add := func(id, label, source string) {
@@ -76,7 +106,7 @@ func (r *Router) claudeCodeModels() []ModelInfo {
 			info.ID = id
 		}
 		info.Source = source
-		info.Address = ClaudeCode + "/" + id
+		info.Address = account + "/" + id
 		info.Name = ClaudeCodeLabelPrefix + label
 		out = append(out, info)
 	}

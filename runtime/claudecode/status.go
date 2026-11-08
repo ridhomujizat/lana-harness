@@ -98,11 +98,24 @@ func (r *Runtime) probeVersion(ctx context.Context, bin string) (string, error) 
 	return version, nil
 }
 
-// authStatus is the part of `claude auth status --json` lana reads. The output
-// also holds the account e-mail and organization, which lana ignores.
+// authStatus is the part of `claude auth status --json` lana reads: the login
+// state, the auth method, and, for the account rows of the Router
+// (API-CCT-011), the e-mail and plan. Nothing else of the output is decoded,
+// and none of it is stored.
 type authStatus struct {
-	LoggedIn   bool   `json:"loggedIn"`
-	AuthMethod string `json:"authMethod"`
+	LoggedIn         bool   `json:"loggedIn"`
+	AuthMethod       string `json:"authMethod"`
+	Email            string `json:"email"`
+	SubscriptionType string `json:"subscriptionType"`
+	PlanTier         string `json:"planTier"`
+}
+
+// plan is subscriptionType, else planTier.
+func (a authStatus) plan() string {
+	if a.SubscriptionType != "" {
+		return a.SubscriptionType
+	}
+	return a.PlanTier
 }
 
 // parseAuthStatus reads `claude auth status --json` output. The command exits
@@ -160,21 +173,105 @@ func (r *Runtime) probeStatus(ctx context.Context, bin string) core.RuntimeStatu
 		return st
 	}
 	st.VersionOK = true
+	env, _, _ := buildEnv(r.opts.Environ(), core.RuntimeConfig{}, nil)
+	auth, err := r.probeAuth(ctx, bin, env)
+	if err != nil {
+		st.Error = err.Error()
+		return st
+	}
+	st.LoggedIn, st.AuthMethod = auth.LoggedIn, auth.AuthMethod
+	return st
+}
+
+// probeAuth runs `<bin> auth status --json` with env. The command prints its
+// JSON on stdout even when it exits 1 (not logged in).
+func (r *Runtime) probeAuth(ctx context.Context, bin string, env []string) (authStatus, error) {
 	pctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	env, _, _ := buildEnv(r.opts.Environ(), core.RuntimeConfig{}, nil)
 	cmd := exec.CommandContext(pctx, bin, "auth", "status", "--json")
 	cmd.Env = env
 	out, runErr := cmd.Output()
 	auth, err := parseAuthStatus(out)
 	if err != nil {
 		if runErr != nil {
-			st.Error = "`claude auth status` failed: " + runErr.Error()
-		} else {
-			st.Error = err.Error()
+			return authStatus{}, fmt.Errorf("`claude auth status` failed: %s", runErr.Error())
 		}
+		return authStatus{}, err
+	}
+	return auth, nil
+}
+
+// cachedAccountStatus is one cached AccountStatus probe.
+type cachedAccountStatus struct {
+	status core.RuntimeAccountStatus
+	at     time.Time
+}
+
+// AccountStatus reports one Claude Code account (API-CCT-011): its binary and
+// version, and its login state, auth method, e-mail, and plan from
+// `claude auth status` run with the account's CLAUDE_CONFIG_DIR. The probe is
+// cached for StatusTTL per account; the e-mail and plan live only in that
+// cache. Running and Queued count the account's turns.
+func (r *Runtime) AccountStatus(ctx context.Context, account core.RuntimeAccount) core.RuntimeAccountStatus {
+	name := account.Name
+	if name == "" {
+		name = core.ClaudeCodeProvider
+	}
+	key := strings.Join([]string{name, account.ConfigDir, account.Binary, account.Auth, account.APIKeyEnv}, "\x00")
+	r.accountStatusMu.Lock()
+	cached, ok := r.accountStatus[key]
+	r.accountStatusMu.Unlock()
+	st := cached.status
+	if !ok || time.Since(cached.at) >= r.opts.StatusTTL {
+		st = r.probeAccount(ctx, account)
+		if ctx.Err() == nil {
+			r.accountStatusMu.Lock()
+			r.accountStatus[key] = cachedAccountStatus{status: st, at: time.Now()}
+			r.accountStatusMu.Unlock()
+		}
+	}
+	st.Running, st.Queued = r.accountTurns(name)
+	return st
+}
+
+func (r *Runtime) probeAccount(ctx context.Context, account core.RuntimeAccount) core.RuntimeAccountStatus {
+	var st core.RuntimeAccountStatus
+	bin := account.Binary
+	if bin == "" {
+		path, err := r.opts.LookPath("claude")
+		if err != nil {
+			st.Error = errNotInstalled
+			return st
+		}
+		bin = path
+	} else if strings.HasPrefix(bin, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			bin = home + bin[1:]
+		}
+	}
+	st.Binary = bin
+	version, err := r.checkVersion(ctx, bin)
+	st.Version = version
+	if err != nil {
+		st.Error = err.Error()
+		return st
+	}
+	st.VersionOK = true
+	env, _, err := buildEnv(r.opts.Environ(), core.RuntimeConfig{
+		ConfigDir: account.ConfigDir, Auth: account.Auth, APIKeyEnv: account.APIKeyEnv,
+	}, r.deps.Secrets)
+	if err != nil {
+		st.Error = err.Error()
+		return st
+	}
+	auth, err := r.probeAuth(ctx, bin, env)
+	if err != nil {
+		st.Error = err.Error()
 		return st
 	}
 	st.LoggedIn, st.AuthMethod = auth.LoggedIn, auth.AuthMethod
+	st.Email, st.Plan = truncate(auth.Email, 200), truncate(auth.plan(), 80)
 	return st
 }
+
+var _ core.RuntimeAccountStatuser = (*Runtime)(nil)

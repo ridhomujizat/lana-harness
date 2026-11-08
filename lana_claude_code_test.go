@@ -135,8 +135,14 @@ agent = "bima"
 	if !strings.Contains(prompt, "You are Bima") || !strings.Contains(prompt, "Bandung") || !strings.Contains(prompt, "mcp__lana__") {
 		t.Fatalf("--append-system-prompt = %q", prompt)
 	}
-	if mcpCfg := argAfter(argv, "--mcp-config"); !strings.Contains(mcpCfg, `"lana"`) || !strings.Contains(mcpCfg, "Bearer ") {
-		t.Fatalf("--mcp-config = %q", mcpCfg)
+	// API-CCT-014: --mcp-config is the path of a 0600 file, so the token is
+	// not in the argv.
+	startLog := fakeClaudeLog(t, logPath, "start")
+	mcpPath := argAfter(argv, "--mcp-config")
+	mcpCfg, _ := startLog[0]["mcp_config"].(string)
+	if !filepath.IsAbs(mcpPath) || strings.Contains(mcpPath, "Bearer") || !strings.Contains(mcpCfg, `"lana"`) || !strings.Contains(mcpCfg, "Bearer ") ||
+		startLog[0]["mcp_config_mode"] != "0600" {
+		t.Fatalf("--mcp-config = %q, file = %q mode %v", mcpPath, mcpCfg, startLog[0]["mcp_config_mode"])
 	}
 	for _, a := range argv {
 		if a == "--strict-mcp-config" {

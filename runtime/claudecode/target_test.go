@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -125,10 +127,12 @@ func TestPromptHeadRestartsWithResume(t *testing.T) {
 	}
 }
 
-// REQ-CCT-006: OpenMCP is called once per process; its config goes to
-// --mcp-config and release runs when the process exits.
+// REQ-CCT-006, API-CCT-014: OpenMCP is called once per process; its config
+// goes to a 0600 file whose path is --mcp-config, and release runs and the
+// file is removed when the process exits.
 func TestOpenMCPPerProcess(t *testing.T) {
-	h := newHarness(t, "hi.jsonl", Options{})
+	tmp := t.TempDir()
+	h := newHarness(t, "hi.jsonl", Options{TempDir: tmp})
 	var mu sync.Mutex
 	opened, released := 0, 0
 	turn := h.turn("s1")
@@ -147,8 +151,13 @@ func TestOpenMCPPerProcess(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if cfg := argValue(h.starts()[0].Argv, "--mcp-config"); !strings.Contains(cfg, `"lana"`) {
-		t.Fatalf("--mcp-config = %q", cfg)
+	start := h.starts()[0]
+	path := argValue(start.Argv, "--mcp-config")
+	if filepath.Dir(path) != tmp || !strings.Contains(start.MCPConfig, `"lana"`) || start.MCPConfigMode != "0600" {
+		t.Fatalf("--mcp-config = %q, file = %q mode %q", path, start.MCPConfig, start.MCPConfigMode)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("config file of a live process: %v", err)
 	}
 	h.rt.Close("s1")
 	deadline := time.Now().Add(5 * time.Second)
@@ -156,7 +165,8 @@ func TestOpenMCPPerProcess(t *testing.T) {
 		mu.Lock()
 		o, r := opened, released
 		mu.Unlock()
-		if o == 1 && r == 1 {
+		_, statErr := os.Stat(path)
+		if o == 1 && r == 1 && errors.Is(statErr, os.ErrNotExist) {
 			break
 		}
 		if time.Now().After(deadline) {

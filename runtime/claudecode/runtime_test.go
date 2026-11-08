@@ -154,12 +154,16 @@ func (h *harness) run(ctx context.Context, turn core.RuntimeTurn) ([]core.Runtim
 }
 
 type logEntry struct {
-	Kind string          `json:"kind"`
-	Argv []string        `json:"argv"`
-	Env  []string        `json:"env"`
-	Cwd  string          `json:"cwd"`
-	Line json.RawMessage `json:"line"`
-	Pid  int             `json:"pid"`
+	Kind string   `json:"kind"`
+	Argv []string `json:"argv"`
+	// MCPConfig and MCPConfigMode are the --mcp-config file's content and
+	// permission bits.
+	MCPConfig     string          `json:"mcp_config"`
+	MCPConfigMode string          `json:"mcp_config_mode"`
+	Env           []string        `json:"env"`
+	Cwd           string          `json:"cwd"`
+	Line          json.RawMessage `json:"line"`
+	Pid           int             `json:"pid"`
 }
 
 func (h *harness) log() []logEntry {

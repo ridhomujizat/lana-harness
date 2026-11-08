@@ -72,8 +72,9 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 			if target, ok := llmcall.ParseTarget(fallback); ok {
 				provider = target.Provider
 			}
-			// ADR 0020: claude-code is built in, not a configured provider.
-			if provider == llmcall.ClaudeCode {
+			// ADR 0020, REQ-CCT-010: a Claude Code account has no router
+			// provider.
+			if llmcall.IsClaudeCodeProvider(config.Providers, provider) {
 				continue
 			}
 			if _, ok := config.Providers[provider]; !ok {

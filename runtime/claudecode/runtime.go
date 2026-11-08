@@ -62,6 +62,9 @@ type Options struct {
 	LookPath func(string) (string, error)
 	// Environ returns the daemon environment the child env is built from.
 	Environ func() []string
+	// TempDir holds the --mcp-config files (API-CCT-014); "" is
+	// os.TempDir().
+	TempDir string
 }
 
 // Runtime is the claude-code AgentRuntime.
@@ -72,10 +75,17 @@ type Runtime struct {
 	sem  *fifoSem
 
 	mu        sync.Mutex
-	procs     map[string]*process // live processes by lana session ID
-	starting  map[string]bool     // sessions whose process is starting
-	claudeIDs map[string]string   // Claude session UUID by lana session ID
+	procs     map[string]*process  // live processes by lana session ID
+	starting  map[string]bool      // sessions whose process is starting
+	claudeIDs map[string]claudeRef // Claude session by lana session ID
 	closed    bool
+	// mcpFiles are the --mcp-config files of live processes (API-CCT-014).
+	mcpFiles map[string]bool
+	// accounts are the running and queued turns per account (API-CCT-011).
+	accounts map[string]*accountCounts
+
+	accountStatusMu sync.Mutex
+	accountStatus   map[string]cachedAccountStatus
 
 	versionMu sync.Mutex
 	versions  map[string]versionInfo
@@ -168,9 +178,53 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 	}
 	return &Runtime{
 		deps: deps, log: log, opts: opts, sem: newFIFOSem(opts.MaxConcurrent),
-		procs: map[string]*process{}, starting: map[string]bool{}, claudeIDs: map[string]string{},
-		versions: map[string]versionInfo{},
+		procs: map[string]*process{}, starting: map[string]bool{}, claudeIDs: map[string]claudeRef{},
+		versions: map[string]versionInfo{}, mcpFiles: map[string]bool{}, accounts: map[string]*accountCounts{},
+		accountStatus: map[string]cachedAccountStatus{},
 	}
+}
+
+// claudeRef is the Claude session a lana session ran last, with its account:
+// a session of one account is never resumed on another (REQ-CCT-010).
+type claudeRef struct {
+	id      string
+	account string
+}
+
+// accountCounts are the turns of one account that run or wait for a slot.
+type accountCounts struct {
+	running, queued int
+}
+
+// accountName is the account of a turn config: "" is the built-in one.
+func accountName(cfg core.RuntimeConfig) string {
+	if cfg.Account == "" {
+		return core.ClaudeCodeProvider
+	}
+	return cfg.Account
+}
+
+// countTurn moves the account's counts by the given amounts.
+func (r *Runtime) countTurn(account string, running, queued int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c := r.accounts[account]
+	if c == nil {
+		c = &accountCounts{}
+		r.accounts[account] = c
+	}
+	c.running += running
+	c.queued += queued
+}
+
+// accountTurns returns the running and queued turns of an account.
+func (r *Runtime) accountTurns(account string) (running, queued int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c := r.accounts[account]; c != nil {
+		return c.running, c.queued
+	}
+	return 0, 0
 }
 
 // TurnError is the error RunTurn returns for a failed turn.
@@ -235,7 +289,8 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 	if closed {
 		return fail(classRuntime, "Claude Code runtime is shut down")
 	}
-	bin, err := r.resolveBinary(turn.Config.Binary)
+	account := accountName(turn.Config)
+	bin, err := r.resolveBinary(turn.Config.Binary, account == core.ClaudeCodeProvider)
 	if err != nil {
 		return fail(classNotInstalled, err.Error())
 	}
@@ -253,15 +308,22 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 	if err != nil {
 		return fail("client", err.Error())
 	}
+	r.countTurn(account, 0, 1)
 	if err := r.sem.Acquire(ctx); err != nil {
+		r.countTurn(account, 0, -1)
 		return cancelled()
 	}
-	defer r.sem.Release()
+	r.countTurn(account, 1, -1)
+	defer func() {
+		r.sem.Release()
+		r.countTurn(account, -1, 0)
+	}()
 
 	// A change of the prompt head or the lana tool set starts a new process
-	// that resumes the Claude session (REQ-CCT-005).
+	// that resumes the Claude session (REQ-CCT-005). The account is part of
+	// the key, so a process never serves two accounts (REQ-CCT-010).
 	promptSum := sha256.Sum256([]byte(turn.Config.AppendSystemPrompt))
-	key := strings.Join([]string{bin, dir, turn.Config.Auth, turn.Config.APIKeyEnv, turn.Config.Model, turn.Config.Effort,
+	key := strings.Join([]string{account, turn.Config.ConfigDir, bin, dir, turn.Config.Auth, turn.Config.APIKeyEnv, turn.Config.Model, turn.Config.Effort,
 		hex.EncodeToString(promptSum[:8]), turn.Config.MCPKey}, "\x00")
 	p, err := r.acquireProcess(ctx, turn, launch{bin: bin, env: env, dir: dir, key: key, apiKey: apiKey})
 	if err != nil {
@@ -319,17 +381,22 @@ func (r *Runtime) acquireProcess(ctx context.Context, turn core.RuntimeTurn, l l
 		}
 	}
 	r.evictIdleLocked()
+	account := accountName(turn.Config)
 	claudeID, resume := turn.ResumeID, true
 	if !isUUID(claudeID) {
 		if claudeID != "" {
 			r.log.Warn("claude: ignoring invalid resume ID", "session", sid)
 		}
-		claudeID = r.claudeIDs[sid]
+		claudeID = ""
+		// REQ-CCT-010: a Claude session of another account is not resumed.
+		if ref, ok := r.claudeIDs[sid]; ok && ref.account == account {
+			claudeID = ref.id
+		}
 	}
 	if claudeID == "" {
 		claudeID, resume = newUUID(), false
 	}
-	r.claudeIDs[sid] = claudeID
+	r.claudeIDs[sid] = claudeRef{id: claudeID, account: account}
 	r.starting[sid] = true
 	r.mu.Unlock()
 
@@ -354,13 +421,25 @@ func (r *Runtime) startSessionProcess(ctx context.Context, turn core.RuntimeTurn
 	mcpConfig, release := "", func() {}
 	if turn.OpenMCP != nil {
 		config, rel, err := turn.OpenMCP()
+		if rel == nil {
+			rel = func() {}
+		}
 		switch {
 		case err != nil:
 			r.log.Warn("claude: lana tools are not available to this process", "session", sid, "error", err)
 		default:
-			mcpConfig = config
-			if rel != nil {
-				release = rel
+			// API-CCT-014: the config (with the session token) goes in a
+			// 0600 file that is removed when the process exits.
+			path, err := r.writeMCPConfig(config)
+			if err != nil {
+				rel()
+				r.log.Warn("claude: lana tools are not available to this process", "session", sid, "error", err)
+				break
+			}
+			mcpConfig = path
+			release = func() {
+				r.removeMCPConfig(path)
+				rel()
 			}
 		}
 	}
@@ -537,7 +616,7 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 		if id := p.state.claudeID; id != "" {
 			r.mu.Lock()
 			if r.procs[p.sessionID] == p || r.procs[p.sessionID] == nil {
-				r.claudeIDs[p.sessionID] = id
+				r.claudeIDs[p.sessionID] = claudeRef{id: id, account: accountName(turn.Config)}
 			}
 			r.mu.Unlock()
 		}
@@ -728,8 +807,67 @@ func (r *Runtime) Close(sessionID string) {
 	}
 }
 
+// writeMCPConfig writes an --mcp-config value to a new 0600 file in TempDir
+// and returns its path (API-CCT-014).
+func (r *Runtime) writeMCPConfig(config string) (string, error) {
+	dir := r.opts.TempDir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	f, err := os.CreateTemp(dir, "lana-mcp-*.json")
+	if err != nil {
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	path := f.Name()
+	r.mu.Lock()
+	r.mcpFiles[path] = true
+	r.mu.Unlock()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		r.removeMCPConfig(path)
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	if _, err := f.WriteString(config); err != nil {
+		_ = f.Close()
+		r.removeMCPConfig(path)
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		r.removeMCPConfig(path)
+		return "", fmt.Errorf("write MCP config: %w", err)
+	}
+	return path, nil
+}
+
+// removeMCPConfig deletes one --mcp-config file. The file goes before its
+// entry, so a concurrent removeMCPConfigs that no longer sees the entry never
+// returns while the file is still on disk.
+func (r *Runtime) removeMCPConfig(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		r.log.Warn("claude: remove MCP config", "error", err)
+	}
+	r.mu.Lock()
+	delete(r.mcpFiles, path)
+	r.mu.Unlock()
+}
+
+// removeMCPConfigs deletes every --mcp-config file still on disk.
+func (r *Runtime) removeMCPConfigs() {
+	r.mu.Lock()
+	paths := make([]string, 0, len(r.mcpFiles))
+	for path := range r.mcpFiles {
+		paths = append(paths, path)
+	}
+	r.mu.Unlock()
+	for _, path := range paths {
+		r.removeMCPConfig(path)
+	}
+}
+
 // Shutdown stops every process and waits for them to exit or ctx to end.
+// The --mcp-config files are removed either way.
 func (r *Runtime) Shutdown(ctx context.Context) error {
+	defer r.removeMCPConfigs()
 	r.mu.Lock()
 	r.closed = true
 	procs := make([]*process, 0, len(r.procs))
@@ -755,8 +893,10 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// resolveBinary returns the binary path: the configured one, or `claude` on PATH.
-func (r *Runtime) resolveBinary(configured string) (string, error) {
+// resolveBinary returns the binary path: the configured one, or `claude` on
+// PATH. builtin marks a turn of the built-in account, whose binary Status
+// reports.
+func (r *Runtime) resolveBinary(configured string, builtin bool) (string, error) {
 	bin := configured
 	if bin == "" {
 		path, err := r.opts.LookPath("claude")
@@ -774,6 +914,9 @@ func (r *Runtime) resolveBinary(configured string) (string, error) {
 		if err != nil || info.IsDir() {
 			return "", userError(errNotInstalled)
 		}
+	}
+	if !builtin {
+		return bin, nil
 	}
 	r.statusMu.Lock()
 	if r.lastBinary != bin {

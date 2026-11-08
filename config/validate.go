@@ -16,7 +16,11 @@ import (
 )
 
 var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
-var providerKeys = []string{"api_key_env", "base_url", "disabled", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
+var providerKeys = []string{"allow_scheduled", "api_key_env", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
+
+// claudeAccountKeys are the keys of a [providers.<name>] table of kind
+// "claude-code", a Claude Code account (API-CCT-010).
+var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 
@@ -59,7 +63,7 @@ var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module
 var webKeys = []string{"addr", "enabled", "open_browser"}
 
 // providerKinds are the accepted providers.<name>.kind values (API-RTR-001).
-var providerKinds = []string{"anthropic", "deepseek", "openai", "openai_compat", "openrouter"}
+var providerKinds = []string{"anthropic", core.ClaudeCodeKind, "deepseek", "openai", "openai_compat", "openrouter"}
 
 // embeddingKinds are the provider kinds that can serve knowledge embeddings
 // (REQ-RTR-007).
@@ -380,10 +384,20 @@ func validateRouter(v map[string]any, path string, add func(string, string)) {
 }
 
 func validateProvider(v map[string]any, path string, add func(string, string)) {
+	kindValue, _ := v["kind"].(string)
+	claude := kindValue == core.ClaudeCodeKind
 	for _, key := range sortedKeys(v) {
-		if !contains(providerKeys, key) {
+		switch {
+		case !contains(providerKeys, key):
 			add(path+"."+key, unknownKeyMsg(key, providerKeys))
+		case claude && !contains(claudeAccountKeys, key):
+			add(path+"."+key, "not allowed for kind claude-code")
+		case !claude && kindValue != "" && contains(claudeAccountKeys, key) && !contains([]string{"api_key_env", "disabled", "kind"}, key):
+			add(path+"."+key, "allowed only for kind claude-code")
 		}
+	}
+	if claude {
+		validateClaudeAccount(v, path, add)
 	}
 	kind, ok := v["kind"]
 	if !ok {
@@ -436,6 +450,42 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 				add(path+"."+key, "must be greater than 0, got "+s)
 			}
 		}
+	}
+}
+
+// validateClaudeAccount checks the Claude Code keys of a provider of kind
+// "claude-code" (API-CCT-010).
+func validateClaudeAccount(v map[string]any, path string, add func(string, string)) {
+	for _, key := range []string{"auth", "binary", "config_dir"} {
+		if val, ok := v[key]; ok {
+			if _, ok := val.(string); !ok {
+				add(path+"."+key, typeMsg("string", val))
+			}
+		}
+	}
+	if val, ok := v["allow_scheduled"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".allow_scheduled", typeMsg("boolean", val))
+		}
+	}
+	auth, _ := v["auth"].(string)
+	if auth != "" && !contains(runtimeAuthModes, auth) {
+		add(path+".auth", enumMsg(auth, runtimeAuthModes))
+	}
+	if keyEnv, _ := v["api_key_env"].(string); auth == core.RuntimeAuthAPIKey && keyEnv == "" {
+		add(path+".api_key_env", "required when auth is api_key")
+	}
+	if dir, ok := v["config_dir"].(string); ok && dir != "" {
+		switch {
+		case strings.ContainsAny(dir, "\x00\r\n"):
+			add(path+".config_dir", "must be one line")
+		case !strings.HasPrefix(dir, "/") && dir != "~" && !strings.HasPrefix(dir, "~/") &&
+			!strings.HasPrefix(dir, "$LANA_HOME") && !strings.HasPrefix(dir, "${LANA_HOME}"):
+			add(path+".config_dir", "must be an absolute path, or start with ~/ or $LANA_HOME")
+		}
+	}
+	if bin, ok := v["binary"].(string); ok && strings.HasPrefix(bin, "-") {
+		add(path+".binary", "must not start with '-'")
 	}
 }
 
@@ -570,12 +620,13 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["reasoning_effort"]; ok {
 		s, ok := val.(string)
 		// A Claude Code agent's effort values differ; validateEffective
-		// checks them against the merged model and runtime keys (API-CCR-001).
+		// checks an address model against the merged model, runtime, and
+		// providers (API-CCR-001, REQ-CCT-010).
 		runtime, _ := v["runtime"].(string)
 		model, _ := v["model"].(string)
 		if !ok {
 			add(path+".reasoning_effort", typeMsg("string", val))
-		} else if runtime == "" && !isClaudeCodeAddress(model) && s != "" && !contains(nativeEfforts, s) {
+		} else if runtime == "" && !isAddress(model) && s != "" && !contains(nativeEfforts, s) {
 			add(path+".reasoning_effort", enumMsg(s, nativeEfforts))
 		}
 	}
@@ -917,6 +968,15 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	if _, ok := providers[core.ClaudeCodeProvider]; ok {
 		add("providers."+core.ClaudeCodeProvider, "claude-code is built in")
 	}
+	// REQ-CCT-010: the Claude Code accounts are the built-in claude-code and
+	// every provider of kind claude-code.
+	accounts := claudeAccounts{core.ClaudeCodeProvider: true}
+	for _, name := range providerNames {
+		provider, _ := asMap(providers[name])
+		if kind, _ := provider["kind"].(string); kind == core.ClaudeCodeKind {
+			accounts[name] = true
+		}
+	}
 	// API-RTR-001: base_url is required only for openai_compat; the other
 	// kinds default to their public API URL.
 	for _, name := range providerNames {
@@ -958,9 +1018,11 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 				add(itemPath, fmt.Sprintf("%q is a combo; a combo must not list another combo", item))
 			case !isAddress(item):
 				add(itemPath, fmt.Sprintf("%q is not a provider/model address", item))
-			case isClaudeCodeAddress(item):
+			case accounts.address(item):
 				if msg := claudeCodeModelMsg(item); msg != "" {
 					add(itemPath, msg)
+				} else if seen[item] {
+					add(itemPath, fmt.Sprintf("model %q is listed twice", item))
 				}
 			case !contains(providerNames, addressProvider(item)):
 				add(itemPath, fmt.Sprintf("unknown provider %q", addressProvider(item)))
@@ -973,7 +1035,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	for _, name := range agentNames {
 		agent, _ := asMap(agents[name])
 		path := "agents." + name
-		legacy := validateClaudeKeys(agent, path, add)
+		legacy := validateClaudeKeys(agent, path, accounts, add)
 		provider, _ := agent["provider"].(string)
 		if raw, ok := agent["provider"]; ok {
 			if p, ok := raw.(string); ok && p != "" && !contains(providerNames, p) {
@@ -989,7 +1051,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		case legacy:
 			// API-CCT-002: the model of a legacy runtime agent is the part
 			// after "claude-code/"; validateClaudeKeys checked it.
-		case provider == "" && isClaudeCodeAddress(model):
+		case provider == "" && accounts.address(model):
 			if msg := claudeCodeModelMsg(model); msg != "" {
 				add(path+".model", msg)
 			}
@@ -1006,7 +1068,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 				add(itemPath, fmt.Sprintf("%q is a combo; fallback takes provider:model or provider/model", item))
 			case !isModelRef(item):
 				add(itemPath, fmt.Sprintf("%q is not provider:model or provider/model", item))
-			case isClaudeCodeAddress(item):
+			case accounts.address(item):
 				if msg := claudeCodeModelMsg(item); msg != "" {
 					add(itemPath, msg)
 				}
@@ -1075,7 +1137,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	}
 	if router, ok := asMap(m["router"]); ok {
 		if background, ok := router["background_model"].(string); ok && background != "" {
-			validateBackgroundModel(background, combos, providerNames, add)
+			validateBackgroundModel(background, combos, providerNames, accounts, add)
 		}
 	}
 	rows, _ := asSlice(m["modules"])
@@ -1278,15 +1340,22 @@ func enumMsg(value string, choices []string) string {
 	return fmt.Sprintf("invalid value '%s' (choices: %s)", value, strings.Join(sorted, ", "))
 }
 
-// isClaudeCodeAddress reports whether s is a "claude-code/<model>" address.
-func isClaudeCodeAddress(s string) bool {
-	return isAddress(s) && addressProvider(s) == core.ClaudeCodeProvider
+// claudeAccounts is the set of Claude Code account names: the built-in
+// claude-code and every provider of kind claude-code (REQ-CCT-010).
+type claudeAccounts map[string]bool
+
+// address reports whether s is a "<account>/<model>" address of an account.
+func (a claudeAccounts) address(s string) bool {
+	return isAddress(s) && a[addressProvider(s)]
 }
 
-// claudeCodeModelMsg checks the model part of a claude-code address
+// claudeCodeModelMsg checks the model part of a Claude Code address
 // (REQ-CCT-001); "" means valid.
 func claudeCodeModelMsg(address string) string {
-	model := strings.TrimPrefix(address, core.ClaudeCodeProvider+"/")
+	model := address
+	if i := strings.IndexByte(address, '/'); i >= 0 {
+		model = address[i+1:]
+	}
 	if strings.HasPrefix(model, "-") {
 		return "a claude-code model must not start with '-'"
 	}
@@ -1298,13 +1367,13 @@ func claudeCodeModelMsg(address string) string {
 
 // validateBackgroundModel checks [router] background_model (API-CCT-003): a
 // combo or address of a known provider, never with a claude-code target.
-func validateBackgroundModel(value string, combos map[string]any, providerNames []string, add func(string, string)) {
+func validateBackgroundModel(value string, combos map[string]any, providerNames []string, accounts claudeAccounts, add func(string, string)) {
 	const path = "router.background_model"
 	if raw, ok := combos[value]; ok {
 		combo, _ := asMap(raw)
 		list, _ := asStringSlice(combo["models"])
 		for _, item := range list {
-			if isClaudeCodeAddress(item) {
+			if accounts.address(item) {
 				add(path, fmt.Sprintf("combo %q lists %q; background passes cannot use claude-code", value, item))
 				return
 			}
@@ -1312,7 +1381,7 @@ func validateBackgroundModel(value string, combos map[string]any, providerNames 
 		return
 	}
 	switch {
-	case isClaudeCodeAddress(value) || addressProvider(value) == core.ClaudeCodeProvider:
+	case accounts[addressProvider(value)]:
 		add(path, "background passes cannot use claude-code")
 	case !isModelRef(value):
 		add(path, fmt.Sprintf("unknown provider or combo %q", value))
@@ -1327,7 +1396,7 @@ func validateBackgroundModel(value string, combos map[string]any, providerNames 
 // auth, api_key_env, binary, and allow_scheduled are accepted on any agent and
 // apply to its Claude Code turns. It reports whether the agent uses the
 // legacy runtime key.
-func validateClaudeKeys(agent map[string]any, path string, add func(string, string)) bool {
+func validateClaudeKeys(agent map[string]any, path string, accounts claudeAccounts, add func(string, string)) bool {
 	auth, _ := agent["auth"].(string)
 	if auth != "" && !contains(runtimeAuthModes, auth) {
 		add(path+".auth", enumMsg(auth, runtimeAuthModes))
@@ -1338,7 +1407,7 @@ func validateClaudeKeys(agent map[string]any, path string, add func(string, stri
 	model, _ := agent["model"].(string)
 	runtime, isString := agent["runtime"].(string)
 	legacy := isString && runtime != ""
-	claude := isClaudeCodeAddress(model)
+	claude := accounts.address(model)
 	if legacy {
 		names := runtimeNames()
 		if !contains(names, runtime) {
@@ -1362,6 +1431,9 @@ func validateClaudeKeys(agent map[string]any, path string, add func(string, stri
 		if !contains(allowed, effort) {
 			add(path+".reasoning_effort", enumMsg(effort, allowed))
 		}
+	} else if ok && effort != "" && isAddress(model) && !contains(nativeEfforts, effort) {
+		// The layer check leaves an address model to this merged check.
+		add(path+".reasoning_effort", enumMsg(effort, nativeEfforts))
 	}
 	return legacy
 }

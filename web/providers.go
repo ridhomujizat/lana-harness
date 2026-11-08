@@ -17,6 +17,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
@@ -33,10 +34,15 @@ var providerEnvRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // providerKinds are the kinds a provider form may save (API-RTR-001).
 var providerKinds = map[string]bool{
 	"openai": true, "deepseek": true, "openrouter": true, "anthropic": true, "openai_compat": true,
+	core.ClaudeCodeKind: true,
 }
 
 // providerKindsMessage is the error text for a kind outside providerKinds.
-const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, openai_compat"
+const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, openai_compat, claude-code"
+
+// claudeTestModel is the model of a Claude Code account test without one: the
+// cheapest alias.
+const claudeTestModel = "haiku"
 
 // ProviderTest is one connection test. APIKey carries an inline key for this
 // call only: the handler never writes it and the type prints "***" when it is
@@ -89,6 +95,16 @@ type providerJSON struct {
 	ModelsCount int `json:"models_count"`
 	// Disabled is the disabled key of the entry (API-RTR-006 revision 2).
 	Disabled bool `json:"disabled"`
+	// Builtin marks the built-in Claude Code account "claude-code", which has
+	// no table (API-CCT-010).
+	Builtin bool `json:"builtin"`
+	// ConfigDir is the CLAUDE_CONFIG_DIR of a Claude Code account; "" for the
+	// built-in one (Claude Code's own default, ~/.claude) and other kinds.
+	ConfigDir string `json:"config_dir"`
+	// AllowScheduled is the allow_scheduled key of a Claude Code account.
+	AllowScheduled bool `json:"allow_scheduled"`
+	// LoginCommand logs a Claude Code account in once (then /login).
+	LoginCommand string `json:"login_command,omitempty"`
 }
 
 type listProvidersResponse struct {
@@ -101,6 +117,11 @@ type providerSaveResponse struct {
 	Name            string `json:"name"`
 	Version         string `json:"version"`
 	RestartRequired bool   `json:"restart_required"`
+	// ConfigDir and LoginCommand answer a Claude Code account save
+	// (API-CCT-010); ConfigDir and Message a Claude Code account delete.
+	ConfigDir    string `json:"config_dir,omitempty"`
+	LoginCommand string `json:"login_command,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 type providerTestRequest struct {
@@ -136,6 +157,12 @@ type providerRecord struct {
 	StreamIdleTimeout string
 	ThinkingFormat    string
 	Disabled          bool
+
+	// Claude Code account keys (kind "claude-code", API-CCT-010).
+	ConfigDir      string
+	Binary         string
+	Auth           string
+	AllowScheduled bool
 }
 
 // providerValidationError carries config.Check issues through the section
@@ -193,7 +220,13 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		Providers:       []providerJSON{},
 		RestartRequired: file.Version != store.ConfigLoadedVersion() || s.secretsRestartRequired(),
 	}
+	// API-CCT-010: the built-in Claude Code account is always listed.
+	builtin := providerJSON{
+		Name: core.ClaudeCodeProvider, Kind: core.ClaudeCodeKind, Builtin: true,
+		KeyState: "unset", UsedBy: []string{}, LoginCommand: llmcall.ClaudeLoginCommand(""),
+	}
 	if !file.Exists {
+		response.Providers = append(response.Providers, builtin)
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
@@ -203,6 +236,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
+	builtin.UsedBy = document.providerUsedBy(core.ClaudeCodeProvider)
 	secretValues := map[string]string{}
 	if home := s.providerHome(); home != "" {
 		values, readErr := webfiles.ReadSecrets(secretsPath(home))
@@ -215,11 +249,12 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	names := sortedMapKeys(document.Providers)
-	modelLists := s.routerProviderModels(r.Context(), document, names)
+	modelLists := s.routerProviderModels(r.Context(), document, append(append([]string{}, names...), core.ClaudeCodeProvider))
+	builtin.ModelsCount = len(modelLists[core.ClaudeCodeProvider])
 	for _, name := range names {
 		record := providerRecordFromMap(document.Providers[name])
 		keyEnv := providerEffectiveKeyEnv(record, name)
-		response.Providers = append(response.Providers, providerJSON{
+		row := providerJSON{
 			Name:           name,
 			Kind:           record.Kind,
 			BaseURL:        record.BaseURL,
@@ -229,8 +264,16 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			UsedBy:         document.providerUsedBy(name),
 			ModelsCount:    len(modelLists[name]),
 			Disabled:       record.Disabled,
-		})
+		}
+		if record.Kind == core.ClaudeCodeKind {
+			row.ConfigDir = s.claudeConfigDir(name, record)
+			row.AllowScheduled = record.AllowScheduled
+			row.LoginCommand = llmcall.ClaudeLoginCommand(row.ConfigDir)
+		}
+		response.Providers = append(response.Providers, row)
 	}
+	// The built-in account comes after the tables.
+	response.Providers = append(response.Providers, builtin)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -255,6 +298,10 @@ func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if !providerKinds[body.Kind] {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", providerKindsMessage)
+		return
+	}
+	if body.Kind == core.ClaudeCodeKind {
+		s.testClaudeAccount(w, r, body)
 		return
 	}
 	// base_url may be omitted for a preset kind; the adapter then uses the
@@ -357,6 +404,21 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	if !providerKinds[kind] {
 		writeProviderIssue(w, "providers."+name+".kind", providerKindsMessage)
+		return
+	}
+	if name == core.ClaudeCodeProvider {
+		writeProviderIssue(w, "providers."+name, "claude-code is built in")
+		return
+	}
+	if kind == core.ClaudeCodeKind {
+		s.putClaudeAccount(w, r, store, name, body)
+		return
+	}
+	if issues := claudeOnlyProviderKeys(body); len(issues) > 0 {
+		for i := range issues {
+			issues[i].Key = "providers." + name + "." + issues[i].Key
+		}
+		writeProviderIssues(w, issues)
 		return
 	}
 	// base_url is optional for the preset kinds; config validation decides
@@ -568,6 +630,10 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeProviderIssue(w, "providers."+name+".expected_version", "expected_version is required")
 		return
 	}
+	if name == core.ClaudeCodeProvider {
+		writeAPIError(w, http.StatusConflict, "builtin", "claude-code is built in and cannot be deleted")
+		return
+	}
 
 	configWriteMu.Lock()
 	defer configWriteMu.Unlock()
@@ -612,11 +678,18 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	version := webfiles.ConfigVersion(candidate)
 	s.auditSave("provider.delete", providerConfigPath(file, s.providerHome()), name, changed)
-	writeJSON(w, http.StatusOK, providerSaveResponse{
+	response := providerSaveResponse{
 		Name:            name,
 		Version:         version,
 		RestartRequired: s.applyLiveRestartRequired(r.Context(), store, candidate),
-	})
+	}
+	// API-CCT-010: only the table goes; the account's folder (and its login)
+	// stays where it is.
+	if record := providerRecordFromMap(document.Providers[name]); record.Kind == core.ClaudeCodeKind {
+		response.ConfigDir = s.claudeConfigDir(name, record)
+		response.Message = "The account folder " + response.ConfigDir + " was kept; delete it yourself to remove its login."
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func parseProviderDocument(raw []byte) (providerDocument, error) {
@@ -641,6 +714,10 @@ func providerRecordFromMap(table map[string]any) providerRecord {
 		ThinkingFormat:    mapProviderString(table, "thinking_format"),
 	}
 	record.Disabled, _ = table["disabled"].(bool)
+	record.ConfigDir = mapProviderString(table, "config_dir")
+	record.Binary = mapProviderString(table, "binary")
+	record.Auth = mapProviderString(table, "auth")
+	record.AllowScheduled, _ = table["allow_scheduled"].(bool)
 	if headers, ok := table["headers"].(map[string]any); ok {
 		record.Headers = make(map[string]string, len(headers))
 		for key, value := range headers {
@@ -867,6 +944,11 @@ func unknownProviderKeys(body map[string]json.RawMessage) []ConfigIssue {
 		"headers":          true,
 		"disabled":         true,
 		"expected_version": true,
+		// Claude Code account keys (API-CCT-010).
+		"config_dir":      true,
+		"binary":          true,
+		"auth":            true,
+		"allow_scheduled": true,
 	}
 	keys := make([]string, 0, len(body))
 	for key := range body {

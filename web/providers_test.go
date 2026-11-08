@@ -187,8 +187,9 @@ model = "gpt-5-mini"
 	if body.RestartRequired != (body.Version != store.ConfigLoadedVersion()) {
 		t.Fatalf("restart_required = %v", body.RestartRequired)
 	}
-	if len(body.Providers) != 2 {
-		t.Fatalf("providers = %d, want 2", len(body.Providers))
+	// The two tables, then the built-in Claude Code account (API-CCT-010).
+	if len(body.Providers) != 3 || body.Providers[2].Name != "claude-code" || !body.Providers[2].Builtin {
+		t.Fatalf("providers = %+v, want 2 tables and claude-code", body.Providers)
 	}
 	byName := map[string]providerJSON{}
 	for _, row := range body.Providers {
@@ -373,7 +374,7 @@ func TestProvidersPutConnectionFailed(t *testing.T) {
 	}
 	var listed listProvidersResponse
 	list.json(t, &listed)
-	if len(listed.Providers) != 1 || listed.Providers[0].KeyState != "set" {
+	if len(listed.Providers) != 2 || listed.Providers[0].KeyState != "set" {
 		t.Fatalf("listed providers = %+v", listed.Providers)
 	}
 }
@@ -537,7 +538,7 @@ func TestProvidersPutDisabledRoundTrip(t *testing.T) {
 		}
 		var body listProvidersResponse
 		response.json(t, &body)
-		if len(body.Providers) != 1 {
+		if len(body.Providers) != 2 {
 			t.Fatalf("providers = %+v", body.Providers)
 		}
 		return body.Providers[0]

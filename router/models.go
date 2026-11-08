@@ -70,8 +70,8 @@ func (c *modelCache) cachedPrice(entry *providerEntry, model string) *Price {
 // (REQ-RTR-013). refresh fetches the list again. When the fetch fails, the
 // catalog models are returned with the error.
 func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]ModelInfo, error) {
-	if provider == ClaudeCode {
-		return r.claudeCodeModels(), nil
+	if r.snap.Load().isClaude(provider) {
+		return r.claudeCodeModels(provider), nil
 	}
 	entry, ok := r.snap.Load().providers[provider]
 	if !ok {

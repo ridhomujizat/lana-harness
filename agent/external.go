@@ -176,18 +176,25 @@ func (r *Registry) shutdownRuntimes(ctx context.Context) {
 	}
 }
 
-// isClaudeProvider reports whether a step's provider is Claude Code; spec 38
-// steps used "claude-agent".
-func isClaudeProvider(provider string) bool {
-	return provider == llmcall.ClaudeCode || provider == "claude-agent"
+// isClaudeProvider reports whether a step's provider is a Claude Code account
+// of llm (REQ-CCT-010); spec 38 steps used "claude-agent".
+func isClaudeProvider(llm core.LLMRegistry, provider string) bool {
+	if provider == "claude-agent" {
+		return true
+	}
+	_, ok := llmcall.ClaudeCodeAccount(llm, provider)
+	return ok
 }
 
-// claudeResume returns the Claude session to resume for the next Claude Code
-// turn: the newest runtime session meta (API-CCR-002), unless a turn ran in
-// lana's loop after it (REQ-CCT-003: an engine switch starts a new Claude
-// session). switched reports that a stored Claude session was dropped. The
-// model is the one the meta names.
-func claudeResume(events []core.SessionEvent) (resumeID, model string, switched bool) {
+// claudeResume returns the Claude session of account to resume for the next
+// Claude Code turn: the newest runtime session meta (API-CCR-002), unless a
+// turn ran in lana's loop after it (REQ-CCT-003: an engine switch starts a
+// new Claude session) or the meta belongs to another account (REQ-CCT-010:
+// sessions never mix accounts). switched reports that a stored Claude session
+// was dropped. The model is the one the meta names. isClaude tells Claude
+// Code step providers from lana's.
+func claudeResume(events []core.SessionEvent, account string, isClaude func(string) bool) (resumeID, model string, switched bool) {
+	metaAccount := ""
 	for _, event := range events {
 		switch event.Kind {
 		case core.KindSystemMessage:
@@ -199,15 +206,22 @@ func claudeResume(events []core.SessionEvent) (resumeID, model string, switched 
 				continue
 			}
 			resumeID, model, switched = payload.ClaudeSessionID, payload.Model, false
+			metaAccount = payload.Account
+			if metaAccount == "" {
+				metaAccount = llmcall.ClaudeCode
+			}
 		case core.KindStepStart:
 			var payload core.StepStart
-			if json.Unmarshal(event.Payload, &payload) != nil || isClaudeProvider(payload.Provider) {
+			if json.Unmarshal(event.Payload, &payload) != nil || isClaude(payload.Provider) {
 				continue
 			}
 			if resumeID != "" {
 				resumeID, model, switched = "", "", true
 			}
 		}
+	}
+	if resumeID != "" && metaAccount != account {
+		return "", "", true
 	}
 	return resumeID, model, switched
 }
@@ -278,6 +292,15 @@ type externalTurn struct {
 	writeErr error
 }
 
+// metaAccount is the account of the runtime session meta: "" for the
+// built-in one, so its events read as before accounts existed.
+func (x *externalTurn) metaAccount() string {
+	if x.provider == llmcall.ClaudeCode {
+		return ""
+	}
+	return x.provider
+}
+
 func (x *externalTurn) append(kind string, payload any) {
 	if _, err := x.events.Append(x.writeCtx, core.EventDraft{Kind: kind, TurnID: x.turnID, Payload: payload}); err != nil {
 		slog.Error("failed to write external turn event", "session_id", x.rn.sessionID, "turn_id", x.turnID, "kind", kind, "error", err)
@@ -343,6 +366,7 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 			x.append(core.KindSystemMessage, core.SystemMessage{
 				V: core.PayloadVersion, Subtype: core.SystemSubtypeRuntime, Runtime: llmcall.ClaudeCode,
 				ClaudeSessionID: ev.ClaudeSessionID, Model: ev.Model, Tools: ev.Tools, Version: ev.Version,
+				Account: x.metaAccount(),
 			})
 		}
 		return
@@ -351,8 +375,9 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 		x.end, x.ended = ev, true
 		return
 	case core.RuntimeLimits:
+		// API-CCT-012: one limit snapshot per account.
 		if h := x.rn.reg.hooksExternal(); h.Limits != nil && len(ev.Windows) > 0 {
-			h.Limits(llmcall.ClaudeCode, llmcall.ClaudeCode, ev.Windows)
+			h.Limits(x.provider, llmcall.ClaudeCode, ev.Windows)
 		}
 		return
 	case core.RuntimeUsage:
@@ -496,9 +521,10 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 		return result, false
 	}
 	target := res.fullChain[0]
+	// API-CCT-012: the record provider is the account name.
 	x := &externalTurn{
 		rn: rn, events: events, writeCtx: writeCtx, turnID: turnID, agent: res,
-		provider: llmcall.ClaudeCode, model: target.Model, requested: res.requested,
+		provider: target.Provider, model: target.Model, requested: res.requested,
 		toolNames: map[string]string{},
 	}
 	reason := "end_turn"
@@ -661,6 +687,18 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	}
 	out.owner = true
 
+	account, ok := llmcall.ClaudeCodeAccount(rn.reg.llm, target.Provider)
+	switch {
+	case !ok:
+		out.early = &core.RuntimeEarlyError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is not configured", target.Provider)}
+		return out
+	case account.Disabled:
+		// A disabled account is skipped like a disabled provider
+		// (API-RTR-001 revision 2).
+		out.early = &core.RuntimeEarlyError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is disabled", target.Provider)}
+		return out
+	}
+
 	rt, err := rn.reg.Runtime(llmcall.ClaudeCode)
 	if err != nil {
 		out.early = &core.RuntimeEarlyError{Class: "runtime", Message: err.Error()}
@@ -671,10 +709,12 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		out.err = runtimeError(err)
 		return out
 	}
-	resumeID, metaModel, switched := claudeResume(chain)
+	isClaude := func(provider string) bool { return isClaudeProvider(rn.reg.llm, provider) }
+	resumeID, metaModel, switched := claudeResume(chain, target.Provider, isClaude)
 	if switched {
-		// REQ-CCT-003: a turn ran in lana's loop since the stored Claude
-		// session, so this turn starts a new one.
+		// REQ-CCT-003, REQ-CCT-010: a turn ran in lana's loop or on another
+		// account since the stored Claude session, so this turn starts a new
+		// one.
 		rt.Close(rn.sessionID)
 	}
 	if resumeID != "" && metaModel != "" {
@@ -707,14 +747,12 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	if model == "default" {
 		model = ""
 	}
-	cfg := res.cfg
 	turn := core.RuntimeTurn{
 		SessionID: rn.sessionID,
 		TurnID:    x.turnID,
 		AgentName: res.name,
 		Config: core.RuntimeConfig{
-			Auth: cfg.Auth, APIKeyEnv: cfg.APIKeyEnv, Model: model, Effort: res.claudeEffort,
-			Binary: cfg.Binary, Workspace: res.workspace,
+			Model: model, Effort: res.claudeEffort, Workspace: res.workspace,
 			AppendSystemPrompt: system, MCPKey: mcpKey,
 		},
 		ResumeID: resumeID,
@@ -723,6 +761,7 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		Approve:  rn.externalApprove(x.turnID, res.name),
 		OpenMCP:  openMCP,
 	}
+	applyAccount(&turn.Config, rn.reg.home, target.Provider, account, res.cfg)
 	rn.setExternal(rt)
 	defer rn.setExternal(nil)
 	runErr := rt.RunTurn(ctx, turn)
@@ -757,6 +796,20 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		out.stop = core.RuntimeStopCancelled
 	}
 	return out
+}
+
+// applyAccount sets the account keys of a Claude Code turn (REQ-CCT-010): the
+// built-in account takes the agent's binary, auth, and api_key_env (the keys
+// of spec 38 agents) and keeps the daemon's CLAUDE_CONFIG_DIR; another
+// account takes its own keys and folder.
+func applyAccount(cfg *core.RuntimeConfig, home, name string, account core.ProviderConfig, agent core.AgentConfig) {
+	cfg.Account = name
+	if name == llmcall.ClaudeCode {
+		cfg.Binary, cfg.Auth, cfg.APIKeyEnv = agent.Binary, agent.Auth, agent.APIKeyEnv
+		return
+	}
+	cfg.Binary, cfg.Auth, cfg.APIKeyEnv = account.Binary, account.Auth, account.APIKeyEnv
+	cfg.ConfigDir = llmcall.ClaudeConfigDir(home, name, account)
 }
 
 // claudeToolCall runs one lana tool for a Claude Code turn through the tool

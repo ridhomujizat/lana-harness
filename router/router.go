@@ -132,7 +132,10 @@ type providerEntry struct {
 type snapshot struct {
 	cfg       Config
 	providers map[string]*providerEntry
-	combos    map[string]Combo
+	// claude are the Claude Code accounts of kind "claude-code" (REQ-CCT-010).
+	// They have no adapter: their targets run in the Claude Code runtime.
+	claude map[string]core.ProviderConfig
+	combos map[string]Combo
 	// cooldown is the normalized cooldown; 0 means off.
 	cooldown time.Duration
 }
@@ -212,6 +215,7 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 	next := &snapshot{
 		cfg:       cloneConfig(cfg),
 		providers: map[string]*providerEntry{},
+		claude:    map[string]core.ProviderConfig{},
 		combos:    map[string]Combo{},
 	}
 	// Work on the copy so a caller that changes its maps later cannot
@@ -241,6 +245,12 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 			continue
 		}
 		pc := cfg.Providers[name]
+		if pc.Kind == core.ClaudeCodeKind {
+			// REQ-CCT-010: a Claude Code account, run by the agent in the
+			// Claude Code runtime.
+			next.claude[name] = pc
+			continue
+		}
 		if old != nil {
 			if prev, ok := old.providers[name]; ok && !prev.custom && reflect.DeepEqual(prev.cfg, pc) {
 				next.providers[name] = prev
@@ -262,7 +272,7 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 	}
 	for _, name := range sortedKeys(cfg.Combos) {
 		combo := cfg.Combos[name]
-		if err := validateCombo(name, combo, next.providers, cfg.Combos); err != nil {
+		if err := validateCombo(name, combo, next, cfg.Combos); err != nil {
 			return nil, err
 		}
 		next.combos[name] = Combo{Description: combo.Description, Models: append([]string(nil), combo.Models...)}
@@ -276,14 +286,15 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 	return next, nil
 }
 
-func validateCombo(name string, combo Combo, providers map[string]*providerEntry, combos map[string]Combo) error {
+func validateCombo(name string, combo Combo, snap *snapshot, combos map[string]Combo) error {
+	providers := snap.providers
 	path := "combos." + name
 	switch {
 	case name == "":
 		return fmt.Errorf("combos: a combo name is empty")
 	case strings.ContainsAny(name, "/:"):
 		return fmt.Errorf("%s: a combo name must not contain '/' or ':'", path)
-	case providers[name] != nil || name == ClaudeCode:
+	case providers[name] != nil || snap.isClaude(name):
 		return fmt.Errorf("%s: a combo name must not equal a provider name", path)
 	case len(combo.Models) == 0:
 		return fmt.Errorf("%s.models: a combo needs at least one model", path)
@@ -298,7 +309,7 @@ func validateCombo(name string, combo Combo, providers map[string]*providerEntry
 		if !ok || strings.IndexAny(address, ":/") != strings.Index(address, "/") {
 			return fmt.Errorf("%s: %q is not a provider/model address", item, address)
 		}
-		if target.Provider == ClaudeCode {
+		if snap.isClaude(target.Provider) {
 			if err := claudeCodeTarget(target); err != nil {
 				return fmt.Errorf("%s: %w", item, err)
 			}
@@ -344,17 +355,26 @@ func (r *Router) Names() []string {
 	return sortedKeys(r.snap.Load().providers)
 }
 
-// Disabled reports whether a configured provider is switched off with
-// disabled = true. An unknown provider is not disabled.
+// Disabled reports whether a configured provider (or Claude Code account) is
+// switched off with disabled = true. An unknown provider is not disabled.
 func (r *Router) Disabled(provider string) bool {
-	entry, ok := r.snap.Load().providers[provider]
+	snap := r.snap.Load()
+	if pc, ok := snap.claude[provider]; ok {
+		return pc.Disabled
+	}
+	entry, ok := snap.providers[provider]
 	return ok && entry.cfg.Disabled
 }
 
 // Kind returns the kind of a provider ("custom" for one added with
-// WithProviders and not in the config).
+// WithProviders and not in the config). A Claude Code account, the built-in
+// one included, has kind "claude-code".
 func (r *Router) Kind(provider string) (string, bool) {
-	entry, ok := r.snap.Load().providers[provider]
+	snap := r.snap.Load()
+	if snap.isClaude(provider) {
+		return core.ClaudeCodeKind, true
+	}
+	entry, ok := snap.providers[provider]
 	if !ok {
 		return "", false
 	}
