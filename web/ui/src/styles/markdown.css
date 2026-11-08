@@ -82,6 +82,7 @@
 }
 
 .md-code {
+  position: relative;
   margin: 0 0 12px;
   overflow: hidden;
   border: 0;
@@ -92,10 +93,7 @@
 .md-code-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 8px 4px 12px;
-  border-bottom: 1px solid var(--divider);
+  padding: 5px 34px 3px 12px;
 }
 
 .md-code-lang {
@@ -106,35 +104,51 @@
 }
 
 .md-copy {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--border-secondary);
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
   border-radius: var(--radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 16px;
+  background: transparent;
+  color: var(--text-tertiary);
   cursor: pointer;
+  opacity: 0;
   transition:
+    opacity var(--dur),
     background var(--dur),
     color var(--dur);
 }
 
+.md-code:hover .md-copy,
+.md-copy:focus-visible {
+  opacity: 1;
+}
+
 .md-copy:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
+  color: var(--text-secondary);
 }
 
 .md-copy:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .md-copy {
+    opacity: 1;
+  }
 }
 
 .md-pre {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px 40px 10px 12px;
   overflow-x: auto;
 }
 
