@@ -8,6 +8,8 @@ but their config keys, events, and tools may still change between betas.
 ## [Unreleased]
 
 ### Added
+- Claude Code is a model like any other: pick `claude-code/<model>` (aliases, every model your plan reports, or custom IDs) in an agent, combo, workflow, or the calendar. The turn runs in your own logged-in `claude` with the agent's persona, memory, and knowledge, and lana's own tools reach it over a local MCP server. If Claude Code cannot run, the turn falls back to the next model in the combo.
+- Several Claude Code accounts, each with its own login folder, shown with email, plan, plan windows, and usage on the Router's Claude Code page.
 
 - Self-update (spec #36): the dashboard shows a floating card when a newer release is out, and
   one click installs it. The daemon verifies the checksum, probes the new binary on a copy of the
@@ -43,6 +45,7 @@ but their config keys, events, and tools may still change between betas.
 - `lana init --provider anthropic`, and DeepSeek in the dashboard setup wizard.
 
 ### Changed
+- The agent Engine choice is gone; `runtime = "claude-code"` still works and is read as `model = "claude-code/<model>"`. Background passes for Claude Code agents use the first non-Claude model of the combo or `[router] background_model`.
 
 - Settings → Providers moved to the Router page (Providers tab).
 - Agent retries moved into the router: the same backoff, now per target before falling back.
