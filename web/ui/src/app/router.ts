@@ -3,6 +3,21 @@
 
 export const DEFAULT_ROUTE = "#/chats";
 
+/* A sign-in link may carry next=#/… (spec #41, the macOS menu bar app) to
+   open a page after the claim. Follow it only when it is an in-app hash with
+   URL-safe characters and not a sign-in page itself; the daemon applies the
+   same rule (web.SafeNextHash) before it puts next in the link. */
+const SAFE_NEXT = /^#\/[A-Za-z0-9/\-_.~?=&%+]+$/;
+const SIGN_IN_PAGES = ["welcome", "login", "forgot"];
+
+export function safeNextHash(next: string | undefined | null): string {
+  if (!next || next.length > 256 || !SAFE_NEXT.test(next) || next.startsWith("#//")) {
+    return "";
+  }
+  const page = next.slice(2).split(/[/?]/)[0] || "";
+  return SIGN_IN_PAGES.includes(page) ? "" : next;
+}
+
 export const AGENT_TABS = [
   "overview",
   "general",

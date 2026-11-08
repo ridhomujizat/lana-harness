@@ -146,6 +146,47 @@ your chat id. Set `LANA_LOG=debug` for more detailed logs.
 To keep the daemon running after you close the terminal, start it from a terminal multiplexer
 (`tmux`) or a launchd/systemd service that runs `lana daemon`.
 
+## macOS menu bar
+
+On a Mac, a small menu bar app shows the lana mark next to the clock. Click it to see whether lana
+runs, how much CPU and memory it uses on this Mac, and to open Chat, Workflows, Calendar, the
+dashboard, or the Router in your browser. It can also start and stop the daemon.
+
+Build it with Xcode or the Command Line Tools (Swift 5.9 or newer, macOS 13 or newer). It works
+inside and outside `nix develop`: the target clears the Nix SDK variables for Swift.
+
+```sh
+make macos-app          # builds dist/Lana.app (ad-hoc signed)
+open dist/Lana.app      # or drag it to /Applications first
+make macos-app-test     # Swift unit tests
+```
+
+The app reads `~/.lana` (or `LANA_HOME` when you start it with one, e.g.
+`LANA_HOME=~/lana-test open -n dist/Lana.app`). In **Settings…** you can set `LANA_HOME`, the
+`lana` binary (by default `lana` on your login shell PATH, then `~/.local/bin`, `~/go/bin`,
+`/opt/homebrew/bin`, `/usr/local/bin`), and **Open lana Menu at login**. Launch at login remembers
+where the app is, so move `Lana.app` to its final place before you turn it on.
+
+What the menu shows:
+
+- **Running · v0.1.0 · up 2h 05m** — the version of the binary the daemon runs and how long it has
+  run. The app reads `daemon.lock` and `daemon.secret` in `LANA_HOME`; it needs no password.
+- **CPU** — CPU use of the daemon and every process it started (Claude Code, MCP servers, tool
+  commands) over the last 2 seconds. 100% is one full core, as in Activity Monitor.
+- **RAM** — resident memory of the same processes (the RSS `ps` shows) and its share of this Mac's
+  memory. The line under it counts the child processes, e.g. "lana daemon + 1 Claude Code process".
+  The numbers refresh every 2 seconds only while the menu is open; the small graphs show the last
+  minute.
+- **Chat, Workflows, Calendar, Open Dashboard, Router** open that page at the `[web] addr`. If the
+  browser is not signed in, the dashboard asks for your password.
+- **Sign In with One-Time Link…** opens a one-time link, like `lana web reset-login`: it lets you set
+  a new password. Hold ⌥ while you click a page to get a link that opens that page afterwards.
+- **Start lana** runs `lana daemon` in the background with your login shell PATH and writes its
+  output to `~/.lana/menubar-daemon.log`. **Stop lana…** asks first, then stops the daemon the way
+  Ctrl-C does.
+
+`dist/Lana.app/Contents/MacOS/LanaMenu --dump-status` prints the same status and usage as JSON.
+
 ## Router
 
 Every model call goes through the router: chat turns, compaction, memory, knowledge, and the proxy

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -91,11 +92,55 @@ func (s *Server) telegramResetAvailable() bool {
 // SignInLink creates a one-time sign-in link for the server address. The code
 // lives in memory only and is valid for 15 minutes (REQ-WLG-002).
 func (s *Server) SignInLink() (string, error) {
+	return s.SignInLinkTo("")
+}
+
+// SignInLinkTo creates a one-time sign-in link that opens next after the owner
+// signs in. next is kept only when SafeNextHash accepts it; anything else is
+// dropped and the link opens the default page (spec #41).
+func (s *Server) SignInLinkTo(next string) (string, error) {
 	code, err := s.signInCodes.create()
 	if err != nil {
 		return "", err
 	}
-	return "http://" + s.Addr() + "/#/welcome?code=" + code, nil
+	link := "http://" + s.Addr() + "/#/welcome?code=" + code
+	if safe, ok := SafeNextHash(next); ok {
+		link += "&next=" + url.QueryEscape(safe)
+	}
+	return link, nil
+}
+
+// maxNextHashLen bounds the next hash of a sign-in link.
+const maxNextHashLen = 256
+
+// SafeNextHash reports whether next is an in-app dashboard hash a sign-in link
+// may open after the claim: it starts with "#/", is at most 256 bytes, uses only
+// URL-safe characters, and is not one of the sign-in pages themselves. The
+// dashboard checks the same rule before it follows next (spec #41).
+func SafeNextHash(next string) (string, bool) {
+	if len(next) < 3 || len(next) > maxNextHashLen || !strings.HasPrefix(next, "#/") {
+		return "", false
+	}
+	for _, r := range next[1:] {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("/-_.~?=&%+", r):
+		default:
+			return "", false
+		}
+	}
+	if strings.HasPrefix(next, "#//") {
+		return "", false
+	}
+	path := next[2:]
+	if i := strings.IndexAny(path, "/?"); i >= 0 {
+		path = path[:i]
+	}
+	switch path {
+	case "welcome", "login", "forgot":
+		return "", false
+	}
+	return next, true
 }
 
 // OpenOnStart runs REQ-WLG-001: when no password is set or a reset was

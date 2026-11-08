@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -108,4 +109,89 @@ func TestLocalSignInLinkNonLoopback(t *testing.T) {
 
 	rr := serveAuth(s, localTestRequest(http.MethodPost, localTestSecret, localTestOutside))
 	assertAuthError(t, rr, http.StatusForbidden, "forbidden_remote")
+}
+
+// TestLocalSignInLinkNext covers spec #41: the optional next query parameter
+// is added to the link only for a safe in-app hash, and the code still works.
+func TestLocalSignInLinkNext(t *testing.T) {
+	s := newAuthServer(t, t.TempDir(), io.Discard)
+	s.SetLocalSecret(localTestSecret)
+
+	cases := []struct {
+		name string
+		next string
+		want string // the next value in the link, "" when it must be absent
+	}{
+		{"absent", "", ""},
+		{"calendar", "#/calendar", "%23%2Fcalendar"},
+		{"chats with query", "#/chats?agent=lana", "%23%2Fchats%3Fagent%3Dlana"},
+		{"no hash", "/chats", ""},
+		{"absolute url", "https://evil.example/#/chats", ""},
+		{"javascript", "javascript:alert(1)", ""},
+		{"protocol relative", "#//evil.example", ""},
+		{"bare hash", "#/", ""},
+		{"welcome loop", "#/welcome?code=x", ""},
+		{"login", "#/login", ""},
+		{"space", "#/chats x", ""},
+		{"quote", "#/chats\"", ""},
+		{"too long", "#/" + strings.Repeat("a", 300), ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := localTestRequest(http.MethodPost, localTestSecret, localTestAddr)
+			req.URL.RawQuery = url.Values{"next": {tc.next}}.Encode()
+			rr := serveAuth(s, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+			}
+			var payload struct {
+				Link string `json:"link"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(payload.Link, "/#/welcome?code=") {
+				t.Fatalf("link = %q, want a sign-in link", payload.Link)
+			}
+			has := strings.Contains(payload.Link, "&next=")
+			if tc.want == "" && has {
+				t.Fatalf("link = %q, want no next", payload.Link)
+			}
+			if tc.want != "" && !strings.HasSuffix(payload.Link, "&next="+tc.want) {
+				t.Fatalf("link = %q, want next=%s", payload.Link, tc.want)
+			}
+		})
+	}
+
+	// The code of a link with next still claims once.
+	req := localTestRequest(http.MethodPost, localTestSecret, localTestAddr)
+	req.URL.RawQuery = "next=%23%2Fworkflows"
+	rr := serveAuth(s, req)
+	var payload struct {
+		Link string `json:"link"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]string{"code": codeFromLink(t, payload.Link), "password": testPassword})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rr := serveAuth(s, authRequest(http.MethodPost, "/v1/auth/claim", string(body))); rr.Code != http.StatusOK {
+		t.Fatalf("claim status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+}
+
+// TestSafeNextHash covers the accept rule shared with the dashboard.
+func TestSafeNextHash(t *testing.T) {
+	for _, ok := range []string{"#/chats", "#/workflows", "#/calendar", "#/router", "#/home", "#/sessions/abc-123", "#/settings/general"} {
+		if got, accepted := SafeNextHash(ok); !accepted || got != ok {
+			t.Errorf("SafeNextHash(%q) = %q, %v; want accepted", ok, got, accepted)
+		}
+	}
+	for _, bad := range []string{"", "#", "#/", "chats", "/#/chats", "#chats", "#/forgot", "#/welcome", "#/login?x=1", "#/a<b", "#/a\nb", "http://x/#/chats"} {
+		if _, accepted := SafeNextHash(bad); accepted {
+			t.Errorf("SafeNextHash(%q) accepted; want rejected", bad)
+		}
+	}
 }

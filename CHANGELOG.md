@@ -19,6 +19,14 @@ but their config keys, events, and tools may still change between betas.
   works) and always writes the router form.
 - `lana init --provider claude-code` writes an agent on `claude-code/sonnet` with no provider table, and
   `--fallback <provider>/<model>` adds the combo `default`. Every preset now writes `model = "<provider>/<model>"`.
+- macOS menu bar app (spec #41): `make macos-app` builds `dist/Lana.app`, a native SwiftUI menu bar
+  item with the lana mark. It shows whether lana runs (version, uptime), the CPU and RAM that lana
+  and its child processes (Claude Code included) use on this Mac, opens Chat, Workflows, Calendar,
+  the dashboard, and the Router, starts and stops the daemon, and can open at login. The lana binary
+  stays CGO-free; the app is a separate Swift package in `apps/macos/LanaMenu`.
+- The local sign-in link endpoint accepts `next=#/…`, and the dashboard opens that page after the
+  sign-in (used by the menu bar app's ⌥-click).
+
 - Session titles (spec #40): after the first turn lana names a session in the background with the
   agent's background model (never Claude Code; the first message when no model is free), so History
   no longer fills with "Untitled session". Rename a session from the History row (pencil or the row
