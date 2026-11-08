@@ -67,19 +67,18 @@ func TestHasKnowledgeTool(t *testing.T) {
 	}
 }
 
-// REQ-CCR-007: the knowledge upkeep agent is never a runtime agent, whether
-// picked by default or named in knowledge.agent.
-func TestKnowledgeAgentSkipsRuntimeAgents(t *testing.T) {
+// REQ-CCT-007 (was REQ-CCR-007): a Claude Code agent may run the knowledge
+// passes; they use its background chain (llmcall.AgentBackgroundChain).
+func TestKnowledgeAgentAllowsClaudeCodeAgents(t *testing.T) {
 	cfg := core.Config{Agents: map[string]core.AgentConfig{
-		"alpha": {Runtime: "claude-code", Tools: []string{"knowledge_read"}},
+		"alpha": {Model: "claude-code/opus", Tools: []string{"knowledge_read"}},
 		"beta":  {Tools: []string{"knowledge_read"}},
 	}}
-	if name, _ := knowledgeAgent(cfg); name != "beta" {
-		t.Fatalf("knowledgeAgent = %q, want beta", name)
+	if name, _ := knowledgeAgent(cfg); name != "alpha" {
+		t.Fatalf("knowledgeAgent = %q, want alpha", name)
 	}
-	cfg.Knowledge.Agent = "alpha"
-	name, reason := knowledgeAgent(cfg)
-	if name != "" || reason == "" {
+	cfg.Knowledge.Agent = "beta"
+	if name, reason := knowledgeAgent(cfg); name != "beta" || reason != "" {
 		t.Fatalf("knowledgeAgent = %q, %q", name, reason)
 	}
 }

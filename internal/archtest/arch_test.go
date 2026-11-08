@@ -212,4 +212,22 @@ func TestRuntimeRules(t *testing.T) {
 	if !isLibrary("runtime/claudecode") {
 		t.Fatal("runtime/claudecode is not a library package")
 	}
+	// ADR 0020: the loopback MCP host is a runtime library too: core and
+	// internal only (the MCP SDK is an external module); the agent package
+	// reaches it through core.RuntimeToolHost, and the root package wires it.
+	ok = checkRules(map[string][]string{
+		"runtime/mcphost": {modulePath + "/core"},
+		"":                {modulePath + "/runtime/mcphost"},
+	})
+	if len(ok) > 0 {
+		t.Fatalf("allowed imports rejected: %v", ok)
+	}
+	for _, imp := range []string{"agent", "runtime/claudecode", "router", "web", "tools"} {
+		if got := checkRules(map[string][]string{"runtime/mcphost": {modulePath + "/" + imp}}); len(got) != 1 {
+			t.Fatalf("runtime/mcphost importing %s: violations = %v", imp, got)
+		}
+	}
+	if got := checkRules(map[string][]string{"agent": {modulePath + "/runtime/mcphost"}}); len(got) != 1 {
+		t.Fatalf("agent importing runtime/mcphost: violations = %v", got)
+	}
 }

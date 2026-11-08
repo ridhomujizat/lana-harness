@@ -9,6 +9,8 @@
 //	FAKECLAUDE_AUTH              `auth status --json` output (default logged in)
 //	FAKECLAUDE_AUTH_EXIT         `auth status` exit code (default 0)
 //	FAKECLAUDE_GATE              file the {"fake":"gate"} directive waits for
+//	FAKECLAUDE_MODELS            JSON models array of the initialize response
+//	                             (default: a recorded, scrubbed list)
 //
 // Fixture lines with a "fake" key are directives:
 //
@@ -16,6 +18,11 @@
 //	{"fake":"hang"}                           wait for an interrupt
 //	{"fake":"gate"}                           wait until FAKECLAUDE_GATE exists
 //	{"fake":"exit","code":1,"stderr":"text"}  write stderr and exit
+//	{"fake":"mcp_call","server":"lana","tool":"memory_write","id":"toolu_1","args":{...}}
+//	    emit an assistant tool_use for mcp__<server>__<tool>, ask can_use_tool,
+//	    call the tool on the MCP server of --mcp-config (URL and bearer token
+//	    from the argv), log the result, and emit the user tool_result
+//	{"fake":"mcp_list","server":"lana"}       log the server's tool names
 //
 // The fixture session ID 00000000-0000-4000-8000-000000000001 is replaced by
 // the --session-id or --resume value.
@@ -23,13 +30,74 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// defaultModels is the models array of a recorded Claude Code 2.1.319
+// initialize response (descriptions shortened).
+const defaultModels = `[{"value":"default","displayName":"Default (recommended)","description":"Use the default model"},` +
+	`{"value":"opus","displayName":"Opus","description":"Opus for complex work"},` +
+	`{"value":"claude-opus-5-5","displayName":"Opus 5.5","description":"Claude Opus 5.5"},` +
+	`{"value":"claude-sonnet-5-5[1m]","displayName":"Sonnet 5.5 (1M context)","description":"Claude Sonnet 5.5 with 1M context"},` +
+	`{"value":"claude-haiku-5-5","displayName":"Haiku 5.5","description":"Claude Haiku 5.5"}]`
+
+// mcpConfig is the --mcp-config value: servers by name with URL and headers.
+type mcpConfig struct {
+	MCPServers map[string]struct {
+		Type    string            `json:"type"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	} `json:"mcpServers"`
+}
+
+type headerTransport struct {
+	headers map[string]string
+}
+
+func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
+
+// mcpSession connects to the named server of the --mcp-config argv.
+func mcpSession(args []string, server string) (*mcp.ClientSession, error) {
+	raw := ""
+	for i, a := range args {
+		if a == "--mcp-config" && i+1 < len(args) {
+			raw = args[i+1]
+		}
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("no --mcp-config")
+	}
+	var cfg mcpConfig
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, err
+	}
+	srv, ok := cfg.MCPServers[server]
+	if !ok {
+		return nil, fmt.Errorf("no MCP server %q", server)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "fakeclaude", Version: "0"}, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: srv.URL, HTTPClient: &http.Client{Transport: headerTransport{headers: srv.Headers}},
+		MaxRetries: -1, DisableStandaloneSSE: true,
+	}, nil)
+}
 
 const fixtureSession = "00000000-0000-4000-8000-000000000001"
 
@@ -123,8 +191,14 @@ func main() {
 			id, _ := m["request_id"].(string)
 			switch req["subtype"] {
 			case "initialize":
+				models := os.Getenv("FAKECLAUDE_MODELS")
+				if models == "" {
+					models = defaultModels
+				}
 				outJSON(map[string]any{"type": "control_response", "response": map[string]any{
-					"subtype": "success", "request_id": id, "response": map[string]any{"commands": []any{}}}})
+					"subtype": "success", "request_id": id, "response": map[string]any{
+						"commands": []any{}, "models": json.RawMessage(models),
+						"account": map[string]any{"email": "user@example.com", "subscriptionType": "max"}}}})
 			case "interrupt":
 				if ignoreInterrupt {
 					return
@@ -202,6 +276,66 @@ func main() {
 					}) {
 						return
 					}
+				case "mcp_list":
+					server, _ := probe["server"].(string)
+					entry := map[string]any{"kind": "mcp_list"}
+					if cs, err := mcpSession(args, server); err != nil {
+						entry["error"] = err.Error()
+					} else {
+						res, err := cs.ListTools(context.Background(), nil)
+						if err != nil {
+							entry["error"] = err.Error()
+						} else {
+							names := []string{}
+							for _, tool := range res.Tools {
+								names = append(names, tool.Name)
+							}
+							entry["tools"] = names
+						}
+						_ = cs.Close()
+					}
+					logLine(entry)
+				case "mcp_call":
+					server, _ := probe["server"].(string)
+					tool, _ := probe["tool"].(string)
+					callID, _ := probe["id"].(string)
+					callArgs, _ := probe["args"].(map[string]any)
+					name := "mcp__" + server + "__" + tool
+					outJSON(map[string]any{"type": "assistant", "message": map[string]any{"model": "claude-haiku-5-5", "role": "assistant",
+						"content": []any{map[string]any{"type": "tool_use", "id": callID, "name": name, "input": callArgs}}},
+						"parent_tool_use_id": nil, "session_id": session})
+					reqID := "fake_perm_" + callID
+					outJSON(map[string]any{"type": "control_request", "request_id": reqID, "request": map[string]any{
+						"subtype": "can_use_tool", "tool_name": name, "input": callArgs, "tool_use_id": callID}})
+					if !wait(0, func() bool { _, ok := responses[reqID]; return ok || interrupted }) {
+						return
+					}
+					text, isError := "", false
+					perm, _ := responses[reqID]["response"].(map[string]any)
+					if perm["behavior"] != "allow" {
+						text, isError = fmt.Sprint(perm["message"]), true
+					} else if cs, err := mcpSession(args, server); err != nil {
+						text, isError = err.Error(), true
+					} else {
+						res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+							Name: tool, Arguments: callArgs, Meta: mcp.Meta{"claudecode/toolUseId": callID},
+						})
+						if err != nil {
+							text, isError = err.Error(), true
+						} else {
+							isError = res.IsError
+							for _, c := range res.Content {
+								if tc, ok := c.(*mcp.TextContent); ok {
+									text += tc.Text
+								}
+							}
+						}
+						_ = cs.Close()
+					}
+					logLine(map[string]any{"kind": "mcp_result", "tool": tool, "text": text, "is_error": isError})
+					outJSON(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": []any{
+						map[string]any{"type": "tool_result", "tool_use_id": callID, "content": text, "is_error": isError}}},
+						"parent_tool_use_id": nil, "session_id": session})
 				case "exit":
 					if s, _ := probe["stderr"].(string); s != "" {
 						fmt.Fprintln(os.Stderr, s)

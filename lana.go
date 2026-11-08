@@ -31,12 +31,14 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
+	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/anthropic"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	"github.com/ridhomujizat/lana-harness/router"
+	"github.com/ridhomujizat/lana-harness/runtime/mcphost"
 	_ "github.com/ridhomujizat/lana-harness/store"
 	"github.com/ridhomujizat/lana-harness/store/memstore"
 	"github.com/ridhomujizat/lana-harness/tools"
@@ -197,6 +199,11 @@ type Runtime struct {
 	// over the session store, nil when the store keeps no router records.
 	router    *router.Router
 	routerRec *routerRecorder
+	// routerKV keeps small router state such as the Claude Code model list;
+	// nil when the store keeps no router records.
+	routerKV routerdb.KVStore
+	// toolHost serves lana's tools to Claude Code turns (ADR 0020).
+	toolHost *mcphost.Host
 	// draining refuses new turns while the daemon waits for running turns
 	// (REQ-TFB-002).
 	draining atomic.Bool
@@ -429,8 +436,13 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		toolboxNames: map[string]bool{},
 	}
 	rt.attachRouterStores()
-	// Spec 38: Claude Agent turns report usage and plan windows to the router.
+	// Spec 38, spec 39: Claude Code turns report usage, plan windows, and the
+	// model list to the router.
 	registry.SetExternalHooks(rt.externalHooks())
+	// ADR 0020: lana's tools reach Claude Code turns over a loopback MCP
+	// server, which listens on the first Claude Code turn.
+	rt.toolHost = mcphost.New(mcphost.Options{Logger: slog.Default()})
+	registry.SetToolHost(rt.toolHost)
 	// REQ-WF-009, AC-WF-016: the workflow tool gate is prepended so a worker's
 	// tool list, step budget and lock are decided before the permission engine
 	// asks the owner. It only acts on sessions a workflow run registered.
@@ -479,7 +491,8 @@ func (rt *Runtime) ApplyConfig(cfg core.Config) error {
 	}
 	agents := make(map[string]core.AgentConfig, len(cfg.Agents))
 	for name, agentCfg := range cfg.Agents {
-		agents[name] = agentCfg
+		// API-CCT-002: a legacy runtime agent is its claude-code address.
+		agents[name] = llmcall.NormalizeAgent(agentCfg)
 	}
 	teams := make(map[string]core.TeamConfig, len(cfg.Teams))
 	for name, teamCfg := range cfg.Teams {
@@ -1145,6 +1158,10 @@ func (rt *Runtime) Close() error {
 	defer cancel()
 	if err := rt.registry.Close(ctx); err != nil {
 		rt.closeErr = err
+	}
+	// ADR 0020: the Claude processes have stopped; stop the MCP host.
+	if rt.toolHost != nil {
+		_ = rt.toolHost.Close()
 	}
 	// Spec 37: the turns have stopped; flush the router's limit snapshots and
 	// the buffered call records while the store is still open.

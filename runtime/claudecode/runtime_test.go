@@ -303,7 +303,7 @@ func TestSessionIDThenResume(t *testing.T) {
 
 func TestBuildArgs(t *testing.T) {
 	id := "11111111-2222-4333-8444-555555555555"
-	args, err := buildArgs(core.RuntimeConfig{Model: "opus", Effort: "high"}, id, false)
+	args, err := buildArgs(core.RuntimeConfig{Model: "opus", Effort: "high"}, id, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,14 +312,17 @@ func TestBuildArgs(t *testing.T) {
 	if got := strings.Join(args, " "); got != want {
 		t.Fatalf("args = %s", got)
 	}
-	args, _ = buildArgs(core.RuntimeConfig{}, id, true)
+	args, _ = buildArgs(core.RuntimeConfig{AppendSystemPrompt: "-You are Bima"}, id, true, `{"mcpServers":{}}`)
+	if got := strings.Join(args, "|"); !strings.Contains(got, "|--append-system-prompt|-You are Bima|--mcp-config|{\"mcpServers\":{}}|") || strings.Contains(got, "strict-mcp-config") {
+		t.Fatalf("prompt and mcp args = %v", args)
+	}
 	if got := strings.Join(args[len(args)-2:], " "); got != "--resume "+id {
 		t.Fatalf("resume args = %v", args)
 	}
-	if _, err := buildArgs(core.RuntimeConfig{}, "--dangerously", true); err == nil {
+	if _, err := buildArgs(core.RuntimeConfig{}, "--dangerously", true, ""); err == nil {
 		t.Fatal("non-UUID session ID accepted")
 	}
-	if _, err := buildArgs(core.RuntimeConfig{Model: "--x"}, id, false); err == nil {
+	if _, err := buildArgs(core.RuntimeConfig{Model: "--x"}, id, false, ""); err == nil {
 		t.Fatal("flag-like model accepted")
 	}
 }

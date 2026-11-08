@@ -284,8 +284,10 @@ func (rt *Runtime) attachRouterStores() {
 	var limits router.LimitStore
 	if st, ok := rt.store.(routerdb.KVStore); ok {
 		limits = newRouterLimitStore(st)
+		rt.routerKV = st
 	}
 	rt.router.AttachStores(rec, limits)
+	rt.loadClaudeCodeModels()
 }
 
 // closeRouterStores flushes the router's limit snapshots and the buffered

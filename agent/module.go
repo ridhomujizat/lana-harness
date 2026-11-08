@@ -60,12 +60,8 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 				slog.Warn("agent uses a tool which is not registered", "agent", name, "tool", toolName)
 			}
 		}
-		// ADR 0018: a runtime agent uses no provider or fallback; its runtime
-		// is built on first use, and config validation already checked the
-		// keys it may not set.
-		if agentCfg.Runtime != "" {
-			continue
-		}
+		// API-CCT-002: a legacy runtime agent is its claude-code address.
+		agentCfg = llmcall.NormalizeAgent(agentCfg)
 		if agentCfg.Provider != "" {
 			if _, ok := config.Providers[agentCfg.Provider]; !ok {
 				return fmt.Errorf("agent '%s' uses provider '%s' which is not registered", name, agentCfg.Provider)
@@ -75,6 +71,10 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 			provider := fallback
 			if target, ok := llmcall.ParseTarget(fallback); ok {
 				provider = target.Provider
+			}
+			// ADR 0020: claude-code is built in, not a configured provider.
+			if provider == llmcall.ClaudeCode {
+				continue
 			}
 			if _, ok := config.Providers[provider]; !ok {
 				return fmt.Errorf("agent '%s' uses fallback provider '%s' which is not registered", name, provider)

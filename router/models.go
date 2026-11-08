@@ -70,6 +70,9 @@ func (c *modelCache) cachedPrice(entry *providerEntry, model string) *Price {
 // (REQ-RTR-013). refresh fetches the list again. When the fetch fails, the
 // catalog models are returned with the error.
 func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]ModelInfo, error) {
+	if provider == ClaudeCode {
+		return r.claudeCodeModels(), nil
+	}
 	entry, ok := r.snap.Load().providers[provider]
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownAddress, provider)

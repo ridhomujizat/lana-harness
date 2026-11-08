@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/home/user/project","session_id":"00000000-0000-4000-8000-000000000001","tools":["Task","Bash","Read"],"model":"claude-haiku-5-5","permissionMode":"default","claude_code_version":"2.1.319"}
+{"fake":"exit","code":1,"stderr":"Error: upstream connection reset"}

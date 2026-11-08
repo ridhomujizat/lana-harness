@@ -898,8 +898,9 @@ func TestOnCompactedObserverNotCalledOnAppendFailure(t *testing.T) {
 	}
 }
 
-// REQ-CCR-007: a manual compaction of a Claude Agent session is refused; the
-// runtime owns its context and lana calls no model for it.
+// REQ-CCT-007 (was REQ-CCR-007): compaction never calls Claude Code; an agent
+// whose chain has only claude-code targets and no [router] background_model
+// gets ErrNoBackgroundModel and no model call.
 func TestCompactNowRefusesRuntimeAgent(t *testing.T) {
 	provider := &recordProvider{text: "summary"}
 	store, info, service := newService(t, provider, core.Config{Agents: map[string]core.AgentConfig{
@@ -907,7 +908,7 @@ func TestCompactNowRefusesRuntimeAgent(t *testing.T) {
 	}})
 	seedTurn(t, store, info.ID)
 	_, err := service.CompactNow(context.Background(), info.ID)
-	if !errors.Is(err, llmcall.ErrRuntimeAgent) {
+	if !errors.Is(err, llmcall.ErrNoBackgroundModel) {
 		t.Fatalf("err = %v", err)
 	}
 	if provider.calls != 0 {

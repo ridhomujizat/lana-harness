@@ -618,14 +618,10 @@ func (s *Service) resolveChain(req core.CompactRequest, agentName string, events
 		if requested == "" {
 			requested = llmcall.Address(req.Targets[0])
 		}
-		return req.Targets, requested, nil
+		// REQ-CCT-007: never a Claude Code target.
+		return llmcall.BackgroundChain(s.LLM, req.Targets, requested)
 	}
-	provider, model, fallback, runtime := s.resolveModel(agentName, events)
-	// REQ-CCR-007: an external runtime owns its own context; lana never
-	// compacts it or calls a model for it.
-	if runtime != "" {
-		return nil, "", fmt.Errorf("%w: %s", llmcall.ErrRuntimeAgent, runtime)
-	}
+	provider, model, fallback := s.resolveModel(agentName, events)
 	if req.Provider != "" {
 		provider = req.Provider
 	}
@@ -639,16 +635,19 @@ func (s *Service) resolveChain(req core.CompactRequest, agentName string, events
 	if err != nil {
 		return nil, "", err
 	}
-	return chain, llmcall.Requested(provider, model), nil
+	// REQ-CCT-007: a background pass never uses a Claude Code target.
+	return llmcall.BackgroundChain(s.LLM, chain, llmcall.Requested(provider, model))
 }
 
-// resolveModel returns the provider, model, fallback, and runtime of the
-// session's agent after its model/selection events.
-func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (string, string, []string, string) {
-	provider, model, runtime := "", "", ""
+// resolveModel returns the provider, model, and fallback of the session's
+// agent after its model/selection events. A legacy runtime agent is its
+// claude-code address (API-CCT-002).
+func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (string, string, []string) {
+	provider, model := "", ""
 	var fallback []string
 	if agent, ok := s.agentConfig(agentName); ok {
-		provider, model, fallback, runtime = agent.Provider, agent.Model, agent.Fallback, agent.Runtime
+		agent = llmcall.NormalizeAgent(agent)
+		provider, model, fallback = agent.Provider, agent.Model, agent.Fallback
 	}
 	for _, event := range events {
 		if event.Kind != core.KindModelSelection {
@@ -660,12 +659,13 @@ func (s *Service) resolveModel(agentName string, events []core.SessionEvent) (st
 		}
 		if payload.Agent != "" {
 			if agent, ok := s.agentConfig(payload.Agent); ok {
-				provider, model, fallback, runtime = agent.Provider, agent.Model, agent.Fallback, agent.Runtime
+				agent = llmcall.NormalizeAgent(agent)
+				provider, model, fallback = agent.Provider, agent.Model, agent.Fallback
 			}
 		}
 		provider, model = llmcall.Select(provider, model, payload)
 	}
-	return provider, model, fallback, runtime
+	return provider, model, fallback
 }
 
 // Install installs the llm.stream overflow listener. The turn loop calls

@@ -181,14 +181,60 @@ func TestEmbedderRoutes(t *testing.T) {
 	}
 }
 
-// REQ-CCR-007: background passes never resolve an agent on an external
-// runtime.
-func TestAgentChainRefusesRuntimeAgent(t *testing.T) {
-	_, _, err := AgentChain(nil, core.AgentConfig{Runtime: "claude-code", Model: "opus"})
-	if !errors.Is(err, ErrRuntimeAgent) {
-		t.Fatalf("err = %v", err)
+// bgRouter is a stubRouter with a [router] background_model.
+type bgRouter struct {
+	*stubRouter
+	background string
+}
+
+func (r bgRouter) BackgroundModel() string { return r.background }
+
+// REQ-CCT-007: background passes never use claude-code targets: the rest of
+// the chain, else [router] background_model, else ErrNoBackgroundModel.
+func TestBackgroundChain(t *testing.T) {
+	r := newStubRouter()
+	r.combos["claude"] = []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}, {Provider: "a", Model: "x"}}
+	chain, requested, err := BackgroundChain(r, []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}, {Provider: "a", Model: "x"}}, "claude")
+	if err != nil || len(chain) != 1 || chain[0].Provider != "a" || requested != "claude" {
+		t.Fatalf("rest: chain=%v requested=%q err=%v", chain, requested, err)
 	}
-	if got := RuntimeProvider("claude-code"); got != "claude-agent" {
+	only := []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}}
+	if _, _, err := BackgroundChain(r, only, "claude-code/opus"); !errors.Is(err, ErrNoBackgroundModel) {
+		t.Fatalf("no background model: err = %v", err)
+	}
+	chain, requested, err = BackgroundChain(bgRouter{r, "b/y"}, only, "claude-code/opus")
+	if err != nil || len(chain) != 1 || chain[0] != (core.LLMTarget{Provider: "b", Model: "y"}) || requested != "b/y" {
+		t.Fatalf("background model: chain=%v requested=%q err=%v", chain, requested, err)
+	}
+	plain := []core.LLMTarget{{Provider: "a", Model: "x"}}
+	if chain, _, _ := BackgroundChain(r, plain, "a/x"); !reflect.DeepEqual(chain, plain) {
+		t.Fatalf("plain chain changed: %v", chain)
+	}
+}
+
+// API-CCT-002: a legacy runtime agent is its claude-code address.
+func TestNormalizeAgent(t *testing.T) {
+	cases := map[string]string{"haiku": "claude-code/haiku", "": "claude-code/default", "claude-code/opus": "claude-code/opus"}
+	for model, want := range cases {
+		got := NormalizeAgent(core.AgentConfig{Runtime: "claude-code", Model: model, Provider: "x"})
+		if got.Model != want || got.Runtime != "" || got.Provider != "" {
+			t.Fatalf("model %q: %+v", model, got)
+		}
+	}
+	if got := NormalizeAgent(core.AgentConfig{Model: "a/x"}); got.Model != "a/x" {
+		t.Fatalf("native agent changed: %+v", got)
+	}
+	chain, requested, err := AgentChain(newStubRouter(), core.AgentConfig{Runtime: "claude-code", Model: "haiku"})
+	if err == nil {
+		t.Fatalf("stub router resolved claude-code without knowing it: %v %q", chain, requested)
+	}
+	if !IsClaudeCodeAddress("claude-code/opus") || IsClaudeCodeAddress("claude-code:opus") || IsClaudeCodeAddress("ds/x") {
+		t.Fatal("IsClaudeCodeAddress")
+	}
+	if got := RuntimeProvider("claude-code"); got != "claude-code" {
 		t.Fatalf("RuntimeProvider = %q", got)
+	}
+	if !WarnNoBackground("agent-x", "test") || WarnNoBackground("agent-x", "test") {
+		t.Fatal("WarnNoBackground is not rate limited")
 	}
 }

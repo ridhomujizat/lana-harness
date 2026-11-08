@@ -4,6 +4,7 @@ package memcapture
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -99,6 +100,17 @@ func (s *Service) run(req core.CaptureRequest) {
 	chain, requested, ok := s.chain(req)
 	if !ok {
 		s.warn("provider is not registered", req, nil)
+		return
+	}
+	// REQ-CCT-007: the pass never uses Claude Code: the rest of the chain,
+	// else [router] background_model, else it is skipped.
+	chain, requested, err = llmcall.BackgroundChain(s.LLM, chain, requested)
+	if errors.Is(err, llmcall.ErrNoBackgroundModel) {
+		llmcall.WarnNoBackground(req.AgentName, "memory_capture")
+		return
+	}
+	if err != nil {
+		s.warn("background model", req, err)
 		return
 	}
 	userEntries, _ := agenthome.ReadEntries(agenthome.SharedUser(req.Home))

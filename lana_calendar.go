@@ -240,13 +240,16 @@ func (a calendarActions) AgentPrompt(ctx context.Context, agentName, prompt, tit
 	rt := a.rt
 	// REQ-CCR-007, AC-CCR-008: a Claude Agent runs on a schedule only with
 	// allow_scheduled = true.
-	if err := rt.scheduledRunAllowed(agentName); err != nil {
+	if err := rt.scheduledRunAllowed(agentName, ""); err != nil {
 		return "", err
 	}
 	session, err := rt.roomSession(ctx, agentName)
 	if err != nil {
 		return "", err
 	}
+	// REQ-CCT-008: the item's turn skips Claude Code unless allow_scheduled.
+	// A message queued behind a running turn is not marked.
+	defer rt.registry.MarkScheduled(session.ID)()
 	text := calendarPromptText(title, prompt)
 	if rt.TurnActive(session.ID) {
 		return session.ID, rt.Send(ctx, session.ID, text)

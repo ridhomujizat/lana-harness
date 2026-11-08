@@ -134,12 +134,21 @@ type resolvedAgent struct {
 	team      string
 	delegates []string
 	roster    []agenthome.RosterEntry
-	// provider and model are the chain's first target, the primary.
+	// provider and model are the first target of chain, the primary of
+	// lana's loop; empty when chain is empty.
 	provider string
 	model    string
-	// chain is the primary followed by the combo's other models or the
-	// agent's fallback entries (REQ-RTR-003).
+	// fullChain is the primary followed by the combo's other models or the
+	// agent's fallback entries (REQ-RTR-003), Claude Code targets included.
+	fullChain []core.LLMTarget
+	// chain is fullChain without its Claude Code targets: the targets lana's
+	// own loop calls (ADR 0020).
 	chain []core.LLMTarget
+	// cfg is the agent's config, legacy runtime key mapped (API-CCT-002).
+	cfg core.AgentConfig
+	// claudeEffort is the reasoning effort of a Claude Code turn: the
+	// session's, else the agent's, without the catalog default.
+	claudeEffort string
 	// requested is the combo or address the agent asked for, recorded by
 	// the router.
 	requested  string
@@ -202,6 +211,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if !ok {
 		return resolvedAgent{}, fmt.Errorf("%w: %s", ErrUnknownAgent, cfgName)
 	}
+	cfg = llmcall.NormalizeAgent(cfg)
 	provider, model := cfg.Provider, cfg.Model
 	if hasSelection && teamName == "" {
 		provider, model = llmcall.Select(provider, model, selection)
@@ -216,6 +226,10 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
 	}
 	requested := llmcall.Requested(provider, model)
+	// ADR 0020: Claude Code targets run in the Claude Code runtime, never in
+	// lana's loop; runTurn dispatches them.
+	fullChain := targets
+	targets = llmcall.WithoutClaudeCode(fullChain)
 	workspace := info.Workspace
 	if workspace == "" {
 		workspace = cfg.Workspace
@@ -235,6 +249,11 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	effort := cfg.ReasoningEffort
 	if hasSelection && selection.ReasoningEffort != "" {
 		effort = selection.ReasoningEffort
+	}
+	// "off" has no --effort value, so a Claude Code turn leaves it out.
+	claudeEffort := effort
+	if claudeEffort == "off" {
+		claudeEffort = ""
 	}
 	// The effort default and the vision flag come from the first target.
 	known, knownOK := llmcall.Lookup(targets)
@@ -270,14 +289,21 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if overlay, ok := rn.reg.agentServers(cfgName); ok {
 		mcpServers = overlay
 	}
+	primary := core.LLMTarget{}
+	if len(targets) > 0 {
+		primary = targets[0]
+	}
 	return resolvedAgent{
 		name:            cfgName,
 		team:            teamName,
 		delegates:       delegates,
 		roster:          roster,
-		provider:        targets[0].Provider,
-		model:           targets[0].Model,
+		provider:        primary.Provider,
+		model:           primary.Model,
+		fullChain:       fullChain,
 		chain:           targets,
+		cfg:             cfg,
+		claudeEffort:    claudeEffort,
 		requested:       requested,
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
@@ -292,6 +318,91 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		workspaceOnly:   cfg.WorkspaceOnly,
 		reasoningEffort: effort,
 	}, nil
+}
+
+// offeredTools returns the tools a turn of the resolved agent offers, the MCP
+// servers that are not available with their reason, and the visible skills.
+// Native turns and Claude Code turns share it (REQ-CCT-006).
+func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]string, map[string]string, []agenthome.Skill) {
+	// REQ-TB-004, REQ-TB-008: a tool an agent lists but nothing has
+	// registered (a command of a package that is not installed) is not
+	// offered. A later registration (the toolbox sync) makes it available on
+	// the next turn without a restart.
+	tools := rn.reg.registeredTools(resolved.tools)
+	var unavailable map[string]string
+	if len(resolved.mcp) > 0 {
+		if mcp := rn.reg.mcpManager(); mcp != nil {
+			names, unavail := mcp.Ensure(ctx, resolved.mcp)
+			tools = append(tools, names...)
+			unavailable = unavail
+		}
+		// REQ-TFB-008 item 2: every server the runtime does not know is listed
+		// as "not loaded".
+		unavailable = unknownMCP(resolved.mcp, tools, unavailable)
+	}
+	var skills []agenthome.Skill
+	if rn.reg.home != "" {
+		skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
+	}
+	// REQ-AMCP-001: skill_load, mcp_manage, and the team tools are offered
+	// without being listed in tools. REQ-CAL-009: so is the calendar tool when
+	// it is registered. The dashboard catalog reads the same helper so the two
+	// cannot drift.
+	_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
+	_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
+	for _, name := range AutoOfferedTools(AutoOfferState{
+		Root:                !resolved.child,
+		MCPManageRegistered: mcpManageRegistered,
+		VisibleSkills:       len(skills) > 0,
+		Team:                resolved.team != "" || len(resolved.delegates) > 0,
+		CalendarRegistered:  calendarRegistered,
+	}) {
+		if !containsString(tools, name) {
+			tools = append(tools, name)
+		}
+	}
+	// REQ-JOB-015: an agent offered bash also gets the job tools without
+	// listing them. It runs before disabled_tools so a disabled job tool is
+	// removed like any other.
+	tools = addCompanionTools(tools, resolved.disabled, func(name string) bool {
+		_, ok := rn.reg.tools.Get(name)
+		return ok
+	})
+	// disabled_tools removes a name from the offered list. It is applied after
+	// the built-in, MCP, skill, and team tools are collected so a disabled
+	// team or skill tool is removed as well (AC-WEB-049, Q-024).
+	tools = filterDisabledTools(tools, resolved.disabled)
+	// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
+	sort.Strings(tools)
+	return tools, unavailable, skills
+}
+
+// toolCtx is the tool context of one turn's calls.
+func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID string) core.ToolCtx {
+	var mcpAdmin core.MCPAdmin
+	if !resolved.child {
+		mcpAdmin = rn.reg.mcpAdminFor()
+	}
+	// REQ-SSR-010: session_search reads the conversation index when the store
+	// provides one.
+	var sessions core.SessionSearcher
+	if searcher, ok := rn.reg.store.(core.SessionSearcher); ok {
+		sessions = searcher
+	}
+	return core.ToolCtx{
+		SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
+		WorkspaceOnly: resolved.workspaceOnly,
+		Skills:        resolved.skills,
+		Questions:     rn.reg.questions,
+		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+		MCPAdmin:      mcpAdmin,
+		MCPStatus:     rn.reg.ServerStatus,
+		AllowedAgents: resolved.delegates,
+		Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
+		Jobs:          rn.reg.jobs,
+		Sessions:      sessions,
+		Knowledge:     rn.reg.knowledgeService(),
+	}
 }
 
 // mergeDelegates joins groups in order and drops duplicates.
@@ -580,9 +691,9 @@ func (rn *Runner) promptHead(ctx context.Context) (promptHead, error) {
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				return promptHead{}, err
 			}
-			// An external runtime's session meta is not a prompt head
-			// (API-CCR-002).
-			if payload.Subtype == core.SystemSubtypeRuntime {
+			// An external runtime's session meta and a note are not a prompt
+			// head (API-CCR-002, REQ-CCT-006).
+			if payload.Subtype != "" {
 				continue
 			}
 			head.exists = true
@@ -651,19 +762,71 @@ func removedHeading(text string) string {
 	return text
 }
 
-func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) (result TurnResult) {
-	// ADR 0018: an agent on an external runtime runs the whole turn there.
-	if ext, ok := rn.externalAgent(ctx); ok {
-		return rn.runExternalTurn(ctx, initial, turnID, continueReason, ext)
+// scheduledClaudeMessage is the turn error of a scheduled run whose chain has
+// only Claude Code targets on an agent without allow_scheduled (REQ-CCT-008).
+func scheduledClaudeMessage(agent string) string {
+	return fmt.Sprintf("claude-code is not allowed for scheduled runs of agent '%s'", agent)
+}
+
+// runTurn picks the engine of one turn (REQ-CCT-003): when the first
+// available target of the chain is a Claude Code address, the turn runs in
+// the Claude Code runtime; otherwise, or after a Claude Code failure before
+// any output, it runs in lana's own loop with the rest of the chain
+// (REQ-CCT-004).
+func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) TurnResult {
+	resolved, err := rn.resolve(ctx)
+	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(resolved.fullChain[0]) {
+		// REQ-CCT-008: a scheduled run uses Claude Code only with
+		// allow_scheduled; else the next target outside Claude Code runs.
+		if rn.reg.isScheduled(rn.sessionID) && !resolved.cfg.AllowScheduled {
+			if len(resolved.chain) == 0 {
+				return rn.failTurn(ctx, turnID, &core.ProviderError{Class: "client", Message: scheduledClaudeMessage(resolved.name)})
+			}
+		} else {
+			result, fallback := rn.runExternalTurn(ctx, initial, turnID, continueReason, resolved)
+			if !fallback {
+				return result
+			}
+			return rn.runNativeTurn(ctx, initial, turnID, continueReason, nativeResume{started: true, userStored: true})
+		}
 	}
-	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
+	return rn.runNativeTurn(ctx, initial, turnID, continueReason, nativeResume{})
+}
+
+// failTurn writes a turn that fails before it starts: turn/start and turn/end
+// with the error.
+func (rn *Runner) failTurn(ctx context.Context, turnID string, pe *core.ProviderError) TurnResult {
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnStart, TurnID: turnID, Payload: core.TurnStart{V: core.PayloadVersion, TurnID: turnID}}); err != nil {
 		slog.Error("failed to write turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
-		result.StopReason = "error"
-		result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
-		return result
+	}
+	end := core.TurnEnd{V: core.PayloadVersion, TurnID: turnID, Reason: "error", Error: &core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
+	if err := writeTurnEnd(writeCtx, events, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
+		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
+	}
+	return TurnResult{SessionID: rn.sessionID, TurnID: turnID, StopReason: "error", Err: pe}
+}
+
+// nativeResume continues a turn in lana's loop after a Claude Code target
+// failed before output (REQ-CCT-004): turn/start and the owner message are
+// already stored, so the loop starts with a model step over the history.
+type nativeResume struct {
+	started    bool
+	userStored bool
+}
+
+func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, continueReason string, resume nativeResume) (result TurnResult) {
+	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
+	writeCtx := context.WithoutCancel(ctx)
+	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
+	if !resume.started {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnStart, TurnID: turnID, Payload: core.TurnStart{V: core.PayloadVersion, TurnID: turnID}}); err != nil {
+			slog.Error("failed to write turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
+			result.StopReason = "error"
+			result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
+			return result
+		}
 	}
 	reason := "end_turn"
 	var runErr *core.ProviderError
@@ -714,6 +877,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 	// is never lost; the step cap and halt paths return it explicitly.
 	var pendingClaim inboxItem
 	claimedPending := false
+	if resume.userStored {
+		// The owner message is in the history already; the first step only
+		// takes an owner message that arrived meanwhile.
+		hasInitial = false
+		pendingTools = true
+		ownerMessage = true
+	}
 	for {
 		claimedText := ""
 		claimed := false
@@ -838,6 +1008,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			reason = "error"
 			goto finished
 		}
+		if len(resolved.chain) == 0 {
+			// ADR 0020: lana's loop cannot call Claude Code targets.
+			runErr = &core.ProviderError{Class: "client", Message: fmt.Sprintf("agent %s has no model for lana's own loop: its chain has only claude-code targets", resolved.name)}
+			reason = "error"
+			goto finished
+		}
 		lastResolved = resolved
 		// REQ-WS-001: create a missing session workspace before any tool runs.
 		// A failure is logged and not fatal; bash, glob, and grep then report a
@@ -912,56 +1088,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		// payload so display surfaces can hide them (REQ-LTC-001).
 		contextBlocks := 0
 		if !promptBuilt {
-			// REQ-TB-004, REQ-TB-008: a tool an agent lists but nothing has
-			// registered (a command of a package that is not installed) is not
-			// offered. A later registration (the toolbox sync) makes it
-			// available on the next turn without a restart.
-			turnTools = append(turnTools, rn.reg.registeredTools(resolved.tools)...)
-			var unavailable map[string]string
-			if len(resolved.mcp) > 0 {
-				if mcp := rn.reg.mcpManager(); mcp != nil {
-					names, unavail := mcp.Ensure(ctx, resolved.mcp)
-					turnTools = append(turnTools, names...)
-					unavailable = unavail
-				}
-				// REQ-TFB-008 item 2: every server the runtime does not know
-				// is listed as "not loaded".
-				unavailable = unknownMCP(resolved.mcp, turnTools, unavailable)
-			}
-			var skills []agenthome.Skill
-			if rn.reg.home != "" {
-				skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
-			}
-			// REQ-AMCP-001: skill_load, mcp_manage, and the team tools are
-			// offered without being listed in tools. REQ-CAL-009: so is the
-			// calendar tool when it is registered. The dashboard catalog
-			// reads the same helper so the two cannot drift.
-			_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
-			_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
-			for _, name := range AutoOfferedTools(AutoOfferState{
-				Root:                !resolved.child,
-				MCPManageRegistered: mcpManageRegistered,
-				VisibleSkills:       len(skills) > 0,
-				Team:                resolved.team != "" || len(resolved.delegates) > 0,
-				CalendarRegistered:  calendarRegistered,
-			}) {
-				if !containsString(turnTools, name) {
-					turnTools = append(turnTools, name)
-				}
-			}
-			// REQ-JOB-015: an agent offered bash also gets the job tools without
-			// listing them. It runs before disabled_tools so a disabled job tool
-			// is removed like any other.
-			turnTools = addCompanionTools(turnTools, resolved.disabled, func(name string) bool {
-				_, ok := rn.reg.tools.Get(name)
-				return ok
-			})
-			// disabled_tools removes a name from the offered list. It is applied
-			// after the built-in, MCP, skill, and team tools are collected so a
-			// disabled team or skill tool is removed as well (AC-WEB-049, Q-024).
-			turnTools = filterDisabledTools(turnTools, resolved.disabled)
-			// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
-			sort.Strings(turnTools)
+			offered, unavailable, skills := rn.offeredTools(ctx, resolved)
+			turnTools = append(turnTools, offered...)
 			// REQ-ECX-024: only an owner message can pick relevant memory, and
 			// only the first user message of the turn carries it.
 			ownerText := ""
@@ -1191,30 +1319,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 					outputs[i] = core.ToolOutput{Status: core.ToolStatusError, Output: reportToolsDisabledText}
 				}
 			} else {
-				var mcpAdmin core.MCPAdmin
-				if !resolved.child {
-					mcpAdmin = rn.reg.mcpAdminFor()
-				}
-				// REQ-SSR-010: session_search reads the conversation index when
-				// the store provides one.
-				var sessions core.SessionSearcher
-				if searcher, ok := rn.reg.store.(core.SessionSearcher); ok {
-					sessions = searcher
-				}
-				toolCtx := core.ToolCtx{
-					SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
-					WorkspaceOnly: resolved.workspaceOnly,
-					Skills:        resolved.skills,
-					Questions:     rn.reg.questions,
-					Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
-					MCPAdmin:      mcpAdmin,
-					MCPStatus:     rn.reg.ServerStatus,
-					AllowedAgents: resolved.delegates,
-					Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
-					Jobs:          rn.reg.jobs,
-					Sessions:      sessions,
-					Knowledge:     rn.reg.knowledgeService(),
-				}
+				toolCtx := rn.toolCtx(ctx, resolved, turnID)
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as
 				// usual and every result is stored in call order.

@@ -22,7 +22,8 @@ func chatServer(t *testing.T, text string) *httptest.Server {
 
 // TestRunOutputModel covers the model of `lana run --output json`: a legacy
 // agent shows "provider:model", a router agent the "provider/model" target
-// that answered, and a Claude Agent "claude-agent/<model>".
+// that answered, and a Claude Code turn "claude-code/<model>" (API-CCT-008;
+// spec 38 showed "claude-agent/<model>").
 func TestRunOutputModel(t *testing.T) {
 	up := chatServer(t, "ok")
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -77,7 +78,7 @@ models = ["down/broken-model", "up/good-model"]
 			t.Fatal(err)
 		}
 		// The model Claude Code reported in its session meta, not the alias.
-		if got := runOutputModel(t); got != "claude-agent/claude-haiku-5-5" {
+		if got := runOutputModel(t); got != "claude-code/claude-haiku-5-5" {
 			t.Fatalf("model = %q", got)
 		}
 	})

@@ -106,10 +106,11 @@ func argAfter(argv []string, flag string) string {
 	return ""
 }
 
-// AC-CCR-002, AC-CCR-004, AC-CCR-009 (data side): a Claude Agent turn through
+// AC-CCR-002, AC-CCR-004, AC-CCR-009 (data side): a Claude Code turn through
 // the runtime and the fake `claude` writes the native events, stores the
-// Claude session UUID, records one router call with provider claude-agent,
-// updates the claude-agent plan windows, and resumes the UUID after a restart.
+// Claude session UUID, records one router call with provider claude-code
+// (API-CCT-008, was claude-agent), updates the claude-code plan windows, and
+// resumes the UUID after a restart.
 func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 	bin := buildFakeClaude(t)
 	fixture, err := filepath.Abs(filepath.Join("runtime", "claudecode", "testdata", "bash.jsonl"))
@@ -131,7 +132,7 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 		_ = rt.Close()
 		t.Fatalf("run: %v", err)
 	}
-	if result.StopReason != StopEndTurn || !strings.Contains(result.Text, "notes.txt") || result.Model != "claude-agent/claude-haiku-5-5" {
+	if result.StopReason != StopEndTurn || !strings.Contains(result.Text, "notes.txt") || result.Model != "claude-code/claude-haiku-5-5" {
 		_ = rt.Close()
 		t.Fatalf("result = %+v", result)
 	}
@@ -185,7 +186,7 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 	// AC-CCR-009 data side: the plan window from rate_limit_event.
 	var windows int
 	for _, snap := range rt.Router().Limits(context.Background(), false) {
-		if snap.Provider == "claude-agent" {
+		if snap.Provider == "claude-code" {
 			if snap.Kind != "claude-code" || len(snap.Windows) == 0 || snap.Windows[0].Type != "five_hour" || snap.Windows[0].Utilization == nil || *snap.Windows[0].Utilization != 0.08 || snap.Windows[0].ResetsAt == nil {
 				t.Fatalf("snapshot = %+v", snap)
 			}
@@ -193,7 +194,7 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 		}
 	}
 	if windows == 0 {
-		t.Fatal("no claude-agent limit snapshot")
+		t.Fatal("no claude-code limit snapshot")
 	}
 	if err := rt.Close(); err != nil {
 		t.Fatal(err)
@@ -204,7 +205,7 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 		t.Fatalf("calls = %+v", calls)
 	}
 	call := calls[0]
-	if call.Provider != "claude-agent" || call.Model != "claude-haiku-5-5" || call.Requested != "claude-agent/claude-haiku-5-5" ||
+	if call.Provider != "claude-code" || call.Model != "claude-haiku-5-5" || call.Requested != "claude-code/haiku" ||
 		call.Outcome != "ok" || call.Agent != "claude" || call.SessionID != sessionID || call.Attempt != 1 ||
 		call.InputTokens == 0 || call.CostUSD == nil || *call.CostUSD <= 0 {
 		t.Fatalf("call = %+v", call)
@@ -225,8 +226,9 @@ func TestClaudeAgentTurnThroughRuntime(t *testing.T) {
 	}
 }
 
-// AC-CCR-008: calendar items and workflow nodes refuse a Claude Agent without
-// allow_scheduled.
+// REQ-CCT-008 (amends AC-CCR-008): a scheduled run of an agent whose chain
+// has only Claude Code targets fails without allow_scheduled; a chain with
+// another target runs it instead (TestClaudeCodeTargetIntegration).
 func TestClaudeAgentScheduledRuns(t *testing.T) {
 	bin := buildFakeClaude(t)
 	cfg := claudeAgentConfig(bin, t.TempDir(), "") + `
@@ -234,16 +236,33 @@ func TestClaudeAgentScheduledRuns(t *testing.T) {
 runtime = "claude-code"
 binary = "` + bin + `"
 allow_scheduled = true
+
+[providers.ds]
+kind = "openai_compat"
+base_url = "http://127.0.0.1:1"
+
+[agents.mixed]
+model = "claude-code/opus"
+fallback = ["ds/deepseek-flash"]
+
+[agents.plain]
+model = "ds/deepseek-flash"
 `
 	rt, _ := routedRuntime(t, cfg)
-	const want = "claude agent 'claude' does not allow scheduled runs"
+	const want = "claude-code is not allowed for scheduled runs of agent 'claude'"
 	if _, err := (calendarActions{rt: rt}).AgentPrompt(context.Background(), "claude", "check mail", "Morning"); err == nil || err.Error() != want {
 		t.Fatalf("calendar err = %v", err)
 	}
 	if _, err := (workflowDeps{rt: rt}).RunAgent(context.Background(), workflow.AgentRequest{WorkflowID: "wf", Agent: "claude", Prompt: "x"}); err == nil || err.Error() != want {
 		t.Fatalf("workflow err = %v", err)
 	}
-	if err := rt.scheduledRunAllowed("cron"); err != nil {
+	if err := rt.scheduledRunAllowed("cron", ""); err != nil {
 		t.Fatalf("allow_scheduled agent refused: %v", err)
+	}
+	if err := rt.scheduledRunAllowed("mixed", ""); err != nil {
+		t.Fatalf("agent with a fallback refused: %v", err)
+	}
+	if err := rt.scheduledRunAllowed("plain", "claude-code/haiku"); err == nil {
+		t.Fatal("a workflow model override with only claude-code was allowed")
 	}
 }

@@ -119,6 +119,11 @@ type SystemMessage struct {
 // session meta (API-CCR-002).
 const SystemSubtypeRuntime = "runtime"
 
+// SystemSubtypeNote is the system/message subtype of a note lana writes for
+// the owner, for example that lana's tools were not available to a Claude
+// Code turn (spec 39 failure cases). It is not a prompt head.
+const SystemSubtypeNote = "note"
+
 type UserMessage struct {
 	V       int            `json:"v"`
 	Content []ContentBlock `json:"content"`

@@ -9,6 +9,9 @@ package claudecode
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -81,9 +84,60 @@ type Runtime struct {
 	status     core.RuntimeStatus
 	statusAt   time.Time
 	lastBinary string
+
+	// models is the model list of the last initialize response (nil: none
+	// yet). Only the models part is read; the account part is never kept.
+	modelsMu sync.Mutex
+	models   []core.RuntimeModel
 }
 
-var _ core.AgentRuntime = (*Runtime)(nil)
+var (
+	_ core.AgentRuntime       = (*Runtime)(nil)
+	_ core.RuntimeModelLister = (*Runtime)(nil)
+)
+
+// EarlyError is the error RunTurn returns when a turn failed before its first
+// content event (REQ-CCT-004).
+type EarlyError = core.RuntimeEarlyError
+
+// Early failure classes (router outcome classes of the call record).
+const (
+	classNotInstalled  = core.ErrorClassNotFound
+	classVersion       = "client"
+	classAuth          = "auth"
+	classMissingSecret = "missing_secret"
+	classRateLimit     = "rate_limit"
+	classRuntime       = "runtime"
+)
+
+// Models returns the models the last initialize response listed (the scope
+// addition to spec 39); ok is false before the first process started.
+func (r *Runtime) Models() ([]core.RuntimeModel, bool) {
+	r.modelsMu.Lock()
+	defer r.modelsMu.Unlock()
+	if r.models == nil {
+		return nil, false
+	}
+	return append([]core.RuntimeModel(nil), r.models...), true
+}
+
+// setModels stores the models of an initialize response and reports them
+// through RuntimeDeps.OnModels when they changed.
+func (r *Runtime) setModels(list []core.RuntimeModel) {
+	if list == nil {
+		return
+	}
+	r.modelsMu.Lock()
+	same := len(list) == len(r.models)
+	for i := 0; same && i < len(list); i++ {
+		same = list[i] == r.models[i]
+	}
+	r.models = append([]core.RuntimeModel{}, list...)
+	r.modelsMu.Unlock()
+	if !same && r.deps.OnModels != nil {
+		r.deps.OnModels(append([]core.RuntimeModel(nil), list...))
+	}
+}
 
 // New returns a Runtime.
 func New(deps core.RuntimeDeps, opts Options) *Runtime {
@@ -138,68 +192,96 @@ func userError(format string, args ...any) error {
 // errNotInstalled is the turn error when the binary is missing.
 const errNotInstalled = "Claude Code is not installed or not on PATH"
 
-// RunTurn runs one turn on the session's process, starting it when needed.
+// RunTurn runs one turn on the session's process, starting it when needed. A
+// failure before the turn's first content event returns an *EarlyError
+// (REQ-CCT-004).
 func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 	emit := turn.Emit
 	if emit == nil {
 		emit = func(core.RuntimeEvent) {}
 	}
+	content := false
+	tracked := func(ev core.RuntimeEvent) {
+		switch ev.Kind {
+		case core.RuntimeTextDelta, core.RuntimeThinkingDelta, core.RuntimeAssistantMessage, core.RuntimeToolCall, core.RuntimeToolResult:
+			content = true
+		}
+		emit(ev)
+	}
+	class := classRuntime
 	end := func(ev core.RuntimeEvent) error {
 		ev.Kind = core.RuntimeEnd
 		emit(ev)
-		if ev.IsError {
-			return &TurnError{Message: ev.ErrorText}
+		if !ev.IsError {
+			return nil
 		}
-		return nil
+		if !content {
+			return &EarlyError{Class: class, Message: ev.ErrorText}
+		}
+		return &TurnError{Message: ev.ErrorText}
 	}
-	fail := func(msg string) error {
+	fail := func(c, msg string) error {
+		class = c
 		return end(core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: msg})
 	}
 	cancelled := func() error { return end(core.RuntimeEvent{StopReason: core.RuntimeStopCancelled}) }
 
 	if turn.SessionID == "" {
-		return fail("runtime turn has no session ID")
+		return fail(classRuntime, "runtime turn has no session ID")
 	}
 	r.mu.Lock()
 	closed := r.closed
 	r.mu.Unlock()
 	if closed {
-		return fail("Claude Agent runtime is shut down")
+		return fail(classRuntime, "Claude Code runtime is shut down")
 	}
 	bin, err := r.resolveBinary(turn.Config.Binary)
 	if err != nil {
-		return fail(err.Error())
+		return fail(classNotInstalled, err.Error())
 	}
 	if _, err := r.checkVersion(ctx, bin); err != nil {
 		if ctx.Err() != nil {
 			return cancelled()
 		}
-		return fail(err.Error())
+		return fail(classVersion, err.Error())
 	}
 	env, apiKey, err := buildEnv(r.opts.Environ(), turn.Config, r.deps.Secrets)
 	if err != nil {
-		return fail(err.Error())
+		return fail(classMissingSecret, err.Error())
 	}
 	dir, err := workspaceDir(turn.Config.Workspace)
 	if err != nil {
-		return fail(err.Error())
+		return fail("client", err.Error())
 	}
 	if err := r.sem.Acquire(ctx); err != nil {
 		return cancelled()
 	}
 	defer r.sem.Release()
 
-	key := strings.Join([]string{bin, dir, turn.Config.Auth, turn.Config.APIKeyEnv, turn.Config.Model, turn.Config.Effort}, "\x00")
+	// A change of the prompt head or the lana tool set starts a new process
+	// that resumes the Claude session (REQ-CCT-005).
+	promptSum := sha256.Sum256([]byte(turn.Config.AppendSystemPrompt))
+	key := strings.Join([]string{bin, dir, turn.Config.Auth, turn.Config.APIKeyEnv, turn.Config.Model, turn.Config.Effort,
+		hex.EncodeToString(promptSum[:8]), turn.Config.MCPKey}, "\x00")
 	p, err := r.acquireProcess(ctx, turn, launch{bin: bin, env: env, dir: dir, key: key, apiKey: apiKey})
 	if err != nil {
 		if ctx.Err() != nil {
 			return cancelled()
 		}
-		return fail(err.Error())
+		if errors.Is(err, errBusy) {
+			content = true // not an early failure: another turn owns the session
+		}
+		return fail(classRuntime, err.Error())
 	}
-	ev := r.serveTurn(ctx, p, turn, emit)
+	ev, evClass := r.serveTurn(ctx, p, turn, tracked)
+	if evClass != "" {
+		class = evClass
+	}
 	return end(ev)
 }
+
+// errBusy is returned when the session already has a running Claude turn.
+var errBusy = errors.New("this session already has a running Claude turn")
 
 // acquireProcess returns the session's live process with a new active turn,
 // starting a process when there is none or its config changed.
@@ -217,7 +299,7 @@ func (r *Runtime) acquireProcess(ctx context.Context, turn core.RuntimeTurn, l l
 	r.mu.Lock()
 	if r.starting[sid] {
 		r.mu.Unlock()
-		return nil, errors.New("this session already has a running Claude turn")
+		return nil, errBusy
 	}
 	if p := r.procs[sid]; p != nil {
 		p.mu.Lock()
@@ -226,7 +308,7 @@ func (r *Runtime) acquireProcess(ctx context.Context, turn core.RuntimeTurn, l l
 		switch {
 		case busy:
 			r.mu.Unlock()
-			return nil, errors.New("this session already has a running Claude turn")
+			return nil, errBusy
 		case p.exited() || stopping || p.key != l.key:
 			delete(r.procs, sid)
 			p.stop(r.opts.KillGrace, r.opts.KillGrace)
@@ -251,7 +333,7 @@ func (r *Runtime) acquireProcess(ctx context.Context, turn core.RuntimeTurn, l l
 	r.starting[sid] = true
 	r.mu.Unlock()
 
-	p, err := r.startSessionProcess(ctx, turn.Config, l, sid, claudeID, resume)
+	p, err := r.startSessionProcess(ctx, turn, l, sid, claudeID, resume)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -261,26 +343,47 @@ func (r *Runtime) acquireProcess(ctx context.Context, turn core.RuntimeTurn, l l
 	}
 	if r.closed {
 		p.stop(0, r.opts.KillGrace)
-		return nil, &TurnError{Message: "Claude Agent runtime is shut down"}
+		return nil, &TurnError{Message: "Claude Code runtime is shut down"}
 	}
 	r.procs[sid] = p
 	r.beginTurn(p)
 	return p, nil
 }
 
-func (r *Runtime) startSessionProcess(ctx context.Context, cfg core.RuntimeConfig, l launch, sid, claudeID string, resume bool) (*process, error) {
-	args, err := buildArgs(cfg, claudeID, resume)
+func (r *Runtime) startSessionProcess(ctx context.Context, turn core.RuntimeTurn, l launch, sid, claudeID string, resume bool) (*process, error) {
+	mcpConfig, release := "", func() {}
+	if turn.OpenMCP != nil {
+		config, rel, err := turn.OpenMCP()
+		switch {
+		case err != nil:
+			r.log.Warn("claude: lana tools are not available to this process", "session", sid, "error", err)
+		default:
+			mcpConfig = config
+			if rel != nil {
+				release = rel
+			}
+		}
+	}
+	args, err := buildArgs(turn.Config, claudeID, resume, mcpConfig)
 	if err != nil {
+		release()
 		return nil, err
 	}
 	p, err := startProcess(l.bin, args, l.env, l.dir, sid, l.key, l.apiKey, r.onExit)
 	if err != nil {
+		release()
 		return nil, err
 	}
+	// REQ-CCT-006: the session's MCP token lives as long as the process.
+	go func() {
+		<-p.done
+		release()
+	}()
 	p.state.claudeID = claudeID
 	ictx, cancel := context.WithTimeout(ctx, initTimeout)
 	defer cancel()
-	if _, err := p.request(ictx, map[string]any{"subtype": "initialize"}); err != nil {
+	resp, err := p.request(ictx, map[string]any{"subtype": "initialize"})
+	if err != nil {
 		p.stop(0, r.opts.KillGrace)
 		if errors.Is(err, errProcessExited) {
 			<-p.done
@@ -291,8 +394,43 @@ func (r *Runtime) startSessionProcess(ctx context.Context, cfg core.RuntimeConfi
 		}
 		return nil, userError("Claude Code did not initialize: %v", err)
 	}
+	r.setModels(parseInitModels(resp.Response))
 	r.log.Debug("claude: process started", "session", sid, "resume", resume)
 	return p, nil
+}
+
+// initModel is one entry of the initialize response's models list. The
+// response also holds account data, which lana never decodes.
+type initModel struct {
+	Value       string `json:"value"`
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// parseInitModels reads only the models list of an initialize response. It
+// returns nil when the response has none.
+func parseInitModels(raw json.RawMessage) []core.RuntimeModel {
+	var body struct {
+		Models []initModel `json:"models"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &body) != nil || body.Models == nil {
+		return nil
+	}
+	out := make([]core.RuntimeModel, 0, len(body.Models))
+	for _, m := range body.Models {
+		value := firstNonEmpty(m.Value, m.ID)
+		if value == "" || strings.HasPrefix(value, "-") {
+			continue
+		}
+		out = append(out, core.RuntimeModel{
+			Value:       value,
+			DisplayName: truncate(firstNonEmpty(m.DisplayName, m.Name, value), 80),
+			Description: truncate(m.Description, 200),
+		})
+	}
+	return out
 }
 
 // beginTurn marks p busy with a new turn. r.mu is held.
@@ -383,8 +521,9 @@ func (r *Runtime) onExit(p *process) {
 }
 
 // serveTurn writes the user message and maps the stream until the turn's
-// result, a cancel, or the process exit. It returns the end event.
-func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTurn, emit func(core.RuntimeEvent)) core.RuntimeEvent {
+// result, a cancel, or the process exit. It returns the end event and, for a
+// failure, its outcome class ("" = runtime).
+func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTurn, emit func(core.RuntimeEvent)) (core.RuntimeEvent, string) {
 	p.mu.Lock()
 	t := p.turn
 	p.mu.Unlock()
@@ -411,16 +550,32 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 		defer p.mu.Unlock()
 		return t.interrupted
 	}
-	finish := func(res *resultLine) core.RuntimeEvent {
+	finish := func(res *resultLine) (core.RuntimeEvent, string) {
 		if res == nil {
 			if isInterrupted() {
-				return core.RuntimeEvent{StopReason: core.RuntimeStopCancelled}
+				return core.RuntimeEvent{StopReason: core.RuntimeStopCancelled}, ""
 			}
 			<-p.done
-			return core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: p.crashText()}
+			return core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: p.crashText()}, classRuntime
 		}
 		emit(m.usageEvent(res))
-		return m.endEvent(res, isInterrupted())
+		ev := m.endEvent(res, isInterrupted())
+		switch {
+		case !ev.IsError:
+			return ev, ""
+		case m.authFailed || ev.ErrorText == notLoggedInMessage:
+			return ev, classAuth
+		case m.rejected != "":
+			return ev, classRateLimit
+		}
+		return ev, classRuntime
+	}
+	// rejected ends a turn whose plan window was rejected before any output
+	// (REQ-CCT-004): the process is stopped, so a late line of this turn
+	// cannot reach the next one, which resumes the Claude session.
+	rejected := func() (core.RuntimeEvent, string) {
+		p.stop(0, r.opts.KillGrace)
+		return core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: m.rejectedText()}, classRateLimit
 	}
 	handle := func(line []byte) *resultLine {
 		lr := m.handle(line)
@@ -443,7 +598,7 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 	if err := p.write(userMessageLine(turn.Input)); err != nil {
 		p.stop(0, r.opts.KillGrace)
 		<-p.done
-		return core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: p.crashText()}
+		return core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: p.crashText()}, classRuntime
 	}
 	ctxDone := ctx.Done()
 	for {
@@ -452,6 +607,9 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 			if res := handle(line); res != nil {
 				return finish(res)
 			}
+			if m.rejectedEarly() {
+				return rejected()
+			}
 		case <-p.done:
 			// The reader queued every line before the exit; drain them.
 			for {
@@ -459,6 +617,9 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 				case line := <-t.lines:
 					if res := handle(line); res != nil {
 						return finish(res)
+					}
+					if m.rejectedEarly() {
+						return rejected()
 					}
 				default:
 					return finish(nil)

@@ -442,9 +442,9 @@ func (s *statusRuntime) statusCalls() int {
 	return s.calls
 }
 
-// API-CCR-003: without a Claude Agent the status lists none and never asks
-// the runtime; with Claude Agents it lists them sorted and reports the
-// runtime's status.
+// API-CCR-003, API-CCT-005: without a Claude Code user the status lists none
+// but still reports the runtime (the Router's Claude Code card); with users it
+// lists the agents sorted, then the combos as "combo:<name>".
 func TestClaudeAgentStatus(t *testing.T) {
 	t.Run("no claude agents", func(t *testing.T) {
 		home := t.TempDir()
@@ -465,11 +465,11 @@ func TestClaudeAgentStatus(t *testing.T) {
 		if agents, ok := got["configured_agents"].([]any); !ok || len(agents) != 0 {
 			t.Fatalf("configured_agents = %s", data)
 		}
-		if got["binary"] != "" || got["error"] != "" {
+		if got["binary"] != "/bin/claude" || got["error"] != "" {
 			t.Fatalf("status = %s", data)
 		}
-		if n := fake.statusCalls(); n != 0 {
-			t.Fatalf("runtime Status called %d times without a Claude Agent", n)
+		if n := fake.statusCalls(); n != 1 {
+			t.Fatalf("runtime Status calls = %d", n)
 		}
 	})
 
@@ -486,6 +486,13 @@ workspace = "`+workspace+`"
 runtime = "claude-code"
 binary = "/nonexistent/claude"
 workspace = "`+workspace+`"
+
+[agents.mixed]
+model = "mock/m"
+fallback = ["claude-code/haiku"]
+
+[combos.cc]
+models = ["claude-code/opus", "mock/m"]
 `)
 		rt, _ := liveWebRuntime(t, home, routerMockScript(1))
 		fake := &statusRuntime{status: core.RuntimeStatus{
@@ -504,11 +511,11 @@ workspace = "`+workspace+`"
 			t.Fatal(err)
 		}
 		want := web.ClaudeAgentStatus{
-			ConfiguredAgents: []string{"claude", "zeta"},
+			ConfiguredAgents: []string{"claude", "mixed", "zeta", "combo:cc"},
 			Binary:           "/usr/local/bin/claude", Version: "2.1.319", VersionOK: true,
 			LoggedIn: true, AuthMethod: "claude.ai", Running: 1, Queued: 2, MaxConcurrent: 2,
 		}
-		if strings.Join(got.ConfiguredAgents, ",") != "claude,zeta" || got.Binary != want.Binary ||
+		if strings.Join(got.ConfiguredAgents, ",") != "claude,mixed,zeta,combo:cc" || got.Binary != want.Binary ||
 			got.Version != want.Version || !got.VersionOK || !got.LoggedIn || got.AuthMethod != want.AuthMethod ||
 			got.Running != 1 || got.Queued != 2 || got.MaxConcurrent != 2 || got.Error != "" {
 			t.Fatalf("status = %+v", got)
@@ -519,9 +526,10 @@ workspace = "`+workspace+`"
 	})
 }
 
-// AC-CCR-010 (backend side): creating Claude Agent "claude" with model opus
-// through the daemon writes runtime = "claude-code", model = "opus", and no
-// provider; the agent list and the settings view show the runtime.
+// AC-CCT-003 (amends AC-CCR-010): creating a Claude Agent with the legacy body
+// through the daemon writes model = "claude-code/opus", no runtime, and no
+// provider; the agent list flags claude_code and the settings view shows the
+// address.
 func TestCreateClaudeAgentThroughDaemon(t *testing.T) {
 	home := t.TempDir()
 	writeLiveConfig(t, home, routerWebConfig)
@@ -544,7 +552,7 @@ func TestCreateClaudeAgentThroughDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	claude := file.Agents["claude"]
-	if claude["runtime"] != "claude-code" || claude["model"] != "opus" {
+	if _, ok := claude["runtime"]; ok || claude["model"] != "claude-code/opus" {
 		t.Fatalf("config.toml claude table = %+v\n%s", claude, raw)
 	}
 	if _, ok := claude["provider"]; ok {
@@ -552,7 +560,7 @@ func TestCreateClaudeAgentThroughDaemon(t *testing.T) {
 	}
 
 	resp, data = webDo(t, http.MethodGet, ts.URL+"/v1/agents", "", cookie, "")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `"engine_label":"Claude Agent"`) {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `"claude_code":true`) {
 		t.Fatalf("agents = %d %s", resp.StatusCode, data)
 	}
 	resp, data = webDo(t, http.MethodGet, ts.URL+"/v1/config", "", cookie, "")
@@ -567,7 +575,7 @@ func TestCreateClaudeAgentThroughDaemon(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Settings.Agents["claude"]; got.Runtime != "claude-code" || got.Model != "opus" || got.Provider != "" {
+	if got := cfg.Settings.Agents["claude"]; got.Runtime != "" || got.Model != "claude-code/opus" || got.Provider != "" {
 		t.Fatalf("settings claude = %+v", got)
 	}
 }

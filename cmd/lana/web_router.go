@@ -13,6 +13,7 @@ import (
 
 	lana "github.com/ridhomujizat/lana-harness"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/router"
 	"github.com/ridhomujizat/lana-harness/router/openaiproxy"
@@ -89,7 +90,8 @@ func (b *webBackend) RouterModels(ctx context.Context, provider string, refresh 
 	if err != nil {
 		return web.RouterModelList{}, err
 	}
-	if _, ok := r.Kind(provider); !ok {
+	// Spec 39: claude-code is built in, not a configured provider.
+	if _, ok := r.Kind(provider); !ok && provider != router.ClaudeCode {
 		return web.RouterModelList{}, web.ErrRouterUnknownProvider
 	}
 	infos, fetchErr := r.Models(ctx, provider, refresh)
@@ -122,6 +124,17 @@ func (b *webBackend) RouterTest(ctx context.Context, address string) (web.Router
 	r, err := b.llmRouter()
 	if err != nil {
 		return web.RouterTestResult{}, err
+	}
+	// Spec 39: a Claude Code address runs one tiny Claude Code turn.
+	if llmcall.IsClaudeCodeAddress(address) {
+		if _, err := r.Resolve(address); err != nil {
+			return web.RouterTestResult{}, web.ErrRouterUnknownAddress
+		}
+		latency, err := b.rt.TestClaudeCode(ctx, address)
+		if err != nil {
+			return routerTestFailure(err), nil
+		}
+		return web.RouterTestResult{OK: true, LatencyMS: latency}, nil
 	}
 	chain, err := r.Resolve(address)
 	if err != nil {
@@ -375,6 +388,12 @@ func (b *webBackend) touchProxyKey(id string) {
 	}()
 }
 
+// ClaudeCodeInstalled implements web.ClaudeCodeBackend: the claude binary is
+// found (spec 39, API-CCT-004).
+func (b *webBackend) ClaudeCodeInstalled(ctx context.Context) bool {
+	return b.rt != nil && b.rt.ClaudeCodeInstalled(ctx)
+}
+
 // ClaudeAgentStatus implements web.RouterBackend (API-CCR-003). Without a
 // configured Claude Agent it reports none and starts nothing; otherwise the
 // claude-code runtime probes `claude --version` and `claude auth status`
@@ -383,10 +402,9 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 	if b.rt == nil {
 		return web.ClaudeAgentStatus{ConfiguredAgents: []string{}}, nil
 	}
+	// API-CCT-005: the agents and combos whose chains use claude-code. The
+	// status is probed even with no users, for the Router's Claude Code card.
 	agents := b.rt.RuntimeAgents(lana.ClaudeCodeRuntime)
-	if len(agents) == 0 {
-		return web.ClaudeAgentStatus{ConfiguredAgents: []string{}}, nil
-	}
 	status, err := b.rt.AgentRuntimeStatus(ctx, lana.ClaudeCodeRuntime)
 	if err != nil {
 		return web.ClaudeAgentStatus{ConfiguredAgents: agents, Error: err.Error()}, nil
