@@ -440,38 +440,62 @@ a.wf-tr:hover { background: var(--surface-2); }
 .wf-runfoot b { color: var(--text); font-weight: 600; }
 .wf-runfoot .amber { color: var(--orange); }
 .wf-runfoot .violet { color: var(--violet); }
-.wf-edgebar {
+.wf-edgeacts {
   position: absolute;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   display: flex;
-  gap: 8px;
   align-items: center;
-  padding: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur, 0.15s);
+  z-index: 6;
+}
+.wf-edgeacts.on { opacity: 1; }
+.wf-edgeacts-in { display: flex; align-items: center; gap: 6px; pointer-events: none; }
+.wf-edgeacts.on .wf-edgeacts-in { pointer-events: auto; }
+.wf-edgeacts-del {
+  position: relative;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+}
+.wf-edgeacts-del:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, var(--surface));
+}
+.wf-edgeacts-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wf-edgeacts-ports {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-full);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--shadow-pop);
-  z-index: 5;
-  animation: wfPop 0.15s ease-out;
+  box-shadow: var(--shadow-sm);
 }
-.wf-edgeports { display: flex; gap: 2px; }
-.wf-edgeports button, .wf-edgedel {
+.wf-edgeacts-ports button {
   border: 0;
   background: transparent;
-  padding: 4px 10px;
-  border-radius: var(--r-sm);
+  padding: 2px 8px;
+  border-radius: var(--r-full);
   font: inherit;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   color: var(--text-2);
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
+  cursor: pointer;
 }
-.wf-edgeports button.on { background: var(--surface-3); color: var(--text); }
-.wf-edgedel { color: var(--red); }
-.wf-edgedel:hover { background: var(--red-soft); }
+.wf-edgeacts-ports button.on { background: var(--surface-3); color: var(--text); }
+.wf-edgeacts-ports button:hover { background: var(--surface-2); color: var(--text); }
 .wf-editor .wf-canvas { padding-left: 0; }
 .wf-issuebar {
   position: absolute;
@@ -545,6 +569,11 @@ a.wf-tr:hover { background: var(--surface-2); }
   background: transparent;
   color: var(--text);
 }
+/* The Message node's channel checklist (spec #33). */
+.wf-channels { display: flex; flex-direction: column; gap: 6px; }
+.wf-channel { display: flex; flex-direction: column; gap: 2px; }
+.wf-channel-row { display: flex; gap: 8px; align-items: center; font-size: var(--fs); }
+.wf-channel-why { font-size: var(--fs-xs); padding-left: 24px; }
 .wf-h4 { margin: 4px 0 0; font-size: var(--fs); font-weight: 600; }
 .wf-json {
   margin: 0;
@@ -831,7 +860,7 @@ button.wf-item:hover { background: var(--surface-2); }
 @keyframes wfGlow { 0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 10%, transparent); } 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--blue) 16%, transparent); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .wf-node, .wf-msg, .wf-stat, .wf-edgebar { animation: none; }
+  .wf-node, .wf-msg, .wf-stat, .wf-edgeacts { animation: none; }
   .wf-node.t-run, .wf-badge.b-blue i, .wf-dot.blue, .wf-typing i, .wf-item.s-running i, .wf-loading .i { animation: none; }
 }
 
