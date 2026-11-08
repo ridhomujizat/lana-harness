@@ -720,12 +720,19 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 
 	// REQ-CCT-005: the <context> block (time, relevant memory, knowledge
 	// recall, jobs) goes in front of the owner message, as in native turns.
-	contextBlocks := 0
+	// A reply adds the quoted automation message as one more injected block.
+	prefix := make([]core.ContentBlock, 0, 2)
 	if built.context != "" {
-		input.Content = append([]core.ContentBlock{{Kind: core.BlockText, Text: built.context}}, input.Content...)
-		contextBlocks = 1
+		prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: built.context})
 	}
-	payload := core.UserMessage{V: core.PayloadVersion, Content: input.Content, ContextBlocks: contextBlocks}
+	if initial.replyTo != nil {
+		prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: replyQuoteBlock(initial.replyTo)})
+	}
+	input.Content = append(prefix, input.Content...)
+	payload := core.UserMessage{V: core.PayloadVersion, Content: input.Content, ContextBlocks: len(prefix)}
+	if initial.replyTo != nil {
+		payload.ReplyTo = initial.replyTo
+	}
 	if continueReason != "" {
 		payload.Continue = true
 		payload.ContinueReason = continueReason

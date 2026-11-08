@@ -1229,8 +1229,9 @@ func channelSettings(raw map[string]any) map[string]any {
 
 // Send starts a turn on the daemon root context, or queues the text in the
 // session inbox when a turn is already running. Attachments are
-// workspace-relative paths (API-ATT-002).
-func (b *webBackend) Send(ctx context.Context, id, text string, attachments []string) (web.SendResult, error) {
+// workspace-relative paths (API-ATT-002). replyTo names the automation message
+// the message replies to, or 0 (API-WEB-007).
+func (b *webBackend) Send(ctx context.Context, id, text string, attachments []string, replyTo int64) (web.SendResult, error) {
 	// API-TFB-008: refuse before starting or queueing a turn.
 	if b.rt.Draining() {
 		return web.SendResult{}, web.ErrDraining
@@ -1243,9 +1244,16 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 	if err := b.ensureLease(ctx, id); err != nil {
 		return web.SendResult{}, err
 	}
+	// A reply_to is validated here, before the asynchronous turn starts, so the
+	// owner gets the error (the turn goroutine only logs its failures).
+	if replyTo > 0 {
+		if _, err := b.rt.ResolveReply(ctx, id, replyTo); err != nil {
+			return web.SendResult{}, turnError(err)
+		}
+	}
 	if b.TurnActive(id) {
 		b.waitRunning(id, 2*time.Second)
-		if err := b.rt.Send(ctx, id, text, attachments...); err != nil {
+		if err := b.rt.SendReply(ctx, id, text, replyTo, attachments...); err != nil {
 			return web.SendResult{}, turnError(err)
 		}
 		return web.SendResult{Turn: "queued"}, nil
@@ -1262,7 +1270,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 		// Wait for the first turn to reach turn/start so Send lands in its
 		// inbox instead of starting a second turn.
 		b.waitRunning(id, 2*time.Second)
-		if err := b.rt.Send(ctx, id, text, attachments...); err != nil {
+		if err := b.rt.SendReply(ctx, id, text, replyTo, attachments...); err != nil {
 			return web.SendResult{}, turnError(err)
 		}
 		return web.SendResult{Turn: "queued"}, nil
@@ -1279,7 +1287,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 	go func() {
 		defer close(done)
 		defer b.finishTurn(id)
-		if _, err := b.rt.Run(root, lana.Request{Prompt: text, SessionID: id, Attachments: attachments}); err != nil {
+		if _, err := b.rt.Run(root, lana.Request{Prompt: text, SessionID: id, Attachments: attachments, ReplyTo: replyTo}); err != nil {
 			slog.Error("web: turn failed", "session", id, "error", err)
 		}
 	}()
@@ -1292,7 +1300,14 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 // SendNote implements the optional web.noteSender extension: it writes a hidden
 // runtime note to the session log and then starts the turn, so the agent reads
 // the note before the owner message (API-ROOM-003, REQ-ROOM-008).
-func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments []string, note string) (web.SendResult, error) {
+func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments []string, replyTo int64, note string) (web.SendResult, error) {
+	// Validate the reply before writing the note, so a rejected reply leaves no
+	// orphaned note behind.
+	if replyTo > 0 {
+		if _, err := b.rt.ResolveReply(ctx, id, replyTo); err != nil {
+			return web.SendResult{}, turnError(err)
+		}
+	}
 	if strings.TrimSpace(note) != "" {
 		info, err := b.resolveSession(ctx, id)
 		if err != nil {
@@ -1302,7 +1317,7 @@ func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments 
 			return web.SendResult{}, turnError(err)
 		}
 	}
-	return b.Send(ctx, id, text, attachments)
+	return b.Send(ctx, id, text, attachments, replyTo)
 }
 
 // SaveAttachment stores one uploaded file in the session workspace
@@ -1787,6 +1802,8 @@ func turnError(err error) error {
 		return web.ErrInvalidState
 	case errors.Is(err, lana.ErrDraining):
 		return web.ErrDraining
+	case errors.Is(err, lana.ErrInvalidReplyTo):
+		return web.ErrInvalidReplyTo
 	default:
 		return err
 	}

@@ -242,6 +242,70 @@
   color: var(--text);
 }
 
+/* API-WF-005: the muted "via workflow …" line above an out-of-band message.
+   API reply: it carries the Reply action of a sourced message. */
+.turn-via {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: var(--fs-xs);
+}
+.turn-via-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-via .turn-reply {
+  flex-shrink: 0;
+  min-height: 0;
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+}
+.tp-note-text .turn-via {
+  margin-bottom: 2px;
+}
+
+/* API reply: the cancelable chip above a composer while a reply is set. */
+.reply-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 var(--s-2);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.reply-chip-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.reply-chip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.reply-chip-title {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.reply-chip-quote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+.reply-chip-cancel {
+  flex-shrink: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tp-live-dot,
   .spin {

@@ -200,3 +200,44 @@ func TestTurnRoutesRequireAuth(t *testing.T) {
 	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/messages", `{"text":"hi"}`, cookie, ""))
 	assertAuthError(t, rr, http.StatusForbidden, "csrf_invalid")
 }
+
+// API-WEB-007: reply_to is threaded to the backend.
+func TestSendMessageReplyTo(t *testing.T) {
+	backend, info := newTurnTestBackend()
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/messages", `{"text":"explain","reply_to":7}`, cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	backend.mu.Lock()
+	replyTo := backend.sentReplyTo[info.ID]
+	backend.mu.Unlock()
+	if replyTo != 7 {
+		t.Fatalf("reply_to = %d, want 7", replyTo)
+	}
+}
+
+// A backend that refuses the reply_to answers 400 with the contract message.
+func TestSendMessageReplyToRejected(t *testing.T) {
+	backend, info := newTurnTestBackend()
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+	backend.mu.Lock()
+	backend.replyErr[info.ID] = ErrInvalidReplyTo
+	backend.mu.Unlock()
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/messages", `{"text":"x","reply_to":4}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+	if !strings.Contains(rr.Body.String(), "reply_to must point at an automation message in this chat") {
+		t.Fatalf("body = %q", rr.Body.String())
+	}
+}
+
+// A negative reply_to is refused before it reaches the backend.
+func TestSendMessageReplyToNegative(t *testing.T) {
+	backend, info := newTurnTestBackend()
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/sessions/"+info.ID+"/messages", `{"text":"x","reply_to":-1}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+}

@@ -70,6 +70,10 @@ var (
 	// after a normal end; the handler answers 409 nothing_to_continue
 	// (API-TFB-003).
 	ErrNothingToContinue = errors.New("nothing to continue")
+	// ErrInvalidReplyTo is returned by a Backend when a message's reply_to does
+	// not name an automation message in the session; the handler answers 400
+	// (API-WEB-007).
+	ErrInvalidReplyTo = errors.New("reply_to must point at an automation message in this chat")
 )
 
 // SendResult is the outcome of Backend.Send.
@@ -183,7 +187,10 @@ type Backend interface {
 	CreateSession(ctx context.Context, agent, model string) (Session, error)
 	Agents() []Agent
 
-	Send(ctx context.Context, id, text string, attachments []string) (SendResult, error)
+	// Send starts a turn (or queues a message) on the session. replyTo names
+	// the seq of the automation message the text replies to, or 0 (API-WEB-007,
+	// API-ROOM-003).
+	Send(ctx context.Context, id, text string, attachments []string, replyTo int64) (SendResult, error)
 	// SaveAttachment stores one uploaded file in the session workspace
 	// (API-ATT-001). r is streamed, never buffered whole.
 	SaveAttachment(ctx context.Context, id, name string, r io.Reader) (attach.Info, error)
@@ -717,6 +724,9 @@ func (s *Server) writeBackendError(w http.ResponseWriter, operation string, err 
 	case errors.Is(err, ErrNothingToContinue):
 		// API-TFB-003: the last turn ended normally.
 		writeAPIError(w, http.StatusConflict, "nothing_to_continue", "the last turn ended normally")
+	case errors.Is(err, ErrInvalidReplyTo):
+		// API-WEB-007: reply_to did not name an automation message.
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "reply_to must point at an automation message in this chat")
 	default:
 		s.logger.Error("web: "+operation, "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")

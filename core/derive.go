@@ -65,6 +65,12 @@ func DeriveMessages(events []SessionEvent) ([]Message, error) {
 			if err := decodePayload(event.Payload, &payload); err != nil {
 				return nil, err
 			}
+			// A message posted out-of-band by a lana automation is not part of
+			// the model history unless the owner replied to it; the reply
+			// carries the quote as a normal user-message block.
+			if payload.Source != "" {
+				continue
+			}
 			messages = append(messages, Message{Role: RoleAssistant, Content: append([]ContentBlock(nil), payload.Content...)})
 		case KindToolResult:
 			var payload ToolResultPayload

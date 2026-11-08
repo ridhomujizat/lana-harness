@@ -121,6 +121,29 @@ func TestRoomSendCreatesWebSession(t *testing.T) {
 	}
 }
 
+// API-ROOM-003: the room send threads reply_to to the backend.
+func TestRoomSendReplyTo(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agentNames["dana"] = true
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/messages", `{"text":"halo","reply_to":9}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body roomSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	backend.mu.Lock()
+	replyTo := backend.sentReplyTo[body.SessionID]
+	backend.mu.Unlock()
+	if replyTo != 9 {
+		t.Fatalf("reply_to = %d, want 9", replyTo)
+	}
+}
+
 // AC-ROOM-005: new_topic creates a web session before sending.
 func TestRoomSendNewTopic(t *testing.T) {
 	backend := newFakeWebBackend()
