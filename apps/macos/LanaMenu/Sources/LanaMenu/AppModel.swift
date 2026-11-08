@@ -84,6 +84,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var launchAtLogin = false
 
     let settings = AppSettings()
+    /// notifier posts the macOS notifications of spec #42.
+    let notifier = Notifier(home: { AppSettings().home })
     private let reader = LibprocReader()
     private let meter = UsageMeter()
     private let versions = VersionCache()
@@ -99,6 +101,10 @@ final class AppModel: ObservableObject {
         status = readStatus(home: AppSettings().home)
         probeShell()
         refreshLaunchAtLogin()
+        // Ask for notification permission and subscribe once the app runs.
+        DispatchQueue.main.async { [notifier] in
+            notifier.start()
+        }
     }
 
     // MARK: Open and close
@@ -218,6 +224,7 @@ final class AppModel: ObservableObject {
         resolveBinaryNow()
         trackedPID = nil
         refresh()
+        notifier.restart()
     }
 
     // MARK: Actions

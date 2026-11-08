@@ -6,7 +6,7 @@ public let defaultWebAddr = "127.0.0.1:18300"
 
 /// LanaHome names the files the menu bar app reads under $LANA_HOME. The app
 /// never writes there except menubar-daemon.log when it starts the daemon.
-public struct LanaHome: Equatable {
+public struct LanaHome: Equatable, Sendable {
     public let path: String
 
     public init(path: String) {
@@ -173,7 +173,7 @@ func parseTOMLString(_ value: String) -> String? {
 
 /// DaemonSecret is $LANA_HOME/daemon.secret: the bound web address and the
 /// local control secret the daemon writes after its listener is up.
-public struct DaemonSecret: Codable, Equatable {
+public struct DaemonSecret: Codable, Equatable, Sendable {
     public var addr: String
     public var secret: String
 }

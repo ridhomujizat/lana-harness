@@ -20,6 +20,7 @@ import { ProviderLogo } from "./router/provider-logo";
 import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
+import { useSessionPresence } from "../lib/session-presence";
 import type { ApprovalEvent } from "../api/approvals";
 import {
   attachmentName,
@@ -1464,6 +1465,8 @@ export function SessionPage({ id, view }: SessionPageProps) {
   const attachmentDraft = useAttachmentDraft();
   const pendingFilesRef = useRef<DraftAttachment[]>([]);
   const fileDrop = useFileDrop(attachmentDraft.addFiles);
+  /* Spec #42: no macOS reply notification while this page is in front. */
+  useSessionPresence(id);
 
   const readOnly = holder === "other";
   const busySession = readOnly || turnRunning;

@@ -69,6 +69,8 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            NotificationSection(notifier: model.notifier)
+
             Section {
                 Toggle("Open lana Menu at login", isOn: Binding(
                     get: { model.launchAtLogin },
@@ -105,5 +107,80 @@ struct SettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             binary = url.path
         }
+    }
+}
+
+/// NotificationSection holds the notification toggles of spec #42 and the
+/// permission and subscription state.
+struct NotificationSection: View {
+    @ObservedObject var notifier: Notifier
+
+    var body: some View {
+        Section {
+            Toggle("Messages", isOn: $notifier.settings.messages)
+            Toggle("Show message preview", isOn: $notifier.settings.showPreview)
+                .disabled(!notifier.settings.messages && !notifier.settings.questions)
+            Toggle("Approvals", isOn: $notifier.settings.approvals)
+            Toggle("Questions", isOn: $notifier.settings.questions)
+            Toggle("Workflow started (silent)", isOn: $notifier.settings.workflowStarted)
+            Toggle("Workflow finished or failed", isOn: $notifier.settings.workflowFinished)
+            LabeledContent("Permission") {
+                HStack {
+                    Text(permissionLine)
+                        .foregroundStyle(permissionOK ? Color.secondary : Color.orange)
+                    Button("Open System Settings…") { notifier.openSystemSettings() }
+                }
+            }
+            LabeledContent("Daemon events") {
+                Text(subscriptionLine)
+                    .font(.callout)
+                    .foregroundStyle(notifier.subscription.state == "subscribed" ? Color.secondary : Color.orange)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text(footer)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear { notifier.refreshPermission() }
+    }
+
+    private var permissionOK: Bool {
+        notifier.permission == "authorized" || notifier.permission == "provisional"
+    }
+
+    private var permissionLine: String {
+        switch notifier.permission {
+        case "authorized": return "Allowed"
+        case "provisional": return "Allowed quietly"
+        case "denied": return "Denied"
+        case "not_determined": return "Not asked yet"
+        case "unavailable": return "Needs Lana.app"
+        default: return "Checking…"
+        }
+    }
+
+    private var subscriptionLine: String {
+        let s = notifier.subscription
+        switch s.state {
+        case "subscribed": return "Connected" + (s.addr.map { " to " + $0 } ?? "") + " · \(s.received) received"
+        case "waiting_for_daemon": return "Waiting for lana to start"
+        case "connecting": return "Connecting…"
+        case "retrying": return "Reconnecting" + (s.detail.map { ": " + $0 } ?? "")
+        default: return s.state
+        }
+    }
+
+    private var footer: String {
+        if notifier.permission == "denied" {
+            return "macOS blocks lana's notifications. Turn on Allow notifications for lana in System Settings → Notifications."
+        }
+        if let error = notifier.lastError {
+            return error
+        }
+        return "A reply does not notify while its chat is open in a dashboard tab. Telegram chats notify only for approvals and questions."
     }
 }

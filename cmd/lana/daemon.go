@@ -319,6 +319,11 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 			webServer.SetCalendarGoogle(google)
 		}
 		webServer.SetToolbox(rt.Toolbox())
+		// Spec #42: the menu bar app reads the notification bus from GET
+		// /v1/local/events; the runtime feeds it replies and workflow runs,
+		// the web brokers approvals and questions.
+		webServer.SetNotifications(rt.Notifications())
+		rt.StartNotifications(runCtx)
 		webServer.SetDaemonStore(backend)
 		// Spec 36: the dashboard checks for, downloads, and installs updates.
 		updates = newUpdateService(updateServiceOptions{
