@@ -208,6 +208,12 @@ type RouterPlanWindow struct {
 	// Utilization is the used fraction, 0..1; null when not reported.
 	Utilization *float64   `json:"utilization"`
 	ResetsAt    *time.Time `json:"resets_at"`
+	// Label names a window the UI has no fixed name for ("Weekly · Fable");
+	// omitted for the known windows (spec 39 Revision 4).
+	Label string `json:"label,omitempty"`
+	// Source is "stream" (a turn's rate_limit_event) or "usage_probe"
+	// (`claude -p /usage`).
+	Source string `json:"source,omitempty"`
 }
 
 // RouterKeyCreated is the answer of POST /v1/router/keys. Key is the only
@@ -300,6 +306,7 @@ func (s *Server) registerRouterRoutes() {
 	s.Handle("GET /v1/router/usage", http.HandlerFunc(s.handleRouterUsage))
 	s.Handle("GET /v1/router/calls", http.HandlerFunc(s.handleRouterCalls))
 	s.Handle("GET /v1/router/limits", http.HandlerFunc(s.handleRouterLimits))
+	s.Handle("POST /v1/router/limits/refresh", http.HandlerFunc(s.handleRefreshRouterLimits))
 	s.Handle("PUT /v1/router/combos/{name}", http.HandlerFunc(s.handlePutCombo))
 	s.Handle("DELETE /v1/router/combos/{name}", http.HandlerFunc(s.handleDeleteCombo))
 	s.Handle("PUT /v1/router/proxy", http.HandlerFunc(s.handlePutRouterProxy))
@@ -753,11 +760,21 @@ type routerLimitsResponse struct {
 }
 
 func (s *Server) handleRouterLimits(w http.ResponseWriter, r *http.Request) {
+	s.serveRouterLimits(w, r, queryFlag(r, "refresh"))
+}
+
+// handleRefreshRouterLimits is POST /v1/router/limits/refresh (spec 39
+// Revision 4): GET /v1/router/limits?refresh=1 as a state-changing call.
+func (s *Server) handleRefreshRouterLimits(w http.ResponseWriter, r *http.Request) {
+	s.serveRouterLimits(w, r, true)
+}
+
+func (s *Server) serveRouterLimits(w http.ResponseWriter, r *http.Request, refresh bool) {
 	port := s.routerPortOrError(w)
 	if port == nil {
 		return
 	}
-	limits, err := port.RouterLimits(r.Context(), queryFlag(r, "refresh"))
+	limits, err := port.RouterLimits(r.Context(), refresh)
 	if err != nil {
 		s.writeRouterError(w, "router limits", err)
 		return

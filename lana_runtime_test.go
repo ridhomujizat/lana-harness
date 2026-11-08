@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 // API-RTR-013: a plan window Claude Code reports without a utilization stays
@@ -19,7 +20,7 @@ func TestExternalWindowsUtilization(t *testing.T) {
 		{Type: "five_hour", Status: "allowed", Utilization: &util, ResetsAt: resets},
 		{Type: "seven_day", Status: "allowed"},
 	}
-	out := externalWindows(in)
+	out := externalWindows(in, router.WindowSourceStream)
 	if len(out) != 2 || out[0].Utilization == nil || *out[0].Utilization != 0.42 || out[0].ResetsAt == nil || !out[0].ResetsAt.Equal(resets) {
 		t.Fatalf("windows = %+v", out)
 	}

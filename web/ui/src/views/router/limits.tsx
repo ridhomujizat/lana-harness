@@ -226,7 +226,7 @@ function hasUtilization(window: PlanWindow): boolean {
 /* AC-CCR-009: "5-hour window · 42 % used · resets <time>". Utilization is a
    fraction; a window without one says "usage not reported". */
 export function windowText(window: PlanWindow): string {
-  const parts = [windowLabel(window.type)];
+  const parts = [planWindowLabel(window)];
   if (hasUtilization(window)) {
     parts.push(Math.round(Number(window.utilization) * 100) + " % used");
   } else if (window.status === "rejected") {
@@ -238,6 +238,12 @@ export function windowText(window: PlanWindow): string {
     parts.push(resetsIn(window.resets_at));
   }
   return parts.join(" · ");
+}
+
+/* A window's name: its label ("Weekly · Fable", spec 39 Revision 4), else
+   the name of its type. */
+export function planWindowLabel(window: PlanWindow): string {
+  return window.label ? window.label : windowLabel(window.type);
 }
 
 /* The plan name of `claude auth status`: "max" → "Max". */
@@ -260,7 +266,7 @@ export function PlanWindows({ windows }: { windows: PlanWindow[] }) {
         return (
           <Meter
             key={window.type}
-            label={windowLabel(window.type)}
+            label={planWindowLabel(window)}
             text={windowText(window).split(" · ").slice(1).join(" · ")}
             value={window.status === "rejected" && (!reported || !used) ? 1 : used}
             tone={window.status === "rejected" ? "red" : usedTone(used)}
@@ -294,12 +300,29 @@ export function LoginCommand({ command }: { command: string }) {
   );
 }
 
-/* The windows of an account: its own, else its limit snapshot's. */
+/* The windows of an account: its own limit snapshot's, which a refresh
+   renews (spec 39 Revision 4), else the account status's, else an older
+   snapshot's (the claude-agent name before spec 39). */
 export function accountWindows(account: ClaudeAccount, limit: LimitSnapshot | null): PlanWindow[] {
-  if (account.windows.length > 0) {
-    return account.windows;
+  const snapshot = limit && Array.isArray(limit.windows) ? limit.windows : [];
+  if (limit && limit.provider === account.name && snapshot.length > 0) {
+    return snapshot;
   }
-  return limit && Array.isArray(limit.windows) ? limit.windows : [];
+  return account.windows.length > 0 ? account.windows : snapshot;
+}
+
+/* The error of the last usage probe of an account, inline (spec 39
+   Revision 4). */
+export function UsageProbeError({ limit }: { limit: LimitSnapshot | null }) {
+  if (!limit || !limit.error) {
+    return null;
+  }
+  return (
+    <p className="rt-limit-err" role="status">
+      <Ic name="circle-alert" size={12} />
+      <span>{limit.error}</span>
+    </p>
+  );
 }
 
 /* One Claude Code account on the Quota page (REQ-CCT-011): its email, plan,

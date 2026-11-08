@@ -396,6 +396,37 @@ func TestRouterLimitsEndpoint(t *testing.T) {
 	}
 }
 
+// Spec 39 Revision 4: POST /v1/router/limits/refresh needs the session and
+// the CSRF token, refreshes, and answers like GET ?refresh=1, with the label
+// and source of each plan window.
+func TestRouterLimitsRefreshEndpoint(t *testing.T) {
+	s, _, fake, cookie, csrf := newRouterTestServer(t, routerTestConfig)
+	at := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	used := 0.0
+	fake.limits = []RouterLimit{{Provider: "claude-code", Kind: "claude-code", UpdatedAt: &at, Error: "probe failed",
+		Windows: []RouterPlanWindow{{Type: "seven_day_fable", Status: "allowed", Utilization: &used, Label: "Weekly · Fable", Source: "usage_probe"}}}}
+	if denied := serveMCP(t, s, http.MethodPost, "/v1/router/limits/refresh", "", cookie, ""); denied.code != http.StatusForbidden {
+		t.Fatalf("without CSRF = %d", denied.code)
+	}
+	if denied := serveMCP(t, s, http.MethodPost, "/v1/router/limits/refresh", "", nil, ""); denied.code != http.StatusUnauthorized && denied.code != http.StatusForbidden {
+		t.Fatalf("without a session = %d", denied.code)
+	}
+	if len(fake.refresh) != 0 {
+		t.Fatalf("refresh ran without auth: %v", fake.refresh)
+	}
+	response := serveMCP(t, s, http.MethodPost, "/v1/router/limits/refresh", "", cookie, csrf)
+	if response.code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.code, response.body)
+	}
+	if len(fake.refresh) != 1 || !fake.refresh[0] {
+		t.Fatalf("refresh = %v", fake.refresh)
+	}
+	want := `"windows":[{"type":"seven_day_fable","status":"allowed","utilization":0,"resets_at":null,"label":"Weekly · Fable","source":"usage_probe"}]`
+	if !strings.Contains(string(response.body), want) || !strings.Contains(string(response.body), `"error":"probe failed"`) {
+		t.Fatalf("body lacks %s:\n%s", want, response.body)
+	}
+}
+
 // AC-RTR-019 and API-RTR-007: combo save and delete.
 func TestRouterCombos(t *testing.T) {
 	s, store, _, cookie, csrf := newRouterTestServer(t, routerTestConfig)

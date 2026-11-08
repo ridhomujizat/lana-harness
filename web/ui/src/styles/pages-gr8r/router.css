@@ -791,3 +791,13 @@
   .rt-dh-acts { margin-left: 0; }
   .rt-conn-acts { margin-left: 0; }
 }
+
+/* Refresh control of the Quota, Usage, and Claude Code pages (spec 39
+   Revision 4): "Updated 3 min ago" and the Refresh button. */
+.rt-refresh { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.rt-refresh-at { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
+.rt-acct-windows { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+@media (max-width: 760px) {
+  .rt-section-h .rt-refresh { margin-left: auto; }
+  .rt-toolbar .rt-refresh { justify-content: flex-end; }
+}

@@ -262,16 +262,21 @@ func (rt *Runtime) updateExternalLimits(provider, runtime string, windows []core
 	if rt.router == nil || len(windows) == 0 {
 		return
 	}
-	rt.router.UpdateLimits(router.LimitUpdate{Provider: provider, Kind: runtime, Windows: externalWindows(windows)})
+	// Fresh windows from a turn clear an older usage probe error.
+	noError := ""
+	rt.router.UpdateLimits(router.LimitUpdate{
+		Provider: provider, Kind: runtime, Windows: externalWindows(windows, router.WindowSourceStream),
+		MergeWindows: true, Error: &noError,
+	})
 }
 
-// externalWindows converts runtime plan windows to router windows. A window
-// without a reported utilization keeps a nil Utilization (JSON null, "usage
-// not reported"), never 0.
-func externalWindows(windows []core.RuntimeLimitWindow) []router.Window {
+// externalWindows converts runtime plan windows to router windows with the
+// given source. A window without a reported utilization keeps a nil
+// Utilization (JSON null, "usage not reported"), never 0.
+func externalWindows(windows []core.RuntimeLimitWindow, source string) []router.Window {
 	out := make([]router.Window, 0, len(windows))
 	for _, w := range windows {
-		win := router.Window{Type: w.Type, Status: w.Status}
+		win := router.Window{Type: w.Type, Status: w.Status, Label: w.Label, Source: source}
 		if w.Utilization != nil {
 			// Copy: the window must not alias the runtime's event. Nil stays
 			// nil (not reported).

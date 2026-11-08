@@ -1,6 +1,6 @@
 # Contract: Claude Code as a router target
 
-- **Requirements**: [requirements.md](requirements.md) r3 · **Revision**: 3 · **Status**: Approved (2026-11-08)
+- **Requirements**: [requirements.md](requirements.md) r3 · **Revision**: 4 · **Status**: Approved (2026-11-08)
 - **Applies to**: config / HTTP / UI
 
 | Operation ID | Change | Requirements |
@@ -41,3 +41,17 @@ line, failed only>","started_at":"<RFC 3339>|null","finished_at":"<RFC 3339>|nul
 | `API-CCT-019` | `PUT /v1/router/claude-code/accounts/{name}/label` body `{"label": string, "expected_version"?: string}` stores `label` in the account table (trimmed, one line, at most 60 characters; `""` removes it) and answers `{"name","label","version","restart_required"}`. The built-in account answers 409 `builtin`. Config: `[providers.<name>] label` is accepted for kind `claude-code` only. `GET /v1/providers` rows of kind `claude-code` add `label`. | REQ-CCT-012 |
 | `API-CCT-020` | `GET /v1/router/claude-agent` `accounts[]` items add `label` (stored label or `""`), `display_name` (label, else e-mail, else name), and `sign_in` (the state above; `idle` when none). `login_command` becomes `CLAUDE_CONFIG_DIR='<dir>' CLAUDE_SECURESTORAGE_CONFIG_DIR='<dir>' claude auth login` (`claude auth login` for the built-in account). | REQ-CCT-012 |
 | `API-CCT-021` | Process environment of every `claude` run for a named account (turns, `auth status`, test turns, `auth login`/`logout`): `CLAUDE_CONFIG_DIR` and `CLAUDE_SECURESTORAGE_CONFIG_DIR` = the folder (each once), without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`. The built-in account keeps the daemon's folder variables. | REQ-CCT-012 |
+
+## Revision 4 (2026-11-08): usage probe (owner request)
+
+The owner: the Claude Code plan windows on Quota and Usage did not refresh. Before this revision they
+moved only with the `rate_limit_event` of a turn. All endpoints are behind the dashboard session and,
+for `POST`, the CSRF check.
+
+| Operation ID | Change | Requirements |
+|---|---|---|
+| `API-CCT-022` | **Usage probe.** For one account lana runs `claude -p /usage --output-format stream-json --verbose --no-session-persistence --setting-sources project` with the account environment (`API-CCT-021`), stdin closed, in a new empty temp folder (removed afterwards), its own process group, a 45 s deadline (process group stopped on timeout). `/usage` is a local command: no model call. `--setting-sources project` in the empty folder skips the owner's user settings, so no hook or plugin runs; `--bare` is not used because it never reads the OAuth login. The probe fails when the result has `is_error`, reports any `input_tokens` or `output_tokens` > 0, or has no result line. An `api_key` account is no subscription and runs nothing. | REQ-CCT-011 |
+| `API-CCT-023` | **Parsing.** From the result text (else the assistant text): `Current session: N% used · resets <when>` → window `five_hour`; `Current week (all models): …` → `seven_day`; `Current week (<Model>): …` → `seven_day_<model lowercased, each run of non-alphanumerics → _>` with `label` `"Weekly · <Model>"`. `utilization` = N/100, `status` `allowed` (or `rejected` at 100 %). `<when>` is `<Mon> <D> at <h[:mm]>am/pm (<IANA zone>)` read in that zone (year: the next occurrence at or after now − 1 day), `in 2h 5m`, or absent (no `resets_at`). Text without plan lines that says it is not a subscription (API usage, Console) gives no windows and the snapshot error `Not a subscription: …`; "not logged in" or an unknown form is a probe error. | REQ-CCT-011 |
+| `API-CCT-024` | **Refresh.** `GET /v1/router/limits?refresh=1` and the new `POST /v1/router/limits/refresh` (same answer as `GET /v1/router/limits`) fetch the API providers' balances (5 min throttle, as before) and, in parallel, run the probe for the built-in account (when `claude` is found) and every Claude Code account that is not `disabled` and not `auth = "api_key"`, at most once per 60 s per account; a throttled account keeps its snapshot and `updated_at`. Windows merge into the account's snapshot by `type` (other windows and a stored `label` stay); a failed probe sets the snapshot `error` and keeps the old windows and `updated_at`. A later turn's windows also merge and clear the error. | REQ-CCT-011 |
+| `API-CCT-025` | **Window fields.** `windows[]` items of `GET /v1/router/limits` and of `GET /v1/router/claude-agent` `accounts[]` add `label` (omitted when empty) and `source`: `"stream"` (a turn's `rate_limit_event`) or `"usage_probe"`. | REQ-CCT-011 |
+| `API-CCT-026` | **UI.** Quota (top right), Usage (next to the range picker; also reloads the usage), and the Claude Code page (Accounts header) show **Refresh** with a spinner and "Updated <relative time>". On mount each of them refreshes once when a Claude Code snapshot is older than 5 minutes (or a signed-in account has none); the 60 s daemon throttle stops loops. Extra weekly windows show under the account by their label ("Weekly · Fable"); the probe error shows inline. | REQ-CCT-009, 011 |

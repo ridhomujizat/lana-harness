@@ -50,6 +50,11 @@ var (
 // control characters removed, whitespace collapsed, secrets redacted, and at
 // most 240 characters.
 func signInDetail(stderr string) string {
+	return stderrDetail(stderr, "sign-in link")
+}
+
+// stderrDetail is signInDetail with every URL replaced by link.
+func stderrDetail(stderr, link string) string {
 	last := ""
 	lines := strings.Split(strings.ReplaceAll(stderr, "\r", "\n"), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -58,7 +63,7 @@ func signInDetail(stderr string) string {
 			break
 		}
 	}
-	last = signInURLRe.ReplaceAllString(last, "sign-in link")
+	last = signInURLRe.ReplaceAllString(last, link)
 	last = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return ' '

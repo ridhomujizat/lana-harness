@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -798,4 +799,47 @@ func TestDisabledProviderMovesOn(t *testing.T) {
 		t.Fatalf("served = %v, err = %v", served, err)
 	}
 	_, _ = drain(stream)
+}
+
+// Spec 39 Revision 4: MergeWindows replaces windows of the same type in
+// place, appends new ones, keeps the others and a stored label; KeepTime
+// leaves UpdatedAt as it was.
+func TestLimitWindowsMergeAndKeepTime(t *testing.T) {
+	r, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	a, b := 0.1, 0.2
+	r.UpdateLimits(LimitUpdate{Provider: "claude-code", At: at, Windows: []Window{
+		{Type: "five_hour", Utilization: &a, Source: WindowSourceStream},
+		{Type: "seven_day_fable", Utilization: &a, Label: "Weekly · Fable", Source: WindowSourceUsageProbe},
+	}})
+	r.UpdateLimits(LimitUpdate{Provider: "claude-code", At: at.Add(time.Minute), MergeWindows: true, Windows: []Window{
+		{Type: "seven_day_fable", Utilization: &b, Source: WindowSourceStream},
+		{Type: "seven_day", Utilization: &b, Source: WindowSourceStream},
+	}})
+	msg := "probe failed"
+	r.UpdateLimits(LimitUpdate{Provider: "claude-code", At: at.Add(time.Hour), Error: &msg, KeepTime: true})
+	snaps := r.Limits(context.Background(), false)
+	if len(snaps) != 1 {
+		t.Fatalf("snapshots = %+v", snaps)
+	}
+	snap := snaps[0]
+	if snap.Error != msg || !snap.UpdatedAt.Equal(at.Add(time.Minute)) {
+		t.Fatalf("error/time = %q %v", snap.Error, snap.UpdatedAt)
+	}
+	var got []string
+	for _, w := range snap.Windows {
+		got = append(got, fmt.Sprintf("%s:%v:%s:%s", w.Type, *w.Utilization, w.Label, w.Source))
+	}
+	want := "five_hour:0.1::stream seven_day_fable:0.2:Weekly · Fable:stream seven_day:0.2::stream"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("windows = %v, want %s", got, want)
+	}
+	// Without MergeWindows the windows are replaced.
+	r.UpdateLimits(LimitUpdate{Provider: "claude-code", Windows: []Window{{Type: "five_hour"}}})
+	if snap := r.Limits(context.Background(), false)[0]; len(snap.Windows) != 1 {
+		t.Fatalf("replaced windows = %+v", snap.Windows)
+	}
 }
