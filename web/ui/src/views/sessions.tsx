@@ -1,8 +1,13 @@
 import { Ic } from "../ui/icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
-import { listSessions } from "../api/sessions";
+import {
+  getSession,
+  listSessions,
+  regenerateSessionTitle,
+  renameSession,
+} from "../api/sessions";
 import type { ListSessionsResponse, Session } from "../api/sessions";
 import { formatTime } from "../lib/format";
 import {
@@ -12,12 +17,22 @@ import {
   Chip,
   IconButton,
   Lbl,
+  Menu,
+  MenuItem,
   SearchInput,
   Select,
 } from "../ui/gr8r";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import { NewSessionPage } from "./new-session";
 import { SessionPage } from "./session";
+import {
+  TitleInput,
+  publishSessionTitle,
+  titleUpdateFrom,
+  useSessionTitleUpdates,
+  visibleTitle,
+} from "./session-title";
+import type { SessionTitleUpdate } from "./session-title";
 
 /* The rev 1 route target stays exported so older callers keep working; the
    view itself now lives in new-session.js. */
@@ -41,6 +56,11 @@ const STATUS_FACETS = [
 
 const PAGE_SIZE = 50;
 const SEARCH_DELAY_MS = 250;
+/* Spec 40: a row whose title is being made is read again on this interval,
+   a bounded number of times, so the History list picks up the title of a
+   session that is not open. */
+const TITLE_POLL_MS = 2500;
+const TITLE_POLL_LIMIT = 24;
 
 interface Filters {
   channel: string;
@@ -284,18 +304,34 @@ function FacetOption({
   );
 }
 
+interface SessionItemProps {
+  session: Session;
+  selected: boolean;
+  tabIndex: number;
+  editing: boolean;
+  onStartEdit: (id: string) => void;
+  onCancelEdit: () => void;
+  onRename: (id: string, title: string) => Promise<void>;
+  onRegenerate: (id: string) => void;
+}
+
 function SessionItem({
   session,
   selected,
   tabIndex,
-}: {
-  session: Session;
-  selected: boolean;
-  tabIndex: number;
-}) {
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onRename,
+  onRegenerate,
+}: SessionItemProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLSpanElement>(null);
   const status = String(session.status || "idle");
   const channel = String(session.channel || "");
-  const title = session.title || "Untitled session";
+  const pending = session.title_pending === true;
+  const title = visibleTitle(session.title, pending);
+  const naming = pending && !session.title;
   const agent = session.agent || "unknown";
   const preview =
     session.preview ||
@@ -305,6 +341,38 @@ function SessionItem({
     session.in_use === "other" && session.holder_pid
       ? "PID " + session.holder_pid
       : "";
+  const meta = (
+    <span className="session-row-meta">
+      {showDot ? (
+        <span
+          className={"session-row-dot status-" + status}
+          aria-hidden="true"
+        />
+      ) : null}
+      <span className="session-row-agent trunc">{agent}</span>
+      <Lbl color={CHANNEL_COLORS[channel] || "var(--gray)"}>
+        {channelLabel(channel)}
+      </Lbl>
+      {holder ? <span className="session-row-holder">{holder}</span> : null}
+    </span>
+  );
+  if (editing) {
+    return (
+      <li className={"session-row is-editing" + (selected ? " is-selected" : "")}>
+        <div className="session-row-link">
+          <TitleInput
+            initial={session.title || ""}
+            label="Session title"
+            className="session-row-input"
+            onSave={(value) => onRename(session.id, value)}
+            onCancel={onCancelEdit}
+          />
+          {meta}
+          <span className="session-row-preview trunc">{preview}</span>
+        </div>
+      </li>
+    );
+  }
   return (
     <li className={"session-row" + (selected ? " is-selected" : "")}>
       <a
@@ -316,28 +384,66 @@ function SessionItem({
         data-session-row
       >
         <span className="session-row-head">
-          <span className="session-row-title trunc">{title}</span>
+          <span
+            className={
+              "session-row-title trunc" +
+              (naming ? " is-naming" : "") +
+              (!session.title && !pending ? " is-untitled" : "")
+            }
+          >
+            {title}
+          </span>
           <span className="session-row-time num">
             {relativeTime(session.updated_at)}
           </span>
         </span>
-        <span className="session-row-meta">
-          {showDot ? (
-            <span
-              className={"session-row-dot status-" + status}
-              aria-hidden="true"
-            />
-          ) : null}
-          <span className="session-row-agent trunc">{agent}</span>
-          <Lbl color={CHANNEL_COLORS[channel] || "var(--gray)"}>
-            {channelLabel(channel)}
-          </Lbl>
-          {holder ? (
-            <span className="session-row-holder">{holder}</span>
-          ) : null}
-        </span>
+        {meta}
         <span className="session-row-preview trunc">{preview}</span>
       </a>
+      <span
+        className={"session-row-actions" + (menuOpen ? " is-open" : "")}
+        ref={menuRef}
+      >
+        <IconButton
+          icon="pencil"
+          size="xs"
+          className="session-row-rename"
+          data-session-rename={session.id}
+          label={"Rename " + title}
+          tabIndex={tabIndex}
+          onClick={() => onStartEdit(session.id)}
+        />
+        <IconButton
+          icon="ellipsis"
+          size="xs"
+          label={"More actions for " + title}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          tabIndex={tabIndex}
+          onClick={() => setMenuOpen(true)}
+        />
+        <Menu anchorRef={menuRef} open={menuOpen} onClose={() => setMenuOpen(false)}>
+          <MenuItem
+            icon="pencil"
+            onClick={() => {
+              setMenuOpen(false);
+              onStartEdit(session.id);
+            }}
+          >
+            Rename
+          </MenuItem>
+          <MenuItem
+            icon="sparkles"
+            disabled={pending}
+            onClick={() => {
+              setMenuOpen(false);
+              onRegenerate(session.id);
+            }}
+          >
+            Regenerate title
+          </MenuItem>
+        </Menu>
+      </span>
     </li>
   );
 }
@@ -414,6 +520,136 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
   const [details, setDetails] = useState<unknown[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
+  /* Spec 40: the row whose title is being edited, and a title error. */
+  const [editingId, setEditingId] = useState("");
+  const [titleError, setTitleError] = useState("");
+  const titlePolls = useRef<Record<string, number>>({});
+
+  /* Ends the inline edit and puts focus back on the row's rename button. */
+  const endEdit = useCallback((id: string) => {
+    setEditingId("");
+    window.setTimeout(() => {
+      const button = document.querySelector<HTMLElement>(
+        '[data-session-rename="' + id + '"]'
+      );
+      button?.focus();
+    }, 0);
+  }, []);
+
+  const applyTitle = useCallback((update: SessionTitleUpdate) => {
+    setSessions((current) => {
+      let changed = false;
+      const next = current.map((row) => {
+        if (row.id !== update.id) {
+          return row;
+        }
+        if (
+          row.title === update.title &&
+          (row.title_source || "") === update.title_source &&
+          (row.title_pending === true) === update.title_pending
+        ) {
+          return row;
+        }
+        changed = true;
+        return {
+          ...row,
+          title: update.title,
+          title_source: update.title_source,
+          title_pending: update.title_pending,
+        };
+      });
+      return changed ? next : current;
+    });
+  }, []);
+
+  /* REQ-TTL-011: an open session page passes the title it gets from its
+     stream; a rename or regenerate in the header does the same. */
+  useSessionTitleUpdates(applyTitle);
+
+  /* Rows whose title is being made are read again until it arrives. */
+  const pendingIds = sessions
+    .filter((row) => row.title_pending === true)
+    .map((row) => row.id)
+    .join(",");
+  useEffect(() => {
+    if (!pendingIds) {
+      return undefined;
+    }
+    const ids = pendingIds
+      .split(",")
+      .filter((id) => (titlePolls.current[id] || 0) < TITLE_POLL_LIMIT);
+    if (ids.length === 0) {
+      return undefined;
+    }
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      for (const id of ids) {
+        titlePolls.current[id] = (titlePolls.current[id] || 0) + 1;
+        getSession(id)
+          .then((row) => {
+            if (alive) {
+              applyTitle(titleUpdateFrom(id, row as unknown as Record<string, unknown>));
+            }
+          })
+          .catch(() => undefined);
+      }
+    }, TITLE_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [pendingIds, applyTitle]);
+
+  const renameRow = useCallback(
+    async (id: string, title: string) => {
+      setTitleError("");
+      try {
+        const row = await renameSession(id, title);
+        const update = titleUpdateFrom(id, row as unknown as Record<string, unknown>);
+        applyTitle(update);
+        publishSessionTitle(update);
+        endEdit(id);
+        announce(title ? "Session renamed." : "The session will get an automatic title.");
+      } catch (failure) {
+        setTitleError("Could not rename the session. " + errorMessage(failure));
+        announce("Could not rename the session. " + errorMessage(failure));
+        throw failure;
+      }
+    },
+    [announce, applyTitle, endEdit]
+  );
+
+  const regenerateRow = useCallback(
+    async (id: string) => {
+      setTitleError("");
+      const before = sessions.find((row) => row.id === id);
+      applyTitle({
+        id,
+        title: before?.title || "",
+        title_source: before?.title_source || "",
+        title_pending: true,
+      });
+      announce("Making a new title.");
+      try {
+        const row = await regenerateSessionTitle(id);
+        const update = titleUpdateFrom(id, row as unknown as Record<string, unknown>);
+        applyTitle(update);
+        publishSessionTitle(update);
+        announce("New title: " + (update.title || "untitled") + ".");
+      } catch (failure) {
+        if (before) {
+          applyTitle(titleUpdateFrom(id, before as unknown as Record<string, unknown>));
+        }
+        const busy = failure instanceof ApiError && failure.code === "title_busy";
+        const message = busy
+          ? "A title is already being made for this session."
+          : "Could not make a new title. " + errorMessage(failure);
+        setTitleError(message);
+        announce(message);
+      }
+    },
+    [announce, applyTitle, sessions]
+  );
 
   /* Debounce the search box so typing "disk" issues one list request. */
   useEffect(() => {
@@ -715,6 +951,12 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
           </div>
         ) : null}
 
+        {titleError ? (
+          <div className="sessions-error">
+            <ErrorNotice message={titleError} />
+          </div>
+        ) : null}
+
         {loading ? (
           <p className="sessions-state" role="status">
             Loading sessions.
@@ -761,6 +1003,11 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
                       ? 0
                       : -1
                 }
+                editing={session.id === editingId}
+                onStartEdit={setEditingId}
+                onCancelEdit={() => endEdit(session.id)}
+                onRename={renameRow}
+                onRegenerate={(id) => void regenerateRow(id)}
               />
             ))}
           </ul>

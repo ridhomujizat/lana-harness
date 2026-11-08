@@ -8,6 +8,12 @@ but their config keys, events, and tools may still change between betas.
 ## [Unreleased]
 
 ### Added
+- Session titles (spec #40): after the first turn lana names a session in the background with the
+  agent's background model (never Claude Code; the first message when no model is free), so History
+  no longer fills with "Untitled session". Rename a session from the History row (pencil or the row
+  menu) or by clicking the title in the session header; an empty title goes back to an automatic
+  one, and **Regenerate title** makes a new one. Workflow and calendar sessions are named
+  "Workflow · <name>" and "Calendar · <item>". Titles update live in open pages.
 - Claude Code is a model like any other: pick `claude-code/<model>` (aliases, every model your plan reports, or custom IDs) in an agent, combo, workflow, or the calendar. The turn runs in your own logged-in `claude` with the agent's persona, memory, and knowledge, and lana's own tools reach it over a local MCP server. If Claude Code cannot run, the turn falls back to the next model in the combo.
 - Several Claude Code accounts, each with its own login folder, shown with email, plan, plan windows, and usage on the Router's Claude Code page.
 

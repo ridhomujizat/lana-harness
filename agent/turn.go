@@ -1511,6 +1511,11 @@ finished:
 			})
 		}
 	}
+	// Spec 40, REQ-TTL-001: name an untitled session in the background.
+	rn.reg.titleTurnEnd(reason, lastResolved.child, ownerMessage, core.TitleRequest{
+		SessionID: rn.sessionID, AgentName: lastResolved.name,
+		Targets: lastResolved.chain, Requested: lastResolved.requested,
+	})
 	result.StopReason = reason
 	result.Text = lastText
 	result.Usage = totalUsage

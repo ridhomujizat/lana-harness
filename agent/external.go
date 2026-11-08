@@ -591,6 +591,12 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 			})
 		}
 	}
+	// Spec 40, REQ-TTL-001: the title pass uses the background chain, never
+	// Claude Code.
+	rn.reg.titleTurnEnd(reason, res.child, run.owner, core.TitleRequest{
+		SessionID: rn.sessionID, AgentName: res.name,
+		Targets: res.fullChain, Requested: res.requested,
+	})
 	result.StopReason = reason
 	result.Text = x.lastText
 	result.Usage = x.usage

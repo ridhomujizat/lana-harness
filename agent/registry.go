@@ -69,6 +69,7 @@ type Registry struct {
 	questions  core.QuestionService
 	compaction core.Compactor
 	memory     core.MemoryCapturer
+	titler     core.SessionTitler
 	knowledge  core.Knowledge
 	config     core.Config
 	secrets    core.Secrets
@@ -192,6 +193,23 @@ func (r *Registry) SetMemoryCapturer(c core.MemoryCapturer) { r.memory = c }
 // memoryCapturer returns the memory-capture service, or nil when none is
 // installed.
 func (r *Registry) memoryCapturer() core.MemoryCapturer { return r.memory }
+
+// SetSessionTitler installs the session title service used at turn end
+// (spec 40). It is set at boot, before any turn starts; nil disables titles.
+func (r *Registry) SetSessionTitler(t core.SessionTitler) { r.titler = t }
+
+// titleTurnEnd asks the title service to name a session after a completed
+// root turn that stored an owner message (REQ-TTL-001). The service returns
+// at once and skips a session that already has a title.
+func (r *Registry) titleTurnEnd(reason string, child, owner bool, req core.TitleRequest) {
+	if r.titler == nil || child || !owner {
+		return
+	}
+	if reason != "end_turn" && reason != "max_steps" && reason != "loop" {
+		return
+	}
+	r.titler.TurnEnded(req)
+}
 
 // SetKnowledge installs the knowledge service used by the knowledge tools and
 // per-turn recall. It is set at boot, before any turn starts; a nil service

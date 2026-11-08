@@ -22,6 +22,7 @@ import (
 	_ "github.com/ridhomujizat/lana-harness/agent/compaction"
 	_ "github.com/ridhomujizat/lana-harness/agent/knowledge"
 	_ "github.com/ridhomujizat/lana-harness/agent/memcapture"
+	"github.com/ridhomujizat/lana-harness/agent/titles"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
@@ -259,6 +260,9 @@ type Runtime struct {
 	// store closes (spec 37, REQ-RTR-009).
 	routerUpkeepOnce sync.Once
 	routerUpkeep     sync.WaitGroup
+	// titles names sessions after their first turn (spec 40). It is never
+	// nil after New.
+	titles *titles.Service
 }
 
 // Jobs returns the runtime's background-job registry (REQ-JOB-018,
@@ -436,6 +440,8 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		toolboxNames: map[string]bool{},
 	}
 	rt.attachRouterStores()
+	// Spec 40: name sessions in the background after their first turn.
+	rt.startTitles()
 	// Spec 38, spec 39: Claude Code turns report usage, plan windows, and the
 	// model list to the router.
 	registry.SetExternalHooks(rt.externalHooks())
@@ -1158,6 +1164,11 @@ func (rt *Runtime) Close() error {
 	defer cancel()
 	if err := rt.registry.Close(ctx); err != nil {
 		rt.closeErr = err
+	}
+	// Spec 40: the turns have stopped, so no new title pass starts; the
+	// running ones stop with rt.ctx. Join them before the store closes.
+	if rt.titles != nil {
+		rt.titles.Wait()
 	}
 	// ADR 0020: the Claude processes have stopped; stop the MCP host.
 	if rt.toolHost != nil {

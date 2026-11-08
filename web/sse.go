@@ -98,6 +98,11 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 	if err := writeSSE(w, flusher, "status", "", lastStatus); err != nil {
 		return
 	}
+	// REQ-TTL-011: the poll below sends a "title" event when the title, its
+	// source, or the pending flag changes, so an open page shows the
+	// automatic title when it arrives.
+	titlePort := s.titleBackend()
+	lastTitle := titleJSON{Title: session.Title, TitleSource: session.TitleSource, TitlePending: s.titlePending(id)}
 
 	// Subscribe to approvals before replaying the open ones so a request that
 	// opens during the handshake is not missed. The resolver lets a child
@@ -208,6 +213,17 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				s.logger.Warn("web: stream poll holder", "session", id, "error", err)
 				continue
+			}
+			if titlePort != nil {
+				if title, source, err := titlePort.SessionTitle(r.Context(), id); err == nil {
+					next := titleJSON{Title: title, TitleSource: source, TitlePending: titlePort.TitlePending(id)}
+					if next != lastTitle {
+						if err := writeSSE(w, flusher, "title", "", next); err != nil {
+							return
+						}
+						lastTitle = next
+					}
+				}
 			}
 			running = backend.TurnActive(id)
 			status := statusFromHolder(holder, running)
