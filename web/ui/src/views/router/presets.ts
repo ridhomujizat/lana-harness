@@ -154,15 +154,37 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   },
 ];
 
-/* The Claude Code subscription card and its route segment. Router records
-   of the Claude Agent runtime use the provider name claude-agent. */
+/* The Claude Code subscription card and its route segment (spec 39). Router
+   records before spec 39 used the provider name claude-agent; since then a
+   record names the Claude Code account (claude-code, or one added as
+   [providers.<name>] kind = "claude-code"). */
 export const CLAUDE_CODE_ID = "claude-code";
+export const CLAUDE_CODE_KIND = "claude-code";
 export const CLAUDE_AGENT_PROVIDER_NAME = "claude-agent";
+export const CLAUDE_CODE_GROUP = "Claude Code";
 
-/* Claude Code's names: the runtime's router records (claude-agent), its
-   address prefix (claude-code/<model>), and its model-picker group. */
+/* The names of Claude Code accounts this page has seen, so a page that only
+   knows a provider name (a log row, a combo chip) can still show the Claude
+   logo. Pages fill it from GET /v1/router/claude-agent and /v1/providers. */
+const claudeAccounts = new Set<string>([CLAUDE_CODE_ID]);
+
+export function rememberClaudeAccounts(names: string[]): void {
+  for (const name of names) {
+    if (name) {
+      claudeAccounts.add(name);
+    }
+  }
+}
+
+/* Claude Code's names: an account name, the old claude-agent records, and
+   the model-picker group ("Claude Code" or "Claude Code · <account> …"). */
 export function isClaudeCode(name: string): boolean {
-  return name === CLAUDE_AGENT_PROVIDER_NAME || name === CLAUDE_CODE_ID || name === "Claude Code";
+  return (
+    name === CLAUDE_AGENT_PROVIDER_NAME ||
+    claudeAccounts.has(name) ||
+    name === CLAUDE_CODE_GROUP ||
+    name.startsWith(CLAUDE_CODE_GROUP + " · ")
+  );
 }
 
 export function presetById(id: string): ProviderPreset | undefined {
@@ -204,7 +226,7 @@ export function presetFor(provider: ProviderShape): ProviderPreset | undefined {
    the monogram fallback. */
 export function logoFor(provider: ProviderShape | undefined | null, name?: string): string {
   const key = provider ? provider.name : name || "";
-  if (isClaudeCode(key)) {
+  if (isClaudeCode(key) || (provider && provider.kind === CLAUDE_CODE_KIND)) {
     return "claude";
   }
   if (!provider) {
@@ -217,7 +239,7 @@ export function logoFor(provider: ProviderShape | undefined | null, name?: strin
 /* The display label of a provider entry's family: "DeepSeek" for ds. */
 export function familyLabel(provider: ProviderShape | undefined | null, name?: string): string {
   const key = provider ? provider.name : name || "";
-  if (isClaudeCode(key)) {
+  if (isClaudeCode(key) || (provider && provider.kind === CLAUDE_CODE_KIND)) {
     return "Claude Code";
   }
   const preset = provider ? presetFor(provider) : undefined;
@@ -226,6 +248,9 @@ export function familyLabel(provider: ProviderShape | undefined | null, name?: s
 
 /* The route segment of the card a provider entry belongs to. */
 export function cardIdFor(provider: ProviderShape): string {
+  if (provider.kind === CLAUDE_CODE_KIND) {
+    return CLAUDE_CODE_ID;
+  }
   const preset = presetFor(provider);
   return preset ? preset.id : provider.name;
 }

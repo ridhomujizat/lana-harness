@@ -4,26 +4,26 @@ import type { FormEvent, MouseEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import { createAgent, listAgents } from "../api/agents";
 import type { Agent, CreateAgentRequest } from "../api/agents";
+import { getRouter } from "../api/router";
+import type { RouterOverview } from "../api/router";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { avatarFor } from "../lib/avatar";
 import {
-  CLAUDE_RUNTIME,
   isTeam,
   rosterNames,
   agentHref,
-  engineLabel,
+  usesClaudeCode,
   splitModel,
   providerLabel,
 } from "./agent-common";
+import { CLAUDE_EFFORTS, ClaudeCodeNote, choiceOptions } from "./agent-runtime";
 import {
-  CLAUDE_AUTH,
-  CLAUDE_EFFORTS,
-  ClaudeModelControl,
-  DEFAULT_CLAUDE,
-  RuntimeChoice,
-} from "./agent-runtime";
-import type { ClaudeValues, RuntimeValue } from "./agent-runtime";
+  ClaudeCodeBadge,
+  claudeAccountNames,
+  claudeTargetAccount,
+  useClaudeAccounts,
+} from "./router/claude-code";
 import type { AgentLike } from "./agent-common";
 import { useRooms } from "./presence";
 import type { RoomRow } from "../api/rooms";
@@ -38,7 +38,6 @@ import {
   SearchInput,
   Select,
   Skeleton,
-  Toggle,
 } from "../ui/gr8r";
 import type { BadgeTone } from "../ui/gr8r";
 
@@ -134,106 +133,63 @@ function memberCount(row: RoomRow | undefined): number {
 export interface CreateAgentDialogProps {
   onClose: () => void;
   onCreated?: (name: string) => void;
-  /* The runtime picked when the dialog opens, for example Claude Agent from
-     the Router's Claude Code page. */
-  initialRuntime?: RuntimeValue;
+  /* The model picked when the dialog opens, for example a Claude Code model
+     from the Router's Claude Code page. */
+  initialModel?: string;
 }
 
-const PERMISSION_OPTIONS = [
-  { value: "ask", label: "Ask before risky tools" },
-  { value: "trust", label: "Trust: run every tool" },
-  { value: "never", label: "Never: read-only work" },
-];
-
-const COLOR_OPTIONS = [
-  { value: "", label: "Automatic" },
-  { value: "brand", label: "Brand" },
-  { value: "success", label: "Success" },
-  { value: "warning", label: "Warning" },
-  { value: "error", label: "Error" },
-  { value: "blue", label: "Blue" },
-  { value: "gray", label: "Gray" },
-];
-
-const ENV_RULE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-function lines(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
+/* REQ-WEB-045 and spec 39 (REQ-CCT-009): every agent is a lana agent made
+   from a template. The model is optional; a Claude Code model shows its note
+   and the Claude reasoning effort. */
 export function CreateAgentDialog({
   onClose,
   onCreated,
-  initialRuntime,
+  initialModel,
 }: CreateAgentDialogProps) {
   const announce = useAnnounce();
   const [name, setName] = useState("");
-  const [runtime, setRuntime] = useState<RuntimeValue>(initialRuntime || "");
   const [template, setTemplate] = useState<string>(TEMPLATES[0].value);
   const [workspace, setWorkspace] = useState("");
-  const [claude, setClaude] = useState<ClaudeValues>(DEFAULT_CLAUDE);
-  const [permission, setPermission] = useState("ask");
-  const [title, setTitle] = useState("");
-  const [color, setColor] = useState("");
-  const [description, setDescription] = useState("");
-  const [allowRules, setAllowRules] = useState("");
-  const [denyRules, setDenyRules] = useState("");
+  const [model, setModel] = useState(initialModel || "");
+  const [effort, setEffort] = useState("");
+  const [router, setRouter] = useState<RouterOverview | null>(null);
+  const { accounts } = useClaudeAccounts();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
 
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve()
+      .then(() => getRouter())
+      .then((value) => {
+        if (alive && value) {
+          setRouter(value);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const templateInfo =
     TEMPLATES.find((item) => item.value === template) || TEMPLATES[0];
-  const isClaude = runtime === CLAUDE_RUNTIME;
-
-  function updateClaude<K extends keyof ClaudeValues>(key: K, value: ClaudeValues[K]) {
-    setClaude((current) => ({ ...current, [key]: value }));
-  }
-
-  /* REQ-CCR-001: a Claude Agent sends runtime and its own keys, never a
-     provider or a template. */
-  function claudeBody(value: string): CreateAgentRequest {
-    const body: CreateAgentRequest = {
-      name: value,
-      runtime: CLAUDE_RUNTIME,
-      auth: claude.auth,
-      permission,
-      allow_scheduled: claude.allow_scheduled,
-    };
-    if (claude.model.trim()) {
-      body.model = claude.model.trim();
-    }
-    if (claude.reasoning_effort) {
-      body.reasoning_effort = claude.reasoning_effort;
-    }
-    if (claude.auth === "api_key") {
-      body.api_key_env = claude.api_key_env.trim();
-    }
-    if (claude.binary.trim()) {
-      body.binary = claude.binary.trim();
-    }
-    if (workspace.trim()) {
-      body.workspace = workspace.trim();
-    }
-    if (title.trim()) {
-      body.title = title.trim();
-    }
-    if (color) {
-      body.color = color;
-    }
-    if (description.trim()) {
-      body.description = description.trim();
-    }
-    const allow = lines(allowRules);
-    const deny = lines(denyRules);
-    if (allow.length || deny.length) {
-      body.rules = { allow, deny };
-    }
-    return body;
-  }
+  const choices = useMemo(() => (router ? router.choices : []), [router]);
+  const names = useMemo(
+    () => claudeAccountNames(choices, router ? router.providers : null, accounts),
+    [choices, router, accounts]
+  );
+  const claudeAccount = claudeTargetAccount(model, choices, router ? router.combos : null, names);
+  const modelOptions = useMemo(() => {
+    const options = choiceOptions(choices, router ? router.providers : undefined, accounts);
+    const known = !model || options.some((option) => option.value === model);
+    return [
+      { value: "", label: "Same as the default agent" },
+      ...(known ? [] : [{ value: model, label: model }]),
+      ...options,
+    ];
+  }, [choices, router, accounts, model]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -247,17 +203,18 @@ export function CreateAgentDialog({
       );
       return;
     }
-    if (isClaude && claude.auth === "api_key" && !ENV_RULE.test(claude.api_key_env.trim())) {
-      setError("Enter the env variable that holds the API key, for example ANTHROPIC_API_KEY.");
-      return;
-    }
     setBusy(true);
     setError("");
     setDetails([]);
     try {
-      const body: CreateAgentRequest = isClaude
-        ? claudeBody(value)
-        : { name: value, template, workspace: workspace.trim() };
+      /* API-CCT-002: the model is an address; never a provider or runtime. */
+      const body: CreateAgentRequest = { name: value, template, workspace: workspace.trim() };
+      if (model) {
+        body.model = model;
+      }
+      if (claudeAccount && effort) {
+        body.reasoning_effort = effort;
+      }
       const created = await createAgent(body);
       const createdName = created && created.name ? created.name : value;
       announce(
@@ -291,9 +248,7 @@ export function CreateAgentDialog({
     <Dialog title="Create agent" dismissible={!busy} onClose={onClose}>
       <form className="agent-dialog-form" onSubmit={submit}>
         <p className="hint">
-          {isClaude
-            ? "A Claude Agent runs Claude Code on this machine. Log in once with claude in a terminal."
-            : "Create an agent from a template. You can change the model and the other settings after it appears."}
+          Create an agent from a template. You can change the other settings after it appears.
         </p>
 
         <label className="field">
@@ -316,105 +271,57 @@ export function CreateAgentDialog({
         </label>
 
         <div className="field">
-          <span className="field-label" id="create-agent-runtime-label">
-            Runtime
-          </span>
-          <RuntimeChoice
-            name="create-agent-runtime"
-            labelledBy="create-agent-runtime-label"
-            value={runtime}
-            disabled={busy}
-            onChange={setRuntime}
+          <label className="field-label" htmlFor="create-agent-template">
+            Template
+          </label>
+          <Select
+            id="create-agent-template"
+            name="template"
+            aria-label="Template"
+            value={template}
+            onChange={setTemplate}
+            options={TEMPLATES.map((item) => ({
+              value: item.value,
+              label: item.label,
+            }))}
           />
+          <span className="hint">{templateInfo.note}</span>
         </div>
 
-        {isClaude ? (
-          <>
-            <div className="field">
-              <label className="field-label" htmlFor="create-agent-claude-model">
-                Model
-              </label>
-              <ClaudeModelControl
-                id="create-agent-claude-model"
-                value={claude.model}
-                disabled={busy}
-                onChange={(value) => updateClaude("model", value)}
-              />
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="create-agent-effort">
-                Reasoning effort
-              </label>
-              <Select
-                id="create-agent-effort"
-                value={claude.reasoning_effort}
-                options={CLAUDE_EFFORTS}
-                disabled={busy}
-                onChange={(value) => updateClaude("reasoning_effort", value)}
-              />
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="create-agent-auth">
-                Sign-in
-              </label>
-              <Select
-                id="create-agent-auth"
-                value={claude.auth}
-                options={CLAUDE_AUTH.map((entry) => ({ value: entry.value, label: entry.title }))}
-                disabled={busy}
-                onChange={(value) => updateClaude("auth", value)}
-              />
-              <span className="hint">
-                {CLAUDE_AUTH.find((entry) => entry.value === claude.auth)?.note}
-              </span>
-            </div>
-            {claude.auth === "api_key" ? (
-              <label className="field">
-                <span className="field-label">API key variable</span>
-                <input
-                  type="text"
-                  name="api_key_env"
-                  value={claude.api_key_env}
-                  placeholder="ANTHROPIC_API_KEY"
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => updateClaude("api_key_env", event.target.value)}
-                />
-                <span className="hint">The env variable or secret that holds the key.</span>
-              </label>
-            ) : null}
-            <label className="field">
-              <span className="field-label">Claude Code binary</span>
-              <input
-                type="text"
-                name="binary"
-                value={claude.binary}
-                placeholder="claude on PATH"
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) => updateClaude("binary", event.target.value)}
-              />
-              <span className="hint">Optional. Leave empty to use claude from PATH.</span>
-            </label>
-          </>
-        ) : (
+        <div className="field">
+          <label className="field-label" htmlFor="create-agent-model">
+            Model
+          </label>
+          <Select
+            id="create-agent-model"
+            aria-label="Model"
+            value={model}
+            options={modelOptions}
+            disabled={busy}
+            onChange={(value) => {
+              setModel(value);
+              setEffort("");
+            }}
+          />
+          {claudeAccount ? <ClaudeCodeNote account={claudeAccount} /> : null}
+        </div>
+
+        {claudeAccount ? (
           <div className="field">
-            <label className="field-label" htmlFor="create-agent-template">
-              Template
+            <label className="field-label" htmlFor="create-agent-effort">
+              Reasoning effort
             </label>
             <Select
-              id="create-agent-template"
-              name="template"
-              value={template}
-              onChange={setTemplate}
-              options={TEMPLATES.map((item) => ({
-                value: item.value,
-                label: item.label,
-              }))}
+              id="create-agent-effort"
+              aria-label="Reasoning effort"
+              value={effort}
+              options={CLAUDE_EFFORTS}
+              disabled={busy}
+              onChange={setEffort}
             />
-            <span className="hint">{templateInfo.note}</span>
+            <span className="hint">Passed to Claude Code as --effort.</span>
           </div>
-        )}
+        ) : null}
 
         <label className="field">
           <span className="field-label">Workspace</span>
@@ -428,97 +335,9 @@ export function CreateAgentDialog({
             onChange={(event) => setWorkspace(event.target.value)}
           />
           <span id="create-agent-workspace-hint" className="hint">
-            {isClaude
-              ? "The folder Claude Code works in. Leave empty to use the default workspace."
-              : "Optional. Leave empty to use the default workspace."}
+            Optional. Leave empty to use the default workspace.
           </span>
         </label>
-
-        {isClaude ? (
-          <>
-            <div className="field">
-              <label className="field-label" htmlFor="create-agent-permission">
-                Permission
-              </label>
-              <Select
-                id="create-agent-permission"
-                value={permission}
-                options={PERMISSION_OPTIONS}
-                disabled={busy}
-                onChange={setPermission}
-              />
-            </div>
-            <label className="field">
-              <span className="field-label">Deny rules</span>
-              <textarea
-                name="deny"
-                rows={2}
-                value={denyRules}
-                placeholder="bash(rm *)"
-                spellCheck={false}
-                onChange={(event) => setDenyRules(event.target.value)}
-              />
-              <span className="hint">One pattern per line. Optional.</span>
-            </label>
-            <label className="field">
-              <span className="field-label">Allow rules</span>
-              <textarea
-                name="allow"
-                rows={2}
-                value={allowRules}
-                spellCheck={false}
-                onChange={(event) => setAllowRules(event.target.value)}
-              />
-              <span className="hint">One pattern per line. Optional.</span>
-            </label>
-            <div className="field agent-dialog-switch">
-              <span className="field-label" id="create-agent-scheduled-label">
-                Allow scheduled runs
-              </span>
-              <Toggle
-                aria-labelledby="create-agent-scheduled-label"
-                checked={claude.allow_scheduled}
-                disabled={busy}
-                onChange={(checked) => updateClaude("allow_scheduled", checked)}
-              />
-              <span className="hint">
-                Off by default: schedules and workflows cannot start this agent unattended.
-              </span>
-            </div>
-            <label className="field">
-              <span className="field-label">Title</span>
-              <input
-                type="text"
-                name="title"
-                value={title}
-                maxLength={60}
-                autoComplete="off"
-                onChange={(event) => setTitle(event.target.value)}
-              />
-            </label>
-            <div className="field">
-              <label className="field-label" htmlFor="create-agent-color">
-                Color
-              </label>
-              <Select
-                id="create-agent-color"
-                value={color}
-                options={COLOR_OPTIONS}
-                disabled={busy}
-                onChange={setColor}
-              />
-            </div>
-            <label className="field">
-              <span className="field-label">Description</span>
-              <textarea
-                name="description"
-                rows={2}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-              />
-            </label>
-          </>
-        ) : null}
 
         {error ? <ErrorNotice message={error} details={details} /> : null}
 
@@ -569,7 +388,7 @@ function matchesQuery(agent: AgentLike, query: string): boolean {
     agent.model,
     agent.permission,
     agent.policy,
-    engineLabel(agent),
+    usesClaudeCode(agent) ? "Claude Code" : "",
   ].concat(rosterNames(agent));
   const haystack = fields
     .filter((value) => value !== null && value !== undefined)
@@ -615,16 +434,16 @@ function AgentCard({
       : "Team"
     : Number(row ? row.turns_7d : 0) + " tasks · 7d";
   const model = splitModel(agent);
-  const engine = engineLabel(agent);
-  const modelText = model.model
-    ? model.provider
-      ? providerLabel(model.provider) + " · " + model.model
-      : model.model
-    : "";
-  /* Spec 38: a Claude Agent shows its engine before the model. */
-  const modelLabel = engine
-    ? engine + (model.model ? " · " + model.model : "")
-    : modelText;
+  /* Spec 39 (API-CCT-006): an agent on Claude Code shows the Claude mark;
+     its model is the address, for example claude-code/opus. */
+  const claude = usesClaudeCode(agent);
+  const modelLabel = claude
+    ? String(agent.model || "")
+    : model.model
+      ? model.provider
+        ? providerLabel(model.provider) + " · " + model.model
+        : model.model
+      : "";
 
   return (
     <article className="pcard" onClick={(event) => onOpen(event, agent.name)}>
@@ -659,9 +478,10 @@ function AgentCard({
 
       <p className="agent-card-preview">{description}</p>
 
-      {modelLabel ? (
+      {modelLabel || claude ? (
         <div className="agent-card-meta">
-          <Lbl color="var(--text-4)">{modelLabel}</Lbl>
+          {claude ? <ClaudeCodeBadge /> : null}
+          {modelLabel ? <Lbl color="var(--text-4)">{modelLabel}</Lbl> : null}
         </div>
       ) : null}
 

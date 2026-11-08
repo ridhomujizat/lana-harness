@@ -19,7 +19,7 @@ vi.mock("../api/settings", async (importOriginal) => {
 });
 vi.mock("../api/router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/router")>();
-  return { ...actual, getRouter: vi.fn() };
+  return { ...actual, getRouter: vi.fn(), getClaudeAgent: vi.fn() };
 });
 vi.mock("../api/models", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/models")>();
@@ -47,8 +47,8 @@ import { getAgentOverview, openRoomsStream } from "../api/rooms";
 import type { AgentOverview as AgentOverviewData } from "../api/rooms";
 import { getConfig } from "../api/settings";
 import type { GetConfigResponse } from "../api/settings";
-import { getRouter } from "../api/router";
-import type { RouterOverview } from "../api/router";
+import { getClaudeAgent, getRouter } from "../api/router";
+import type { ClaudeAccount, RouterOverview } from "../api/router";
 import { AgentDetailPage } from "./agent-detail";
 
 function baseAgent(overrides: Partial<Agent>): Agent {
@@ -320,11 +320,43 @@ describe("agent router model picker (AC-RTR-024)", () => {
   });
 });
 
-/* Spec 38 (AC-CCR-010, UI side): switching the runtime to Claude Agent writes
-   runtime = "claude-code" and the Claude model, with no provider. */
-describe("agent runtime switch (AC-CCR-010)", () => {
-  it("writes runtime claude-code and the model without a provider", async () => {
+/* Spec 39 (REQ-CCT-009, AC-CCT-011): no engine choice; Claude Code models are
+   router choices, and the agent form shows the Claude Code note. */
+const CLAUDE_ROUTER: RouterOverview = {
+  ...ROUTER,
+  choices: [
+    ...ROUTER.choices,
+    { value: "claude-code/opus", label: "Claude Code · Opus (latest)", group: "Claude Code" },
+    { value: "claude-code/claude-opus-5-5", label: "Claude Code · Opus 5.5", group: "Claude Code" },
+  ],
+};
+
+function claudeAccount(name: string, email: string): ClaudeAccount {
+  return {
+    name,
+    builtin: name === "claude-code",
+    config_dir: "",
+    binary: "/usr/local/bin/claude",
+    version: "2.1.319",
+    version_ok: true,
+    logged_in: true,
+    email,
+    plan: "max",
+    auth_method: "claude.ai",
+    error: "",
+    running: 0,
+    queued: 0,
+    login_command: "",
+    windows: [],
+    agents: [],
+    combos: [],
+  };
+}
+
+describe("Claude Code as a model (AC-CCT-011)", () => {
+  it("has no engine choice and saves the Claude Code address alone", async () => {
     mockRouterAgent("coding");
+    vi.mocked(getRouter).mockResolvedValue(CLAUDE_ROUTER);
     vi.mocked(updateAgent).mockResolvedValue({
       name: "coder",
       version: "v2",
@@ -332,29 +364,39 @@ describe("agent runtime switch (AC-CCR-010)", () => {
     });
     render(<AgentDetailPage name="coder" tab="general" />);
 
-    fireEvent.click(await screen.findByRole("radio", { name: "Claude Agent" }));
-    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
-    fireEvent.click(screen.getByRole("combobox", { name: "Claude model" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Opus" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(screen.queryByRole("radio", { name: "Claude Agent" })).toBeNull();
+    expect(screen.queryByText("Engine")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Reasoning effort" })).toBeNull();
+    fireEvent.click(model);
+    fireEvent.click(await screen.findByRole("option", { name: "Claude Code · Opus (latest)" }));
 
+    expect(
+      screen.getByText(/Runs in Claude Code with your Claude plan\. Claude Code uses its own file and shell tools; lana's memory, knowledge, calendar, workflow and other tools come in through MCP\. Max steps and compaction settings don't apply\./)
+    ).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Allow scheduled runs on claude-code/ }).getAttribute("href")).toBe(
+      "#/router/providers/claude-code"
+    );
+    expect(screen.queryByText(/Login with Claude/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
-      expect(vi.mocked(updateAgent)).toHaveBeenCalled();
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith("coder", { model: "claude-code/opus" }, "v1");
     });
     const patch = vi.mocked(updateAgent).mock.calls[0]?.[1] ?? {};
-    expect(patch).toMatchObject({ runtime: "claude-code", model: "opus" });
+    expect("runtime" in patch).toBe(false);
     expect("provider" in patch).toBe(false);
-    expect(screen.queryByText(/Login with Claude/i)).toBeNull();
   });
 
-  it("shows the Claude Agent engine and hides the lana-only tabs", async () => {
+  it("shows a legacy runtime agent as its address with every tab, and saves the address", async () => {
     vi.mocked(listAgents).mockResolvedValue({
       agents: [
         baseAgent({
-          model: "opus",
-          provider: "",
+          model: "claude-code/opus",
+          provider: "claude-code",
           runtime: "claude-code",
-          engine_label: "Claude Agent",
+          claude_code: true,
         }),
       ],
     });
@@ -365,15 +407,60 @@ describe("agent runtime switch (AC-CCR-010)", () => {
         agents: { coder: { runtime: "claude-code", model: "opus" } },
       },
     });
-    vi.mocked(getRouter).mockResolvedValue(ROUTER);
+    vi.mocked(getRouter).mockResolvedValue(CLAUDE_ROUTER);
+    vi.mocked(updateAgent).mockResolvedValue({ name: "coder", version: "v2", restart_required: false });
     render(<AgentDetailPage name="coder" tab="general" />);
 
-    expect(await screen.findByText("Claude Agent", { selector: ".badge" })).toBeTruthy();
-    expect(screen.queryByRole("tab", { name: "Tools" })).toBeNull();
-    expect(screen.getByRole("tab", { name: "Rules" })).toBeTruthy();
-    expect(
-      (screen.getByRole("combobox", { name: "Claude model" }) as HTMLElement).textContent
-    ).toContain("Opus");
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(model.textContent).toContain("Claude Code · Opus (latest)");
+    expect(screen.getByRole("tab", { name: "Tools" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Persona & memory" })).toBeTruthy();
+    expect(screen.getByText("Claude Code", { selector: ".rt-cc-badge span" })).toBeTruthy();
+    expect(screen.queryByText("Claude Agent")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith("coder", { model: "claude-code/opus" }, "v1");
+    });
+  });
+
+  it("groups Claude Code models per account with the account email", async () => {
+    mockRouterAgent("coding");
+    vi.mocked(getRouter).mockResolvedValue({
+      ...CLAUDE_ROUTER,
+      choices: [
+        ...CLAUDE_ROUTER.choices,
+        { value: "claude-work/opus", label: "Claude Code · Opus (latest)", group: "Claude Code" },
+      ],
+    });
+    vi.mocked(getClaudeAgent).mockResolvedValue({
+      configured_agents: [],
+      binary: "/usr/local/bin/claude",
+      version: "2.1.319",
+      version_ok: true,
+      logged_in: true,
+      auth_method: "claude.ai",
+      error: "",
+      running: 0,
+      queued: 0,
+      max_concurrent: 2,
+      accounts: [claudeAccount("claude-code", "me@home.dev"), claudeAccount("claude-work", "me@work.dev")],
+    });
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    await waitFor(() => expect(vi.mocked(getClaudeAgent)).toHaveBeenCalled());
+    fireEvent.click(model);
+    const listbox = await screen.findByRole("listbox");
+    await waitFor(() => {
+      const groups = Array.from(listbox.querySelectorAll('[role="group"]')).map((node) =>
+        node.getAttribute("aria-label")
+      );
+      expect(groups).toContain("Claude Code · claude-code (me@home.dev)");
+      expect(groups).toContain("Claude Code · claude-work (me@work.dev)");
+    });
+    const work = listbox.querySelector('[aria-label="Claude Code · claude-work (me@work.dev)"]') as HTMLElement;
+    expect(work.querySelector('[data-logo="claude"]')).toBeTruthy();
   });
 });
 

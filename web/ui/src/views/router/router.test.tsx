@@ -24,11 +24,13 @@ vi.mock("../../api/router", async (importOriginal) => {
     testProvider: vi.fn(),
     testRouterModel: vi.fn(),
     listRouterModels: vi.fn(),
+    saveClaudeCodeModels: vi.fn(),
   };
 });
 
 import * as api from "../../api/router";
 import type {
+  ClaudeAccount,
   ClaudeAgentStatus,
   LimitSnapshot,
   RouterOverview,
@@ -135,6 +137,28 @@ const LIMITS: LimitSnapshot[] = [
   },
 ];
 
+function account(overrides: Partial<ClaudeAccount> & { name: string }): ClaudeAccount {
+  return {
+    builtin: false,
+    config_dir: "",
+    binary: "/Users/x/.local/bin/claude",
+    version: "2.1.319",
+    version_ok: true,
+    logged_in: true,
+    email: "",
+    plan: "",
+    auth_method: "claude.ai",
+    error: "",
+    running: 0,
+    queued: 0,
+    login_command: "",
+    windows: [],
+    agents: [],
+    combos: [],
+    ...overrides,
+  };
+}
+
 const CLAUDE: ClaudeAgentStatus = {
   configured_agents: ["claude"],
   binary: "/Users/x/.local/bin/claude",
@@ -146,6 +170,48 @@ const CLAUDE: ClaudeAgentStatus = {
   running: 1,
   queued: 0,
   max_concurrent: 2,
+  accounts: [
+    account({
+      name: "claude-code",
+      builtin: true,
+      logged_in: false,
+      running: 1,
+      login_command: "claude",
+      agents: ["claude"],
+    }),
+  ],
+};
+
+/* AC-CCT-013: two logged-in accounts, each with its own email, plan,
+   windows, and users. */
+const TWO_ACCOUNTS: ClaudeAgentStatus = {
+  ...CLAUDE,
+  logged_in: true,
+  accounts: [
+    account({
+      name: "claude-code",
+      builtin: true,
+      email: "me@home.dev",
+      plan: "max",
+      config_dir: "/Users/x/.claude",
+      windows: [
+        { type: "five_hour", status: "allowed", utilization: 0.42, resets_at: "2026-11-08T10:05:00Z" },
+        { type: "seven_day", status: "allowed", utilization: 0.1, resets_at: "2026-11-12T10:00:00Z" },
+      ],
+      agents: ["claude"],
+    }),
+    account({
+      name: "claude-work",
+      email: "me@work.dev",
+      plan: "team",
+      config_dir: "/Users/x/.lana/claude/claude-work",
+      windows: [
+        { type: "five_hour", status: "allowed", utilization: 0.8, resets_at: "2026-11-08T11:00:00Z" },
+        { type: "seven_day", status: "allowed", utilization: 0.55, resets_at: "2026-11-13T10:00:00Z" },
+      ],
+      combos: ["work"],
+    }),
+  ],
 };
 
 function call(id: number, overrides: Partial<RouterCall> = {}): RouterCall {
@@ -262,17 +328,35 @@ describe("router quota", () => {
     });
   });
 
-  /* AC-CCR-009 and REQ-CCR-008: the plan window line, the login hint, and
-     never a login button. */
+  /* AC-CCR-009 and REQ-CCT-010: the plan window from the old claude-agent
+     snapshot, the login command, and never a login button. */
   it("renders the Claude Code plan card", async () => {
     render(<RouterQuota />);
-    const card = await screen.findByLabelText("Claude Code plan");
-    expect(within(card).getByText(/^5-hour window · 42 % used · resets /)).toBeTruthy();
+    const card = await screen.findByLabelText("Claude Code plan of claude-code");
+    expect(within(card).getByText(/^42 % used · resets /)).toBeTruthy();
     expect(within(card).getByText("Not logged in")).toBeTruthy();
-    expect(card.textContent).toContain("Run claude, then /login.");
-    expect(within(card).getByText("1 running · 0 queued of 2 at once")).toBeTruthy();
-    expect(within(card).queryByRole("button")).toBeNull();
+    expect(card.textContent).toContain("Log in once in a terminal:");
+    expect(card.textContent).toContain("then type /login.");
+    expect(within(card).getByText("1 running · 0 queued")).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: /^log ?in/i })).toBeNull();
     expect(screen.queryByText(/Login with Claude/i)).toBeNull();
+  });
+
+  /* REQ-CCT-011: one Claude Code card per account with email, plan, and its
+     own windows. */
+  it("shows one Claude Code card per account", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    render(<RouterQuota />);
+    const home = await screen.findByLabelText("Claude Code plan of claude-code");
+    const work = screen.getByLabelText("Claude Code plan of claude-work");
+    expect(within(home).getByText("me@home.dev")).toBeTruthy();
+    expect(within(home).getByText("Max")).toBeTruthy();
+    expect(within(home).getByText(/^42 % used/)).toBeTruthy();
+    expect(within(work).getByText("me@work.dev")).toBeTruthy();
+    expect(within(work).getByText("Team")).toBeTruthy();
+    expect(within(work).getByText(/^80 % used/)).toBeTruthy();
+    expect(within(work).getByText(/^55 % used/)).toBeTruthy();
+    expect(screen.queryByLabelText("Limits of claude-agent")).toBeNull();
   });
 
   it("counts down to the reset", () => {
@@ -290,7 +374,7 @@ describe("router quota", () => {
     expect(openai.querySelector('[data-logo="openai"]')).toBeTruthy();
     const local = screen.getByLabelText("Limits of local");
     expect(local.querySelector("[data-monogram]")).toBeTruthy();
-    expect((await screen.findByLabelText("Claude Code plan")).querySelector('[data-logo="claude"]')).toBeTruthy();
+    expect((await screen.findByLabelText("Claude Code plan of claude-code")).querySelector('[data-logo="claude"]')).toBeTruthy();
   });
 });
 
@@ -538,7 +622,11 @@ describe("router providers grid", () => {
 
   it("shows the Claude Code states", async () => {
     vi.mocked(api.listProviders).mockResolvedValue(providersResponse([]));
-    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce({ ...CLAUDE, binary: "" });
+    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce({
+      ...CLAUDE,
+      binary: "",
+      accounts: CLAUDE.accounts.map((entry) => ({ ...entry, binary: "" })),
+    });
     const first = render(<RouterProviders />);
     expect(await within(card("Claude Code")).findByText("Not installed")).toBeTruthy();
     expect(card("Claude Code").querySelector('[data-logo="claude"]')).toBeTruthy();
@@ -546,13 +634,23 @@ describe("router providers grid", () => {
 
     vi.mocked(api.getClaudeAgent).mockResolvedValueOnce(CLAUDE);
     const second = render(<RouterProviders />);
-    expect(await within(card("Claude Code")).findByText("Not logged in")).toBeTruthy();
+    expect(await within(card("Claude Code")).findByText("1 account · 0 logged in")).toBeTruthy();
     second.unmount();
 
-    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce({ ...CLAUDE, logged_in: true, configured_agents: ["claude", "cody"] });
+    vi.mocked(api.getClaudeAgent).mockResolvedValueOnce(TWO_ACCOUNTS);
     render(<RouterProviders />);
-    expect(await within(card("Claude Code")).findByText("Logged in · 2 agents")).toBeTruthy();
+    expect(await within(card("Claude Code")).findByText("2 accounts · 2 logged in")).toBeTruthy();
+    expect(within(card("Claude Code")).getByText("me@home.dev")).toBeTruthy();
     expect(within(card("Claude Code")).getByRole("link").getAttribute("href")).toBe("#/router/providers/claude-code");
+  });
+
+  it("keeps Claude Code accounts out of the compatible providers", async () => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([row({ name: "claude-work", kind: "claude-code", api_key_env: "" })])
+    );
+    render(<RouterProviders />);
+    await screen.findByRole("article", { name: "Claude Code" });
+    expect(screen.queryByRole("article", { name: "claude-work" })).toBeNull();
   });
 });
 
@@ -667,20 +765,174 @@ describe("router provider page", () => {
     expect(vi.mocked(api.listRouterModels)).toHaveBeenCalledWith("ds", false);
   });
 
-  it("shows Claude Code with a create button and never a login button", async () => {
+});
+
+/* Spec 39 revision 2 (REQ-CCT-010, REQ-CCT-011): the Claude Code page lists
+   the accounts as connections, adds one with a login command, and keeps the
+   custom model IDs. */
+describe("Claude Code page", () => {
+  beforeEach(() => {
+    vi.mocked(api.listProviders).mockResolvedValue(
+      providersResponse([
+        row({ name: "claude-code", kind: "claude-code", api_key_env: "", builtin: true, allow_scheduled: false }),
+        row({
+          name: "claude-work",
+          kind: "claude-code",
+          api_key_env: "",
+          config_dir: "/Users/x/.lana/claude/claude-work",
+          allow_scheduled: true,
+        }),
+      ])
+    );
+    vi.mocked(api.getRouterUsage).mockResolvedValue({
+      ...USAGE,
+      by_provider: [
+        { ...STATS, provider: "claude-code", calls: 12, input_tokens: 45000, output_tokens: 3000, cost_usd: 0.42 },
+        { ...STATS, provider: "claude-work", calls: 3, input_tokens: 9000, output_tokens: 1000, cost_usd: 0.05 },
+      ],
+    });
+  });
+
+  /* AC-CCT-013 (UI side). */
+  it("shows each account with its email, plan, windows, and usage", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    render(<ProviderDetail id="claude-code" />);
+    const home = await screen.findByRole("listitem", { name: "Account claude-code" });
+    const work = screen.getByRole("listitem", { name: "Account claude-work" });
+    expect(within(home).getByText("me@home.dev")).toBeTruthy();
+    expect(within(home).getByText("Max")).toBeTruthy();
+    expect(within(home).getByText("Built in")).toBeTruthy();
+    expect(within(home).getByText(/^42 % used · resets /)).toBeTruthy();
+    expect(within(home).getByText(/^10 % used · resets /)).toBeTruthy();
+    expect(await within(home).findByText(/^12 calls · 45k in/)).toBeTruthy();
+    expect(within(work).getByText("me@work.dev")).toBeTruthy();
+    expect(within(work).getByText("Team")).toBeTruthy();
+    expect(within(work).getByText(/^80 % used/)).toBeTruthy();
+    expect(within(work).getByText(/^55 % used/)).toBeTruthy();
+    expect(within(work).getByText(/^3 calls · 9k in/)).toBeTruthy();
+    /* The built-in account cannot be deleted; an added one can. */
+    expect(within(home).queryByRole("button", { name: "Delete claude-code" })).toBeNull();
+    expect(within(work).getByRole("button", { name: "Delete claude-work" })).toBeTruthy();
+    expect(screen.getByText(/break Anthropic's terms/)).toBeTruthy();
+  });
+
+  it("shows the login command of a logged-out account and never a login button", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue({
+      ...TWO_ACCOUNTS,
+      accounts: [
+        account({
+          name: "claude-work",
+          logged_in: false,
+          login_command: "CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-work' claude",
+        }),
+      ],
+    });
+    render(<ProviderDetail id="claude-code" />);
+    const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    expect(within(work).getByText("Not logged in")).toBeTruthy();
+    expect(within(work).getByText("CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-work' claude")).toBeTruthy();
+    expect(within(work).getByRole("button", { name: "Copy login command" })).toBeTruthy();
+    expect(work.textContent).toContain("then type /login.");
+    expect(screen.queryByRole("button", { name: /^log ?in/i })).toBeNull();
+  });
+
+  it("switches scheduled runs per account with kind claude-code", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    vi.mocked(api.saveProvider).mockResolvedValue({ name: "claude-work", version: "v2", restart_required: false });
+    render(<ProviderDetail id="claude-code" />);
+    const toggle = await screen.findByRole("checkbox", { name: "Allow scheduled runs for claude-work" });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("claude-work", {
+        kind: "claude-code",
+        config_dir: "/Users/x/.lana/claude/claude-work",
+        allow_scheduled: false,
+        disabled: false,
+        expected_version: "v1",
+      });
+    });
+  });
+
+  it("adds an account and shows its login command until it is logged in", async () => {
     HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
       this.open = true;
     };
-    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-      this.open = false;
-    };
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(CLAUDE);
+    vi.mocked(api.saveProvider).mockResolvedValue({
+      name: "claude-play",
+      version: "v2",
+      restart_required: false,
+      login_command: "CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-play' claude",
+    });
     render(<ProviderDetail id="claude-code" />);
-    expect((await screen.findAllByText("Not logged in")).length).toBeGreaterThan(0);
-    expect(document.body.textContent).toContain("Run claude, then /login.");
-    expect(screen.queryByRole("button", { name: /log ?in/i })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Create Claude Agent" }));
-    const radio = (await screen.findByRole("radio", { name: "Claude Agent" })) as HTMLInputElement;
-    expect(radio.checked).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Add account" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Use separate accounts for separate purposes");
+    fireEvent.change(within(dialog).getByLabelText("Name"), { target: { value: "claude-play" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add account" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.saveProvider)).toHaveBeenCalledWith("claude-play", {
+        kind: "claude-code",
+        expected_version: "v1",
+      });
+    });
+    const step = screen.getByRole("dialog");
+    expect(await within(step).findByText("CLAUDE_CONFIG_DIR='/Users/x/.lana/claude/claude-play' claude")).toBeTruthy();
+    expect(within(step).queryByRole("button", { name: /^log ?in/i })).toBeNull();
+
+    vi.mocked(api.getClaudeAgent).mockResolvedValue({
+      ...CLAUDE,
+      accounts: [...CLAUDE.accounts, account({ name: "claude-play", logged_in: false })],
+    });
+    fireEvent.click(within(step).getByRole("button", { name: "Check again" }));
+    expect(await within(step).findByText(/Not logged in yet/)).toBeTruthy();
+
+    vi.mocked(api.getClaudeAgent).mockResolvedValue({
+      ...CLAUDE,
+      accounts: [...CLAUDE.accounts, account({ name: "claude-play", email: "me@work.dev", plan: "pro" })],
+    });
+    fireEvent.click(within(step).getByRole("button", { name: "Check again" }));
+    expect(await within(step).findByText(/Logged in as me@work.dev · Pro/)).toBeTruthy();
+    expect(within(step).queryByRole("button", { name: "Check again" })).toBeNull();
+  });
+
+  it("adds and removes a custom model ID with PUT /v1/router/claude-code/models", async () => {
+    vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
+    vi.mocked(api.listRouterModels).mockResolvedValue([
+      {
+        provider: "claude-code",
+        fetched_at: "",
+        fetch_error: "",
+        models: [
+          { id: "opus", address: "claude-code/opus", name: "Claude Code · Opus (latest)", context_window: 200000, max_output: 0, vision: true, thinking: true, price: null, source: "alias" },
+          { id: "claude-opus-5-5", address: "claude-code/claude-opus-5-5", name: "Claude Code · Opus 5.5", context_window: 200000, max_output: 0, vision: true, thinking: true, price: null, source: "claude_code" },
+          { id: "my-model", address: "claude-code/my-model", name: "my-model", context_window: 0, max_output: 0, vision: false, thinking: false, price: null, source: "custom" },
+        ],
+      },
+    ]);
+    vi.mocked(api.saveClaudeCodeModels).mockResolvedValue({ models: ["my-model", "claude-next"], version: "v2", restart_required: false });
+    vi.mocked(api.testRouterModel).mockResolvedValue({ ok: true, latency_ms: 900 });
+    render(<ProviderDetail id="claude-code" />);
+    const table = await screen.findByLabelText("Claude Code models");
+    expect(await within(table).findByText("Claude Code · Opus 5.5")).toBeTruthy();
+    expect(within(table).getByText("Custom")).toBeTruthy();
+    expect(within(table).getByText("Alias")).toBeTruthy();
+    expect(table.textContent).toContain("uses your plan");
+
+    fireEvent.click(within(table).getByRole("button", { name: "Test claude-code/opus" }));
+    await waitFor(() => expect(vi.mocked(api.testRouterModel)).toHaveBeenCalledWith("claude-code/opus"));
+
+    fireEvent.change(within(table).getByLabelText("Custom model ID"), { target: { value: "claude-next" } });
+    fireEvent.click(within(table).getByRole("button", { name: "Add model" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.saveClaudeCodeModels)).toHaveBeenCalledWith(["my-model", "claude-next"], "v1");
+    });
+
+    fireEvent.click(within(table).getByRole("button", { name: "Remove my-model" }));
+    await waitFor(() => {
+      expect(vi.mocked(api.saveClaudeCodeModels)).toHaveBeenLastCalledWith([], "v2");
+    });
   });
 });
 

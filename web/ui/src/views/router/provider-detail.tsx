@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as routerApi from "../../api/router";
 import type {
-  ClaudeAgentStatus,
   LimitSnapshot,
   ListProvidersResponse,
   ProviderRow,
@@ -10,20 +9,14 @@ import type {
 } from "../../api/router";
 import { Badge, Button, EmptyState, ErrorState, IconButton, Panel, Toggle } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
-import { CLAUDE_RUNTIME } from "../agent-common";
-import { CreateAgentDialog } from "../agents";
 import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../settings-pages";
+import { ClaudeCodeDetail } from "./claude-code-page";
 import { ConnectionDialog } from "./connection-dialog";
-import { ClaudeAgentCard, LimitCard } from "./limits";
+import { LimitCard } from "./limits";
 import { ProviderModelsPanel } from "./models";
-import {
-  CLAUDE_AGENT_PROVIDER_NAME,
-  CLAUDE_CODE_ID,
-  cardIdFor,
-  presetById,
-} from "./presets";
+import { CLAUDE_CODE_ID, cardIdFor, presetById } from "./presets";
 import { ProviderLogo } from "./provider-logo";
-import { StatusPills, UsedBy, cardStatus, claudeStatus, keyState } from "./providers";
+import { StatusPills, UsedBy, cardStatus, keyState } from "./providers";
 import { compact, count, failureOf, inUseText, isStale, ms, percent, statsCostText } from "./router-common";
 
 /* One provider's page (#/router/providers/<preset or name>): its connections
@@ -575,111 +568,3 @@ function ApiProviderDetail({ id }: { id: string }) {
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/* Claude Code                                                         */
-/* ------------------------------------------------------------------ */
-
-function ClaudeCodeDetail() {
-  const [status, setStatus] = useState<ClaudeAgentStatus | null>(null);
-  const [failed, setFailed] = useState("");
-  const [creating, setCreating] = useState(false);
-  const { limits } = useLimits([CLAUDE_AGENT_PROVIDER_NAME]);
-
-  useEffect(() => {
-    let alive = true;
-    routerApi
-      .getClaudeAgent()
-      .then((value) => {
-        if (alive) {
-          setStatus(value);
-        }
-      })
-      .catch((failure: unknown) => {
-        if (alive) {
-          setFailed(failureOf(failure).message);
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const state = claudeStatus(status, Boolean(failed));
-  const limit = limits && limits.length > 0 ? limits[0] || null : null;
-  const agents = status ? status.configured_agents : [];
-
-  return (
-    <div className="rt-detail-page">
-      <BackLink />
-      <header className="rt-dh">
-        <ProviderLogo logo="claude" name="Claude Code" size={52} />
-        <div className="rt-dh-t">
-          <h1>Claude Code</h1>
-          <p className="rt-dh-sub">
-            Runs Claude Code on this machine as an agent runtime, on your Claude plan or an API key.
-          </p>
-          <div className="rt-dh-status">
-            <Badge tone={state.tone} dot={state.tone !== "gray"}>
-              {state.label}
-            </Badge>
-          </div>
-        </div>
-        <div className="rt-dh-acts">
-          <Button variant="primary" size="sm" icon="plus" onClick={() => setCreating(true)}>
-            Create Claude Agent
-          </Button>
-        </div>
-      </header>
-
-      {failed ? (
-        <p className="rt-limit-err" role="alert">
-          {failed}
-        </p>
-      ) : null}
-      {status && !status.binary ? (
-        <p className="rt-claude-login">
-          Claude Code is not on this machine&apos;s PATH. Install it, run <code>claude</code>, then{" "}
-          <code>/login</code>.
-        </p>
-      ) : null}
-
-      <div className="rt-grid2 rt-claude-grid">
-        <ClaudeAgentCard status={status} limit={limit} usage={null} />
-        <Panel title="Agents using it">
-          {agents.length === 0 ? (
-            <EmptyState
-              size="sm"
-              icon="bot"
-              text="No Claude Agent yet. Create one to run Claude Code with lana's chats, schedules, and workflows."
-            />
-          ) : (
-            <ul className="rt-agent-list">
-              {agents.map((name) => (
-                <li key={name}>
-                  <a href={"#/agents/" + encodeURIComponent(name)}>
-                    <Ic name="bot" size={14} />
-                    <span className="trunc">{name}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
-
-      <UsageStrip names={[CLAUDE_AGENT_PROVIDER_NAME]} />
-
-      {creating ? (
-        <CreateAgentDialog
-          initialRuntime={CLAUDE_RUNTIME}
-          onClose={() => setCreating(false)}
-          onCreated={(name) => {
-            window.location.hash = "#/agents/" + encodeURIComponent(name);
-          }}
-        />
-      ) : null}
-    </div>
-  );
-}
-

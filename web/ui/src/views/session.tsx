@@ -14,6 +14,9 @@ import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
 import { COMBOS_GROUP, getRouter } from "../api/router";
+import { groupClaudeChoices, useClaudeAccounts } from "./router/claude-code";
+import { CLAUDE_CODE_GROUP } from "./router/presets";
+import { ProviderLogo } from "./router/provider-logo";
 import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
@@ -493,7 +496,14 @@ function RouterChoiceItems({
       {groups.map((group) => (
         <div key={group} role="group" aria-label={group}>
           <p className="mh" aria-hidden="true">
-            {group}
+            {group === CLAUDE_CODE_GROUP || group.startsWith(CLAUDE_CODE_GROUP + " · ") ? (
+              <span className="mh-logo">
+                <ProviderLogo logo="claude" name="Claude Code" size={14} />
+                {group}
+              </span>
+            ) : (
+              group
+            )}
           </p>
           {choices
             .filter((choice) => choice.group === group)
@@ -747,6 +757,13 @@ function Composer({
   const messageTarget =
     teamSession && team && team.name ? String(team.name) : agent || "agent";
   const busySession = readOnly || turnRunning;
+
+  /* Spec 39 (REQ-CCT-009): Claude Code models sit in one group per account. */
+  const { accounts: claudeAccounts } = useClaudeAccounts();
+  const menuChoices = useMemo(
+    () => groupClaudeChoices(choices, null, claudeAccounts),
+    [choices, claudeAccounts]
+  );
 
   /* Spec 37: the session model menu offers the router choices. */
   useEffect(() => {
@@ -1029,7 +1046,7 @@ function Composer({
                       agentModel={agentModel}
                       provider={modelProvider}
                       models={catalog}
-                      choices={choices}
+                      choices={menuChoices}
                       onPick={pickModel}
                     />
                   </Menu>

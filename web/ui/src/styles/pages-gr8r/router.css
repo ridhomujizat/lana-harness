@@ -68,7 +68,6 @@ g.on .rt-cost-bar { opacity: 0.85; }
   border-radius: var(--r-lg);
   background: var(--surface);
 }
-.rt-claude { grid-column: 1 / -1; }
 .rt-limit-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .rt-limit-name { font-weight: 600; color: var(--text); min-width: 0; }
 .rt-limit-h .badge { margin-left: auto; flex: none; }
@@ -112,8 +111,6 @@ g.on .rt-cost-bar { opacity: 0.85; }
   color: var(--text);
   font-size: var(--fs-sm);
 }
-.rt-claude-cost { margin: 0; font-size: var(--fs-sm); }
-.rt-claude-cost .num { font-weight: 600; }
 
 .rt-cooling-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .rt-cooling-list li {
@@ -247,22 +244,107 @@ g.on .rt-cost-bar { opacity: 0.85; }
 .rt-code .ibtn { position: absolute; top: 6px; right: 6px; }
 .rt-keys-table { min-width: 520px; }
 
-/* Agent runtime choice (spec 38) */
-.rt-runtime { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.rt-runtime-tile {
+/* Claude Code (spec 39): the mark on agents, the model note, and the
+   account rows of the Claude Code page. */
+.rt-cc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rt-cc-badge .pl { border-radius: 999px; }
+.agent-cc-note {
   display: flex;
-  gap: 10px;
   align-items: flex-start;
+  gap: 10px;
+  margin-top: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  cursor: pointer;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r);
+  background: var(--sunken);
 }
-.rt-runtime-tile.is-on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.rt-runtime-tile b { display: block; font-weight: 600; font-size: var(--fs-sm); }
-.rt-runtime-tile span { display: block; color: var(--text-3); font-size: var(--fs-xs); }
-.rt-engine { white-space: nowrap; }
+.agent-cc-note p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; max-width: 72ch; }
+.agent-cc-note a, .agent-cc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.agent-cc-link { font-size: var(--fs-sm); }
+.mh-logo { display: inline-flex; align-items: center; gap: 6px; }
+
+.rt-accts { list-style: none; margin: 0; padding: 0; }
+.rt-acct {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--divider);
+}
+.rt-acct:first-child { border-top: 0; padding-top: 4px; }
+.rt-acct.is-off .rt-acct-body, .rt-acct.is-off .rt-acct-id { opacity: 0.6; }
+.rt-acct-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
+.rt-acct-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 200px; }
+.rt-acct-name { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.rt-acct-email { color: var(--text-2); font-size: var(--fs-sm); }
+.rt-acct-state { display: flex; flex-wrap: wrap; gap: 4px; }
+.rt-acct-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.rt-acct-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px 24px;
+  padding-left: 44px;
+}
+.rt-windows { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.rt-acct-facts { align-content: start; }
+.rt-acct-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding-left: 44px;
+}
+.rt-acct-sched { display: inline-flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.rt-acct-sched b { display: block; font-weight: 500; font-size: var(--fs-sm); color: var(--text); }
+.rt-acct-sched .hint { display: block; }
+.rt-login {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--amber-soft);
+  font-size: var(--fs-sm);
+}
+.rt-acct > .rt-login { margin-left: 44px; }
+.rt-login-k { color: var(--text-2); }
+.rt-login-k code { font-family: var(--mono); color: var(--text); }
+.rt-login-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.rt-login-cmd code { overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.rt-cc-terms { margin: 12px 0 0; }
+.rt-cc-login-step { display: flex; flex-direction: column; gap: 12px; }
+.rt-cc-login-step p { margin: 0; }
+.rt-cc-models-lead { margin: 0 0 12px; }
+.rt-cc-add-model { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.rt-cc-add-model .input { width: 16rem; max-width: 100%; }
 
 @media (max-width: 1000px) {
   .rt-grid2 { grid-template-columns: minmax(0, 1fr); }
@@ -277,13 +359,13 @@ g.on .rt-cost-bar { opacity: 0.85; }
   .mini.rt-combo-row { display: flex; flex-wrap: wrap; gap: var(--s-2); min-height: 0; padding: 10px 14px; }
   .mini.rt-combo-row .settings-cell { flex: 1 1 100%; }
   .rt-proxy-row { grid-template-columns: minmax(0, 1fr); }
-  .rt-runtime { grid-template-columns: minmax(0, 1fr); }
+  .rt-acct-body { grid-template-columns: minmax(0, 1fr); padding-left: 0; }
+  .rt-acct-foot { padding-left: 0; }
+  .rt-acct > .rt-login { margin-left: 0; }
   .rt-section-h .btn { margin-left: auto; }
 }
 .rt-key-acts { white-space: nowrap; }
-.rt-claude .rt-limit-b { max-width: 760px; }
-.agent-claude-login { margin: 8px 0 0; }
-.agent-claude-login code, .rt-claude-login code { font-family: var(--mono); }
+.rt-claude-login code { font-family: var(--mono); }
 
 /* ------------------------------------------------------------------ */
 /* Provider logos                                                      */
@@ -447,8 +529,6 @@ g.on .rt-cost-bar { opacity: 0.85; }
 .rt-detail-page > .settings-status:empty, .rt-providers > .settings-status:empty { margin: 0; min-height: 0; }
 .rt-detail-quota { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .rt-detail-quota .panel { margin-bottom: 0; }
-.rt-claude-grid { align-items: start; }
-.rt-claude-grid .rt-claude { grid-column: auto; }
 .rt-agent-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .rt-agent-list a {
   display: flex;

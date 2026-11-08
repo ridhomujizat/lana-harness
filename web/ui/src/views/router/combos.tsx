@@ -18,7 +18,8 @@ import type { SelectOption } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { Alert, StatusLine } from "../settings-pages";
 import { UsedBy } from "./providers";
-import { ProviderMark, providerIndex } from "./provider-logo";
+import { ProviderLogo, ProviderMark, providerIndex } from "./provider-logo";
+import { ACCOUNTS_TERMS_NOTE, claudeAccountNames, groupClaudeChoices, isClaudeChoice, useClaudeAccounts } from "./claude-code";
 import { failureOf, inUseText, isStale } from "./router-common";
 
 /* Router → Combos (REQ-RTR-004, REQ-RTR-014, API-RTR-007), laid out like
@@ -70,6 +71,9 @@ interface ComboDialogProps {
   version: string;
   addresses: SelectOption[];
   providers?: Record<string, RouterProvider>;
+  /* The Claude Code account names, for the several-accounts note
+     (REQ-CCT-010). */
+  claudeAccounts?: string[];
   takenNames: string[];
   onClose: () => void;
   onSaved: (text: string) => void;
@@ -80,6 +84,7 @@ export function ComboDialog({
   version,
   addresses,
   providers = {},
+  claudeAccounts = [],
   takenNames,
   onClose,
   onSaved,
@@ -97,6 +102,11 @@ export function ComboDialog({
 
   const available = addresses.filter((entry) => !models.includes(entry.value));
   const full = models.length >= MAX_MODELS;
+  /* REQ-CCT-010: lana never rotates accounts; a combo of several Claude
+     Code accounts gets the terms note. */
+  const claudeInCombo = new Set(
+    models.map((address) => addressProvider(address)).filter((name) => claudeAccounts.includes(name))
+  );
 
   function add(value: string) {
     const address = value.trim();
@@ -350,6 +360,11 @@ export function ComboDialog({
             </div>
           </div>
           {full ? <span className="hint">A combo holds at most {MAX_MODELS} models.</span> : null}
+          {claudeInCombo.size > 1 ? (
+            <p className="hint rt-cc-terms" role="note">
+              {ACCOUNTS_TERMS_NOTE}
+            </p>
+          ) : null}
         </div>
 
         <Alert
@@ -390,9 +405,15 @@ export function RouterCombos() {
   }, [load]);
 
   const index = useMemo(() => providerIndex(data?.providers || []), [data]);
+  /* REQ-CCT-009: Claude Code models in one group per account. */
+  const { accounts } = useClaudeAccounts();
+  const claudeNames = useMemo(
+    () => claudeAccountNames(data?.choices || [], data?.providers || [], accounts),
+    [data, accounts]
+  );
   const addresses = useMemo(
     () =>
-      (data?.choices || [])
+      groupClaudeChoices(data?.choices || [], data?.providers || [], accounts)
         .filter((choice) => choice.group !== COMBOS_GROUP)
         .map((choice) => ({
           value: choice.value,
@@ -401,9 +422,13 @@ export function RouterCombos() {
               ? choice.label + " (" + choice.value + ")"
               : choice.value,
           group: choice.group,
-          icon: <ProviderMark provider={index[choice.group]} name={choice.group} size={16} />,
+          icon: isClaudeChoice(choice, claudeNames) ? (
+            <ProviderLogo logo="claude" name="Claude Code" size={16} />
+          ) : (
+            <ProviderMark provider={index[choice.group]} name={choice.group} size={16} />
+          ),
         })),
-    [data, index]
+    [data, index, accounts, claudeNames]
   );
   const combos = data?.combos || [];
 
@@ -488,6 +513,7 @@ export function RouterCombos() {
           version={data.version}
           addresses={addresses}
           providers={index}
+          claudeAccounts={claudeNames}
           takenNames={combos.map((combo) => combo.name).concat(data.providers.map((provider) => provider.name))}
           onClose={() => setDialog(null)}
           onSaved={(text) => {

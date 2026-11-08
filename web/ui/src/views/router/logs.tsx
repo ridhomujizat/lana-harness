@@ -19,6 +19,8 @@ import {
   timeLabel,
 } from "./router-common";
 import { ProviderMark, providerIndex } from "./provider-logo";
+import { useClaudeAccounts } from "./claude-code";
+import { CLAUDE_CODE_KIND } from "./presets";
 
 /* Router → Logs (REQ-RTR-009, API-RTR-012): every attempt, newest first.
    "Load more" passes the last id as `before`, which is exclusive. */
@@ -135,7 +137,19 @@ export function RouterLogs() {
     };
   }, []);
 
-  const index = useMemo(() => providerIndex(providers), [providers]);
+  /* Spec 39 (API-CCT-012): Claude Code records name their account; the
+     filter lists every account and the rows show the Claude logo. */
+  const { accounts } = useClaudeAccounts();
+  const filterProviders = useMemo(() => {
+    const list: RouterProvider[] = providers.slice();
+    for (const account of accounts) {
+      if (!list.some((entry) => entry.name === account.name)) {
+        list.push({ name: account.name, kind: CLAUDE_CODE_KIND, base_url: "", key_state: "", used_by: [] });
+      }
+    }
+    return list;
+  }, [providers, accounts]);
+  const index = useMemo(() => providerIndex(filterProviders), [filterProviders]);
   const query = useMemo<CallsQuery>(
     () => ({ limit: PAGE_SIZE, provider, status, source }),
     [provider, status, source]
@@ -212,7 +226,7 @@ export function RouterLogs() {
             size="sm"
             options={[
               { value: "", label: "All providers" },
-              ...providers.map((entry) => ({
+              ...filterProviders.map((entry) => ({
                 value: entry.name,
                 label: entry.name,
                 icon: <ProviderMark provider={entry} size={16} />,

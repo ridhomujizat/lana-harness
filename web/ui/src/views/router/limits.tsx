@@ -1,20 +1,19 @@
 import type { ReactNode } from "react";
 import type {
   BalanceLimit,
-  ClaudeAgentStatus,
+  ClaudeAccount,
   CreditLimit,
   LimitSnapshot,
   PlanWindow,
   RateLimitValue,
-  UsageProviderRow,
 } from "../../api/router";
 import { Badge, Progress } from "../../ui/gr8r";
 import type { ProgressTone } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import {
+  CopyButton,
   agoText,
   count,
-  costText,
   kindLabel,
   resetsIn,
   usd,
@@ -24,8 +23,9 @@ import { ProviderLogo, ProviderMark } from "./provider-logo";
 import { familyLabel } from "./presets";
 import type { ProviderShape } from "./presets";
 
-/* The quota cards (REQ-RTR-012, REQ-CCR-008): one card per provider with
-   what it last reported, and the Claude Code card with its plan windows.
+/* The quota cards (REQ-RTR-012, REQ-CCR-008, REQ-CCT-011): one card per
+   provider with what it last reported, and one card per Claude Code account
+   with its plan windows.
    Shown on the Quota page and on each provider's page. */
 
 const RATE_ROWS: Array<{ key: "requests" | "tokens" | "input_tokens" | "output_tokens"; unit: string }> = [
@@ -240,105 +240,102 @@ export function windowText(window: PlanWindow): string {
   return parts.join(" · ");
 }
 
-function authIsPlan(method: string): boolean {
-  return !/api|console|key/i.test(method || "");
+/* The plan name of `claude auth status`: "max" → "Max". */
+export function planLabel(plan: string): string {
+  const text = String(plan || "").replace(/[_-]+/g, " ").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 }
 
-export function ClaudeAgentCard({
-  status,
-  limit,
-  usage,
-}: {
-  status: ClaudeAgentStatus | null;
-  limit: LimitSnapshot | null;
-  usage: UsageProviderRow | null;
-}) {
-  const windows = limit && Array.isArray(limit.windows) ? limit.windows : [];
-  const plan = status ? authIsPlan(status.auth_method) : true;
+/* The plan windows of one Claude Code account (AC-CCR-009): a bar per
+   window with "42 % used · resets in 1h 32m". */
+export function PlanWindows({ windows }: { windows: PlanWindow[] }) {
+  if (windows.length === 0) {
+    return <p className="rt-limit-none">No plan windows reported yet. They appear after the first turn.</p>;
+  }
   return (
-    <article className="rt-limit rt-claude" aria-label="Claude Code plan">
+    <div className="rt-windows">
+      {windows.map((window) => {
+        const reported = hasUtilization(window);
+        const used = reported ? Math.max(0, Math.min(1, Number(window.utilization) || 0)) : 0;
+        return (
+          <Meter
+            key={window.type}
+            label={windowLabel(window.type)}
+            text={windowText(window).split(" · ").slice(1).join(" · ")}
+            value={window.status === "rejected" && (!reported || !used) ? 1 : used}
+            tone={window.status === "rejected" ? "red" : usedTone(used)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* REQ-CCT-010: lana never logs in. A logged-out account shows the command
+   that logs it in once, with a copy button, and never a login button. */
+export function LoginCommand({ command }: { command: string }) {
+  const text = command || "claude";
+  return (
+    <div className="rt-login" role="note">
+      <span className="rt-login-k">Log in once in a terminal:</span>
+      <span className="rt-login-cmd">
+        <code className="mono">{text}</code>
+        <CopyButton text={text} label="Copy login command" />
+      </span>
+      <span className="rt-login-k">
+        then type <code className="mono">/login</code>.
+      </span>
+    </div>
+  );
+}
+
+/* The windows of an account: its own, else its limit snapshot's. */
+export function accountWindows(account: ClaudeAccount, limit: LimitSnapshot | null): PlanWindow[] {
+  if (account.windows.length > 0) {
+    return account.windows;
+  }
+  return limit && Array.isArray(limit.windows) ? limit.windows : [];
+}
+
+/* One Claude Code account on the Quota page (REQ-CCT-011): its email, plan,
+   login state, and its own plan windows. */
+export function ClaudeAccountCard({
+  account,
+  limit,
+}: {
+  account: ClaudeAccount;
+  limit: LimitSnapshot | null;
+}) {
+  const windows = accountWindows(account, limit);
+  return (
+    <article className="rt-limit rt-claude" aria-label={"Claude Code plan of " + account.name}>
       <header className="rt-limit-h">
         <ProviderLogo logo="claude" name="Claude Code" size={28} />
         <span className="rt-limit-title">
-          <span className="rt-limit-name trunc">Claude Code</span>
-          <span className="rt-limit-sub trunc">Claude Agent runtime</span>
+          <span className="rt-limit-name trunc">{account.email || "Claude Code"}</span>
+          <span className="rt-limit-sub mono trunc">{account.name}</span>
         </span>
-        {status ? (
-          status.logged_in ? (
-            <Badge tone="green" dot>
-              Logged in{status.auth_method ? " · " + status.auth_method : ""}
-            </Badge>
-          ) : (
-            <Badge tone="amber" dot>
-              Not logged in
-            </Badge>
-          )
-        ) : null}
+        {account.plan ? <Badge tone="violet">{planLabel(account.plan)}</Badge> : null}
+        {account.logged_in ? (
+          <Badge tone="green" dot>
+            Logged in
+          </Badge>
+        ) : (
+          <Badge tone="amber" dot>
+            Not logged in
+          </Badge>
+        )}
       </header>
       <div className="rt-limit-b">
-        {status ? (
-          <dl className="rt-facts">
-            <dt>Binary</dt>
-            <dd className="mono trunc" title={status.binary}>
-              {status.binary || "Not found on PATH"}
-            </dd>
-            <dt>Version</dt>
-            <dd className="num">
-              {status.version || "Unknown"}
-              {status.version && !status.version_ok ? (
-                <span className="rt-warn">
-                  <Ic name="triangle-alert" size={12} /> Too old. Update Claude Code to 2.1.0 or newer.
-                </span>
-              ) : null}
-            </dd>
-            <dt>Runs</dt>
-            <dd className="num">
-              {count(status.running)} running · {count(status.queued)} queued
-              {status.max_concurrent > 0 ? " of " + count(status.max_concurrent) + " at once" : ""}
-            </dd>
-            {status.configured_agents.length > 0 ? (
-              <>
-                <dt>Agents</dt>
-                <dd className="trunc">{status.configured_agents.join(", ")}</dd>
-              </>
-            ) : null}
-          </dl>
-        ) : null}
-        {status && !status.logged_in ? (
-          <p className="rt-claude-login">
-            Run <code>claude</code>, then <code>/login</code>.
-          </p>
-        ) : null}
-        {windows.map((window) => {
-          const reported = hasUtilization(window);
-          const used = reported ? Math.max(0, Math.min(1, Number(window.utilization) || 0)) : 0;
-          return (
-            <Meter
-              key={window.type}
-              label={windowLabel(window.type)}
-              text={windowText(window)}
-              value={window.status === "rejected" && (!reported || !used) ? 1 : used}
-              tone={window.status === "rejected" ? "red" : usedTone(used)}
-            />
-          );
-        })}
-        {windows.length === 0 ? (
-          <p className="rt-limit-none">No plan windows reported yet.</p>
-        ) : null}
-        {usage ? (
-          <p className="rt-claude-cost">
-            <span className="num">{costText(usage.cost_usd, usage.cost_partial)}</span>{" "}
-            <span className="muted">
-              {plan
-                ? "reported by Claude Code; included in your plan"
-                : "reported by Claude Code"}
-            </span>
-          </p>
-        ) : null}
-        {status && status.error ? (
+        {!account.logged_in ? <LoginCommand command={account.login_command} /> : null}
+        <PlanWindows windows={windows} />
+        <p className="rt-limit-none">
+          {count(account.running)} running · {count(account.queued)} queued
+        </p>
+        {account.error ? (
           <p className="rt-limit-err" role="status">
             <Ic name="circle-alert" size={12} />
-            <span>{status.error}</span>
+            <span>{account.error}</span>
           </p>
         ) : null}
       </div>

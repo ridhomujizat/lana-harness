@@ -8,6 +8,10 @@ vi.mock("../api/agents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/agents")>();
   return { ...actual, listAgents: vi.fn(), createAgent: vi.fn() };
 });
+vi.mock("../api/router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/router")>();
+  return { ...actual, getRouter: vi.fn(), getClaudeAgent: vi.fn() };
+});
 vi.mock("../api/rooms", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/rooms")>();
   return { ...actual, listRooms: vi.fn(), openRoomsStream: vi.fn() };
@@ -16,6 +20,7 @@ vi.mock("../api/rooms", async (importOriginal) => {
 import { createAgent, listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { openRoomsStream } from "../api/rooms";
+import { getRouter } from "../api/router";
 import type { RoomRow } from "../api/rooms";
 import { AgentsPage, CreateAgentDialog } from "./agents";
 
@@ -162,8 +167,9 @@ describe("Agents roster (AC-ROOM-019)", () => {
   });
 });
 
-/* Spec 38 (REQ-CCR-009, AC-CCR-010 UI side). */
-describe("Claude Agent runtime", () => {
+/* Spec 39 (REQ-CCT-009, AC-CCT-011): no engine choice; a Claude Code model
+   is picked like any other model. */
+describe("Claude Code models", () => {
   beforeEach(() => {
     HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
       this.open = true;
@@ -171,9 +177,20 @@ describe("Claude Agent runtime", () => {
     HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
       this.open = false;
     };
+    vi.mocked(getRouter).mockResolvedValue({
+      version: "v1",
+      providers: [],
+      combos: [],
+      cooling: [],
+      proxy: { enabled: false, base_url: "" },
+      choices: [
+        { value: "deepseek/deepseek-flash", label: "DeepSeek Flash", group: "deepseek" },
+        { value: "claude-code/opus", label: "Claude Code · Opus (latest)", group: "Claude Code" },
+      ],
+    });
   });
 
-  it("creates a Claude Agent with runtime claude-code and no provider", async () => {
+  it("creates a lana agent with a Claude Code model and no runtime or provider", async () => {
     vi.mocked(createAgent).mockResolvedValue({ name: "claude", restart_required: false });
     const onCreated = vi.fn();
     render(<CreateAgentDialog onClose={() => {}} onCreated={onCreated} />);
@@ -181,35 +198,39 @@ describe("Claude Agent runtime", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /Name/ }), {
       target: { value: "claude" },
     });
-    fireEvent.click(screen.getByRole("radio", { name: "Claude Agent" }));
-    expect(screen.queryByRole("combobox", { name: "Template" })).toBeNull();
-    fireEvent.click(screen.getByRole("combobox", { name: "Claude model" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Opus" }));
+    expect(screen.queryByRole("radio", { name: "Claude Agent" })).toBeNull();
+    expect(screen.queryByText("Runtime")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Template" })).toBeTruthy();
+    expect(screen.queryByText(/Runs in Claude Code/)).toBeNull();
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Claude Code · Opus (latest)" }));
+    expect(screen.getByText(/Runs in Claude Code with your Claude plan/)).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
 
     await waitFor(() => {
       expect(onCreated).toHaveBeenCalledWith("claude");
     });
     const body = vi.mocked(createAgent).mock.calls[0]?.[0];
-    expect(body).toMatchObject({
+    expect(body).toEqual({
       name: "claude",
-      runtime: "claude-code",
-      model: "opus",
-      auth: "subscription",
-      allow_scheduled: false,
-      permission: "ask",
+      template: "assistant",
+      workspace: "",
+      model: "claude-code/opus",
     });
-    expect(body && "provider" in body).toBe(false);
-    expect(body && "template" in body).toBe(false);
     expect(screen.queryByText(/Login with Claude/i)).toBeNull();
   });
 
-  it("labels a Claude Agent card with its engine", async () => {
+  it("marks an agent that runs in Claude Code with the Claude logo", async () => {
     vi.mocked(listAgents).mockResolvedValue({
-      agents: [agent({ name: "claude", provider: "", model: "opus", runtime: "claude-code" })],
+      agents: [agent({ name: "claude", provider: "claude-code", model: "claude-code/opus", claude_code: true })],
     });
     installRows([room({ name: "claude" })]);
     render(<AgentsPage />);
-    expect(await screen.findByText("Claude Agent · opus")).toBeTruthy();
+    expect(await screen.findByText("claude-code/opus")).toBeTruthy();
+    const badge = document.querySelector(".rt-cc-badge") as HTMLElement;
+    expect(badge.textContent).toBe("Claude Code");
+    expect(badge.querySelector('[data-logo="claude"]')).toBeTruthy();
+    expect(screen.queryByText(/Claude Agent/)).toBeNull();
   });
 });

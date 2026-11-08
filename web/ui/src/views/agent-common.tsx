@@ -26,7 +26,7 @@ export function Icon({ name, className = "icon-20" }: IconProps) {
 export interface AgentLike {
   name?: string;
   runtime?: string;
-  engine_label?: string;
+  claude_code?: boolean;
   kind?: string;
   provider?: string | null;
   model?: string | null;
@@ -141,28 +141,19 @@ export function splitTarget(target: unknown): {
   return { provider: "", model: value };
 }
 
-/* Spec 38: the runtime of a Claude Agent. */
+/* Spec 38's legacy runtime key: a file may still say runtime = "claude-code"
+   (spec 39, API-CCT-002). The dashboard never writes it. */
 export const CLAUDE_RUNTIME = "claude-code";
 
 export interface RuntimeLike {
   runtime?: string;
-  engine_label?: string;
+  claude_code?: boolean;
 }
 
-export function isClaudeAgent(agent: RuntimeLike | null | undefined): boolean {
-  return Boolean(agent && agent.runtime === CLAUDE_RUNTIME);
-}
-
-/* The engine name an agent shows: the API's engine_label, else "Claude
-   Agent" for the claude-code runtime, else "" (lana's own loop). */
-export function engineLabel(agent: RuntimeLike | null | undefined): string {
-  if (!agent) {
-    return "";
-  }
-  if (agent.engine_label && agent.engine_label.toLowerCase() !== "lana") {
-    return agent.engine_label;
-  }
-  return isClaudeAgent(agent) ? "Claude Agent" : "";
+/* Spec 39 (API-CCT-006): whether the agent's first target runs in Claude
+   Code. Every agent is a lana agent; this only adds the Claude mark. */
+export function usesClaudeCode(agent: RuntimeLike | null | undefined): boolean {
+  return Boolean(agent && (agent.claude_code === true || agent.runtime === CLAUDE_RUNTIME));
 }
 
 export function providerLabel(value: unknown): string {

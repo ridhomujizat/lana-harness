@@ -11,6 +11,7 @@ import type {
 import { Badge, Button, EmptyState, ErrorState, Panel, Seg, Stat } from "../../ui/gr8r";
 import { ShareBars } from "../home-charts";
 import { ProviderMark, providerIndex } from "./provider-logo";
+import { useClaudeAccounts } from "./claude-code";
 import { UsageChart } from "./usage-chart";
 import {
   compact,
@@ -174,6 +175,9 @@ export function RouterUsagePage() {
     };
   }, []);
 
+  /* Spec 39: Claude Code rows name their account; knowing the accounts
+     gives them the Claude logo. */
+  useClaudeAccounts();
   const index = useMemo(() => providerIndex(providers), [providers]);
   const totals = usage?.totals;
 

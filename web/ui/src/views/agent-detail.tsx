@@ -8,7 +8,7 @@ import { getModels } from "../api/models";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { getConfig } from "../api/settings";
 import { getRouter } from "../api/router";
-import type { RouterChoice, RouterProvider } from "../api/router";
+import type { RouterChoice, RouterCombo, RouterProvider } from "../api/router";
 import type { ConfigAgent } from "../api/settings";
 import { createSession } from "../api/sessions";
 import { Dialog, detailText, useAnnounce } from "../ui/ui";
@@ -19,7 +19,7 @@ import {
   splitModel,
   splitTarget,
   CLAUDE_RUNTIME,
-  engineLabel,
+  usesClaudeCode,
   normalizePermission,
   agentHref,
   sessionSummary,
@@ -27,14 +27,14 @@ import {
 } from "./agent-common";
 import type { AgentLike, Permission } from "./agent-common";
 import { AgentOverview } from "./agent-overview";
+import { CLAUDE_EFFORTS, ClaudeCodeNote, choiceOptions } from "./agent-runtime";
 import {
-  CLAUDE_AUTH,
-  CLAUDE_EFFORTS,
-  ClaudeModelControl,
-  RuntimeChoice,
-  choiceOptions,
-} from "./agent-runtime";
-import type { RuntimeValue } from "./agent-runtime";
+  CLAUDE_CODE_HREF,
+  ClaudeCodeBadge,
+  claudeAccountNames,
+  claudeTargetAccount,
+  useClaudeAccounts,
+} from "./router/claude-code";
 import { gr8rColor, useRooms } from "./presence";
 import { DEFAULT_AGENT_TAB } from "../app/router";
 import { PersonaTab } from "./agent-tabs/persona";
@@ -55,7 +55,6 @@ import {
   Select,
   Skeleton,
   Tabs,
-  Textarea,
   Toggle,
 } from "../ui/gr8r";
 import type { SelectOption } from "../ui/gr8r";
@@ -90,11 +89,6 @@ const TABS: readonly TabEntry[] = [
 ];
 
 type GeneralKey =
-  | "runtime"
-  | "auth"
-  | "api_key_env"
-  | "binary"
-  | "allow_scheduled"
   | "description"
   | "title"
   | "color"
@@ -109,11 +103,6 @@ type GeneralKey =
   | "workspace_only";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
-  "runtime",
-  "auth",
-  "api_key_env",
-  "binary",
-  "allow_scheduled",
   "description",
   "title",
   "color",
@@ -164,22 +153,11 @@ const PERMISSIONS: readonly PermissionOption[] = [
   },
 ];
 
-/* Spec 38: tabs that do not apply to a Claude Agent (its tools, skills, and
-   MCP come from Claude Code itself). */
-const CLAUDE_HIDDEN_TABS: readonly TabId[] = ["persona", "tools", "skills", "mcp"];
-
 /* Spec 37: the model picker values that are not router choices. */
 const OTHER_MODEL = "__other__";
 const LEGACY_MODEL = "__legacy__";
 
-const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 interface AgentValues {
-  runtime: RuntimeValue;
-  auth: string;
-  api_key_env: string;
-  binary: string;
-  allow_scheduled: boolean;
   description: string;
   title: string;
   color: string;
@@ -195,11 +173,6 @@ interface AgentValues {
 }
 
 interface AgentForm {
-  runtime: RuntimeValue;
-  auth: string;
-  api_key_env: string;
-  binary: string;
-  allow_scheduled: boolean;
   description: string;
   title: string;
   color: string;
@@ -226,6 +199,9 @@ interface AgentDetailData {
   choices: RouterChoice[];
   /* GET /v1/router providers, for the logos of the model picker. */
   providers: RouterProvider[];
+  /* GET /v1/router combos: a combo whose first model is Claude Code makes
+     the agent a Claude Code agent (spec 39). */
+  combos: RouterCombo[];
   /* The configured tool list, so General can gate the memory toggle. */
   tools: string[];
 }
@@ -290,24 +266,33 @@ function sessionModel(agent: AgentLike | null | undefined): string {
   return "";
 }
 
-function normalizeRuntime(value: unknown): RuntimeValue {
-  return value === CLAUDE_RUNTIME ? CLAUDE_RUNTIME : "";
+/* Spec 39 (API-CCT-002): a legacy file says runtime = "claude-code" with
+   model "M"; it means model "claude-code/M". The list row already carries
+   the mapped address. */
+function isLegacyRuntime(agent: Agent, configAgent: ConfigAgent): boolean {
+  const record = configAgent || {};
+  return pickText(record.runtime, agent.runtime) === CLAUDE_RUNTIME;
+}
+
+function legacyAddress(agent: Agent, configAgent: ConfigAgent): string {
+  const row = agent.model ? String(agent.model) : "";
+  if (row.startsWith(CLAUDE_RUNTIME + "/")) {
+    return row;
+  }
+  const model = pickText((configAgent || {}).model, row) || "default";
+  return model.startsWith(CLAUDE_RUNTIME + "/") ? model : CLAUDE_RUNTIME + "/" + model;
 }
 
 function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
   const record = configAgent || {};
   const parts = splitModel(agent);
+  const legacy = isLegacyRuntime(agent, configAgent);
   return {
-    runtime: normalizeRuntime(pickText(record.runtime, agent.runtime)),
-    auth: pickText(record.auth) || "subscription",
-    api_key_env: pickText(record.api_key_env),
-    binary: pickText(record.binary),
-    allow_scheduled: record.allow_scheduled === true,
     description: pickText(record.description, agent.description),
     title: pickText(record.title, agent.title),
     color: normalizeColor(pickText(record.color, agent.color)),
-    provider: pickText(record.provider, agent.provider, parts.provider),
-    model: pickText(record.model, parts.model),
+    provider: legacy ? "" : pickText(record.provider, agent.provider, parts.provider),
+    model: legacy ? legacyAddress(agent, configAgent) : pickText(record.model, parts.model),
     reasoning_effort: pickText(record.reasoning_effort, agent.reasoning_effort),
     fallback: Array.isArray(record.fallback)
       ? record.fallback.map((target) => String(target))
@@ -326,11 +311,6 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
 
 function formValues(initial: AgentValues): AgentForm {
   return {
-    runtime: initial.runtime,
-    auth: initial.auth || "subscription",
-    api_key_env: initial.api_key_env || "",
-    binary: initial.binary || "",
-    allow_scheduled: initial.allow_scheduled === true,
     description: initial.description || "",
     title: initial.title || "",
     color: normalizeColor(initial.color),
@@ -348,11 +328,6 @@ function formValues(initial: AgentValues): AgentForm {
 
 function canonical(form: AgentForm): AgentValues {
   return {
-    runtime: normalizeRuntime(form.runtime),
-    auth: form.auth || "subscription",
-    api_key_env: String(form.api_key_env || "").trim(),
-    binary: String(form.binary || "").trim(),
-    allow_scheduled: form.allow_scheduled === true,
     description: String(form.description || "").trim(),
     title: String(form.title || "").trim(),
     color: normalizeColor(form.color),
@@ -414,13 +389,6 @@ function validateForm(form: AgentForm, baseline: AgentValues): string {
     }
   }
 
-  if (form.runtime === CLAUDE_RUNTIME) {
-    if (form.auth === "api_key" && !ENV_NAME_RE.test(String(form.api_key_env || "").trim())) {
-      return "Enter the env variable that holds the API key, for example ANTHROPIC_API_KEY.";
-    }
-    return "";
-  }
-
   for (const target of form.fallback) {
     const parts = splitTarget(target);
     if (!parts.provider || !parts.model) {
@@ -442,17 +410,7 @@ function nextDuplicateName(source: string, agents: AgentLike[]): string {
 function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
   const patch: AgentWriteFields = {};
   for (const key of keys) {
-    if (key === "runtime") {
-      patch.runtime = current.runtime;
-    } else if (key === "auth") {
-      patch.auth = current.auth;
-    } else if (key === "api_key_env") {
-      patch.api_key_env = current.api_key_env;
-    } else if (key === "binary") {
-      patch.binary = current.binary;
-    } else if (key === "allow_scheduled") {
-      patch.allow_scheduled = current.allow_scheduled;
-    } else if (key === "description") {
+    if (key === "description") {
       patch.description = current.description;
     } else if (key === "title") {
       patch.title = current.title;
@@ -625,6 +583,9 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const [headerError, setHeaderError] = useState("");
   const [startBusy, setStartBusy] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
+  /* A legacy runtime = "claude-code" file is rewritten on the next save. */
+  const [legacyRuntime, setLegacyRuntime] = useState(false);
+  const { accounts } = useClaudeAccounts();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const pendingTabFocus = useRef(false);
 
@@ -642,6 +603,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     setFallbackDraft(null);
     setOtherModel(false);
     setHeaderError("");
+    setLegacyRuntime(false);
 
     Promise.all([
       listAgents(),
@@ -662,7 +624,15 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         const tools = Array.isArray(configAgent.tools)
           ? configAgent.tools.map((tool) => String(tool))
           : [];
-        setPage({ agent, agents: rows, choices, providers: routerPage ? routerPage.providers : [], tools });
+        setPage({
+          agent,
+          agents: rows,
+          choices,
+          providers: routerPage ? routerPage.providers : [],
+          combos: routerPage ? routerPage.combos : [],
+          tools,
+        });
+        setLegacyRuntime(Boolean(agent && isLegacyRuntime(agent, configAgent)));
         setVersion(config && config.version ? String(config.version) : "");
         if (initial) {
           const values = formValues(initial);
@@ -686,17 +656,9 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     };
   }, [agentName, reloadToken, announce]);
 
-  /* Spec 38: a Claude Agent has no persona, tools, skills, or MCP tabs. */
-  const claudeAgent = Boolean(
-    page && page.agent && page.agent.runtime === CLAUDE_RUNTIME
-  );
-  const tabs = useMemo(
-    () =>
-      claudeAgent
-        ? TABS.filter((item) => !CLAUDE_HIDDEN_TABS.includes(item.id))
-        : TABS,
-    [claudeAgent]
-  );
+  /* Spec 39: every agent is a lana agent with every tab; a Claude Code turn
+     gets the persona, memory, and lana tools through MCP. */
+  const tabs = TABS;
   const activeTab: TabId =
     tabs.find((item) => item.id === tab)?.id ?? DEFAULT_AGENT_TAB;
 
@@ -714,12 +676,28 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     }
   }, [activeTab]);
 
-  const dirty = useMemo(() => dirtyKeys(form, baseline), [form, baseline]);
+  /* API-CCT-002: saving a legacy runtime file always writes the model
+     address, so the file loses runtime. */
+  const dirty = useMemo(() => {
+    const keys = dirtyKeys(form, baseline);
+    if (legacyRuntime && form && !keys.includes("model")) {
+      keys.push("model");
+    }
+    return keys;
+  }, [form, baseline, legacyRuntime]);
 
   const choices = useMemo(() => (page ? page.choices : []), [page]);
-  const isClaudeForm = Boolean(form && form.runtime === CLAUDE_RUNTIME);
   const legacy = Boolean(form && form.provider);
   const formModel = form ? form.model : "";
+  const claudeNames = useMemo(
+    () => claudeAccountNames(choices, page ? page.providers : null, accounts),
+    [choices, page, accounts]
+  );
+  /* REQ-CCT-009: the Claude Code account the picked model runs on. */
+  const claudeAccount = legacy
+    ? ""
+    : claudeTargetAccount(formModel, choices, page ? page.combos : null, claudeNames);
+  const isClaudeForm = claudeAccount !== "";
   const knownChoice = choices.some((choice) => choice.value === formModel);
   const isCombo = choices.some(
     (choice) => choice.group === "Combos" && choice.value === formModel
@@ -829,30 +807,19 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       setForm({ ...form, provider: baseline.provider, model: baseline.model });
       return;
     }
-    setForm({ ...form, provider: "", model: value });
-  }
-
-  /* Spec 38: switching the runtime starts the model from the saved value of
-     that runtime, or empty (Claude Code's default). */
-  function pickRuntime(next: RuntimeValue) {
-    if (!form || !baseline) {
-      return;
-    }
-    const back = next === baseline.runtime;
-    setOtherModel(false);
-    setForm({
-      ...form,
-      runtime: next,
-      provider: back ? baseline.provider : "",
-      model: back ? baseline.model : "",
-      reasoning_effort: back ? baseline.reasoning_effort : "",
-      fallback:
-        next === CLAUDE_RUNTIME
-          ? []
-          : back
-            ? baseline.fallback.slice()
-            : form.fallback,
-    });
+    /* Claude Code and router models take different effort values, so a
+       switch across them starts from the model's default. */
+    const nextClaude =
+      claudeTargetAccount(value, choices, page ? page.combos : null, claudeNames) !== "";
+    const effort =
+      value === baseline.model
+        ? baseline.reasoning_effort
+        : nextClaude !== isClaudeForm
+          ? ""
+          : form.reasoning_effort;
+    /* API-CCT-002: provider is only cleared for a legacy provider/model
+       pair; a Claude Code pick writes the model address alone. */
+    setForm({ ...form, provider: "", model: value, reasoning_effort: effort });
   }
 
   function resetForm() {
@@ -1005,6 +972,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
         setVersion(String(result.version));
       }
       setBaseline(current);
+      setLegacyRuntime(false);
       setSaveNotice("Changes saved.");
       setRestartNotice(Boolean(result && result.restart_required));
       announce("Saved changes to " + agentName + ".");
@@ -1194,7 +1162,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
           },
         ]
       : []),
-    ...choiceOptions(choices, page ? page.providers : undefined),
+    ...choiceOptions(choices, page ? page.providers : undefined, accounts),
     { value: OTHER_MODEL, label: "Other…" },
   ];
   const modelValue = legacy
@@ -1252,11 +1220,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               <div className="agent-detail-name-row">
                 <h1 className="agent-detail-name">{agent.name}</h1>
                 <Badge>{agent.title || "Agent"}</Badge>
-                {engineLabel(agent) ? (
-                  <Badge tone="violet" className="rt-engine">
-                    {engineLabel(agent)}
-                  </Badge>
-                ) : null}
+                {usesClaudeCode(agent) ? <ClaudeCodeBadge /> : null}
                 {agent.default ? (
                   <Badge tone="accent" dot>
                     Default
@@ -1426,176 +1390,8 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                   ) : null}
                 </div>
               </div>
-              {isClaudeForm ? (
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <label className="t" htmlFor="agent-description">
-                      Description
-                    </label>
-                    <div className="d">What this agent is for.</div>
-                  </div>
-                  <div className="agent-ctl">
-                    <Textarea
-                      id="agent-description"
-                      rows={2}
-                      value={form.description}
-                      disabled={saving}
-                      onChange={(event) =>
-                        updateField("description", event.target.value)
-                      }
-                    />
-                  </div>
-                </div>
-              ) : null}
             </section>
 
-            <section className="sblock" aria-labelledby="agent-runtime-title">
-              <h2 id="agent-runtime-title">Runtime</h2>
-              <div className="srow">
-                <div className="agent-srow-text">
-                  <span className="t" id="agent-runtime-label">
-                    Engine
-                  </span>
-                  <div className="d">
-                    Who runs the turns: lana&rsquo;s own loop, or Claude Code on
-                    this machine.
-                  </div>
-                </div>
-                <div className="agent-ctl agent-ctl-wide">
-                  <RuntimeChoice
-                    name="agent-runtime"
-                    labelledBy="agent-runtime-label"
-                    value={form.runtime}
-                    disabled={saving}
-                    onChange={pickRuntime}
-                  />
-                </div>
-              </div>
-            </section>
-
-            {isClaudeForm ? (
-              <section className="sblock" aria-labelledby="agent-claude-title">
-                <h2 id="agent-claude-title">Claude Code</h2>
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <label className="t" htmlFor="agent-claude-model">
-                      Model
-                    </label>
-                    <div className="d">Passed to Claude Code as --model.</div>
-                  </div>
-                  <div className="agent-ctl">
-                    <ClaudeModelControl
-                      id="agent-claude-model"
-                      value={form.model}
-                      disabled={saving}
-                      onChange={(value) => updateField("model", value)}
-                    />
-                  </div>
-                </div>
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <label className="t" htmlFor="agent-claude-effort">
-                      Reasoning effort
-                    </label>
-                    <div className="d">Passed to Claude Code as --effort.</div>
-                  </div>
-                  <div className="agent-ctl">
-                    <Select
-                      id="agent-claude-effort"
-                      aria-label="Reasoning effort"
-                      value={form.reasoning_effort}
-                      disabled={saving}
-                      options={CLAUDE_EFFORTS}
-                      onChange={(value) => updateField("reasoning_effort", value)}
-                    />
-                  </div>
-                </div>
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <label className="t" htmlFor="agent-claude-auth">
-                      Sign-in
-                    </label>
-                    <div className="d">
-                      {CLAUDE_AUTH.find((entry) => entry.value === form.auth)?.note ||
-                        "How Claude Code is billed."}
-                    </div>
-                  </div>
-                  <div className="agent-ctl">
-                    <Select
-                      id="agent-claude-auth"
-                      aria-label="Sign-in"
-                      value={form.auth}
-                      disabled={saving}
-                      options={CLAUDE_AUTH.map((entry) => ({
-                        value: entry.value,
-                        label: entry.title,
-                      }))}
-                      onChange={(value) => updateField("auth", value)}
-                    />
-                    {form.auth === "api_key" ? (
-                      <Input
-                        className="mono"
-                        aria-label="API key variable"
-                        placeholder="ANTHROPIC_API_KEY"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={form.api_key_env}
-                        disabled={saving}
-                        onChange={(event) =>
-                          updateField("api_key_env", event.target.value)
-                        }
-                      />
-                    ) : null}
-                  </div>
-                </div>
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <label className="t" htmlFor="agent-claude-binary">
-                      Binary
-                    </label>
-                    <div className="d">Leave empty to use claude from PATH.</div>
-                  </div>
-                  <div className="agent-ctl">
-                    <Input
-                      id="agent-claude-binary"
-                      className="mono"
-                      placeholder="claude"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={form.binary}
-                      disabled={saving}
-                      onChange={(event) => updateField("binary", event.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <span className="t" id="agent-claude-scheduled-label">
-                      Allow scheduled runs
-                    </span>
-                    <div className="d">
-                      When off, schedules and workflows cannot start this agent
-                      unattended.
-                    </div>
-                  </div>
-                  <div className="agent-ctl">
-                    <Toggle
-                      aria-labelledby="agent-claude-scheduled-label"
-                      checked={form.allow_scheduled}
-                      disabled={saving}
-                      onChange={(checked) => updateField("allow_scheduled", checked)}
-                    />
-                  </div>
-                </div>
-                <p className="hint agent-claude-login">
-                  Claude Code signs in on its own: run <code>claude</code> in a
-                  terminal, then <code>/login</code>. The Router page shows the
-                  login state.
-                </p>
-              </section>
-            ) : null}
-
-            {!isClaudeForm ? (
             <section className="sblock" aria-labelledby="agent-model-title">
               <h2 id="agent-model-title">Model</h2>
               <div className="srow">
@@ -1634,10 +1430,55 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                       }
                     />
                   ) : null}
+                  {isClaudeForm ? <ClaudeCodeNote account={claudeAccount} /> : null}
+                  {legacyRuntime ? (
+                    <span className="hint">
+                      This agent still uses the old engine setting. Saving
+                      writes the model as {form.model}.
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
-              {thinkingModel ? (
+              {isClaudeForm ? (
+                <>
+                  <div className="srow">
+                    <div className="agent-srow-text">
+                      <label className="t" htmlFor="agent-claude-effort">
+                        Reasoning effort
+                      </label>
+                      <div className="d">Passed to Claude Code as --effort.</div>
+                    </div>
+                    <div className="agent-ctl">
+                      <Select
+                        id="agent-claude-effort"
+                        aria-label="Reasoning effort"
+                        value={form.reasoning_effort}
+                        disabled={saving}
+                        options={CLAUDE_EFFORTS}
+                        onChange={(value) => updateField("reasoning_effort", value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="srow">
+                    <div className="agent-srow-text">
+                      <span className="t">Scheduled runs</span>
+                      <div className="d">
+                        Whether workflows and the calendar may start Claude Code
+                        is set per account.
+                      </div>
+                    </div>
+                    <div className="agent-ctl">
+                      <a className="agent-cc-link" href={CLAUDE_CODE_HREF}>
+                        {"Allow scheduled runs on " + claudeAccount}
+                        <Ic name="arrow-up-right" size={12} />
+                      </a>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {!isClaudeForm && thinkingModel ? (
                 <div className="srow">
                   <div className="agent-srow-text">
                     <label className="t" htmlFor="agent-thinking">
@@ -1804,8 +1645,6 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
-            ) : null}
-
             <section
               className="sblock"
               aria-labelledby="agent-permission-title"
@@ -1862,8 +1701,6 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
-            {!isClaudeForm ? (
-            <>
             <section className="sblock" aria-labelledby="agent-limits-title">
               <h2 id="agent-limits-title">Limits</h2>
               <div className="srow">
@@ -1941,10 +1778,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               </div>
             </section>
 
-            </>
-            ) : null}
-
-            {!isClaudeForm && page && page.tools.includes("memory_write") ? (
+            {page && page.tools.includes("memory_write") ? (
               <section
                 className="sblock"
                 aria-labelledby="agent-memory-title"

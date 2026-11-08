@@ -24,7 +24,7 @@ import {
   permissionMeta,
   presenceTone,
   providerLabel,
-  engineLabel,
+  usesClaudeCode,
   splitModel,
 } from "./agent-common";
 import { gr8rColor, useRooms } from "./presence";
@@ -112,10 +112,11 @@ function factsLine(data: AgentOverviewData, agent?: Agent | null): string {
       " days)",
   ];
   if (agent) {
-    const model = splitModel(agent).model || "Agent default";
-    /* Spec 38: a Claude Agent names its engine before the model. */
-    const engine = engineLabel(agent);
-    parts.push(engine ? engine + " · " + model : model);
+    /* Spec 39: no engine name; a Claude Code agent shows its address. */
+    const model = usesClaudeCode(agent)
+      ? String(agent.model || "") || "Claude Code"
+      : splitModel(agent).model || "Agent default";
+    parts.push(model);
     parts.push(permissionMeta(agent.permission || agent.policy).label);
   }
   const channels = (data.looks_after.channels || [])

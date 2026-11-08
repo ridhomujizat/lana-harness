@@ -9,7 +9,15 @@ import type { BadgeTone } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { Alert, SettingsRestartBanner, StatusLine } from "../settings-pages";
 import { ConnectionDialog } from "./connection-dialog";
-import { CLAUDE_CODE_ID, PROVIDER_PRESETS, cardIdFor, presetFor, providerHref } from "./presets";
+import {
+  CLAUDE_CODE_ID,
+  CLAUDE_CODE_KIND,
+  PROVIDER_PRESETS,
+  cardIdFor,
+  presetFor,
+  providerHref,
+  rememberClaudeAccounts,
+} from "./presets";
 import type { ProviderPreset } from "./presets";
 import { ProviderLogo } from "./provider-logo";
 import { failureOf, ms } from "./router-common";
@@ -220,7 +228,8 @@ function SectionHead({
   );
 }
 
-/* Claude Code's card status (spec 38, API-CCR-003). */
+/* Claude Code's card status (REQ-CCT-009, API-CCT-011): how many accounts
+   and how many of them are logged in. */
 export function claudeStatus(
   status: ClaudeAgentStatus | null,
   failed: boolean
@@ -228,14 +237,16 @@ export function claudeStatus(
   if (!status) {
     return failed ? { label: "Status unavailable", tone: "gray" } : { label: "Checking…", tone: "gray" };
   }
-  if (!status.binary) {
+  const accounts = status.accounts;
+  if (!status.binary && !accounts.some((account) => account.binary)) {
     return { label: "Not installed", tone: "gray" };
   }
-  if (!status.logged_in) {
-    return { label: "Not logged in", tone: "amber" };
-  }
-  const agents = status.configured_agents.length;
-  return { label: "Logged in · " + agents + (agents === 1 ? " agent" : " agents"), tone: "green" };
+  const total = accounts.length;
+  const loggedIn = accounts.filter((account) => account.logged_in).length;
+  return {
+    label: total + (total === 1 ? " account" : " accounts") + " · " + loggedIn + " logged in",
+    tone: loggedIn === 0 ? "amber" : "green",
+  };
 }
 
 /* The model Test All sends for a connection: the first model the router lists
@@ -301,6 +312,7 @@ export function RouterProviders() {
       .getClaudeAgent()
       .then((value) => {
         if (alive) {
+          rememberClaudeAccounts(value.accounts.map((account) => account.name));
           setClaude(value);
         }
       })
@@ -382,9 +394,10 @@ export function RouterProviders() {
 
   const apiCards = PROVIDER_PRESETS.map((preset) => ({ id: preset.id, preset, rows: byCard[preset.id] || [] }));
   const customCards: TestCard[] = providers
-    .filter((row) => !presetFor(row))
+    .filter((row) => row.kind !== CLAUDE_CODE_KIND && !presetFor(row))
     .map((row) => ({ id: row.name, rows: [row] }));
   const claudeState = claudeStatus(claude, claudeFailed);
+  const claudeEmail = claude ? (claude.accounts.find((account) => account.email) || { email: "" }).email : "";
   const canAdd = Boolean(data && data.version);
 
   return (
@@ -412,6 +425,7 @@ export function RouterProviders() {
                 {claudeState.label}
               </Badge>
             }
+            extra={claudeEmail}
           />
         </div>
       </section>

@@ -202,7 +202,7 @@ export const KIND_PRESETS: KindPreset[] = [
 
 export function kindLabel(kind: string): string {
   if (kind === "claude-code") {
-    return "Claude Agent";
+    return "Claude Code";
   }
   const preset = KIND_PRESETS.find((entry) => entry.value === kind);
   return preset ? preset.label : kind || "Unknown";
@@ -212,7 +212,7 @@ export function kindPreset(kind: string): KindPreset | undefined {
   return KIND_PRESETS.find((entry) => entry.value === kind);
 }
 
-/* Plan windows of the Claude Agent (spec 38): known types get a name, others
+/* Plan windows of Claude Code (spec 38): known types get a name, others
    are humanized ("seven_day_opus" → "Seven day opus window"). */
 const WINDOW_LABELS: Record<string, string> = {
   five_hour: "5-hour window",

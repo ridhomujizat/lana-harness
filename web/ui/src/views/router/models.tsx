@@ -31,7 +31,7 @@ function priceText(model: RouterModel): string {
   );
 }
 
-function usedByText(model: RouterModel): string {
+export function usedByText(model: RouterModel): string {
   const agents = model.used_by?.agents || [];
   const combos = model.used_by?.combos || [];
   const parts = agents.slice();

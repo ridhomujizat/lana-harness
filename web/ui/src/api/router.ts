@@ -29,6 +29,11 @@ export interface ProviderRow {
   models_count?: number;
   /* Revision 2: a disabled entry is skipped by the router. */
   disabled?: boolean;
+  /* Spec 39 (API-CCT-010): a Claude Code account has kind "claude-code";
+     the built-in one (~/.claude, no table) has builtin true. */
+  builtin?: boolean;
+  config_dir?: string;
+  allow_scheduled?: boolean;
 }
 
 export interface ListProvidersResponse {
@@ -41,6 +46,12 @@ export interface ProviderSaveResponse {
   name: string;
   version: string;
   restart_required: boolean;
+  /* Spec 39 (API-CCT-010): a saved Claude Code account answers the command
+     that logs it in once: CLAUDE_CONFIG_DIR='<dir>' claude, then /login. */
+  login_command?: string;
+  /* A deleted Claude Code account keeps its folder; the answer says where. */
+  config_dir?: string;
+  message?: string;
 }
 
 export interface ProviderWriteRequest {
@@ -51,6 +62,11 @@ export interface ProviderWriteRequest {
   headers?: Record<string, string>;
   /* Revision 2: absent keeps the stored value. */
   disabled?: boolean;
+  /* Spec 39 (API-CCT-010): the keys of a kind "claude-code" account. */
+  config_dir?: string;
+  binary?: string;
+  auth?: string;
+  allow_scheduled?: boolean;
   expected_version: string;
 }
 
@@ -482,6 +498,8 @@ export interface LimitSnapshot {
   windows?: PlanWindow[] | null;
 }
 
+/* Router records and limits of Claude Code turns before spec 39 used the
+   provider name claude-agent; old rows keep it (API-CCT-008). */
 export const CLAUDE_AGENT_PROVIDER = "claude-agent";
 
 export async function getRouterLimits(refresh?: boolean): Promise<LimitSnapshot[]> {
@@ -493,10 +511,36 @@ export async function getRouterLimits(refresh?: boolean): Promise<LimitSnapshot[
 }
 
 /* ------------------------------------------------------------------ */
-/* Claude Agent (spec 38, API-CCR-003)                                */
+/* Claude Code (spec 38 API-CCR-003, spec 39 API-CCT-005/011)         */
 /* ------------------------------------------------------------------ */
 
+/* The built-in Claude Code account and address prefix (API-CCT-001). */
+export const CLAUDE_CODE_PROVIDER = "claude-code";
+
+/* One Claude Code account (API-CCT-011). email and plan come from that
+   account's `claude auth status`; they are never stored. */
+export interface ClaudeAccount {
+  name: string;
+  builtin: boolean;
+  config_dir: string;
+  binary: string;
+  version: string;
+  version_ok: boolean;
+  logged_in: boolean;
+  email: string;
+  plan: string;
+  auth_method: string;
+  error: string;
+  running: number;
+  queued: number;
+  login_command: string;
+  windows: PlanWindow[];
+  agents: string[];
+  combos: string[];
+}
+
 export interface ClaudeAgentStatus {
+  /* Agents as name, combos as combo:<name> (API-CCT-005). */
   configured_agents: string[];
   binary: string;
   version: string;
@@ -507,6 +551,37 @@ export interface ClaudeAgentStatus {
   running: number;
   queued: number;
   max_concurrent: number;
+  /* Revision 2 (API-CCT-011): one entry per account. An older daemon sends
+     none; the client then describes the built-in account from the top-level
+     fields. */
+  accounts: ClaudeAccount[];
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item || "")).filter(Boolean) : [];
+}
+
+function normalizeAccount(value: Partial<ClaudeAccount> | null | undefined): ClaudeAccount {
+  const entry = value || {};
+  return {
+    name: String(entry.name || CLAUDE_CODE_PROVIDER),
+    builtin: entry.builtin === true,
+    config_dir: String(entry.config_dir || ""),
+    binary: String(entry.binary || ""),
+    version: String(entry.version || ""),
+    version_ok: entry.version_ok !== false,
+    logged_in: entry.logged_in === true,
+    email: String(entry.email || ""),
+    plan: String(entry.plan || ""),
+    auth_method: String(entry.auth_method || ""),
+    error: String(entry.error || ""),
+    running: Number(entry.running) || 0,
+    queued: Number(entry.queued) || 0,
+    login_command: String(entry.login_command || ""),
+    windows: Array.isArray(entry.windows) ? entry.windows : [],
+    agents: strings(entry.agents),
+    combos: strings(entry.combos),
+  };
 }
 
 export async function getClaudeAgent(): Promise<ClaudeAgentStatus> {
@@ -515,10 +590,8 @@ export async function getClaudeAgent(): Promise<ClaudeAgentStatus> {
     "/v1/router/claude-agent"
   );
   const value = data || {};
-  return {
-    configured_agents: Array.isArray(value.configured_agents)
-      ? value.configured_agents
-      : [],
+  const status: ClaudeAgentStatus = {
+    configured_agents: strings(value.configured_agents),
     binary: String(value.binary || ""),
     version: String(value.version || ""),
     version_ok: value.version_ok !== false,
@@ -528,7 +601,49 @@ export async function getClaudeAgent(): Promise<ClaudeAgentStatus> {
     running: Number(value.running) || 0,
     queued: Number(value.queued) || 0,
     max_concurrent: Number(value.max_concurrent) || 0,
+    accounts: [],
   };
+  if (Array.isArray(value.accounts) && value.accounts.length > 0) {
+    status.accounts = value.accounts.map((entry) => normalizeAccount(entry));
+  } else if (data) {
+    const users = status.configured_agents;
+    status.accounts = [
+      normalizeAccount({
+        name: CLAUDE_CODE_PROVIDER,
+        builtin: true,
+        binary: status.binary,
+        version: status.version,
+        version_ok: status.version_ok,
+        logged_in: status.logged_in,
+        auth_method: status.auth_method,
+        error: status.error,
+        running: status.running,
+        queued: status.queued,
+        login_command: "claude",
+        agents: users.filter((name) => !name.startsWith("combo:")),
+        combos: users.filter((name) => name.startsWith("combo:")).map((name) => name.slice(6)),
+      }),
+    ];
+  }
+  return status;
+}
+
+/* API-CCT-013: the custom Claude Code model IDs ([router] claude_code_models).
+   The body is the whole list. */
+export interface ClaudeCodeModelsResponse {
+  models: string[];
+  version: string;
+  restart_required: boolean;
+}
+
+export function saveClaudeCodeModels(
+  models: string[],
+  expectedVersion: string
+): Promise<ClaudeCodeModelsResponse> {
+  return request<ClaudeCodeModelsResponse>("PUT", "/v1/router/claude-code/models", {
+    models,
+    expected_version: expectedVersion,
+  });
 }
 
 /* ------------------------------------------------------------------ */
