@@ -7,4 +7,5 @@
 |---|---|---|---|
 | T-CCT-01 | Backend: address + config + legacy mapping + background_model; per-turn engine dispatch + early fallback; prompt head + recall injection; `mcphost` loopback MCP with tokens and tool-runner dispatch; claudecode args; records/limits rename; tests | REQ-CCT-001..008; AC-CCT-001..010 | Pending |
 | T-CCT-02 | UI: remove Engine choice; Claude Code models in pickers; agent form note + Claude-only keys; Router Subscriptions card; legacy save drops runtime; `make web` | REQ-CCT-009; AC-CCT-011 | Pending |
+| T-CCT-04 | Claude Code accounts: `kind = "claude-code"` connections with `CLAUDE_CONFIG_DIR`, add-account flow (folder + login command), per-account status (email, plan), windows, usage, records; UI account rows on the Claude Code page | REQ-CCT-010, 011; AC-CCT-012, 013 | Pending |
 | T-CCT-03 | Runtime smoke with the real `claude` (persona, MCP memory tool + approval, combo fallback) and screenshots | all | Pending |
