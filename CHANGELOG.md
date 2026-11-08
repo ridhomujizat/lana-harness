@@ -7,6 +7,8 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.3.0-beta.1] - 2026-11-08
+
 ### Added
 - Generated agent avatars (spec 43): every agent now has a face, a solid blob in its color with two
   white eye holes, instead of a letter. **Generate avatar** on the agent profile and General tab asks
@@ -192,6 +194,7 @@ First tagged build, for daily use.
   `$LANA_HOME/lana.db` first if you may need to roll back.
 - Knowledge tools are offered only to agents that list them in `tools`.
 
-[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.2.0-beta.1...HEAD
+[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.1...HEAD
+[0.3.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.2.0-beta.1...v0.3.0-beta.1
 [0.2.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.1.0-beta.1...v0.2.0-beta.1
 [0.1.0-beta.1]: https://github.com/ridhomujizat/lana-harness/releases/tag/v0.1.0-beta.1
