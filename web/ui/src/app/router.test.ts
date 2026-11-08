@@ -8,6 +8,7 @@ import {
   SETTINGS_TABS,
   SETUP_STEPS,
   parseRoute,
+  safeNextHash,
 } from "./router";
 
 const ROUTES = [
@@ -183,5 +184,33 @@ describe("route table", () => {
     expect(route.path).toBe("#/router/providers");
     expect(SETTINGS_TABS).not.toContain("providers");
     expect(parseRoute("#/settings/secrets").view).toBe("settings");
+  });
+
+  it("accepts only safe in-app next hashes", () => {
+    for (const ok of ["#/chats", "#/workflows", "#/calendar", "#/router", "#/home", "#/sessions/abc-1"]) {
+      expect(safeNextHash(ok)).toBe(ok);
+    }
+    for (const bad of [
+      undefined,
+      "",
+      "#/",
+      "chats",
+      "/#/chats",
+      "https://evil.example/#/chats",
+      "javascript:alert(1)",
+      "#//evil.example",
+      "#/welcome?code=x",
+      "#/login",
+      "#/forgot",
+      "#/chats x",
+      "#/a<b",
+      "#/" + "a".repeat(300),
+    ]) {
+      expect(safeNextHash(bad)).toBe("");
+    }
+    const route = parseRoute("#/welcome?code=abc&next=%23%2Fcalendar");
+    expect(route.view).toBe("welcome");
+    expect(route.params.code).toBe("abc");
+    expect(safeNextHash(route.params.next)).toBe("#/calendar");
   });
 });

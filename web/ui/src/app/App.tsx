@@ -12,7 +12,7 @@ import {
   watchSystemTheme,
 } from "./theme";
 import type { ThemeChoice } from "./theme";
-import { DEFAULT_ROUTE, ROUTE_REDIRECTS, parseRoute } from "./router";
+import { DEFAULT_ROUTE, ROUTE_REDIRECTS, parseRoute, safeNextHash } from "./router";
 import type { Route } from "./router";
 import { Sidebar, readCollapsed, saveCollapsed } from "./Sidebar";
 import type { DaemonCard } from "./Sidebar";
@@ -419,9 +419,12 @@ export function App() {
         route.view === "welcome" ||
         route.view === "forgot")
     ) {
-      window.location.hash = DEFAULT_ROUTE;
+      /* A signed-in browser that opens a sign-in link with next (spec #41)
+         goes straight to that page. */
+      const next = route.view === "welcome" ? safeNextHash(route.params.next) : "";
+      window.location.hash = next || DEFAULT_ROUTE;
     }
-  }, [auth, route.view]);
+  }, [auth, route.view, route.params.next]);
 
   useEffect(() => {
     if (
@@ -490,8 +493,12 @@ export function App() {
   function authenticated(csrf: string) {
     setCSRF(csrf);
     setAuth("loggedIn");
-    if (window.location.hash !== DEFAULT_ROUTE) {
-      window.location.hash = DEFAULT_ROUTE;
+    /* After the claim, a sign-in link with a safe next (spec #41) opens that
+       page instead of the default one. */
+    const target =
+      (route.view === "welcome" && safeNextHash(route.params.next)) || DEFAULT_ROUTE;
+    if (window.location.hash !== target) {
+      window.location.hash = target;
     }
   }
 

@@ -8,7 +8,7 @@ DIST ?= dist
 PREFIX ?= $(HOME)/.local
 PLATFORMS := "darwin arm64" "darwin amd64" "linux amd64" "linux arm64"
 
-.PHONY: build install release checksums clean web web-check tag
+.PHONY: build install release checksums clean web web-check tag macos-app macos-app-test
 
 # build writes ./lana for daily use, with the version, commit, and build date.
 build:
@@ -62,3 +62,35 @@ checksums:
 
 clean:
 	rm -rf $(DIST)
+
+# macos-app builds the macOS menu bar app (spec #41) into dist/Lana.app. It is
+# a separate Swift package under apps/macos/LanaMenu built with the Xcode
+# toolchain, so the Go build stays CGO-free (ADR 0013) and `make build` never
+# needs Swift. The bundle is ad-hoc signed. Inside `nix develop` the Nix SDK
+# variables are cleared for swift so the Xcode SDK is used.
+MACOS_PKG := apps/macos/LanaMenu
+MACOS_APP := $(DIST)/Lana.app
+MACOS_SHORT_VERSION := $(shell echo '$(VERSION)' | sed 's/-.*//')
+SWIFT ?= env -u SDKROOT -u DEVELOPER_DIR -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS -u MACOSX_DEPLOYMENT_TARGET -u CC -u CXX -u LD /usr/bin/xcrun swift
+
+macos-app:
+	@test "$$(uname -s)" = Darwin || { echo "macos-app: needs macOS" >&2; exit 1; }
+	cd $(MACOS_PKG) && $(SWIFT) build -c release --product LanaMenu
+	rm -rf "$(MACOS_APP)"
+	mkdir -p "$(MACOS_APP)/Contents/MacOS" "$(MACOS_APP)/Contents/Resources"
+	cp "$$(cd $(MACOS_PKG) && $(SWIFT) build -c release --show-bin-path)/LanaMenu" "$(MACOS_APP)/Contents/MacOS/LanaMenu"
+	sed -e 's/@VERSION@/$(VERSION)/' -e 's/@SHORT_VERSION@/$(MACOS_SHORT_VERSION)/' $(MACOS_PKG)/Info.plist.in > "$(MACOS_APP)/Contents/Info.plist"
+	printf 'APPL????' > "$(MACOS_APP)/Contents/PkgInfo"
+	@if command -v iconutil >/dev/null; then \
+		mkdir -p "$(DIST)/.lana-iconset" && \
+		"$(MACOS_APP)/Contents/MacOS/LanaMenu" --write-iconset "$(DIST)/.lana-iconset/AppIcon.iconset" && \
+		iconutil -c icns -o "$(MACOS_APP)/Contents/Resources/AppIcon.icns" "$(DIST)/.lana-iconset/AppIcon.iconset" && \
+		rm -r "$(DIST)/.lana-iconset"; \
+	else echo "macos-app: iconutil not found; the app has no icon"; fi
+	codesign -s - --force --deep "$(MACOS_APP)"
+	codesign --verify "$(MACOS_APP)"
+	@echo "built $(MACOS_APP) ($(VERSION))"
+
+# macos-app-test runs the Swift unit tests of the menu bar app.
+macos-app-test:
+	cd $(MACOS_PKG) && $(SWIFT) test
