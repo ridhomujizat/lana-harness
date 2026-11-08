@@ -25,11 +25,102 @@
 .rt-partial { font-size: var(--fs-2xs); letter-spacing: 0; vertical-align: middle; }
 .rt-bad { color: var(--red); }
 
-/* Chart: the cost multiple under the token columns */
-.rt-sw-cost, .rt-cost-bar { background: var(--violet); fill: var(--violet); }
-g.on .rt-cost-bar { opacity: 0.85; }
-.rt-axis-title { fill: var(--text-3); font-weight: 500; }
-.rt-chart-table { margin-top: 6px; }
+/* Chart: range totals, then a Tokens panel above a Cost (USD) panel on one
+   time axis, a thin hover guide, and a floating tooltip. */
+/* The series colours of this chart: the first three slots of the dataviz
+   reference palette in fixed order (validated: CVD and normal-vision
+   separation pass on the white and the dark card), stepped per theme. The
+   cost panel is a single series in its own panel, in slot 7 (violet). */
+.rt-chart {
+  --rt-in: #2a78d6;
+  --rt-cache: #eb6834;
+  --rt-out: #1baf7a;
+  --rt-cost: #6250d6;
+  gap: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .rt-chart {
+    --rt-in: #3987e5;
+    --rt-cache: #d95926;
+    --rt-out: #199e70;
+    --rt-cost: #9085e9;
+  }
+}
+:root[data-theme='dark'] .rt-chart {
+  --rt-in: #3987e5;
+  --rt-cache: #d95926;
+  --rt-out: #199e70;
+  --rt-cost: #9085e9;
+}
+.rt-chart .sw-in, .rt-chart .hc-bar.in { background: var(--rt-in); fill: var(--rt-in); }
+.rt-chart .sw-cache, .rt-chart .hc-bar.cache { background: var(--rt-cache); fill: var(--rt-cache); }
+.rt-chart .sw-out, .rt-chart .hc-bar.out { background: var(--rt-out); fill: var(--rt-out); }
+.rt-chart .rt-sw-cost, .rt-chart .rt-cost-bar { background: var(--rt-cost); fill: var(--rt-cost); }
+.rt-chart-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 0;
+  margin: -2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+}
+.rt-chart-sum > span + span::before { content: "·"; margin: 0 7px; color: var(--text-4); }
+.rt-chart-sum b { color: var(--text); font-weight: 600; }
+.rt-plot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  border-radius: var(--r-sm);
+  touch-action: pan-y;
+  outline: none;
+}
+.rt-plot:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent-line); }
+.rt-pane { min-width: 0; }
+.rt-pane-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 16px;
+  margin-bottom: 6px;
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  color: var(--text-3);
+}
+.rt-pane-t { color: var(--text-2); font-weight: 600; }
+.rt-legend { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
+.rt-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.rt-key { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.rt-guide { stroke: var(--text-4); stroke-width: 1; shape-rendering: crispEdges; pointer-events: none; }
+.rt-tip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  visibility: hidden;
+  pointer-events: none;
+  display: grid;
+  grid-template-columns: 10px auto auto;
+  align-items: center;
+  gap: 3px 6px;
+  min-width: 112px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.rt-tip-t { grid-column: 1 / -1; color: var(--text); font-weight: 600; }
+.rt-tip-r { display: contents; }
+.rt-tip-r b { color: var(--text); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.rt-tip-k { display: block; width: 10px; height: 2px; border-radius: 1px; }
+.rt-tip-c { grid-column: 1 / -1; }
+.rt-chart-table { margin-top: -4px; }
 
 .rt-grid2 {
   display: grid;

@@ -49,7 +49,7 @@ import { RouterQuota } from "./quota";
 import { RouterCombos } from "./combos";
 import { RouterLogs, PAGE_SIZE, requestedDiffers } from "./logs";
 import { statsCostText } from "./router-common";
-import { tickEvery } from "./usage-chart";
+import { UsageChart, bucketText, niceMax, tickEvery } from "./usage-chart";
 import { RouterProxy } from "./proxy";
 import { RouterProviders } from "./providers";
 import { ProviderDetail } from "./provider-detail";
@@ -295,6 +295,95 @@ describe("router usage", () => {
     expect(tickEvery(24, 300)).toBe(5);
     expect(tickEvery(4, 300)).toBe(1);
     expect(tickEvery(30, 100)).toBe(15);
+  });
+
+  it("rounds the axis maximum so the mid tick is round too", () => {
+    expect(niceMax(157000)).toBe(200000);
+    expect(niceMax(0.015)).toBe(0.02);
+    expect(niceMax(3500)).toBe(4000);
+    expect(niceMax(0)).toBe(1);
+  });
+
+  describe("tokens and cost chart", () => {
+    const SERIES = [
+      { t: "2026-11-08T00:00:00Z", input_tokens: 30000, output_tokens: 5000, cached_tokens: 10000, cost_usd: 0.8, calls: 70, errors: 1 },
+      { t: "2026-11-08T01:00:00Z", input_tokens: 0, output_tokens: 0, cached_tokens: 0, cost_usd: 0, calls: 0, errors: 0 },
+      { t: "2026-11-08T02:00:00Z", input_tokens: 2000, output_tokens: 0, cached_tokens: 0, cost_usd: 0, calls: 2, errors: 2 },
+    ];
+    const at = (iso: string) => bucketText(Date.parse(iso), "24h");
+    const [T0, T1] = ["2026-11-08T00:00:00Z", "2026-11-08T01:00:00Z"];
+    const sum = (container: HTMLElement) =>
+      (container.querySelector(".rt-chart-sum") as HTMLElement).textContent;
+
+    it("labels both panels and shows the range totals", () => {
+      const { container } = render(<UsageChart series={SERIES} range="24h" />);
+      expect(sum(container)).toBe("37k tokens$0.8072 calls");
+      const tokens = screen.getByRole("region", { name: "Tokens" });
+      expect(within(tokens).getByText("Tokens")).toBeTruthy();
+      expect(within(tokens).getByText("Input")).toBeTruthy();
+      expect(within(tokens).getByText("Cached")).toBeTruthy();
+      expect(within(tokens).getByText("Output")).toBeTruthy();
+      const cost = screen.getByRole("region", { name: "Cost (USD)" });
+      expect(within(cost).getByText("Cost (USD)")).toBeTruthy();
+      /* The time axis is only under the cost panel. */
+      expect(within(tokens).queryByText(at(T0))).toBeNull();
+      expect(within(cost).getByText(at(T0))).toBeTruthy();
+      /* Same corner treatment for every column; empty buckets draw nothing. */
+      expect(tokens.querySelectorAll(".rt-col")).toHaveLength(2);
+      expect(cost.querySelectorAll(".rt-cost-bar")).toHaveLength(1);
+      expect(screen.getByText("Show as a table")).toBeTruthy();
+      expect(screen.queryByTestId("usage-tip")).toBeNull();
+    });
+
+    it("keeps the totals on hover and shows the bucket in a tooltip", () => {
+      const { container } = render(<UsageChart series={SERIES} range="24h" />);
+      const plot = screen.getByRole("group", { name: /Tokens and cost over time/ });
+      vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 760, bottom: 300, width: 760, height: 300, toJSON: () => ({}),
+      } as DOMRect);
+      const before = sum(container);
+      /* The first bucket sits just right of the y labels. */
+      fireEvent.pointerMove(plot, { clientX: 60, clientY: 40 });
+      const tip = screen.getByTestId("usage-tip");
+      expect(tip.textContent).toContain(at(T0) + "–" + at(T1));
+      expect(tip.textContent).toContain("20kInput");
+      expect(tip.textContent).toContain("10kCached");
+      expect(tip.textContent).toContain("5kOutput");
+      expect(tip.textContent).toContain("$0.80Cost");
+      expect(tip.textContent).toContain("70 calls · 1 failed");
+      expect(sum(container)).toBe(before);
+      expect(container.querySelectorAll(".rt-guide")).toHaveLength(2);
+
+      fireEvent.pointerLeave(plot);
+      expect(screen.queryByTestId("usage-tip")).toBeNull();
+      expect(container.querySelectorAll(".rt-guide")).toHaveLength(0);
+      expect(sum(container)).toBe(before);
+    });
+
+    it("reads the buckets with the keyboard, including No calls", () => {
+      const { container } = render(<UsageChart series={SERIES} range="24h" />);
+      const plot = screen.getByRole("group", { name: /Tokens and cost over time/ });
+      const before = sum(container);
+      plot.focus();
+      fireEvent.keyDown(plot, { key: "ArrowRight" });
+      fireEvent.keyDown(plot, { key: "ArrowRight" });
+      const tip = screen.getByTestId("usage-tip");
+      expect(tip.textContent).toContain(at(T1));
+      expect(tip.textContent).toContain("No calls");
+      expect(tip.textContent).not.toMatch(/Input|Cost/);
+      expect(screen.getByText(/, No calls$/)).toBeTruthy();
+
+      /* Failed-only calls: no price, so "—" and never "$0.00". */
+      fireEvent.keyDown(plot, { key: "End" });
+      expect(tip.textContent).toContain("2kInput");
+      expect(tip.textContent).toContain("—Cost");
+      expect(tip.textContent).toContain("2 calls · 2 failed");
+      expect(tip.textContent).not.toContain("$0.00");
+      expect(sum(container)).toBe(before);
+
+      fireEvent.keyDown(plot, { key: "Escape" });
+      expect(screen.queryByTestId("usage-tip")).toBeNull();
+    });
   });
 
   it("loads the chosen range", async () => {
