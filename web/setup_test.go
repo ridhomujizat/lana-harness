@@ -22,6 +22,12 @@ type setupTestConfig struct {
 	Web       setupTestWeb                   `toml:"web"`
 	Providers map[string]setupTestProvider   `toml:"providers"`
 	Agents    map[string]setupTestAgentSetup `toml:"agents"`
+	Combos    map[string]setupTestCombo      `toml:"combos"`
+	Router    map[string]any                 `toml:"router"`
+}
+
+type setupTestCombo struct {
+	Models []string `toml:"models"`
 }
 
 type setupTestWeb struct {
@@ -335,7 +341,8 @@ func TestSetupSaveWritesFiles(t *testing.T) {
 	if !ok {
 		t.Fatalf("agents = %+v, want coder", config.Agents)
 	}
-	if agent.Provider != "openai" || agent.Model != "gpt-5-mini" || agent.Workspace != "~/lana/workspace" || agent.Permission != "ask" {
+	// The legacy body is saved in router form: a model address, no provider.
+	if agent.Provider != "" || agent.Model != "openai/gpt-5-mini" || agent.Workspace != "~/lana/workspace" || agent.Permission != "ask" {
 		t.Fatalf("agent = %+v", agent)
 	}
 	if !containsString(agent.Tools, "bash") {

@@ -83,8 +83,16 @@ lana --version
 ### 3. Create the config
 
 ```sh
-lana init --provider deepseek     # or openai, openrouter, anthropic
+lana init --provider deepseek     # or openai, openrouter, anthropic, claude-code
+lana init --provider claude-code --fallback deepseek/deepseek-flash   # Claude plan first, DeepSeek when it fails
 ```
+
+Every preset writes the router form: the agent's `model = "<provider>/<model>"`. `--provider claude-code` uses your
+own Claude Code login (`claude-code/sonnet`, no API key; sign in once with `claude auth login`). `--fallback` adds a
+second model and saves the pair as the combo `default`.
+
+Prefer a browser? Start `lana daemon` and open the dashboard: the setup wizard connects Claude Code and any number of
+API keys (each tested as you paste it), then picks the main model, an optional fallback, and the background model.
 
 This creates `~/.lana` (override with `LANA_HOME`):
 

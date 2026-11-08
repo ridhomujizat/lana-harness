@@ -49,10 +49,13 @@ export const ROUTE_REDIRECTS: Record<string, string> = {
   "#/router/proxy": "#/router/endpoint",
   "#/router/models": "#/router/providers",
 };
+/* "connect" is the Connect your models step; "provider" is its rev 2 name,
+   kept for open tabs and links. */
 export const SETUP_STEPS = [
   "unlock",
   "provider",
   "connect",
+  "model",
   "agent",
   "persona",
   "ready",

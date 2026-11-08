@@ -99,7 +99,7 @@ function signedInText(account: ClaudeAccount | undefined): string {
 /* ------------------------------------------------------------------ */
 
 /* One sign-in the page follows. command is the terminal fallback. */
-interface SignInFlow {
+export interface SignInFlow {
   name: string;
   phase: "running" | "succeeded" | "failed" | "cancelled";
   error: string;
@@ -107,7 +107,7 @@ interface SignInFlow {
 }
 
 /* The inline card of a running, failed, or cancelled sign-in. */
-function SignInCard({
+export function SignInCard({
   flow,
   onCancel,
   onRetry,

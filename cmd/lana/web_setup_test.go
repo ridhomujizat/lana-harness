@@ -238,7 +238,8 @@ func TestDaemonSetupSaveRestartsInPlace(t *testing.T) {
 	if !ok {
 		t.Fatalf("agents = %+v, want coder", savedConfig.Agents)
 	}
-	if agentConfig.Provider != "openai" || agentConfig.Model != "gpt-5-mini" ||
+	// The setup saves the router form: a model address and no provider key.
+	if agentConfig.Provider != "" || agentConfig.Model != "openai/gpt-5-mini" ||
 		agentConfig.Workspace != "~/lana/workspace" || agentConfig.Permission != "ask" {
 		t.Fatalf("agent = %+v", agentConfig)
 	}

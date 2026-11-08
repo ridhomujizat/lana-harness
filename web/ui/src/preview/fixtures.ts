@@ -204,6 +204,31 @@ const setupTestFixture: ProviderTestResponse = {
 
 const setupSaveFixture: SetupSaveResponse = { restart: "draining", pid: 9182 };
 
+const claudeAgentFixture = {
+  configured_agents: [],
+  binary: "/usr/local/bin/claude",
+  version: "2.1.319",
+  version_ok: true,
+  logged_in: true,
+  auth_method: "oauth",
+  error: "",
+  running: 0,
+  queued: 0,
+  max_concurrent: 2,
+  accounts: [
+    {
+      name: "claude-code",
+      builtin: true,
+      binary: "/usr/local/bin/claude",
+      version: "2.1.319",
+      logged_in: true,
+      email: "owner@example.com",
+      plan: "max",
+      login_command: "claude",
+    },
+  ],
+};
+
 /* ------------------------------------------------------------------- agents */
 
 const agentLana: Agent = {
@@ -1861,6 +1886,13 @@ export function mockApi(method: string, url: URL, body?: unknown): MockResult {
   }
 
   switch (at(1)) {
+    case "router":
+      /* The Claude Code card of the setup wizard: the built-in account,
+         signed in. */
+      if (at(2) === "claude-agent") {
+        return { status: 200, body: claudeAgentFixture };
+      }
+      break;
     case "workflows":
       return mockWorkflows(m, parts);
     case "calendar":

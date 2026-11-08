@@ -8,6 +8,17 @@ but their config keys, events, and tools may still change between betas.
 ## [Unreleased]
 
 ### Added
+- Router onboarding: the setup wizard now matches the Router. **Connect your models** shows the Router's provider
+  cards with real logos: Claude Code on top (signed in with email and plan, one-click **Sign in with Claude Code**
+  with the terminal fallback, or a "Not installed" note), then OpenAI, Anthropic, DeepSeek, OpenRouter, and the
+  OpenAI-compatible presets under **More providers**. A card opens inline; paste a key and it is tested on the spot.
+  Connect as many as you like. **Pick a model** uses the grouped model picker for the main model, an optional
+  **Fallback when it fails** (saved as the combo `default`), and, for a Claude Code main model, the background model
+  for titles, memory, and knowledge. The ready page sums it all up with links to the Router and the agent.
+  `POST /v1/setup` takes several providers, `model`, `fallback`, and `background_model` (the one-provider body still
+  works) and always writes the router form.
+- `lana init --provider claude-code` writes an agent on `claude-code/sonnet` with no provider table, and
+  `--fallback <provider>/<model>` adds the combo `default`. Every preset now writes `model = "<provider>/<model>"`.
 - Session titles (spec #40): after the first turn lana names a session in the background with the
   agent's background model (never Claude Code; the first message when no model is free), so History
   no longer fills with "Untitled session". Rename a session from the History row (pencil or the row

@@ -387,7 +387,7 @@ func agentList() int {
 		if permission == "" {
 			permission = "ask"
 		}
-		fmt.Printf("%s  %s:%s  %s  persona=%s  user=%s  memory=%s\n", name, agent.Provider, agent.Model, permission, source, user, memory)
+		fmt.Printf("%s  %s  %s  persona=%s  user=%s  memory=%s\n", name, llmcall.Display(agent.Provider, agent.Model), permission, source, user, memory)
 	}
 	return 0
 }
@@ -495,8 +495,8 @@ func agentShow(args []string) int {
 	if permission == "" {
 		permission = "ask"
 	}
-	fmt.Printf("agent       %s\nmodel       %s:%s\npermission  %s\ntools       %s\npersona     %s (%s)\nhome        %s\nuser        %s characters\nmemory      %s characters\n",
-		name, agent.Provider, agent.Model, permission, strings.Join(agent.Tools, ", "), source, personaPath, paths.Dir, user, memory)
+	fmt.Printf("agent       %s\nmodel       %s\npermission  %s\ntools       %s\npersona     %s (%s)\nhome        %s\nuser        %s characters\nmemory      %s characters\n",
+		name, llmcall.Display(agent.Provider, agent.Model), permission, strings.Join(agent.Tools, ", "), source, personaPath, paths.Dir, user, memory)
 	return 0
 }
 

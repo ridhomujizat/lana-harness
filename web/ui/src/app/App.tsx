@@ -444,7 +444,7 @@ export function App() {
     setupNeeded()
       .then((needed) => {
         if (alive && needed && !window.location.hash.startsWith("#/setup/")) {
-          window.location.hash = "#/setup/provider";
+          window.location.hash = "#/setup/connect";
         }
       })
       .catch(() => {});
