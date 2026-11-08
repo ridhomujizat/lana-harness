@@ -7,6 +7,8 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.2.0-beta.1] - 2026-11-08
+
 ### Added
 - Refresh for Claude Code plan usage (spec 39 Revision 4): the Quota page, the Usage page, and the
   Claude Code page have a **Refresh** button with "Updated <time>", and refresh on their own when a
@@ -115,6 +117,25 @@ but their config keys, events, and tools may still change between betas.
 - A workflow with no edges no longer breaks its page ("t.edges is not iterable"): the API sends empty `nodes` and
   `edges` lists instead of `null`, and the dashboard treats a missing list as empty.
 
+### Upgrade notes
+
+- The session database moves to schema version 9 on first start (router call records, proxy keys,
+  and session titles). Older binaries refuse the upgraded database. Back up `$LANA_HOME/lana.db`
+  first if you may need to roll back.
+- Agents can now use `model = "<provider>/<model>"` or a combo name. The old `provider` + `model` +
+  `fallback` form still works; the dashboard and `lana init` write the new form.
+- `runtime = "claude-code"` is deprecated and read as `model = "claude-code/<model>"`. Saving the
+  agent in the dashboard rewrites it.
+- `kind = "openai_compat"` providers now need `base_url`. New kinds: `openai`, `deepseek`,
+  `openrouter`, `anthropic`, and `claude-code` accounts.
+- A provider in use without its API key now logs a warning at boot instead of stopping the daemon;
+  calls to it fail and fall back to the next model.
+- Retry and fallback moved from the agent into the router; an auth error now falls back to the next
+  model in the chain.
+- Settings → Providers moved to Router → Providers.
+- The macOS menu bar app is built separately with `make macos-app`; it is not part of the release
+  assets.
+
 ## [0.1.0-beta.1] - 2026-11-02
 
 First tagged build, for daily use.
@@ -157,5 +178,6 @@ First tagged build, for daily use.
   `$LANA_HOME/lana.db` first if you may need to roll back.
 - Knowledge tools are offered only to agents that list them in `tools`.
 
-[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.2.0-beta.1...HEAD
+[0.2.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.1.0-beta.1...v0.2.0-beta.1
 [0.1.0-beta.1]: https://github.com/ridhomujizat/lana-harness/releases/tag/v0.1.0-beta.1
