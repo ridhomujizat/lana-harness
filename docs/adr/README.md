@@ -34,6 +34,7 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0018](0018-claude-code-as-external-agent-runtime.md) | Run Claude Code as an external agent runtime over headless stream-json | Accepted | 2026-11-08 |
 | [0019](0019-llm-router-as-embeddable-core.md) | Route all LLM calls through an embeddable router package | Accepted | 2026-11-08 |
 | [0020](0020-claude-code-as-router-target-with-lana-context.md) | Offer Claude Code as a router target that runs with lana's context and tools | Accepted | 2026-11-08 |
+| [0021](0021-embedded-js-sandbox-for-workflow-scripts.md) | Run guardian-written workflow scripts in an embedded JavaScript sandbox | Accepted | 2026-11-08 |
 
 ## How to add an ADR
 

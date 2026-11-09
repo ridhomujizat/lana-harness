@@ -198,3 +198,28 @@ func TestTemplateRefs(t *testing.T) {
 		t.Fatalf("TemplateRefs = %#v, want %#v", got, want)
 	}
 }
+
+// TestTemplateParams checks the spec #44 rule: the script of a script_parse node
+// is left out of the rendered params through a copy, while every other type
+// returns its params map unchanged (REQ-SP-001).
+func TestTemplateParams(t *testing.T) {
+	spParams := map[string]any{"input": "x", "goal": "g", "script": "var s = 1;"}
+	got := TemplateParams(Node{Type: "script_parse", Params: spParams})
+	if _, ok := got["script"]; ok {
+		t.Fatalf("TemplateParams(script_parse) kept script: %#v", got)
+	}
+	if got["input"] != "x" || got["goal"] != "g" {
+		t.Fatalf("TemplateParams(script_parse) = %#v", got)
+	}
+	got["input"] = "y"
+	if spParams["input"] != "x" || spParams["goal"] != "g" || spParams["script"] != "var s = 1;" {
+		t.Fatalf("TemplateParams mutated the original params: %#v", spParams)
+	}
+
+	msgParams := map[string]any{"text": "hi"}
+	msg := TemplateParams(Node{Type: "message", Params: msgParams})
+	msg["text"] = "changed"
+	if msgParams["text"] != "changed" {
+		t.Fatalf("TemplateParams(message) did not return the same map")
+	}
+}

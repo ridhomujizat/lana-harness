@@ -63,6 +63,15 @@ type WorkflowBackend interface {
 	Command(ctx context.Context, channel, text string) (workflow.CommandResult, bool)
 	// IsWorkflowSession reports whether a session runs on channel "workflow".
 	IsWorkflowSession(sessionID string) bool
+	// TestScript runs a node's script on a sample (API-SP-002).
+	TestScript(ctx context.Context, id string, node workflow.Node, input any, hasInput bool, run int) (workflow.TestResult, error)
+	// GenerateScript asks the guardian for a script (API-SP-003).
+	GenerateScript(ctx context.Context, id string, node workflow.Node, input any, hasInput bool, run int, expected map[string]any) (workflow.GenerateResult, error)
+	// ConvertNode proposes a script_parse node for an agent, bot or worker
+	// (API-SP-004).
+	ConvertNode(ctx context.Context, id, nodeID string) (workflow.ConvertResult, error)
+	// ScriptSuggestions lists the nodes worth converting (API-SP-005).
+	ScriptSuggestions(ctx context.Context, id string) ([]workflow.Suggestion, error)
 }
 
 // SetWorkflows installs the workflow port. Call it before Start; a nil port
@@ -120,6 +129,8 @@ func (s *Server) registerWorkflowRoutes() {
 	s.Handle("GET /v1/workflows/{id}/assistant", http.HandlerFunc(s.handleWorkflowChat))
 	s.Handle("POST /v1/workflows/{id}/assistant", http.HandlerFunc(s.handleWorkflowAssist))
 	s.Handle("POST /v1/workflows/{id}/webhook/rotate", http.HandlerFunc(s.handleWorkflowRotateWebhook))
+	// Script Parse routes (spec #44, API-SP-002..005).
+	s.registerWorkflowScriptRoutes()
 }
 
 // handleWorkflowList serves API-WF-001 (REQ-WF-001, REQ-WF-011). It merges the
@@ -811,6 +822,7 @@ func (s *Server) writeWorkflowErrorWithNotFound(w http.ResponseWriter, operation
 	case errors.Is(err, workflow.ErrRunFinished):
 		writeAPIError(w, http.StatusConflict, "run_finished", "the run already finished")
 	case errors.Is(err, workflow.ErrDecisionClosed):
+		// API-WF-015; a second Script Parse revert gets the same 409 (API-SP-006).
 		writeAPIError(w, http.StatusConflict, "decision_resolved", "the decision was already answered")
 	case errors.Is(err, workflow.ErrInvalidChoice):
 		writeAPIError(w, http.StatusBadRequest, "invalid_choice", "the choice is not valid for this decision")

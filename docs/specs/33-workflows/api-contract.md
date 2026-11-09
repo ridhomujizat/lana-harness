@@ -103,6 +103,7 @@
 | `merge` | — | `{<input node id>: output, ...}` |
 | `state_get` | **`key`** | `{key, value, exists}` |
 | `state_set` | **`key`**, **`value`** | `{key, value}` |
+| `script_parse` | **`input`**, **`goal`**, **`output_schema`**, … (spec [44](../44-script-parse/requirements.md) API-SP-001) | the checked object |
 
 `op`: `==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `not_contains`, `exists`, `not_exists`, `truthy`, `falsy`.
 

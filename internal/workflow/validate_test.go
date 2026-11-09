@@ -323,3 +323,81 @@ func hasCodeFor(issues []Issue, node, code string) bool {
 	}
 	return false
 }
+
+// scriptParseGraph builds a reachable single script_parse node for the spec #44
+// validation tests.
+func scriptParseGraph(params map[string]any) Graph {
+	return Graph{
+		Nodes: []Node{
+			{ID: "t", Type: "trigger.manual"},
+			{ID: "s", Type: "script_parse", Name: "Parse", Params: params},
+		},
+		Edges: []Edge{{ID: "e1", From: "t", To: "s"}},
+	}
+}
+
+// TestValidateScriptParse covers the script_parse rules of REQ-SP-013 and the
+// template rule of REQ-SP-001.
+func TestValidateScriptParse(t *testing.T) {
+	agentOK := func(string) bool { return true }
+	agentNo := func(string) bool { return false }
+	base := func() map[string]any {
+		return map[string]any{
+			"input":         "{{ input.url }}",
+			"goal":          "extract repos",
+			"output_schema": map[string]any{"repos": "object[]", "note": "string"},
+		}
+	}
+	with := func(over map[string]any) map[string]any {
+		m := base()
+		for k, v := range over {
+			m[k] = v
+		}
+		return m
+	}
+
+	cases := []struct {
+		name    string
+		params  map[string]any
+		agents  func(string) bool
+		want    []string // codes that must be present on node "s"
+		notWant []string // codes that must be absent on node "s"
+	}{
+		{"empty script ok", with(map[string]any{"script": ""}), agentOK, nil, []string{"bad_schema", "bad_script", "bad_template"}},
+		{"valid script ok", with(map[string]any{"script": "function parse(input, ctx) { return {repos: []}; }"}), agentOK, nil, []string{"bad_schema", "bad_script", "bad_template"}},
+		{"empty schema", with(map[string]any{"output_schema": map[string]any{}}), agentOK, []string{"bad_schema"}, []string{"bad_script"}},
+		{"unknown type", with(map[string]any{"output_schema": map[string]any{"x": "widget"}}), agentOK, []string{"bad_schema"}, nil},
+		{"item schema not object array", with(map[string]any{"item_schema": map[string]any{"note": map[string]any{"a": "string"}}}), agentOK, []string{"bad_schema"}, nil},
+		{"syntax error script", with(map[string]any{"script": "function parse(input, ctx) { return {"}), agentOK, []string{"bad_script"}, []string{"bad_schema"}},
+		{"no parse function", with(map[string]any{"script": "function other() { return {}; }"}), agentOK, []string{"bad_script"}, nil},
+		{"script too large", with(map[string]any{"script": "//" + strings.Repeat("x", 40<<10)}), agentOK, []string{"bad_script"}, nil},
+		{"bad on_drift", with(map[string]any{"on_drift": "bogus"}), agentOK, []string{"missing_param"}, nil},
+		{"bad timeout", with(map[string]any{"timeout_ms": 50}), agentOK, []string{"missing_param"}, nil},
+		{"unknown fallback agent", with(map[string]any{"fallback_agent": "ghost"}), agentNo, []string{"unknown_agent"}, nil},
+		{"empty fallback agent", with(map[string]any{"fallback_agent": ""}), agentNo, nil, []string{"unknown_agent"}},
+		{"script braces safe", with(map[string]any{"script": `function parse(input, ctx) { var s = "{{ x }}"; return {a: s}; }`}), agentOK, nil, []string{"bad_template", "bad_script"}},
+		{"input template bad ref", with(map[string]any{"input": "{{ nodes.missing.output }}"}), agentOK, []string{"bad_template"}, []string{"bad_schema", "bad_script"}},
+	}
+	for _, tc := range cases {
+		issues := Validate(scriptParseGraph(tc.params), tc.agents)
+		for _, code := range tc.want {
+			if !hasCodeFor(issues, "s", code) {
+				t.Fatalf("%s: want issue %q on node s, got %+v", tc.name, code, issues)
+			}
+		}
+		for _, code := range tc.notWant {
+			if hasCodeFor(issues, "s", code) {
+				t.Fatalf("%s: unexpected issue %q on node s: %+v", tc.name, code, issues)
+			}
+		}
+	}
+}
+
+// TestValidateScriptParseMissingSchema checks a missing output_schema reports
+// exactly one missing_param and never a bad_schema (REQ-SP-013).
+func TestValidateScriptParseMissingSchema(t *testing.T) {
+	issues := Validate(scriptParseGraph(map[string]any{"input": "{{ input.url }}", "goal": "g"}), func(string) bool { return true })
+	if len(issues) != 1 || issues[0].Code != "missing_param" || issues[0].NodeID != "s" {
+		t.Fatalf("issues=%+v, want exactly one missing_param on s", issues)
+	}
+}
