@@ -125,8 +125,18 @@ export default defineConfig({
     modulePreload: { polyfill: false },
   },
   server: {
+    /* The daemon rejects a state-changing request whose Origin is not its own
+       address, so the dev proxy presents the daemon's origin instead of Vite's. */
     proxy: {
-      "/v1": "http://127.0.0.1:18300",
+      "/v1": {
+        target: "http://127.0.0.1:18300",
+        changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (req) => {
+            if (req.getHeader("origin")) req.setHeader("origin", "http://127.0.0.1:18300");
+          });
+        },
+      },
     },
   },
   test: {
