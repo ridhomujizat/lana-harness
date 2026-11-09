@@ -23,6 +23,7 @@ import {
   Toggle,
   useToast,
 } from "../ui/gr8r";
+import { displayLabel, useAgentLabel } from "./agent-label";
 import { describeCron, isTrigger, nodeMeta } from "./workflow-catalog";
 import {
   AgentFace,
@@ -57,7 +58,11 @@ function Section({
   );
 }
 
-function triggerLine(node: WfNode, workflow: Workflow): string {
+function triggerLine(
+  node: WfNode,
+  workflow: Workflow,
+  label: (name: string) => string
+): string {
   const p = node.params;
   switch (node.type) {
     case "trigger.schedule":
@@ -69,7 +74,7 @@ function triggerLine(node: WfNode, workflow: Workflow): string {
     case "trigger.chat":
       return "/" + String(p.command) + " in web chat or the Telegram owner chat";
     case "trigger.event":
-      return String(p.kind) + (p.agent ? " · " + String(p.agent) : "");
+      return String(p.kind) + (p.agent ? " · " + label(String(p.agent)) : "");
     default:
       return "From the Editor or the Runs tab, with optional JSON input";
   }
@@ -84,6 +89,7 @@ export function WorkflowSettings({
 }) {
   const toast = useToast();
   const agents = useAgentNames();
+  const label = useAgentLabel();
   const [name, setName] = useState(workflow.name);
   const [description, setDescription] = useState(workflow.description);
   const [entries, setEntries] = useState<StateEntry[]>([]);
@@ -276,7 +282,7 @@ export function WorkflowSettings({
           <div className="wf-card wf-guardian">
             <AgentFace name={workflow.guardian} size="md" />
             <div>
-              <b>{workflow.guardian}</b>
+              <b>{label(workflow.guardian)}</b>
               <p className="muted">
                 {guardianAgent && guardianAgent.model ? guardianAgent.model.split("/").pop() + " · " : ""}
                 edits via the web assistant{guarding ? " · guarding " + guarding + " workflows" : ""}
@@ -308,7 +314,7 @@ export function WorkflowSettings({
                     <b>{node.name || meta.label}</b>
                     <p className="muted">
                       {on ? "" : "Off · "}
-                      {triggerLine(node, workflow)}
+                      {triggerLine(node, workflow, label)}
                     </p>
                   </div>
                   <Toggle
@@ -443,7 +449,7 @@ export function WorkflowSettings({
             <label className={"wf-card wf-radio" + (mode === "guardian" ? " on" : "")}>
               <div>
                 <b>Retry, then guardian decides</b>
-                <p>{workflow.guardian} reads the error and skips, continues or stops the run.</p>
+                <p>{label(workflow.guardian)} reads the error and skips, continues or stops the run.</p>
               </div>
               <Radio checked={mode === "guardian"} onChange={() => void saveFailure("guardian")} name="wf-mode" />
             </label>
@@ -520,7 +526,7 @@ export function WorkflowSettings({
             onChange={setGuardian}
             options={agents.map((agent) => ({
               value: agent.name,
-              label: agent.name,
+              label: displayLabel(agent),
               icon: agentOptionIcon(agent.name),
             }))}
             aria-label="Guardian"

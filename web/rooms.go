@@ -67,7 +67,9 @@ type roomJSON struct {
 	Name  string `json:"name"`
 	Kind  string `json:"kind"`
 	Title string `json:"title"`
-	Color string `json:"color"`
+	// DisplayName is the human name shown in the UI, "" when unset.
+	DisplayName string `json:"display_name"`
+	Color       string `json:"color"`
 	// AvatarSVG is the avatar the room shows, never empty, and AvatarSource
 	// "saved" or "default" (spec 43, API-AVT-005).
 	AvatarSVG    string   `json:"avatar_svg"`
@@ -309,10 +311,12 @@ func (s *Server) computeRooms(ctx context.Context) ([]roomJSON, error) {
 	return rows, nil
 }
 
-// agentMeta is the configured title and color of an agent (API-ROOM-006).
+// agentMeta is the configured title, display name, and color of an agent
+// (API-ROOM-006).
 type agentMeta struct {
-	title string
-	color string
+	title       string
+	displayName string
+	color       string
 }
 
 // roomAgentMeta reads the [agents.<name>] tables for the title and color, the
@@ -332,7 +336,7 @@ func (s *Server) roomAgentMeta(ctx context.Context) map[string]agentMeta {
 	}
 	for name, table := range tables {
 		record := agentRecordFromMap(table)
-		meta[name] = agentMeta{title: record.Title, color: record.Color}
+		meta[name] = agentMeta{title: record.Title, displayName: record.DisplayName, color: record.Color}
 	}
 	return meta
 }
@@ -357,6 +361,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 	} else {
 		if m, ok := meta[agent.Name]; ok {
 			row.Title = m.title
+			row.DisplayName = m.displayName
 			row.Color = core.ResolveAgentColor(agent.Name, m.color)
 		}
 		row.AvatarSVG, row.AvatarSource = s.agentAvatar(agent.Name)

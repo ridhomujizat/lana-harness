@@ -6,6 +6,7 @@ import type { ChatMessage, LockTool, Workflow } from "../api/workflows";
 import { Ic } from "../ui/icons";
 import { Button, Select } from "../ui/gr8r";
 import { AgentFace } from "./workflow-common";
+import { displayLabel, useAgentLabel } from "./agent-label";
 import { TEMPLATES } from "./workflow-templates";
 import type { WorkflowTemplate } from "./workflow-templates";
 import { agentOptionIcon } from "./agent-avatar";
@@ -101,6 +102,7 @@ export function WorkflowAssistant({
   onTestRun,
   onImport,
 }: AssistantProps) {
+  const label = useAgentLabel();
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
@@ -162,7 +164,7 @@ export function WorkflowAssistant({
                     options={agents.map((agent) => ({
                       value: agent.name,
                       icon: agentOptionIcon(agent.name),
-                      label: agent.name + (agent.model ? " · " + agent.model.split("/").pop() : ""),
+                      label: displayLabel(agent) + (agent.model ? " · " + agent.model.split("/").pop() : ""),
                     }))}
                     aria-label="Guardian bot"
                   />
@@ -287,7 +289,7 @@ export function WorkflowAssistant({
           <textarea
             value={text}
             rows={2}
-            placeholder={"Minta " + guardian + " membuat atau mengubah sesuatu…"}
+            placeholder={"Minta " + label(guardian) + " membuat atau mengubah sesuatu…"}
             aria-label="Message the guardian"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onKey}

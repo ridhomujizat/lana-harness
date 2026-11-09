@@ -15,6 +15,8 @@ export interface McpStatus {
 
 export interface Agent {
   name: string;
+  /* display_name is the human name, "" when unset (falls back to name). */
+  display_name?: string;
   kind: string;
   title: string;
   /* A color token (brand, success, warning, error, blue, gray) or, since
@@ -61,6 +63,7 @@ export interface AgentWriteFields {
      clear a legacy provider/model pair. */
   provider?: string;
   model?: string;
+  display_name?: string;
   title?: string;
   color?: string;
   fallback?: string[];
@@ -86,6 +89,7 @@ export interface AgentWriteFields {
    picks the starting tools, prompt, and limits. */
 export interface CreateAgentRequest {
   name: string;
+  display_name?: string;
   /* Every agent is a lana agent and starts from a template (spec 39). */
   template: string;
   workspace?: string;
@@ -151,12 +155,17 @@ export function updateAgent(
 
 export function duplicateAgent(
   name: string,
-  newName: string
+  newName: string,
+  displayName?: string
 ): Promise<AgentCreatedResponse> {
+  const body: { name: string; display_name?: string } = { name: newName };
+  if (displayName) {
+    body.display_name = displayName;
+  }
   return request<AgentCreatedResponse>(
     "POST",
     "/v1/agents/" + encodeURIComponent(name) + "/duplicate",
-    { name: newName }
+    body
   );
 }
 

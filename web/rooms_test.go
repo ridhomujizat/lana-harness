@@ -90,6 +90,25 @@ func TestRoomsSortAndPreview(t *testing.T) {
 	}
 }
 
+// TestRoomRowDisplayName covers the display_name field of a room row: an agent
+// with a configured display_name carries it, a team row leaves it empty.
+func TestRoomRowDisplayName(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{
+		{Name: "coder", Kind: "agent"},
+		{Name: "squad", Kind: "team", Lead: "coder", Members: []string{"coder"}},
+	}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+	s.SetConfigStore(newTestConfigStore(t, "[agents.coder]\ndisplay_name = \"Omnix Lead\"\n", 0o600, ConfigSettings{}))
+
+	if row := roomRowForTest(t, s, cookie, "coder"); row.DisplayName != "Omnix Lead" {
+		t.Fatalf("agent display_name = %q, want Omnix Lead", row.DisplayName)
+	}
+	if row := roomRowForTest(t, s, cookie, "squad"); row.DisplayName != "" {
+		t.Fatalf("team display_name = %q, want empty", row.DisplayName)
+	}
+}
+
 // AC-ROOM-004: sending to a room with no web session creates one and starts the
 // turn there.
 func TestRoomSendCreatesWebSession(t *testing.T) {

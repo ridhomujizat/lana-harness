@@ -6,6 +6,7 @@ import { errorMessage, ApiError } from "../api/client";
 import { detailText } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { splitModel } from "./agent-common";
+import { displayLabel, useAgentLabel } from "./agent-label";
 import {
   listMcpServers,
   saveMcpServer,
@@ -902,6 +903,7 @@ interface ServerRowProps {
 /* One server row. The name opens the detail page; the ellipsis opens the row
    actions (open or restart). */
 function ServerRow({ server, restarting, onRestart, onOpen }: ServerRowProps) {
+  const label = useAgentLabel();
   const moreRef = useRef<HTMLSpanElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const target = serverTarget(server);
@@ -945,7 +947,7 @@ function ServerRow({ server, restarting, onRestart, onOpen }: ServerRowProps) {
                 +{agentNames.length - shown.length}
               </span>
             ) : null}
-            <span className="sr">Used by {agentNames.join(", ")}</span>
+            <span className="sr">Used by {agentNames.map((agentName) => label(agentName)).join(", ")}</span>
           </>
         )}
       </span>
@@ -1698,7 +1700,7 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
       agent.name,
       nextList,
       nextServerAgents,
-      "Removed " + agent.name + " from " + name + "."
+      "Removed " + displayLabel(agent) + " from " + name + "."
     );
   }
 
@@ -1731,7 +1733,7 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
       selected.name,
       list.concat([name]),
       nextServerAgents,
-      "Added " + selected.name + " to " + name + "."
+      "Added " + displayLabel(selected) + " to " + name + "."
     );
   }
 
@@ -2095,7 +2097,7 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
                       size="md"
                     />
                     <span className="mcp-agent-text">
-                      <span className="mcp-agent-name">{agent.name}</span>
+                      <span className="mcp-agent-name">{displayLabel(agent)}</span>
                       <span className="mcp-agent-model">
                         {modelLabel(agent)}
                       </span>
@@ -2103,7 +2105,7 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
                     <IconButton
                       size="sm"
                       icon="x"
-                      label={"Remove agent " + agent.name}
+                      label={"Remove agent " + displayLabel(agent)}
                       disabled={Boolean(agentBusy)}
                       onClick={() => removeAgent(agent)}
                     />
@@ -2124,7 +2126,7 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
                       aria-label="Agent"
                       options={availableAgents.map((agent) => ({
                         value: agent.name,
-                        label: agent.name,
+                        label: displayLabel(agent),
                       }))}
                       value={pickerValue}
                       disabled={Boolean(agentBusy)}

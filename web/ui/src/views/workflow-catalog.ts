@@ -492,8 +492,12 @@ export function messageChannelSummary(
     .join(", ");
 }
 
-/* The second line of a node card, e.g. "Schedule · Asia/Jakarta". */
-export function nodeSubtitle(node: WfNode): string {
+/* The second line of a node card, e.g. "Schedule · Asia/Jakarta". `label`
+   resolves an agent ID to the name a person reads, when the card shows one. */
+export function nodeSubtitle(
+  node: WfNode,
+  label?: (name: string) => string
+): string {
   const p = node.params || {};
   const meta = nodeMeta(node.type);
   switch (node.type) {
@@ -515,8 +519,13 @@ export function nodeSubtitle(node: WfNode): string {
       return str(p.script).trim()
         ? "Script Parse · rev " + (str(p.script_rev) || "1")
         : "Script Parse · learns on first run";
-    case "bot":
-      return "Call bot · " + (str(p.agent) || "pick a bot");
+    case "bot": {
+      const agent = str(p.agent);
+      if (!agent) {
+        return "Call bot · pick a bot";
+      }
+      return "Call bot · " + (label ? label(agent) : agent);
+    }
     case "worker":
       return "Worker agent" + (str(p.model) ? " · " + str(p.model) : "");
     case "browser":

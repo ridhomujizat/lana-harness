@@ -108,7 +108,10 @@ export interface SetupClaudeAccount {
 }
 
 export interface SetupAgentDraft {
+  /* name is the ID: the config key, the route, and the @mention token. */
   name: string;
+  /* displayName is the human name people see; it falls back to name. */
+  displayName: string;
   template: string;
   workspace: string;
   permission: string;
@@ -140,6 +143,8 @@ export interface SetupSummary {
   fallback: string;
   background: string;
   agentName: string;
+  /* agentLabel is the human name to show, when it differs from the ID. */
+  agentLabel: string;
   template: string;
   permission: string;
   workspace: string;
@@ -166,6 +171,7 @@ export function defaultDraft(): SetupDraft {
     background: "",
     agent: {
       name: "default",
+      displayName: "default",
       template: "assistant",
       workspace: "~/lana/workspace",
       permission: "ask",
@@ -215,6 +221,7 @@ export function normalizeDraft(value: unknown): SetupDraft {
     background: textValue(draft.background, ""),
     agent: {
       name: textValue(agent.name, fallback.agent.name),
+      displayName: textValue(agent.displayName, fallback.agent.displayName),
       template: textValue(agent.template, fallback.agent.template),
       workspace: textValue(agent.workspace, fallback.agent.workspace),
       permission: textValue(agent.permission, fallback.agent.permission),
@@ -311,6 +318,7 @@ export function summaryFor(draft: SetupDraft): SetupSummary {
     fallback: draft.fallback,
     background: draft.background,
     agentName: draft.agent.name.trim(),
+    agentLabel: draft.agent.displayName.trim() || draft.agent.name.trim(),
     template: draft.agent.template,
     permission: draft.agent.permission,
     workspace: draft.agent.workspace.trim() || "~/lana/workspace",

@@ -167,6 +167,48 @@ describe("Agents roster (AC-ROOM-019)", () => {
   });
 });
 
+/* The create dialog splits the human name from the ID: the name people see is
+   free text and the ID is filled in from it until the owner edits the ID. */
+describe("Create agent dialog", () => {
+  beforeEach(() => {
+    /* jsdom has no modal dialog implementation. */
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.open = false;
+    };
+    vi.mocked(listAgents).mockResolvedValue({ agents: [] });
+    installRows([]);
+  });
+
+  it("slugs the name into the ID and sends both", async () => {
+    vi.mocked(createAgent).mockResolvedValue({
+      name: "omnix-lead",
+      restart_required: true,
+    });
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Hire an agent" }));
+
+    const name = screen.getByLabelText(/^Name/) as HTMLInputElement;
+    const id = screen.getByLabelText(/^ID/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Omnix Lead" } });
+    expect(id.value).toBe("omnix-lead");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createAgent)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "omnix-lead",
+          display_name: "Omnix Lead",
+        })
+      );
+    });
+  });
+});
+
 /* Spec 39 (REQ-CCT-009, AC-CCT-011): no engine choice; a Claude Code model
    is picked like any other model. */
 describe("Claude Code models", () => {

@@ -13,6 +13,7 @@ import type { KnowledgeReport, KnowledgeStatus } from "../api/knowledge";
 import { Markdown } from "../lib/markdown";
 import { detailText } from "../ui/ui";
 import { Ic } from "../ui/icons";
+import { useAgentLabel } from "./agent-label";
 import {
   Badge,
   Button,
@@ -142,6 +143,7 @@ export function KnowledgePage() {
 
   const [reloadToken, setReloadToken] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const label = useAgentLabel();
 
   /* A failed refresh keeps the last data and shows the notice; only the first
      load leaves the loading state. */
@@ -458,7 +460,7 @@ export function KnowledgePage() {
           </dl>
           <p className="knowledge-note">
             Knowledge agent:{" "}
-            {data.agent ? <AgentName name={data.agent} /> : "none configured"}
+            {data.agent ? <AgentName name={data.agent} label={label(data.agent)} /> : "none configured"}
           </p>
           {data.agent_error ? (
             <div className="alert danger" role="alert">

@@ -26,6 +26,7 @@ export function Icon({ name, className = "icon-20" }: IconProps) {
 
 export interface AgentLike {
   name?: string;
+  display_name?: string;
   runtime?: string;
   claude_code?: boolean;
   kind?: string;

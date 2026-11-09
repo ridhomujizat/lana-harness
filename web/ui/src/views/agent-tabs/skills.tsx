@@ -7,6 +7,7 @@ import { listSkills } from "../../api/skills";
 import type { SkillRow } from "../../api/skills";
 import { Dialog, ErrorNotice, Loading } from "../../ui/ui";
 import { AgentAvatar, agoLabel } from "../agent-common";
+import { useAgentLabel } from "../agent-label";
 import { Ic } from "../../ui/icons";
 
 /* REQ-WEB-047: the agent's skills list. Removing a name changes only the
@@ -54,6 +55,7 @@ function AddSkillsDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
+  const label = useAgentLabel();
   const takenSet = useMemo(() => new Set(taken), [taken]);
 
   const options = useMemo(() => {
@@ -132,15 +134,15 @@ function AddSkillsDialog({
 
   return (
     <Dialog
-      title={"Add skills to " + agent}
+      title={"Add skills to " + label(agent)}
       className="agent-tabs-dialog agent-skills-dialog"
       dismissible={!busy}
       onClose={onClose}
     >
       <form className="agent-skills-add" onSubmit={submit}>
         <p className="hint">
-          Pick global skills from the library. {agent} loads them when a task
-          needs them.
+          Pick global skills from the library. {label(agent)} loads them when a
+          task needs them.
         </p>
 
         <label className="agent-tabs-search agent-skills-search">
@@ -239,6 +241,7 @@ export interface SkillsTabProps {
 
 export function SkillsTab({ name }: SkillsTabProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const label = useAgentLabel();
   const [catalog, setCatalog] = useState<SkillCatalog>({
     valid: [],
     invalid: [],
@@ -517,7 +520,7 @@ export function SkillsTab({ name }: SkillsTabProps) {
                       ) : (
                         <span className="agent-skills-scope">
                           <AgentAvatar name={scopeAgent} size="20" />
-                          <span>Only {scopeAgent}</span>
+                          <span>Only {label(scopeAgent)}</span>
                         </span>
                       )}
                     </td>
@@ -531,7 +534,7 @@ export function SkillsTab({ name }: SkillsTabProps) {
                         type="button"
                         className="agent-tabs-icon-button"
                         aria-label={
-                          "Remove " + row.name + " from " + name
+                          "Remove " + row.name + " from " + label(name)
                         }
                         disabled={saving}
                         onClick={() => removeSkill(row.name)}

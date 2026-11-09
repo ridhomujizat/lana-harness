@@ -5,6 +5,12 @@ import { ErrorNotice, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { Button, Field, Input, Textarea, cn } from "../ui/gr8r";
 import {
+  AGENT_ID_HINT,
+  AGENT_ID_RULE,
+  MAX_DISPLAY_NAME,
+  slugifyAgentName,
+} from "./agent-label";
+import {
   getDaemonStartedAt,
   getSetup,
   pollDaemonRestart,
@@ -152,6 +158,10 @@ function setupBody(draft: SetupDraft, persona: SetupPersonaDraft) {
     backgroundModel: isClaudeAddress(draft.model) ? draft.background : "",
     agent: {
       name: draft.agent.name.trim(),
+      ...(draft.agent.displayName.trim() &&
+      draft.agent.displayName.trim() !== draft.agent.name.trim()
+        ? { display_name: draft.agent.displayName.trim() }
+        : {}),
       template: draft.agent.template,
       workspace: draft.agent.workspace.trim(),
       permission: draft.agent.permission,
@@ -165,26 +175,55 @@ function setupBody(draft: SetupDraft, persona: SetupPersonaDraft) {
 
 interface AgentFieldErrors {
   name?: string;
+  id?: string;
   workspace?: string;
 }
 
 function AgentStep() {
   const announce = useAnnounce();
   const [agent, setAgent] = useState(() => readDraft().agent);
+  const [idTouched, setIdTouched] = useState(false);
   const [errors, setErrors] = useState<AgentFieldErrors>({});
 
+  /* The ID follows the name (slugifyAgentName) until the owner edits the ID by
+     hand, then it stays put. The four Field components keep their own keys. */
   function update(field: keyof SetupAgentDraft, value: string) {
     const next = { ...agent, [field]: value };
+    if (field === "displayName" && !idTouched) {
+      next.name = slugifyAgentName(value);
+    }
     setAgent(next);
     const current = readDraft();
     writeDraft({ ...current, agent: next });
-    setErrors((currentErrors) => ({ ...currentErrors, [field]: "" }));
+    const key: keyof AgentFieldErrors | "" =
+      field === "displayName"
+        ? "name"
+        : field === "name"
+          ? "id"
+          : field === "workspace"
+            ? "workspace"
+            : "";
+    if (key) {
+      setErrors((currentErrors) => ({ ...currentErrors, [key]: "" }));
+    }
+  }
+
+  function updateId(value: string) {
+    setIdTouched(true);
+    update("name", value);
   }
 
   function validate(): boolean {
     const nextErrors: AgentFieldErrors = {};
-    if (!/^[a-z0-9-]+$/.test(agent.name)) {
-      nextErrors.name = "Use lowercase letters, numbers, and dashes only.";
+    const displayName = agent.displayName.trim();
+    if (!displayName) {
+      nextErrors.name = "Enter a name for the agent, for example Research Assistant.";
+    } else if (Array.from(displayName).length > MAX_DISPLAY_NAME) {
+      nextErrors.name =
+        "The name must be at most " + MAX_DISPLAY_NAME + " characters.";
+    }
+    if (!AGENT_ID_RULE.test(agent.name.trim())) {
+      nextErrors.id = "The ID is not valid. " + AGENT_ID_HINT;
     }
     if (!agent.workspace.trim()) {
       nextErrors.workspace = "Enter a workspace path.";
@@ -210,9 +249,9 @@ function AgentStep() {
 
       <div className="auth-form">
         <Field
-          label="Agent name"
+          label="Name"
           htmlFor="setup-agent-name"
-          hint="Lowercase letters, numbers, and dashes. Routes and the CLI use this name."
+          hint="The name people see, for example Research Assistant."
           error={errors.name}
         >
           <Input
@@ -220,10 +259,29 @@ function AgentStep() {
             className="input-lg"
             type="text"
             autoComplete="off"
+            value={agent.displayName}
+            maxLength={MAX_DISPLAY_NAME}
+            aria-required="true"
+            onChange={(event) => update("displayName", event.target.value)}
+          />
+        </Field>
+
+        <Field
+          label="ID"
+          htmlFor="setup-agent-id"
+          hint="Used in links, the config file, and @mentions. Filled in from the name. You cannot change it later."
+          error={errors.id}
+        >
+          <Input
+            id="setup-agent-id"
+            className="input-lg"
+            type="text"
+            autoComplete="off"
             spellCheck={false}
             value={agent.name}
+            maxLength={32}
             aria-required="true"
-            onChange={(event) => update("name", event.target.value)}
+            onChange={(event) => updateId(event.target.value)}
           />
         </Field>
 
@@ -579,6 +637,8 @@ function ReadyStep() {
   const permission = permissionById(summary.permission).summary;
   const template = templateById(summary.template).label;
   const agentName = summary.agentName || "default";
+  /* The link and the avatar use the ID; the labels show the display name. */
+  const agentLabel = summary.agentLabel || agentName;
   const names = (summary.claudeCode ? [CLAUDE_CODE_ID] : []).concat(summary.providers);
   const account = summary.claudeAccount;
   const rows: { icon: string; label: string; value: ReactNode }[] = [
@@ -641,7 +701,7 @@ function ReadyStep() {
     });
   }
   rows.push(
-    { icon: "bot", label: "Agent", value: agentName + " · " + template },
+    { icon: "bot", label: "Agent", value: agentLabel + " · " + template },
     { icon: "shield-check", label: "Tool permission", value: permission },
     { icon: "folder", label: "Workspace", value: summary.workspace || "~/lana/workspace" }
   );
@@ -684,7 +744,7 @@ function ReadyStep() {
         </a>
         <a className="link setup-agent-link" href={"#/agents/" + encodeURIComponent(agentName)}>
           <AgentAvatar name={agentName} size="sm" aria-hidden="true" />
-          Open agent {agentName}
+          Open agent {agentLabel}
         </a>
       </div>
     </SetupShell>

@@ -61,6 +61,7 @@ export interface SetupInput {
   backgroundModel: string;
   agent: {
     name: string;
+    display_name?: string;
     template: string;
     workspace: string;
     permission: string;
@@ -118,6 +119,18 @@ export async function saveSetup(input: SetupInput): Promise<SetupSaveResponse> {
   const config = await request<GetConfigVersionResponse>("GET", "/v1/config");
   const expectedVersion =
     config && typeof config.version === "string" ? config.version : "";
+  /* display_name is sent only when the human name differs from the ID, so a
+     wizard that kept them equal writes no extra config key. */
+  const agent: SetupInput["agent"] = {
+    name: input.agent.name,
+    template: input.agent.template,
+    workspace: input.agent.workspace,
+    permission: input.agent.permission,
+  };
+  const displayName = (input.agent.display_name || "").trim();
+  if (displayName && displayName !== input.agent.name.trim()) {
+    agent.display_name = displayName;
+  }
   const body: Record<string, unknown> = {
     providers: input.providers.map((provider) => {
       const entry: Record<string, string> = {
@@ -133,10 +146,11 @@ export async function saveSetup(input: SetupInput): Promise<SetupSaveResponse> {
     }),
     model: input.model,
     agent: {
-      name: input.agent.name,
-      template: input.agent.template,
-      workspace: input.agent.workspace,
-      permission: input.agent.permission,
+      name: agent.name,
+      ...(agent.display_name ? { display_name: agent.display_name } : {}),
+      template: agent.template,
+      workspace: agent.workspace,
+      permission: agent.permission,
     },
     persona: {
       agent_md: input.persona.agentMd,

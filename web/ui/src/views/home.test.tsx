@@ -13,6 +13,17 @@ vi.mock("../api/dashboard", () => ({
   getDashboard: vi.fn(),
 }));
 
+/* The Logs page resolves agent labels from the shared rooms store, so that
+   store is stubbed with no rows and the ID stays the fallback label. */
+vi.mock("../api/rooms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/rooms")>();
+  return {
+    ...actual,
+    listRooms: vi.fn().mockResolvedValue([]),
+    openRoomsStream: vi.fn(() => ({ close: () => {} })),
+  };
+});
+
 function makeDashboard(overrides: Partial<Dashboard> = {}): Dashboard {
   return {
     range: "24h",

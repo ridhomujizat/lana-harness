@@ -35,6 +35,7 @@ import {
 } from "./attachments";
 import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
 import type { FaceRef } from "./presence";
+import { agentLabel, displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
 import {
@@ -337,6 +338,7 @@ export function RoomView({ room }: RoomViewProps) {
       const row = byName[name];
       map[name] = {
         name,
+        label: agentLabel(name, byName),
         color: row ? row.color : undefined,
         presence: row ? row.presence : undefined,
       };
@@ -1018,9 +1020,9 @@ export function RoomView({ room }: RoomViewProps) {
     : room.turns_7d + " turns this week";
   const placeholder = team
     ? "Message the team…   " +
-      (room.lead || "The lead") +
+      (room.lead ? agentLabel(room.lead, byName) : "The lead") +
       " answers, or type @ to ask one agent"
-    : "Message " + room.name + "…   Type @ to bring in another agent";
+    : "Message " + displayLabel(room) + "…   Type @ to bring in another agent";
   const attachDisabled = !currentWebSessionId || sending || uploading;
   const activity = liveTool ? activityPhrase(liveTool) : "thinking";
 
@@ -1045,8 +1047,11 @@ export function RoomView({ room }: RoomViewProps) {
     : [];
   const teamSubtitle =
     "Lead: " +
-    (room.lead || "none") +
-    (workingMembers.length > 0 ? " · " + workingLabel(workingMembers) : "");
+    (room.lead ? agentLabel(room.lead, byName) : "none") +
+    (workingMembers.length > 0
+      ? " · " +
+        workingLabel(workingMembers.map((name) => agentLabel(name, byName)))
+      : "");
 
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (mentions.onKeyDown(event)) {
@@ -1093,7 +1098,7 @@ export function RoomView({ room }: RoomViewProps) {
           <div className="room-summary" key={node.key}>
             <BookIcon />
             <span className="room-summary-text">
-              {room.name + " summarized earlier messages · full log in "}
+              {displayLabel(room) + " summarized earlier messages · full log in "}
             </span>
             <a
               className="room-summary-link"
@@ -1130,6 +1135,7 @@ export function RoomView({ room }: RoomViewProps) {
               <TurnBlock
                 turn={node.turn}
                 agent={room.name}
+                agentLabel={displayLabel(room)}
                 agentColor={room.color}
                 onReply={setReplyTarget}
                 waitingForInput={Boolean(activeQuestion)}
@@ -1173,7 +1179,7 @@ export function RoomView({ room }: RoomViewProps) {
         )}
         <div className="room-head-main">
           <div className="room-head-title">
-            <span className="room-head-name">{room.name}</span>
+            <span className="room-head-name">{displayLabel(room)}</span>
             {team ? (
               <Badge tone="violet">{"Team · " + teamAgents + " agents"}</Badge>
             ) : room.title ? (
@@ -1229,7 +1235,7 @@ export function RoomView({ room }: RoomViewProps) {
               <div className="room-live" role="status">
                 <TypingDots />
                 <span className="room-live-text">
-                  {room.name + " is " + activity + "…"}
+                  {displayLabel(room) + " is " + activity + "…"}
                 </span>
               </div>
             ) : null}
@@ -1306,7 +1312,7 @@ export function RoomView({ room }: RoomViewProps) {
           <textarea
             ref={inputRef}
             rows={2}
-            aria-label={"Message " + (team ? "the team" : room.name)}
+            aria-label={"Message " + (team ? "the team" : displayLabel(room))}
             placeholder={placeholder}
             value={draft}
             disabled={sending}
@@ -1375,6 +1381,12 @@ function RoomEmpty({
   team: boolean;
   teamFaces: FaceRef[];
 }) {
+  const leadFace = teamFaces.find((face) => face.name === room.lead);
+  const leadLabel = room.lead
+    ? leadFace && leadFace.label
+      ? leadFace.label
+      : room.lead
+    : "the lead";
   return (
     <div className="room-empty">
       {team && teamFaces.length > 0 ? (
@@ -1397,9 +1409,9 @@ function RoomEmpty({
       <h2 className="room-empty-title">
         {team
           ? "Ask the team something — " +
-            (room.lead || "the lead") +
+            leadLabel +
             " will hand work to the right member"
-          : "Start a conversation with " + room.name}
+          : "Start a conversation with " + displayLabel(room)}
       </h2>
       {room.title ? (
         <p className="room-empty-text muted">{room.title}</p>

@@ -10,6 +10,17 @@ const BLOB =
   '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
   '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>';
 
+/* The session list resolves its agent labels from the shared rooms store, so
+   that store is stubbed with no rows and the ID stays the fallback label. */
+vi.mock("../api/rooms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/rooms")>();
+  return {
+    ...actual,
+    listRooms: vi.fn().mockResolvedValue([]),
+    openRoomsStream: vi.fn(() => ({ close: () => {} })),
+  };
+});
+
 function stubSessionsFetch(sessions: Session[]) {
   const body: ListSessionsResponse = {
     sessions,

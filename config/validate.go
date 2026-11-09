@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -103,6 +103,10 @@ const maxAgentDescription = 120
 // maxAgentTitle is the longest accepted agents.<name>.title, in characters
 // (runes) (REQ-ROOM-009, API-ROOM-006).
 const maxAgentTitle = 60
+
+// maxAgentDisplayName is the longest accepted agents.<name>.display_name, in
+// characters (runes).
+const maxAgentDisplayName = 40
 
 // maxTeamDescription is the longest accepted teams.<name>.description, in
 // characters (runes).
@@ -556,6 +560,19 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			}
 			if n := utf8.RuneCountInString(s); n > maxAgentTitle {
 				add(path+".title", fmt.Sprintf("must be at most %d characters (got %d)", maxAgentTitle, n))
+			}
+		}
+	}
+	if val, ok := v["display_name"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".display_name", typeMsg("string", val))
+		} else {
+			if strings.ContainsAny(s, "\n\r") {
+				add(path+".display_name", "must be one line")
+			}
+			if n := utf8.RuneCountInString(s); n > maxAgentDisplayName {
+				add(path+".display_name", fmt.Sprintf("must be at most %d characters (got %d)", maxAgentDisplayName, n))
 			}
 		}
 	}

@@ -18,6 +18,7 @@ import { Ic, LanaMark } from "../ui/icons";
 import { Avatar, Button, SearchInput } from "../ui/gr8r";
 import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 import { gr8rColor } from "./presence";
+import { displayLabel } from "./agent-label";
 import { CreateAgentDialog } from "./agents";
 import {
   AttachmentChips,
@@ -76,7 +77,11 @@ function matchesQuery(agent: Agent, query: string): boolean {
   }
   /* A team matches its name, its lead, its members, and its description, so
      typing a member name such as "research" finds the team too. */
-  const fields: (string | undefined)[] = [agent.name, agent.description];
+  const fields: (string | undefined)[] = [
+    agent.name,
+    agent.display_name,
+    agent.description,
+  ];
   if (isTeam(agent)) {
     fields.push(agent.lead);
     const members = Array.isArray(agent.members) ? agent.members : [];
@@ -189,7 +194,7 @@ function AgentOption({
         <AgentAvatar name={agent.name} color={gr8rColor(agent.color)} size="md" />
       )}
       <span className="agent-option-text">
-        <span className="agent-option-name">{agent.name}</span>
+        <span className="agent-option-name">{displayLabel(agent)}</span>
         <span className="agent-option-meta">
           {team
             ? "Team · " + rosterSize(agent) + " agents"
@@ -393,7 +398,7 @@ function AgentPicker({
           aria-expanded={open}
           aria-controls={open ? LISTBOX_ID : undefined}
           aria-label={
-            selected ? "Change agent: " + selected.name : "Pick an agent"
+            selected ? "Change agent: " + displayLabel(selected) : "Pick an agent"
           }
           disabled={disabled}
           onClick={togglePicker}
@@ -411,7 +416,7 @@ function AgentPicker({
             {loading
               ? "Loading agents…"
               : selected
-                ? selected.name
+                ? displayLabel(selected)
                 : "Pick an agent"}
           </span>
         </Button>
@@ -603,7 +608,7 @@ export function NewSessionPage() {
     if (taskRef.current) {
       taskRef.current.focus();
     }
-    announce(agent.name + " selected.");
+    announce(displayLabel(agent) + " selected.");
   }
 
   function handleAgentCreated(createdName: string) {
@@ -727,7 +732,7 @@ export function NewSessionPage() {
 
     /* The sent message owns its attachments now, so the draft is cleared. */
     attachmentDraft.clear();
-    announce("Session started with " + selected.name + ".");
+    announce("Session started with " + displayLabel(selected) + ".");
     setBusy(false);
     window.location.hash = "#/sessions/" + encodeURIComponent(sessionId);
   }

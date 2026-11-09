@@ -19,6 +19,8 @@ export interface RoomRow {
   name: string;
   kind: string;
   title: string;
+  /* display_name is the human name, "" when unset (falls back to name). */
+  display_name?: string;
   color: string;
   /* Spec 43: the saved or default avatar of the agent or team. */
   avatar_svg?: string;

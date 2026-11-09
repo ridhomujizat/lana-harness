@@ -134,10 +134,11 @@ type setupProviderEntry struct {
 }
 
 type setupAgentRequest struct {
-	Name       string `json:"name"`
-	Template   string `json:"template"`
-	Workspace  string `json:"workspace"`
-	Permission string `json:"permission"`
+	Name        string `json:"name"`
+	Template    string `json:"template"`
+	Workspace   string `json:"workspace"`
+	Permission  string `json:"permission"`
+	DisplayName string `json:"display_name"`
 }
 
 type setupPersonaRequest struct {
@@ -163,16 +164,17 @@ type setupProviderPlan struct {
 // setupPlan is a validated setup request. It carries only values that are safe
 // to write; the inline keys are never logged or returned.
 type setupPlan struct {
-	providers  []setupProviderPlan
-	model      string
-	fallback   string
-	background string
-	agentName  string
-	workspace  string
-	permission string
-	template   agenthome.Template
-	agentMD    string
-	userMD     string
+	providers   []setupProviderPlan
+	model       string
+	fallback    string
+	background  string
+	agentName   string
+	displayName string
+	workspace   string
+	permission  string
+	template    agenthome.Template
+	agentMD     string
+	userMD      string
 }
 
 // agentModel is the model key of the setup agent: the default combo when a
@@ -531,10 +533,11 @@ func renderSetupConfig(ctx context.Context, check func(context.Context, []byte) 
 		}
 	}
 	agentTable := renderAgentTable(plan.agentName, agentRecord{
-		Model:      plan.agentModel(),
-		Workspace:  plan.workspace,
-		Tools:      append([]string(nil), plan.template.Tools...),
-		Permission: plan.permission,
+		Model:       plan.agentModel(),
+		Workspace:   plan.workspace,
+		Tools:       append([]string(nil), plan.template.Tools...),
+		Permission:  plan.permission,
+		DisplayName: plan.displayName,
 	})
 	if err := rewrite("[agents."+plan.agentName+"]", agentTable); err != nil {
 		return nil, nil, err
@@ -796,8 +799,12 @@ func setupAddressProvider(address string) string {
 // validateSetupAgent checks the agent and persona fields.
 func validateSetupAgent(body *setupRequest, plan *setupPlan) *setupInputError {
 	agentName := body.Agent.Name
-	if !agentNameRE.MatchString(agentName) {
-		return setupFieldError("agent.name", "name must match [a-z0-9-]+")
+	if !agenthome.ValidName(agentName) {
+		return setupFieldError("agent.name", "name must match [a-z][a-z0-9_-]{0,31}")
+	}
+	displayName := strings.TrimSpace(body.Agent.DisplayName)
+	if problem := validateAgentDisplayName(displayName); problem != "" {
+		return setupFieldError("agent.display_name", problem)
 	}
 	template, ok := agenthome.LookupTemplate(body.Agent.Template)
 	if !ok {
@@ -831,6 +838,7 @@ func validateSetupAgent(body *setupRequest, plan *setupPlan) *setupInputError {
 		}
 	}
 	plan.agentName = agentName
+	plan.displayName = displayName
 	plan.workspace = workspace
 	plan.permission = permission
 	plan.template = template

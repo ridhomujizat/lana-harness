@@ -250,17 +250,21 @@ export function AgentAvatarStack({
    one-line labels. */
 export function AgentName({
   name,
+  label,
   size = "sm",
   className,
 }: {
+  /* name is the agent ID: it seeds the avatar. */
   name: string;
+  /* label is the display name to show; it falls back to name. */
+  label?: string;
   size?: AvatarSize;
   className?: string;
 }) {
   return (
     <span className={cn("agent-name-chip", className)}>
       <AgentAvatar name={name} size={size} aria-hidden="true" data-tip={undefined} />
-      <span className="trunc">{name}</span>
+      <span className="trunc">{label || name}</span>
     </span>
   );
 }

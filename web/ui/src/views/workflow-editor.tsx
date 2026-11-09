@@ -31,6 +31,7 @@ import { WorkflowCanvas, addNodeBelow } from "./workflow-canvas";
 import type { NodeBadge, NodeTone } from "./workflow-canvas";
 import { GROUPS, NODE_CATALOG, newNodeId, nodeMeta } from "./workflow-catalog";
 import { ago, useAgentNames } from "./workflow-common";
+import { useAgentLabel } from "./agent-label";
 import { NodeInspector } from "./workflow-inspector";
 import { useScriptSuggestions } from "./workflow-script";
 import { WorkflowHeader } from "./workflow-page";
@@ -175,6 +176,7 @@ export function WorkflowEditor({
 }) {
   const toast = useToast();
   const agents = useAgentNames();
+  const label = useAgentLabel();
   const agentNames = agents.map((agent) => agent.name);
   const [draft, setDraft] = useState<Graph>(() => workflow?.graph || emptyGraph());
   const [name, setName] = useState(workflow?.name || "New workflow");
@@ -252,11 +254,11 @@ export function WorkflowEditor({
     for (const node of draft.nodes) {
       if (names.has(node.name) || names.has(node.id)) {
         tones[node.id] = "changed";
-        badges[node.id] = { text: "Changed by " + workflow.guardian + " · v" + last.change.to_version, tone: "violet" };
+        badges[node.id] = { text: "Changed by " + label(workflow.guardian) + " · v" + last.change.to_version, tone: "violet" };
       }
     }
     return { tones, badges };
-  }, [messages, workflow, draft.nodes]);
+  }, [messages, workflow, draft.nodes, label]);
 
   function select(id: string) {
     setSelected(id);
@@ -513,7 +515,7 @@ export function WorkflowEditor({
   } else if (dirty) {
     meta = "Unsaved changes";
   } else {
-    const who = workflow.version_author === "guardian" ? workflow.guardian : "you";
+    const who = workflow.version_author === "guardian" ? label(workflow.guardian) : "you";
     meta =
       (status === "active" ? "Saved" : "Draft") +
       " · v" +
@@ -611,7 +613,7 @@ export function WorkflowEditor({
                   <Ic name="workflow" size={18} />
                 </span>
                 <b>Canvas masih kosong</b>
-                <p>Ceritakan ke {guardian || "guardian"} di panel chat, atau tarik node dari palet. Node baru muncul di sini.</p>
+                <p>Ceritakan ke {label(guardian) || "guardian"} di panel chat, atau tarik node dari palet. Node baru muncul di sini.</p>
               </div>
             }
           />
@@ -636,7 +638,7 @@ export function WorkflowEditor({
             {panel === "chat" || !selectedNode ? (
               <div className="wf-side-title">
                 <b>Workflow assistant</b>
-                <span className="muted">{guardian || "—"} · guardian of this workflow</span>
+                <span className="muted">{label(guardian) || "—"} · guardian of this workflow</span>
               </div>
             ) : (
               <div className="wf-side-title">
@@ -660,6 +662,7 @@ export function WorkflowEditor({
               graph={draft}
               node={selectedNode}
               agents={agentNames}
+              agentLabel={label}
               suggestion={scriptHints.suggestions.find((hint) => hint.node_id === selectedNode.id)}
               onDismissSuggestion={() => scriptHints.dismiss(selectedNode.id)}
               onChange={updateNode}

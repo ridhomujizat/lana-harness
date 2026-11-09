@@ -156,6 +156,8 @@ export function entryLabel(entry: Entry): string {
 export interface EntryHandlers {
   onOpen: (entry: Entry, anchor: HTMLElement) => void;
   fallback: boolean;
+  /* label resolves an agent ID name to its display name, "" when unset. */
+  label?: (name: string) => string;
 }
 
 function dragStart(event: DragEvent<HTMLElement>, entry: Entry) {
@@ -195,7 +197,7 @@ export function EntryChip({ entry, onOpen, fallback, showTime = true }: EntryHan
 }
 
 /* The sub line of a card: the runs a grouped entry stands for, or the source. */
-function entrySub(entry: Entry): string {
+function entrySub(entry: Entry, label?: (name: string) => string): string {
   if (entry.group && entry.group.length > 1) {
     const failed = entry.group.filter((run) => run.status === "failed").length;
     return entry.group.length + " runs" + (failed > 0 ? " · " + failed + " failed" : "");
@@ -204,7 +206,7 @@ function entrySub(entry: Entry): string {
     return "Run #" + (entry.workflow?.run_number || "") + " · " + entry.status;
   }
   if (entry.source === "workflow_slot") {
-    return (entry.status === "skipped" ? "Skipped" : entry.moved ? "Moved" : "Workflow") + " · " + (entry.workflow?.guardian || "");
+    return (entry.status === "skipped" ? "Skipped" : entry.moved ? "Moved" : "Workflow") + " · " + (label ? label(entry.workflow?.guardian || "") : entry.workflow?.guardian || "");
   }
   if (entry.source === "google") {
     return entry.google?.calendar_name || "Google";
@@ -220,7 +222,7 @@ function entryCompactStatus(entry: Entry): string {
   return entry.source === "workflow_run" ? entry.status : "";
 }
 
-export function EntryCard({ entry, onOpen, fallback, compact }: EntryHandlers & { entry: Entry; compact?: boolean }) {
+export function EntryCard({ entry, onOpen, fallback, compact, label }: EntryHandlers & { entry: Entry; compact?: boolean }) {
   const agent = agentOf(entry);
   const draggable = canDrag(entry, fallback);
   const colorStyle = { "--c": entryColor(entry) } as CSSProperties;
@@ -268,7 +270,7 @@ export function EntryCard({ entry, onOpen, fallback, compact }: EntryHandlers & 
           <span className="m">
             <Ic name={entryIcon(entry)} size={11} />
             <span className="num">{entryWhen(entry)}</span>
-            <span className="trunc grow">{entrySub(entry)}</span>
+            <span className="trunc grow">{entrySub(entry, label)}</span>
             {entry.habit && entry.habit.streak > 0 ? <span className="num">🔥{entry.habit.streak}</span> : null}
             {agent ? <AgentFace name={agent} /> : null}
           </span>
@@ -465,7 +467,7 @@ export function WeekView({
                 </div>
               ) : null}
               {timed.map((entry) => (
-                <EntryCard key={entry.key} entry={entry} onOpen={handlers.onOpen} fallback={handlers.fallback} />
+                <EntryCard key={entry.key} entry={entry} onOpen={handlers.onOpen} fallback={handlers.fallback} label={handlers.label} />
               ))}
               {list.length === 0 ? <span className="wcol-empty">Nothing</span> : null}
             </div>
@@ -559,7 +561,7 @@ export function DayView({
                   width: "calc(" + 100 / slot.lanes + "% - 4px)",
                 }}
               >
-                <EntryCard entry={slot.entry} compact={slot.compact} onOpen={handlers.onOpen} fallback={handlers.fallback} />
+                <EntryCard entry={slot.entry} compact={slot.compact} onOpen={handlers.onOpen} fallback={handlers.fallback} label={handlers.label} />
               </div>
             ))}
           </div>

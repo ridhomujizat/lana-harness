@@ -16,6 +16,7 @@ import { Badge, Button, EmptyState, Tabs, useToast } from "../ui/gr8r";
 import { WorkflowCanvas } from "./workflow-canvas";
 import type { NodeBadge, NodeTone } from "./workflow-canvas";
 import { nodeMeta } from "./workflow-catalog";
+import { useAgentLabel } from "./agent-label";
 import {
   AgentFace,
   RUN_WORDS,
@@ -181,6 +182,7 @@ function DecisionCard({
   now: number;
   onAnswer: (choice: string) => Promise<void>;
 }) {
+  const label = useAgentLabel();
   const [busy, setBusy] = useState("");
   const act = async (choice: string) => {
     setBusy(choice);
@@ -271,7 +273,7 @@ function DecisionCard({
         <p className="muted">I am asking because this changes the saved workflow. I can also apply it to this run only.</p>
       ) : null}
       <span className="wf-decision-meta">
-        {workflow.guardian} · {clock(decision.created_at, true)} · {tokens(decision.tokens)} tokens
+        {label(workflow.guardian)} · {clock(decision.created_at, true)} · {tokens(decision.tokens)} tokens
         {pending && decision.expires_at
           ? " · auto-stops in " + duration(decision.expires_at - now).replace(/ \d+ s$/, "")
           : ""}

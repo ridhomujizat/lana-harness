@@ -31,6 +31,7 @@ import { getDaemon } from "../api/settings";
 import { Dialog, detailText, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { agoLabel } from "./agent-common";
+import { displayLabel, useAgentLabel } from "./agent-label";
 import {
   Avatar,
   Badge,
@@ -289,6 +290,7 @@ interface ChannelRowProps {
   badge: ReactNode;
   meta: ReactNode;
   agent?: string;
+  agentLabel?: string;
   action?: ReactNode;
   muted?: boolean;
 }
@@ -301,6 +303,7 @@ function ChannelRow({
   badge,
   meta,
   agent,
+  agentLabel,
   action,
   muted,
 }: ChannelRowProps) {
@@ -323,7 +326,7 @@ function ChannelRow({
       {agent ? (
         <div className="chan-card-agent">
           <AgentAvatar name={agent} color={agentColor(agent)} size="sm" />
-          <span>{agent}</span>
+          <span>{agentLabel || agent}</span>
         </div>
       ) : null}
       {action ? <div className="chan-card-foot">{action}</div> : null}
@@ -333,6 +336,7 @@ function ChannelRow({
 
 export function ChannelsPage() {
   const announce = useAnnounce();
+  const label = useAgentLabel();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [channels, setChannels] = useState<ChannelCard[]>([]);
   const [error, setError] = useState("");
@@ -468,6 +472,7 @@ export function ChannelsPage() {
             }
             meta={telegramMetaParts.join(" · ")}
             agent={telegramAgent}
+            agentLabel={telegramAgent ? label(telegramAgent) : ""}
             action={
               <Button
                 as="a"
@@ -528,6 +533,7 @@ export function ChannelsPage() {
 
 export function TelegramPage() {
   const announce = useAnnounce();
+  const label = useAgentLabel();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [telegram, setTelegram] = useState<TelegramChannelCard | null>(null);
   const [version, setVersion] = useState("");
@@ -1042,7 +1048,7 @@ export function TelegramPage() {
       setConnectingChat(null);
       return;
     }
-    const message = connectedText(botUsername, agent);
+    const message = connectedText(botUsername, label(agent));
     setConnectStatus(message);
     setConnectError("");
     setConnectDetails([]);
@@ -1295,7 +1301,7 @@ export function TelegramPage() {
       : { tone: "warn", text: "Token missing." });
   const agentOptions = agents.map((agent) => ({
     value: agent.name,
-    label: agent.name,
+    label: displayLabel(agent),
   }));
 
   return (
@@ -1366,7 +1372,7 @@ export function TelegramPage() {
               Connected to {botUsername ? "@" + botUsername : "your bot"}
             </p>
             <p className="chan-connected-text" role="status" aria-live="polite">
-              {connectedText(botUsername, activeAgent)}
+              {connectedText(botUsername, label(activeAgent))}
             </p>
           </Panel>
         ) : (
@@ -1929,7 +1935,7 @@ export function TelegramPage() {
                                   (chat.agent ? "" : " is-empty")
                                 }
                               >
-                                {chat.agent || "No agent"}
+                                {chat.agent ? label(chat.agent) : "No agent"}
                               </span>
                             </span>
                           </td>
@@ -2005,7 +2011,7 @@ function AddChatDialog({
   const chats = Array.isArray(waiting) ? waiting : [];
   const firstWaiting = chats.length > 0;
   const agentOptions = [{ value: "", label: "Choose an agent" }].concat(
-    agents.map((item) => ({ value: item.name, label: item.name }))
+    agents.map((item) => ({ value: item.name, label: displayLabel(item) }))
   );
 
   async function submit(event: FormEvent<HTMLFormElement>) {

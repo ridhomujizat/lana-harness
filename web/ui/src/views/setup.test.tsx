@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { AGENT_ID_HINT } from "./agent-label";
 
 /* The Router onboarding (setup wizard): connect Claude Code and API key
    providers, pick a model with an optional fallback (the default combo) and
@@ -450,13 +451,19 @@ describe("Set up your agent", () => {
   it("shows the agent validation messages and stays on the step", () => {
     render(<SetupWizard step="agent" />);
 
-    const name = screen.getByLabelText("Agent name");
+    const name = screen.getByLabelText("Name");
+    const id = screen.getByLabelText("ID");
     const workspace = screen.getByLabelText("Workspace");
-    fireEvent.change(name, { target: { value: "Bad Name" } });
+    fireEvent.change(name, { target: { value: "Omnix Lead" } });
+    /* The ID fills in from the name until the owner edits it by hand. */
+    expect((id as HTMLInputElement).value).toBe("omnix-lead");
+    fireEvent.change(id, { target: { value: "Bad Name" } });
     fireEvent.change(workspace, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    expect(screen.getByText("Use lowercase letters, numbers, and dashes only.")).toBeTruthy();
+    expect(
+      screen.getByText("The ID is not valid. " + AGENT_ID_HINT)
+    ).toBeTruthy();
     expect(screen.getByText("Enter a workspace path.")).toBeTruthy();
     expect(window.location.hash).toBe("");
     expect(screen.queryByText(/API key|Base URL|provider/i)).toBeNull();

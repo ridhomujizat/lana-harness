@@ -36,6 +36,13 @@ import {
   useClaudeAccounts,
 } from "./router/claude-code";
 import { gr8rColor, useRooms } from "./presence";
+import {
+  AGENT_ID_HINT,
+  AGENT_ID_RULE,
+  MAX_DISPLAY_NAME,
+  displayLabel,
+  slugifyAgentName,
+} from "./agent-label";
 import { DEFAULT_AGENT_TAB } from "../app/router";
 import { PersonaTab } from "./agent-tabs/persona";
 import { ToolsTab } from "./agent-tabs/tools";
@@ -90,6 +97,7 @@ const TABS: readonly TabEntry[] = [
 ];
 
 type GeneralKey =
+  | "display_name"
   | "description"
   | "title"
   | "color"
@@ -104,6 +112,7 @@ type GeneralKey =
   | "workspace_only";
 
 const GENERAL_KEYS: readonly GeneralKey[] = [
+  "display_name",
   "description",
   "title",
   "color",
@@ -159,6 +168,7 @@ const OTHER_MODEL = "__other__";
 const LEGACY_MODEL = "__legacy__";
 
 interface AgentValues {
+  display_name: string;
   description: string;
   title: string;
   color: string;
@@ -174,6 +184,7 @@ interface AgentValues {
 }
 
 interface AgentForm {
+  display_name: string;
   description: string;
   title: string;
   color: string;
@@ -293,6 +304,7 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
   const parts = splitModel(agent);
   const legacy = isLegacyRuntime(agent, configAgent);
   return {
+    display_name: pickText(record.display_name, agent.display_name),
     description: pickText(record.description, agent.description),
     title: pickText(record.title, agent.title),
     color: normalizeColor(pickText(record.color, agent.color)),
@@ -316,6 +328,7 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
 
 function formValues(initial: AgentValues): AgentForm {
   return {
+    display_name: initial.display_name || "",
     description: initial.description || "",
     title: initial.title || "",
     color: normalizeColor(initial.color),
@@ -333,6 +346,7 @@ function formValues(initial: AgentValues): AgentForm {
 
 function canonical(form: AgentForm): AgentValues {
   return {
+    display_name: String(form.display_name || "").trim(),
     description: String(form.description || "").trim(),
     title: String(form.title || "").trim(),
     color: normalizeColor(form.color),
@@ -367,6 +381,9 @@ function dirtyKeys(
 }
 
 function validateForm(form: AgentForm, baseline: AgentValues): string {
+  if (Array.from(String(form.display_name || "")).length > MAX_DISPLAY_NAME) {
+    return "The display name is at most " + MAX_DISPLAY_NAME + " characters.";
+  }
   /* REQ-ROOM-009: the title is a single line of at most 60 characters. */
   if (Array.from(String(form.title || "")).length > TITLE_LIMIT) {
     return "The title is at most " + TITLE_LIMIT + " characters.";
@@ -415,7 +432,9 @@ function nextDuplicateName(source: string, agents: AgentLike[]): string {
 function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
   const patch: AgentWriteFields = {};
   for (const key of keys) {
-    if (key === "description") {
+    if (key === "display_name") {
+      patch.display_name = current.display_name;
+    } else if (key === "description") {
       patch.description = current.description;
     } else if (key === "title") {
       patch.title = current.title;
@@ -472,7 +491,15 @@ function DuplicateAgentDialog({
   onDuplicated,
 }: DuplicateAgentDialogProps) {
   const announce = useAnnounce();
-  const [name, setName] = useState(() => nextDuplicateName(source, agents));
+  const sourceAgent = agents.find((item) => item.name === source);
+  const sourceLabel = displayLabel(sourceAgent) || source;
+  const [agentId, setAgentId] = useState(() =>
+    nextDuplicateName(source, agents)
+  );
+  const [label, setLabel] = useState(
+    () => sourceLabel + " " + agentId.slice(source.length + 1)
+  );
+  const [idTouched, setIdTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
@@ -482,18 +509,31 @@ function DuplicateAgentDialog({
     if (busy) {
       return;
     }
-    const value = name.trim();
-    if (!/^[a-z0-9-]+$/.test(value)) {
-      setError("The name must use lowercase letters, digits, and dashes.");
+    const displayName = label.trim();
+    const value = agentId.trim();
+    if (!displayName) {
+      setError("Enter a name for the new agent.");
+      return;
+    }
+    if (Array.from(displayName).length > MAX_DISPLAY_NAME) {
+      setError("The name must be at most " + MAX_DISPLAY_NAME + " characters.");
+      return;
+    }
+    if (!AGENT_ID_RULE.test(value)) {
+      setError("The ID is not valid. " + AGENT_ID_HINT);
       return;
     }
     setBusy(true);
     setError("");
     setDetails([]);
     try {
-      const created = await duplicateAgent(source, value);
+      const created = await duplicateAgent(
+        source,
+        value,
+        displayName !== value ? displayName : undefined
+      );
       const createdName = created && created.name ? created.name : value;
-      announce("Agent " + createdName + " created from " + source + ".");
+      announce("Agent " + displayName + " created from " + sourceLabel + ".");
       if (onDuplicated) {
         onDuplicated(createdName);
       }
@@ -501,7 +541,7 @@ function DuplicateAgentDialog({
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409) {
         setError(
-          "An agent named " + value + " already exists. Pick another name."
+          "An agent with the ID " + value + " already exists. Change the ID."
         );
       } else {
         setError(errorMessage(failure));
@@ -517,26 +557,52 @@ function DuplicateAgentDialog({
     <Dialog title="Duplicate agent" dismissible={!busy} onClose={onClose}>
       <form className="agent-dialog-form" onSubmit={submit}>
         <p className="hint">
-          Copy <strong>{source}</strong> to a new agent. The config table and
-          AGENT.md are copied; MEMORY.md is not.
+          Copy <strong>{sourceLabel}</strong> to a new agent. The config table
+          and AGENT.md are copied; MEMORY.md is not.
         </p>
         <div className="field">
-          <label className="label" htmlFor="duplicate-agent-name">
+          <label className="label" htmlFor="duplicate-agent-label">
             New name
           </label>
           <Input
-            id="duplicate-agent-name"
+            id="duplicate-agent-label"
             data-autofocus
             type="text"
-            value={name}
+            value={label}
             autoComplete="off"
-            spellCheck={false}
-            pattern="[a-z0-9-]+"
+            maxLength={MAX_DISPLAY_NAME}
             required
             invalid={Boolean(error)}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setLabel(event.target.value);
+              if (!idTouched) {
+                setAgentId(slugifyAgentName(event.target.value));
+              }
+            }}
           />
-          <span className="hint">Lowercase letters, digits, and dashes.</span>
+          <span className="hint">The name people see.</span>
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="duplicate-agent-name">
+            ID
+          </label>
+          <Input
+            id="duplicate-agent-name"
+            type="text"
+            value={agentId}
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={32}
+            required
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setIdTouched(true);
+              setAgentId(event.target.value);
+            }}
+          />
+          <span className="hint">
+            Used in links, the config file, and @mentions.
+          </span>
         </div>
         {error ? (
           <div role="alert">
@@ -1129,7 +1195,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
             />
             <div className="agent-detail-heading">
               <div className="agent-detail-name-row">
-                <h1 className="agent-detail-name">{agent.name}</h1>
+                <h1 className="agent-detail-name">{displayLabel(agent)}</h1>
                 <Badge tone="accent" dot>
                   Team
                 </Badge>
@@ -1174,6 +1240,10 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   const canSave = dirty.length > 0 && !saving;
   const knownAgents = page ? page.agents : [];
   const titleIssue = issueMessage(details, "agents." + agent.name + ".title");
+  const displayNameIssue = issueMessage(
+    details,
+    "agents." + agent.name + ".display_name"
+  );
   const colorIssue = issueMessage(details, "agents." + agent.name + ".color");
   const row = byName[agent.name];
   const presence = row ? row.presence : null;
@@ -1262,7 +1332,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
             </span>
             <div className="agent-detail-heading">
               <div className="agent-detail-name-row">
-                <h1 className="agent-detail-name">{agent.name}</h1>
+                <h1 className="agent-detail-name">{displayLabel(agent)}</h1>
                 <Badge>{agent.title || "Agent"}</Badge>
                 {usesClaudeCode(agent) ? <ClaudeCodeBadge /> : null}
                 {agent.default ? (
@@ -1343,6 +1413,43 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
               aria-labelledby="agent-profile-title"
             >
               <h2 id="agent-profile-title">Profile</h2>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-display-name">
+                    Display name
+                  </label>
+                  <div className="d">
+                    The name people see. The ID {agent.name} stays the same.
+                  </div>
+                </div>
+                <div className="agent-ctl">
+                  <Input
+                    id="agent-display-name"
+                    type="text"
+                    maxLength={MAX_DISPLAY_NAME}
+                    value={form.display_name}
+                    placeholder={agent.name}
+                    autoComplete="off"
+                    disabled={saving}
+                    invalid={Boolean(displayNameIssue)}
+                    onChange={(event) =>
+                      updateField("display_name", event.target.value)
+                    }
+                  />
+                  <span className="agent-counter">
+                    {Array.from(form.display_name).length +
+                      " / " +
+                      MAX_DISPLAY_NAME}
+                  </span>
+                  {displayNameIssue ? (
+                    <span className="err" role="alert">
+                      <Ic name="circle-alert" size={12} />
+                      {displayNameIssue}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
               <div className="srow">
                 <div className="agent-srow-text">
                   <label className="t" htmlFor="agent-title">

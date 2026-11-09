@@ -68,6 +68,7 @@ export interface ConfigAgent {
   description?: string;
   provider?: string;
   model?: string;
+  display_name?: string;
   title?: string;
   color?: string;
   fallback?: string[];

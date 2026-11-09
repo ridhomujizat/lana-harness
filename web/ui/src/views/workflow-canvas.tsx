@@ -13,6 +13,7 @@ import {
   nodePorts,
   nodeSubtitle,
 } from "./workflow-catalog";
+import { useAgentLabel } from "./agent-label";
 import { AgentAvatar } from "./agent-avatar";
 
 /* The workflow canvas of REQ-WF-011 (design workflows-2/3/5/7): node cards on a
@@ -307,6 +308,7 @@ export function WorkflowCanvas({
   ariaLabel,
   insetLeft = 0,
 }: CanvasProps) {
+  const label = useAgentLabel();
   const editable = Boolean(onChange);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
@@ -835,7 +837,7 @@ export function WorkflowCanvas({
               )}
               <span className="wf-node-text">
                 <span className="wf-node-name trunc">{node.name || meta.label}</span>
-                <span className="wf-node-sub trunc">{nodeSubtitle(node)}</span>
+                <span className="wf-node-sub trunc">{nodeSubtitle(node, label)}</span>
               </span>
               <span
                 className="wf-port out"

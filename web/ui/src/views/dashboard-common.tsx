@@ -4,6 +4,7 @@ import { getDashboard } from "../api/dashboard";
 import type { Dashboard, DashboardRange } from "../api/dashboard";
 import { Button, Seg, Select } from "../ui/gr8r";
 import { agentOptionIcon } from "./agent-avatar";
+import { useAgentLabel } from "./agent-label";
 
 /* Shared state and helpers of the monitoring pages (spec 28): Home shows the
    charts, Logs shows the error log and tool health. Both read the same
@@ -234,6 +235,7 @@ export function useDashboard(path: string): DashboardState {
 
 /* The range switch, agent filter, last update and refresh of the header. */
 export function DashboardFilters({ state }: { state: DashboardState }) {
+  const label = useAgentLabel();
   return (
     <>
       <Seg
@@ -254,7 +256,7 @@ export function DashboardFilters({ state }: { state: DashboardState }) {
             { value: "", label: "All agents" },
             ...state.agentOptions.map((name) => ({
               value: name,
-              label: name,
+              label: label(name),
               icon: agentOptionIcon(name),
             })),
           ]}

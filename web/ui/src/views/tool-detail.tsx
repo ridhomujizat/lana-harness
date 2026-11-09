@@ -16,6 +16,7 @@ import { Ic } from "../ui/icons";
 import { Badge, Button, ErrorState, Input, Modal, Panel, Select, Textarea, Toggle, useToast } from "../ui/gr8r";
 import { AppIcon, StateBadge, isInstalled, manifestIssues, useToolboxStream } from "./tools";
 import type { ManifestIssue } from "./tools";
+import { useAgentLabel } from "./agent-label";
 import { AgentAvatar } from "./agent-avatar";
 
 /* Tool detail (spec #34 r2): install with one click, turn the tool on for
@@ -161,6 +162,7 @@ function CommandRow({ pkgId, command, installed }: { pkgId: string; command: Com
 
 export function ToolDetailPage({ id }: { id: string }) {
   const toast = useToast();
+  const label = useAgentLabel();
   const [pkg, setPkg] = useState<PackageDetail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -328,7 +330,7 @@ export function ToolDetailPage({ id }: { id: string }) {
           {agents.map((agent) => (
             <li key={agent.name}>
               <AgentAvatar name={agent.name} size="md" />
-              <span className="tl-agent-name">{agent.name}</span>
+              <span className="tl-agent-name">{label(agent.name)}</span>
               <Toggle
                 checked={agent.enabled}
                 disabled={!installed || busy === "agent-" + agent.name}
@@ -337,7 +339,7 @@ export function ToolDetailPage({ id }: { id: string }) {
                     setPkg(await setAgentUse(id, agent.name, on));
                   })
                 }
-                aria-label={"Use " + pkg.name + " with " + agent.name}
+                aria-label={"Use " + pkg.name + " with " + label(agent.name)}
               />
             </li>
           ))}

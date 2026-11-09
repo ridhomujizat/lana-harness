@@ -28,6 +28,17 @@ vi.mock("../api/channels", async (importOriginal) => {
   };
 });
 
+/* The channels views resolve agent labels from the shared rooms store, so that
+   store is stubbed with no rows and the ID stays the fallback label. */
+vi.mock("../api/rooms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/rooms")>();
+  return {
+    ...actual,
+    listRooms: vi.fn().mockResolvedValue([]),
+    openRoomsStream: vi.fn(() => ({ close: () => {} })),
+  };
+});
+
 const telegramCard: TelegramChannelCard = {
   name: "telegram",
   status: "connected",
