@@ -24,6 +24,7 @@ import {
   Stat,
 } from "../ui/gr8r";
 import { AgentName } from "./agent-avatar";
+import { PagesPanel, ReviewPanel } from "./knowledge-domains";
 
 /* REQ-KNU-040, REQ-KNU-041; AC-KNU-008: the Knowledge page shows the vault
    status and the upkeep log, uploads files into inbox/, and starts a
@@ -122,7 +123,11 @@ function SourceRow({
   );
 }
 
-export function KnowledgePage() {
+export function KnowledgePage({
+  params = {},
+}: {
+  params?: Record<string, string>;
+} = {}) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading"
   );
@@ -430,6 +435,24 @@ export function KnowledgePage() {
           </ErrorState>
         </div>
       ) : null}
+
+      <ReviewPanel onChanged={() => void fetchStatus(false)} />
+
+      <PagesPanel
+        scopes={
+          data.scopes && data.scopes.length > 0
+            ? data.scopes
+            : [
+                {
+                  scope: "shared",
+                  pages: data.counts.pages,
+                  journal_days: data.counts.journal_days,
+                  updated_at: 0,
+                },
+              ]
+        }
+        initialScope={params.scope}
+      />
 
       <Panel
         title="Vault"

@@ -1449,3 +1449,62 @@
   color: var(--text);
   background: var(--surface-2);
 }
+
+/* Spec 46 REQ-DKN-072: "What it knows". */
+.ov-knows-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: var(--s-3);
+}
+
+.ov-knows-count {
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.ov-knows-label {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.ov-knows-new {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.ov-knows-bars {
+  height: 48px;
+}
+
+.ov-knows-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-knows-list a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+}
+
+.ov-knows-list a:hover {
+  color: var(--text);
+}
+
+.ov-knows-date {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+}

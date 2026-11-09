@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import { getAgentOverview } from "../api/rooms";
-import type { AgentOverview as AgentOverviewData, RoomRow } from "../api/rooms";
+import type {
+  AgentOverview as AgentOverviewData,
+  OverviewKnowledge,
+  RoomRow,
+} from "../api/rooms";
 import type { Agent } from "../api/agents";
 import { detailText } from "../ui/ui";
 import { Ic } from "../ui/icons";
@@ -165,6 +169,88 @@ function stepIcon(status: string) {
     );
   }
   return <span className="ov-step-pending" aria-hidden="true" />;
+}
+
+/* Spec 46 REQ-DKN-072: "What it knows" — the agent's domain pages, how many
+   changed this week, an 8-week trend, and the newest pages. */
+function KnowledgeCard({
+  name,
+  viewName,
+  knowledge,
+}: {
+  name: string;
+  viewName: string;
+  knowledge?: OverviewKnowledge;
+}) {
+  if (!knowledge) {
+    return null;
+  }
+  const href = "#/knowledge?scope=" + encodeURIComponent(name);
+  if (!knowledge.available) {
+    return (
+      <Panel title={"What " + viewName + " knows"}>
+        <p className="muted">
+          No knowledge tool. Add knowledge_search to this agent&apos;s tools so it
+          can grow its own knowledge.
+        </p>
+      </Panel>
+    );
+  }
+  const weeks = Array.isArray(knowledge.weeks) ? knowledge.weeks : [];
+  const maxWeek = weeks.reduce((max, value) => Math.max(max, Number(value) || 0), 0);
+  const recent = Array.isArray(knowledge.recent) ? knowledge.recent : [];
+  return (
+    <Panel
+      title={"What " + viewName + " knows"}
+      className="ov-knows"
+      actions={
+        <Button as="a" size="sm" variant="ghost" href={href}>
+          Open
+        </Button>
+      }
+    >
+      <div className="ov-knows-head">
+        <span className="ov-knows-count">{Number(knowledge.pages) || 0}</span>
+        <span className="ov-knows-label">
+          {knowledge.pages === 1 ? "page" : "pages"} in its domain
+          {knowledge.changed_7d > 0 ? (
+            <span className="ov-knows-new">{" +" + knowledge.changed_7d + " this week"}</span>
+          ) : null}
+        </span>
+      </div>
+      {weeks.length > 0 ? (
+        <div className="ov-bars ov-knows-bars" aria-label="Pages changed per week">
+          {weeks.map((value, index) => {
+            const count = Number(value) || 0;
+            const height = maxWeek > 0 ? Math.max(8, Math.round((count / maxWeek) * 100)) : 8;
+            return (
+              <span
+                key={index}
+                className={"ov-bar" + (index === weeks.length - 1 ? " is-today" : "")}
+                style={{ height: height + "%" }}
+                title={(weeks.length - 1 - index === 0 ? "this week" : weeks.length - 1 - index + " weeks ago") + " · " + count}
+              />
+            );
+          })}
+        </div>
+      ) : null}
+      {recent.length === 0 ? (
+        <p className="muted">Nothing learned yet. Its domain fills up from its conversations.</p>
+      ) : (
+        <ul className="ov-knows-list">
+          {recent.map((page) => (
+            <li key={page.path}>
+              <a href={href}>
+                <Ic name="file-text" size={13} />
+                <span className="trunc grow">{page.title}</span>
+                <span className="ov-knows-date">{page.updated}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
 }
 
 export function AgentOverview({
@@ -497,6 +583,8 @@ export function AgentOverview({
         </div>
 
         <div className="stack">
+          <KnowledgeCard name={data.name} viewName={viewName} knowledge={data.knowledge} />
+
           <Panel title="This week">
             <div className="ov-bars">
               {days.map((day, index) => {
