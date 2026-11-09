@@ -7,6 +7,8 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.3.0-beta.3] - 2026-11-09
+
 ### Added
 - Script drift guard (spec 45): a Script Parse output that passes the contract is also compared with
   the node's last good outputs. Values that suddenly go all zero, all equal, much shorter or longer,
@@ -253,7 +255,9 @@ First tagged build, for daily use.
   `$LANA_HOME/lana.db` first if you may need to roll back.
 - Knowledge tools are offered only to agents that list them in `tools`.
 
-[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.1...HEAD
+[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.3...HEAD
+[0.3.0-beta.3]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.2...v0.3.0-beta.3
+[0.3.0-beta.2]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.1...v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.2.0-beta.1...v0.3.0-beta.1
 [0.2.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.1.0-beta.1...v0.2.0-beta.1
 [0.1.0-beta.1]: https://github.com/ridhomujizat/lana-harness/releases/tag/v0.1.0-beta.1
