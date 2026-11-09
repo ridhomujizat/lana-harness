@@ -60,12 +60,14 @@ type roomMessageJSON struct {
 
 // roomJSON is one row of API-ROOM-001.
 type roomJSON struct {
-	Name    string   `json:"name"`
-	Kind    string   `json:"kind"`
-	Title   string   `json:"title"`
-	Color   string   `json:"color"`
-	Members []string `json:"members"`
-	Lead    string   `json:"lead"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	// DisplayName is the human name shown in the UI, "" when unset.
+	DisplayName string   `json:"display_name"`
+	Color       string   `json:"color"`
+	Members     []string `json:"members"`
+	Lead        string   `json:"lead"`
 	// Presence is derived, never stored (REQ-ROOM-006).
 	Presence     presenceJSON     `json:"presence"`
 	LastMessage  *roomMessageJSON `json:"last_message"`
@@ -299,10 +301,12 @@ func (s *Server) computeRooms(ctx context.Context) ([]roomJSON, error) {
 	return rows, nil
 }
 
-// agentMeta is the configured title and color of an agent (API-ROOM-006).
+// agentMeta is the configured title, display name, and color of an agent
+// (API-ROOM-006).
 type agentMeta struct {
-	title string
-	color string
+	title       string
+	displayName string
+	color       string
 }
 
 // roomAgentMeta reads the [agents.<name>] tables for the title and color, the
@@ -322,7 +326,7 @@ func (s *Server) roomAgentMeta(ctx context.Context) map[string]agentMeta {
 	}
 	for name, table := range tables {
 		record := agentRecordFromMap(table)
-		meta[name] = agentMeta{title: record.Title, color: record.Color}
+		meta[name] = agentMeta{title: record.Title, displayName: record.DisplayName, color: record.Color}
 	}
 	return meta
 }
@@ -345,6 +349,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 		row.Members = nonNilStrings(agent.Members)
 	} else if m, ok := meta[agent.Name]; ok {
 		row.Title = m.title
+		row.DisplayName = m.displayName
 		row.Color = core.ResolveAgentColor(agent.Name, m.color)
 	}
 

@@ -88,6 +88,9 @@ type AgentConfig struct {
 	// Title is the agent role shown on its profile, at most 60 characters
 	// (REQ-ROOM-009, API-ROOM-006).
 	Title string `toml:"title"`
+	// DisplayName is the human name shown in the UI, one line, at most 40
+	// characters; "" means the UI shows the agent name.
+	DisplayName string `toml:"display_name"`
 	// Color is the avatar color, one of brand, success, warning, error, blue,
 	// gray; "" derives a stable color from the name (REQ-ROOM-009, API-ROOM-006).
 	Color string     `toml:"color"`

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,11 +30,11 @@ const maxAgentDescription = 120
 // maxAgentTitle mirrors the config validation limit (REQ-ROOM-009, API-ROOM-006).
 const maxAgentTitle = 60
 
+// maxAgentDisplayName mirrors the config validation limit for display_name.
+const maxAgentDisplayName = 40
+
 // agentColors are the accepted agent color values (API-ROOM-006, API-ROOM-007).
 var agentColors = []string{"brand", "success", "warning", "error", "blue", "gray"}
-
-// agentNameRE is the create and duplicate name rule of API-WEB-025.
-var agentNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // agentKeys are the keys a PUT /v1/agents/{name} body may carry. They match
 // the [agents.<name>] table of core.AgentConfig.
@@ -62,6 +61,7 @@ var agentKeys = map[string]bool{
 	"vision":               true,
 	"description":          true,
 	"title":                true,
+	"display_name":         true,
 	"color":                true,
 	"rules":                true,
 }
@@ -78,15 +78,16 @@ var putAgentKeys = func() map[string]bool {
 
 // createAgentKeys are the fields accepted by POST /v1/agents.
 var createAgentKeys = map[string]bool{
-	"name":        true,
-	"template":    true,
-	"workspace":   true,
-	"permission":  true,
-	"description": true,
+	"name":         true,
+	"template":     true,
+	"workspace":    true,
+	"permission":   true,
+	"description":  true,
+	"display_name": true,
 }
 
 // duplicateAgentKeys are the fields accepted by the duplicate endpoint.
-var duplicateAgentKeys = map[string]bool{"name": true}
+var duplicateAgentKeys = map[string]bool{"name": true, "display_name": true}
 
 func (s *Server) registerAgentRoutes() {
 	s.Handle("GET /v1/agents", http.HandlerFunc(s.handleAgents))
@@ -118,6 +119,8 @@ type agentJSON struct {
 	Description string          `json:"description"`
 	// Title is the agent role, "" when unset (API-ROOM-007).
 	Title string `json:"title"`
+	// DisplayName is the human name shown in the UI, "" when unset.
+	DisplayName string `json:"display_name"`
 	// Color is the resolved avatar color, never empty (API-ROOM-007).
 	Color           string   `json:"color"`
 	Default         bool     `json:"default"`
@@ -186,6 +189,8 @@ type agentRecord struct {
 	Description string
 	// Title is the agent role, "" when the key is absent (API-ROOM-007).
 	Title string
+	// DisplayName is the human name shown in the UI, "" when the key is absent.
+	DisplayName string
 	// Color is the avatar color, "" when absent and derived from the name
 	// (API-ROOM-007).
 	Color string
@@ -321,6 +326,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			record := agentRecordFromMap(table)
 			row.Description = record.Description
 			row.Title = record.Title
+			row.DisplayName = record.DisplayName
 			row.Color = core.ResolveAgentColor(name, record.Color)
 			row.Provider = record.Provider
 			row.Permission = record.Permission
@@ -467,8 +473,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAgentIssue(w, "name", "name is required")
 		return
 	}
-	if !agentNameRE.MatchString(name) {
-		writeAgentIssue(w, "name", "name must match [a-z0-9-]+")
+	if !agenthome.ValidName(name) {
+		writeAgentIssue(w, "name", "name must match [a-z][a-z0-9_-]{0,31}")
 		return
 	}
 	template, present, err := agentStringField(body, "template")
@@ -493,6 +499,16 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if problem := validateAgentDescription(description); problem != "" {
 		writeAgentIssue(w, "agents."+name+".description", problem)
+		return
+	}
+	displayName, _, err := agentStringField(body, "display_name")
+	if err != nil {
+		writeAgentIssue(w, "display_name", "display_name must be a string")
+		return
+	}
+	displayName = strings.TrimSpace(displayName)
+	if problem := validateAgentDisplayName(displayName); problem != "" {
+		writeAgentIssue(w, "display_name", problem)
 		return
 	}
 	permission := tpl.Permission
@@ -540,7 +556,11 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	persona, err := tpl.Persona(name)
+	personaName := name
+	if displayName != "" {
+		personaName = displayName
+	}
+	persona, err := tpl.Persona(personaName)
 	if err != nil {
 		s.logger.Error("web: render agent template", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -554,6 +574,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 		Tools:       append([]string(nil), tpl.Tools...),
 		Permission:  permission,
 		Description: description,
+		DisplayName: displayName,
 	}
 	table := renderAgentTable(name, record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), agentChecker(store), raw, "[agents."+name+"]", table)
@@ -700,9 +721,21 @@ func (s *Server) handleDuplicateAgent(w http.ResponseWriter, r *http.Request) {
 		writeAgentIssue(w, "name", "name is required")
 		return
 	}
-	if !agentNameRE.MatchString(name) {
-		writeAgentIssue(w, "name", "name must match [a-z0-9-]+")
+	if !agenthome.ValidName(name) {
+		writeAgentIssue(w, "name", "name must match [a-z][a-z0-9_-]{0,31}")
 		return
+	}
+	displayName, displayNamePresent, err := agentStringField(body, "display_name")
+	if err != nil {
+		writeAgentIssue(w, "display_name", "display_name must be a string")
+		return
+	}
+	if displayNamePresent {
+		displayName = strings.TrimSpace(displayName)
+		if problem := validateAgentDisplayName(displayName); problem != "" {
+			writeAgentIssue(w, "display_name", problem)
+			return
+		}
 	}
 
 	configWriteMu.Lock()
@@ -751,6 +784,9 @@ func (s *Server) handleDuplicateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record := agentRecordFromMap(source)
+	if displayNamePresent {
+		record.DisplayName = displayName
+	}
 	table := renderAgentTable(name, record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), agentChecker(store), file.Raw, "[agents."+name+"]", table)
 	if err != nil {
@@ -975,6 +1011,17 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.Title = value
 		return nil
+	case "display_name":
+		// An empty display_name removes the key.
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if problem := validateAgentDisplayName(value); problem != "" {
+			return errors.New(problem)
+		}
+		record.DisplayName = value
+		return nil
 	case "color":
 		// REQ-ROOM-009, API-ROOM-007: an empty color removes the key.
 		var value string
@@ -1019,6 +1066,18 @@ func validateAgentTitle(value string) string {
 	}
 	if n := utf8.RuneCountInString(value); n > maxAgentTitle {
 		return fmt.Sprintf("must be at most %d characters (got %d)", maxAgentTitle, n)
+	}
+	return ""
+}
+
+// validateAgentDisplayName mirrors the config rule: a single line of at most 40
+// characters.
+func validateAgentDisplayName(value string) string {
+	if strings.ContainsAny(value, "\n\r") {
+		return "must be one line"
+	}
+	if n := utf8.RuneCountInString(value); n > maxAgentDisplayName {
+		return fmt.Sprintf("must be at most %d characters (got %d)", maxAgentDisplayName, n)
 	}
 	return ""
 }
@@ -1172,6 +1231,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		Vision:              mapAgentBoolPtr(table, "vision"),
 		Description:         mapAgentString(table, "description"),
 		Title:               mapAgentString(table, "title"),
+		DisplayName:         mapAgentString(table, "display_name"),
 		Color:               mapAgentString(table, "color"),
 	}
 	if rules, ok := table["rules"].(map[string]any); ok {
@@ -1268,6 +1328,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentBoolPtr(&b, "vision", record.Vision)
 	writeAgentString(&b, "description", record.Description)
 	writeAgentString(&b, "title", record.Title)
+	writeAgentString(&b, "display_name", record.DisplayName)
 	writeAgentString(&b, "color", record.Color)
 	if len(record.Rules.Allow) > 0 || len(record.Rules.Deny) > 0 {
 		parts := make([]string, 0, 2)

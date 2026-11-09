@@ -144,7 +144,7 @@ func TestAgentsCreateDuplicateAndNameCoversACWEB048(t *testing.T) {
 		t.Fatal("reviewer must not be the default agent")
 	}
 
-	// A name outside [a-z0-9-]+ is 422 validation_failed.
+	// A name outside the agent home rule is 422 validation_failed.
 	rr = serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents", `{"name":"Reviewer!","template":"assistant"}`, cookie, csrf))
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("bad name status = %d, body = %q", rr.Code, rr.Body.String())
@@ -888,5 +888,135 @@ model = "m"
 	team := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "squad")
 	if team.Title != "Career plan" || team.Color != "brand" {
 		t.Fatalf("team title/color = %q/%q", team.Title, team.Color)
+	}
+}
+
+// TestAgentsCreateDisplayName covers create with an optional display_name: it is
+// stored in the table, returned by GET, and used as the persona name.
+func TestAgentsCreateDisplayName(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	rr := serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents",
+		`{"name":"omnix-lead","template":"worker","workspace":"/tmp/omnix","display_name":"Omnix Lead"}`, cookie, csrf))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+
+	row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "omnix-lead")
+	if row.DisplayName != "Omnix Lead" {
+		t.Fatalf("listed display_name = %q, want Omnix Lead", row.DisplayName)
+	}
+	record := agentRecordFromMap(t016ReadAgentTables(t, store.path)["omnix-lead"])
+	if record.DisplayName != "Omnix Lead" {
+		t.Fatalf("saved display_name = %q, want Omnix Lead", record.DisplayName)
+	}
+	persona, err := os.ReadFile(agenthome.Paths(store.home, "omnix-lead").Agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(persona, []byte("You are Omnix Lead")) {
+		t.Fatalf("AGENT.md does not greet the display name: %q", persona)
+	}
+}
+
+// TestAgentsCreateDisplayNameTooLong covers the create-time display_name limit:
+// a value over 40 characters is a field error on display_name.
+func TestAgentsCreateDisplayNameTooLong(t *testing.T) {
+	s, _, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	payload, err := json.Marshal(map[string]any{
+		"name":         "omnix-lead",
+		"template":     "worker",
+		"display_name": strings.Repeat("x", 41),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents", string(payload), cookie, csrf))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	envelope := decodeError(t, &httptestResponse{code: rr.Code, body: rr.Body.Bytes()})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("error = %+v", envelope.Error)
+	}
+	if key, _ := envelope.Error.Details[0]["key"].(string); key != "display_name" {
+		t.Fatalf("detail key = %q, want display_name", key)
+	}
+}
+
+// TestAgentsCreateRejectsBadName covers the agent home name rule: a name that
+// starts with a digit is 422 validation_failed.
+func TestAgentsCreateRejectsBadName(t *testing.T) {
+	s, _, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	rr := serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents", `{"name":"2bot","template":"assistant"}`, cookie, csrf))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad name status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	envelope := decodeError(t, &httptestResponse{code: rr.Code, body: rr.Body.Bytes()})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("bad name error = %+v", envelope.Error)
+	}
+	if message, _ := envelope.Error.Details[0]["message"].(string); message != "name must match [a-z][a-z0-9_-]{0,31}" {
+		t.Fatalf("bad name message = %q", message)
+	}
+}
+
+// TestAgentsDisplayNamePut covers the display_name field of the agent save: it
+// sets the human name, an empty value removes the key, and a value over 40
+// characters is a field error.
+func TestAgentsDisplayNamePut(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	save := func(t *testing.T, body map[string]any) (int, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body["expected_version"] = webfiles.ConfigVersion(raw)
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		return rr.Code, rr.Body.Bytes()
+	}
+
+	code, body := save(t, map[string]any{"display_name": "Omnix Lead"})
+	if code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	if got := agentRecordFromMap(t016ReadAgentTables(t, store.path)["coder"]).DisplayName; got != "Omnix Lead" {
+		t.Fatalf("saved display_name = %q, want Omnix Lead", got)
+	}
+	if row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder"); row.DisplayName != "Omnix Lead" {
+		t.Fatalf("listed display_name = %q, want Omnix Lead", row.DisplayName)
+	}
+
+	// An empty string removes the key.
+	code, body = save(t, map[string]any{"display_name": ""})
+	if code != http.StatusOK {
+		t.Fatalf("clear status = %d, body = %q", code, body)
+	}
+	if _, ok := t016ReadAgentTables(t, store.path)["coder"]["display_name"]; ok {
+		t.Fatalf("display_name key still present: %+v", t016ReadAgentTables(t, store.path)["coder"])
+	}
+	if row := t016FindAgentRow(t, t016AgentsList(t, s, cookie), "coder"); row.DisplayName != "" {
+		t.Fatalf("cleared display_name = %q, want empty", row.DisplayName)
+	}
+
+	// A value over 40 characters names agents.coder.display_name.
+	code, body = save(t, map[string]any{"display_name": strings.Repeat("x", 41)})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("long display_name status = %d, body = %q", code, body)
+	}
+	envelope := decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("long display_name error = %+v", envelope.Error)
+	}
+	if key, _ := envelope.Error.Details[0]["key"].(string); key != "agents.coder.display_name" {
+		t.Fatalf("long display_name key = %q, want agents.coder.display_name", key)
 	}
 }

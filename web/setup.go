@@ -84,10 +84,11 @@ type setupProviderRequest struct {
 }
 
 type setupAgentRequest struct {
-	Name       string `json:"name"`
-	Template   string `json:"template"`
-	Workspace  string `json:"workspace"`
-	Permission string `json:"permission"`
+	Name        string `json:"name"`
+	Template    string `json:"template"`
+	Workspace   string `json:"workspace"`
+	Permission  string `json:"permission"`
+	DisplayName string `json:"display_name"`
 }
 
 type setupPersonaRequest struct {
@@ -103,16 +104,17 @@ type setupSaveResponse struct {
 // setupPlan is a validated setup request. It carries only values that are safe
 // to write; the inline key is never logged or returned.
 type setupPlan struct {
-	provider   setupProviderPreset
-	baseURL    string
-	model      string
-	apiKey     string
-	agentName  string
-	workspace  string
-	permission string
-	template   agenthome.Template
-	agentMD    string
-	userMD     string
+	provider    setupProviderPreset
+	baseURL     string
+	model       string
+	apiKey      string
+	agentName   string
+	displayName string
+	workspace   string
+	permission  string
+	template    agenthome.Template
+	agentMD     string
+	userMD      string
 }
 
 // setupInputError is a rejected setup field. code selects validation_failed or
@@ -304,11 +306,12 @@ func (s *Server) handleSaveSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentTable := renderAgentTable(plan.agentName, agentRecord{
-		Provider:   plan.provider.name,
-		Model:      plan.model,
-		Workspace:  plan.workspace,
-		Tools:      append([]string(nil), plan.template.Tools...),
-		Permission: plan.permission,
+		Provider:    plan.provider.name,
+		Model:       plan.model,
+		Workspace:   plan.workspace,
+		Tools:       append([]string(nil), plan.template.Tools...),
+		Permission:  plan.permission,
+		DisplayName: plan.displayName,
 	})
 	candidate, agentKeys, err := webfiles.RewriteTable(r.Context(), agentChecker(store), candidate, "[agents."+plan.agentName+"]", agentTable)
 	if err != nil {
@@ -381,8 +384,12 @@ func validateSetup(body *setupRequest) (*setupPlan, *setupInputError) {
 	}
 
 	agentName := body.Agent.Name
-	if !agentNameRE.MatchString(agentName) {
-		return nil, setupFieldError("agent.name", "name must match [a-z0-9-]+")
+	if !agenthome.ValidName(agentName) {
+		return nil, setupFieldError("agent.name", "name must match [a-z][a-z0-9_-]{0,31}")
+	}
+	displayName := strings.TrimSpace(body.Agent.DisplayName)
+	if problem := validateAgentDisplayName(displayName); problem != "" {
+		return nil, setupFieldError("agent.display_name", problem)
 	}
 	template, ok := agenthome.LookupTemplate(body.Agent.Template)
 	if !ok {
@@ -416,16 +423,17 @@ func validateSetup(body *setupRequest) (*setupPlan, *setupInputError) {
 		}
 	}
 	return &setupPlan{
-		provider:   preset,
-		baseURL:    baseURL,
-		model:      model,
-		apiKey:     apiKey,
-		agentName:  agentName,
-		workspace:  workspace,
-		permission: permission,
-		template:   template,
-		agentMD:    body.Persona.AgentMD,
-		userMD:     body.Persona.UserMD,
+		provider:    preset,
+		baseURL:     baseURL,
+		model:       model,
+		apiKey:      apiKey,
+		agentName:   agentName,
+		displayName: displayName,
+		workspace:   workspace,
+		permission:  permission,
+		template:    template,
+		agentMD:     body.Persona.AgentMD,
+		userMD:      body.Persona.UserMD,
 	}, nil
 }
 

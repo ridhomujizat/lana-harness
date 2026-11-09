@@ -16,7 +16,7 @@ import (
 var topKeys = []string{"agents", "channels", "knowledge", "mcp", "modules", "providers", "routes", "teams", "version", "web"}
 var providerKeys = []string{"api_key_env", "base_url", "headers", "kind", "stream_idle_timeout", "thinking_format", "timeout"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 var teamKeys = []string{"description", "lead", "members"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
@@ -30,6 +30,10 @@ const maxAgentDescription = 120
 // maxAgentTitle is the longest accepted agents.<name>.title, in characters
 // (runes) (REQ-ROOM-009, API-ROOM-006).
 const maxAgentTitle = 60
+
+// maxAgentDisplayName is the longest accepted agents.<name>.display_name, in
+// characters (runes).
+const maxAgentDisplayName = 40
 
 // agentColors are the accepted agents.<name>.color values (API-ROOM-006).
 var agentColors = []string{"brand", "success", "warning", "error", "blue", "gray"}
@@ -299,6 +303,19 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			}
 			if n := utf8.RuneCountInString(s); n > maxAgentTitle {
 				add(path+".title", fmt.Sprintf("must be at most %d characters (got %d)", maxAgentTitle, n))
+			}
+		}
+	}
+	if val, ok := v["display_name"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".display_name", typeMsg("string", val))
+		} else {
+			if strings.ContainsAny(s, "\n\r") {
+				add(path+".display_name", "must be one line")
+			}
+			if n := utf8.RuneCountInString(s); n > maxAgentDisplayName {
+				add(path+".display_name", fmt.Sprintf("must be at most %d characters (got %d)", maxAgentDisplayName, n))
 			}
 		}
 	}

@@ -299,3 +299,58 @@ func TestAgentTitleColorLoaded(t *testing.T) {
 		t.Fatalf("title/color = %q/%q", cfg.Title, cfg.Color)
 	}
 }
+
+// TestAgentDisplayNameValidation covers agents.<name>.display_name: a single
+// line of at most 40 characters.
+func TestAgentDisplayNameValidation(t *testing.T) {
+	withDisplayName := func(value string) string {
+		return "[agents.coder]\ndisplay_name = \"" + value + "\"\n"
+	}
+	tests := []struct {
+		name  string
+		table string
+		ok    bool
+		msg   string
+	}{
+		{name: "40 characters pass", table: withDisplayName(strings.Repeat("a", 40)), ok: true},
+		{name: "41 characters fail", table: withDisplayName(strings.Repeat("a", 41)), msg: "40"},
+		{name: "empty passes", table: withDisplayName(""), ok: true},
+		{name: "newline fails", table: withDisplayName(`one\ntwo`), msg: "one line"},
+		{name: "carriage return fails", table: withDisplayName(`one\rtwo`), msg: "one line"},
+		{name: "non string fails", table: "[agents.coder]\ndisplay_name = 1\n", msg: "must be string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadAgentKeys(t, tt.table)
+			if tt.ok {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			var errs Errors
+			if !errors.As(err, &errs) {
+				t.Fatalf("error is not Errors: %v", err)
+			}
+			found := findError(errs, "agents.coder.display_name")
+			if found == nil {
+				t.Fatalf("no error for agents.coder.display_name: %v", errs)
+			}
+			if !strings.Contains(found.Msg, tt.msg) {
+				t.Fatalf("msg = %q, want it to contain %q", found.Msg, tt.msg)
+			}
+		})
+	}
+}
+
+// TestAgentDisplayNameLoaded covers that display_name loads into the effective
+// config.
+func TestAgentDisplayNameLoaded(t *testing.T) {
+	res, err := loadAgentKeys(t, "[agents.coder]\ndisplay_name = \"Omnix Lead\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Config.Agents["coder"].DisplayName; got != "Omnix Lead" {
+		t.Fatalf("display_name = %q, want Omnix Lead", got)
+	}
+}
