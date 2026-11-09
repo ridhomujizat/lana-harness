@@ -7,6 +7,34 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.3.0-beta.3] - 2026-11-09
+
+### Added
+- Script drift guard (spec 45): a Script Parse output that passes the contract is also compared with
+  the node's last good outputs. Values that suddenly go all zero, all equal, much shorter or longer,
+  change shape, copy another field, go blank, or a list that shrinks sharply count as drift
+  `profile_drift`, and the run continues through the agent fallback. If the fallback agrees with the
+  script, the change was real data: the baseline restarts (`profile_accept`) with no rewrite and no
+  notice. Type strings may carry rules after the type (`"integer >0"`, `"string url"`, `min:N`,
+  `max:N`, `>=0`); Generate and Convert add rules that hold on the sample, and a rule that real data
+  breaks is dropped in a new version (`rule_drop`) with a notice. Optional `audit_every: N` runs the
+  fallback on every Nth script run (`via=audit`). Test reports rule and profile problems. Each signal is a vote of the
+  baseline outputs, so up to 2 wrong outputs of 5 that passed earlier cannot silence it.
+- Script Parse workflow node (spec 44, ADR 0021): a step that extracts or reshapes data of a fixed
+  shape (a web page, an MCP or API JSON answer) runs a small JavaScript `parse(input, ctx)` function
+  in an embedded goja sandbox at 0 tokens. `output_schema` is required, with optional `item_schema`
+  and `allow_empty`; empty strings and lists count as drift. An empty script is learned on the first
+  run. On drift the run continues through an agent fallback, the guardian rewrites the script and
+  saves it as a new version (revertable from the run or the Script tab), and the owner gets a notice.
+  The inspector has a Script tab (code, Generate, Test on a run or a pasted sample, tokens saved,
+  history). Agent steps with steady token use get a **Convert to Script Parse** suggestion that keeps
+  the node id. New `POST /v1/workflows/{id}/script/test|generate|convert`,
+  `GET /v1/workflows/{id}/script/suggestions`, `node_run.via`, `script_stats` on the workflow detail,
+  decision kind `script`, and a "GitHub trending digest" template.
+
+### Changed
+- Database schema 10: `workflow_node_runs.via`.
+
 ## [0.3.0-beta.2] - 2026-11-09
 
 ### Added
@@ -227,7 +255,9 @@ First tagged build, for daily use.
   `$LANA_HOME/lana.db` first if you may need to roll back.
 - Knowledge tools are offered only to agents that list them in `tools`.
 
-[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.1...HEAD
+[Unreleased]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.3...HEAD
+[0.3.0-beta.3]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.2...v0.3.0-beta.3
+[0.3.0-beta.2]: https://github.com/ridhomujizat/lana-harness/compare/v0.3.0-beta.1...v0.3.0-beta.2
 [0.3.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.2.0-beta.1...v0.3.0-beta.1
 [0.2.0-beta.1]: https://github.com/ridhomujizat/lana-harness/compare/v0.1.0-beta.1...v0.2.0-beta.1
 [0.1.0-beta.1]: https://github.com/ridhomujizat/lana-harness/releases/tag/v0.1.0-beta.1

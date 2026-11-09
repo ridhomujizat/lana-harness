@@ -82,6 +82,10 @@ type Detail struct {
 	Graph          Graph   `json:"graph"`
 	LockCurrent    bool    `json:"lock_current"`
 	Webhook        Webhook `json:"webhook"`
+	// ScriptStats carries the per-node Script Parse stats of the current graph
+	// (API-SP-009, REQ-SP-019); it is omitted when the graph has no script_parse
+	// node.
+	ScriptStats map[string]ScriptStat `json:"script_stats,omitempty"`
 }
 
 // CreateInput is the body of API-WF-002 (REQ-WF-001, REQ-WF-002). A nil Graph

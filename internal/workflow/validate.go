@@ -132,6 +132,9 @@ func (v *validator) checkNode(n Node, seen map[string]bool) {
 	v.checkParent(n, spec)
 	v.checkTemplates(n)
 	v.checkAgent(n)
+	if n.Type == "script_parse" {
+		v.checkScriptParse(n)
+	}
 	v.checkMessage(n)
 }
 
@@ -195,30 +198,38 @@ func (v *validator) checkParent(n Node, spec NodeSpec) {
 }
 
 // checkTemplates parses every template of a node and checks that every
-// nodes.<id> reference names a node of the graph (REQ-WF-002).
+// nodes.<id> reference names a node of the graph (REQ-WF-002). It checks the
+// params that are rendered, so the JavaScript of a script_parse script is not
+// parsed as a template (REQ-SP-001).
 func (v *validator) checkTemplates(n Node) {
-	if err := CheckTemplates(n.Params); err != nil {
+	params := TemplateParams(n)
+	if err := CheckTemplates(params); err != nil {
 		v.add(n.ID, "bad_template", "node %s has a bad template: %v", nodeLabel(n), err)
 	}
-	for _, ref := range TemplateRefs(n.Params) {
+	for _, ref := range TemplateRefs(params) {
 		if _, ok := v.nodeByID[ref]; !ok {
 			v.add(n.ID, "bad_template", "node %s references unknown node %q", nodeLabel(n), ref)
 		}
 	}
 }
 
-// checkAgent rejects an unknown agent name on bot, worker and trigger.event
-// nodes (REQ-WF-002). It is skipped when agentExists is nil.
+// checkAgent rejects an unknown agent name on bot, worker, trigger.event and
+// script_parse nodes (REQ-WF-002, REQ-SP-013). A script_parse node names its
+// agent with fallback_agent; the others use agent. It is skipped when
+// agentExists is nil.
 func (v *validator) checkAgent(n Node) {
 	if v.agentExists == nil {
 		return
 	}
+	param := "agent"
 	switch n.Type {
+	case "script_parse":
+		param = "fallback_agent"
 	case "bot", "worker", "trigger.event":
 	default:
 		return
 	}
-	name, _ := n.Params["agent"].(string)
+	name, _ := n.Params[param].(string)
 	if name == "" {
 		return
 	}

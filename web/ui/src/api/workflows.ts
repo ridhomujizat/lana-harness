@@ -86,6 +86,18 @@ export interface Workflow {
   consecutive_failures: number;
   created_at: number;
   updated_at: number;
+  /* Per script_parse node (spec #44, API-SP-009). */
+  script_stats?: Record<string, ScriptStat>;
+}
+
+export interface ScriptStat {
+  script_runs: number;
+  fallback_runs: number;
+  tokens_saved: number;
+  last_update: number;
+  /* Spec #45: runs whose script output an audit fallback confirmed. */
+  audit_runs?: number;
+  events: Decision[];
 }
 
 export interface TriggerInfo {
@@ -202,6 +214,8 @@ export interface NodeRun {
   logs: string[];
   tokens: number;
   session_id: string;
+  /* How a script_parse node produced its output (spec #44). */
+  via?: "" | "script" | "fallback" | "audit";
   started_at: number;
   ended_at: number;
 }
@@ -660,4 +674,93 @@ export function openWorkflowStream(
       }
     },
   };
+}
+
+/* Script Parse calls of spec #44 (API-SP-002..005). */
+
+export interface ScriptProblem {
+  code: string;
+  message: string;
+}
+
+export interface ScriptTestResult {
+  ok: boolean;
+  output: unknown;
+  problems: ScriptProblem[];
+  logs: string[];
+  duration_ms: number;
+  sample: { source: "request" | "run"; run?: number };
+}
+
+export interface ScriptGenerateResult {
+  feasible: boolean;
+  reason: string;
+  script: string;
+  output: unknown;
+  problems: ScriptProblem[];
+  agreement?: number;
+  tokens: number;
+  /* Spec #45: the schemas with the guardian's kept rules merged in. */
+  output_schema?: Record<string, unknown>;
+  item_schema?: Record<string, unknown>;
+}
+
+export interface ScriptConvertCheck {
+  run: number;
+  ok: boolean;
+  agreement: number;
+  problems: ScriptProblem[];
+}
+
+export interface ScriptConvertResult {
+  feasible: boolean;
+  reason: string;
+  node?: WfNode;
+  checks: ScriptConvertCheck[];
+  tokens: number;
+}
+
+export interface ScriptSuggestion {
+  node_id: string;
+  name: string;
+  type: string;
+  runs: number;
+  avg_tokens: number;
+  est_tokens_30d: number;
+}
+
+/* Sample source: a pasted input wins, else the node's input in run `run`,
+   else the newest run that reached the node. */
+export interface ScriptSample {
+  input?: unknown;
+  run?: number;
+}
+
+export function testScript(
+  id: string,
+  node: WfNode,
+  sample: ScriptSample = {}
+): Promise<ScriptTestResult> {
+  return request<ScriptTestResult>("POST", wf(id) + "/script/test", { node, ...sample });
+}
+
+export function generateScript(
+  id: string,
+  node: WfNode,
+  sample: ScriptSample = {},
+  expected?: Record<string, unknown>
+): Promise<ScriptGenerateResult> {
+  return request<ScriptGenerateResult>("POST", wf(id) + "/script/generate", {
+    node,
+    ...sample,
+    ...(expected ? { expected } : {}),
+  });
+}
+
+export function convertNode(id: string, nodeId: string): Promise<ScriptConvertResult> {
+  return request<ScriptConvertResult>("POST", wf(id) + "/script/convert", { node_id: nodeId });
+}
+
+export function scriptSuggestions(id: string): Promise<{ suggestions: ScriptSuggestion[] }> {
+  return request<{ suggestions: ScriptSuggestion[] }>("GET", wf(id) + "/script/suggestions");
 }

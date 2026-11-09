@@ -19,6 +19,12 @@ type nodeResult struct {
 	Port      string
 	Tokens    int64
 	SessionID string
+	// Via records how a script_parse node resolved: "" for the other node
+	// types, script or fallback for a Script Parse node (spec #44, REQ-SP-004,
+	// REQ-SP-005).
+	Via string
+	// Logs are lines the node handler wants appended to the node run (spec #44).
+	Logs []string
 }
 
 // invoke runs one node handler by type. The waiting nodes (wait, approval) are
@@ -35,6 +41,8 @@ func (ex *runExec) invoke(ctx context.Context, node Node, item int, params map[s
 		return ex.agentNode(ctx, node, item, params, agent, paramString(params, "prompt"))
 	case "worker":
 		return ex.workerNode(ctx, node, item, params)
+	case "script_parse":
+		return ex.scriptParseNode(ctx, node, item, params)
 	case "browser":
 		return ex.browserNode(ctx, node, params)
 	case "bash":

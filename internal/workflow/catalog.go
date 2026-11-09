@@ -47,9 +47,10 @@ var nodeCatalog = map[string]NodeSpec{
 	"trigger.event":    {Type: "trigger.event", Group: groupTrigger, Label: "Event", Required: []string{"kind"}, Ports: []string{"out"}, Trigger: true},
 	"trigger.chat":     {Type: "trigger.chat", Group: groupTrigger, Label: "Chat command", Required: []string{"command"}, Ports: []string{"out"}, Trigger: true},
 
-	"agent":  {Type: "agent", Group: groupAI, Label: "Agent", Required: []string{"prompt"}, Ports: []string{"out"}},
-	"bot":    {Type: "bot", Group: groupAI, Label: "Bot", Required: []string{"agent", "prompt"}, Ports: []string{"out"}},
-	"worker": {Type: "worker", Group: groupAI, Label: "Worker", Required: []string{"task"}, Ports: []string{"out"}},
+	"agent":        {Type: "agent", Group: groupAI, Label: "Agent", Required: []string{"prompt"}, Ports: []string{"out"}},
+	"bot":          {Type: "bot", Group: groupAI, Label: "Bot", Required: []string{"agent", "prompt"}, Ports: []string{"out"}},
+	"worker":       {Type: "worker", Group: groupAI, Label: "Worker", Required: []string{"task"}, Ports: []string{"out"}},
+	"script_parse": {Type: "script_parse", Group: groupAI, Label: "Script Parse", Required: []string{"input", "goal", "output_schema"}, Ports: []string{"out"}},
 
 	"browser":  {Type: "browser", Group: groupTool, Label: "Browser", Required: []string{"url"}, Ports: []string{"out"}},
 	"bash":     {Type: "bash", Group: groupTool, Label: "Bash", Required: []string{"command"}, Ports: []string{"out"}},
@@ -127,6 +128,9 @@ func LockToolsOf(n Node) []string {
 		return []string{toolStateSet}
 	case "worker":
 		return stringList(n.Params["tools"])
+	case "script_parse":
+		// A script_parse node runs in-process and adds no tool (REQ-SP-014).
+		return nil
 	}
 	return nil
 }

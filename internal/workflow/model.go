@@ -46,6 +46,13 @@ const (
 	NodeFallback  NodeStatus = "fallback"
 )
 
+// Node run via values (spec #44, REQ-SP-019; spec #45, REQ-DG-007).
+const (
+	ViaScript   = "script"
+	ViaFallback = "fallback"
+	ViaAudit    = "audit"
+)
+
 // Sentinel errors returned by the store and the service.
 var (
 	ErrNotFound        = errors.New("workflow: not found")
@@ -74,7 +81,7 @@ func (e *InvalidGraphError) Error() string {
 // Issue is one graph validation problem.
 type Issue struct {
 	NodeID  string `json:"node_id"`
-	Code    string `json:"code"` // unknown_type, duplicate_id, missing_node, cycle, unreachable, missing_param, bad_template, bad_cron, bad_parent, no_trigger, unknown_agent
+	Code    string `json:"code"` // unknown_type, duplicate_id, missing_node, cycle, unreachable, missing_param, bad_template, bad_cron, bad_parent, no_trigger, unknown_agent, bad_schema, bad_script
 	Message string `json:"message"`
 }
 
@@ -205,6 +212,7 @@ type NodeRun struct {
 	Output    json.RawMessage `json:"output"`
 	Port      string          `json:"port,omitempty"` // branch taken (if/switch/approval/loop)
 	Error     string          `json:"error"`
+	Via       string          `json:"via"` // "" | script | fallback (spec #44)
 	Logs      []string        `json:"logs"`
 	Tokens    int64           `json:"tokens"`
 	SessionID string          `json:"session_id"`

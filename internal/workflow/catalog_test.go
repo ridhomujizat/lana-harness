@@ -22,6 +22,7 @@ func TestCatalogSpec(t *testing.T) {
 		{"agent", groupAI, []string{"prompt"}, []string{"out"}, false},
 		{"bot", groupAI, []string{"agent", "prompt"}, []string{"out"}, false},
 		{"worker", groupAI, []string{"task"}, []string{"out"}, false},
+		{"script_parse", groupAI, []string{"input", "goal", "output_schema"}, []string{"out"}, false},
 		{"browser", groupTool, []string{"url"}, []string{"out"}, false},
 		{"bash", groupTool, []string{"command"}, []string{"out"}, false},
 		{"webfetch", groupTool, []string{"url"}, []string{"out"}, false},
@@ -64,17 +65,17 @@ func TestCatalogSpec(t *testing.T) {
 
 func TestCatalogNodeTypes(t *testing.T) {
 	types := NodeTypes()
-	if len(types) != 23 {
-		t.Fatalf("NodeTypes=%v want 23 types", types)
+	if len(types) != 24 {
+		t.Fatalf("NodeTypes=%v want 24 types", types)
 	}
 	if !slices.IsSorted(types) {
 		t.Fatalf("NodeTypes is not sorted: %v", types)
 	}
 	for _, want := range []string{
 		"trigger.manual", "trigger.schedule", "trigger.interval", "trigger.webhook",
-		"trigger.event", "trigger.chat", "agent", "bot", "worker", "browser", "bash",
-		"webfetch", "tool", "message", "knowledge", "if", "switch", "loop", "wait",
-		"approval", "merge", "state_get", "state_set",
+		"trigger.event", "trigger.chat", "agent", "bot", "worker", "script_parse",
+		"browser", "bash", "webfetch", "tool", "message", "knowledge", "if", "switch",
+		"loop", "wait", "approval", "merge", "state_get", "state_set",
 	} {
 		if !slices.Contains(types, want) {
 			t.Fatalf("NodeTypes is missing %q", want)
@@ -122,6 +123,7 @@ func TestCatalogLockTools(t *testing.T) {
 		{Node{Type: "worker"}, nil},
 		{Node{Type: "state_get"}, nil},
 		{Node{Type: "agent"}, nil},
+		{Node{Type: "script_parse"}, nil},
 		{Node{Type: "trigger.schedule"}, nil},
 		{Node{Type: "browser", Disabled: true}, nil},
 	}
@@ -129,5 +131,29 @@ func TestCatalogLockTools(t *testing.T) {
 		if got := LockToolsOf(tc.node); !slices.Equal(got, tc.want) {
 			t.Fatalf("LockToolsOf(%+v)=%v want %v", tc.node, got, tc.want)
 		}
+	}
+}
+
+// TestCatalogScriptParse pins the spec #44 catalog row: required params, the out
+// port, and the empty tool lock (REQ-SP-001, REQ-SP-014).
+func TestCatalogScriptParse(t *testing.T) {
+	spec, ok := Spec("script_parse")
+	if !ok {
+		t.Fatal("Spec(script_parse) not found")
+	}
+	if spec.Type != "script_parse" || spec.Group != groupAI || spec.Trigger {
+		t.Fatalf("Spec(script_parse)=%+v", spec)
+	}
+	if spec.Label != "Script Parse" {
+		t.Fatalf("Label=%q, want %q", spec.Label, "Script Parse")
+	}
+	if want := []string{"input", "goal", "output_schema"}; !slices.Equal(spec.Required, want) {
+		t.Fatalf("Required=%v, want %v", spec.Required, want)
+	}
+	if want := []string{"out"}; !slices.Equal(spec.Ports, want) {
+		t.Fatalf("Ports=%v, want %v", spec.Ports, want)
+	}
+	if got := LockToolsOf(Node{Type: "script_parse"}); got != nil {
+		t.Fatalf("LockToolsOf(script_parse)=%v, want nil", got)
 	}
 }

@@ -1,0 +1,446 @@
+{
+ "source": "live github.com/trending, scratch daemon 2026-11-09 (spec 45 live check)",
+ "baseline": [
+  {
+   "run": 2,
+   "via": "fallback",
+   "output": {
+    "digest": "GitHub Trending \u2014 Today (2026-11-09)\n\n1. sherlock-project/sherlock \u2014 Hunt down social media accounts by username across social networks (2,372 stars today) https://github.com/sherlock-project/sherlock\n2. dsx-ai-factory/nvke \u2014 NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal. (345 stars today) https://github.com/dsx-ai-factory/nvke\n3. milind-soni/OpenMausBot \u2014 Open-source Grok Bot alternative with a virtual machine that bots can use (1,437 stars today) https://github.com/milind-soni/OpenMausBot\n4. anthropics/claude-quickstarts \u2014 A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API (28 stars today) https://github.com/anthropics/claude-quickstarts\n5. vercel-labs/agent-browser \u2014 Browser automation CLI for AI agents (812 stars today) https://github.com/vercel-labs/agent-browser\n6. meta/astryx \u2014 An open source design system that's fully customizable and agent ready (863 stars today) https://github.com/meta/astryx\n7. anthropics/skills \u2014 Public repository for Agent Skills (793 stars today) https://github.com/anthropics/skills\n8. google-deepmind/mujoco \u2014 Multi-Joint dynamics with Contact. A general purpose physics simulator. (26 stars today) https://github.com/google-deepmind/mujoco\n9. ranxianglei/billion-context \u2014 A context-compression plugin for month-long single sessions (billions of tokens), small context windows (a 100K context is enough) and token savings (5x fewer tokens). billion-context is all you need (460 stars today) https://github.com/ranxianglei/billion-context",
+    "repos": [
+     {
+      "description": "Hunt down social media accounts by username across social networks",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 2372,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal.",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 345,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Open-source Grok Bot alternative with a virtual machine that bots can use",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 1437,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 28,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Browser automation CLI for AI agents",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 812,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "An open source design system that's fully customizable and agent ready",
+      "name": "meta/astryx",
+      "stars_today": 863,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Public repository for Agent Skills",
+      "name": "anthropics/skills",
+      "stars_today": 793,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Multi-Joint dynamics with Contact. A general purpose physics simulator.",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 26,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "A context-compression plugin for month-long single sessions (billions of tokens) ,small context windows (a 100K context is enough) and token savings (5x fewer tokens) .\u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 460,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  },
+  {
+   "run": 3,
+   "via": "script",
+   "output": {
+    "digest": "GitHub Trending \u2014 Today (2026-11-09)\n\n1. sherlock-project/sherlock \u2014 Hunt down social media accounts by username across social networks (2,372 stars today) https://github.com/sherlock-project/sherlock\n2. dsx-ai-factory/nvke \u2014 NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal. (345 stars today) https://github.com/dsx-ai-factory/nvke\n3. milind-soni/OpenMausBot \u2014 Open-source Grok Bot alternative with a virtual machine that bots can use (1,437 stars today) https://github.com/milind-soni/OpenMausBot\n4. anthropics/claude-quickstarts \u2014 A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API (28 stars today) https://github.com/anthropics/claude-quickstarts\n5. vercel-labs/agent-browser \u2014 Browser automation CLI for AI agents (812 stars today) https://github.com/vercel-labs/agent-browser\n6. meta/astryx \u2014 An open source design system that's fully customizable and agent ready (863 stars today) https://github.com/meta/astryx\n7. anthropics/skills \u2014 Public repository for Agent Skills (793 stars today) https://github.com/anthropics/skills\n8. google-deepmind/mujoco \u2014 Multi-Joint dynamics with Contact. A general purpose physics simulator. (26 stars today) https://github.com/google-deepmind/mujoco\n9. ranxianglei/billion-context \u2014 A context-compression plugin for month-long single sessions (billions of tokens) ,small context windows (a 100K context is enough) and token savings (5x fewer tokens) .\u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need (460 stars today) https://github.com/ranxianglei/billion-context",
+    "repos": [
+     {
+      "description": "Hunt down social media accounts by username across social networks",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 2372,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal.",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 345,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Open-source Grok Bot alternative with a virtual machine that bots can use",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 1437,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 28,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Browser automation CLI for AI agents",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 812,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "An open source design system that's fully customizable and agent ready",
+      "name": "meta/astryx",
+      "stars_today": 863,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Public repository for Agent Skills",
+      "name": "anthropics/skills",
+      "stars_today": 793,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Multi-Joint dynamics with Contact. A general purpose physics simulator.",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 26,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "A context-compression plugin for month-long single sessions (billions of tokens) ,small context windows (a 100K context is enough) and token savings (5x fewer tokens) .\u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 460,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  },
+  {
+   "run": 5,
+   "via": "fallback",
+   "output": {
+    "digest": "GitHub Trending \u2014 November 9, 2026\n1. sherlock-project/sherlock \u2014 Hunt down social media accounts by username across social networks (2,372 stars today)\n2. dsx-ai-factory/nvke \u2014 NVIDIA Kubernetes Engine (NVKE): a management plane for GPU Kubernetes on bare metal (345 stars today)\n3. milind-soni/OpenMausBot \u2014 Open-source Grok Bot alternative with a virtual machine that bots can use (1,437 stars today)\n4. anthropics/claude-quickstarts \u2014 Projects to help developers quickly build deployable apps with the Claude API (28 stars today)\n5. vercel-labs/agent-browser \u2014 Browser automation CLI for AI agents (812 stars today)\n6. meta/astryx \u2014 Open source, fully customizable, agent-ready design system (863 stars today)\n7. anthropics/skills \u2014 Public repository for Agent Skills (793 stars today)\n8. google-deepmind/mujoco \u2014 Multi-Joint dynamics with Contact: a general purpose physics simulator (26 stars today)\n9. ranxianglei/billion-context \u2014 Context-compression plugin for month-long single sessions with small context windows and 5x token savings (460 stars today)",
+    "repos": [
+     {
+      "description": "Hunt down social media accounts by username across social networks",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 2372,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal.",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 345,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Open-source Grok Bot alternative with a virtual machine that bots can use",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 1437,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 28,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Browser automation CLI for AI agents",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 812,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "An open source design system that's fully customizable and agent ready",
+      "name": "meta/astryx",
+      "stars_today": 863,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Public repository for Agent Skills",
+      "name": "anthropics/skills",
+      "stars_today": 793,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Multi-Joint dynamics with Contact. A general purpose physics simulator.",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 26,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "A context-compression plugin for month-long single sessions (billions of tokens), small context windows (a 100K context is enough) and token savings (5x fewer tokens). \u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 460,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  },
+  {
+   "run": 6,
+   "via": "script",
+   "output": {
+    "digest": "GitHub Trending \u2014 November 9, 2026\n1. sherlock-project/sherlock \u2014 Hunt down social media accounts by username across social networks (2,372 stars today)\n2. dsx-ai-factory/nvke \u2014 NVIDIA Kubernetes Engine (NVKE): a management plane for GPU Kubernetes on bare metal (345 stars today)\n3. milind-soni/OpenMausBot \u2014 Open-source Grok Bot alternative with a virtual machine that bots can use (1,437 stars today)\n4. anthropics/claude-quickstarts \u2014 Projects to help developers quickly build deployable apps with the Claude API (28 stars today)\n5. vercel-labs/agent-browser \u2014 Browser automation CLI for AI agents (812 stars today)\n6. meta/astryx \u2014 Open source, fully customizable, agent-ready design system (863 stars today)\n7. anthropics/skills \u2014 Public repository for Agent Skills (793 stars today)\n8. google-deepmind/mujoco \u2014 Multi-Joint dynamics with Contact: a general purpose physics simulator (26 stars today)\n9. ranxianglei/billion-context \u2014 Context-compression plugin for month-long single sessions with small context windows and 5x token savings (460 stars today)",
+    "repos": [
+     {
+      "description": "Hunt down social media accounts by username across social networks",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 2372,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal.",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 345,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Open-source Grok Bot alternative with a virtual machine that bots can use",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 1437,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 28,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Browser automation CLI for AI agents",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 812,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "An open source design system that's fully customizable and agent ready",
+      "name": "meta/astryx",
+      "stars_today": 863,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Public repository for Agent Skills",
+      "name": "anthropics/skills",
+      "stars_today": 793,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Multi-Joint dynamics with Contact. A general purpose physics simulator.",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 26,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "A context-compression plugin for month-long single sessions (billions of tokens) ,small context windows (a 100K context is enough) and token savings (5x fewer tokens) .\u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 460,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  },
+  {
+   "run": 7,
+   "via": "script",
+   "output": {
+    "digest": "GitHub Trending \u2014 Today (2026-11-09)\n\n1. sherlock-project/sherlock \u2014 Hunt down social media accounts by username across social networks (2,373 stars today) https://github.com/sherlock-project/sherlock\n2. dsx-ai-factory/nvke \u2014 NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal. (345 stars today) https://github.com/dsx-ai-factory/nvke\n3. milind-soni/OpenMausBot \u2014 Open-source Grok Bot alternative with a virtual machine that bots can use (1,439 stars today) https://github.com/milind-soni/OpenMausBot\n4. anthropics/claude-quickstarts \u2014 A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API (32 stars today) https://github.com/anthropics/claude-quickstarts\n5. vercel-labs/agent-browser \u2014 Browser automation CLI for AI agents (815 stars today) https://github.com/vercel-labs/agent-browser\n6. meta/astryx \u2014 An open source design system that's fully customizable and agent ready (875 stars today) https://github.com/meta/astryx\n7. anthropics/skills \u2014 Public repository for Agent Skills (792 stars today) https://github.com/anthropics/skills\n8. google-deepmind/mujoco \u2014 Multi-Joint dynamics with Contact. A general purpose physics simulator. (41 stars today) https://github.com/google-deepmind/mujoco\n9. ranxianglei/billion-context \u2014 A context-compression plugin for month-long single sessions (billions of tokens) ,small context windows (a 100K context is enough) and token savings (5x fewer tokens) .\u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need (460 stars today) https://github.com/ranxianglei/billion-context",
+    "repos": [
+     {
+      "description": "Hunt down social media accounts by username across social networks",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 2373,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "NVIDIA Kubernetes Engine (NVKE). A management plane for GPU Kubernetes on bare metal.",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 345,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Open-source Grok Bot alternative with a virtual machine that bots can use",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 1439,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "A collection of projects designed to help developers quickly get started with building deployable applications using the Claude API",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 32,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Browser automation CLI for AI agents",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 815,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "An open source design system that's fully customizable and agent ready",
+      "name": "meta/astryx",
+      "stars_today": 875,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Public repository for Agent Skills",
+      "name": "anthropics/skills",
+      "stars_today": 792,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Multi-Joint dynamics with Contact. A general purpose physics simulator.",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 41,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "A context-compression plugin for month-long single sessions (billions of tokens) ,small context windows (a 100K context is enough) and token savings (5x fewer tokens) .\u4e0a\u4e0b\u6587\u538b\u7f29\u63d2\u4ef6\uff0c\u6708\u7ea7\u957f\u4f1a\u8bdd\u4f1a\u8bdd\uff0c \u517c\u987e\u5c0f\u7a97\u53e3(100k\u4e0a\u4e0b\u6587\u8db3\u77e3)\u7701token(\u77015\u500dtoken) . billion-context is all you need",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 460,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  }
+ ],
+ "silent_drift": [
+  {
+   "run": 4,
+   "output": {
+    "digest": "GitHub Trending \u2014 Today (2026-11-09)\n\n1. sherlock-project/sherlock \u2014 Link: https://github.com/sherlock-project/sherlock (0 stars today) https://github.com/sherlock-project/sherlock\n2. dsx-ai-factory/nvke \u2014 Link: https://github.com/dsx-ai-factory/nvke (0 stars today) https://github.com/dsx-ai-factory/nvke\n3. milind-soni/OpenMausBot \u2014 Link: https://github.com/milind-soni/OpenMausBot (0 stars today) https://github.com/milind-soni/OpenMausBot\n4. anthropics/claude-quickstarts \u2014 Link: https://github.com/anthropics/claude-quickstarts (0 stars today) https://github.com/anthropics/claude-quickstarts\n5. vercel-labs/agent-browser \u2014 Link: https://github.com/vercel-labs/agent-browser (0 stars today) https://github.com/vercel-labs/agent-browser\n6. meta/astryx \u2014 Link: https://github.com/meta/astryx (0 stars today) https://github.com/meta/astryx\n7. anthropics/skills \u2014 Link: https://github.com/anthropics/skills (0 stars today) https://github.com/anthropics/skills\n8. google-deepmind/mujoco \u2014 Link: https://github.com/google-deepmind/mujoco (0 stars today) https://github.com/google-deepmind/mujoco\n9. ranxianglei/billion-context \u2014 Link: https://github.com/ranxianglei/billion-context (0 stars today) https://github.com/ranxianglei/billion-context",
+    "repos": [
+     {
+      "description": "Link: https://github.com/sherlock-project/sherlock",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 0,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "Link: https://github.com/dsx-ai-factory/nvke",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 0,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Link: https://github.com/milind-soni/OpenMausBot",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 0,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "Link: https://github.com/anthropics/claude-quickstarts",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 0,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Link: https://github.com/vercel-labs/agent-browser",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 0,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "Link: https://github.com/meta/astryx",
+      "name": "meta/astryx",
+      "stars_today": 0,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Link: https://github.com/anthropics/skills",
+      "name": "anthropics/skills",
+      "stars_today": 0,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Link: https://github.com/google-deepmind/mujoco",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 0,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "Link: https://github.com/ranxianglei/billion-context",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 0,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  },
+  {
+   "run": 8,
+   "output": {
+    "digest": "GitHub Trending \u2014 Today (2026-11-09)\n\n1. sherlock-project/sherlock \u2014 Link: https://github.com/sherlock-project/sherlock (0 stars today) https://github.com/sherlock-project/sherlock\n2. dsx-ai-factory/nvke \u2014 Link: https://github.com/dsx-ai-factory/nvke (0 stars today) https://github.com/dsx-ai-factory/nvke\n3. milind-soni/OpenMausBot \u2014 Link: https://github.com/milind-soni/OpenMausBot (0 stars today) https://github.com/milind-soni/OpenMausBot\n4. anthropics/claude-quickstarts \u2014 Link: https://github.com/anthropics/claude-quickstarts (0 stars today) https://github.com/anthropics/claude-quickstarts\n5. vercel-labs/agent-browser \u2014 Link: https://github.com/vercel-labs/agent-browser (0 stars today) https://github.com/vercel-labs/agent-browser\n6. meta/astryx \u2014 Link: https://github.com/meta/astryx (0 stars today) https://github.com/meta/astryx\n7. anthropics/skills \u2014 Link: https://github.com/anthropics/skills (0 stars today) https://github.com/anthropics/skills\n8. google-deepmind/mujoco \u2014 Link: https://github.com/google-deepmind/mujoco (0 stars today) https://github.com/google-deepmind/mujoco\n9. ranxianglei/billion-context \u2014 Link: https://github.com/ranxianglei/billion-context (0 stars today) https://github.com/ranxianglei/billion-context",
+    "repos": [
+     {
+      "description": "Link: https://github.com/sherlock-project/sherlock",
+      "name": "sherlock-project/sherlock",
+      "stars_today": 0,
+      "url": "https://github.com/sherlock-project/sherlock"
+     },
+     {
+      "description": "Link: https://github.com/dsx-ai-factory/nvke",
+      "name": "dsx-ai-factory/nvke",
+      "stars_today": 0,
+      "url": "https://github.com/dsx-ai-factory/nvke"
+     },
+     {
+      "description": "Link: https://github.com/milind-soni/OpenMausBot",
+      "name": "milind-soni/OpenMausBot",
+      "stars_today": 0,
+      "url": "https://github.com/milind-soni/OpenMausBot"
+     },
+     {
+      "description": "Link: https://github.com/anthropics/claude-quickstarts",
+      "name": "anthropics/claude-quickstarts",
+      "stars_today": 0,
+      "url": "https://github.com/anthropics/claude-quickstarts"
+     },
+     {
+      "description": "Link: https://github.com/vercel-labs/agent-browser",
+      "name": "vercel-labs/agent-browser",
+      "stars_today": 0,
+      "url": "https://github.com/vercel-labs/agent-browser"
+     },
+     {
+      "description": "Link: https://github.com/meta/astryx",
+      "name": "meta/astryx",
+      "stars_today": 0,
+      "url": "https://github.com/meta/astryx"
+     },
+     {
+      "description": "Link: https://github.com/anthropics/skills",
+      "name": "anthropics/skills",
+      "stars_today": 0,
+      "url": "https://github.com/anthropics/skills"
+     },
+     {
+      "description": "Link: https://github.com/google-deepmind/mujoco",
+      "name": "google-deepmind/mujoco",
+      "stars_today": 0,
+      "url": "https://github.com/google-deepmind/mujoco"
+     },
+     {
+      "description": "Link: https://github.com/ranxianglei/billion-context",
+      "name": "ranxianglei/billion-context",
+      "stars_today": 0,
+      "url": "https://github.com/ranxianglei/billion-context"
+     }
+    ]
+   }
+  }
+ ]
+}
