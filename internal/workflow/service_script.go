@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ridhomujizat/lana-harness/internal/scriptrt"
 )
 
 // Script Parse service errors.
@@ -284,9 +286,13 @@ func (s *Service) GenerateScript(ctx context.Context, wfID string, node Node, in
 
 // ConvertNode proposes a script_parse node that replaces an agent, bot or worker
 // node and keeps its id (REQ-SP-017, API-SP-004). The guardian derives the goal
-// and the input template from the node's prompt and writes the script; up to
-// three of the node's newest succeeded runs are used as expected outputs for
-// per-run checks. A feasible=false answer returns the reason and no node.
+// and the input template from the node's prompt and writes the script; the script
+// must compile (scriptrt.Compile, after the empty and size checks) before it is
+// accepted, and the guardian gets one retry carrying the compile problems
+// (scriptRegenAttempts attempts in total). Up to three of the node's newest
+// succeeded runs are used as expected outputs for per-run checks. A feasible=false
+// answer returns the reason and no node, and so does a last attempt whose script
+// still does not compile, with the compile problem as the reason and no node.
 func (s *Service) ConvertNode(ctx context.Context, wfID, nodeID string) (ConvertResult, error) {
 	wf, err := s.store.GetWorkflow(ctx, wfID)
 	if err != nil {
@@ -330,36 +336,68 @@ func (s *Service) ConvertNode(ctx context.Context, wfID, nodeID string) (Convert
 	if node.Type == "worker" {
 		rawPrompt = paramString(node.Params, "task")
 	}
-	call, cerr := s.deps.RunAgent(ctx, AgentRequest{
-		WorkflowID: wfID,
-		NodeID:     node.ID,
-		Agent:      wf.Guardian,
-		Prompt: BuildScriptPrompt(ScriptPromptInput{
-			AgentPrompt: rawPrompt,
-			Schema:      asMapParam(node.Params["output_schema"]),
-			ItemSchema:  asMapParam(node.Params["item_schema"]),
-			Input:       renderedPromptText(newest.nodeRun.Input),
-			Expected:    decodeInput(newest.nodeRun.Output),
-		}),
-		Tools: []string{},
-	})
-	tokens := call.Tokens
-	if cerr != nil {
-		return ConvertResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, cerr)
-	}
-	if call.StopReason == "error" {
-		return ConvertResult{}, fmt.Errorf("%w: the guardian stopped with an error", ErrGuardianUnavailable)
-	}
-	reply, perr := ParseScriptReply(call.Text)
-	if perr != nil {
-		return ConvertResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, perr)
-	}
-	if !reply.Feasible {
-		reason := reply.Reason
-		if reason == "" {
-			reason = "the guardian reported the step is not feasible"
+	// The guardian gets up to scriptRegenAttempts attempts (REQ-SP-007): a
+	// candidate whose script does not compile is retried once, as GenerateScript
+	// does, with the compile problems carried in the next prompt (REQ-SP-017).
+	emptyChecks := []ConvertCheck{}
+	var tokens int64
+	var reply ScriptReply
+	var perr error
+	var problems []ScriptProblem
+	for attempt := 0; attempt < scriptRegenAttempts; attempt++ {
+		call, cerr := s.deps.RunAgent(ctx, AgentRequest{
+			WorkflowID: wfID,
+			NodeID:     node.ID,
+			Agent:      wf.Guardian,
+			Prompt: BuildScriptPrompt(ScriptPromptInput{
+				AgentPrompt: rawPrompt,
+				Schema:      asMapParam(node.Params["output_schema"]),
+				ItemSchema:  asMapParam(node.Params["item_schema"]),
+				Input:       renderedPromptText(newest.nodeRun.Input),
+				Expected:    decodeInput(newest.nodeRun.Output),
+				Problems:    problemStrings(problems),
+			}),
+			Tools: []string{},
+		})
+		tokens += call.Tokens
+		if cerr != nil {
+			return ConvertResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, cerr)
 		}
-		return ConvertResult{Feasible: false, Reason: reason, Checks: []ConvertCheck{}, Tokens: tokens}, nil
+		if call.StopReason == "error" {
+			return ConvertResult{}, fmt.Errorf("%w: the guardian stopped with an error", ErrGuardianUnavailable)
+		}
+		reply, perr = ParseScriptReply(call.Text)
+		if perr != nil {
+			return ConvertResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, perr)
+		}
+		if !reply.Feasible {
+			reason := reply.Reason
+			if reason == "" {
+				reason = "the guardian reported the step is not feasible"
+			}
+			return ConvertResult{Feasible: false, Reason: reason, Checks: emptyChecks, Tokens: tokens}, nil
+		}
+		// The proposed script must compile before it can be offered to the owner
+		// (REQ-SP-017): an empty or over-long script and a scriptrt.Compile
+		// failure are script_error problems the guardian can retry.
+		switch {
+		case strings.TrimSpace(reply.Script) == "":
+			problems = []ScriptProblem{{Code: DriftScript, Message: "script is empty"}}
+		case len(reply.Script) > scriptrt.MaxScriptBytes:
+			problems = []ScriptProblem{{Code: DriftScript, Message: scriptrt.ErrScriptTooLarge.Error()}}
+		default:
+			problems = nil
+			if _, cerr := scriptrt.Compile(reply.Script); cerr != nil {
+				problems = []ScriptProblem{{Code: DriftScript, Message: cerr.Error()}}
+			}
+		}
+		if len(problems) == 0 {
+			break
+		}
+	}
+	if len(problems) > 0 {
+		reason := problems[0].Code + ": " + problems[0].Message
+		return ConvertResult{Feasible: false, Reason: reason, Checks: emptyChecks, Tokens: tokens}, nil
 	}
 	reply.Input = normalizeConvertInput(reply.Input, rawPrompt)
 
