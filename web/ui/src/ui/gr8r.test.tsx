@@ -13,15 +13,38 @@ import {
   MenuItem,
   Modal,
   Seg,
+  Select,
   Tabs,
   Toggle,
   ToastProvider,
   useToast,
 } from "./gr8r";
+import { Dialog } from "./ui";
 
 afterEach(() => {
   vi.useRealTimers();
 });
+
+/* jsdom has no modal dialog; showModal only needs to set open here. */
+function stubModalDialog(): void {
+  const proto = HTMLDialogElement.prototype;
+  if (typeof proto.showModal !== "function") {
+    proto.showModal = () => {};
+  }
+  if (typeof proto.close !== "function") {
+    proto.close = () => {};
+  }
+  vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(
+    function (this: HTMLDialogElement) {
+      this.open = true;
+    }
+  );
+  vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(
+    function (this: HTMLDialogElement) {
+      this.open = false;
+    }
+  );
+}
 
 describe("Button", () => {
   it("renders the Gr8r variant, size and loading classes", () => {
@@ -270,6 +293,211 @@ describe("Modal", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("Select", () => {
+  const options = [
+    { value: "a", label: "Alpha" },
+    { value: "b", label: "Beta" },
+  ];
+
+  function rect(values: Partial<DOMRect>): DOMRect {
+    return {
+      top: 0,
+      bottom: 0,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+      ...values,
+    } as DOMRect;
+  }
+
+  function renderSelect(): void {
+    render(
+      <Select
+        aria-label="Model"
+        value="a"
+        options={options}
+        onChange={() => {}}
+      />
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the menu through the Popover API and hides it on close", () => {
+    const show = vi.spyOn(HTMLElement.prototype, "showPopover");
+    const hide = vi.spyOn(HTMLElement.prototype, "hidePopover");
+
+    renderSelect();
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+    expect(show).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("listbox");
+    expect(show).toHaveBeenCalledTimes(1);
+    expect(menu.getAttribute("popover")).toBe("manual");
+
+    fireEvent.click(screen.getByRole("option", { name: "Beta" }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("flips the menu above the trigger when there is no room below", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(300);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(200);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 350, bottom: 370, left: 40, right: 240, width: 200, height: 20 })
+    );
+
+    renderSelect();
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+
+    expect(screen.getByRole("listbox").style.top).toBe("46px");
+  });
+
+  it("caps the menu height to the available space below the trigger", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(300);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(200);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 100, bottom: 120, left: 40, right: 240, width: 200, height: 20 })
+    );
+
+    renderSelect();
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+
+    const menu = screen.getByRole("listbox");
+    expect(menu.style.maxHeight).toBe("268px");
+    expect(menu.style.top).toBe("124px");
+  });
+
+  it("closes only the menu on Escape, leaving an open dialog alone", () => {
+    const onClose = vi.fn();
+    stubModalDialog();
+
+    render(
+      <Dialog title="Create" onClose={onClose}>
+        <Select aria-label="Model" value="a" options={options} onChange={() => {}} />
+      </Dialog>
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    fireEvent.keyDown(screen.getByRole("option", { name: "Alpha" }), {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Create" })).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  /* A modal dialog makes everything outside it inert, so a menu portaled to
+     <body> paints on top but takes no clicks or wheel scrolls. */
+  it("renders the menu inside the open dialog that holds the trigger", () => {
+    stubModalDialog();
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <Dialog title="Create" onClose={onClose}>
+        <Select aria-label="Model" value="a" options={options} onChange={onChange} />
+      </Dialog>
+    );
+    const dialog = screen.getByRole("dialog", { name: "Create" });
+    const trigger = screen.getByRole("combobox", { name: "Model" });
+
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("listbox");
+    expect(menu.parentElement).toBe(dialog);
+
+    const beta = screen.getByRole("option", { name: "Beta" });
+    fireEvent.pointerDown(beta);
+    fireEvent.click(beta);
+    expect(onChange).toHaveBeenCalledWith("b");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.getByRole("dialog", { name: "Create" })).toBe(dialog);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("renders the menu in the body when no dialog is open", () => {
+    renderSelect();
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    expect(screen.getByRole("listbox").parentElement).toBe(document.body);
+  });
+
+  it("keeps its scroll position when the menu itself scrolls", () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(300);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      rect({ top: 100, bottom: 120, left: 40, right: 240, width: 200, height: 20 })
+    );
+    renderSelect();
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    const menu = screen.getByRole("listbox");
+    expect(menu.style.maxHeight).toBe("268px");
+
+    /* placeAnchored clears the cap to measure; a scroll inside the menu must
+       not trigger it, or the list snaps back to the top. */
+    menu.style.maxHeight = "1px";
+    fireEvent.scroll(menu);
+    expect(menu.style.maxHeight).toBe("1px");
+
+    fireEvent.scroll(window);
+    expect(menu.style.maxHeight).toBe("268px");
+  });
+});
+
+describe("Menu inside a modal dialog", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function Harness({ onPick }: { onPick: () => void }) {
+    const anchorRef = useRef<HTMLButtonElement>(null);
+    const [open, setOpen] = useState(false);
+    return (
+      <Dialog title="Edit" onClose={() => {}}>
+        <button type="button" ref={anchorRef} onClick={() => setOpen(true)}>
+          More
+        </button>
+        <Menu anchorRef={anchorRef} open={open} onClose={() => setOpen(false)}>
+          <MenuItem
+            onClick={() => {
+              onPick();
+              setOpen(false);
+            }}
+          >
+            Rename
+          </MenuItem>
+        </Menu>
+      </Dialog>
+    );
+  }
+
+  it("portals the menu into the dialog and lets an item be picked", () => {
+    stubModalDialog();
+    const onPick = vi.fn();
+    render(<Harness onPick={onPick} />);
+    const dialog = screen.getByRole("dialog", { name: "Edit" });
+
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const menu = screen.getByRole("menu");
+    expect(menu.parentElement).toBe(dialog);
+    expect(menu.getAttribute("popover")).toBe("manual");
+
+    const item = screen.getByRole("menuitem", { name: "Rename" });
+    fireEvent.pointerDown(item);
+    fireEvent.click(item);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Edit" })).toBe(dialog);
   });
 });
 

@@ -13,6 +13,8 @@ type NodeSpec struct {
 	Required []string
 	Ports    []string
 	Trigger  bool
+	// Doc documents optional params the assistant prompt should mention.
+	Doc string
 }
 
 // Node groups.
@@ -50,11 +52,12 @@ var nodeCatalog = map[string]NodeSpec{
 	"worker":       {Type: "worker", Group: groupAI, Label: "Worker", Required: []string{"task"}, Ports: []string{"out"}},
 	"script_parse": {Type: "script_parse", Group: groupAI, Label: "Script Parse", Required: []string{"input", "goal", "output_schema"}, Ports: []string{"out"}},
 
-	"browser":   {Type: "browser", Group: groupTool, Label: "Browser", Required: []string{"url"}, Ports: []string{"out"}},
-	"bash":      {Type: "bash", Group: groupTool, Label: "Bash", Required: []string{"command"}, Ports: []string{"out"}},
-	"webfetch":  {Type: "webfetch", Group: groupTool, Label: "Web fetch", Required: []string{"url"}, Ports: []string{"out"}},
-	"tool":      {Type: "tool", Group: groupTool, Label: "Tool", Required: []string{"name"}, Ports: []string{"out"}},
-	"message":   {Type: "message", Group: groupTool, Label: "Message", Required: []string{"text"}, Ports: []string{"out"}},
+	"browser":  {Type: "browser", Group: groupTool, Label: "Browser", Required: []string{"url"}, Ports: []string{"out"}},
+	"bash":     {Type: "bash", Group: groupTool, Label: "Bash", Required: []string{"command"}, Ports: []string{"out"}},
+	"webfetch": {Type: "webfetch", Group: groupTool, Label: "Web fetch", Required: []string{"url"}, Ports: []string{"out"}},
+	"tool":     {Type: "tool", Group: groupTool, Label: "Tool", Required: []string{"name"}, Ports: []string{"out"}},
+	"message": {Type: "message", Group: groupTool, Label: "Message", Required: []string{"text"}, Ports: []string{"out"},
+		Doc: `param "channels": list of channel ids ("web", "telegram"; default ["telegram"]); "web" posts into the agent's web chat and needs "agent"`},
 	"knowledge": {Type: "knowledge", Group: groupTool, Label: "Knowledge", Required: []string{"title", "text"}, Ports: []string{"out"}},
 
 	"if":       {Type: "if", Group: groupFlow, Label: "If", Required: []string{"left", "op"}, Ports: []string{"true", "false"}},

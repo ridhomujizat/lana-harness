@@ -99,6 +99,9 @@ type Service struct {
 	notifierMu sync.RWMutex
 	notifier   Notifier
 
+	chanMu   sync.RWMutex
+	channels map[string]messageChannel
+
 	subMu  sync.Mutex
 	subs   map[int]chan Change
 	subSeq int
@@ -134,6 +137,7 @@ func NewService(st Store, deps Deps, opts ...Option) *Service {
 		subs:         map[int]chan Change{},
 		runLocks:     map[string]*sync.Mutex{},
 		lastFired:    map[string]int64{},
+		channels:     map[string]messageChannel{},
 
 		intervalConsumed: map[string]time.Time{},
 	}
@@ -141,12 +145,15 @@ func NewService(st Store, deps Deps, opts ...Option) *Service {
 	for _, opt := range opts {
 		opt(s)
 	}
+	// Telegram is the built-in Message node channel, backed by the notifier
+	// (REQ-WF-005); the runtime registers "web" on top.
+	s.registerTelegramChannel()
 	s.engine = NewEngine(st, deps, EngineOptions{
-		Now:       s.now,
-		Sleep:     s.sleep,
-		Notify:    s.notify,
-		SendOwner: s.sendOwner,
-		Changed:   s.broadcast,
+		Now:         s.now,
+		Sleep:       s.sleep,
+		Notify:      s.notify,
+		SendMessage: s.dispatchMessage,
+		Changed:     s.broadcast,
 	})
 	return s
 }
@@ -256,7 +263,7 @@ func detailOf(wf Workflow, ver Version) Detail {
 		VersionAuthor:  ver.Author,
 		VersionSummary: ver.Summary,
 		VersionAt:      ver.CreatedAt,
-		Graph:          ver.Graph,
+		Graph:          ver.Graph.Normalized(),
 		LockCurrent:    LockCovers(wf.Lock, ver.Graph),
 		Webhook:        Webhook{Path: "/hooks/" + wf.ID, Token: wf.WebhookToken},
 	}
@@ -264,7 +271,14 @@ func detailOf(wf Workflow, ver Version) Detail {
 
 // Versions lists the saved versions of a workflow, newest first (API-WF-006).
 func (s *Service) Versions(ctx context.Context, id string) ([]Version, error) {
-	return s.store.ListVersions(ctx, id)
+	versions, err := s.store.ListVersions(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range versions {
+		versions[i].Graph = versions[i].Graph.Normalized()
+	}
+	return versions, nil
 }
 
 // LockPreview returns what activation would lock (API-WF-008, REQ-WF-009).
@@ -300,7 +314,7 @@ func (s *Service) RunDetail(ctx context.Context, id, ref string) (RunDetail, err
 	}
 	var graph Graph
 	if ver, err := s.store.GetVersion(ctx, run.WorkflowID, run.Version); err == nil {
-		graph = ver.Graph
+		graph = ver.Graph.Normalized()
 	}
 	nodes, _ := s.store.ListNodeRuns(ctx, run.ID)
 	decisions, _ := s.store.ListDecisions(ctx, DecisionFilter{RunID: run.ID})
@@ -370,6 +384,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Detail, error) {
 	if in.Graph != nil {
 		graph = *in.Graph
 	}
+	graph = graph.Normalized()
 	if issues := Validate(graph, s.deps.AgentExists); len(issues) > 0 {
 		return Detail{}, &InvalidGraphError{Issues: issues}
 	}
@@ -407,21 +422,22 @@ func (s *Service) Update(ctx context.Context, id string, in UpdateInput) (Detail
 		if in.BaseVersion != wf.Version {
 			return Detail{}, ErrVersionConflict
 		}
-		if issues := Validate(*in.Graph, s.deps.AgentExists); len(issues) > 0 {
+		graph := in.Graph.Normalized()
+		if issues := Validate(graph, s.deps.AgentExists); len(issues) > 0 {
 			return Detail{}, &InvalidGraphError{Issues: issues}
 		}
 		summary := in.Summary
 		if summary == "" {
 			summary = "edited"
 		}
-		if _, err := s.store.SaveVersion(ctx, id, in.BaseVersion, *in.Graph, "owner", summary); err != nil {
+		if _, err := s.store.SaveVersion(ctx, id, in.BaseVersion, graph, "owner", summary); err != nil {
 			return Detail{}, err
 		}
 		wf, err = s.store.GetWorkflow(ctx, id)
 		if err != nil {
 			return Detail{}, err
 		}
-		newGraph = *in.Graph
+		newGraph = graph
 		graphChanged = true
 	}
 
@@ -493,14 +509,15 @@ func (s *Service) Restore(ctx context.Context, id string, version int) (Detail, 
 	if err != nil {
 		return Detail{}, err
 	}
-	if _, err := s.store.SaveVersion(ctx, id, wf.Version, ver.Graph, "owner", fmt.Sprintf("restore v%d", version)); err != nil {
+	graph := ver.Graph.Normalized()
+	if _, err := s.store.SaveVersion(ctx, id, wf.Version, graph, "owner", fmt.Sprintf("restore v%d", version)); err != nil {
 		return Detail{}, err
 	}
 	current, err := s.store.GetWorkflow(ctx, id)
 	if err != nil {
 		return Detail{}, err
 	}
-	if current.Status == StatusActive && !LockCovers(current.Lock, ver.Graph) {
+	if current.Status == StatusActive && !LockCovers(current.Lock, graph) {
 		current.Status = StatusDraft
 		current.UpdatedAt = s.now().UnixMilli()
 		if err := s.store.UpdateWorkflow(ctx, current); err != nil {
@@ -746,7 +763,8 @@ func (s *Service) Assist(ctx context.Context, id string, baseVersion int, messag
 	case nil:
 		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, CreatedAt: now}
 	default:
-		issues := Validate(*reply.Graph, s.deps.AgentExists)
+		graph := reply.Graph.Normalized()
+		issues := Validate(graph, s.deps.AgentExists)
 		if len(issues) > 0 {
 			// An invalid graph saves no version and reports the problems
 			// (AC-WF-018).
@@ -761,16 +779,16 @@ func (s *Service) Assist(ctx context.Context, id string, baseVersion int, messag
 		if summary == "" {
 			summary = "assistant change"
 		}
-		newVer, err := s.store.SaveVersion(ctx, id, baseVersion, *reply.Graph, "guardian", summary)
+		newVer, err := s.store.SaveVersion(ctx, id, baseVersion, graph, "guardian", summary)
 		if err != nil {
 			return AssistResult{}, err
 		}
-		change := DiffGraphs(old, *reply.Graph)
+		change := DiffGraphs(old, graph)
 		change.FromVersion = baseVersion
 		change.ToVersion = newVer.Version
 		change.Summary = reply.Summary
 		if current, err := s.store.GetWorkflow(ctx, id); err == nil {
-			if current.Status == StatusActive && !LockCovers(current.Lock, *reply.Graph) {
+			if current.Status == StatusActive && !LockCovers(current.Lock, graph) {
 				current.Status = StatusDraft
 				current.UpdatedAt = now
 				_ = s.store.UpdateWorkflow(ctx, current)

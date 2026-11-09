@@ -38,6 +38,9 @@ func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message st
 	for _, t := range NodeTypes() {
 		spec, _ := Spec(t)
 		fmt.Fprintf(&b, "- %s [%s]: required %s; ports %s\n", t, spec.Group, paramsList(spec.Required), portsList(t, spec))
+		if spec.Doc != "" {
+			fmt.Fprintf(&b, "  %s\n", spec.Doc)
+		}
 	}
 	b.WriteString("\n")
 
@@ -47,6 +50,7 @@ func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message st
 	b.WriteString("- from_port is \"out\" (default), \"true\"/\"false\" (if), a case name or \"default\" (switch), \"approved\"/\"denied\" (approval), \"body\"/\"done\" (loop).\n")
 	b.WriteString("- loops: a body node carries \"parent\": \"<loop id>\"; the loop has an edge with from_port \"body\" to the first body node and an edge with from_port \"done\" to what runs after.\n")
 	b.WriteString("- templates: {{ input.x }}, {{ nodes.<id>.output.<path> }}, {{ item }}, {{ state.key }}, {{ run.number }}.\n")
+	b.WriteString("- {{ nodes.<id>.output }} inside text gives the node's main text (text, markdown, content); use {{ nodes.<id>.output.<field> }} for another field.\n")
 	b.WriteString("- positions: x/y in pixels, nodes are 248x64, keep a 40 px vertical gap, keep existing positions and place new nodes below their parent node.\n")
 	// Script Parse rules (spec #44, REQ-SP-020).
 	b.WriteString("- prefer script_parse over agent when a step only extracts, filters or reformats data of a fixed shape (pages, API or MCP JSON).\n")

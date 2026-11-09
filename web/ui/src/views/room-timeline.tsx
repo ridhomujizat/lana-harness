@@ -44,8 +44,8 @@ import {
   useMentions,
 } from "./room-group";
 import { storedAttachments } from "./session";
-import { buildTurns, TurnBlock, UserBubble } from "./turn";
-import type { ChatTurn, ThreadItem } from "./turn";
+import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
+import type { ChatTurn, ReplyTarget, ThreadItem } from "./turn";
 
 /* The room timeline of REQ-ROOM-002 to REQ-ROOM-005. It joins the room's
    segments into one bottom-anchored thread, streams the newest segment like
@@ -311,11 +311,14 @@ export function RoomView({ room }: RoomViewProps) {
   const [questionBusy, setQuestionBusy] = useState(false);
   const [closedQuestionIds, setClosedQuestionIds] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  /* API reply: the automation message the next send replies to. */
+  const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [newTopic, setNewTopic] = useState(false);
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickRef = useRef(true);
   const prependRef = useRef<number | null>(null);
   const startedRef = useRef(false);
@@ -718,6 +721,13 @@ export function RoomView({ room }: RoomViewProps) {
 
   useStickToBottom(scrollRef, stickRef);
 
+  /* API reply: clicking Reply sets a target and focuses the composer input. */
+  useEffect(() => {
+    if (replyTarget) {
+      inputRef.current?.focus();
+    }
+  }, [replyTarget]);
+
   /* The timeline is bottom anchored: new content scrolls into view unless the
      owner has scrolled up (AC-ROOM-002, AC-ROOM-003). */
   useLayoutEffect(() => {
@@ -940,7 +950,13 @@ export function RoomView({ room }: RoomViewProps) {
       if (topic) {
         body.new_topic = true;
       }
+      if (replyTarget) {
+        body.reply_to = replyTarget.seq;
+      }
       const result = await sendToRoom(room.name, body);
+      /* API reply: a successful send clears the target; the stored message now
+         carries its own reply_to. */
+      setReplyTarget(null);
       setNewTopic(false);
       attachmentDraft.clear();
       if (result.command) {
@@ -1036,6 +1052,11 @@ export function RoomView({ room }: RoomViewProps) {
     if (mentions.onKeyDown(event)) {
       return;
     }
+    if (event.key === "Escape" && replyTarget) {
+      event.preventDefault();
+      setReplyTarget(null);
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void sendMessage();
@@ -1096,6 +1117,7 @@ export function RoomView({ room }: RoomViewProps) {
               text={node.item.text}
               continue={node.item.continue === true}
               attachments={storedAttachments(node.sessionId, node.item.attachments)}
+              replyTo={node.item.replyTo || null}
             />
           </div>
         );
@@ -1109,6 +1131,7 @@ export function RoomView({ room }: RoomViewProps) {
                 turn={node.turn}
                 agent={room.name}
                 agentColor={room.color}
+                onReply={setReplyTarget}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1256,6 +1279,9 @@ export function RoomView({ room }: RoomViewProps) {
         </div>
         {newTopic ? <div className="room-newtopic">New topic</div> : null}
         <div className="cbox">
+          {replyTarget ? (
+            <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />
+          ) : null}
           <AttachmentChips
             items={attachmentDraft.items}
             onRemove={attachmentDraft.remove}
@@ -1278,6 +1304,7 @@ export function RoomView({ room }: RoomViewProps) {
             />
           ) : null}
           <textarea
+            ref={inputRef}
             rows={2}
             aria-label={"Message " + (team ? "the team" : room.name)}
             placeholder={placeholder}

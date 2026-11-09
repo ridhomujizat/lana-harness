@@ -1,4 +1,5 @@
 import { queryString, request } from "./client";
+import { watchVisibility } from "./visibility";
 
 /* Workflow calls of API-WF-001 to API-WF-019 (spec #33). Types are written by
    hand from the Go JSON structs of internal/workflow. */
@@ -360,6 +361,23 @@ export function getWorkflow(id: string): Promise<Workflow> {
   return workflowRequest("GET", wf(id));
 }
 
+/* API-WF-001: one delivery channel of the Message node. The server lists them
+   in a stable order (web, telegram, then the rest by id); more (Discord,
+   Slack) may appear later, so the UI renders whatever it returns. */
+export interface MessageChannel {
+  id: string;
+  label: string;
+  needs_agent: boolean;
+  available: boolean;
+  reason?: string;
+}
+
+export function getWorkflowChannels(): Promise<MessageChannel[]> {
+  return request<{ channels: MessageChannel[] }>("GET", base + "/channels").then(
+    (res) => list(res.channels)
+  );
+}
+
 export function createWorkflow(body: {
   name: string;
   description?: string;
@@ -521,6 +539,9 @@ export function rotateWebhook(id: string): Promise<{ token: string }> {
 export interface WorkflowChange {
   workflow_id: string;
   run_id?: string;
+  /* Set when the stream reconnects after a hidden pause: the tab missed every
+     change while it was gone, so the view must refetch what it shows. */
+  refresh?: boolean;
 }
 
 export interface WorkflowStream {
@@ -537,8 +558,25 @@ export function openWorkflowStream(
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /* A hidden tab releases its connection; on the next visible change the stream
+     asks its view to refetch once (the pushed changes were missed) and
+     reconnects. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      onChange({ workflow_id: "", refresh: true });
+      void connect();
+    },
+  });
+
   function scheduleReconnect(): void {
-    if (!closed) {
+    if (!closed && !visibility.blocked()) {
       retryTimer = setTimeout(connect, 1000);
     }
   }
@@ -577,7 +615,7 @@ export function openWorkflowStream(
   }
 
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -625,6 +663,7 @@ export function openWorkflowStream(
   return {
     close() {
       closed = true;
+      visibility.close();
       if (retryTimer !== null) {
         clearTimeout(retryTimer);
       }

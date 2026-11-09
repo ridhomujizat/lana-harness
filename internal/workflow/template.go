@@ -92,22 +92,47 @@ func renderString(s string, sc Scope) (any, error) {
 	return b.String(), nil
 }
 
-// stringify renders a resolved value for use inside mixed text.
+// stringify renders a resolved value for use inside mixed text. A node output
+// map prefers its primary text; a list or a map without one stays compact JSON.
 func stringify(v any) string {
 	switch t := v.(type) {
 	case nil:
 		return ""
 	case string:
 		return t
-	case map[string]any, []any:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprint(v)
+	case map[string]any:
+		if text, ok := primaryText(t); ok {
+			return text
 		}
-		return string(b)
+		return jsonText(v)
+	case []any:
+		return jsonText(v)
 	default:
 		return fmt.Sprint(t)
 	}
+}
+
+// jsonText encodes v as compact JSON for use inside mixed text, falling back to
+// fmt when the value cannot be marshalled.
+func jsonText(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	return string(b)
+}
+
+// primaryText returns the first non-empty string among the well-known text keys
+// of a node output, so {{ nodes.<id>.output }} inside mixed text yields the
+// node's main text (text, markdown, content, ...) instead of the JSON of its
+// whole output object.
+func primaryText(m map[string]any) (string, bool) {
+	for _, key := range []string{"text", "markdown", "content", "output", "result"} {
+		if s, ok := m[key].(string); ok && s != "" {
+			return s, true
+		}
+	}
+	return "", false
 }
 
 // tmplToken is one literal or expression part of a template string.

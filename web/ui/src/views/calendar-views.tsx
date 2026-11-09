@@ -5,15 +5,17 @@ import { Ic } from "../ui/icons";
 import { cn } from "../ui/gr8r";
 import { AgentFace } from "./workflow-common";
 import {
-  HOUR_PX,
   WEEKDAY_SHORT,
   clockText,
   dayKey,
   dayTitle,
+  groupWorkflowRuns,
   isTimed,
-  layoutDay,
+  layoutDayAdaptive,
+  minuteOfY,
   sameDay,
   startOfDay,
+  yOfMinute,
 } from "./calendar-model";
 import type { ViewRange } from "./calendar-model";
 
@@ -192,45 +194,86 @@ export function EntryChip({ entry, onOpen, fallback, showTime = true }: EntryHan
   );
 }
 
-export function EntryCard({ entry, onOpen, fallback }: EntryHandlers & { entry: Entry }) {
+/* The sub line of a card: the runs a grouped entry stands for, or the source. */
+function entrySub(entry: Entry): string {
+  if (entry.group && entry.group.length > 1) {
+    const failed = entry.group.filter((run) => run.status === "failed").length;
+    return entry.group.length + " runs" + (failed > 0 ? " · " + failed + " failed" : "");
+  }
+  if (entry.source === "workflow_run") {
+    return "Run #" + (entry.workflow?.run_number || "") + " · " + entry.status;
+  }
+  if (entry.source === "workflow_slot") {
+    return (entry.status === "skipped" ? "Skipped" : entry.moved ? "Moved" : "Workflow") + " · " + (entry.workflow?.guardian || "");
+  }
+  if (entry.source === "google") {
+    return entry.google?.calendar_name || "Google";
+  }
+  return entry.kind[0]!.toUpperCase() + entry.kind.slice(1);
+}
+
+/* The short trailing status a compact card shows next to its time. */
+function entryCompactStatus(entry: Entry): string {
+  if (entry.group && entry.group.length > 1) {
+    return entry.group.length + " runs";
+  }
+  return entry.source === "workflow_run" ? entry.status : "";
+}
+
+export function EntryCard({ entry, onOpen, fallback, compact }: EntryHandlers & { entry: Entry; compact?: boolean }) {
   const agent = agentOf(entry);
   const draggable = canDrag(entry, fallback);
-  const sub =
-    entry.source === "workflow_run"
-      ? "Run #" + (entry.workflow?.run_number || "") + " · " + entry.status
-      : entry.source === "workflow_slot"
-        ? (entry.status === "skipped" ? "Skipped" : entry.moved ? "Moved" : "Workflow") + " · " + (entry.workflow?.guardian || "")
-        : entry.source === "google"
-          ? entry.google?.calendar_name || "Google"
-          : entry.kind[0]!.toUpperCase() + entry.kind.slice(1);
+  const colorStyle = { "--c": entryColor(entry) } as CSSProperties;
+  const status = entryCompactStatus(entry);
   return (
     <button
       type="button"
       className={cn(
         "wcard",
+        compact && "compact",
         entry.source !== "item" && "event",
         entry.source === "workflow_slot" && "slot",
         isDone(entry) && "done",
         entry.firing?.status === "missed" && "missed"
       )}
-      style={{ "--c": entryColor(entry) } as CSSProperties}
+      style={colorStyle}
       draggable={draggable}
       onDragStart={draggable ? (event) => dragStart(event, entry) : undefined}
-      onClick={(event) => onOpen(entry, event.currentTarget)}
+      onClick={(event) => {
+        /* A grouped slot stands for many runs: open the workflow's runs page
+           instead of a single run's drawer. */
+        if (entry.group && entry.group.length > 1) {
+          window.location.hash = "#/workflows/" + encodeURIComponent(entry.workflow?.id || "") + "/runs";
+          return;
+        }
+        onOpen(entry, event.currentTarget);
+      }}
       aria-label={entryLabel(entry)}
       data-key={entry.key}
     >
-      <span className="t">
-        <span className="pdot" style={{ "--c": entryColor(entry) } as CSSProperties} />
-        <span className="trunc">{entry.title}</span>
-      </span>
-      <span className="m">
-        <Ic name={entryIcon(entry)} size={11} />
-        <span className="num">{entryWhen(entry)}</span>
-        <span className="trunc grow">{sub}</span>
-        {entry.habit && entry.habit.streak > 0 ? <span className="num">🔥{entry.habit.streak}</span> : null}
-        {agent ? <AgentFace name={agent} /> : null}
-      </span>
+      {compact ? (
+        <span className="t">
+          <span className="pdot" style={colorStyle} />
+          <span className="trunc grow">{entry.title}</span>
+          <span className="num faint wcard-when">{entryWhen(entry)}</span>
+          {status ? <span className="wcard-status">{status}</span> : null}
+          {agent ? <AgentFace name={agent} /> : null}
+        </span>
+      ) : (
+        <>
+          <span className="t">
+            <span className="pdot" style={colorStyle} />
+            <span className="trunc">{entry.title}</span>
+          </span>
+          <span className="m">
+            <Ic name={entryIcon(entry)} size={11} />
+            <span className="num">{entryWhen(entry)}</span>
+            <span className="trunc grow">{entrySub(entry)}</span>
+            {entry.habit && entry.habit.streak > 0 ? <span className="num">🔥{entry.habit.streak}</span> : null}
+            {agent ? <AgentFace name={agent} /> : null}
+          </span>
+        </>
+      )}
     </button>
   );
 }
@@ -448,9 +491,9 @@ export function DayView({
   }) {
   const scroller = useRef<HTMLDivElement>(null);
   const allDay = entries.filter((entry) => !isTimed(entry));
-  const placed = layoutDay(entries, day);
+  const { slots: placed, hourTops } = layoutDayAdaptive(groupWorkflowRuns(entries), day);
   const isToday = sameDay(day, new Date(now));
-  const nowTop = ((now - startOfDay(day).getTime()) / 3600000) * HOUR_PX;
+  const nowTop = yOfMinute((now - startOfDay(day).getTime()) / 60000, hourTops);
   const dayKeyText = dayKey(day);
 
   useEffect(() => {
@@ -459,7 +502,7 @@ export function DayView({
       return;
     }
     const firstTimed = placed[0]?.top;
-    const target = isToday ? nowTop - 120 : firstTimed !== undefined ? firstTimed - 48 : 7 * HOUR_PX;
+    const target = isToday ? nowTop - 120 : firstTimed !== undefined ? firstTimed - 48 : yOfMinute(7 * 60, hourTops);
     el.scrollTop = Math.max(0, target);
     // Scroll once per day shown, not on every entry change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -468,7 +511,7 @@ export function DayView({
   const minuteAt = (event: DragEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const y = event.clientY - rect.top;
-    const minute = Math.round(((y / HOUR_PX) * 60) / 15) * 15;
+    const minute = Math.round(minuteOfY(y, hourTops) / 15) * 15;
     return Math.max(0, Math.min(23 * 60 + 45, minute));
   };
 
@@ -484,10 +527,10 @@ export function DayView({
         </div>
       </div>
       <div className="cday-scroll" ref={scroller}>
-        <div className="cday-grid" style={{ height: 24 * HOUR_PX }}>
+        <div className="cday-grid" style={{ height: hourTops[24]! }}>
           <div className="cday-hours" aria-hidden="true">
             {HOURS.map((hour) => (
-              <span key={hour} style={{ top: hour * HOUR_PX }}>
+              <span key={hour} style={{ top: hourTops[hour]! }}>
                 {String(hour).padStart(2, "0")}:00
               </span>
             ))}
@@ -497,12 +540,12 @@ export function DayView({
             {...dropProps(day, handlers.onDrop, minuteAt)}
             onDoubleClick={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
-              const minute = Math.floor(((event.clientY - rect.top) / HOUR_PX) * 2) * 30;
+              const minute = Math.floor(minuteOfY(event.clientY - rect.top, hourTops) / 30) * 30;
               handlers.onAdd(day, minute);
             }}
           >
             {HOURS.map((hour) => (
-              <i key={hour} className="cday-line" style={{ top: hour * HOUR_PX }} />
+              <i key={hour} className="cday-line" style={{ top: hourTops[hour]! }} />
             ))}
             {isToday ? <i className="cday-now" style={{ top: nowTop }} aria-hidden="true" /> : null}
             {placed.map((slot) => (
@@ -516,7 +559,7 @@ export function DayView({
                   width: "calc(" + 100 / slot.lanes + "% - 4px)",
                 }}
               >
-                <EntryCard entry={slot.entry} onOpen={handlers.onOpen} fallback={handlers.fallback} />
+                <EntryCard entry={slot.entry} compact={slot.compact} onOpen={handlers.onOpen} fallback={handlers.fallback} />
               </div>
             ))}
           </div>

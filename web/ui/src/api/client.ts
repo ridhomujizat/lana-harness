@@ -1,6 +1,7 @@
 import type { ApprovalEvent } from "./approvals";
 import type { QuestionEvent } from "./questions";
 import type { SessionEvent } from "./sessions";
+import { watchVisibility } from "./visibility";
 
 /* The shared fetch client. Paths, headers, the 401 handler, and the error
    envelope follow /assets/api.js exactly. */
@@ -302,8 +303,23 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /* A hidden tab releases its connection; on the next visible change the stream
+     reconnects from its last seq, so no event is missed. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      void connect();
+    },
+  });
+
   function scheduleReconnect(): void {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     if (handlers.onState) {
@@ -336,7 +352,7 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
         }
       }
     } catch {
-      if (!closed && handlers.onState) {
+      if (!closed && !visibility.blocked() && handlers.onState) {
         handlers.onState("reconnecting");
       }
     } finally {
@@ -352,7 +368,7 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
   }
 
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -409,6 +425,7 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
   return {
     close() {
       closed = true;
+      visibility.close();
       if (retryTimer !== null) {
         clearTimeout(retryTimer);
         retryTimer = null;

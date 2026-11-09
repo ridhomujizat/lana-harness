@@ -52,7 +52,7 @@ func (ex *runExec) invoke(ctx context.Context, node Node, item int, params map[s
 	case "tool":
 		return ex.toolNode(ctx, node, params)
 	case "message":
-		return ex.messageNode(ctx, node, params)
+		return ex.messageNode(ctx, node, item, params)
 	case "knowledge":
 		return ex.knowledgeNode(ctx, node, params)
 	case "if":
@@ -195,16 +195,48 @@ func (ex *runExec) toolNode(ctx context.Context, node Node, params map[string]an
 	return nodeResult{Output: map[string]any{"output": text}, Port: "out"}, nil
 }
 
-// messageNode sends text to the Telegram owner chat (REQ-WF-005).
-func (ex *runExec) messageNode(ctx context.Context, node Node, params map[string]any) (nodeResult, error) {
-	if ex.e.opts.SendOwner == nil {
-		return nodeResult{}, errors.New("telegram is not connected")
-	}
+// messageNode delivers the node text to one or more channels (REQ-WF-005). The
+// channels param defaults to ["telegram"] so workflows saved before channels
+// existed keep working. Every channel is attempted; the node fails only when
+// all of them fail.
+func (ex *runExec) messageNode(ctx context.Context, node Node, item int, params map[string]any) (nodeResult, error) {
 	text := paramString(params, "text")
-	if err := ex.e.opts.SendOwner(ctx, text); err != nil {
-		return nodeResult{}, err
+	channels := stringList(params["channels"])
+	if len(channels) == 0 {
+		channels = []string{defaultMessageChannel}
 	}
-	return nodeResult{Output: map[string]any{"sent": true, "text": text}, Port: "out"}, nil
+	agent := paramString(params, "agent")
+	send := ex.e.opts.SendMessage
+	row := ex.ensureRow(node, item)
+
+	results := make(map[string]string, len(channels))
+	failures := make([]string, 0, len(channels))
+	sent := 0
+	for _, id := range channels {
+		var err error
+		if send == nil {
+			err = errors.New("no message channels are registered")
+		} else {
+			err = send(ctx, MessageRequest{
+				Channel: id, Agent: agent, Text: text,
+				WorkflowID: ex.wf.ID, WorkflowName: ex.wf.Name, RunNumber: ex.run.Number,
+			})
+		}
+		if err != nil {
+			results[id] = err.Error()
+			failures = append(failures, id+": "+err.Error())
+			ex.appendLog(row, "message to "+id+" failed: "+err.Error())
+			continue
+		}
+		results[id] = "ok"
+		sent++
+	}
+
+	out := map[string]any{"sent": sent > 0, "text": text, "channels": results}
+	if sent == 0 {
+		return nodeResult{Output: out}, errors.New(strings.Join(failures, "; "))
+	}
+	return nodeResult{Output: out, Port: "out"}, nil
 }
 
 // knowledgeNode saves text as a knowledge note (REQ-WF-005).
@@ -499,10 +531,11 @@ func firstChars(s string, n int) string {
 	return string(r[:n])
 }
 
-// paramString reads a string param.
+// paramString reads a string param. A string is returned as is; a map or list
+// that a template resolved to (for example a node output) is reduced with
+// stringify, so its primary text or JSON is used instead of an empty string.
 func paramString(params map[string]any, key string) string {
-	s, _ := params[key].(string)
-	return s
+	return stringify(params[key])
 }
 
 // paramBool reads a bool param.

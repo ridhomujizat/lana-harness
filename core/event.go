@@ -144,6 +144,10 @@ type UserMessage struct {
 	// (<context> and, when it changed, <system-update>). They are hidden from
 	// display surfaces but still sent to the model (REQ-LTC-001).
 	ContextBlocks int `json:"context_blocks,omitempty"`
+	// ReplyTo is set when the owner's message replies to an automation message
+	// (an assistant/message with a Source). The quoted text rides the leading
+	// injected block; the reference is kept for display surfaces.
+	ReplyTo *ReplyRef `json:"reply_to,omitempty"`
 	// Runtime marks a note lana wrote itself (the empty-answer, step-limit, or
 	// tool-call-text note), not a message from the owner. Display surfaces hide
 	// it and it is not an owner message (REQ-MEM-021).
@@ -154,6 +158,33 @@ type AssistantMessage struct {
 	V          int            `json:"v"`
 	Content    []ContentBlock `json:"content"`
 	StopReason string         `json:"stop_reason"`
+	// Source marks a message posted out-of-band by a lana automation, such as a
+	// workflow's Message node (e.g. "workflow"); empty means a normal model
+	// reply. SourceName names the poster (e.g. the workflow name). Old payloads
+	// decode unchanged.
+	Source     string `json:"source,omitempty"`
+	SourceName string `json:"source_name,omitempty"`
+}
+
+// ReplyRef is the automation message an owner reply points back to: the seq of
+// the assistant/message event, its source and source name, and its quoted text.
+type ReplyRef struct {
+	Seq        int64  `json:"seq"`
+	Source     string `json:"source,omitempty"`
+	SourceName string `json:"source_name,omitempty"`
+	Text       string `json:"text"`
+}
+
+// ReplyQuoteMax caps the quoted text of a reply, in runes.
+const ReplyQuoteMax = 8000
+
+// ReplyQuoteText returns text capped at ReplyQuoteMax runes with an ellipsis.
+func ReplyQuoteText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= ReplyQuoteMax {
+		return text
+	}
+	return string(runes[:ReplyQuoteMax]) + "…"
 }
 
 type AssistantAttempt struct {

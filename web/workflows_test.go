@@ -98,6 +98,8 @@ type fakeWorkflowBackend struct {
 	commandCh string
 	commands  []string
 
+	channels []workflow.MessageChannel
+
 	workflowSessions map[string]bool
 
 	changes    chan workflow.Change
@@ -323,6 +325,12 @@ func (f *fakeWorkflowBackend) ScriptSuggestions(_ context.Context, _ string) ([]
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.suggestions, f.suggestionsErr
+}
+
+func (f *fakeWorkflowBackend) MessageChannels() []workflow.MessageChannel {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.channels
 }
 
 // newWorkflowTestServer logs in an owner and installs the workflow port.
@@ -652,6 +660,39 @@ func TestWorkflowUnavailable(t *testing.T) {
 	s, cookie, _ := newLoggedInSessionServer(t, newFakeWebBackend())
 	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/workflows", "", cookie, ""))
 	assertAuthError(t, rr, http.StatusServiceUnavailable, "workflows_unavailable")
+}
+
+// The channels endpoint lists the Message node channels. The get route returns
+// 404, so a 200 proves the literal /v1/workflows/channels route wins over
+// GET /v1/workflows/{id} with id "channels".
+func TestWorkflowChannels(t *testing.T) {
+	backend := newFakeWorkflowBackend()
+	backend.getErr = workflow.ErrNotFound
+	backend.channels = []workflow.MessageChannel{
+		{ID: "web", Label: "Web chat", NeedsAgent: true, Available: true},
+		{ID: "telegram", Label: "Telegram", Available: false, Reason: "Telegram is not connected"},
+	}
+	s, cookie, _ := newWorkflowTestServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/workflows/channels", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Channels []workflow.MessageChannel `json:"channels"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(got.Channels) != 2 || got.Channels[0].ID != "web" || got.Channels[1].ID != "telegram" {
+		t.Fatalf("channels = %+v", got.Channels)
+	}
+	if !got.Channels[0].NeedsAgent || got.Channels[0].Label != "Web chat" {
+		t.Fatalf("web channel = %+v", got.Channels[0])
+	}
+	if got.Channels[1].Available || got.Channels[1].Reason != "Telegram is not connected" {
+		t.Fatalf("telegram channel = %+v", got.Channels[1])
+	}
 }
 
 // *workflow.Service satisfies the WorkflowBackend port the web handlers use

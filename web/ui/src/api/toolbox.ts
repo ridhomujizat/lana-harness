@@ -1,4 +1,5 @@
 import { request } from "./client";
+import { watchVisibility } from "./visibility";
 
 /* Tools page calls of spec #34 (design "Web API"). The Go side calls the
    feature the toolbox; the sidebar calls it Tools. */
@@ -143,13 +144,31 @@ export function openToolboxStream(onChange: (id: string) => void): { close: () =
   let closed = false;
   let controller: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+
+  /* A hidden tab releases its connection; on the next visible change the stream
+     asks its view to reload once (the pushed changes were missed) and
+     reconnects. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      onChange("");
+      void connect();
+    },
+  });
+
   const retry = () => {
-    if (!closed) {
+    if (!closed && !visibility.blocked()) {
       timer = setTimeout(connect, 1500);
     }
   };
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -200,6 +219,7 @@ export function openToolboxStream(onChange: (id: string) => void): { close: () =
   return {
     close() {
       closed = true;
+      visibility.close();
       if (timer) {
         clearTimeout(timer);
       }

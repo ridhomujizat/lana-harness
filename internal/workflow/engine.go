@@ -44,9 +44,9 @@ type EngineOptions struct {
 	Sleep func(ctx context.Context, d time.Duration) error
 	// Notify tells the owner; nil drops the notice.
 	Notify func(ctx context.Context, n Notice)
-	// SendOwner sends a plain owner message (the message node); nil means
-	// Telegram is not connected.
-	SendOwner func(ctx context.Context, text string) error
+	// SendMessage delivers one Message node message through a registered
+	// channel; nil fails the message node (no channel is registered).
+	SendMessage func(ctx context.Context, req MessageRequest) error
 	// Changed is called after every saved change to a workflow or run.
 	Changed func(workflowID, runID string)
 	// DiagnoseTimeout bounds one guardian diagnosis; nil uses three minutes.
@@ -374,7 +374,7 @@ func (e *Engine) saveFixVersion(ctx context.Context, run Run, d Decision) {
 		return
 	}
 	name := d.NodeID
-	g := cur.Graph
+	g := cur.Graph.Normalized()
 	for i := range g.Nodes {
 		if g.Nodes[i].ID != d.NodeID {
 			continue
