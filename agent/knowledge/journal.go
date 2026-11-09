@@ -102,7 +102,14 @@ func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) {
 	if len(notes) > 0 {
 		at := time.UnixMilli(last.CreatedAt)
 		block := journalBlock(info, at, notes)
-		rel, err := vault.AppendJournal(at.Format("2006-01-02"), block)
+		// REQ-DKN-030: a session whose agent has a domain journals into that
+		// domain; every other session (for example a team) keeps the shared
+		// journal.
+		scope := kv.ScopeShared
+		if domainAgent(s.Config, info.Agent) {
+			scope = info.Agent
+		}
+		rel, err := vault.AppendJournalIn(scope, at.Format("2006-01-02"), block)
 		if err != nil {
 			slog.Warn("knowledge journal: appending failed", "session_id", info.ID, "error", err)
 			return

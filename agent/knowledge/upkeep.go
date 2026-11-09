@@ -347,7 +347,8 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 			Provider: s.cfg.EmbeddingProvider,
 			Model:    s.cfg.EmbeddingModel,
 		},
-		Log: []core.KnowledgeLogEntry{},
+		Log:    []core.KnowledgeLogEntry{},
+		Scopes: []core.KnowledgeScopeStat{},
 	}
 	if _, err := os.Stat(s.vaultPath); err == nil {
 		status.Exists = true
@@ -386,6 +387,21 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 		status.Consolidation.Report = value
 	}
 	status.Log = s.recentLog(vault.Root(), 20)
+	// REQ-DKN-012, API-DKN-003: per-scope counts and the pending review count
+	// (the web layer adds pending skill proposals later).
+	if stats, err := idx.ScopeStats(); err == nil {
+		for _, st := range stats {
+			status.Scopes = append(status.Scopes, core.KnowledgeScopeStat{
+				Scope:       st.Scope,
+				Pages:       st.Pages,
+				JournalDays: st.JournalDays,
+				UpdatedAt:   st.UpdatedAt,
+			})
+		}
+	}
+	if proposals, err := idx.PendingProposals(); err == nil {
+		status.ReviewPending = len(proposals)
+	}
 	return status, nil
 }
 

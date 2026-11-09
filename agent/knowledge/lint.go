@@ -89,10 +89,28 @@ func (s *Service) lint(ctx context.Context) (string, error) {
 	return s.writeLintReport(vault.Root(), report.date, report.render())
 }
 
-// readWikiPages reads and parses every markdown page under wiki/, sorted by
-// path (design §8).
+// readWikiPages reads and parses every markdown page under the shared wiki and
+// each domain wiki, sorted by path (design §4.4, §8).
 func readWikiPages(root string) ([]lintPage, error) {
-	dir := filepath.Join(root, "wiki")
+	dirs := []string{filepath.Join(root, "wiki")}
+	for _, name := range domainFolders(root) {
+		dirs = append(dirs, filepath.Join(root, "agents", name, "wiki"))
+	}
+	var out []lintPage
+	for _, dir := range dirs {
+		pages, err := readWikiDir(root, dir)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pages...)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].page.Path < out[j].page.Path })
+	return out, nil
+}
+
+// readWikiDir reads and parses every markdown page under one wiki folder,
+// sorted by path.
+func readWikiDir(root, dir string) ([]lintPage, error) {
 	var out []lintPage
 	err := filepath.WalkDir(dir, func(abs string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -227,7 +245,7 @@ func (r *lintReport) checkBrokenLinks(l *lintLookup) {
 			if l.targetValid(target) {
 				continue
 			}
-			line := fmt.Sprintf("- [[%s]] → [[%s]]", p.page.Title, target)
+			line := fmt.Sprintf("- %s → [[%s]]", pageLabel(p), target)
 			if seen[line] {
 				continue
 			}
@@ -257,23 +275,26 @@ func (r *lintReport) checkOrphans(l *lintLookup) {
 			continue
 		}
 		if !inbound[p.page.Path] {
-			r.orphans = append(r.orphans, "- [["+p.page.Title+"]]")
+			r.orphans = append(r.orphans, "- "+pageLabel(p))
 		}
 	}
 }
 
-// checkDuplicates lists pairs of pages whose folded titles or aliases are equal
-// (design §8).
+// checkDuplicates lists pairs of pages in the same scope whose folded titles or
+// aliases are equal (design §4.4, §8). A title may live in two scopes without
+// being a duplicate.
 func (r *lintReport) checkDuplicates(l *lintLookup) {
 	groups := map[string][]int{}
 	for i, p := range l.pages {
+		scope := kv.ScopeOf(p.page.Path)
 		keys := append([]string{p.page.Title}, p.page.Meta.Aliases...)
 		for _, key := range keys {
 			folded := foldKey(key)
 			if folded == "" {
 				continue
 			}
-			groups[folded] = appendUniqueIndex(groups[folded], i)
+			group := scope + "\x00" + folded
+			groups[group] = appendUniqueIndex(groups[group], i)
 		}
 	}
 	folded := make([]string, 0, len(groups))
@@ -293,7 +314,7 @@ func (r *lintReport) checkDuplicates(l *lintLookup) {
 					continue
 				}
 				seen[pair] = true
-				r.duplicates = append(r.duplicates, fmt.Sprintf("- [[%s]] and [[%s]]", l.pages[i].page.Title, l.pages[j].page.Title))
+				r.duplicates = append(r.duplicates, fmt.Sprintf("- %s and %s", pageLabel(l.pages[i]), pageLabel(l.pages[j])))
 			}
 		}
 	}
@@ -303,10 +324,10 @@ func (r *lintReport) checkDuplicates(l *lintLookup) {
 func (r *lintReport) checkMissing() {
 	for _, p := range r.items {
 		if strings.TrimSpace(p.page.Meta.Type) == "" {
-			r.missing = append(r.missing, fmt.Sprintf("- [[%s]]: no type", p.page.Title))
+			r.missing = append(r.missing, fmt.Sprintf("- %s: no type", pageLabel(p)))
 		}
 		if strings.TrimSpace(p.page.Meta.Description) == "" {
-			r.missing = append(r.missing, fmt.Sprintf("- [[%s]]: no description", p.page.Title))
+			r.missing = append(r.missing, fmt.Sprintf("- %s: no description", pageLabel(p)))
 		}
 	}
 }
@@ -317,7 +338,7 @@ func (r *lintReport) checkConflicts() {
 	for _, p := range r.items {
 		for i, line := range strings.Split(strings.ReplaceAll(p.page.Raw, "\r\n", "\n"), "\n") {
 			if strings.Contains(line, "**Conflict:**") {
-				r.conflicts = append(r.conflicts, fmt.Sprintf("- [[%s]] line %d: %s", p.page.Title, i+1, strings.TrimSpace(line)))
+				r.conflicts = append(r.conflicts, fmt.Sprintf("- %s line %d: %s", pageLabel(p), i+1, strings.TrimSpace(line)))
 			}
 		}
 	}
@@ -507,6 +528,16 @@ func (s *Service) writeLintReport(root, date, markdown string) (string, error) {
 		return "", err
 	}
 	return rel, nil
+}
+
+// pageLabel renders a page as a report wikilink, with its scope in parentheses
+// when it is not shared: "[[Gaji]] (dana)" (design §4.4).
+func pageLabel(p lintPage) string {
+	label := "[[" + p.page.Title + "]]"
+	if scope := kv.ScopeOf(p.page.Path); scope != kv.ScopeShared {
+		label += " (" + scope + ")"
+	}
+	return label
 }
 
 // foldKey folds a title or alias for duplicate detection: accented and

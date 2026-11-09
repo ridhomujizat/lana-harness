@@ -55,7 +55,7 @@ func (f *fakeKnowledge) Ingest(_ context.Context, in core.KnowledgeIngest) (core
 	return f.ingestRes, f.ingestErr
 }
 
-func (f *fakeKnowledge) Recall(context.Context, string, int, func(string) bool) ([]core.KnowledgeHit, error) {
+func (f *fakeKnowledge) Recall(context.Context, string, int, []string, string, func(string) bool) ([]core.KnowledgeHit, error) {
 	return nil, nil
 }
 

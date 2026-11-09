@@ -616,7 +616,9 @@ func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []stri
 		defer rn.mu.Unlock()
 		return rn.knowledgeShown[path]
 	}
-	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, skip)
+	// A later task sets the recall scopes to the caller's domain and shared;
+	// for now recall searches every scope.
+	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, nil, "", skip)
 	if err != nil {
 		slog.Debug("knowledge recall", "session_id", rn.sessionID, "error", err)
 		return nil

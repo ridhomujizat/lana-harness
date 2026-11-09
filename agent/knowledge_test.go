@@ -36,7 +36,7 @@ func (f *fakeKnowledgeRecall) Ingest(context.Context, core.KnowledgeIngest) (cor
 	return core.KnowledgeIngestResult{}, nil
 }
 
-func (f *fakeKnowledgeRecall) Recall(_ context.Context, text string, limit int, skip func(string) bool) ([]core.KnowledgeHit, error) {
+func (f *fakeKnowledgeRecall) Recall(_ context.Context, text string, limit int, _ []string, _ string, skip func(string) bool) ([]core.KnowledgeHit, error) {
 	f.recallCalls++
 	query := knowledgeTokens(text)
 	var out []core.KnowledgeHit
