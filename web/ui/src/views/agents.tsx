@@ -156,7 +156,7 @@ export function CreateAgentDialog({
     const displayName = name.trim();
     const value = (idTouched ? agentId : slugifyAgentName(displayName)).trim();
     if (!displayName) {
-      setError("Enter a name for the agent, for example Omnix Lead.");
+      setError("Enter a name for the agent, for example Research Assistant.");
       return;
     }
     if (Array.from(displayName).length > MAX_DISPLAY_NAME) {
@@ -223,7 +223,7 @@ export function CreateAgentDialog({
             name="name"
             value={name}
             autoComplete="off"
-            placeholder="Omnix Lead"
+            placeholder="Research Assistant"
             maxLength={MAX_DISPLAY_NAME}
             required
             aria-describedby="create-agent-name-hint"
@@ -235,7 +235,7 @@ export function CreateAgentDialog({
             }}
           />
           <span id="create-agent-name-hint" className="hint">
-            The name people see, for example Omnix Lead.
+            The name people see, for example Research Assistant.
           </span>
         </label>
 
@@ -247,7 +247,7 @@ export function CreateAgentDialog({
             value={agentId}
             autoComplete="off"
             spellCheck={false}
-            placeholder="omnix-lead"
+            placeholder="research-assistant"
             maxLength={32}
             required
             aria-describedby="create-agent-id-hint"

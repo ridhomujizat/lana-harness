@@ -877,7 +877,7 @@ function AgentStep() {
     const nextErrors: AgentFieldErrors = {};
     const displayName = agent.displayName.trim();
     if (!displayName) {
-      nextErrors.name = "Enter a name for the agent, for example Omnix Lead.";
+      nextErrors.name = "Enter a name for the agent, for example Research Assistant.";
     } else if (Array.from(displayName).length > MAX_DISPLAY_NAME) {
       nextErrors.name =
         "The name must be at most " + MAX_DISPLAY_NAME + " characters.";
@@ -911,7 +911,7 @@ function AgentStep() {
         <Field
           label="Name"
           htmlFor="setup-agent-name"
-          hint="The name people see, for example Omnix Lead."
+          hint="The name people see, for example Research Assistant."
           error={errors.name}
         >
           <Input

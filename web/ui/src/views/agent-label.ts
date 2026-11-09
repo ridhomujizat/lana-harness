@@ -3,7 +3,7 @@ import type { RoomRow } from "../api/rooms";
 import { useRooms } from "./presence";
 
 /* An agent has an ID name (config key, URL, home folder, @mention) and an
-   optional display name such as "Omnix Lead". The UI shows the display name
+   optional display name such as "Research Assistant". The UI shows the display name
    and falls back to the ID name. */
 
 /* MAX_DISPLAY_NAME mirrors the config rule of agents.<name>.display_name. */
@@ -49,7 +49,7 @@ export function useAgentLabel(): (name: string | null | undefined) => string {
   );
 }
 
-/* slugifyAgentName turns "Omnix Lead" into "omnix-lead". The result matches
+/* slugifyAgentName turns "Research Assistant" into "research-assistant". The result matches
    AGENT_ID_RULE, or is "" when the input has no usable characters. */
 export function slugifyAgentName(value: string): string {
   let slug = value
