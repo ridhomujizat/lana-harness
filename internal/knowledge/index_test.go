@@ -366,11 +366,13 @@ func TestIndexPDFText(t *testing.T) {
 	}
 }
 
-// Design §2: a v1 index is upgraded to version 2 in place, keeping its data and
-// gaining the upkeep tables.
-func TestIndexMigrateV1ToV2(t *testing.T) {
+// Design §2, REQ-DKN-004: a v1 index is upgraded to version 3 in place, gains
+// the v3 tables, and drops its file rows so the next Sync reindexes the vault
+// with scopes. The vault file is untouched.
+func TestIndexMigrateV1ToV3(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "knowledge.db")
+	writeVaultFile(t, dir, "wiki/A.md", "---\ntype: topic\n---\n# A\n\nIsi halaman A.\n")
 
 	db, err := sql.Open("sqlite", "file:"+dbPath)
 	if err != nil {
@@ -391,33 +393,123 @@ func TestIndexMigrateV1ToV2(t *testing.T) {
 		t.Fatalf("close raw db: %v", err)
 	}
 
-	idx, err := OpenIndex(dbPath, dir)
-	if err != nil {
-		t.Fatalf("OpenIndex: %v", err)
-	}
-	defer func() { _ = idx.Close() }()
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+	ctx := context.Background()
 
 	var version int
 	if err := idx.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("version = %d, want 3", version)
 	}
 
-	var title string
-	if err := idx.db.QueryRow("SELECT title FROM files WHERE path = ?", "wiki/A.md").Scan(&title); err != nil {
-		t.Fatalf("v1 data lost: %v", err)
-	}
-	if title != "A" {
-		t.Fatalf("title = %q, want A", title)
-	}
-
-	for _, table := range []string{"journal_marks", "promote_marks", "upkeep"} {
+	for _, table := range []string{"journal_marks", "promote_marks", "upkeep", "proposals"} {
 		var name string
 		if err := idx.db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name); err != nil {
 			t.Fatalf("table %s missing after migration: %v", table, err)
 		}
+	}
+
+	var count int
+	if err := idx.db.QueryRow("SELECT COUNT(*) FROM files").Scan(&count); err != nil {
+		t.Fatalf("count files: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("files not dropped after migration: %d", count)
+	}
+
+	// The vault file is untouched and reindexes with its scope on the next Sync.
+	if err := idx.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	hits, err := idx.Search(ctx, Query{Text: "halaman"})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 1 || hits[0].Path != "wiki/A.md" || hits[0].Scope != ScopeShared {
+		t.Fatalf("reindex after migration = %+v", hits)
+	}
+}
+
+// Design §2, REQ-DKN-004: a v2 index migrates to v3, drops its rows, and after
+// Sync the vault files carry their scopes; only domain wiki/journal files are
+// indexed.
+func TestIndexMigrateV2ToV3(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "knowledge.db")
+	writeVaultFile(t, dir, "wiki/Shared.md", "# Shared\n\nIsi bersama.\n")
+	writeVaultFile(t, dir, "agents/dana/wiki/Gaji.md", "# Gaji\n\nGaji domain dana.\n")
+	writeVaultFile(t, dir, "agents/dana/journal/2026-11-01.md", "# Journal\n\nCatatan dana.\n")
+	writeVaultFile(t, dir, "agents/dana/index.md", "# Index\n\nGenerated.\n")
+
+	db, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := db.Exec(indexSchema); err != nil {
+		t.Fatalf("create v1 schema: %v", err)
+	}
+	if _, err := db.Exec(indexSchemaV2); err != nil {
+		t.Fatalf("create v2 schema: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatalf("set version 2: %v", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO files (path, kind, title, type, description, aliases, updated, mtime, size, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"wiki/Old.md", "page", "Old", "", "", "[]", "", 1, 2, "h"); err != nil {
+		t.Fatalf("insert v2 row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+	ctx := context.Background()
+
+	var version int
+	if err := idx.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version != 3 {
+		t.Fatalf("version = %d, want 3", version)
+	}
+	var count int
+	if err := idx.db.QueryRow("SELECT COUNT(*) FROM files").Scan(&count); err != nil {
+		t.Fatalf("count files: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("files not dropped after migration: %d", count)
+	}
+
+	if err := idx.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	kindScope := func(rel string) (kind, scope string, ok bool) {
+		err := idx.db.QueryRow("SELECT kind, scope FROM files WHERE path = ?", rel).Scan(&kind, &scope)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", false
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		return kind, scope, true
+	}
+
+	if kind, scope, ok := kindScope("agents/dana/wiki/Gaji.md"); !ok || kind != kindPage || scope != "dana" {
+		t.Fatalf("dana wiki row = %q %q %v", kind, scope, ok)
+	}
+	if kind, scope, ok := kindScope("agents/dana/journal/2026-11-01.md"); !ok || kind != kindJournal || scope != "dana" {
+		t.Fatalf("dana journal row = %q %q %v", kind, scope, ok)
+	}
+	if _, _, ok := kindScope("agents/dana/index.md"); ok {
+		t.Fatalf("agents/dana/index.md must not be indexed")
+	}
+	if kind, scope, ok := kindScope("wiki/Shared.md"); !ok || kind != kindPage || scope != ScopeShared {
+		t.Fatalf("shared row = %q %q %v", kind, scope, ok)
 	}
 }
 
@@ -477,5 +569,169 @@ func TestIndexMarksAndUpkeep(t *testing.T) {
 	}
 	if v, _, _ := idx.UpkeepValue("last_report"); v != "reports/lint-2026-11-02.md" {
 		t.Fatalf("UpkeepValue after overwrite = %q", v)
+	}
+}
+
+// Design §2, REQ-DKN-001: a domain wiki file is indexed as a page in its domain
+// scope, a domain journal file as a journal, and other files under agents/ are
+// not indexed.
+func TestIndexDomainScopeKinds(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Open(dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	writeVaultFile(t, dir, "wiki/Shared.md", "# Shared\n\nIsi bersama.\n")
+	writeVaultFile(t, dir, "agents/dana/wiki/Gaji.md", "# Gaji\n\nGaji domain.\n")
+	writeVaultFile(t, dir, "agents/dana/journal/2026-11-01.md", "# Journal\n\nCatatan.\n")
+	writeVaultFile(t, dir, "agents/dana/index.md", "# Index\n\nGenerated.\n")
+	writeVaultFile(t, dir, "agents/dana/sources/raw.txt", "bahan dana\n")
+	writeVaultFile(t, dir, "agents/Bad/wiki/x.md", "# Bad\n\nbad scope name.\n")
+
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+	if err := idx.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	kindScope := func(rel string) (kind, scope string, ok bool) {
+		err := idx.db.QueryRow("SELECT kind, scope FROM files WHERE path = ?", rel).Scan(&kind, &scope)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", false
+		}
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		return kind, scope, true
+	}
+
+	if kind, scope, ok := kindScope("agents/dana/wiki/Gaji.md"); !ok || kind != kindPage || scope != "dana" {
+		t.Fatalf("dana wiki row = %q %q %v", kind, scope, ok)
+	}
+	if kind, scope, ok := kindScope("agents/dana/journal/2026-11-01.md"); !ok || kind != kindJournal || scope != "dana" {
+		t.Fatalf("dana journal row = %q %q %v", kind, scope, ok)
+	}
+	if kind, scope, ok := kindScope("wiki/Shared.md"); !ok || kind != kindPage || scope != ScopeShared {
+		t.Fatalf("shared row = %q %q %v", kind, scope, ok)
+	}
+	for _, rel := range []string{"agents/dana/index.md", "agents/dana/sources/raw.txt", "agents/Bad/wiki/x.md"} {
+		if _, _, ok := kindScope(rel); ok {
+			t.Fatalf("%s must not be indexed", rel)
+		}
+	}
+}
+
+// Design §2: ScopeStats reports shared first (even empty), then the other
+// scopes in name order, with page and journal-day counts and the newest mtime.
+func TestIndexScopeStats(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Open(dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	writeVaultFile(t, dir, "wiki/S.md", "# S\n\nIsi.\n")
+	writeVaultFile(t, dir, "agents/dana/wiki/G1.md", "# G1\n\nIsi.\n")
+	writeVaultFile(t, dir, "agents/dana/wiki/G2.md", "# G2\n\nIsi.\n")
+	writeVaultFile(t, dir, "agents/dana/journal/2026-11-01.md", "# J\n\nCatatan.\n")
+	writeVaultFile(t, dir, "agents/rio/wiki/R.md", "# R\n\nIsi.\n")
+
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+	if err := idx.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	stats, err := idx.ScopeStats()
+	if err != nil {
+		t.Fatalf("ScopeStats: %v", err)
+	}
+	if len(stats) != 3 || stats[0].Scope != ScopeShared || stats[1].Scope != "dana" || stats[2].Scope != "rio" {
+		t.Fatalf("scopes = %+v", stats)
+	}
+	if stats[0].Pages != 1 || stats[0].JournalDays != 0 || stats[0].UpdatedAt == 0 {
+		t.Fatalf("shared stat = %+v", stats[0])
+	}
+	if stats[1].Pages != 2 || stats[1].JournalDays != 1 || stats[1].UpdatedAt == 0 {
+		t.Fatalf("dana stat = %+v", stats[1])
+	}
+	if stats[2].Pages != 1 || stats[2].JournalDays != 0 {
+		t.Fatalf("rio stat = %+v", stats[2])
+	}
+
+	// An index with no files still reports shared with zero counts.
+	empty := newIndex(t, t.TempDir())
+	empty.now = (&fakeClock{t: testNow}).now
+	st, err := empty.ScopeStats()
+	if err != nil {
+		t.Fatalf("empty ScopeStats: %v", err)
+	}
+	if len(st) != 1 || st[0].Scope != ScopeShared || st[0].Pages != 0 || st[0].UpdatedAt != 0 {
+		t.Fatalf("empty stats = %+v", st)
+	}
+}
+
+// Design §2: Pages lists only kind=page, filters by scope and a case-insensitive
+// substring, orders newest first, and reports the total before the limit.
+func TestIndexPagesFilterLimitTotal(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Open(dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	writeVaultFile(t, dir, "wiki/Rencana.md", "---\ntype: project\ndescription: Rencana tahunan\n---\n# Rencana\n\nIsi.\n")
+	writeVaultFile(t, dir, "wiki/Gaji.md", "---\ntype: topic\ndescription: Gaji karyawan\n---\n# Gaji\n\nIsi.\n")
+	writeVaultFile(t, dir, "agents/dana/wiki/Gaji.md", "---\ntype: topic\ndescription: Gaji dana\n---\n# Gaji\n\nIsi.\n")
+	writeVaultFile(t, dir, "agents/dana/journal/2026-11-01.md", "# J\n\nCatatan.\n")
+
+	base := testNow
+	for rel, at := range map[string]time.Time{
+		"wiki/Rencana.md":          base.Add(-2 * time.Hour),
+		"wiki/Gaji.md":             base.Add(-1 * time.Hour),
+		"agents/dana/wiki/Gaji.md": base,
+	} {
+		if err := os.Chtimes(filepath.Join(dir, filepath.FromSlash(rel)), at, at); err != nil {
+			t.Fatalf("chtimes %s: %v", rel, err)
+		}
+	}
+
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+
+	rows, total, err := idx.Pages("", "", 0)
+	if err != nil {
+		t.Fatalf("Pages: %v", err)
+	}
+	if total != 3 || len(rows) != 3 {
+		t.Fatalf("all pages = %d rows, total %d; want 3, 3", len(rows), total)
+	}
+	if rows[0].Path != "agents/dana/wiki/Gaji.md" || rows[0].Scope != "dana" || rows[1].Path != "wiki/Gaji.md" || rows[2].Path != "wiki/Rencana.md" {
+		t.Fatalf("page order = %+v", rows)
+	}
+	if rows[0].Mtime != base.UnixMilli() {
+		t.Fatalf("mtime = %d, want %d", rows[0].Mtime, base.UnixMilli())
+	}
+	if rows[0].Type != "topic" || rows[0].Description != "Gaji dana" {
+		t.Fatalf("page row = %+v", rows[0])
+	}
+
+	shared, sTotal, err := idx.Pages(ScopeShared, "", 0)
+	if err != nil {
+		t.Fatalf("Pages(shared): %v", err)
+	}
+	if sTotal != 2 || len(shared) != 2 {
+		t.Fatalf("shared pages = %d rows, total %d; want 2, 2", len(shared), sTotal)
+	}
+
+	// q is a case-insensitive substring of title, aliases, or description.
+	matched, mTotal, err := idx.Pages("all", "gaji", 0)
+	if err != nil {
+		t.Fatalf("Pages(q): %v", err)
+	}
+	if mTotal != 2 || len(matched) != 2 {
+		t.Fatalf("q pages = %d rows, total %d; want 2, 2", len(matched), mTotal)
+	}
+
+	one, oTotal, err := idx.Pages("", "", 1)
+	if err != nil {
+		t.Fatalf("Pages(limit): %v", err)
+	}
+	if oTotal != 3 || len(one) != 1 || one[0].Path != "agents/dana/wiki/Gaji.md" {
+		t.Fatalf("limited pages = %+v, total %d", one, oTotal)
 	}
 }

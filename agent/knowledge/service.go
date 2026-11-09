@@ -316,7 +316,7 @@ func (s *Service) Recall(ctx context.Context, text string, limit int, skip func(
 	if err := idx.Sync(ctx); err != nil {
 		return nil, err
 	}
-	hits, err := idx.Recall(ctx, text, limit)
+	hits, err := idx.Recall(ctx, text, limit, nil, "")
 	if err != nil {
 		return nil, err
 	}

@@ -1,12 +1,25 @@
 package knowledge
 
 import (
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
 
 // chunkRunes is the longest chunk text in runes (design §3).
 const chunkRunes = 1500
+
+// supersededSpan matches one struck-through span and an optional until mark
+// directly after it on the same line (REQ-DKN-026). The span must not cross a
+// line, so ".*?" stops at the first "~~" on its line.
+var supersededSpan = regexp.MustCompile(`~~.*?~~(?:[ \t]*\*\(until \d{4}-\d{2}-\d{2}\)\*)?`)
+
+// stripSuperseded removes the struck-through spans and their until marks from
+// chunk text before it is stored, so search and snippets only hold the current
+// facts (REQ-DKN-026). Removal stays within a line, so start_line is unchanged.
+func stripSuperseded(text string) string {
+	return supersededSpan.ReplaceAllString(text, "")
+}
 
 // Chunk is one indexed piece of a file. StartLine is the 1-based line of the
 // chunk's first source line in the file; for PDFs it is the line in the
