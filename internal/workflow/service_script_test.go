@@ -165,6 +165,89 @@ func TestServiceTestScriptProblems(t *testing.T) {
 	}
 }
 
+// testProfileDriftScript returns a repos output whose descriptions repeat each
+// item's name, the copy signal of REQ-DG-002.
+const testProfileDriftScript = `function parse(input, ctx) { return {repos: [
+	{name:'owner/repo0', description:'Link: owner/repo0 page', stars_today:5},
+	{name:'owner/repo1', description:'Link: owner/repo1 page', stars_today:3},
+	{name:'owner/repo2', description:'Link: owner/repo2 page', stars_today:7}]}; }`
+
+// testProfileParams builds the params of a repos script_parse node with the name,
+// description and stars_today item fields the profile signals read (REQ-DG-002).
+func testProfileParams(script string) map[string]any {
+	return map[string]any{
+		"input":         "page",
+		"goal":          "list the repos",
+		"output_schema": map[string]any{"repos": "object[]"},
+		"item_schema": map[string]any{"repos": map[string]any{
+			"name": "string", "description": "string", "stars_today": "integer",
+		}},
+		"script": script,
+	}
+}
+
+// testProfileOutput builds a repos output with the given descriptions, an item
+// name of at least 8 runes and positive stars, so the output holds to every other
+// profile signal.
+func testProfileOutput(descs ...string) map[string]any {
+	names := []string{"owner/repo0", "owner/repo1", "owner/repo2"}
+	arr := make([]any, len(descs))
+	for i, d := range descs {
+		arr[i] = map[string]any{"name": names[i], "description": d, "stars_today": i + 1}
+	}
+	return map[string]any{"repos": arr}
+}
+
+// REQ-DG-008, API-SP-002: Test also reports a profile_drift problem when the
+// script output breaks the workflow's stored baseline profile. Here every
+// description repeats its item name (the copy signal) while the baseline outputs
+// keep them apart.
+func TestServiceTestScriptProfileDrift(t *testing.T) {
+	st := NewMemStore()
+	svc := newTestService(t, st, newFakeDeps(), &testClock{t: time.Now()})
+	ctx := context.Background()
+	params := testProfileParams(testProfileDriftScript)
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, scriptGraph(params))
+	seedBaselineRun(t, st, wf, testProfileOutput("A short blurb zero", "A short blurb one", "A short blurb two"), NodeSucceeded, ViaScript)
+	seedBaselineRun(t, st, wf, testProfileOutput("Another blurb zero", "Another blurb one", "Another blurb two"), NodeSucceeded, ViaScript)
+
+	res, err := svc.TestScript(ctx, "w", testScriptNode("parse", params), "page", true, 0)
+	if err != nil {
+		t.Fatalf("TestScript: %v", err)
+	}
+	if res.OK {
+		t.Fatalf("result=%+v want not OK", res)
+	}
+	if len(res.Problems) != 1 || res.Problems[0].Code != DriftProfile {
+		t.Fatalf("problems=%+v want one %s", res.Problems, DriftProfile)
+	}
+	if res.Output == nil {
+		t.Fatalf("output missing: %+v", res)
+	}
+}
+
+// REQ-DG-008, API-SP-002: without stored runs the workflow has no baseline, so
+// the profile check is skipped and the same script is OK.
+func TestServiceTestScriptNoProfileWithoutBaseline(t *testing.T) {
+	st := NewMemStore()
+	svc := newTestService(t, st, newFakeDeps(), &testClock{t: time.Now()})
+	params := testProfileParams(testProfileDriftScript)
+	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, scriptGraph(params))
+
+	res, err := svc.TestScript(context.Background(), "w", testScriptNode("parse", params), "page", true, 0)
+	if err != nil {
+		t.Fatalf("TestScript: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("result=%+v want OK", res)
+	}
+	for _, p := range res.Problems {
+		if p.Code == DriftProfile {
+			t.Fatalf("problems=%+v want no %s", res.Problems, DriftProfile)
+		}
+	}
+}
+
 // API-SP-003, REQ-SP-016: a successful Generate returns the script and output,
 // sets the agreement when an expected output is given, and resets the
 // regeneration pause so the next run regenerates again.
@@ -611,5 +694,123 @@ func TestServiceGetOmitsScriptStats(t *testing.T) {
 	}
 	if detail.ScriptStats != nil {
 		t.Fatalf("script_stats=%+v want nil", detail.ScriptStats)
+	}
+}
+
+// REQ-DG-006, API-DG-003: Generate keeps a proposed rule that holds on the
+// expected output and the script output, and returns the item schema with the
+// token merged in.
+func TestServiceGenerateScriptKeepsRules(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	params := scriptParams(map[string]any{
+		"script":        "",
+		"output_schema": map[string]any{"repos": "object[]"},
+		"item_schema":   map[string]any{"repos": map[string]any{"stars_today": "integer"}},
+	})
+	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, scriptGraph(params))
+	svc := newTestService(t, st, deps, &testClock{t: time.Now()})
+
+	deps.replies = []fakeReply{
+		{agent: "g", contains: "You write a deterministic JavaScript parser",
+			text: `{"feasible":true,"script":"function parse(input, ctx) { return {repos: [{stars_today: 5}]}; }","rules":{"repos.stars_today":">0"}}`, tokens: 7},
+	}
+	expected := map[string]any{"repos": []any{map[string]any{"stars_today": 5}}}
+	res, err := svc.GenerateScript(context.Background(), "w", testScriptNode("parse", params), "page", true, 0, expected)
+	if err != nil {
+		t.Fatalf("GenerateScript: %v", err)
+	}
+	if !res.Feasible {
+		t.Fatalf("result=%+v want feasible", res)
+	}
+	entry := asMapParam(asMapParam(res.ItemSchema)["repos"])
+	if entry["stars_today"] != "integer >0" {
+		t.Fatalf("item_schema=%v, want stars_today %q", res.ItemSchema, "integer >0")
+	}
+}
+
+// REQ-DG-006: a proposed rule that a script output breaks is dropped and no
+// schema is returned.
+func TestServiceGenerateScriptDropsBreakingRule(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	params := scriptParams(map[string]any{
+		"script":        "",
+		"output_schema": map[string]any{"repos": "object[]"},
+		"item_schema":   map[string]any{"repos": map[string]any{"stars_today": "integer"}},
+	})
+	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, scriptGraph(params))
+	svc := newTestService(t, st, deps, &testClock{t: time.Now()})
+
+	deps.replies = []fakeReply{
+		{agent: "g", contains: "You write a deterministic JavaScript parser",
+			text: `{"feasible":true,"script":"function parse(input, ctx) { return {repos: [{stars_today: 0}]}; }","rules":{"repos.stars_today":">0"}}`, tokens: 7},
+	}
+	expected := map[string]any{"repos": []any{map[string]any{"stars_today": 0}}}
+	res, err := svc.GenerateScript(context.Background(), "w", testScriptNode("parse", params), "page", true, 0, expected)
+	if err != nil {
+		t.Fatalf("GenerateScript: %v", err)
+	}
+	if !res.Feasible {
+		t.Fatalf("result=%+v want feasible", res)
+	}
+	if res.OutputSchema != nil || res.ItemSchema != nil {
+		t.Fatalf("schema=%v/%v, want none (the rule does not hold)", res.OutputSchema, res.ItemSchema)
+	}
+}
+
+// REQ-DG-006, API-DG-003: Convert merges a kept rule into the proposed node
+// schema.
+func TestServiceConvertNodeKeepsRules(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	params := map[string]any{"prompt": "Summarize {{ input.text }}", "output_schema": map[string]any{"title": "string"}}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, convertGraph(params))
+	svc := newTestService(t, st, deps, &testClock{t: time.Now()})
+	ctx := context.Background()
+
+	deps.replies = []fakeReply{
+		{agent: "g", contains: "This replaces an agent step",
+			text: `{"feasible":true,"reason":"","script":"function parse(input, ctx) { return {title: 'hello'}; }","goal":"extract the title","input":"{{ input.text }}","output_schema":{"title":"string"},"rules":{"title":"min:3"}}`, tokens: 9},
+	}
+	run := seedRunAt(t, st, wf, "manual", RunSucceeded, svc.now().UnixMilli(), map[string]any{"text": "hi"})
+	putServiceNodeRun(t, st, run, "write", NodeSucceeded, "", 1000,
+		map[string]any{"prompt": "Summarize hi"}, map[string]any{"title": "hello"})
+
+	res, err := svc.ConvertNode(ctx, "w", "write")
+	if err != nil {
+		t.Fatalf("ConvertNode: %v", err)
+	}
+	if !res.Feasible || res.Node == nil {
+		t.Fatalf("result=%+v want feasible with a node", res)
+	}
+	schema := asMapParam(res.Node.Params["output_schema"])
+	if schema["title"] != "string min:3" {
+		t.Fatalf("output_schema=%v, want title %q", res.Node.Params["output_schema"], "string min:3")
+	}
+}
+
+// API-DG-004, REQ-DG-007: ScriptStats counts the node runs with via=audit apart
+// from the script and fallback runs.
+func TestServiceScriptStatsAuditRuns(t *testing.T) {
+	st := NewMemStore()
+	svc := newTestService(t, st, newFakeDeps(), &testClock{t: time.Now()})
+	ctx := context.Background()
+	params := scriptParams(map[string]any{"script": "", "baseline_tokens": 100})
+	g := scriptGraph(params)
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+	now := svc.now().UnixMilli()
+
+	run1 := seedRunAt(t, st, wf, "manual", RunSucceeded, now-2_000, nil)
+	run2 := seedRunAt(t, st, wf, "manual", RunSucceeded, now-1_000, nil)
+	putServiceNodeRun(t, st, run1, "parse", NodeSucceeded, ViaScript, 0, nil, map[string]any{"title": "a"})
+	putServiceNodeRun(t, st, run2, "parse", NodeSucceeded, "audit", 30, nil, map[string]any{"title": "b"})
+
+	stat, ok := svc.ScriptStats(ctx, "w", g)["parse"]
+	if !ok {
+		t.Fatalf("stats missing the parse node")
+	}
+	if stat.ScriptRuns != 1 || stat.AuditRuns != 1 || stat.FallbackRuns != 0 {
+		t.Fatalf("stat=%+v want 1 script, 1 audit, 0 fallback", stat)
 	}
 }

@@ -8,6 +8,16 @@ but their config keys, events, and tools may still change between betas.
 ## [Unreleased]
 
 ### Added
+- Script drift guard (spec 45): a Script Parse output that passes the contract is also compared with
+  the node's last good outputs. Values that suddenly go all zero, all equal, much shorter or longer,
+  change shape, copy another field, go blank, or a list that shrinks sharply count as drift
+  `profile_drift`, and the run continues through the agent fallback. If the fallback agrees with the
+  script, the change was real data: the baseline restarts (`profile_accept`) with no rewrite and no
+  notice. Type strings may carry rules after the type (`"integer >0"`, `"string url"`, `min:N`,
+  `max:N`, `>=0`); Generate and Convert add rules that hold on the sample, and a rule that real data
+  breaks is dropped in a new version (`rule_drop`) with a notice. Optional `audit_every: N` runs the
+  fallback on every Nth script run (`via=audit`). Test reports rule and profile problems. Each signal is a vote of the
+  baseline outputs, so up to 2 wrong outputs of 5 that passed earlier cannot silence it.
 - Script Parse workflow node (spec 44, ADR 0021): a step that extracts or reshapes data of a fixed
   shape (a web page, an MCP or API JSON answer) runs a small JavaScript `parse(input, ctx)` function
   in an embedded goja sandbox at 0 tokens. `output_schema` is required, with optional `item_schema`

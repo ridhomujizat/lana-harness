@@ -150,7 +150,7 @@ export const NODE_CATALOG: NodeMeta[] = [
       { name: "input", label: "Input", kind: "value", required: true, mono: true, placeholder: "{{ nodes.fetch.output.markdown }}", help: "What the script parses: text or JSON from an earlier node." },
       { name: "goal", label: "Goal", kind: "textarea", required: true, help: "What to extract, in plain words. The guardian writes the script from it." },
       { name: "output_schema", label: "Output schema", kind: "json", required: true, mono: true, help: 'Required. Detects when the source changes shape, e.g. {"repos": "object[]"}.' },
-      { name: "item_schema", label: "Item schema", kind: "json", mono: true, help: 'Optional. Checks each element of an object[] field, e.g. {"repos": {"name": "string", "url": "string"}}.' },
+      { name: "item_schema", label: "Item schema", kind: "json", mono: true, help: 'Optional. Checks each element of an object[] field, e.g. {"repos": {"url": "string url", "stars": "integer >0"}}. Rules after the type: >0, >=0, url, min:N, max:N.' },
       { name: "allow_empty", label: "May be empty", kind: "list", help: 'Fields that may be empty, e.g. repos or repos.description.' },
       { name: "fallback_agent", label: "Fallback agent", kind: "agent", help: "Empty = the guardian." },
       { name: "on_drift", label: "When the shape changes", kind: "select", options: ["regenerate", "fallback_only", "fail"] },

@@ -28,7 +28,7 @@ import {
 } from "../api/workflows";
 import type { Decision, WfNode, Workflow } from "../api/workflows";
 import { ToastProvider } from "../ui/gr8r";
-import { ConvertBanner, ConvertDialog, ScriptTab } from "./workflow-script";
+import { ConvertBanner, ConvertDialog, ScriptTab, eventLabel } from "./workflow-script";
 
 function wrap(node: ReactNode) {
   return render(<ToastProvider>{node}</ToastProvider>);
@@ -96,7 +96,7 @@ describe("ScriptTab", () => {
     wrap(<ScriptTab workflowId="wf" node={node} onChange={() => undefined} />);
 
     expect(await screen.findByText("25k")).toBeTruthy();
-    expect(screen.getByText("Script updated to rev 3 · empty_drift")).toBeTruthy();
+    expect(screen.getByText("Script updated to rev 3 · empty result")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
     expect(await screen.findByText("Fails the contract")).toBeTruthy();
@@ -127,6 +127,52 @@ describe("ScriptTab", () => {
     const next = onChange.mock.calls[0]![0] as WfNode;
     expect(next.params.script).toContain("name: 'a'");
     expect(next.params.script_rev).toBe(4);
+  });
+
+  /* Spec #45 (REQ-DG-006, REQ-DG-009). */
+  it("applies the schemas with rules that Generate returns", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(workflowWithStats());
+    vi.mocked(generateScript).mockResolvedValue({
+      feasible: true,
+      reason: "",
+      script: "function parse(input) { return { repos: [] }; }",
+      output: { repos: [] },
+      problems: [],
+      tokens: 900,
+      item_schema: { repos: { stars_today: "integer >0", url: "string url" } },
+    });
+    const onChange = vi.fn();
+    wrap(<ScriptTab workflowId="wf" node={node} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use this script" }));
+    const next = onChange.mock.calls[0]![0] as WfNode;
+    expect(next.params.item_schema).toEqual({ repos: { stars_today: "integer >0", url: "string url" } });
+    expect(next.params.output_schema).toEqual({ repos: "object[]" });
+  });
+
+  it("sets and clears audit_every", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(workflowWithStats());
+    const onChange = vi.fn();
+    const view = wrap(<ScriptTab workflowId="wf" node={node} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Audit every N runs"), { target: { value: "20" } });
+    const audited = onChange.mock.calls[0]![0] as WfNode;
+    expect(audited.params.audit_every).toBe(20);
+    view.unmount();
+    wrap(<ScriptTab workflowId="wf" node={audited} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Audit every N runs"), { target: { value: "0" } });
+    expect("audit_every" in (onChange.mock.calls[1]![0] as WfNode).params).toBe(false);
+  });
+
+  it("labels the drift guard events", () => {
+    expect(eventLabel({ ...update, action: "profile_accept", fix: { drift: "profile_drift" } })).toBe(
+      "Data changed, script confirmed",
+    );
+    expect(eventLabel({ ...update, action: "rule_drop", fix: { drift: "rule_drift" } })).toBe(
+      "Rule dropped: real data broke it",
+    );
+    expect(eventLabel({ ...update, action: "script_fallback", fix: { drift: "profile_drift" } })).toBe(
+      "Agent fallback · values look off",
+    );
   });
 });
 

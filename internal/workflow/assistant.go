@@ -56,6 +56,8 @@ func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message st
 	b.WriteString("- prefer script_parse over agent when a step only extracts, filters or reformats data of a fixed shape (pages, API or MCP JSON).\n")
 	b.WriteString("- leave the script_parse param \"script\" empty: it is learned on the first run.\n")
 	b.WriteString("- always give a script_parse \"output_schema\" (and \"item_schema\" for object[] fields).\n")
+	b.WriteString("- rule tokens may follow the type in output_schema and item_schema, such as \"integer >0\", \"string url\", min:N, max:N or >=0.\n")
+	b.WriteString("- a script_parse \"audit_every\": N (0 = off) also runs the fallback every Nth script run to catch a wrong-but-valid value; each audit costs one fallback.\n")
 	b.WriteString("\n")
 
 	if len(history) > 10 {

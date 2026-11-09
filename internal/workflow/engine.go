@@ -452,6 +452,10 @@ type runExec struct {
 	// regenDone records the nodes that started regeneration in this run, so a
 	// node regenerates at most once per run (REQ-SP-009). A nil map is fine.
 	regenDone map[string]bool
+	// baselines caches the drift guard baseline of each script_parse node by
+	// node id, so the store is read once per node per run (spec #45,
+	// REQ-DG-001). A nil map is fine.
+	baselines map[string]scriptBaseline
 }
 
 // execute loads a run and drives it to a final state or a wait (REQ-WF-007).
