@@ -18,7 +18,7 @@ import {
   scriptSuggestions,
   testScript,
 } from "../api/workflows";
-import { Badge, Button, Field, Input, Modal, Select, Textarea, useToast } from "../ui/gr8r";
+import { Badge, Button, Field, Input, Modal, Select, Skeleton, Textarea, useToast } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { ago, prettyValue, tokens, useWorkflowStream } from "./workflow-common";
 
@@ -526,6 +526,59 @@ export function ConvertBanner({
   );
 }
 
+/* ConvertWaiting is the Convert dialog's loading state: the guardian status
+   with an elapsed timer, over a skeleton shaped like the proposal it waits for
+   (per-run checks, then the goal, input and script). */
+function ConvertWaiting() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="wf-convert-wait" role="status" aria-live="polite">
+      <div className="wf-convert-wait-h">
+        <span className="wf-convert-orb" aria-hidden="true">
+          <Ic name="braces" size={16} />
+        </span>
+        <div className="wf-convert-wait-b">
+          <b>
+            The guardian is writing a script
+            <span className="wf-typing" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          </b>
+          <span className="muted">
+            It reads this step's past runs, writes a parser, then checks it against each run.
+          </span>
+        </div>
+        <span className="wf-convert-time muted" aria-label={`${seconds} seconds elapsed`}>
+          {seconds}s
+        </span>
+      </div>
+      <div className="wf-convert-sk" aria-hidden="true">
+        {[0.72, 0.58, 0.66].map((w, i) => (
+          <div className="wf-convert-sk-row" key={i}>
+            <Skeleton width={64} height={20} radius={999} />
+            <Skeleton width={`${w * 100}%`} height={10} />
+          </div>
+        ))}
+        <Skeleton width={56} height={11} style={{ marginTop: 6 }} />
+        <Skeleton width="84%" height={10} />
+        <Skeleton width={72} height={11} style={{ marginTop: 6 }} />
+        <div className="wf-convert-sk-code">
+          {[0.46, 0.78, 0.64, 0.88, 0.52, 0.7, 0.34].map((w, i) => (
+            <Skeleton key={i} width={`${w * 100}%`} height={9} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ConvertDialog asks the guardian for a script_parse replacement of an agent
    step (API-SP-004) and shows it with the per-run checks before Replace. */
 export function ConvertDialog({
@@ -575,7 +628,7 @@ export function ConvertDialog({
         </>
       }
     >
-      {!result && !error ? <p className="muted">The guardian is writing a script from past runs…</p> : null}
+      {!result && !error ? <ConvertWaiting /> : null}
       {error ? <p className="wf-field-err">{error}</p> : null}
       {result && !result.feasible ? (
         <div className="wf-script-result">
