@@ -41,6 +41,14 @@ type ToolCtx struct {
 	Home string
 	// Skills are the global skills listed in the agent's config.
 	Skills []string
+	// SkillWrite is the calling agent's skill_write config: "approve" (the
+	// default) stages a skill proposal for the owner's review, "direct"
+	// writes the skill at once (spec 46 REQ-DKN-050).
+	SkillWrite string
+	// OwnerTurn is true when the turn is a root turn started by an owner
+	// message (spec 46 REQ-DKN-021, REQ-DKN-032); child and non-owner turns
+	// are false.
+	OwnerTurn bool
 	// Questions asks the owner through the session's channel.
 	Questions QuestionService
 	// Subagents runs child sessions for the task tools.

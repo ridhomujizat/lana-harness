@@ -23,6 +23,10 @@ type skillWriteTool struct{}
 // (REQ-ECX-011). The skill list itself stays in the # Skills section.
 const skillLoadGuidance = "Call skill_load with a skill's name before following that skill; the loaded text is the current procedure, and the list in the prompt is only an index."
 
+// skillWriteGuidance is the head-prompt note shown when skill_write is offered
+// (REQ-DKN-052).
+const skillWriteGuidance = "Propose a skill with skill_write after a multi-step procedure worked, after the owner corrected how a task should be done, or after you solved a problem you are likely to meet again in your field. Keep it a reusable procedure (when to use, steps, pitfalls), not a log of one incident. The owner approves proposed skills before they load."
+
 // NewSkillLoad creates the skill_load tool.
 func NewSkillLoad() core.Tool { return &skillLoadTool{} }
 
@@ -37,9 +41,11 @@ func (t *skillLoadTool) Risk(json.RawMessage) core.Risk { return core.RiskRead }
 func (t *skillLoadTool) PromptGuidance() string { return skillLoadGuidance }
 
 func (t *skillWriteTool) Spec() core.ToolSpec {
-	return core.ToolSpec{Name: "skill_write", Description: "Create or update one of your own skills (SKILL.md) so you can reuse a procedure that worked. name: lowercase letters, digits, - and _. description: one line saying when to use it.", InputSchema: skillWriteSpec}
+	return core.ToolSpec{Name: "skill_write", Description: "Create or update one of your own skills (SKILL.md) so you can reuse a procedure that worked. The skill is proposed for the owner's approval, unless the agent writes skills directly (skill_write = \"direct\"). name: lowercase letters, digits, - and _. description: one line saying when to use it.", InputSchema: skillWriteSpec}
 }
 func (t *skillWriteTool) Risk(json.RawMessage) core.Risk { return core.RiskWrite }
+
+func (t *skillWriteTool) PromptGuidance() string { return skillWriteGuidance }
 
 // skillFiles lists the regular files in a skill folder except SKILL.md.
 func skillFiles(dir string) ([]string, error) {
@@ -122,6 +128,15 @@ func (t *skillWriteTool) Call(_ context.Context, tc core.ToolCtx, raw json.RawMe
 	}
 	if tc.Home == "" || !agenthome.ValidName(tc.AgentName) {
 		return errorOutput("skills are not available")
+	}
+	// REQ-DKN-050: unless the agent writes skills directly, stage the skill as
+	// a proposal the owner reviews before it loads.
+	if tc.SkillWrite != "direct" {
+		meta := agenthome.SkillProposalMeta{SessionID: tc.SessionID, OwnerTurn: tc.OwnerTurn}
+		if err := agenthome.ProposeSkill(tc.Home, tc.AgentName, in.Name, in.Description, in.Body, meta); err != nil {
+			return errorOutput("invalid input: " + err.Error())
+		}
+		return successOutput("proposed skill " + in.Name + "; the owner reviews it in Knowledge → Review")
 	}
 	created, err := agenthome.WriteSkill(tc.Home, tc.AgentName, in.Name, in.Description, in.Body)
 	if err != nil {

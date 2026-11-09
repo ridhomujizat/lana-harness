@@ -415,6 +415,7 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
 		WorkspaceOnly: resolved.workspaceOnly,
 		Skills:        resolved.skills,
+		SkillWrite:    resolved.cfg.SkillWrite,
 		Questions:     rn.reg.questions,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
 		MCPAdmin:      mcpAdmin,
@@ -1359,6 +1360,10 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				}
 			} else {
 				toolCtx := rn.toolCtx(ctx, resolved, turnID)
+				// REQ-DKN-021, REQ-DKN-032: a tool sees an owner turn only for
+				// a root turn that stored an owner message, the same values
+				// captureEligible uses (REQ-MEM-010).
+				toolCtx.OwnerTurn = !resolved.child && ownerMessage
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as
 				// usual and every result is stored in call order.
