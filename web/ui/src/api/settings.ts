@@ -41,6 +41,7 @@ export interface ConfigRules {
 export interface ConfigAgent {
   provider?: string;
   model?: string;
+  display_name?: string;
   title?: string;
   color?: string;
   fallback?: string[];

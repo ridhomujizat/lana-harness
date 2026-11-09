@@ -16,6 +16,7 @@ import {
   Select,
 } from "../ui/gr8r";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
+import { useAgentLabel } from "./agent-label";
 import { NewSessionPage } from "./new-session";
 import { SessionPage } from "./session";
 
@@ -178,14 +179,18 @@ function facetCount(
 }
 
 function agentFacetLabel(
+  label: (name: string) => string,
   name: string,
   kind: string | undefined,
   count: number
 ): string {
-  return name + (kind === "team" ? " · Team" : "") + " (" + count + ")";
+  return label(name) + (kind === "team" ? " · Team" : "") + " (" + count + ")";
 }
 
-function filterChips(filters: Filters): FilterChip[] {
+function filterChips(
+  filters: Filters,
+  label: (name: string) => string
+): FilterChip[] {
   const chips: FilterChip[] = [];
   if (filters.channel) {
     chips.push({
@@ -210,7 +215,7 @@ function filterChips(filters: Filters): FilterChip[] {
       key: "agent:" + filters.agent,
       kind: "agent",
       value: filters.agent,
-      label: "Agent: " + filters.agent,
+      label: "Agent: " + label(filters.agent),
     });
   }
   return chips;
@@ -297,6 +302,7 @@ function SessionItem({
   const channel = String(session.channel || "");
   const title = session.title || "Untitled session";
   const agent = session.agent || "unknown";
+  const label = useAgentLabel();
   const preview =
     session.preview ||
     (status === "idle" ? "No messages yet." : statusLabel(status));
@@ -328,7 +334,7 @@ function SessionItem({
               aria-hidden="true"
             />
           ) : null}
-          <span className="session-row-agent trunc">{agent}</span>
+          <span className="session-row-agent trunc">{label(agent)}</span>
           <Lbl color={CHANNEL_COLORS[channel] || "var(--gray)"}>
             {channelLabel(channel)}
           </Lbl>
@@ -395,6 +401,7 @@ export interface SessionsPageProps {
 
 export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
   const announce = useAnnounce();
+  const label = useAgentLabel();
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [applied, setApplied] = useState<Filters>(emptyFilters);
@@ -524,7 +531,7 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
   }, [announce, applied, loadingMore, nextBefore, query]);
 
   const visibleFilters = filterOpen ? draft : applied;
-  const chips = filterChips(visibleFilters);
+  const chips = filterChips(visibleFilters, label);
   const hasMore = nextBefore !== null;
   const countText = String(sessions.length) + (hasMore ? "+" : "");
   const agentNames = Object.keys(facets.agent || {}).sort((left, right) =>
@@ -547,7 +554,7 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
   function applyFilter() {
     setApplied(copyFilters(draft));
     setFilterOpen(false);
-    const count = filterChips(copyFilters(draft)).length;
+    const count = filterChips(copyFilters(draft), label).length;
     announce(
       count === 0
         ? "Filters cleared."
@@ -846,6 +853,7 @@ export function SessionsPage({ selectedId = "" }: SessionsPageProps) {
                   ...agentNames.map((name) => ({
                     value: name,
                     label: agentFacetLabel(
+                      label,
                       name,
                       facets.agentKinds[name],
                       facetCount(facets.agent, name)

@@ -21,6 +21,7 @@ import {
   buildTrajectory,
   recordKindLabel,
 } from "./trajectory-model";
+import { useAgentLabel } from "./agent-label";
 import type {
   Trajectory,
   TrajectorySpan,
@@ -979,9 +980,10 @@ export function TrajectoryView({
   onLoadChild,
   running = false,
 }: TrajectoryViewProps) {
+  const agentLabel = useAgentLabel();
   const trajectory = useMemo(
-    () => buildTrajectory(events, childEvents),
-    [events, childEvents]
+    () => buildTrajectory(events, childEvents, agentLabel),
+    [events, childEvents, agentLabel]
   );
   const index = useMemo(() => indexRecords(trajectory), [trajectory]);
   const turns = useMemo(() => sectionTurns(trajectory), [trajectory]);

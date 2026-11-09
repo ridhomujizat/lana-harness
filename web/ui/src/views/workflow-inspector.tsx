@@ -23,6 +23,8 @@ interface InspectorProps {
   graph: Graph;
   node: WfNode;
   agents: string[];
+  /* agentLabel resolves an agent ID to its display name for the pickers. */
+  agentLabel?: (name: string) => string;
   onChange: (node: WfNode) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -162,11 +164,13 @@ function ParamField({
   spec,
   node,
   agents,
+  agentLabel,
   set,
 }: {
   spec: FieldSpec;
   node: WfNode;
   agents: string[];
+  agentLabel: (name: string) => string;
   set: (name: string, value: unknown) => void;
 }) {
   const id = "wf-f-" + node.id + "-" + spec.name;
@@ -225,7 +229,7 @@ function ParamField({
           placeholder="Pick a bot"
           options={[
             ...(spec.required ? [] : [{ value: "", label: "—" }]),
-            ...agents.map((agent) => ({ value: agent, label: agent })),
+            ...agents.map((agent) => ({ value: agent, label: agentLabel(agent) })),
           ]}
           onChange={(next) => set(spec.name, next || undefined)}
         />
@@ -349,10 +353,12 @@ export function NodeInspector({
   graph,
   node,
   agents,
+  agentLabel,
   onChange,
   onDelete,
   onClose,
 }: InspectorProps) {
+  const labelOf = agentLabel || ((name: string) => name);
   const [tab, setTab] = useState("params");
   const meta = nodeMeta(node.type);
   const set = (name: string, value: unknown) => {
@@ -403,7 +409,14 @@ export function NodeInspector({
               />
             </Field>
             {meta.fields.map((spec) => (
-              <ParamField key={spec.name} spec={spec} node={node} agents={agents} set={set} />
+              <ParamField
+                key={spec.name}
+                spec={spec}
+                node={node}
+                agents={agents}
+                agentLabel={labelOf}
+                set={set}
+              />
             ))}
             {node.type !== "loop" && !node.type.startsWith("trigger.") && loops.length > 0 ? (
               <Field label="Inside loop" hint="Body nodes run once per loop item." htmlFor={"wf-parent-" + node.id}>

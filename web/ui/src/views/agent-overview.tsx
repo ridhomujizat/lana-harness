@@ -27,6 +27,7 @@ import {
   splitModel,
 } from "./agent-common";
 import { gr8rColor, useRooms } from "./presence";
+import { displayLabel } from "./agent-label";
 
 /* REQ-ROOM-010: the alive agent profile. It loads API-ROOM-008 and refreshes
    every 10 s and whenever the live room row changes presence or last activity
@@ -243,6 +244,10 @@ export function AgentOverview({
     return items.filter((item) => activeKinds.includes(item.kind));
   }, [data, activeKinds]);
 
+  /* The display name of the profile: the room row carries display_name, and the
+     overview payload keeps only the ID name. */
+  const viewName = displayLabel(row) || (data ? data.name : name);
+
   if (status === "loading") {
     return (
       <div className="ov-page" aria-hidden="true">
@@ -324,13 +329,13 @@ export function AgentOverview({
         <div className="ov-hero-in">
           <Avatar
             size="xl"
-            name={data.name}
+            name={viewName}
             color={gr8rColor(data.color)}
             presence={presenceState === "online" || presenceState === "working"}
           />
           <div className="ov-hero-body">
             <div className="ov-hero-name-row">
-              <h1 className="ov-hero-name">{data.name}</h1>
+              <h1 className="ov-hero-name">{viewName}</h1>
               {data.title ? <Badge tone="accent">{data.title}</Badge> : null}
               {data.presence ? (
                 <Badge tone={presenceTone(presenceState)} dot>
@@ -349,7 +354,7 @@ export function AgentOverview({
               variant="primary"
               href={"#/chats/" + encodeURIComponent(data.name)}
             >
-              {"Chat with " + data.name}
+              {"Chat with " + viewName}
             </Button>
             <Button
               as="a"
@@ -414,7 +419,7 @@ export function AgentOverview({
           </Panel>
 
           <Panel
-            title={"What " + data.name + " has been doing"}
+            title={"What " + viewName + " has been doing"}
             actions={
               <Seg
                 className="ov-filters"
@@ -455,7 +460,7 @@ export function AgentOverview({
             )}
           </Panel>
 
-          <Panel title={"What " + data.name + " remembers about you"}>
+          <Panel title={"What " + viewName + " remembers about you"}>
             {entries.length === 0 ? (
               <p className="muted">Nothing remembered yet.</p>
             ) : (
@@ -522,7 +527,7 @@ export function AgentOverview({
             ) : (
               <p className="muted">
                 {"No job yet — describe what " +
-                  data.name +
+                  viewName +
                   " is responsible for."}
               </p>
             )}
@@ -600,6 +605,7 @@ function TeamOverview({
   const names = [lead, ...members].filter(Boolean);
   const count = names.length;
   const presenceState = data.presence ? data.presence.state : "";
+  const teamName = displayLabel(byName[data.name]) || data.name;
 
   return (
     <div className="ov-page">
@@ -610,7 +616,7 @@ function TeamOverview({
               size="lg"
               max={4}
               items={names.map((member) => ({
-                name: member,
+                name: displayLabel(byName[member]) || member,
                 color: gr8rColor(member),
               }))}
             />
@@ -619,7 +625,7 @@ function TeamOverview({
           )}
           <div className="ov-hero-body">
             <div className="ov-hero-name-row">
-              <h1 className="ov-hero-name">{data.name}</h1>
+              <h1 className="ov-hero-name">{teamName}</h1>
               <Badge tone="accent" dot>
                 Team
               </Badge>
@@ -643,7 +649,7 @@ function TeamOverview({
               variant="primary"
               href={"#/chats/" + encodeURIComponent(data.name)}
             >
-              {"Chat with " + data.name}
+              {"Chat with " + teamName}
             </Button>
           </div>
         </div>
@@ -661,11 +667,13 @@ function TeamOverview({
                 <li key={member} className="ov-member">
                   <Avatar
                     size="lg"
-                    name={member}
+                    name={displayLabel(memberRow) || member}
                     color={gr8rColor(memberRow ? memberRow.color : undefined)}
                   />
                   <span className="ov-member-body">
-                    <span className="ov-member-name">{member}</span>
+                    <span className="ov-member-name">
+                      {displayLabel(memberRow) || member}
+                    </span>
                     <span className="ov-member-status">
                       {memberRow && memberRow.presence
                         ? memberRow.presence.label

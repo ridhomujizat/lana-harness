@@ -25,6 +25,17 @@ vi.mock("../api/knowledge", async (importOriginal) => {
   };
 });
 
+/* The knowledge page resolves the agent label from the shared rooms store, so
+   that store is stubbed with no rows and the ID stays the fallback label. */
+vi.mock("../api/rooms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/rooms")>();
+  return {
+    ...actual,
+    listRooms: vi.fn().mockResolvedValue([]),
+    openRoomsStream: vi.fn(() => ({ close: () => {} })),
+  };
+});
+
 function makeStatus(overrides: Partial<KnowledgeStatus> = {}): KnowledgeStatus {
   return {
     available: true,

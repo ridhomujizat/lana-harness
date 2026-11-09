@@ -17,6 +17,8 @@ export interface RoomRow {
   name: string;
   kind: string;
   title: string;
+  /* display_name is the human name, "" when unset (falls back to name). */
+  display_name?: string;
   color: string;
   members: string[];
   lead: string;

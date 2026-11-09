@@ -25,6 +25,7 @@ import { Ic } from "../ui/icons";
 import { avatarFor } from "../lib/avatar";
 import { agoLabel, isTeam, rosterNames, splitModel } from "./agent-common";
 import type { AgentLike } from "./agent-common";
+import { displayLabel } from "./agent-label";
 import {
   Avatar,
   AvatarStack,
@@ -784,6 +785,9 @@ function AddAgentsDialog({
 
   const agentOptions = agents.filter((agent) => !isTeam(agent));
   const teamOptions = agents.filter(isTeam);
+  const byName = new Map(agents.map((agent) => [agent.name, agent]));
+  /* Member IDs resolve to their display name when the agent is known here. */
+  const memberLabel = (name: string) => displayLabel(byName.get(name)) || name;
 
   function matches(value: Agent): boolean {
     if (!search) {
@@ -791,6 +795,7 @@ function AddAgentsDialog({
     }
     const haystack = [
       value.name,
+      value.display_name,
       value.description,
       value.model,
       teamMembers(value).join(" "),
@@ -872,12 +877,12 @@ function AddAgentsDialog({
                 onChange={() => toggleAgent(agent.name)}
               />
               <Avatar
-                name={agent.name}
+                name={displayLabel(agent)}
                 color={agentColor(agent.name)}
                 size="lg"
               />
               <span className="skills-add-text">
-                <span className="skills-add-name">{agent.name}</span>
+                <span className="skills-add-name">{displayLabel(agent)}</span>
                 {model ? <span className="skills-add-meta">{model}</span> : null}
               </span>
               {added ? <span className="skills-add-state">Added</span> : null}
@@ -911,13 +916,13 @@ function AddAgentsDialog({
                 size="sm"
                 max={3}
                 items={rosterNames(team).map((member) => ({
-                  name: member,
+                  name: memberLabel(member),
                   color: agentColor(member),
                 }))}
               />
               <span className="skills-add-text">
                 <span className="skills-add-name-row">
-                  <span className="skills-add-name">{team.name}</span>
+                  <span className="skills-add-name">{displayLabel(team)}</span>
                   <Badge tone="accent" dot>
                     Team
                   </Badge>
@@ -980,9 +985,9 @@ function AgentPickerRow({
   const model = agentModelLabel(agent);
   return (
     <div className="mini skills-agent-row">
-      <Avatar name={agent.name} color={agentColor(agent.name)} size="md" />
+      <Avatar name={displayLabel(agent)} color={agentColor(agent.name)} size="md" />
       <span className="skills-agent-text">
-        <span className="skills-agent-name">{agent.name}</span>
+        <span className="skills-agent-name">{displayLabel(agent)}</span>
         {model ? <span className="skills-agent-model">{model}</span> : null}
       </span>
       {readOnly ? (
@@ -992,7 +997,7 @@ function AgentPickerRow({
           className="skills-agent-remove"
           size="sm"
           icon="x"
-          label={"Remove " + agent.name + " from " + skillName}
+          label={"Remove " + displayLabel(agent) + " from " + skillName}
           onClick={onRemove}
         />
       )}
@@ -1555,7 +1560,8 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
                     result.ok ? "skills-result-ok" : "skills-result-error"
                   }
                 >
-                  <strong>{result.name}</strong>: {result.message}
+                  <strong>{displayLabel(agentsByName.get(result.name)) || result.name}</strong>
+                  {": " + result.message}
                 </li>
               ))}
             </ul>
@@ -1650,7 +1656,7 @@ export function SkillEditorPage({ scope, name, isNew }: SkillEditorPageProps) {
                     { value: "global", label: "Global" },
                     ...scopeChoices.map((agent) => ({
                       value: "agent:" + agent.name,
-                      label: agent.name,
+                      label: displayLabel(agent),
                     })),
                   ]}
                   value={skillScope}

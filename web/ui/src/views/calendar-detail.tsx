@@ -75,13 +75,17 @@ export function byText(by: string): string {
   return by.startsWith("agent:") ? by.slice(6) : by;
 }
 
-export function actionText(action: Action | null, workflowName?: (id: string) => string): string {
+export function actionText(
+  action: Action | null,
+  workflowName?: (id: string) => string,
+  label?: (name: string) => string
+): string {
   if (!action) {
     return "";
   }
   switch (action.type) {
     case "agent_prompt":
-      return action.agent + " runs: " + action.prompt;
+      return (label ? label(action.agent) : action.agent) + " runs: " + action.prompt;
     case "run_workflow":
       return "Run workflow " + (workflowName ? workflowName(action.workflow_id) : action.workflow_id);
     default:
@@ -161,6 +165,7 @@ export function EntryDrawer({
   fallback,
   workflowName,
   agents,
+  label,
   workflows,
 }: {
   entry: Entry;
@@ -170,6 +175,7 @@ export function EntryDrawer({
   fallback: boolean;
   workflowName: (id: string) => string;
   agents: string[];
+  label: (name: string) => string;
   workflows: { id: string; name: string }[];
 }) {
   const [full, setFull] = useState(false);
@@ -186,6 +192,7 @@ export function EntryDrawer({
   const overridden = entry.moved || entry.status === "skipped";
   const rerun = !fallback && item && firing && ["missed", "failed", "dismissed"].includes(firing.status);
   const by = byText(entry.created_by);
+  const byName = entry.created_by.startsWith("agent:") ? label(by) : by;
   const assignee = entry.assignee && entry.assignee !== "owner" ? entry.assignee : "";
   const full_item = detail?.item || null;
   const editable = Boolean(canEdit && full_item);
@@ -365,6 +372,7 @@ export function EntryDrawer({
           item={full_item}
           entry={entry}
           agents={agents}
+          label={label}
           workflows={workflows}
           onSave={actions.onSave}
           extra={
@@ -374,7 +382,7 @@ export function EntryDrawer({
                 "Added by",
                 <span className="row" style={{ gap: 6 }}>
                   {entry.created_by.startsWith("agent:") ? <AgentFace name={by} /> : null}
-                  {by === "you" ? "You" : by}
+                  {by === "you" ? "You" : byName}
                 </span>
               )}
               {firing
@@ -413,7 +421,7 @@ export function EntryDrawer({
               assignee ? (
                 <span className="row" style={{ gap: 6 }}>
                   <AgentFace name={assignee} />
-                  {assignee}
+                  {label(assignee)}
                 </span>
               ) : (
                 <span>Me</span>
@@ -426,7 +434,7 @@ export function EntryDrawer({
               "Added by",
               <span className="row" style={{ gap: 6 }}>
                 {entry.created_by.startsWith("agent:") ? <AgentFace name={by} /> : null}
-                {by === "you" ? "You" : by}
+                {by === "you" ? "You" : byName}
               </span>
             )
           : null}
@@ -434,7 +442,7 @@ export function EntryDrawer({
           ? prop(
               "zap",
               "When due",
-              entry.action ? <span>{actionText(entry.action, workflowName)}</span> : <span className="faint">Just shows it</span>
+              entry.action ? <span>{actionText(entry.action, workflowName, label)}</span> : <span className="faint">Just shows it</span>
             )
           : null}
         {firing
@@ -458,7 +466,7 @@ export function EntryDrawer({
               </button>
             )
           : null}
-        {entry.workflow?.guardian ? prop("shield", "Guardian", <span>{entry.workflow.guardian}</span>) : null}
+        {entry.workflow?.guardian ? prop("shield", "Guardian", <span>{label(entry.workflow.guardian)}</span>) : null}
         {run
           ? prop(
               "circle-dot",
@@ -522,17 +530,21 @@ export function EntryDrawer({
             <h3>Activity</h3>
             <span className="cnt num">{detail.history.length}</span>
           </div>
-          {detail.history.map((line, index) => (
-            <div className="act-line" key={index}>
-              <span className="ico">
-                {line.by.startsWith("agent:") ? <AgentFace name={byText(line.by)} /> : <Ic name="user" size={13} />}
-              </span>
-              <span className="grow">
-                <b>{byText(line.by) === "you" ? "You" : byText(line.by)}</b> {line.summary.toLowerCase()}
-              </span>
-              <time className="faint num">{ago(line.at)}</time>
-            </div>
-          ))}
+          {detail.history.map((line, index) => {
+            const lineBy = byText(line.by);
+            const lineName = line.by.startsWith("agent:") ? label(lineBy) : lineBy;
+            return (
+              <div className="act-line" key={index}>
+                <span className="ico">
+                  {line.by.startsWith("agent:") ? <AgentFace name={lineBy} /> : <Ic name="user" size={13} />}
+                </span>
+                <span className="grow">
+                  <b>{lineBy === "you" ? "You" : lineName}</b> {line.summary.toLowerCase()}
+                </span>
+                <time className="faint num">{ago(line.at)}</time>
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
@@ -892,12 +904,13 @@ export interface EditorProps {
   day: Date;
   minute?: number;
   agents: string[];
+  label: (name: string) => string;
   workflows: { id: string; name: string }[];
   onClose: () => void;
   onSave: (input: ItemInput) => Promise<void>;
 }
 
-export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose, onSave }: EditorProps) {
+export function ItemEditor({ item, kind, day, minute, agents, label, workflows, onClose, onSave }: EditorProps) {
   const [form, setForm] = useState<FormState>(() => formFrom(item, kind, day, minute));
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
@@ -922,7 +935,7 @@ export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose
     }
   }
 
-  const agentOptions = [{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: name }))];
+  const agentOptions = [{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: label(name) }))];
   const repeatOptions = repeatOptionsFor(form);
 
   let when: ReactNode;
@@ -991,7 +1004,14 @@ export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose
   return (
     <Modal
       title={(item ? "Edit " : "New ") + KIND_WORDS[form.kind].toLowerCase()}
-      subtitle={item ? "Added by " + byText(item.created_by) : undefined}
+      subtitle={
+        item
+          ? "Added by " +
+            (item.created_by.startsWith("agent:")
+              ? label(byText(item.created_by))
+              : byText(item.created_by))
+          : undefined
+      }
       size="lg"
       onClose={onClose}
       className="cform"
@@ -1122,7 +1142,7 @@ export function ItemEditor({ item, kind, day, minute, agents, workflows, onClose
                 <Select
                   value={form.agent}
                   placeholder="Pick an agent"
-                  options={agents.map((name) => ({ value: name, label: name }))}
+                  options={agents.map((name) => ({ value: name, label: label(name) }))}
                   onChange={(value) => set("agent", value)}
                 />
               </Field>
@@ -1207,6 +1227,7 @@ function ItemDrawerForm({
   item,
   entry,
   agents,
+  label,
   workflows,
   onSave,
   extra,
@@ -1214,6 +1235,7 @@ function ItemDrawerForm({
   item: Item;
   entry: Entry;
   agents: string[];
+  label: (name: string) => string;
   workflows: { id: string; name: string }[];
   onSave: (fields: ItemInput) => Promise<void>;
   extra: ReactNode;
@@ -1367,7 +1389,7 @@ function ItemDrawerForm({
             className="cdr-sel"
             aria-label="For"
             value={form.assignee}
-            options={[{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: name }))]}
+            options={[{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: label(name) }))]}
             onChange={(value) => set("assignee", value)}
           />
         )}
@@ -1423,7 +1445,7 @@ function ItemDrawerForm({
                 <Select
                   value={form.agent}
                   placeholder="Pick an agent"
-                  options={agents.map((name) => ({ value: name, label: name }))}
+                  options={agents.map((name) => ({ value: name, label: label(name) }))}
                   onChange={(value) => set("agent", value)}
                 />
               </Field>

@@ -2,6 +2,7 @@ import { Button, ErrorState, Panel, Stat } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { DashboardFilters, count, share, useDashboard } from "./dashboard-common";
 import { OutcomeDonut, ShareBars, TokenColumns, ToolBars } from "./home-charts";
+import { useAgentLabel } from "./agent-label";
 
 /* The monitoring dashboard (spec 28). On owner request (2026-11-05) Home shows
    only graphics: a KPI strip, token usage over time, turn outcomes, the busiest
@@ -40,6 +41,7 @@ function tokensOf(row: { input_tokens?: number; output_tokens?: number }): numbe
 export function HomePage() {
   const state = useDashboard("#/home");
   const { data, error } = state;
+  const label = useAgentLabel();
   const summary = data?.summary;
   const now = data?.now;
 
@@ -153,7 +155,7 @@ export function HomePage() {
                 empty="No agent activity in this range."
                 rows={(data.by_agent || []).map((row) => ({
                   key: row.agent,
-                  label: row.agent,
+                  label: label(row.agent),
                   sub: count(row.turns) + " turns",
                   value: tokensOf(row),
                 }))}

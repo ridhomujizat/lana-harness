@@ -38,6 +38,7 @@ import { AgendaView, DayView, MonthView, WeekView } from "./calendar-views";
 import { EntryDrawer, ItemEditor, KIND_ICONS, KIND_WORDS, MoveDialog, ScopeDialog } from "./calendar-detail";
 import { CalendarSettingsDrawer } from "./calendar-settings";
 import { useAgentNames, useNow, useWorkflowStream } from "./workflow-common";
+import { useAgentLabel } from "./agent-label";
 
 /* Calendar page (spec #35 REQ-CAL-010): one calendar for the owner's items,
    agents' items, workflow slots and runs, and Google events. View and date
@@ -158,6 +159,7 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
   const [newOpen, setNewOpen] = useState(false);
   const newRef = useRef<HTMLSpanElement>(null);
   const agents = useAgentNames().map((agent) => agent.name);
+  const agentName = useAgentLabel();
 
   const weekStart = data?.weekStart ?? 1;
   const picked = useMemo(() => {
@@ -608,7 +610,7 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
           />
         ) : null}
         {view === "week" ? (
-          <WeekView range={range} byDay={byDay} today={today} onOpen={openEntry} fallback={fallback} onDrop={onDrop} onAdd={onAdd} />
+          <WeekView range={range} byDay={byDay} today={today} onOpen={openEntry} fallback={fallback} onDrop={onDrop} onAdd={onAdd} label={agentName} />
         ) : null}
         {view === "day" ? (
           <DayView
@@ -619,6 +621,7 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
             fallback={fallback}
             onDrop={onDrop}
             onAdd={onAdd}
+            label={agentName}
           />
         ) : null}
         {view === "agenda" ? (
@@ -636,6 +639,7 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
           fallback={fallback}
           workflowName={workflowName}
           agents={agents}
+          label={agentName}
           workflows={workflows.map((workflow) => ({ id: workflow.id, name: workflow.name }))}
           actions={{
             onComplete: (done) => {
@@ -681,6 +685,7 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
           day={editor.day}
           minute={editor.minute}
           agents={agents}
+          label={agentName}
           workflows={workflows.map((workflow) => ({ id: workflow.id, name: workflow.name }))}
           onClose={() => setEditor(null)}
           onSave={saveItem}

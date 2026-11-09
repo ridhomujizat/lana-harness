@@ -10,6 +10,7 @@ import type { DaemonInfo } from "../api/daemon";
 import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { Button, Modal, Skeleton } from "../ui/gr8r";
+import { useAgentLabel } from "./agent-label";
 
 /* REQ-TFB-003: one restart flow for Settings > General and the Telegram
    connect step. start() posts the restart (API-TFB-002); a draining answer
@@ -258,6 +259,7 @@ export function RestartDaemonDialog({
   onClose,
   confirmFirst = true,
 }: RestartDaemonDialogProps) {
+  const label = useAgentLabel();
   const [info, setInfo] = useState<DaemonInfo | null>(null);
   const [loading, setLoading] = useState(confirmFirst);
   const [loadError, setLoadError] = useState("");
@@ -420,7 +422,7 @@ export function RestartDaemonDialog({
                       {(turn && turn.title) || "Untitled session"}
                     </span>
                     <span className="settings-turn-agent">
-                      {(turn && turn.agent) || "unknown agent"}
+                      {label(turn && turn.agent) || "unknown agent"}
                     </span>
                   </li>
                 ))}

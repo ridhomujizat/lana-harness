@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { RoomRow } from "../api/rooms";
 import { gr8rColor, PresenceLabel, useRooms } from "./presence";
+import { displayLabel } from "./agent-label";
 import { relativeShort, RoomView } from "./room-timeline";
 import {
   Avatar,
@@ -72,7 +73,7 @@ function RowFace({ row }: { row: RoomRow }) {
   const state = rowState(row);
   return (
     <Avatar
-      name={row.name}
+      name={displayLabel(row)}
       color={gr8rColor(row.color)}
       size="lg"
       presence={Boolean(row.presence)}
@@ -120,6 +121,7 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
       const preview = row.last_message ? row.last_message.preview : "";
       return (
         row.name.toLowerCase().includes(text) ||
+        displayLabel(row).toLowerCase().includes(text) ||
         (row.title || "").toLowerCase().includes(text) ||
         preview.toLowerCase().includes(text)
       );
@@ -224,7 +226,7 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
                       <RowFace row={row} />
                       <span className="rooms-row-body">
                         <span className="rooms-row-top">
-                          <span className="rooms-row-name">{row.name}</span>
+                          <span className="rooms-row-name">{displayLabel(row)}</span>
                           <span className="rooms-row-time">{relativeShort(at)}</span>
                         </span>
                         <span className="rooms-row-title">

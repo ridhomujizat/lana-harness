@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { AGENT_ID_HINT } from "./agent-label";
 import { SetupShell, SetupWizard } from "./setup";
 
 /* Step navigation and validation keep the behavior of views/setup.js. The
@@ -13,6 +14,7 @@ const EMPTY_CONNECT_DRAFT = {
   connect: { apiKey: "", baseUrl: "", model: "" },
   agent: {
     name: "default",
+    displayName: "default",
     template: "assistant",
     workspace: "~/lana/workspace",
     permission: "ask",
@@ -53,14 +55,18 @@ describe("setup wizard", () => {
   it("shows the agent validation messages and stays on the step", () => {
     render(<SetupWizard step="agent" />);
 
-    const name = screen.getByLabelText("Agent name");
+    const name = screen.getByLabelText("Name");
+    const id = screen.getByLabelText("ID");
     const workspace = screen.getByLabelText("Workspace");
-    fireEvent.change(name, { target: { value: "Bad Name" } });
+    fireEvent.change(name, { target: { value: "Omnix Lead" } });
+    /* The ID fills in from the name until the owner edits it by hand. */
+    expect((id as HTMLInputElement).value).toBe("omnix-lead");
+    fireEvent.change(id, { target: { value: "Bad Name" } });
     fireEvent.change(workspace, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(
-      screen.getByText("Use lowercase letters, numbers, and dashes only.")
+      screen.getByText("The ID is not valid. " + AGENT_ID_HINT)
     ).toBeTruthy();
     expect(screen.getByText("Enter a workspace path.")).toBeTruthy();
     expect(window.location.hash).toBe("");

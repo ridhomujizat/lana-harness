@@ -10,6 +10,7 @@ import { WorkflowEditor } from "./workflow-editor";
 import { WorkflowRuns } from "./workflow-runs";
 import { WorkflowSettings } from "./workflow-settings";
 import { AgentFace, WorkflowBadge, useWorkflowStream } from "./workflow-common";
+import { useAgentLabel } from "./agent-label";
 
 /* The workflow shell of REQ-WF-011: breadcrumb, status, guardian chip and the
    Editor / Executions / Settings tabs. Each tab renders its own action buttons
@@ -41,6 +42,7 @@ export function WorkflowHeader({
   slots: HeaderSlots;
   isNew?: boolean;
 }) {
+  const label = useAgentLabel();
   const base = "#/workflows/" + encodeURIComponent(id);
   const tabs: { key: WorkflowTab; label: string; href: string }[] = [
     { key: "editor", label: "Editor", href: isNew ? "#/workflows/new" : base },
@@ -56,7 +58,7 @@ export function WorkflowHeader({
         <WorkflowBadge status={status} />
         <span className="wf-guard-chip">
           <AgentFace name={guardian} />
-          Guardian: {guardian}
+          Guardian: {label(guardian)}
         </span>
         <span className="wf-head-meta">{slots.meta}</span>
         <div className="wf-head-acts">{slots.actions}</div>

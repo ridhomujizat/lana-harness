@@ -62,6 +62,7 @@ import {
 import { ApprovalCard, approvalResultWords } from "./approval";
 import type { ApprovalItem } from "./approval";
 import { isTeam, rosterNames } from "./agent-common";
+import { displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
 import { buildTurns, TurnBlock, UserBubble } from "./turn";
@@ -327,7 +328,7 @@ function AgentMenuContent({
               onClick={() => onPick(entry.name)}
             >
               <span className="mi-text">
-                <span className="mi-name">{entry.name}</span>
+                <span className="mi-name">{displayLabel(entry)}</span>
                 <span className="mi-meta">
                   {team
                     ? "Team · " + rosterNames(entry).length + " agents"
@@ -593,7 +594,9 @@ function TrustDialog({
 
 interface ComposerProps {
   agent: string;
+  agentLabel: string;
   team: Team | null;
+  teamLabel: string;
   model: string;
   policy: string;
   reasoningEffort: string;
@@ -620,7 +623,9 @@ interface ComposerProps {
 
 function Composer({
   agent,
+  agentLabel,
   team,
+  teamLabel,
   model,
   policy,
   reasoningEffort,
@@ -677,7 +682,9 @@ function Composer({
   const modelValue = model || agentModel;
   const teamSession = Boolean(team) || isTeam(agentEntry);
   const messageTarget =
-    teamSession && team && team.name ? String(team.name) : agent || "agent";
+    teamSession && team && team.name
+      ? teamLabel || String(team.name)
+      : agentLabel || agent || "agent";
   const busySession = readOnly || turnRunning;
 
   /* The provider of the current model, or the agent's provider when the
@@ -864,7 +871,7 @@ function Composer({
               >
                 <span className="mi-text">
                   <span className="mi-name">Switch agent or team</span>
-                  <span className="mi-meta">{agent || "no agent"}</span>
+                  <span className="mi-meta">{agentLabel || agent || "no agent"}</span>
                 </span>
               </button>
             </Menu>
@@ -2298,8 +2305,14 @@ export function SessionPage({ id, view }: SessionPageProps) {
   );
 
   const changeAgent = useCallback(
-    (name: string) => patch({ agent: name }, "Agent changed to " + name + "."),
-    [patch]
+    (name: string) => {
+      const entry = agents.find((item) => item.name === name) || null;
+      return patch(
+        { agent: name },
+        "Agent changed to " + (displayLabel(entry) || name) + "."
+      );
+    },
+    [agents, patch]
   );
 
   const changeModel = useCallback(
@@ -2433,6 +2446,21 @@ export function SessionPage({ id, view }: SessionPageProps) {
 
   const agent = detail.agent || "agent";
   const team = detail.team || null;
+  const agentEntry = agents.find((entry) => entry.name === agent) || null;
+  const agentLabel = displayLabel(agentEntry) || agent;
+  const teamEntry =
+    team && team.name
+      ? agents.find((entry) => entry.name === String(team.name)) || null
+      : null;
+  const teamLabel = team ? displayLabel(teamEntry) || String(team.name || "") : "";
+  /* The display names of every loaded agent, so the team block names its
+     members without another request. */
+  const agentLabels: Record<string, string> = {};
+  for (const entry of agents) {
+    if (entry && entry.name) {
+      agentLabels[entry.name] = displayLabel(entry);
+    }
+  }
   const activeApproval =
     approvals.find((approval) => !approval.decided) ||
     (approvals.length > 0 ? approvals[approvals.length - 1] || null : null);
@@ -2581,7 +2609,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
                   key={item.key}
                   turn={item.turn}
                   agent={agent}
+                  agentLabel={agentLabel}
                   team={team}
+                  teamLabels={agentLabels}
                   rootEvents={turnEvents.get(item.turn.id) || []}
                   childEvents={childEvents}
                   childLive={childLive}
@@ -2616,7 +2646,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
               <div className="chat-empty">
                 <p className="chat-empty-title">No messages yet</p>
                 <p className="chat-empty-text">
-                  Send the first message to {agent} with the composer below.
+                  Send the first message to {agentLabel} with the composer below.
                 </p>
               </div>
             ) : null}
@@ -2654,7 +2684,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
           <JobsStrip sessionId={id} />
           <Composer
             agent={agent}
+            agentLabel={agentLabel}
             team={team}
+            teamLabel={teamLabel}
             model={detail.model || ""}
             policy={detail.policy || "ask"}
             reasoningEffort={detail.reasoning_effort || ""}

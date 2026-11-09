@@ -18,6 +18,12 @@ import type { ChatTurn, TurnStep } from "./turn";
 
 const TITLE_LIMIT = 48;
 
+/* The name shown to people: the face's display label when known, else the ID. */
+function faceLabel(faces: Record<string, FaceRef>, name: string): string {
+  const face = faces[name];
+  return face && face.label ? face.label : name;
+}
+
 export interface HandoffChip {
   key: string;
   agent: string;
@@ -239,7 +245,7 @@ function HandoffChipView({
 }) {
   const face = faces[chip.agent];
   const colors = agentFaceColors(face ? face.color : undefined);
-  const text = chip.agent + " · " + chip.title + " · " + chip.state;
+  const text = faceLabel(faces, chip.agent) + " · " + chip.title + " · " + chip.state;
   return (
     <span
       className={"handoff-chip handoff-" + chip.state}
@@ -247,7 +253,7 @@ function HandoffChipView({
       aria-label={text}
     >
       <Avatar
-        name={chip.agent}
+        name={faceLabel(faces, chip.agent)}
         color={gr8rColor(face ? face.color : undefined)}
         size="sm"
       />
@@ -267,17 +273,18 @@ function LeadMessage({
 }) {
   const face = faces[lead];
   const color = agentFaceColors(face ? face.color : undefined).fg;
+  const leadLabel = faceLabel(faces, lead);
   return (
     <div className="group-msg group-lead-msg">
       <Avatar
-        name={lead}
+        name={leadLabel}
         color={gr8rColor(face ? face.color : undefined)}
         size="md"
       />
       <div className="group-msg-main">
         <div className="group-msg-head">
           <span className="group-msg-name" style={{ color }}>
-            {lead}
+            {leadLabel}
           </span>
           <span className="group-lead-pill">lead</span>
           <span className="group-msg-time">{formatClock(item.at)}</span>
@@ -309,6 +316,7 @@ function MemberMessage({
   face: FaceRef | undefined;
 }) {
   const color = agentFaceColors(face ? face.color : undefined).fg;
+  const memberLabel = face && face.label ? face.label : item.agent;
   const tools = item.tools === 1 ? "1 tool" : item.tools + " tools";
   const meta = ["replying to " + lead, formatClock(item.at), tools]
     .filter(Boolean)
@@ -316,14 +324,14 @@ function MemberMessage({
   return (
     <div className="group-msg group-member-msg">
       <Avatar
-        name={item.agent}
+        name={memberLabel}
         color={gr8rColor(face ? face.color : undefined)}
         size="md"
       />
       <div className="group-msg-main">
         <div className="group-msg-head">
           <span className="group-msg-name" style={{ color }}>
-            {item.agent}
+            {memberLabel}
           </span>
           <span className="group-msg-meta">{meta}</span>
         </div>
@@ -342,10 +350,11 @@ function WorkingRow({
   item: Extract<GroupItem, { kind: "working" }>;
   face: FaceRef | undefined;
 }) {
+  const memberLabel = face && face.label ? face.label : item.agent;
   return (
     <div className="group-msg group-member-msg group-working" role="status">
       <Avatar
-        name={item.agent}
+        name={memberLabel}
         color={gr8rColor(face ? face.color : undefined)}
         presence
         size="md"
@@ -353,7 +362,7 @@ function WorkingRow({
       <div className="group-msg-main">
         <span className="group-working-text">
           <TypingDots />
-          <span>{item.agent + " is working on " + item.title + "…"}</span>
+          <span>{memberLabel + " is working on " + item.title + "…"}</span>
         </span>
       </div>
     </div>
@@ -379,7 +388,7 @@ export function RoomGroup({ turn, room, faces }: RoomGroupProps) {
           <MemberMessage
             key={item.key}
             item={item}
-            lead={lead}
+            lead={faceLabel(faces, lead)}
             face={faces[item.agent]}
           />
         );

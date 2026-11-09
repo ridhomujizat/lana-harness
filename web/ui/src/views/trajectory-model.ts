@@ -145,6 +145,10 @@ export interface Trajectory {
   spans: TrajectorySpan[];
 }
 
+/* AgentLabel resolves an agent ID to the name a person reads. The builder
+   takes one so a record title never shows a raw config ID. */
+export type AgentLabel = (name: string) => string;
+
 const KIND_LABELS: Record<RecordKind, string> = {
   system: "SYSTEM",
   context: "CONTEXT",
@@ -1097,7 +1101,8 @@ function pushMemory(
 function pushSetting(
   state: BuildState,
   event: SessionEvent,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  label: AgentLabel
 ): void {
   if (event.kind === "model/selection") {
     const provider = stringOf(payload.provider);
@@ -1109,7 +1114,7 @@ function pushSetting(
       title += " · thinking " + effort;
     }
     if (agent) {
-      title += " · " + agent;
+      title += " · " + label(agent);
     }
     pushRecord(state, {
       key: "setting-" + event.seq,
@@ -1147,7 +1152,7 @@ function pushOther(
   });
 }
 
-function walk(events: SessionEvent[]): BuildState {
+function walk(events: SessionEvent[], label: AgentLabel): BuildState {
   const state = newState();
   const ordered = events.slice().sort((left, right) => left.seq - right.seq);
   for (const event of ordered) {
@@ -1205,7 +1210,7 @@ function walk(events: SessionEvent[]): BuildState {
         pushApprovalDecided(state, event, payload);
         break;
       case "approval/policy":
-        pushSetting(state, event, payload);
+        pushSetting(state, event, payload, label);
         break;
       case "question/asked":
         pushQuestionAsked(state, event, payload);
@@ -1214,7 +1219,7 @@ function walk(events: SessionEvent[]): BuildState {
         pushQuestionAnswered(state, event, payload);
         break;
       case "model/selection":
-        pushSetting(state, event, payload);
+        pushSetting(state, event, payload, label);
         break;
       case "compaction/summary":
         pushCompaction(state, event, payload);
@@ -1264,8 +1269,12 @@ function asSubtool(record: TrajRecord, prefix: string): TrajRecord {
 
 /* The child log keeps its own turns and steps, but the parent shows the
    child's assistant and tool records flat, one level deep (REQ-TRJ-009). */
-function childRecords(events: SessionEvent[], prefix: string): TrajRecord[] {
-  const child = walk(events);
+function childRecords(
+  events: SessionEvent[],
+  prefix: string,
+  label: AgentLabel
+): TrajRecord[] {
+  const child = walk(events, label);
   const records: TrajRecord[] = [];
   for (const record of child.topRecords) {
     if (record.kind === "assistant") {
@@ -1286,7 +1295,8 @@ function childRecords(events: SessionEvent[], prefix: string): TrajRecord[] {
 
 function attachChildren(
   state: BuildState,
-  childEvents: Record<string, SessionEvent[]>
+  childEvents: Record<string, SessionEvent[]>,
+  label: AgentLabel
 ): void {
   const childrenById = new Map<string, SessionEvent[]>();
   for (const id of Object.keys(childEvents || {})) {
@@ -1324,7 +1334,8 @@ function attachChildren(
     }
     record.children = childRecords(
       list,
-      "subtool-" + record.childSessionId + "-"
+      "subtool-" + record.childSessionId + "-",
+      label
     );
   }
 }
@@ -1386,10 +1397,11 @@ function collectRecords(state: BuildState): TrajRecord[] {
 
 export function buildTrajectory(
   events: SessionEvent[] | null | undefined,
-  childEvents: Record<string, SessionEvent[]> | null | undefined = {}
+  childEvents: Record<string, SessionEvent[]> | null | undefined = {},
+  agentLabel: AgentLabel = (name) => name
 ): Trajectory {
-  const state = walk(Array.isArray(events) ? events : []);
-  attachChildren(state, childEvents || {});
+  const state = walk(Array.isArray(events) ? events : [], agentLabel);
+  attachChildren(state, childEvents || {}, agentLabel);
   finalizeToolCounts(state);
   const records = collectRecords(state);
   const usage = emptyUsage();

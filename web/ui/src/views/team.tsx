@@ -43,6 +43,14 @@ export interface SharedTeamProps {
   childEvents?: Record<string, SessionEvent[]>;
   childLive?: Record<string, TurnView>;
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
+  /* labels maps an agent ID to its display name (falls back to the ID). */
+  labels?: Record<string, string>;
+}
+
+/* The name shown to people: the display label when known, else the ID. */
+function labelOf(labels: Record<string, string> | undefined, name: string): string {
+  const label = labels ? labels[name] : "";
+  return label || name;
 }
 
 /* Child logs carry the agent tag the session view adds (session.js) and the
@@ -615,6 +623,9 @@ function liveTextFor(
 export interface DelegationStepProps {
   from?: string;
   to?: string;
+  /* The human names; from/to stay the IDs for the avatar color. */
+  fromLabel?: string;
+  toLabel?: string;
   text?: string;
   status?: string;
   avatar?: string;
@@ -623,6 +634,8 @@ export interface DelegationStepProps {
 export function DelegationStep({
   from = "",
   to = "",
+  fromLabel = "",
+  toLabel = "",
   text = "",
   status = "",
   avatar = "",
@@ -635,8 +648,8 @@ export function DelegationStep({
       </span>
       <div className="team-step-body">
         <div className="team-step-head">
-          <span className="team-step-from">{from || "agent"}</span>
-          <span className="team-step-to">→ {to || LEAD}</span>
+          <span className="team-step-from">{fromLabel || from || "agent"}</span>
+          <span className="team-step-to">→ {toLabel || to || LEAD}</span>
           {status === "running" ? (
             <span className={"badge-ui team-badge-" + tone}>
               <span className="badge-ui-dot" aria-hidden="true"></span>Running
@@ -692,6 +705,7 @@ export function TeamWorkPanel({
   childEvents = {},
   childLive = {},
   onLoadChildren = null,
+  labels = {},
 }: SharedTeamProps) {
   const live = Boolean(turn && turn.running);
   const [open, setOpen] = useState(live);
@@ -734,6 +748,7 @@ export function TeamWorkPanel({
     [rootEvents]
   );
   const lead = team && team.lead ? String(team.lead) : LEAD;
+  const leadLabel = labelOf(labels, lead);
   const threadId =
     "team-work-" +
     String((turn && turn.id) || "turn").replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -847,6 +862,8 @@ export function TeamWorkPanel({
                   <DelegationStep
                     from={group.out.from}
                     to={group.out.to}
+                    fromLabel={leadLabel}
+                    toLabel={labelOf(labels, group.out.agent)}
                     text={group.out.text}
                     avatar={lead}
                   />
@@ -862,6 +879,8 @@ export function TeamWorkPanel({
                   <DelegationStep
                     from={group.ret.from}
                     to={group.ret.to}
+                    fromLabel={labelOf(labels, group.ret.agent)}
+                    toLabel={leadLabel}
                     text={group.ret.text}
                     avatar={group.ret.agent}
                   />
@@ -870,6 +889,8 @@ export function TeamWorkPanel({
                   <DelegationStep
                     from={group.out.agent}
                     to={LEAD}
+                    fromLabel={labelOf(labels, group.out.agent)}
+                    toLabel={leadLabel}
                     text={cut(liveText || "Working…", RETURN_LIMIT)}
                     status="running"
                     avatar={group.out.agent}
@@ -884,7 +905,7 @@ export function TeamWorkPanel({
         <div className="team-answer">
           <div className="team-answer-head">
             <AgentAvatar name={lead} size="20" />
-            <span className="team-answer-label">lead · answer</span>
+            <span className="team-answer-label">{leadLabel + " · answer"}</span>
           </div>
           <div className="team-answer-text">
             <Markdown text={answer} />
@@ -902,6 +923,7 @@ export function TeamBlock({
   childEvents = {},
   childLive = {},
   onLoadChildren = null,
+  labels = {},
 }: SharedTeamProps) {
   const members = Array.isArray(team && team.members) ? team.members : [];
   const lead = team && team.lead ? String(team.lead) : LEAD;
@@ -909,6 +931,7 @@ export function TeamBlock({
     .concat(members.map((name) => String(name || "")))
     .filter(Boolean);
   const shown = roster.slice(0, 3);
+  const teamName = team && team.name ? labelOf(labels, String(team.name)) : "Team";
   const startedAt =
     turnTimes(asTeamEvents(rootEvents)).startedAt ||
     Number(turn && turn.startedAt) ||
@@ -924,7 +947,7 @@ export function TeamBlock({
             <AgentAvatar key={name} name={name} size="24" />
           ))}
         </span>
-        <span className="team-name">{(team && team.name) || "Team"}</span>
+        <span className="team-name">{teamName}</span>
         <span className="badge-ui badge-ui-brand team-badge">
           <span className="badge-ui-dot" aria-hidden="true"></span>Team
         </span>
@@ -939,6 +962,7 @@ export function TeamBlock({
         childEvents={childEvents}
         childLive={childLive}
         onLoadChildren={onLoadChildren}
+        labels={labels}
       />
     </article>
   );

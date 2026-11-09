@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { DashboardErrorRow } from "../api/dashboard";
 import { Badge, Button, EmptyState, ErrorState, Panel, Seg } from "../ui/gr8r";
 import type { BadgeTone } from "../ui/gr8r";
+import { useAgentLabel } from "./agent-label";
 import {
   DashboardFilters,
   clockTime,
@@ -44,10 +45,12 @@ function ErrorLogRow({
   row,
   open,
   onToggle,
+  label,
 }: {
   row: DashboardErrorRow;
   open: boolean;
   onToggle: () => void;
+  label: (name: string) => string;
 }) {
   const sessionId = row.session_id || "";
   const href = sessionId
@@ -61,7 +64,7 @@ function ErrorLogRow({
         <Badge tone={SOURCE_TONES[source] || "gray"} dot>
           {SOURCE_LABELS[source] || source || "Other"}
         </Badge>
-        <span className="home-error-agent trunc">{row.agent || "—"}</span>
+        <span className="home-error-agent trunc">{row.agent ? label(row.agent) : "—"}</span>
         <button
           type="button"
           className={"home-error-message" + (open ? " is-open" : "")}
@@ -85,7 +88,7 @@ function ErrorLogRow({
           {row.agent ? (
             <>
               <dt>Agent</dt>
-              <dd>{row.agent}</dd>
+              <dd>{label(row.agent)}</dd>
             </>
           ) : null}
           {row.turn_id ? (
@@ -120,6 +123,7 @@ function errorKey(row: DashboardErrorRow, indexInSameMs: number): string {
 
 export function LogsPage() {
   const state = useDashboard("#/logs");
+  const label = useAgentLabel();
   const { data, agent, error } = state;
   const [errorFilter, setErrorFilter] = useState("all");
   const [openErrors, setOpenErrors] = useState<string[]>([]);
@@ -220,6 +224,7 @@ export function LogsPage() {
                     row={row}
                     open={openErrors.includes(key)}
                     onToggle={() => toggleError(key)}
+                    label={label}
                   />
                 ))}
               </ul>

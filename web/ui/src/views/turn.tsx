@@ -677,7 +677,10 @@ function TurnProcess({
 
 export interface TurnBlockProps {
   turn: Turn;
+  /* agent is the identity: the avatar color hash and the fallback label. */
   agent: string;
+  /* agentLabel is the human name to show, when it differs from the ID. */
+  agentLabel?: string;
   /* The resolved agent color of the room timeline (REQ-ROOM-001): when it is
      known the header shows the colored face; otherwise the legacy hashed
      avatar of the session view stays. */
@@ -687,6 +690,8 @@ export interface TurnBlockProps {
   thinking?: boolean;
   waitingForInput?: boolean;
   team?: { lead: string; members: string[] } | null;
+  /* teamLabels maps an agent ID to its display name for the team block. */
+  teamLabels?: Record<string, string>;
   rootEvents?: SessionEvent[];
   childEvents?: Record<string, SessionEvent[]>;
   childLive?: Record<string, Turn>;
@@ -702,11 +707,13 @@ export interface TurnBlockProps {
 export function TurnBlock({
   turn,
   agent,
+  agentLabel = "",
   agentColor = "",
   streamingText = "",
   thinking = false,
   waitingForInput = false,
   team = null,
+  teamLabels = {},
   rootEvents = [],
   childEvents = {},
   childLive = {},
@@ -740,6 +747,7 @@ export function TurnBlock({
         childEvents={childEvents}
         childLive={childLive}
         onLoadChildren={onLoadChildren}
+        labels={teamLabels}
       />
     );
   }
@@ -770,21 +778,22 @@ export function TurnBlock({
 
   const statusCard = showStatusCard ? turnEndCard(turn) : null;
   const parts = splitTurn(turn.groups);
+  const shownAgent = agentLabel || agent;
 
   return (
     <article className="turn">
       <div className="turn-head">
         {agentColor ? (
-          <AgentFace name={agent} color={agentColor} size={32} />
+          <AgentFace name={shownAgent} color={agentColor} size={32} />
         ) : (
           <span
             className={"agent-avatar tone-" + agentTone(agent)}
             aria-hidden="true"
           >
-            {agentInitial(agent)}
+            {agentInitial(shownAgent)}
           </span>
         )}
-        <span className="turn-agent">{agent}</span>
+        <span className="turn-agent">{shownAgent}</span>
         <span className="turn-status">{statusText}</span>
         <span className="turn-spacer"></span>
         <span className="turn-time">{formatClock(startedAt)}</span>

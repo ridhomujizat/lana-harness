@@ -16,6 +16,13 @@ import {
 } from "./agent-common";
 import type { AgentLike } from "./agent-common";
 import { useRooms } from "./presence";
+import {
+  AGENT_ID_HINT,
+  AGENT_ID_RULE,
+  MAX_DISPLAY_NAME,
+  displayLabel,
+  slugifyAgentName,
+} from "./agent-label";
 import type { RoomRow } from "../api/rooms";
 import {
   Avatar,
@@ -41,7 +48,6 @@ const TEMPLATES = [
   { value: "worker", label: "Worker", note: "Runs focused, repeatable work." },
 ] as const;
 
-const NAME_RULE = /^[a-z0-9-]+$/;
 
 /* The pulse order and wording of REQ-ROOM-011. */
 const PULSE_STATES: readonly { state: string; word: string }[] = [
@@ -131,6 +137,8 @@ export function CreateAgentDialog({
 }: CreateAgentDialogProps) {
   const announce = useAnnounce();
   const [name, setName] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [idTouched, setIdTouched] = useState(false);
   const [template, setTemplate] = useState<string>(TEMPLATES[0].value);
   const [workspace, setWorkspace] = useState("");
   const [busy, setBusy] = useState(false);
@@ -145,11 +153,20 @@ export function CreateAgentDialog({
     if (busy) {
       return;
     }
-    const value = name.trim();
-    if (!NAME_RULE.test(value)) {
+    const displayName = name.trim();
+    const value = (idTouched ? agentId : slugifyAgentName(displayName)).trim();
+    if (!displayName) {
+      setError("Enter a name for the agent, for example Omnix Lead.");
+      return;
+    }
+    if (Array.from(displayName).length > MAX_DISPLAY_NAME) {
       setError(
-        "The name must use lowercase letters, digits, and dashes, for example reviewer-2."
+        "The name must be at most " + MAX_DISPLAY_NAME + " characters."
       );
+      return;
+    }
+    if (!AGENT_ID_RULE.test(value)) {
+      setError("The ID is not valid. " + AGENT_ID_HINT);
       return;
     }
     setBusy(true);
@@ -161,11 +178,14 @@ export function CreateAgentDialog({
         template,
         workspace: workspace.trim(),
       };
+      if (displayName !== value) {
+        body.display_name = displayName;
+      }
       const created = await createAgent(body);
       const createdName = created && created.name ? created.name : value;
       announce(
         "Agent " +
-          createdName +
+          displayName +
           " created. Restart the daemon for it to take effect."
       );
       if (onCreated) {
@@ -175,7 +195,7 @@ export function CreateAgentDialog({
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409) {
         setError(
-          "An agent named " + value + " already exists. Pick another name."
+          "An agent with the ID " + value + " already exists. Change the ID."
         );
       } else {
         setError(errorMessage(failure));
@@ -203,14 +223,42 @@ export function CreateAgentDialog({
             name="name"
             value={name}
             autoComplete="off"
-            spellCheck={false}
-            pattern="[a-z0-9-]+"
+            placeholder="Omnix Lead"
+            maxLength={MAX_DISPLAY_NAME}
             required
             aria-describedby="create-agent-name-hint"
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setName(event.target.value);
+              if (!idTouched) {
+                setAgentId(slugifyAgentName(event.target.value));
+              }
+            }}
           />
           <span id="create-agent-name-hint" className="hint">
-            Lowercase letters, digits, and dashes.
+            The name people see, for example Omnix Lead.
+          </span>
+        </label>
+
+        <label className="field">
+          <span className="field-label">ID</span>
+          <input
+            type="text"
+            name="id"
+            value={agentId}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="omnix-lead"
+            maxLength={32}
+            required
+            aria-describedby="create-agent-id-hint"
+            onChange={(event) => {
+              setIdTouched(true);
+              setAgentId(event.target.value);
+            }}
+          />
+          <span id="create-agent-id-hint" className="hint">
+            Used in links, the config file, and @mentions. Filled in from the
+            name. You cannot change it later.
           </span>
         </label>
 
@@ -291,6 +339,7 @@ function matchesQuery(agent: AgentLike, query: string): boolean {
   }
   const fields: unknown[] = [
     agent.name,
+    agent.display_name,
     agent.description,
     agent.provider,
     agent.model,
@@ -361,7 +410,7 @@ function AgentCard({
           />
         ) : (
           <Avatar
-            name={agent.name}
+            name={displayLabel(agent)}
             color={agentColor(agent.name)}
             size="md"
             presence={state === "online" || state === "working"}
@@ -369,7 +418,7 @@ function AgentCard({
         )}
         <div className="agent-card-id">
           <a className="agent-card-name" href={agentHref(agent.name)}>
-            {agent.name}
+            {displayLabel(agent)}
           </a>
           <span className="agent-card-role">{role}</span>
         </div>

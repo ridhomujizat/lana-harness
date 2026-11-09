@@ -3,6 +3,17 @@ import { render, screen } from "@testing-library/react";
 import type { ListSessionsResponse, Session } from "../api/sessions";
 import { SessionsPage } from "./sessions";
 
+/* The session list resolves its agent labels from the shared rooms store, so
+   that store is stubbed with no rows and the ID stays the fallback label. */
+vi.mock("../api/rooms", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/rooms")>();
+  return {
+    ...actual,
+    listRooms: vi.fn().mockResolvedValue([]),
+    openRoomsStream: vi.fn(() => ({ close: () => {} })),
+  };
+});
+
 function stubSessionsFetch(sessions: Session[]) {
   const body: ListSessionsResponse = {
     sessions,

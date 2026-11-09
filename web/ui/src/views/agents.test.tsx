@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 /* REQ-ROOM-011: the roster pulse and the cards. The agent list and the live
    rooms store are mocked so the pulse counts and the context action can be
@@ -13,7 +13,7 @@ vi.mock("../api/rooms", async (importOriginal) => {
   return { ...actual, listRooms: vi.fn(), openRoomsStream: vi.fn() };
 });
 
-import { listAgents } from "../api/agents";
+import { createAgent, listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
 import { openRoomsStream } from "../api/rooms";
 import type { RoomRow } from "../api/rooms";
@@ -159,5 +159,47 @@ describe("Agents roster (AC-ROOM-019)", () => {
     expect(await screen.findByRole("link", { name: "dana" })).toBeTruthy();
     expect(screen.getByText("Finance")).toBeTruthy();
     expect(screen.getByText("Hire a new agent")).toBeTruthy();
+  });
+});
+
+/* The create dialog splits the human name from the ID: the name people see is
+   free text and the ID is filled in from it until the owner edits the ID. */
+describe("Create agent dialog", () => {
+  beforeEach(() => {
+    /* jsdom has no modal dialog implementation. */
+    HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
+      this.open = false;
+    };
+    vi.mocked(listAgents).mockResolvedValue({ agents: [] });
+    installRows([]);
+  });
+
+  it("slugs the name into the ID and sends both", async () => {
+    vi.mocked(createAgent).mockResolvedValue({
+      name: "omnix-lead",
+      restart_required: true,
+    });
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Hire an agent" }));
+
+    const name = screen.getByLabelText(/^Name/) as HTMLInputElement;
+    const id = screen.getByLabelText(/^ID/) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Omnix Lead" } });
+    expect(id.value).toBe("omnix-lead");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createAgent)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "omnix-lead",
+          display_name: "Omnix Lead",
+        })
+      );
+    });
   });
 });

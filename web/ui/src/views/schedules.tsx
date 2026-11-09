@@ -5,6 +5,7 @@ import type { Run, WfNode, Workflow } from "../api/workflows";
 import { Ic } from "../ui/icons";
 import { Badge, Button, EmptyState, ErrorState, Seg, useToast } from "../ui/gr8r";
 import { nextCron } from "./cron-next";
+import { useAgentLabel } from "./agent-label";
 import { describeCron, isTrigger, nodeMeta } from "./workflow-catalog";
 import {
   RUN_TONES,
@@ -30,7 +31,11 @@ interface TriggerRow {
   live: boolean;
 }
 
-function triggerText(node: WfNode, workflow: Workflow): { title: string; detail: string } {
+function triggerText(
+  node: WfNode,
+  workflow: Workflow,
+  label: (name: string) => string
+): { title: string; detail: string } {
   const p = node.params || {};
   switch (node.type) {
     case "trigger.schedule":
@@ -42,7 +47,7 @@ function triggerText(node: WfNode, workflow: Workflow): { title: string; detail:
     case "trigger.chat":
       return { title: "/" + String(p.command || ""), detail: "Web chat and Telegram owner chat" };
     case "trigger.event":
-      return { title: String(p.kind || ""), detail: "Lana event" + (p.agent ? " · " + String(p.agent) : "") };
+      return { title: String(p.kind || ""), detail: "Lana event" + (p.agent ? " · " + label(String(p.agent)) : "") };
     default:
       return { title: "Run button", detail: "Manual" };
   }
@@ -85,11 +90,13 @@ function TriggerList({
   list,
   now,
   busy,
+  label,
   onRun,
 }: {
   list: TriggerRow[];
   now: number;
   busy: string;
+  label: (name: string) => string;
   onRun: (workflow: Workflow) => void;
 }) {
   return (
@@ -103,7 +110,7 @@ function TriggerList({
       </div>
       {list.map((row) => {
         const meta = nodeMeta(row.node.type);
-        const text = triggerText(row.node, row.workflow);
+        const text = triggerText(row.node, row.workflow, label);
         const when = whenText(row, now);
         return (
           <div className={"sch-tr" + (row.live ? "" : " off")} role="row" key={row.workflow.id + row.node.id}>
@@ -123,7 +130,7 @@ function TriggerList({
             <a className="sch-cell sch-wf" href={"#/workflows/" + encodeURIComponent(row.workflow.id)}>
               <span className="trunc">{row.workflow.name}</span>
               <small className="trunc">
-                Guarded by {row.workflow.guardian} · v{row.workflow.version}
+                Guarded by {label(row.workflow.guardian)} · v{row.workflow.version}
               </small>
             </a>
             <span>
@@ -150,6 +157,7 @@ function TriggerList({
 
 export function SchedulesPage() {
   const toast = useToast();
+  const label = useAgentLabel();
   const now = useNow(30000);
   const [workflows, setWorkflows] = useState<Workflow[] | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -299,7 +307,7 @@ export function SchedulesPage() {
           />
         </div>
       ) : null}
-      {shownRows.length > 0 ? <TriggerList list={shownRows} now={now} busy={busy} onRun={(wf) => void runNow(wf)} /> : null}
+      {shownRows.length > 0 ? <TriggerList list={shownRows} now={now} busy={busy} label={label} onRun={(wf) => void runNow(wf)} /> : null}
 
       <h2 className="sch-h2">Recent runs</h2>
       {workflows && runs.length === 0 ? (

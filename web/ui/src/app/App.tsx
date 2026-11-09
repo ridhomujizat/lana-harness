@@ -17,6 +17,7 @@ import type { Route } from "./router";
 import { Sidebar, readCollapsed, saveCollapsed } from "./Sidebar";
 import type { DaemonCard } from "./Sidebar";
 import { useAnnounce } from "../ui/ui";
+import { useAgentLabel } from "../views/agent-label";
 import { Ic } from "../ui/icons";
 import { LoginLoading, LoginPage } from "../views/login";
 import { WelcomePage } from "../views/welcome";
@@ -178,8 +179,12 @@ function titleCase(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-/* The topbar trail, e.g. "Agents / cody", "Settings / Providers". */
-export function crumbsFor(route: Route): Crumb[] {
+/* The topbar trail, e.g. "Agents / cody", "Settings / Providers". The label
+   resolver turns an agent ID into its display name. */
+export function crumbsFor(
+  route: Route,
+  label: (name: string | null | undefined) => string
+): Crumb[] {
   const params = route.params || {};
   switch (route.view) {
     case "home":
@@ -189,7 +194,7 @@ export function crumbsFor(route: Route): Crumb[] {
     case "chat":
       return [
         { label: "Chats", href: "#/chats" },
-        { label: params.name || "Chat" },
+        { label: label(params.name) || "Chat" },
       ];
     case "logs":
       return [{ label: "Logs" }];
@@ -219,7 +224,7 @@ export function crumbsFor(route: Route): Crumb[] {
     case "agent":
       return [
         { label: "Agents", href: "#/agents" },
-        { label: params.name || "Agent" },
+        { label: label(params.name) || "Agent" },
       ];
     case "skills":
       return [{ label: "Skills" }];
@@ -342,6 +347,7 @@ export function App() {
     window.setTimeout(() => node.classList.add("settled"), 700);
   }, []);
   const announce = useAnnounce();
+  const label = useAgentLabel();
   const [auth, setAuth] = useState<AuthState>("checking");
   const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -514,7 +520,7 @@ export function App() {
   }
 
   const daemon = daemonCard(daemonInfo);
-  const crumbs = crumbsFor(route);
+  const crumbs = crumbsFor(route, label);
   return (
     <div
       className={

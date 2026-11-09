@@ -154,6 +154,8 @@ export function entryLabel(entry: Entry): string {
 export interface EntryHandlers {
   onOpen: (entry: Entry, anchor: HTMLElement) => void;
   fallback: boolean;
+  /* label resolves an agent ID name to its display name, "" when unset. */
+  label?: (name: string) => string;
 }
 
 function dragStart(event: DragEvent<HTMLElement>, entry: Entry) {
@@ -192,14 +194,14 @@ export function EntryChip({ entry, onOpen, fallback, showTime = true }: EntryHan
   );
 }
 
-export function EntryCard({ entry, onOpen, fallback }: EntryHandlers & { entry: Entry }) {
+export function EntryCard({ entry, onOpen, fallback, label }: EntryHandlers & { entry: Entry }) {
   const agent = agentOf(entry);
   const draggable = canDrag(entry, fallback);
   const sub =
     entry.source === "workflow_run"
       ? "Run #" + (entry.workflow?.run_number || "") + " · " + entry.status
       : entry.source === "workflow_slot"
-        ? (entry.status === "skipped" ? "Skipped" : entry.moved ? "Moved" : "Workflow") + " · " + (entry.workflow?.guardian || "")
+        ? (entry.status === "skipped" ? "Skipped" : entry.moved ? "Moved" : "Workflow") + " · " + (label ? label(entry.workflow?.guardian || "") : entry.workflow?.guardian || "")
         : entry.source === "google"
           ? entry.google?.calendar_name || "Google"
           : entry.kind[0]!.toUpperCase() + entry.kind.slice(1);
@@ -422,7 +424,7 @@ export function WeekView({
                 </div>
               ) : null}
               {timed.map((entry) => (
-                <EntryCard key={entry.key} entry={entry} onOpen={handlers.onOpen} fallback={handlers.fallback} />
+                <EntryCard key={entry.key} entry={entry} onOpen={handlers.onOpen} fallback={handlers.fallback} label={handlers.label} />
               ))}
               {list.length === 0 ? <span className="wcol-empty">Nothing</span> : null}
             </div>
@@ -516,7 +518,7 @@ export function DayView({
                   width: "calc(" + 100 / slot.lanes + "% - 4px)",
                 }}
               >
-                <EntryCard entry={slot.entry} onOpen={handlers.onOpen} fallback={handlers.fallback} />
+                <EntryCard entry={slot.entry} onOpen={handlers.onOpen} fallback={handlers.fallback} label={handlers.label} />
               </div>
             ))}
           </div>

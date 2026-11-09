@@ -172,6 +172,9 @@ export function SkeletonRows({ count = 3 }: { count?: number }) {
 
 export interface FaceRef {
   name: string;
+  /* label is the human name to show; name stays the ID for the color and the
+     identity checks. It falls back to name when unset. */
+  label?: string;
   color?: string;
   presence?: Presence | null;
 }
