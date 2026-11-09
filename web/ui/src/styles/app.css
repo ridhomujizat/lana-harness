@@ -2443,6 +2443,18 @@ pre.json {
   white-space: pre-wrap;
 }
 
+/* API reply: the muted quote line of an owner reply, above its text. */
+.chat-bubble-quote {
+  display: block;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .chat-empty {
   display: flex;
   flex-direction: column;

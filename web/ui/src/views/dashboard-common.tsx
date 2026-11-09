@@ -3,6 +3,7 @@ import { errorMessage } from "../api/client";
 import { getDashboard } from "../api/dashboard";
 import type { Dashboard, DashboardRange } from "../api/dashboard";
 import { Button, Seg, Select } from "../ui/gr8r";
+import { agentOptionIcon } from "./agent-avatar";
 import { useAgentLabel } from "./agent-label";
 
 /* Shared state and helpers of the monitoring pages (spec 28): Home shows the
@@ -253,7 +254,11 @@ export function DashboardFilters({ state }: { state: DashboardState }) {
           placeholder="All agents"
           options={[
             { value: "", label: "All agents" },
-            ...state.agentOptions.map((name) => ({ value: name, label: label(name) })),
+            ...state.agentOptions.map((name) => ({
+              value: name,
+              label: label(name),
+              icon: agentOptionIcon(name),
+            })),
           ]}
           value={state.agent}
           onChange={state.setAgent}

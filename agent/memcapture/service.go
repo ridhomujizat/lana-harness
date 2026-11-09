@@ -4,6 +4,7 @@ package memcapture
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/secretlike"
 )
 
@@ -95,9 +97,20 @@ func (s *Service) run(req core.CaptureRequest) {
 	// REQ-ATT-007: the capture transcript shows an image as its placeholder
 	// text, never as image bytes.
 	history = withoutImages(history)
-	provider, ok := s.LLM.Provider(req.Provider)
+	chain, requested, ok := s.chain(req)
 	if !ok {
 		s.warn("provider is not registered", req, nil)
+		return
+	}
+	// REQ-CCT-007: the pass never uses Claude Code: the rest of the chain,
+	// else [router] background_model, else it is skipped.
+	chain, requested, err = llmcall.BackgroundChain(s.LLM, chain, requested)
+	if errors.Is(err, llmcall.ErrNoBackgroundModel) {
+		llmcall.WarnNoBackground(req.AgentName, "memory_capture")
+		return
+	}
+	if err != nil {
+		s.warn("background model", req, err)
 		return
 	}
 	userEntries, _ := agenthome.ReadEntries(agenthome.SharedUser(req.Home))
@@ -105,9 +118,14 @@ func (s *Service) run(req core.CaptureRequest) {
 	messages := append(history, core.Message{Role: core.RoleUser, Content: []core.ContentBlock{
 		{Kind: core.BlockText, Text: captureInstruction(userEntries, memoryEntries)},
 	}})
-	stream, err := provider.Stream(ctx, core.ChatRequest{
-		Model: req.Model, System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: captureMaxTokens, ReasoningEffort: req.ReasoningEffort,
-	})
+	// REQ-RTR-007: the pass goes through the turn's chain, so it gets the
+	// same fallback and is recorded with source memory_capture.
+	stream, _, err := llmcall.Stream(ctx, s.LLM, chain, core.ChatRequest{
+		System: req.System, Messages: messages, Tools: req.Tools, MaxTokens: captureMaxTokens, ReasoningEffort: req.ReasoningEffort,
+	}, core.LLMCallMeta{
+		Source: llmcall.SourceMemoryCapture, Agent: req.AgentName, SessionID: req.SessionID,
+		TurnID: req.TurnID, Requested: requested,
+	}, nil)
 	if err != nil {
 		s.warn("stream failed", req, err)
 		return
@@ -154,6 +172,40 @@ func (s *Service) run(req core.CaptureRequest) {
 	}
 	slog.Info("memory captured", "agent", req.AgentName, "session_id", req.SessionID, "turn_id", req.TurnID, "count", len(applied),
 		"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens, "cached_input_tokens", usage.CachedInputTokens)
+}
+
+// chain returns the chain of a pass: the turn's chain when the request
+// carries it, else its provider and model, else the agent's configured chain.
+// ok is false when no target is known or the provider is not registered.
+func (s *Service) chain(req core.CaptureRequest) ([]core.LLMTarget, string, bool) {
+	if s.LLM == nil {
+		return nil, "", false
+	}
+	if len(req.Targets) > 0 {
+		requested := req.Requested
+		if requested == "" {
+			requested = llmcall.Address(req.Targets[0])
+		}
+		return req.Targets, requested, true
+	}
+	if req.Provider != "" && req.Model != "" {
+		if _, ok := s.LLM.Provider(req.Provider); !ok {
+			return nil, "", false
+		}
+		return []core.LLMTarget{{Provider: req.Provider, Model: req.Model}}, llmcall.Requested(req.Provider, req.Model), true
+	}
+	if s.LookupAgent == nil {
+		return nil, "", false
+	}
+	cfg, ok := s.LookupAgent(req.AgentName)
+	if !ok {
+		return nil, "", false
+	}
+	chain, requested, err := llmcall.AgentChain(s.LLM, cfg)
+	if err != nil {
+		return nil, "", false
+	}
+	return chain, requested, true
 }
 
 // apply writes one validated op to its memory file. An error is logged and the

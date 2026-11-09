@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -76,6 +77,9 @@ func (s *Store) Create(ctx context.Context, in core.NewSession) (core.SessionInf
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
+	if in.Title != "" && validTitleSource(in.TitleSource) && in.TitleSource != "" {
+		info.Title, info.TitleSource = in.Title, in.TitleSource
+	}
 	sess := &session{info: info}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -120,6 +124,39 @@ func (s *Store) Info(ctx context.Context, sessionID string) (core.SessionInfo, e
 		return core.SessionInfo{}, fmt.Errorf("%w: session %s", core.ErrNotFound, sessionID)
 	}
 	return sess.info, nil
+}
+
+// validTitleSource reports whether source is a stored title source (spec 40).
+func validTitleSource(source string) bool {
+	switch source {
+	case "", core.TitleSourceAuto, core.TitleSourceOwner, core.TitleSourceSystem:
+		return true
+	}
+	return false
+}
+
+// SetSessionTitle implements core.SessionTitleStore (spec 40).
+func (s *Store) SetSessionTitle(ctx context.Context, sessionID, title, source string, onlyIfUntitled bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !validTitleSource(source) {
+		return false, fmt.Errorf("invalid title source %q", source)
+	}
+	if title == "" {
+		source = ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		return false, fmt.Errorf("%w: session %s", core.ErrNotFound, sessionID)
+	}
+	if onlyIfUntitled && sess.info.TitleSource != "" {
+		return false, nil
+	}
+	sess.info.Title, sess.info.TitleSource = title, source
+	return true, nil
 }
 
 // Append writes drafts in one transaction.
@@ -367,6 +404,9 @@ func (s *Store) List(ctx context.Context, filter core.SessionFilter) ([]core.Ses
 			continue
 		}
 		if filter.Agent != "" && info.Agent != filter.Agent {
+			continue
+		}
+		if len(filter.ExcludeChannels) > 0 && slices.Contains(filter.ExcludeChannels, info.Channel) {
 			continue
 		}
 		if filter.TopLevelOnly && info.ParentSessionID != "" {

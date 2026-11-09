@@ -496,3 +496,40 @@ describe("buildTrajectory subagents", () => {
     expect(tool?.childSessionId).toBe("child-1");
   });
 });
+
+describe("runtime session meta", () => {
+  /* API-CCR-002: a system/message of subtype "runtime" is the Claude Code
+     session meta. It shows as a small setting chip, never as an empty system
+     prompt, and does not count as the first prompt head. */
+  const log: SessionEvent[] = [
+    event(1, "session/created", "", { agent: "claude" }),
+    event(2, "turn/start", "t1", { turn_id: "t1" }, 1000),
+    event(
+      3,
+      "system/message",
+      "t1",
+      {
+        v: 1,
+        subtype: "runtime",
+        runtime: "claude-code",
+        claude_session_id: "6f1c0d2e-0000-4000-8000-000000000000",
+        model: "claude-opus-5",
+        tools: ["Bash"],
+        version: "2.1.319",
+      },
+      1100
+    ),
+    event(4, "turn/end", "t1", { reason: "end_turn" }, 2000),
+    event(5, "system/message", "", { text: "Head", sections: [{ name: "Role", text: "v1" }] }, 3000),
+  ];
+
+  it("renders a Claude Code session chip instead of a system record", () => {
+    const trajectory = buildTrajectory(log, {});
+    const records = allRecords(trajectory);
+    const systems = records.filter((record) => record.kind === "system");
+    expect(systems.map((record) => record.title)).toEqual(["System prompt · Role"]);
+    const chip = records.find((record) => record.seqs.includes(3));
+    expect(chip?.kind).toBe("setting");
+    expect(chip?.title).toBe("Claude Code session · claude-opus-5 · 2.1.319");
+  });
+});

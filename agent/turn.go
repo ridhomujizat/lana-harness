@@ -17,7 +17,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
-	"github.com/ridhomujizat/lana-harness/internal/models"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // Runner holds the state of one session.
@@ -37,13 +37,29 @@ type Runner struct {
 	// block this session (REQ-KNW-050). It is in memory, so a restart forgets
 	// it.
 	knowledgeShown map[string]bool
+	// externalRT is the runtime of the running external turn, nil otherwise
+	// (ADR 0018). Cancel interrupts it.
+	externalRT core.AgentRuntime
 }
 
-// inboxItem is one queued owner message: its text and the workspace-relative
-// paths of its attachments (REQ-ATT-002).
+// inboxItem is one queued owner message: its text, the workspace-relative
+// paths of its attachments (REQ-ATT-002), and the automation message it
+// replies to, when it is a reply.
 type inboxItem struct {
 	text        string
 	attachments []string
+	replyTo     *core.ReplyRef
+}
+
+// replyQuoteBlock is the injected text block of a reply: the note naming the
+// automation message the owner replied to, then its quoted text. Being a normal
+// user-message block, it stays in history for later turns.
+func replyQuoteBlock(reply *core.ReplyRef) string {
+	via := reply.Source
+	if reply.SourceName != "" {
+		via = "workflow " + reply.SourceName
+	}
+	return "[The owner is replying to this message you posted via " + via + "]\n" + reply.Text
 }
 
 func (rn *Runner) popInbox() (inboxItem, bool) {
@@ -127,12 +143,28 @@ func (rn *Runner) runChain(ctx context.Context, initial inboxItem, turnID, conti
 }
 
 type resolvedAgent struct {
-	name       string
-	team       string
-	delegates  []string
-	roster     []agenthome.RosterEntry
-	provider   string
-	model      string
+	name      string
+	team      string
+	delegates []string
+	roster    []agenthome.RosterEntry
+	// provider and model are the first target of chain, the primary of
+	// lana's loop; empty when chain is empty.
+	provider string
+	model    string
+	// fullChain is the primary followed by the combo's other models or the
+	// agent's fallback entries (REQ-RTR-003), Claude Code targets included.
+	fullChain []core.LLMTarget
+	// chain is fullChain without its Claude Code targets: the targets lana's
+	// own loop calls (ADR 0020).
+	chain []core.LLMTarget
+	// cfg is the agent's config, legacy runtime key mapped (API-CCT-002).
+	cfg core.AgentConfig
+	// claudeEffort is the reasoning effort of a Claude Code turn: the
+	// session's, else the agent's, without the catalog default.
+	claudeEffort string
+	// requested is the combo or address the agent asked for, recorded by
+	// the router.
+	requested  string
 	promptFile string
 	channel    string
 	workspace  string
@@ -140,7 +172,6 @@ type resolvedAgent struct {
 	disabled   []string
 	mcp        []string
 	skills     []string
-	fallback   []core.LLMTarget
 	maxSteps   int
 	child      bool
 	// vision reports whether the model can see images. The agent key wins over
@@ -193,17 +224,33 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if !ok {
 		return resolvedAgent{}, fmt.Errorf("%w: %s", ErrUnknownAgent, cfgName)
 	}
+	cfg = llmcall.NormalizeAgent(cfg)
 	provider, model := cfg.Provider, cfg.Model
 	if hasSelection && teamName == "" {
-		if selection.Provider != "" {
-			provider = selection.Provider
-		}
-		if selection.Model != "" {
-			model = selection.Model
-		}
+		provider, model = llmcall.Select(provider, model, selection)
 	}
-	if provider == "" || model == "" {
+	if model == "" {
 		return resolvedAgent{}, fmt.Errorf("agent %s has no provider or model set", cfgName)
+	}
+	// REQ-RTR-003: the legacy provider + model, or a combo or address,
+	// followed by the agent's fallback entries.
+	targets, err := llmcall.Chain(rn.reg.llm, provider, model, cfg.Fallback)
+	if err != nil {
+		return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
+	}
+	requested := llmcall.Requested(provider, model)
+	// ADR 0020: Claude Code targets run in the Claude Code runtime, never in
+	// lana's loop; runTurn dispatches them.
+	fullChain := targets
+	targets = llmcall.WithoutClaudeCode(rn.reg.llm, fullChain)
+	// Spec 39 revision 5: a background-work session (a workflow guardian's
+	// structured call) runs on the background chain, never in Claude Code.
+	if rn.reg.isBackground(rn.sessionID) {
+		background, backgroundRequested, err := llmcall.BackgroundChain(rn.reg.llm, fullChain, requested)
+		if err != nil {
+			return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
+		}
+		fullChain, targets, requested = background, background, backgroundRequested
 	}
 	workspace := info.Workspace
 	if workspace == "" {
@@ -225,22 +272,23 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if hasSelection && selection.ReasoningEffort != "" {
 		effort = selection.ReasoningEffort
 	}
-	if effort == "" {
-		if known, ok := models.Lookup(model); ok {
-			effort = known.DefaultEffort
-		}
+	// "off" has no --effort value, so a Claude Code turn leaves it out.
+	claudeEffort := effort
+	if claudeEffort == "off" {
+		claudeEffort = ""
+	}
+	// The effort default and the vision flag come from the first target.
+	known, knownOK := llmcall.Lookup(targets)
+	if effort == "" && knownOK {
+		effort = known.DefaultEffort
 	}
 	// REQ-ATT-003: the agent key wins over the catalog flag; an unknown model
 	// is not a vision model unless the agent sets vision = true.
 	vision := false
 	if cfg.Vision != nil {
 		vision = *cfg.Vision
-	} else if known, ok := models.Lookup(model); ok {
+	} else if knownOK {
 		vision = known.Vision
-	}
-	fallback, err := parseFallback(cfg.Fallback)
-	if err != nil {
-		return resolvedAgent{}, err
 	}
 	delegates := append([]string{}, cfg.Subagents...)
 	if teamName != "" {
@@ -263,13 +311,22 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	if overlay, ok := rn.reg.agentServers(cfgName); ok {
 		mcpServers = overlay
 	}
+	primary := core.LLMTarget{}
+	if len(targets) > 0 {
+		primary = targets[0]
+	}
 	return resolvedAgent{
 		name:            cfgName,
 		team:            teamName,
 		delegates:       delegates,
 		roster:          roster,
-		provider:        provider,
-		model:           model,
+		provider:        primary.Provider,
+		model:           primary.Model,
+		fullChain:       fullChain,
+		chain:           targets,
+		cfg:             cfg,
+		claudeEffort:    claudeEffort,
+		requested:       requested,
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
 		workspace:       workspace,
@@ -277,13 +334,97 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		disabled:        cfg.DisabledTools,
 		mcp:             mcpServers,
 		skills:          cfg.Skills,
-		fallback:        fallback,
 		maxSteps:        maxSteps,
 		child:           info.ParentSessionID != "",
 		vision:          vision,
 		workspaceOnly:   cfg.WorkspaceOnly,
 		reasoningEffort: effort,
 	}, nil
+}
+
+// offeredTools returns the tools a turn of the resolved agent offers, the MCP
+// servers that are not available with their reason, and the visible skills.
+// Native turns and Claude Code turns share it (REQ-CCT-006).
+func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]string, map[string]string, []agenthome.Skill) {
+	// REQ-TB-004, REQ-TB-008: a tool an agent lists but nothing has
+	// registered (a command of a package that is not installed) is not
+	// offered. A later registration (the toolbox sync) makes it available on
+	// the next turn without a restart.
+	tools := rn.reg.registeredTools(resolved.tools)
+	var unavailable map[string]string
+	if len(resolved.mcp) > 0 {
+		if mcp := rn.reg.mcpManager(); mcp != nil {
+			names, unavail := mcp.Ensure(ctx, resolved.mcp)
+			tools = append(tools, names...)
+			unavailable = unavail
+		}
+		// REQ-TFB-008 item 2: every server the runtime does not know is listed
+		// as "not loaded".
+		unavailable = unknownMCP(resolved.mcp, tools, unavailable)
+	}
+	var skills []agenthome.Skill
+	if rn.reg.home != "" {
+		skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
+	}
+	// REQ-AMCP-001: skill_load, mcp_manage, and the team tools are offered
+	// without being listed in tools. REQ-CAL-009: so is the calendar tool when
+	// it is registered. The dashboard catalog reads the same helper so the two
+	// cannot drift.
+	_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
+	_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
+	for _, name := range AutoOfferedTools(AutoOfferState{
+		Root:                !resolved.child,
+		MCPManageRegistered: mcpManageRegistered,
+		VisibleSkills:       len(skills) > 0,
+		Team:                resolved.team != "" || len(resolved.delegates) > 0,
+		CalendarRegistered:  calendarRegistered,
+	}) {
+		if !containsString(tools, name) {
+			tools = append(tools, name)
+		}
+	}
+	// REQ-JOB-015: an agent offered bash also gets the job tools without
+	// listing them. It runs before disabled_tools so a disabled job tool is
+	// removed like any other.
+	tools = addCompanionTools(tools, resolved.disabled, func(name string) bool {
+		_, ok := rn.reg.tools.Get(name)
+		return ok
+	})
+	// disabled_tools removes a name from the offered list. It is applied after
+	// the built-in, MCP, skill, and team tools are collected so a disabled
+	// team or skill tool is removed as well (AC-WEB-049, Q-024).
+	tools = filterDisabledTools(tools, resolved.disabled)
+	// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
+	sort.Strings(tools)
+	return tools, unavailable, skills
+}
+
+// toolCtx is the tool context of one turn's calls.
+func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID string) core.ToolCtx {
+	var mcpAdmin core.MCPAdmin
+	if !resolved.child {
+		mcpAdmin = rn.reg.mcpAdminFor()
+	}
+	// REQ-SSR-010: session_search reads the conversation index when the store
+	// provides one.
+	var sessions core.SessionSearcher
+	if searcher, ok := rn.reg.store.(core.SessionSearcher); ok {
+		sessions = searcher
+	}
+	return core.ToolCtx{
+		SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
+		WorkspaceOnly: resolved.workspaceOnly,
+		Skills:        resolved.skills,
+		Questions:     rn.reg.questions,
+		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+		MCPAdmin:      mcpAdmin,
+		MCPStatus:     rn.reg.ServerStatus,
+		AllowedAgents: resolved.delegates,
+		Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
+		Jobs:          rn.reg.jobs,
+		Sessions:      sessions,
+		Knowledge:     rn.reg.knowledgeService(),
+	}
 }
 
 // mergeDelegates joins groups in order and drops duplicates.
@@ -300,18 +441,6 @@ func mergeDelegates(groups ...[]string) []string {
 		}
 	}
 	return out
-}
-
-func parseFallback(list []string) ([]core.LLMTarget, error) {
-	out := make([]core.LLMTarget, 0, len(list))
-	for _, item := range list {
-		provider, model, ok := strings.Cut(item, ":")
-		if !ok || provider == "" || model == "" {
-			return nil, fmt.Errorf("invalid fallback: %s", item)
-		}
-		out = append(out, core.LLMTarget{Provider: provider, Model: model})
-	}
-	return out, nil
 }
 
 func normalizePath(path string) (string, error) {
@@ -584,6 +713,11 @@ func (rn *Runner) promptHead(ctx context.Context) (promptHead, error) {
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				return promptHead{}, err
 			}
+			// An external runtime's session meta and a note are not a prompt
+			// head (API-CCR-002, REQ-CCT-006).
+			if payload.Subtype != "" {
+				continue
+			}
 			head.exists = true
 			head.text = payload.Text
 			head.compacted = false
@@ -650,15 +784,80 @@ func removedHeading(text string) string {
 	return text
 }
 
-func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) (result TurnResult) {
-	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
+// scheduledClaudeMessage is the turn error of a scheduled run whose chain has
+// only Claude Code targets on an agent without allow_scheduled (REQ-CCT-008).
+func scheduledClaudeMessage(agent string) string {
+	return fmt.Sprintf("claude-code is not allowed for scheduled runs of agent '%s'", agent)
+}
+
+// allowScheduled reports whether a scheduled run may use the Claude Code
+// target (REQ-CCT-008, REQ-CCT-010): the account's allow_scheduled or the
+// agent's legacy key.
+func allowScheduled(llm core.LLMRegistry, target core.LLMTarget, cfg core.AgentConfig) bool {
+	account, _ := llmcall.ClaudeCodeAccount(llm, target.Provider)
+	return account.AllowScheduled || cfg.AllowScheduled
+}
+
+// runTurn picks the engine of one turn (REQ-CCT-003): when the first
+// available target of the chain is a Claude Code address, the turn runs in
+// the Claude Code runtime; otherwise, or after a Claude Code failure before
+// any output, it runs in lana's own loop with the rest of the chain
+// (REQ-CCT-004).
+func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) TurnResult {
+	resolved, err := rn.resolve(ctx)
+	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(rn.reg.llm, resolved.fullChain[0]) {
+		// REQ-CCT-008: a scheduled run uses Claude Code only with
+		// allow_scheduled (the account's or the agent's); else the next
+		// target outside Claude Code runs.
+		if rn.reg.isScheduled(rn.sessionID) && !allowScheduled(rn.reg.llm, resolved.fullChain[0], resolved.cfg) {
+			if len(resolved.chain) == 0 {
+				return rn.failTurn(ctx, turnID, &core.ProviderError{Class: "client", Message: scheduledClaudeMessage(resolved.name)})
+			}
+		} else {
+			result, fallback := rn.runExternalTurn(ctx, initial, turnID, continueReason, resolved)
+			if !fallback {
+				return result
+			}
+			return rn.runNativeTurn(ctx, initial, turnID, continueReason, nativeResume{started: true, userStored: true})
+		}
+	}
+	return rn.runNativeTurn(ctx, initial, turnID, continueReason, nativeResume{})
+}
+
+// failTurn writes a turn that fails before it starts: turn/start and turn/end
+// with the error.
+func (rn *Runner) failTurn(ctx context.Context, turnID string, pe *core.ProviderError) TurnResult {
 	writeCtx := context.WithoutCancel(ctx)
 	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
 	if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnStart, TurnID: turnID, Payload: core.TurnStart{V: core.PayloadVersion, TurnID: turnID}}); err != nil {
 		slog.Error("failed to write turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
-		result.StopReason = "error"
-		result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
-		return result
+	}
+	end := core.TurnEnd{V: core.PayloadVersion, TurnID: turnID, Reason: "error", Error: &core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
+	if err := writeTurnEnd(writeCtx, events, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
+		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
+	}
+	return TurnResult{SessionID: rn.sessionID, TurnID: turnID, StopReason: "error", Err: pe}
+}
+
+// nativeResume continues a turn in lana's loop after a Claude Code target
+// failed before output (REQ-CCT-004): turn/start and the owner message are
+// already stored, so the loop starts with a model step over the history.
+type nativeResume struct {
+	started    bool
+	userStored bool
+}
+
+func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, continueReason string, resume nativeResume) (result TurnResult) {
+	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
+	writeCtx := context.WithoutCancel(ctx)
+	events := &Events{Store: rn.reg.store, SessionID: rn.sessionID}
+	if !resume.started {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindTurnStart, TurnID: turnID, Payload: core.TurnStart{V: core.PayloadVersion, TurnID: turnID}}); err != nil {
+			slog.Error("failed to write turn/start", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
+			result.StopReason = "error"
+			result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
+			return result
+		}
 	}
 	reason := "end_turn"
 	var runErr *core.ProviderError
@@ -709,6 +908,13 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 	// is never lost; the step cap and halt paths return it explicitly.
 	var pendingClaim inboxItem
 	claimedPending := false
+	if resume.userStored {
+		// The owner message is in the history already; the first step only
+		// takes an owner message that arrived meanwhile.
+		hasInitial = false
+		pendingTools = true
+		ownerMessage = true
+	}
 	for {
 		claimedText := ""
 		claimed := false
@@ -833,6 +1039,12 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			reason = "error"
 			goto finished
 		}
+		if len(resolved.chain) == 0 {
+			// ADR 0020: lana's loop cannot call Claude Code targets.
+			runErr = &core.ProviderError{Class: "client", Message: fmt.Sprintf("agent %s has no model for lana's own loop: its chain has only claude-code targets", resolved.name)}
+			reason = "error"
+			goto finished
+		}
 		lastResolved = resolved
 		// REQ-WS-001: create a missing session workspace before any tool runs.
 		// A failure is logged and not fatal; bash, glob, and grep then report a
@@ -907,56 +1119,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		// payload so display surfaces can hide them (REQ-LTC-001).
 		contextBlocks := 0
 		if !promptBuilt {
-			// REQ-TB-004, REQ-TB-008: a tool an agent lists but nothing has
-			// registered (a command of a package that is not installed) is not
-			// offered. A later registration (the toolbox sync) makes it
-			// available on the next turn without a restart.
-			turnTools = append(turnTools, rn.reg.registeredTools(resolved.tools)...)
-			var unavailable map[string]string
-			if len(resolved.mcp) > 0 {
-				if mcp := rn.reg.mcpManager(); mcp != nil {
-					names, unavail := mcp.Ensure(ctx, resolved.mcp)
-					turnTools = append(turnTools, names...)
-					unavailable = unavail
-				}
-				// REQ-TFB-008 item 2: every server the runtime does not know
-				// is listed as "not loaded".
-				unavailable = unknownMCP(resolved.mcp, turnTools, unavailable)
-			}
-			var skills []agenthome.Skill
-			if rn.reg.home != "" {
-				skills, _ = agenthome.VisibleSkills(rn.reg.home, resolved.name, resolved.skills)
-			}
-			// REQ-AMCP-001: skill_load, mcp_manage, and the team tools are
-			// offered without being listed in tools. REQ-CAL-009: so is the
-			// calendar tool when it is registered. The dashboard catalog
-			// reads the same helper so the two cannot drift.
-			_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
-			_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
-			for _, name := range AutoOfferedTools(AutoOfferState{
-				Root:                !resolved.child,
-				MCPManageRegistered: mcpManageRegistered,
-				VisibleSkills:       len(skills) > 0,
-				Team:                resolved.team != "" || len(resolved.delegates) > 0,
-				CalendarRegistered:  calendarRegistered,
-			}) {
-				if !containsString(turnTools, name) {
-					turnTools = append(turnTools, name)
-				}
-			}
-			// REQ-JOB-015: an agent offered bash also gets the job tools without
-			// listing them. It runs before disabled_tools so a disabled job tool
-			// is removed like any other.
-			turnTools = addCompanionTools(turnTools, resolved.disabled, func(name string) bool {
-				_, ok := rn.reg.tools.Get(name)
-				return ok
-			})
-			// disabled_tools removes a name from the offered list. It is applied
-			// after the built-in, MCP, skill, and team tools are collected so a
-			// disabled team or skill tool is removed as well (AC-WEB-049, Q-024).
-			turnTools = filterDisabledTools(turnTools, resolved.disabled)
-			// REQ-LTC-003: a deterministic tool order keeps the prefix stable.
-			sort.Strings(turnTools)
+			offered, unavailable, skills := rn.offeredTools(ctx, resolved)
+			turnTools = append(turnTools, offered...)
 			// REQ-ECX-024: only an owner message can pick relevant memory, and
 			// only the first user message of the turn carries it.
 			ownerText := ""
@@ -991,10 +1155,15 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 			}
 			// REQ-LTC-001: the first user message of the turn carries the
 			// <context> block, and a <system-update> when sections changed.
+			// A reply adds the quoted automation message as one more injected
+			// block before the owner's text.
 			if claimed {
 				prefix := []core.ContentBlock{{Kind: core.BlockText, Text: built.context}}
 				if update != "" {
 					prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: update})
+				}
+				if !runtimeNote && claimedItem.replyTo != nil {
+					prefix = append(prefix, core.ContentBlock{Kind: core.BlockText, Text: replyQuoteBlock(claimedItem.replyTo)})
 				}
 				inputMsg.Content = append(prefix, inputMsg.Content...)
 				contextBlocks = len(prefix)
@@ -1003,6 +1172,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		}
 		if claimed {
 			payload := core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content, PromptSections: storedSections, ContextBlocks: contextBlocks, Runtime: runtimeNote}
+			if !runtimeNote && claimedItem.replyTo != nil {
+				payload.ReplyTo = claimedItem.replyTo
+			}
 			if continueMsg {
 				payload.Continue = true
 				payload.ContinueReason = continueReason
@@ -1048,7 +1220,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		if c := rn.reg.compactor(); c != nil {
 			if _, cerr := c.CompactIfNeeded(ctx, core.CompactRequest{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name,
-				Provider: resolved.provider, Model: resolved.model, System: prompt,
+				Provider: resolved.provider, Model: resolved.model,
+				Targets: resolved.chain, Requested: resolved.requested, System: prompt,
 				Tools: specs, MaxTokens: control.MaxTokens,
 				ReasoningEffort: resolved.reasoningEffort, Trigger: "pressure",
 			}); cerr != nil {
@@ -1071,13 +1244,17 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		req.Temperature = control.Temperature
 		req.ReasoningEffort = resolved.reasoningEffort
 
-		targets := append([]core.LLMTarget{{Provider: resolved.provider, Model: resolved.model}}, resolved.fallback...)
+		targets := append([]core.LLMTarget(nil), resolved.chain...)
+		// served is the target that answered the step; the router may fall
+		// back past the primary (AC-RTR-007).
+		served := targets[0]
 		var (
 			text       string
 			thinking   string
 			toolBlocks []core.ContentBlock
 			usage      core.Usage
 			stop       string
+			ordered    []core.ContentBlock
 		)
 		// REQ-LTC-032: a retryable failure after the first stream event, but
 		// before the assistant message is stored, repeats the step. The partial
@@ -1085,6 +1262,8 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		for attempt := 1; ; attempt++ {
 			stream, err := rn.reg.hooks.LLMStream.Call(ctx, core.LLMStreamInput{
 				SessionID: rn.sessionID, TurnID: turnID, Step: step, AgentName: resolved.name, Targets: targets, Request: req,
+				Requested: resolved.requested,
+				OnServed:  func(target core.LLMTarget) { served = target },
 			})
 			if err != nil {
 				if ctx.Err() != nil {
@@ -1099,7 +1278,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				seen      int
 				streamErr error
 			)
-			text, thinking, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID)
+			text, thinking, toolBlocks, usage, stop, seen, streamErr = rn.consumeStream(ctx, stream, turnID, &ordered)
 			if streamErr == nil {
 				break
 			}
@@ -1108,9 +1287,9 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				goto finished
 			}
 			pe := providerError(streamErr)
-			rn.writeStepAttempt(writeCtx, events, step, resolved, turnID, attempt, *pe)
+			rn.writeStepAttempt(writeCtx, events, step, served, turnID, attempt, *pe)
 			// Only a mid-stream failure is repeated here; a failure before the
-			// first event is the llm.stream retry hook's job (REQ-LTC-031).
+			// first event is the router's job (REQ-LTC-031, REQ-RTR-005).
 			if seen == 0 || !retryable(pe.Class) || attempt > maxStepRetries {
 				runErr = pe
 				reason = "error"
@@ -1128,15 +1307,20 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		totalUsage.OutputTokens += usage.OutputTokens
 		totalUsage.CachedInputTokens += usage.CachedInputTokens
 		// REQ-MDL-003: the thinking block is stored first, then the answer text,
-		// then the tool calls.
+		// then the tool calls. Signed thinking (Anthropic) is stored in response
+		// order instead: the API checks it against the exact content around it.
 		content := make([]core.ContentBlock, 0, 2+len(toolBlocks))
-		if thinking != "" {
-			content = append(content, core.ContentBlock{Kind: core.BlockThinking, Text: thinking})
+		if ordered != nil {
+			content = ordered
+		} else {
+			if thinking != "" {
+				content = append(content, core.ContentBlock{Kind: core.BlockThinking, Text: thinking})
+			}
+			if text != "" {
+				content = append(content, core.ContentBlock{Kind: core.BlockText, Text: text})
+			}
+			content = append(content, toolBlocks...)
 		}
-		if text != "" {
-			content = append(content, core.ContentBlock{Kind: core.BlockText, Text: text})
-		}
-		content = append(content, toolBlocks...)
 		if stop == "" {
 			stop = "end_turn"
 		}
@@ -1174,30 +1358,7 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 					outputs[i] = core.ToolOutput{Status: core.ToolStatusError, Output: reportToolsDisabledText}
 				}
 			} else {
-				var mcpAdmin core.MCPAdmin
-				if !resolved.child {
-					mcpAdmin = rn.reg.mcpAdminFor()
-				}
-				// REQ-SSR-010: session_search reads the conversation index when
-				// the store provides one.
-				var sessions core.SessionSearcher
-				if searcher, ok := rn.reg.store.(core.SessionSearcher); ok {
-					sessions = searcher
-				}
-				toolCtx := core.ToolCtx{
-					SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
-					WorkspaceOnly: resolved.workspaceOnly,
-					Skills:        resolved.skills,
-					Questions:     rn.reg.questions,
-					Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
-					MCPAdmin:      mcpAdmin,
-					MCPStatus:     rn.reg.ServerStatus,
-					AllowedAgents: resolved.delegates,
-					Depth:         sessionDepth(ctx, rn.reg.store, rn.sessionID),
-					Jobs:          rn.reg.jobs,
-					Sessions:      sessions,
-					Knowledge:     rn.reg.knowledgeService(),
-				}
+				toolCtx := rn.toolCtx(ctx, resolved, turnID)
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as
 				// usual and every result is stored in call order.
@@ -1285,14 +1446,14 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 				}
 			}
 		}
-		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Usage: usage}}); err != nil {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: served.Provider, Model: served.Model, Usage: usage}}); err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished
 		}
 		// REQ-LTC-005: the step log line reports the cache hit share.
 		slog.Info("step finished", "session_id", rn.sessionID, "turn_id", turnID, "step", step,
-			"provider", resolved.provider, "model", resolved.model,
+			"provider", served.Provider, "model", served.Model,
 			"input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens,
 			"cached_input_tokens", usage.CachedInputTokens,
 			"cache_hit_pct", cacheHitPct(usage.InputTokens, usage.CachedInputTokens))
@@ -1375,10 +1536,16 @@ finished:
 			c.Capture(core.CaptureRequest{
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: lastResolved.name,
 				Home: rn.reg.home, Provider: lastResolved.provider, Model: lastResolved.model,
+				Targets: lastResolved.chain, Requested: lastResolved.requested,
 				System: prompt, Tools: lastSpecs, ReasoningEffort: lastResolved.reasoningEffort,
 			})
 		}
 	}
+	// Spec 40, REQ-TTL-001: name an untitled session in the background.
+	rn.reg.titleTurnEnd(reason, lastResolved.child, ownerMessage, core.TitleRequest{
+		SessionID: rn.sessionID, AgentName: lastResolved.name,
+		Targets: lastResolved.chain, Requested: lastResolved.requested,
+	})
 	result.StopReason = reason
 	result.Text = lastText
 	result.Usage = totalUsage
@@ -1390,7 +1557,27 @@ finished:
 // the explicit thinking block when the provider sends one, else the joined
 // thinking deltas. seen is the number of events read before a failure, which
 // tells a pre-first-event failure from a mid-stream one (REQ-LTC-032).
-func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string) (string, string, []core.ContentBlock, core.Usage, string, int, error) {
+// ordered is set to the blocks in response order (text deltas joined per
+// run) when the stream carried a signed thinking block, else to nil.
+func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, turnID string, ordered *[]core.ContentBlock) (string, string, []core.ContentBlock, core.Usage, string, int, error) {
+	*ordered = nil
+	var inOrder []core.ContentBlock
+	signed := false
+	appendText := func(s string) {
+		if s == "" {
+			return
+		}
+		if n := len(inOrder); n > 0 && inOrder[n-1].Kind == core.BlockText {
+			inOrder[n-1].Text += s
+			return
+		}
+		inOrder = append(inOrder, core.ContentBlock{Kind: core.BlockText, Text: s})
+	}
+	defer func() {
+		if signed {
+			*ordered = inOrder
+		}
+	}()
 	var text strings.Builder
 	var reasoning strings.Builder
 	thinkingBlock := ""
@@ -1412,6 +1599,7 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 		switch event.Kind {
 		case core.ChatTextDelta:
 			text.WriteString(event.Text)
+			appendText(event.Text)
 			rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "text_delta", Text: event.Text})
 		case core.ChatThinkingDelta:
 			reasoning.WriteString(event.Text)
@@ -1420,10 +1608,16 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 			switch event.Block.Kind {
 			case core.BlockText:
 				text.WriteString(event.Block.Text)
+				appendText(event.Block.Text)
 			case core.BlockThinking:
 				thinkingBlock = event.Block.Text
+				if event.Block.Signature != "" {
+					signed = true
+					inOrder = append(inOrder, event.Block)
+				}
 			default:
 				blocks = append(blocks, event.Block)
+				inOrder = append(inOrder, event.Block)
 			}
 		case core.ChatUsage:
 			usage = event.Usage
@@ -1439,8 +1633,8 @@ func (rn *Runner) consumeStream(ctx context.Context, stream core.ChatStream, tur
 
 // writeStepAttempt records one failed stream attempt of a step. attempt counts
 // from 1 (REQ-LTC-032).
-func (rn *Runner) writeStepAttempt(ctx context.Context, events *Events, step int, resolved resolvedAgent, turnID string, attempt int, pe core.ProviderError) {
-	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: attempt, Provider: resolved.provider, Model: resolved.model, Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
+func (rn *Runner) writeStepAttempt(ctx context.Context, events *Events, step int, target core.LLMTarget, turnID string, attempt int, pe core.ProviderError) {
+	payload := core.AssistantAttempt{V: core.PayloadVersion, Step: step, Attempt: attempt, Provider: target.Provider, Model: target.Model, Error: core.PayloadError{Class: pe.Class, Status: pe.Status, Message: pe.Message}}
 	_, _ = events.Append(ctx, core.EventDraft{Kind: core.KindAssistantAttempt, TurnID: turnID, Payload: payload})
 }
 
@@ -1541,7 +1735,7 @@ const reportToolsDisabledText = "Tools are disabled for this final report; answe
 const maxStepRetries = 2
 
 // stepRetryDelays is the backoff between mid-stream step retries. It mirrors
-// the first delays of NewRetry (agent/retry.go) and is a variable so tests can
+// the first delays of the router's backoff and is a variable so tests can
 // replace it and run fast.
 var stepRetryDelays = []time.Duration{2 * time.Second, 4 * time.Second}
 

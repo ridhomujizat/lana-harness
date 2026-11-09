@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import type { RoomRow } from "../api/rooms";
 import { Markdown } from "../lib/markdown";
-import { Avatar, Button } from "../ui/gr8r";
+import { Button } from "../ui/gr8r";
+import { AgentAvatar } from "./agent-avatar";
 import { agentFaceColors, gr8rColor, TypingDots } from "./presence";
 import type { FaceRef } from "./presence";
 import { teamSteps } from "./team";
@@ -252,8 +253,8 @@ function HandoffChipView({
       style={{ background: colors.bg, color: colors.fg }}
       aria-label={text}
     >
-      <Avatar
-        name={faceLabel(faces, chip.agent)}
+      <AgentAvatar
+        name={chip.agent}
         color={gr8rColor(face ? face.color : undefined)}
         size="sm"
       />
@@ -276,8 +277,8 @@ function LeadMessage({
   const leadLabel = faceLabel(faces, lead);
   return (
     <div className="group-msg group-lead-msg">
-      <Avatar
-        name={leadLabel}
+      <AgentAvatar
+        name={lead}
         color={gr8rColor(face ? face.color : undefined)}
         size="md"
       />
@@ -323,8 +324,8 @@ function MemberMessage({
     .join(" · ");
   return (
     <div className="group-msg group-member-msg">
-      <Avatar
-        name={memberLabel}
+      <AgentAvatar
+        name={item.agent}
         color={gr8rColor(face ? face.color : undefined)}
         size="md"
       />
@@ -353,8 +354,8 @@ function WorkingRow({
   const memberLabel = face && face.label ? face.label : item.agent;
   return (
     <div className="group-msg group-member-msg group-working" role="status">
-      <Avatar
-        name={memberLabel}
+      <AgentAvatar
+        name={item.agent}
         color={gr8rColor(face ? face.color : undefined)}
         presence
         size="md"

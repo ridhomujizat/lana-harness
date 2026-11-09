@@ -11,6 +11,8 @@ export type FieldKind =
   | "bool"
   | "select"
   | "agent"
+  /* The Message node's channel checklist and agent picker (spec #33). */
+  | "channels"
   | "tools"
   | "json"
   | "list"
@@ -135,6 +137,28 @@ export const NODE_CATALOG: NodeMeta[] = [
     defaults: { prompt: "" },
   },
   {
+    /* Spec #44: a guardian-written JavaScript parser that runs at 0 tokens and
+       falls back to the agent when the source changes shape. The script is
+       edited in the inspector's Script panel, not as a field. */
+    type: "script_parse",
+    group: "ai",
+    label: "Script Parse",
+    icon: "braces",
+    tint: "violet",
+    ports: ["out"],
+    fields: [
+      { name: "input", label: "Input", kind: "value", required: true, mono: true, placeholder: "{{ nodes.fetch.output.markdown }}", help: "What the script parses: text or JSON from an earlier node." },
+      { name: "goal", label: "Goal", kind: "textarea", required: true, help: "What to extract, in plain words. The guardian writes the script from it." },
+      { name: "output_schema", label: "Output schema", kind: "json", required: true, mono: true, help: 'Required. Detects when the source changes shape, e.g. {"repos": "object[]"}.' },
+      { name: "item_schema", label: "Item schema", kind: "json", mono: true, help: 'Optional. Checks each element of an object[] field, e.g. {"repos": {"url": "string url", "stars": "integer >0"}}. Rules after the type: >0, >=0, url, min:N, max:N.' },
+      { name: "allow_empty", label: "May be empty", kind: "list", help: 'Fields that may be empty, e.g. repos or repos.description.' },
+      { name: "fallback_agent", label: "Fallback agent", kind: "agent", help: "Empty = the guardian." },
+      { name: "on_drift", label: "When the shape changes", kind: "select", options: ["regenerate", "fallback_only", "fail"] },
+      { name: "timeout_ms", label: "Time limit (ms)", kind: "number", placeholder: "2000" },
+    ],
+    defaults: { input: "", goal: "", output_schema: {}, script: "", on_drift: "regenerate" },
+  },
+  {
     type: "bot",
     group: "ai",
     label: "Call another bot",
@@ -225,7 +249,10 @@ export const NODE_CATALOG: NodeMeta[] = [
     icon: "send",
     tint: "blue",
     ports: ["out"],
-    fields: [{ name: "text", label: "Message", kind: "textarea", required: true, help: "Sent to your Telegram owner chat." }],
+    fields: [
+      { name: "text", label: "Message", kind: "textarea", required: true, help: "Sent to your Telegram owner chat." },
+      { name: "channels", label: "Send to", kind: "channels", help: "Where the message is delivered. A channel that needs an agent posts as the one you pick." },
+    ],
     defaults: { text: "" },
   },
   {
@@ -430,6 +457,41 @@ export function describeCron(expr: string): string {
   return expr;
 }
 
+/* The labels of the channels the daemon ships today, for the card summary; the
+   inspector reads the live list (and any later channel) from the endpoint, and
+   an unknown id falls back to itself. */
+const MESSAGE_CHANNEL_LABELS: Record<string, string> = {
+  web: "Web chat",
+  telegram: "Telegram",
+};
+
+/* The channels a channel needs an agent to post as. */
+const MESSAGE_AGENT_CHANNELS = new Set(["web"]);
+
+/* The selected channel ids of a Message node: an explicit, non-empty list, or
+   the run-time default (telegram) for an older node that has none. */
+export function messageChannelIds(params: Record<string, unknown>): string[] {
+  const raw = params.channels;
+  const list = Array.isArray(raw) ? raw.map(String).filter(Boolean) : [];
+  return list.length > 0 ? list : ["telegram"];
+}
+
+/* The Message node's card summary, e.g. "Web chat (lana), Telegram". A channel
+   that needs an agent shows it in parentheses. */
+export function messageChannelSummary(
+  params: Record<string, unknown>
+): string {
+  const agent = str(params.agent);
+  return messageChannelIds(params)
+    .map((id) => {
+      const label = MESSAGE_CHANNEL_LABELS[id] || id;
+      return MESSAGE_AGENT_CHANNELS.has(id) && agent
+        ? label + " (" + agent + ")"
+        : label;
+    })
+    .join(", ");
+}
+
 /* The second line of a node card, e.g. "Schedule · Asia/Jakarta". `label`
    resolves an agent ID to the name a person reads, when the card shows one. */
 export function nodeSubtitle(
@@ -453,6 +515,10 @@ export function nodeSubtitle(
       return "Run button · optional JSON input";
     case "agent":
       return "Agent step · guardian";
+    case "script_parse":
+      return str(p.script).trim()
+        ? "Script Parse · rev " + (str(p.script_rev) || "1")
+        : "Script Parse · learns on first run";
     case "bot": {
       const agent = str(p.agent);
       if (!agent) {
@@ -471,7 +537,7 @@ export function nodeSubtitle(
     case "tool":
       return "Tool · " + (str(p.name) || "pick a tool");
     case "message":
-      return "Telegram · owner chat";
+      return messageChannelSummary(p);
     case "knowledge":
       return "Knowledge · " + (str(p.folder) || "notes");
     case "if":

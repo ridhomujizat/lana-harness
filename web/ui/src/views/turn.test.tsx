@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { buildTurns, turnEndCard, turnSummary, TurnBlock } from "./turn";
-import type { TurnStep } from "./turn";
+import {
+  buildTurns,
+  ReplyChip,
+  TurnBlock,
+  UserBubble,
+  turnEndCard,
+  turnSummary,
+} from "./turn";
+import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
+import type { ReplyTarget, TurnStep } from "./turn";
 import type { SessionEvent, EventPayload } from "../api/sessions";
 
 function event(
@@ -366,5 +374,207 @@ describe("turn header avatar", () => {
     rerender(<TurnBlock turn={turnItem.turn} agent="lana" />);
     expect(container.querySelector(".turn-head .agent-face")).toBeNull();
     expect(container.querySelector(".turn-head .agent-avatar")).not.toBeNull();
+    /* Spec 43: no letter; the server-rendered avatar until the store knows. */
+    expect(
+      container.querySelector(".turn-head .agent-avatar img.av-img")?.getAttribute("src")
+    ).toBe("/v1/agents/lana/avatar.svg?theme=light");
+  });
+
+  /* Spec 43: the timeline speaker shows the generated avatar. */
+  it("shows the stored svg for the speaker", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "the answer" }],
+      }),
+      event(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    setAgentAvatar(
+      "lana",
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
+        '<circle cx="50" cy="50" r="38" fill="currentColor"/>' +
+        '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
+        '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>',
+      "#9b5cff"
+    );
+    try {
+      const { container } = render(<TurnBlock turn={turnItem.turn} agent="lana" />);
+      const face = container.querySelector(".turn-head .agent-face.has-svg") as HTMLElement;
+      expect(face.querySelector("svg circle")).not.toBeNull();
+      expect(face.textContent).toBe("");
+    } finally {
+      resetAvatarStore();
+    }
+  });
+});
+
+/* API-WF-005: an out-of-band assistant message names its source above the
+   answer; a normal reply shows nothing. */
+describe("assistant message source", () => {
+  function turnFrom(payload: EventPayload) {
+    const items = buildTurns([event(1, "assistant/message", "t1", payload)]);
+    const item = items.find((entry) => entry.kind === "turn");
+    if (!item || item.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    return item.turn;
+  }
+
+  it("shows a via workflow label for a sourced message", () => {
+    const { container } = render(
+      <TurnBlock
+        turn={turnFrom({
+          content: [{ type: "text", text: "Your brief is ready." }],
+          source: "workflow",
+          source_name: "Daily brief",
+        })}
+        agent="lana"
+      />
+    );
+    expect(screen.getByText("via workflow Daily brief")).toBeTruthy();
+    expect(container.querySelector(".turn-answer .turn-via")).not.toBeNull();
+  });
+
+  it("shows the bare source when the name is empty", () => {
+    render(
+      <TurnBlock
+        turn={turnFrom({
+          content: [{ type: "text", text: "Hello." }],
+          source: "workflow",
+        })}
+        agent="lana"
+      />
+    );
+    expect(screen.getByText("via workflow")).toBeTruthy();
+  });
+
+  it("shows no label for a normal reply", () => {
+    render(
+      <TurnBlock
+        turn={turnFrom({ content: [{ type: "text", text: "just a reply" }] })}
+        agent="lana"
+      />
+    );
+    expect(screen.queryByText(/^via /)).toBeNull();
+    expect(screen.getByText("just a reply")).toBeTruthy();
+  });
+});
+
+/* API reply: a sourced automation message can be replied to; the reply action
+   targets the message's seq. A normal message has no Reply. */
+describe("reply to an automation message", () => {
+  function sourcedTurn() {
+    const items = buildTurns([
+      event(5, "assistant/message", "t1", {
+        content: [{ type: "text", text: "Your brief is ready.\nSecond line." }],
+        source: "workflow",
+        source_name: "Daily brief",
+      }),
+      event(6, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const item = items.find((entry) => entry.kind === "turn");
+    if (!item || item.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    return item.turn;
+  }
+
+  it("shows Reply on a sourced message and targets its seq", () => {
+    const replies: ReplyTarget[] = [];
+    render(
+      <TurnBlock
+        turn={sourcedTurn()}
+        agent="lana"
+        onReply={(target) => replies.push(target)}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reply to Daily brief" })
+    );
+    expect(replies).toEqual([
+      {
+        seq: 5,
+        source: "workflow",
+        sourceName: "Daily brief",
+        text: "Your brief is ready.\nSecond line.",
+      },
+    ]);
+  });
+
+  it("shows no Reply on a normal assistant message", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "just a reply" }],
+      }),
+    ]);
+    const item = items.find((entry) => entry.kind === "turn");
+    if (!item || item.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    render(<TurnBlock turn={item.turn} agent="lana" onReply={() => {}} />);
+    expect(screen.queryByRole("button", { name: /^Reply/ })).toBeNull();
+  });
+
+  it("reads the reply_to of an owner message", () => {
+    const items = buildTurns([
+      event(1, "user/message", "t1", {
+        content: [{ type: "text", text: "thanks" }],
+        reply_to: {
+          seq: 5,
+          source: "workflow",
+          source_name: "Daily brief",
+          text: "Your brief is ready.",
+        },
+      }),
+    ]);
+    const user = items[0];
+    if (!user || user.kind !== "user") {
+      throw new Error("expected a user item");
+    }
+    expect(user.replyTo).toEqual({
+      seq: 5,
+      source: "workflow",
+      sourceName: "Daily brief",
+      text: "Your brief is ready.",
+    });
+  });
+
+  it("renders the quote line of an owner reply above the text", () => {
+    render(
+      <UserBubble
+        text="thanks"
+        replyTo={{
+          seq: 5,
+          source: "workflow",
+          sourceName: "Daily brief",
+          text: "Your brief is ready.\nMore",
+        }}
+      />
+    );
+    expect(
+      screen.getByText("↪ workflow Daily brief: Your brief is ready.")
+    ).toBeTruthy();
+    expect(screen.getByText("thanks")).toBeTruthy();
+  });
+
+  it("clears the reply chip from its ×", () => {
+    const cancelled = vi.fn();
+    render(
+      <ReplyChip
+        target={{
+          seq: 5,
+          source: "workflow",
+          sourceName: "Daily brief",
+          text: "hello",
+        }}
+        onCancel={cancelled}
+      />
+    );
+    expect(screen.getByText("Replying to workflow Daily brief")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+    expect(cancelled).toHaveBeenCalledTimes(1);
   });
 });

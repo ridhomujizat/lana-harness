@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import { listRooms, openRoomsStream } from "../api/rooms";
+import { agentCssColor, isHexColor, parseAvatarSvg } from "../lib/avatar-svg";
+import { useAgentAvatar } from "../lib/avatar-store";
+import { AvatarImage, useAvatarImage } from "./agent-avatar";
 import type { Presence, RoomRow } from "../api/rooms";
 
 /* The presence kit of REQ-ROOM-006 and REQ-ROOM-013: the agent face, the
@@ -23,8 +26,17 @@ function faceTone(color?: string): FaceTone {
 }
 
 /* The tinted background and strong foreground of an agent color. The group
-   room uses them for the handoff chips and the message names (REQ-ROOM-008). */
+   room uses them for the handoff chips and the message names (REQ-ROOM-008).
+   A hex color (spec 43) tints the same way through color-mix, so it follows
+   the theme like the tokens. */
 export function agentFaceColors(color?: string): { bg: string; fg: string } {
+  if (isHexColor(color)) {
+    const hex = color.trim();
+    return {
+      bg: "color-mix(in srgb, " + hex + " 16%, var(--bg-primary))",
+      fg: "color-mix(in srgb, " + hex + " 72%, var(--text-primary))",
+    };
+  }
   const tone = faceTone(color);
   return {
     bg: "var(--face-" + tone + "-bg)",
@@ -33,18 +45,10 @@ export function agentFaceColors(color?: string): { bg: string; fg: string } {
 }
 
 /* The agent color as a Gr8r token, so a Gr8r Avatar keeps the same palette as
-   the tinted AgentFace and the roster (REQ-ROOM-006, REQ-ROOM-011). */
-const GR8R_COLORS: Record<string, string> = {
-  brand: "var(--violet)",
-  success: "var(--green)",
-  warning: "var(--amber)",
-  error: "var(--red)",
-  blue: "var(--blue)",
-  gray: "var(--gray)",
-};
-
+   the tinted AgentFace and the roster (REQ-ROOM-006, REQ-ROOM-011). A hex
+   color (spec 43) passes through as the CSS color. */
 export function gr8rColor(color?: string): string {
-  return GR8R_COLORS[faceTone(color)] || "var(--violet)";
+  return agentCssColor(color, "var(--violet)");
 }
 
 /* The presence dot of the face; the label colors of PresenceLabel are a
@@ -85,16 +89,35 @@ export function AgentFace({
   style,
 }: AgentFaceProps) {
   const face = agentFaceColors(color);
+  const stored = useAgentAvatar(name);
+  const shape = stored && stored.svg ? parseAvatarSvg(stored.svg) : null;
+  /* Spec 43: names the store has not seen use the server-rendered avatar;
+     the letter is left for an image that fails (a deleted agent). */
+  const image = useAvatarImage(shape ? "" : name);
   const state = presence ? presence.state : "";
   const label = presence ? name + ", " + state : name;
+  const blob = Boolean(shape) || !image.failed;
+  const look: CSSProperties = blob
+    ? { background: "transparent", color: gr8rColor(stored?.color || color) }
+    : { background: face.bg, color: face.fg };
   return (
     <span
-      className={"agent-face size-" + size + (className ? " " + className : "")}
+      className={
+        "agent-face size-" +
+        size +
+        (blob ? " has-svg" : "") +
+        (className ? " " + className : "")
+      }
       role="img"
       aria-label={label}
-      style={{ background: face.bg, color: face.fg, ...style }}
+      style={{ ...look, ...style }}
     >
-      {initialOf(name)}
+      {shape ??
+        (!image.failed ? (
+          <AvatarImage src={image.src} onError={image.onError} />
+        ) : (
+          initialOf(name)
+        ))}
       {state === "working" ? (
         <span className="agent-face-ring" aria-hidden="true" />
       ) : null}

@@ -98,10 +98,31 @@ type fakeWorkflowBackend struct {
 	commandCh string
 	commands  []string
 
+	channels []workflow.MessageChannel
+
 	workflowSessions map[string]bool
 
 	changes    chan workflow.Change
 	unsubCount int
+
+	// Script Parse routes (spec #44).
+	testScript         workflow.TestResult
+	testScriptErr      error
+	testScriptNode     workflow.Node
+	testScriptInput    any
+	testScriptHasInput bool
+	testScriptRun      int
+
+	generateScript         workflow.GenerateResult
+	generateScriptErr      error
+	generateScriptExpected map[string]any
+
+	convertResult workflow.ConvertResult
+	convertErr    error
+	convertNodeID string
+
+	suggestions    []workflow.Suggestion
+	suggestionsErr error
 }
 
 func newFakeWorkflowBackend() *fakeWorkflowBackend {
@@ -276,6 +297,42 @@ func (f *fakeWorkflowBackend) IsWorkflowSession(sessionID string) bool {
 	return f.workflowSessions[sessionID]
 }
 
+func (f *fakeWorkflowBackend) TestScript(_ context.Context, _ string, node workflow.Node, input any, hasInput bool, run int) (workflow.TestResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.testScriptNode = node
+	f.testScriptInput = input
+	f.testScriptHasInput = hasInput
+	f.testScriptRun = run
+	return f.testScript, f.testScriptErr
+}
+
+func (f *fakeWorkflowBackend) GenerateScript(_ context.Context, _ string, _ workflow.Node, _ any, _ bool, _ int, expected map[string]any) (workflow.GenerateResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.generateScriptExpected = expected
+	return f.generateScript, f.generateScriptErr
+}
+
+func (f *fakeWorkflowBackend) ConvertNode(_ context.Context, _, nodeID string) (workflow.ConvertResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.convertNodeID = nodeID
+	return f.convertResult, f.convertErr
+}
+
+func (f *fakeWorkflowBackend) ScriptSuggestions(_ context.Context, _ string) ([]workflow.Suggestion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suggestions, f.suggestionsErr
+}
+
+func (f *fakeWorkflowBackend) MessageChannels() []workflow.MessageChannel {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.channels
+}
+
 // newWorkflowTestServer logs in an owner and installs the workflow port.
 func newWorkflowTestServer(t *testing.T, wf WorkflowBackend) (*Server, *http.Cookie, string) {
 	t.Helper()
@@ -444,6 +501,30 @@ func TestWorkflowInvalidGraph(t *testing.T) {
 	assertAuthError(t, rr, http.StatusBadRequest, "unknown_agent")
 }
 
+// API-WF-017, spec 39 revision 5: a guardian on Claude Code without a
+// background model answers 503 guardian_needs_background_model with the
+// message the assistant shows; another failure stays guardian_unavailable.
+func TestWorkflowAssistGuardianNeedsBackgroundModel(t *testing.T) {
+	backend := newFakeWorkflowBackend()
+	backend.assistErr = &workflow.GuardianBackgroundError{Agent: "bima"}
+	s, cookie, csrf := newWorkflowTestServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi","base_version":1}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "guardian_needs_background_model")
+	var env errorEnvelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	const want = "The guardian bima runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes."
+	if env.Error.Message != want {
+		t.Fatalf("message = %q", env.Error.Message)
+	}
+
+	backend.assistErr = workflow.ErrGuardianUnavailable
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi","base_version":1}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "guardian_unavailable")
+}
+
 // API-WF-011, REQ-WF-003: a manual run answers 202 with the run.
 func TestWorkflowStartRun(t *testing.T) {
 	backend := newFakeWorkflowBackend()
@@ -579,6 +660,39 @@ func TestWorkflowUnavailable(t *testing.T) {
 	s, cookie, _ := newLoggedInSessionServer(t, newFakeWebBackend())
 	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/workflows", "", cookie, ""))
 	assertAuthError(t, rr, http.StatusServiceUnavailable, "workflows_unavailable")
+}
+
+// The channels endpoint lists the Message node channels. The get route returns
+// 404, so a 200 proves the literal /v1/workflows/channels route wins over
+// GET /v1/workflows/{id} with id "channels".
+func TestWorkflowChannels(t *testing.T) {
+	backend := newFakeWorkflowBackend()
+	backend.getErr = workflow.ErrNotFound
+	backend.channels = []workflow.MessageChannel{
+		{ID: "web", Label: "Web chat", NeedsAgent: true, Available: true},
+		{ID: "telegram", Label: "Telegram", Available: false, Reason: "Telegram is not connected"},
+	}
+	s, cookie, _ := newWorkflowTestServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/workflows/channels", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got struct {
+		Channels []workflow.MessageChannel `json:"channels"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(got.Channels) != 2 || got.Channels[0].ID != "web" || got.Channels[1].ID != "telegram" {
+		t.Fatalf("channels = %+v", got.Channels)
+	}
+	if !got.Channels[0].NeedsAgent || got.Channels[0].Label != "Web chat" {
+		t.Fatalf("web channel = %+v", got.Channels[0])
+	}
+	if got.Channels[1].Available || got.Channels[1].Reason != "Telegram is not connected" {
+		t.Fatalf("telegram channel = %+v", got.Channels[1])
+	}
 }
 
 // *workflow.Service satisfies the WorkflowBackend port the web handlers use

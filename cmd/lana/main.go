@@ -23,7 +23,9 @@ import (
 	"github.com/ridhomujizat/lana-harness/channels/cli/tui"
 	"github.com/ridhomujizat/lana-harness/config"
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 var version = "dev"
@@ -84,6 +86,16 @@ func run(args []string) int {
 		return cmdDaemon(args[1:])
 	case "web":
 		return cmdWeb(args[1:])
+	case "update":
+		return cmdUpdate(args[1:])
+	case "update-probe":
+		// Hidden: the update job runs it against a copy of the data
+		// (API-UPD-010).
+		return cmdUpdateProbe(args[1:])
+	case "update-watch":
+		// Hidden: the old binary starts it to guard the first start of a new
+		// one (API-UPD-010).
+		return cmdUpdateWatch(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command: %s\n", args[0])
 		return 2
@@ -95,23 +107,44 @@ func help() {
 	if term.IsTerminal(os.Stdout.Fd()) {
 		fmt.Print("\n" + tui.LogoText() + "\n")
 	}
-	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek|anthropic|claude-code] [--fallback <provider>/<model>]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana update rollback\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }
 
-// providerPreset holds the wizard's default values for one provider.
+// providerPreset holds the wizard's default values for one provider. The
+// provider table uses the preset kind of the same name (API-RTR-001), so it
+// needs no base_url. claude-code is the built-in Claude Code account: it has
+// no provider table and no key (API-CCT-001).
 type providerPreset struct {
-	name    string
-	baseURL string
-	keyEnv  string
-	model   string
+	name   string
+	keyEnv string
+	model  string
 }
 
+// claudeCodePreset is the preset name of the built-in Claude Code account.
+const claudeCodePreset = core.ClaudeCodeProvider
+
+// initComboName is the combo `lana init --fallback` writes: [model, fallback].
+const initComboName = "default"
+
 var providerPresets = []providerPreset{
-	{name: "openai", baseURL: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY", model: "gpt-5-mini"},
-	{name: "openrouter", baseURL: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY", model: "openai/gpt-5-mini"},
-	{name: "deepseek", baseURL: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY", model: "deepseek-flash"},
+	{name: "openai", keyEnv: "OPENAI_API_KEY", model: models.TestModel("openai")},
+	{name: "openrouter", keyEnv: "OPENROUTER_API_KEY", model: models.TestModel("openrouter")},
+	{name: "deepseek", keyEnv: "DEEPSEEK_API_KEY", model: models.TestModel("deepseek")},
+	{name: "anthropic", keyEnv: "ANTHROPIC_API_KEY", model: defaultAnthropicModel()},
+	{name: claudeCodePreset, model: "sonnet"},
+}
+
+// defaultAnthropicModel is the first Sonnet model of the Anthropic picker:
+// a capable default for a coding agent, cheaper than Opus.
+func defaultAnthropicModel() string {
+	for _, model := range models.ForKind("anthropic") {
+		if strings.HasPrefix(model.ID, "claude-sonnet-") {
+			return model.ID
+		}
+	}
+	return models.TestModel("anthropic")
 }
 
 func lookupProvider(name string) (providerPreset, bool) {
@@ -132,12 +165,60 @@ func providerNames() string {
 	return strings.Join(names, ", ")
 }
 
+// initProvider is one provider `lana init` writes: a preset with the key
+// variable the owner chose.
+type initProvider struct {
+	preset providerPreset
+	keyEnv string
+	apiKey string
+}
+
+// initPlan is what `lana init` writes: the providers with a table, the main
+// model address, and an optional fallback address (the default combo).
+type initPlan struct {
+	providers []initProvider
+	model     string
+	fallback  string
+}
+
+// splitInitAddress splits "<provider>/<model>" of a preset provider.
+func splitInitAddress(address string) (providerPreset, string, error) {
+	address = strings.TrimSpace(address)
+	slash := strings.Index(address, "/")
+	if slash <= 0 || slash == len(address)-1 {
+		return providerPreset{}, "", fmt.Errorf("fallback %q must be <provider>/<model>", address)
+	}
+	preset, ok := lookupProvider(address[:slash])
+	if !ok {
+		return providerPreset{}, "", fmt.Errorf("unknown provider %q in fallback (choices: %s)", address[:slash], providerNames())
+	}
+	return preset, address[slash+1:], nil
+}
+
+// addProvider adds the table of a preset once; claude-code has none.
+func (p *initPlan) addProvider(preset providerPreset, keyEnv, apiKey string) {
+	if preset.name == claudeCodePreset {
+		return
+	}
+	for _, provider := range p.providers {
+		if provider.preset.name == preset.name {
+			return
+		}
+	}
+	p.providers = append(p.providers, initProvider{preset: preset, keyEnv: keyEnv, apiKey: apiKey})
+}
+
+func (p *initPlan) claudeCodeMain() bool {
+	return strings.HasPrefix(p.model, claudeCodePreset+"/")
+}
+
 func cmdInit(args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	force := fs.Bool("force", false, "overwrite file")
 	yes := fs.Bool("yes", false, "accept defaults")
 	providerFlag := fs.String("provider", "openai", "provider: "+providerNames())
+	fallbackFlag := fs.String("fallback", "", "fallback model <provider>/<model>; makes the default combo")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -154,7 +235,7 @@ func cmdInit(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: unknown provider %q (choices: %s)\n", *providerFlag, providerNames())
 		return 2
 	}
-	keyEnv, model, apiKey := preset.keyEnv, preset.model, ""
+	keyEnv, model, apiKey, fallback := preset.keyEnv, preset.model, "", strings.TrimSpace(*fallbackFlag)
 	if !*yes {
 		fmt.Printf("Provider: %s\n", providerNames())
 		selected, ok := lookupProvider(ask("Provider", preset.name))
@@ -163,9 +244,34 @@ func cmdInit(args []string) int {
 			return 2
 		}
 		preset = selected
-		keyEnv = ask("Env API key", preset.keyEnv)
+		keyEnv = preset.keyEnv
+		if preset.name != claudeCodePreset {
+			keyEnv = ask("Env API key", preset.keyEnv)
+		}
 		model = ask("Model", preset.model)
-		apiKey = askKey("API key " + keyEnv)
+		if preset.name != claudeCodePreset {
+			apiKey = askKey("API key " + keyEnv)
+		}
+		fallback = askOptional("Fallback model <provider>/<model>", fallback)
+	}
+	plan := initPlan{model: preset.name + "/" + strings.TrimSpace(model)}
+	plan.addProvider(preset, keyEnv, apiKey)
+	if fallback != "" {
+		fallbackPreset, fallbackModel, err := splitInitAddress(fallback)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		plan.fallback = fallbackPreset.name + "/" + fallbackModel
+		if plan.fallback == plan.model {
+			fmt.Fprintln(os.Stderr, "error: the fallback must differ from the main model")
+			return 2
+		}
+		fallbackKey := ""
+		if !*yes && fallbackPreset.name != claudeCodePreset && fallbackPreset.name != preset.name {
+			fallbackKey = askKey("API key " + fallbackPreset.keyEnv)
+		}
+		plan.addProvider(fallbackPreset, fallbackPreset.keyEnv, fallbackKey)
 	}
 	cfgPath := filepath.Join(home, "config.toml")
 	promptPath := filepath.Join(home, "agents", "default.md")
@@ -176,30 +282,90 @@ func cmdInit(args []string) int {
 			return 2
 		}
 	}
+	cfgText := initConfig(plan)
+	if _, err := config.Check(context.Background(), home, []byte(cfgText)); err != nil {
+		var errs config.Errors
+		if errors.As(err, &errs) {
+			for _, item := range errs {
+				fmt.Fprintf(os.Stderr, "error: %s\n", item.Error())
+			}
+			return 2
+		}
+		return fail(err, 2)
+	}
 	for path, data := range map[string]struct {
 		text string
 		mode os.FileMode
 	}{
-		cfgPath:     {initConfig(preset, keyEnv, model), 0o644},
+		cfgPath:     {cfgText, 0o644},
 		promptPath:  {"You are a concise, careful personal coding assistant.\n", 0o644},
-		secretsPath: {secretsText(keyEnv, apiKey), 0o600},
+		secretsPath: {initSecretsText(plan.providers), 0o600},
 	} {
 		if err := atomicWrite(path, []byte(data.text), data.mode); err != nil {
 			return fail(err, 1)
 		}
 	}
-	if apiKey != "" {
-		fmt.Printf("✓ created %s\n✓ created %s\n✓ created %s (0600, API key saved)\n", cfgPath, promptPath, secretsPath)
-		fmt.Println("· run: lana chat")
+	savedKey := false
+	var missing []string
+	for _, provider := range plan.providers {
+		if provider.apiKey != "" {
+			savedKey = true
+		} else {
+			missing = append(missing, provider.keyEnv)
+		}
+	}
+	secretsNote := " (0600)"
+	if savedKey {
+		secretsNote = " (0600, API key saved)"
+	}
+	fmt.Printf("✓ created %s\n✓ created %s\n✓ created %s%s\n", cfgPath, promptPath, secretsPath, secretsNote)
+	if plan.claudeCodeMain() || strings.HasPrefix(plan.fallback, claudeCodePreset+"/") {
+		fmt.Println("· Sign in once with `claude auth login` if you haven't")
+	}
+	if len(missing) > 0 {
+		fmt.Printf("· set %s in %s or as a shell env var, then run: lana chat\n", strings.Join(missing, ", "), secretsPath)
 		return 0
 	}
-	fmt.Printf("✓ created %s\n✓ created %s\n✓ created %s (0600)\n", cfgPath, promptPath, secretsPath)
-	fmt.Printf("· set %s in %s or as a shell env var, then run: lana chat\n", keyEnv, secretsPath)
+	fmt.Println("· run: lana chat")
 	return 0
 }
 
-func initConfig(preset providerPreset, keyEnv, model string) string {
-	return fmt.Sprintf("[providers.%s]\nkind = \"openai_compat\"\nbase_url = %q\napi_key_env = %q\n\n[agents.default]\nprovider = %q\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"cli\"\nagent = \"default\"\n", preset.name, preset.baseURL, keyEnv, preset.name, model)
+// initConfig renders the router-form config of `lana init`: one table per
+// provider with its preset kind, the default combo when there is a fallback,
+// and the agent with model = "<provider>/<model>" (or "default") and no
+// provider key. A Claude Code main model with an API fallback runs the
+// background passes on the fallback ([router] background_model, REQ-CCT-007).
+func initConfig(plan initPlan) string {
+	var b strings.Builder
+	for _, provider := range plan.providers {
+		fmt.Fprintf(&b, "[providers.%s]\nkind = %q\napi_key_env = %q\n\n", provider.preset.name, provider.preset.name, provider.keyEnv)
+	}
+	agentModel := plan.model
+	if plan.fallback != "" {
+		fmt.Fprintf(&b, "[combos.%s]\nmodels = [%q, %q]\n\n", initComboName, plan.model, plan.fallback)
+		agentModel = initComboName
+	}
+	fmt.Fprintf(&b, "[agents.default]\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n", agentModel)
+	if plan.claudeCodeMain() && plan.fallback != "" && !strings.HasPrefix(plan.fallback, claudeCodePreset+"/") {
+		fmt.Fprintf(&b, "[router]\nbackground_model = %q\n\n", plan.fallback)
+	}
+	b.WriteString("[[routes]]\nchannel = \"cli\"\nagent = \"default\"\n")
+	return b.String()
+}
+
+// initSecretsText is the first secrets.env: one line per provider key.
+func initSecretsText(providers []initProvider) string {
+	if len(providers) == 0 {
+		return "# API keys of the providers in config.toml; do not commit.\n"
+	}
+	var b strings.Builder
+	for i, provider := range providers {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(secretsText(provider.keyEnv, provider.apiKey))
+	}
+	return b.String()
 }
 
 func secretsText(keyEnv, key string) string {
@@ -207,6 +373,15 @@ func secretsText(keyEnv, key string) string {
 		return "# Put the API key here, or set it as an env var in your shell.\n# " + keyEnv + "=\n"
 	}
 	return "# Provider API key; do not commit.\n" + keyEnv + "=" + key + "\n"
+}
+
+// askOptional asks for a value that may stay empty.
+func askOptional(label, def string) string {
+	if def != "" {
+		return ask(label, def)
+	}
+	fmt.Printf("%s (optional, leave empty for none): ", label)
+	return readLine()
 }
 
 func ask(label, def string) string {
@@ -305,7 +480,7 @@ func cmdConfig(args []string) int {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			env := result.Config.Providers[name].APIKeyEnv
+			env := router.EffectiveKeyEnv(result.Config.Providers[name], name)
 			if env == "" {
 				continue
 			}
@@ -367,7 +542,7 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	}
 	providerName, model := "", ""
 	if agent, ok := result.Config.Agents[agentName]; ok {
-		providerName, model = agent.Provider, agent.Model
+		providerName, model = primaryTarget(result.Config, agent)
 	}
 	opts := lana.Options{Home: home}
 	var options []lana.Option
@@ -376,8 +551,8 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 	}
 	missingEnv := ""
 	if providerName != "" {
-		if provider, ok := result.Config.Providers[providerName]; ok && provider.APIKeyEnv != "" {
-			if os.Getenv(provider.APIKeyEnv) == "" && !secretInFile(home, provider.APIKeyEnv) {
+		if env := router.EffectiveKeyEnv(result.Config.Providers[providerName], providerName); env != "" {
+			if os.Getenv(env) == "" && !secretInFile(home, env) {
 				text := "Hello from MockLlm. The provider is not configured, so this is a sample answer. Set the provider's API key to use a real model."
 				layer := fmt.Sprintf("[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.%s]\nprovider = \"mock\"\nmodel = \"mock\"\n\n[[routes]]\nchannel = \"cli\"\nagent = %q\n\n[[routes]]\nchannel = \"library\"\nagent = %q\n", agentName, agentName, agentName)
 				opts.Layers = []config.Layer{{Name: "mock", TOML: []byte(layer)}}
@@ -387,13 +562,30 @@ func runtimeFor(ctx context.Context, home, agentName string, approve lana.Approv
 				}
 				opts.Providers = map[string]core.Provider{"mock": mock.New(mock.Script{Responses: responses})}
 				providerName, model = "mock", "mock"
-				missingEnv = provider.APIKeyEnv
+				missingEnv = env
 			}
 		}
 	}
 	options = append(options, extra...)
 	rt, err := lana.New(ctx, opts, options...)
 	return rt, providerName, model, missingEnv, err
+}
+
+// primaryTarget returns the provider and model of an agent's first target:
+// the legacy provider and model, the first model of its combo, or its
+// provider/model address.
+func primaryTarget(cfg core.Config, agent core.AgentConfig) (string, string) {
+	if agent.Provider != "" {
+		return agent.Provider, agent.Model
+	}
+	value := agent.Model
+	if combo, ok := cfg.Combos[value]; ok && len(combo.Models) > 0 {
+		value = combo.Models[0]
+	}
+	if target, ok := router.ParseAddress(value); ok {
+		return target.Provider, target.Model
+	}
+	return "", agent.Model
 }
 
 func secretInFile(home, name string) bool {
@@ -646,7 +838,7 @@ func cmdRun(args []string) int {
 		approve = lineAnswerer
 		questionOpts = append(questionOpts, lana.AskWith(lineQuestioner), lana.AskChannels("cli"))
 	}
-	rt, providerName, model, missingEnv, err := runtimeFor(ctx, home, agentName, approve, questionOpts...)
+	rt, _, _, missingEnv, err := runtimeFor(ctx, home, agentName, approve, questionOpts...)
 	if err != nil {
 		var errs config.Errors
 		if errors.As(err, &errs) {
@@ -683,7 +875,14 @@ func cmdRun(args []string) int {
 	if result.StopReason == lana.StopCancelled && exitCode == 0 {
 		exitCode = 130
 	}
-	value := runOutput{Type: "result", SessionID: result.SessionID, Agent: agentName, Model: providerName + ":" + model, Cwd: cwd, StopReason: result.StopReason, Text: result.Text, Usage: usageOutput{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}, DurationMS: duration, ExitCode: exitCode, Error: payloadError}
+	// The served model: "provider:model" for a legacy agent, the router target
+	// "provider/model" that answered, or "claude-agent/<model>" for a Claude
+	// Agent (lana.Result.Model).
+	runModel := result.Model
+	if runModel == "" {
+		runModel = rt.AgentModel(agentName)
+	}
+	value := runOutput{Type: "result", SessionID: result.SessionID, Agent: agentName, Model: runModel, Cwd: cwd, StopReason: result.StopReason, Text: result.Text, Usage: usageOutput{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}, DurationMS: duration, ExitCode: exitCode, Error: payloadError}
 	switch *output {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)

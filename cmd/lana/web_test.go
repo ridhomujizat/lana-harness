@@ -322,9 +322,22 @@ func webLogin(t *testing.T, ts *httptest.Server, token string) (*http.Cookie, st
 
 func webCreateSession(t *testing.T, rt *lana.Runtime, ctx context.Context) core.SessionInfo {
 	t.Helper()
-	info, err := rt.CreateChannelSession(ctx, "web", "owner", "assistant")
+	return webCreateAgentSession(t, rt, ctx, "assistant")
+}
+
+// webCreateAgentSession creates a web session for agent with an owner title.
+// Spec 40: after the first turn of an untitled web session a background title
+// pass calls the same provider with no tools and reasoning "off". The owner
+// title skips that pass, so it neither takes a scripted mock response from the
+// turns under test nor becomes the last request a capture provider records.
+func webCreateAgentSession(t *testing.T, rt *lana.Runtime, ctx context.Context, agent string) core.SessionInfo {
+	t.Helper()
+	info, err := rt.CreateChannelSession(ctx, "web", "owner", agent)
 	if err != nil {
 		t.Fatalf("CreateChannelSession: %v", err)
+	}
+	if info, err = rt.SetSessionTitle(ctx, info.ID, "Test session"); err != nil {
+		t.Fatalf("SetSessionTitle: %v", err)
 	}
 	return info
 }
@@ -339,6 +352,38 @@ func webWaitFor(t *testing.T, timeout time.Duration, what string, fn func() bool
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+// webWaitIdle waits until the session list no longer reports the session as
+// running. turn/end lands in the log before the turn's bookkeeping finishes:
+// the web backend's in-process turn marker clears only after the runtime's Run
+// returns. Until then the backend's TurnActive is still true, so compact, fork,
+// and policy writes answer invalid_state. The list row status is derived from
+// that same TurnActive check, so an idle row means those writes are allowed.
+func webWaitIdle(t *testing.T, ts *httptest.Server, cookie *http.Cookie, sessionID string) {
+	t.Helper()
+	webWaitFor(t, 5*time.Second, "session "+sessionID+" to be idle", func() bool {
+		resp, body := webDo(t, http.MethodGet, ts.URL+"/v1/sessions", "", cookie, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list sessions status = %d, body = %q", resp.StatusCode, body)
+		}
+		var list struct {
+			Sessions []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal(body, &list); err != nil {
+			t.Fatalf("list sessions body %q: %v", body, err)
+		}
+		for _, row := range list.Sessions {
+			if row.ID == sessionID {
+				return row.Status != web.SessionStatusRunning
+			}
+		}
+		t.Fatalf("session %s is missing from the list: %q", sessionID, body)
+		return false
+	})
 }
 
 func webHistory(t *testing.T, rt *lana.Runtime, sessionID string) []core.SessionEvent {
@@ -705,6 +750,9 @@ func TestWebCompactForkAndPolicy(t *testing.T) {
 		}
 		return false
 	})
+	// turn/end is written before the turn's bookkeeping clears; compact is
+	// refused until the session reports idle.
+	webWaitIdle(t, ts, cookie, info.ID)
 
 	resp, body := webDo(t, http.MethodPost, ts.URL+"/v1/sessions/"+info.ID+"/compact", "", cookie, csrf)
 	if resp.StatusCode != http.StatusOK {
@@ -1322,10 +1370,7 @@ agent = "lana"
 	}})
 	_, ts, cookie, csrf := webServer(t, rt, home)
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatalf("CreateChannelSession: %v", err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	runTurn := func() {
 		t.Helper()
 		if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {

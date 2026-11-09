@@ -18,6 +18,11 @@ type CompactRequest struct {
 	AgentName string
 	Provider  string
 	Model     string
+	// Targets is the agent's chain (primary first). When set it wins over
+	// Provider and Model, so the summary gets the same fallback as the turn.
+	Targets []LLMTarget
+	// Requested is the combo or address the agent asked for.
+	Requested string
 	System    string
 	Tools     []ToolSpec
 	MaxTokens int

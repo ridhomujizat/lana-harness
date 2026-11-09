@@ -194,4 +194,8 @@ data: [DONE]
 	if info.Channel != "library" {
 		t.Fatalf("channel=%q", info.Channel)
 	}
+	// A legacy provider + model agent keeps the "provider:model" display.
+	if result.Model != "local:m" {
+		t.Fatalf("model=%q", result.Model)
+	}
 }

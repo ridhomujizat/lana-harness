@@ -19,6 +19,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	kv "github.com/ridhomujizat/lana-harness/internal/knowledge"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // queueSize is the depth of the per-service compile queue (design §5).
@@ -122,16 +123,10 @@ func (s *Service) open() (*kv.Vault, *kv.Index, error) {
 
 // attachEmbedder wires the optional embedding backend from
 // knowledge.embedding_provider when that provider implements core.Embedder
-// (REQ-KNW-031, API-KNW-004).
+// (REQ-KNW-031, API-KNW-004). With a router the calls go through
+// LLMRouter.Embed, so they are retried and recorded (REQ-RTR-007).
 func (s *Service) attachEmbedder(idx *kv.Index) {
-	if s.cfg.EmbeddingProvider == "" || s.llm == nil {
-		return
-	}
-	provider, ok := s.llm.Provider(s.cfg.EmbeddingProvider)
-	if !ok {
-		return
-	}
-	if embedder, ok := provider.(core.Embedder); ok {
+	if embedder, ok := llmcall.Embedder(s.llm, s.cfg.EmbeddingProvider); ok {
 		idx.SetEmbedder(embedder, s.cfg.EmbeddingModel)
 	}
 }

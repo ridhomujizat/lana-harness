@@ -33,6 +33,7 @@ import {
   useWorkflowStream,
 } from "./workflow-common";
 import { WorkflowHeader } from "./workflow-page";
+import { agentOptionIcon } from "./agent-avatar";
 
 /* REQ-WF-011 settings (design workflows-4): general, guardian, triggers,
    locked permissions, state (REQ-WF-006), failure default and delete. */
@@ -112,7 +113,9 @@ export function WorkflowSettings({
     loadState();
   }, [loadState]);
   useWorkflowStream((change) => {
-    if (change.workflow_id === workflow.id && change.run_id) {
+    /* A refresh arrives when the stream reconnects after a hidden pause: the
+       changes made while the tab was gone were missed. */
+    if (change.refresh || (change.workflow_id === workflow.id && change.run_id)) {
       loadState();
     }
   });
@@ -521,7 +524,11 @@ export function WorkflowSettings({
           <Select
             value={guardian}
             onChange={setGuardian}
-            options={agents.map((agent) => ({ value: agent.name, label: displayLabel(agent) }))}
+            options={agents.map((agent) => ({
+              value: agent.name,
+              label: displayLabel(agent),
+              icon: agentOptionIcon(agent.name),
+            }))}
             aria-label="Guardian"
           />
         </Modal>

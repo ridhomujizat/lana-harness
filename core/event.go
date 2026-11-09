@@ -102,7 +102,31 @@ type SystemMessage struct {
 	V        int             `json:"v"`
 	Text     string          `json:"text"`
 	Sections []PromptSection `json:"sections,omitempty"`
+	// Subtype is "" for the prompt head. SystemSubtypeRuntime marks the
+	// session meta of an external runtime process (API-CCR-002); such an event
+	// is not a prompt head and carries the fields below instead of Text.
+	Subtype string `json:"subtype,omitempty"`
+	// Runtime is the runtime name, for example "claude-code".
+	Runtime string `json:"runtime,omitempty"`
+	// ClaudeSessionID is the runtime's own session ID, resumed on later turns.
+	ClaudeSessionID string   `json:"claude_session_id,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Tools           []string `json:"tools,omitempty"`
+	Version         string   `json:"version,omitempty"`
+	// Account is the Claude Code account the runtime session belongs to
+	// (REQ-CCT-010). Empty means the built-in account "claude-code"; a
+	// session of one account is never resumed on another.
+	Account string `json:"account,omitempty"`
 }
+
+// SystemSubtypeRuntime is the system/message subtype of an external runtime's
+// session meta (API-CCR-002).
+const SystemSubtypeRuntime = "runtime"
+
+// SystemSubtypeNote is the system/message subtype of a note lana writes for
+// the owner, for example that lana's tools were not available to a Claude
+// Code turn (spec 39 failure cases). It is not a prompt head.
+const SystemSubtypeNote = "note"
 
 type UserMessage struct {
 	V       int            `json:"v"`
@@ -120,6 +144,10 @@ type UserMessage struct {
 	// (<context> and, when it changed, <system-update>). They are hidden from
 	// display surfaces but still sent to the model (REQ-LTC-001).
 	ContextBlocks int `json:"context_blocks,omitempty"`
+	// ReplyTo is set when the owner's message replies to an automation message
+	// (an assistant/message with a Source). The quoted text rides the leading
+	// injected block; the reference is kept for display surfaces.
+	ReplyTo *ReplyRef `json:"reply_to,omitempty"`
 	// Runtime marks a note lana wrote itself (the empty-answer, step-limit, or
 	// tool-call-text note), not a message from the owner. Display surfaces hide
 	// it and it is not an owner message (REQ-MEM-021).
@@ -130,6 +158,33 @@ type AssistantMessage struct {
 	V          int            `json:"v"`
 	Content    []ContentBlock `json:"content"`
 	StopReason string         `json:"stop_reason"`
+	// Source marks a message posted out-of-band by a lana automation, such as a
+	// workflow's Message node (e.g. "workflow"); empty means a normal model
+	// reply. SourceName names the poster (e.g. the workflow name). Old payloads
+	// decode unchanged.
+	Source     string `json:"source,omitempty"`
+	SourceName string `json:"source_name,omitempty"`
+}
+
+// ReplyRef is the automation message an owner reply points back to: the seq of
+// the assistant/message event, its source and source name, and its quoted text.
+type ReplyRef struct {
+	Seq        int64  `json:"seq"`
+	Source     string `json:"source,omitempty"`
+	SourceName string `json:"source_name,omitempty"`
+	Text       string `json:"text"`
+}
+
+// ReplyQuoteMax caps the quoted text of a reply, in runes.
+const ReplyQuoteMax = 8000
+
+// ReplyQuoteText returns text capped at ReplyQuoteMax runes with an ellipsis.
+func ReplyQuoteText(text string) string {
+	runes := []rune(text)
+	if len(runes) <= ReplyQuoteMax {
+		return text
+	}
+	return string(runes[:ReplyQuoteMax]) + "…"
 }
 
 type AssistantAttempt struct {
@@ -146,6 +201,9 @@ type ToolCallPayload struct {
 	CallID string          `json:"call_id"`
 	Name   string          `json:"name"`
 	Input  json.RawMessage `json:"input"`
+	// External marks a call an external runtime ran itself, such as a Claude
+	// Code tool (API-CCR-002). lana did not run it.
+	External bool `json:"external,omitempty"`
 }
 
 type ToolResultPayload struct {

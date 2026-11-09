@@ -4,16 +4,25 @@ import type { FormEvent, MouseEvent } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import { createAgent, listAgents } from "../api/agents";
 import type { Agent, CreateAgentRequest } from "../api/agents";
+import { getRouter } from "../api/router";
+import type { RouterOverview } from "../api/router";
 import { Dialog, ErrorNotice, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
-import { avatarFor } from "../lib/avatar";
 import {
   isTeam,
   rosterNames,
   agentHref,
+  usesClaudeCode,
   splitModel,
   providerLabel,
 } from "./agent-common";
+import { CLAUDE_EFFORTS, ClaudeCodeNote, choiceOptions } from "./agent-runtime";
+import {
+  ClaudeCodeBadge,
+  claudeAccountNames,
+  claudeTargetAccount,
+  useClaudeAccounts,
+} from "./router/claude-code";
 import type { AgentLike } from "./agent-common";
 import { useRooms } from "./presence";
 import {
@@ -25,8 +34,6 @@ import {
 } from "./agent-label";
 import type { RoomRow } from "../api/rooms";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   EmptyState,
@@ -36,6 +43,7 @@ import {
   Select,
   Skeleton,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 
 /* REQ-ROOM-011: the alive roster. The Agents page shows a team pulse and one
@@ -66,18 +74,8 @@ const STATE_FALLBACK: Record<string, string> = {
   resting: "Idle",
 };
 
-/* The agent identity colors of lib/avatar.ts map onto the Gr8r status tokens,
-   so one agent keeps one color in the picker, the chat, and the roster. */
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 /* green active / gray idle / amber waiting / red error (page mapping). */
@@ -129,11 +127,18 @@ function memberCount(row: RoomRow | undefined): number {
 export interface CreateAgentDialogProps {
   onClose: () => void;
   onCreated?: (name: string) => void;
+  /* The model picked when the dialog opens, for example a Claude Code model
+     from the Router's Claude Code page. */
+  initialModel?: string;
 }
 
+/* REQ-WEB-045 and spec 39 (REQ-CCT-009): every agent is a lana agent made
+   from a template. The model is optional; a Claude Code model shows its note
+   and the Claude reasoning effort. */
 export function CreateAgentDialog({
   onClose,
   onCreated,
+  initialModel,
 }: CreateAgentDialogProps) {
   const announce = useAnnounce();
   const [name, setName] = useState("");
@@ -141,12 +146,46 @@ export function CreateAgentDialog({
   const [idTouched, setIdTouched] = useState(false);
   const [template, setTemplate] = useState<string>(TEMPLATES[0].value);
   const [workspace, setWorkspace] = useState("");
+  const [model, setModel] = useState(initialModel || "");
+  const [effort, setEffort] = useState("");
+  const [router, setRouter] = useState<RouterOverview | null>(null);
+  const { accounts } = useClaudeAccounts();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
 
+  useEffect(() => {
+    let alive = true;
+    Promise.resolve()
+      .then(() => getRouter())
+      .then((value) => {
+        if (alive && value) {
+          setRouter(value);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const templateInfo =
     TEMPLATES.find((item) => item.value === template) || TEMPLATES[0];
+  const choices = useMemo(() => (router ? router.choices : []), [router]);
+  const names = useMemo(
+    () => claudeAccountNames(choices, router ? router.providers : null, accounts),
+    [choices, router, accounts]
+  );
+  const claudeAccount = claudeTargetAccount(model, choices, router ? router.combos : null, names);
+  const modelOptions = useMemo(() => {
+    const options = choiceOptions(choices, router ? router.providers : undefined, accounts);
+    const known = !model || options.some((option) => option.value === model);
+    return [
+      { value: "", label: "Same as the default agent" },
+      ...(known ? [] : [{ value: model, label: model }]),
+      ...options,
+    ];
+  }, [choices, router, accounts, model]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -173,20 +212,26 @@ export function CreateAgentDialog({
     setError("");
     setDetails([]);
     try {
-      const body: CreateAgentRequest = {
-        name: value,
-        template,
-        workspace: workspace.trim(),
-      };
+      /* API-CCT-002: the model is an address; never a provider or runtime. */
+      const body: CreateAgentRequest = { name: value, template, workspace: workspace.trim() };
       if (displayName !== value) {
         body.display_name = displayName;
+      }
+      if (model) {
+        body.model = model;
+      }
+      if (claudeAccount && effort) {
+        body.reasoning_effort = effort;
       }
       const created = await createAgent(body);
       const createdName = created && created.name ? created.name : value;
       announce(
         "Agent " +
           displayName +
-          " created. Restart the daemon for it to take effect."
+          " created." +
+          (created && created.restart_required
+            ? " Restart the daemon for it to take effect."
+            : "")
       );
       if (onCreated) {
         onCreated(createdName);
@@ -211,8 +256,7 @@ export function CreateAgentDialog({
     <Dialog title="Create agent" dismissible={!busy} onClose={onClose}>
       <form className="agent-dialog-form" onSubmit={submit}>
         <p className="hint">
-          Create an agent from a template. You can change the model and the
-          other settings after it appears.
+          Create an agent from a template. You can change the other settings after it appears.
         </p>
 
         <label className="field">
@@ -269,6 +313,7 @@ export function CreateAgentDialog({
           <Select
             id="create-agent-template"
             name="template"
+            aria-label="Template"
             value={template}
             onChange={setTemplate}
             options={TEMPLATES.map((item) => ({
@@ -278,6 +323,41 @@ export function CreateAgentDialog({
           />
           <span className="hint">{templateInfo.note}</span>
         </div>
+
+        <div className="field">
+          <label className="field-label" htmlFor="create-agent-model">
+            Model
+          </label>
+          <Select
+            id="create-agent-model"
+            aria-label="Model"
+            value={model}
+            options={modelOptions}
+            disabled={busy}
+            onChange={(value) => {
+              setModel(value);
+              setEffort("");
+            }}
+          />
+          {claudeAccount ? <ClaudeCodeNote account={claudeAccount} /> : null}
+        </div>
+
+        {claudeAccount ? (
+          <div className="field">
+            <label className="field-label" htmlFor="create-agent-effort">
+              Reasoning effort
+            </label>
+            <Select
+              id="create-agent-effort"
+              aria-label="Reasoning effort"
+              value={effort}
+              options={CLAUDE_EFFORTS}
+              disabled={busy}
+              onChange={setEffort}
+            />
+            <span className="hint">Passed to Claude Code as --effort.</span>
+          </div>
+        ) : null}
 
         <label className="field">
           <span className="field-label">Workspace</span>
@@ -345,6 +425,7 @@ function matchesQuery(agent: AgentLike, query: string): boolean {
     agent.model,
     agent.permission,
     agent.policy,
+    usesClaudeCode(agent) ? "Claude Code" : "",
   ].concat(rosterNames(agent));
   const haystack = fields
     .filter((value) => value !== null && value !== undefined)
@@ -390,17 +471,22 @@ function AgentCard({
       : "Team"
     : Number(row ? row.turns_7d : 0) + " tasks · 7d";
   const model = splitModel(agent);
-  const modelLabel = model.model
-    ? model.provider
-      ? providerLabel(model.provider) + " · " + model.model
-      : model.model
-    : "";
+  /* Spec 39 (API-CCT-006): an agent on Claude Code shows the Claude mark;
+     its model is the address, for example claude-code/opus. */
+  const claude = usesClaudeCode(agent);
+  const modelLabel = claude
+    ? String(agent.model || "")
+    : model.model
+      ? model.provider
+        ? providerLabel(model.provider) + " · " + model.model
+        : model.model
+      : "";
 
   return (
     <article className="pcard" onClick={(event) => onOpen(event, agent.name)}>
       <div className="agent-card-head">
         {team ? (
-          <AvatarStack
+          <AgentAvatarStack
             size="md"
             max={3}
             items={rosterNames(agent).map((name) => ({
@@ -409,8 +495,8 @@ function AgentCard({
             }))}
           />
         ) : (
-          <Avatar
-            name={displayLabel(agent)}
+          <AgentAvatar
+            name={agent.name}
             color={agentColor(agent.name)}
             size="md"
             presence={state === "online" || state === "working"}
@@ -429,9 +515,10 @@ function AgentCard({
 
       <p className="agent-card-preview">{description}</p>
 
-      {modelLabel ? (
+      {modelLabel || claude ? (
         <div className="agent-card-meta">
-          <Lbl color="var(--text-4)">{modelLabel}</Lbl>
+          {claude ? <ClaudeCodeBadge /> : null}
+          {modelLabel ? <Lbl color="var(--text-4)">{modelLabel}</Lbl> : null}
         </div>
       ) : null}
 

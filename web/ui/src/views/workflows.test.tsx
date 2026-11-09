@@ -17,6 +17,7 @@ vi.mock("../api/workflows", async (importOriginal) => {
     getRun: vi.fn(),
     answerDecision: vi.fn(),
     openWorkflowStream: vi.fn(),
+    scriptSuggestions: vi.fn(() => Promise.resolve({ suggestions: [] })),
   };
 });
 vi.mock("../api/approvals", () => ({ answerApproval: vi.fn() }));
@@ -39,6 +40,7 @@ import type { Graph, RunDetail, Workflow, WorkflowChange, WorkflowList } from ".
 import { ToastProvider } from "../ui/gr8r";
 import { WorkflowsPage } from "./workflows";
 import { WorkflowEditor } from "./workflow-editor";
+import { WorkflowPage } from "./workflow-page";
 import { WorkflowRuns } from "./workflow-runs";
 
 function wrap(node: ReactNode) {
@@ -156,6 +158,27 @@ describe("workflow editor", () => {
     expect(body.base_version).toBe(1);
     expect(body.graph!.nodes.map((node) => node.id)).toEqual(["go", "bash"]);
     expect(body.graph!.edges).toEqual([{ id: "e1", from: "go", to: "bash" }]);
+  });
+});
+
+describe("workflow page", () => {
+  it("opens a workflow whose stored graph has edges: null", async () => {
+    /* GET /v1/workflows/hi of a fresh workflow from a server that sent its
+       nil edge list as null. getWorkflow is the real client here. */
+    const wire = { ...workflow({ id: "hi", name: "hi" }), graph: { nodes: graph.nodes, edges: null } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify(wire) }) as Response)
+    );
+    vi.mocked(getChat).mockResolvedValue({ messages: [] });
+    vi.mocked(lockPreview).mockResolvedValue({ tools: [] });
+    try {
+      const { container } = wrap(<WorkflowPage id="hi" tab="editor" />);
+      await screen.findByRole("region", { name: "Workflow editor canvas" });
+      expect(container.querySelector('[data-node="go"]')).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

@@ -33,6 +33,40 @@ type restartController struct {
 
 	once     sync.Once
 	requests chan struct{}
+
+	// hookMu guards updateHook.
+	hookMu sync.Mutex
+	// updateHook is set by an update job that waits for this restart. It runs
+	// in place of the plain exec (spec 36, design.md Job state machine); a
+	// plain restart leaves it nil.
+	updateHook updateRestartHook
+}
+
+// updateRestartHook installs a verified update and replaces the process image.
+// It runs on the daemon goroutine after the drain completed and the runtime
+// closed, and returns only when the exec failed.
+type updateRestartHook func(lock *daemonLock, stderr io.Writer) int
+
+// setUpdateHook marks the pending restart as an update restart.
+func (c *restartController) setUpdateHook(hook updateRestartHook) {
+	if c == nil {
+		return
+	}
+	c.hookMu.Lock()
+	c.updateHook = hook
+	c.hookMu.Unlock()
+}
+
+// takeUpdateHook returns and clears the update hook; nil for a plain restart.
+func (c *restartController) takeUpdateHook() updateRestartHook {
+	if c == nil {
+		return nil
+	}
+	c.hookMu.Lock()
+	defer c.hookMu.Unlock()
+	hook := c.updateHook
+	c.updateHook = nil
+	return hook
 }
 
 func newRestartController(lock *daemonLock) *restartController {
@@ -86,10 +120,25 @@ func (c *restartController) requested() <-chan struct{} {
 	return c.requests
 }
 
+// execRestart replaces the process image with the binary at path ("" means
+// os.Executable). Tests replace it so they never exec.
+var execRestart = restartInPlace
+
+// restartExec is the last step of a daemon restart. An update restart runs the
+// update hook, which installs the new binary and execs it; a plain restart
+// execs the same binary as before (spec 36).
+func restartExec(c *restartController, lock *daemonLock, stderr io.Writer) int {
+	if hook := c.takeUpdateHook(); hook != nil {
+		return hook(lock, stderr)
+	}
+	return execRestart(lock, stderr, "")
+}
+
 // restartInPlace runs the same binary with the same arguments in the same
 // process. The lock descriptor is cleared of close-on-exec first, so its flock
-// stays held across the exec (Q-019).
-func restartInPlace(lock *daemonLock, stderr io.Writer) int {
+// stays held across the exec (Q-019). executable "" means os.Executable; an
+// update passes the resolved path it replaced (spec 36).
+func restartInPlace(lock *daemonLock, stderr io.Writer, executable string) int {
 	if lock == nil {
 		_, _ = fmt.Fprintln(stderr, "error: restart: daemon lock is not held")
 		return 1
@@ -98,10 +147,13 @@ func restartInPlace(lock *daemonLock, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "error: restart: %v\n", err)
 		return 1
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "error: restart: %v\n", err)
-		return 1
+	if executable == "" {
+		path, err := os.Executable()
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "error: restart: %v\n", err)
+			return 1
+		}
+		executable = path
 	}
 	if err := syscall.Exec(executable, os.Args, restartEnv(os.Environ(), lock.fd())); err != nil {
 		_, _ = fmt.Fprintf(stderr, "error: restart: %v\n", err)

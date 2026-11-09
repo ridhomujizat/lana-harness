@@ -5,20 +5,72 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
 type secretSource struct {
 	env  func(string) (string, bool)
-	file map[string]string
+	file *secretFile
+}
+
+// secretFile is the secrets.env layer of a secret source. A lookup re-reads
+// the file when its modification time or size changed since the last read, so
+// a key the dashboard writes reaches the running daemon without a restart
+// (REQ-RTR-008). The environment still wins over the file.
+type secretFile struct {
+	path string
+
+	mu      sync.Mutex
+	modTime time.Time
+	size    int64
+	values  map[string]string
+}
+
+// lookup returns the file value of name, reloading the file first when it
+// changed. A file that cannot be read or parsed keeps the values of the last
+// good read; a removed file has no values.
+func (f *secretFile) lookup(name string) (string, bool) {
+	if f == nil {
+		return "", false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.path != "" {
+		f.refreshLocked()
+	}
+	v, ok := f.values[name]
+	return v, ok
+}
+
+func (f *secretFile) refreshLocked() {
+	info, err := os.Stat(f.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			f.values = map[string]string{}
+			f.modTime, f.size = time.Time{}, 0
+		}
+		return
+	}
+	if info.ModTime().Equal(f.modTime) && info.Size() == f.size {
+		return
+	}
+	data, err := os.ReadFile(f.path)
+	if err != nil {
+		return
+	}
+	values, _ := parseSecrets(f.path, data)
+	f.values = values
+	f.modTime, f.size = info.ModTime(), info.Size()
 }
 
 func (s secretSource) Lookup(name string) (core.Secret, bool) {
 	if v, ok := s.env(name); ok && v != "" {
 		return core.NewSecret(v), true
 	}
-	if v, ok := s.file[name]; ok && v != "" {
+	if v, ok := s.file.lookup(name); ok && v != "" {
 		return core.NewSecret(v), true
 	}
 	return core.Secret{}, false
@@ -33,13 +85,13 @@ func (s secretSource) lookupString(name string) (string, bool) {
 }
 
 func loadSecretSource(home string, env func(string) (string, bool)) (secretSource, []Warning, []Error) {
-	src := secretSource{env: env, file: map[string]string{}}
+	src := secretSource{env: env, file: &secretFile{values: map[string]string{}}}
 	var warnings []Warning
-	var errs []Error
 	if home == "" {
 		return src, nil, nil
 	}
 	path := filepath.Join(home, "secrets.env")
+	src.file.path = path
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -55,6 +107,17 @@ func loadSecretSource(home string, env func(string) (string, bool)) (secretSourc
 	if err != nil {
 		return src, warnings, []Error{{File: path, Msg: err.Error()}}
 	}
+	values, errs := parseSecrets(path, data)
+	src.file.values = values
+	src.file.modTime, src.file.size = info.ModTime(), info.Size()
+	return src, warnings, errs
+}
+
+// parseSecrets reads the NAME=value lines of secrets.env. Invalid lines are
+// reported and skipped.
+func parseSecrets(path string, data []byte) (map[string]string, []Error) {
+	values := map[string]string{}
+	var errs []Error
 	for i, raw := range strings.Split(string(data), "\n") {
 		line := strings.TrimSuffix(raw, "\r")
 		trimmed := strings.TrimSpace(line)
@@ -77,9 +140,9 @@ func loadSecretSource(home string, env func(string) (string, bool)) (secretSourc
 				value = value[1 : len(value)-1]
 			}
 		}
-		src.file[name] = value
+		values[name] = value
 	}
-	return src, warnings, errs
+	return values, errs
 }
 
 func interpolateMCP(value map[string]any, secrets secretSource, positions map[string]pos) []Error {

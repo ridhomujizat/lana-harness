@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ApiError } from "../api/client";
 import type { ModelsResponse } from "../api/models";
 import type { SessionDetail, SessionEvent } from "../api/sessions";
@@ -389,6 +389,38 @@ describe("composer model catalog", () => {
     ).toBeTruthy();
   });
 
+  /* Spec 37 (REQ-RTR-018): with the router, the menu offers the agent picker
+     choices, combos first, and sets the picked value as is. */
+  it("offers the router choices and sets a combo", async () => {
+    const fetchMock = stubFetch([]);
+    const base = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/v1/router")) {
+        return json({
+          version: "v1",
+          choices: [
+            { value: "coding", label: "coding", group: "Combos" },
+            { value: "deepseek/deepseek-flash", label: "DeepSeek Flash", group: "deepseek" },
+          ],
+        });
+      }
+      return base ? base(input, init) : json({});
+    });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model: deepseek:chat" })
+    );
+    const combos = await screen.findByRole("group", { name: "Combos" });
+    expect(within(combos).getByRole("menuitemradio", { name: /coding/ })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "deepseek" })).toBeTruthy();
+    fireEvent.click(within(combos).getByRole("menuitemradio", { name: /coding/ }));
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ model: "coding" });
+    });
+  });
+
   it("keeps the free-text provider:model input working", async () => {
     const fetchMock = stubFetch([]);
 
@@ -473,5 +505,80 @@ describe("composer thinking chip", () => {
     expect(
       screen.queryByRole("button", { name: "Thinking: Model default" })
     ).toBeNull();
+  });
+});
+
+/* API reply: replying to a workflow message sets the chip, threads reply_to on
+   the send, and clears the chip after a successful send. */
+describe("session reply to a workflow message", () => {
+  it("sets the target, sends reply_to, and clears the chip", async () => {
+    stubFetch([
+      sessionEvent(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "Your brief is ready." }],
+        source: "workflow",
+        source_name: "Daily brief",
+      }),
+      sessionEvent(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    vi.mocked(turnsApi.sendMessage).mockResolvedValue({
+      turn: "started",
+      turn_id: "t2",
+    });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reply to Daily brief" })
+    );
+    expect(await screen.findByText("Replying to workflow Daily brief")).toBeTruthy();
+
+    const input = screen.getByLabelText("Message lana") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "thanks" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(turnsApi.sendMessage)).toHaveBeenCalledWith(
+        "s1",
+        "thanks",
+        [],
+        1
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Replying to workflow Daily brief")).toBeNull();
+    });
+  });
+
+  /* API reply: a refused reply keeps the chip and shows the error inline. */
+  it("keeps the target and shows the error on a 400", async () => {
+    stubFetch([
+      sessionEvent(1, "assistant/message", "t1", {
+        content: [{ type: "text", text: "Your brief is ready." }],
+        source: "workflow",
+        source_name: "Daily brief",
+      }),
+      sessionEvent(2, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    vi.mocked(turnsApi.sendMessage).mockRejectedValue(
+      new ApiError(
+        400,
+        "invalid_request",
+        "reply_to must point at an automation message in this chat"
+      )
+    );
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Reply to Daily brief" })
+    );
+    const input = screen.getByLabelText("Message lana") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "thanks" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(
+      await screen.findByText(
+        "reply_to must point at an automation message in this chat"
+      )
+    ).toBeTruthy();
+    expect(screen.getByText("Replying to workflow Daily brief")).toBeTruthy();
   });
 });

@@ -39,13 +39,16 @@ type cancelTurnResponse struct {
 type messageBody struct {
 	Text        *string  `json:"text"`
 	Attachments []string `json:"attachments"`
+	// ReplyTo names the seq of the automation message the text replies to. It
+	// is optional; absent means an ordinary message.
+	ReplyTo *int64 `json:"reply_to"`
 }
 
 // noteSender is an optional Backend extension. A room send uses it to start a
 // turn that carries a hidden runtime note the agent reads before the owner
 // message (API-ROOM-003, REQ-ROOM-008).
 type noteSender interface {
-	SendNote(ctx context.Context, id, text string, attachments []string, note string) (SendResult, error)
+	SendNote(ctx context.Context, id, text string, attachments []string, replyTo int64, note string) (SendResult, error)
 }
 
 func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +75,14 @@ func (s *Server) sendSessionMessage(w http.ResponseWriter, r *http.Request, back
 	text := ""
 	if body.Text != nil {
 		text = *body.Text
+	}
+	replyTo := int64(0)
+	if body.ReplyTo != nil {
+		if *body.ReplyTo < 0 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "reply_to must be a non-negative integer")
+			return SendResult{}, false
+		}
+		replyTo = *body.ReplyTo
 	}
 	attachments := body.Attachments
 	if len(attachments) > attach.MaxFiles {
@@ -115,7 +126,7 @@ func (s *Server) sendSessionMessage(w http.ResponseWriter, r *http.Request, back
 	if s.runWorkflowCommand(w, r, text) {
 		return SendResult{}, false
 	}
-	result, err := startMessageTurn(r.Context(), backend, id, text, attachments, note)
+	result, err := startMessageTurn(r.Context(), backend, id, text, attachments, replyTo, note)
 	if err != nil {
 		s.writeBackendError(w, "send message", err)
 		return SendResult{}, false
@@ -126,13 +137,14 @@ func (s *Server) sendSessionMessage(w http.ResponseWriter, r *http.Request, back
 // startMessageTurn starts a turn on the session. A non-empty note is delivered
 // as a hidden runtime note when the backend supports notes; otherwise the note
 // is dropped and the plain owner message starts (API-ROOM-003, REQ-ROOM-008).
-func startMessageTurn(ctx context.Context, backend Backend, id, text string, attachments []string, note string) (SendResult, error) {
+// replyTo is the automation message the text replies to, or 0.
+func startMessageTurn(ctx context.Context, backend Backend, id, text string, attachments []string, replyTo int64, note string) (SendResult, error) {
 	if note != "" {
 		if sender, ok := backend.(noteSender); ok {
-			return sender.SendNote(ctx, id, text, attachments, note)
+			return sender.SendNote(ctx, id, text, attachments, replyTo, note)
 		}
 	}
-	return backend.Send(ctx, id, text, attachments)
+	return backend.Send(ctx, id, text, attachments, replyTo)
 }
 
 func (s *Server) handleCancelTurn(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,5 @@
 import { ApiError, queryString, request } from "./client";
+import { watchVisibility } from "./visibility";
 
 /* Calendar calls of API-CAL-001 to API-CAL-015 (spec #35). Types follow the
    contract's shared objects. Instants are Unix ms; dates are YYYY-MM-DD and
@@ -101,6 +102,9 @@ export interface Entry {
   workflow: EntryWorkflow | null;
   google: (GoogleRef & { color?: string; calendar_name?: string }) | null;
   readonly: boolean;
+  /* When several workflow runs are merged into one slot (calendar-model
+     groupWorkflowRuns), the runs it stands for. */
+  group?: Entry[];
 }
 
 export type GoogleState = "off" | "linked" | "syncing" | "needs_reauth" | "error";
@@ -253,8 +257,25 @@ export function openCalendarStream(onChange: (change: CalendarChange) => void): 
   let controller: AbortController | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
 
+  /* A hidden tab releases its connection; on the next visible change the stream
+     asks its view to reload once (the pushed changes were missed) and
+     reconnects. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (retry !== null) {
+        clearTimeout(retry);
+        retry = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      onChange({ what: "refresh" });
+      void connect();
+    },
+  });
+
   const again = () => {
-    if (!closed) {
+    if (!closed && !visibility.blocked()) {
       retry = setTimeout(() => void connect(), 1000);
     }
   };
@@ -293,7 +314,7 @@ export function openCalendarStream(onChange: (change: CalendarChange) => void): 
   }
 
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -343,6 +364,7 @@ export function openCalendarStream(onChange: (change: CalendarChange) => void): 
   return {
     close() {
       closed = true;
+      visibility.close();
       if (retry !== null) {
         clearTimeout(retry);
       }

@@ -17,6 +17,9 @@ type testLiveConfigStore struct {
 	*testConfigStore
 	applied  [][]byte
 	applyErr error
+	// advance moves the loaded version to each applied candidate, like the
+	// daemon when no restart-only change is pending.
+	advance bool
 }
 
 func (s *testLiveConfigStore) ApplyLive(ctx context.Context, candidate []byte) error {
@@ -27,6 +30,9 @@ func (s *testLiveConfigStore) ApplyLive(ctx context.Context, candidate []byte) e
 		return s.applyErr
 	}
 	s.applied = append(s.applied, append([]byte(nil), candidate...))
+	if s.advance {
+		s.loaded = shaHex(candidate)
+	}
 	return nil
 }
 
@@ -174,11 +180,12 @@ func TestTeamSaveRestartRequiredLive(t *testing.T) {
 	}
 }
 
-// TestProviderSaveStaysRestartRequired covers AC-TFB-015: the live-capable
-// store does not make a provider save live.
-func TestProviderSaveStaysRestartRequired(t *testing.T) {
+// TestProviderSaveAppliesLive covers the web side of AC-RTR-011 (which
+// supersedes AC-TFB-015): a provider save reaches ApplyLive and answers
+// restart_required false once the store has loaded the written version.
+func TestProviderSaveAppliesLive(t *testing.T) {
 	raw := liveAgentConfig
-	store := &testLiveConfigStore{testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{})}
+	store := &testLiveConfigStore{testConfigStore: newTestConfigStore(t, raw, 0o600, ConfigSettings{}), advance: true}
 	s, cookie, csrf := newLiveConfigTestServer(t, store)
 
 	body := `{"kind":"openai_compat","base_url":"https://example.com/v2","expected_version":"` + shaHex([]byte(raw)) + `"}`
@@ -188,10 +195,24 @@ func TestProviderSaveStaysRestartRequired(t *testing.T) {
 	}
 	var saved providerSaveResponse
 	response.json(t, &saved)
-	if !saved.RestartRequired {
-		t.Fatal("restart_required = false for a provider save")
+	if saved.RestartRequired {
+		t.Fatal("restart_required = true for a live provider save")
 	}
-	if len(store.applied) != 0 {
-		t.Fatalf("provider save reached ApplyLive: %q", store.applied)
+	if len(store.applied) != 1 || !strings.Contains(string(store.applied[0]), "https://example.com/v2") {
+		t.Fatalf("ApplyLive calls = %q", store.applied)
+	}
+
+	// A store that keeps an older loaded version (another restart-only change
+	// is pending) still reports restart_required.
+	store.advance = false
+	store.loaded = "pending-restart"
+	body = `{"kind":"openai_compat","base_url":"https://example.com/v3","expected_version":"` + saved.Version + `"}`
+	response = serveMCP(t, s, http.MethodPut, "/v1/providers/mock", body, cookie, csrf)
+	if response.code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", response.code, response.body)
+	}
+	response.json(t, &saved)
+	if !saved.RestartRequired {
+		t.Fatal("restart_required = false while another change is pending")
 	}
 }

@@ -66,3 +66,19 @@ func TestHasKnowledgeTool(t *testing.T) {
 		t.Fatal("hasKnowledgeTool accepted an agent without a knowledge tool")
 	}
 }
+
+// REQ-CCT-007 (was REQ-CCR-007): a Claude Code agent may run the knowledge
+// passes; they use its background chain (llmcall.AgentBackgroundChain).
+func TestKnowledgeAgentAllowsClaudeCodeAgents(t *testing.T) {
+	cfg := core.Config{Agents: map[string]core.AgentConfig{
+		"alpha": {Model: "claude-code/opus", Tools: []string{"knowledge_read"}},
+		"beta":  {Tools: []string{"knowledge_read"}},
+	}}
+	if name, _ := knowledgeAgent(cfg); name != "alpha" {
+		t.Fatalf("knowledgeAgent = %q, want alpha", name)
+	}
+	cfg.Knowledge.Agent = "beta"
+	if name, reason := knowledgeAgent(cfg); name != "beta" || reason != "" {
+		t.Fatalf("knowledgeAgent = %q, %q", name, reason)
+	}
+}

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { ApiError, errorMessage } from "../api/client";
-import { avatarFor } from "../lib/avatar";
 import {
   checkTelegram,
   connectTelegram,
@@ -48,8 +47,10 @@ import {
   Skeleton,
   Toggle,
 } from "../ui/gr8r";
+import { AgentAvatar, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
+import { ChannelLogo } from "./channel-logo";
 
 /* REQ-WEB-052: the channels list and the Telegram detail. REQ-WEB-053: the
    add-chat dialog with the chats that wrote to the bot without a route.
@@ -81,51 +82,22 @@ const COMING_SOON = [
   {
     name: "discord",
     label: "Discord",
-    icon: "message-circle",
     description: "Talk to agents in a server or DM.",
   },
   {
     name: "slack",
     label: "Slack",
-    icon: "hash",
     description: "Mention an agent in a channel.",
   },
   {
     name: "whatsapp",
     label: "WhatsApp",
-    icon: "phone",
     description: "Chat with an agent from your phone.",
   },
 ];
 
-/* The agent identity colors (lib/avatar.ts) map onto the Gr8r status tokens so
-   one agent keeps one color in the roster, the list and the detail page. */
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
-}
-
-function TelegramMark() {
-  return (
-    <svg
-      className="chan-mark"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path
-        d="M16.906 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"
-        fill="currentColor"
-      ></path>
-    </svg>
-  );
+  return agentFallbackColor(name);
 }
 
 function telegramStatus(status: string | undefined): {
@@ -299,20 +271,21 @@ function SettingRow({ id, label, hint, control, error }: SettingRowProps) {
 
 interface ChannelTileProps {
   children: ReactNode;
-  brand?: boolean;
 }
 
-function ChannelTile({ children, brand }: ChannelTileProps) {
+function ChannelTile({ children }: ChannelTileProps) {
   return (
-    <span className={"chan-tile" + (brand ? " is-brand" : "")} aria-hidden="true">
+    <span className="chan-tile" aria-hidden="true">
       {children}
     </span>
   );
 }
 
 interface ChannelRowProps {
-  tile: ReactNode;
-  brand?: boolean;
+  /* The icon of a generic tile (web, CLI). */
+  tile?: ReactNode;
+  /* A chat channel such as telegram shows its brand logo instead. */
+  channel?: string;
   title: string;
   badge: ReactNode;
   meta: ReactNode;
@@ -325,7 +298,7 @@ interface ChannelRowProps {
 /* One card of the channels grid (Gr8r projects/members style). */
 function ChannelRow({
   tile,
-  brand,
+  channel,
   title,
   badge,
   meta,
@@ -337,7 +310,11 @@ function ChannelRow({
   return (
     <article className={"chan-card" + (muted ? " is-muted" : "")}>
       <div className="chan-card-head">
-        <ChannelTile brand={brand}>{tile}</ChannelTile>
+        {channel ? (
+          <ChannelLogo channel={channel} size={40} />
+        ) : (
+          <ChannelTile>{tile}</ChannelTile>
+        )}
         <div className="chan-card-id">
           <div className="chan-card-title">
             <h2 className="chan-card-name">{title}</h2>
@@ -348,7 +325,7 @@ function ChannelRow({
       </div>
       {agent ? (
         <div className="chan-card-agent">
-          <Avatar name={agentLabel || agent} color={agentColor(agent)} size="sm" />
+          <AgentAvatar name={agent} color={agentColor(agent)} size="sm" />
           <span>{agentLabel || agent}</span>
         </div>
       ) : null}
@@ -486,8 +463,7 @@ export function ChannelsPage() {
       {status === "ready" && channels.length > 0 ? (
         <div className="chan-grid">
           <ChannelRow
-            brand
-            tile={<TelegramMark />}
+            channel="telegram"
             title="Telegram"
             badge={
               <Badge tone={telegramState.tone} dot>
@@ -543,7 +519,7 @@ export function ChannelsPage() {
             <ChannelRow
               key={channel.name}
               muted
-              tile={<Ic name={channel.icon} size={20} />}
+              channel={channel.name}
               title={channel.label}
               badge={<Badge tone="gray">Coming soon</Badge>}
               meta={channel.description}
@@ -1947,8 +1923,8 @@ export function TelegramPage() {
                           <td>
                             <span className="chan-agent">
                               {chat.agent ? (
-                                <Avatar
-                                  name={label(chat.agent)}
+                                <AgentAvatar
+                                  name={chat.agent}
                                   color={agentColor(chat.agent)}
                                   size="sm"
                                 />

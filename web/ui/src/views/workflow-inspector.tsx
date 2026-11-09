@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import type { Graph, NodeRun, WfNode } from "../api/workflows";
-import { getRun, listRuns } from "../api/workflows";
+import type { Graph, MessageChannel, NodeRun, ScriptSuggestion, WfNode } from "../api/workflows";
+import { getRun, getWorkflowChannels, listRuns } from "../api/workflows";
+import { errorMessage } from "../api/client";
 import { Ic } from "../ui/icons";
 import {
   Button,
+  Checkbox,
   Field,
   Input,
   Select,
@@ -11,9 +13,11 @@ import {
   Textarea,
   Toggle,
 } from "../ui/gr8r";
-import { nodeMeta } from "./workflow-catalog";
+import { messageChannelIds, nodeMeta } from "./workflow-catalog";
 import type { FieldSpec } from "./workflow-catalog";
 import { prettyValue } from "./workflow-common";
+import { agentOptionIcon } from "./agent-avatar";
+import { ConvertBanner, ConvertDialog, ScriptTab } from "./workflow-script";
 
 /* The node inspector of design workflows-2: Parameters, Last output and On
    failure. Edits go straight into the draft graph; the editor saves. */
@@ -25,6 +29,9 @@ interface InspectorProps {
   agents: string[];
   /* agentLabel resolves an agent ID to its display name for the pickers. */
   agentLabel?: (name: string) => string;
+  /* Spec #44: set when the daemon suggests converting this agent step. */
+  suggestion?: ScriptSuggestion;
+  onDismissSuggestion?: () => void;
   onChange: (node: WfNode) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -160,6 +167,108 @@ function ToolsField({
   );
 }
 
+/* The Message node's "Send to" checklist (spec #33). The channel list is read
+   once from the endpoint; an old node without a channels param starts on the
+   run-time default (telegram) and the first change writes the explicit list.
+   A selected channel that needs an agent reveals the agent picker, and at
+   least one channel must stay selected. */
+function MessageChannelsField({
+  node,
+  agents,
+  set,
+}: {
+  node: WfNode;
+  agents: string[];
+  set: (name: string, value: unknown) => void;
+}) {
+  const [channels, setChannels] = useState<MessageChannel[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    getWorkflowChannels()
+      .then((list) => {
+        if (live) {
+          setChannels(list);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (live) {
+          setError(errorMessage(failure));
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const selected = messageChannelIds(node.params);
+  const agent = typeof node.params.agent === "string" ? node.params.agent : "";
+  const rows = channels || [];
+  const needsAgent = rows.filter(
+    (channel) => selected.includes(channel.id) && channel.needs_agent
+  );
+
+  const toggle = (id: string, checked: boolean) => {
+    let next = selected.filter((value) => value !== id);
+    if (checked) {
+      next = next.concat([id]);
+    }
+    if (next.length === 0) {
+      return;
+    }
+    const order = rows.map((channel) => channel.id);
+    next.sort((left, right) => order.indexOf(left) - order.indexOf(right));
+    set("channels", next);
+  };
+
+  return (
+    <>
+      <Field label="Send to">
+        <div className="wf-channels">
+          {rows.map((channel) => {
+            const checked = selected.includes(channel.id);
+            const disabled =
+              (!channel.available && !checked) ||
+              (checked && selected.length === 1);
+            return (
+              <div className="wf-channel" key={channel.id}>
+                <label className="wf-channel-row">
+                  <Checkbox
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(nextChecked) => toggle(channel.id, nextChecked)}
+                  />
+                  <span>{channel.label}</span>
+                </label>
+                {!channel.available && channel.reason ? (
+                  <span className="wf-channel-why muted">{channel.reason}</span>
+                ) : null}
+              </div>
+            );
+          })}
+          {error ? <span className="wf-field-err">{error}</span> : null}
+        </div>
+      </Field>
+      {needsAgent.length > 0 ? (
+        <Field
+          label="Agent"
+          hint="The channel posts as this agent."
+          error={agent ? undefined : "Pick an agent for " + needsAgent[0]!.label + "."}
+          htmlFor={"wf-f-" + node.id + "-agent"}
+        >
+          <Select
+            id={"wf-f-" + node.id + "-agent"}
+            value={agent}
+            placeholder="Pick a bot"
+            options={agents.map((name) => ({ value: name, label: name, icon: agentOptionIcon(name) }))}
+            onChange={(next) => set("agent", next || undefined)}
+          />
+        </Field>
+      ) : null}
+    </>
+  );
+}
+
 function ParamField({
   spec,
   node,
@@ -173,6 +282,9 @@ function ParamField({
   agentLabel: (name: string) => string;
   set: (name: string, value: unknown) => void;
 }) {
+  if (spec.kind === "channels") {
+    return <MessageChannelsField node={node} agents={agents} set={set} />;
+  }
   const id = "wf-f-" + node.id + "-" + spec.name;
   const value = node.params[spec.name];
   let control;
@@ -229,7 +341,7 @@ function ParamField({
           placeholder="Pick a bot"
           options={[
             ...(spec.required ? [] : [{ value: "", label: "—" }]),
-            ...agents.map((agent) => ({ value: agent, label: agentLabel(agent) })),
+            ...agents.map((agent) => ({ value: agent, label: agentLabel(agent), icon: agentOptionIcon(agent) })),
           ]}
           onChange={(next) => set(spec.name, next || undefined)}
         />
@@ -354,12 +466,16 @@ export function NodeInspector({
   node,
   agents,
   agentLabel,
+  suggestion,
+  onDismissSuggestion,
   onChange,
   onDelete,
   onClose,
 }: InspectorProps) {
   const labelOf = agentLabel || ((name: string) => name);
   const [tab, setTab] = useState("params");
+  const [converting, setConverting] = useState(false);
+  const isScript = node.type === "script_parse";
   const meta = nodeMeta(node.type);
   const set = (name: string, value: unknown) => {
     const params = { ...node.params };
@@ -394,6 +510,7 @@ export function NodeInspector({
         onChange={setTab}
         items={[
           { value: "params", label: "Parameters" },
+          ...(isScript ? [{ value: "script", label: "Script" }] : []),
           { value: "output", label: "Last output" },
           { value: "failure", label: "On failure" },
         ]}
@@ -401,6 +518,13 @@ export function NodeInspector({
       <div className="wf-insp-b">
         {tab === "params" ? (
           <>
+            {suggestion && !isScript ? (
+              <ConvertBanner
+                suggestion={suggestion}
+                onConvert={() => setConverting(true)}
+                onDismiss={() => onDismissSuggestion?.()}
+              />
+            ) : null}
             <Field label="Name" htmlFor={"wf-name-" + node.id}>
               <Input
                 id={"wf-name-" + node.id}
@@ -439,6 +563,9 @@ export function NodeInspector({
               <span>Node enabled</span>
             </label>
           </>
+        ) : null}
+        {tab === "script" && isScript ? (
+          <ScriptTab workflowId={workflowId} node={node} onChange={onChange} />
         ) : null}
         {tab === "output" ? <LastOutput workflowId={workflowId} nodeId={node.id} /> : null}
         {tab === "failure" ? (
@@ -494,6 +621,18 @@ export function NodeInspector({
           </>
         ) : null}
       </div>
+      {converting ? (
+        <ConvertDialog
+          workflowId={workflowId}
+          node={node}
+          onClose={() => setConverting(false)}
+          onReplace={(next) => {
+            setConverting(false);
+            onChange(next);
+            setTab("script");
+          }}
+        />
+      ) : null}
       <footer className="wf-insp-f">
         <Button variant="danger-ghost" icon="trash-2" onClick={onDelete}>
           Delete node

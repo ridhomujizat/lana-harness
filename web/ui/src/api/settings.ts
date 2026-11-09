@@ -19,6 +19,24 @@ import type { DaemonInfo } from "./daemon";
 import { listAudit } from "./audit";
 import type { AuditEntry, AuditPage } from "./audit";
 import { listSecrets, setSecret, deleteSecret } from "./secrets";
+import {
+  deleteProvider,
+  listProviders,
+  saveProvider,
+  testProvider,
+} from "./router";
+
+/* The provider calls moved to api/router.ts with the Router page (spec 37,
+   API-RTR-006). They stay importable from here for existing callers. */
+export type {
+  ListProvidersResponse,
+  ProviderRow,
+  ProviderSaveResponse,
+  ProviderTestRequest,
+  ProviderTestResponse,
+  ProviderWriteRequest,
+} from "./router";
+export { deleteProvider, listProviders, saveProvider, testProvider };
 
 /* Settings calls of API-WEB-013, API-WEB-014, API-WEB-020, API-WEB-022,
    API-WEB-023, API-WEB-024, API-WEB-029, and API-WEB-030. Paths and field names
@@ -39,6 +57,15 @@ export interface ConfigRules {
 }
 
 export interface ConfigAgent {
+  /* Spec 38 (API-CCR-001): "claude-code" runs the agent through Claude Code;
+     empty is lana's own loop. */
+  runtime?: string;
+  auth?: string;
+  api_key_env?: string;
+  binary?: string;
+  allow_scheduled?: boolean;
+  reasoning_effort?: string;
+  description?: string;
   provider?: string;
   model?: string;
   display_name?: string;
@@ -114,51 +141,6 @@ export interface PutConfigResponse {
   restart_required: boolean;
 }
 
-export interface ProviderRow {
-  name: string;
-  kind: string;
-  base_url: string;
-  api_key_env: string;
-  key_state: string;
-  used_by: string[];
-}
-
-export interface ListProvidersResponse {
-  version: string;
-  providers: ProviderRow[];
-  restart_required: boolean;
-}
-
-export interface ProviderSaveResponse {
-  name: string;
-  version: string;
-  restart_required: boolean;
-}
-
-export interface ProviderWriteRequest {
-  kind: string;
-  base_url?: string;
-  api_key_env?: string;
-  api_key?: string;
-  headers?: Record<string, string>;
-  expected_version: string;
-}
-
-export interface ProviderTestRequest {
-  kind: string;
-  base_url?: string;
-  model?: string;
-  api_key?: string;
-  api_key_env?: string;
-}
-
-export interface ProviderTestResponse {
-  ok: boolean;
-  latency_ms?: number;
-  status?: number;
-  message?: string;
-}
-
 export interface SaveWebRequest {
   addr: string;
   expected_version: string;
@@ -205,38 +187,6 @@ export function saveConfig(
     raw,
     expected_version: expectedVersion,
   });
-}
-
-export function listProviders(): Promise<ListProvidersResponse> {
-  return request<ListProvidersResponse>("GET", "/v1/providers");
-}
-
-export function saveProvider(
-  name: string,
-  body: ProviderWriteRequest
-): Promise<ProviderSaveResponse> {
-  return request<ProviderSaveResponse>(
-    "PUT",
-    "/v1/providers/" + encodeURIComponent(name),
-    body
-  );
-}
-
-export function deleteProvider(
-  name: string,
-  expectedVersion: string
-): Promise<ProviderSaveResponse> {
-  return request<ProviderSaveResponse>(
-    "DELETE",
-    "/v1/providers/" + encodeURIComponent(name),
-    { expected_version: expectedVersion }
-  );
-}
-
-export function testProvider(
-  body: ProviderTestRequest
-): Promise<ProviderTestResponse> {
-  return request<ProviderTestResponse>("POST", "/v1/providers/test", body);
 }
 
 export { listSecrets, setSecret, deleteSecret };

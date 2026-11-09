@@ -36,6 +36,12 @@ type AgentRequest struct {
 	Tools                     []string // nil = agent defaults; non-nil = only these tools may run
 	Lock                      []string // tools that run without approval
 	MaxSteps                  int      // 0 = agent default; counts tool calls
+	// Background marks a guardian's structured call (assistant graph edits,
+	// failure decisions): lana background work that runs on the agent's
+	// background chain, never in Claude Code (spec 39 revision 5). A
+	// guardian with no model outside Claude Code fails with a
+	// *GuardianBackgroundError.
+	Background bool
 }
 
 // AgentResult is the outcome of one RunAgent call.

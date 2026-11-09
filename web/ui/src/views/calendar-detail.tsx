@@ -34,8 +34,10 @@ import {
 } from "../ui/gr8r";
 import type { BadgeTone } from "../ui/gr8r";
 import { AgentFace, ago } from "./workflow-common";
+import { ChannelLogo } from "./channel-logo";
 import { dayKey, dayTitle, instantOf, isTimed, parseDay, timeOf } from "./calendar-model";
 import { entryColor, entryIcon, entryWhen } from "./calendar-views";
+import { agentOptionIcon } from "./agent-avatar";
 
 /* The entry popover, the item editor and the small move/scope dialogs of the
    Calendar page (spec #35 REQ-CAL-001, -003, -004, -005, -006, -010). */
@@ -935,7 +937,7 @@ export function ItemEditor({ item, kind, day, minute, agents, label, workflows, 
     }
   }
 
-  const agentOptions = [{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: label(name) }))];
+  const agentOptions = [{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: label(name), icon: agentOptionIcon(name) }))];
   const repeatOptions = repeatOptionsFor(form);
 
   let when: ReactNode;
@@ -1142,7 +1144,7 @@ export function ItemEditor({ item, kind, day, minute, agents, label, workflows, 
                 <Select
                   value={form.agent}
                   placeholder="Pick an agent"
-                  options={agents.map((name) => ({ value: name, label: label(name) }))}
+                  options={agents.map((name) => ({ value: name, label: label(name), icon: agentOptionIcon(name) }))}
                   onChange={(value) => set("agent", value)}
                 />
               </Field>
@@ -1178,7 +1180,7 @@ export function ItemEditor({ item, kind, day, minute, agents, label, workflows, 
                 value={form.target}
                 onChange={(value) => set("target", value as FormState["target"])}
                 options={[
-                  { value: "telegram", label: "Telegram", icon: "send" },
+                  { value: "telegram", label: "Telegram", icon: <ChannelLogo channel="telegram" size={13} /> },
                   { value: "web", label: "Web", icon: "monitor" },
                 ]}
               />
@@ -1389,7 +1391,7 @@ function ItemDrawerForm({
             className="cdr-sel"
             aria-label="For"
             value={form.assignee}
-            options={[{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: label(name) }))]}
+            options={[{ value: "owner", label: "Me" }, ...agents.map((name) => ({ value: name, label: label(name), icon: agentOptionIcon(name) }))]}
             onChange={(value) => set("assignee", value)}
           />
         )}
@@ -1445,7 +1447,7 @@ function ItemDrawerForm({
                 <Select
                   value={form.agent}
                   placeholder="Pick an agent"
-                  options={agents.map((name) => ({ value: name, label: label(name) }))}
+                  options={agents.map((name) => ({ value: name, label: label(name), icon: agentOptionIcon(name) }))}
                   onChange={(value) => set("agent", value)}
                 />
               </Field>
@@ -1475,7 +1477,7 @@ function ItemDrawerForm({
                 value={form.target}
                 onChange={(value) => set("target", value as FormState["target"])}
                 options={[
-                  { value: "telegram", label: "Telegram", icon: "send" },
+                  { value: "telegram", label: "Telegram", icon: <ChannelLogo channel="telegram" size={13} /> },
                   { value: "web", label: "Web", icon: "monitor" },
                 ]}
               />

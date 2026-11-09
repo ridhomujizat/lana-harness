@@ -83,7 +83,12 @@ describe("knowledge page (AC-KNU-008)", () => {
     expect(
       screen.getByText(/openai text-embedding-3-small · 880\/900/)
     ).toBeTruthy();
-    expect(screen.getByText(/Knowledge agent: lana/)).toBeTruthy();
+    /* Spec 43: the knowledge agent shows with its avatar. */
+    const note = Array.from(document.querySelectorAll(".knowledge-note")).find((node) =>
+      (node.textContent || "").includes("Knowledge agent")
+    ) as HTMLElement;
+    expect(note.textContent).toContain("Knowledge agent: lana");
+    expect(note.querySelector(".agent-name-chip .av")).toBeTruthy();
   });
 
   it("explains when the knowledge service is not running", async () => {

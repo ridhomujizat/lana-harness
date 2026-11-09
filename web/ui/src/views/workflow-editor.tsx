@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- the editor resets its draft when the saved workflow changes */
 import { useEffect, useMemo, useState } from "react";
-import type { DragEvent as ReactDragEvent } from "react";
+import type { DragEvent as ReactDragEvent, ReactNode } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import {
   activateWorkflow,
@@ -33,6 +33,7 @@ import { GROUPS, NODE_CATALOG, newNodeId, nodeMeta } from "./workflow-catalog";
 import { ago, useAgentNames } from "./workflow-common";
 import { useAgentLabel } from "./agent-label";
 import { NodeInspector } from "./workflow-inspector";
+import { useScriptSuggestions } from "./workflow-script";
 import { WorkflowHeader } from "./workflow-page";
 import { emptyGraph } from "./workflow-templates";
 import type { WorkflowTemplate } from "./workflow-templates";
@@ -288,6 +289,22 @@ export function WorkflowEditor({
     const next = addNodeBelow(draft, node, selectedNode);
     setDraft(next);
     select(node.id);
+  }
+
+  /* Spec #44: agent steps worth converting to Script Parse. Only saved
+     nodes of the current graph get a pill. */
+  const scriptHints = useScriptSuggestions(workflow?.id || "");
+  const sidePills: Record<string, ReactNode> = {};
+  for (const hint of scriptHints.suggestions) {
+    const node = draft.nodes.find((item) => item.id === hint.node_id);
+    if (node && (node.type === "agent" || node.type === "bot" || node.type === "worker")) {
+      sidePills[hint.node_id] = (
+        <span className="wf-pill-script" title="Convert to Script Parse to save tokens">
+          <Ic name="braces" size={12} />
+          Script?
+        </span>
+      );
+    }
   }
 
   function updateNode(node: WfNode) {
@@ -587,6 +604,7 @@ export function WorkflowEditor({
             onDropType={(type, at) => addType(type, at)}
             tones={changed.tones}
             badges={changed.badges}
+            sidePills={sidePills}
             ariaLabel="Workflow editor canvas"
             insetLeft={230}
             empty={
@@ -645,6 +663,8 @@ export function WorkflowEditor({
               node={selectedNode}
               agents={agentNames}
               agentLabel={label}
+              suggestion={scriptHints.suggestions.find((hint) => hint.node_id === selectedNode.id)}
+              onDismissSuggestion={() => scriptHints.dismiss(selectedNode.id)}
               onChange={updateNode}
               onDelete={() => deleteNode(selectedNode.id)}
               onClose={() => {

@@ -66,6 +66,9 @@ Order of work: approve requirements, then the contract (if applicable), then des
 Implementation must not start while there are still blocking open questions or earlier artifacts
 have not been approved.
 
+> **Gate lifted (2026-11-08)** for specs #37 (LLM router) and #38 (Claude Agent runtime). The owner answered the
+> interview and said "ya ikuti rekomendasimu". Remaining details use `Rekomendasi agent:`.
+>
 > **Gate lifted (2026-11-05)** for spec #35 (calendar). The owner answered the interview and said "tulis spec dulu lalu
 > implementasi FEnya". Remaining details use `Rekomendasi agent:` in its resolution table.
 >
@@ -152,3 +155,13 @@ it is reversible and does not change observable behavior.
 | — | Agent rooms, presence, alive profile and roster | [Approved r1](32-agent-rooms/requirements.md) | [Approved r1](32-agent-rooms/api-contract.md) | [Approved r1](32-agent-rooms/design.md) | [Completed r1](32-agent-rooms/tasks.md) |
 | — | Workflows: guarded automation graphs, durable runs, error ladder | [Approved r1](33-workflows/requirements.md) | [Approved r1](33-workflows/api-contract.md) | [Approved r1](33-workflows/design.md) | [Completed r1](33-workflows/tasks.md) |
 | — | Calendar: scheduler calendar, items, habits, workflow slots and runs, Google, ICS | [Approved r1](35-calendar/requirements.md) | [Approved r1](35-calendar/api-contract.md) | [Approved r1](35-calendar/design.md) | [Completed r1](35-calendar/tasks.md) |
+| — | Self-update: update card, one-click update, trial boot and rollback | [Approved r1](36-self-update/requirements.md) | [Approved r1](36-self-update/api-contract.md) | [Approved r1](36-self-update/design.md) | [Completed r1](36-self-update/tasks.md) |
+| — | LLM router: provider kinds, combos, fallback, usage and limits, proxy, Router page | [Approved r1](37-llm-router/requirements.md) | [Approved r1](37-llm-router/api-contract.md) | [Approved r1](37-llm-router/design.md) | [Completed r1](37-llm-router/tasks.md) |
+| — | Claude Agent runtime: Claude Code over headless stream-json (ADR 0018) | [Approved r1](38-claude-agent-runtime/requirements.md) | [Approved r1](38-claude-agent-runtime/api-contract.md) | [Approved r1](38-claude-agent-runtime/design.md) | [Completed r1](38-claude-agent-runtime/tasks.md) |
+| — | Claude Code as a router target with lana context and tools (ADR 0020) | [Approved r2](39-claude-code-target/requirements.md) | [Approved r2](39-claude-code-target/api-contract.md) | [Approved r1](39-claude-code-target/design.md) | [Completed r1](39-claude-code-target/tasks.md) |
+| — | Session titles: automatic titles after the first turn, rename, regenerate | [Approved r1](40-session-titles/requirements.md) | In requirements | Not required | [Completed r1](40-session-titles/tasks.md) |
+| — | macOS menu bar app: status, usage, pages, start and stop, sign-in link `next` | [Approved r1](41-macos-menubar/requirements.md) | In requirements | Not required | [Completed r1](41-macos-menubar/tasks.md) |
+| — | macOS notifications: replies, approvals with actions, questions, workflow runs; presence | [Approved r1](42-macos-notifications/requirements.md) | In requirements | Not required | [Completed r1](42-macos-notifications/tasks.md) |
+| — | Generated agent avatars: blob faces with two eye holes, model or local generator, default per name | [Approved r1](43-agent-avatars/requirements.md) | In requirements | Not required | [Completed r1](43-agent-avatars/tasks.md) |
+| — | Script Parse node: guardian-written JS parser, contract check, agent fallback, auto-regeneration | [Approved r1](44-script-parse/requirements.md) | In requirements | [Approved r1](44-script-parse/design.md) | [Completed r1](44-script-parse/tasks.md) |
+| — | Script drift guard: output profile vs last good runs, schema rule tokens, optional audit fallback | [Approved r1](45-script-drift-guard/requirements.md) | In requirements | [Approved r1](45-script-drift-guard/design.md) | [Completed r1](45-script-drift-guard/tasks.md) |

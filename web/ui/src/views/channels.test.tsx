@@ -77,6 +77,21 @@ describe("channels views", () => {
     expect(screen.getByText("On")).toBeTruthy();
   });
 
+  it("shows the brand logos of the chat channels", async () => {
+    const { container } = render(<ChannelsPage />);
+    await screen.findByText("Telegram");
+    for (const channel of ["telegram", "discord", "slack", "whatsapp"]) {
+      const logo = container.querySelector('.chan-card [data-channel="' + channel + '"]');
+      expect(logo, channel).toBeTruthy();
+      expect(logo?.querySelector("svg"), channel).toBeTruthy();
+    }
+    expect(screen.getByText("Discord")).toBeTruthy();
+    expect(screen.getByText("Slack")).toBeTruthy();
+    expect(screen.getByText("WhatsApp")).toBeTruthy();
+    /* Web and the CLI keep their generic icon tiles. */
+    expect(container.querySelectorAll(".chan-card .chan-tile").length).toBe(2);
+  });
+
   it("blocks a bot token pasted into the Advanced token variable", async () => {
     const user = userEvent.setup();
     const { container } = render(<TelegramPage />);

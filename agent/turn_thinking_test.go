@@ -189,3 +189,91 @@ func TestTurnReasoningEffortPrecedence(t *testing.T) {
 		})
 	}
 }
+
+// signedThinkingProvider scripts a two-step turn whose first step streams
+// signed thinking blocks around text and tool calls, as the Anthropic adapter
+// does.
+type signedThinkingProvider struct {
+	mu       sync.Mutex
+	requests []core.ChatRequest
+}
+
+func (p *signedThinkingProvider) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
+	p.mu.Lock()
+	p.requests = append(p.requests, req)
+	step := len(p.requests)
+	p.mu.Unlock()
+	return func(yield func(core.ChatEvent, error) bool) {
+		var events []core.ChatEvent
+		if step == 1 {
+			events = []core.ChatEvent{
+				{Kind: core.ChatThinkingDelta, Text: "plan"},
+				{Kind: core.ChatBlock, Block: core.ContentBlock{Kind: core.BlockThinking, Text: "plan", Signature: "s1"}},
+				{Kind: core.ChatTextDelta, Text: "Read"},
+				{Kind: core.ChatTextDelta, Text: "ing"},
+				{Kind: core.ChatBlock, Block: core.ContentBlock{Kind: core.BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)}},
+				{Kind: core.ChatBlock, Block: core.ContentBlock{Kind: core.BlockThinking, Signature: "s2"}},
+				{Kind: core.ChatBlock, Block: core.ContentBlock{Kind: core.BlockToolUse, ID: "c2", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)}},
+				{Kind: core.ChatStop, StopReason: "tool_use"},
+			}
+		} else {
+			events = []core.ChatEvent{{Kind: core.ChatTextDelta, Text: "done"}, {Kind: core.ChatStop, StopReason: "end_turn"}}
+		}
+		for _, ev := range events {
+			if !yield(ev, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+// Signed thinking (spec 37, Anthropic) is stored in response order with its
+// signature and sent back unchanged on the next step.
+func TestTurnSignedThinkingKeepsOrder(t *testing.T) {
+	h := newHarness(t, mock.Script{}, map[string]core.AgentConfig{
+		"assistant": {Provider: "mock", Model: "m", Tools: []string{"read_file"}},
+	})
+	if err := os.WriteFile(filepath.Join(h.ws, "a.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	provider := &signedThinkingProvider{}
+	h.llm.providers["mock"] = provider
+	result := h.run(t, "hi")
+	if result.StopReason != "end_turn" || result.Text != "done" {
+		t.Fatalf("result=%+v", result)
+	}
+	want := []core.ContentBlock{
+		{Kind: core.BlockThinking, Text: "plan", Signature: "s1"},
+		{Kind: core.BlockText, Text: "Reading"},
+		{Kind: core.BlockToolUse, ID: "c1", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)},
+		{Kind: core.BlockThinking, Signature: "s2"},
+		{Kind: core.BlockToolUse, ID: "c2", Name: "read_file", Input: json.RawMessage(`{"path":"a.txt"}`)},
+	}
+	var first *core.AssistantMessage
+	for _, event := range h.events(t) {
+		if event.Kind != core.KindAssistantMessage {
+			continue
+		}
+		var payload core.AssistantMessage
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		first = &payload
+		break
+	}
+	if first == nil || !reflect.DeepEqual(first.Content, want) {
+		t.Fatalf("first assistant content=%+v", first)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("requests=%d", len(provider.requests))
+	}
+	var sent []core.ContentBlock
+	for _, message := range provider.requests[1].Messages {
+		if message.Role == core.RoleAssistant {
+			sent = message.Content
+		}
+	}
+	if !reflect.DeepEqual(sent, want) {
+		t.Fatalf("assistant content sent back=%+v", sent)
+	}
+}

@@ -123,10 +123,7 @@ agent = "lana"
 		t.Fatalf("attach answered restart_required true: %q", data)
 	}
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatalf("CreateChannelSession: %v", err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -168,10 +165,7 @@ agent = "lana"
 	}})
 	_, ts, cookie, csrf := webServer(t, rt, home)
 
-	info, err := rt.CreateChannelSession(context.Background(), "web", "owner", "lana")
-	if err != nil {
-		t.Fatalf("CreateChannelSession: %v", err)
-	}
+	info := webCreateAgentSession(t, rt, context.Background(), "lana")
 	runTurn := func() {
 		t.Helper()
 		if _, err := rt.Run(context.Background(), lana.Request{Prompt: "hi", SessionID: info.ID}); err != nil {
@@ -226,9 +220,9 @@ agent = "lana"
 	}
 }
 
-// TestLiveApplyBookkeeping covers the loaded-version rule: a live agent save
-// keeps the generic restart banner off, a pending provider change keeps it on,
-// and a later live save does not hide that pending change.
+// TestLiveApplyBookkeeping covers the loaded-version rule: live agent and
+// provider saves keep the generic restart banner off, a pending [web] change
+// keeps it on, and a later live save does not hide that pending change.
 func TestLiveApplyBookkeeping(t *testing.T) {
 	raw := `[providers.mock]
 kind = "openai_compat"
@@ -278,7 +272,8 @@ agent = "lana"
 		t.Fatalf("loaded version = %q, file version = %q", state.LoadedVersion, state.Version)
 	}
 
-	// A provider save still needs a restart (AC-TFB-015).
+	// A provider save applies live too (spec 37 AC-RTR-011, superseding
+	// AC-TFB-015): no restart and no banner.
 	state = getLiveConfigState(t, ts.URL, cookie)
 	body := `{"kind":"openai_compat","base_url":"https://example.com/v2","expected_version":"` + state.Version + `"}`
 	resp, data := webDo(t, http.MethodPut, ts.URL+"/v1/providers/mock", body, cookie, csrf)
@@ -291,15 +286,36 @@ agent = "lana"
 	if err := json.Unmarshal(data, &providerSaved); err != nil {
 		t.Fatal(err)
 	}
-	if !providerSaved.RestartRequired {
-		t.Fatalf("provider save answered restart_required false: %q", data)
+	if providerSaved.RestartRequired {
+		t.Fatalf("provider save answered restart_required true: %q", data)
+	}
+	state = getLiveConfigState(t, ts.URL, cookie)
+	if state.RestartRequired || state.LoadedVersion != state.Version {
+		t.Fatalf("banner is on after a live provider save: %+v", state)
+	}
+
+	// A raw save of a restart-only section ([web]) stays pending.
+	current, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawBody, err := json.Marshal(map[string]string{
+		"raw":              string(current) + "\n[web]\nopen_browser = false\n",
+		"expected_version": state.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, data = webDo(t, http.MethodPut, ts.URL+"/v1/config", string(rawBody), cookie, csrf)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT config status = %d, body = %q", resp.StatusCode, data)
 	}
 	pending := getLiveConfigState(t, ts.URL, cookie)
 	if !pending.RestartRequired || pending.LoadedVersion == pending.Version {
-		t.Fatalf("provider restart banner = %+v", pending)
+		t.Fatalf("web restart banner = %+v", pending)
 	}
 
-	// A live agent save keeps the pending provider change pending.
+	// A live agent save keeps the pending [web] change pending.
 	state = saveAgent("newer-model")
 	if !state.RestartRequired {
 		t.Fatalf("live save hid the pending provider change: %+v", state)

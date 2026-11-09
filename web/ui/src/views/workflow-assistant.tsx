@@ -9,6 +9,7 @@ import { AgentFace } from "./workflow-common";
 import { displayLabel, useAgentLabel } from "./agent-label";
 import { TEMPLATES } from "./workflow-templates";
 import type { WorkflowTemplate } from "./workflow-templates";
+import { agentOptionIcon } from "./agent-avatar";
 
 /* The workflow assistant column of REQ-WF-010 (design workflows-5 and -6):
    chat with the guardian, change cards with a diff and Undo, the activation
@@ -162,6 +163,7 @@ export function WorkflowAssistant({
                     onChange={(name) => onGuardian?.(name)}
                     options={agents.map((agent) => ({
                       value: agent.name,
+                      icon: agentOptionIcon(agent.name),
                       label: displayLabel(agent) + (agent.model ? " · " + agent.model.split("/").pop() : ""),
                     }))}
                     aria-label="Guardian bot"

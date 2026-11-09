@@ -27,7 +27,7 @@ func TestClassify(t *testing.T) {
 		{503, "", "server"},
 		{400, `{"error":{"code":"context_length_exceeded"}}`, "context_length"},
 		{400, `{"error":{"code":"invalid"}}`, "client"},
-		{404, "", "client"},
+		{404, "", core.ErrorClassNotFound},
 		{422, "", "client"},
 	}
 	for _, tc := range cases {

@@ -14,6 +14,7 @@ type SessionInfo struct {
 	Address         string
 	Workspace       string
 	Title           string
+	TitleSource     string // "", auto, owner, or system: who set Title (spec 40)
 	Status          string
 	ParentSessionID string
 	InheritedSeq    int64
@@ -32,6 +33,10 @@ type NewSession struct {
 	ParentSessionID string
 	ParentCallID    string
 	InheritedSeq    int64
+	// Title and TitleSource set the session title at creation (spec 40,
+	// REQ-TTL-007). Both are empty for a session the title pass names later.
+	Title       string
+	TitleSource string
 }
 
 // SessionFilter limits List.
@@ -41,6 +46,9 @@ type SessionFilter struct {
 	ParentSessionID string
 	// Agent matches sessions.agent exactly; empty means no filter (REQ-ROOM-002).
 	Agent string
+	// ExcludeChannels leaves out sessions on these channels; empty means no
+	// filter (REQ-ROOM-002).
+	ExcludeChannels []string
 	// TopLevelOnly excludes child sessions.
 	TopLevelOnly bool
 	// Before, when > 0, keeps only sessions last updated before this Unix ms

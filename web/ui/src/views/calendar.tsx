@@ -174,8 +174,22 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
   const fromMs = range.from.getTime();
   const toMs = range.to.getTime();
   const fallbackRef = useRef(false);
+  /* The range currently on screen, and the sequence number of the newest load.
+     A response is used only when it is the latest request and its range is
+     still the one shown: changing "Week starts on" moves the range while an
+     older request (the settings reload, a debounced stream reload) is still in
+     flight, and that stale response must not overwrite the new range. */
+  const rangeRef = useRef({ fromMs, toMs });
+  const loadSeq = useRef(0);
+  useEffect(() => {
+    rangeRef.current = { fromMs, toMs };
+  }, [fromMs, toMs]);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    const asked = { fromMs, toMs };
+    const stale = () =>
+      seq !== loadSeq.current || rangeRef.current.fromMs !== asked.fromMs || rangeRef.current.toMs !== asked.toMs;
     const loadFallback = async (): Promise<Data> => {
       const list = await listWorkflows();
       setWorkflows(list.workflows);
@@ -214,9 +228,15 @@ export function CalendarPage({ params }: { params: Record<string, string> }) {
           next = await loadFallback();
         }
       }
+      if (stale()) {
+        return;
+      }
       setData(next);
       setError("");
     } catch (failure) {
+      if (stale()) {
+        return;
+      }
       setError(errorMessage(failure));
     }
   }, [fromMs, toMs]);

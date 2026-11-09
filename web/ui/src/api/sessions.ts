@@ -15,6 +15,11 @@ export interface Session {
   address: string;
   agent: string;
   title: string;
+  /* Spec 40: "" (no title yet), "auto", "owner", or "system". Older daemons
+     omit both title fields. */
+  title_source?: string;
+  /* True while the daemon is naming the session (REQ-TTL-012). */
+  title_pending?: boolean;
   status: string;
   preview: string;
   turn_count: number;
@@ -64,6 +69,35 @@ export interface SessionContentBlock {
   path?: string;
 }
 
+/* API-WF-005: an assistant message delivered out of band in a chat carries its
+   source (e.g. "workflow") and the source's name (e.g. the workflow name). A
+   normal reply omits both. */
+export interface AssistantMessagePayload extends EventPayload {
+  content?: SessionContentBlock[];
+  source?: string;
+  source_name?: string;
+  stop_reason?: string;
+}
+
+/* API reply: the automation message an owner reply points back to (the seq of
+   the assistant/message event, its source and name, and the quoted text). */
+export interface ReplyRef {
+  seq: number;
+  source?: string;
+  source_name?: string;
+  text: string;
+}
+
+/* The user/message payload fields the web surfaces read. reply_to is set when
+   the owner sent the message as a reply to an automation message. */
+export interface UserMessagePayload extends EventPayload {
+  content?: SessionContentBlock[];
+  continue?: boolean;
+  context_blocks?: number;
+  runtime?: boolean;
+  reply_to?: ReplyRef;
+}
+
 export interface SessionEvent {
   seq: number;
   kind: string;
@@ -101,6 +135,8 @@ export interface PatchSessionRequest {
   policy?: string;
   reasoning_effort?: string;
   confirm_trust?: boolean;
+  /* Spec 40: a new title; "" goes back to an automatic one. */
+  title?: string;
 }
 
 export function listSessions(
@@ -150,5 +186,20 @@ export function patchSession(
     "PATCH",
     "/v1/sessions/" + encodeURIComponent(id),
     patch
+  );
+}
+
+/* Spec 40, REQ-TTL-008: renames a session. An empty title goes back to an
+   automatic one. */
+export function renameSession(id: string, title: string): Promise<SessionDetail> {
+  return patchSession(id, { title });
+}
+
+/* Spec 40, REQ-TTL-010: names the session again now and answers the session
+   with its new title. 409 title_busy while a title is being made. */
+export function regenerateSessionTitle(id: string): Promise<SessionDetail> {
+  return request<SessionDetail>(
+    "POST",
+    "/v1/sessions/" + encodeURIComponent(id) + "/title/regenerate"
   );
 }

@@ -31,6 +31,9 @@ func classifyHTTP(status int, body []byte) *core.ProviderError {
 		class = "auth"
 	case status == http.StatusTooManyRequests:
 		class = "rate_limit"
+	case status == http.StatusNotFound:
+		// The model or the endpoint does not exist; the router moves on.
+		class = core.ErrorClassNotFound
 	case status >= 500:
 		class = "server"
 	case status == http.StatusBadRequest || status == http.StatusRequestEntityTooLarge:

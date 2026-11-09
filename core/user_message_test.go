@@ -2,6 +2,7 @@ package core
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,15 @@ func TestUserMessageDisplayContent(t *testing.T) {
 			name:    "field drops context and system update",
 			message: UserMessage{ContextBlocks: 2, Content: []ContentBlock{context, update, plain}},
 			want:    []ContentBlock{plain},
+		},
+		{
+			name: "field drops the reply quote",
+			message: UserMessage{ContextBlocks: 2, ReplyTo: &ReplyRef{Seq: 3}, Content: []ContentBlock{
+				context,
+				block("[The owner is replying to this message you posted via workflow wf]\nreport"),
+				plain,
+			}},
+			want: []ContentBlock{plain},
 		},
 		{
 			name:    "fallback drops leading context block",
@@ -66,5 +76,19 @@ func TestUserMessageDisplayContent(t *testing.T) {
 				t.Fatalf("DisplayContent()=%v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// ReplyQuoteText leaves short text alone and caps long text at ReplyQuoteMax
+// runes with an ellipsis.
+func TestReplyQuoteTextCap(t *testing.T) {
+	short := "hello"
+	if got := ReplyQuoteText(short); got != short {
+		t.Fatalf("short = %q", got)
+	}
+	got := ReplyQuoteText(strings.Repeat("x", ReplyQuoteMax+10))
+	runes := []rune(got)
+	if len(runes) != ReplyQuoteMax+1 || runes[len(runes)-1] != '…' {
+		t.Fatalf("capped runes = %d, last = %q", len(runes), runes[len(runes)-1])
 	}
 }

@@ -231,14 +231,15 @@ func TestDaemonSetupSaveRestartsInPlace(t *testing.T) {
 	if !ok {
 		t.Fatalf("providers = %+v, want openai", savedConfig.Providers)
 	}
-	if providerConfig.Kind != "openai_compat" || providerConfig.BaseURL != provider.URL+"/v1" || providerConfig.APIKeyEnv != "OPENAI_API_KEY" {
+	if providerConfig.Kind != "openai" || providerConfig.BaseURL != provider.URL+"/v1" || providerConfig.APIKeyEnv != "OPENAI_API_KEY" {
 		t.Fatalf("provider = %+v", providerConfig)
 	}
 	agentConfig, ok := savedConfig.Agents["coder"]
 	if !ok {
 		t.Fatalf("agents = %+v, want coder", savedConfig.Agents)
 	}
-	if agentConfig.Provider != "openai" || agentConfig.Model != "gpt-5-mini" ||
+	// The setup saves the router form: a model address and no provider key.
+	if agentConfig.Provider != "" || agentConfig.Model != "openai/gpt-5-mini" ||
 		agentConfig.Workspace != "~/lana/workspace" || agentConfig.Permission != "ask" {
 		t.Fatalf("agent = %+v", agentConfig)
 	}

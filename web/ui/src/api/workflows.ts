@@ -1,4 +1,5 @@
 import { queryString, request } from "./client";
+import { watchVisibility } from "./visibility";
 
 /* Workflow calls of API-WF-001 to API-WF-019 (spec #33). Types are written by
    hand from the Go JSON structs of internal/workflow. */
@@ -85,6 +86,18 @@ export interface Workflow {
   consecutive_failures: number;
   created_at: number;
   updated_at: number;
+  /* Per script_parse node (spec #44, API-SP-009). */
+  script_stats?: Record<string, ScriptStat>;
+}
+
+export interface ScriptStat {
+  script_runs: number;
+  fallback_runs: number;
+  tokens_saved: number;
+  last_update: number;
+  /* Spec #45: runs whose script output an audit fallback confirmed. */
+  audit_runs?: number;
+  events: Decision[];
 }
 
 export interface TriggerInfo {
@@ -201,6 +214,8 @@ export interface NodeRun {
   logs: string[];
   tokens: number;
   session_id: string;
+  /* How a script_parse node produced its output (spec #44). */
+  via?: "" | "script" | "fallback" | "audit";
   started_at: number;
   ended_at: number;
 }
@@ -250,6 +265,90 @@ export interface VersionInfo {
   node_count?: number;
 }
 
+/* Read-side normalization. Older servers sent nil Go slices as JSON null
+   (a new workflow had "edges": null), and versions stored before that fix
+   still can. Every list a view iterates is made an array here, once, so the
+   views can trust the types above. */
+
+/* Loose is T as it may arrive on the wire: any field null or missing. */
+type Loose<T> = { [K in keyof T]?: T[K] | null };
+
+function list<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+export function normalizeGraph(raw: Loose<Graph> | null | undefined): Graph {
+  return {
+    nodes: list(raw?.nodes).map((node) => ({ ...node, params: node.params ?? {} })),
+    edges: list(raw?.edges),
+  };
+}
+
+function normalizeLock(raw: Lock | null | undefined): Lock | null {
+  return raw ? { ...raw, tools: normalizeLockTools(raw.tools) } : null;
+}
+
+function normalizeLockTools(raw: LockTool[] | null | undefined): LockTool[] {
+  return list(raw).map((tool) => ({ ...tool, used_by: list(tool.used_by) }));
+}
+
+export function normalizeWorkflow(raw: Workflow): Workflow {
+  return {
+    ...raw,
+    graph: normalizeGraph(raw.graph),
+    lock: normalizeLock(raw.lock),
+    failure_default: raw.failure_default ?? {},
+  };
+}
+
+export function normalizeRunDetail(raw: RunDetail): RunDetail {
+  return {
+    ...raw,
+    graph: normalizeGraph(raw.graph),
+    nodes: list(raw.nodes).map((row) => ({
+      ...row,
+      attempts: list(row.attempts),
+      logs: list(row.logs),
+    })),
+    decisions: list(raw.decisions),
+  };
+}
+
+export function normalizeWorkflowList(raw: WorkflowList): WorkflowList {
+  return {
+    ...raw,
+    workflows: list(raw.workflows).map((row) => ({
+      ...row,
+      triggers: list(row.triggers),
+      bots: list(row.bots),
+    })),
+    attention: list(raw.attention),
+  };
+}
+
+export function normalizeChatMessage(raw: ChatMessage): ChatMessage {
+  if (!raw.change) {
+    return raw;
+  }
+  return {
+    ...raw,
+    change: {
+      ...raw.change,
+      added: list(raw.change.added),
+      removed: list(raw.change.removed),
+      changed: list(raw.change.changed),
+    },
+  };
+}
+
+function workflowRequest(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<Workflow> {
+  return request<Workflow>(method, path, body).then(normalizeWorkflow);
+}
+
 const base = "/v1/workflows";
 
 function wf(id: string): string {
@@ -257,11 +356,28 @@ function wf(id: string): string {
 }
 
 export function listWorkflows(): Promise<WorkflowList> {
-  return request<WorkflowList>("GET", base);
+  return request<WorkflowList>("GET", base).then(normalizeWorkflowList);
 }
 
 export function getWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("GET", wf(id));
+  return workflowRequest("GET", wf(id));
+}
+
+/* API-WF-001: one delivery channel of the Message node. The server lists them
+   in a stable order (web, telegram, then the rest by id); more (Discord,
+   Slack) may appear later, so the UI renders whatever it returns. */
+export interface MessageChannel {
+  id: string;
+  label: string;
+  needs_agent: boolean;
+  available: boolean;
+  reason?: string;
+}
+
+export function getWorkflowChannels(): Promise<MessageChannel[]> {
+  return request<{ channels: MessageChannel[] }>("GET", base + "/channels").then(
+    (res) => list(res.channels)
+  );
 }
 
 export function createWorkflow(body: {
@@ -270,7 +386,7 @@ export function createWorkflow(body: {
   guardian: string;
   graph?: Graph;
 }): Promise<Workflow> {
-  return request<Workflow>("POST", base, body);
+  return workflowRequest("POST", base, body);
 }
 
 export interface UpdateWorkflowBody {
@@ -287,7 +403,7 @@ export function updateWorkflow(
   id: string,
   body: UpdateWorkflowBody
 ): Promise<Workflow> {
-  return request<Workflow>("PUT", wf(id), body);
+  return workflowRequest("PUT", wf(id), body);
 }
 
 export function deleteWorkflow(id: string): Promise<void> {
@@ -295,27 +411,31 @@ export function deleteWorkflow(id: string): Promise<void> {
 }
 
 export function listVersions(id: string): Promise<{ versions: VersionInfo[] }> {
-  return request<{ versions: VersionInfo[] }>("GET", wf(id) + "/versions");
+  return request<{ versions: VersionInfo[] }>("GET", wf(id) + "/versions").then(
+    (res) => ({ versions: list(res.versions) })
+  );
 }
 
 export function restoreVersion(id: string, version: number): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/restore", { version });
+  return workflowRequest("POST", wf(id) + "/restore", { version });
 }
 
 export function lockPreview(id: string): Promise<{ tools: LockTool[] }> {
-  return request<{ tools: LockTool[] }>("GET", wf(id) + "/lock");
+  return request<{ tools: LockTool[] }>("GET", wf(id) + "/lock").then((res) => ({
+    tools: normalizeLockTools(res.tools),
+  }));
 }
 
 export function activateWorkflow(id: string, version: number): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/activate", { version });
+  return workflowRequest("POST", wf(id) + "/activate", { version });
 }
 
 export function pauseWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/pause");
+  return workflowRequest("POST", wf(id) + "/pause");
 }
 
 export function resumeWorkflow(id: string): Promise<Workflow> {
-  return request<Workflow>("POST", wf(id) + "/resume");
+  return workflowRequest("POST", wf(id) + "/resume");
 }
 
 export function startRun(id: string, input?: unknown): Promise<Run> {
@@ -333,14 +453,14 @@ export function listRuns(
   return request<{ runs: Run[] }>(
     "GET",
     wf(id) + "/runs" + queryString(options)
-  );
+  ).then((res) => ({ runs: list(res.runs) }));
 }
 
 export function getRun(id: string, run: string | number): Promise<RunDetail> {
   return request<RunDetail>(
     "GET",
     wf(id) + "/runs/" + encodeURIComponent(String(run))
-  );
+  ).then(normalizeRunDetail);
 }
 
 export function cancelRun(id: string, run: string | number): Promise<Run> {
@@ -363,7 +483,9 @@ export function answerDecision(
 }
 
 export function getState(id: string): Promise<{ entries: StateEntry[] }> {
-  return request<{ entries: StateEntry[] }>("GET", wf(id) + "/state");
+  return request<{ entries: StateEntry[] }>("GET", wf(id) + "/state").then(
+    (res) => ({ entries: list(res.entries) })
+  );
 }
 
 export function setState(
@@ -386,7 +508,9 @@ export function deleteState(id: string, key?: string): Promise<void> {
 }
 
 export function getChat(id: string): Promise<{ messages: ChatMessage[] }> {
-  return request<{ messages: ChatMessage[] }>("GET", wf(id) + "/assistant");
+  return request<{ messages: ChatMessage[] }>("GET", wf(id) + "/assistant").then(
+    (res) => ({ messages: list(res.messages).map(normalizeChatMessage) })
+  );
 }
 
 export interface AssistResponse {
@@ -403,7 +527,11 @@ export function askAssistant(
   return request<AssistResponse>("POST", wf(id) + "/assistant", {
     message,
     base_version: baseVersion,
-  });
+  }).then((res) => ({
+    ...res,
+    message: normalizeChatMessage(res.message),
+    workflow: normalizeWorkflow(res.workflow),
+  }));
 }
 
 export function rotateWebhook(id: string): Promise<{ token: string }> {
@@ -413,6 +541,9 @@ export function rotateWebhook(id: string): Promise<{ token: string }> {
 export interface WorkflowChange {
   workflow_id: string;
   run_id?: string;
+  /* Set when the stream reconnects after a hidden pause: the tab missed every
+     change while it was gone, so the view must refetch what it shows. */
+  refresh?: boolean;
 }
 
 export interface WorkflowStream {
@@ -429,8 +560,25 @@ export function openWorkflowStream(
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /* A hidden tab releases its connection; on the next visible change the stream
+     asks its view to refetch once (the pushed changes were missed) and
+     reconnects. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      onChange({ workflow_id: "", refresh: true });
+      void connect();
+    },
+  });
+
   function scheduleReconnect(): void {
-    if (!closed) {
+    if (!closed && !visibility.blocked()) {
       retryTimer = setTimeout(connect, 1000);
     }
   }
@@ -469,7 +617,7 @@ export function openWorkflowStream(
   }
 
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -517,6 +665,7 @@ export function openWorkflowStream(
   return {
     close() {
       closed = true;
+      visibility.close();
       if (retryTimer !== null) {
         clearTimeout(retryTimer);
       }
@@ -525,4 +674,93 @@ export function openWorkflowStream(
       }
     },
   };
+}
+
+/* Script Parse calls of spec #44 (API-SP-002..005). */
+
+export interface ScriptProblem {
+  code: string;
+  message: string;
+}
+
+export interface ScriptTestResult {
+  ok: boolean;
+  output: unknown;
+  problems: ScriptProblem[];
+  logs: string[];
+  duration_ms: number;
+  sample: { source: "request" | "run"; run?: number };
+}
+
+export interface ScriptGenerateResult {
+  feasible: boolean;
+  reason: string;
+  script: string;
+  output: unknown;
+  problems: ScriptProblem[];
+  agreement?: number;
+  tokens: number;
+  /* Spec #45: the schemas with the guardian's kept rules merged in. */
+  output_schema?: Record<string, unknown>;
+  item_schema?: Record<string, unknown>;
+}
+
+export interface ScriptConvertCheck {
+  run: number;
+  ok: boolean;
+  agreement: number;
+  problems: ScriptProblem[];
+}
+
+export interface ScriptConvertResult {
+  feasible: boolean;
+  reason: string;
+  node?: WfNode;
+  checks: ScriptConvertCheck[];
+  tokens: number;
+}
+
+export interface ScriptSuggestion {
+  node_id: string;
+  name: string;
+  type: string;
+  runs: number;
+  avg_tokens: number;
+  est_tokens_30d: number;
+}
+
+/* Sample source: a pasted input wins, else the node's input in run `run`,
+   else the newest run that reached the node. */
+export interface ScriptSample {
+  input?: unknown;
+  run?: number;
+}
+
+export function testScript(
+  id: string,
+  node: WfNode,
+  sample: ScriptSample = {}
+): Promise<ScriptTestResult> {
+  return request<ScriptTestResult>("POST", wf(id) + "/script/test", { node, ...sample });
+}
+
+export function generateScript(
+  id: string,
+  node: WfNode,
+  sample: ScriptSample = {},
+  expected?: Record<string, unknown>
+): Promise<ScriptGenerateResult> {
+  return request<ScriptGenerateResult>("POST", wf(id) + "/script/generate", {
+    node,
+    ...sample,
+    ...(expected ? { expected } : {}),
+  });
+}
+
+export function convertNode(id: string, nodeId: string): Promise<ScriptConvertResult> {
+  return request<ScriptConvertResult>("POST", wf(id) + "/script/convert", { node_id: nodeId });
+}
+
+export function scriptSuggestions(id: string): Promise<{ suggestions: ScriptSuggestion[] }> {
+  return request<{ suggestions: ScriptSuggestion[] }>("GET", wf(id) + "/script/suggestions");
 }

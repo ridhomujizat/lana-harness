@@ -132,6 +132,10 @@ func (v *validator) checkNode(n Node, seen map[string]bool) {
 	v.checkParent(n, spec)
 	v.checkTemplates(n)
 	v.checkAgent(n)
+	if n.Type == "script_parse" {
+		v.checkScriptParse(n)
+	}
+	v.checkMessage(n)
 }
 
 // checkBounds enforces the numeric range of the interval and wait nodes
@@ -194,36 +198,103 @@ func (v *validator) checkParent(n Node, spec NodeSpec) {
 }
 
 // checkTemplates parses every template of a node and checks that every
-// nodes.<id> reference names a node of the graph (REQ-WF-002).
+// nodes.<id> reference names a node of the graph (REQ-WF-002). It checks the
+// params that are rendered, so the JavaScript of a script_parse script is not
+// parsed as a template (REQ-SP-001).
 func (v *validator) checkTemplates(n Node) {
-	if err := CheckTemplates(n.Params); err != nil {
+	params := TemplateParams(n)
+	if err := CheckTemplates(params); err != nil {
 		v.add(n.ID, "bad_template", "node %s has a bad template: %v", nodeLabel(n), err)
 	}
-	for _, ref := range TemplateRefs(n.Params) {
+	for _, ref := range TemplateRefs(params) {
 		if _, ok := v.nodeByID[ref]; !ok {
 			v.add(n.ID, "bad_template", "node %s references unknown node %q", nodeLabel(n), ref)
 		}
 	}
 }
 
-// checkAgent rejects an unknown agent name on bot, worker and trigger.event
-// nodes (REQ-WF-002). It is skipped when agentExists is nil.
+// checkAgent rejects an unknown agent name on bot, worker, trigger.event and
+// script_parse nodes (REQ-WF-002, REQ-SP-013). A script_parse node names its
+// agent with fallback_agent; the others use agent. It is skipped when
+// agentExists is nil.
 func (v *validator) checkAgent(n Node) {
 	if v.agentExists == nil {
 		return
 	}
+	param := "agent"
 	switch n.Type {
+	case "script_parse":
+		param = "fallback_agent"
 	case "bot", "worker", "trigger.event":
 	default:
 		return
 	}
-	name, _ := n.Params["agent"].(string)
+	name, _ := n.Params[param].(string)
 	if name == "" {
 		return
 	}
 	if !v.agentExists(name) {
 		v.add(n.ID, "unknown_agent", "node %s uses unknown agent %q", nodeLabel(n), name)
 	}
+}
+
+// checkMessage checks the Message node's channels param and the agent the web
+// channel needs (REQ-WF-002): channels, when present, is a list of non-empty
+// ids, and a "web" channel needs a non-empty agent that exists. An unknown
+// channel id is accepted here and fails at run time, because a channel may be
+// registered later.
+func (v *validator) checkMessage(n Node) {
+	if n.Type != "message" {
+		return
+	}
+	channels, bad := messageChannels(n.Params)
+	if bad {
+		v.add(n.ID, "bad_param", "node %s needs param %q to be a list of channel ids", nodeLabel(n), "channels")
+		return
+	}
+	if !containsString(channels, channelWeb) {
+		return
+	}
+	agent, _ := n.Params["agent"].(string)
+	if strings.TrimSpace(agent) == "" {
+		v.add(n.ID, "missing_param", "node %s needs param %q for the web channel", nodeLabel(n), "agent")
+		return
+	}
+	if v.agentExists != nil && !v.agentExists(agent) {
+		v.add(n.ID, "unknown_agent", "node %s uses unknown agent %q", nodeLabel(n), agent)
+	}
+}
+
+// messageChannels reads the Message node's channels param: it accepts []string
+// and []any, requires every entry to be a non-empty string, and reports bad when
+// the param is present but is not such a list. A missing or nil param is not
+// bad: it defaults to telegram.
+func messageChannels(params map[string]any) ([]string, bool) {
+	raw, ok := params["channels"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	var items []any
+	switch t := raw.(type) {
+	case []string:
+		items = make([]any, len(t))
+		for i, s := range t {
+			items[i] = s
+		}
+	case []any:
+		items = t
+	default:
+		return nil, true
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok || s == "" {
+			return nil, true
+		}
+		out = append(out, s)
+	}
+	return out, false
 }
 
 // checkEdges runs the per-edge rules.

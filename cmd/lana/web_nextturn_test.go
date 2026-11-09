@@ -135,10 +135,7 @@ disabled_tools = ` + tc.disabled
 				catalogTestTool{name: "mcp__github__create_issue", risk: core.RiskExec},
 			})
 			ctx := context.Background()
-			info, err := rt.CreateChannelSession(ctx, "web", "owner", "coder")
-			if err != nil {
-				t.Fatalf("CreateChannelSession: %v", err)
-			}
+			info := webCreateAgentSession(t, rt, ctx, "coder")
 			if _, err := rt.Run(ctx, lana.Request{Prompt: "hello", SessionID: info.ID}); err != nil {
 				t.Fatalf("Run: %v", err)
 			}

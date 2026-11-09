@@ -14,6 +14,7 @@ import {
   nodeSubtitle,
 } from "./workflow-catalog";
 import { useAgentLabel } from "./agent-label";
+import { AgentAvatar } from "./agent-avatar";
 
 /* The workflow canvas of REQ-WF-011 (design workflows-2/3/5/7): node cards on a
    dot grid, orthogonal edges with port labels, dashed loop bodies, pan, zoom
@@ -120,16 +121,75 @@ export function nextPort(graph: Graph, source: WfNode, target: WfNode): string {
 
 interface EdgeGeom {
   edge: WfEdge;
+  key: string;
   d: string;
   label: string;
   lx: number;
   ly: number;
+  mid: { x: number; y: number };
+}
+
+/* A stable key for one edge. The edge id is used when it is non-empty and
+   appears only once in the graph; otherwise (an empty id, or an id shared by
+   several edges) a key is built from the edge's position so each edge still
+   keys apart. An id that is repeated is deliberately not trusted, because the
+   graph may come from a stored version written before ids were enforced. */
+export function edgeKey(edge: WfEdge, index: number, uniqueIds?: Set<string>): string {
+  if (edge.id && (!uniqueIds || uniqueIds.has(edge.id))) {
+    return edge.id;
+  }
+  return "edge@" + index + ":" + edge.from + ":" + (edge.from_port || "out") + ":" + edge.to;
+}
+
+/* The edgeKey of every edge of a graph, sharing one uniqueness scan. The
+   result is parallel to graph.edges, so an index found here can address the
+   same edge in the graph. */
+function edgeKeysOf(graph: Graph): string[] {
+  const counts = new Map<string, number>();
+  for (const edge of graph.edges) {
+    if (edge.id) {
+      counts.set(edge.id, (counts.get(edge.id) || 0) + 1);
+    }
+  }
+  const unique = new Set<string>();
+  for (const [id, count] of counts) {
+    if (count === 1) {
+      unique.add(id);
+    }
+  }
+  return graph.edges.map((edge, index) => edgeKey(edge, index, unique));
+}
+
+
+/* The point at the middle of a polyline by arc length. */
+function polylineMid(points: { x: number; y: number }[]): { x: number; y: number } {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    total += Math.hypot(
+      points[i]!.x - points[i - 1]!.x,
+      points[i]!.y - points[i - 1]!.y
+    );
+  }
+  let half = total / 2;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    if (half <= seg || i === points.length - 1) {
+      const t = seg === 0 ? 0 : half / seg;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    half -= seg;
+  }
+  return points[0]!;
 }
 
 function edgeGeometry(graph: Graph, boxes: Map<string, Box>): EdgeGeom[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const keys = edgeKeysOf(graph);
   const out: EdgeGeom[] = [];
-  for (const edge of graph.edges) {
+  for (let i = 0; i < graph.edges.length; i++) {
+    const edge = graph.edges[i]!;
     const from = byId.get(edge.from);
     const to = byId.get(edge.to);
     if (!from || !to) {
@@ -148,31 +208,52 @@ function edgeGeometry(graph: Graph, boxes: Map<string, Box>): EdgeGeom[] {
     const ty = to.position.y;
     let d: string;
     let midY: number;
+    let points: { x: number; y: number }[];
     if (ty > sy + 16) {
       midY = sy + Math.max(16, Math.min(28, (ty - sy) / 2));
       if (Math.abs(tx - sx) < 1) {
         d = `M${sx},${sy} V${ty}`;
+        points = [
+          { x: sx, y: sy },
+          { x: sx, y: ty },
+        ];
       } else {
         const r = Math.min(8, Math.abs(tx - sx) / 2, (ty - midY) / 2);
         const dir = tx > sx ? 1 : -1;
         d =
           `M${sx},${sy} V${midY - r} Q${sx},${midY} ${sx + dir * r},${midY}` +
           ` H${tx - dir * r} Q${tx},${midY} ${tx},${midY + r} V${ty}`;
+        points = [
+          { x: sx, y: sy },
+          { x: sx, y: midY },
+          { x: tx, y: midY },
+          { x: tx, y: ty },
+        ];
       }
     } else {
       /* A target above or beside the source: route around the right side. */
       const side = Math.max(from.position.x, to.position.x) + NODE_W + 32;
       midY = sy + 20;
       d = `M${sx},${sy} V${midY} H${side} V${ty - 20} H${tx} V${ty}`;
+      points = [
+        { x: sx, y: sy },
+        { x: sx, y: midY },
+        { x: side, y: midY },
+        { x: side, y: ty - 20 },
+        { x: tx, y: ty - 20 },
+        { x: tx, y: ty },
+      ];
     }
     const label =
       port && port !== "out" && !(from.type === "loop") ? port : "";
     out.push({
       edge,
+      key: keys[i]!,
       d,
       label,
       lx: Math.abs(tx - sx) < 1 ? sx : (sx + tx) / 2 + (tx > sx ? 24 : -24),
       ly: midY,
+      mid: polylineMid(points),
     });
   }
   return out;
@@ -236,12 +317,55 @@ export function WorkflowCanvas({
   const [connectTo, setConnectTo] = useState<{ x: number; y: number } | null>(
     null
   );
-  const [selectedEdge, setSelectedEdge] = useState<string>("");
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const fitted = useRef(false);
 
   const boxes = useMemo(() => loopBoxes(graph), [graph]);
   const edges = useMemo(() => edgeGeometry(graph, boxes), [graph, boxes]);
+  const edgeKeys = useMemo(() => edgeKeysOf(graph), [graph]);
   const returns = useMemo(() => loopReturns(graph, boxes), [graph, boxes]);
+  const nodeById = useMemo(
+    () => new Map(graph.nodes.map((node) => [node.id, node])),
+    [graph.nodes]
+  );
+
+  /* The controls sit on the edge, so moving from the line onto the button
+     leaves the hit path for a moment: keep the edge "hovered" until the
+     pointer has had a chance to land on the controls. */
+  const hideTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (hideTimer.current !== null) {
+        window.clearTimeout(hideTimer.current);
+      }
+    },
+    []
+  );
+
+  function showEdgeHover(key: string) {
+    if (!editable) {
+      return;
+    }
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+    setHoverEdge(key);
+  }
+
+  function scheduleEdgeHoverOff() {
+    if (!editable) {
+      return;
+    }
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current);
+    }
+    hideTimer.current = window.setTimeout(() => {
+      setHoverEdge(null);
+      hideTimer.current = null;
+    }, 120);
+  }
 
   const toCanvas = useCallback(
     (clientX: number, clientY: number) => {
@@ -300,22 +424,37 @@ export function WorkflowCanvas({
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  function removeEdge(id: string) {
+  /* Edges are addressed by their edgeKey, never by id alone: a graph may hold
+     several edges with the same (or an empty) id, so the key is resolved to a
+     single index before the edit. */
+  function edgeIndex(key: string): number {
+    return edgeKeys.indexOf(key);
+  }
+
+  function removeEdge(key: string) {
     if (!onChange) {
       return;
     }
-    onChange({ ...graph, edges: graph.edges.filter((edge) => edge.id !== id) });
-    setSelectedEdge("");
+    const index = edgeIndex(key);
+    if (index < 0) {
+      return;
+    }
+    onChange({ ...graph, edges: graph.edges.filter((_, i) => i !== index) });
+    setSelectedEdge(null);
   }
 
-  function setEdgePort(id: string, port: string) {
+  function setEdgePort(key: string, port: string) {
     if (!onChange) {
+      return;
+    }
+    const index = edgeIndex(key);
+    if (index < 0) {
       return;
     }
     onChange({
       ...graph,
-      edges: graph.edges.map((edge) =>
-        edge.id === id ? { ...edge, from_port: port === "out" ? "" : port } : edge
+      edges: graph.edges.map((edge, i) =>
+        i === index ? { ...edge, from_port: port === "out" ? "" : port } : edge
       ),
     });
   }
@@ -324,7 +463,7 @@ export function WorkflowCanvas({
     if (event.button !== 0) {
       return;
     }
-    setSelectedEdge("");
+    setSelectedEdge(null);
     setDrag({
       kind: "pan",
       startX: event.clientX,
@@ -341,7 +480,7 @@ export function WorkflowCanvas({
     if (event.button !== 0) {
       return;
     }
-    setSelectedEdge("");
+    setSelectedEdge(null);
     if (!editable) {
       onSelect?.(node.id);
       return;
@@ -545,10 +684,6 @@ export function WorkflowCanvas({
     onDropType(type, { x: snap(point.x - NODE_W / 2), y: snap(point.y - NODE_H / 2) });
   }
 
-  const edgeSel = edges.find((geom) => geom.edge.id === selectedEdge);
-  const edgeSource = edgeSel
-    ? graph.nodes.find((node) => node.id === edgeSel.edge.from)
-    : undefined;
   const connectFrom =
     drag && drag.kind === "connect" ? { x: drag.originX, y: drag.originY } : null;
 
@@ -609,14 +744,16 @@ export function WorkflowCanvas({
               tones &&
               (tones[geom.edge.to] === "skip" || tones[geom.edge.to] === "pending");
             return (
-              <g key={geom.edge.id}>
+              <g key={geom.key}>
                 <path
                   d={geom.d}
                   className="wf-hit"
+                  onPointerEnter={() => showEdgeHover(geom.key)}
+                  onPointerLeave={() => scheduleEdgeHoverOff()}
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     if (editable) {
-                      setSelectedEdge(geom.edge.id);
+                      setSelectedEdge(geom.key);
                     }
                   }}
                 />
@@ -626,7 +763,7 @@ export function WorkflowCanvas({
                     "wf-edge" +
                     (tone === "ok" && !dead ? " ok" : "") +
                     (dead ? " dead" : "") +
-                    (selectedEdge === geom.edge.id ? " sel" : "")
+                    (selectedEdge === geom.key ? " sel" : "")
                   }
                   markerEnd="url(#wf-arrow)"
                 />
@@ -653,7 +790,7 @@ export function WorkflowCanvas({
           .filter((geom) => geom.label)
           .map((geom) => (
             <span
-              key={"lbl-" + geom.edge.id}
+              key={"lbl-" + geom.key}
               className={"wf-pill port-" + geom.label}
               style={{ left: geom.lx, top: geom.ly }}
             >
@@ -689,9 +826,15 @@ export function WorkflowCanvas({
               data-node={node.id}
             >
               {!isTrigger(node.type) ? <span className="wf-port in" /> : null}
-              <span className={"wf-ico tint-" + meta.tint}>
-                <Ic name={meta.icon} size={18} />
-              </span>
+              {node.type === "bot" && typeof node.params?.agent === "string" && node.params.agent ? (
+                <span className="wf-ico wf-ico-agent">
+                  <AgentAvatar name={node.params.agent} size="lg" aria-hidden="true" />
+                </span>
+              ) : (
+                <span className={"wf-ico tint-" + meta.tint}>
+                  <Ic name={meta.icon} size={18} />
+                </span>
+              )}
               <span className="wf-node-text">
                 <span className="wf-node-name trunc">{node.name || meta.label}</span>
                 <span className="wf-node-sub trunc">{nodeSubtitle(node, label)}</span>
@@ -713,44 +856,75 @@ export function WorkflowCanvas({
             </div>
           );
         })}
+        {editable
+          ? edges.map((geom) => {
+              const active =
+                hoverEdge === geom.key || selectedEdge === geom.key;
+              const source = nodeById.get(geom.edge.from);
+              const target = nodeById.get(geom.edge.to);
+              const srcName = source
+                ? source.name || nodeMeta(source.type).label
+                : geom.edge.from;
+              const dstName = target
+                ? target.name || nodeMeta(target.type).label
+                : geom.edge.to;
+              const ports = source
+                ? source.type === "loop"
+                  ? ["body", "done"]
+                  : nodePorts(source)
+                : [];
+              const showPorts =
+                selectedEdge === geom.key && ports.length > 1;
+              return (
+                <div
+                  key={"acts-" + geom.key}
+                  className={"wf-edgeacts" + (active ? " on" : "")}
+                  style={{ left: geom.mid.x, top: geom.mid.y }}
+                >
+                  <div
+                    className="wf-edgeacts-in"
+                    style={{ transform: `scale(${1 / zoom})` }}
+                    onPointerEnter={() => showEdgeHover(geom.key)}
+                    onPointerLeave={() => scheduleEdgeHoverOff()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    {showPorts ? (
+                      <span className="wf-edgeacts-ports">
+                        {ports.map((port) => (
+                          <button
+                            key={port}
+                            type="button"
+                            className={
+                              (geom.edge.from_port || "out") === port
+                                ? "on"
+                                : undefined
+                            }
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={() => setEdgePort(geom.key, port)}
+                          >
+                            {port}
+                          </button>
+                        ))}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="wf-edgeacts-del"
+                      aria-label={`Delete edge from ${srcName} to ${dstName}`}
+                      tabIndex={active ? 0 : -1}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => removeEdge(geom.key)}
+                    >
+                      <Ic name="trash-2" size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          : null}
       </div>
       {graph.nodes.length === 0 && empty ? (
         <div className="wf-empty">{empty}</div>
-      ) : null}
-      {edgeSel && editable ? (
-        <div
-          className="wf-edgebar"
-          onPointerDown={(event) => event.stopPropagation()}
-          role="toolbar"
-          aria-label="Edge"
-        >
-          {edgeSource && nodePorts(edgeSource).length > 1 ? (
-            <span className="wf-edgeports">
-              {(edgeSource.type === "loop" ? ["body", "done"] : nodePorts(edgeSource)).map(
-                (port) => (
-                  <button
-                    key={port}
-                    type="button"
-                    className={
-                      (edgeSel.edge.from_port || "out") === port ? "on" : undefined
-                    }
-                    onClick={() => setEdgePort(edgeSel.edge.id, port)}
-                  >
-                    {port}
-                  </button>
-                )
-              )}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            className="wf-edgedel"
-            onClick={() => removeEdge(edgeSel.edge.id)}
-          >
-            <Ic name="trash-2" size={14} />
-            Delete edge
-          </button>
-        </div>
       ) : null}
       {footer ? <div className="wf-foot">{footer}</div> : null}
       <div

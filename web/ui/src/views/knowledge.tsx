@@ -23,6 +23,7 @@ import {
   Skeleton,
   Stat,
 } from "../ui/gr8r";
+import { AgentName } from "./agent-avatar";
 
 /* REQ-KNU-040, REQ-KNU-041; AC-KNU-008: the Knowledge page shows the vault
    status and the upkeep log, uploads files into inbox/, and starts a
@@ -458,7 +459,8 @@ export function KnowledgePage() {
             <dd>{embeddingText(data)}</dd>
           </dl>
           <p className="knowledge-note">
-            Knowledge agent: {data.agent ? label(data.agent) : "none configured"}
+            Knowledge agent:{" "}
+            {data.agent ? <AgentName name={data.agent} label={label(data.agent)} /> : "none configured"}
           </p>
           {data.agent_error ? (
             <div className="alert danger" role="alert">

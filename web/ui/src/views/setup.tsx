@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { ApiError, errorMessage, setCSRF } from "../api/client";
 import { ErrorNotice, useAnnounce } from "../ui/ui";
-import { Ic, LanaMark } from "../ui/icons";
-import { Button, Field, IconButton, Input, Textarea, cn } from "../ui/gr8r";
-import { providerLabel } from "./agent-common";
+import { Ic } from "../ui/icons";
+import { Button, Field, Input, Textarea, cn } from "../ui/gr8r";
 import {
   AGENT_ID_HINT,
   AGENT_ID_RULE,
@@ -16,81 +15,33 @@ import {
   getSetup,
   pollDaemonRestart,
   saveSetup,
-  testProvider,
 } from "../api/setup";
-import type { SetupTestProviderResponse } from "../api/setup";
+import { CLAUDE_CODE_ID, presetById } from "./router/presets";
+import { ProviderLogo } from "./router/provider-logo";
+import { planLabel } from "./router/limits";
+import { SetupShell, StepHeading, go } from "./setup-shell";
+import { AddressLabel, ConnectStep, ModelStep, ROUTER_NOTE, providerFace } from "./setup-models";
+import {
+  clearDraft,
+  isClaudeAddress,
+  readDraft,
+  readSummary,
+  summaryFor,
+  writeDraft,
+  writeSummary,
+} from "./setup-draft";
+import type { SetupAgentDraft, SetupDraft, SetupPersonaDraft } from "./setup-draft";
+import { AgentAvatar } from "./agent-avatar";
 
-/* Setup wizard (REQ-WEB-032, REQ-WEB-033, REQ-WEB-034). The shell and the
-   progress are shared with the Unlock step in views/login.js. Every step is a
-   hash route under #/setup/{step}; app.js owns the route table. */
+export { SetupShell } from "./setup-shell";
+export type { SetupShellProps } from "./setup-shell";
 
-const DRAFT_KEY = "lana.setup";
-const SUMMARY_KEY = "lana.setup.summary";
+/* Setup wizard (REQ-WEB-032, REQ-WEB-033, REQ-WEB-034), Router onboarding:
+   unlock → connect your models → pick a model → agent + persona → ready.
+   The shell and the progress are shared with the Unlock step in
+   views/login.tsx; the model steps live in views/setup-models.tsx. */
+
 const USER_LIMIT = 2000;
-const STEP_TOTAL = 5;
-
-/* The asset scan forbids every protocol-relative URL in shell files, so the
-   scheme is assembled instead of written as one literal. */
-const SECURE = "https:" + "/".repeat(2);
-
-interface ProviderPreset {
-  id: string;
-  label: string;
-  icon: string;
-  description: string;
-  kind: string;
-  baseUrl: string;
-  keyEnv: string;
-  model: string;
-  suggestions: readonly string[];
-}
-
-const PROVIDERS = [
-  {
-    id: "openai",
-    label: "OpenAI",
-    icon: "sparkles",
-    description: "GPT models through api.openai.com.",
-    kind: "openai_compat",
-    baseUrl: SECURE + "api.openai.com/v1",
-    keyEnv: "OPENAI_API_KEY",
-    model: "gpt-5-mini",
-    suggestions: ["gpt-5-mini", "gpt-5", "gpt-4.1"],
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    icon: "bot",
-    description: "Claude models through api.anthropic.com.",
-    /* Q-029: until a native adapter exists, Anthropic uses the
-       OpenAI-compatible endpoint through the same openai_compat kind. */
-    kind: "openai_compat",
-    baseUrl: SECURE + "api.anthropic.com/v1",
-    keyEnv: "ANTHROPIC_API_KEY",
-    model: "claude-sonnet-4-5",
-    suggestions: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    icon: "route",
-    description: "Models from many vendors with one key.",
-    kind: "openai_compat",
-    baseUrl: SECURE + "openrouter.ai/api/v1",
-    keyEnv: "OPENROUTER_API_KEY",
-    model: "openai/gpt-5-mini",
-    suggestions: [
-      "openai/gpt-5-mini",
-      "anthropic/claude-sonnet-4.5",
-      "google/gemini-2.5-pro",
-    ],
-  },
-] as const satisfies readonly ProviderPreset[];
-
-const PROVIDER_BY_ID: Record<string, ProviderPreset> = {};
-for (const preset of PROVIDERS) {
-  PROVIDER_BY_ID[preset.id] = preset;
-}
 
 interface TemplatePreset {
   id: string;
@@ -162,70 +113,7 @@ for (const permission of PERMISSIONS) {
   PERMISSION_BY_ID[permission.id] = permission;
 }
 
-const STEP_NUMBER: Record<string, number> = {
-  unlock: 1,
-  provider: 2,
-  connect: 3,
-  agent: 4,
-  persona: 4,
-  ready: 5,
-};
-
 const numberFormat = new Intl.NumberFormat("en-US");
-
-interface SetupConnectDraft {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-}
-
-interface SetupAgentDraft {
-  /* name is the ID: the config key, the route, and the @mention token. */
-  name: string;
-  /* displayName is the human name people see; it falls back to name. */
-  displayName: string;
-  template: string;
-  workspace: string;
-  permission: string;
-}
-
-interface SetupPersonaDraft {
-  agentMd: string;
-  userMd: string;
-}
-
-interface SetupDraft {
-  provider: string;
-  connect: SetupConnectDraft;
-  agent: SetupAgentDraft;
-  persona: SetupPersonaDraft;
-}
-
-interface SetupSummary {
-  provider: string;
-  providerLabel: string;
-  model: string;
-  agentName: string;
-  template: string;
-  templateLabel: string;
-  permission: string;
-  permissionLabel: string;
-  workspace: string;
-}
-
-/* sessionStorage holds the draft across routes. A module-level copy keeps the
-   wizard working when storage is disabled; it is cleared with the stored copy
-   after a successful save. */
-let memoryDraft: SetupDraft | null = null;
-let memorySummary: SetupSummary | null = null;
-
-function textValue(value: unknown, fallback: string): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function providerById(id: string): ProviderPreset {
-  return PROVIDER_BY_ID[id] || PROVIDERS[0];
-}
 
 function templateById(id: string): TemplatePreset {
   return TEMPLATE_BY_ID[id] || TEMPLATES[0];
@@ -235,288 +123,13 @@ function permissionById(id: string): PermissionPreset {
   return PERMISSION_BY_ID[id] || PERMISSIONS[0];
 }
 
-function defaultConnect(providerId: string): SetupConnectDraft {
-  const preset = providerById(providerId);
-  return {
-    apiKey: "",
-    baseUrl: preset.baseUrl,
-    model: preset.model,
-  };
-}
-
-function defaultDraft(): SetupDraft {
-  return {
-    provider: PROVIDERS[0].id,
-    connect: defaultConnect(PROVIDERS[0].id),
-    agent: {
-      name: "default",
-      displayName: "default",
-      template: TEMPLATES[0].id,
-      workspace: "~/lana/workspace",
-      permission: PERMISSIONS[0].id,
-    },
-    persona: {
-      agentMd: "",
-      userMd: "",
-    },
-  };
-}
-
-function normalizeDraft(value: unknown): SetupDraft {
-  const fallback = defaultDraft();
-  if (!value || typeof value !== "object") {
-    return fallback;
-  }
-  const draft = value as Record<string, unknown>;
-  const rawProvider = draft.provider;
-  const provider =
-    typeof rawProvider === "string" && PROVIDER_BY_ID[rawProvider]
-      ? rawProvider
-      : fallback.provider;
-  const preset = providerById(provider);
-  const connect =
-    draft.connect && typeof draft.connect === "object"
-      ? (draft.connect as Record<string, unknown>)
-      : {};
-  const agent =
-    draft.agent && typeof draft.agent === "object"
-      ? (draft.agent as Record<string, unknown>)
-      : {};
-  const persona =
-    draft.persona && typeof draft.persona === "object"
-      ? (draft.persona as Record<string, unknown>)
-      : {};
-  return {
-    provider,
-    connect: {
-      apiKey: textValue(connect.apiKey, ""),
-      baseUrl: textValue(connect.baseUrl, preset.baseUrl),
-      model: textValue(connect.model, preset.model),
-    },
-    agent: {
-      name: textValue(agent.name, fallback.agent.name),
-      displayName: textValue(agent.displayName, fallback.agent.displayName),
-      template:
-        typeof agent.template === "string" && TEMPLATE_BY_ID[agent.template]
-          ? agent.template
-          : fallback.agent.template,
-      workspace: textValue(agent.workspace, fallback.agent.workspace),
-      permission:
-        typeof agent.permission === "string" && PERMISSION_BY_ID[agent.permission]
-          ? agent.permission
-          : fallback.agent.permission,
-    },
-    persona: {
-      agentMd: textValue(persona.agentMd, ""),
-      userMd: textValue(persona.userMd, ""),
-    },
-  };
-}
-
-function readDraft(): SetupDraft {
-  if (memoryDraft) {
-    return memoryDraft;
-  }
-  let parsed: unknown = null;
-  try {
-    const raw = window.sessionStorage.getItem(DRAFT_KEY);
-    if (raw) {
-      parsed = JSON.parse(raw);
-    }
-  } catch {
-    /* Storage can be disabled; the in-memory copy still carries this page. */
-  }
-  memoryDraft = normalizeDraft(parsed);
-  return memoryDraft;
-}
-
-function writeDraft(next: SetupDraft): SetupDraft {
-  memoryDraft = normalizeDraft(next);
-  try {
-    window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(memoryDraft));
-  } catch {
-    /* Keep the in-memory copy when storage is unavailable. */
-  }
-  return memoryDraft;
-}
-
-function clearDraft(): void {
-  memoryDraft = null;
-  try {
-    window.sessionStorage.removeItem(DRAFT_KEY);
-  } catch {
-    /* Nothing else to clear. */
-  }
-}
-
-function readSummary(): SetupSummary | null {
-  if (memorySummary) {
-    return memorySummary;
-  }
-  try {
-    const raw = window.sessionStorage.getItem(SUMMARY_KEY);
-    if (raw) {
-      memorySummary = JSON.parse(raw) as SetupSummary;
-      return memorySummary;
-    }
-  } catch {
-    /* Fall through to the draft. */
-  }
-  return null;
-}
-
-function writeSummary(summary: SetupSummary): void {
-  memorySummary = summary;
-  try {
-    window.sessionStorage.setItem(SUMMARY_KEY, JSON.stringify(summary));
-  } catch {
-    /* The current page still has the summary in memory. */
-  }
-}
-
-function summaryFor(draft: SetupDraft): SetupSummary {
-  const preset = providerById(draft.provider);
-  const template = templateById(draft.agent.template);
-  const permission = permissionById(draft.agent.permission);
-  return {
-    provider: draft.provider,
-    providerLabel: preset.label,
-    model: draft.connect.model.trim(),
-    agentName: draft.agent.displayName.trim() || draft.agent.name.trim(),
-    template: draft.agent.template,
-    templateLabel: template.label,
-    permission: draft.agent.permission,
-    permissionLabel: permission.summary,
-    workspace: draft.agent.workspace.trim() || "~/lana/workspace",
-  };
-}
-
 function characterCount(value: unknown): number {
   return Array.from(String(value || "")).length;
-}
-
-function go(step: string): void {
-  window.location.hash = "#/setup/" + step;
-}
-
-function setupAddress(): string {
-  return window.location.host || "127.0.0.1:18300";
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function providerFailure(result: SetupTestProviderResponse | null): string {
-  if (result && typeof result.message === "string" && result.message) {
-    return result.message;
-  }
-  const status = Number(result && result.status);
-  if (Number.isFinite(status) && status > 0) {
-    return "The provider answered with status " + status + ".";
-  }
-  return "The provider did not answer.";
 }
 
 /* The API contract has no template preview endpoint, so the persona fields
    start empty and "Reset to template" stays disabled with a short note. */
 const TEMPLATE_PREVIEW_AVAILABLE = false;
-
-/* The step progress of the Gr8r onboarding card: one bar per step, the bars
-   up to the current step filled, the current one growing in. */
-function Steps({ step }: { step: string }) {
-  const current = STEP_NUMBER[step] || 1;
-  return (
-    <>
-      <div
-        className="steps"
-        role="progressbar"
-        aria-valuemin={1}
-        aria-valuemax={STEP_TOTAL}
-        aria-valuenow={current}
-        aria-label="Setup progress"
-      >
-        {Array.from({ length: STEP_TOTAL }, (_unused, index) => (
-          <i
-            key={index}
-            className={cn(index + 1 <= current && "on", index + 1 === current && "cur")}
-          ></i>
-        ))}
-      </div>
-      <div className="steps-sub faint">
-        Step {current} of {STEP_TOTAL}
-      </div>
-    </>
-  );
-}
-
-export interface SetupShellProps {
-  step: string;
-  size?: string;
-  variant?: "steps" | "door";
-  children?: ReactNode;
-}
-
-/* The Gr8r auth/onboarding shell: a full-page column with the brand bar, a
-   centred card, and a quiet footer. The door variant is the pre-login card
-   (login, welcome, forgot); the steps variant is the setup wizard and adds the
-   progress bars. */
-export function SetupShell({
-  step,
-  size = "regular",
-  variant = "steps",
-  children,
-}: SetupShellProps) {
-  const door = variant === "door";
-  return (
-    <div className="auth">
-      <div className="auth-top">
-        <span className="brand">
-          <LanaMark size={22} />
-          <span className="lana-word">LΛNΛ</span>
-        </span>
-      </div>
-      <div className="auth-c">
-        <div
-          className={cn(
-            "auth-card",
-            door ? "fx-auth" : "onb fx-step",
-            size === "wide" && "onb-wide"
-          )}
-        >
-          {door ? null : <Steps step={step} />}
-          {children}
-        </div>
-      </div>
-      <div className="auth-foot">
-        <span className="faint">
-          {door
-            ? "lana on this computer · only this computer can open this page."
-            : "Local only · " + setupAddress()}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-interface StepHeadingProps {
-  title: string;
-  children?: ReactNode;
-}
-
-function StepHeading({ title, children }: StepHeadingProps) {
-  return (
-    <>
-      <h1>{title}</h1>
-      <p className="sub">{children}</p>
-    </>
-  );
-}
 
 /* Returns the boolean `needed` flag of API-WEB-018. Errors are rethrown, not
    turned into `false`: the caller decides whether to show the wizard, a retry,
@@ -527,310 +140,37 @@ export async function setupNeeded(): Promise<boolean> {
   return Boolean(status && status.needed);
 }
 
-function ProviderStep() {
-  const announce = useAnnounce();
-  const [provider, setProvider] = useState(() => readDraft().provider);
-
-  function selectProvider(id: string) {
-    if (id === provider) {
-      return;
-    }
-    const current = readDraft();
-    const next = {
-      ...current,
-      provider: id,
-      connect: defaultConnect(id),
-    };
-    writeDraft(next);
-    setProvider(id);
-    announce(providerById(id).label + " selected.");
-  }
-
-  return (
-    <SetupShell step="provider">
-      <StepHeading title="Choose a model provider">
-        Pick where lana sends model requests. Each provider has a default base URL
-        that you can change in the next step.
-      </StepHeading>
-
-      <div className="opts" role="radiogroup" aria-label="Provider">
-        {PROVIDERS.map((preset) => {
-          const on = preset.id === provider;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              className={cn("opt", on && "on")}
-              onClick={() => selectProvider(preset.id)}
-            >
-              <Ic name={preset.icon} size={18} />
-              <b>{preset.label}</b>
-              <span>{preset.description}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="auth-actions">
-        <Button variant="ghost" onClick={() => go("unlock")}>
-          Back
-        </Button>
-        <span className="sp"></span>
-        <Button
-          variant="primary"
-          size="lg"
-          iconRight="arrow-right"
-          onClick={() => go("connect")}
-        >
-          Continue
-        </Button>
-      </div>
-    </SetupShell>
-  );
-}
-
-interface ConnectFieldErrors {
-  apiKey?: string;
-  baseUrl?: string;
-  model?: string;
-}
-
-function ConnectStep() {
-  const announce = useAnnounce();
-  const [draft] = useState(readDraft);
-  const preset = providerById(draft.provider);
-  const [connect, setConnect] = useState(() => draft.connect);
-  const [keyShown, setKeyShown] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<ConnectFieldErrors>({});
-  const [result, setResult] = useState<SetupTestProviderResponse | null>(null);
-  const [requestError, setRequestError] = useState<unknown>(null);
-  const [testing, setTesting] = useState(false);
-  const [tested, setTested] = useState(false);
-
-  function update(field: keyof SetupConnectDraft, value: string) {
-    const next = { ...connect, [field]: value };
-    setConnect(next);
-    const current = readDraft();
-    writeDraft({ ...current, connect: next });
-    setFieldErrors((errors) => ({ ...errors, [field]: "" }));
-    setResult(null);
-    setRequestError(null);
-    setTested(false);
-  }
-
-  function validate(): boolean {
-    const errors: ConnectFieldErrors = {};
-    if (!connect.apiKey.trim()) {
-      errors.apiKey = "Enter the API key.";
-    }
-    if (!connect.baseUrl.trim()) {
-      errors.baseUrl = "Enter the base URL.";
-    } else if (!isHttpUrl(connect.baseUrl.trim())) {
-      errors.baseUrl = "Use a complete URL that starts with http or https.";
-    }
-    if (!connect.model.trim()) {
-      errors.model = "Enter the default model.";
-    }
-    setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
-  }
-
-  async function runTest() {
-    if (testing) {
-      return;
-    }
-    if (!validate()) {
-      announce("Check the highlighted fields and try again.");
-      return;
-    }
-    setTesting(true);
-    setResult(null);
-    setRequestError(null);
-    setTested(false);
-    announce("Testing the connection.");
-    try {
-      const response = await testProvider({
-        kind: preset.kind,
-        baseUrl: connect.baseUrl.trim(),
-        model: connect.model.trim(),
-        apiKey: connect.apiKey,
-      });
-      setResult(response);
-      if (response && response.ok) {
-        const latency = Number(response.latency_ms) || 0;
-        const message =
-          connect.model.trim() + " answered in " + latency + " ms.";
-        setTested(true);
-        announce("Connection works. " + message);
-      } else {
-        const message = providerFailure(response);
-        setFieldErrors((errors) => ({ ...errors, apiKey: message }));
-        announce("Could not reach the model. " + message);
-      }
-    } catch (error) {
-      const message = errorMessage(error);
-      setRequestError(error);
-      setFieldErrors((errors) => ({ ...errors, apiKey: message }));
-      announce("Could not test the connection. " + message);
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  function continueNext(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!tested || testing) {
-      return;
-    }
-    go("agent");
-  }
-
-  const latency = Number(result && result.latency_ms) || 0;
-  const testedOk = Boolean(result && result.ok);
-  const alertTitle = testedOk ? "Connection works" : "Could not reach the model";
-  const alertBody = result
-    ? result.ok
-      ? connect.model.trim() + " answered in " + latency + " ms."
-      : providerFailure(result)
-    : requestError
-      ? errorMessage(requestError)
-      : "";
-
-  return (
-    <SetupShell step="connect">
-      <StepHeading title={"Connect " + preset.label}>
-        Add the API key and pick the default model. lana tests the connection
-        before it saves.
-      </StepHeading>
-
-      <form className="auth-form" onSubmit={continueNext}>
-        <Field
-          label="API key"
-          htmlFor="setup-api-key"
-          hint={"Saved to secrets.env as " + preset.keyEnv + ". It stays on this machine."}
-          error={fieldErrors.apiKey}
-        >
-          <div className="pw-field">
-            <Input
-              id="setup-api-key"
-              className="input-lg"
-              type={keyShown ? "text" : "password"}
-              autoComplete="off"
-              spellCheck={false}
-              value={connect.apiKey}
-              disabled={testing}
-              aria-required="true"
-              onChange={(event) => update("apiKey", event.target.value)}
-            />
-            <IconButton
-              size="sm"
-              className="pw-eye"
-              icon={keyShown ? "eye-off" : "eye"}
-              label={keyShown ? "Hide API key" : "Show API key"}
-              on={keyShown}
-              disabled={testing}
-              onClick={() => setKeyShown((current) => !current)}
-            />
-          </div>
-        </Field>
-
-        <Field
-          label="Base URL"
-          htmlFor="setup-base-url"
-          hint="Change it for a proxy or a compatible gateway."
-          error={fieldErrors.baseUrl}
-        >
-          <Input
-            id="setup-base-url"
-            className="input-lg"
-            type="url"
-            autoComplete="url"
-            spellCheck={false}
-            value={connect.baseUrl}
-            disabled={testing}
-            aria-required="true"
-            onChange={(event) => update("baseUrl", event.target.value)}
-          />
-        </Field>
-
-        <Field
-          label="Default model"
-          htmlFor="setup-model"
-          hint="The default agent uses this model. Change it any time in Settings."
-          error={fieldErrors.model}
-        >
-          <Input
-            id="setup-model"
-            className="input-lg"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={connect.model}
-            disabled={testing}
-            aria-required="true"
-            onChange={(event) => update("model", event.target.value)}
-          />
-        </Field>
-
-        <div className="suggests">
-          <span className="faint">Suggested</span>
-          {preset.suggestions.map((model) => {
-            const on = connect.model === model;
-            return (
-              <button
-                key={model}
-                type="button"
-                className={cn("badge", "suggest", on && "accent")}
-                aria-pressed={on}
-                disabled={testing}
-                onClick={() => update("model", model)}
-              >
-                <span className="dot" aria-hidden="true"></span>
-                {model}
-              </button>
-            );
-          })}
-        </div>
-
-        <div
-          className="auth-status"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          {result || requestError ? (
-            <div className={cn("alert", testedOk ? "ok" : "danger")}>
-              <Ic name={testedOk ? "circle-check" : "circle-alert"} size={15} />
-              <div className="grow">
-                <b>{alertTitle}</b>
-                <p className="alert-body">{alertBody}</p>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="auth-actions">
-          <Button variant="secondary" disabled={testing} onClick={runTest}>
-            {result && !result.ok ? "Test again" : "Test connection"}
-          </Button>
-          <span className="sp"></span>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={testing}
-            disabled={!tested || testing}
-          >
-            Save and continue
-          </Button>
-        </div>
-        {!tested ? (
-          <p className="hint">Test the connection before you continue.</p>
-        ) : null}
-      </form>
-    </SetupShell>
-  );
+/* The POST /v1/setup body of a draft (API-WEB-021 revision 3). */
+function setupBody(draft: SetupDraft, persona: SetupPersonaDraft) {
+  return {
+    providers: draft.connections.map((connection) => {
+      const preset = presetById(connection.id);
+      return {
+        name: connection.id,
+        kind: preset ? preset.kind : "openai_compat",
+        apiKey: connection.apiKey,
+        baseUrl: connection.baseUrl,
+        apiKeyEnv: preset ? preset.keyEnv : "",
+      };
+    }),
+    model: draft.model,
+    fallback: draft.fallback,
+    backgroundModel: isClaudeAddress(draft.model) ? draft.background : "",
+    agent: {
+      name: draft.agent.name.trim(),
+      ...(draft.agent.displayName.trim() &&
+      draft.agent.displayName.trim() !== draft.agent.name.trim()
+        ? { display_name: draft.agent.displayName.trim() }
+        : {}),
+      template: draft.agent.template,
+      workspace: draft.agent.workspace.trim(),
+      permission: draft.agent.permission,
+    },
+    persona: {
+      agentMd: persona.agentMd,
+      userMd: persona.userMd,
+    },
+  };
 }
 
 interface AgentFieldErrors {
@@ -1018,7 +358,7 @@ function AgentStep() {
       </div>
 
       <div className="auth-actions">
-        <Button variant="ghost" onClick={() => go("connect")}>
+        <Button variant="ghost" onClick={() => go("model")}>
           Back
         </Button>
         <span className="sp"></span>
@@ -1169,28 +509,7 @@ function PersonaStep() {
          for the daemon instance that setup starts. */
       const startedAt = await getDaemonStartedAt();
       setRestartStartedAt(startedAt);
-      await saveSetup({
-        provider: {
-          name: current.provider,
-          apiKey: current.connect.apiKey,
-          baseUrl: current.connect.baseUrl.trim(),
-          model: current.connect.model.trim(),
-        },
-        agent: {
-          name: current.agent.name.trim(),
-          ...(current.agent.displayName.trim() &&
-          current.agent.displayName.trim() !== current.agent.name.trim()
-            ? { display_name: current.agent.displayName.trim() }
-            : {}),
-          template: current.agent.template,
-          workspace: current.agent.workspace.trim(),
-          permission: current.agent.permission,
-        },
-        persona: {
-          agentMd: persona.agentMd,
-          userMd: persona.userMd,
-        },
-      });
+      await saveSetup(setupBody(current, persona));
       writeSummary(summaryFor(current));
       clearDraft();
       setSaving(false);
@@ -1311,32 +630,81 @@ function PersonaStep() {
   );
 }
 
+/* The ready summary (mockup 05, Router onboarding): what was connected,
+   the models, the agent, and where to change them. */
 function ReadyStep() {
   const summary = readSummary() || summaryFor(readDraft());
-  const permission =
-    summary.permissionLabel || permissionById(summary.permission).summary;
-  const rows: { icon: string; label: string; value: string }[] = [
+  const permission = permissionById(summary.permission).summary;
+  const template = templateById(summary.template).label;
+  const agentName = summary.agentName || "default";
+  /* The link and the avatar use the ID; the labels show the display name. */
+  const agentLabel = summary.agentLabel || agentName;
+  const names = (summary.claudeCode ? [CLAUDE_CODE_ID] : []).concat(summary.providers);
+  const account = summary.claudeAccount;
+  const rows: { icon: string; label: string; value: ReactNode }[] = [
     {
       icon: "server",
-      label: "Provider",
-      value: summary.providerLabel || providerLabel(summary.provider),
+      label: "Connected",
+      value: names.length ? (
+        <span className="setup-logos">
+          {names.map((name) => {
+            const face = providerFace(name);
+            return (
+              <span key={name} className="setup-logo-chip">
+                <ProviderLogo logo={face.logo} name={face.label} size={16} />
+                {face.label}
+              </span>
+            );
+          })}
+        </span>
+      ) : (
+        "Nothing yet"
+      ),
     },
-    { icon: "cpu", label: "Model", value: summary.model || "The provider default" },
     {
-      icon: "bot",
-      label: "Agent",
-      value:
-        (summary.agentName || "default") +
-        " · " +
-        (summary.templateLabel || templateById(summary.template).label),
-    },
-    { icon: "shield-check", label: "Tool permission", value: permission },
-    {
-      icon: "folder",
-      label: "Workspace",
-      value: summary.workspace || "~/lana/workspace",
+      icon: "cpu",
+      label: "Main model",
+      value: summary.model ? <AddressLabel address={summary.model} /> : "Not set",
     },
   ];
+  if (summary.fallback) {
+    rows.push({
+      icon: "layers",
+      label: "Fallback · combo default",
+      value: (
+        <span className="setup-chain">
+          <AddressLabel address={summary.model} />
+          <Ic name="arrow-right" size={12} />
+          <AddressLabel address={summary.fallback} />
+        </span>
+      ),
+    });
+  }
+  if (isClaudeAddress(summary.model)) {
+    rows.push({
+      icon: "clock",
+      label: "Background model",
+      value: summary.background ? (
+        <AddressLabel address={summary.background} />
+      ) : (
+        "Skipped until you connect an API key"
+      ),
+    });
+  }
+  if (summary.claudeCode) {
+    rows.push({
+      icon: "user",
+      label: "Claude Code account",
+      value: ["Signed in", account && account.email, account && account.plan ? planLabel(account.plan) : ""]
+        .filter(Boolean)
+        .join(" · "),
+    });
+  }
+  rows.push(
+    { icon: "bot", label: "Agent", value: agentLabel + " · " + template },
+    { icon: "shield-check", label: "Tool permission", value: permission },
+    { icon: "folder", label: "Workspace", value: summary.workspace || "~/lana/workspace" }
+  );
 
   return (
     <SetupShell step="ready">
@@ -1369,9 +737,16 @@ function ReadyStep() {
       <Button variant="primary" size="lg" block as="a" href="#/sessions/new">
         Start your first session
       </Button>
-      <a className="link ready-link" href="#/settings/general">
-        Open settings
-      </a>
+      <p className="hint setup-ready-note">{ROUTER_NOTE}</p>
+      <div className="setup-ready-links">
+        <a className="link" href="#/router/providers">
+          Open Router
+        </a>
+        <a className="link setup-agent-link" href={"#/agents/" + encodeURIComponent(agentName)}>
+          <AgentAvatar name={agentName} size="sm" aria-hidden="true" />
+          Open agent {agentLabel}
+        </a>
+      </div>
     </SetupShell>
   );
 }
@@ -1382,16 +757,17 @@ export interface SetupWizardProps {
 
 export function SetupWizard({ step }: SetupWizardProps) {
   switch (step) {
-    case "connect":
-      return <ConnectStep />;
+    case "model":
+      return <ModelStep />;
     case "agent":
       return <AgentStep />;
     case "persona":
       return <PersonaStep />;
     case "ready":
       return <ReadyStep />;
+    case "connect":
     case "provider":
     default:
-      return <ProviderStep />;
+      return <ConnectStep />;
   }
 }

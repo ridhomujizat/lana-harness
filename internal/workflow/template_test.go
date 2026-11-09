@@ -120,6 +120,58 @@ func TestRenderMixedText(t *testing.T) {
 	}
 }
 
+// TestRenderMixedTextNodeOutput checks that {{ nodes.<id>.output }} inside
+// mixed text gives the node's main text with real newlines, and falls back to
+// compact JSON for a map without a primary text key or a list.
+func TestRenderMixedTextNodeOutput(t *testing.T) {
+	sc := Scope{Nodes: map[string]any{
+		"agent":  map[string]any{"text": "line one\nline two"},
+		"fetch":  map[string]any{"url": "https://x", "format": "markdown", "content": "# Hello"},
+		"scrape": map[string]any{"url": "https://x", "title": "T", "markdown": "body"},
+		"trap":   map[string]any{"count": 1.0},
+		"list":   []any{"a", "b"},
+	}}
+	cases := []struct {
+		tmpl string
+		want string
+	}{
+		{"out: {{ nodes.agent.output }}", "out: line one\nline two"},
+		{"out: {{ nodes.fetch.output }}", "out: # Hello"},
+		{"out: {{ nodes.scrape.output }}", "out: body"},
+		{"out: {{ nodes.trap.output }}", `out: {"count":1}`},
+		{"out: {{ nodes.list.output }}", `out: ["a","b"]`},
+	}
+	for _, tc := range cases {
+		got, err := Render(tc.tmpl, sc)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.tmpl, err)
+		}
+		if got != tc.want {
+			t.Fatalf("%s = %#v, want %q", tc.tmpl, got, tc.want)
+		}
+	}
+}
+
+// TestRenderSingleExpressionNodeOutputKeepsMap covers AC-WF-007 for a node
+// output: a param that is one expression still resolves to the object, so a
+// param that expects an object is not reduced to text.
+func TestRenderSingleExpressionNodeOutputKeepsMap(t *testing.T) {
+	sc := Scope{Nodes: map[string]any{
+		"agent": map[string]any{"text": "the answer"},
+	}}
+	got, err := Render("{{ nodes.agent.output }}", sc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("Render type = %T, want map[string]any", got)
+	}
+	if m["text"] != "the answer" {
+		t.Fatalf("Render = %#v", got)
+	}
+}
+
 // TestRenderNoTemplateReturnsString leaves plain strings untouched.
 func TestRenderNoTemplateReturnsString(t *testing.T) {
 	got, err := Render("  plain  ", Scope{})
@@ -196,5 +248,30 @@ func TestTemplateRefs(t *testing.T) {
 	want := []string{"foo", "bar"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("TemplateRefs = %#v, want %#v", got, want)
+	}
+}
+
+// TestTemplateParams checks the spec #44 rule: the script of a script_parse node
+// is left out of the rendered params through a copy, while every other type
+// returns its params map unchanged (REQ-SP-001).
+func TestTemplateParams(t *testing.T) {
+	spParams := map[string]any{"input": "x", "goal": "g", "script": "var s = 1;"}
+	got := TemplateParams(Node{Type: "script_parse", Params: spParams})
+	if _, ok := got["script"]; ok {
+		t.Fatalf("TemplateParams(script_parse) kept script: %#v", got)
+	}
+	if got["input"] != "x" || got["goal"] != "g" {
+		t.Fatalf("TemplateParams(script_parse) = %#v", got)
+	}
+	got["input"] = "y"
+	if spParams["input"] != "x" || spParams["goal"] != "g" || spParams["script"] != "var s = 1;" {
+		t.Fatalf("TemplateParams mutated the original params: %#v", spParams)
+	}
+
+	msgParams := map[string]any{"text": "hi"}
+	msg := TemplateParams(Node{Type: "message", Params: msgParams})
+	msg["text"] = "changed"
+	if msgParams["text"] != "changed" {
+		t.Fatalf("TemplateParams(message) did not return the same map")
 	}
 }

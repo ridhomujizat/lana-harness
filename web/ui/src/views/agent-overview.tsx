@@ -7,8 +7,6 @@ import type { Agent } from "../api/agents";
 import { detailText } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   Chip,
@@ -19,15 +17,19 @@ import {
   Skeleton,
   Stat,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
+import { GenerateAvatarButton } from "./avatar-dialog";
 import {
   agentHref,
   permissionMeta,
   presenceTone,
   providerLabel,
+  usesClaudeCode,
   splitModel,
 } from "./agent-common";
 import { gr8rColor, useRooms } from "./presence";
 import { displayLabel } from "./agent-label";
+import { ChannelLogo, isBrandChannel } from "./channel-logo";
 
 /* REQ-ROOM-010: the alive agent profile. It loads API-ROOM-008 and refreshes
    every 10 s and whenever the live room row changes presence or last activity
@@ -112,7 +114,10 @@ function factsLine(data: AgentOverviewData, agent?: Agent | null): string {
       " days)",
   ];
   if (agent) {
-    const model = splitModel(agent).model || "Agent default";
+    /* Spec 39: no engine name; a Claude Code agent shows its address. */
+    const model = usesClaudeCode(agent)
+      ? String(agent.model || "") || "Claude Code"
+      : splitModel(agent).model || "Agent default";
     parts.push(model);
     parts.push(permissionMeta(agent.permission || agent.policy).label);
   }
@@ -327,12 +332,22 @@ export function AgentOverview({
     <div className="ov-page">
       <section className="panel ov-hero">
         <div className="ov-hero-in">
-          <Avatar
-            size="xl"
-            name={viewName}
-            color={gr8rColor(data.color)}
-            presence={presenceState === "online" || presenceState === "working"}
-          />
+          <span className="avatar-edit-wrap">
+            <AgentAvatar
+              size="xl"
+              name={data.name}
+              color={gr8rColor(data.color)}
+              presence={presenceState === "online" || presenceState === "working"}
+            />
+            <GenerateAvatarButton
+              compact
+              name={data.name}
+              color={data.color}
+              svg={data.avatar_svg}
+              source={data.avatar_source}
+              onSaved={() => setToken((value) => value + 1)}
+            />
+          </span>
           <div className="ov-hero-body">
             <div className="ov-hero-name-row">
               <h1 className="ov-hero-name">{viewName}</h1>
@@ -538,9 +553,13 @@ export function AgentOverview({
               <ul className="ov-look">
                 {channels.map((entry, index) => (
                   <li key={"c" + index} className="ov-look-row">
-                    <span className="ov-look-icon" aria-hidden="true">
-                      <Ic name="radio-tower" size={15} />
-                    </span>
+                    {isBrandChannel(entry.channel) ? (
+                      <ChannelLogo channel={entry.channel} size={28} />
+                    ) : (
+                      <span className="ov-look-icon" aria-hidden="true">
+                        <Ic name="radio-tower" size={15} />
+                      </span>
+                    )}
                     <span className="ov-look-body">
                       <span className="ov-look-name">{entry.channel}</span>
                       {entry.match ? (
@@ -612,16 +631,16 @@ function TeamOverview({
       <section className="panel ov-hero">
         <div className="ov-hero-in">
           {names.length > 0 ? (
-            <AvatarStack
+            <AgentAvatarStack
               size="lg"
               max={4}
               items={names.map((member) => ({
-                name: displayLabel(byName[member]) || member,
+                name: member,
                 color: gr8rColor(member),
               }))}
             />
           ) : (
-            <Avatar size="xl" name={data.name} color="var(--violet)" />
+            <AgentAvatar size="xl" name={data.name} color="var(--violet)" />
           )}
           <div className="ov-hero-body">
             <div className="ov-hero-name-row">
@@ -665,9 +684,9 @@ function TeamOverview({
               const isLead = member === lead;
               return (
                 <li key={member} className="ov-member">
-                  <Avatar
+                  <AgentAvatar
                     size="lg"
-                    name={displayLabel(memberRow) || member}
+                    name={member}
                     color={gr8rColor(memberRow ? memberRow.color : undefined)}
                   />
                   <span className="ov-member-body">

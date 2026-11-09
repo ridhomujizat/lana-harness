@@ -168,9 +168,9 @@ func (n *noticeLog) notify(_ context.Context, nt Notice) {
 	n.mu.Unlock()
 }
 
-func (n *noticeLog) sendOwner(_ context.Context, text string) error {
+func (n *noticeLog) sendMessage(_ context.Context, req MessageRequest) error {
 	n.mu.Lock()
-	n.sent = append(n.sent, text)
+	n.sent = append(n.sent, req.Text)
 	n.mu.Unlock()
 	return nil
 }
@@ -325,6 +325,38 @@ func hasLog(logs []string, line string) bool {
 		}
 	}
 	return false
+}
+
+// ---- paramString ----------------------------------------------------------
+
+// TestParamString covers a string, a node output map, a map without a primary
+// text key, a list and nil.
+func TestParamString(t *testing.T) {
+	params := map[string]any{
+		"s":     "hi",
+		"agent": map[string]any{"text": "the answer"},
+		"fetch": map[string]any{"url": "u", "markdown": "md"},
+		"trap":  map[string]any{"count": 1.0},
+		"list":  []any{"a", "b"},
+		"nil":   nil,
+	}
+	cases := []struct {
+		key  string
+		want string
+	}{
+		{"s", "hi"},
+		{"agent", "the answer"},
+		{"fetch", "md"},
+		{"trap", `{"count":1}`},
+		{"list", `["a","b"]`},
+		{"nil", ""},
+		{"missing", ""},
+	}
+	for _, tc := range cases {
+		if got := paramString(params, tc.key); got != tc.want {
+			t.Fatalf("paramString(%q) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
 }
 
 // ---- AC-WF-006 ------------------------------------------------------------
@@ -760,7 +792,7 @@ func TestEngineResumeSkipsFinishedNodes(t *testing.T) {
 	}
 
 	notices := &noticeLog{}
-	eng := testEngine(st, deps, EngineOptions{SendOwner: notices.sendOwner, Notify: notices.notify})
+	eng := testEngine(st, deps, EngineOptions{SendMessage: notices.sendMessage, Notify: notices.notify})
 	eng.Launch(ctx, run.ID)
 	eng.Wait()
 
@@ -854,6 +886,14 @@ func TestEngineGuardianSkip(t *testing.T) {
 	d := decs[0]
 	if d.Kind != "guardian" || d.Action != "skip" || d.Tokens != 42 || d.Status != "applied" {
 		t.Fatalf("decision=%+v", d)
+	}
+	// Spec 39 revision 5: the failure decision is a structured call on the
+	// guardian's background chain.
+	deps.mu.Lock()
+	calls := append([]AgentRequest(nil), deps.agentCalls...)
+	deps.mu.Unlock()
+	if len(calls) != 1 || calls[0].Agent != "g" || !calls[0].Background {
+		t.Fatalf("guardian calls=%+v want one background call", calls)
 	}
 }
 
@@ -1436,5 +1476,48 @@ func TestEngineGuardianParseFailure(t *testing.T) {
 	}
 	if !alerted {
 		t.Fatal("no plain alert was sent")
+	}
+}
+
+// ---- script_parse template handling ---------------------------------------
+
+// TestEngineScriptParseKeepsScriptLiteral checks that processNode renders the
+// other params of a script_parse node but never the JavaScript: the raw script
+// reaches the handler with its "{{ }}" untouched (REQ-SP-001). The workflow
+// failure mode is "continue" so the node, which has no handler in this slice,
+// fails without a guardian call.
+func TestEngineScriptParseKeepsScriptLiteral(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	const script = `function parse(input, ctx) { var s = "{{ input.url }}"; return {url: input.url}; }`
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true}),
+			wfNode("parse", "script_parse", "Parse", map[string]any{
+				"input":         "{{ input.url }}",
+				"goal":          "extract the url",
+				"output_schema": map[string]any{"url": "string"},
+				"script":        script,
+			}),
+		},
+		Edges: []Edge{wfEdge("start", "out", "parse")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "wf-sp", Name: "SP", Guardian: "g", FailureDefault: FailurePolicy{Mode: "continue"}}, g)
+	run := seedRun(t, st, wf, "manual", map[string]any{"url": "https://example.com"})
+	eng := testEngine(st, deps, EngineOptions{})
+
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	row := mustNode(t, st, run.ID, "parse", -1)
+	var params map[string]any
+	if err := json.Unmarshal(row.Input, &params); err != nil {
+		t.Fatalf("decode node input: %v", err)
+	}
+	if params["input"] != "https://example.com" {
+		t.Fatalf("input param=%v, want the rendered url", params["input"])
+	}
+	if got, _ := params["script"].(string); got != script {
+		t.Fatalf("script param=%q, want the raw source %q", got, script)
 	}
 }

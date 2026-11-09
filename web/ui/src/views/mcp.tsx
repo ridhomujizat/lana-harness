@@ -5,7 +5,6 @@ import type { ChangeEvent, FormEvent, MouseEvent, ReactNode } from "react";
 import { errorMessage, ApiError } from "../api/client";
 import { detailText } from "../ui/ui";
 import { Ic } from "../ui/icons";
-import { avatarFor } from "../lib/avatar";
 import { splitModel } from "./agent-common";
 import { displayLabel, useAgentLabel } from "./agent-label";
 import {
@@ -23,8 +22,6 @@ import type {
 } from "../api/mcp";
 import type { Agent } from "../api/agents";
 import {
-  Avatar,
-  AvatarStack,
   Badge,
   Button,
   EmptyState,
@@ -44,6 +41,7 @@ import {
   Tabs,
   Textarea,
 } from "../ui/gr8r";
+import { AgentAvatar, AgentAvatarStack, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 
 /* T-032: the MCP list (REQ-WEB-050), the MCP detail page, and the add-server
@@ -155,18 +153,8 @@ function effectiveStatus(
   return "idle";
 }
 
-/* The server colors (lib/avatar.ts) map onto the Gr8r status tokens so one
-   agent keeps one color in the list, the detail, and the agents pages. */
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 function statusTone(status: McpStatus): BadgeTone {
@@ -946,11 +934,11 @@ function ServerRow({ server, restarting, onRestart, onOpen }: ServerRowProps) {
           <span className="mcp-muted">No agents</span>
         ) : (
           <>
-            <AvatarStack
+            <AgentAvatarStack
               size="sm"
               max={4}
               items={shown.map((agentName) => ({
-                name: label(agentName),
+                name: agentName,
                 color: agentColor(agentName),
               }))}
             />
@@ -2103,8 +2091,8 @@ export function McpDetailPage({ name }: McpDetailPageProps) {
               ) : (
                 agentRows.map((agent) => (
                   <div className="mcp-agent-row" key={agent.name}>
-                    <Avatar
-                      name={displayLabel(agent)}
+                    <AgentAvatar
+                      name={agent.name}
                       color={agentColor(agent.name)}
                       size="md"
                     />

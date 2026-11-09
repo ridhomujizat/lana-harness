@@ -45,7 +45,9 @@ func (s *Server) registerLocalRoutes() {
 
 // handleLocalSignInLink answers POST /v1/local/sign-in-link (API-WLG-008). A
 // request must carry the daemon secret in X-Lana-Local-Secret and come from a
-// loopback address; the answer is the one-time sign-in link.
+// loopback address; the answer is the one-time sign-in link. The optional
+// query parameter next (spec #41) names the dashboard hash, such as
+// "#/calendar", the link opens after the claim; an unsafe next is ignored.
 func (s *Server) handleLocalSignInLink(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -62,7 +64,7 @@ func (s *Server) handleLocalSignInLink(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusForbidden, "forbidden_remote", "local control is loopback only")
 		return
 	}
-	link, err := s.SignInLink()
+	link, err := s.SignInLinkTo(r.URL.Query().Get("next"))
 	if err != nil {
 		s.logger.Error("web: local sign-in link", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")

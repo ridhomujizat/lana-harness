@@ -1,6 +1,14 @@
 import { mockToolbox } from "./toolbox-fixtures";
 import { mockWorkflows } from "./workflow-fixtures";
+import { mockUpdate } from "./update-fixtures";
 import { mockCalendar } from "./calendar-fixtures";
+import {
+  AVATAR_CLOUD,
+  AVATAR_ELLIPSE,
+  AVATAR_SQUIRCLE,
+  AVATAR_TRIANGLE,
+  mockAvatar,
+} from "./avatar-fixtures";
 import type {
   Agent,
   AgentCreatedResponse,
@@ -203,6 +211,31 @@ const setupTestFixture: ProviderTestResponse = {
 
 const setupSaveFixture: SetupSaveResponse = { restart: "draining", pid: 9182 };
 
+const claudeAgentFixture = {
+  configured_agents: [],
+  binary: "/usr/local/bin/claude",
+  version: "2.1.319",
+  version_ok: true,
+  logged_in: true,
+  auth_method: "oauth",
+  error: "",
+  running: 0,
+  queued: 0,
+  max_concurrent: 2,
+  accounts: [
+    {
+      name: "claude-code",
+      builtin: true,
+      binary: "/usr/local/bin/claude",
+      version: "2.1.319",
+      logged_in: true,
+      email: "owner@example.com",
+      plan: "max",
+      login_command: "claude",
+    },
+  ],
+};
+
 /* ------------------------------------------------------------------- agents */
 
 const agentLana: Agent = {
@@ -210,6 +243,8 @@ const agentLana: Agent = {
   kind: "agent",
   title: "Chief of staff",
   color: "brand",
+  avatar_svg: AVATAR_SQUIRCLE,
+  avatar_source: "saved",
   model: "gpt-5",
   policy: "ask",
   skills: ["release-notes", "sql-style"],
@@ -233,6 +268,8 @@ const agentDefault: Agent = {
   kind: "agent",
   title: "General assistant",
   color: "gray",
+  avatar_svg: AVATAR_ELLIPSE,
+  avatar_source: "default",
   model: "gpt-5-mini",
   policy: "ask",
   skills: [],
@@ -254,7 +291,9 @@ const agentResearcher: Agent = {
   name: "researcher",
   kind: "agent",
   title: "Research analyst",
-  color: "warning",
+  color: "#ff6a00",
+  avatar_svg: AVATAR_CLOUD,
+  avatar_source: "saved",
   model: "claude-sonnet-4-5",
   policy: "trust",
   skills: [],
@@ -278,6 +317,8 @@ const agentTeam: Agent = {
   kind: "team",
   title: "Nightly triage",
   color: "success",
+  avatar_svg: AVATAR_TRIANGLE,
+  avatar_source: "default",
   model: null,
   policy: "ask",
   lead: "lana",
@@ -1011,6 +1052,8 @@ export const roomsFixture: RoomRow[] = [
     kind: "agent",
     title: "Chief of staff",
     color: "brand",
+    avatar_svg: AVATAR_SQUIRCLE,
+    avatar_source: "saved",
     members: [],
     lead: "",
     presence: presence("working", "Working", world - 40 * MIN, S_TOOLS),
@@ -1031,6 +1074,8 @@ export const roomsFixture: RoomRow[] = [
     kind: "agent",
     title: "General assistant",
     color: "gray",
+    avatar_svg: AVATAR_ELLIPSE,
+    avatar_source: "default",
     members: [],
     lead: "",
     presence: presence("online", "Online", world - 4 * HOUR, S_DEFAULT),
@@ -1050,7 +1095,9 @@ export const roomsFixture: RoomRow[] = [
     name: "researcher",
     kind: "agent",
     title: "Research analyst",
-    color: "warning",
+    color: "#ff6a00",
+    avatar_svg: AVATAR_CLOUD,
+    avatar_source: "saved",
     members: [],
     lead: "",
     presence: presence("waiting", "Needs you", world - 2 * HOUR, S_DBS),
@@ -1071,6 +1118,8 @@ export const roomsFixture: RoomRow[] = [
     kind: "team",
     title: "Nightly triage",
     color: "success",
+    avatar_svg: AVATAR_TRIANGLE,
+    avatar_source: "default",
     members: ["researcher", "default"],
     lead: "lana",
     presence: presence("working", "Working", world - 20 * MIN, S_TEAM),
@@ -1130,6 +1179,8 @@ export const agentOverviewFixture: AgentOverview = {
   kind: "agent",
   title: "Chief of staff",
   color: "brand",
+  avatar_svg: AVATAR_SQUIRCLE,
+  avatar_source: "saved",
   persona_line: "Keep the workspace moving and the vault honest.",
   created_at: world - 41 * DAY,
   presence: presence("working", "Working", world - 40 * MIN, S_TOOLS),
@@ -1672,7 +1723,7 @@ export const configFixture: GetConfigResponse = {
         provider: "anthropic",
         model: "claude-sonnet-4-5",
         title: "Research analyst",
-        color: "warning",
+        color: "#ff6a00",
         workspace: "/Users/ridho/lana/research",
         tools: ["read_file", "web_search", "web_fetch"],
         skills: [],
@@ -1860,12 +1911,21 @@ export function mockApi(method: string, url: URL, body?: unknown): MockResult {
   }
 
   switch (at(1)) {
+    case "router":
+      /* The Claude Code card of the setup wizard: the built-in account,
+         signed in. */
+      if (at(2) === "claude-agent") {
+        return { status: 200, body: claudeAgentFixture };
+      }
+      break;
     case "workflows":
       return mockWorkflows(m, parts);
     case "calendar":
       return mockCalendar(m, parts, url, body);
     case "toolbox":
       return mockToolbox(m, parts);
+    case "update":
+      return mockUpdate(m, parts);
     case "auth": {
       if (at(2) === "state" && isGet) return { status: 200, body: authStateFixture };
       if (at(2) === "session" && isGet) {
@@ -1983,6 +2043,7 @@ export function mockApi(method: string, url: URL, body?: unknown): MockResult {
       }
       if (at(3) === "overview" && isGet)
         return { status: 200, body: agentOverviewFixture };
+      if (at(3) === "avatar") return mockAvatar(m, name, at(4), body);
       if (at(3) === "files" && isGet)
         return { status: 200, body: agentFileFixture };
       if (at(3) === "files")

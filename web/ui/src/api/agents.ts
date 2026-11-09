@@ -1,4 +1,5 @@
 import { request } from "./client";
+import { rememberAvatars } from "../lib/avatar-store";
 import type { ConfigAgent, GetConfigResponse } from "./settings";
 
 /* Agent calls of API-WEB-012, API-WEB-016, API-WEB-025, and the tab loader of
@@ -18,7 +19,13 @@ export interface Agent {
   display_name?: string;
   kind: string;
   title: string;
+  /* A color token (brand, success, warning, error, blue, gray) or, since
+     spec 43, a "#rrggbb" hex. */
   color: string;
+  /* Spec 43: the sanitized avatar of every agent and team: a saved one or
+     the default seeded from the name. Missing on an older server. */
+  avatar_svg?: string;
+  avatar_source?: AvatarSource;
   model: string | null;
   policy: string;
   lead?: string;
@@ -33,6 +40,12 @@ export interface Agent {
   workspace: string;
   disabled_tools: string[];
   reasoning_effort?: string;
+  /* Spec 39 (API-CCT-006): runtime is "claude-code" only for a legacy file
+     (model then holds the mapped claude-code address); the UI never shows an
+     engine. claude_code is true when the agent's first target runs in
+     Claude Code. */
+  runtime?: string;
+  claude_code?: boolean;
   tools_count: number;
   sessions_count: number;
   last_active_at: number | null;
@@ -45,6 +58,9 @@ export interface ListAgentsResponse {
 /* AgentWriteFields is the editable part of [agents.<name>]. Every key is
    optional because PUT accepts a subset (API-WEB-025). */
 export interface AgentWriteFields {
+  /* Spec 39 (API-CCT-002): the dashboard never writes runtime; a Claude Code
+     agent is model = "<account>/<model>". provider is only written as "" to
+     clear a legacy provider/model pair. */
   provider?: string;
   model?: string;
   display_name?: string;
@@ -74,10 +90,13 @@ export interface AgentWriteFields {
 export interface CreateAgentRequest {
   name: string;
   display_name?: string;
+  /* Every agent is a lana agent and starts from a template (spec 39). */
   template: string;
   workspace?: string;
-  permission?: string;
-  description?: string;
+  /* A router address, combo, or "<account>/<model>" of Claude Code; empty
+     starts on the default agent's model. Never a provider or runtime. */
+  model?: string;
+  reasoning_effort?: string;
 }
 
 export interface AgentCreatedResponse {
@@ -110,7 +129,10 @@ export interface AgentTabData {
 }
 
 export function listAgents(): Promise<ListAgentsResponse> {
-  return request<ListAgentsResponse>("GET", "/v1/agents");
+  return request<ListAgentsResponse>("GET", "/v1/agents").then((page) => {
+    rememberAvatars(page && Array.isArray(page.agents) ? page.agents : []);
+    return page;
+  });
 }
 
 export function createAgent(
@@ -192,4 +214,70 @@ export async function loadAgentTab(name: string): Promise<AgentTabData> {
     agent: agents[name] || {},
     row: rows.find((item) => item && item.name === name) || {},
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Generated avatars (spec 43)                                        */
+/* ------------------------------------------------------------------ */
+
+export interface GenerateAvatarRequest {
+  /* A router combo or "provider/model" address; omitted uses the agent's
+     background model. Never a Claude Code model. */
+  model?: string;
+  seed?: number;
+}
+
+export interface GenerateAvatarResponse {
+  svg: string;
+  /* "" when the built-in generator ran. */
+  model: string;
+  seed: number;
+  /* "local" when no model was available or its output was invalid. */
+  source: "model" | "local";
+}
+
+/* "saved" for a chosen avatar, "default" for the one seeded from the name. */
+export type AvatarSource = "saved" | "default";
+
+export interface PutAvatarResponse {
+  name: string;
+  avatar_svg: string;
+  avatar_source?: AvatarSource;
+  color: string;
+  restart_required: boolean;
+}
+
+/* DELETE puts the agent back on its default avatar and returns it. */
+export interface DeleteAvatarResponse {
+  name: string;
+  avatar_svg: string;
+  avatar_source?: AvatarSource;
+  color: string;
+}
+
+/* The server-rendered avatar for an <img>, colors baked in for the theme. */
+export function agentAvatarSvgUrl(name: string, theme: "light" | "dark"): string {
+  return avatarPath(name) + ".svg?theme=" + theme;
+}
+
+function avatarPath(name: string): string {
+  return "/v1/agents/" + encodeURIComponent(name) + "/avatar";
+}
+
+export function generateAgentAvatar(
+  name: string,
+  body: GenerateAvatarRequest = {}
+): Promise<GenerateAvatarResponse> {
+  return request<GenerateAvatarResponse>("POST", avatarPath(name) + "/generate", body);
+}
+
+export function putAgentAvatar(
+  name: string,
+  body: { svg: string; color?: string }
+): Promise<PutAvatarResponse> {
+  return request<PutAvatarResponse>("PUT", avatarPath(name), body);
+}
+
+export function deleteAgentAvatar(name: string): Promise<DeleteAvatarResponse> {
+  return request<DeleteAvatarResponse>("DELETE", avatarPath(name));
 }

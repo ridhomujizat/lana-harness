@@ -42,7 +42,16 @@ type ContentBlock struct {
 	Data      []byte          `json:"data,omitempty"`
 	Path      string          `json:"path,omitempty"`   // workspace-relative path of an image block
 	Images    []ContentBlock  `json:"images,omitempty"` // image blocks of a tool_result block
+	// Signature is the provider signature of a thinking block, sent back
+	// unchanged with the block (Anthropic). A redacted thinking block stores
+	// its encrypted data here behind RedactedThinkingPrefix. Adapters that do
+	// not sign thinking ignore it.
+	Signature string `json:"signature,omitempty"`
 }
+
+// RedactedThinkingPrefix marks a Signature that holds the data of a redacted
+// thinking block instead of a signature. Such a block has no text.
+const RedactedThinkingPrefix = "redacted_thinking:"
 
 // Usage is the token count. InputTokens counts all prompt tokens
 // (cache hit + miss); CachedInputTokens is the part served from the

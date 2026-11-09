@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TABS,
   LEGACY_SETTINGS_TABS,
+  ROUTER_TABS,
+  ROUTE_REDIRECTS,
   ROUTE_TABLE,
   SETTINGS_TABS,
   SETUP_STEPS,
   parseRoute,
+  safeNextHash,
 } from "./router";
 
 const ROUTES = [
@@ -16,6 +19,9 @@ const ROUTES = [
   "#/sessions",
   "#/sessions/new",
   "#/sessions/{id}",
+  "#/router",
+  "#/router/{tab}",
+  "#/router/providers/{provider}",
   "#/agents",
   "#/agents/{name}/{tab}",
   "#/skills",
@@ -137,5 +143,74 @@ describe("route table", () => {
     const history = parseRoute("#/history");
     expect(history.view).toBe("sessions");
     expect(history.section).toBe("sessions");
+  });
+
+  /* API-RTR-017 revision 2: the Router pages, Providers by default, and one
+     provider's page. */
+  it("resolves the router pages and a provider page", () => {
+    const home = parseRoute("#/router");
+    expect(home.view).toBe("router");
+    expect(home.section).toBe("router");
+    expect(home.params).toEqual({ tab: "providers" });
+
+    for (const tab of ["providers", "combos", "usage", "quota", "logs", "endpoint"]) {
+      const route = parseRoute("#/router/" + tab);
+      expect(route.view).toBe("router");
+      expect(route.params.tab).toBe(tab);
+    }
+    expect(ROUTER_TABS).toEqual(["providers", "combos", "usage", "quota", "logs", "endpoint"]);
+    expect(parseRoute("#/router/bogus").view).toBe("not-found");
+
+    const detail = parseRoute("#/router/providers/gemini");
+    expect(detail.view).toBe("router");
+    expect(detail.params).toEqual({ tab: "providers", provider: "gemini" });
+  });
+
+  it("redirects the old router tabs", () => {
+    expect(ROUTE_REDIRECTS["#/router/overview"]).toBe("#/router/usage");
+    expect(ROUTE_REDIRECTS["#/router/proxy"]).toBe("#/router/endpoint");
+    expect(ROUTE_REDIRECTS["#/router/models"]).toBe("#/router/providers");
+    const overview = parseRoute("#/router/overview");
+    expect(overview.params.tab).toBe("usage");
+    expect(overview.path).toBe("#/router/usage");
+    expect(parseRoute("#/router/proxy").params.tab).toBe("endpoint");
+    expect(parseRoute("#/router/models").params.tab).toBe("providers");
+  });
+
+  it("redirects the old settings providers tab to the router", () => {
+    const route = parseRoute("#/settings/providers");
+    expect(route.view).toBe("router");
+    expect(route.params.tab).toBe("providers");
+    expect(route.path).toBe("#/router/providers");
+    expect(SETTINGS_TABS).not.toContain("providers");
+    expect(parseRoute("#/settings/secrets").view).toBe("settings");
+  });
+
+  it("accepts only safe in-app next hashes", () => {
+    for (const ok of ["#/chats", "#/workflows", "#/calendar", "#/router", "#/home", "#/sessions/abc-1"]) {
+      expect(safeNextHash(ok)).toBe(ok);
+    }
+    for (const bad of [
+      undefined,
+      "",
+      "#/",
+      "chats",
+      "/#/chats",
+      "https://evil.example/#/chats",
+      "javascript:alert(1)",
+      "#//evil.example",
+      "#/welcome?code=x",
+      "#/login",
+      "#/forgot",
+      "#/chats x",
+      "#/a<b",
+      "#/" + "a".repeat(300),
+    ]) {
+      expect(safeNextHash(bad)).toBe("");
+    }
+    const route = parseRoute("#/welcome?code=abc&next=%23%2Fcalendar");
+    expect(route.view).toBe("welcome");
+    expect(route.params.code).toBe("abc");
+    expect(safeNextHash(route.params.next)).toBe("#/calendar");
   });
 });

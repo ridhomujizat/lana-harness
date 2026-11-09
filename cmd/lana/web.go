@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,10 +30,12 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/stats"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
-	"github.com/ridhomujizat/lana-harness/providers/openai"
+	"github.com/ridhomujizat/lana-harness/router"
 	"github.com/ridhomujizat/lana-harness/tools/permission"
 	"github.com/ridhomujizat/lana-harness/web"
 )
@@ -61,6 +64,9 @@ type webBackend struct {
 	restart *restartController
 	// drain waits for running turns before a restart (REQ-TFB-002).
 	drain *drainController
+	// update is the self-update service; a config save applies its [update]
+	// table live (spec 36). Nil outside the daemon.
+	update *updateService
 	// logs holds the daemon's recent WARN+ records for the dashboard; nil means
 	// the daemon log section is empty (REQ-DSH-008, REQ-DSH-009).
 	logs *logring.Buffer
@@ -71,6 +77,10 @@ type webBackend struct {
 	root context.Context
 	// active holds the sessions whose turn this process started.
 	active map[string]struct{}
+
+	// proxy is the router proxy handler and its key last-use throttle
+	// (spec 37, REQ-RTR-015).
+	proxy routerProxyState
 }
 
 var _ web.Backend = (*webBackend)(nil)
@@ -94,10 +104,12 @@ const (
 	providerTestKeyEnv = "LANA_PROVIDER_TEST_KEY"
 	// providerTestPrompt is the smallest possible chat message.
 	providerTestPrompt = "ping"
+	// providerTestName is the provider name of the throwaway test router.
+	providerTestName = "provider-test"
 )
 
 // TestProvider implements web.ProviderTester with the same adapter the runtime
-// uses (providers/openai). It sends exactly one chat request with one output
+// uses for the kind, built through the router's kind registry. It sends exactly one chat request with one output
 // token and a 15-second timeout. The key of the request is only passed to the
 // adapter; it is never written, logged, or returned.
 func (b *webBackend) TestProvider(ctx context.Context, test web.ProviderTest) (web.TestResult, error) {
@@ -120,13 +132,28 @@ func (b *webBackend) TestProvider(ctx context.Context, test web.ProviderTest) (w
 			}, nil
 		}
 	}
-	adapter, err := openai.NewAdapter("provider-test", openai.Config{
-		BaseURL:   test.BaseURL,
-		APIKeyEnv: envName,
-		Timeout:   providerTestTimeout.String(),
-	}, secrets)
+	// The adapter comes from the router's kind registry, so every kind is
+	// tested with the adapter the runtime uses for it (anthropic with the
+	// Messages adapter, the OpenAI-wire kinds with providers/openai).
+	baseURL := test.BaseURL
+	if baseURL == "" {
+		baseURL = models.DefaultBaseURL(test.Kind)
+	}
+	tester, err := router.New(router.Config{Providers: map[string]core.ProviderConfig{
+		providerTestName: {
+			Kind:      test.Kind,
+			BaseURL:   test.BaseURL,
+			APIKeyEnv: envName,
+			Timeout:   providerTestTimeout.String(),
+		},
+	}}, router.WithSecrets(secrets))
 	if err != nil {
-		return web.TestResult{OK: false, Message: err.Error()}, nil
+		return web.TestResult{OK: false, Message: redactProviderTestKey(err.Error(), key)}, nil
+	}
+	defer func() { _ = tester.Close() }()
+	adapter, ok := tester.Provider(providerTestName)
+	if !ok {
+		return web.TestResult{OK: false, Message: "provider kind " + test.Kind + " is not available"}, nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, providerTestTimeout)
@@ -144,11 +171,11 @@ func (b *webBackend) TestProvider(ctx context.Context, test web.ProviderTest) (w
 		MaxTokens: 1,
 	})
 	if err != nil {
-		return providerTestFailure(err, test.BaseURL, key), nil
+		return providerTestFailure(err, baseURL, key), nil
 	}
 	for _, streamErr := range stream {
 		if streamErr != nil {
-			return providerTestFailure(streamErr, test.BaseURL, key), nil
+			return providerTestFailure(streamErr, baseURL, key), nil
 		}
 	}
 	return web.TestResult{OK: true, LatencyMS: time.Since(start).Milliseconds()}, nil
@@ -259,12 +286,91 @@ func startupNonLiveConfig(home string, rt *lana.Runtime) core.Config {
 	return core.Config{}
 }
 
-// nonLiveConfig clears the sections a live apply replaces.
+// nonLiveConfig clears the sections a live apply replaces. [update] always
+// applies live (API-UPD-008); providers, combos, and [router] apply live
+// through the router (REQ-RTR-008).
 func nonLiveConfig(cfg core.Config) core.Config {
 	cfg.Agents = nil
 	cfg.Teams = nil
 	cfg.MCP = nil
+	cfg.Update = core.UpdateConfig{}
+	cfg.Providers = nil
+	cfg.Combos = nil
+	cfg.Router = core.RouterConfig{}
 	return cfg
+}
+
+// SetUpdateService installs the self-update service (spec 36).
+func (b *webBackend) SetUpdateService(service *updateService) {
+	b.update = service
+}
+
+// writeUpdateConfig writes channel and check into [update] of config.toml
+// through the shared config writer, appending the table when it is missing
+// (API-UPD-008). Every other byte stays the same. When the runtime had loaded
+// the file before this write, the loaded version moves with it, because
+// [update] applies live and must not raise the restart banner.
+func (b *webBackend) writeUpdateConfig(ctx context.Context, channel *string, check *bool) error {
+	webfiles.ConfigWriteMu.Lock()
+	defer webfiles.ConfigWriteMu.Unlock()
+	path := filepath.Join(b.home, "config.toml")
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	type entry struct{ key, value string }
+	var entries []entry
+	if channel != nil {
+		entries = append(entries, entry{"channel", strconv.Quote(*channel)})
+	}
+	if check != nil {
+		entries = append(entries, entry{"check", strconv.FormatBool(*check)})
+	}
+	candidate := data
+	for i, item := range entries {
+		next, err := webfiles.SetTableKey(candidate, "[update]", item.key, item.value)
+		if errors.Is(err, webfiles.ErrTableNotFound) {
+			table := "[update]\n"
+			for _, rest := range entries[i:] {
+				table += rest.key + " = " + rest.value + "\n"
+			}
+			next, _, err = webfiles.RewriteTable(ctx, func(context.Context, []byte) error { return nil }, candidate, "[update]", table)
+			if err != nil {
+				return err
+			}
+			candidate = next
+			break
+		}
+		if err != nil {
+			return err
+		}
+		candidate = next
+	}
+	if _, err := config.Check(ctx, b.home, candidate); err != nil {
+		return err
+	}
+	if err := webfiles.AtomicWrite(path, candidate); err != nil {
+		return err
+	}
+	b.versionMu.Lock()
+	if b.loadedSHA256 == webfiles.ConfigVersion(data) {
+		b.loadedSHA256 = webfiles.ConfigVersion(candidate)
+	}
+	b.versionMu.Unlock()
+	return nil
+}
+
+// applyUpdateSection hands the [update] table of a written config.toml to the
+// update service, so a raw config save changes the channel live.
+func (b *webBackend) applyUpdateSection(ctx context.Context, data []byte) {
+	if b.update == nil {
+		return
+	}
+	result, err := config.Check(ctx, b.home, data)
+	if err != nil {
+		return
+	}
+	b.update.applyConfigAsync(result.Config.Update)
 }
 
 // SetRestartController installs the in-place restart scheduler (API-WEB-023).
@@ -838,7 +944,11 @@ func (b *webBackend) ConfigWrite(ctx context.Context, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return webfiles.AtomicWrite(filepath.Join(b.home, "config.toml"), data)
+	if err := webfiles.AtomicWrite(filepath.Join(b.home, "config.toml"), data); err != nil {
+		return err
+	}
+	b.applyUpdateSection(ctx, data)
+	return nil
 }
 
 // ConfigLoadedVersion implements web.ConfigStore. It is the version the runtime
@@ -862,7 +972,9 @@ func (b *webBackend) ApplyLive(ctx context.Context, candidate []byte) error {
 		return err
 	}
 	if b.rt != nil {
-		b.rt.ApplyConfig(result.Config)
+		if err := b.rt.ApplyConfig(result.Config); err != nil {
+			return err
+		}
 	}
 	if reflect.DeepEqual(nonLiveConfig(result.Config), b.nonLive) {
 		b.versionMu.Lock()
@@ -1026,6 +1138,12 @@ func settingsFromConfig(cfg core.Config) web.ConfigSettings {
 				Allow: append([]string(nil), agent.Rules.Allow...),
 				Deny:  append([]string(nil), agent.Rules.Deny...),
 			},
+			ReasoningEffort: agent.ReasoningEffort,
+			Runtime:         agent.Runtime,
+			Auth:            agent.Auth,
+			APIKeyEnv:       agent.APIKeyEnv,
+			Binary:          agent.Binary,
+			AllowScheduled:  agent.AllowScheduled,
 		}
 	}
 	for _, route := range cfg.Routes {
@@ -1111,8 +1229,9 @@ func channelSettings(raw map[string]any) map[string]any {
 
 // Send starts a turn on the daemon root context, or queues the text in the
 // session inbox when a turn is already running. Attachments are
-// workspace-relative paths (API-ATT-002).
-func (b *webBackend) Send(ctx context.Context, id, text string, attachments []string) (web.SendResult, error) {
+// workspace-relative paths (API-ATT-002). replyTo names the automation message
+// the message replies to, or 0 (API-WEB-007).
+func (b *webBackend) Send(ctx context.Context, id, text string, attachments []string, replyTo int64) (web.SendResult, error) {
 	// API-TFB-008: refuse before starting or queueing a turn.
 	if b.rt.Draining() {
 		return web.SendResult{}, web.ErrDraining
@@ -1125,9 +1244,16 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 	if err := b.ensureLease(ctx, id); err != nil {
 		return web.SendResult{}, err
 	}
+	// A reply_to is validated here, before the asynchronous turn starts, so the
+	// owner gets the error (the turn goroutine only logs its failures).
+	if replyTo > 0 {
+		if _, err := b.rt.ResolveReply(ctx, id, replyTo); err != nil {
+			return web.SendResult{}, turnError(err)
+		}
+	}
 	if b.TurnActive(id) {
 		b.waitRunning(id, 2*time.Second)
-		if err := b.rt.Send(ctx, id, text, attachments...); err != nil {
+		if err := b.rt.SendReply(ctx, id, text, replyTo, attachments...); err != nil {
 			return web.SendResult{}, turnError(err)
 		}
 		return web.SendResult{Turn: "queued"}, nil
@@ -1144,7 +1270,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 		// Wait for the first turn to reach turn/start so Send lands in its
 		// inbox instead of starting a second turn.
 		b.waitRunning(id, 2*time.Second)
-		if err := b.rt.Send(ctx, id, text, attachments...); err != nil {
+		if err := b.rt.SendReply(ctx, id, text, replyTo, attachments...); err != nil {
 			return web.SendResult{}, turnError(err)
 		}
 		return web.SendResult{Turn: "queued"}, nil
@@ -1161,7 +1287,7 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 	go func() {
 		defer close(done)
 		defer b.finishTurn(id)
-		if _, err := b.rt.Run(root, lana.Request{Prompt: text, SessionID: id, Attachments: attachments}); err != nil {
+		if _, err := b.rt.Run(root, lana.Request{Prompt: text, SessionID: id, Attachments: attachments, ReplyTo: replyTo}); err != nil {
 			slog.Error("web: turn failed", "session", id, "error", err)
 		}
 	}()
@@ -1174,7 +1300,14 @@ func (b *webBackend) Send(ctx context.Context, id, text string, attachments []st
 // SendNote implements the optional web.noteSender extension: it writes a hidden
 // runtime note to the session log and then starts the turn, so the agent reads
 // the note before the owner message (API-ROOM-003, REQ-ROOM-008).
-func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments []string, note string) (web.SendResult, error) {
+func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments []string, replyTo int64, note string) (web.SendResult, error) {
+	// Validate the reply before writing the note, so a rejected reply leaves no
+	// orphaned note behind.
+	if replyTo > 0 {
+		if _, err := b.rt.ResolveReply(ctx, id, replyTo); err != nil {
+			return web.SendResult{}, turnError(err)
+		}
+	}
 	if strings.TrimSpace(note) != "" {
 		info, err := b.resolveSession(ctx, id)
 		if err != nil {
@@ -1184,7 +1317,7 @@ func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments 
 			return web.SendResult{}, turnError(err)
 		}
 	}
-	return b.Send(ctx, id, text, attachments)
+	return b.Send(ctx, id, text, attachments, replyTo)
 }
 
 // SaveAttachment stores one uploaded file in the session workspace
@@ -1669,6 +1802,8 @@ func turnError(err error) error {
 		return web.ErrInvalidState
 	case errors.Is(err, lana.ErrDraining):
 		return web.ErrDraining
+	case errors.Is(err, lana.ErrInvalidReplyTo):
+		return web.ErrInvalidReplyTo
 	default:
 		return err
 	}
@@ -1770,7 +1905,10 @@ func (b *webBackend) sessionModel(ctx context.Context, info core.SessionInfo) (s
 			return "", err
 		}
 		switch {
-		case selection.Provider != "" || selection.Model != "":
+		case selection.Model != "":
+			// A combo or address selection has no provider (API-RTR-003).
+			model = llmcall.Display(selection.Provider, selection.Model)
+		case selection.Provider != "":
 			model = selection.Provider + ":" + selection.Model
 		case selection.Agent != "":
 			// SetAgent records only the agent; the model stays the agent's

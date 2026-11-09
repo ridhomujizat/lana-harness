@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // testProviderTesterBackend adds the provider port to the in-memory backend.
@@ -185,8 +187,9 @@ model = "gpt-5-mini"
 	if body.RestartRequired != (body.Version != store.ConfigLoadedVersion()) {
 		t.Fatalf("restart_required = %v", body.RestartRequired)
 	}
-	if len(body.Providers) != 2 {
-		t.Fatalf("providers = %d, want 2", len(body.Providers))
+	// The two tables, then the built-in Claude Code account (API-CCT-010).
+	if len(body.Providers) != 3 || body.Providers[2].Name != "claude-code" || !body.Providers[2].Builtin {
+		t.Fatalf("providers = %+v, want 2 tables and claude-code", body.Providers)
 	}
 	byName := map[string]providerJSON{}
 	for _, row := range body.Providers {
@@ -371,7 +374,7 @@ func TestProvidersPutConnectionFailed(t *testing.T) {
 	}
 	var listed listProvidersResponse
 	list.json(t, &listed)
-	if len(listed.Providers) != 1 || listed.Providers[0].KeyState != "set" {
+	if len(listed.Providers) != 2 || listed.Providers[0].KeyState != "set" {
 		t.Fatalf("listed providers = %+v", listed.Providers)
 	}
 }
@@ -396,11 +399,11 @@ model = "gpt-5-mini"
 
 	usedBody := `{"expected_version":"` + shaHex([]byte(raw)) + `"}`
 	used := serveProvider(t, s, http.MethodDelete, "/v1/providers/openai", usedBody, cookie, csrf)
-	if used.code != http.StatusUnprocessableEntity {
+	if used.code != http.StatusConflict {
 		t.Fatalf("used delete status = %d, body = %q", used.code, used.body)
 	}
-	if !strings.Contains(string(used.body), "agents.coder.provider") {
-		t.Fatalf("used delete does not list the agent: %q", used.body)
+	if envelope := decodeError(t, used); envelope.Error.Code != "in_use" || envelope.Error.Message != "used by agents: coder" {
+		t.Fatalf("used delete error = %+v", envelope.Error)
 	}
 	unchanged, err := os.ReadFile(store.path)
 	if err != nil {
@@ -476,5 +479,150 @@ model = "gpt-5-mini"
 	}
 	if !strings.Contains(string(missingResponse.body), "X-New") {
 		t.Fatalf("missing mask does not name the header: %q", missingResponse.body)
+	}
+}
+
+// API-RTR-006: a connection test without a model uses the model an agent or
+// combo already uses with the named provider, else the kind's test model
+// (internal/models.TestModel), else the base URL's catalog; a typed model is
+// kept, and a custom provider with no known model must name one.
+func TestProviderTestDefaultModel(t *testing.T) {
+	raw := `[providers.claude]
+kind = "anthropic"
+
+[agents.coder]
+model = "claude/claude-sonnet-5-5"
+`
+	store := newTestConfigStore(t, raw, 0o600, ConfigSettings{})
+	var seen []string
+	s, cookie, csrf, _ := newProviderTestServer(t, store, func(_ context.Context, test ProviderTest) (TestResult, error) {
+		seen = append(seen, test.Model)
+		return TestResult{OK: true}, nil
+	})
+	cases := []struct {
+		body string
+		want string
+	}{
+		{`{"kind":"anthropic","api_key":"sk-x"}`, models.TestModel("anthropic")},
+		{`{"kind":"deepseek","api_key":"sk-x","model":""}`, models.TestModel("deepseek")},
+		{`{"kind":"openai","api_key":"sk-x"}`, models.TestModel("openai")},
+		{`{"kind":"openrouter","api_key":"sk-x"}`, models.TestModel("openrouter")},
+		{`{"name":"claude","kind":"anthropic","api_key":"sk-x"}`, "claude-sonnet-5-5"},
+		{`{"name":"other","kind":"anthropic","api_key":"sk-x"}`, models.TestModel("anthropic")},
+		{`{"kind":"anthropic","api_key":"sk-x","model":"  claude-opus-5 "}`, "claude-opus-5"},
+	}
+	for _, tc := range cases {
+		seen = nil
+		response := serveProvider(t, s, http.MethodPost, "/v1/providers/test", tc.body, cookie, csrf)
+		if response.code != http.StatusOK || len(seen) != 1 || seen[0] != tc.want || tc.want == "" {
+			t.Fatalf("%s = %d %s, tested %v, want %q", tc.body, response.code, response.body, seen, tc.want)
+		}
+	}
+	unknown := serveProvider(t, s, http.MethodPost, "/v1/providers/test",
+		`{"kind":"openai_compat","base_url":"https://llm.example.com/v1","api_key":"sk-x"}`, cookie, csrf)
+	if unknown.code != http.StatusBadRequest || !strings.Contains(string(unknown.body), "enter a test model") {
+		t.Fatalf("custom without model = %d %s", unknown.code, unknown.body)
+	}
+}
+
+// API-RTR-006 revision 2: PUT accepts disabled, GET reports it, and a PUT
+// without the key keeps the stored value.
+func TestProvidersPutDisabledRoundTrip(t *testing.T) {
+	store := newTestConfigStore(t, providerTestConfig, 0o600, ConfigSettings{})
+	s, cookie, csrf, _ := newProviderTestServer(t, store, nil)
+	list := func() providerJSON {
+		t.Helper()
+		response := serveProvider(t, s, http.MethodGet, "/v1/providers", "", cookie, csrf)
+		if response.code != http.StatusOK {
+			t.Fatalf("list status = %d, body = %q", response.code, response.body)
+		}
+		var body listProvidersResponse
+		response.json(t, &body)
+		if len(body.Providers) != 2 {
+			t.Fatalf("providers = %+v", body.Providers)
+		}
+		return body.Providers[0]
+	}
+	put := func(body string) {
+		t.Helper()
+		data, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		full := `{"kind":"openai_compat","base_url":"https://api.openai.com/v1"` + body + `,"expected_version":"` + shaHex(data) + `"}`
+		response := serveProvider(t, s, http.MethodPut, "/v1/providers/openai", full, cookie, csrf)
+		if response.code != http.StatusOK {
+			t.Fatalf("put status = %d, body = %q", response.code, response.body)
+		}
+	}
+	if list().Disabled {
+		t.Fatal("a new provider is disabled")
+	}
+	put(`,"disabled":true`)
+	data, _ := os.ReadFile(store.path)
+	if !strings.Contains(string(data), "disabled = true\n") {
+		t.Fatalf("config does not hold disabled = true:\n%s", data)
+	}
+	if !list().Disabled {
+		t.Fatal("GET does not report disabled")
+	}
+	put(``)
+	if !list().Disabled {
+		t.Fatal("a PUT without disabled turned the provider back on")
+	}
+	put(`,"disabled":false`)
+	data, _ = os.ReadFile(store.path)
+	if strings.Contains(string(data), "disabled") || list().Disabled {
+		t.Fatalf("disabled = false was not saved:\n%s", data)
+	}
+
+	data, _ = os.ReadFile(store.path)
+	bad := `{"kind":"openai_compat","base_url":"https://api.openai.com/v1","disabled":"yes","expected_version":"` + shaHex(data) + `"}`
+	if response := serveProvider(t, s, http.MethodPut, "/v1/providers/openai", bad, cookie, csrf); response.code == http.StatusOK {
+		t.Fatalf("a string disabled was accepted: %q", response.body)
+	}
+}
+
+// A save of a compat preset tests the host's known model; a custom server
+// with no known model is tested with a guess, and a 404 for that guess still
+// saves the key (the server took it), while a 401 does not.
+func TestProvidersPutTestModelForCompatHosts(t *testing.T) {
+	raw := "[web]\n"
+	store := newTestConfigStore(t, raw, 0o600, ConfigSettings{})
+	var seen []ProviderTest
+	s, cookie, csrf, _ := newProviderTestServer(t, store, func(_ context.Context, test ProviderTest) (TestResult, error) {
+		seen = append(seen, test)
+		switch test.APIKey.Reveal() {
+		case "sk-unknown-model":
+			return TestResult{OK: false, Status: 404, Message: "model not found"}, nil
+		case "sk-bad":
+			return TestResult{OK: false, Status: 401, Message: "bad key"}, nil
+		}
+		return TestResult{OK: true, LatencyMS: 3}, nil
+	})
+	put := func(name, base, key string) int {
+		t.Helper()
+		data, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := `{"kind":"openai_compat","base_url":"` + base + `","api_key":"` + key + `","expected_version":"` + shaHex(data) + `"}`
+		response := serveProvider(t, s, http.MethodPut, "/v1/providers/"+name, body, cookie, csrf)
+		if response.code != http.StatusOK {
+			t.Logf("%s: %s", name, response.body)
+		}
+		return response.code
+	}
+	if code := put("groq", "https://api.groq.com/openai/v1", "sk-good"); code != http.StatusOK {
+		t.Fatalf("groq save status = %d", code)
+	}
+	if got := seen[len(seen)-1].Model; got != "llama-3.1-8b-instant" {
+		t.Fatalf("groq test model = %q", got)
+	}
+	if code := put("local", "http://127.0.0.1:9/v1", "sk-unknown-model"); code != http.StatusOK {
+		t.Fatalf("a 404 for a guessed model refused the save: %d", code)
+	}
+	if code := put("local-2", "http://127.0.0.1:9/v1", "sk-bad"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("a 401 saved the key: %d", code)
 	}
 }

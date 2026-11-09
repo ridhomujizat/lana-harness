@@ -567,8 +567,8 @@ func TestMigrateV6ToV7Calendar(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 7 {
-		t.Fatalf("version=%d, want 7", version)
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
 	}
 	if n := countRows(t, s, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'calendar_%'"); n != 7 {
 		t.Fatalf("calendar tables=%d, want 7", n)

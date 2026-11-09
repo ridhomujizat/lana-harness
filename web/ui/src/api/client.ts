@@ -1,6 +1,7 @@
 import type { ApprovalEvent } from "./approvals";
 import type { QuestionEvent } from "./questions";
 import type { SessionEvent } from "./sessions";
+import { watchVisibility } from "./visibility";
 
 /* The shared fetch client. Paths, headers, the 401 handler, and the error
    envelope follow /assets/api.js exactly. */
@@ -131,11 +132,17 @@ export async function request<T>(
   }
 
   if (!response.ok) {
+    /* Two error shapes: the envelope {"error":{"code","message","details"}}
+       and the flat router shape {"error":"in_use","message","issues"} of
+       docs/specs/37-llm-router/api-contract.md (API-RTR-006, API-RTR-007). */
+    const flat =
+      isRecord(data) && typeof data.error === "string" ? data : null;
     const envelope =
-      isRecord(data) && isRecord(data.error) ? data.error : null;
+      isRecord(data) && isRecord(data.error) ? data.error : flat;
+    const rawCode = flat ? flat.error : envelope ? envelope.code : undefined;
     const code =
-      envelope && typeof envelope.code === "string"
-        ? envelope.code
+      typeof rawCode === "string" && rawCode
+        ? rawCode
         : "http_" + response.status;
     const message =
       envelope && typeof envelope.message === "string"
@@ -143,7 +150,11 @@ export async function request<T>(
         : text ||
           "The request failed with status " + response.status + ".";
     const details =
-      envelope && Array.isArray(envelope.details) ? envelope.details : [];
+      envelope && Array.isArray(envelope.details)
+        ? envelope.details
+        : envelope && Array.isArray(envelope.issues)
+          ? envelope.issues
+          : [];
     const error = new ApiError(response.status, code, message, details);
     if (response.status === 401 && unauthorizedHandler) {
       unauthorizedHandler(error);
@@ -167,6 +178,9 @@ export interface StreamHandlers {
   onQuestion?: (payload: QuestionEvent) => void;
   onApprovalClosed?: (payload: StreamFrame) => void;
   onShutdown?: (payload: StreamFrame) => void;
+  /* Spec 40, REQ-TTL-011: the session title, its source, or the pending flag
+     changed. */
+  onTitle?: (payload: StreamFrame) => void;
   onState?: (state: StreamState) => void;
   onUnauthorized?: () => void;
   onError?: (status: number) => void;
@@ -269,6 +283,12 @@ function dispatchBlock(
     }
     return;
   }
+  if (eventName === "title") {
+    if (handlers.onTitle) {
+      handlers.onTitle(payload as StreamFrame);
+    }
+    return;
+  }
   if (eventName === "shutdown") {
     if (handlers.onShutdown) {
       handlers.onShutdown(payload as StreamFrame);
@@ -283,8 +303,23 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
   let controller: AbortController | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /* A hidden tab releases its connection; on the next visible change the stream
+     reconnects from its last seq, so no event is missed. */
+  const visibility = watchVisibility({
+    onRelease: () => {
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      controller?.abort();
+    },
+    onResume: () => {
+      void connect();
+    },
+  });
+
   function scheduleReconnect(): void {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     if (handlers.onState) {
@@ -317,7 +352,7 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
         }
       }
     } catch {
-      if (!closed && handlers.onState) {
+      if (!closed && !visibility.blocked() && handlers.onState) {
         handlers.onState("reconnecting");
       }
     } finally {
@@ -333,7 +368,7 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
   }
 
   async function connect(): Promise<void> {
-    if (closed) {
+    if (closed || visibility.blocked()) {
       return;
     }
     controller = new AbortController();
@@ -390,6 +425,7 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
   return {
     close() {
       closed = true;
+      visibility.close();
       if (retryTimer !== null) {
         clearTimeout(retryTimer);
         retryTimer = null;

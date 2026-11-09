@@ -88,7 +88,7 @@ func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) {
 		return
 	}
 
-	reply, err := s.journalRequest(ctx, agentCfg, rows)
+	reply, err := s.journalRequest(ctx, info, agentCfg, rows)
 	if err != nil {
 		slog.Warn("knowledge journal: request failed", "session_id", info.ID, "error", err)
 		return
@@ -116,18 +116,14 @@ func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) {
 
 // journalRequest makes the one model call of a journal pass and returns its
 // raw reply (design §4).
-func (s *Service) journalRequest(ctx context.Context, agentCfg core.AgentConfig, rows []core.TextRow) (string, error) {
-	if s.llm == nil {
-		return "", errors.New("no llm registry")
-	}
-	provider, ok := s.llm.Provider(agentCfg.Provider)
-	if !ok {
-		return "", fmt.Errorf("unknown provider %q", agentCfg.Provider)
+func (s *Service) journalRequest(ctx context.Context, info core.SessionInfo, agentCfg core.AgentConfig, rows []core.TextRow) (string, error) {
+	call, err := s.agentCall(info.Agent, agentCfg)
+	if err != nil {
+		return "", err
 	}
 	callCtx, cancel := context.WithTimeout(ctx, journalCallTimeout)
 	defer cancel()
-	stream, err := provider.Stream(callCtx, core.ChatRequest{
-		Model:  agentCfg.Model,
+	stream, err := s.stream(callCtx, call, info.ID, core.ChatRequest{
 		System: journalSystem,
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: journalExcerpt(rows)},

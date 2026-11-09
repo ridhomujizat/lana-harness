@@ -61,8 +61,19 @@ type WorkflowBackend interface {
 	Webhook(ctx context.Context, id, token string, body []byte) (workflow.Run, error)
 	// Command matches a chat command and starts a run (API-WF-021).
 	Command(ctx context.Context, channel, text string) (workflow.CommandResult, bool)
+	// MessageChannels lists the Message node delivery channels.
+	MessageChannels() []workflow.MessageChannel
 	// IsWorkflowSession reports whether a session runs on channel "workflow".
 	IsWorkflowSession(sessionID string) bool
+	// TestScript runs a node's script on a sample (API-SP-002).
+	TestScript(ctx context.Context, id string, node workflow.Node, input any, hasInput bool, run int) (workflow.TestResult, error)
+	// GenerateScript asks the guardian for a script (API-SP-003).
+	GenerateScript(ctx context.Context, id string, node workflow.Node, input any, hasInput bool, run int, expected map[string]any) (workflow.GenerateResult, error)
+	// ConvertNode proposes a script_parse node for an agent, bot or worker
+	// (API-SP-004).
+	ConvertNode(ctx context.Context, id, nodeID string) (workflow.ConvertResult, error)
+	// ScriptSuggestions lists the nodes worth converting (API-SP-005).
+	ScriptSuggestions(ctx context.Context, id string) ([]workflow.Suggestion, error)
 }
 
 // SetWorkflows installs the workflow port. Call it before Start; a nil port
@@ -98,6 +109,7 @@ func (s *Server) registerWorkflowRoutes() {
 
 	s.Handle("GET /v1/workflows", http.HandlerFunc(s.handleWorkflowList))
 	s.Handle("GET /v1/workflows/stream", http.HandlerFunc(s.handleWorkflowStream))
+	s.Handle("GET /v1/workflows/channels", http.HandlerFunc(s.handleWorkflowChannels))
 	s.Handle("POST /v1/workflows", http.HandlerFunc(s.handleWorkflowCreate))
 	s.Handle("GET /v1/workflows/{id}", http.HandlerFunc(s.handleWorkflowGet))
 	s.Handle("PUT /v1/workflows/{id}", http.HandlerFunc(s.handleWorkflowUpdate))
@@ -120,6 +132,8 @@ func (s *Server) registerWorkflowRoutes() {
 	s.Handle("GET /v1/workflows/{id}/assistant", http.HandlerFunc(s.handleWorkflowChat))
 	s.Handle("POST /v1/workflows/{id}/assistant", http.HandlerFunc(s.handleWorkflowAssist))
 	s.Handle("POST /v1/workflows/{id}/webhook/rotate", http.HandlerFunc(s.handleWorkflowRotateWebhook))
+	// Script Parse routes (spec #44, API-SP-002..005).
+	s.registerWorkflowScriptRoutes()
 }
 
 // handleWorkflowList serves API-WF-001 (REQ-WF-001, REQ-WF-011). It merges the
@@ -142,6 +156,22 @@ func (s *Server) handleWorkflowList(w http.ResponseWriter, r *http.Request) {
 	}
 	mergeWorkflowApprovals(&overview, s.openWorkflowApprovals(), backend.IsWorkflowSession, s.workflowSessionAddress(r.Context()))
 	writeJSON(w, http.StatusOK, overview)
+}
+
+// handleWorkflowChannels serves the Message node channel list. The list is
+// stable: web first, telegram second, then the rest by id.
+func (s *Server) handleWorkflowChannels(w http.ResponseWriter, r *http.Request) {
+	backend := s.workflowsOrError(w)
+	if backend == nil {
+		return
+	}
+	channels := backend.MessageChannels()
+	if channels == nil {
+		channels = []workflow.MessageChannel{}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Channels []workflow.MessageChannel `json:"channels"`
+	}{Channels: channels})
 }
 
 // handleWorkflowCreate serves API-WF-002 (REQ-WF-001, REQ-WF-002).
@@ -791,6 +821,7 @@ func (s *Server) writeWorkflowError(w http.ResponseWriter, operation string, err
 // route. The run and decision routes name the missing object.
 func (s *Server) writeWorkflowErrorWithNotFound(w http.ResponseWriter, operation string, err error, notFound string) {
 	var invalid *workflow.InvalidGraphError
+	var needsBackground *workflow.GuardianBackgroundError
 	switch {
 	case errors.Is(err, workflow.ErrNotFound):
 		code, message := "workflow_not_found", "workflow not found"
@@ -810,11 +841,14 @@ func (s *Server) writeWorkflowErrorWithNotFound(w http.ResponseWriter, operation
 	case errors.Is(err, workflow.ErrRunFinished):
 		writeAPIError(w, http.StatusConflict, "run_finished", "the run already finished")
 	case errors.Is(err, workflow.ErrDecisionClosed):
+		// API-WF-015; a second Script Parse revert gets the same 409 (API-SP-006).
 		writeAPIError(w, http.StatusConflict, "decision_resolved", "the decision was already answered")
 	case errors.Is(err, workflow.ErrInvalidChoice):
 		writeAPIError(w, http.StatusBadRequest, "invalid_choice", "the choice is not valid for this decision")
 	case errors.Is(err, workflow.ErrLockRequired):
 		writeAPIError(w, http.StatusConflict, "lock_required", "the workflow permissions must be locked again")
+	case errors.As(err, &needsBackground):
+		writeAPIError(w, http.StatusServiceUnavailable, "guardian_needs_background_model", needsBackground.Error())
 	case errors.Is(err, workflow.ErrGuardianUnavailable):
 		writeAPIError(w, http.StatusServiceUnavailable, "guardian_unavailable", "the guardian is not available")
 	case errors.As(err, &invalid):

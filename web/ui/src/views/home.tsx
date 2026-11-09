@@ -2,6 +2,7 @@ import { Button, ErrorState, Panel, Stat } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { DashboardFilters, count, share, useDashboard } from "./dashboard-common";
 import { OutcomeDonut, ShareBars, TokenColumns, ToolBars } from "./home-charts";
+import { AgentAvatar } from "./agent-avatar";
 import { useAgentLabel } from "./agent-label";
 
 /* The monitoring dashboard (spec 28). On owner request (2026-11-05) Home shows
@@ -13,6 +14,7 @@ const BREAKDOWN_SOURCE_LABELS: Record<string, string> = {
   turn: "Chat turns",
   compaction: "Compaction",
   memory_capture: "Memory capture",
+  title: "Session titles",
 };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -156,6 +158,7 @@ export function HomePage() {
                 rows={(data.by_agent || []).map((row) => ({
                   key: row.agent,
                   label: label(row.agent),
+                  icon: <AgentAvatar name={row.agent} size="sm" aria-hidden="true" />,
                   sub: count(row.turns) + " turns",
                   value: tokensOf(row),
                 }))}

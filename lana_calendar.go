@@ -238,10 +238,18 @@ func (a calendarActions) AgentExists(name string) bool {
 // queued in its inbox. It blocks until the turn ends.
 func (a calendarActions) AgentPrompt(ctx context.Context, agentName, prompt, title string) (string, error) {
 	rt := a.rt
-	session, err := rt.roomSession(ctx, agentName)
+	// REQ-CCR-007, AC-CCR-008: a Claude Agent runs on a schedule only with
+	// allow_scheduled = true.
+	if err := rt.scheduledRunAllowed(agentName, ""); err != nil {
+		return "", err
+	}
+	session, err := rt.roomSession(ctx, agentName, calendarSessionTitle(title))
 	if err != nil {
 		return "", err
 	}
+	// REQ-CCT-008: the item's turn skips Claude Code unless allow_scheduled.
+	// A message queued behind a running turn is not marked.
+	defer rt.registry.MarkScheduled(session.ID)()
 	text := calendarPromptText(title, prompt)
 	if rt.TurnActive(session.ID) {
 		return session.ID, rt.Send(ctx, session.ID, text)
@@ -285,8 +293,9 @@ func (a calendarActions) SendMessage(ctx context.Context, target, text string) e
 
 // roomSession returns the room session of an agent: its newest top-level web
 // session of the owner, or a new one (spec #32, the web rooms' current
-// session).
-func (rt *Runtime) roomSession(ctx context.Context, agentName string) (core.SessionInfo, error) {
+// session). A new session gets title as its fixed title (spec 40,
+// REQ-TTL-007); an existing one keeps its title.
+func (rt *Runtime) roomSession(ctx context.Context, agentName, title string) (core.SessionInfo, error) {
 	if err := rt.closedError(); err != nil {
 		return core.SessionInfo{}, err
 	}
@@ -305,7 +314,7 @@ func (rt *Runtime) roomSession(ctx context.Context, agentName string) (core.Sess
 	if len(list) > 0 {
 		return list[0], nil
 	}
-	return rt.CreateChannelSession(ctx, calendarRoomChannel, calendarRoomAddress, agentName)
+	return rt.createChannelSession(ctx, calendarRoomChannel, calendarRoomAddress, agentName, title)
 }
 
 // calendarSecrets adapts the runtime's secret store, <home>/secrets.env, to

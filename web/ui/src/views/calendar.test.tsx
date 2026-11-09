@@ -25,7 +25,7 @@ vi.mock("../api/rooms", async (importOriginal) => {
 });
 
 import { openCalendarStream } from "../api/calendar";
-import type { CalendarChange } from "../api/calendar";
+import type { CalendarChange, Entry } from "../api/calendar";
 import { mockApi } from "../preview/fixtures";
 import { ToastProvider } from "../ui/gr8r";
 import { CalendarPage } from "./calendar";
@@ -83,6 +83,48 @@ function renderPage(params: Record<string, string> = weekParams) {
 }
 
 const entriesCalls = () => calls.filter((call) => call.path.startsWith("/v1/calendar/entries"));
+
+function timedEntry(title: string, start: number, end: number): Entry {
+  return {
+    key: title + ":" + start,
+    source: "item",
+    kind: "event",
+    title,
+    start,
+    end,
+    all_day: false,
+    date: dayKey(new Date(start)),
+    end_date: dayKey(new Date(end)),
+    color: "",
+    status: "",
+    moved: false,
+    occurrence: start,
+    item_id: "ci_" + title,
+    repeating: false,
+    assignee: "owner",
+    created_by: "owner",
+    action: null,
+    firing: null,
+    habit: null,
+    workflow: null,
+    google: null,
+    readonly: false,
+  };
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/* A gate the test releases by hand, so two loads can be made to finish in the
+   order the test wants. */
+function gate(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
 
 describe("CalendarPage", () => {
   it("shows items, workflow slots and runs together", async () => {
@@ -173,6 +215,108 @@ describe("CalendarPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 400));
     });
     expect(entriesCalls().length).toBeGreaterThan(before);
+  });
+
+  it("keeps the newer range's entries when two loads resolve out of order", async () => {
+    const gates: Array<{ from: number; release: () => void }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname.startsWith("/v1/calendar/entries")) {
+          const from = Number(url.searchParams.get("from"));
+          const held = gate();
+          gates.push({ from, release: held.release });
+          await held.promise;
+          const title = dayKey(new Date(from)) === "2026-11-09" ? "New week" : "Old week";
+          return json({
+            entries: [timedEntry(title, from + 9 * 3600000, from + 10 * 3600000)],
+            timezone: "UTC",
+            week_start: 1,
+            now: Date.now(),
+            google: { state: "off" },
+            missed: 0,
+          });
+        }
+        return json({ workflows: [] });
+      })
+    );
+
+    const view = renderPage({ view: "week", date: "2026-11-02" });
+    await waitFor(() => expect(gates).toHaveLength(1));
+    view.rerender(
+      <ToastProvider>
+        <CalendarPage params={{ view: "week", date: "2026-11-09" }} />
+      </ToastProvider>
+    );
+    await waitFor(() => expect(gates).toHaveLength(2));
+
+    /* The newer range lands first… */
+    gates[1]!.release();
+    expect(await screen.findByText("New week")).toBeTruthy();
+    /* …then the older range lands last and must not overwrite it. */
+    await act(async () => {
+      gates[0]!.release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText("Old week")).toBeNull();
+    expect(screen.getByText("New week")).toBeTruthy();
+  });
+
+  it("shows the newly included day's entries after switching week start, with no refresh", async () => {
+    let serverWeekStart = 1;
+    const A_FROM = new Date(2026, 10, 2).getTime();
+    const held: Array<() => void> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        const method = (init?.method || "GET").toUpperCase();
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+        if (url.pathname === "/v1/calendar/entries") {
+          const from = Number(url.searchParams.get("from"));
+          const to = Number(url.searchParams.get("to"));
+          /* The Mon-start range is held: it stands for the reload that the
+             settings save kicks off while the range is still the old one. */
+          if (from === A_FROM) {
+            const pending = gate();
+            held.push(pending.release);
+            await pending.promise;
+          }
+          const nov9 = new Date(2026, 10, 9, 9).getTime();
+          const entries = nov9 >= from && nov9 < to ? [timedEntry("Rapat Senin", nov9, nov9 + 3600000)] : [];
+          return json({ entries, timezone: "UTC", week_start: serverWeekStart, now: Date.now(), google: { state: "off" }, missed: 0 });
+        }
+        if (url.pathname === "/v1/calendar/settings" && method === "PUT") {
+          serverWeekStart = Number((body as { week_start?: number }).week_start);
+        }
+        const result = mockApi(method, url, body);
+        if (result.status === 204) {
+          return new Response(null, { status: 204 });
+        }
+        return json(result.body ?? null, result.status);
+      })
+    );
+
+    /* Sunday 8 Nov: Monday-start shows 2–8 Nov, Sunday-start shows 8–14 Nov. */
+    renderPage({ view: "week", date: "2026-11-08" });
+    await waitFor(() => expect(held).toHaveLength(1));
+    expect(screen.queryByText("Rapat Senin")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Calendar settings" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Sunday" }));
+    await waitFor(() => expect(held).toHaveLength(2));
+
+    /* The settings reload (old range) lands first: the range moves to Sunday
+       and 9 Nov loads. */
+    held[1]!();
+    expect(await screen.findByText("Rapat Senin")).toBeTruthy();
+    /* The initial Mon-start load lands last; it must not wipe 9 Nov. */
+    await act(async () => {
+      held[0]!();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("Rapat Senin")).toBeTruthy();
   });
 
   it("creates a task from the New menu", async () => {

@@ -8,29 +8,19 @@ import type {
   WorkflowChange,
   WorkflowStatus,
 } from "../api/workflows";
-import { avatarFor } from "../lib/avatar";
-import { Avatar, Badge } from "../ui/gr8r";
+import { Badge } from "../ui/gr8r";
+import { AgentAvatar, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
-import { useAgentLabel } from "./agent-label";
 
 /* Shared bits of the Workflows pages (spec #33): status badges, time words,
    guardian faces, the live stream hook and the agent list. */
 
-const AVATAR_COLORS: Record<string, string> = {
-  "tone-brand": "var(--violet)",
-  "tone-success": "var(--green)",
-  "tone-warning": "var(--amber)",
-  "tone-error": "var(--red)",
-  "tone-gray": "var(--gray)",
-};
-
 export function agentColor(name: string): string {
-  return AVATAR_COLORS[avatarFor(name).colorClass] || "var(--violet)";
+  return agentFallbackColor(name);
 }
 
 export function AgentFace({ name, size }: { name: string; size?: "sm" | "md" }) {
-  const label = useAgentLabel();
-  return <Avatar name={label(name)} color={agentColor(name)} size={size || "sm"} />;
+  return <AgentAvatar name={name} color={agentColor(name)} size={size || "sm"} />;
 }
 
 const WF_TONES: Record<WorkflowStatus, BadgeTone> = {

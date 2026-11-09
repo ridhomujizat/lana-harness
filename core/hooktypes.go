@@ -36,6 +36,12 @@ type LLMStreamInput struct {
 	AgentName string
 	Targets   []LLMTarget
 	Request   ChatRequest
+	// Requested is the combo or address the agent asked for, copied into
+	// the router's call records.
+	Requested string
+	// OnServed, when set, receives the target that answered, before the
+	// stream is returned.
+	OnServed func(LLMTarget)
 }
 
 // ToolsPreExecuteInput is the input to ToolsPreExecute.

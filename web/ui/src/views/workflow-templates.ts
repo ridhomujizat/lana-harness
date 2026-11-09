@@ -50,6 +50,43 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
   {
+    /* Spec #44: a zero-token pipeline. The Script Parse node learns its script
+       on the first run and builds the digest text itself. */
+    key: "github-trending",
+    name: "GitHub trending digest",
+    description: "Fetch GitHub trending every morning, parse it with a learned script, send me the list. 0 tokens per run once learned.",
+    line: "Jadwal → web fetch → Script Parse → Telegram",
+    icon: "braces",
+    tint: "violet",
+    graph: {
+      nodes: [
+        { id: "every-day", type: "trigger.schedule", name: "Every day 07:00", position: { x: X, y: 0 }, params: { cron: "0 7 * * *", enabled: true } },
+        { id: "fetch", type: "webfetch", name: "Fetch GitHub trending", position: { x: X, y: 104 }, params: { url: "https://github.com/trending" } },
+        {
+          id: "parse",
+          type: "script_parse",
+          name: "Parse trending repos",
+          position: { x: X, y: 208 },
+          params: {
+            input: "{{ nodes.fetch.output.markdown }}",
+            goal: "List the trending repositories (owner/name, url, description, language, stars today) and build a short digest text with one numbered line per repo.",
+            output_schema: { repos: "object[]", digest: "string" },
+            item_schema: { repos: { name: "string", url: "string", description: "string", stars_today: "integer" } },
+            allow_empty: ["repos.description"],
+            script: "",
+            on_drift: "regenerate",
+          },
+        },
+        { id: "send", type: "message", name: "Send digest", position: { x: X, y: 312 }, params: { text: "GitHub trending today\n\n{{ nodes.parse.output.digest }}" } },
+      ],
+      edges: [
+        { id: "e1", from: "every-day", to: "fetch" },
+        { id: "e2", from: "fetch", to: "parse" },
+        { id: "e3", from: "parse", to: "send" },
+      ],
+    },
+  },
+  {
     key: "review-pr",
     name: "Review PR dengan approval",
     description: "A GitHub webhook asks a bot to review the PR, then waits for my approval before deploying.",

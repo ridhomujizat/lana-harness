@@ -219,3 +219,27 @@ describe("Agent overview team variant (REQ-ROOM-010)", () => {
     expect(screen.queryByText(/remembers about you/)).toBeNull();
   });
 });
+
+describe("Agent overview looks after", () => {
+  it("shows the brand logo of a chat channel and a generic icon otherwise", async () => {
+    vi.mocked(getAgentOverview).mockResolvedValue(
+      overview({
+        looks_after: {
+          channels: [
+            { channel: "telegram", match: "chat 42" },
+            { channel: "matrix", match: "" },
+          ],
+          teams: [],
+        },
+      })
+    );
+    const { container } = render(<AgentOverview name="dana" agent={agent()} />);
+
+    await screen.findByText("chat 42");
+    const rows = container.querySelectorAll(".ov-look-row");
+    expect(rows[0]?.querySelector('[data-channel="telegram"] svg')).toBeTruthy();
+    expect(rows[0]?.querySelector(".ov-look-icon")).toBeNull();
+    expect(rows[1]?.querySelector(".ov-look-icon")).toBeTruthy();
+    expect(rows[1]?.querySelector(".cl")).toBeNull();
+  });
+});
