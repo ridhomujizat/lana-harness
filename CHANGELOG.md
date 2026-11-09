@@ -7,6 +7,21 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.3.0-beta.4] - 2026-11-09
+
+### Added
+- Agent display names: an agent has an optional `display_name` (one line, at most 40 characters)
+  next to its ID, for example "Research Assistant" for `research-assistant`. The create, duplicate,
+  and setup forms take a free-text name and fill the ID from it until the owner edits the ID; the
+  agent profile edits the display name. Every page that shows an agent shows the display name and
+  falls back to the ID. URLs, the config table, @mentions, picker values, and avatars keep the ID.
+  `display_name` is on `[agents.<name>]`, `GET/PUT/POST /v1/agents`, the duplicate endpoint, setup,
+  and the rooms API. A new agent's AGENT.md persona uses the display name when one is given.
+
+### Changed
+- The dashboard's agent ID rule now matches the agent home: `[a-z][a-z0-9_-]{0,31}`. An ID such as
+  `2bot` is rejected when the agent is created instead of failing later.
+
 ## [0.3.0-beta.3] - 2026-11-09
 
 ### Added
