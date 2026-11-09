@@ -709,3 +709,149 @@ func TestWorkflowGraphEdgesNeverNull(t *testing.T) {
 		t.Fatalf("legacy graph JSON=%s", b)
 	}
 }
+
+// REQ-SP-019: a node run round-trips its via value, including the empty one, and
+// the upsert overwrites it.
+func TestNodeRunViaRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	w := createTestWorkflow(t, s, "wf-via")
+	run, err := s.CreateRun(ctx, workflow.Run{WorkflowID: w.ID, Version: 1, Trigger: "manual", Status: workflow.RunRunning, StartedAt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutNodeRun(ctx, workflow.NodeRun{RunID: run.ID, NodeID: "n2", ItemIndex: 0, Status: workflow.NodeSucceeded, Via: workflow.ViaScript, StartedAt: 10, EndedAt: 20}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutNodeRun(ctx, workflow.NodeRun{RunID: run.ID, NodeID: "n3", ItemIndex: 0, Status: workflow.NodeSucceeded, StartedAt: 30, EndedAt: 40}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := s.ListNodeRuns(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]workflow.NodeRun{}
+	for _, nr := range list {
+		byID[nr.NodeID] = nr
+	}
+	if byID["n2"].Via != workflow.ViaScript {
+		t.Fatalf("via of n2=%q, want %q", byID["n2"].Via, workflow.ViaScript)
+	}
+	if byID["n3"].Via != "" {
+		t.Fatalf("via of n3=%q, want empty", byID["n3"].Via)
+	}
+
+	n2 := byID["n2"]
+	n2.Via = workflow.ViaFallback
+	if err := s.PutNodeRun(ctx, n2); err != nil {
+		t.Fatal(err)
+	}
+	reread, err := s.ListNodeRuns(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, nr := range reread {
+		if nr.NodeID == "n2" && nr.Via != workflow.ViaFallback {
+			t.Fatalf("via after upsert=%q, want %q", nr.Via, workflow.ViaFallback)
+		}
+	}
+}
+
+// v9Database builds a schema-version-9 database the way the previous binary left
+// it: migrations 0001-0009 applied and user_version set to 9.
+func v9Database(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "lana.db")
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"migrations/0001_session_log.sql", "migrations/0002_session_leases.sql",
+		"migrations/0003_session_status_waiting_input.sql", "migrations/0004_session_text.sql",
+		"migrations/0005_room_reads.sql", "migrations/0006_workflows.sql",
+		"migrations/0007_calendar.sql", "migrations/0008_router.sql",
+		"migrations/0009_session_title.sql",
+	} {
+		data, err := migrationFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 9"); err != nil {
+		t.Fatal(err)
+	}
+	return db, path
+}
+
+// REQ-SP-019: a version-9 database migrates to the current version and gains
+// workflow_node_runs.via with an empty default.
+func TestMigrateV9ToV10AddsVia(t *testing.T) {
+	ctx := context.Background()
+	db, path := v9Database(t)
+	var before int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('workflow_node_runs') WHERE name = 'via'").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if before != 0 {
+		t.Fatalf("v9 fixture already has a via column")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("version=%d, want %d", version, schemaVersion)
+	}
+
+	var dflt sql.NullString
+	var notNull int
+	if err := s.db.QueryRow("SELECT dflt_value, \"notnull\" FROM pragma_table_info('workflow_node_runs') WHERE name = 'via'").Scan(&dflt, &notNull); err != nil {
+		t.Fatalf("via column missing after migrate: %v", err)
+	}
+	if !dflt.Valid || dflt.String != "''" {
+		t.Fatalf("via default=%v, want ''", dflt)
+	}
+	if notNull != 1 {
+		t.Fatalf("via notnull=%d, want 1", notNull)
+	}
+
+	// A node run written through the API reads back with an empty via.
+	w := createTestWorkflow(t, s, "wf-via-migrated")
+	run, err := s.CreateRun(ctx, workflow.Run{WorkflowID: w.ID, Version: 1, Trigger: "manual", Status: workflow.RunRunning, StartedAt: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutNodeRun(ctx, workflow.NodeRun{RunID: run.ID, NodeID: "n2", ItemIndex: 0, Status: workflow.NodeSucceeded, StartedAt: 1, EndedAt: 2}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListNodeRuns(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Via != "" {
+		t.Fatalf("migrated node runs=%+v, want one with empty via", list)
+	}
+}

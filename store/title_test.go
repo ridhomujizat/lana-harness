@@ -65,8 +65,8 @@ func TestMigrateV8ToV9SessionTitle(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != schemaVersion || schemaVersion != 9 {
-		t.Fatalf("version=%d schemaVersion=%d, want 9", version, schemaVersion)
+	if version != schemaVersion {
+		t.Fatalf("version=%d schemaVersion=%d, want the current version", version, schemaVersion)
 	}
 	titled, err := s.Info(ctx, "s-titled")
 	if err != nil {

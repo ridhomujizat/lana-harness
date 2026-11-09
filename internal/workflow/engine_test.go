@@ -1478,3 +1478,46 @@ func TestEngineGuardianParseFailure(t *testing.T) {
 		t.Fatal("no plain alert was sent")
 	}
 }
+
+// ---- script_parse template handling ---------------------------------------
+
+// TestEngineScriptParseKeepsScriptLiteral checks that processNode renders the
+// other params of a script_parse node but never the JavaScript: the raw script
+// reaches the handler with its "{{ }}" untouched (REQ-SP-001). The workflow
+// failure mode is "continue" so the node, which has no handler in this slice,
+// fails without a guardian call.
+func TestEngineScriptParseKeepsScriptLiteral(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	const script = `function parse(input, ctx) { var s = "{{ input.url }}"; return {url: input.url}; }`
+	g := Graph{
+		Nodes: []Node{
+			wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true}),
+			wfNode("parse", "script_parse", "Parse", map[string]any{
+				"input":         "{{ input.url }}",
+				"goal":          "extract the url",
+				"output_schema": map[string]any{"url": "string"},
+				"script":        script,
+			}),
+		},
+		Edges: []Edge{wfEdge("start", "out", "parse")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "wf-sp", Name: "SP", Guardian: "g", FailureDefault: FailurePolicy{Mode: "continue"}}, g)
+	run := seedRun(t, st, wf, "manual", map[string]any{"url": "https://example.com"})
+	eng := testEngine(st, deps, EngineOptions{})
+
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	row := mustNode(t, st, run.ID, "parse", -1)
+	var params map[string]any
+	if err := json.Unmarshal(row.Input, &params); err != nil {
+		t.Fatalf("decode node input: %v", err)
+	}
+	if params["input"] != "https://example.com" {
+		t.Fatalf("input param=%v, want the rendered url", params["input"])
+	}
+	if got, _ := params["script"].(string); got != script {
+		t.Fatalf("script param=%q, want the raw source %q", got, script)
+	}
+}

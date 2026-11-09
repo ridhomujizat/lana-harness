@@ -74,6 +74,14 @@ type Engine struct {
 	mu   sync.Mutex
 	live map[string]*liveRun
 	wg   sync.WaitGroup
+	// scriptNoticeAt throttles script_fallback notices per workflow/node
+	// (REQ-SP-011). It is guarded by mu and lazily initialized; it is lost on
+	// restart, where one extra notice is acceptable.
+	scriptNoticeAt map[string]time.Time
+	// scriptPauseReset holds the last ResetScriptPause per "wfID/nodeID"
+	// (REQ-SP-009). It is guarded by mu and lazily initialized; rejections older
+	// than it no longer count toward the regeneration pause.
+	scriptPauseReset map[string]time.Time
 }
 
 // NewEngine returns an engine over st and deps with the given options.
@@ -263,11 +271,16 @@ func (e *Engine) CancelAll() {
 
 // Answer resolves a pending decision and resumes the run (REQ-WF-008). It
 // returns ErrNotFound for an unknown decision, ErrDecisionClosed when it is not
-// pending, and ErrInvalidChoice for a choice the decision does not accept.
+// pending, and ErrInvalidChoice for a choice the decision does not accept. A
+// kind "script" decision accepts the "revert" choice and is handled separately
+// (REQ-SP-012).
 func (e *Engine) Answer(ctx context.Context, decisionID, choice string) (Run, error) {
 	d, err := e.store.GetDecision(ctx, decisionID)
 	if err != nil {
 		return Run{}, err
+	}
+	if d.Kind == "script" {
+		return e.answerScript(ctx, d, choice)
 	}
 	if d.Status != "pending" {
 		return Run{}, ErrDecisionClosed
@@ -429,6 +442,16 @@ type runExec struct {
 
 	// triggerNodeID is the trigger node that fires for this run.
 	triggerNodeID string
+
+	// scripts is a per-run override of a script_parse node's script, keyed by
+	// node id (spec #44, REQ-SP-008). Regeneration sets it so later items of the
+	// same run use the new script; a nil map is fine.
+	scripts map[string]string
+	// scriptCache caches compiled scripts by source text for one run.
+	scriptCache map[string]scriptCompile
+	// regenDone records the nodes that started regeneration in this run, so a
+	// node regenerates at most once per run (REQ-SP-009). A nil map is fine.
+	regenDone map[string]bool
 }
 
 // execute loads a run and drives it to a final state or a wait (REQ-WF-007).
@@ -549,7 +572,7 @@ func (ex *runExec) processNode(ctx context.Context, node Node, item int) {
 		return
 	}
 
-	rendered, err := Render(node.Params, ex.scopeFor(item))
+	rendered, err := Render(TemplateParams(node), ex.scopeFor(item))
 	if err != nil {
 		ex.escalate(ctx, node, item, row, map[string]any{}, ex.policy(node), err)
 		return
@@ -557,6 +580,14 @@ func (ex *runExec) processNode(ctx context.Context, node Node, item int) {
 	params, _ := rendered.(map[string]any)
 	if params == nil {
 		params = map[string]any{}
+	}
+	// The script of a script_parse node is JavaScript and is never rendered, so
+	// TemplateParams left it out; put the raw source back before run overrides
+	// are merged (REQ-SP-001).
+	if node.Type == "script_parse" {
+		if raw, ok := node.Params["script"]; ok {
+			params["script"] = raw
+		}
 	}
 	if ov, ok := ex.run.Overrides[node.ID]; ok {
 		params = mergeParams(params, ov)
@@ -799,8 +830,15 @@ func (ex *runExec) runLadder(ctx context.Context, node Node, item int, row *Node
 		if err == nil {
 			row.Attempts = append(row.Attempts, att)
 			ex.run.Tokens += tokens
+			row.Via = res.Via
+			for _, line := range res.Logs {
+				ex.appendLog(row, line)
+			}
 			ex.succeedNode(row, node, res.Output, res.Port, tokens, res.SessionID)
 			return
+		}
+		for _, line := range res.Logs {
+			ex.appendLog(row, line)
 		}
 		if ex.ctx.Err() != nil {
 			row.Attempts = append(row.Attempts, att)

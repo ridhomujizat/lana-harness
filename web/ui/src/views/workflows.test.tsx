@@ -17,6 +17,7 @@ vi.mock("../api/workflows", async (importOriginal) => {
     getRun: vi.fn(),
     answerDecision: vi.fn(),
     openWorkflowStream: vi.fn(),
+    scriptSuggestions: vi.fn(() => Promise.resolve({ suggestions: [] })),
   };
 });
 vi.mock("../api/approvals", () => ({ answerApproval: vi.fn() }));

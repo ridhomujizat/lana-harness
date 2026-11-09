@@ -104,6 +104,25 @@ type fakeWorkflowBackend struct {
 
 	changes    chan workflow.Change
 	unsubCount int
+
+	// Script Parse routes (spec #44).
+	testScript         workflow.TestResult
+	testScriptErr      error
+	testScriptNode     workflow.Node
+	testScriptInput    any
+	testScriptHasInput bool
+	testScriptRun      int
+
+	generateScript         workflow.GenerateResult
+	generateScriptErr      error
+	generateScriptExpected map[string]any
+
+	convertResult workflow.ConvertResult
+	convertErr    error
+	convertNodeID string
+
+	suggestions    []workflow.Suggestion
+	suggestionsErr error
 }
 
 func newFakeWorkflowBackend() *fakeWorkflowBackend {
@@ -276,6 +295,36 @@ func (f *fakeWorkflowBackend) IsWorkflowSession(sessionID string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.workflowSessions[sessionID]
+}
+
+func (f *fakeWorkflowBackend) TestScript(_ context.Context, _ string, node workflow.Node, input any, hasInput bool, run int) (workflow.TestResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.testScriptNode = node
+	f.testScriptInput = input
+	f.testScriptHasInput = hasInput
+	f.testScriptRun = run
+	return f.testScript, f.testScriptErr
+}
+
+func (f *fakeWorkflowBackend) GenerateScript(_ context.Context, _ string, _ workflow.Node, _ any, _ bool, _ int, expected map[string]any) (workflow.GenerateResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.generateScriptExpected = expected
+	return f.generateScript, f.generateScriptErr
+}
+
+func (f *fakeWorkflowBackend) ConvertNode(_ context.Context, _, nodeID string) (workflow.ConvertResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.convertNodeID = nodeID
+	return f.convertResult, f.convertErr
+}
+
+func (f *fakeWorkflowBackend) ScriptSuggestions(_ context.Context, _ string) ([]workflow.Suggestion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suggestions, f.suggestionsErr
 }
 
 func (f *fakeWorkflowBackend) MessageChannels() []workflow.MessageChannel {

@@ -129,7 +129,15 @@ function decorate(detail: RunDetail) {
         } else if (node.type === "if" || node.type === "switch" || node.type === "approval") {
           text = "took " + (row.port || "out");
         }
-        badges[node.id] = { text: row.status === "fallback" ? "Fallback" : text, tone: "green" };
+        if (row.via === "script") {
+          text = "script · " + text + " · 0 tok";
+        } else if (row.via === "fallback") {
+          text = "agent fallback · " + tokens(row.tokens) + " tok";
+        }
+        badges[node.id] = {
+          text: row.status === "fallback" ? "Fallback" : text,
+          tone: row.via === "fallback" ? "amber" : "green",
+        };
         break;
       }
       case "failed":
@@ -197,6 +205,37 @@ function DecisionCard({
             </Button>
             <Button loading={busy === "deny"} disabled={busy !== ""} onClick={() => void act("deny")}>
               Deny
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  if (decision.kind === "script") {
+    /* Spec #44: a Script Parse fallback or script update; never pending. */
+    const drift = typeof decision.fix?.drift === "string" ? decision.fix.drift : "";
+    const update = decision.action === "script_update";
+    return (
+      <div className="wf-decision">
+        <div className="wf-decision-h">
+          <Ic name={update ? "refresh-cw" : "braces"} size={14} />
+          <b>
+            {update
+              ? "Script updated to rev " + String(decision.fix?.rev_to ?? "?")
+              : "Script Parse used the agent"}
+          </b>
+        </div>
+        <p>
+          {drift ? <code>{drift}</code> : null} {decision.reason}
+        </p>
+        <span className="wf-decision-meta">
+          {workflow.guardian} · {clock(decision.created_at, true)} · {tokens(decision.tokens)} tokens
+          {decision.choice === "revert" ? " · reverted" : ""}
+        </span>
+        {update && decision.choice === "" ? (
+          <div className="wf-decision-acts">
+            <Button loading={busy === "revert"} disabled={busy !== ""} icon="undo-2" onClick={() => void act("revert")}>
+              Revert script
             </Button>
           </div>
         ) : null}

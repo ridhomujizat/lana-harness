@@ -52,6 +52,10 @@ func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message st
 	b.WriteString("- templates: {{ input.x }}, {{ nodes.<id>.output.<path> }}, {{ item }}, {{ state.key }}, {{ run.number }}.\n")
 	b.WriteString("- {{ nodes.<id>.output }} inside text gives the node's main text (text, markdown, content); use {{ nodes.<id>.output.<field> }} for another field.\n")
 	b.WriteString("- positions: x/y in pixels, nodes are 248x64, keep a 40 px vertical gap, keep existing positions and place new nodes below their parent node.\n")
+	// Script Parse rules (spec #44, REQ-SP-020).
+	b.WriteString("- prefer script_parse over agent when a step only extracts, filters or reformats data of a fixed shape (pages, API or MCP JSON).\n")
+	b.WriteString("- leave the script_parse param \"script\" empty: it is learned on the first run.\n")
+	b.WriteString("- always give a script_parse \"output_schema\" (and \"item_schema\" for object[] fields).\n")
 	b.WriteString("\n")
 
 	if len(history) > 10 {

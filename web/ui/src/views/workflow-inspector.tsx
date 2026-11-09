@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Graph, MessageChannel, NodeRun, WfNode } from "../api/workflows";
+import type { Graph, MessageChannel, NodeRun, ScriptSuggestion, WfNode } from "../api/workflows";
 import { getRun, getWorkflowChannels, listRuns } from "../api/workflows";
 import { errorMessage } from "../api/client";
 import { Ic } from "../ui/icons";
@@ -17,6 +17,7 @@ import { messageChannelIds, nodeMeta } from "./workflow-catalog";
 import type { FieldSpec } from "./workflow-catalog";
 import { prettyValue } from "./workflow-common";
 import { agentOptionIcon } from "./agent-avatar";
+import { ConvertBanner, ConvertDialog, ScriptTab } from "./workflow-script";
 
 /* The node inspector of design workflows-2: Parameters, Last output and On
    failure. Edits go straight into the draft graph; the editor saves. */
@@ -26,6 +27,9 @@ interface InspectorProps {
   graph: Graph;
   node: WfNode;
   agents: string[];
+  /* Spec #44: set when the daemon suggests converting this agent step. */
+  suggestion?: ScriptSuggestion;
+  onDismissSuggestion?: () => void;
   onChange: (node: WfNode) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -457,11 +461,15 @@ export function NodeInspector({
   graph,
   node,
   agents,
+  suggestion,
+  onDismissSuggestion,
   onChange,
   onDelete,
   onClose,
 }: InspectorProps) {
   const [tab, setTab] = useState("params");
+  const [converting, setConverting] = useState(false);
+  const isScript = node.type === "script_parse";
   const meta = nodeMeta(node.type);
   const set = (name: string, value: unknown) => {
     const params = { ...node.params };
@@ -496,6 +504,7 @@ export function NodeInspector({
         onChange={setTab}
         items={[
           { value: "params", label: "Parameters" },
+          ...(isScript ? [{ value: "script", label: "Script" }] : []),
           { value: "output", label: "Last output" },
           { value: "failure", label: "On failure" },
         ]}
@@ -503,6 +512,13 @@ export function NodeInspector({
       <div className="wf-insp-b">
         {tab === "params" ? (
           <>
+            {suggestion && !isScript ? (
+              <ConvertBanner
+                suggestion={suggestion}
+                onConvert={() => setConverting(true)}
+                onDismiss={() => onDismissSuggestion?.()}
+              />
+            ) : null}
             <Field label="Name" htmlFor={"wf-name-" + node.id}>
               <Input
                 id={"wf-name-" + node.id}
@@ -534,6 +550,9 @@ export function NodeInspector({
               <span>Node enabled</span>
             </label>
           </>
+        ) : null}
+        {tab === "script" && isScript ? (
+          <ScriptTab workflowId={workflowId} node={node} onChange={onChange} />
         ) : null}
         {tab === "output" ? <LastOutput workflowId={workflowId} nodeId={node.id} /> : null}
         {tab === "failure" ? (
@@ -589,6 +608,18 @@ export function NodeInspector({
           </>
         ) : null}
       </div>
+      {converting ? (
+        <ConvertDialog
+          workflowId={workflowId}
+          node={node}
+          onClose={() => setConverting(false)}
+          onReplace={(next) => {
+            setConverting(false);
+            onChange(next);
+            setTab("script");
+          }}
+        />
+      ) : null}
       <footer className="wf-insp-f">
         <Button variant="danger-ghost" icon="trash-2" onClick={onDelete}>
           Delete node

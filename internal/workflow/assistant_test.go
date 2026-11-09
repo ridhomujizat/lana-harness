@@ -37,6 +37,9 @@ func TestBuildAssistantPrompt(t *testing.T) {
 		`"graph"`,
 		`"summary"`,
 		"{{ nodes.<id>.output.<path> }}",
+		"prefer script_parse over agent",
+		`leave the script_parse param "script" empty`,
+		`always give a script_parse "output_schema"`,
 	}
 	for _, want := range wants {
 		if !strings.Contains(prompt, want) {

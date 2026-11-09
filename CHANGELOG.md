@@ -7,6 +7,22 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+- Script Parse workflow node (spec 44, ADR 0021): a step that extracts or reshapes data of a fixed
+  shape (a web page, an MCP or API JSON answer) runs a small JavaScript `parse(input, ctx)` function
+  in an embedded goja sandbox at 0 tokens. `output_schema` is required, with optional `item_schema`
+  and `allow_empty`; empty strings and lists count as drift. An empty script is learned on the first
+  run. On drift the run continues through an agent fallback, the guardian rewrites the script and
+  saves it as a new version (revertable from the run or the Script tab), and the owner gets a notice.
+  The inspector has a Script tab (code, Generate, Test on a run or a pasted sample, tokens saved,
+  history). Agent steps with steady token use get a **Convert to Script Parse** suggestion that keeps
+  the node id. New `POST /v1/workflows/{id}/script/test|generate|convert`,
+  `GET /v1/workflows/{id}/script/suggestions`, `node_run.via`, `script_stats` on the workflow detail,
+  decision kind `script`, and a "GitHub trending digest" template.
+
+### Changed
+- Database schema 10: `workflow_node_runs.via`.
+
 ## [0.3.0-beta.2] - 2026-11-09
 
 ### Added

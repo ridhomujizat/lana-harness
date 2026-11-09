@@ -21,7 +21,7 @@ const workflowColumns = "id, name, description, guardian, status, version, lock_
 
 const runColumns = "id, workflow_id, number, version, trigger, input_json, status, waiting_reason, wake_at, error, tokens, nodes_done, nodes_total, summary, overrides_json, started_at, ended_at"
 
-const nodeRunColumns = "run_id, node_id, item_index, status, attempts_json, input_json, output_json, port, error, logs_json, tokens, session_id, started_at, ended_at"
+const nodeRunColumns = "run_id, node_id, item_index, status, attempts_json, input_json, output_json, port, error, logs_json, tokens, session_id, started_at, ended_at, via"
 
 const decisionColumns = "id, workflow_id, run_id, run_number, node_id, item_index, kind, action, reason, fix_json, persistent, confidence, tokens, status, choice, created_at, expires_at, resolved_at"
 
@@ -92,7 +92,7 @@ func scanRun(row rowScanner) (workflow.Run, error) {
 func scanNodeRun(row rowScanner) (workflow.NodeRun, error) {
 	var nr workflow.NodeRun
 	var attempts, input, output, logs string
-	if err := row.Scan(&nr.RunID, &nr.NodeID, &nr.ItemIndex, &nr.Status, &attempts, &input, &output, &nr.Port, &nr.Error, &logs, &nr.Tokens, &nr.SessionID, &nr.StartedAt, &nr.EndedAt); err != nil {
+	if err := row.Scan(&nr.RunID, &nr.NodeID, &nr.ItemIndex, &nr.Status, &attempts, &input, &output, &nr.Port, &nr.Error, &logs, &nr.Tokens, &nr.SessionID, &nr.StartedAt, &nr.EndedAt, &nr.Via); err != nil {
 		return workflow.NodeRun{}, err
 	}
 	if attempts != "" {
@@ -506,8 +506,8 @@ func (s *Store) PutNodeRun(ctx context.Context, nr workflow.NodeRun) error {
 		if err != nil {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, "INSERT INTO workflow_node_runs (run_id, node_id, item_index, status, attempts_json, input_json, output_json, port, error, logs_json, tokens, session_id, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id, node_id, item_index) DO UPDATE SET status = excluded.status, attempts_json = excluded.attempts_json, input_json = excluded.input_json, output_json = excluded.output_json, port = excluded.port, error = excluded.error, logs_json = excluded.logs_json, tokens = excluded.tokens, session_id = excluded.session_id, started_at = excluded.started_at, ended_at = excluded.ended_at",
-			nr.RunID, nr.NodeID, nr.ItemIndex, string(nr.Status), string(attempts), rawText(nr.Input), rawText(nr.Output), nr.Port, nr.Error, string(logs), nr.Tokens, nr.SessionID, nr.StartedAt, nr.EndedAt)
+		_, err = conn.ExecContext(ctx, "INSERT INTO workflow_node_runs (run_id, node_id, item_index, status, attempts_json, input_json, output_json, port, error, logs_json, tokens, session_id, started_at, ended_at, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(run_id, node_id, item_index) DO UPDATE SET status = excluded.status, attempts_json = excluded.attempts_json, input_json = excluded.input_json, output_json = excluded.output_json, port = excluded.port, error = excluded.error, logs_json = excluded.logs_json, tokens = excluded.tokens, session_id = excluded.session_id, started_at = excluded.started_at, ended_at = excluded.ended_at, via = excluded.via",
+			nr.RunID, nr.NodeID, nr.ItemIndex, string(nr.Status), string(attempts), rawText(nr.Input), rawText(nr.Output), nr.Port, nr.Error, string(logs), nr.Tokens, nr.SessionID, nr.StartedAt, nr.EndedAt, nr.Via)
 		return err
 	})
 }

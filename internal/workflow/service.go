@@ -247,7 +247,13 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 	if err != nil {
 		return Detail{}, err
 	}
-	return detailOf(wf, ver), nil
+	detail := detailOf(wf, ver)
+	// The detail carries the Script Parse stats only when the graph has a
+	// script_parse node (API-SP-009, REQ-SP-019).
+	if graphHasScriptParse(ver.Graph) {
+		detail.ScriptStats = s.ScriptStats(ctx, id, ver.Graph)
+	}
+	return detail, nil
 }
 
 // detailOf assembles the workflow (detail) object of API-WF-003.
