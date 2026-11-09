@@ -89,6 +89,45 @@ func TestApplyOverLimit(t *testing.T) {
 	}
 }
 
+// REQ-DKN-040: a change that does not grow a memory over the limit is accepted;
+// a growth past the limit fails.
+func TestApplyWithoutGrowth(t *testing.T) {
+	long := strings.Repeat("x", 9000)
+	if _, err := Apply([]string{long}, "add", "one more", "", MemoryLimit); !errors.Is(err, ErrOverLimit) {
+		t.Fatalf("growing add err = %v, want over limit", err)
+	}
+	shorter := strings.Repeat("y", 8500)
+	entries, err := Apply([]string{long}, "replace", shorter, long, MemoryLimit)
+	if err != nil || len(entries) != 1 || entries[0] != shorter {
+		t.Fatalf("shortening replace = %v, %v", entries, err)
+	}
+}
+
+// REQ-DKN-034: RemoveEntries drops the given 1-based ids and returns their text
+// in id order; an unknown id is an error and writes nothing.
+func TestRemoveEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents", "a", "MEMORY.md")
+	if err := WriteFile(path, Join([]string{"one", "two", "three", "four"})); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := RemoveEntries(path, []int{4, 2})
+	if err != nil || !slices.Equal(removed, []string{"two", "four"}) {
+		t.Fatalf("removed = %v, %v", removed, err)
+	}
+	entries, err := ReadEntries(path)
+	if err != nil || !slices.Equal(entries, []string{"one", "three"}) {
+		t.Fatalf("entries = %v, %v", entries, err)
+	}
+
+	if _, err := RemoveEntries(path, []int{9}); err == nil {
+		t.Fatal("unknown id must fail")
+	}
+	entries, _ = ReadEntries(path)
+	if !slices.Equal(entries, []string{"one", "three"}) {
+		t.Fatalf("unknown id changed the file: %v", entries)
+	}
+}
+
 func TestUpdateConcurrent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents", "a", "MEMORY.md")
 	var wg sync.WaitGroup

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 )
 
 // agentFileBodyLimit is the largest accepted PUT /v1/agents/{name}/files/{file}
-// body. It leaves room for the 4,000 character memory limit in any encoding.
+// body. It leaves room for the 8,000 character memory limit in any encoding.
 const agentFileBodyLimit = 64 << 10
 
 // AgentFileStore supplies the home directory and the configured agent names.
@@ -101,12 +102,6 @@ func (s *Server) handlePutAgentFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	characters := utf8.RuneCountInString(body.Content)
-	if target.limit != nil && characters > *target.limit {
-		writeAPIErrorDetails(w, http.StatusUnprocessableEntity, "over_limit", "file is over its limit", []map[string]any{
-			{"file": target.name, "characters": characters, "limit": *target.limit},
-		})
-		return
-	}
 
 	configWriteMu.Lock()
 	defer configWriteMu.Unlock()
@@ -116,6 +111,21 @@ func (s *Server) handlePutAgentFile(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("web: read agent file before save", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
+	}
+	if target.limit != nil && characters > *target.limit {
+		// REQ-DKN-040, API-DKN-009: MEMORY.md accepts a body over the limit
+		// when it does not grow the file; the other files refuse it outright.
+		if target.memory {
+			if characters > utf8.RuneCountInString(string(current)) {
+				writeAPIError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("%s is %d/%d characters", target.name, characters, *target.limit))
+				return
+			}
+		} else {
+			writeAPIErrorDetails(w, http.StatusUnprocessableEntity, "over_limit", "file is over its limit", []map[string]any{
+				{"file": target.name, "characters": characters, "limit": *target.limit},
+			})
+			return
+		}
 	}
 	version := fileVersion(current)
 	if body.ExpectedVersion != version {
@@ -145,6 +155,9 @@ type agentFileRef struct {
 	name  string
 	path  string
 	limit *int
+	// memory marks MEMORY.md, whose limit only refuses a growing file
+	// (REQ-DKN-040, API-DKN-009).
+	memory bool
 }
 
 func agentFileTarget(store AgentFileStore, name, file string) (agentFileRef, bool) {
@@ -160,7 +173,7 @@ func agentFileTarget(store AgentFileStore, name, file string) (agentFileRef, boo
 		return agentFileRef{name: "USER.md", path: agenthome.SharedUser(store.SettingsHome()), limit: &limit}, true
 	case "memory":
 		limit := agenthome.MemoryLimit
-		return agentFileRef{name: "MEMORY.md", path: home.Memory, limit: &limit}, true
+		return agentFileRef{name: "MEMORY.md", path: home.Memory, limit: &limit, memory: true}, true
 	case "job":
 		// JOB.md is the agent job description (REQ-ROOM-009, API-ROOM-007).
 		limit := agenthome.JobLimit

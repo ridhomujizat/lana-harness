@@ -1,6 +1,7 @@
 package agenthome
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -212,5 +213,126 @@ func TestContextBlockTruncatesReason(t *testing.T) {
 	got := ContextBlock(PromptInput{Agent: "a", UnavailableMCP: map[string]string{"x": reason}})
 	if want := "unavailable MCP servers: x (" + strings.Repeat("é", 80) + ")"; !strings.Contains(got, want) {
 		t.Fatalf("context = %q, want %q", got, want)
+	}
+}
+
+// REQ-DKN-050: a proposal stores a SKILL.md like WriteSkill writes plus a
+// proposal.json; a second proposal for the same name replaces the pending one;
+// the list is newest first and reports whether the agent already has the skill.
+func TestProposeSkillAndList(t *testing.T) {
+	home := t.TempDir()
+	if _, err := WriteSkill(home, "dev", "existing", "Existing skill.", "Body."); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProposeSkill(home, "dev", "payroll-check", "Check payroll.", "1. Do it.", SkillProposalMeta{SessionID: "s1", OwnerTurn: true, CreatedAt: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ProposeSkill(home, "dev", "existing", "Update it.", "New body.", SkillProposalMeta{SessionID: "s2", CreatedAt: 300}); err != nil {
+		t.Fatal(err)
+	}
+
+	proposals, err := SkillProposals(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposals) != 2 {
+		t.Fatalf("proposals = %+v", proposals)
+	}
+	if proposals[0].Name != "existing" || proposals[0].CreatedAt != 300 || proposals[0].Agent != "dev" || !proposals[0].Exists {
+		t.Fatalf("first = %+v", proposals[0])
+	}
+	if proposals[1].Name != "payroll-check" || proposals[1].SessionID != "s1" || !proposals[1].OwnerTurn || proposals[1].Exists {
+		t.Fatalf("second = %+v", proposals[1])
+	}
+
+	// A second proposal with the same name replaces the pending one.
+	if err := ProposeSkill(home, "dev", "payroll-check", "Check payroll again.", "1. Better.", SkillProposalMeta{SessionID: "s3", CreatedAt: 400}); err != nil {
+		t.Fatal(err)
+	}
+	proposals, err = SkillProposals(home)
+	if err != nil || len(proposals) != 2 {
+		t.Fatalf("after replace = %+v, %v", proposals, err)
+	}
+	if proposals[0].Name != "payroll-check" || proposals[0].Description != "Check payroll again." {
+		t.Fatalf("replaced first = %+v", proposals[0])
+	}
+}
+
+// REQ-DKN-050: ProposeSkill validates like WriteSkill and refuses a bad agent.
+func TestProposeSkillValidation(t *testing.T) {
+	home := t.TempDir()
+	tests := []struct {
+		agent string
+		name  string
+		desc  string
+		body  string
+		want  string
+	}{
+		{"dev", "Bad", "d", "b", `invalid name "Bad"`},
+		{"dev", "ok", "one\nline", "b", "description must be one line"},
+		{"dev", "ok", "d", "   ", "body is required"},
+		{"dev", "ok", "d", strings.Repeat("x", 20001), "body is longer than 20000 characters"},
+		{"Bad_Name", "ok", "d", "b", `invalid agent name`},
+	}
+	for _, tc := range tests {
+		err := ProposeSkill(home, tc.agent, tc.name, tc.desc, tc.body, SkillProposalMeta{})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s/%s: err = %v, want %q", tc.agent, tc.name, err, tc.want)
+		}
+	}
+}
+
+// REQ-DKN-051: approve writes the skill and removes the proposal; reject drops
+// the proposal; a missing proposal is an os.ErrNotExist error.
+func TestApproveAndRejectSkill(t *testing.T) {
+	home := t.TempDir()
+	if err := ProposeSkill(home, "dev", "payroll-check", "Check payroll.", "1. Do it.", SkillProposalMeta{SessionID: "s1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApproveSkill(home, "dev", "payroll-check"); err != nil {
+		t.Fatal(err)
+	}
+	skill, err := ParseSkill(filepath.Join(AgentSkillsDir(home, "dev"), "payroll-check"))
+	if err != nil || skill.Description != "Check payroll." || skill.Body != "1. Do it." {
+		t.Fatalf("approved skill = %+v, %v", skill, err)
+	}
+	if _, err := os.Stat(proposeDir(home, "dev", "payroll-check")); !os.IsNotExist(err) {
+		t.Fatalf("proposal folder still exists: %v", err)
+	}
+	if err := ApproveSkill(home, "dev", "payroll-check"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("second approve err = %v, want not exist", err)
+	}
+
+	if err := ProposeSkill(home, "dev", "disk-cleanup", "Free space.", "Body.", SkillProposalMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RejectSkill(home, "dev", "disk-cleanup"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(AgentSkillsDir(home, "dev"), "disk-cleanup")); !os.IsNotExist(err) {
+		t.Fatalf("rejected skill was written: %v", err)
+	}
+	if _, err := os.Stat(proposeDir(home, "dev", "disk-cleanup")); !os.IsNotExist(err) {
+		t.Fatalf("proposal folder still exists: %v", err)
+	}
+	if err := RejectSkill(home, "dev", "disk-cleanup"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("second reject err = %v, want not exist", err)
+	}
+}
+
+// REQ-DKN-051: skill_load and the prompt never see a proposed skill.
+func TestVisibleSkillsSkipsProposals(t *testing.T) {
+	home := t.TempDir()
+	writeNamedSkill(t, AgentSkillsDir(home, "dev"), "kept", "Kept skill.")
+	if err := ProposeSkill(home, "dev", "payroll-check", "Check payroll.", "Body.", SkillProposalMeta{}); err != nil {
+		t.Fatal(err)
+	}
+
+	skills, invalid := VisibleSkills(home, "dev", []string{"kept", "payroll-check"})
+	if len(invalid) != 0 {
+		t.Fatalf("invalid = %#v", invalid)
+	}
+	if len(skills) != 1 || skills[0].Name != "kept" {
+		t.Fatalf("skills = %#v, want kept only", skills)
 	}
 }
