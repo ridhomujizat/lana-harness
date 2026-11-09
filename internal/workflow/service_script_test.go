@@ -8,8 +8,11 @@ package workflow
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ridhomujizat/lana-harness/internal/scriptrt"
 )
 
 // testScriptNode builds a script_parse node with the given params.
@@ -448,6 +451,119 @@ func TestServiceConvertNodeInfeasible(t *testing.T) {
 	}
 	if res.Feasible || res.Node != nil || res.Reason != "real summarization" {
 		t.Fatalf("result=%+v", res)
+	}
+}
+
+// convertBrokenScript is a guardian script that does not compile: the markdown
+// link regex has an unterminated group, so scriptrt.Compile rejects it.
+const convertBrokenScript = `function parse(input, ctx) { var m = /^##\s+\[([^\]]+)\]\(\/([^\/)\s]+)\/([^\/)\s]+\)\s*$/.exec(input); return {title: m ? m[1] : ''}; }`
+
+// API-SP-004, REQ-SP-017: a first script that does not compile is retried once
+// with the compile problem carried in the prompt; the second, valid script is
+// accepted.
+func TestServiceConvertNodeRetriesCompileError(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	const validScript = `function parse(input, ctx) { return {title: 'hello'}; }`
+	deps.replies = []fakeReply{
+		{agent: "g", contains: "Problems with the previous attempt",
+			text: compactJSON(map[string]any{
+				"feasible":      true,
+				"script":        validScript,
+				"goal":          "extract the title",
+				"input":         "{{ input.text }}",
+				"output_schema": map[string]any{"title": "string"},
+			}), tokens: 6},
+		{agent: "g", contains: "This replaces an agent step",
+			text: compactJSON(map[string]any{
+				"feasible":      true,
+				"script":        convertBrokenScript,
+				"goal":          "extract the title",
+				"input":         "{{ input.text }}",
+				"output_schema": map[string]any{"title": "string"},
+			}), tokens: 4},
+	}
+	params := map[string]any{"prompt": "Summarize {{ input.text }}", "output_schema": map[string]any{"title": "string"}}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, convertGraph(params))
+	svc := newTestService(t, st, deps, &testClock{t: time.Now()})
+	ctx := context.Background()
+	run := seedRunAt(t, st, wf, "manual", RunSucceeded, svc.now().UnixMilli(), map[string]any{"text": "hi"})
+	putServiceNodeRun(t, st, run, "write", NodeSucceeded, "", 1000,
+		map[string]any{"prompt": "Summarize hi"}, map[string]any{"title": "hello"})
+
+	res, err := svc.ConvertNode(ctx, "w", "write")
+	if err != nil {
+		t.Fatalf("ConvertNode: %v", err)
+	}
+	if !res.Feasible || res.Node == nil {
+		t.Fatalf("result=%+v", res)
+	}
+	if got := paramString(res.Node.Params, "script"); got != validScript {
+		t.Fatalf("script=%q want the valid script", got)
+	}
+	if got := guardianCallCount(deps); got != 2 {
+		t.Fatalf("guardian calls=%d want 2", got)
+	}
+	if res.Tokens != 10 {
+		t.Fatalf("tokens=%d want 10", res.Tokens)
+	}
+	_, cerr := scriptrt.Compile(convertBrokenScript)
+	if cerr == nil {
+		t.Fatal("fixture script must not compile")
+	}
+	deps.mu.Lock()
+	calls := append([]AgentRequest(nil), deps.agentCalls...)
+	deps.mu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("agent calls=%d want 2", len(calls))
+	}
+	if !strings.Contains(calls[1].Prompt, "Problems with the previous attempt") ||
+		!strings.Contains(calls[1].Prompt, DriftScript) ||
+		!strings.Contains(calls[1].Prompt, cerr.Error()) {
+		t.Fatalf("second prompt does not carry the compile problem:\n%s", calls[1].Prompt)
+	}
+}
+
+// API-SP-004, REQ-SP-017: a script that still does not compile on the retry makes
+// the conversion infeasible, with the compile problem as the reason and no node.
+func TestServiceConvertNodeCompileFailsTwice(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "g", contains: "Problems with the previous attempt",
+			text: compactJSON(map[string]any{"feasible": true, "script": convertBrokenScript}), tokens: 4},
+		{agent: "g", contains: "This replaces an agent step",
+			text: compactJSON(map[string]any{"feasible": true, "script": convertBrokenScript}), tokens: 6},
+	}
+	params := map[string]any{"prompt": "Summarize {{ input.text }}"}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, convertGraph(params))
+	svc := newTestService(t, st, deps, &testClock{t: time.Now()})
+	ctx := context.Background()
+	run := seedRunAt(t, st, wf, "manual", RunSucceeded, svc.now().UnixMilli(), map[string]any{"text": "hi"})
+	putServiceNodeRun(t, st, run, "write", NodeSucceeded, "", 100, map[string]any{"prompt": "Summarize hi"}, map[string]any{"text": "hi"})
+
+	res, err := svc.ConvertNode(ctx, "w", "write")
+	if err != nil {
+		t.Fatalf("ConvertNode: %v", err)
+	}
+	if res.Feasible || res.Node != nil {
+		t.Fatalf("result=%+v want infeasible with no node", res)
+	}
+	_, cerr := scriptrt.Compile(convertBrokenScript)
+	if cerr == nil {
+		t.Fatal("fixture script must not compile")
+	}
+	if !strings.Contains(res.Reason, DriftScript) || !strings.Contains(res.Reason, cerr.Error()) {
+		t.Fatalf("reason=%q want the compile problem", res.Reason)
+	}
+	if got := guardianCallCount(deps); got != 2 {
+		t.Fatalf("guardian calls=%d want 2", got)
+	}
+	if res.Checks == nil || len(res.Checks) != 0 {
+		t.Fatalf("checks=%+v want empty and non-nil", res.Checks)
+	}
+	if res.Tokens != 10 {
+		t.Fatalf("tokens=%d want 10", res.Tokens)
 	}
 }
 

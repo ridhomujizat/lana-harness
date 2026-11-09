@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 /* Spec #44 web acceptance (REQ-SP-021): the Script tab tests and generates on
@@ -213,6 +213,24 @@ describe("Convert", () => {
     wrap(<ConvertDialog workflowId="wf" node={agentNode} onReplace={() => undefined} onClose={() => undefined} />);
     expect(await screen.findByText("Summaries need judgment.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Replace node" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows a loading state with an elapsed timer while the guardian writes", () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(convertNode).mockReturnValue(new Promise(() => undefined));
+      wrap(<ConvertDialog workflowId="wf" node={agentNode} onReplace={() => undefined} onClose={() => undefined} />);
+      const status = screen.getByRole("status");
+      expect(status.textContent).toContain("The guardian is writing a script");
+      expect(status.textContent).toContain("0s");
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(status.textContent).toContain("3s");
+      expect((screen.getByRole("button", { name: "Replace node" }) as HTMLButtonElement).disabled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("banner offers convert and dismiss", () => {
