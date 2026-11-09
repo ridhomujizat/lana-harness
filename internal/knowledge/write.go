@@ -19,14 +19,18 @@ var knowledgeTypes = []string{"person", "project", "organization", "place", "top
 
 // logVerbs maps an effective action to its log bullet verb (REQ-KNW-004).
 var logVerbs = map[string]string{
-	"create":  "created",
-	"append":  "appended to",
-	"replace": "replaced text in",
-	"meta":    "updated details of",
+	"create":    "created",
+	"append":    "appended to",
+	"replace":   "replaced text in",
+	"meta":      "updated details of",
+	"supersede": "superseded",
 }
 
-// Op is one page change. Action is one of create, append, replace, meta.
-// Sources are wikilink strings such as [[sources/2026-11-01 Rapat.pdf]].
+// Op is one page change. Action is one of create, append, replace, meta,
+// supersede. Scope selects the page folder: "" or "shared" is the shared wiki,
+// an agent name is agents/<name>/wiki (design §1). Source is the wikilink title
+// a supersede change cites. Sources are wikilink strings such as
+// [[sources/2026-11-01 Rapat.pdf]].
 type Op struct {
 	Action      string
 	Title       string
@@ -37,6 +41,8 @@ type Op struct {
 	Heading     string
 	OldText     string
 	NewText     string
+	Scope       string
+	Source      string
 	Aliases     []string
 	Tags        []string
 	Sources     []string
@@ -60,6 +66,9 @@ func (v *Vault) Apply(op Op, actor string) (Result, error) {
 	if !validAction(op.Action) {
 		return Result{}, fmt.Errorf("unknown action %q", op.Action)
 	}
+	if op.Scope != "" && op.Scope != ScopeShared && !ValidScopeName(op.Scope) {
+		return Result{}, fmt.Errorf("invalid scope %q", op.Scope)
+	}
 	if secretMismatch(op.Body, op.Text, op.NewText, op.Description) {
 		return Result{}, errors.New("content looks like a secret; not saved")
 	}
@@ -69,6 +78,12 @@ func (v *Vault) Apply(op Op, actor string) (Result, error) {
 		return Result{}, err
 	}
 	defer unlock()
+
+	if scope := op.Scope; scope != "" && scope != ScopeShared {
+		if err := os.MkdirAll(filepath.Join(v.root, filepath.FromSlash(WikiDir(scope))), 0o700); err != nil {
+			return Result{}, err
+		}
+	}
 
 	rel, action, op, err := v.resolveTarget(op)
 	if err != nil {
@@ -87,6 +102,11 @@ func (v *Vault) Apply(op Op, actor string) (Result, error) {
 	if err := v.regenerateIndex(); err != nil {
 		return Result{}, err
 	}
+	if op.Scope != "" && op.Scope != ScopeShared {
+		if err := v.regenerateDomainIndex(op.Scope); err != nil {
+			return Result{}, err
+		}
+	}
 	if err := v.appendLog(actor, action, rel, op); err != nil {
 		return Result{}, err
 	}
@@ -97,7 +117,7 @@ func (v *Vault) Apply(op Op, actor string) (Result, error) {
 // whose title or alias names an existing page appends its body instead
 // (REQ-KNW-011).
 func (v *Vault) resolveTarget(op Op) (string, string, Op, error) {
-	page, found, err := v.FindPage(op.Title)
+	page, found, err := v.FindPageIn(op.Scope, op.Title)
 	if err != nil {
 		return "", "", op, err
 	}
@@ -114,7 +134,7 @@ func (v *Vault) resolveTarget(op Op) (string, string, Op, error) {
 		if !validType(op.Type) {
 			return "", "", op, fmt.Errorf("type %q must be one of %s", op.Type, strings.Join(knowledgeTypes, ", "))
 		}
-		rel := path.Join(wikiDir, op.Title+".md")
+		rel := path.Join(WikiDir(op.Scope), op.Title+".md")
 		_, statErr := os.Stat(filepath.Join(v.root, filepath.FromSlash(rel)))
 		switch {
 		case statErr == nil:
@@ -230,6 +250,12 @@ func renderPage(page Page, action string, op Op, today string) (string, error) {
 		body = appendText(body, op.Heading, op.Text)
 	case "replace":
 		next, err := replaceText(body, page.Title, op.OldText, op.NewText)
+		if err != nil {
+			return "", err
+		}
+		body = next
+	case "supersede":
+		next, err := supersedeText(body, page.Title, op.OldText, op.NewText, op.Source, today)
 		if err != nil {
 			return "", err
 		}
@@ -382,6 +408,31 @@ func replaceText(body, title, old, replacement string) (string, error) {
 	return strings.Replace(body, old, replacement, 1), nil
 }
 
+// supersedeText replaces the single occurrence of old in body with the struck
+// and dated form that keeps the old fact and adds the new one (REQ-DKN-025):
+// "~~<old>~~ *(until <date>)* <new> *(since <date>)*", plus ", [[source]]"
+// inside the since note when source is set.
+func supersedeText(body, title, old, new, source, date string) (string, error) {
+	if strings.Contains(old, "\n") {
+		return "", errors.New("old_text must be one line")
+	}
+	if old == "" {
+		return "", errors.New("old_text is required")
+	}
+	switch n := strings.Count(body, old); {
+	case n == 0:
+		return "", fmt.Errorf("no text in %s matches old_text", title)
+	case n > 1:
+		return "", fmt.Errorf("old_text matches %d places; use more specific text", n)
+	}
+	since := date
+	if source != "" {
+		since = fmt.Sprintf("%s, [[%s]]", date, source)
+	}
+	repl := fmt.Sprintf("~~%s~~ *(until %s)* %s *(since %s)*", old, date, new, since)
+	return strings.Replace(body, old, repl, 1), nil
+}
+
 // parseHeading returns the level and text of a markdown heading line.
 func parseHeading(line string) (int, string, bool) {
 	i := 0
@@ -426,7 +477,7 @@ func mergeStrings(existing, add []string, ci bool) []string {
 // validAction reports whether action is a known page action.
 func validAction(action string) bool {
 	switch action {
-	case "create", "append", "replace", "meta":
+	case "create", "append", "replace", "meta", "supersede":
 		return true
 	}
 	return false
@@ -442,8 +493,10 @@ func validType(typ string) bool {
 	return false
 }
 
-// renderIndex builds the index.md catalog from pages (REQ-KNW-004).
-func renderIndex(pages []Page) string {
+// renderIndex builds the index.md catalog from pages. When domains is set, one
+// trailing Domains line per domain names its index and page count
+// (REQ-KNW-004, REQ-DKN-003).
+func renderIndex(pages []Page, domains []domainCount) string {
 	var b strings.Builder
 	b.WriteString(indexHeader)
 	for _, section := range indexSections {
@@ -471,6 +524,12 @@ func renderIndex(pages []Page) string {
 			} else {
 				fmt.Fprintf(&b, "- [[%s]]\n", p.Title)
 			}
+		}
+	}
+	if len(domains) > 0 {
+		b.WriteString("\n## Domains\n")
+		for _, d := range domains {
+			fmt.Fprintf(&b, "- [[agents/%s/index|%s]] — %d pages\n", d.name, d.name, d.count)
 		}
 	}
 	return b.String()
@@ -515,7 +574,11 @@ func logEntry(now time.Time, actor, action, rel string, op Op) string {
 	if verb == "" {
 		verb = action
 	}
-	fmt.Fprintf(&b, "- %s [[%s]]\n", verb, titleOf(rel))
+	scope := ""
+	if op.Scope != "" && op.Scope != ScopeShared {
+		scope = " (" + op.Scope + ")"
+	}
+	fmt.Fprintf(&b, "- %s [[%s]]%s\n", verb, titleOf(rel), scope)
 	for _, s := range op.Sources {
 		fmt.Fprintf(&b, "- from %s\n", s)
 	}

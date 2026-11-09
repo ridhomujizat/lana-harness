@@ -268,3 +268,136 @@ func TestAppendTextSkipsDuplicateBlocks(t *testing.T) {
 		t.Fatalf("all-duplicate append changed the body: %q", all)
 	}
 }
+
+// REQ-DKN-002: a domain create lands under agents/<name>/wiki and a later append
+// finds it there; the shared wiki does not see it.
+func TestDomainCreateThenAppend(t *testing.T) {
+	v, _ := newVault(t)
+	res, err := v.Apply(Op{Action: "create", Scope: "dana", Title: "Sop", Type: "topic", Body: "A"}, "test")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if res.Op != "create" || res.Path != "agents/dana/wiki/Sop.md" {
+		t.Fatalf("Result = %+v, want a create at agents/dana/wiki/Sop.md", res)
+	}
+	res, err = v.Apply(Op{Action: "append", Scope: "dana", Title: "Sop", Text: "B"}, "test")
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if res.Op != "append" || res.Path != "agents/dana/wiki/Sop.md" {
+		t.Fatalf("Result = %+v, want an append to the domain page", res)
+	}
+	page, ok, err := v.FindPageIn("dana", "Sop")
+	if err != nil || !ok {
+		t.Fatalf("FindPageIn = %v, %v", ok, err)
+	}
+	if page.Body != "A\n\nB\n" {
+		t.Fatalf("body = %q", page.Body)
+	}
+	if _, ok, _ := v.FindPage("Sop"); ok {
+		t.Fatal("domain page must not be visible in the shared wiki")
+	}
+}
+
+// REQ-DKN-002: the same title may exist in the shared wiki and a domain, each
+// with its own file.
+func TestSameTitleSharedAndDomain(t *testing.T) {
+	v, _ := newVault(t)
+	if _, err := v.Apply(Op{Action: "create", Title: "Gaji", Type: "topic", Body: "shared"}, "test"); err != nil {
+		t.Fatalf("create shared: %v", err)
+	}
+	res, err := v.Apply(Op{Action: "create", Scope: "dana", Title: "Gaji", Type: "topic", Body: "domain"}, "test")
+	if err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+	if res.Op != "create" || res.Path != "agents/dana/wiki/Gaji.md" {
+		t.Fatalf("Result = %+v, want a second page in the domain", res)
+	}
+	if got := mustFind(t, v, "Gaji").Body; got != "shared\n" {
+		t.Fatalf("shared body = %q", got)
+	}
+	page, ok, err := v.FindPageIn("dana", "Gaji")
+	if err != nil || !ok {
+		t.Fatalf("FindPageIn = %v, %v", ok, err)
+	}
+	if page.Body != "domain\n" {
+		t.Fatalf("domain body = %q", page.Body)
+	}
+}
+
+func TestInvalidScopeRefused(t *testing.T) {
+	v, _ := newVault(t)
+	for _, scope := range []string{"Dana", "1dana", "da na"} {
+		if _, err := v.Apply(Op{Action: "create", Scope: scope, Title: "X", Type: "topic", Body: "b"}, "test"); err == nil {
+			t.Errorf("scope %q should be refused", scope)
+		}
+	}
+}
+
+// REQ-DKN-025: supersede keeps the old text struck through and dated, then adds
+// the new text with its own date; updated frontmatter moves too.
+func TestSupersede(t *testing.T) {
+	v, _ := newVault(t)
+	createPage(t, v, "Lisensi", "topic", "Harga lisensi 100.")
+	if _, err := v.Apply(Op{
+		Action:  "supersede",
+		Title:   "Lisensi",
+		OldText: "Harga lisensi 100.",
+		NewText: "Harga lisensi 120.",
+	}, "test"); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	want := "~~Harga lisensi 100.~~ *(until 2026-11-01)* Harga lisensi 120. *(since 2026-11-01)*\n"
+	page := mustFind(t, v, "Lisensi")
+	if page.Body != want {
+		t.Fatalf("body = %q, want %q", page.Body, want)
+	}
+	if page.Meta.Updated != "2026-11-01" {
+		t.Fatalf("updated = %q, want 2026-11-01", page.Meta.Updated)
+	}
+}
+
+func TestSupersedeWithSource(t *testing.T) {
+	v, _ := newVault(t)
+	createPage(t, v, "Lisensi", "topic", "Harga lisensi 100.")
+	if _, err := v.Apply(Op{
+		Action:  "supersede",
+		Title:   "Lisensi",
+		OldText: "Harga lisensi 100.",
+		NewText: "Harga lisensi 120.",
+		Source:  "Rapat 2026-11-01",
+	}, "test"); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	want := "~~Harga lisensi 100.~~ *(until 2026-11-01)* Harga lisensi 120. *(since 2026-11-01, [[Rapat 2026-11-01]])*\n"
+	if got := mustFind(t, v, "Lisensi").Body; got != want {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
+func TestSupersedeMultilineOldText(t *testing.T) {
+	v, _ := newVault(t)
+	createPage(t, v, "Lisensi", "topic", "Baris satu.\nBaris dua.")
+	_, err := v.Apply(Op{Action: "supersede", Title: "Lisensi", OldText: "Baris satu.\nBaris dua.", NewText: "x"}, "test")
+	if err == nil || err.Error() != "old_text must be one line" {
+		t.Fatalf("err = %v, want the one-line error", err)
+	}
+}
+
+func TestSupersedeAmbiguous(t *testing.T) {
+	v, _ := newVault(t)
+	createPage(t, v, "Lisensi", "topic", "alpha beta alpha.")
+	_, err := v.Apply(Op{Action: "supersede", Title: "Lisensi", OldText: "alpha", NewText: "x"}, "test")
+	if err == nil || err.Error() != "old_text matches 2 places; use more specific text" {
+		t.Fatalf("err = %v, want the ambiguous error", err)
+	}
+}
+
+func TestSupersedeNoMatch(t *testing.T) {
+	v, _ := newVault(t)
+	createPage(t, v, "Lisensi", "topic", "Harga lisensi 100.")
+	_, err := v.Apply(Op{Action: "supersede", Title: "Lisensi", OldText: "tidak ada", NewText: "x"}, "test")
+	if err == nil || err.Error() != "no text in Lisensi matches old_text" {
+		t.Fatalf("err = %v, want the no-match error", err)
+	}
+}

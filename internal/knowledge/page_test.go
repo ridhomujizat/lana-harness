@@ -144,3 +144,27 @@ func TestValidTitle(t *testing.T) {
 		}
 	}
 }
+
+// REQ-DKN-002: FindPageIn resolves a title (or alias) inside one scope only;
+// FindPage stays the shared wiki.
+func TestFindPageInScope(t *testing.T) {
+	v, _ := newVault(t)
+	if _, err := v.Apply(Op{Action: "create", Title: "Gaji", Type: "topic", Body: "shared", Aliases: []string{"Upah"}}, "test"); err != nil {
+		t.Fatalf("create shared: %v", err)
+	}
+	if _, err := v.Apply(Op{Action: "create", Scope: "dana", Title: "Gaji", Type: "topic", Body: "domain"}, "test"); err != nil {
+		t.Fatalf("create domain: %v", err)
+	}
+	if p, ok, err := v.FindPageIn("dana", "Gaji"); err != nil || !ok || p.Body != "domain\n" {
+		t.Fatalf("FindPageIn(dana, Gaji) = %+v, %v, %v", p, ok, err)
+	}
+	if p, ok, err := v.FindPage("Gaji"); err != nil || !ok || p.Body != "shared\n" {
+		t.Fatalf("FindPage(Gaji) = %+v, %v, %v", p, ok, err)
+	}
+	if _, ok, err := v.FindPageIn("dana", "Upah"); err != nil || ok {
+		t.Fatalf("FindPageIn(dana, Upah) = %v, %v, want not found", ok, err)
+	}
+	if _, ok, err := v.FindPage("Upah"); err != nil || !ok {
+		t.Fatalf("FindPage(Upah) = %v, %v, want found", ok, err)
+	}
+}

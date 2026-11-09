@@ -78,15 +78,20 @@ func ValidTitle(title string) error {
 	return nil
 }
 
-// FindPage matches title against page file names under wiki/ recursively and
-// against frontmatter aliases, both case-insensitive (REQ-KNW-011). The second
-// return value reports whether a page was found.
+// FindPage matches title against the shared wiki pages (REQ-KNW-011).
 func (v *Vault) FindPage(title string) (Page, bool, error) {
+	return v.FindPageIn(ScopeShared, title)
+}
+
+// FindPageIn matches title against page file names under the wiki folder of
+// scope and against frontmatter aliases, both case-insensitive (REQ-KNW-011,
+// REQ-DKN-002). The second return value reports whether a page was found.
+func (v *Vault) FindPageIn(scope, title string) (Page, bool, error) {
 	target := strings.ToLower(strings.TrimSpace(title))
 	if target == "" {
 		return Page{}, false, nil
 	}
-	pages, err := v.wikiPages()
+	pages, err := v.wikiPages(scope)
 	if err != nil {
 		return Page{}, false, err
 	}
