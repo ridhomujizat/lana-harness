@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -408,5 +409,59 @@ func TestParseScriptReplyCases(t *testing.T) {
 		if tc.wantSchema != nil && compactJSON(got.OutputSchema) != compactJSON(tc.wantSchema) {
 			t.Fatalf("%s: OutputSchema = %v, want %v", tc.name, got.OutputSchema, tc.wantSchema)
 		}
+	}
+}
+
+// TestParseScriptReplyRules covers the optional rules object of a generation
+// reply (REQ-DG-006): a string value is taken as is and an array of strings is
+// joined by spaces, while any other value type is ignored.
+func TestParseScriptReplyRules(t *testing.T) {
+	got, err := ParseScriptReply(`{"feasible":true,"script":"var x = 1;","rules":{"f":">0","g":"min:3 max:5"}}`)
+	if err != nil {
+		t.Fatalf("ParseScriptReply: %v", err)
+	}
+	if want := map[string]string{"f": ">0", "g": "min:3 max:5"}; !reflect.DeepEqual(got.Rules, want) {
+		t.Fatalf("Rules = %v, want %v", got.Rules, want)
+	}
+
+	got, err = ParseScriptReply(`{"feasible":true,"script":"var x = 1;","rules":{"f":[">0","max:5"],"g":7,"h":["url"]}}`)
+	if err != nil {
+		t.Fatalf("ParseScriptReply: %v", err)
+	}
+	if want := map[string]string{"f": ">0 max:5", "h": "url"}; !reflect.DeepEqual(got.Rules, want) {
+		t.Fatalf("Rules = %v, want %v", got.Rules, want)
+	}
+
+	got, err = ParseScriptReply(`{"feasible":true,"script":"var x = 1;"}`)
+	if err != nil {
+		t.Fatalf("ParseScriptReply: %v", err)
+	}
+	if got.Rules != nil {
+		t.Fatalf("Rules = %v, want nil", got.Rules)
+	}
+}
+
+// TestBuildScriptPromptRules covers REQ-DG-006: the generate and convert prompts
+// ask for optional rules and list the vocabulary, while a regeneration, which
+// never changes rules, does not.
+func TestBuildScriptPromptRules(t *testing.T) {
+	generate := BuildScriptPrompt(ScriptPromptInput{Goal: "extract", Schema: map[string]any{"count": "integer"}, Input: "sample"})
+	convert := BuildScriptPrompt(ScriptPromptInput{AgentPrompt: "Summarize {{ input.text }}", Input: "sample"})
+	regenerate := BuildScriptPrompt(ScriptPromptInput{
+		Goal: "extract", Schema: map[string]any{"count": "integer"}, Input: "sample",
+		OldScript: "function parse(input, ctx) { return {count: 1}; }",
+	})
+
+	vocabulary := []string{`"rules"`, `"<field path>"`, `"<tokens>"`, ">0", ">=0", "url", "min:N", "max:N", "Add a rule only when real data can never break it"}
+	for _, want := range vocabulary {
+		if !strings.Contains(generate, want) {
+			t.Fatalf("generate prompt missing %q in:\n%s", want, generate)
+		}
+		if !strings.Contains(convert, want) {
+			t.Fatalf("convert prompt missing %q in:\n%s", want, convert)
+		}
+	}
+	if strings.Contains(regenerate, "Add a rule only when real data can never break it") || strings.Contains(regenerate, `"<field path>"`) {
+		t.Fatalf("regeneration prompt must not ask for rules:\n%s", regenerate)
 	}
 }

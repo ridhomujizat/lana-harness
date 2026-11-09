@@ -165,13 +165,48 @@ function sampleOf(mode: SampleMode, run: string, pasted: string): ScriptSample {
   return {};
 }
 
-function eventLabel(event: Decision): string {
+/* Spec #45 drift codes, in owner words. */
+const DRIFT_LABELS: Record<string, string> = {
+  script_error: "script error",
+  schema_drift: "wrong shape",
+  empty_drift: "empty result",
+  item_drift: "wrong item shape",
+  no_script: "no script yet",
+  profile_drift: "values look off",
+  rule_drift: "rule broken",
+  audit_drift: "audit mismatch",
+};
+
+export function driftLabel(code: string): string {
+  return DRIFT_LABELS[code] || code;
+}
+
+export function eventLabel(event: Decision): string {
   const fix = event.fix || {};
-  const drift = typeof fix.drift === "string" ? fix.drift : "";
-  if (event.action === "script_update") {
-    return "Script updated to rev " + String(fix.rev_to ?? "?") + (drift ? " · " + drift : "");
+  const drift = typeof fix.drift === "string" ? driftLabel(fix.drift) : "";
+  switch (event.action) {
+    case "script_update":
+      return "Script updated to rev " + String(fix.rev_to ?? "?") + (drift ? " · " + drift : "");
+    case "profile_accept":
+      return "Data changed, script confirmed";
+    case "rule_drop":
+      return "Rule dropped: real data broke it";
+    default:
+      return "Agent fallback" + (drift ? " · " + drift : "");
   }
-  return "Agent fallback" + (drift ? " · " + drift : "");
+}
+
+function eventIcon(action: string): string {
+  switch (action) {
+    case "script_update":
+      return "refresh-cw";
+    case "profile_accept":
+      return "check";
+    case "rule_drop":
+      return "eraser";
+    default:
+      return "sparkles";
+  }
 }
 
 function StatsCard({ stat }: { stat?: ScriptStat }) {
@@ -192,6 +227,12 @@ function StatsCard({ stat }: { stat?: ScriptStat }) {
         <b>{tokens(stat.tokens_saved)}</b>
         <span className="muted">tokens saved</span>
       </div>
+      {stat.audit_runs ? (
+        <div>
+          <b>{stat.audit_runs}</b>
+          <span className="muted">audits</span>
+        </div>
+      ) : null}
       <div>
         <b>{stat.last_update ? ago(stat.last_update) : "—"}</b>
         <span className="muted">last update</span>
@@ -248,6 +289,27 @@ export function ScriptTab({
     });
   };
 
+  /* Generate may return the schemas with the guardian's rules (spec #45). */
+  const applyGenerated = (result: ScriptGenerateResult) => {
+    const params: Record<string, unknown> = {
+      ...node.params,
+      script: result.script,
+      script_rev: savedRev + 1,
+    };
+    if (result.output_schema) params.output_schema = result.output_schema;
+    if (result.item_schema) params.item_schema = result.item_schema;
+    onChange({ ...node, params });
+  };
+
+  const auditEvery = Number(node.params.audit_every) || 0;
+  const setAuditEvery = (raw: string) => {
+    const n = Math.max(0, Math.min(1000, Math.floor(Number(raw) || 0)));
+    const params: Record<string, unknown> = { ...node.params };
+    if (n > 0) params.audit_every = n;
+    else delete params.audit_every;
+    onChange({ ...node, params });
+  };
+
   const runTest = async () => {
     setBusy("test");
     setError("");
@@ -302,6 +364,21 @@ export function ScriptTab({
           value={script}
           placeholder={"function parse(input, ctx) {\n  return { items: [] };\n}"}
           onChange={(event) => setScript(event.target.value)}
+        />
+      </Field>
+      <Field
+        label="Audit every N runs"
+        hint="0 = off. Each audit also runs the agent fallback (one fallback of tokens) to catch wrong values that still look valid."
+        htmlFor={"wf-audit-" + node.id}
+      >
+        <Input
+          id={"wf-audit-" + node.id}
+          type="number"
+          min={0}
+          max={1000}
+          inputMode="numeric"
+          value={auditEvery ? String(auditEvery) : "0"}
+          onChange={(event) => setAuditEvery(event.target.value)}
         />
       </Field>
       <SamplePicker
@@ -379,7 +456,7 @@ export function ScriptTab({
                 variant="primary"
                 icon="check"
                 onClick={() => {
-                  setScript(generated.script);
+                  applyGenerated(generated);
                   setGenerated(null);
                 }}
               >
@@ -394,7 +471,7 @@ export function ScriptTab({
         <ul className="wf-script-events">
           {stat.events.map((event) => (
             <li key={event.id}>
-              <Ic name={event.action === "script_update" ? "refresh-cw" : "sparkles"} size={14} />
+              <Ic name={eventIcon(event.action)} size={14} />
               <div className="wf-script-ev-b">
                 <span>{eventLabel(event)}</span>
                 <span className="muted">

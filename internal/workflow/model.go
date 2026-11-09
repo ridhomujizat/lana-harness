@@ -46,10 +46,11 @@ const (
 	NodeFallback  NodeStatus = "fallback"
 )
 
-// Node run via values (spec #44, REQ-SP-019).
+// Node run via values (spec #44, REQ-SP-019; spec #45, REQ-DG-007).
 const (
 	ViaScript   = "script"
 	ViaFallback = "fallback"
+	ViaAudit    = "audit"
 )
 
 // Sentinel errors returned by the store and the service.

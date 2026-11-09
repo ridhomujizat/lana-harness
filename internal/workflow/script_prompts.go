@@ -54,6 +54,16 @@ const scriptReplyContract = `Reply with ONE JSON object only: {"feasible": true|
 // input template and the output schema.
 const scriptConvertReplyContract = `Reply with ONE JSON object only: {"feasible": true|false, "reason": "...", "script": "<JavaScript source>", "goal": "<goal>", "input": "<template>", "output_schema": {"text": "string"}}`
 
+// scriptRulesGuidance asks for the optional schema rules of REQ-DG-006 and lists
+// the rule vocabulary. It is added to the generate and convert prompts only: a
+// regeneration never changes rules.
+const scriptRulesGuidance = `Rules (optional):
+In the reply you may add "rules": {"<field path>": "<tokens>"} to mark a field value that can never break the rule on real data.
+A field path is "f" for an output_schema field, or "f.k" for item_schema field k of the array field f.
+Tokens: >0 and >=0 (integer or number), url (string, an http(s) URL), min:N and max:N (string length, number value or array length).
+Add a rule only when real data can never break it (for example stars today >0 on a trending list, a url field); leave rules out when unsure.
+`
+
 // CutText keeps the head and tail bytes of s, cutting on UTF-8 rune boundaries.
 // When s is longer than head+tail it returns the head, a marker naming the total
 // byte count and the kept byte counts, and the tail. A head or tail of zero (or
@@ -330,6 +340,7 @@ type ScriptPromptInput struct {
 // API-SP-008 as the last line.
 func BuildScriptPrompt(in ScriptPromptInput) string {
 	convert := strings.TrimSpace(in.AgentPrompt) != ""
+	regenerating := in.OldScript != "" || in.DriftError != ""
 	var b strings.Builder
 	b.WriteString("You write a deterministic JavaScript parser for a lana workflow step.\n\n")
 
@@ -373,7 +384,7 @@ func BuildScriptPrompt(in ScriptPromptInput) string {
 		b.WriteString("Expected output:\n" + CutText(compactJSON(in.Expected), scriptExpectedMaxBytes, 0) + "\n\n")
 	}
 
-	if in.OldScript != "" || in.DriftError != "" {
+	if regenerating {
 		b.WriteString("Script to repair or replace:\n")
 		if in.OldScript != "" {
 			b.WriteString(in.OldScript + "\n")
@@ -389,6 +400,11 @@ func BuildScriptPrompt(in ScriptPromptInput) string {
 		for _, p := range in.Problems {
 			b.WriteString("- " + p + "\n")
 		}
+		b.WriteString("\n")
+	}
+
+	if !regenerating {
+		b.WriteString(scriptRulesGuidance)
 		b.WriteString("\n")
 	}
 
@@ -415,6 +431,7 @@ type ScriptReply struct {
 	Goal         string
 	Input        string
 	OutputSchema map[string]any
+	Rules        map[string]string
 }
 
 // ParseScriptReply extracts the guardian's generation answer from text with
@@ -444,10 +461,54 @@ func ParseScriptReply(text string) (ScriptReply, error) {
 	if os, ok := m["output_schema"].(map[string]any); ok {
 		reply.OutputSchema = os
 	}
+	if rm, ok := m["rules"].(map[string]any); ok {
+		reply.Rules = scriptRulesFromReply(rm)
+	}
 	if reply.Feasible && strings.TrimSpace(reply.Script) == "" {
 		return ScriptReply{}, errors.New("workflow: script reply is feasible but has no script")
 	}
 	return reply, nil
+}
+
+// scriptRulesFromReply reads the optional rules object of a generation reply
+// (REQ-DG-006). The value of an entry is a field path and one or more tokens: a
+// string is taken as is and an array of strings is joined by single spaces. Any
+// other value type is ignored; an empty result stays nil.
+func scriptRulesFromReply(m map[string]any) map[string]string {
+	var rules map[string]string
+	for path, v := range m {
+		tokens, ok := scriptRuleTokens(v)
+		if !ok {
+			continue
+		}
+		if rules == nil {
+			rules = map[string]string{}
+		}
+		rules[path] = tokens
+	}
+	return rules
+}
+
+// scriptRuleTokens renders one reply rule value: a string as is, an array of
+// strings joined by spaces, and anything else as not usable.
+func scriptRuleTokens(v any) (string, bool) {
+	switch t := v.(type) {
+	case string:
+		return t, true
+	case []any:
+		var toks []string
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				toks = append(toks, s)
+			}
+		}
+		if len(toks) == 0 {
+			return "", false
+		}
+		return strings.Join(toks, " "), true
+	default:
+		return "", false
+	}
 }
 
 // stripScriptFence removes a ```js, ```javascript or bare ``` fence around a

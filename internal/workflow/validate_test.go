@@ -377,6 +377,17 @@ func TestValidateScriptParse(t *testing.T) {
 		{"empty fallback agent", with(map[string]any{"fallback_agent": ""}), agentNo, nil, []string{"unknown_agent"}},
 		{"script braces safe", with(map[string]any{"script": `function parse(input, ctx) { var s = "{{ x }}"; return {a: s}; }`}), agentOK, nil, []string{"bad_template", "bad_script"}},
 		{"input template bad ref", with(map[string]any{"input": "{{ nodes.missing.output }}"}), agentOK, []string{"bad_template"}, []string{"bad_schema", "bad_script"}},
+		{"audit_every absent ok", base(), agentOK, nil, []string{"bad_param"}},
+		{"audit_every zero ok", with(map[string]any{"audit_every": 0}), agentOK, nil, []string{"bad_param"}},
+		{"audit_every max ok", with(map[string]any{"audit_every": 1000}), agentOK, nil, []string{"bad_param"}},
+		{"audit_every too high", with(map[string]any{"audit_every": 1001}), agentOK, []string{"bad_param"}, nil},
+		{"audit_every negative", with(map[string]any{"audit_every": -1}), agentOK, []string{"bad_param"}, nil},
+		{"audit_every fractional", with(map[string]any{"audit_every": 1.5}), agentOK, []string{"bad_param"}, nil},
+		{"audit_every string", with(map[string]any{"audit_every": "5"}), agentOK, []string{"bad_param"}, nil},
+		{"bad rule url on integer", with(map[string]any{"output_schema": map[string]any{"repos": "object[]", "count": "integer url"}}), agentOK, []string{"bad_rule"}, nil},
+		{"bad rule >0 on string", with(map[string]any{"output_schema": map[string]any{"repos": "object[]", "note": "string >0"}}), agentOK, []string{"bad_rule"}, nil},
+		{"bad rule on item field", with(map[string]any{"item_schema": map[string]any{"repos": map[string]any{"stars": "boolean >0"}}}), agentOK, []string{"bad_rule"}, nil},
+		{"good rules ok", with(map[string]any{"output_schema": map[string]any{"repos": "object[] min:1", "count": "integer >0"}}), agentOK, nil, []string{"bad_rule", "bad_schema"}},
 	}
 	for _, tc := range cases {
 		issues := Validate(scriptParseGraph(tc.params), tc.agents)
@@ -399,5 +410,19 @@ func TestValidateScriptParseMissingSchema(t *testing.T) {
 	issues := Validate(scriptParseGraph(map[string]any{"input": "{{ input.url }}", "goal": "g"}), func(string) bool { return true })
 	if len(issues) != 1 || issues[0].Code != "missing_param" || issues[0].NodeID != "s" {
 		t.Fatalf("issues=%+v, want exactly one missing_param on s", issues)
+	}
+}
+
+// TestSpec33TypeStringsUnchanged proves the spec 33 readers still take the
+// first word of a type string, so rule tokens do not change them (REQ-DG-003).
+func TestSpec33TypeStringsUnchanged(t *testing.T) {
+	if got := schemaFieldType("integer >0 x"); got != "integer" {
+		t.Fatalf("schemaFieldType = %q, want %q", got, "integer")
+	}
+	if err := CheckSchema(map[string]any{"count": "integer >0 stars"}, map[string]any{"count": float64(3)}); err != nil {
+		t.Fatalf("CheckSchema with a rule = %v, want nil", err)
+	}
+	if err := CheckSchema(map[string]any{"count": "integer >0 stars"}, map[string]any{"count": float64(0)}); err != nil {
+		t.Fatalf("CheckSchema ignores rule values = %v, want nil", err)
 	}
 }

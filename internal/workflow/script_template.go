@@ -1,6 +1,10 @@
 package workflow
 
-import "github.com/ridhomujizat/lana-harness/internal/scriptrt"
+import (
+	"math"
+
+	"github.com/ridhomujizat/lana-harness/internal/scriptrt"
+)
 
 // TemplateParams returns the params that are rendered as templates (REQ-SP-001,
 // design #44 "Catalog and validation"). For script_parse the "script" param is
@@ -31,11 +35,24 @@ func (v *validator) checkScriptParse(n Node) {
 	}
 	if schema != nil {
 		v.checkScriptItemSchema(n, schema)
+		v.checkScriptRules(n, schema)
 	}
 	v.checkScriptAllowEmpty(n)
 	v.checkScriptSource(n)
 	v.checkScriptDrift(n)
+	v.checkScriptAudit(n)
 	v.checkScriptTimeout(n)
+}
+
+// checkScriptRules reports every rule token written on a type it does not fit
+// (REQ-DG-003, issue bad_rule). It runs only when output_schema is valid; the
+// item schema is read leniently because the item_schema check already reports a
+// bad one.
+func (v *validator) checkScriptRules(n Node, schema map[string]any) {
+	itemSchema := asMapParam(n.Params["item_schema"])
+	for _, problem := range RuleProblems(schema, itemSchema) {
+		v.add(n.ID, "bad_rule", "node %s has a bad rule: %s", nodeLabel(n), problem)
+	}
 }
 
 // checkScriptOutputSchema validates the output_schema of a script_parse node
@@ -148,6 +165,19 @@ func (v *validator) checkScriptDrift(n Node) {
 		}
 	default:
 		v.add(n.ID, "missing_param", "node %s needs param %q to be one of regenerate, fallback_only, fail", nodeLabel(n), "on_drift")
+	}
+}
+
+// checkScriptAudit validates the optional audit_every param (REQ-DG-007,
+// API-DG-001): absent or nil is fine, otherwise it must be an integer from 0 to
+// 1000, where 0 means off.
+func (v *validator) checkScriptAudit(n Node) {
+	raw, present := n.Params["audit_every"]
+	if !present || raw == nil {
+		return
+	}
+	if f, ok := asFloat(raw); !ok || f != math.Trunc(f) || f < 0 || f > 1000 {
+		v.add(n.ID, "bad_param", "node %s needs param %q to be an integer from 0 to 1000", nodeLabel(n), "audit_every")
 	}
 }
 

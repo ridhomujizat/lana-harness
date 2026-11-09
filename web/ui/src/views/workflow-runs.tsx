@@ -133,6 +133,8 @@ function decorate(detail: RunDetail) {
           text = "script · " + text + " · 0 tok";
         } else if (row.via === "fallback") {
           text = "agent fallback · " + tokens(row.tokens) + " tok";
+        } else if (row.via === "audit") {
+          text = "script · audited · " + tokens(row.tokens) + " tok";
         }
         badges[node.id] = {
           text: row.status === "fallback" ? "Fallback" : text,

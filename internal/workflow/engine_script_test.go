@@ -7,7 +7,9 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -870,5 +872,410 @@ func TestScriptVersionConflictDropsUpdate(t *testing.T) {
 	wf2, _ := st.GetWorkflow(ctx, "w")
 	if wf2.Version != 2 {
 		t.Fatalf("version=%d want 2 (only the owner edit)", wf2.Version)
+	}
+}
+
+// ---- drift guard (spec #45, REQ-DG-001..007) ------------------------------
+
+// trendParams builds the params of a repos-array script_parse node shaped like
+// testdata/trending_profile.json, with over applied on top.
+func trendParams(over map[string]any) map[string]any {
+	m := map[string]any{
+		"input":          "page",
+		"goal":           "list the repos",
+		"output_schema":  map[string]any{"repos": "object[]"},
+		"item_schema":    map[string]any{"repos": map[string]any{"name": "string", "stars_today": "integer"}},
+		"fallback_agent": "fallback-bot",
+	}
+	for k, v := range over {
+		m[k] = v
+	}
+	return m
+}
+
+// trendOutput builds a repos output with the given stars per item.
+func trendOutput(stars ...int) map[string]any {
+	arr := make([]any, len(stars))
+	for i, s := range stars {
+		arr[i] = map[string]any{"name": fmt.Sprintf("owner/repo%d", i), "stars_today": s}
+	}
+	return map[string]any{"repos": arr}
+}
+
+// trendScript builds a parse script that returns trendOutput(stars...).
+func trendScript(stars ...int) string {
+	parts := make([]string, len(stars))
+	for i, s := range stars {
+		parts[i] = fmt.Sprintf("{name:'owner/repo%d',stars_today:%d}", i, s)
+	}
+	return "function parse(input, ctx) { return {repos: [" + strings.Join(parts, ",") + "]}; }"
+}
+
+// trendJSON renders trendOutput(stars...) as the fallback answer text.
+func trendJSON(stars ...int) string {
+	b, _ := json.Marshal(trendOutput(stars...))
+	return string(b)
+}
+
+// nodeLogsContain reports whether any log line contains sub.
+func nodeLogsContain(logs []string, sub string) bool {
+	for _, l := range logs {
+		if strings.Contains(l, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// versionNodeSpec returns the schema spec of a versioned node's item field.
+func versionNodeSpec(t *testing.T, st *MemStore, wfID string, version int, nodeID, field, key string) string {
+	t.Helper()
+	v, err := st.GetVersion(context.Background(), wfID, version)
+	if err != nil {
+		t.Fatalf("get version %d: %v", version, err)
+	}
+	for _, n := range v.Graph.Nodes {
+		if n.ID != nodeID {
+			continue
+		}
+		entry := asMapParam(asMapParam(n.Params["item_schema"])[field])
+		s, _ := entry[key].(string)
+		return s
+	}
+	return ""
+}
+
+// TestScriptParseProfileDriftRegenerates covers REQ-DG-005 without confirmation:
+// the script drifts, the fallback disagrees, so regeneration runs.
+func TestScriptParseProfileDriftRegenerates(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(5, 5, 5), tokens: 10},
+		{agent: "g", contains: "Goal: list the repos",
+			text: `{"feasible":true,"script":"` + trendScript(5, 5, 5) + `"}`, tokens: 8},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(0, 0, 0)})))
+	seedBaselineRun(t, st, wf, trendOutput(5, 3, 7), NodeSucceeded, ViaScript)
+	seedBaselineRun(t, st, wf, trendOutput(2, 9, 4), NodeSucceeded, ViaScript)
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaFallback {
+		t.Fatalf("node=%+v want succeeded/fallback", nr)
+	}
+	if !nodeLogsContain(nr.Logs, "script drift: "+DriftProfile+":") {
+		t.Fatalf("logs=%v want a profile_drift line", nr.Logs)
+	}
+	decs, _ := st.ListDecisions(context.Background(), DecisionFilter{WorkflowID: "w", RunID: run.ID})
+	if len(decs) != 1 || decs[0].Action != "script_update" {
+		t.Fatalf("decisions=%+v want one script_update", decs)
+	}
+	wf2, _ := st.GetWorkflow(context.Background(), "w")
+	if wf2.Version != 2 {
+		t.Fatalf("version=%d want 2", wf2.Version)
+	}
+}
+
+// TestScriptParseProfileDriftConfirmed covers AC-DG-003: a profile drift the
+// fallback confirms records profile_accept, sends no notice, saves no version,
+// and the node output is the fallback output.
+func TestScriptParseProfileDriftConfirmed(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(0, 0, 0), tokens: 9},
+	}
+	notices := &noticeLog{}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(0, 0, 0)})))
+	seedBaselineRun(t, st, wf, trendOutput(5, 3, 7), NodeSucceeded, ViaScript)
+	seedBaselineRun(t, st, wf, trendOutput(2, 9, 4), NodeSucceeded, ViaScript)
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{Notify: notices.notify})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaFallback || nr.Tokens != 9 {
+		t.Fatalf("node=%+v want succeeded/fallback/9 tok", nr)
+	}
+	if !nodeLogsContain(nr.Logs, "profile change confirmed by fallback (agreement 1.00)") {
+		t.Fatalf("logs=%v want the confirmation line", nr.Logs)
+	}
+	decs, _ := st.ListDecisions(context.Background(), DecisionFilter{WorkflowID: "w", RunID: run.ID})
+	if len(decs) != 1 || decs[0].Kind != "script" || decs[0].Action != "profile_accept" || decs[0].Status != "applied" {
+		t.Fatalf("decisions=%+v want one applied profile_accept", decs)
+	}
+	if decs[0].Fix["drift"] != DriftProfile {
+		t.Fatalf("fix=%v want drift profile_drift", decs[0].Fix)
+	}
+	if ag, _ := asFloat(decs[0].Fix["agreement"]); ag != 1 {
+		t.Fatalf("agreement=%v want 1", decs[0].Fix["agreement"])
+	}
+	if got := notices.snapshot(); len(got) != 0 {
+		t.Fatalf("notices=%+v want none on a confirmed profile drift", got)
+	}
+	if wf2, _ := st.GetWorkflow(context.Background(), "w"); wf2.Version != 1 {
+		t.Fatalf("version=%d want 1 (a confirmed profile drift changes no schema)", wf2.Version)
+	}
+}
+
+// TestScriptParseProfileAcceptRestartsBaseline covers the profile_accept cut of
+// REQ-DG-001: after a confirmed profile drift at run 3, the next run's baseline
+// starts there, so the next run with the accepted data is via=script.
+func TestScriptParseProfileAcceptRestartsBaseline(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(0, 0, 0), tokens: 4},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(0, 0, 0)})))
+	seedBaselineRun(t, st, wf, trendOutput(5, 3, 7), NodeSucceeded, ViaScript)
+	seedBaselineRun(t, st, wf, trendOutput(2, 9, 4), NodeSucceeded, ViaScript)
+	eng := testEngine(st, deps, EngineOptions{})
+	ctx := context.Background()
+
+	run := seedRun(t, st, wf, "manual", nil)
+	eng.Launch(ctx, run.ID)
+	eng.Wait()
+	if decs, _ := st.ListDecisions(ctx, DecisionFilter{WorkflowID: "w", RunID: run.ID}); len(decs) != 1 {
+		t.Fatalf("decisions=%+v want one profile_accept", decs)
+	}
+
+	// The baseline now cuts at the profile_accept run, so only that run's output
+	// remains (fewer than two), and the next run with the same data is via=script.
+	base, _ := loadScriptBaseline(ctx, st, "w", "parse", "")
+	if len(base) != 1 {
+		t.Fatalf("baseline=%d want 1 (the cut)", len(base))
+	}
+
+	run2 := seedRun(t, st, wf, "manual", nil)
+	eng.Launch(ctx, run2.ID)
+	eng.Wait()
+	nr2 := mustNode(t, st, run2.ID, "parse", -1)
+	if nr2.Status != NodeSucceeded || nr2.Via != ViaScript || nr2.Tokens != 0 {
+		t.Fatalf("run 2 node=%+v want succeeded/script/0 tok", nr2)
+	}
+}
+
+// TestScriptParseRuleDriftConfirmed covers AC-DG-004: a rule drift the fallback
+// confirms drops the violated token in a new version, records rule_drop and
+// notifies the owner.
+func TestScriptParseRuleDriftConfirmed(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(0), tokens: 7},
+	}
+	notices := &noticeLog{}
+	params := trendParams(map[string]any{
+		"script":      trendScript(0),
+		"item_schema": map[string]any{"repos": map[string]any{"name": "string", "stars_today": "integer >0"}},
+	})
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, scriptGraph(params))
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{Notify: notices.notify})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaFallback || nr.Tokens != 7 {
+		t.Fatalf("node=%+v want succeeded/fallback/7 tok", nr)
+	}
+	decs, _ := st.ListDecisions(context.Background(), DecisionFilter{WorkflowID: "w", RunID: run.ID})
+	if len(decs) != 1 || decs[0].Kind != "script" || decs[0].Action != "rule_drop" || decs[0].Status != "applied" {
+		t.Fatalf("decisions=%+v want one applied rule_drop", decs)
+	}
+	rules, _ := decs[0].Fix["rules"].([]map[string]any)
+	if len(rules) != 1 || rules[0]["path"] != "repos.stars_today" || rules[0]["token"] != ">0" {
+		t.Fatalf("rules=%v want one [repos.stars_today >0] entry", decs[0].Fix["rules"])
+	}
+	if got := notices.snapshot(); len(got) != 1 || !strings.Contains(got[0].Text, "rule dropped: repos.stars_today >0") {
+		t.Fatalf("notices=%+v want one 'rule dropped'", got)
+	}
+	wf2, _ := st.GetWorkflow(context.Background(), "w")
+	if wf2.Version != 2 {
+		t.Fatalf("version=%d want 2", wf2.Version)
+	}
+	if got := versionNodeSpec(t, st, "w", 2, "parse", "repos", "stars_today"); got != "integer" {
+		t.Fatalf("stars_today spec=%q want %q (token dropped)", got, "integer")
+	}
+}
+
+// TestScriptParseRuleDriftRegenerates covers REQ-DG-005 without confirmation: a
+// rule drift the fallback does not confirm takes the spec 44 regeneration path.
+func TestScriptParseRuleDriftRegenerates(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(5), tokens: 10},
+		{agent: "g", contains: "Goal: list the repos",
+			text: `{"feasible":true,"script":"` + trendScript(5) + `"}`, tokens: 8},
+	}
+	params := trendParams(map[string]any{
+		"script":      trendScript(0),
+		"item_schema": map[string]any{"repos": map[string]any{"name": "string", "stars_today": "integer >0"}},
+	})
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, scriptGraph(params))
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaFallback {
+		t.Fatalf("node=%+v want succeeded/fallback", nr)
+	}
+	if !nodeLogsContain(nr.Logs, "script drift: "+DriftRule+":") {
+		t.Fatalf("logs=%v want a rule_drift line", nr.Logs)
+	}
+	decs, _ := st.ListDecisions(context.Background(), DecisionFilter{WorkflowID: "w", RunID: run.ID})
+	if len(decs) != 1 || decs[0].Action != "script_update" {
+		t.Fatalf("decisions=%+v want one script_update", decs)
+	}
+	wf2, _ := st.GetWorkflow(context.Background(), "w")
+	if wf2.Version != 2 {
+		t.Fatalf("version=%d want 2", wf2.Version)
+	}
+	// The dropped rule is unchanged by regeneration (REQ-DG-006): the new
+	// version keeps it, because only a confirmed drift drops a rule.
+	if got := versionNodeSpec(t, st, "w", 2, "parse", "repos", "stars_today"); got != "integer >0" {
+		t.Fatalf("stars_today spec=%q want %q", got, "integer >0")
+	}
+}
+
+// TestScriptParseAuditEvery covers AC-DG-005: audit_every 3 makes the third
+// script run an audit that keeps the script output, sets via=audit and adds the
+// fallback tokens; the count then restarts, so the fourth run is via=script.
+func TestScriptParseAuditEvery(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(5, 5, 5), tokens: 11},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(5, 5, 5), "audit_every": 3})))
+	seedBaselineRun(t, st, wf, trendOutput(5, 3, 7), NodeSucceeded, ViaScript)
+	seedBaselineRun(t, st, wf, trendOutput(5, 3, 7), NodeSucceeded, ViaScript)
+	eng := testEngine(st, deps, EngineOptions{})
+	ctx := context.Background()
+
+	run3 := seedRun(t, st, wf, "manual", nil)
+	eng.Launch(ctx, run3.ID)
+	eng.Wait()
+	nr3 := mustNode(t, st, run3.ID, "parse", -1)
+	if nr3.Status != NodeSucceeded || nr3.Via != ViaAudit || nr3.Tokens != 11 {
+		t.Fatalf("run 3 node=%+v want succeeded/audit/11 tok", nr3)
+	}
+	if !nodeLogsContain(nr3.Logs, "audit ok, agreement 1.00") {
+		t.Fatalf("logs=%v want the audit line", nr3.Logs)
+	}
+	if decs, _ := st.ListDecisions(ctx, DecisionFilter{WorkflowID: "w", RunID: run3.ID}); len(decs) != 0 {
+		t.Fatalf("decisions=%+v want none on a confirmed audit", decs)
+	}
+
+	run4 := seedRun(t, st, wf, "manual", nil)
+	eng.Launch(ctx, run4.ID)
+	eng.Wait()
+	nr4 := mustNode(t, st, run4.ID, "parse", -1)
+	if nr4.Status != NodeSucceeded || nr4.Via != ViaScript || nr4.Tokens != 0 {
+		t.Fatalf("run 4 node=%+v want succeeded/script/0 tok (count restarts)", nr4)
+	}
+}
+
+// TestScriptParseAuditDrift covers REQ-DG-007: an audit the fallback does not
+// confirm is audit_drift and takes the spec 44 drift path with the fallback
+// output.
+func TestScriptParseAuditDrift(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", text: trendJSON(9, 9, 9), tokens: 6},
+		{agent: "g", contains: "Goal: list the repos",
+			text: `{"feasible":true,"script":"` + trendScript(9, 9, 9) + `"}`, tokens: 5},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(5, 5, 5), "audit_every": 1})))
+	seedBaselineRun(t, st, wf, trendOutput(5, 3, 7), NodeSucceeded, ViaScript)
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaFallback {
+		t.Fatalf("node=%+v want succeeded/fallback", nr)
+	}
+	if !nodeLogsContain(nr.Logs, "script drift: "+DriftAudit+":") {
+		t.Fatalf("logs=%v want an audit_drift line", nr.Logs)
+	}
+	decs, _ := st.ListDecisions(context.Background(), DecisionFilter{WorkflowID: "w", RunID: run.ID})
+	if len(decs) != 1 || decs[0].Action != "script_update" {
+		t.Fatalf("decisions=%+v want one script_update", decs)
+	}
+}
+
+// TestScriptParseAuditFallbackErrorKeepsScript covers REQ-DG-007: an audit whose
+// fallback call fails (with a live context) is skipped, the script output stands
+// and via stays script.
+func TestScriptParseAuditFallbackErrorKeepsScript(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	deps.replies = []fakeReply{
+		{agent: "fallback-bot", contains: "Goal: list the repos", err: errors.New("audit boom")},
+	}
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(5, 5, 5), "audit_every": 1})))
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaScript {
+		t.Fatalf("node=%+v want succeeded/script (audit skipped)", nr)
+	}
+	if got, want := string(nodeJSON(decodeAny(t, nr.Output))), string(nodeJSON(trendOutput(5, 5, 5))); got != want {
+		t.Fatalf("output=%s want the script output %s", got, want)
+	}
+	skipped := false
+	for _, l := range nr.Logs {
+		if strings.HasPrefix(l, "audit skipped:") {
+			skipped = true
+			break
+		}
+	}
+	if !skipped {
+		t.Fatalf("logs=%v want an 'audit skipped:' line", nr.Logs)
+	}
+	if got := deps.agentCount(); got != 1 {
+		t.Fatalf("agent calls=%d want 1 (the audit fallback)", got)
+	}
+}
+
+// TestScriptParseNoBaselineSkipsProfile covers AC-DG-006: without a baseline the
+// profile check is skipped, so a zero output runs via script as in spec 44.
+func TestScriptParseNoBaselineSkipsProfile(t *testing.T) {
+	st := NewMemStore()
+	deps := newFakeDeps()
+	wf := seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"},
+		scriptGraph(trendParams(map[string]any{"script": trendScript(0, 0, 0)})))
+	run := seedRun(t, st, wf, "manual", nil)
+	eng := testEngine(st, deps, EngineOptions{})
+	eng.Launch(context.Background(), run.ID)
+	eng.Wait()
+
+	nr := mustNode(t, st, run.ID, "parse", -1)
+	if nr.Status != NodeSucceeded || nr.Via != ViaScript || nr.Tokens != 0 {
+		t.Fatalf("node=%+v want succeeded/script/0 tok", nr)
+	}
+	if deps.agentCount() != 0 {
+		t.Fatalf("agent calls=%d want 0", deps.agentCount())
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/internal/scriptrt"
@@ -53,12 +54,14 @@ type scriptCompile struct {
 	err  error
 }
 
-// scriptParseNode runs one script_parse node (REQ-SP-002..012). It runs the
-// script and checks its output against the contract; on drift, or when the
-// script is empty, it runs the fallback agent, records a script decision and
-// notifies the owner. With on_drift regenerate (the default) it also asks the
-// guardian for a repaired script, validates it and saves it as a new version
-// (REQ-SP-007, REQ-SP-008).
+// scriptParseNode runs one script_parse node (REQ-SP-002..012, REQ-DG-001..007).
+// It runs the script and checks its output against the contract, the node's
+// rules and its baseline profile; on drift, or when the script is empty, it runs
+// the fallback agent, records a script decision and notifies the owner. With
+// on_drift regenerate (the default) it also asks the guardian for a repaired
+// script, validates it and saves it as a new version (REQ-SP-007, REQ-SP-008). A
+// soft drift the fallback output confirms is a false alarm (REQ-DG-005), and
+// audit_every makes every Nth script run a fallback audit (REQ-DG-007).
 func (ex *runExec) scriptParseNode(ctx context.Context, node Node, item int, params map[string]any) (nodeResult, error) {
 	script := paramString(params, "script")
 	// A per-run override set by regeneration wins over the pinned params
@@ -77,23 +80,97 @@ func (ex *runExec) scriptParseNode(ctx context.Context, node Node, item int, par
 		"workflow_id": ex.wf.ID,
 	}
 
-	var drift *DriftError
+	var (
+		drift      *DriftError
+		scriptOut  any
+		scriptLogs []string
+		audit      bool
+	)
 	if script != "" {
 		out, logs, dr := ex.runScript(ctx, script, params, jsctx, timeout)
-		if dr == nil {
-			return nodeResult{Output: out, Port: "out", Via: ViaScript, Tokens: 0, Logs: logs}, nil
-		}
-		drift = dr
-		// on_drift=fail fails the node with the drift error and lets the spec 33
-		// ladder run (REQ-SP-006). An empty script never fails here.
-		if onDrift == "fail" {
-			return nodeResult{Logs: []string{fmt.Sprintf("script drift: %s: %s", drift.Code, drift.Message)}}, drift
+		if dr != nil {
+			drift = dr
+		} else {
+			scriptOut, scriptLogs = out, logs
+			// After the contract passes, the drift guard checks the rules
+			// (REQ-DG-004) and the baseline profile (REQ-DG-001), then decides
+			// whether this is an audit run (REQ-DG-007).
+			baseline, sinceCheck := ex.baseline(ctx, node.ID)
+			if drift = CheckRules(params, out); drift == nil {
+				drift = CheckProfile(params, baseline, out)
+			}
+			if drift == nil {
+				audit = auditDue(params, sinceCheck)
+			}
 		}
 	} else {
 		drift = &DriftError{Code: scriptNoScriptCode, Message: scriptNoScriptMessage}
 	}
 
+	// on_drift=fail fails the node with the drift error and lets the spec 33
+	// ladder run (REQ-SP-006). An empty script never fails here, and a drift the
+	// fallback has not confirmed yet fails before any agent call.
+	if script != "" && drift != nil && onDrift == "fail" {
+		return nodeResult{Logs: []string{fmt.Sprintf("script drift: %s: %s", drift.Code, drift.Message)}}, drift
+	}
+
+	// A script output that passed every check without an audit is the node
+	// result as in spec 44 (REQ-SP-004, AC-DG-006).
+	if drift == nil && !audit {
+		return nodeResult{Output: scriptOut, Port: "out", Via: ViaScript, Tokens: 0, Logs: scriptLogs}, nil
+	}
+
+	// Audit: the script output passed every check, so run the fallback once and
+	// compare it with the script output (REQ-DG-007).
+	if audit {
+		fbOut, fbTokens, fbSession, err := ex.runFallback(ctx, node, item, params)
+		if err != nil {
+			// A cancelled context still fails the audit as before; any other
+			// audit error skips the check and keeps the script output, so a
+			// broken fallback never fails an otherwise good run (REQ-DG-007).
+			if ctx.Err() != nil {
+				return nodeResult{Port: "out", Via: ViaFallback, Tokens: fbTokens, SessionID: fbSession, Logs: scriptLogs}, err
+			}
+			logs := append(scriptLogs, fmt.Sprintf("audit skipped: %v", err))
+			return nodeResult{Output: scriptOut, Port: "out", Via: ViaScript, Tokens: fbTokens, SessionID: fbSession, Logs: logs}, nil
+		}
+		ok, score := scriptConfirms(fbOut, scriptOut)
+		if ok {
+			logs := append(scriptLogs, fmt.Sprintf("audit ok, agreement %.2f", score))
+			return nodeResult{Output: scriptOut, Port: "out", Via: ViaAudit, Tokens: fbTokens, SessionID: fbSession, Logs: logs}, nil
+		}
+		drift = &DriftError{
+			Code:    DriftAudit,
+			Message: fmt.Sprintf("audit agreement %.2f is below %.2f", score, scriptAgreementMin),
+		}
+		return ex.fallbackDriftResult(ctx, node, item, params, script, drift, fbOut, fbTokens, fbSession, scriptLogs), nil
+	}
+
 	// Fallback: one agent call that answers the node goal as JSON (REQ-SP-005).
+	out, tokens, session, err := ex.runFallback(ctx, node, item, params)
+	if err != nil {
+		return nodeResult{Port: "out", Via: ViaFallback, Tokens: tokens, SessionID: session}, err
+	}
+
+	// A soft drift the fallback output confirms was a false alarm: the script
+	// output was right (REQ-DG-005).
+	if isSoftDrift(drift) {
+		if ok, score := scriptConfirms(out, scriptOut); ok {
+			return ex.confirmSoftDrift(ctx, node, item, params, drift, scriptOut, out, score, tokens, session, scriptLogs), nil
+		}
+	}
+
+	// Regeneration and the decision bookkeeping share the fallback output
+	// (REQ-SP-007..011).
+	return ex.fallbackDriftResult(ctx, node, item, params, script, drift, out, tokens, session, scriptLogs), nil
+}
+
+// runFallback runs the one fallback agent call of a script_parse node and
+// checks its answer against the contract (REQ-SP-005). It returns the checked
+// output, the tokens spent and the agent session; the fallback output never
+// passes the rule check (REQ-DG-004). It is shared by the drift, audit and soft
+// drift paths.
+func (ex *runExec) runFallback(ctx context.Context, node Node, item int, params map[string]any) (any, int64, string, error) {
 	agent := paramString(params, "fallback_agent")
 	if agent == "" {
 		agent = ex.wf.Guardian
@@ -106,35 +183,123 @@ func (ex *runExec) scriptParseNode(ctx context.Context, node Node, item int, par
 	}
 	res, err := ex.callAgent(ctx, node, req)
 	if err != nil {
-		return nodeResult{Port: "out", Via: ViaFallback, Tokens: res.Tokens, SessionID: res.SessionID}, err
+		return nil, res.Tokens, res.SessionID, err
 	}
 	if res.StopReason == "error" {
-		return nodeResult{Port: "out", Via: ViaFallback, Tokens: res.Tokens, SessionID: res.SessionID}, errors.New("agent stopped with an error")
+		return nil, res.Tokens, res.SessionID, errors.New("agent stopped with an error")
 	}
 	finished, ferr := ex.finishSchema(ctx, node, item, req, res, outputSchema)
 	if ferr != nil {
-		return nodeResult{Port: "out", Via: ViaFallback, Tokens: finished.Tokens, SessionID: finished.SessionID}, ferr
+		return nil, finished.Tokens, finished.SessionID, ferr
 	}
 	out, dr := CheckContract(params, finished.Output)
 	if dr != nil {
-		return nodeResult{Port: "out", Via: ViaFallback, Tokens: finished.Tokens, SessionID: finished.SessionID}, dr
+		return nil, finished.Tokens, finished.SessionID, dr
 	}
+	return out, finished.Tokens, finished.SessionID, nil
+}
 
-	// Regeneration and the decision bookkeeping share the fallback output
-	// (REQ-SP-007..011).
-	extra, _ := ex.afterFallback(ctx, node, item, params, script, drift, out, finished.Tokens)
-	logs := []string{
-		fmt.Sprintf("script drift: %s: %s", drift.Code, drift.Message),
-		fmt.Sprintf("fallback via %s: %d tok", agent, finished.Tokens),
+// fallbackDriftResult runs the post-fallback drift bookkeeping (regeneration,
+// decision, notice) and builds the node result of a script_parse node whose
+// output is the fallback output (REQ-SP-007..011, REQ-DG-007). logs are the
+// lines collected before the fallback, such as the script logs.
+func (ex *runExec) fallbackDriftResult(ctx context.Context, node Node, item int, params map[string]any, script string, drift *DriftError, out any, tokens int64, session string, logs []string) nodeResult {
+	extra, _ := ex.afterFallback(ctx, node, item, params, script, drift, out, tokens)
+	agent := paramString(params, "fallback_agent")
+	if agent == "" {
+		agent = ex.wf.Guardian
 	}
+	logs = append(logs,
+		fmt.Sprintf("script drift: %s: %s", drift.Code, drift.Message),
+		fmt.Sprintf("fallback via %s: %d tok", agent, tokens),
+	)
 	return nodeResult{
 		Output:    out,
 		Port:      "out",
 		Via:       ViaFallback,
-		Tokens:    finished.Tokens + extra,
-		SessionID: finished.SessionID,
+		Tokens:    tokens + extra,
+		SessionID: session,
 		Logs:      logs,
-	}, nil
+	}
+}
+
+// auditDue reports whether the next script run of a node is an audit
+// (REQ-DG-007): audit_every is the param, 0 or absent means off, and the run is
+// due when the count of script runs since the newest fallback or audit run,
+// plus this run, reaches it.
+func auditDue(params map[string]any, sinceCheck int) bool {
+	n := paramFloat(params, "audit_every", 0)
+	return n > 0 && float64(sinceCheck+1) >= n
+}
+
+// isSoftDrift reports whether a drift code is a soft drift the fallback output
+// can confirm (REQ-DG-005).
+func isSoftDrift(drift *DriftError) bool {
+	return drift != nil && (drift.Code == DriftProfile || drift.Code == DriftRule)
+}
+
+// scriptConfirms reports whether a fallback output confirms a script output
+// (the spec 44 agreement rule, REQ-DG-005): it holds when they agree on at least
+// scriptAgreementLeaves expected leaves with a score of at least
+// scriptAgreementMin, or, with fewer leaves, when every leaf agrees.
+func scriptConfirms(expected, got any) (bool, float64) {
+	score, leaves := Agreement(expected, got)
+	if leaves >= scriptAgreementLeaves {
+		return score >= scriptAgreementMin, score
+	}
+	return score == 1, score
+}
+
+// confirmSoftDrift handles a soft drift whose fallback output agrees with the
+// script output (REQ-DG-005): the drift was a false alarm, the node output is
+// the fallback output and there is no regeneration. A confirmed profile drift
+// records profile_accept, so the baseline restarts at this run and no notice is
+// sent. A confirmed rule drift drops the violated tokens in a new version and
+// notifies the owner.
+func (ex *runExec) confirmSoftDrift(ctx context.Context, node Node, item int, params map[string]any, drift *DriftError, scriptOut, fallbackOut any, score float64, tokens int64, session string, logs []string) nodeResult {
+	switch drift.Code {
+	case DriftProfile:
+		ex.putDecision(Decision{
+			ID: decisionID(), WorkflowID: ex.wf.ID, RunID: ex.run.ID, RunNumber: ex.run.Number,
+			NodeID: node.ID, ItemIndex: item, Kind: "script", Action: "profile_accept",
+			Status: "applied", Reason: drift.Message, Tokens: tokens, CreatedAt: ex.now(),
+			Fix: map[string]any{"drift": drift.Code, "error": drift.Message, "agreement": score},
+		})
+		logs = append(logs, fmt.Sprintf("profile change confirmed by fallback (agreement %.2f)", score))
+	case DriftRule:
+		refs := RuleViolations(params, scriptOut)
+		note := "rule dropped: " + ruleRefsText(refs)
+		if _, err := ex.e.saveRuleDrop(ctx, ex.wf.ID, node.ID, refs); err != nil {
+			note = "rule drop failed: " + err.Error()
+		}
+		ex.putDecision(Decision{
+			ID: decisionID(), WorkflowID: ex.wf.ID, RunID: ex.run.ID, RunNumber: ex.run.Number,
+			NodeID: node.ID, ItemIndex: item, Kind: "script", Action: "rule_drop",
+			Status: "applied", Reason: drift.Message, Tokens: tokens, Persistent: true, CreatedAt: ex.now(),
+			Fix: map[string]any{"drift": drift.Code, "error": drift.Message, "rules": ruleRefsFix(refs)},
+		})
+		ex.scriptNotice(node, drift, note, true)
+		logs = append(logs, note)
+	}
+	return nodeResult{Output: fallbackOut, Port: "out", Via: ViaFallback, Tokens: tokens, SessionID: session, Logs: logs}
+}
+
+// ruleRefsText renders rule refs as "path token" pairs joined by ", ".
+func ruleRefsText(refs []RuleRef) string {
+	parts := make([]string, len(refs))
+	for i, r := range refs {
+		parts[i] = r.Path + " " + r.Token
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ruleRefsFix renders rule refs as the fix entries of a rule_drop decision.
+func ruleRefsFix(refs []RuleRef) []map[string]any {
+	out := make([]map[string]any, len(refs))
+	for i, r := range refs {
+		out[i] = map[string]any{"path": r.Path, "token": r.Token}
+	}
+	return out
 }
 
 // runScript compiles (through the per-run cache) and runs one script, then
@@ -326,12 +491,14 @@ func (ex *runExec) regenerate(ctx context.Context, node Node, item int, params m
 }
 
 // evalScript compiles and runs one script_parse script on input and checks its
-// output against the node contract (REQ-SP-003, REQ-SP-007). It is the shared
-// building block of the engine's candidate check and of the service Test and
-// Generate operations (spec #44, API-SP-002, API-SP-003): it returns the checked
-// output, the raw console lines, one ScriptProblem per failure (a compile or run
-// failure as script_error, otherwise the drift code CheckContract reported) and
-// the run's wall time. The sandbox ctx passed to the script is empty.
+// output against the node contract and the node rules (REQ-SP-003, REQ-SP-007,
+// REQ-DG-004). It is the shared building block of the engine's candidate check
+// and of the service Test and Generate operations (spec #44, API-SP-002,
+// API-SP-003): it returns the checked output, the raw console lines, one
+// ScriptProblem per failure (a compile or run failure as script_error, otherwise
+// the drift code CheckContract or CheckRules reported) and the run's wall time.
+// The sandbox ctx passed to the script is empty. It never checks the profile:
+// that needs the workflow baseline of TestScript (REQ-DG-008).
 func evalScript(ctx context.Context, params map[string]any, script string, input any, timeout time.Duration) (any, []string, []ScriptProblem, time.Duration) {
 	prog, err := scriptrt.Compile(script)
 	if err != nil {
@@ -344,6 +511,9 @@ func evalScript(ctx context.Context, params map[string]any, script string, input
 	out, dr := CheckContract(params, res.Value)
 	if dr != nil {
 		return nil, res.Logs, []ScriptProblem{{Code: dr.Code, Message: dr.Message}}, res.Duration
+	}
+	if rd := CheckRules(params, out); rd != nil {
+		return nil, res.Logs, []ScriptProblem{{Code: rd.Code, Message: rd.Message}}, res.Duration
 	}
 	return out, res.Logs, nil, res.Duration
 }
@@ -516,6 +686,48 @@ func (e *Engine) saveScriptVersion(ctx context.Context, wfID, nodeID, oldScript,
 			"baseline_tokens": baseline,
 		})
 		summary := fmt.Sprintf("script %s: rev %d (%s)", nodeName(n), newRev, driftCode)
+		if _, err := e.store.SaveVersion(ctx, wfID, wf.Version, g, "guardian", summary); err != nil {
+			if errors.Is(err, ErrVersionConflict) {
+				continue
+			}
+			return "", err
+		}
+		e.changed(wfID, "")
+		return "", nil
+	}
+	return "owner changed the node; update dropped", nil
+}
+
+// saveRuleDrop saves a new workflow version with the violated rule tokens
+// removed from a node's schema (REQ-DG-005). It loads the current version,
+// applies DropRules to the stored node params, and saves with the guardian as
+// the author and a summary naming the dropped tokens. It returns a drop reason
+// when the node is gone; on ErrVersionConflict it reloads once and retries once,
+// like saveScriptVersion.
+func (e *Engine) saveRuleDrop(ctx context.Context, wfID, nodeID string, refs []RuleRef) (string, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		wf, err := e.store.GetWorkflow(ctx, wfID)
+		if err != nil {
+			return "", err
+		}
+		cur, err := e.store.GetVersion(ctx, wfID, wf.Version)
+		if err != nil {
+			return "", err
+		}
+		g := cur.Graph
+		idx := -1
+		for i := range g.Nodes {
+			if g.Nodes[i].ID == nodeID {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return "node no longer exists; update dropped", nil
+		}
+		n := g.Nodes[idx]
+		g.Nodes[idx].Params = DropRules(n.Params, refs)
+		summary := fmt.Sprintf("rules %s: dropped %s", nodeName(n), ruleRefsText(refs))
 		if _, err := e.store.SaveVersion(ctx, wfID, wf.Version, g, "guardian", summary); err != nil {
 			if errors.Is(err, ErrVersionConflict) {
 				continue

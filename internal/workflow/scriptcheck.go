@@ -7,12 +7,15 @@ import (
 )
 
 // Drift codes name the first contract step that rejected a script_parse output
-// (REQ-SP-003).
+// (REQ-SP-003), plus the drift guard codes of REQ-DG-004.
 const (
-	DriftScript = "script_error"
-	DriftSchema = "schema_drift"
-	DriftEmpty  = "empty_drift"
-	DriftItem   = "item_drift"
+	DriftScript  = "script_error"
+	DriftSchema  = "schema_drift"
+	DriftEmpty   = "empty_drift"
+	DriftItem    = "item_drift"
+	DriftRule    = "rule_drift"
+	DriftProfile = "profile_drift"
+	DriftAudit   = "audit_drift"
 )
 
 // DriftError reports a contract failure of a script_parse output (REQ-SP-003):

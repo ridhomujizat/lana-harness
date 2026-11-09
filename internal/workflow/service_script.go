@@ -83,15 +83,19 @@ type TestResult struct {
 }
 
 // GenerateResult is the response of API-SP-003. Agreement is set, and non-nil,
-// only when an expected output was available.
+// only when an expected output was available. OutputSchema and ItemSchema carry
+// the node schema with the kept rules merged in, and are set only when the
+// guardian proposed rules that hold (REQ-DG-006, API-DG-003).
 type GenerateResult struct {
-	Feasible  bool            `json:"feasible"`
-	Reason    string          `json:"reason"`
-	Script    string          `json:"script"`
-	Output    any             `json:"output"`
-	Problems  []ScriptProblem `json:"problems"`
-	Agreement *float64        `json:"agreement,omitempty"`
-	Tokens    int64           `json:"tokens"`
+	Feasible     bool            `json:"feasible"`
+	Reason       string          `json:"reason"`
+	Script       string          `json:"script"`
+	Output       any             `json:"output"`
+	Problems     []ScriptProblem `json:"problems"`
+	Agreement    *float64        `json:"agreement,omitempty"`
+	Tokens       int64           `json:"tokens"`
+	OutputSchema map[string]any  `json:"output_schema,omitempty"`
+	ItemSchema   map[string]any  `json:"item_schema,omitempty"`
 }
 
 // ConvertCheck is one per-run check of a converted script (API-SP-004): Run is
@@ -129,6 +133,7 @@ type Suggestion struct {
 type ScriptStat struct {
 	ScriptRuns   int        `json:"script_runs"`
 	FallbackRuns int        `json:"fallback_runs"`
+	AuditRuns    int        `json:"audit_runs"`
 	TokensSaved  int64      `json:"tokens_saved"`
 	LastUpdate   int64      `json:"last_update"`
 	Events       []Decision `json:"events"`
@@ -155,6 +160,15 @@ func (s *Service) TestScript(ctx context.Context, wfID string, node Node, input 
 		return res, nil
 	}
 	out, logs, problems, dur := evalScript(ctx, node.Params, script, sample, scriptTimeout(node.Params))
+	if len(problems) == 0 {
+		// The output passed the contract and rules, so also check it against
+		// the workflow's stored baseline (REQ-DG-008, API-SP-002); a drift is
+		// reported as a profile_drift problem.
+		baseline, _ := loadScriptBaseline(ctx, s.store, wfID, node.ID, "")
+		if drift := CheckProfile(node.Params, baseline, out); drift != nil {
+			problems = append(problems, ScriptProblem{Code: DriftProfile, Message: drift.Message})
+		}
+	}
 	res.OK = len(problems) == 0
 	res.Output = out
 	if problems != nil {
@@ -246,6 +260,10 @@ func (s *Service) GenerateScript(ctx context.Context, wfID string, node Node, in
 			if hasExpected {
 				a := agreement
 				res.Agreement = &a
+			}
+			if merged, ok := mergeHeldRules(params, reply.Rules, expectedVal, out); ok {
+				res.OutputSchema = asMapParam(merged["output_schema"])
+				res.ItemSchema = asMapParam(merged["item_schema"])
 			}
 			s.engine.ResetScriptPause(wfID, node.ID)
 			return res, nil
@@ -375,6 +393,7 @@ func (s *Service) ConvertNode(ctx context.Context, wfID, nodeID string) (Convert
 	// prompt, then compare the script output with the run's output.
 	timeout := scriptTimeout(proposed.Params)
 	checks := make([]ConvertCheck, 0, len(samples))
+	var outputs []any
 	for _, smp := range samples {
 		fallback := renderedPromptText(smp.nodeRun.Input)
 		var in any = fallback
@@ -388,6 +407,15 @@ func (s *Service) ConvertNode(ctx context.Context, wfID, nodeID string) (Convert
 			check.Problems = probs
 		}
 		checks = append(checks, check)
+		outputs = append(outputs, decodeInput(smp.nodeRun.Output), out)
+	}
+	if merged, ok := mergeHeldRules(proposed.Params, reply.Rules, outputs...); ok {
+		if os := asMapParam(merged["output_schema"]); os != nil {
+			proposed.Params["output_schema"] = os
+		}
+		if is := asMapParam(merged["item_schema"]); is != nil {
+			proposed.Params["item_schema"] = is
+		}
 	}
 	return ConvertResult{Feasible: true, Node: &proposed, Checks: checks, Tokens: tokens}, nil
 }
@@ -521,7 +549,7 @@ func (s *Service) ScriptStats(ctx context.Context, wfID string, g Graph) map[str
 	}
 
 	runs, _ := s.store.ListRuns(ctx, RunFilter{WorkflowID: wfID, Limit: scriptStatsRuns})
-	counts := map[string]*[2]int{}
+	counts := map[string]*[3]int{}
 	for _, run := range runs {
 		nrs, err := s.store.ListNodeRuns(ctx, run.ID)
 		if err != nil {
@@ -533,7 +561,7 @@ func (s *Service) ScriptStats(ctx context.Context, wfID string, g Graph) map[str
 			}
 			c := counts[nr.NodeID]
 			if c == nil {
-				c = &[2]int{}
+				c = &[3]int{}
 				counts[nr.NodeID] = c
 			}
 			switch nr.Via {
@@ -541,6 +569,8 @@ func (s *Service) ScriptStats(ctx context.Context, wfID string, g Graph) map[str
 				c[0]++
 			case ViaFallback:
 				c[1]++
+			case "audit":
+				c[2]++
 			}
 		}
 	}
@@ -572,6 +602,7 @@ func (s *Service) ScriptStats(ctx context.Context, wfID string, g Graph) map[str
 		if c := counts[id]; c != nil {
 			st.ScriptRuns = c[0]
 			st.FallbackRuns = c[1]
+			st.AuditRuns = c[2]
 		}
 		st.TokensSaved = int64(st.ScriptRuns) * int64(paramFloat(p, "baseline_tokens", 0))
 		stats[id] = st
@@ -825,6 +856,21 @@ func scriptAgreementProblem(expected, got any) *ScriptProblem {
 		}
 	}
 	return nil
+}
+
+// mergeHeldRules keeps the schema rules a generator proposed that hold on every
+// given output and merges them into params (REQ-DG-006, API-DG-003). It returns
+// the params with the kept rules and true when at least one rule was kept; a nil
+// map along with false means there was nothing to merge. A nil output is ignored.
+func mergeHeldRules(params map[string]any, rules map[string]string, outputs ...any) (map[string]any, bool) {
+	if len(rules) == 0 {
+		return nil, false
+	}
+	kept := KeepHoldingRules(params, rules, outputs...)
+	if len(kept) == 0 {
+		return nil, false
+	}
+	return MergeRules(params, kept), true
 }
 
 // problemStrings renders problems as "<code>: <message>" lines for a prompt

@@ -95,6 +95,8 @@ export interface ScriptStat {
   fallback_runs: number;
   tokens_saved: number;
   last_update: number;
+  /* Spec #45: runs whose script output an audit fallback confirmed. */
+  audit_runs?: number;
   events: Decision[];
 }
 
@@ -213,7 +215,7 @@ export interface NodeRun {
   tokens: number;
   session_id: string;
   /* How a script_parse node produced its output (spec #44). */
-  via?: "" | "script" | "fallback";
+  via?: "" | "script" | "fallback" | "audit";
   started_at: number;
   ended_at: number;
 }
@@ -698,6 +700,9 @@ export interface ScriptGenerateResult {
   problems: ScriptProblem[];
   agreement?: number;
   tokens: number;
+  /* Spec #45: the schemas with the guardian's kept rules merged in. */
+  output_schema?: Record<string, unknown>;
+  item_schema?: Record<string, unknown>;
 }
 
 export interface ScriptConvertCheck {
