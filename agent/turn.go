@@ -545,7 +545,7 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		}
 		in.RelevantMemory = rn.relevantMemory(ownerText, in.Memory)
 	}
-	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, toolNames)
+	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, res.name, toolNames)
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
 	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
 }
@@ -596,9 +596,10 @@ const (
 // to ownerText as "<title> (<path>): <description or snippet>" lines. Recall
 // runs only for an owner message, when knowledge_search is offered in this
 // turn, when auto_recall is not false, and when the knowledge service is
-// installed. A page already shown in this session is skipped, so each appears
-// once per session (REQ-KNW-050).
-func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []string {
+// installed. It searches the caller's domain and the shared wiki, preferring
+// the domain on a tie (REQ-KNW-050, REQ-DKN-012). A page already shown in this
+// session is skipped, so each appears once per session.
+func (rn *Runner) relevantKnowledge(ownerText, agentName string, toolNames []string) []string {
 	if strings.TrimSpace(ownerText) == "" || !containsString(toolNames, "knowledge_search") {
 		return nil
 	}
@@ -616,9 +617,8 @@ func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []stri
 		defer rn.mu.Unlock()
 		return rn.knowledgeShown[path]
 	}
-	// A later task sets the recall scopes to the caller's domain and shared;
-	// for now recall searches every scope.
-	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, nil, "", skip)
+	scopes, prefer := recallScopes(service, agentName)
+	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, scopes, prefer, skip)
 	if err != nil {
 		slog.Debug("knowledge recall", "session_id", rn.sessionID, "error", err)
 		return nil
@@ -640,6 +640,20 @@ func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []stri
 		out = append(out, knowledgeRecallLine(hit))
 	}
 	return out
+}
+
+// knowledgeRecallSharedScope is the shared scope of per-turn recall.
+const knowledgeRecallSharedScope = "shared"
+
+// recallScopes returns the scopes and the preferred scope of per-turn
+// knowledge recall: the caller's domain and the shared wiki when the caller
+// owns a domain, else the shared wiki alone. The preferred scope breaks an
+// equal-score tie in favour of the domain page (REQ-DKN-012, design §8).
+func recallScopes(service core.Knowledge, agentName string) ([]string, string) {
+	if domains, ok := service.(core.KnowledgeDomains); ok && agentName != "" && domains.HasDomain(agentName) {
+		return []string{agentName, knowledgeRecallSharedScope}, agentName
+	}
+	return []string{knowledgeRecallSharedScope}, agentName
 }
 
 // knowledgeRecallLine renders one recall line: the title, the vault path, and
