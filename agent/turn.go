@@ -415,6 +415,7 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name, Workspace: resolved.workspace, Home: rn.reg.home,
 		WorkspaceOnly: resolved.workspaceOnly,
 		Skills:        resolved.skills,
+		SkillWrite:    resolved.cfg.SkillWrite,
 		Questions:     rn.reg.questions,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
 		MCPAdmin:      mcpAdmin,
@@ -544,7 +545,7 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 		}
 		in.RelevantMemory = rn.relevantMemory(ownerText, in.Memory)
 	}
-	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, toolNames)
+	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, res.name, toolNames)
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
 	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
 }
@@ -595,9 +596,10 @@ const (
 // to ownerText as "<title> (<path>): <description or snippet>" lines. Recall
 // runs only for an owner message, when knowledge_search is offered in this
 // turn, when auto_recall is not false, and when the knowledge service is
-// installed. A page already shown in this session is skipped, so each appears
-// once per session (REQ-KNW-050).
-func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []string {
+// installed. It searches the caller's domain and the shared wiki, preferring
+// the domain on a tie (REQ-KNW-050, REQ-DKN-012). A page already shown in this
+// session is skipped, so each appears once per session.
+func (rn *Runner) relevantKnowledge(ownerText, agentName string, toolNames []string) []string {
 	if strings.TrimSpace(ownerText) == "" || !containsString(toolNames, "knowledge_search") {
 		return nil
 	}
@@ -615,7 +617,8 @@ func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []stri
 		defer rn.mu.Unlock()
 		return rn.knowledgeShown[path]
 	}
-	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, skip)
+	scopes, prefer := recallScopes(service, agentName)
+	hits, err := service.Recall(ctx, ownerText, knowledgeRecallMax, scopes, prefer, skip)
 	if err != nil {
 		slog.Debug("knowledge recall", "session_id", rn.sessionID, "error", err)
 		return nil
@@ -637,6 +640,20 @@ func (rn *Runner) relevantKnowledge(ownerText string, toolNames []string) []stri
 		out = append(out, knowledgeRecallLine(hit))
 	}
 	return out
+}
+
+// knowledgeRecallSharedScope is the shared scope of per-turn recall.
+const knowledgeRecallSharedScope = "shared"
+
+// recallScopes returns the scopes and the preferred scope of per-turn
+// knowledge recall: the caller's domain and the shared wiki when the caller
+// owns a domain, else the shared wiki alone. The preferred scope breaks an
+// equal-score tie in favour of the domain page (REQ-DKN-012, design §8).
+func recallScopes(service core.Knowledge, agentName string) ([]string, string) {
+	if domains, ok := service.(core.KnowledgeDomains); ok && agentName != "" && domains.HasDomain(agentName) {
+		return []string{agentName, knowledgeRecallSharedScope}, agentName
+	}
+	return []string{knowledgeRecallSharedScope}, agentName
 }
 
 // knowledgeRecallLine renders one recall line: the title, the vault path, and
@@ -1359,6 +1376,10 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				}
 			} else {
 				toolCtx := rn.toolCtx(ctx, resolved, turnID)
+				// REQ-DKN-021, REQ-DKN-032: a tool sees an owner turn only for
+				// a root turn that stored an owner message, the same values
+				// captureEligible uses (REQ-MEM-010).
+				toolCtx.OwnerTurn = !resolved.child && ownerMessage
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as
 				// usual and every result is stored in call order.

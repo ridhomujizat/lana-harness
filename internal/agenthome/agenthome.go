@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"unicode/utf8"
@@ -16,8 +17,10 @@ import (
 
 // Size limits in Unicode code points.
 const (
-	UserLimit   = 2000
-	MemoryLimit = 32000
+	UserLimit = 2000
+	// MemoryLimit is the limit of MEMORY.md, in Unicode code points
+	// (REQ-DKN-040).
+	MemoryLimit = 8000
 	// JobLimit is the limit of JOB.md, the agent job description
 	// (REQ-ROOM-009, API-ROOM-007).
 	JobLimit = 4000
@@ -135,6 +138,7 @@ func Apply(entries []string, action, content, oldText string, limit int) ([]stri
 	if strings.Contains("\n"+content+"\n", "\n"+Separator+"\n") || len(Parse(content)) > 1 {
 		return nil, &ApplyError{Kind: ErrInvalid, Field: "content must not contain a " + Separator + " line"}
 	}
+	oldSize := Size(entries)
 	out := append([]string(nil), entries...)
 	switch action {
 	case "add":
@@ -170,10 +174,49 @@ func Apply(entries []string, action, content, oldText string, limit int) ([]stri
 	default:
 		return nil, &ApplyError{Kind: ErrInvalid, Field: "action must be add, replace, or remove"}
 	}
-	if size := Size(out); size > limit {
+	// REQ-DKN-040: a change that does not grow the file is accepted even when
+	// it is over the limit, so an existing file is never cut.
+	if size := Size(out); size > limit && size > oldSize {
 		return nil, &ApplyError{Kind: ErrOverLimit, Size: size, Limit: limit}
 	}
 	return out, nil
+}
+
+// RemoveEntries removes the entries at the given 1-based ids from path, under
+// the same file lock and atomic write as Update, and returns the removed texts
+// in id order. An unknown id is an error and writes nothing.
+func RemoveEntries(path string, ids []int) (removed []string, err error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	_, err = Update(path, func(entries []string) ([]string, error) {
+		seen := make(map[int]bool, len(ids))
+		for _, id := range ids {
+			if id < 1 || id > len(entries) {
+				return nil, fmt.Errorf("no entry m%d", id)
+			}
+			if seen[id] {
+				return nil, fmt.Errorf("entry m%d is listed twice", id)
+			}
+			seen[id] = true
+		}
+		order := append([]int(nil), ids...)
+		sort.Ints(order)
+		removed = make([]string, 0, len(order))
+		for i := len(order) - 1; i >= 0; i-- {
+			id := order[i]
+			removed = append(removed, entries[id-1])
+			entries = append(entries[:id-1], entries[id:]...)
+		}
+		for i, j := 0, len(removed)-1; i < j; i, j = i+1, j-1 {
+			removed[i], removed[j] = removed[j], removed[i]
+		}
+		return entries, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return removed, nil
 }
 
 // Update locks path, reads its entries, applies fn, and replaces the file atomically.

@@ -175,12 +175,69 @@ func TestAgentMemoryLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder/files/memory", string(payload), cookie, csrf))
-	if rr.Code != http.StatusUnprocessableEntity {
+	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
 	}
 	path := agenthome.Paths(home, "coder").Memory
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("over-limit memory file exists: %v", err)
+	}
+}
+
+// API-DKN-009, REQ-DKN-040: a MEMORY.md body over the limit is accepted when it
+// does not grow the file, and refused with 400 invalid_request when it does.
+func TestAgentMemoryShrinkCoversACDKN006(t *testing.T) {
+	home := t.TempDir()
+	store := &testSettingsStore{home: home, agents: []string{"coder"}}
+	s, cookie, csrf := newSettingsTestServer(t, store)
+	path := agenthome.Paths(home, "coder").Memory
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := strings.Repeat("m", 9000)
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A shorter body is accepted even though it is over the limit.
+	shorter := strings.Repeat("m", 8500)
+	payload, err := json.Marshal(map[string]string{"content": shorter, "expected_version": fileVersion([]byte(existing))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder/files/memory", string(payload), cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("shorter PUT status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+
+	// A longer body is refused with 400 invalid_request and leaves the file.
+	longer := strings.Repeat("m", 9100)
+	payload, err = json.Marshal(map[string]string{"content": longer, "expected_version": fileVersion([]byte(shorter))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr = serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder/files/memory", string(payload), cookie, csrf))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("longer PUT status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "invalid_request" || envelope.Error.Message != "MEMORY.md is 9100/8000 characters" {
+		t.Fatalf("error = %+v", envelope.Error)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != shorter {
+		t.Fatalf("longer save changed MEMORY.md: %q", after)
 	}
 }
 

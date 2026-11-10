@@ -7,6 +7,54 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.3.0-beta.5] - 2026-11-10
+
+### Added
+- Domain knowledge per agent (spec 46): every agent with a knowledge tool owns
+  `knowledge/agents/<name>/wiki/` and `journal/` in the vault. The shared `wiki/` stays the common
+  layer for people, organizations, and places. Per-turn recall searches the agent's own domain and
+  the shared wiki; another agent's domain is reachable with `knowledge_search scope=agent:<name>`.
+- `knowledge_search`, `knowledge_read`, and `knowledge_write` take a `scope` (`mine`, `domain`,
+  `shared`, `all`, `agent:<name>`). A write to another agent's domain becomes a proposal that the
+  domain agent applies at its next promotion; proposals from turns the owner did not start wait for
+  the owner.
+- `knowledge_write` action `supersede`: a changed fact keeps the old line struck through and dated
+  next to the new one. Search and recall only rank the current text.
+- Domain promotion: nightly (and right after the owner approves a proposal) each domain agent
+  compiles its new journal notes and proposals into its domain or the shared wiki with its own
+  model, filtered by its `JOB.md`, keeping operations with confidence ≥ 0.6 (≥ 0.8 for proposals
+  the owner has not approved). Skipped operations are logged with a reason.
+- Learned skills: `skill_write` stores a proposal under `agents/<name>/proposed-skills/` that the
+  owner approves; `[agents.<name>] skill_write = "direct"` keeps the old behavior.
+- Review queue on the Knowledge page (proposals and skill proposals, approve or reject) with a
+  count badge in the sidebar; a page list with a scope filter and a page viewer; "What it knows"
+  on the agent profile. API: `GET /v1/knowledge/pages`, `GET /v1/knowledge/page`, `GET /v1/review`,
+  `POST /v1/review/{id}/approve|reject`, `scopes` and `review_pending` on `GET /v1/knowledge`,
+  `knowledge` on the agent overview.
+- The Convert dialog shows the guardian status, an elapsed-time counter, and a skeleton while it
+  works.
+
+### Changed
+- `MEMORY.md` is a hot cache of 8,000 characters (was 32,000). A change that does not grow the
+  file is accepted even above the limit, so no existing file is cut. Domain promotion moves facts
+  out of a `MEMORY.md` above 6,000 characters into pages and removes an entry only when most of its
+  words were written; removed text is kept in `log.md`.
+- Journals of agents with a domain go to `agents/<name>/journal/` instead of `journal/`.
+
+### Fixed
+- Convert compiles the guardian's script, retries once with the compile error, and reports
+  `feasible=false` instead of letting a broken script fail the workflow save.
+- The Vite dev proxy rewrites `Origin`, so POSTs from the dev server are no longer rejected.
+
+### Upgrade notes
+- The knowledge index (`$LANA_HOME/knowledge.db`) moves to schema version 3 on first start and is
+  rebuilt from the vault; vault files are not changed. It now also holds proposals.
+- Agents need `knowledge_search` / `knowledge_read` / `knowledge_write` in `tools` to get a domain.
+  After adding them, the next nightly run journals the agent's older sessions (40,000 characters
+  per session per run) with the agent's own model.
+- `skill_write` now asks the owner by default. Set `skill_write = "direct"` on an agent to keep
+  writing skills at once.
+
 ## [0.3.0-beta.4] - 2026-11-09
 
 ### Added

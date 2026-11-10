@@ -862,6 +862,7 @@ button.wf-item:hover { background: var(--surface-2); }
 @media (prefers-reduced-motion: reduce) {
   .wf-node, .wf-msg, .wf-stat, .wf-edgeacts { animation: none; }
   .wf-node.t-run, .wf-badge.b-blue i, .wf-dot.blue, .wf-typing i, .wf-item.s-running i, .wf-loading .i { animation: none; }
+  .wf-convert-wait, .wf-convert-orb, .wf-convert-orb .i, .wf-convert-sk .sk { animation: none; }
 }
 
 @media (max-width: 1100px) {
@@ -943,6 +944,30 @@ button.wf-item:hover { background: var(--surface-2); }
 .wf-script-convert { display: flex; flex-direction: column; gap: 8px; }
 .wf-script-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .wf-script-checks li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wf-convert-wait { display: flex; flex-direction: column; gap: 16px; animation: wfIn 0.2s ease-out; }
+.wf-convert-wait-h { display: flex; align-items: flex-start; gap: 12px; }
+.wf-convert-orb {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center;
+  color: var(--violet); background: color-mix(in srgb, var(--violet) 12%, transparent);
+  animation: wfConvertGlow 1.8s ease-in-out infinite;
+}
+.wf-convert-orb .i { animation: wfPulse 1.8s ease-in-out infinite; }
+.wf-convert-wait-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; font-size: var(--fs-sm); }
+.wf-convert-wait-b b { display: inline-flex; align-items: center; gap: 6px; }
+.wf-convert-wait-b .wf-typing { padding: 0; }
+.wf-convert-wait-b .wf-typing i { width: 4px; height: 4px; background: var(--violet); }
+.wf-convert-time { flex: none; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.wf-convert-sk { display: flex; flex-direction: column; gap: 8px; }
+.wf-convert-sk-row { display: flex; align-items: center; gap: 10px; }
+.wf-convert-sk-code {
+  display: flex; flex-direction: column; gap: 7px; margin-top: 2px;
+  padding: 12px; border-radius: var(--r); background: var(--surface-2); border: 1px solid var(--border);
+}
+@keyframes wfConvertGlow {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 8%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--violet) 16%, transparent); }
+}
 @media (max-width: 480px) {
   .wf-script-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

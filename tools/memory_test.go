@@ -28,12 +28,12 @@ func TestMemoryTools(t *testing.T) {
 	read, write := NewMemoryRead(), NewMemoryWrite()
 
 	out := callMemory(t, write, tc, `{"target":"memory","action":"add","content":"Owner uses fish shell"}`)
-	if out.Status != core.ToolStatusSuccess || out.Output != "added to memory (21/32000 characters)" {
+	if out.Status != core.ToolStatusSuccess || out.Output != "added to memory (21/8000 characters)" {
 		t.Fatalf("add = %+v", out)
 	}
 	callMemory(t, write, tc, `{"target":"memory","action":"add","content":"Server kenari runs Debian"}`)
 	out = callMemory(t, read, tc, `{"target":"memory"}`)
-	if !strings.HasPrefix(out.Output, "memory 49/32000 characters, 2 entries\nm1: Owner uses fish shell\nm2: Server kenari") {
+	if !strings.HasPrefix(out.Output, "memory 49/8000 characters, 2 entries\nm1: Owner uses fish shell\nm2: Server kenari") {
 		t.Fatalf("read = %q", out.Output)
 	}
 	out = callMemory(t, write, tc, `{"target":"memory","action":"replace","content":"x","old_text":"s"}`)

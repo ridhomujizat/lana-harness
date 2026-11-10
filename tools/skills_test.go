@@ -47,6 +47,9 @@ func TestSkillTools(t *testing.T) {
 		}
 	}
 	tc := core.ToolCtx{AgentName: "worker", Home: home, Skills: []string{"a"}}
+	// The default skill_write stages a proposal; a direct agent writes instead.
+	direct := tc
+	direct.SkillWrite = "direct"
 	load, write := NewSkillLoad(), NewSkillWrite()
 
 	out := callSkill(t, load, tc, `{"name":"a"}`)
@@ -62,11 +65,11 @@ func TestSkillTools(t *testing.T) {
 		t.Fatalf("load b = %+v", out)
 	}
 
-	out = callSkill(t, write, tc, `{"name":"x","description":"Use x.","body":"Step 1."}`)
+	out = callSkill(t, write, direct, `{"name":"x","description":"Use x.","body":"Step 1."}`)
 	if out.Status != core.ToolStatusSuccess || out.Output != "created skill x" {
 		t.Fatalf("create x = %+v", out)
 	}
-	out = callSkill(t, write, tc, `{"name":"x","description":"Use x.","body":"Step 1."}`)
+	out = callSkill(t, write, direct, `{"name":"x","description":"Use x.","body":"Step 1."}`)
 	if out.Status != core.ToolStatusSuccess || out.Output != "updated skill x" {
 		t.Fatalf("update x = %+v", out)
 	}
@@ -74,9 +77,50 @@ func TestSkillTools(t *testing.T) {
 		t.Fatalf("SKILL.md not written: %v", err)
 	}
 
-	out = callSkill(t, write, tc, `{"name":"Bad","description":"Use bad.","body":"Step 1."}`)
+	out = callSkill(t, write, direct, `{"name":"Bad","description":"Use bad.","body":"Step 1."}`)
 	if out.Status != core.ToolStatusError || !strings.HasPrefix(out.Output, "invalid input: ") {
 		t.Fatalf("invalid name = %+v", out)
+	}
+}
+
+// REQ-DKN-050: the default and "approve" skill_write stage a proposal that
+// skill_load cannot see, and never write to the agent's skills.
+func TestSkillWriteStagesProposal(t *testing.T) {
+	for _, mode := range []string{"", "approve"} {
+		t.Run("skill_write="+mode, func(t *testing.T) {
+			home := t.TempDir()
+			tc := core.ToolCtx{AgentName: "worker", Home: home, SessionID: "s1", SkillWrite: mode, OwnerTurn: true}
+			out := callSkill(t, NewSkillWrite(), tc, `{"name":"x","description":"Use x.","body":"Step 1."}`)
+			if out.Status != core.ToolStatusSuccess || out.Output != "proposed skill x; the owner reviews it in Knowledge → Review" {
+				t.Fatalf("write = %+v", out)
+			}
+			if _, err := os.Stat(filepath.Join(home, "agents", "worker", "proposed-skills", "x", "SKILL.md")); err != nil {
+				t.Fatalf("proposal not written: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(home, "agents", "worker", "skills", "x")); !os.IsNotExist(err) {
+				t.Fatalf("skill written despite staged mode: %v", err)
+			}
+			load := callSkill(t, NewSkillLoad(), tc, `{"name":"x"}`)
+			if load.Status != core.ToolStatusError || !strings.Contains(load.Output, `unknown skill "x"`) {
+				t.Fatalf("load of a proposal = %+v", load)
+			}
+		})
+	}
+}
+
+// REQ-DKN-050: skill_write = "direct" writes the skill at once.
+func TestSkillWriteDirectWrites(t *testing.T) {
+	home := t.TempDir()
+	tc := core.ToolCtx{AgentName: "worker", Home: home, SkillWrite: "direct"}
+	out := callSkill(t, NewSkillWrite(), tc, `{"name":"x","description":"Use x.","body":"Step 1."}`)
+	if out.Status != core.ToolStatusSuccess || out.Output != "created skill x" {
+		t.Fatalf("write = %+v", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, "agents", "worker", "skills", "x", "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "agents", "worker", "proposed-skills", "x")); !os.IsNotExist(err) {
+		t.Fatalf("proposal written despite direct mode: %v", err)
 	}
 }
 

@@ -66,6 +66,9 @@ Order of work: approve requirements, then the contract (if applicable), then des
 Implementation must not start while there are still blocking open questions or earlier artifacts
 have not been approved.
 
+> **Gate lifted (2026-11-10)** for spec #46 (domain knowledge). The owner answered the interview and said
+> "autodevelopement dengan rekomendasi kamu, sampai tasknya selesai". Remaining details use `Rekomendasi agent:`.
+>
 > **Gate lifted (2026-11-08)** for specs #37 (LLM router) and #38 (Claude Agent runtime). The owner answered the
 > interview and said "ya ikuti rekomendasimu". Remaining details use `Rekomendasi agent:`.
 >
@@ -165,3 +168,4 @@ it is reversible and does not change observable behavior.
 | — | Generated agent avatars: blob faces with two eye holes, model or local generator, default per name | [Approved r1](43-agent-avatars/requirements.md) | In requirements | Not required | [Completed r1](43-agent-avatars/tasks.md) |
 | — | Script Parse node: guardian-written JS parser, contract check, agent fallback, auto-regeneration | [Approved r1](44-script-parse/requirements.md) | In requirements | [Approved r1](44-script-parse/design.md) | [Completed r1](44-script-parse/tasks.md) |
 | — | Script drift guard: output profile vs last good runs, schema rule tokens, optional audit fallback | [Approved r1](45-script-drift-guard/requirements.md) | In requirements | [Approved r1](45-script-drift-guard/design.md) | [Completed r1](45-script-drift-guard/tasks.md) |
+| — | Domain knowledge per agent: vault scopes, proposals, domain promotion, 8k memory, learned skills, review queue | [Approved r1](46-domain-knowledge/requirements.md) | [Approved r1](46-domain-knowledge/api-contract.md) | [Approved r1](46-domain-knowledge/design.md) | [Completed r1](46-domain-knowledge/tasks.md) |

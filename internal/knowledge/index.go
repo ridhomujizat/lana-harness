@@ -25,7 +25,7 @@ import (
 
 // Index sizing and schema constants (design §3).
 const (
-	indexSchemaVersion = 2
+	indexSchemaVersion = 3
 	indexSyncInterval  = 10 * time.Second
 	embedBatchSize     = 64
 	indexCatalogMax    = 400
@@ -52,6 +52,10 @@ var indexKindByDir = map[string]string{
 	sourcesDir: kindSource,
 	journalDir: kindJournal,
 }
+
+// indexRoots are the top-level vault folders scan walks. agents/ holds one
+// domain per agent; kindOf decides which of its files are indexed (design §2).
+var indexRoots = []string{wikiDir, sourcesDir, journalDir, agentsDir}
 
 // indexSchema is schema version 1 of knowledge.db (design §3).
 const indexSchema = `
@@ -89,6 +93,31 @@ CREATE TABLE promote_marks (path TEXT PRIMARY KEY, offset INTEGER NOT NULL, upda
 CREATE TABLE upkeep (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `
 
+// indexSchemaV3 is the schema version 3 migration: the per-file scope and the
+// proposals table (design §2). A fresh database runs it right after
+// indexSchemaV2; an existing one runs it over its schema. The rows of files and
+// chunks (and the vectors of those chunks) are dropped right after, so the next
+// Sync reindexes every vault file with its scope (REQ-DKN-004).
+const indexSchemaV3 = `
+ALTER TABLE files ADD COLUMN scope TEXT NOT NULL DEFAULT 'shared';
+CREATE INDEX files_scope ON files(scope, kind);
+CREATE TABLE proposals (
+  id TEXT PRIMARY KEY,             -- "p_" + ULID
+  agent TEXT NOT NULL,             -- target domain
+  from_agent TEXT NOT NULL,
+  session_id TEXT NOT NULL DEFAULT '',
+  turn_id TEXT NOT NULL DEFAULT '',
+  owner_turn INTEGER NOT NULL DEFAULT 0,
+  op TEXT NOT NULL,                -- JSON of the requested core.KnowledgeWrite
+  title TEXT NOT NULL,
+  status TEXT NOT NULL,            -- pending | approved | applied | rejected
+  result TEXT NOT NULL DEFAULT '', -- applied ops or error
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX proposals_agent ON proposals(agent, status);
+`
+
 // Index is the derived SQLite index of one vault (REQ-KNW-030). It lives
 // outside the vault and can be rebuilt from the files at any time.
 type Index struct {
@@ -111,7 +140,7 @@ type Index struct {
 }
 
 // OpenIndex opens or creates the index database and applies the schema up to
-// version 2 (design §2, §3). vaultRoot is the folder the index describes.
+// version 3 (design §2, §3). vaultRoot is the folder the index describes.
 func OpenIndex(dbPath, vaultRoot string) (*Index, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
@@ -168,6 +197,21 @@ func (i *Index) migrate(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, indexSchemaV2); err != nil {
 			_ = tx.Rollback()
 			return err
+		}
+	}
+	if version < 3 {
+		if _, err := tx.ExecContext(ctx, indexSchemaV3); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		// The scope column is new: drop the file and chunk rows so the next
+		// Sync reindexes every vault file with its scope. Vault files are not
+		// touched (REQ-DKN-004).
+		for _, stmt := range []string{"DELETE FROM vectors", "DELETE FROM chunks", "DELETE FROM files"} {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", indexSchemaVersion)); err != nil {
@@ -297,7 +341,7 @@ type fileState struct {
 // within the extension and size caps (design §3).
 func (i *Index) scan() (map[string]vaultFile, error) {
 	out := map[string]vaultFile{}
-	for dir, kind := range indexKindByDir {
+	for _, dir := range indexRoots {
 		root := filepath.Join(i.root, dir)
 		err := filepath.WalkDir(root, func(abs string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -328,6 +372,10 @@ func (i *Index) scan() (map[string]vaultFile, error) {
 				return nil
 			}
 			rel := i.rel(abs)
+			kind, ok := kindOf(rel)
+			if !ok {
+				return nil
+			}
 			out[rel] = vaultFile{path: rel, kind: kind, abs: abs, mtime: info.ModTime().UnixNano(), size: info.Size()}
 			return nil
 		})
@@ -398,6 +446,7 @@ func (i *Index) syncOne(ctx context.Context, tx *sql.Tx, rel string) error {
 	} else {
 		chunks = ChunkText(raw)
 	}
+	scope := ScopeOf(rel)
 
 	if _, err := tx.ExecContext(ctx, "DELETE FROM vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE path = ?)", rel); err != nil {
 		return err
@@ -406,20 +455,24 @@ func (i *Index) syncOne(ctx context.Context, tx *sql.Tx, rel string) error {
 		return err
 	}
 	for ord, chunk := range chunks {
+		text := stripSuperseded(chunk.Text)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO chunks (path, ord, title, heading, start_line, text) VALUES (?, ?, ?, ?, ?, ?)",
-			rel, ord, title, chunk.Heading, chunk.StartLine, chunk.Text); err != nil {
+			rel, ord, title, chunk.Heading, chunk.StartLine, text); err != nil {
 			return err
 		}
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO files (path, kind, title, type, description, aliases, updated, mtime, size, hash)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO files (path, kind, title, type, description, aliases, updated, scope, mtime, size, hash)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(path) DO UPDATE SET
   kind = excluded.kind, title = excluded.title, type = excluded.type,
   description = excluded.description, aliases = excluded.aliases, updated = excluded.updated,
-  mtime = excluded.mtime, size = excluded.size, hash = excluded.hash`,
-		rel, kind, title, typ, desc, aliases, updated, info.ModTime().UnixNano(), info.Size(), sha256Hex(data))
+  scope = excluded.scope, mtime = excluded.mtime, size = excluded.size, hash = excluded.hash`,
+		rel, kind, title, typ, desc, aliases, updated, scope, info.ModTime().UnixNano(), info.Size(), sha256Hex(data))
 	return err
 }
 
@@ -461,11 +514,24 @@ func (i *Index) rel(abs string) string {
 	return filepath.ToSlash(r)
 }
 
-// kindOf returns the index kind of a vault-relative path, if its top-level
-// folder is indexed.
+// kindOf returns the index kind of a vault-relative path, if it is indexed. A
+// file under agents/<name>/ is indexed only when <name> is a legal scope name
+// and the file sits in that domain's wiki/ or journal/ (design §2).
 func kindOf(rel string) (string, bool) {
-	top, _, _ := strings.Cut(rel, "/")
-	kind, ok := indexKindByDir[top]
+	parts := strings.Split(rel, "/")
+	if parts[0] == agentsDir {
+		if len(parts) < 3 || !ValidScopeName(parts[1]) {
+			return "", false
+		}
+		switch parts[2] {
+		case wikiDir:
+			return kindPage, true
+		case journalDir:
+			return kindJournal, true
+		}
+		return "", false
+	}
+	kind, ok := indexKindByDir[parts[0]]
 	return kind, ok
 }
 
@@ -606,12 +672,21 @@ func (i *Index) dropVectors() {
 
 // Catalog returns at most limit page catalog lines formatted
 // "title — type — description", ordered by title case-insensitively
-// (design §5). limit <= 0 means indexCatalogMax.
-func (i *Index) Catalog(limit int) ([]string, error) {
+// (design §5). limit <= 0 means indexCatalogMax. Zero scopes means every scope.
+func (i *Index) Catalog(limit int, scopes ...string) ([]string, error) {
 	if limit <= 0 {
 		limit = indexCatalogMax
 	}
-	rows, err := i.db.Query("SELECT title, type, description FROM files WHERE kind = ? ORDER BY lower(title)", kindPage)
+	query := "SELECT title, type, description FROM files WHERE kind = ?"
+	args := []any{kindPage}
+	if len(scopes) > 0 {
+		query += " AND scope IN (" + placeholders(len(scopes)) + ")"
+		for _, scope := range scopes {
+			args = append(args, scope)
+		}
+	}
+	query += " ORDER BY lower(title)"
+	rows, err := i.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -635,6 +710,14 @@ func (i *Index) Catalog(limit int) ([]string, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// placeholders returns n comma-separated "?" markers for an IN clause.
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.Repeat("?,", n-1) + "?"
 }
 
 // SourceState is one row of sources_state (design §5).
@@ -774,4 +857,128 @@ INSERT INTO upkeep (key, value) VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, value)
 	return err
+}
+
+// ScopeStat is the page count, journal-day count, and newest mtime of one
+// scope (design §2).
+type ScopeStat struct {
+	Scope       string
+	Pages       int
+	JournalDays int
+	UpdatedAt   int64
+}
+
+// ScopeStats returns one row per scope with a file, shared first (always
+// present, even with zero pages) and the other scopes in name order
+// (design §2). UpdatedAt is the newest file mtime in milliseconds. It runs
+// Sync first, like Pages, so files added outside lana and fresh lana writes
+// are seen.
+func (i *Index) ScopeStats() ([]ScopeStat, error) {
+	if err := i.Sync(context.Background()); err != nil {
+		return nil, err
+	}
+	rows, err := i.db.Query(`
+SELECT scope, SUM(kind = ?), SUM(kind = ?), COALESCE(MAX(mtime), 0)
+FROM files GROUP BY scope`, kindPage, kindJournal)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	byScope := map[string]ScopeStat{}
+	for rows.Next() {
+		var (
+			s       ScopeStat
+			mtime   int64
+			pages   int
+			journal int
+		)
+		if err := rows.Scan(&s.Scope, &pages, &journal, &mtime); err != nil {
+			return nil, err
+		}
+		s.Pages = pages
+		s.JournalDays = journal
+		s.UpdatedAt = mtime / int64(time.Millisecond)
+		byScope[s.Scope] = s
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := []ScopeStat{{Scope: ScopeShared}}
+	if s, ok := byScope[ScopeShared]; ok {
+		out[0] = s
+	}
+	var others []string
+	for scope := range byScope {
+		if scope != ScopeShared {
+			others = append(others, scope)
+		}
+	}
+	sort.Strings(others)
+	for _, scope := range others {
+		out = append(out, byScope[scope])
+	}
+	return out, nil
+}
+
+// PageRow is one page for the knowledge page list (design §2). Mtime is the
+// file mtime in milliseconds.
+type PageRow struct {
+	Path        string
+	Title       string
+	Scope       string
+	Type        string
+	Description string
+	Updated     string
+	Mtime       int64
+}
+
+// Pages returns the pages of one scope, newest first, with the total count
+// before the limit (design §2). scope "" or "all" means every scope; q is a
+// case-insensitive substring of the title, aliases, or description. It runs
+// Sync first, like Search, so files added outside lana are seen.
+func (i *Index) Pages(scope, q string, limit int) ([]PageRow, int, error) {
+	if err := i.Sync(context.Background()); err != nil {
+		return nil, 0, err
+	}
+	where := []string{"kind = ?"}
+	args := []any{kindPage}
+	if scope != "" && scope != "all" {
+		where = append(where, "scope = ?")
+		args = append(args, scope)
+	}
+	if q = strings.TrimSpace(q); q != "" {
+		like := "%" + strings.ToLower(q) + "%"
+		where = append(where, "(lower(title) LIKE ? OR lower(aliases) LIKE ? OR lower(description) LIKE ?)")
+		args = append(args, like, like, like)
+	}
+	clause := " WHERE " + strings.Join(where, " AND ")
+
+	var total int
+	if err := i.db.QueryRow("SELECT COUNT(*) FROM files"+clause, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	query := "SELECT path, title, scope, type, description, updated, mtime FROM files" + clause + " ORDER BY mtime DESC, path"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := i.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PageRow
+	for rows.Next() {
+		var (
+			p     PageRow
+			mtime int64
+		)
+		if err := rows.Scan(&p.Path, &p.Title, &p.Scope, &p.Type, &p.Description, &p.Updated, &mtime); err != nil {
+			return nil, 0, err
+		}
+		p.Mtime = mtime / int64(time.Millisecond)
+		out = append(out, p)
+	}
+	return out, total, rows.Err()
 }

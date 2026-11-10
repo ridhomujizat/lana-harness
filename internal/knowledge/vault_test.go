@@ -226,3 +226,73 @@ func TestOpenCreatesInboxAndJournal(t *testing.T) {
 		}
 	}
 }
+
+// REQ-DKN-030: AppendJournalIn writes under the journal folder of the scope.
+func TestAppendJournalIn(t *testing.T) {
+	v, dir := newVault(t)
+	rel, err := v.AppendJournalIn("dana", "2026-11-01", "## 14:05 · dana\n- note")
+	if err != nil {
+		t.Fatalf("AppendJournalIn: %v", err)
+	}
+	if rel != "agents/dana/journal/2026-11-01.md" {
+		t.Fatalf("rel = %q, want agents/dana/journal/2026-11-01.md", rel)
+	}
+	got := readFile(t, filepath.Join(dir, agentsDir, "dana", journalDir, "2026-11-01.md"))
+	if want := "# 2026-11-01\n\n## 14:05 · dana\n- note\n"; got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+}
+
+// REQ-DKN-003: a domain index lists only that domain's pages.
+func TestDomainIndexListsOnlyDomainPages(t *testing.T) {
+	v, dir := newVault(t)
+	createPage(t, v, "Shared Page", "topic", "s")
+	if _, err := v.Apply(Op{Action: "create", Scope: "dana", Title: "Dana Page", Type: "topic", Body: "d"}, "test"); err != nil {
+		t.Fatalf("domain create: %v", err)
+	}
+	idx := readFile(t, filepath.Join(dir, agentsDir, "dana", indexFile))
+	if !strings.Contains(idx, "- [[Dana Page]]") {
+		t.Fatalf("domain index missing its page:\n%s", idx)
+	}
+	if strings.Contains(idx, "Shared Page") {
+		t.Fatalf("domain index lists a shared page:\n%s", idx)
+	}
+}
+
+// REQ-DKN-003: the vault index lists each domain with its page count in name
+// order.
+func TestVaultIndexDomainsSection(t *testing.T) {
+	v, dir := newVault(t)
+	for _, in := range []struct{ scope, title string }{
+		{"dana", "Dana One"},
+		{"dana", "Dana Two"},
+		{"rio", "Rio One"},
+	} {
+		if _, err := v.Apply(Op{Action: "create", Scope: in.scope, Title: in.title, Type: "topic", Body: "x"}, "test"); err != nil {
+			t.Fatalf("create %s/%s: %v", in.scope, in.title, err)
+		}
+	}
+	idx := readFile(t, filepath.Join(dir, indexFile))
+	want := "## Domains\n- [[agents/dana/index|dana]] — 2 pages\n- [[agents/rio/index|rio]] — 1 pages\n"
+	if !strings.Contains(idx, want) {
+		t.Fatalf("index.md missing the Domains section:\n%s", idx)
+	}
+}
+
+// REQ-DKN-003: a domain change line names its scope; a shared one does not.
+func TestLogScopeSuffix(t *testing.T) {
+	v, dir := newVault(t)
+	if _, err := v.Apply(Op{Action: "create", Scope: "dana", Title: "Sop", Type: "topic", Body: "x"}, "test"); err != nil {
+		t.Fatalf("domain create: %v", err)
+	}
+	if _, err := v.Apply(Op{Action: "create", Title: "Shared", Type: "topic", Body: "x"}, "test"); err != nil {
+		t.Fatalf("shared create: %v", err)
+	}
+	log := readFile(t, filepath.Join(dir, logFile))
+	if !strings.Contains(log, "- created [[Sop]] (dana)") {
+		t.Fatalf("log missing the domain scope suffix:\n%s", log)
+	}
+	if !strings.Contains(log, "- created [[Shared]]\n") || strings.Contains(log, "(shared)") {
+		t.Fatalf("shared log line must not carry a scope suffix:\n%s", log)
+	}
+}

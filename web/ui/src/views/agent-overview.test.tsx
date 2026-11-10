@@ -243,3 +243,34 @@ describe("Agent overview looks after", () => {
     expect(rows[1]?.querySelector(".cl")).toBeNull();
   });
 });
+
+describe("what it knows (spec 46, AC-DKN-008)", () => {
+  it("shows the domain page count, the weekly bars, and the recent pages", async () => {
+    vi.mocked(getAgentOverview).mockResolvedValue({
+      ...overview(),
+      knowledge: {
+        available: true,
+        pages: 12,
+        changed_7d: 3,
+        weeks: [0, 0, 1, 2, 0, 4, 2, 3],
+        recent: [{ title: "Gaji", path: "agents/dana/wiki/Gaji.md", updated: "2026-11-10" }],
+      },
+    });
+    const { container } = render(<AgentOverview name="dana" agent={agent()} />);
+
+    await screen.findByText(/\+3 this week/);
+    expect(container.querySelector(".ov-knows-count")?.textContent).toBe("12");
+    expect(container.querySelectorAll(".ov-knows-bars .ov-bar")).toHaveLength(8);
+    const link = screen.getByText("Gaji").closest("a") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("#/knowledge?scope=dana");
+  });
+
+  it("explains an agent without a knowledge tool", async () => {
+    vi.mocked(getAgentOverview).mockResolvedValue({
+      ...overview(),
+      knowledge: { available: false, pages: 0, changed_7d: 0, weeks: [], recent: [] },
+    });
+    render(<AgentOverview name="dana" agent={agent()} />);
+    expect(await screen.findByText(/No knowledge tool/)).toBeTruthy();
+  });
+});

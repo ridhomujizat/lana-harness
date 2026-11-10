@@ -1,6 +1,7 @@
 package agenthome
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -118,6 +120,18 @@ func AgentSkillsDir(home, agent string) string {
 	return filepath.Join(home, "agents", agent, "skills")
 }
 
+// AgentProposedSkillsDir returns the folder of pending skill proposals of agent
+// under home (REQ-DKN-050). It is separate from AgentSkillsDir, so skill_load
+// and the prompt never see a proposal.
+func AgentProposedSkillsDir(home, agent string) string {
+	return filepath.Join(home, "agents", agent, "proposed-skills")
+}
+
+// proposeDir returns the proposal folder of one skill name.
+func proposeDir(home, agent, name string) string {
+	return filepath.Join(AgentProposedSkillsDir(home, agent), name)
+}
+
 // ReadSkills reads every skill folder in dir and tags the valid ones with scope.
 func ReadSkills(dir, scope string) ([]Skill, []InvalidSkill) {
 	entries, err := os.ReadDir(dir)
@@ -214,9 +228,182 @@ func WriteSkill(home, agent, name, description, body string) (created bool, err 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	text := "---\nname: " + name + "\ndescription: " + description + "\n---\n" + strings.TrimSpace(body) + "\n"
-	if err := WriteFile(path, text); err != nil {
+	if err := WriteFile(path, skillText(name, description, body)); err != nil {
 		return false, err
 	}
 	return created, nil
+}
+
+// skillText renders a SKILL.md with the shared frontmatter and body format.
+func skillText(name, description, body string) string {
+	return "---\nname: " + name + "\ndescription: " + description + "\n---\n" + strings.TrimSpace(body) + "\n"
+}
+
+// SkillProposalMeta is the origin of a skill proposal (REQ-DKN-050).
+type SkillProposalMeta struct {
+	SessionID string
+	OwnerTurn bool
+	// CreatedAt is a Unix time in milliseconds; 0 means now.
+	CreatedAt int64
+}
+
+// SkillProposal is one pending skill proposal.
+type SkillProposal struct {
+	Agent       string
+	Name        string
+	Description string
+	Body        string
+	SessionID   string
+	// Exists reports whether the agent already has a skill with this name.
+	Exists    bool
+	OwnerTurn bool
+	CreatedAt int64
+}
+
+// proposalFile is the proposal.json file of a skill proposal.
+type proposalFile struct {
+	CreatedAt int64  `json:"created_at"`
+	SessionID string `json:"session_id"`
+	OwnerTurn bool   `json:"owner_turn"`
+}
+
+// ProposeSkill stages a skill as a proposal instead of writing it to the
+// agent's skills (REQ-DKN-050, REQ-DKN-051). It validates the same way WriteSkill
+// does, writes the proposal atomically, and replaces a pending proposal with the
+// same name.
+func ProposeSkill(home, agent, name, description, body string, meta SkillProposalMeta) error {
+	if !ValidSkillName(name) {
+		return fmt.Errorf("invalid name %q", name)
+	}
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return errors.New("description is required")
+	}
+	if strings.ContainsAny(description, "\n\r") {
+		return errors.New("description must be one line")
+	}
+	if utf8.RuneCountInString(description) > skillDescriptionLimit {
+		return fmt.Errorf("description is longer than %d characters", skillDescriptionLimit)
+	}
+	if strings.TrimSpace(body) == "" {
+		return errors.New("body is required")
+	}
+	if utf8.RuneCountInString(body) > skillBodyLimit {
+		return fmt.Errorf("body is longer than %d characters", skillBodyLimit)
+	}
+	if !ValidName(agent) {
+		return fmt.Errorf("invalid agent name %q", agent)
+	}
+	createdAt := meta.CreatedAt
+	if createdAt == 0 {
+		createdAt = time.Now().UnixMilli()
+	}
+	dir := proposeDir(home, agent, name)
+	if err := WriteFile(filepath.Join(dir, "SKILL.md"), skillText(name, description, body)); err != nil {
+		return err
+	}
+	data, err := json.Marshal(proposalFile{CreatedAt: createdAt, SessionID: meta.SessionID, OwnerTurn: meta.OwnerTurn})
+	if err != nil {
+		return err
+	}
+	return WriteFile(filepath.Join(dir, "proposal.json"), string(data))
+}
+
+// SkillProposals reads every pending skill proposal under home, across all
+// agents, newest first. A folder that does not parse is skipped (REQ-DKN-060).
+func SkillProposals(home string) ([]SkillProposal, error) {
+	agents, err := os.ReadDir(filepath.Join(home, "agents"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var proposals []SkillProposal
+	for _, agentEntry := range agents {
+		if !agentEntry.IsDir() || strings.HasPrefix(agentEntry.Name(), ".") {
+			continue
+		}
+		agent := agentEntry.Name()
+		entries, err := os.ReadDir(AgentProposedSkillsDir(home, agent))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			dir := filepath.Join(AgentProposedSkillsDir(home, agent), entry.Name())
+			skill, err := ParseSkill(dir)
+			if err != nil {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "proposal.json"))
+			if err != nil {
+				continue
+			}
+			var meta proposalFile
+			if err := json.Unmarshal(data, &meta); err != nil {
+				continue
+			}
+			exists := false
+			if info, err := os.Stat(filepath.Join(AgentSkillsDir(home, agent), skill.Name, "SKILL.md")); err == nil && !info.IsDir() {
+				exists = true
+			}
+			proposals = append(proposals, SkillProposal{
+				Agent: agent, Name: skill.Name, Description: skill.Description, Body: skill.Body,
+				SessionID: meta.SessionID, OwnerTurn: meta.OwnerTurn, CreatedAt: meta.CreatedAt, Exists: exists,
+			})
+		}
+	}
+	sort.Slice(proposals, func(i, j int) bool {
+		if proposals[i].CreatedAt != proposals[j].CreatedAt {
+			return proposals[i].CreatedAt > proposals[j].CreatedAt
+		}
+		if proposals[i].Agent != proposals[j].Agent {
+			return proposals[i].Agent < proposals[j].Agent
+		}
+		return proposals[i].Name < proposals[j].Name
+	})
+	return proposals, nil
+}
+
+// ApproveSkill writes a pending proposal as a real agent skill and removes the
+// proposal folder. A missing proposal is an os.ErrNotExist-wrapping error
+// (REQ-DKN-051).
+func ApproveSkill(home, agent, name string) error {
+	if !ValidName(agent) || !ValidSkillName(name) {
+		return fmt.Errorf("invalid proposal %q", name)
+	}
+	dir := proposeDir(home, agent, name)
+	skill, err := ParseSkill(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("skill proposal %s/%s: %w", agent, name, os.ErrNotExist)
+		}
+		return err
+	}
+	if _, err := WriteSkill(home, agent, skill.Name, skill.Description, skill.Body); err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+// RejectSkill drops a pending skill proposal. A missing proposal is an
+// os.ErrNotExist-wrapping error (REQ-DKN-051).
+func RejectSkill(home, agent, name string) error {
+	if !ValidName(agent) || !ValidSkillName(name) {
+		return fmt.Errorf("invalid proposal %q", name)
+	}
+	dir := proposeDir(home, agent, name)
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("skill proposal %s/%s: %w", agent, name, os.ErrNotExist)
+		}
+		return err
+	}
+	return os.RemoveAll(dir)
 }

@@ -380,6 +380,46 @@ func TestKnowledgeConsolidateAt(t *testing.T) {
 	}
 }
 
+// API-DKN-002: agents.<name>.skill_write accepts "" (the default), "approve", or
+// "direct", and rejects anything else with the exact message.
+func TestSkillWriteValue(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		ok    bool
+	}{
+		{`""`, true},
+		{`"approve"`, true},
+		{`"direct"`, true},
+		{`"always"`, false},
+	} {
+		home := t.TempDir()
+		writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\nskill_write = "+tc.value+"\n")
+		_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
+		if tc.ok {
+			if err != nil {
+				t.Fatalf("skill_write = %s rejected: %v", tc.value, err)
+			}
+			continue
+		}
+		var errs Errors
+		if !errors.As(err, &errs) {
+			t.Fatalf("skill_write = %s not rejected: %v", tc.value, err)
+		}
+		found := false
+		for _, e := range errs {
+			if e.Key == "agents.x.skill_write" {
+				found = true
+				if e.Msg != `want "approve" or "direct"` {
+					t.Fatalf("message = %q", e.Msg)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("skill_write = %s not rejected: %v", tc.value, errs)
+		}
+	}
+}
+
 // API-KNU-001: journal must be a boolean.
 func TestKnowledgeJournalType(t *testing.T) {
 	home := t.TempDir()
