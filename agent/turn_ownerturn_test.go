@@ -91,3 +91,57 @@ func TestToolCtxOwnerTurn(t *testing.T) {
 		t.Fatalf("child turn: calls=%d OwnerTurn=%v want 1/false", calls, owner)
 	}
 }
+
+// REQ-DKN-021, REQ-DKN-032: a lana tool called from a Claude Code turn carries
+// the same OwnerTurn as a native turn: true for a root owner turn, false for a
+// child turn.
+func TestExternalToolCtxOwnerTurn(t *testing.T) {
+	host := &fakeToolHost{}
+	script := func(ctx context.Context, _ *fakeRuntime, turn core.RuntimeTurn) error {
+		call := host.bound()
+		if call == nil {
+			return end(turn, core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: "no bound lana tool"})
+		}
+		input := json.RawMessage(`{}`)
+		out := call(ctx, "c1", "probe", input)
+		turn.Emit(core.RuntimeEvent{Kind: core.RuntimeToolCall, ID: "c1", Name: "mcp__lana__probe", Input: input, Risk: core.RiskRead})
+		turn.Emit(core.RuntimeEvent{Kind: core.RuntimeToolResult, ID: "c1", Output: out.Output, IsError: out.Status != core.ToolStatusSuccess})
+		turn.Emit(core.RuntimeEvent{Kind: core.RuntimeAssistantMessage, Text: "done"})
+		return end(turn, core.RuntimeEvent{StopReason: core.RuntimeStopEndTurn})
+	}
+	external := func(t *testing.T) (*harness, *ownerTurnProbe) {
+		t.Helper()
+		h, _ := newExternalHarness(t, core.AgentConfig{Tools: []string{"probe"}}, script)
+		p := &ownerTurnProbe{}
+		if err := h.tools.Register(p); err != nil {
+			t.Fatal(err)
+		}
+		h.reg.SetToolHost(host)
+		return h, p
+	}
+
+	root, rootProbe := external(t)
+	if result := root.run(t, "hi"); result.StopReason != "end_turn" {
+		t.Fatalf("root result=%+v", result)
+	}
+	calls, owner, _ := rootProbe.seen()
+	if calls != 1 || !owner {
+		t.Fatalf("root turn: calls=%d OwnerTurn=%v want 1/true", calls, owner)
+	}
+
+	child, childProbe := external(t)
+	info, err := child.store.Create(context.Background(), core.NewSession{
+		Agent: "assistant", Channel: "library", Workspace: child.ws, ParentSessionID: child.info.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.info = info
+	if result := child.run(t, "hi"); result.StopReason != "end_turn" {
+		t.Fatalf("child result=%+v", result)
+	}
+	calls, owner, _ = childProbe.seen()
+	if calls != 1 || owner {
+		t.Fatalf("child turn: calls=%d OwnerTurn=%v want 1/false", calls, owner)
+	}
+}
