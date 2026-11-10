@@ -343,6 +343,30 @@ func TestPromoteDomainSupersede(t *testing.T) {
 	}
 }
 
+// AC-DKN-005 (design §4.2 step 4): a create op whose type is missing or unknown
+// is applied as topic.
+func TestPromoteDomainCreateWithoutTypeUsesTopic(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Tanpa Tipe","description":"d","body":"isi","scope":"domain","confidence":0.7},
+		{"op":"create","title":"Tipe Asing","type":"planet","description":"d","body":"isi","scope":"domain","confidence":0.7}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- catatan\n")
+	res, err := env.svc.promoteDomain(context.Background(), "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 2 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 2 and 0", res.Applied, res.Skipped)
+	}
+	for _, rel := range []string{"agents/dana/wiki/Tanpa Tipe.md", "agents/dana/wiki/Tipe Asing.md"} {
+		if page := env.readVault(rel); !strings.Contains(page, "type: topic") {
+			t.Fatalf("%s frontmatter is not type topic:\n%s", rel, page)
+		}
+	}
+}
+
 // AC-DKN-005 (REQ-DKN-033): Consolidate promotes every domain agent in name
 // order after the shared promotion and before lint, and the log names each.
 func TestConsolidatePromotesDomainsAfterShared(t *testing.T) {
@@ -426,6 +450,33 @@ func TestPromoteDomainKeepsProposalWhenOpSkipped(t *testing.T) {
 	}
 }
 
+// AC-DKN-005 (design §4.2 step 5): a proposal listed in applied_proposals that
+// no op references stays pending when any op in the reply was skipped.
+func TestPromoteDomainKeepsListedProposalWhenOpSkipped(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	p := ownerProposal(t, env, "Gaji")
+	provider.setText(fmt.Sprintf(`{"ops":[
+		{"op":"create","title":"Tebakan","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.5}
+	],"applied_proposals":["%s"],"prune":[]}`, p.ID))
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 0 || res.Skipped != 1 {
+		t.Fatalf("applied=%d skipped=%d, want 0 and 1", res.Applied, res.Skipped)
+	}
+	if len(res.Proposals) != 0 {
+		t.Fatalf("proposals applied = %v, want none", res.Proposals)
+	}
+	if status := env.proposalStatus(t, p.ID); status != proposalStatusPending {
+		t.Fatalf("proposal status = %q, want pending", status)
+	}
+}
+
 // AC-DKN-005 (design §4.2 step 5): a proposal listed in applied_proposals with
 // no op referencing it at all becomes applied.
 func TestPromoteDomainAppliesListedProposalWithoutOp(t *testing.T) {
@@ -490,5 +541,18 @@ func TestPromoteDomainJournalSourceLinkHasNoSuffix(t *testing.T) {
 	}
 	if strings.Contains(page, "[[agents/dana/journal/2026-11-01.md]]") {
 		t.Fatalf("journal source link keeps the .md suffix:\n%s", page)
+	}
+}
+
+// AC-DKN-005 (design §4.2): the domain prompt tells the model to take a fitting
+// proposal and to name it on every op that carries it, and that a create needs a
+// valid type.
+func TestDomainSystemPromptCarriesProposalAndTypeRules(t *testing.T) {
+	proposal := `Take a proposal when it fits your job and does not contradict what you know, and set "proposal" to its id on every op that carries it; leave out a proposal that is wrong or outside your job.`
+	if !strings.Contains(domainSystem, proposal) {
+		t.Fatalf("domainSystem missing the proposal sentence:\n%s", domainSystem)
+	}
+	if !strings.Contains(domainSystem, `a "create" op needs a "type"`) {
+		t.Fatalf("domainSystem missing the create type rule:\n%s", domainSystem)
 	}
 }
