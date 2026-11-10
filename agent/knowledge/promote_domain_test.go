@@ -375,7 +375,7 @@ func TestConsolidatePromotesDomainsAfterShared(t *testing.T) {
 	if shared < 0 || dana < 0 || rio < 0 {
 		t.Fatalf("consolidation log missing a promotion line:\n%s", log)
 	}
-	if !(shared < dana && dana < rio) {
+	if shared >= dana || dana >= rio {
 		t.Fatalf("domain promotion is not after the shared promotion, in name order:\n%s", log)
 	}
 }
