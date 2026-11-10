@@ -229,7 +229,7 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 		// reply was skipped at all; a proposal whose only ops were skipped, or
 		// that is listed while another op was skipped, keeps its status so it is
 		// offered again (design §4.2 step 5).
-		if !appliedViaOp[p.ID] && !(listed[p.ID] && !opReferenced[p.ID] && res.Skipped == 0) {
+		if !appliedViaOp[p.ID] && (!listed[p.ID] || opReferenced[p.ID] || res.Skipped != 0) {
 			continue
 		}
 		if err := idx.SetProposal(p.ID, proposalStatusApplied, resultLine, s.now().UnixMilli()); err != nil {

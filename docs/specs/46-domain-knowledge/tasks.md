@@ -53,7 +53,7 @@ suite (`go test -race -count=1 ./...`, `golangci-lint run`) runs after each wave
 
 ### T-005 Domain promotion and nightly order
 
-- Status: Done 2026-11-10 (271eb13, fixes 6f39866, 6e35f32, T-005d). Evidence: `go test ./agent/knowledge/...` ok (AC-DKN-005); live smoke below found three proposal-handling bugs, all fixed with tests.
+- Status: Done 2026-11-10 (271eb13, fixes 6f39866, 6e35f32, 5aaa31f, 3cf7774). Evidence: `go test ./agent/knowledge/...` ok (AC-DKN-005); live smoke below found four proposal-handling bugs, all fixed with tests.
 - Files: new `agent/knowledge/promote_domain.go` + test; `upkeep.go`, `promote.go`.
 - Covers: REQ-DKN-031–034. Design §4.2, §4.3.
 - Acceptance: AC-DKN-005.
@@ -114,7 +114,10 @@ headless screenshots through CDP.
   and a `..` page path → 400, `/v1/agents/dana/overview` knowledge block.
 - Bugs found and fixed: a proposal marked applied while its op was skipped (6f39866); a create op
   without `type` failed and the listed proposal was still marked applied (6e35f32); status counts
-  ignored domains (78f3439); owner-approved proposals still needed 0.8 (T-005d).
+  ignored domains (78f3439); owner-approved proposals still needed 0.8 (5aaa31f); proposals reached
+  the model as one cut line, so a fact was lost and a create became an empty page (3cf7774).
+- After the fixes: an owner-approved `dana` → `rio` proposal became a full `agents/rio/wiki/PPh 21 atas THR.md`
+  page and the proposal `applied`.
 - Not checked live: the Claude Code runtime path (its tool calls do not set `OwnerTurn`, so its
   proposals always wait for the owner); Telegram; MEMORY.md pruning with a real model (unit tests
   only); a nightly run by the clock.
