@@ -55,6 +55,12 @@ func (m *Module) Install(b *core.Builder, _ core.ModuleConfig) error {
 	m.cancel = cancel
 	m.service = NewService(base, b.Home(), b.Config().Knowledge, store, llm)
 	m.service.Config = b.Config()
+	// REQ-DKN-033: PromoteSoon runs the domain promotion of one agent in the
+	// background. Tests may override the hook.
+	m.service.promoteDomainFn = func(ctx context.Context, agent string) error {
+		_, err := m.service.promoteDomain(ctx, agent)
+		return err
+	}
 	if agentsAny, ok := b.Lookup(core.ServiceAgents); ok {
 		if sink, ok := agentsAny.(knowledgeSink); ok {
 			sink.SetKnowledge(m.service)

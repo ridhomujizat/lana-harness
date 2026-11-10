@@ -566,6 +566,35 @@ func (v *Vault) appendLog(actor, action, rel string, op Op) error {
 	return err
 }
 
+// AppendLog appends one log.md entry "## <time> <title>" with the given bullet
+// lines, under the vault lock and without rewriting the file (REQ-DKN-034).
+// Lines are written as given, one per line.
+func (v *Vault) AppendLog(now time.Time, title string, lines []string) error {
+	unlock, err := v.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	f, err := os.OpenFile(filepath.Join(v.root, logFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	prefix := ""
+	if fi, err := f.Stat(); err == nil && fi.Size() > 0 {
+		prefix = "\n"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "## %s %s\n", now.Format("2006-01-02 15:04"), title)
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	_, err = f.WriteString(prefix + b.String())
+	return err
+}
+
 // logEntry renders one log block.
 func logEntry(now time.Time, actor, action, rel string, op Op) string {
 	var b strings.Builder

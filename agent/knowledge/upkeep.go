@@ -204,6 +204,18 @@ func (s *Service) Consolidate(ctx context.Context) error {
 		lines = append(lines, "- error: promotion: "+err.Error())
 	}
 
+	// REQ-DKN-033: domain promotion runs after the shared promotion and before
+	// lint, one agent at a time in name order. A failing agent does not stop
+	// the run.
+	for _, agent := range domainAgents(s.Config) {
+		res, err := s.promoteDomain(ctx, agent)
+		lines = append(lines, fmt.Sprintf("- promoted %s: %d ops", agent, res.Applied))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("promotion %s: %w", agent, err))
+			lines = append(lines, "- error: promotion "+agent+": "+err.Error())
+		}
+	}
+
 	reportPath, err := s.lint(ctx)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("lint: %w", err))

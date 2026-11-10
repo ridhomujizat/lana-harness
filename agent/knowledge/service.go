@@ -34,6 +34,7 @@ const queueSize = 256
 const (
 	proposalStatusPending  = "pending"
 	proposalStatusApproved = "approved"
+	proposalStatusApplied  = "applied"
 	proposalStatusRejected = "rejected"
 
 	domainStatsPageMax   = 500
