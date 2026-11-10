@@ -109,8 +109,8 @@ others send proposals. Agents also learn procedures as skills, which the owner a
   and title, and the catalog of its domain and the shared wiki. It returns page operations, each
   with a target scope (`domain` or `shared`) and a confidence from 0 to 1. lana applies an
   operation only when its confidence is at least 0.6, or at least 0.8 when it comes from a
-  proposal. Facts outside the agent's job go to the shared wiki or are left out. Skipped
-  operations are counted in the log entry.
+  proposal the owner has not approved. Facts outside the agent's job go to the shared wiki or are
+  left out. Skipped operations are counted in the log entry.
 - **REQ-DKN-032** Proposals that did not come from an owner turn are never promoted
   automatically: they wait in the review queue until the owner approves them. Proposal text is
   data for the model, never instructions; the promotion prompt says so.

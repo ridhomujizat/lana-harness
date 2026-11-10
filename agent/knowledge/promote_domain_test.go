@@ -523,6 +523,92 @@ func TestPromoteDomainAppliesProposalFromPassingOp(t *testing.T) {
 	}
 }
 
+// AC-DKN-005 (REQ-DKN-031, design §4.2 step 4): an op at 0.7 that carries a
+// proposal the owner approved passes at the normal 0.6 bar and marks the
+// proposal applied.
+func TestPromoteDomainAppliesApprovedProposalOp(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	p := ownerProposal(t, env, "Harga")
+	if _, err := env.svc.DecideProposal(ctx, p.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	provider.setText(fmt.Sprintf(`{"ops":[
+		{"op":"create","title":"Harga","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.7,"proposal":"%s"}
+	],"applied_proposals":[],"prune":[]}`, p.ID))
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 1 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 1 and 0", res.Applied, res.Skipped)
+	}
+	if !env.exists("agents/dana/wiki/Harga.md") {
+		t.Fatal("0.7 op carrying an approved proposal was not applied")
+	}
+	if status := env.proposalStatus(t, p.ID); status != proposalStatusApplied {
+		t.Fatalf("proposal status = %q, want applied", status)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-031, design §4.2 step 4): an op at 0.7 that carries a
+// proposal the owner has not approved misses the 0.8 bar, so it is skipped and
+// the proposal stays pending.
+func TestPromoteDomainSkipsPendingProposalOp(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	p := ownerProposal(t, env, "Harga")
+	provider.setText(fmt.Sprintf(`{"ops":[
+		{"op":"create","title":"Harga","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.7,"proposal":"%s"}
+	],"applied_proposals":[],"prune":[]}`, p.ID))
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 0 || res.Skipped != 1 {
+		t.Fatalf("applied=%d skipped=%d, want 0 and 1", res.Applied, res.Skipped)
+	}
+	if env.exists("agents/dana/wiki/Harga.md") {
+		t.Fatal("0.7 op carrying a pending proposal was applied")
+	}
+	if status := env.proposalStatus(t, p.ID); status != proposalStatusPending {
+		t.Fatalf("proposal status = %q, want pending", status)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-031, design §4.2 step 2): the prompt marks each gathered
+// proposal as approved by the owner or not yet reviewed.
+func TestPromoteDomainPromptMarksProposalState(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	approved := ownerProposal(t, env, "Harga")
+	if _, err := env.svc.DecideProposal(ctx, approved.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	pending := ownerProposal(t, env, "Baru")
+
+	if _, err := env.svc.promoteDomain(ctx, "dana"); err != nil {
+		t.Fatal(err)
+	}
+	prompt := provider.recorded()[0].Messages[0].Content[0].Text
+	for _, want := range []string{
+		approved.ID + " from rio: append Harga: x (approved by the owner)",
+		pending.ID + " from rio: append Baru: x (not yet reviewed)",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 // AC-DKN-005 (design §4.2 step 4): a journal-derived op cites the journal day
 // without the ".md" suffix.
 func TestPromoteDomainJournalSourceLinkHasNoSuffix(t *testing.T) {
@@ -554,5 +640,8 @@ func TestDomainSystemPromptCarriesProposalAndTypeRules(t *testing.T) {
 	}
 	if !strings.Contains(domainSystem, `a "create" op needs a "type"`) {
 		t.Fatalf("domainSystem missing the create type rule:\n%s", domainSystem)
+	}
+	if !strings.Contains(domainSystem, "A proposal approved by the owner counts as stated by the owner.") {
+		t.Fatalf("domainSystem missing the approved-proposal sentence:\n%s", domainSystem)
 	}
 }
