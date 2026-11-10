@@ -97,17 +97,23 @@ func (v *Vault) seedFile(rel, content string) error {
 	return writeBytes(path, []byte(content))
 }
 
-// AppendJournal appends block to journal/<day>.md under the vault lock,
+// AppendJournal appends block to the shared journal/<day>.md (REQ-KNU-004).
+func (v *Vault) AppendJournal(day, block string) (string, error) {
+	return v.AppendJournalIn(ScopeShared, day, block)
+}
+
+// AppendJournalIn appends block to the journal of scope under the vault lock,
 // creating the file with a "# <day>" header when it is missing. It returns the
-// vault-relative path of the journal file (design §2, REQ-KNU-004).
-func (v *Vault) AppendJournal(day, block string) (rel string, err error) {
+// vault-relative path of the journal file (design §1, REQ-KNU-004).
+func (v *Vault) AppendJournalIn(scope, day, block string) (rel string, err error) {
 	unlock, err := v.lock()
 	if err != nil {
 		return "", err
 	}
 	defer unlock()
 
-	abs := filepath.Join(v.root, journalDir, day+".md")
+	dir := JournalDir(scope)
+	abs := filepath.Join(v.root, filepath.FromSlash(dir), day+".md")
 	data, err := os.ReadFile(abs)
 	if errors.Is(err, fs.ErrNotExist) {
 		data = []byte("# " + day + "\n")
@@ -118,7 +124,7 @@ func (v *Vault) AppendJournal(day, block string) (rel string, err error) {
 	if err := writeBytes(abs, data); err != nil {
 		return "", err
 	}
-	return journalDir + "/" + day + ".md", nil
+	return dir + "/" + day + ".md", nil
 }
 
 // lock takes the in-process mutex and the file lock. The returned function
@@ -151,9 +157,10 @@ func (v *Vault) rel(abs string) string {
 	return filepath.ToSlash(r)
 }
 
-// wikiPages reads every markdown page under wiki/, sorted by path.
-func (v *Vault) wikiPages() ([]Page, error) {
-	root := filepath.Join(v.root, wikiDir)
+// wikiPages reads every markdown page under the wiki folder of scope, sorted by
+// path (design §1).
+func (v *Vault) wikiPages(scope string) ([]Page, error) {
+	root := filepath.Join(v.root, filepath.FromSlash(WikiDir(scope)))
 	var paths []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -217,11 +224,61 @@ func writeBytes(path string, data []byte) error {
 	return os.Rename(name, path)
 }
 
-// regenerateIndex rebuilds index.md from every page under wiki/ (REQ-KNW-004).
+// domainCount is one agent domain under agents/ and its page count (design §1).
+type domainCount struct {
+	name  string
+	count int
+}
+
+// regenerateIndex rebuilds the shared index.md from every page under wiki/ plus
+// a trailing Domains section when any domain holds pages (REQ-KNW-004,
+// REQ-DKN-003).
 func (v *Vault) regenerateIndex() error {
-	pages, err := v.wikiPages()
+	pages, err := v.wikiPages(ScopeShared)
 	if err != nil {
 		return err
 	}
-	return writeBytes(filepath.Join(v.root, indexFile), []byte(renderIndex(pages)))
+	domains, err := v.domainCounts()
+	if err != nil {
+		return err
+	}
+	return writeBytes(filepath.Join(v.root, indexFile), []byte(renderIndex(pages, domains)))
+}
+
+// regenerateDomainIndex rebuilds agents/<scope>/index.md from that domain's
+// pages only (REQ-DKN-003).
+func (v *Vault) regenerateDomainIndex(scope string) error {
+	pages, err := v.wikiPages(scope)
+	if err != nil {
+		return err
+	}
+	return writeBytes(filepath.Join(v.root, agentsDir, scope, indexFile), []byte(renderIndex(pages, nil)))
+}
+
+// domainCounts returns the domains under agents/ that hold at least one wiki
+// page, sorted by name (design §1).
+func (v *Vault) domainCounts() ([]domainCount, error) {
+	entries, err := os.ReadDir(filepath.Join(v.root, agentsDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []domainCount
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		pages, err := v.wikiPages(e.Name())
+		if err != nil {
+			return nil, err
+		}
+		if len(pages) == 0 {
+			continue
+		}
+		out = append(out, domainCount{name: e.Name(), count: len(pages)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out, nil
 }

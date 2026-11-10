@@ -6,24 +6,41 @@ package knowledge
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
+	"github.com/ridhomujizat/lana-harness/internal/id"
 	kv "github.com/ridhomujizat/lana-harness/internal/knowledge"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 )
 
 // queueSize is the depth of the per-service compile queue (design §5).
 const queueSize = 256
+
+// Proposal statuses (design §2) and the domain stats bounds (API-DKN-008).
+const (
+	proposalStatusPending  = "pending"
+	proposalStatusApproved = "approved"
+	proposalStatusApplied  = "applied"
+	proposalStatusRejected = "rejected"
+
+	domainStatsPageMax   = 500
+	domainStatsRecentMax = 5
+	domainStatBucket     = 7 * 24 * time.Hour
+)
 
 // Compile states of one source (REQ-KNW-023).
 const (
@@ -33,6 +50,7 @@ const (
 )
 
 var _ core.Knowledge = (*Service)(nil)
+var _ core.KnowledgeDomains = (*Service)(nil)
 
 // Service implements core.Knowledge. The vault and the index open on the first
 // call, so an install that never uses knowledge creates nothing (design §5).
@@ -51,6 +69,15 @@ type Service struct {
 	// Config is the effective runtime config. The module binds it so the upkeep
 	// loop can pick the knowledge agent (REQ-KNU-030, design §3).
 	Config core.Config
+
+	// promoteDomainFn runs the domain promotion of one agent (design §4.2). It
+	// is nil until that pass is wired; PromoteSoon is nil-safe.
+	promoteDomainFn func(ctx context.Context, agent string) error
+
+	// promoteMu guards promoteFlight, the in-flight domain promotions per agent
+	// (design §4). A second request for the same agent is dropped.
+	promoteMu     sync.Mutex
+	promoteFlight map[string]bool
 
 	// compileMu serializes compile passes: the source queue worker and
 	// promotion share it (REQ-KNW-023, design §7).
@@ -210,7 +237,7 @@ func (s *Service) Search(ctx context.Context, q core.KnowledgeQuery) ([]core.Kno
 	if err := idx.Sync(ctx); err != nil {
 		return nil, err
 	}
-	hits, err := idx.Search(ctx, kv.Query{Text: q.Text, Limit: q.Limit, Kind: q.Kind, Type: q.Type})
+	hits, err := idx.Search(ctx, kv.Query{Text: q.Text, Limit: q.Limit, Kind: q.Kind, Type: q.Type, Scopes: q.Scopes})
 	if err != nil {
 		return nil, err
 	}
@@ -225,10 +252,61 @@ func (s *Service) Read(ctx context.Context, ref string, from, to int) (core.Know
 	if err != nil {
 		return core.KnowledgeDoc{}, err
 	}
-	rel, abs, err := s.resolveRead(vault, ref)
+	rel, _, err := s.resolveRead(vault, ref)
 	if err != nil {
 		return core.KnowledgeDoc{}, err
 	}
+	return s.docForRel(vault, rel, from, to)
+}
+
+// ReadIn is Read with scope resolution: a path ref is read as Read; a title or
+// alias resolves in caller's domain first, then the shared wiki, then the other
+// domains in name order. A non-empty scope restricts title resolution to that
+// scope ("shared" or an agent name) (REQ-DKN-011).
+func (s *Service) ReadIn(ctx context.Context, ref, caller, scope string, from, to int) (core.KnowledgeDoc, error) {
+	vault, _, err := s.open()
+	if err != nil {
+		return core.KnowledgeDoc{}, err
+	}
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return core.KnowledgeDoc{}, errors.New("knowledge path is required")
+	}
+	if strings.ContainsAny(ref, "/\\") || filepath.IsAbs(ref) {
+		rel, _, err := s.resolveRead(vault, ref)
+		if err != nil {
+			return core.KnowledgeDoc{}, err
+		}
+		return s.docForRel(vault, rel, from, to)
+	}
+	for _, sc := range readScopes(vault.Root(), caller, scope) {
+		page, ok, err := vault.FindPageIn(sc, ref)
+		if err != nil {
+			return core.KnowledgeDoc{}, err
+		}
+		if ok {
+			return s.docForRel(vault, page.Path, from, to)
+		}
+	}
+	if scope == "" {
+		// Fall back to a root file name, like Read (REQ-KNW-041).
+		rel, err := vaultRel(vault.Root(), ref)
+		if err != nil {
+			return core.KnowledgeDoc{}, err
+		}
+		abs := filepath.Join(vault.Root(), filepath.FromSlash(rel))
+		if _, statErr := os.Stat(abs); statErr != nil {
+			return core.KnowledgeDoc{}, fmt.Errorf("knowledge: %s not found", ref)
+		}
+		return s.docForRel(vault, rel, from, to)
+	}
+	return core.KnowledgeDoc{}, fmt.Errorf("knowledge: %s not found", ref)
+}
+
+// docForRel reads one vault-relative file into a KnowledgeDoc and sets its
+// scope. A PDF reads as extracted text (REQ-KNW-041).
+func (s *Service) docForRel(vault *kv.Vault, rel string, from, to int) (core.KnowledgeDoc, error) {
+	abs := filepath.Join(vault.Root(), filepath.FromSlash(rel))
 	var raw string
 	if strings.EqualFold(filepath.Ext(abs), ".pdf") {
 		pages, err := attach.PDFText(abs)
@@ -244,12 +322,17 @@ func (s *Service) Read(ctx context.Context, ref string, from, to int) (core.Know
 		raw = string(data)
 	}
 	doc := newDoc(rel, raw, from, to)
+	doc.Scope = kv.ScopeOf(rel)
 	return doc, nil
 }
 
 // Write applies one page change with the given actor, then re-indexes the
 // changed file (REQ-KNW-010).
 func (s *Service) Write(ctx context.Context, w core.KnowledgeWrite) (core.KnowledgeWriteResult, error) {
+	scope, err := s.writeScope(w.Scope)
+	if err != nil {
+		return core.KnowledgeWriteResult{}, err
+	}
 	vault, idx, err := s.open()
 	if err != nil {
 		return core.KnowledgeWriteResult{}, err
@@ -268,6 +351,8 @@ func (s *Service) Write(ctx context.Context, w core.KnowledgeWrite) (core.Knowle
 		Heading:     w.Heading,
 		OldText:     w.OldText,
 		NewText:     w.NewText,
+		Scope:       scope,
+		Source:      w.Source,
 		Aliases:     w.Aliases,
 		Tags:        w.Tags,
 	}, actor)
@@ -306,9 +391,10 @@ func (s *Service) Ingest(ctx context.Context, in core.KnowledgeIngest) (core.Kno
 	return core.KnowledgeIngestResult{Path: srcPath, Duplicate: duplicate, Queued: true}, nil
 }
 
-// Recall returns up to limit wiki pages relevant to text, skipping any path the
-// caller already showed (REQ-KNW-050).
-func (s *Service) Recall(ctx context.Context, text string, limit int, skip func(path string) bool) ([]core.KnowledgeHit, error) {
+// Recall returns up to limit wiki pages relevant to text, from scopes only (nil
+// or empty means every scope), skipping any path the caller already showed
+// (REQ-KNW-050, REQ-DKN-012).
+func (s *Service) Recall(ctx context.Context, text string, limit int, scopes []string, prefer string, skip func(path string) bool) ([]core.KnowledgeHit, error) {
 	_, idx, err := s.open()
 	if err != nil {
 		return nil, err
@@ -316,7 +402,7 @@ func (s *Service) Recall(ctx context.Context, text string, limit int, skip func(
 	if err := idx.Sync(ctx); err != nil {
 		return nil, err
 	}
-	hits, err := idx.Recall(ctx, text, limit)
+	hits, err := idx.Recall(ctx, text, limit, scopes, prefer)
 	if err != nil {
 		return nil, err
 	}
@@ -392,9 +478,370 @@ func knowledgeHits(hits []kv.Hit) []core.KnowledgeHit {
 
 func knowledgeHit(h kv.Hit) core.KnowledgeHit {
 	return core.KnowledgeHit{
-		Path: h.Path, Title: h.Title, Kind: h.Kind, Type: h.Type, Description: h.Description,
+		Path: h.Path, Title: h.Title, Kind: h.Kind, Type: h.Type, Scope: h.Scope, Description: h.Description,
 		Heading: h.Heading, Snippet: h.Snippet, Updated: h.Updated, StartLine: h.StartLine,
 	}
+}
+
+// writeScope normalizes a KnowledgeWrite scope: "" or "shared" is the shared
+// wiki; an agent name must be a domain agent (design §4). It returns the scope
+// to hand the vault.
+func (s *Service) writeScope(raw string) (string, error) {
+	scope := strings.TrimSpace(raw)
+	if scope == "" || scope == kv.ScopeShared {
+		return kv.ScopeShared, nil
+	}
+	if !domainAgent(s.Config, scope) {
+		return "", fmt.Errorf("agent %q has no knowledge domain", scope)
+	}
+	return scope, nil
+}
+
+// HasDomain reports whether agent owns a knowledge domain (design §4).
+func (s *Service) HasDomain(agent string) bool {
+	return domainAgent(s.Config, agent)
+}
+
+// Propose stores one requested change to another agent's domain (REQ-DKN-021).
+// The target must be a domain agent other than the proposer.
+func (s *Service) Propose(ctx context.Context, p core.KnowledgeProposal) (core.KnowledgeProposal, error) {
+	if !domainAgent(s.Config, p.Agent) {
+		return core.KnowledgeProposal{}, fmt.Errorf("agent %q has no knowledge domain", p.Agent)
+	}
+	if p.FromAgent != "" && p.FromAgent == p.Agent {
+		return core.KnowledgeProposal{}, errors.New("cannot propose to your own domain; write it")
+	}
+	_, idx, err := s.open()
+	if err != nil {
+		return core.KnowledgeProposal{}, err
+	}
+	op, err := json.Marshal(p.Write)
+	if err != nil {
+		return core.KnowledgeProposal{}, err
+	}
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		title = p.Write.Title
+	}
+	now := s.now().UnixMilli()
+	stored := kv.Proposal{
+		ID:        "p_" + id.New(),
+		Agent:     p.Agent,
+		FromAgent: p.FromAgent,
+		SessionID: p.SessionID,
+		TurnID:    p.TurnID,
+		OwnerTurn: p.OwnerTurn,
+		Op:        string(op),
+		Title:     title,
+		Status:    proposalStatusPending,
+		CreatedAt: now,
+	}
+	if err := idx.AddProposal(stored); err != nil {
+		return core.KnowledgeProposal{}, err
+	}
+	p.ID = stored.ID
+	p.Title = title
+	p.Status = stored.Status
+	p.CreatedAt = now
+	return p, nil
+}
+
+// PendingProposals returns every pending proposal of every agent, newest first
+// (REQ-DKN-060).
+func (s *Service) PendingProposals(ctx context.Context) ([]core.KnowledgeProposal, error) {
+	_, idx, err := s.open()
+	if err != nil {
+		return nil, err
+	}
+	stored, err := idx.PendingProposals()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.KnowledgeProposal, 0, len(stored))
+	for _, p := range stored {
+		out = append(out, coreProposal(p))
+	}
+	return out, nil
+}
+
+// DecideProposal approves or rejects one pending proposal (REQ-DKN-061). An
+// unknown or already-decided id wraps os.ErrNotExist.
+func (s *Service) DecideProposal(ctx context.Context, id string, approve bool) (core.KnowledgeProposal, error) {
+	_, idx, err := s.open()
+	if err != nil {
+		return core.KnowledgeProposal{}, err
+	}
+	p, err := idx.GetProposal(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return core.KnowledgeProposal{}, fmt.Errorf("knowledge proposal %s: %w", id, os.ErrNotExist)
+		}
+		return core.KnowledgeProposal{}, err
+	}
+	if p.Status != proposalStatusPending {
+		return core.KnowledgeProposal{}, fmt.Errorf("knowledge proposal %s: %w", id, os.ErrNotExist)
+	}
+	status := proposalStatusRejected
+	if approve {
+		status = proposalStatusApproved
+	}
+	now := s.now().UnixMilli()
+	if err := idx.SetProposal(id, status, p.Result, now); err != nil {
+		return core.KnowledgeProposal{}, err
+	}
+	p.Status = status
+	p.DecidedAt = now
+	if approve {
+		s.PromoteSoon(p.Agent)
+	}
+	return coreProposal(p), nil
+}
+
+// PromoteSoon requests a domain promotion of agent in the background on the
+// service base context (REQ-DKN-033, design §4). A request is dropped while a
+// pass for the same agent is in flight; a nil hook is a no-op.
+func (s *Service) PromoteSoon(agent string) {
+	if s.promoteDomainFn == nil || agent == "" {
+		return
+	}
+	if !s.promoteBegin(agent) {
+		return
+	}
+	go func() {
+		defer s.promoteEnd(agent)
+		if err := s.promoteDomainFn(s.base, agent); err != nil {
+			slog.Warn("knowledge promotion: domain pass failed", "agent", agent, "error", err)
+		}
+	}()
+}
+
+// promoteBegin claims the in-flight slot of one agent, reporting false when a
+// pass for it is already running (design §4).
+func (s *Service) promoteBegin(agent string) bool {
+	s.promoteMu.Lock()
+	defer s.promoteMu.Unlock()
+	if s.promoteFlight[agent] {
+		return false
+	}
+	if s.promoteFlight == nil {
+		s.promoteFlight = map[string]bool{}
+	}
+	s.promoteFlight[agent] = true
+	return true
+}
+
+// promoteEnd releases the in-flight slot of one agent.
+func (s *Service) promoteEnd(agent string) {
+	s.promoteMu.Lock()
+	delete(s.promoteFlight, agent)
+	s.promoteMu.Unlock()
+}
+
+// Pages returns a page of one scope, newest first, with the total before the
+// limit (API-DKN-004).
+func (s *Service) Pages(ctx context.Context, scope, q string, limit int) ([]core.KnowledgePageInfo, int, error) {
+	_, idx, err := s.open()
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, total, err := idx.Pages(scope, q, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]core.KnowledgePageInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, pageInfo(r))
+	}
+	return out, total, nil
+}
+
+// Page returns the document and raw markdown of one vault file by path
+// (API-DKN-005). A path outside the wiki and journal folders is refused; a
+// missing file wraps os.ErrNotExist.
+func (s *Service) Page(ctx context.Context, ref string) (core.KnowledgeDoc, string, error) {
+	vault, _, err := s.open()
+	if err != nil {
+		return core.KnowledgeDoc{}, "", err
+	}
+	rel, err := validPagePath(ref)
+	if err != nil {
+		return core.KnowledgeDoc{}, "", err
+	}
+	abs := filepath.Join(vault.Root(), filepath.FromSlash(rel))
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return core.KnowledgeDoc{}, "", fmt.Errorf("knowledge page %s: %w", rel, os.ErrNotExist)
+		}
+		return core.KnowledgeDoc{}, "", err
+	}
+	raw := string(data)
+	doc := newDoc(rel, raw, 0, 0)
+	doc.Scope = kv.ScopeOf(rel)
+	return doc, raw, nil
+}
+
+// DomainStats returns the "What it knows" stats of one agent's domain
+// (API-DKN-008): the page count, the pages changed in the last 7 days, 8 weekly
+// buckets (oldest first, the last ending now), and the 5 newest pages.
+func (s *Service) DomainStats(ctx context.Context, agent string, now time.Time) (core.KnowledgeDomainStats, error) {
+	_, idx, err := s.open()
+	if err != nil {
+		return core.KnowledgeDomainStats{}, err
+	}
+	rows, total, err := idx.Pages(agent, "", domainStatsPageMax)
+	if err != nil {
+		return core.KnowledgeDomainStats{}, err
+	}
+	stats := core.KnowledgeDomainStats{Pages: total, Recent: []core.KnowledgePageInfo{}}
+	weekAgo := now.Add(-domainStatBucket)
+	for _, r := range rows {
+		t := time.UnixMilli(r.Mtime)
+		if !t.Before(weekAgo) && !t.After(now) {
+			stats.Changed7d++
+		}
+		for i := 0; i < len(stats.Weeks); i++ {
+			start := now.Add(-time.Duration(len(stats.Weeks)-i) * domainStatBucket)
+			end := now.Add(-time.Duration(len(stats.Weeks)-i-1) * domainStatBucket)
+			if !t.Before(start) && t.Before(end) {
+				stats.Weeks[i]++
+				break
+			}
+		}
+	}
+	recent := rows
+	if len(recent) > domainStatsRecentMax {
+		recent = recent[:domainStatsRecentMax]
+	}
+	for _, r := range recent {
+		stats.Recent = append(stats.Recent, pageInfo(r))
+	}
+	return stats, nil
+}
+
+// ScopeStats returns one stat per vault scope, shared first (API-DKN-003).
+func (s *Service) ScopeStats(ctx context.Context) ([]core.KnowledgeScopeStat, error) {
+	_, idx, err := s.open()
+	if err != nil {
+		return nil, err
+	}
+	stats, err := idx.ScopeStats()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.KnowledgeScopeStat, 0, len(stats))
+	for _, st := range stats {
+		out = append(out, core.KnowledgeScopeStat{
+			Scope:       st.Scope,
+			Pages:       st.Pages,
+			JournalDays: st.JournalDays,
+			UpdatedAt:   st.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// coreProposal maps one stored proposal to the core shape, decoding its Op JSON
+// into Write (design §2).
+func coreProposal(p kv.Proposal) core.KnowledgeProposal {
+	out := core.KnowledgeProposal{
+		ID: p.ID, Agent: p.Agent, FromAgent: p.FromAgent, SessionID: p.SessionID, TurnID: p.TurnID,
+		Title: p.Title, Status: p.Status, Result: p.Result, OwnerTurn: p.OwnerTurn,
+		CreatedAt: p.CreatedAt, DecidedAt: p.DecidedAt,
+	}
+	if p.Op != "" {
+		var w core.KnowledgeWrite
+		if err := json.Unmarshal([]byte(p.Op), &w); err != nil {
+			slog.Debug("knowledge proposal: decoding op failed", "id", p.ID, "error", err)
+		} else {
+			out.Write = w
+		}
+	}
+	return out
+}
+
+// pageInfo maps one index page row to the core shape.
+func pageInfo(r kv.PageRow) core.KnowledgePageInfo {
+	return core.KnowledgePageInfo{
+		Path: r.Path, Title: r.Title, Scope: r.Scope, Type: r.Type,
+		Description: r.Description, Updated: r.Updated, Mtime: r.Mtime,
+	}
+}
+
+// readScopes returns the title-resolution order of ReadIn: caller's domain,
+// then shared, then every domain folder in name order; an explicit scope
+// restricts it to that scope (REQ-DKN-011).
+func readScopes(root, caller, scope string) []string {
+	if scope != "" {
+		return []string{scope}
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(sc string) {
+		if sc == "" || seen[sc] {
+			return
+		}
+		seen[sc] = true
+		out = append(out, sc)
+	}
+	add(caller)
+	add(kv.ScopeShared)
+	for _, name := range domainFolders(root) {
+		add(name)
+	}
+	return out
+}
+
+// domainFolders returns the agent domain folders under agents/, sorted by name
+// (design §1).
+func domainFolders(root string) []string {
+	entries, err := os.ReadDir(filepath.Join(root, "agents"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() && kv.ValidScopeName(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// validPagePath normalizes and validates a vault page path for Page
+// (API-DKN-005): vault-relative, no "..", ending in .md, inside wiki/,
+// journal/, agents/<name>/wiki/, or agents/<name>/journal/.
+func validPagePath(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || filepath.IsAbs(ref) || strings.ContainsAny(ref, "\\") {
+		return "", fmt.Errorf("invalid path %q", ref)
+	}
+	rel := path.Clean(ref)
+	if rel != ref || rel == "." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("invalid path %q", ref)
+	}
+	if !strings.EqualFold(path.Ext(rel), ".md") {
+		return "", fmt.Errorf("invalid path %q: expected a markdown file", ref)
+	}
+	if !insidePageFolders(rel) {
+		return "", fmt.Errorf("invalid path %q: outside the wiki or journal folders", ref)
+	}
+	return rel, nil
+}
+
+// insidePageFolders reports whether a vault-relative path sits in a wiki or
+// journal folder (shared or a domain).
+func insidePageFolders(rel string) bool {
+	parts := strings.Split(rel, "/")
+	if len(parts) < 2 {
+		return false
+	}
+	if parts[0] == "wiki" || parts[0] == "journal" {
+		return true
+	}
+	return parts[0] == "agents" && len(parts) >= 4 && kv.ValidScopeName(parts[1]) &&
+		(parts[2] == "wiki" || parts[2] == "journal")
 }
 
 // newDoc builds a KnowledgeDoc for raw with the requested 1-based line range.

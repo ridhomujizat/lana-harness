@@ -13,6 +13,7 @@ import type {
 } from "react";
 import { createPortal } from "react-dom";
 import { Ic, LanaMark } from "../ui/icons";
+import { getKnowledge, REVIEW_CHANGED_EVENT } from "../api/knowledge";
 import type { Route } from "./router";
 
 export const SIDEBAR_KEY = "lana.sidebar";
@@ -164,16 +165,51 @@ function readNarrow(): boolean {
   );
 }
 
+/* Spec 46 REQ-DKN-071: the number of pending review items, shown on the
+   Knowledge item. It loads once, refreshes after a review decision and when
+   the window regains focus, and stays 0 when the knowledge service is off or
+   the call fails. */
+function useReviewPending(): number {
+  const [pending, setPending] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      getKnowledge()
+        .then((status) => {
+          if (alive) {
+            setPending(Number(status?.review_pending) || 0);
+          }
+        })
+        .catch(() => {
+          if (alive) {
+            setPending(0);
+          }
+        });
+    };
+    load();
+    window.addEventListener(REVIEW_CHANGED_EVENT, load);
+    window.addEventListener("focus", load);
+    return () => {
+      alive = false;
+      window.removeEventListener(REVIEW_CHANGED_EVENT, load);
+      window.removeEventListener("focus", load);
+    };
+  }, []);
+  return pending;
+}
+
 function SItem({
   item,
   active,
   collapsed,
   onNavigate,
+  count,
 }: {
   item: NavItem;
   active: boolean;
   collapsed: boolean;
   onNavigate?: () => void;
+  count?: number;
 }) {
   return (
     <a
@@ -187,6 +223,11 @@ function SItem({
     >
       <Ic name={item.icon} />
       <span className="trunc">{item.label}</span>
+      {count && count > 0 ? (
+        <span className="ct dotc" aria-label={count + " to review"}>
+          {count}
+        </span>
+      ) : null}
     </a>
   );
 }
@@ -571,6 +612,7 @@ export function Sidebar({
   const narrow = useSyncExternalStore(subscribeNarrow, readNarrow, () => false);
   /* The icon-only rail; the mobile drawer keeps the full tree. */
   const rail = collapsed && !narrow;
+  const reviewPending = useReviewPending();
   return (
     <nav id="sidebar-nav" className="side" aria-label="Main">
       <div className="side-top">
@@ -631,6 +673,7 @@ export function Sidebar({
               active={isActive(item, route)}
               collapsed={collapsed}
               onNavigate={onNavigate}
+              count={item.key === "knowledge" ? reviewPending : undefined}
             />
           ));
           const tree = !section.routerTree ? null : rail ? (

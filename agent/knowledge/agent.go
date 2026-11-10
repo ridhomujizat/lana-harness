@@ -45,3 +45,27 @@ func hasKnowledgeTool(agentCfg core.AgentConfig) bool {
 	}
 	return false
 }
+
+// domainAgent reports whether name is a configured agent that owns a
+// knowledge domain: it exists in cfg.Agents and has a knowledge tool
+// (design §4).
+func domainAgent(cfg core.Config, name string) bool {
+	if name == "" {
+		return false
+	}
+	agentCfg, ok := cfg.Agents[name]
+	return ok && hasKnowledgeTool(agentCfg)
+}
+
+// domainAgents returns the configured domain agents in name order
+// (design §4).
+func domainAgents(cfg core.Config) []string {
+	out := make([]string, 0, len(cfg.Agents))
+	for name := range cfg.Agents {
+		if domainAgent(cfg, name) {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

@@ -73,3 +73,23 @@ func TestChunkTextSplitsAtBlankLines(t *testing.T) {
 		t.Fatalf("start lines = %d, %d; want 1, 3", chunks[0].StartLine, chunks[1].StartLine)
 	}
 }
+
+// REQ-DKN-026: stripSuperseded removes a struck-through span and a directly
+// following until mark, and leaves other text alone.
+func TestStripSuperseded(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"Gaji ~~5000~~ *(until 2026-11-01)* 7000", "Gaji  7000"},
+		{"baris biasa tanpa coretan", "baris biasa tanpa coretan"},
+		{"~~lama~~ teks baru", " teks baru"},
+		{"~~a~~~~b~~", ""},
+		{"baris satu ~~x~~\nbaris dua", "baris satu \nbaris dua"},
+	}
+	for _, tc := range tests {
+		if got := stripSuperseded(tc.in); got != tc.want {
+			t.Errorf("stripSuperseded(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

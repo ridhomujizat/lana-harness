@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 
 	"github.com/ridhomujizat/lana-harness/core"
@@ -18,6 +20,10 @@ import (
 type fakeKnowledgeRecall struct {
 	pages       []core.KnowledgeHit
 	recallCalls int
+	// recallScopes and recallPrefer record the arguments of the last Recall, so
+	// the turn's scope choice can be asserted (REQ-DKN-012).
+	recallScopes []string
+	recallPrefer string
 }
 
 func (f *fakeKnowledgeRecall) Search(context.Context, core.KnowledgeQuery) ([]core.KnowledgeHit, error) {
@@ -36,8 +42,10 @@ func (f *fakeKnowledgeRecall) Ingest(context.Context, core.KnowledgeIngest) (cor
 	return core.KnowledgeIngestResult{}, nil
 }
 
-func (f *fakeKnowledgeRecall) Recall(_ context.Context, text string, limit int, skip func(string) bool) ([]core.KnowledgeHit, error) {
+func (f *fakeKnowledgeRecall) Recall(_ context.Context, text string, limit int, scopes []string, prefer string, skip func(string) bool) ([]core.KnowledgeHit, error) {
 	f.recallCalls++
+	f.recallScopes = append([]string(nil), scopes...)
+	f.recallPrefer = prefer
 	query := knowledgeTokens(text)
 	var out []core.KnowledgeHit
 	for _, page := range f.pages {
@@ -79,6 +87,49 @@ func knowledgeIntersect(a, b map[string]bool) map[string]bool {
 		}
 	}
 	return out
+}
+
+// fakeDomainRecall is fakeKnowledgeRecall plus core.KnowledgeDomains, so the
+// recall scope behavior can be tested (AC-DKN-002).
+type fakeDomainRecall struct {
+	*fakeKnowledgeRecall
+	domains []string
+}
+
+func (f *fakeDomainRecall) HasDomain(agent string) bool { return slices.Contains(f.domains, agent) }
+
+func (f *fakeDomainRecall) ReadIn(context.Context, string, string, string, int, int) (core.KnowledgeDoc, error) {
+	return core.KnowledgeDoc{}, nil
+}
+
+func (f *fakeDomainRecall) Propose(context.Context, core.KnowledgeProposal) (core.KnowledgeProposal, error) {
+	return core.KnowledgeProposal{}, nil
+}
+
+func (f *fakeDomainRecall) PendingProposals(context.Context) ([]core.KnowledgeProposal, error) {
+	return nil, nil
+}
+
+func (f *fakeDomainRecall) DecideProposal(context.Context, string, bool) (core.KnowledgeProposal, error) {
+	return core.KnowledgeProposal{}, nil
+}
+
+func (f *fakeDomainRecall) PromoteSoon(string) {}
+
+func (f *fakeDomainRecall) Pages(context.Context, string, string, int) ([]core.KnowledgePageInfo, int, error) {
+	return nil, 0, nil
+}
+
+func (f *fakeDomainRecall) Page(context.Context, string) (core.KnowledgeDoc, string, error) {
+	return core.KnowledgeDoc{}, "", nil
+}
+
+func (f *fakeDomainRecall) DomainStats(context.Context, string, time.Time) (core.KnowledgeDomainStats, error) {
+	return core.KnowledgeDomainStats{}, nil
+}
+
+func (f *fakeDomainRecall) ScopeStats(context.Context) ([]core.KnowledgeScopeStat, error) {
+	return nil, nil
 }
 
 // newKnowledgeHarness builds a harness whose agent offers agentTools and whose
@@ -157,5 +208,33 @@ func TestTurnRelevantKnowledgeNotOffered(t *testing.T) {
 	}
 	if fake.recallCalls != 0 {
 		t.Fatalf("recall calls = %d, want 0", fake.recallCalls)
+	}
+}
+
+// AC-DKN-002 (REQ-DKN-012, design §8): recallScopes returns the caller's
+// domain and the shared wiki for a domain agent, else the shared wiki alone,
+// and prefers the caller's domain on a tie.
+func TestRecallScopes(t *testing.T) {
+	service := &fakeDomainRecall{fakeKnowledgeRecall: &fakeKnowledgeRecall{}, domains: []string{"dana"}}
+	if scopes, prefer := recallScopes(service, "dana"); !slices.Equal(scopes, []string{"dana", "shared"}) || prefer != "dana" {
+		t.Fatalf("domain agent = %v prefer %q, want [dana shared] and dana", scopes, prefer)
+	}
+	if scopes, prefer := recallScopes(service, "rio"); !slices.Equal(scopes, []string{"shared"}) || prefer != "rio" {
+		t.Fatalf("agent without domain = %v prefer %q, want [shared] and rio", scopes, prefer)
+	}
+	if scopes, prefer := recallScopes(&fakeKnowledgeRecall{}, "dana"); !slices.Equal(scopes, []string{"shared"}) || prefer != "dana" {
+		t.Fatalf("no domain service = %v prefer %q, want [shared] and dana", scopes, prefer)
+	}
+}
+
+// AC-DKN-002 (REQ-DKN-012): a turn recalls with the caller's domain and the
+// shared wiki, preferring the caller's domain.
+func TestTurnRelevantKnowledgeScopes(t *testing.T) {
+	page := core.KnowledgeHit{Path: "agents/assistant/wiki/Rapat.md", Title: "Rapat", Scope: "assistant", Description: "Klien utama proyek X"}
+	fake := &fakeDomainRecall{fakeKnowledgeRecall: &fakeKnowledgeRecall{pages: []core.KnowledgeHit{page}}, domains: []string{"assistant"}}
+	h := newKnowledgeHarness(t, []string{"knowledge_search"}, fake)
+	h.run(t, "kontrak pak budi")
+	if !slices.Equal(fake.recallScopes, []string{"assistant", "shared"}) || fake.recallPrefer != "assistant" {
+		t.Fatalf("recall scopes = %v prefer %q, want [assistant shared] and assistant", fake.recallScopes, fake.recallPrefer)
 	}
 }

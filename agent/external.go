@@ -787,7 +787,11 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	var openMCP func() (string, func(), error)
 	mcpKey := ""
 	if host := rn.reg.toolHostFor(); host != nil && len(specs) > 0 {
-		if err := host.Bind(rn.sessionID, specs, rn.claudeToolCall(ctx, x.turnID, res, tools)); err != nil {
+		// REQ-DKN-021, REQ-DKN-032: a tool sees an owner turn only for a root
+		// turn that stored an owner message, the same value captureEligible
+		// uses (REQ-MEM-010).
+		ownerTurn := !res.child && out.owner
+		if err := host.Bind(rn.sessionID, specs, rn.claudeToolCall(ctx, x.turnID, res, tools, ownerTurn)); err != nil {
 			slog.Warn("lana tools are not available to claude code", "session_id", rn.sessionID, "error", err)
 			x.append(core.KindSystemMessage, core.SystemMessage{V: core.PayloadVersion, Subtype: core.SystemSubtypeNote,
 				Text: "lana's tools are not available to Claude Code in this turn: " + err.Error()})
@@ -875,7 +879,7 @@ func applyAccount(cfg *core.RuntimeConfig, home, name string, account core.Provi
 // runner, so the permission engine, approvals, input checks, and spill apply
 // (REQ-CCT-006). The call ends when the turn ends or Claude drops the request.
 // The tool/call and tool/result events come from Claude's own stream.
-func (rn *Runner) claudeToolCall(turnCtx context.Context, turnID string, res resolvedAgent, allowed []string) core.RuntimeToolFunc {
+func (rn *Runner) claudeToolCall(turnCtx context.Context, turnID string, res resolvedAgent, allowed []string, ownerTurn bool) core.RuntimeToolFunc {
 	return func(reqCtx context.Context, callID, name string, input json.RawMessage) core.ToolOutput {
 		ctx, cancel := context.WithCancel(turnCtx)
 		defer cancel()
@@ -885,7 +889,11 @@ func (rn *Runner) claudeToolCall(turnCtx context.Context, turnID string, res res
 			return core.ToolOutput{Status: core.ToolStatusError, Output: "tool " + name + " is not offered to this agent"}
 		}
 		call := core.ToolCall{SessionID: rn.sessionID, TurnID: turnID, CallID: callID, Name: name, Input: input}
-		outs := rn.reg.pipeline.Run(ctx, []core.ToolCall{call}, allowed, rn.toolCtx(ctx, res, turnID))
+		toolCtx := rn.toolCtx(ctx, res, turnID)
+		// REQ-DKN-021, REQ-DKN-032: a tool sees an owner turn only for a root
+		// turn that stored an owner message (REQ-MEM-010).
+		toolCtx.OwnerTurn = ownerTurn
+		outs := rn.reg.pipeline.Run(ctx, []core.ToolCall{call}, allowed, toolCtx)
 		if len(outs) == 0 {
 			return core.ToolOutput{Status: core.ToolStatusError, Output: "tool produced no output"}
 		}

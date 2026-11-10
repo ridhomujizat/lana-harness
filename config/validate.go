@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -665,6 +665,16 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			add(path+".reasoning_effort", typeMsg("string", val))
 		} else if runtime == "" && !isAddress(model) && s != "" && !contains(nativeEfforts, s) {
 			add(path+".reasoning_effort", enumMsg(s, nativeEfforts))
+		}
+	}
+	// API-DKN-002: skill_write is "approve" (the default when empty) or
+	// "direct" (REQ-DKN-050).
+	if val, ok := v["skill_write"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".skill_write", typeMsg("string", val))
+		} else if s != "" && s != "approve" && s != "direct" {
+			add(path+".skill_write", `want "approve" or "direct"`)
 		}
 	}
 	if raw, ok := v["rules"]; ok {

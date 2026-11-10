@@ -204,6 +204,18 @@ func (s *Service) Consolidate(ctx context.Context) error {
 		lines = append(lines, "- error: promotion: "+err.Error())
 	}
 
+	// REQ-DKN-033: domain promotion runs after the shared promotion and before
+	// lint, one agent at a time in name order. A failing agent does not stop
+	// the run.
+	for _, agent := range domainAgents(s.Config) {
+		res, err := s.promoteDomain(ctx, agent)
+		lines = append(lines, fmt.Sprintf("- promoted %s: %d ops", agent, res.Applied))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("promotion %s: %w", agent, err))
+			lines = append(lines, "- error: promotion "+agent+": "+err.Error())
+		}
+	}
+
 	reportPath, err := s.lint(ctx)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("lint: %w", err))
@@ -347,7 +359,8 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 			Provider: s.cfg.EmbeddingProvider,
 			Model:    s.cfg.EmbeddingModel,
 		},
-		Log: []core.KnowledgeLogEntry{},
+		Log:    []core.KnowledgeLogEntry{},
+		Scopes: []core.KnowledgeScopeStat{},
 	}
 	if _, err := os.Stat(s.vaultPath); err == nil {
 		status.Exists = true
@@ -386,6 +399,26 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 		status.Consolidation.Report = value
 	}
 	status.Log = s.recentLog(vault.Root(), 20)
+	// REQ-DKN-012, API-DKN-003: per-scope counts and the pending review count
+	// (the web layer adds pending skill proposals later).
+	if stats, err := idx.ScopeStats(); err == nil {
+		for _, st := range stats {
+			status.Scopes = append(status.Scopes, core.KnowledgeScopeStat{
+				Scope:       st.Scope,
+				Pages:       st.Pages,
+				JournalDays: st.JournalDays,
+				UpdatedAt:   st.UpdatedAt,
+			})
+			// API-DKN-003: counts cover every scope; vaultCounts saw shared only.
+			if st.Scope != "shared" {
+				status.Counts.Pages += st.Pages
+				status.Counts.JournalDays += st.JournalDays
+			}
+		}
+	}
+	if proposals, err := idx.PendingProposals(); err == nil {
+		status.ReviewPending = len(proposals)
+	}
 	return status, nil
 }
 

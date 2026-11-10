@@ -144,7 +144,7 @@ function routeContent(
     case "skills":
       return <SkillsPage />;
     case "knowledge":
-      return <KnowledgePage />;
+      return <KnowledgePage params={route.params || {}} />;
     case "new-skill":
       return <SkillEditorPage isNew={true} />;
     case "skill":

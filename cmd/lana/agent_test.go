@@ -157,7 +157,7 @@ func TestAgentListShowEdit(t *testing.T) {
 	home := initHome(t)
 	captureStdout(t, func() int { return agentNew([]string{"helper", "--yes"}, false) })
 	out, code := captureStdout(t, agentList)
-	if code != 0 || !strings.Contains(out, "default  deepseek/deepseek-flash  ask  persona=prompt_file:agents/default.md") || !strings.Contains(out, "helper  deepseek/deepseek-flash  ask  persona=AGENT.md  user=0/2000  memory=0/32000") {
+	if code != 0 || !strings.Contains(out, "default  deepseek/deepseek-flash  ask  persona=prompt_file:agents/default.md") || !strings.Contains(out, "helper  deepseek/deepseek-flash  ask  persona=AGENT.md  user=0/2000  memory=0/8000") {
 		t.Fatalf("list = %q", out)
 	}
 	t.Setenv("VISUAL", "")

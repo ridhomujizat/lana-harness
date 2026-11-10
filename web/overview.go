@@ -73,6 +73,25 @@ type overviewMemoryJSON struct {
 	Total   int      `json:"total"`
 }
 
+// overviewKnowledgeRecentJSON is one recently updated domain page of the "What
+// it knows" block (API-DKN-008).
+type overviewKnowledgeRecentJSON struct {
+	Title   string `json:"title"`
+	Path    string `json:"path"`
+	Updated string `json:"updated"`
+}
+
+// overviewKnowledgeJSON is the "What it knows" block (API-DKN-008). Weeks holds
+// 8 counts of domain pages by 7-day bucket, oldest first; Recent holds at most
+// 5 pages, newest first, and is never null.
+type overviewKnowledgeJSON struct {
+	Available bool                          `json:"available"`
+	Pages     int                           `json:"pages"`
+	Changed7d int                           `json:"changed_7d"`
+	Weeks     [8]int                        `json:"weeks"`
+	Recent    []overviewKnowledgeRecentJSON `json:"recent"`
+}
+
 // overviewChannelJSON is one route the agent looks after.
 type overviewChannelJSON struct {
 	Channel string `json:"channel"`
@@ -105,6 +124,7 @@ type overviewResponse struct {
 	Activity    []overviewActivityJSON `json:"activity"`
 	Week        overviewWeekJSON       `json:"week"`
 	Memory      overviewMemoryJSON     `json:"memory"`
+	Knowledge   overviewKnowledgeJSON  `json:"knowledge"`
 	Job         string                 `json:"job"`
 	LooksAfter  overviewLooksAfterJSON `json:"looks_after"`
 }
@@ -155,6 +175,7 @@ func (s *Server) buildOverview(ctx context.Context, backend Backend, room Agent,
 		Presence:     row.Presence,
 		Activity:     []overviewActivityJSON{},
 		Memory:       overviewMemoryJSON{Entries: []string{}},
+		Knowledge:    overviewKnowledgeJSON{Recent: []overviewKnowledgeRecentJSON{}},
 		LooksAfter:   overviewLooksAfterJSON{Channels: []overviewChannelJSON{}, Teams: []string{}},
 	}
 	if row.Kind == "team" {
@@ -212,6 +233,36 @@ func (s *Server) buildOverview(ctx context.Context, backend Backend, room Agent,
 		out.Job = job
 	}
 	out.LooksAfter = overviewLooksAfter(s.overviewConfig(ctx), room.Name)
+	out.Knowledge, err = s.overviewKnowledge(ctx, room.Name)
+	if err != nil {
+		return overviewResponse{}, err
+	}
+	return out, nil
+}
+
+// overviewKnowledge builds the "What it knows" block from the optional
+// scoped-knowledge port (API-DKN-008). A missing port or an agent without a
+// domain yields available:false with zero fields; a team name resolves to its
+// lead inside the runtime.
+func (s *Server) overviewKnowledge(ctx context.Context, name string) (overviewKnowledgeJSON, error) {
+	out := overviewKnowledgeJSON{Recent: []overviewKnowledgeRecentJSON{}}
+	if s.knowledgeDomainBackend == nil {
+		return out, nil
+	}
+	available, stats, err := s.knowledgeDomainBackend.AgentKnowledge(ctx, name)
+	if err != nil {
+		return overviewKnowledgeJSON{}, err
+	}
+	if !available {
+		return out, nil
+	}
+	out.Available = true
+	out.Pages = stats.Pages
+	out.Changed7d = stats.Changed7d
+	out.Weeks = stats.Weeks
+	for _, page := range stats.Recent {
+		out.Recent = append(out.Recent, overviewKnowledgeRecentJSON{Title: page.Title, Path: page.Path, Updated: page.Updated})
+	}
 	return out, nil
 }
 

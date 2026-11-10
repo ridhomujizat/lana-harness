@@ -125,8 +125,19 @@ export interface AgentOverview {
   activity: OverviewActivity[];
   week: OverviewWeek;
   memory: { entries: string[]; total: number };
+  /* Spec 46 API-DKN-008: the agent's domain knowledge; older daemons leave it
+     out. weeks holds 8 weekly counts, oldest first. */
+  knowledge?: OverviewKnowledge;
   job: string;
   looks_after: OverviewLooksAfter;
+}
+
+export interface OverviewKnowledge {
+  available: boolean;
+  pages: number;
+  changed_7d: number;
+  weeks: number[];
+  recent: { title: string; path: string; updated: string }[];
 }
 
 export interface SendRoomRequest {

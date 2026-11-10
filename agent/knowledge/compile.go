@@ -339,10 +339,18 @@ func (s *Service) compileInstruction(ctx context.Context, vault *kv.Vault, idx *
 	return b.String()
 }
 
-// relatedPages returns up to compileRelatedMax wiki pages named in the part or
-// found by a page search over its first compileSearchRunes runes (design §5
-// step 3).
+// relatedPages returns the shared wiki pages named in the part or found by a
+// page search over its first compileSearchRunes runes. Compile passes write the
+// shared wiki only, so only shared pages are related (design §5 step 3,
+// REQ-DKN-022).
 func (s *Service) relatedPages(ctx context.Context, vault *kv.Vault, idx *kv.Index, text string) []string {
+	return s.relatedPagesIn(ctx, vault, idx, text, []string{kv.ScopeShared})
+}
+
+// relatedPagesIn returns up to compileRelatedMax pages named in text or found by
+// a page search over its first compileSearchRunes runes, restricted to the given
+// scopes (design §5 step 3, §4.2 step 2).
+func (s *Service) relatedPagesIn(ctx context.Context, vault *kv.Vault, idx *kv.Index, text string, scopes []string) []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(rel string) {
@@ -353,12 +361,15 @@ func (s *Service) relatedPages(ctx context.Context, vault *kv.Vault, idx *kv.Ind
 		out = append(out, rel)
 	}
 	for _, name := range wikilinkPattern.FindAllStringSubmatch(text, -1) {
-		page, ok, err := vault.FindPage(strings.TrimSpace(name[1]))
-		if err == nil && ok {
-			add(page.Path)
+		for _, scope := range scopes {
+			page, ok, err := vault.FindPageIn(scope, strings.TrimSpace(name[1]))
+			if err == nil && ok {
+				add(page.Path)
+				break
+			}
 		}
 	}
-	hits, err := idx.Search(ctx, kv.Query{Text: firstRunes(text, compileSearchRunes), Limit: compileRelatedMax, Kind: "page"})
+	hits, err := idx.Search(ctx, kv.Query{Text: firstRunes(text, compileSearchRunes), Limit: compileRelatedMax, Kind: "page", Scopes: scopes})
 	if err == nil {
 		for _, h := range hits {
 			add(h.Path)

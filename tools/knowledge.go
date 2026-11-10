@@ -25,16 +25,36 @@ const (
 	knowledgeIngestTitleMax     = 80
 )
 
-var knowledgeSearchSpec = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Words to look for in the knowledge vault."},"limit":{"type":"integer","minimum":1,"maximum":20,"description":"Maximum number of results, 1-20. Defaults to 8."},"kind":{"type":"string","enum":["page","source","journal"],"description":"Only this kind of file. Optional."},"type":{"type":"string","description":"Only pages of this type: person, project, organization, place, topic, or source. Optional."}},"required":["query"],"additionalProperties":false}`)
-var knowledgeReadSpec = json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Vault-relative file path, for example wiki/Pak Budi.md."},"title":{"type":"string","description":"Page title or alias. Used when path is empty."},"from_line":{"type":"integer","minimum":1,"description":"1-based first line to read. Defaults to 1."},"to_line":{"type":"integer","minimum":1,"description":"1-based last line to read. Defaults to the end of the file."}},"additionalProperties":false}`)
-var knowledgeWriteSpec = json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["create","append","replace","meta"],"description":"create makes a page, append adds text, replace swaps one exact text, meta updates frontmatter."},"title":{"type":"string","description":"Page title. A create whose title or alias exists becomes an append."},"type":{"type":"string","enum":["person","project","organization","place","topic","source"],"description":"Page type, used by create and meta. Optional."},"description":{"type":"string","description":"One-line page description, used by create and meta. Optional."},"body":{"type":"string","description":"Page body, required for create."},"text":{"type":"string","description":"Text to append, required for append."},"heading":{"type":"string","description":"Section to append under, for append. Optional."},"old_text":{"type":"string","description":"Text to replace, required for replace. Must occur once in the body."},"new_text":{"type":"string","description":"Replacement text, required for replace."},"aliases":{"type":"array","items":{"type":"string"},"description":"Aliases to merge, used by create and meta. Optional."},"tags":{"type":"array","items":{"type":"string"},"description":"Tags to merge, used by create and meta. Optional."}},"required":["action","title"],"additionalProperties":false}`)
+var knowledgeSearchSpec = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Words to look for in the knowledge vault."},"scope":{"type":"string","description":"mine (default: your domain and the shared wiki), domain (your domain only), shared, all, or agent:<name> for another agent's domain."},"limit":{"type":"integer","minimum":1,"maximum":20,"description":"Maximum number of results, 1-20. Defaults to 8."},"kind":{"type":"string","enum":["page","source","journal"],"description":"Only this kind of file. Optional."},"type":{"type":"string","description":"Only pages of this type: person, project, organization, place, topic, or source. Optional."}},"required":["query"],"additionalProperties":false}`)
+var knowledgeReadSpec = json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Vault-relative file path, for example wiki/Pak Budi.md."},"title":{"type":"string","description":"Page title or alias. Used when path is empty."},"scope":{"type":"string","description":"mine (your domain first), domain, shared, all, or agent:<name> for another agent's domain. Used with title only."},"from_line":{"type":"integer","minimum":1,"description":"1-based first line to read. Defaults to 1."},"to_line":{"type":"integer","minimum":1,"description":"1-based last line to read. Defaults to the end of the file."}},"additionalProperties":false}`)
+var knowledgeWriteSpec = json.RawMessage(`{"type":"object","properties":{"action":{"type":"string","enum":["create","append","replace","meta","supersede"],"description":"create makes a page, append adds text, replace swaps one exact text, meta updates frontmatter, supersede strikes an old fact and adds the new one, keeping both."},"title":{"type":"string","description":"Page title. A create whose title or alias exists becomes an append."},"scope":{"type":"string","description":"mine (your domain, the default by type), shared, or agent:<name> for another agent's domain, which files a proposal."},"source":{"type":"string","description":"A page or source title a supersede change cites, rendered as a wikilink. Optional."},"type":{"type":"string","enum":["person","project","organization","place","topic","source"],"description":"Page type, used by create and meta. Optional."},"description":{"type":"string","description":"One-line page description, used by create and meta. Optional."},"body":{"type":"string","description":"Page body, required for create."},"text":{"type":"string","description":"Text to append, required for append."},"heading":{"type":"string","description":"Section to append under, for append. Optional."},"old_text":{"type":"string","description":"Text to replace, required for replace and supersede. Must occur once in the body."},"new_text":{"type":"string","description":"Replacement text, required for replace and supersede."},"aliases":{"type":"array","items":{"type":"string"},"description":"Aliases to merge, used by create and meta. Optional."},"tags":{"type":"array","items":{"type":"string"},"description":"Tags to merge, used by create and meta. Optional."}},"required":["action","title"],"additionalProperties":false}`)
 var knowledgeIngestSpec = json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Workspace file to ingest: .md, .txt, .pdf, or .html."},"url":{"type":"string","format":"uri","pattern":"^https?://","description":"Web page to fetch and convert to markdown."},"text":{"type":"string","description":"Text to store as a markdown source."},"title":{"type":"string","description":"Source title. Optional; defaults to the file name, the page title, or the first line."}},"additionalProperties":false}`)
 
 // knowledgeSearchGuidance is the head-prompt note shown when knowledge_search
 // is offered (REQ-KNW-044).
 const knowledgeSearchGuidance = "Search knowledge_search before answering about people, projects, or things the owner shared earlier. " +
 	"Save lasting knowledge with knowledge_write, or knowledge_ingest for documents, links, and long notes. " +
-	"Keep memory_write for short facts about the owner and yourself."
+	"Keep memory_write for short facts about the owner and yourself. " +
+	"Your own domain holds knowledge of your field; search scope=agent:<name> to look into another agent's field. " +
+	"When a fact changed, call knowledge_write action=supersede with the one line that holds the old fact; lana strikes and dates it for you, so never write strikethrough by hand."
+
+// Knowledge scope values the tools accept (REQ-DKN-010, REQ-DKN-020).
+const (
+	knowledgeScopeShared = "shared"
+	knowledgeScopeMine   = "mine"
+	knowledgeScopeDomain = "domain"
+	knowledgeScopeAll    = "all"
+	// knowledgeScopePrefix starts the "agent:<name>" scope form.
+	knowledgeScopePrefix = "agent:"
+)
+
+// Scope errors of the knowledge tools (API-DKN-001). A scope error is an input
+// error; errNoDomain is a tool error.
+var (
+	errSearchScope = errors.New("scope must be mine, domain, shared, all, or agent:<name>")
+	errWriteScope  = errors.New("scope must be mine, shared, or agent:<name>")
+	errNoDomain    = errors.New("you have no knowledge domain; use scope shared")
+)
 
 type knowledgeSearchTool struct{}
 type knowledgeReadTool struct{}
@@ -70,6 +90,7 @@ func (t *knowledgeSearchTool) PromptGuidance() string { return knowledgeSearchGu
 func (t *knowledgeSearchTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {
 		Query string `json:"query"`
+		Scope string `json:"scope"`
 		Limit *int   `json:"limit"`
 		Kind  string `json:"kind"`
 		Type  string `json:"type"`
@@ -89,11 +110,20 @@ func (t *knowledgeSearchTool) Call(ctx context.Context, tc core.ToolCtx, raw jso
 	default:
 		return inputErrorOutput(errors.New("kind must be page, source, or journal"))
 	}
+	domains, _ := tc.Knowledge.(core.KnowledgeDomains)
+	scopes, err := searchScopes(strings.TrimSpace(in.Scope), tc.AgentName, domains)
+	if err != nil {
+		if errors.Is(err, errSearchScope) {
+			return inputErrorOutput(err)
+		}
+		return errorOutput(err.Error())
+	}
 	hits, err := tc.Knowledge.Search(ctx, core.KnowledgeQuery{
-		Text:  query,
-		Limit: knowledgeSearchLimit(in.Limit),
-		Kind:  in.Kind,
-		Type:  in.Type,
+		Text:   query,
+		Limit:  knowledgeSearchLimit(in.Limit),
+		Kind:   in.Kind,
+		Type:   in.Type,
+		Scopes: scopes,
 	})
 	if err != nil {
 		return errorOutput(err.Error())
@@ -102,6 +132,46 @@ func (t *knowledgeSearchTool) Call(ctx context.Context, tc core.ToolCtx, raw jso
 		return successOutput(fmt.Sprintf("Nothing in knowledge matched %q.", query))
 	}
 	return successOutput(formatKnowledgeHits(query, hits))
+}
+
+// searchScopes resolves the knowledge_search "scope" value to index scopes
+// (REQ-DKN-010, design §5): the caller's domain and the shared wiki for "mine"
+// (the default), the caller's domain for "domain", the shared wiki for
+// "shared", every scope (nil) for "all", and the named domain for
+// "agent:<name>". Without a domain service the caller only sees the shared
+// wiki.
+func searchScopes(raw, caller string, domains core.KnowledgeDomains) ([]string, error) {
+	switch raw {
+	case "", knowledgeScopeMine:
+		if domains != nil && domains.HasDomain(caller) {
+			return []string{caller, knowledgeScopeShared}, nil
+		}
+		return []string{knowledgeScopeShared}, nil
+	case knowledgeScopeDomain:
+		if domains != nil && domains.HasDomain(caller) {
+			return []string{caller}, nil
+		}
+		return nil, errNoDomain
+	case knowledgeScopeShared:
+		return []string{knowledgeScopeShared}, nil
+	case knowledgeScopeAll:
+		return nil, nil
+	default:
+		name, ok := knowledgeAgentScope(raw)
+		if !ok {
+			return nil, errSearchScope
+		}
+		if domains == nil || !domains.HasDomain(name) {
+			return nil, fmt.Errorf("no knowledge domain for agent %q", name)
+		}
+		return []string{name}, nil
+	}
+}
+
+// knowledgeAgentScope parses the "agent:<name>" scope form.
+func knowledgeAgentScope(raw string) (string, bool) {
+	name, ok := strings.CutPrefix(raw, knowledgeScopePrefix)
+	return name, ok
 }
 
 // knowledgeSearchLimit clamps the requested limit to 1..20, default 8
@@ -128,6 +198,9 @@ func formatKnowledgeHits(query string, hits []core.KnowledgeHit) string {
 	fmt.Fprintf(&b, "Found %d results for %q:\n", len(hits), query)
 	for i, hit := range hits {
 		header := fmt.Sprintf("%d. %s", i+1, hit.Path)
+		if hit.Scope != "" {
+			header += " [" + hit.Scope + "]"
+		}
 		if hit.Type != "" {
 			header += " — " + hit.Type
 		}
@@ -179,6 +252,7 @@ func (t *knowledgeReadTool) Call(ctx context.Context, tc core.ToolCtx, raw json.
 	var in struct {
 		Path     string `json:"path"`
 		Title    string `json:"title"`
+		Scope    string `json:"scope"`
 		FromLine int    `json:"from_line"`
 		ToLine   int    `json:"to_line"`
 	}
@@ -189,7 +263,8 @@ func (t *knowledgeReadTool) Call(ctx context.Context, tc core.ToolCtx, raw json.
 		return errorOutput("knowledge is not available")
 	}
 	ref := strings.TrimSpace(in.Path)
-	if ref == "" {
+	byTitle := ref == ""
+	if byTitle {
 		ref = strings.TrimSpace(in.Title)
 	}
 	if ref == "" {
@@ -202,11 +277,47 @@ func (t *knowledgeReadTool) Call(ctx context.Context, tc core.ToolCtx, raw json.
 	if in.ToLine > 0 && in.ToLine < from {
 		return inputErrorOutput(errors.New("to_line must be at least from_line"))
 	}
+	// The scope applies to a title ref only; a path ref is read as is
+	// (REQ-DKN-011, API-DKN-001).
+	if byTitle {
+		if domains, ok := tc.Knowledge.(core.KnowledgeDomains); ok {
+			scope, err := readScope(strings.TrimSpace(in.Scope), tc.AgentName)
+			if err != nil {
+				return inputErrorOutput(err)
+			}
+			doc, rerr := domains.ReadIn(ctx, ref, tc.AgentName, scope, from, in.ToLine)
+			if rerr != nil {
+				return errorOutput(rerr.Error())
+			}
+			return successOutput(formatKnowledgeDoc(doc))
+		}
+	}
 	doc, err := tc.Knowledge.Read(ctx, ref, from, in.ToLine)
 	if err != nil {
 		return errorOutput(err.Error())
 	}
 	return successOutput(formatKnowledgeDoc(doc))
+}
+
+// readScope maps the knowledge_read "scope" value to the explicit scope ReadIn
+// takes; "" keeps the default resolution order (REQ-DKN-011, design §5).
+// "mine" and "domain" read the caller's domain; "all" keeps the default order,
+// which already covers every scope.
+func readScope(raw, caller string) (string, error) {
+	switch raw {
+	case "", knowledgeScopeAll:
+		return "", nil
+	case knowledgeScopeMine, knowledgeScopeDomain:
+		return caller, nil
+	case knowledgeScopeShared:
+		return knowledgeScopeShared, nil
+	default:
+		name, ok := knowledgeAgentScope(raw)
+		if !ok {
+			return "", errSearchScope
+		}
+		return name, nil
+	}
 }
 
 // formatKnowledgeDoc numbers the document's lines like read_file and appends a
@@ -243,28 +354,33 @@ func formatKnowledgeDoc(doc core.KnowledgeDoc) string {
 func (t *knowledgeWriteTool) Spec() core.ToolSpec {
 	return core.ToolSpec{
 		Name:        "knowledge_write",
-		Description: "Create a knowledge page, append text, replace one exact text, or update frontmatter. A create whose title or alias exists appends instead. Never deletes a page.",
+		Description: "Create a knowledge page, append text, replace one exact text, supersede a changed fact, or update frontmatter. A create whose title or alias exists appends instead. Scope is mine (your domain, the default by type), shared, or agent:<name> for another agent's domain, which files a proposal it reviews. Never deletes a page.",
 		InputSchema: knowledgeWriteSpec,
 	}
 }
 
-// Risk is memory: the tool changes the shared knowledge vault (REQ-KNW-040).
+// Risk is memory: the tool changes the knowledge vault (REQ-KNW-040).
 func (t *knowledgeWriteTool) Risk(json.RawMessage) core.Risk { return core.RiskMemory }
 
+// knowledgeWriteInput is the knowledge_write tool input (API-DKN-001).
+type knowledgeWriteInput struct {
+	Action      string   `json:"action"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Body        string   `json:"body"`
+	Text        string   `json:"text"`
+	Heading     string   `json:"heading"`
+	OldText     string   `json:"old_text"`
+	NewText     string   `json:"new_text"`
+	Scope       string   `json:"scope"`
+	Source      string   `json:"source"`
+	Aliases     []string `json:"aliases"`
+	Tags        []string `json:"tags"`
+}
+
 func (t *knowledgeWriteTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
-	var in struct {
-		Action      string   `json:"action"`
-		Title       string   `json:"title"`
-		Type        string   `json:"type"`
-		Description string   `json:"description"`
-		Body        string   `json:"body"`
-		Text        string   `json:"text"`
-		Heading     string   `json:"heading"`
-		OldText     string   `json:"old_text"`
-		NewText     string   `json:"new_text"`
-		Aliases     []string `json:"aliases"`
-		Tags        []string `json:"tags"`
-	}
+	var in knowledgeWriteInput
 	if err := decodeInput(raw, &in); err != nil {
 		return inputErrorOutput(err)
 	}
@@ -275,7 +391,15 @@ func (t *knowledgeWriteTool) Call(ctx context.Context, tc core.ToolCtx, raw json
 		in.Description, in.Aliases, in.Tags); err != nil {
 		return inputErrorOutput(err)
 	}
-	res, err := tc.Knowledge.Write(ctx, core.KnowledgeWrite{
+	domains, _ := tc.Knowledge.(core.KnowledgeDomains)
+	scope, proposeTo, err := knowledgeWriteScope(ctx, tc, in, domains)
+	if err != nil {
+		if errors.Is(err, errWriteScope) {
+			return inputErrorOutput(err)
+		}
+		return errorOutput(err.Error())
+	}
+	w := core.KnowledgeWrite{
 		Action:      in.Action,
 		Title:       strings.TrimSpace(in.Title),
 		Type:        in.Type,
@@ -285,14 +409,112 @@ func (t *knowledgeWriteTool) Call(ctx context.Context, tc core.ToolCtx, raw json
 		Heading:     in.Heading,
 		OldText:     in.OldText,
 		NewText:     in.NewText,
+		Source:      in.Source,
 		Actor:       "agent " + tc.AgentName,
+		Scope:       scope,
 		Aliases:     in.Aliases,
 		Tags:        in.Tags,
-	})
+	}
+	if proposeTo != "" {
+		w.Scope = proposeTo
+		// A change for another agent's domain is a proposal it applies at its
+		// next promotion (REQ-DKN-021).
+		p, perr := domains.Propose(ctx, core.KnowledgeProposal{
+			Agent:     proposeTo,
+			FromAgent: tc.AgentName,
+			SessionID: tc.SessionID,
+			TurnID:    tc.TurnID,
+			OwnerTurn: tc.OwnerTurn,
+			Title:     w.Title,
+			Write:     w,
+		})
+		if perr != nil {
+			return errorOutput(perr.Error())
+		}
+		return successOutput(fmt.Sprintf("proposed to %s as %s; %s applies it at its next promotion", proposeTo, p.ID, proposeTo))
+	}
+	res, err := tc.Knowledge.Write(ctx, w)
 	if err != nil {
 		return errorOutput(err.Error())
 	}
 	return successOutput(knowledgeWriteMessage(res))
+}
+
+// knowledgeWriteScope decides where a knowledge_write lands: the shared wiki
+// ("" or "shared"), the caller's domain, or another agent's domain as a
+// proposal. It returns the scope for the write and, when the target is another
+// agent, that agent's name (REQ-DKN-020–021, design §5).
+func knowledgeWriteScope(ctx context.Context, tc core.ToolCtx, in knowledgeWriteInput, domains core.KnowledgeDomains) (scope, proposeTo string, err error) {
+	caller := tc.AgentName
+	hasDomain := func(name string) bool { return domains != nil && domains.HasDomain(name) }
+	switch raw := strings.TrimSpace(in.Scope); raw {
+	case "":
+		// Default scope by type; a caller without a domain writes shared only
+		// (REQ-DKN-020).
+		if in.Action == "create" && !knowledgeSharedType(in.Type) {
+			if hasDomain(caller) {
+				return caller, "", nil
+			}
+			return knowledgeScopeShared, "", nil
+		}
+		if in.Action == "create" {
+			return knowledgeScopeShared, "", nil
+		}
+		// append, replace, meta, and supersede change the page where it lives:
+		// the caller's domain first, then shared.
+		return knowledgePageScope(ctx, domains, caller, strings.TrimSpace(in.Title))
+	case knowledgeScopeMine:
+		if !hasDomain(caller) {
+			return "", "", errNoDomain
+		}
+		return caller, "", nil
+	case knowledgeScopeShared:
+		return knowledgeScopeShared, "", nil
+	default:
+		name, ok := knowledgeAgentScope(raw)
+		if !ok {
+			return "", "", errWriteScope
+		}
+		if name == caller {
+			if !hasDomain(caller) {
+				return "", "", errNoDomain
+			}
+			return caller, "", nil
+		}
+		if domains == nil {
+			return "", "", fmt.Errorf("no knowledge domain for agent %q", name)
+		}
+		return name, name, nil
+	}
+}
+
+// knowledgePageScope returns the scope where an existing page lives: the
+// caller's domain first, then the shared wiki. When the page is in neither it
+// returns the shared scope, so the write reports the existing "page not found"
+// error (REQ-DKN-020).
+func knowledgePageScope(ctx context.Context, domains core.KnowledgeDomains, caller, title string) (string, string, error) {
+	if domains != nil {
+		if domains.HasDomain(caller) {
+			if doc, err := domains.ReadIn(ctx, title, caller, caller, 1, 1); err == nil {
+				return doc.Scope, "", nil
+			}
+		}
+		if doc, err := domains.ReadIn(ctx, title, caller, knowledgeScopeShared, 1, 1); err == nil {
+			return doc.Scope, "", nil
+		}
+	}
+	return knowledgeScopeShared, "", nil
+}
+
+// knowledgeSharedType reports whether a page type defaults to the shared wiki
+// on a create: people, organizations, places, and sources are shared, the rest
+// go to the caller's domain (REQ-DKN-020).
+func knowledgeSharedType(typ string) bool {
+	switch typ {
+	case "person", "organization", "place", "source":
+		return true
+	}
+	return false
 }
 
 // validateKnowledgeWrite checks the required fields of one action (design §6).
@@ -316,12 +538,19 @@ func validateKnowledgeWrite(action, title, body, text, oldText, newText, descrip
 		if strings.TrimSpace(newText) == "" {
 			return errors.New("new_text is required for replace")
 		}
+	case "supersede":
+		if strings.TrimSpace(oldText) == "" {
+			return errors.New("old_text is required for supersede")
+		}
+		if strings.TrimSpace(newText) == "" {
+			return errors.New("new_text is required for supersede")
+		}
 	case "meta":
 		if strings.TrimSpace(description) == "" && len(aliases) == 0 && len(tags) == 0 {
 			return errors.New("metadata is required for meta: description, aliases, or tags")
 		}
 	default:
-		return errors.New("action must be create, append, replace, or meta")
+		return errors.New("action must be create, append, replace, meta, or supersede")
 	}
 	return nil
 }
@@ -337,6 +566,8 @@ func knowledgeWriteMessage(res core.KnowledgeWriteResult) string {
 		verb = "appended to"
 	case "replace":
 		verb = "replaced text in"
+	case "supersede":
+		verb = "superseded text in"
 	case "meta":
 		verb = "updated details of"
 	}
