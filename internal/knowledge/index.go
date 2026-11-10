@@ -870,8 +870,13 @@ type ScopeStat struct {
 
 // ScopeStats returns one row per scope with a file, shared first (always
 // present, even with zero pages) and the other scopes in name order
-// (design §2). UpdatedAt is the newest file mtime in milliseconds.
+// (design §2). UpdatedAt is the newest file mtime in milliseconds. It runs
+// Sync first, like Pages, so files added outside lana and fresh lana writes
+// are seen.
 func (i *Index) ScopeStats() ([]ScopeStat, error) {
+	if err := i.Sync(context.Background()); err != nil {
+		return nil, err
+	}
 	rows, err := i.db.Query(`
 SELECT scope, SUM(kind = ?), SUM(kind = ?), COALESCE(MAX(mtime), 0)
 FROM files GROUP BY scope`, kindPage, kindJournal)

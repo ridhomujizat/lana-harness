@@ -863,3 +863,75 @@ func TestPromoteDomainCreateUsesTextAsBody(t *testing.T) {
 		t.Fatalf("create page missing its text body:\n%s", page)
 	}
 }
+
+// REQ-DKN-031, design §4.2: a domain promotion re-indexes the pages it writes,
+// so ScopeStats counts them without any other call.
+func TestPromoteDomainScopeStatsFresh(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+	if _, err := env.svc.promoteDomain(ctx, "dana"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The write is indexed at once, before any stats read runs its own sync.
+	_, idx, err := env.svc.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := idx.Catalog(0, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != 1 || !strings.HasPrefix(catalog[0], "Gaji") {
+		t.Fatalf("catalog = %v, want the promoted page indexed", catalog)
+	}
+
+	stats, err := env.svc.ScopeStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byScope := map[string]core.KnowledgeScopeStat{}
+	for _, s := range stats {
+		byScope[s.Scope] = s
+	}
+	if byScope["dana"].Pages != 1 {
+		t.Fatalf("dana stat = %+v, want 1 page without any other call", byScope["dana"])
+	}
+}
+
+// API-DKN-003, REQ-DKN-031: right after a promotion the Status scope count
+// matches the domain folder on disk.
+func TestStatusScopesAfterPromotion(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.9},
+		{"op":"create","title":"Upah","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+	if _, err := env.svc.promoteDomain(ctx, "dana"); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := env.svc.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byScope := map[string]core.KnowledgeScopeStat{}
+	for _, s := range status.Scopes {
+		byScope[s.Scope] = s
+	}
+	folder, err := os.ReadDir(filepath.Join(env.vaultDir, "agents", "dana", "wiki"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byScope["dana"].Pages != len(folder) || byScope["dana"].Pages != 2 {
+		t.Fatalf("dana stat = %+v, domain folder holds %d pages", byScope["dana"], len(folder))
+	}
+}

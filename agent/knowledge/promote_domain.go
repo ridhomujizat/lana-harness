@@ -168,10 +168,20 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 		skippedOps   []string
 		pruneIDs     []string
 		written      []string
+		changed      []string
 		appliedViaOp = map[string]bool{}
 		opReferenced = map[string]bool{}
 		listed       = map[string]bool{}
 	)
+	// Pages an earlier part already wrote are re-indexed even when a later part
+	// fails, so the stats paths see them (REQ-DKN-031, design §4.2).
+	defer func() {
+		for _, rel := range changed {
+			if err := idx.SyncFile(filepath.Join(vault.Root(), filepath.FromSlash(rel))); err != nil {
+				slog.Warn("knowledge promotion: re-index failed", "path", rel, "error", err)
+			}
+		}
+	}()
 	for i, part := range parts {
 		instruction := domainInstruction(job, catalog, relatedBodies, part, i == 0, proposals, memory)
 		reply, err := s.domainPart(ctx, call, instruction)
@@ -201,6 +211,7 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 				if err == nil {
 					res.Applied++
 					appliedOps = append(appliedOps, r.Op+" "+titleOfPath(r.Path))
+					changed = append(changed, r.Path)
 					if text := domainWrittenText(op); strings.TrimSpace(text) != "" {
 						written = append(written, text)
 					}

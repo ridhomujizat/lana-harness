@@ -667,6 +667,30 @@ func TestIndexScopeStats(t *testing.T) {
 	}
 }
 
+// Design §2: ScopeStats runs Sync first, so a file added outside lana is counted
+// without any other call.
+func TestIndexScopeStatsSyncsFirst(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Open(dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	writeVaultFile(t, dir, "agents/dana/wiki/Gaji.md", "# Gaji\n\nIsi.\n")
+
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+	stats, err := idx.ScopeStats()
+	if err != nil {
+		t.Fatalf("ScopeStats: %v", err)
+	}
+	byScope := map[string]ScopeStat{}
+	for _, s := range stats {
+		byScope[s.Scope] = s
+	}
+	if byScope["dana"].Pages != 1 {
+		t.Fatalf("dana stat = %+v, want 1 page without an explicit Sync", byScope["dana"])
+	}
+}
+
 // Design §2: Pages lists only kind=page, filters by scope and a case-insensitive
 // substring, orders newest first, and reports the total before the limit.
 func TestIndexPagesFilterLimitTotal(t *testing.T) {
