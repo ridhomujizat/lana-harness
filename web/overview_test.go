@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,4 +168,69 @@ func TestOverviewNotFound(t *testing.T) {
 
 	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/agents/missing/overview", "", cookie, ""))
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+}
+
+// TestOverviewKnowledgeBlock covers the API-DKN-008 "What it knows" block.
+func TestOverviewKnowledgeBlock(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	backend.knowledgeAvail = true
+	backend.knowledgeStats = core.KnowledgeDomainStats{
+		Pages: 12, Changed7d: 3, Weeks: [8]int{0, 0, 1, 2, 0, 4, 2, 3},
+		Recent: []core.KnowledgePageInfo{{Title: "Gaji", Path: "agents/dana/wiki/Gaji.md", Updated: "2026-11-10"}},
+	}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+	body := overviewForTest(t, s, cookie, "dana")
+
+	if !body.Knowledge.Available || body.Knowledge.Pages != 12 || body.Knowledge.Changed7d != 3 {
+		t.Fatalf("knowledge = %+v", body.Knowledge)
+	}
+	if body.Knowledge.Weeks != [8]int{0, 0, 1, 2, 0, 4, 2, 3} {
+		t.Fatalf("weeks = %v", body.Knowledge.Weeks)
+	}
+	if len(body.Knowledge.Recent) != 1 || body.Knowledge.Recent[0].Title != "Gaji" ||
+		body.Knowledge.Recent[0].Path != "agents/dana/wiki/Gaji.md" || body.Knowledge.Recent[0].Updated != "2026-11-10" {
+		t.Fatalf("recent = %+v", body.Knowledge.Recent)
+	}
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/agents/dana/overview", "", cookie, ""))
+	if !strings.Contains(rr.Body.String(), `"knowledge":{"available":true`) {
+		t.Fatalf("body has no knowledge block: %s", rr.Body.String())
+	}
+}
+
+// TestOverviewKnowledgeUnavailable covers API-DKN-008: an agent without a
+// domain, or a runtime without a knowledge service, reports available:false
+// with zero fields and a never-null recent list.
+func TestOverviewKnowledgeUnavailable(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	body := overviewForTest(t, s, cookie, "dana")
+	if body.Knowledge.Available || body.Knowledge.Pages != 0 || body.Knowledge.Changed7d != 0 {
+		t.Fatalf("knowledge = %+v", body.Knowledge)
+	}
+	if body.Knowledge.Recent == nil || len(body.Knowledge.Recent) != 0 {
+		t.Fatalf("recent = %+v, want empty non-null", body.Knowledge.Recent)
+	}
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/agents/dana/overview", "", cookie, ""))
+	if !strings.Contains(rr.Body.String(), `"knowledge":{"available":false`) {
+		t.Fatalf("body has no unavailable knowledge block: %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"recent":[]`) {
+		t.Fatalf("body has no empty recent: %s", rr.Body.String())
+	}
+}
+
+// TestOverviewKnowledgeWithoutPort covers a Backend that does not implement the
+// optional KnowledgeDomainBackend port.
+func TestOverviewKnowledgeWithoutPort(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	body := overviewForTest(t, s, cookie, "dana")
+	if body.Knowledge.Available || body.Knowledge.Recent == nil {
+		t.Fatalf("knowledge = %+v", body.Knowledge)
+	}
 }

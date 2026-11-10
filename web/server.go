@@ -72,6 +72,10 @@ type Server struct {
 	jobBackend       JobBackend
 	dashboardBackend DashboardBackend
 	knowledgeBackend KnowledgeBackend
+	// knowledgeDomainBackend serves the page list, page read, review queue,
+	// and the agent overview knowledge block (API-DKN-004–008); nil when the
+	// backend does not implement the port.
+	knowledgeDomainBackend KnowledgeDomainBackend
 	// workflows is the workflow port of the /v1/workflows routes (spec #33).
 	// It is guarded by workflowsMu so SetWorkflows may run after Start.
 	workflows   WorkflowBackend

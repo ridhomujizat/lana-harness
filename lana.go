@@ -2015,6 +2015,11 @@ func (rt *Runtime) IngestKnowledge(ctx context.Context, in KnowledgeSave) (core.
 // the runtime has no knowledge service (API-KNU-003–006, design §9).
 var ErrKnowledgeUnavailable = errors.New("knowledge is not available")
 
+// ErrInvalidInput is returned by the runtime's review endpoints when a decision
+// is refused because the item no longer passes its rules (API-DKN-007). The web
+// bridge maps it to a 400 invalid_request.
+var ErrInvalidInput = errors.New("invalid input")
+
 // KnowledgeReport is the latest lint report: its vault-relative path and its
 // markdown (API-KNU-004).
 type KnowledgeReport struct {
@@ -2083,18 +2088,36 @@ func unavailableKnowledgeStatus() core.KnowledgeStatus {
 		SourcesFailed:    []core.KnowledgeSourceError{},
 		InboxUnsupported: []string{},
 		Log:              []core.KnowledgeLogEntry{},
+		Scopes:           []core.KnowledgeScopeStat{},
 	}
 }
 
 // KnowledgeStatus reports the vault state for GET /v1/knowledge (API-KNU-003,
 // REQ-KNU-040). Without a knowledge service it returns available:false rather
-// than an error, so the page can say why.
+// than an error, so the page can say why. The pending count adds the skill
+// proposals the knowledge service does not hold (API-DKN-003, REQ-DKN-060).
 func (rt *Runtime) KnowledgeStatus(ctx context.Context) (core.KnowledgeStatus, error) {
+	pending := 0
+	if rt.home != "" {
+		if proposals, err := agenthome.SkillProposals(rt.home); err == nil {
+			pending = len(proposals)
+		}
+	}
 	admin := rt.knowledgeAdmin()
 	if admin == nil {
-		return unavailableKnowledgeStatus(), nil
+		status := unavailableKnowledgeStatus()
+		status.ReviewPending = pending
+		return status, nil
 	}
-	return admin.Status(ctx)
+	status, err := admin.Status(ctx)
+	if err != nil {
+		return core.KnowledgeStatus{}, err
+	}
+	status.ReviewPending += pending
+	if status.Scopes == nil {
+		status.Scopes = []core.KnowledgeScopeStat{}
+	}
+	return status, nil
 }
 
 // KnowledgeReport returns the latest lint report for GET /v1/knowledge/report
@@ -2159,6 +2182,236 @@ func (rt *Runtime) KnowledgeConsolidate(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// knowledgeDomains returns the scoped knowledge surface of the runtime, or nil
+// when the runtime has no knowledge service (design §9).
+func (rt *Runtime) knowledgeDomains() core.KnowledgeDomains {
+	service, ok := rt.coreCtx.Lookup(core.ServiceKnowledge)
+	if !ok || service == nil {
+		return nil
+	}
+	domains, ok := service.(core.KnowledgeDomains)
+	if !ok {
+		return nil
+	}
+	return domains
+}
+
+// KnowledgePages returns one page of the knowledge list, newest first, with the
+// total before the limit (API-DKN-004). Without a knowledge service it returns
+// ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgePages(ctx context.Context, scope, q string, limit int) ([]core.KnowledgePageInfo, int, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return nil, 0, ErrKnowledgeUnavailable
+	}
+	return domains.Pages(ctx, scope, q, limit)
+}
+
+// KnowledgePage returns one vault file and its raw markdown (API-DKN-005).
+// Without a knowledge service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgePage(ctx context.Context, path string) (core.KnowledgeDoc, string, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeDoc{}, "", ErrKnowledgeUnavailable
+	}
+	return domains.Page(ctx, path)
+}
+
+// ReviewItems returns the pending review queue, newest first (API-DKN-006). It
+// merges the knowledge proposals of the knowledge service with the skill
+// proposals of the agent home; a runtime without a knowledge service still
+// lists the skill proposals.
+func (rt *Runtime) ReviewItems(ctx context.Context) ([]core.ReviewItem, error) {
+	items := make([]core.ReviewItem, 0)
+	if domains := rt.knowledgeDomains(); domains != nil {
+		proposals, err := domains.PendingProposals(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range proposals {
+			items = append(items, reviewItemFromProposal(p))
+		}
+	}
+	if rt.home != "" {
+		proposals, err := agenthome.SkillProposals(rt.home)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range proposals {
+			items = append(items, reviewItemFromSkill(p))
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt > items[j].CreatedAt })
+	return items, nil
+}
+
+// ReviewDecide approves or rejects one review item and returns its new status
+// (API-DKN-007): a knowledge proposal decides to "approved"/"rejected" and a
+// skill proposal to "applied"/"rejected". An unknown or already-decided id
+// wraps os.ErrNotExist; a skill that no longer passes its rules is
+// ErrInvalidInput.
+func (rt *Runtime) ReviewDecide(ctx context.Context, id string, approve bool) (string, error) {
+	switch {
+	case strings.HasPrefix(id, "p_"):
+		domains := rt.knowledgeDomains()
+		if domains == nil {
+			return "", ErrKnowledgeUnavailable
+		}
+		proposal, err := domains.DecideProposal(ctx, id, approve)
+		if err != nil {
+			return "", err
+		}
+		return proposal.Status, nil
+	case strings.HasPrefix(id, "s_"):
+		if rt.home == "" {
+			return "", fmt.Errorf("skill proposal %s: %w", id, os.ErrNotExist)
+		}
+		agent, name, ok := splitSkillProposalID(id)
+		if !ok {
+			return "", fmt.Errorf("skill proposal %s: %w", id, os.ErrNotExist)
+		}
+		var err error
+		if approve {
+			err = agenthome.ApproveSkill(rt.home, agent, name)
+		} else {
+			err = agenthome.RejectSkill(rt.home, agent, name)
+		}
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", err
+			}
+			return "", fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		}
+		if approve {
+			return "applied", nil
+		}
+		return "rejected", nil
+	default:
+		return "", fmt.Errorf("review item %s: %w", id, os.ErrNotExist)
+	}
+}
+
+// AgentKnowledge reports the "What it knows" block of one agent (API-DKN-008).
+// A team name resolves to its lead. available is false when the runtime has no
+// knowledge service or the agent has no domain.
+func (rt *Runtime) AgentKnowledge(ctx context.Context, name string) (bool, core.KnowledgeDomainStats, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return false, core.KnowledgeDomainStats{}, nil
+	}
+	agent := rt.knowledgeAgentName(name)
+	if !domains.HasDomain(agent) {
+		return false, core.KnowledgeDomainStats{}, nil
+	}
+	stats, err := domains.DomainStats(ctx, agent, time.Now())
+	if err != nil {
+		return false, core.KnowledgeDomainStats{}, err
+	}
+	if stats.Recent == nil {
+		stats.Recent = []core.KnowledgePageInfo{}
+	}
+	return true, stats, nil
+}
+
+// knowledgeAgentName resolves a room name to the agent that owns its knowledge
+// domain: a team resolves to its lead (API-DKN-008).
+func (rt *Runtime) knowledgeAgentName(name string) string {
+	if _, ok := rt.agents()[name]; ok {
+		return name
+	}
+	if team, ok := rt.teams()[name]; ok && team.Lead != "" {
+		return team.Lead
+	}
+	return name
+}
+
+// reviewItemFromProposal maps one knowledge proposal to a review item
+// (API-DKN-006).
+func reviewItemFromProposal(p core.KnowledgeProposal) core.ReviewItem {
+	return core.ReviewItem{
+		ID:        p.ID,
+		Kind:      "knowledge",
+		Agent:     p.Agent,
+		From:      p.FromAgent,
+		Title:     p.Title,
+		Action:    p.Write.Action,
+		Body:      renderKnowledgeChange(p.Write),
+		OwnerTurn: p.OwnerTurn,
+		SessionID: p.SessionID,
+		CreatedAt: p.CreatedAt,
+	}
+}
+
+// reviewItemFromSkill maps one skill proposal to a review item (API-DKN-006).
+func reviewItemFromSkill(p agenthome.SkillProposal) core.ReviewItem {
+	action := "create"
+	if p.Exists {
+		action = "update"
+	}
+	return core.ReviewItem{
+		ID:          "s_" + p.Agent + "." + p.Name,
+		Kind:        "skill",
+		Agent:       p.Agent,
+		From:        p.Agent,
+		Title:       p.Name,
+		Action:      action,
+		Description: p.Description,
+		Body:        p.Body,
+		OwnerTurn:   p.OwnerTurn,
+		SessionID:   p.SessionID,
+		CreatedAt:   p.CreatedAt,
+	}
+}
+
+// renderKnowledgeChange renders a requested page change as readable text for
+// the review queue (API-DKN-006).
+func renderKnowledgeChange(w core.KnowledgeWrite) string {
+	switch w.Action {
+	case "replace", "supersede":
+		old := w.OldText
+		if old == "" {
+			old = w.Text
+		}
+		return old + " -> " + w.NewText
+	case "meta":
+		parts := make([]string, 0, 4)
+		if w.Type != "" {
+			parts = append(parts, "type: "+w.Type)
+		}
+		if w.Description != "" {
+			parts = append(parts, "description: "+w.Description)
+		}
+		if len(w.Aliases) > 0 {
+			parts = append(parts, "aliases: "+strings.Join(w.Aliases, ", "))
+		}
+		if len(w.Tags) > 0 {
+			parts = append(parts, "tags: "+strings.Join(w.Tags, ", "))
+		}
+		return strings.Join(parts, "\n")
+	case "append":
+		if w.Text != "" {
+			return w.Text
+		}
+		return w.Body
+	default:
+		if w.Body != "" {
+			return w.Body
+		}
+		return w.Text
+	}
+}
+
+// splitSkillProposalID splits a review id "s_<agent>.<name>" at the first dot
+// after "s_" (design §7).
+func splitSkillProposalID(id string) (agent, name string, ok bool) {
+	rest := strings.TrimPrefix(id, "s_")
+	agent, name, found := strings.Cut(rest, ".")
+	if !found || agent == "" || name == "" {
+		return "", "", false
+	}
+	return agent, name, true
 }
 
 // knowledgeSaveIngest converts a KnowledgeSave into a KnowledgeIngest. It is

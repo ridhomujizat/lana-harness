@@ -179,6 +179,25 @@ type KnowledgeProposal struct {
 	DecidedAt int64
 }
 
+// ReviewItem is one pending entry of the owner review queue (API-DKN-006): a
+// knowledge proposal (Kind "knowledge") or a skill proposal (Kind "skill").
+// Action is the requested write action, or "create"/"update" for a skill. Body
+// is a readable rendering of the change; Description is set for skill items
+// only.
+type ReviewItem struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Agent       string `json:"agent"`
+	From        string `json:"from"`
+	Title       string `json:"title"`
+	Action      string `json:"action"`
+	Description string `json:"description,omitempty"`
+	Body        string `json:"body"`
+	OwnerTurn   bool   `json:"owner_turn"`
+	SessionID   string `json:"session_id"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
 // KnowledgeQuery is one search request. Kind and Type optionally narrow the
 // results; "" means any (REQ-KNW-040). Scopes narrows by file scope; nil or
 // empty means every scope (REQ-DKN-010).

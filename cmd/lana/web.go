@@ -95,6 +95,7 @@ var _ web.LiveConfigStore = (*webBackend)(nil)
 var _ web.JobBackend = (*webBackend)(nil)
 var _ web.DashboardBackend = (*webBackend)(nil)
 var _ web.KnowledgeBackend = (*webBackend)(nil)
+var _ web.KnowledgeDomainBackend = (*webBackend)(nil)
 
 const (
 	// providerTestTimeout is the 15-second limit of API-WEB-019.
@@ -519,6 +520,76 @@ func (b *webBackend) KnowledgeConsolidate(ctx context.Context) error {
 		return web.ErrKnowledgeUnavailable
 	}
 	return knowledgeConsolidateError(b.rt.KnowledgeConsolidate(ctx))
+}
+
+// knowledgeDomainError maps the runtime's scoped-knowledge outcome to the web
+// port: a missing service becomes web.ErrKnowledgeUnavailable and an invalid
+// review item becomes web.ErrReviewInvalid (API-DKN-004–008). Not-found and
+// other errors pass through unchanged.
+func knowledgeDomainError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, lana.ErrKnowledgeUnavailable):
+		return web.ErrKnowledgeUnavailable
+	case errors.Is(err, lana.ErrInvalidInput):
+		return web.ErrReviewInvalid
+	default:
+		return err
+	}
+}
+
+// KnowledgePages implements web.KnowledgeDomainBackend (API-DKN-004).
+func (b *webBackend) KnowledgePages(ctx context.Context, scope, q string, limit int) ([]core.KnowledgePageInfo, int, error) {
+	if b.rt == nil {
+		return nil, 0, web.ErrKnowledgeUnavailable
+	}
+	pages, total, err := b.rt.KnowledgePages(ctx, scope, q, limit)
+	if err != nil {
+		return nil, 0, knowledgeDomainError(err)
+	}
+	return pages, total, nil
+}
+
+// KnowledgePage implements web.KnowledgeDomainBackend (API-DKN-005).
+func (b *webBackend) KnowledgePage(ctx context.Context, path string) (core.KnowledgeDoc, string, error) {
+	if b.rt == nil {
+		return core.KnowledgeDoc{}, "", web.ErrKnowledgeUnavailable
+	}
+	return b.rt.KnowledgePage(ctx, path)
+}
+
+// ReviewItems implements web.KnowledgeDomainBackend (API-DKN-006).
+func (b *webBackend) ReviewItems(ctx context.Context) ([]core.ReviewItem, error) {
+	if b.rt == nil {
+		return []core.ReviewItem{}, nil
+	}
+	items, err := b.rt.ReviewItems(ctx)
+	if err != nil {
+		return nil, knowledgeDomainError(err)
+	}
+	return items, nil
+}
+
+// ReviewDecide implements web.KnowledgeDomainBackend (API-DKN-007).
+func (b *webBackend) ReviewDecide(ctx context.Context, id string, approve bool) (string, error) {
+	if b.rt == nil {
+		return "", web.ErrKnowledgeUnavailable
+	}
+	status, err := b.rt.ReviewDecide(ctx, id, approve)
+	if err != nil {
+		return "", knowledgeDomainError(err)
+	}
+	return status, nil
+}
+
+// AgentKnowledge implements web.KnowledgeDomainBackend (API-DKN-008). Outside
+// the daemon it reports available:false.
+func (b *webBackend) AgentKnowledge(ctx context.Context, name string) (bool, core.KnowledgeDomainStats, error) {
+	if b.rt == nil {
+		return false, core.KnowledgeDomainStats{}, nil
+	}
+	return b.rt.AgentKnowledge(ctx, name)
 }
 
 // DaemonInfo implements web.DaemonStore (API-WEB-022).
