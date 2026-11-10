@@ -600,8 +600,8 @@ func TestPromoteDomainPromptMarksProposalState(t *testing.T) {
 	}
 	prompt := provider.recorded()[0].Messages[0].Content[0].Text
 	for _, want := range []string{
-		approved.ID + " from rio: append Harga: x (approved by the owner)",
-		pending.ID + " from rio: append Baru: x (not yet reviewed)",
+		approved.ID + " from rio (approved by the owner): append Harga",
+		pending.ID + " from rio (not yet reviewed): append Baru",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -643,5 +643,92 @@ func TestDomainSystemPromptCarriesProposalAndTypeRules(t *testing.T) {
 	}
 	if !strings.Contains(domainSystem, "A proposal approved by the owner counts as stated by the owner.") {
 		t.Fatalf("domainSystem missing the approved-proposal sentence:\n%s", domainSystem)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-031, design §4.2 step 2): the prompt carries the whole
+// content of each gathered proposal: every line of an append's text and the body
+// of a create, not just a first line.
+func TestPromoteDomainPromptCarriesProposalContent(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	appendText := "\n## THR\n- THR wajib dibayar paling lambat 7 hari\n- THR dihitung dari gaji pokok\n"
+	if _, err := env.svc.Propose(ctx, core.KnowledgeProposal{
+		Agent: "dana", FromAgent: "rio", OwnerTurn: true,
+		Write: core.KnowledgeWrite{Action: "append", Title: "THR", Text: appendText},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createBody := "Upah dibayar tiap tanggal 25\nHitungan mingguan\n"
+	if _, err := env.svc.Propose(ctx, core.KnowledgeProposal{
+		Agent: "dana", FromAgent: "rio", OwnerTurn: true,
+		Write: core.KnowledgeWrite{Action: "create", Title: "Upah", Type: "topic", Body: createBody},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := env.svc.promoteDomain(ctx, "dana"); err != nil {
+		t.Fatal(err)
+	}
+	prompt := provider.recorded()[0].Messages[0].Content[0].Text
+	for _, want := range []string{
+		"## THR",
+		"- THR wajib dibayar paling lambat 7 hari",
+		"- THR dihitung dari gaji pokok",
+		"Upah dibayar tiap tanggal 25",
+		"Hitungan mingguan",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-031, design §4.2 step 4): a create op with no body and no
+// text is skipped as an empty page and logs the reason.
+func TestPromoteDomainSkipsEmptyCreate(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Kosong","type":"topic","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- catatan\n")
+	res, err := env.svc.promoteDomain(context.Background(), "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 0 || res.Skipped != 1 {
+		t.Fatalf("applied=%d skipped=%d, want 0 and 1", res.Applied, res.Skipped)
+	}
+	if env.exists("agents/dana/wiki/Kosong.md") {
+		t.Fatal("empty create was applied")
+	}
+	want := "- skipped create [[Kosong]]: invalid: empty page"
+	if log := env.readLog(); !strings.Contains(log, want) {
+		t.Fatalf("log missing skipped op line %q:\n%s", want, log)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-031, design §4.2 step 4): a create op with no body uses
+// its text as the page body.
+func TestPromoteDomainCreateUsesTextAsBody(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Upah","type":"topic","text":"Upah dibayar tiap tanggal 25","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- catatan\n")
+	res, err := env.svc.promoteDomain(context.Background(), "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 1 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 1 and 0", res.Applied, res.Skipped)
+	}
+	page := env.readVault("agents/dana/wiki/Upah.md")
+	if !strings.Contains(page, "Upah dibayar tiap tanggal 25") {
+		t.Fatalf("create page missing its text body:\n%s", page)
 	}
 }

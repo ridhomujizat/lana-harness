@@ -28,6 +28,7 @@ const (
 	domainCallTimeout        = 180 * time.Second
 	domainCatalogMax         = 400
 	domainRelatedRunes       = 6000
+	domainProposalContent    = 4000
 	domainConfidence         = 0.6
 	domainProposalConfidence = 0.8
 	domainMaxPrune           = 10
@@ -334,6 +335,12 @@ func domainOpSkipReason(op domainOp, proposalStatus map[string]string) string {
 	if strings.TrimSpace(op.Op) == "" || strings.TrimSpace(op.Title) == "" {
 		return "invalid"
 	}
+	// REQ-DKN-031: a create with neither a body nor a text would write an empty
+	// page, so it is skipped (design §4.2 step 4).
+	if strings.TrimSpace(op.Op) == "create" &&
+		strings.TrimSpace(op.Body) == "" && strings.TrimSpace(op.Text) == "" {
+		return "invalid: empty page"
+	}
 	bar := domainConfidence
 	if id := strings.TrimSpace(op.Proposal); id != "" {
 		if status, ok := proposalStatus[id]; ok && status == proposalStatusPending {
@@ -368,6 +375,11 @@ func domainType(typ string) string {
 func (s *Service) applyDomainOp(vault *kv.Vault, agent string, op domainOp, journalLinks []string) (kv.Result, error) {
 	if strings.TrimSpace(op.Op) == "create" {
 		op.Type = domainType(op.Type)
+		// REQ-DKN-031 (design §4.2 step 4): a create op may carry its page text
+		// in "text"; use it as the body when no body is set.
+		if strings.TrimSpace(op.Body) == "" {
+			op.Body = op.Text
+		}
 	}
 	scope := kv.ScopeShared
 	if strings.TrimSpace(op.Scope) != kv.ScopeShared {
@@ -440,11 +452,13 @@ func domainInstruction(job string, catalog []string, relatedBodies [][2]string, 
 	if first && len(proposals) > 0 {
 		b.WriteString("\n# Proposals from other agents\n")
 		for _, p := range proposals {
-			state := " (not yet reviewed)"
+			state := "not yet reviewed"
 			if p.Status == proposalStatusApproved {
-				state = " (approved by the owner)"
+				state = "approved by the owner"
 			}
-			fmt.Fprintf(&b, "- %s from %s: %s%s\n", p.ID, p.FromAgent, renderProposalWrite(coreProposal(p).Write), state)
+			w := coreProposal(p).Write
+			fmt.Fprintf(&b, "- %s from %s (%s): %s\n", p.ID, p.FromAgent, state, renderProposalWrite(w))
+			b.WriteString(renderProposalContent(w))
 		}
 	}
 	if first && len(entries) > 0 {
@@ -504,8 +518,8 @@ func domainJob(home, agent string, cfg core.AgentConfig) string {
 	}
 }
 
-// renderProposalWrite renders one requested change as a readable line for the
-// prompt (design §4.2 step 2).
+// renderProposalWrite renders the header line of one requested change for the
+// prompt: its action, title, page type and heading (design §4.2 step 2).
 func renderProposalWrite(w core.KnowledgeWrite) string {
 	action := strings.TrimSpace(w.Action)
 	if action == "" {
@@ -522,25 +536,72 @@ func renderProposalWrite(w core.KnowledgeWrite) string {
 	if t := strings.TrimSpace(w.Type); t != "" {
 		fmt.Fprintf(&b, " (%s)", t)
 	}
-	switch action {
-	case "append":
-		if h := strings.TrimSpace(w.Heading); h != "" {
-			fmt.Fprintf(&b, " under %q", h)
-		}
-		if text := strings.TrimSpace(w.Text); text != "" {
-			b.WriteString(": " + firstLine(text, compileDescriptionCut))
-		}
-	case "replace", "supersede":
-		fmt.Fprintf(&b, ": %q -> %q", firstLine(w.OldText, compileDescriptionCut), firstLine(w.NewText, compileDescriptionCut))
-	default:
-		if d := strings.TrimSpace(w.Description); d != "" {
-			b.WriteString(" — " + d)
-		}
-		if body := strings.TrimSpace(w.Body); body != "" {
-			b.WriteString(": " + firstLine(body, compileDescriptionCut))
-		}
+	if h := strings.TrimSpace(w.Heading); h != "" {
+		fmt.Fprintf(&b, " under %q", h)
 	}
 	return b.String()
+}
+
+// renderProposalContent renders the full content of one requested change as an
+// indented block under its header line: the description when one is set, then
+// the body of a create (its text when no body is set), the text of an append, or
+// the old and new text of a replace or supersede, with the aliases and tags of a
+// create (design §4.2 step 2). The block is cut to domainProposalContent runes
+// with "…" when longer.
+func renderProposalContent(w core.KnowledgeWrite) string {
+	var b strings.Builder
+	writeProposalField(&b, "description", w.Description)
+	action := strings.TrimSpace(w.Action)
+	if action == "" {
+		action = "create"
+	}
+	switch action {
+	case "append":
+		writeProposalField(&b, "text", w.Text)
+	case "replace", "supersede":
+		writeProposalField(&b, "old", w.OldText)
+		writeProposalField(&b, "new", w.NewText)
+	default:
+		body := w.Body
+		if strings.TrimSpace(body) == "" {
+			body = w.Text
+		}
+		writeProposalField(&b, "body", body)
+		if len(w.Aliases) > 0 {
+			writeProposalField(&b, "aliases", strings.Join(w.Aliases, ", "))
+		}
+		if len(w.Tags) > 0 {
+			writeProposalField(&b, "tags", strings.Join(w.Tags, ", "))
+		}
+	}
+	return cutProposalContent(b.String())
+}
+
+// writeProposalField writes one labelled field of a proposal's content block,
+// every line prefixed with four spaces and the label on the first line. An empty
+// value writes nothing.
+func writeProposalField(b *strings.Builder, label, value string) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\r\n", "\n"))
+	if value == "" {
+		return
+	}
+	lines := strings.Split(value, "\n")
+	fmt.Fprintf(b, "    %s: %s\n", label, strings.TrimRight(lines[0], " \t"))
+	for _, line := range lines[1:] {
+		b.WriteString("    ")
+		b.WriteString(strings.TrimRight(line, " \t"))
+		b.WriteByte('\n')
+	}
+}
+
+// cutProposalContent cuts a rendered content block to domainProposalContent
+// runes, appending "…" when it was longer.
+func cutProposalContent(s string) string {
+	r := []rune(s)
+	if len(r) <= domainProposalContent {
+		return s
+	}
+	return string(r[:domainProposalContent]) + "…"
 }
 
 // pruneDomainMemory drops up to domainMaxPrune existing memory entries named by
