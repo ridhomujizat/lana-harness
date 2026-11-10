@@ -7,7 +7,7 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
-## [0.4.0-beta.1] - 2026-11-10
+## [0.3.0-beta.5] - 2026-11-10
 
 ### Added
 - Domain knowledge per agent (spec 46): every agent with a knowledge tool owns
