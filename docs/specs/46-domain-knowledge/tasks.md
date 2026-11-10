@@ -121,3 +121,23 @@ headless screenshots through CDP.
 - Not checked live: the Claude Code runtime path (its tool calls do not set `OwnerTurn`, so its
   proposals always wait for the owner); Telegram; MEMORY.md pruning with a real model (unit tests
   only); a nightly run by the clock.
+
+## Live test 2026-11-10 (round 2, owner: "ikuti rekomendasi mu, dan test live")
+
+- Claude Code path: an agent on `claude-code/sonnet` proposed to `dana` through the loopback MCP
+  tools; the proposal had `owner_turn = 1` after 29df2f0.
+- Nightly by the clock: `consolidate_at` set three minutes ahead; the run fired one tick after the
+  time and journaled, promoted, and linted.
+- MEMORY.md pruning with a real model: the first run pruned four entries that no page held (text
+  kept only in `log.md`). Fixed in 96a99dd: an entry is removed only when 60% of its words are in
+  the text the passing ops wrote. Rerun: three entries kept and logged ("not found in written
+  pages"), the pruned ones were present in `Kebijakan Penggajian`. The model's `update` op now maps
+  to `append`.
+- Copy of the owner's real `~/.lana` (real sessions and vault; knowledge tools added to `lana`;
+  port 18399): index migrated v2 → v3 without vault changes; `lana` (combo `claude-code/sonnet`)
+  wrote `agents/lana/wiki/lana-harness.md`; a limited consolidation (3 newest sessions) journaled
+  into `agents/lana/journal/` and promoted one page; profile "What lana knows" and the Knowledge
+  scope filter rendered. Found and fixed a stale scope count after promotion (b781709).
+- Backlog note: adding knowledge tools to `lana` makes its 25 older sessions (~889k characters)
+  eligible for journaling; the first nightly run reads them 40,000 characters per session per run
+  with the agent's own model.
