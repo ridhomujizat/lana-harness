@@ -35,7 +35,8 @@ var knowledgeIngestSpec = json.RawMessage(`{"type":"object","properties":{"path"
 const knowledgeSearchGuidance = "Search knowledge_search before answering about people, projects, or things the owner shared earlier. " +
 	"Save lasting knowledge with knowledge_write, or knowledge_ingest for documents, links, and long notes. " +
 	"Keep memory_write for short facts about the owner and yourself. " +
-	"Your own domain holds knowledge of your field; search scope=agent:<name> to look into another agent's field."
+	"Your own domain holds knowledge of your field; search scope=agent:<name> to look into another agent's field. " +
+	"When a fact changed, call knowledge_write action=supersede with the one line that holds the old fact; lana strikes and dates it for you, so never write strikethrough by hand."
 
 // Knowledge scope values the tools accept (REQ-DKN-010, REQ-DKN-020).
 const (
