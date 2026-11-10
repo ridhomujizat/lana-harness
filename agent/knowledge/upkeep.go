@@ -409,6 +409,11 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 				JournalDays: st.JournalDays,
 				UpdatedAt:   st.UpdatedAt,
 			})
+			// API-DKN-003: counts cover every scope; vaultCounts saw shared only.
+			if st.Scope != "shared" {
+				status.Counts.Pages += st.Pages
+				status.Counts.JournalDays += st.JournalDays
+			}
 		}
 	}
 	if proposals, err := idx.PendingProposals(); err == nil {

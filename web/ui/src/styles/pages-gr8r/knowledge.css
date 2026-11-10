@@ -492,3 +492,8 @@
     animation: none;
   }
 }
+
+.knowledge-page-row .agent-name-chip {
+  flex-shrink: 0;
+  max-width: 140px;
+}
