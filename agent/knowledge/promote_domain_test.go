@@ -379,3 +379,116 @@ func TestConsolidatePromotesDomainsAfterShared(t *testing.T) {
 		t.Fatalf("domain promotion is not after the shared promotion, in name order:\n%s", log)
 	}
 }
+
+// ownerProposal proposes an owner-turn append on dana for the proposal-accounting
+// tests.
+func ownerProposal(t *testing.T, env *vaultEnv, title string) core.KnowledgeProposal {
+	t.Helper()
+	p, err := env.svc.Propose(context.Background(), core.KnowledgeProposal{
+		Agent: "dana", FromAgent: "rio", OwnerTurn: true,
+		Write: core.KnowledgeWrite{Action: "append", Title: title, Text: "x"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// AC-DKN-005 (design §4.2 step 5): a proposal listed in applied_proposals whose
+// only op was skipped for low confidence stays pending, and the log.md entry
+// carries a skipped-op line with the reason.
+func TestPromoteDomainKeepsProposalWhenOpSkipped(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	p := ownerProposal(t, env, "Gaji")
+	provider.setText(fmt.Sprintf(`{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.7,"proposal":"%s"}
+	],"applied_proposals":["%s"],"prune":[]}`, p.ID, p.ID))
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 0 || res.Skipped != 1 {
+		t.Fatalf("applied=%d skipped=%d, want 0 and 1", res.Applied, res.Skipped)
+	}
+	if len(res.Proposals) != 0 {
+		t.Fatalf("proposals applied = %v, want none", res.Proposals)
+	}
+	if status := env.proposalStatus(t, p.ID); status != proposalStatusPending {
+		t.Fatalf("proposal status = %q, want pending", status)
+	}
+	want := "- skipped create [[Gaji]]: below confidence"
+	if log := env.readLog(); !strings.Contains(log, want) {
+		t.Fatalf("log missing skipped op line %q:\n%s", want, log)
+	}
+}
+
+// AC-DKN-005 (design §4.2 step 5): a proposal listed in applied_proposals with
+// no op referencing it at all becomes applied.
+func TestPromoteDomainAppliesListedProposalWithoutOp(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	p := ownerProposal(t, env, "Gaji")
+	provider.setText(fmt.Sprintf(`{"ops":[],"applied_proposals":["%s"],"prune":[]}`, p.ID))
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Proposals) != 1 || res.Proposals[0] != p.ID {
+		t.Fatalf("proposals applied = %v, want [%s]", res.Proposals, p.ID)
+	}
+	if status := env.proposalStatus(t, p.ID); status != proposalStatusApplied {
+		t.Fatalf("proposal status = %q, want applied", status)
+	}
+}
+
+// AC-DKN-005 (design §4.2 step 5): a proposal referenced by a passing op becomes
+// applied even when it is not listed in applied_proposals.
+func TestPromoteDomainAppliesProposalFromPassingOp(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	p := ownerProposal(t, env, "Gaji")
+	provider.setText(fmt.Sprintf(`{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.9,"proposal":"%s"}
+	],"applied_proposals":[],"prune":[]}`, p.ID))
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 1 {
+		t.Fatalf("applied = %d, want 1", res.Applied)
+	}
+	if status := env.proposalStatus(t, p.ID); status != proposalStatusApplied {
+		t.Fatalf("proposal status = %q, want applied", status)
+	}
+}
+
+// AC-DKN-005 (design §4.2 step 4): a journal-derived op cites the journal day
+// without the ".md" suffix.
+func TestPromoteDomainJournalSourceLinkHasNoSuffix(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+	if _, err := env.svc.promoteDomain(context.Background(), "dana"); err != nil {
+		t.Fatal(err)
+	}
+	page := env.readVault("agents/dana/wiki/Gaji.md")
+	if !strings.Contains(page, "[[agents/dana/journal/2026-11-01]]") {
+		t.Fatalf("page missing journal source link:\n%s", page)
+	}
+	if strings.Contains(page, "[[agents/dana/journal/2026-11-01.md]]") {
+		t.Fatalf("journal source link keeps the .md suffix:\n%s", page)
+	}
+}

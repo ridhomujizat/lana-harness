@@ -31,6 +31,7 @@ const (
 	domainConfidence         = 0.6
 	domainProposalConfidence = 0.8
 	domainMaxPrune           = 10
+	domainSkipReasonRunes    = 120
 )
 
 // domainSystem is the system prompt of one domain-promotion call (design §4.2).
@@ -156,10 +157,12 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 	}
 
 	var (
-		appliedOps []string
-		pruneIDs   []string
-		handled    = map[string]bool{}
-		referenced = map[string]bool{}
+		appliedOps   []string
+		skippedOps   []string
+		pruneIDs     []string
+		appliedViaOp = map[string]bool{}
+		opReferenced = map[string]bool{}
+		listed       = map[string]bool{}
 	)
 	for i, part := range parts {
 		instruction := domainInstruction(job, catalog, relatedBodies, part, i == 0, proposals, memory)
@@ -176,24 +179,32 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 			ops = ops[:domainMaxOps]
 		}
 		for _, op := range ops {
-			if !domainOpPasses(op) {
-				res.Skipped++
-				continue
+			id := strings.TrimSpace(op.Proposal)
+			if id != "" {
+				// An op that names a proposal references it whether or not it
+				// passes, so a skipped op never lets applied_proposals mark the
+				// proposal applied (design §4.2 step 5).
+				opReferenced[id] = true
 			}
-			r, err := s.applyDomainOp(vault, agent, op, journalLinks)
-			if err != nil {
-				slog.Debug("knowledge promotion: op skipped", "agent", agent, "title", op.Title, "error", err)
-				res.Skipped++
-				continue
+			reason := domainOpSkipReason(op)
+			if reason == "" {
+				r, err := s.applyDomainOp(vault, agent, op, journalLinks)
+				if err == nil {
+					res.Applied++
+					appliedOps = append(appliedOps, r.Op+" "+titleOfPath(r.Path))
+					if id != "" {
+						appliedViaOp[id] = true
+					}
+					continue
+				}
+				reason = "apply: " + err.Error()
 			}
-			res.Applied++
-			appliedOps = append(appliedOps, r.Op+" "+titleOfPath(r.Path))
-			if id := strings.TrimSpace(op.Proposal); id != "" {
-				handled[id] = true
-			}
+			res.Skipped++
+			skippedOps = append(skippedOps, fmt.Sprintf("- skipped %s [[%s]]: %s", op.Op, op.Title, firstRunes(reason, domainSkipReasonRunes)))
+			slog.Info("knowledge promotion skipped op", "agent", agent, "title", op.Title, "op", op.Op, "scope", op.Scope, "confidence", op.Confidence, "proposal", op.Proposal, "reason", reason)
 		}
 		for _, id := range parsed.AppliedProposals {
-			referenced[strings.TrimSpace(id)] = true
+			listed[strings.TrimSpace(id)] = true
 		}
 		if i == 0 && readMemory {
 			pruneIDs = append(pruneIDs, parsed.Prune...)
@@ -208,7 +219,11 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 	}
 	resultLine := strings.Join(appliedOps, ", ")
 	for _, p := range proposals {
-		if !handled[p.ID] && !referenced[p.ID] {
+		// Applied only when a passing op references it, or when it is listed in
+		// applied_proposals and no op references it at all; a proposal whose
+		// only ops were skipped keeps its status so it is offered again
+		// (design §4.2 step 5).
+		if !appliedViaOp[p.ID] && !(listed[p.ID] && !opReferenced[p.ID]) {
 			continue
 		}
 		if err := idx.SetProposal(p.ID, proposalStatusApplied, resultLine, s.now().UnixMilli()); err != nil {
@@ -226,8 +241,9 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 	lines := []string{
 		"- journal: " + strings.Join(res.Journal, ", "),
 		fmt.Sprintf("- applied %d ops (%d skipped)", res.Applied, res.Skipped),
-		"- proposals applied: " + strings.Join(res.Proposals, ", "),
 	}
+	lines = append(lines, skippedOps...)
+	lines = append(lines, "- proposals applied: "+strings.Join(res.Proposals, ", "))
 	for _, text := range res.Pruned {
 		lines = append(lines, "- pruned memory: "+text)
 	}
@@ -303,18 +319,23 @@ func domainProposals(idx *kv.Index, agent string) ([]kv.Proposal, error) {
 	return out, nil
 }
 
-// domainOpPasses reports whether one operation clears its confidence bar:
-// domainConfidence normally, domainProposalConfidence when it answers a
-// proposal (REQ-DKN-031, design §4.2 step 4).
-func domainOpPasses(op domainOp) bool {
+// domainOpSkipReason returns why one operation is skipped: "invalid" when it
+// has no action or title, "below confidence" when it misses its bar
+// (domainConfidence normally, domainProposalConfidence when it answers a
+// proposal), or "" when it passes and must be applied (REQ-DKN-031, design §4.2
+// step 4).
+func domainOpSkipReason(op domainOp) string {
 	if strings.TrimSpace(op.Op) == "" || strings.TrimSpace(op.Title) == "" {
-		return false
+		return "invalid"
 	}
 	bar := domainConfidence
 	if strings.TrimSpace(op.Proposal) != "" {
 		bar = domainProposalConfidence
 	}
-	return op.Confidence >= bar
+	if op.Confidence < bar {
+		return "below confidence"
+	}
+	return ""
 }
 
 // applyDomainOp turns one promotion operation into a vault write with the
@@ -420,14 +441,15 @@ func readRelatedBodies(root string, related []string) [][2]string {
 }
 
 // journalSourceLinks returns the wikilink form of each journal file read this
-// run, such as [[agents/dana/journal/2026-11-01.md]] (design §4.2 step 4).
+// run, such as [[agents/dana/journal/2026-11-01]], without the ".md" suffix
+// (design §4.2 step 4).
 func journalSourceLinks(journal []domainJournalFile) []string {
 	if len(journal) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(journal))
 	for _, f := range journal {
-		out = append(out, "[["+f.rel+"]]")
+		out = append(out, "[["+strings.TrimSuffix(f.rel, filepath.Ext(f.rel))+"]]")
 	}
 	return out
 }
