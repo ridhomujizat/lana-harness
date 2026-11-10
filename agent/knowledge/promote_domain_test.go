@@ -258,9 +258,12 @@ func TestPromoteDomainProviderErrorKeepsState(t *testing.T) {
 }
 
 // AC-DKN-005 (REQ-DKN-034): above 6,000 characters the memory entries are sent
-// and the prune ids remove entries; the log keeps their full text.
+// and the prune ids whose facts a passing op wrote are removed; the log keeps
+// their full text.
 func TestPromoteDomainPrunesMemory(t *testing.T) {
-	provider := &fakeProvider{text: `{"ops":[],"applied_proposals":[],"prune":["m1","m2"]}`}
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Memo","type":"topic","body":"memo one memo two","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":["m1","m2"]}`}
 	env := newDomainPromoteEnv(t, provider)
 	ctx := context.Background()
 
@@ -290,6 +293,134 @@ func TestPromoteDomainPrunesMemory(t *testing.T) {
 	prompt := provider.recorded()[0].Messages[0].Content[0].Text
 	if !strings.Contains(prompt, "# Memory entries") || !strings.Contains(prompt, "m3:") {
 		t.Fatalf("prompt missing memory entries:\n%s", prompt)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-034, design §4.2 step 6): a prune id is honoured when the
+// fact it names was written into a page by a passing op of the same run.
+func TestPromoteDomainPruneKeepsOnlyWrittenFacts(t *testing.T) {
+	provider := &fakeProvider{}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+	pad := strings.Repeat("z", 6500)
+	entry := "gaji naik sepuluh persen " + pad
+	env.writeHomeFile("agents/dana/MEMORY.md", entry+"\n")
+	if agenthome.Size([]string{entry}) <= domainMemoryTrigger {
+		t.Fatalf("test memory is %d characters, want more than %d", agenthome.Size([]string{entry}), domainMemoryTrigger)
+	}
+
+	provider.setText(`{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","body":"gaji naik sepuluh persen","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":["m1"]}`)
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pruned) != 1 {
+		t.Fatalf("pruned = %v, want one entry", res.Pruned)
+	}
+	if remaining := agenthome.Parse(env.readHome("agents/dana/MEMORY.md")); len(remaining) != 0 {
+		t.Fatalf("remaining memory = %+v, want none", remaining)
+	}
+	log := env.readLog()
+	if !strings.Contains(log, "- pruned memory: gaji naik sepuluh persen") {
+		t.Fatalf("log missing pruned entry text:\n%s", log)
+	}
+	if strings.Contains(log, "- kept memory m1") {
+		t.Fatalf("written entry was kept:\n%s", log)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-034, design §4.2 step 6): a prune id whose fact the run
+// did not write into any page is kept and logged.
+func TestPromoteDomainKeepsMemoryNotWritten(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"Gaji","type":"topic","body":"something unrelated","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":["m1"]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+	pad := strings.Repeat("z", 6500)
+	entry := "gaji naik sepuluh persen " + pad
+	env.writeHomeFile("agents/dana/MEMORY.md", entry+"\n")
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pruned) != 0 {
+		t.Fatalf("pruned = %v, want none", res.Pruned)
+	}
+	if remaining := agenthome.Parse(env.readHome("agents/dana/MEMORY.md")); len(remaining) != 1 || remaining[0] != entry {
+		t.Fatalf("memory was changed: %+v", remaining)
+	}
+	log := env.readLog()
+	if !strings.Contains(log, "- kept memory m1: not found in written pages") {
+		t.Fatalf("log missing kept memory line:\n%s", log)
+	}
+	if strings.Contains(log, "- pruned memory:") {
+		t.Fatalf("log holds a pruned line for a kept entry:\n%s", log)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-034, design §4.2 step 6): with no passing op nothing is
+// pruned, whatever the reply lists.
+func TestPromoteDomainNoPassingOpKeepsMemory(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[],"applied_proposals":[],"prune":["m1"]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+	pad := strings.Repeat("z", 6500)
+	entry := "gaji naik sepuluh persen " + pad
+	env.writeHomeFile("agents/dana/MEMORY.md", entry+"\n")
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 0 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 0 and 0", res.Applied, res.Skipped)
+	}
+	if len(res.Pruned) != 0 {
+		t.Fatalf("pruned = %v, want none", res.Pruned)
+	}
+	if remaining := agenthome.Parse(env.readHome("agents/dana/MEMORY.md")); len(remaining) != 1 {
+		t.Fatalf("memory was changed: %+v", remaining)
+	}
+	if log := env.readLog(); strings.Contains(log, "- pruned memory:") {
+		t.Fatalf("log holds a pruned line with no passing op:\n%s", log)
+	}
+}
+
+// AC-DKN-005 (REQ-DKN-034, design §4.2 step 4): an "update" op name is an alias
+// of "append" and is applied as one.
+func TestPromoteDomainUpdateAliasAppends(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"update","title":"Gaji","text":"gaji naik dua belas persen","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	if _, err := env.svc.Write(ctx, core.KnowledgeWrite{Action: "create", Title: "Gaji", Type: "topic", Body: "gaji lama sepuluh persen\n", Scope: "dana"}); err != nil {
+		t.Fatal(err)
+	}
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- gaji naik\n")
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 1 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 1 and 0", res.Applied, res.Skipped)
+	}
+	page := env.readVault("agents/dana/wiki/Gaji.md")
+	if !strings.Contains(page, "gaji naik dua belas persen") {
+		t.Fatalf("update op was not applied as append:\n%s", page)
 	}
 }
 

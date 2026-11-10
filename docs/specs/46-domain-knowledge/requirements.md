@@ -121,8 +121,9 @@ others send proposals. Agents also learn procedures as skills, which the owner a
   become `applied`, with the operations it made.
 - **REQ-DKN-034** While `MEMORY.md` of the agent is above 6,000 characters, domain promotion also
   reads its entries and may return entry ids whose facts the same reply wrote into pages. lana
-  removes those entries from `MEMORY.md` and writes their full text into the `log.md` entry, so
-  nothing is lost. At most 10 entries are removed per run.
+  removes an entry only when most of its words appear in the text the reply wrote. lana removes
+  those entries from `MEMORY.md` and writes their full text into the `log.md` entry, so nothing is
+  lost. At most 10 entries are removed per run.
 
 ### Agent memory size
 

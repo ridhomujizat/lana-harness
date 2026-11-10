@@ -32,6 +32,7 @@ const (
 	domainConfidence         = 0.6
 	domainProposalConfidence = 0.8
 	domainMaxPrune           = 10
+	domainMemoryPrunePercent = 60
 	domainSkipReasonRunes    = 120
 )
 
@@ -56,6 +57,7 @@ type domainResult struct {
 	Skipped   int
 	Proposals []string
 	Pruned    []string
+	Kept      []string
 }
 
 // domainOp is one promotion operation: a compile op plus the target scope, the
@@ -165,6 +167,7 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 		appliedOps   []string
 		skippedOps   []string
 		pruneIDs     []string
+		written      []string
 		appliedViaOp = map[string]bool{}
 		opReferenced = map[string]bool{}
 		listed       = map[string]bool{}
@@ -184,6 +187,7 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 			ops = ops[:domainMaxOps]
 		}
 		for _, op := range ops {
+			op.Op = domainOpAlias(op.Op)
 			id := strings.TrimSpace(op.Proposal)
 			if id != "" {
 				// An op that names a proposal references it whether or not it
@@ -197,6 +201,9 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 				if err == nil {
 					res.Applied++
 					appliedOps = append(appliedOps, r.Op+" "+titleOfPath(r.Path))
+					if text := domainWrittenText(op); strings.TrimSpace(text) != "" {
+						written = append(written, text)
+					}
 					if id != "" {
 						appliedViaOp[id] = true
 					}
@@ -238,10 +245,12 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 		res.Proposals = append(res.Proposals, p.ID)
 	}
 
-	// Prune only when the entries were read; the full removed text goes into
-	// the log so nothing is lost (REQ-DKN-034, design §4.2 step 6).
+	// Prune only when the entries were read and the reply wrote pages; an id is
+	// honoured only when the entry's words appear in that written text, and the
+	// full removed text goes into the log so nothing is lost (REQ-DKN-034,
+	// design §4.2 step 6).
 	if readMemory {
-		s.pruneDomainMemory(agent, entries, pruneIDs, &res)
+		s.pruneDomainMemory(agent, entries, pruneIDs, strings.ToLower(strings.Join(written, "\n")), &res)
 	}
 
 	lines := []string{
@@ -252,6 +261,9 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 	lines = append(lines, "- proposals applied: "+strings.Join(res.Proposals, ", "))
 	for _, text := range res.Pruned {
 		lines = append(lines, "- pruned memory: "+text)
+	}
+	for _, id := range res.Kept {
+		lines = append(lines, "- kept memory "+id+": not found in written pages")
 	}
 	if err := vault.AppendLog(s.now(), "promotion "+agent, lines); err != nil {
 		return res, err
@@ -604,10 +616,52 @@ func cutProposalContent(s string) string {
 	return string(r[:domainProposalContent]) + "…"
 }
 
+// domainOpAlias maps a model op name to the canonical compile action: "update"
+// and "add" become "append", "edit" becomes "replace" and "new" becomes
+// "create". An unknown name is returned unchanged and stays skipped
+// (REQ-DKN-034, design §4.2 step 4).
+func domainOpAlias(op string) string {
+	switch strings.TrimSpace(op) {
+	case "update", "add":
+		return "append"
+	case "edit":
+		return "replace"
+	case "new":
+		return "create"
+	default:
+		return strings.TrimSpace(op)
+	}
+}
+
+// domainWrittenText returns the text one passing op wrote into a page: the body
+// and description of a create, the text of an append, the new text of a replace
+// or supersede, and the description of a meta (REQ-DKN-034, design §4.2 step 6).
+func domainWrittenText(op domainOp) string {
+	switch strings.TrimSpace(op.Op) {
+	case "create":
+		return strings.Join([]string{op.Body, op.Description}, "\n")
+	case "append":
+		return op.Text
+	case "replace", "supersede":
+		return op.NewText
+	case "meta":
+		return op.Description
+	default:
+		return ""
+	}
+}
+
 // pruneDomainMemory drops up to domainMaxPrune existing memory entries named by
-// the reply and records their full text for the log (REQ-DKN-034, design §4.2
-// step 6). A missing or duplicate id is ignored; a failed write is logged.
-func (s *Service) pruneDomainMemory(agent string, entries []string, ids []string, res *domainResult) {
+// the reply whose fact this run wrote into a page, and records their full text
+// for the log (REQ-DKN-034, design §4.2 step 6). An id is honoured only when at
+// least domainMemoryPrunePercent of the entry's tokens appear in written, the
+// text the passing ops of this run wrote; a kept id is recorded for the log. A
+// missing, duplicate, or out-of-range id is ignored; a failed write is logged.
+func (s *Service) pruneDomainMemory(agent string, entries []string, ids []string, written string, res *domainResult) {
+	writtenTokens := map[string]bool{}
+	for _, token := range agenthome.Tokens(written) {
+		writtenTokens[token] = true
+	}
 	var want []int
 	seen := map[int]bool{}
 	for _, raw := range ids {
@@ -616,6 +670,10 @@ func (s *Service) pruneDomainMemory(agent string, entries []string, ids []string
 			continue
 		}
 		seen[n] = true
+		if !memoryWrittenIn(entries[n-1], writtenTokens) {
+			res.Kept = append(res.Kept, fmt.Sprintf("m%d", n))
+			continue
+		}
 		want = append(want, n)
 		if len(want) >= domainMaxPrune {
 			break
@@ -630,6 +688,24 @@ func (s *Service) pruneDomainMemory(agent string, entries []string, ids []string
 		return
 	}
 	res.Pruned = append(res.Pruned, removed...)
+}
+
+// memoryWrittenIn reports whether enough of one memory entry's tokens appear in
+// the text this run wrote: at least domainMemoryPrunePercent of them, and always
+// at least one. An entry with no tokens is never reported as written
+// (REQ-DKN-034, design §4.2 step 6).
+func memoryWrittenIn(entry string, written map[string]bool) bool {
+	tokens := agenthome.Tokens(entry)
+	if len(tokens) == 0 {
+		return false
+	}
+	seen := 0
+	for _, token := range tokens {
+		if written[token] {
+			seen++
+		}
+	}
+	return seen*100 >= domainMemoryPrunePercent*len(tokens)
 }
 
 // parseMemoryID parses a memory entry id of the form "m<n>".

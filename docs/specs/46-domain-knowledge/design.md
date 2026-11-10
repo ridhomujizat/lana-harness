@@ -187,8 +187,10 @@ the shared journal. Block format unchanged.
 4. Apply: an op passes when `confidence ≥ 0.6`, or `≥ 0.8` when it names a gathered proposal the
    owner has not approved; a proposal the owner approved counts as stated by the owner and is
    judged at 0.6, and an op naming a proposal outside this run is judged at 0.6 and marks nothing
-   applied. Passing ops go through `Vault.Apply` with `Scope = agent` (domain) or shared, actor
-   `promotion <agent>`, sources `[[agents/<agent>/journal/<day>]]` for journal-derived ops.
+   applied. A model op name that is an alias is normalised before the op is judged: `update` and
+   `add` become `append`, `edit` becomes `replace`, and `new` becomes `create`; any other unknown
+   name is skipped. Passing ops go through `Vault.Apply` with `Scope = agent` (domain) or shared,
+   actor `promotion <agent>`, sources `[[agents/<agent>/journal/<day>]]` for journal-derived ops.
    Failing ops are counted as skipped.
 5. Marks: on success of every part, journal `promote_marks` move to the file sizes; a `create` op
    whose `type` is empty or not one of person, project, organization, place, topic, source is
@@ -197,9 +199,14 @@ the shared journal. Block format unchanged.
    skipped; any other gathered `approved` proposal stays `approved`, and a gathered `pending` one
    stays `pending` and is offered again next run. A model or parse error leaves all marks and
    proposals unchanged.
-6. Prune: only when step 1 read memory; ids must name existing entries, at most 10; removed via
-   `agenthome.Update` with an op that drops those entries; the full removed text goes into the
-   log entry (`- pruned memory: <text>`).
+6. Prune: only when step 1 read memory; ids must name existing entries, at most 10, and are
+   honoured only when the fact was written this run: at least 60% of the entry's
+   `agenthome.Tokens` must appear among the tokens of the text the passing ops wrote (a create
+   counts its body plus its description, an append its text, a replace or supersede its new text,
+   a meta its description). An entry with no tokens is never pruned, and with no passing op
+   nothing is pruned. A kept id is logged as `- kept memory m<n>: not found in written pages`.
+   Removed via `agenthome.Update` with an op that drops those entries; the full removed text goes
+   into the log entry (`- pruned memory: <text>`).
 7. Log: one `log.md` entry `## <time> promotion <agent>` with `- journal: <files>`,
    `- applied N ops (M skipped)`, `- proposals applied: …`, `- pruned memory: …`.
 
