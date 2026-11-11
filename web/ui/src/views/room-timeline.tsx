@@ -985,13 +985,27 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setApprovals((current) => current.filter((item) => !item.decided));
   }, []);
 
-  /* REQ-ROOM-003: send to the room's current web session; "New topic" asks the
-     server to create a new one first (AC-ROOM-004, AC-ROOM-005). */
+  /* REQ-ROOM-003: send to the room's current web session; a new topic asks
+     the server to create a new one first (AC-ROOM-004, AC-ROOM-005). A new
+     session starts only from the /new command, like Hermes and Telegram
+     (owner 2026-11-11): "/new" alone arms it for the next message, and
+     "/new <message>" sends that message in a fresh session. */
   async function sendMessage() {
-    const text = draft.trim();
+    let text = draft.trim();
     const files = attachmentDraft.items.slice();
     if ((!text && files.length === 0) || sending) {
       return;
+    }
+    let startNew = newTopic;
+    const command = /^\/new(?:\s+([\s\S]*))?$/i.exec(text);
+    if (command) {
+      text = (command[1] || "").trim();
+      startNew = true;
+      if (!text && files.length === 0) {
+        setNewTopic(true);
+        setDraft("");
+        return;
+      }
     }
     setSending(true);
     setActionError("");
@@ -999,7 +1013,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setCommandReply("");
     setDraft("");
     pinToBottom(scrollRef, stickRef);
-    const topic = newTopic;
+    const topic = startNew;
     try {
       let paths: string[] = [];
       if (files.length > 0 && currentWebSessionId) {
@@ -1465,7 +1479,14 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             />
           ) : null}
         </div>
-        {newTopic ? <div className="room-newtopic">New topic</div> : null}
+        {newTopic ? (
+          <div className="room-newtopic">
+            New topic · your next message starts a fresh session
+            <button type="button" className="room-newtopic-cancel" onClick={() => setNewTopic(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : null}
         <div className="cbox">
           {replyTarget ? (
             <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />
@@ -1540,15 +1561,6 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 Discuss
               </Button>
             ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              className={newTopic ? "on" : undefined}
-              disabled={sending}
-              onClick={() => setNewTopic((value) => !value)}
-            >
-              New topic
-            </Button>
             <span className="room-composer-spacer"></span>
             <Button
               size="sm"
