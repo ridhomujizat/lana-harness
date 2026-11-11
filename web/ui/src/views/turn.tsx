@@ -1,3 +1,5 @@
+import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
+import { FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { useEffect, useState } from "react";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
@@ -88,22 +90,16 @@ export function quoteLine(text: string, max = 90): string {
   return cut((first || "").trim(), max);
 }
 
-/* UserAttachmentRef is a stored image block of an owner message: the reader
-   turns it into a URL (API-ATT-003). */
+/* UserAttachmentRef is a stored attachment of an owner message: an image block,
+   or (REQ-CHF-001) the text block of another file. The reader turns it into a
+   URL (API-ATT-003). */
 export interface UserAttachmentRef {
   path: string;
   mediaType: string;
+  file?: MessageFile;
 }
 
-/* UserAttachment is the renderable form of an attachment: a local object URL
-   for a pending file, or a served URL for a stored one. */
-export interface UserAttachment {
-  key: string;
-  name: string;
-  src: string;
-  alt: string;
-  isImage: boolean;
-}
+export type { UserAttachment };
 
 export type TurnSegment =
   | {
@@ -476,17 +472,6 @@ function stepStatusText(step: TurnStep): string {
     return "Cancelled.";
   }
   return "Running.";
-}
-
-function Icon({ name, className = "icon-20" }: { name: string; className?: string }) {
-  return (
-    <img
-      className={className}
-      src={"/assets/icons/" + name + ".svg"}
-      alt=""
-      aria-hidden="true"
-    />
-  );
 }
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -1028,41 +1013,20 @@ export function UserBubble({
       </div>
     );
   }
+  /* REQ-CHF-002: files sit above the bubble as cards; the bubble holds only
+     the owner's text and is left out when there is none. */
   return (
     <div className="chat-user-row">
-      <div className="chat-bubble">
-        {replyTo ? (
-          <span className="chat-bubble-quote" title={replyQuoteLabel(replyTo)}>
-            {replyQuoteLabel(replyTo)}
-          </span>
-        ) : null}
-        {text ? <span className="chat-bubble-text">{text}</span> : null}
-        {attachments.length > 0 ? (
-          <div className="chat-bubble-attachments">
-            {attachments.map((attachment) =>
-              attachment.isImage && attachment.src ? (
-                <a
-                  className="chat-attachment-image"
-                  key={attachment.key}
-                  href={attachment.src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img
-                    src={attachment.src}
-                    loading="lazy"
-                    alt={attachment.alt}
-                  />
-                </a>
-              ) : (
-                <span className="chat-attachment-file" key={attachment.key}>
-                  <Icon name="file" className="icon-16" />
-                  <span className="chat-attachment-name">
-                    {attachment.name}
-                  </span>
-                </span>
-              )
-            )}
+      <div className="chat-user-stack">
+        {attachments.length > 0 ? <MessageFiles attachments={attachments} /> : null}
+        {text || replyTo ? (
+          <div className="chat-bubble">
+            {replyTo ? (
+              <span className="chat-bubble-quote" title={replyQuoteLabel(replyTo)}>
+                {replyQuoteLabel(replyTo)}
+              </span>
+            ) : null}
+            {text ? <FoldText text={text} /> : null}
           </div>
         ) : null}
       </div>
@@ -1096,8 +1060,9 @@ function pushStep(turn: ChatTurn, step: TurnStep): void {
   turn.steps.push(step);
 }
 
-/* userMessageAttachments collects the image blocks of an owner message. The
-   web API keeps the path and media type and drops the bytes (API-ATT-004). */
+/* userMessageAttachments collects the image blocks and file blocks of an owner
+   message in order. The web API keeps an image's path and media type and drops
+   the bytes (API-ATT-004). */
 function userMessageAttachments(
   payload: Record<string, unknown>
 ): UserAttachmentRef[] {
@@ -1117,6 +1082,14 @@ function userMessageAttachments(
         mediaType:
           typeof value.media_type === "string" ? value.media_type : "",
       });
+      continue;
+    }
+    const file =
+      value.type === "text" && typeof value.text === "string"
+        ? parseAttachmentBlock(value.text)
+        : null;
+    if (file) {
+      refs.push({ path: file.path, mediaType: file.mediaType, file });
     }
   }
   return refs;

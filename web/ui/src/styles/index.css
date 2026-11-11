@@ -47,6 +47,7 @@
 @import "./pages-gr8r/skills.css" layer(gr8r);
 @import "./pages-gr8r/mcp.css" layer(gr8r);
 @import "./pages-gr8r/knowledge.css" layer(gr8r);
+@import "./pages-gr8r/message-files.css" layer(gr8r);
 @import "./pages-gr8r/channels.css" layer(gr8r);
 @import "./pages-gr8r/settings.css" layer(gr8r);
 @import "./pages-gr8r/setup.css" layer(gr8r);

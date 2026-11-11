@@ -259,7 +259,7 @@ describe("session attachments", () => {
       expect(container.querySelectorAll(".attach-chip").length).toBe(0);
     });
     expect(container.querySelectorAll(".chat-attachment-image").length).toBe(2);
-    expect(container.querySelectorAll(".chat-attachment-file").length).toBe(1);
+    expect(container.querySelectorAll(".mf-card").length).toBe(1);
   });
 
   it("does not upload a file whose chip was removed", async () => {
