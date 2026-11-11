@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -11,13 +12,20 @@ import (
 
 // assistantReplyContract is the exact reply contract given to the guardian at
 // the end of the assistant prompt.
-const assistantReplyContract = `Reply with ONE JSON object only, no prose around it: {"reply": "<answer in the owner's language>", "graph": <the full new graph> or null when nothing changes, "summary": "<one line of what changed>"}. Do not call tools.`
+const assistantReplyContract = `Reply with ONE JSON object only, no prose around it: {"reply": "<answer in the owner's language>", "graph": <the full new graph> or null when nothing changes, "summary": "<one line of what changed>", "test": true to start a test run of the saved graph now, else false}. Do not call tools.`
 
 // BuildAssistantPrompt builds the guardian assistant prompt of REQ-WF-010: the
 // workflow goal, the current graph as indented JSON, the node catalog, the
 // editing rules, the last ten chat messages, the owner message and the reply
 // contract.
 func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message string) string {
+	return BuildAssistantPromptEnv(w, g, history, message, AssistEnv{}, nil)
+}
+
+// BuildAssistantPromptEnv is BuildAssistantPrompt with the environment the
+// workflow can use and the newest run, so the guardian builds with what
+// exists, reads test results, and does not ask the owner for known facts.
+func BuildAssistantPromptEnv(w Workflow, g Graph, history []ChatMessage, message string, env AssistEnv, last *RunDetail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are the guardian of workflow %q (%s).\n", w.Name, w.ID)
 	goal := w.Description
@@ -60,6 +68,17 @@ func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message st
 	b.WriteString("- a script_parse \"audit_every\": N (0 = off) also runs the fallback every Nth script run to catch a wrong-but-valid value; each audit costs one fallback.\n")
 	b.WriteString("\n")
 
+	writeAssistEnv(&b, env)
+	writeLastRun(&b, last)
+
+	b.WriteString("How to answer:\n")
+	b.WriteString("- Use the environment above. Never ask the owner for an agent, MCP server, URL, tool name or secret name it lists; use it.\n")
+	b.WriteString("- To call an API that has an MCP server, prefer a tool node with the MCP tool name and its input: no model per run, and lana adds the server's auth.\n")
+	b.WriteString("- Ask the owner only for a fact that is not above and that you cannot leave as a sensible default; then ask once, for everything at the same time.\n")
+	b.WriteString("- You cannot run commands, read files or call tools in this chat, and nothing carries over to a later chat. Never promise to do something later; do it now in the graph, or say plainly what the owner must do.\n")
+	b.WriteString("- When the owner asks you to try or test it, or after a change you are unsure works, save the graph and set \"test\": true; the next message shows the run result above as \"Last run\". Read it and fix what failed.\n")
+	b.WriteString("- Keep the reply short: what you changed, and why if it is not what the owner asked.\n\n")
+
 	if len(history) > 10 {
 		history = history[len(history)-10:]
 	}
@@ -83,6 +102,8 @@ type AssistantReply struct {
 	Reply   string
 	Graph   *Graph
 	Summary string
+	// Test asks for a test run of the saved graph.
+	Test bool
 }
 
 // ParseAssistantReply parses the guardian assistant answer (REQ-WF-010). A text
@@ -103,6 +124,9 @@ func ParseAssistantReply(text string) (AssistantReply, error) {
 	}
 	if s, ok := obj["summary"].(string); ok {
 		reply.Summary = s
+	}
+	if t, ok := obj["test"].(bool); ok {
+		reply.Test = t
 	}
 	if gv, ok := obj["graph"]; ok && gv != nil {
 		raw, err := json.Marshal(gv)
@@ -250,4 +274,103 @@ func chatRole(role string) string {
 		return "owner"
 	}
 	return role
+}
+
+// writeAssistEnv writes the environment section of the assistant prompt.
+func writeAssistEnv(b *strings.Builder, env AssistEnv) {
+	if len(env.Agents) == 0 && len(env.MCPTools) == 0 && len(env.MCPUnavailable) == 0 && len(env.Secrets) == 0 {
+		return
+	}
+	b.WriteString("Environment (what this workflow can use):\n")
+	if len(env.Agents) > 0 {
+		b.WriteString("Agents:\n")
+		for _, a := range env.Agents {
+			line := "- " + a.Name
+			if a.Model != "" {
+				line += " (" + a.Model + ")"
+			}
+			if a.Description != "" {
+				line += ": " + a.Description
+			}
+			if len(a.MCP) > 0 {
+				line += "; MCP servers: " + strings.Join(a.MCP, ", ")
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+	if len(env.MCPTools) > 0 {
+		b.WriteString("MCP tools (use in a tool node as \"name\", or the guardian's agent node can call them):\n")
+		for _, t := range env.MCPTools {
+			line := "- " + t.Name
+			if t.Description != "" {
+				line += ": " + truncateRunes(oneLine(t.Description), 160)
+			}
+			if t.Input != "" {
+				line += "; input " + truncateRunes(t.Input, 300)
+			}
+			b.WriteString(line + "\n")
+		}
+	}
+	if len(env.MCPUnavailable) > 0 {
+		names := make([]string, 0, len(env.MCPUnavailable))
+		for name := range env.MCPUnavailable {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(b, "- MCP server %s is not available: %s\n", name, oneLine(env.MCPUnavailable[name]))
+		}
+	}
+	if len(env.Secrets) > 0 {
+		fmt.Fprintf(b, "Secrets set by the owner (names only): %s.\n", strings.Join(env.Secrets, ", "))
+		if env.BashSeesSecrets {
+			b.WriteString("Bash nodes get them as env vars.\n")
+		} else {
+			b.WriteString("Bash nodes do NOT get them as env vars; MCP servers and providers use them through lana's config.\n")
+		}
+	}
+	b.WriteString("\n")
+}
+
+// writeLastRun writes the newest run and its failed nodes.
+func writeLastRun(b *strings.Builder, last *RunDetail) {
+	if last == nil || last.Run.ID == "" {
+		return
+	}
+	r := last.Run
+	fmt.Fprintf(b, "Last run: #%d (%s, version %d) %s", r.Number, r.Trigger, r.Version, r.Status)
+	if r.Error != "" {
+		b.WriteString(": " + truncateRunes(oneLine(r.Error), 300))
+	}
+	b.WriteString("\n")
+	// Each node's status with its error, or the start of its output, so the
+	// guardian can answer what a test produced.
+	for i, n := range last.Nodes {
+		if i >= 12 {
+			fmt.Fprintf(b, "- … %d more nodes\n", len(last.Nodes)-i)
+			break
+		}
+		detail := oneLine(n.Error)
+		if detail == "" && len(n.Output) > 0 && string(n.Output) != "null" {
+			detail = "output " + oneLine(string(n.Output))
+		}
+		fmt.Fprintf(b, "- node %s %s", n.NodeID, n.Status)
+		if detail != "" {
+			b.WriteString(": " + truncateRunes(detail, 300))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncateRunes(s string, limit int) string {
+	r := []rune(s)
+	if len(r) <= limit {
+		return s
+	}
+	return string(r[:limit]) + "…"
 }

@@ -192,3 +192,23 @@ func TestDiffGraphsPositionOnly(t *testing.T) {
 		t.Fatalf("position-only move should not change the graph: %+v", got)
 	}
 }
+
+func TestBuildAssistantPromptLastRun(t *testing.T) {
+	last := &RunDetail{
+		Run:   Run{ID: "r1", Number: 4, Trigger: "manual", Version: 3, Status: RunFailed, Error: "node fetch failed"},
+		Nodes: []NodeRun{
+			{NodeID: "start", Status: "succeeded", Output: json.RawMessage(`{"ok":true}`)},
+			{NodeID: "fetch", Status: NodeFailed, Error: "unknown tool mcp__x__y"},
+		},
+	}
+	prompt := BuildAssistantPromptEnv(Workflow{ID: "w", Name: "W"}, Graph{}, nil, "kenapa gagal?", AssistEnv{}, last)
+	for _, want := range []string{"Last run: #4 (manual, version 3) failed", "node fetch failed: unknown tool mcp__x__y", `node start succeeded: output {"ok":true}`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt misses %q:\n%s", want, prompt)
+		}
+	}
+	reply, err := ParseAssistantReply(`{"reply":"ok","graph":null,"test":true}`)
+	if err != nil || !reply.Test {
+		t.Fatalf("reply = %+v, %v; want test", reply, err)
+	}
+}
