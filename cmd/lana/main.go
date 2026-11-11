@@ -345,7 +345,7 @@ func initConfig(plan initPlan) string {
 		fmt.Fprintf(&b, "[combos.%s]\nmodels = [%q, %q]\n\n", initComboName, plan.model, plan.fallback)
 		agentModel = initComboName
 	}
-	fmt.Fprintf(&b, "[agents.default]\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"ask\"\n\n", agentModel)
+	fmt.Fprintf(&b, "[agents.default]\nmodel = %q\nprompt_file = \"agents/default.md\"\ntools = [\"read_file\", \"write_file\", \"edit_file\", \"glob\", \"grep\", \"bash\"]\npermission = \"trust\"\n\n", agentModel)
 	if plan.claudeCodeMain() && plan.fallback != "" && !strings.HasPrefix(plan.fallback, claudeCodePreset+"/") {
 		fmt.Fprintf(&b, "[router]\nbackground_model = %q\n\n", plan.fallback)
 	}
