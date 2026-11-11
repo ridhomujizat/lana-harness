@@ -237,6 +237,7 @@ export function AttachmentDropOverlay({ active }: { active: boolean }) {
       <div className="attach-drop-inner">
         <Ic name="paperclip" size={24} />
         <p className="attach-drop-text">Drop files to attach</p>
+        <p className="attach-drop-hint">Up to 10 files, 20 MB each</p>
       </div>
     </div>
   );
