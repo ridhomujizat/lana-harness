@@ -504,10 +504,12 @@ export function KnowledgePage({
         </div>
         <div className="acts">
           <span className="kg-lastrun">{lastRunLine(data)}</span>
+          {/* hidden, not .sr: a global input width rule beats .sr and the
+              absolute input then widens the page (horizontal scroll). */}
           <input
             id="knowledge-upload"
             ref={inputRef}
-            className="sr"
+            hidden
             type="file"
             multiple
             accept=".md,.txt,.pdf,.html"
