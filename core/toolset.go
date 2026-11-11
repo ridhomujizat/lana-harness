@@ -1,7 +1,8 @@
 package core
 
 // StandardTools is the toolset every agent gets unless its toolset is
-// "custom": files, shell, web, memory, knowledge, and asking the owner
+// "custom": files, shell, web, memory, knowledge, asking the owner, the
+// calendar and workflows
 // (Hermes-style default; owner decision 2026-11-11).
 var StandardTools = []string{
 	"read_file", "write_file", "edit_file", "glob", "grep",
@@ -10,6 +11,9 @@ var StandardTools = []string{
 	"memory_read", "memory_write",
 	"knowledge_search", "knowledge_read", "knowledge_write",
 	"ask_user",
+	// Calendar items and workflows, so any agent can set a reminder or build
+	// and test an automation from chat (owner request 2026-11-11).
+	"calendar", "workflow",
 }
 
 // ToolsetCustom limits an agent to its own tools list.

@@ -14,7 +14,9 @@ import (
 )
 
 // The workflow agent tool (spec #33). It inspects workflows and their runs and
-// starts or cancels runs. Creating and editing workflows stays in the web UI.
+// starts or cancels runs. With a service that also implements WorkflowEditor
+// an agent can create a draft workflow or change one by asking its guardian,
+// and test it; activating stays with the owner in the web UI.
 
 // WorkflowService is the part of *workflow.Service the workflow tool calls.
 type WorkflowService interface {
@@ -39,22 +41,48 @@ const (
 	workflowTrigger = "agent"
 )
 
-const workflowDescription = "Inspect and trigger workflows. " +
+const workflowDescription = "Inspect, build and test workflows. " +
 	"list shows every workflow with its status and last run, plus pending attention items. " +
 	"get shows one workflow's current version, triggers and node names/types. " +
 	"runs lists recent runs; run shows one run with its steps. " +
-	"start starts a run with trigger \"agent\" and optional input; cancel stops a run. " +
+	"create makes a draft workflow from a plain-language request (name + request; the guardian agent builds the graph); " +
+	"edit asks a workflow's guardian to change it (id + request); " +
+	"test runs it now and waits for the result (up to about 2 minutes). " +
+	"start starts a run with trigger \"agent\" and optional input without waiting; cancel stops a run. " +
+	"A created workflow stays a draft until the owner reviews its permissions and activates it in the web. " +
 	"A workflow session cannot start another workflow."
 
 var workflowSpec = json.RawMessage(`{"type":"object","properties":{` +
-	`"action":{"type":"string","enum":["list","get","runs","run","start","cancel"],"description":"Operation."},` +
-	`"id":{"type":"string","description":"Workflow id. Required for every action except list."},` +
+	`"action":{"type":"string","enum":["list","get","runs","run","create","edit","test","start","cancel"],"description":"Operation."},` +
+	`"id":{"type":"string","description":"Workflow id. Required for every action except list and create."},` +
+	`"name":{"type":"string","description":"create: a short workflow name, for example Daily ticket reminder."},` +
+	`"request":{"type":"string","description":"create/edit: what the workflow should do or what to change, in plain words with every detail the owner gave (schedule, sources, where to send)."},` +
+	`"guardian":{"type":"string","description":"create: the agent that guards the workflow. Defaults to you."},` +
 	`"ref":{"type":"string","description":"Run id or run number, for run and cancel."},` +
 	`"limit":{"type":"integer","minimum":1,"maximum":50,"description":"runs: how many runs to return. Defaults to 10, at most 50."},` +
-	`"input":{"type":"object","description":"start: the run input object. Optional."}` +
+	`"input":{"type":"object","description":"start/test: the run input object. Optional."}` +
 	`},"required":["action"],"additionalProperties":false}`)
 
+// WorkflowEditor is the optional part of the service that creates workflows
+// and runs the guardian assistant (API-WF-002, API-WF-017).
+type WorkflowEditor interface {
+	Create(ctx context.Context, in workflow.CreateInput) (workflow.Detail, error)
+	Assist(ctx context.Context, id string, baseVersion int, message string) (workflow.AssistResult, error)
+}
+
 type workflowTool struct{ svc WorkflowService }
+
+// PromptGuidance tells agents when to suggest a calendar item and when a
+// workflow (owner request 2026-11-11).
+func (t *workflowTool) PromptGuidance() string {
+	return workflowGuidance
+}
+
+const workflowGuidance = `When the owner asks for something at a time or on repeat, offer to automate it once, and pick the right place:
+- A reminder, a habit or a one-off time (pay a bill, take medicine, a meeting, "ingatkan aku jam 8"): a calendar item with the calendar tool (reminder, task, habit or event, with a repeat rule). No workflow.
+- Repeating work with steps (fetch data, check it, report or act on it, for example "every morning send me my open tickets"): a workflow. Create it with workflow create (name + the full request), then workflow test, read the result, and fix it with workflow edit if a step failed. Tell the owner the result and the link; it stays a draft until they review its permissions and activate it.
+- Doing it once now: just do it; do not build an automation.
+Ask before creating when the owner did not ask for an automation.`
 
 // NewWorkflow creates the workflow tool (spec #33).
 func NewWorkflow(svc WorkflowService) core.Tool { return &workflowTool{svc: svc} }
@@ -72,6 +100,10 @@ func (t *workflowTool) Risk(raw json.RawMessage) core.Risk {
 		switch in.Action {
 		case "list", "get", "runs", "run":
 			return core.RiskRead
+		case "create", "edit", "test":
+			// A draft does nothing until the owner activates it, and a test
+			// run is what the workflow assistant also starts on its own.
+			return core.RiskWrite
 		}
 	}
 	return core.RiskExec
@@ -79,11 +111,14 @@ func (t *workflowTool) Risk(raw json.RawMessage) core.Risk {
 
 // workflowInput is the tool input.
 type workflowInput struct {
-	Action string          `json:"action"`
-	ID     string          `json:"id"`
-	Ref    string          `json:"ref"`
-	Limit  *int            `json:"limit"`
-	Input  json.RawMessage `json:"input"`
+	Action   string          `json:"action"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Request  string          `json:"request"`
+	Guardian string          `json:"guardian"`
+	Ref      string          `json:"ref"`
+	Limit    *int            `json:"limit"`
+	Input    json.RawMessage `json:"input"`
 }
 
 func (t *workflowTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
@@ -115,6 +150,21 @@ func (t *workflowTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMe
 			return inputErrorOutput(errors.New("ref is required"))
 		}
 		return t.run(ctx, in.ID, in.Ref)
+	case "create":
+		if strings.TrimSpace(in.Name) == "" || strings.TrimSpace(in.Request) == "" {
+			return inputErrorOutput(errors.New("name and request are required"))
+		}
+		return t.create(ctx, tc, in)
+	case "edit":
+		if in.ID == "" || strings.TrimSpace(in.Request) == "" {
+			return inputErrorOutput(errors.New("id and request are required"))
+		}
+		return t.edit(ctx, tc, in)
+	case "test":
+		if in.ID == "" {
+			return inputErrorOutput(errors.New("id is required"))
+		}
+		return t.test(ctx, tc, in)
 	case "start":
 		if in.ID == "" {
 			return inputErrorOutput(errors.New("id is required"))
@@ -526,4 +576,117 @@ func workflowJSON(v any) (core.ToolOutput, error) {
 		return errorOutput(err.Error())
 	}
 	return successOutput(string(data))
+}
+
+// workflowLink is the web address of a workflow.
+func workflowLink(id string) string {
+	return "#/workflows/" + id
+}
+
+// workflowAssistView is the create and edit output.
+type workflowAssistView struct {
+	ID      string                `json:"id"`
+	Name    string                `json:"name"`
+	Link    string                `json:"link"`
+	Status  string                `json:"status"`
+	Version int                   `json:"version"`
+	Reply   string                `json:"guardian_reply"`
+	Change  *workflow.GraphChange `json:"change,omitempty"`
+	Issues  []workflow.Issue      `json:"issues,omitempty"`
+	Note    string                `json:"note,omitempty"`
+}
+
+func (t *workflowTool) editor() (WorkflowEditor, bool) {
+	editor, ok := t.svc.(WorkflowEditor)
+	return editor, ok
+}
+
+func (t *workflowTool) create(ctx context.Context, tc core.ToolCtx, in workflowInput) (core.ToolOutput, error) {
+	if t.svc.IsWorkflowSession(tc.SessionID) {
+		return errorOutput("a workflow session cannot create a workflow")
+	}
+	editor, ok := t.editor()
+	if !ok {
+		return errorOutput("creating workflows is not available here")
+	}
+	guardian := strings.TrimSpace(in.Guardian)
+	if guardian == "" {
+		guardian = tc.AgentName
+	}
+	detail, err := editor.Create(ctx, workflow.CreateInput{
+		Name: strings.TrimSpace(in.Name), Description: strings.TrimSpace(in.Request), Guardian: guardian,
+	})
+	if err != nil {
+		return errorOutput(err.Error())
+	}
+	return t.assist(ctx, editor, detail.ID, detail.Version, in.Request)
+}
+
+func (t *workflowTool) edit(ctx context.Context, tc core.ToolCtx, in workflowInput) (core.ToolOutput, error) {
+	if t.svc.IsWorkflowSession(tc.SessionID) {
+		return errorOutput("a workflow session cannot change a workflow")
+	}
+	editor, ok := t.editor()
+	if !ok {
+		return errorOutput("changing workflows is not available here")
+	}
+	detail, err := t.svc.Get(ctx, in.ID)
+	if err != nil {
+		return errorOutput(err.Error())
+	}
+	return t.assist(ctx, editor, detail.ID, detail.Version, in.Request)
+}
+
+// assist runs one guardian assistant turn and reports what changed.
+func (t *workflowTool) assist(ctx context.Context, editor WorkflowEditor, id string, version int, request string) (core.ToolOutput, error) {
+	res, err := editor.Assist(ctx, id, version, request)
+	if err != nil {
+		return errorOutput(fmt.Sprintf("workflow %s exists, but its guardian could not build it: %v. The owner can open %s and ask there.", id, err, workflowLink(id)))
+	}
+	out := workflowAssistView{
+		ID: res.Workflow.ID, Name: res.Workflow.Name, Link: workflowLink(res.Workflow.ID),
+		Status: string(res.Workflow.Status), Version: res.Workflow.Version,
+		Reply: res.Message.Text, Change: res.Message.Change, Issues: res.Message.Issues,
+	}
+	if res.Workflow.Status != workflow.StatusActive {
+		out.Note = "Draft: test it with workflow test; the owner reviews its permissions and activates it at the link."
+	}
+	return workflowJSON(out)
+}
+
+// workflowTestWait is how long the test action waits for a run to finish.
+var workflowTestWait = 2 * time.Minute
+
+func (t *workflowTool) test(ctx context.Context, tc core.ToolCtx, in workflowInput) (core.ToolOutput, error) {
+	if t.svc.IsWorkflowSession(tc.SessionID) {
+		return errorOutput("a workflow session cannot start another workflow")
+	}
+	input, err := workflowInputObject(in.Input)
+	if err != nil {
+		return inputErrorOutput(err)
+	}
+	run, err := t.svc.StartRun(ctx, in.ID, workflowTrigger, input)
+	if err != nil {
+		return errorOutput(err.Error())
+	}
+	deadline := time.Now().Add(workflowTestWait)
+	for time.Now().Before(deadline) {
+		detail, err := t.svc.RunDetail(ctx, in.ID, run.ID)
+		if err == nil {
+			switch detail.Run.Status {
+			case workflow.RunSucceeded, workflow.RunFailed, workflow.RunCancelled, workflow.RunWaiting:
+				return t.run(ctx, in.ID, run.ID)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return errorOutput(ctx.Err().Error())
+		case <-time.After(2 * time.Second):
+		}
+	}
+	out, err := t.run(ctx, in.ID, run.ID)
+	if err == nil {
+		out.Output = "Still running after 2 minutes; check it later with workflow run.\n" + out.Output
+	}
+	return out, err
 }

@@ -171,7 +171,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		return allow(core.ApprovalOutcome("")), nil
 	}
 	// Hermes-style auto: run unless the call is dangerous (auto.go).
-	if policy == core.PolicyAuto && autoAllows(in.Call.Name, arg, workspace) {
+	if policy == core.PolicyAuto && (autoAllows(in.Call.Name, arg, workspace) || autoDraftWorkflow(in.Call.Name, in.Call.Risk)) {
 		return allow(core.ApprovalOutcome("")), nil
 	}
 	if policy == core.PolicyNever {

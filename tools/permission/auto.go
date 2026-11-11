@@ -5,13 +5,14 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
 // The auto policy (owner decision 2026-11-11, Hermes-style): the standard
 // tools and the team tools run without asking; a dangerous shell command, a
-// write outside the workspace, and any other tool (MCP servers, workflows,
-// admin) still ask the owner.
+// write outside the workspace, and any other tool (MCP servers, workflow runs,
+// admin) still ask the owner. Creating or changing a draft workflow does not.
 
 var autoTools = map[string]bool{
 	"read_file": true, "glob": true, "grep": true, "write_file": true, "edit_file": true,
@@ -45,6 +46,13 @@ func autoAllows(tool string, arg pattern.Argument, workspace string) bool {
 		return tool != "bash" || !DangerousCommand(arg.Value, workspace)
 	}
 	return true
+}
+
+// autoDraftWorkflow lets auto create, change or test a workflow (the
+// workflow tool's write actions): a draft does nothing until the owner
+// activates it. Starting or cancelling a run is exec and still asks.
+func autoDraftWorkflow(tool string, risk core.Risk) bool {
+	return tool == "workflow" && risk == core.RiskWrite
 }
 
 var (

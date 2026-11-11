@@ -33,8 +33,18 @@ func AgentCapabilities(cfg AgentConfig) []string {
 	group("files", "write_file", "edit_file", "read_file")
 	group("shell", "bash")
 	group("knowledge", "knowledge_search", "knowledge_read", "knowledge_write")
-	group("calendar", "calendar")
-	group("workflows", "workflow")
+	// Every agent gets the calendar and workflows with the standard toolset,
+	// so they only tell agents apart when the agent lists them itself.
+	own := map[string]bool{}
+	for _, tool := range cfg.Tools {
+		own[tool] = has[tool]
+	}
+	if own["calendar"] {
+		out = append(out, "calendar")
+	}
+	if own["workflow"] {
+		out = append(out, "workflows")
+	}
 	mcp := append([]string(nil), cfg.MCP...)
 	sort.Strings(mcp)
 	for _, name := range mcp {
