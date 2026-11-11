@@ -28,6 +28,8 @@ type FilterKey = (typeof FILTERS)[number]["key"];
 
 export interface ChatsPageProps {
   roomName?: string;
+  /* Spec 48: prefilled composer text for the opened room. */
+  draft?: string;
 }
 
 function rowState(row: RoomRow): string {
@@ -86,7 +88,7 @@ function isPhoneWidth(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches;
 }
 
-export function ChatsPage({ roomName }: ChatsPageProps) {
+export function ChatsPage({ roomName, draft }: ChatsPageProps) {
   const { rows, loading } = useRooms();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -252,7 +254,7 @@ export function ChatsPage({ roomName }: ChatsPageProps) {
       </aside>
       <section className="rooms-panel">
         {selected ? (
-          <RoomView key={selected.name} room={selected} />
+          <RoomView key={selected.name} room={selected} initialDraft={draft} />
         ) : rows.length === 0 && !loading ? (
           <div className="rooms-placeholder">
             <EmptyState

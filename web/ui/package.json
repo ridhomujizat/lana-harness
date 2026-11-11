@@ -11,6 +11,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "force-graph": "1.52.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

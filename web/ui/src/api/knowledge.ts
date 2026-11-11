@@ -182,6 +182,8 @@ export interface ReviewItem {
   owner_turn: boolean;
   session_id: string;
   created_at: number;
+  /* Spec 48: the replaced text of a replace or supersede op. */
+  old_text?: string;
 }
 
 export interface ReviewDecision {
@@ -215,4 +217,180 @@ export function approveReview(id: string): Promise<ReviewDecision> {
 
 export function rejectReview(id: string): Promise<ReviewDecision> {
   return decide(id, "reject");
+}
+
+/* Spec 48 API-KGR-001: the knowledge graph. Hub edges are not sent; every
+   node joins the hub of its scope. */
+export interface KnowledgeGraphNode {
+  id: string;
+  title: string;
+  scope: string;
+  kind: "page" | "journal" | "source";
+  type: string;
+  updated: string;
+  degree: number;
+}
+
+export interface KnowledgeGraphEdge {
+  source: string;
+  target: string;
+}
+
+export interface KnowledgeGraphHub {
+  scope: string;
+  pages: number;
+}
+
+export interface KnowledgeGraph {
+  nodes: KnowledgeGraphNode[];
+  hubs: KnowledgeGraphHub[];
+  edges: KnowledgeGraphEdge[];
+  counts: { pages: number; links: number; broken: number };
+  truncated: boolean;
+}
+
+export async function getKnowledgeGraph(
+  scope: string,
+  journals = false,
+  sources = false
+): Promise<KnowledgeGraph> {
+  const params = new URLSearchParams();
+  params.set("scope", scope || "all");
+  if (journals) params.set("journals", "1");
+  if (sources) params.set("sources", "1");
+  const g = await request<KnowledgeGraph>(
+    "GET",
+    "/v1/knowledge/graph?" + params.toString()
+  );
+  return {
+    nodes: g?.nodes ?? [],
+    hubs: g?.hubs ?? [],
+    edges: g?.edges ?? [],
+    counts: g?.counts ?? { pages: 0, links: 0, broken: 0 },
+    truncated: Boolean(g?.truncated),
+  };
+}
+
+/* Spec 48 API-KGR-002: page detail fields added to KnowledgePageDoc. Older
+   daemons leave them out, so every field is optional. */
+export interface KnowledgeLinkRef {
+  path: string;
+  title: string;
+  scope: string;
+}
+
+export interface KnowledgeBacklink extends KnowledgeLinkRef {
+  context: string;
+}
+
+export interface KnowledgePageDetail extends KnowledgePageDoc {
+  type?: string;
+  description?: string;
+  updated?: string;
+  sources?: string[];
+  links_out?: KnowledgeLinkRef[];
+  unresolved?: string[];
+  links_in?: KnowledgeBacklink[];
+}
+
+export function getKnowledgePageDetail(
+  path: string
+): Promise<KnowledgePageDetail> {
+  return request<KnowledgePageDetail>(
+    "GET",
+    "/v1/knowledge/page?path=" + encodeURIComponent(path)
+  );
+}
+
+/* Spec 48 API-KGR-003: decided knowledge proposals. */
+export interface DecidedReviewItem extends ReviewItem {
+  status?: string;
+  result?: string;
+  decided_at?: number;
+}
+
+export async function getDecidedReview(): Promise<DecidedReviewItem[]> {
+  const result = await request<{ items: DecidedReviewItem[] | null }>(
+    "GET",
+    "/v1/review?status=decided"
+  );
+  return result && Array.isArray(result.items) ? result.items : [];
+}
+
+/* Spec 48 API-KGR-004: log.md entries, newest first. */
+export type KnowledgeActivityKind =
+  | "run"
+  | "promotion"
+  | "write"
+  | "review"
+  | "lint"
+  | "error"
+  | "other";
+
+export interface KnowledgeActivityEntry {
+  at: string;
+  heading: string;
+  kind: KnowledgeActivityKind;
+  actor: string;
+  lines: string[];
+}
+
+export interface KnowledgeActivityPage {
+  entries: KnowledgeActivityEntry[];
+  next_before: string;
+}
+
+export async function getKnowledgeActivity(
+  opts: { limit?: number; before?: string; kind?: string } = {}
+): Promise<KnowledgeActivityPage> {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts.limit ?? 50));
+  if (opts.before) params.set("before", opts.before);
+  if (opts.kind) params.set("kind", opts.kind);
+  const page = await request<KnowledgeActivityPage>(
+    "GET",
+    "/v1/knowledge/activity?" + params.toString()
+  );
+  return {
+    entries: page?.entries ?? [],
+    next_before: page?.next_before ?? "",
+  };
+}
+
+/* Spec 48 API-KGR-005. */
+export interface KnowledgeLintCounts {
+  date: string;
+  path: string;
+  pages: number;
+  contradictions: number;
+  conflicts: number;
+  duplicates: number;
+  broken: number;
+  orphans: number;
+  missing: number;
+}
+
+export interface KnowledgeHealth {
+  last_run: {
+    at: string;
+    journaled: number;
+    applied: number;
+    skipped: number;
+    error: string;
+  } | null;
+  next_at: string;
+  lint: KnowledgeLintCounts | null;
+  review_pending: number;
+  memory: { agent: string; characters: number; limit: number }[];
+}
+
+export async function getKnowledgeHealth(): Promise<KnowledgeHealth> {
+  const h = await request<KnowledgeHealth>("GET", "/v1/knowledge/health");
+  return {
+    last_run: h?.last_run ?? null,
+    next_at: h?.next_at ?? "",
+    lint: h?.lint ?? null,
+    review_pending: h?.review_pending ?? 0,
+    memory: h?.memory ?? [],
+  };
 }

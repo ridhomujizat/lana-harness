@@ -156,6 +156,39 @@ function matchEmphasis(
   return null;
 }
 
+/* Spec 48: a caller may render [[target]], [[target|label]] and
+   [[target#heading]] itself (the knowledge reader turns them into page
+   links). Set only while one Markdown render runs; without it the text stays
+   as written. */
+export type WikiLinkRenderer = (target: string, label: string) => ReactNode;
+let wikiLinkRenderer: WikiLinkRenderer | null = null;
+
+function matchWikiLink(
+  text: string,
+  index: number
+): { target: string; label: string; end: number } | null {
+  if (!text.startsWith("[[", index)) {
+    return null;
+  }
+  const close = text.indexOf("]]", index + 2);
+  if (close < 0) {
+    return null;
+  }
+  const inner = text.slice(index + 2, close);
+  if (!inner.trim() || inner.includes("[") || inner.includes("\n")) {
+    return null;
+  }
+  const bar = inner.indexOf("|");
+  const ref = bar >= 0 ? inner.slice(0, bar) : inner;
+  const hash = ref.indexOf("#");
+  const target = (hash >= 0 ? ref.slice(0, hash) : ref).trim();
+  const label = (bar >= 0 ? inner.slice(bar + 1) : ref).trim() || target;
+  if (!target) {
+    return null;
+  }
+  return { target, label, end: close + 2 };
+}
+
 /* One left-to-right pass. Code spans, links, and bare URLs are recognised
    before emphasis, so their content is never parsed as markup. */
 function parseInline(
@@ -193,6 +226,16 @@ function parseInline(
       buffer += char;
       index += 1;
       continue;
+    }
+
+    if (char === "[" && wikiLinkRenderer) {
+      const wiki = matchWikiLink(text, index);
+      if (wiki) {
+        flush();
+        nodes.push(wikiLinkRenderer(wiki.target, wiki.label));
+        index = wiki.end;
+        continue;
+      }
     }
 
     if (char === "[") {
@@ -688,15 +731,27 @@ function parseBlocks(lines: string[]): ReactNode[] {
 
 /* Assistant text as a markdown block. Empty and null input render an empty
    `.md` container; callers decide whether to render the component at all. */
-export function Markdown({ text }: { text?: string | null }): ReactElement {
+export function Markdown({
+  text,
+  wikiLink,
+}: {
+  text?: string | null;
+  wikiLink?: WikiLinkRenderer;
+}): ReactElement {
   const source = text === null || text === undefined ? "" : String(text);
-  const blocks = source.trim()
-    ? parseBlocks(
-        source
-          .replace(/\r\n?/g, "\n")
-          .split("\n")
-          .map((line) => line.replace(/^\t+/, (tabs) => "  ".repeat(tabs.length)))
-      )
-    : [];
-  return h("div", { className: "md" }, ...blocks);
+  const previous = wikiLinkRenderer;
+  wikiLinkRenderer = wikiLink || null;
+  try {
+    const blocks = source.trim()
+      ? parseBlocks(
+          source
+            .replace(/\r\n?/g, "\n")
+            .split("\n")
+            .map((line) => line.replace(/^\t+/, (tabs) => "  ".repeat(tabs.length)))
+        )
+      : [];
+    return h("div", { className: "md" }, ...blocks);
+  } finally {
+    wikiLinkRenderer = previous;
+  }
 }
