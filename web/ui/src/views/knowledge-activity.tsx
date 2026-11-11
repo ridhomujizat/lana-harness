@@ -17,7 +17,7 @@ import { Ic } from "../ui/icons";
 import { Badge, Button, Drawer, EmptyState, Progress, Skeleton } from "../ui/gr8r";
 import { AgentName } from "./agent-avatar";
 import { useAgentLabel } from "./agent-label";
-import { makeScopeColors, openHref, ScopeDot } from "./knowledge-shared";
+import { journalTitle, makeScopeColors, openHref, ScopeDot } from "./knowledge-shared";
 import type { ScopeColors } from "./knowledge-shared";
 
 /* Spec 48 REQ-KGR-055: what the nightly run and the agents did, the health of
@@ -32,12 +32,17 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "review", label: "Reviews" },
 ];
 
-function wikiOpen(target: string, text: string) {
-  return (
-    <a className="kg-wikilink" href={openHref(target)}>
-      {text}
-    </a>
-  );
+/* Journal links read as "Lana journal (8 Nov 2026)"; the label function is
+   passed in because the renderer is not a component. */
+function wikiOpener(label: (name: string) => string) {
+  return function wikiOpen(target: string, text: string) {
+    const shown = text === target ? journalTitle(target, label) || text : text;
+    return (
+      <a className="kg-wikilink" href={openHref(target)}>
+        {shown}
+      </a>
+    );
+  };
 }
 
 function dayKey(at: string): string {
@@ -130,7 +135,7 @@ function TimelineEntry({
         <p className="ka-title">{entryTitle(entry, label)}</p>
         {lines.length ? (
           <div className="ka-lines">
-            <Markdown text={lines.map((line) => "- " + line).join("\n")} wikiLink={wikiOpen} />
+            <Markdown text={lines.map((line) => "- " + line).join("\n")} wikiLink={wikiOpener(label)} />
           </div>
         ) : null}
       </div>
@@ -139,6 +144,7 @@ function TimelineEntry({
 }
 
 function ReportDrawer({ onClose }: { onClose: () => void }) {
+  const label = useAgentLabel();
   const [report, setReport] = useState<KnowledgeReport | null | undefined>(undefined);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -172,7 +178,7 @@ function ReportDrawer({ onClose }: { onClose: () => void }) {
       ) : report ? (
         <div className="knowledge-report">
           <code className="mono knowledge-path">{report.path}</code>
-          <Markdown text={report.markdown} wikiLink={wikiOpen} />
+          <Markdown text={report.markdown} wikiLink={wikiOpener(label)} />
         </div>
       ) : (
         <p className="knowledge-empty">No report yet</p>

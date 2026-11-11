@@ -12,8 +12,10 @@ import { Button, Checkbox, EmptyState, IconButton, SearchInput, Skeleton } from 
 import { useAgentLabel } from "./agent-label";
 import {
   askHref,
+  displayTitle,
   firstParagraph,
   isSourcePath,
+  openHref,
   latestChange,
   makeScopeColors,
   pageHref,
@@ -69,7 +71,7 @@ export function buildGraphData(
     ids.add(node.id);
     nodes.push({
       id: node.id,
-      title: node.title,
+      title: node.kind === "journal" ? displayTitle(node.id, node.title, label) : node.title,
       scope: node.scope,
       kind: node.kind,
       degree: node.degree,
@@ -269,7 +271,7 @@ export function PageSummary({
         </div>
       ) : (
         <div className="kg-panel-body">
-          <h2 className="kg-panel-title">{doc.title}</h2>
+          <h2 className="kg-panel-title">{displayTitle(doc.path, doc.title, label)}</h2>
           <p className="kg-panel-meta">
             {doc.updated ? "Updated " + shortDate(doc.updated) : doc.path}
             {sources.length ? " · from " + sources.length + (sources.length === 1 ? " source" : " sources") : ""}
@@ -300,7 +302,7 @@ export function PageSummary({
                   <li key={link.path}>
                     <button type="button" onClick={() => onSelect(link.path)}>
                       <ScopeDot color={colors(link.scope)} />
-                      <span className="trunc">{link.title}</span>
+                      <span className="trunc">{displayTitle(link.path, link.title, label)}</span>
                       <span className="kg-links-scope">{link.scope}</span>
                     </button>
                   </li>
@@ -318,7 +320,7 @@ export function PageSummary({
                   <li key={link.path}>
                     <button type="button" onClick={() => onSelect(link.path)} title={link.context}>
                       <ScopeDot color={colors(link.scope)} />
-                      <span className="trunc">{link.title}</span>
+                      <span className="trunc">{displayTitle(link.path, link.title, label)}</span>
                       <span className="kg-links-scope">{link.scope}</span>
                     </button>
                   </li>
@@ -329,7 +331,13 @@ export function PageSummary({
           {sources.length ? (
             <section className="kg-sec">
               <h3 className="kg-lbl">Learned from</h3>
-              <p className="kg-summary">{sources.join(", ")}</p>
+              <ul className="kg-learned">
+                {sources.map((source) => (
+                  <li key={source}>
+                    <a href={openHref(source)}>{displayTitle(source, source, label)}</a>
+                  </li>
+                ))}
+              </ul>
             </section>
           ) : null}
         </div>
@@ -717,11 +725,17 @@ export function GraphTab({
           colors={colors}
         />
         <div className="kg-toggles">
-          <label className="kg-toggle">
+          <label
+            className="kg-toggle"
+            data-tip="Show each agent's daily notes from its chats (hollow circles), linked to the pages made from them."
+          >
             <Checkbox checked={journals} onChange={setJournals} aria-label="Show journals" />
             <span>Journals</span>
           </label>
-          <label className="kg-toggle">
+          <label
+            className="kg-toggle"
+            data-tip="Show the files you uploaded (squares), linked to the pages that cite them."
+          >
             <Checkbox checked={sources} onChange={setSources} aria-label="Show sources" />
             <span>Sources</span>
           </label>

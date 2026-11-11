@@ -528,6 +528,12 @@
 .kg-dot-ring { width: 8px; height: 8px; border: 1.5px solid var(--text-3); }
 .kg-dot-square { width: 8px; height: 8px; border-radius: 2px; background: var(--text-3); }
 .kg-toggles { display: flex; gap: 16px; margin-left: auto; }
+.kg-toggle[data-tip]:hover::after {
+  left: auto; right: 0; transform: none; width: 260px; white-space: normal;
+  line-height: 1.45; text-align: left; padding: 7px 9px;
+}
+.kg-learned { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; }
+.kg-learned a { color: var(--text-2); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
 .kg-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .kg-lbl {
   margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em;

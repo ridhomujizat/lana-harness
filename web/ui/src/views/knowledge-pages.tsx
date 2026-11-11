@@ -17,6 +17,8 @@ import { useAgentLabel } from "./agent-label";
 import { ScopeChips } from "./knowledge-graph";
 import {
   askHref,
+  displayTitle,
+  journalTitle,
   knowledgeHref,
   makeScopeColors,
   pageBody,
@@ -124,8 +126,9 @@ export function PageReader({
   const scope = doc.scope;
   const agent = scope && scope !== "shared" ? scope : defaultAgent;
   const incoming = doc.links_in || [];
-  const renderLink = (target: string, text: string) => {
+  const renderLink = (target: string, written: string) => {
     const resolved = resolveTarget(doc, target);
+    const text = written === target ? journalTitle(target, label) || written : written;
     if (!resolved) {
       return (
         <span className="kg-wikilink is-broken" title="No page with this title yet">
@@ -140,7 +143,7 @@ export function PageReader({
     );
   };
   return (
-    <article className="kg-reader" aria-label={doc.title}>
+    <article className="kg-reader" aria-label={displayTitle(doc.path, doc.title, label)}>
       <div className="kg-reader-top">
         <code className="mono kg-reader-path trunc">{doc.path}</code>
         <div className="kg-reader-acts">
@@ -160,7 +163,7 @@ export function PageReader({
           ) : null}
         </div>
       </div>
-      <h2 className="kg-reader-title">{doc.title}</h2>
+      <h2 className="kg-reader-title">{displayTitle(doc.path, doc.title, label)}</h2>
       <div className="kg-reader-meta">
         <span className="kg-scope-chip" style={{ color: colors(scope) }}>
           <ScopeDot color={colors(scope)} />
@@ -191,7 +194,7 @@ export function PageReader({
                 <a href={pageHref(link.path)} className="kg-backlink">
                   <span className="kg-backlink-t">
                     <ScopeDot color={colors(link.scope)} />
-                    {link.title}
+                    {displayTitle(link.path, link.title, label)}
                   </span>
                   {link.context ? <span className="kg-backlink-c">{plainLinks(link.context)}</span> : null}
                 </a>

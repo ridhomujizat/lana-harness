@@ -199,6 +199,30 @@ export function isSourcePath(path: string): boolean {
   return /(^|\/)(journal|inbox|sources|reports)\//.test(path);
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const JOURNAL_PATH = /(?:^|\/)(?:agents\/([^/]+)\/)?journal\/(\d{4})-(\d{2})-(\d{2})(?:\.md)?$/;
+
+/* A journal file reads as "Dana journal (5 Nov 2026)" instead of its bare
+   date file name; anything else returns null. */
+export function journalTitle(path: string, label: (name: string) => string): string | null {
+  const match = JOURNAL_PATH.exec(String(path || "").trim());
+  if (!match) {
+    return null;
+  }
+  const scope = match[1] || "shared";
+  const who = scopeLabel(scope, label);
+  const month = MONTHS[Number(match[3]) - 1] || match[3];
+  return who + " journal (" + Number(match[4]) + " " + month + " " + match[2] + ")";
+}
+
+export function displayTitle(
+  path: string,
+  title: string,
+  label: (name: string) => string
+): string {
+  return journalTitle(path, label) || title;
+}
+
 export function Note({ children }: { children: ReactNode }) {
   return <p className="knowledge-note">{children}</p>;
 }

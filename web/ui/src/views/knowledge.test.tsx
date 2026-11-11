@@ -19,7 +19,7 @@ import {
 import type { KnowledgeGraph, KnowledgeStatus } from "../api/knowledge";
 import { KnowledgePage } from "./knowledge";
 import { buildGraphData } from "./knowledge-graph";
-import { firstParagraph, latestChange, makeScopeColors, pageBody } from "./knowledge-shared";
+import { firstParagraph, journalTitle, latestChange, makeScopeColors, pageBody } from "./knowledge-shared";
 
 /* force-graph draws on a canvas jsdom does not have. The fake keeps the
    handlers so a test can click a node. */
@@ -477,6 +477,25 @@ describe("knowledge helpers", () => {
       current: "5%",
       since: "2026-11-01",
     });
+  });
+
+  it("names journals by agent and date", () => {
+    const label = (name: string) => (name === "dana" ? "Dana" : name);
+    expect(journalTitle("agents/dana/journal/2026-11-05.md", label)).toBe("Dana journal (5 Nov 2026)");
+    expect(journalTitle("agents/dana/journal/2026-11-05", label)).toBe("Dana journal (5 Nov 2026)");
+    expect(journalTitle("journal/2026-01-31.md", label)).toBe("Shared journal (31 Jan 2026)");
+    expect(journalTitle("agents/dana/wiki/Gaji.md", label)).toBeNull();
+    const data = buildGraphData(
+      {
+        ...graph,
+        nodes: [
+          ...graph.nodes,
+          { id: "agents/dana/journal/2026-11-05.md", title: "2026-11-05", scope: "dana", kind: "journal", type: "", updated: "", degree: 1 },
+        ],
+      },
+      label
+    );
+    expect(data.nodes.find((node) => node.kind === "journal")?.title).toBe("Dana journal (5 Nov 2026)");
   });
 
   it("gives every agent its own stable colour and shared grey", () => {
