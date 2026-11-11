@@ -259,14 +259,12 @@ function DecisionCard({
       {fix ? (
         <div className="wf-fix">
           <b>Proposed fix</b>
-          <div className="mono">
-            {Object.entries(fix).map(([key, value]) => (
-              <div key={key}>
-                <span>{key}</span>
-                <span>→ {typeof value === "string" ? value : JSON.stringify(value)}</span>
-              </div>
-            ))}
-          </div>
+          {Object.entries(fix).map(([key, value]) => (
+            <div className="wf-fix-row" key={key}>
+              <span>{key}</span>
+              <pre className="mono">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</pre>
+            </div>
+          ))}
         </div>
       ) : null}
       {pending && decision.persistent ? (

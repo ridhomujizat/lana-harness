@@ -646,7 +646,21 @@ button.wf-item:hover { background: var(--surface-2); }
   flex-direction: column;
   gap: 6px;
 }
-.wf-fix .mono > div { display: grid; grid-template-columns: 130px 1fr; gap: 8px; }
+.wf-decision, .wf-fix { min-width: 0; }
+.wf-fix-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wf-fix-row > span { font-size: var(--fs-xs); color: var(--text-3); font-family: var(--mono); }
+.wf-fix-row pre {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
 .wf-side-empty {
   flex: 1;
   display: flex;
@@ -747,7 +761,9 @@ button.wf-item:hover { background: var(--surface-2); }
   padding: 10px 52px 10px 12px;
 }
 .wf-composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.wf-composer textarea { border: 0; outline: 0; resize: none; width: 100%; font: inherit; color: var(--text); background: transparent; min-height: 44px; }
+.wf-composer textarea,
+.wf-composer textarea:focus,
+.wf-composer textarea:focus-visible { border: 0; outline: 0; box-shadow: none; padding: 0; border-radius: 0; resize: none; width: 100%; font: inherit; color: var(--text); background: transparent; min-height: 44px; display: block; }
 .wf-send {
   position: absolute;
   right: 10px;
