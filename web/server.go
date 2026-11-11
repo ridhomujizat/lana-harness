@@ -61,6 +61,7 @@ type Server struct {
 	index            []byte
 	credentials      *credentialStore
 	signInCodes      *signInCodeStore
+	appCodes         *signInCodeStore
 	resetCodes       *resetCodeStore
 	loginLock        *loginLock
 	sessions         *browserSessions
@@ -175,6 +176,7 @@ func New(cfg Config) (*Server, error) {
 		done:      make(chan struct{}),
 	}
 	s.signInCodes = newSignInCodeStore(s.nowTime)
+	s.appCodes = newAppCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
 	s.loginLock = newLoginLock(s.nowTime)
 	s.roomHub = newRoomHub(s)
@@ -390,6 +392,7 @@ func (s *Server) routes() {
 	// are unauthenticated (an owner has no session yet); they keep the Host and
 	// Origin checks.
 	s.mux.Handle("GET /v1/auth/state", s.checkHost(http.HandlerFunc(s.handleAuthState)))
+	s.mux.Handle("GET "+AppSignInPath, s.checkHost(http.HandlerFunc(s.handleAppSignIn)))
 	s.mux.Handle("POST /v1/auth/claim", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleClaim))))
 	s.mux.Handle("POST /v1/auth/login", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleLogin))))
 	s.mux.Handle("POST /v1/auth/reset/telegram", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetTelegram))))

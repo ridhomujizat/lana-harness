@@ -31,6 +31,8 @@ const (
 // plain codes live only in the URL handed to the owner.
 type signInCodeStore struct {
 	now func() time.Time
+	// ttl is how long a code stays valid; zero means signInCodeTTL.
+	ttl time.Duration
 
 	mu    sync.Mutex
 	codes map[[sha256.Size]byte]time.Time
@@ -40,8 +42,8 @@ func newSignInCodeStore(now func() time.Time) *signInCodeStore {
 	return &signInCodeStore{now: now, codes: map[[sha256.Size]byte]time.Time{}}
 }
 
-// create returns a new 32-byte base64url code and stores its hash for 15
-// minutes.
+// create returns a new 32-byte base64url code and stores its hash for the
+// store's TTL (15 minutes for sign-in links).
 func (s *signInCodeStore) create() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
@@ -52,7 +54,11 @@ func (s *signInCodeStore) create() (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pruneLocked()
-	s.codes[sum] = s.now().Add(signInCodeTTL)
+	ttl := s.ttl
+	if ttl <= 0 {
+		ttl = signInCodeTTL
+	}
+	s.codes[sum] = s.now().Add(ttl)
 	return code, nil
 }
 
