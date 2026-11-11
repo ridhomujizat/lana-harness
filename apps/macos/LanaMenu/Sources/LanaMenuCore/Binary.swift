@@ -4,7 +4,7 @@ import Foundation
 /// BinaryResolution says which lana binary the app would start, and why.
 public struct BinaryResolution: Equatable, Codable {
     public var path: String?
-    /// source is "setting", "login shell PATH", "fallback", or "not found".
+    /// source is "setting", "app bundle", "login shell PATH", "fallback", or "not found".
     public var source: String
 
     public init(path: String?, source: String) {
@@ -25,16 +25,21 @@ public func fallbackBinaryPaths(userHome: String) -> [String] {
 }
 
 /// resolveBinary picks the lana binary: the path from the app settings, then
-/// `lana` on the login shell PATH, then the fallback paths.
+/// the binary inside Lana.app (spec #52), then `lana` on the login shell PATH,
+/// then the fallback paths.
 public func resolveBinary(
     setting: String?,
     loginShellBinary: String?,
     userHome: String,
+    bundled: String? = nil,
     isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
 ) -> BinaryResolution {
     if let raw = setting?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
         let path = expandTilde(raw, userHome: userHome)
         return BinaryResolution(path: isExecutable(path) ? path : nil, source: "setting")
+    }
+    if let bundled, isExecutable(bundled) {
+        return BinaryResolution(path: bundled, source: "app bundle")
     }
     if let path = loginShellBinary, path.hasPrefix("/"), isExecutable(path) {
         return BinaryResolution(path: path, source: "login shell PATH")

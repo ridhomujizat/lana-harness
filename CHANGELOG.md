@@ -7,6 +7,20 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+- Lana.app opens the dashboard in its own window (spec #52): **Open lana** in the menu bar (⌘O),
+  a start of Lana.app, or a notification click shows it, with a Dock icon and a main menu while it
+  is open. The window signs in with a one-time app link from the daemon
+  (`POST /v1/local/app-link`, `GET /v1/auth/app`), so no password is typed or changed. Settings can
+  send pages back to the browser.
+- `make app` bundles the lana daemon binary as `Lana.app/Contents/MacOS/lana`, and
+  `apps/macos/install-app.sh` (`make install-app`) installs the app, points `~/.local/bin/lana` and
+  the `dev.lana.daemon` launchd agent at it, and ties the agent to Lana.app with
+  `AssociatedBundleIdentifiers`, so Login Items shows lana with its icon instead of an executable.
+
+### Changed
+- Self-update signs Lana.app again (ad-hoc) after it replaces or restores the bundled binary.
+
 ## [0.4.0-beta.2] - 2026-11-11
 
 ### Added

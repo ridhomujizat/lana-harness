@@ -23,10 +23,17 @@ public struct LanaHome: Equatable, Sendable {
     }
 
     /// resolve picks the home: a non-empty override from the app settings,
-    /// then LANA_HOME from the environment the app was launched with, then
-    /// ~/.lana. It mirrors config.HomeDir in Go; only the override expands "~".
-    public static func resolve(override: String?, environment: [String: String], userHome: String) -> LanaHome {
+    /// then the home the bundle is built for (Info.plist LanaHome, the dev
+    /// app's ~/.lana-dev, spec #52), then LANA_HOME from the environment the
+    /// app was launched with, then ~/.lana. The bundle home comes before the
+    /// environment so the dev app never follows a LANA_HOME meant for the
+    /// production daemon. It mirrors config.HomeDir in Go; only the override
+    /// and the bundle home expand "~".
+    public static func resolve(override: String?, bundleHome: String? = nil, environment: [String: String], userHome: String) -> LanaHome {
         if let raw = override?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            return LanaHome(path: expandTilde(raw, userHome: userHome))
+        }
+        if let raw = bundleHome?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
             return LanaHome(path: expandTilde(raw, userHome: userHome))
         }
         if let env = environment["LANA_HOME"], !env.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
