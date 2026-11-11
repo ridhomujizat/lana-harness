@@ -51,6 +51,10 @@ type ToolCtx struct {
 	OwnerTurn bool
 	// Questions asks the owner through the session's channel.
 	Questions QuestionService
+	// Files records and delivers the files the send_file tool sends
+	// (REQ-AGF-003, REQ-AGF-004). Nil when the runtime has no file service;
+	// the tool then reports that sending is not available.
+	Files FileSender
 	// Subagents runs child sessions for the task tools.
 	Subagents SubagentRunner
 	// MCPAdmin changes MCP servers for the mcp_manage tool. Nil when the

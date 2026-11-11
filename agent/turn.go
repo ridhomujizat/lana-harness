@@ -372,12 +372,14 @@ func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]s
 	// cannot drift.
 	_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
 	_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
+	_, sendFileRegistered := rn.reg.tools.Get(SendFileTool)
 	for _, name := range AutoOfferedTools(AutoOfferState{
 		Root:                !resolved.child,
 		MCPManageRegistered: mcpManageRegistered,
 		VisibleSkills:       len(skills) > 0,
 		Team:                resolved.team != "" || len(resolved.delegates) > 0,
 		CalendarRegistered:  calendarRegistered,
+		SendFileRegistered:  sendFileRegistered,
 	}) {
 		if !containsString(tools, name) {
 			tools = append(tools, name)
@@ -417,6 +419,7 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		Skills:        resolved.skills,
 		SkillWrite:    resolved.cfg.SkillWrite,
 		Questions:     rn.reg.questions,
+		Files:         rn.reg.files,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
 		MCPAdmin:      mcpAdmin,
 		MCPStatus:     rn.reg.ServerStatus,

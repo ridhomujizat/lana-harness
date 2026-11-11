@@ -69,7 +69,7 @@ func TestAgentNewYes(t *testing.T) {
 		t.Fatal(err)
 	}
 	agent := result.Config.Agents["helper"]
-	if agent.Provider != "" || agent.Model != "deepseek/deepseek-flash" || agent.Permission != "ask" || strings.Join(agent.Tools, ",") != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user" {
+	if agent.Provider != "" || agent.Model != "deepseek/deepseek-flash" || agent.Permission != "ask" || strings.Join(agent.Tools, ",") != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user,send_file" {
 		t.Fatalf("agent = %+v", agent)
 	}
 	if result.Config.Routes[0].Agent != "default" {
@@ -83,13 +83,13 @@ func TestAgentNewWorkerTemplate(t *testing.T) {
 		t.Fatalf("exit = %d", code)
 	}
 	result, _ := config.Load(context.Background(), config.Options{Home: home})
-	if got := strings.Join(result.Config.Agents["w1"].Tools, ","); got != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user" {
+	if got := strings.Join(result.Config.Agents["w1"].Tools, ","); got != "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user,send_file" {
 		t.Fatalf("tools = %s", got)
 	}
 }
 
 func TestAgentNewFullToolTemplates(t *testing.T) {
-	const wantTools = "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user"
+	const wantTools = "read_file,write_file,edit_file,glob,grep,bash,web_fetch,memory_read,memory_write,skill_write,ask_user,send_file"
 	for _, tc := range []struct{ name, template string }{
 		{"a1", "assistant"},
 		{"c1", "coder"},

@@ -398,6 +398,18 @@ func mediaType(head []byte, name string) string {
 	}
 }
 
+// MediaTypePath returns the media type of the file at abs, from its first
+// bytes and its name, using the same rules Save applies. It lets a file that
+// already lives under attachments keep its type without being copied again
+// (REQ-AGF-003).
+func MediaTypePath(abs string) (string, error) {
+	head, err := headOf(abs)
+	if err != nil {
+		return "", err
+	}
+	return mediaType(head, filepath.Base(abs)), nil
+}
+
 var textExt = map[string]bool{
 	".go": true, ".py": true, ".js": true, ".ts": true, ".tsx": true,
 	".java": true, ".rb": true, ".rs": true, ".c": true, ".h": true,

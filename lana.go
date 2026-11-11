@@ -28,6 +28,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/calendar"
+	"github.com/ridhomujizat/lana-harness/internal/file"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
@@ -73,6 +74,7 @@ type runtimeOptions struct {
 	approveChannels map[string]bool
 	ask             AskFunc
 	askChannels     map[string]bool
+	file            FileFunc
 }
 
 // ApproveFunc answers approvals for the library channel.
@@ -111,6 +113,16 @@ func AskChannels(channels ...string) Option {
 			o.askChannels[channel] = true
 		}
 	}
+}
+
+// FileFunc delivers a file sent by the send_file tool to the session's channel.
+type FileFunc = func(ctx context.Context, req core.FileSendRequest) core.FileSendOutcome
+
+// FileWith installs the file sender for the send_file tool. Without it the
+// service writes the file/sent event and reports no delivery (the web chat
+// reads the event from the stream).
+func FileWith(fn FileFunc) Option {
+	return func(o *runtimeOptions) { o.file = fn }
 }
 
 var (
@@ -172,7 +184,7 @@ var toolCatalogGroupOrder = []struct {
 	Label string
 	Names []string
 }{
-	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep"}},
+	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep", "send_file"}},
 	{ID: "shell", Label: "Shell", Names: []string{"bash"}},
 	{ID: "web", Label: "Web", Names: []string{"web_search", "web_fetch"}},
 	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write", "session_search"}},
@@ -392,6 +404,8 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	questionService := question.New(coreCtx.Sessions, coreCtx.Hooks)
 	coreCtx.Questions = questionService
 	registry.SetQuestions(questionService)
+	fileService := file.New(coreCtx.Sessions, coreCtx.Hooks)
+	registry.SetFiles(fileService)
 	if opts.Approval == PolicyTrust {
 		coreCtx.Hooks.ToolsPreExecute.Use(func(context.Context, core.ToolsPreExecuteInput, core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 			return core.ToolDecision{Allowed: true}, nil
@@ -443,6 +457,18 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 				outcome = questionNoResponder()
 			}
 			return outcome, nil
+		})
+	}
+	if runtimeOpts.file != nil {
+		fn := runtimeOpts.file
+		coreCtx.Hooks.FileSend.Use(func(ctx context.Context, req core.FileSendRequest, _ core.Next[core.FileSendRequest, core.FileSendOutcome]) (outcome core.FileSendOutcome, err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					outcome = core.FileSendOutcome{}
+					err = nil
+				}
+			}()
+			return fn(ctx, req), nil
 		})
 	}
 	root, cancel := context.WithCancel(context.Background())
@@ -1374,12 +1400,14 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 	}
 	_, mcpManageRegistered := registry.Get("mcp_manage")
 	_, calendarRegistered := registry.Get(agent.CalendarTool)
+	_, sendFileRegistered := registry.Get(agent.SendFileTool)
 	autoOffered := agent.AutoOfferedTools(agent.AutoOfferState{
 		Root:                true,
 		MCPManageRegistered: mcpManageRegistered,
 		VisibleSkills:       visibleSkills,
 		Team:                inTeam || len(agentCfg.Subagents) > 0,
 		CalendarRegistered:  calendarRegistered,
+		SendFileRegistered:  sendFileRegistered,
 	})
 	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
 	for _, group := range toolCatalogGroupOrder {
