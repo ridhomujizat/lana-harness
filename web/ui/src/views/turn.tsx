@@ -119,11 +119,24 @@ export type TurnSegment =
          source ("workflow") and the source's name. */
       source?: string;
       sourceName?: string;
+      /* Group rooms: an agent's reply and what it used. */
+      agentMeta?: AgentReplyMeta;
     }
   | { kind: "thinking"; key: string; text: string }
   | { kind: "step"; key: string; step: TurnStep };
 
+/* Group rooms: a reply's pass/fail state and the tools, notes and files the
+   agent used (assistant/message with source "agent"). */
+export interface AgentReplyMeta {
+  passed: boolean;
+  failed: boolean;
+  tools: Record<string, number>;
+  notes: string[];
+  files: string[];
+}
+
 export interface TurnGroup {
+  agentMeta?: AgentReplyMeta;
   kind: "text" | "thinking" | "activity";
   key: string;
   text?: string;
@@ -1274,10 +1287,11 @@ export function buildTurns(
           });
         }
         const text = contentText(payload.content);
-        if (text) {
+        const source = stringOf(payload.source);
+        const agentReply = source === "agent";
+        if (text || (agentReply && payload.passed === true)) {
           /* API-WF-005: an out-of-band message names its source, shown as a
              muted "via …" line above the answer. */
-          const source = stringOf(payload.source);
           const sourceName = stringOf(payload.source_name);
           turn.segments.push({
             kind: "text",
@@ -1285,6 +1299,7 @@ export function buildTurns(
             text,
             seq: event.seq,
             ...(source ? { source, sourceName } : {}),
+            ...(agentReply ? { agentMeta: agentMetaOf(payload) } : {}),
           });
         }
         break;
@@ -1498,4 +1513,25 @@ export function buildTurns(
     items.push({ kind: "turn", key: turn.key, turn });
   }
   return items;
+}
+
+function agentMetaOf(payload: Record<string, unknown>): AgentReplyMeta {
+  const tools: Record<string, number> = {};
+  if (payload.tools && typeof payload.tools === "object") {
+    for (const [name, count] of Object.entries(payload.tools as Record<string, unknown>)) {
+      const n = Number(count);
+      if (Number.isFinite(n) && n > 0) {
+        tools[name] = n;
+      }
+    }
+  }
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
+  return {
+    passed: payload.passed === true,
+    failed: payload.failed === true,
+    tools,
+    notes: list(payload.notes),
+    files: list(payload.files),
+  };
 }

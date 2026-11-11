@@ -70,6 +70,9 @@ type roomJSON struct {
 	Title string `json:"title"`
 	// Can names what an agent can do (spec 47 team work); empty for a team.
 	Can []string `json:"can"`
+	// Mode is a team's conversation mode, "group" or "lead"; empty for an
+	// agent.
+	Mode string `json:"mode,omitempty"`
 	// DisplayName is the human name shown in the UI, "" when unset.
 	DisplayName string `json:"display_name"`
 	Color       string `json:"color"`
@@ -325,6 +328,7 @@ type agentMeta struct {
 	title       string
 	displayName string
 	color       string
+	mode        string
 }
 
 // roomAgentMeta reads the [agents.<name>] tables for the title and color, the
@@ -349,7 +353,7 @@ func (s *Server) roomAgentMeta(ctx context.Context) map[string]agentMeta {
 	// Spec 47: a team's display_name names its room.
 	if document, err := parseTeamDocument(file.Raw); err == nil {
 		for name, table := range document.Teams {
-			meta[name] = agentMeta{displayName: mapAgentString(table, "display_name")}
+			meta[name] = agentMeta{displayName: mapAgentString(table, "display_name"), mode: mapAgentString(table, "mode")}
 		}
 	}
 	return meta
@@ -373,8 +377,12 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 		row.Lead = agent.Lead
 		row.Members = nonNilStrings(agent.Members)
 		row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(agent.Name), avatar.Default
+		row.Mode = core.TeamModeGroup
 		if m, ok := meta[agent.Name]; ok {
 			row.DisplayName = m.displayName
+			if m.mode == core.TeamModeLead {
+				row.Mode = core.TeamModeLead
+			}
 		}
 	} else {
 		if m, ok := meta[agent.Name]; ok {

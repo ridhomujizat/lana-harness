@@ -50,8 +50,11 @@ export type GroupItem =
       toolsUsed: Record<string, number>;
       notes: string[];
       files: string[];
+      /* Group rooms: said to the room, not an answer to the lead. */
+      direct?: boolean;
     }
   | { kind: "passed"; key: string; from: string[]; to: string }
+  | { kind: "pass"; key: string; agent: string }
   | { kind: "working"; key: string; agent: string; title: string }
   | { kind: "discussion"; key: string };
 
@@ -184,6 +187,28 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
   let lead: Extract<GroupItem, { kind: "lead" }> | null = null;
 
   for (const group of turn.groups) {
+    if (group.kind === "text" && group.source === "agent" && group.agentMeta) {
+      /* Group rooms: each agent's reply is that agent's own message. */
+      const agent = group.sourceName || "agent";
+      if (group.agentMeta.passed) {
+        items.push({ kind: "pass", key: "pass-" + group.key, agent });
+      } else {
+        items.push({
+          kind: "member",
+          key: "member-" + group.key,
+          agent,
+          text: group.text || "",
+          at: turn.lastAt || turn.startedAt,
+          tools: Object.values(group.agentMeta.tools).reduce((a, b) => a + b, 0),
+          toolsUsed: group.agentMeta.tools,
+          notes: group.agentMeta.notes,
+          files: group.agentMeta.files,
+          direct: true,
+        });
+      }
+      lead = null;
+      continue;
+    }
     if (group.kind === "text") {
       if (!group.text) {
         continue;
@@ -382,7 +407,7 @@ function MemberMessage({
     .filter(([name]) => !name.startsWith("knowledge_"))
     .sort((a, b) => b[1] - a[1]);
   const tools = named.length > 0 ? "" : item.tools === 1 ? "1 tool" : item.tools > 0 ? item.tools + " tools" : "";
-  const meta = ["replying to " + lead, formatClock(item.at), tools]
+  const meta = [item.direct ? "" : "replying to " + lead, formatClock(item.at), tools]
     .filter(Boolean)
     .join(" · ");
   return (
@@ -501,6 +526,13 @@ export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemor
               <LeadMessage item={item} lead={lead} faces={faces} can={can} />
               {tail}
             </Fragment>
+          );
+        }
+        if (item.kind === "pass") {
+          return (
+            <div key={item.key} className="disc-pass">
+              <span>{faceLabel(faces, item.agent) + " passed"}</span>
+            </div>
           );
         }
         if (item.kind === "passed") {

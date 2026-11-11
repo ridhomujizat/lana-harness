@@ -239,3 +239,19 @@ describe("team work by knowledge and tools", () => {
     expect(screen.getByRole("button", { name: "▤ Used 1 note" })).toBeTruthy();
   });
 });
+
+describe("group rooms", () => {
+  it("shows each agent's own reply and passes", () => {
+    const turn = turnOf([
+      ev(2, "assistant/message", { source: "agent", source_name: "lana", content: [{ type: "text", text: "@karin cek gaji." }] }),
+      ev(3, "assistant/message", { source: "agent", source_name: "karin", content: [{ type: "text", text: "Gaji pasar 28–40 jt." }], tools: { web_fetch: 2 }, notes: ["gaji-pasar"] }),
+      ev(4, "assistant/message", { source: "agent", source_name: "dana", passed: true, content: [] }),
+      ev(5, "turn/end", { reason: "end_turn" }),
+    ]);
+    render(<RoomGroup turn={turn} room={room} faces={{}} />);
+    expect(screen.getByText("Gaji pasar 28–40 jt.")).toBeTruthy();
+    expect(screen.getByText("web_fetch ×2")).toBeTruthy();
+    expect(screen.getByText("dana passed")).toBeTruthy();
+    expect(screen.queryByText(/replying to/)).toBeNull();
+  });
+});

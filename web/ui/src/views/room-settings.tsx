@@ -28,6 +28,7 @@ function settingsOf(team: TeamResponse | null): TeamDiscussionSettings {
     return TEAM_DISCUSSION_DEFAULTS;
   }
   return {
+    mode: team.mode === "lead" ? "lead" : "group",
     discuss: team.discuss === "ask" ? "ask" : "auto",
     rounds: team.rounds || 3,
     extra_rounds: team.extra_rounds === "ask" || team.extra_rounds === "never" ? team.extra_rounds : "once",

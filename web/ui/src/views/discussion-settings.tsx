@@ -42,6 +42,19 @@ export function DiscussionSettingsForm({
   return (
     <div className="disc-form">
       <section className="disc-field">
+        <h3>How the room talks</h3>
+        <Option
+          title="Like a work group"
+          sub="Everyone sees the chat. @mention someone to ask them; with no @mention everyone may answer or pass. Teammates hand work to each other with @mentions."
+          control={<Radio name="disc-mode" checked={value.mode === "group"} onChange={() => set("mode", "group")} />}
+        />
+        <Option
+          title={lead + " answers first"}
+          sub={lead + " reads every message and hands work to members."}
+          control={<Radio name="disc-mode" checked={value.mode === "lead"} onChange={() => set("mode", "lead")} />}
+        />
+      </section>
+      <section className="disc-field">
         <h3>Start a discussion</h3>
         <Option
           title={"When " + lead + " sees a question that needs more than one view"}

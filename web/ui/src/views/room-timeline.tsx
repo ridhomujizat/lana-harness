@@ -315,6 +315,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const [liveText, setLiveText] = useState("");
   const [liveThinking, setLiveThinking] = useState(false);
   const [liveTool, setLiveTool] = useState("");
+  /* Group rooms: the agent whose turn it is. */
+  const [liveSpeaker, setLiveSpeaker] = useState("");
   const [streamState, setStreamState] = useState<StreamState>("connected");
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [question, setQuestion] = useState<OpenQuestion | null>(null);
@@ -428,6 +430,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setLiveText("");
     setLiveThinking(false);
     setLiveTool("");
+    setLiveSpeaker("");
     setLiveTurnId("");
     setLiveStartedAt(0);
   }, []);
@@ -520,6 +523,20 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
            agent (API-TEAM-011). The group room builds the member row from the
            delegation, so a child frame leaves the lead's live state alone. */
         if (stringOf(frame.child_session_id)) {
+          /* Group rooms: a teammate's tool calls show who works on what. */
+          if (frame.kind === "tool_call") {
+            const agent = stringOf(frame.agent);
+            if (agent) {
+              setLiveSpeaker(agent);
+            }
+            setLiveTool(stringOf(frame.name));
+          }
+          return;
+        }
+        if (frame.kind === "speaker") {
+          setLiveSpeaker(stringOf(frame.name));
+          setLiveTool("");
+          setLiveText("");
           return;
         }
         const turnId = stringOf(frame.turn_id);
@@ -1052,9 +1069,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     ? (room.members.length + 1) + " agents · " + room.turns_7d + " turns this week"
     : room.turns_7d + " turns this week";
   const placeholder = team
-    ? "Message the team…   " +
-      (room.lead ? agentLabel(room.lead, byName) : "The lead") +
-      " answers, or type @ to ask one agent"
+    ? room.mode === "lead"
+      ? "Message the team…   " + (room.lead ? agentLabel(room.lead, byName) : "The lead") + " answers, or type @ to ask one agent"
+      : "Message the team…   everyone can answer, or @ someone"
     : "Message " + displayLabel(room) + "…   Type @ to bring in another agent";
   const attachDisabled = !currentWebSessionId || sending || uploading;
   const activity = liveTool ? activityPhrase(liveTool) : "thinking";
@@ -1331,7 +1348,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               <div className="room-live" role="status">
                 <TypingDots />
                 <span className="room-live-text">
-                  {displayLabel(room) + " is " + activity + "…"}
+                  {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}
                 </span>
               </div>
             ) : null}

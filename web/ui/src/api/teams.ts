@@ -4,6 +4,7 @@ import { request } from "./client";
 
 /* Spec 47 API-RDS-010: the discussion settings of a team. */
 export interface TeamDiscussionSettings {
+  mode: "group" | "lead";
   discuss: "auto" | "ask";
   rounds: number;
   extra_rounds: "once" | "ask" | "never";
@@ -14,6 +15,7 @@ export interface TeamDiscussionSettings {
 }
 
 export const TEAM_DISCUSSION_DEFAULTS: TeamDiscussionSettings = {
+  mode: "group",
   discuss: "auto",
   rounds: 3,
   extra_rounds: "once",
