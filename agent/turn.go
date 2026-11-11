@@ -429,6 +429,7 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		SkillWrite:    resolved.cfg.SkillWrite,
 		Questions:     rn.reg.questions,
 		Files:         rn.reg.files,
+		Secrets:       rn.reg.secretReqs,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
 		Discussions:   rn.discussionRunner(resolved),
 		MCPAdmin:      mcpAdmin,

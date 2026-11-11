@@ -267,6 +267,17 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 	if webServer != nil {
 		questionRouter.web = webQuestionResponder(webServer.Questions())
 	}
+	secretRouter := &SecretRouter{
+		sessionInfo: func(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+			if rt == nil {
+				return core.SessionInfo{}, errors.New("runtime is not ready")
+			}
+			return rt.SessionInfo(ctx, sessionID)
+		},
+	}
+	if webServer != nil {
+		secretRouter.web = webServer.SecretRequests()
+	}
 	fileRouter := &FileRouter{
 		sessionInfo: func(ctx context.Context, sessionID string) (core.SessionInfo, error) {
 			if rt == nil {
@@ -283,7 +294,7 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 			return channel.SendFile(ctx, sessionID, f)
 		}
 	}
-	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"), lana.FileWith(fileRouter.Send), lana.DiscussionPostWith(func(ctx context.Context, sessionID, name, text string) {
+	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"), lana.FileWith(fileRouter.Send), lana.SecretRequestWith(secretRouter.Request, "web", "workflow"), lana.DiscussionPostWith(func(ctx context.Context, sessionID, name, text string) {
 		// REQ-RDS-033: a team session on Telegram shows every discussion
 		// message; other channels read the events.
 		if channel == nil || rt == nil {
@@ -829,6 +840,41 @@ func webQuestionResponder(broker questionBroker) func(context.Context, core.Ques
 		}
 		return outcome
 	}
+}
+
+// secretBroker is the web secret request broker as the router sees it.
+type secretBroker interface {
+	Ask(context.Context, core.SecretRequest) (core.SecretOutcome, error)
+}
+
+// SecretRouter routes secret requests by the session's channel (spec 53). Web
+// and workflow sessions show the secure card on the web; every other channel
+// is unavailable. The secret request service already refuses Telegram and CLI
+// sessions before any event, so this is the second, fail-closed check.
+type SecretRouter struct {
+	sessionInfo func(context.Context, string) (core.SessionInfo, error)
+	web         secretBroker
+}
+
+// Request routes req to the web broker for a web or workflow session.
+func (r *SecretRouter) Request(ctx context.Context, req core.SecretRequest) core.SecretOutcome {
+	unavailable := core.SecretOutcome{Status: core.SecretStatusUnavailable, Reason: "no_responder"}
+	if r == nil || r.sessionInfo == nil || r.web == nil {
+		return unavailable
+	}
+	info, err := r.sessionInfo(ctx, req.SessionID)
+	if err != nil {
+		return unavailable
+	}
+	switch info.Channel {
+	case "web", "workflow":
+		outcome, err := r.web.Ask(ctx, req)
+		if err != nil {
+			return unavailable
+		}
+		return outcome
+	}
+	return unavailable
 }
 
 // daemonBackend adapts *lana.Runtime to the Telegram channel port.

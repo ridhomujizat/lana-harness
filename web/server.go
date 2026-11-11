@@ -97,6 +97,8 @@ type Server struct {
 	telegramReset  TelegramResetSender
 	approvals      *Approvals
 	questions      *Questions
+	// secretRequests is the secure secret input broker (spec 53).
+	secretRequests *SecretRequests
 	// roomHub pushes changed room rows to the room streams (REQ-ROOM-007).
 	roomHub *roomHub
 	// roomLocks guards "find or create the current web session" per room
@@ -169,10 +171,12 @@ func New(cfg Config) (*Server, error) {
 		sessions:  newBrowserSessions(""),
 		approvals: newApprovals(),
 		questions: newQuestions(),
-		heartbeat: defaultHeartbeatInterval,
-		poll:      defaultStreamPoll,
-		stop:      make(chan struct{}),
-		done:      make(chan struct{}),
+		// Spec 53: the secure secret input broker.
+		secretRequests: newSecretRequests(),
+		heartbeat:      defaultHeartbeatInterval,
+		poll:           defaultStreamPoll,
+		stop:           make(chan struct{}),
+		done:           make(chan struct{}),
 	}
 	s.signInCodes = newSignInCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
@@ -199,6 +203,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerStreamRoutes()
 	s.registerApprovalRoutes()
 	s.registerQuestionRoutes()
+	s.registerSecretRequestRoutes()
 	s.registerConfigRoutes()
 	s.registerSecretRoutes()
 	s.registerAgentRoutes()

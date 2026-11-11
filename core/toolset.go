@@ -11,6 +11,9 @@ var StandardTools = []string{
 	"memory_read", "memory_write",
 	"knowledge_search", "knowledge_read", "knowledge_write",
 	"ask_user",
+	// The secure secret input card (spec 53): the owner types the value, so
+	// it is safe for every agent.
+	"secret_request",
 	// Calendar items and workflows, so any agent can set a reminder or build
 	// and test an automation from chat (owner request 2026-11-11).
 	"calendar", "workflow",

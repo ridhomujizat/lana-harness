@@ -69,6 +69,7 @@ type Registry struct {
 	hooks      *core.Hooks
 	questions  core.QuestionService
 	files      core.FileSender
+	secretReqs core.SecretRequester
 	compaction core.Compactor
 	memory     core.MemoryCapturer
 	titler     core.SessionTitler

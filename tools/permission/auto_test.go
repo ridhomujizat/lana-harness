@@ -36,6 +36,8 @@ func TestAutoPolicy(t *testing.T) {
 		{"web_fetch", pattern.Argument{Kind: pattern.ArgURL, Value: "https://example.com"}, true},
 		{"mcp__broker__place_order", pattern.Argument{Kind: pattern.ArgRaw}, false},
 		{"workflow", pattern.Argument{Kind: pattern.ArgRaw}, false},
+		// Spec 53: the owner types the value, so the card needs no approval.
+		{"secret_request", pattern.Argument{Kind: pattern.ArgRaw}, true},
 	} {
 		if got := autoAllows(tc.tool, tc.arg, ws); got != tc.want {
 			t.Errorf("autoAllows(%s, %q) = %v, want %v", tc.tool, tc.arg.Value, got, tc.want)

@@ -25,6 +25,8 @@ var ErrAssistantUnavailable = errors.New("workflow: the guardian chat is not ava
 type assistNote struct {
 	version int
 	runID   string
+	// secrets is the comma-joined secret names the session was told.
+	secrets string
 }
 
 // AssistantChat returns the workflow's guardian chat session id ("" before
@@ -119,6 +121,7 @@ func (s *Service) AssistantNote(ctx context.Context, id, sessionID string) (note
 	prev, seen := s.assistNoted[sessionID]
 	s.assistMu.Unlock()
 
+	secrets := prev.secrets
 	switch {
 	case !seen:
 		var env AssistEnv
@@ -132,6 +135,7 @@ func (s *Service) AssistantNote(ctx context.Context, id, sessionID string) (note
 			cand = &c
 		}
 		note = BuildAssistantGuide(wf, ver.Graph, env, last, cand)
+		secrets = strings.Join(env.Secrets, ", ")
 	default:
 		var g *Graph
 		if prev.version != wf.Version {
@@ -143,8 +147,23 @@ func (s *Service) AssistantNote(ctx context.Context, id, sessionID string) (note
 			newer = last
 		}
 		note = BuildAssistantDelta(wf, g, newer)
+		// Spec 53: a secret the owner added meanwhile (for example through
+		// secret_request) is named in the next note.
+		if provider, ok := s.deps.(AssistSecretsProvider); ok {
+			if names := strings.Join(provider.AssistSecrets(ctx), ", "); names != secrets {
+				secrets = names
+				if names != "" {
+					line := "Secrets set by the owner now (names only): " + names + "."
+					if note == "" {
+						note = line
+					} else {
+						note += "\n" + line
+					}
+				}
+			}
+		}
 	}
-	sent := assistNote{version: wf.Version, runID: lastID}
+	sent := assistNote{version: wf.Version, runID: lastID, secrets: secrets}
 	commit = func() { s.markAssistNoted(sessionID, sent) }
 	return note, commit, nil
 }
