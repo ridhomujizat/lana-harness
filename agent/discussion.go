@@ -32,6 +32,7 @@ const (
 
 // discussionMember is one member's state in an open discussion.
 type discussionMember struct {
+	notes    []noteRef
 	angle    string
 	childID  string
 	asks     int
@@ -201,6 +202,8 @@ func (d *discussionRunner) Start(ctx context.Context, tc core.ToolCtx, in core.D
 		topic: topic, cfg: d.cfg, members: map[string]*discussionMember{}, limit: d.cfg.RoundLimit(),
 		sem: make(chan struct{}, discussionParallel),
 	}
+	// Knowledge-aware discussions: what each team member knows about the topic.
+	relevant := d.reg.relevantNotes(ctx, topic, d.cfg.Members)
 	members := make([]core.DiscussionMember, 0, len(in.Members))
 	for _, m := range in.Members {
 		name := strings.TrimSpace(m.Agent)
@@ -210,9 +213,22 @@ func (d *discussionRunner) Start(ctx context.Context, tc core.ToolCtx, in core.D
 		if _, dup := st.members[name]; dup {
 			continue
 		}
-		st.members[name] = &discussionMember{angle: strings.TrimSpace(m.Angle)}
+		notes := relevant[name]
+		st.members[name] = &discussionMember{angle: strings.TrimSpace(m.Angle), notes: notes}
 		st.order = append(st.order, name)
-		members = append(members, core.DiscussionMember{Agent: name, Angle: strings.TrimSpace(m.Angle)})
+		members = append(members, core.DiscussionMember{Agent: name, Angle: strings.TrimSpace(m.Angle), Notes: len(notes), Titles: noteTitles(notes, 5)})
+	}
+	var skipped []core.DiscussionSkip
+	var missed []string
+	for _, name := range d.cfg.Members {
+		if _, in := st.members[name]; in {
+			continue
+		}
+		if n := len(relevant[name]); n > 0 {
+			missed = append(missed, fmt.Sprintf("%s (%d notes: %s)", name, n, strings.Join(noteTitles(relevant[name], 3), ", ")))
+			continue
+		}
+		skipped = append(skipped, core.DiscussionSkip{Agent: name, Reason: "no notes on this"})
 	}
 	if !d.reg.disc.put(st) {
 		return toolError("a discussion is already open in this session; end it with discuss_end first"), nil
@@ -221,14 +237,26 @@ func (d *discussionRunner) Start(ctx context.Context, tc core.ToolCtx, in core.D
 	payload := core.DiscussionStartedPayload{
 		V: core.PayloadVersion, ID: st.id, CallID: tc.CallID, Topic: topic, Opening: strings.TrimSpace(in.Opening), Lead: d.lead,
 		Members: members, Rounds: st.limit, ExtraRounds: d.cfg.ExtraMode(), Requested: d.requested(ctx, tc),
+		Skipped: skipped,
 	}
 	if err := d.reg.appendDiscussion(ctx, tc.SessionID, tc.TurnID, core.KindDiscussionStarted, payload); err != nil {
 		d.reg.disc.drop(tc.SessionID)
 		return toolError(internalErrorMessage), nil
 	}
 	d.post(ctx, tc.SessionID, d.lead, payload.Opening)
-	return textOut("Discussion %s is open with %s. Round limit: %d (hard cap %d). Ask members with discuss_ask, one short @mention message each; several discuss_ask calls in one step run in parallel. When members agree, when two replies bring nothing new, or when the difference is one of priorities, call discuss_end.",
-		st.id, strings.Join(st.order, ", "), st.limit, core.TeamRoundsMax), nil
+	var knows strings.Builder
+	for _, m := range members {
+		if m.Notes > 0 {
+			fmt.Fprintf(&knows, " %s has %d matching notes (%s).", m.Agent, m.Notes, strings.Join(m.Titles, ", "))
+		} else {
+			fmt.Fprintf(&knows, " %s has no notes on this; ask only if its role still fits.", m.Agent)
+		}
+	}
+	if len(missed) > 0 {
+		fmt.Fprintf(&knows, " Not invited but has notes: %s. You can still ask them with discuss_ask.", strings.Join(missed, "; "))
+	}
+	return textOut("Discussion %s is open with %s. Round limit: %d (hard cap %d).%s Ask members with discuss_ask, one short @mention message each, and build on what each one knows; several discuss_ask calls in one step run in parallel. When members agree, when two replies bring nothing new, or when the difference is one of priorities, call discuss_end.",
+		st.id, strings.Join(st.order, ", "), st.limit, core.TeamRoundsMax, knows.String()), nil
 }
 
 // requested reports whether the owner turned on Discuss for this turn's
@@ -308,8 +336,14 @@ func (d *discussionRunner) Ask(ctx context.Context, tc core.ToolCtx, in core.Dis
 	}
 	m, ok := st.members[name]
 	if !ok {
-		st.mu.Unlock()
-		return toolError(fmt.Sprintf("agent '%s' is not in this discussion (members: %s)", name, strings.Join(st.order, ", "))), nil
+		if !containsString(st.cfg.Members, name) {
+			st.mu.Unlock()
+			return toolError(fmt.Sprintf("agent '%s' is not a member of this team (members: %s)", name, strings.Join(st.cfg.Members, ", "))), nil
+		}
+		// A team member the lead did not invite joins when asked.
+		m = &discussionMember{notes: d.reg.relevantNotes(ctx, st.topic, []string{name})[name]}
+		st.members[name] = m
+		st.order = append(st.order, name)
 	}
 	round := m.asks + 1
 	if round > st.limit {
@@ -371,6 +405,13 @@ func (d *discussionRunner) Ask(ctx context.Context, tc core.ToolCtx, in core.Dis
 		res.Passed = true
 		res.Reply = reason
 	}
+	var usedNotes []string
+	newPoint := false
+	if !res.Failed && !res.Passed {
+		res.Reply, usedNotes = splitNotesLine(res.Reply)
+		res.Reply, newPoint = markNewPoint(res.Reply)
+		usedNotes = mergeNotes(usedNotes, task.Notes)
+	}
 
 	st.mu.Lock()
 	if task.SessionID != "" {
@@ -393,6 +434,7 @@ func (d *discussionRunner) Ask(ctx context.Context, tc core.ToolCtx, in core.Dis
 	msg := core.DiscussionMessagePayload{
 		V: core.PayloadVersion, ID: st.id, CallID: tc.CallID, Role: core.DiscussionRoleMember, Agent: name, Round: round,
 		Text: res.Reply, Passed: res.Passed, Failed: res.Failed, ChildSessionID: task.SessionID,
+		Notes: usedNotes, NewPoint: newPoint,
 		ReplyTo: strings.TrimSpace(in.ReplyTo), Quote: truncateRunes(strings.TrimSpace(in.Quote), 200),
 	}
 	if res.Failed {
@@ -444,6 +486,12 @@ func (d *discussionRunner) memberPrompt(st *discussionState, name string, m *dis
 		if len(others) > 0 {
 			fmt.Fprintf(&b, "Other members: %s\n", strings.Join(others, ", "))
 		}
+		if len(m.notes) > 0 {
+			b.WriteString("\nYour knowledge pages that match this topic (read them with knowledge_read when you need detail):\n")
+			for _, n := range m.notes {
+				fmt.Fprintf(&b, "- %s (%s)\n", n.title, n.path)
+			}
+		}
 		if st.cfg.KeepsRoomMemory() {
 			if mem := d.reg.RoomMemory().Prompt(st.team, discussionMemoryLimit); mem != "" {
 				fmt.Fprintf(&b, "\nRoom memory (what this room already knows):\n%s\n", mem)
@@ -463,7 +511,7 @@ func (d *discussionRunner) memberPrompt(st *discussionState, name string, m *dis
 	if in.ReplyTo != "" && in.Quote != "" {
 		fmt.Fprintf(&b, "(This answers %s: %q)\n", displayName(d.reg, in.ReplyTo), in.Quote)
 	}
-	fmt.Fprintf(&b, "\nReply as one chat message to the group in the owner's language, in at most %d words. Address others by name when you answer their point. Use your tools only if you need a fact. If you have nothing new to add, reply exactly \"PASS: <short reason>\".", discussionReplyWords)
+	fmt.Fprintf(&b, "\nReply as one chat message to the group in the owner's language, in at most %d words. Address others by name when you answer their point. Use your tools only if you need a fact. Build on what you know: if your notes hold something important the lead did not ask about, raise it and start that sentence with \"New point:\". When you relied on your knowledge pages, end with one line \"Notes: <page titles, comma separated>\". If you have nothing new to add, reply exactly \"PASS: <short reason>\".", discussionReplyWords)
 	return b.String()
 }
 
@@ -680,4 +728,134 @@ func truncateRunes(s string, n int) string {
 	}
 	r := []rune(s)
 	return string(r[:n-1]) + "…"
+}
+
+// noteRef is one knowledge page a member has on the topic.
+type noteRef struct {
+	title string
+	path  string
+}
+
+func noteTitles(notes []noteRef, n int) []string {
+	out := make([]string, 0, n)
+	for i, note := range notes {
+		if i >= n {
+			break
+		}
+		out = append(out, note.title)
+	}
+	return out
+}
+
+// discussionNoteLimit is how many matching pages a member's relevance check
+// counts.
+const discussionNoteLimit = 8
+
+// relevantNotes returns, per member, its domain pages that match topic
+// (knowledge-aware discussions). Members without a domain get none.
+func (r *Registry) relevantNotes(ctx context.Context, topic string, members []string) map[string][]noteRef {
+	out := map[string][]noteRef{}
+	know := r.knowledgeService()
+	if know == nil {
+		return out
+	}
+	domains, _ := know.(core.KnowledgeDomains)
+	for _, name := range members {
+		if domains != nil && !domains.HasDomain(name) {
+			continue
+		}
+		hits, err := know.Recall(ctx, topic, discussionNoteLimit, []string{name}, name, nil)
+		if err != nil {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, h := range hits {
+			if h.Path == "" || seen[h.Path] || strings.Contains(h.Path, "/journal/") {
+				continue
+			}
+			seen[h.Path] = true
+			title := strings.TrimSpace(h.Title)
+			if title == "" {
+				title = strings.TrimSuffix(h.Path[strings.LastIndex(h.Path, "/")+1:], ".md")
+			}
+			out[name] = append(out[name], noteRef{title: title, path: h.Path})
+		}
+	}
+	return out
+}
+
+// knowsSummary is the roster line of a member's knowledge: "48 pages · a, b, c".
+func (r *Registry) knowsSummary(ctx context.Context, name string) string {
+	domains, ok := r.knowledgeService().(core.KnowledgeDomains)
+	if !ok || domains == nil || !domains.HasDomain(name) {
+		return ""
+	}
+	pages, total, err := domains.Pages(ctx, name, "", 4)
+	if err != nil || total == 0 {
+		return ""
+	}
+	titles := make([]string, 0, len(pages))
+	for _, p := range pages {
+		if p.Title != "" {
+			titles = append(titles, p.Title)
+		}
+	}
+	line := fmt.Sprintf("%d pages", total)
+	if len(titles) > 0 {
+		line += " · " + strings.Join(titles, ", ")
+	}
+	return line
+}
+
+// splitNotesLine removes a trailing "Notes: a, b" line from a reply and
+// returns the note titles it named.
+func splitNotesLine(reply string) (string, []string) {
+	lines := strings.Split(strings.TrimRight(reply, "\n "), "\n")
+	if len(lines) == 0 {
+		return reply, nil
+	}
+	last := strings.TrimSpace(lines[len(lines)-1])
+	plain := strings.TrimLeft(last, "*_ ")
+	lower := strings.ToLower(plain)
+	for _, prefix := range []string{"notes:", "catatan:", "notes used:"} {
+		if strings.HasPrefix(lower, prefix) {
+			body := strings.Trim(plain[len(prefix):], "*_ ")
+			var notes []string
+			for _, part := range strings.Split(body, ",") {
+				if t := strings.Trim(strings.TrimSpace(part), "`\"*_"); t != "" && !strings.EqualFold(t, "none") && t != "-" {
+					notes = append(notes, t)
+				}
+			}
+			return strings.TrimSpace(strings.Join(lines[:len(lines)-1], "\n")), notes
+		}
+	}
+	return reply, nil
+}
+
+// markNewPoint reports a "New point:" marker and removes the marker text.
+func markNewPoint(reply string) (string, bool) {
+	found := false
+	for _, marker := range []string{"New point:", "new point:", "**New point:**", "Poin baru:"} {
+		if strings.Contains(reply, marker) {
+			reply = strings.ReplaceAll(reply, marker, "")
+			found = true
+		}
+	}
+	return strings.TrimSpace(strings.ReplaceAll(reply, "  ", " ")), found
+}
+
+func mergeNotes(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{a, b} {
+		for _, n := range list {
+			key := strings.ToLower(n)
+			if n == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, n)
+		}
+	}
+	return out
 }

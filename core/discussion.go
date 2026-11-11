@@ -30,6 +30,16 @@ const DiscussRequestNote = "The owner turned on Discuss for this message: open a
 type DiscussionMember struct {
 	Agent string `json:"agent"`
 	Angle string `json:"angle,omitempty"`
+	// Notes is how many of the member's knowledge pages match the topic, and
+	// Titles the best of them (knowledge-aware discussions).
+	Notes  int      `json:"notes,omitempty"`
+	Titles []string `json:"titles,omitempty"`
+}
+
+// DiscussionSkip is a team member the lead did not bring in, and why.
+type DiscussionSkip struct {
+	Agent  string `json:"agent"`
+	Reason string `json:"reason"`
 }
 
 // DiscussionStartedPayload is the payload of discussion/started.
@@ -44,6 +54,7 @@ type DiscussionStartedPayload struct {
 	Rounds      int                `json:"rounds"`
 	ExtraRounds string             `json:"extra_rounds"`
 	Requested   bool               `json:"requested,omitempty"`
+	Skipped     []DiscussionSkip   `json:"skipped,omitempty"`
 }
 
 // DiscussionMessagePayload is the payload of discussion/message.
@@ -62,6 +73,10 @@ type DiscussionMessagePayload struct {
 	Extra          bool   `json:"extra,omitempty"`
 	Stop           string `json:"stop,omitempty"`
 	ChildSessionID string `json:"child_session_id,omitempty"`
+	// Notes names the member's knowledge pages the reply used; NewPoint is
+	// true when the member raised something the lead did not ask about.
+	Notes    []string `json:"notes,omitempty"`
+	NewPoint bool     `json:"new_point,omitempty"`
 }
 
 // DiscussionPoint is one point of a summary and the member it came from.

@@ -257,3 +257,109 @@ func TestDiscussionLeadPrompt(t *testing.T) {
 		}
 	}
 }
+
+// fakeKnowledge answers Recall and the domain checks the discussion uses.
+type fakeKnowledge struct {
+	core.Knowledge
+	core.KnowledgeDomains
+	hits map[string][]core.KnowledgeHit
+}
+
+func (f *fakeKnowledge) Recall(_ context.Context, _ string, _ int, scopes []string, _ string, _ func(string) bool) ([]core.KnowledgeHit, error) {
+	return f.hits[scopes[0]], nil
+}
+func (f *fakeKnowledge) HasDomain(agent string) bool { return agent == "karin" || agent == "dana" }
+func (f *fakeKnowledge) Pages(_ context.Context, scope, _ string, _ int) ([]core.KnowledgePageInfo, int, error) {
+	if scope == "karin" {
+		return []core.KnowledgePageInfo{{Title: "gaji-pasar"}, {Title: "offer-2026"}}, 48, nil
+	}
+	return nil, 0, nil
+}
+
+func TestDiscussionKnowledgeAware(t *testing.T) {
+	h := newDiscussionHarness(t, mock.Script{Responses: []mock.Response{
+		toolResponse("c1", "discuss_start", `{"topic":"Ambil tawaran?","opening":"O","members":[{"agent":"karin","angle":"pasar"}]}`),
+		toolResponse("c2", "discuss_ask", `{"agent":"karin","message":"@Karin?"}`),
+		textResponse("Layak di persentil 60.\nNew point: bonus tahunan hilang.\nNotes: gaji-pasar, offer-2026"),
+		toolResponse("c3", "discuss_end", `{"reason":"agreed","conclusion":"Ambil."}`),
+		textResponse("ok"),
+	}}, core.TeamConfig{})
+	h.reg.knowledge = &fakeKnowledge{hits: map[string][]core.KnowledgeHit{
+		"karin": {{Path: "agents/karin/wiki/gaji-pasar.md", Title: "gaji-pasar"}, {Path: "agents/karin/wiki/offer-2026.md", Title: "offer-2026"}},
+	}}
+	h.run(t, "ambil ga?")
+	started, msgs, _ := discussionEvents(t, h)
+	if len(started) != 1 || started[0].Members[0].Notes != 2 || len(started[0].Skipped) != 1 || started[0].Skipped[0].Agent != "dana" {
+		t.Fatalf("started=%+v", started)
+	}
+	if p := toolResultPayload(t, h, "c1"); !strings.Contains(p.Output, "karin has 2 matching notes") {
+		t.Fatalf("start output=%q", p.Output)
+	}
+	reply := msgs[1]
+	if !reply.NewPoint || strings.Join(reply.Notes, ",") != "gaji-pasar,offer-2026" || strings.Contains(reply.Text, "Notes:") || strings.Contains(reply.Text, "New point:") {
+		t.Fatalf("reply=%+v", reply)
+	}
+	// The lead's roster carries what each member knows.
+	var system core.SystemMessage
+	for _, e := range h.events(t) {
+		if e.Kind == core.KindSystemMessage {
+			_ = json.Unmarshal(e.Payload, &system)
+		}
+	}
+	if !strings.Contains(system.Text, "karin: Jobs (knows: 48 pages · gaji-pasar, offer-2026)") {
+		t.Fatalf("roster:\n%s", system.Text)
+	}
+}
+
+func TestDiscussionNotesLine(t *testing.T) {
+	text, notes := splitNotesLine("Jawab.\n**Notes:** a, `b`")
+	if text != "Jawab." || strings.Join(notes, "|") != "a|b" {
+		t.Fatalf("text=%q notes=%v", text, notes)
+	}
+	if text, notes := splitNotesLine("Tidak ada catatan di akhir."); text != "Tidak ada catatan di akhir." || notes != nil {
+		t.Fatalf("plain=%q %v", text, notes)
+	}
+}
+
+func TestTaskPromptBuildsOnTeammates(t *testing.T) {
+	h := newDiscussionHarness(t, mock.Script{}, core.TeamConfig{})
+	h.reg.knowledge = &fakeKnowledge{hits: map[string][]core.KnowledgeHit{
+		"karin": {{Path: "agents/karin/wiki/csv-guide.md", Title: "csv-guide"}},
+	}}
+	ctx := context.Background()
+	child, err := h.store.Create(ctx, core.NewSession{Agent: "dana", Channel: "library", Workspace: h.ws, ParentSessionID: h.info.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.Append(ctx, child.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "tc", Payload: core.TurnStart{V: core.PayloadVersion, TurnID: "tc"}},
+		{Kind: core.KindAssistantMessage, TurnID: "tc", Payload: core.AssistantMessage{V: core.PayloadVersion, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "Pakai encoding/csv."}}, StopReason: "end_turn"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runner := &subagentRunner{reg: h.reg, allowed: []string{"karin", "dana"}}
+	got := runner.taskPrompt(ctx, h.info.ID, core.SpawnRequest{Agent: "karin", Prompt: "Implement export CSV", Context: []string{child.ID, "unknown"}, WithNotes: true})
+	for _, want := range []string{"Implement export CSV", "### From dana\nPakai encoding/csv.", "- csv-guide (agents/karin/wiki/csv-guide.md)", "Notes: <page titles"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestToolCallFacts(t *testing.T) {
+	name, note, file := toolCallFacts(json.RawMessage(`{"name":"mcp__lana__knowledge_read","input":{"ref":"agents/karin/wiki/csv-guide.md"}}`))
+	if name != "knowledge_read" || note != "csv-guide" || file != "" {
+		t.Fatalf("read = %q %q %q", name, note, file)
+	}
+	name, _, file = toolCallFacts(json.RawMessage(`{"name":"Edit","input":{"file_path":"invoice/export.go"}}`))
+	if name != "Edit" || file != "invoice/export.go" {
+		t.Fatalf("edit = %q %q", name, file)
+	}
+}
+
+func TestRosterCapabilities(t *testing.T) {
+	got := core.AgentCapabilities(core.AgentConfig{Model: "claude-code/sonnet", Tools: []string{"bash", "write_file", "web_fetch"}, MCP: []string{"broker"}})
+	if strings.Join(got, ",") != "Claude Code,web,files,shell,broker" {
+		t.Fatalf("capabilities = %v", got)
+	}
+}

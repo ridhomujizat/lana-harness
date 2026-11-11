@@ -877,6 +877,7 @@ func (b *webBackend) Agents() []web.Agent {
 			Skills:    skillNames,
 			MCP:       mcp,
 			MCPStatus: mcpStatus,
+			Can:       b.rt.AgentCapabilities(name),
 		})
 	}
 	for _, name := range b.rt.TeamNames() {

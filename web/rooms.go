@@ -68,6 +68,8 @@ type roomJSON struct {
 	Name  string `json:"name"`
 	Kind  string `json:"kind"`
 	Title string `json:"title"`
+	// Can names what an agent can do (spec 47 team work); empty for a team.
+	Can []string `json:"can"`
 	// DisplayName is the human name shown in the UI, "" when unset.
 	DisplayName string `json:"display_name"`
 	Color       string `json:"color"`
@@ -358,6 +360,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 	row := roomJSON{
 		Name:    agent.Name,
 		Kind:    "agent",
+		Can:     nonNilStrings(agent.Can),
 		Members: []string{},
 		Color:   core.ResolveAgentColor(agent.Name, ""),
 	}

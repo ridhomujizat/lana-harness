@@ -1351,6 +1351,14 @@ func (rt *Runtime) AgentModel(agentName string) string {
 	return ""
 }
 
+// AgentCapabilities names what an agent can do (spec 47 team work).
+func (rt *Runtime) AgentCapabilities(agentName string) []string {
+	if agentCfg, ok := rt.agentConfig(agentName); ok {
+		return core.AgentCapabilities(agentCfg)
+	}
+	return nil
+}
+
 // AgentPolicy returns the agent's initial policy; for a team it is the lead's.
 func (rt *Runtime) AgentPolicy(agentName string) string {
 	if agentCfg, ok := rt.agentConfig(agentName); ok {

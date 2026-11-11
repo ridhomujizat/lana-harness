@@ -61,7 +61,68 @@ func (s *subagentRunner) Spawn(ctx context.Context, req core.SpawnRequest) (core
 		return toolError(internalErrorMessage), nil
 	}
 	s.reg.hub.Link(parent.ID, child.ID)
-	return s.runChildTurn(ctx, child, req.Prompt, time.Now())
+	return s.runChildTurn(ctx, child, s.taskPrompt(ctx, parent.ID, req), time.Now())
+}
+
+// taskPrompt adds what the child builds on to a task prompt (spec 47 team
+// work): the last answers of the earlier child sessions the lead named in
+// Context, and the child's knowledge pages that match the task.
+func (s *subagentRunner) taskPrompt(ctx context.Context, parentID string, req core.SpawnRequest) string {
+	var b strings.Builder
+	b.WriteString(req.Prompt)
+	first := true
+	for _, id := range req.Context {
+		info, err := s.reg.store.Info(ctx, id)
+		if err != nil || info.ParentSessionID != parentID {
+			continue
+		}
+		answer := s.reg.lastAnswer(ctx, id)
+		if answer == "" {
+			continue
+		}
+		if first {
+			b.WriteString("\n\nResults from teammates to build on:")
+			first = false
+		}
+		fmt.Fprintf(&b, "\n\n### From %s\n%s", info.Agent, answer)
+	}
+	if req.WithNotes {
+		if notes := s.reg.relevantNotes(ctx, req.Prompt, []string{req.Agent})[req.Agent]; len(notes) > 0 {
+			b.WriteString("\n\nYour knowledge pages that match this task (read them with knowledge_read when you need detail):")
+			for _, n := range notes {
+				fmt.Fprintf(&b, "\n- %s (%s)", n.title, n.path)
+			}
+			b.WriteString("\nIf you relied on these pages, end your answer with one line \"Notes: <page titles, comma separated>\".")
+		}
+	}
+	return b.String()
+}
+
+// lastAnswer is the text of the newest assistant message of a session.
+func (r *Registry) lastAnswer(ctx context.Context, sessionID string) string {
+	events, err := r.store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind != core.KindAssistantMessage {
+			continue
+		}
+		var msg core.AssistantMessage
+		if json.Unmarshal(events[i].Payload, &msg) != nil {
+			continue
+		}
+		var parts []string
+		for _, block := range msg.Content {
+			if block.Kind == core.BlockText && strings.TrimSpace(block.Text) != "" {
+				parts = append(parts, block.Text)
+			}
+		}
+		if len(parts) > 0 {
+			return truncateRunes(strings.Join(parts, "\n"), 4000)
+		}
+	}
+	return ""
 }
 
 // Continue sends a follow-up to an existing child session.
@@ -132,6 +193,8 @@ func (s *subagentRunner) resultOutput(ctx context.Context, child core.SessionInf
 	}
 	steps := 0
 	toolCalls := 0
+	tools := map[string]int{}
+	var notes, files []string
 	for _, event := range events {
 		if event.TurnID != result.TurnID {
 			continue
@@ -141,13 +204,27 @@ func (s *subagentRunner) resultOutput(ctx context.Context, child core.SessionInf
 			steps++
 		case core.KindToolCall:
 			toolCalls++
+			name, ref, file := toolCallFacts(event.Payload)
+			if name != "" {
+				tools[name]++
+			}
+			if ref != "" {
+				notes = append(notes, ref)
+			}
+			if file != "" {
+				files = append(files, file)
+			}
 		}
 	}
+	answer, named := splitNotesLine(result.Text)
 	payload := taskResult{
 		SessionID:  child.ID,
 		Agent:      child.Agent,
 		Status:     result.StopReason,
-		Answer:     result.Text,
+		Answer:     answer,
+		Tools:      tools,
+		Notes:      mergeNotes(named, notes),
+		Files:      mergeNotes(files, nil),
 		Steps:      steps,
 		ToolCalls:  toolCalls,
 		DurationMS: time.Since(started).Milliseconds(),
@@ -176,6 +253,46 @@ type taskResult struct {
 	Steps      int    `json:"steps"`
 	ToolCalls  int    `json:"tool_calls"`
 	DurationMS int64  `json:"duration_ms"`
+	// Spec 47 team work: tool calls by name, the knowledge pages the child
+	// used, and the files it changed.
+	Tools map[string]int `json:"tools,omitempty"`
+	Notes []string       `json:"notes,omitempty"`
+	Files []string       `json:"files,omitempty"`
+}
+
+// toolCallFacts reads a tool/call payload: the tool name without an MCP
+// prefix, the knowledge page it read, and the file it changed.
+func toolCallFacts(raw json.RawMessage) (name, note, file string) {
+	var call struct {
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
+	}
+	if json.Unmarshal(raw, &call) != nil {
+		return "", "", ""
+	}
+	name = call.Name
+	if i := strings.LastIndex(name, "__"); i >= 0 {
+		name = name[i+2:]
+	}
+	var in map[string]any
+	_ = json.Unmarshal(call.Input, &in)
+	str := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := in[k].(string); ok && v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	switch name {
+	case "knowledge_read":
+		if ref := str("ref", "path", "title"); ref != "" {
+			note = strings.TrimSuffix(ref[strings.LastIndex(ref, "/")+1:], ".md")
+		}
+	case "write_file", "edit_file", "Write", "Edit", "MultiEdit":
+		file = str("path", "file_path")
+	}
+	return name, note, file
 }
 
 func toolError(message string) core.ToolOutput {

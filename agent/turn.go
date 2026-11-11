@@ -303,6 +303,11 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 			entry := agenthome.RosterEntry{Name: name}
 			if delegate, ok := agents[name]; ok {
 				entry.Description = delegate.Description
+				entry.Can = core.AgentCapabilities(delegate)
+			}
+			// A team lead picks discussion members by what they know.
+			if teamName != "" {
+				entry.Knows = rn.reg.knowsSummary(ctx, name)
 			}
 			roster = append(roster, entry)
 		}

@@ -192,6 +192,11 @@ type SpawnRequest struct {
 	Prompt string
 	// Title is the child session title. Empty means the agent name.
 	Title string
+	// Context lists earlier child sessions of the same parent whose last
+	// answers the child receives with the prompt (spec 47 team work).
+	Context []string
+	// WithNotes adds the agent's knowledge pages that match the prompt.
+	WithNotes bool
 }
 
 // ContinueRequest is one follow-up to an existing child session.

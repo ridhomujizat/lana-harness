@@ -25,6 +25,11 @@ type DiscussionPrompt struct {
 type RosterEntry struct {
 	Name        string
 	Description string
+	// Knows summarizes the member's knowledge domain ("48 pages · a, b, c"),
+	// "" when it has none (knowledge-aware discussions).
+	Knows string
+	// Can lists what the member can do ("Claude Code, files, shell").
+	Can []string
 }
 
 // ToolNote is the prompt guidance of one offered tool (REQ-ECX-010).
@@ -241,9 +246,19 @@ func roster(entries []RosterEntry) string {
 		if entry.Description != "" {
 			line += ": " + entry.Description
 		}
+		var facts []string
+		if entry.Knows != "" {
+			facts = append(facts, "knows: "+entry.Knows)
+		}
+		if len(entry.Can) > 0 {
+			facts = append(facts, "can: "+strings.Join(entry.Can, ", "))
+		}
+		if len(facts) > 0 {
+			line += " (" + strings.Join(facts, "; ") + ")"
+		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "When a task fits a teammate's role, use the task tool to delegate it, and task_continue to follow up on it; this keeps each session focused on its own work.")
+	lines = append(lines, "When a task fits a teammate's role, use the task tool to delegate it, and task_continue to follow up on it; this keeps each session focused on its own work. Pick the teammate whose knowledge and tools fit the work (research to one with web or knowledge, code changes to one with files and shell or Claude Code). For work in steps, pass earlier results on with task's context field (the session ids from earlier task results) instead of copying them.")
 	return strings.Join(lines, "\n")
 }
 
