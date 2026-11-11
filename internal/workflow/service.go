@@ -43,6 +43,8 @@ const (
 	defaultRunLimit     = 50
 	maxRunLimit         = 200
 	assistTimeout       = 3 * time.Minute
+	// assistEnvTimeout bounds starting MCP servers to list their tools.
+	assistEnvTimeout = 20 * time.Second
 )
 
 // Option configures a Service.
@@ -736,7 +738,19 @@ func (s *Service) Assist(ctx context.Context, id string, baseVersion int, messag
 		return AssistResult{}, err
 	}
 
-	prompt := BuildAssistantPrompt(wf, old, history, message)
+	var env AssistEnv
+	if provider, ok := s.deps.(AssistEnvProvider); ok {
+		ectx, ecancel := context.WithTimeout(ctx, assistEnvTimeout)
+		env = provider.AssistEnv(ectx, wf)
+		ecancel()
+	}
+	var last *RunDetail
+	if runs, err := s.store.ListRuns(ctx, RunFilter{WorkflowID: id, Limit: 1}); err == nil && len(runs) > 0 {
+		if detail, err := s.RunDetail(ctx, id, runs[0].ID); err == nil {
+			last = &detail
+		}
+	}
+	prompt := BuildAssistantPromptEnv(wf, old, history, message, env, last)
 	actx, cancel := context.WithTimeout(ctx, assistTimeout)
 	defer cancel()
 	// The reply is machine-readable (a graph proposal), so the turn is lana
@@ -797,6 +811,15 @@ func (s *Service) Assist(ctx context.Context, id string, baseVersion int, messag
 		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, Change: &change, CreatedAt: now}
 	}
 
+	// The guardian asked for a test run of the saved graph: start it now and
+	// say so; its result reaches the guardian as "Last run" next time.
+	if reply.Test && len(msg.Issues) == 0 {
+		if run, err := s.StartRun(ctx, id, "manual", nil); err == nil {
+			msg.Text = strings.TrimSpace(msg.Text + fmt.Sprintf("\n\nTest run #%d started.", run.Number))
+		} else {
+			msg.Text = strings.TrimSpace(msg.Text + "\n\nThe test run did not start: " + err.Error())
+		}
+	}
 	stored, err := s.store.AppendChat(ctx, msg)
 	if err != nil {
 		return AssistResult{}, err

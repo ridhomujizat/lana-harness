@@ -638,3 +638,53 @@ func TestServiceSubscribeChange(t *testing.T) {
 		t.Fatal("no change received after create")
 	}
 }
+
+// envDeps is fakeDeps with an environment for the assistant prompt.
+type envDeps struct {
+	*fakeDeps
+	env AssistEnv
+}
+
+func (d envDeps) AssistEnv(context.Context, Workflow) AssistEnv { return d.env }
+
+// The assistant sees the environment (MCP tools, secret names) and can start
+// a test run of the graph it saved.
+func TestAssistEnvAndTestRun(t *testing.T) {
+	st := NewMemStore()
+	fake := newFakeDeps()
+	deps := envDeps{fakeDeps: fake, env: AssistEnv{
+		MCPTools: []EnvTool{{Name: "mcp__hub__task_list", Description: "List tasks", Input: `{"type":"object"}`}},
+		Secrets:  []string{"HUB_TOKEN"},
+	}}
+	svc := newTestService(t, st, deps, &testClock{})
+	ctx := context.Background()
+
+	g := Graph{Nodes: []Node{wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true})}}
+	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
+
+	fake.replies = []fakeReply{{
+		contains: "mcp__hub__task_list",
+		text: `{"reply":"Pakai tool MCP langsung","graph":{"nodes":[` +
+			`{"id":"start","type":"trigger.manual","name":"Start","params":{"enabled":true}},` +
+			`{"id":"fetch","type":"tool","name":"Ambil task","params":{"name":"mcp__hub__task_list","input":{}}}],` +
+			`"edges":[{"id":"e1","from":"start","from_port":"out","to":"fetch"}]},"summary":"tool node","test":true}`,
+	}}
+
+	res, err := svc.Assist(ctx, "w", 1, "coba test sendiri")
+	if err != nil {
+		t.Fatalf("assist: %v", err)
+	}
+	if !strings.Contains(res.Message.Text, "Test run #1 started") {
+		t.Fatalf("message = %q, want the test run note", res.Message.Text)
+	}
+	prompt := fake.agentCalls[0].Prompt
+	for _, want := range []string{"HUB_TOKEN", "Bash nodes do NOT get them", "Never promise to do something later"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt misses %q", want)
+		}
+	}
+	runs, _ := st.ListRuns(ctx, RunFilter{WorkflowID: "w"})
+	if len(runs) != 1 || runs[0].Version != 2 {
+		t.Fatalf("runs = %+v, want one run of version 2", runs)
+	}
+}

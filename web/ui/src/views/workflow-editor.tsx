@@ -30,7 +30,7 @@ import { WorkflowAssistant } from "./workflow-assistant";
 import { WorkflowCanvas, addNodeBelow } from "./workflow-canvas";
 import type { NodeBadge, NodeTone } from "./workflow-canvas";
 import { GROUPS, NODE_CATALOG, newNodeId, nodeMeta } from "./workflow-catalog";
-import { ago, useAgentNames } from "./workflow-common";
+import { ago, useAgentNames, useWorkflowStream } from "./workflow-common";
 import { useAgentLabel } from "./agent-label";
 import { NodeInspector } from "./workflow-inspector";
 import { useScriptSuggestions } from "./workflow-script";
@@ -167,6 +167,9 @@ function issuesOf(error: unknown): Issue[] {
   return first && Array.isArray(first.issues) ? first.issues : [];
 }
 
+/* How long the guardian may take to answer (the server's assist timeout). */
+const ASSIST_WAIT_MS = 3 * 60 * 1000;
+
 export function WorkflowEditor({
   workflow,
   onSaved,
@@ -214,18 +217,52 @@ export function WorkflowEditor({
     }
   }, [agents, guardian]);
 
+  /* chatTick reloads the chat. The first message of a new workflow is sent
+     from #/workflows/new; creating it moves to #/workflows/<id>, which mounts
+     a fresh editor while the guardian still works, so the chat reloads when
+     the workflow stream says the workflow changed (the reply is stored). */
+  const [chatTick, setChatTick] = useState(0);
+  useWorkflowStream((change) => {
+    if (workflow && (change.refresh || (change.workflow_id === workflow.id && !change.run_id))) {
+      setChatTick((tick) => tick + 1);
+    }
+  });
   useEffect(() => {
     if (!workflow) {
       return;
     }
     let live = true;
     getChat(workflow.id)
-      .then((response) => live && setMessages(response.messages))
+      .then((response) => {
+        if (!live) {
+          return;
+        }
+        /* Keep an optimistic owner message that the server has not stored yet. */
+        setMessages((current) => {
+          const pending = current.filter((message) => message.id < 0 && !response.messages.some((m) => m.role === "owner" && m.text === message.text));
+          return response.messages.concat(pending);
+        });
+      })
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [workflow?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workflow?.id, chatTick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* The guardian is still answering when the newest message is the owner's and
+     is younger than the assistant timeout, also after a remount. */
+  const [awaitingReply, setAwaitingReply] = useState(false);
+  useEffect(() => {
+    const last = messages.length > 0 ? messages[messages.length - 1] : null;
+    const left = last && last.role === "owner" ? ASSIST_WAIT_MS - (Date.now() - last.created_at) : 0;
+    if (left <= 0) {
+      setAwaitingReply(false);
+      return undefined;
+    }
+    setAwaitingReply(true);
+    const timer = window.setTimeout(() => setAwaitingReply(false), left);
+    return () => window.clearTimeout(timer);
+  }, [messages]);
 
   useEffect(() => {
     if (!workflow) {
@@ -678,7 +715,7 @@ export function WorkflowEditor({
               guardian={guardian || "default"}
               agents={agents}
               messages={messages}
-              busy={busy}
+              busy={busy || awaitingReply}
               lockTools={lockTools}
               onGuardian={setGuardian}
               onSend={send}
