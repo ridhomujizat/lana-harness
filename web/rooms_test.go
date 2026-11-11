@@ -653,3 +653,18 @@ func TestRoomSendDiscussNote(t *testing.T) {
 		t.Fatalf("note = %q", note)
 	}
 }
+
+// An agent at work in a team room shows where in its own chat row, not a
+// bare "Thinking", so the owner's chat with it does not look busy.
+func TestPresenceWorkingInTeamRoom(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "karin", Kind: "agent"}, {Name: "template-email", Kind: "team"}}
+	room := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "template-email", Channel: "web", Address: "owner", Status: "running", CreatedAt: 1000, UpdatedAt: 2000})
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "karin", Channel: "web", Address: "owner", Status: "running", ParentSessionID: room.ID, CreatedAt: 1000, UpdatedAt: 2000})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	row := roomRowForTest(t, s, cookie, "karin")
+	if row.Presence.State != "working" || row.Presence.Label != "Working in template-email" {
+		t.Fatalf("presence = %+v, want working in template-email", row.Presence)
+	}
+}

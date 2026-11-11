@@ -655,9 +655,39 @@ func (s *Server) roomWorking(ctx context.Context, name string) (label string, si
 			continue
 		}
 		label, since = s.roomRunningLabel(ctx, info)
+		// An agent at work in a team room says where, so its own chat row
+		// does not look busy with the owner's chat.
+		if info.ParentSessionID != "" {
+			if team := s.teamRoomOf(ctx, info.ParentSessionID); team != "" {
+				label = "Working in " + team
+			}
+		}
 		return label, since, info.ID, true
 	}
 	return "", 0, "", false
+}
+
+// teamRoomOf returns the display name of the team room a session belongs to,
+// or "" when its agent is not a team.
+func (s *Server) teamRoomOf(ctx context.Context, sessionID string) string {
+	session, err := s.backend.Session(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	room, ok := findRoom(s.backend, session.Agent)
+	if !ok || room.Kind != "team" {
+		return ""
+	}
+	if s.configStore != nil {
+		if file, err := s.configStore.ConfigFile(ctx); err == nil && file.Exists {
+			if document, err := parseTeamDocument(file.Raw); err == nil {
+				if name := mapAgentString(document.Teams[room.Name], "display_name"); name != "" {
+					return name
+				}
+			}
+		}
+	}
+	return room.Name
 }
 
 // roomRunningLabel returns "Running <tool>" from the newest tool call of the
