@@ -151,8 +151,20 @@ type KnowledgeDomains interface {
 	HasDomain(agent string) bool
 	Pages(ctx context.Context, scope, q string, limit int) ([]KnowledgePageInfo, int, error)
 	// Page returns the document and its raw markdown for a vault path
-	// (API-DKN-005).
+	// (API-DKN-005). The document also carries the API-KGR-002 detail fields:
+	// type, description, updated, sources, and the resolved links.
 	Page(ctx context.Context, path string) (KnowledgeDoc, string, error)
+	// Graph returns the knowledge graph of the vault (API-KGR-001, REQ-KGR-010).
+	Graph(ctx context.Context, scope string, journals, sources bool) (KnowledgeGraph, error)
+	// Activity returns the newest log entries, newest first, strictly older than
+	// before when it is non-zero (API-KGR-004, REQ-KGR-040).
+	Activity(ctx context.Context, limit int, before time.Time, kind string) (KnowledgeActivityPage, error)
+	// Health returns the upkeep health of the vault without memory; the runtime
+	// adds the memory blocks (API-KGR-005, REQ-KGR-041).
+	Health(ctx context.Context) (KnowledgeHealth, error)
+	// DecidedProposals returns the latest decided proposals, newest decided
+	// first (API-KGR-003, REQ-KGR-030).
+	DecidedProposals(ctx context.Context, limit int) ([]KnowledgeProposal, error)
 	DomainStats(ctx context.Context, agent string, now time.Time) (KnowledgeDomainStats, error)
 	ScopeStats(ctx context.Context) ([]KnowledgeScopeStat, error)
 	// ReadIn resolves a page title in caller's domain first, then shared, then
@@ -179,11 +191,11 @@ type KnowledgeProposal struct {
 	DecidedAt int64
 }
 
-// ReviewItem is one pending entry of the owner review queue (API-DKN-006): a
-// knowledge proposal (Kind "knowledge") or a skill proposal (Kind "skill").
-// Action is the requested write action, or "create"/"update" for a skill. Body
-// is a readable rendering of the change; Description is set for skill items
-// only.
+// ReviewItem is one entry of the owner review queue (API-DKN-006): a knowledge
+// proposal (Kind "knowledge") or a skill proposal (Kind "skill"). Action is the
+// requested write action, or "create"/"update" for a skill. Body is a readable
+// rendering of the change; Description is set for skill items only. Status,
+// Result, DecidedAt, and OldText are set for decided items (API-KGR-003).
 type ReviewItem struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"`
@@ -196,6 +208,10 @@ type ReviewItem struct {
 	OwnerTurn   bool   `json:"owner_turn"`
 	SessionID   string `json:"session_id"`
 	CreatedAt   int64  `json:"created_at"`
+	Status      string `json:"status,omitempty"`
+	Result      string `json:"result,omitempty"`
+	DecidedAt   int64  `json:"decided_at,omitempty"`
+	OldText     string `json:"old_text,omitempty"`
 }
 
 // KnowledgeQuery is one search request. Kind and Type optionally narrow the
@@ -227,7 +243,8 @@ type KnowledgeHit struct {
 
 // KnowledgeDoc is the text of one vault file, with the returned line range and
 // the file's total line count (REQ-KNW-041). Lines are 1-based. Scope names
-// where the file belongs: "shared" or an agent name.
+// where the file belongs: "shared" or an agent name. The detail fields below
+// are filled by Page only (API-KGR-002, REQ-KGR-020).
 type KnowledgeDoc struct {
 	Path  string
 	Title string
@@ -236,6 +253,30 @@ type KnowledgeDoc struct {
 	Total int
 	Lines []string
 	Scope string
+
+	Type        string
+	Description string
+	Updated     string
+	Sources     []string
+	LinksOut    []KnowledgeLinkRef
+	Unresolved  []string
+	LinksIn     []KnowledgeBacklink
+}
+
+// KnowledgeLinkRef is one resolved link target of a page (API-KGR-002).
+type KnowledgeLinkRef struct {
+	Path  string `json:"path"`
+	Title string `json:"title"`
+	Scope string `json:"scope"`
+}
+
+// KnowledgeBacklink is one resolved inbound link with the context of the
+// linking line (API-KGR-002).
+type KnowledgeBacklink struct {
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	Scope   string `json:"scope"`
+	Context string `json:"context"`
 }
 
 // KnowledgeWrite is one page change, as the knowledge_write tool and the
@@ -287,4 +328,107 @@ type KnowledgeIngestResult struct {
 	Path      string
 	Duplicate bool
 	Queued    bool
+}
+
+// KnowledgeGraph is the knowledge graph of a vault (API-KGR-001, REQ-KGR-010).
+// Edges join nodes in Nodes only; hub edges are not listed.
+type KnowledgeGraph struct {
+	Nodes     []KnowledgeGraphNode `json:"nodes"`
+	Hubs      []KnowledgeGraphHub  `json:"hubs"`
+	Edges     []KnowledgeGraphEdge `json:"edges"`
+	Counts    KnowledgeGraphCounts `json:"counts"`
+	Truncated bool                 `json:"truncated"`
+}
+
+// KnowledgeGraphNode is one node of the knowledge graph. Kind is "page",
+// "journal", or "source"; Degree is edges in plus out (API-KGR-001).
+type KnowledgeGraphNode struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Scope   string `json:"scope"`
+	Kind    string `json:"kind"`
+	Type    string `json:"type"`
+	Updated string `json:"updated"`
+	Degree  int    `json:"degree"`
+}
+
+// KnowledgeGraphEdge is one resolved page-to-page link (API-KGR-001).
+type KnowledgeGraphEdge struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+}
+
+// KnowledgeGraphHub is the page count of one scope (API-KGR-001).
+type KnowledgeGraphHub struct {
+	Scope string `json:"scope"`
+	Pages int    `json:"pages"`
+}
+
+// KnowledgeGraphCounts are the vault totals of a graph (API-KGR-001).
+type KnowledgeGraphCounts struct {
+	Pages  int `json:"pages"`
+	Links  int `json:"links"`
+	Broken int `json:"broken"`
+}
+
+// KnowledgeActivityEntry is one parsed log.md entry (API-KGR-004). At is an
+// RFC 3339 local time; Kind is one of run, promotion, write, review, lint,
+// error, other; Lines drop the leading "- ".
+type KnowledgeActivityEntry struct {
+	At      string   `json:"at"`
+	Heading string   `json:"heading"`
+	Kind    string   `json:"kind"`
+	Actor   string   `json:"actor"`
+	Lines   []string `json:"lines"`
+}
+
+// KnowledgeActivityPage is one page of log entries, newest first. NextBefore is
+// the time to pass as before for the next page, empty when nothing is older
+// (API-KGR-004).
+type KnowledgeActivityPage struct {
+	Entries    []KnowledgeActivityEntry `json:"entries"`
+	NextBefore string                   `json:"next_before"`
+}
+
+// KnowledgeHealth is the upkeep health of the vault (API-KGR-005). LastRun and
+// Lint are null when there is none; Memory is filled by the runtime.
+type KnowledgeHealth struct {
+	LastRun       *KnowledgeHealthRun     `json:"last_run"`
+	NextAt        string                  `json:"next_at"`
+	Lint          *KnowledgeHealthLint    `json:"lint"`
+	ReviewPending int                     `json:"review_pending"`
+	Memory        []KnowledgeHealthMemory `json:"memory"`
+}
+
+// KnowledgeHealthRun is the last nightly run: its time, the sessions journaled,
+// the ops applied and skipped across the run's promotions, and its error
+// (API-KGR-005).
+type KnowledgeHealthRun struct {
+	At        string `json:"at"`
+	Journaled int    `json:"journaled"`
+	Applied   int    `json:"applied"`
+	Skipped   int    `json:"skipped"`
+	Error     string `json:"error"`
+}
+
+// KnowledgeHealthLint is the latest lint report with its per-section counts
+// (API-KGR-005).
+type KnowledgeHealthLint struct {
+	Date           string `json:"date"`
+	Path           string `json:"path"`
+	Pages          int    `json:"pages"`
+	Contradictions int    `json:"contradictions"`
+	Conflicts      int    `json:"conflicts"`
+	Duplicates     int    `json:"duplicates"`
+	Broken         int    `json:"broken"`
+	Orphans        int    `json:"orphans"`
+	Missing        int    `json:"missing"`
+}
+
+// KnowledgeHealthMemory is the MEMORY.md size and limit of one agent
+// (API-KGR-005, REQ-KGR-041).
+type KnowledgeHealthMemory struct {
+	Agent      string `json:"agent"`
+	Characters int    `json:"characters"`
+	Limit      int    `json:"limit"`
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
@@ -18,6 +19,12 @@ import (
 const (
 	knowledgePagesDefaultLimit = 200
 	knowledgePagesMaxLimit     = 500
+)
+
+// Knowledge activity bounds (API-KGR-004): limit 1–200, default 50.
+const (
+	knowledgeActivityDefaultLimit = 50
+	knowledgeActivityMaxLimit     = 200
 )
 
 // knowledgeScopeRE is the agent-name scope pattern of API-DKN-004 (the same
@@ -64,19 +71,28 @@ type KnowledgeBackend interface {
 }
 
 // KnowledgeDomainBackend is the optional scoped-knowledge port of the page
-// list, page read, review queue, and the agent overview block
-// (API-DKN-004–008). A Backend that also implements it installs the port in
-// SetBackend. It is separate from KnowledgeBackend so implementations that
-// only serve the status routes stay unchanged.
+// list, page read, graph, activity, health, review queue, and the agent
+// overview block (API-DKN-004–008, API-KGR-001–005). A Backend that also
+// implements it installs the port in SetBackend. It is separate from
+// KnowledgeBackend so implementations that only serve the status routes stay
+// unchanged.
 type KnowledgeDomainBackend interface {
 	// KnowledgePages returns one page of the knowledge list, newest first,
 	// with the total before the limit (API-DKN-004).
 	KnowledgePages(ctx context.Context, scope, q string, limit int) ([]core.KnowledgePageInfo, int, error)
-	// KnowledgePage returns one vault file and its raw markdown (API-DKN-005).
+	// KnowledgePage returns one vault file and its raw markdown (API-DKN-005,
+	// API-KGR-002).
 	KnowledgePage(ctx context.Context, path string) (core.KnowledgeDoc, string, error)
-	// ReviewItems returns the pending review queue, newest first
-	// (API-DKN-006).
-	ReviewItems(ctx context.Context) ([]core.ReviewItem, error)
+	// KnowledgeGraph returns the knowledge graph (API-KGR-001).
+	KnowledgeGraph(ctx context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error)
+	// KnowledgeActivity returns the newest log entries (API-KGR-004).
+	KnowledgeActivity(ctx context.Context, limit int, before time.Time, kind string) (core.KnowledgeActivityPage, error)
+	// KnowledgeHealth returns the upkeep health (API-KGR-005).
+	KnowledgeHealth(ctx context.Context) (core.KnowledgeHealth, error)
+	// ReviewItems returns the pending review queue (status "pending") or the
+	// latest decided knowledge proposals (status "decided") (API-DKN-006,
+	// API-KGR-003).
+	ReviewItems(ctx context.Context, status string) ([]core.ReviewItem, error)
 	// ReviewDecide approves or rejects one review item and returns its new
 	// status (API-DKN-007).
 	ReviewDecide(ctx context.Context, id string, approve bool) (string, error)
@@ -108,12 +124,20 @@ type knowledgePagesResponse struct {
 	Total int                      `json:"total"`
 }
 
-// knowledgePageResponse is the GET /v1/knowledge/page body (API-DKN-005).
+// knowledgePageResponse is the GET /v1/knowledge/page body (API-DKN-005,
+// API-KGR-002). Lists are never null.
 type knowledgePageResponse struct {
-	Path     string `json:"path"`
-	Title    string `json:"title"`
-	Scope    string `json:"scope"`
-	Markdown string `json:"markdown"`
+	Path        string                   `json:"path"`
+	Title       string                   `json:"title"`
+	Scope       string                   `json:"scope"`
+	Markdown    string                   `json:"markdown"`
+	Type        string                   `json:"type"`
+	Description string                   `json:"description"`
+	Updated     string                   `json:"updated"`
+	Sources     []string                 `json:"sources"`
+	LinksOut    []core.KnowledgeLinkRef  `json:"links_out"`
+	Unresolved  []string                 `json:"unresolved"`
+	LinksIn     []core.KnowledgeBacklink `json:"links_in"`
 }
 
 // reviewListResponse is the GET /v1/review body (API-DKN-006).
@@ -138,6 +162,9 @@ func (s *Server) registerKnowledgeRoutes() {
 	s.Handle("POST /v1/knowledge/consolidate", http.HandlerFunc(s.handleKnowledgeConsolidate))
 	s.Handle("GET /v1/knowledge/pages", http.HandlerFunc(s.handleKnowledgePages))
 	s.Handle("GET /v1/knowledge/page", http.HandlerFunc(s.handleKnowledgePage))
+	s.Handle("GET /v1/knowledge/graph", http.HandlerFunc(s.handleKnowledgeGraph))
+	s.Handle("GET /v1/knowledge/activity", http.HandlerFunc(s.handleKnowledgeActivity))
+	s.Handle("GET /v1/knowledge/health", http.HandlerFunc(s.handleKnowledgeHealth))
 	s.Handle("GET /v1/review", http.HandlerFunc(s.handleReviewList))
 	s.Handle("POST /v1/review/{id}/approve", s.handleReviewDecide(true))
 	s.Handle("POST /v1/review/{id}/reject", s.handleReviewDecide(false))
@@ -315,7 +342,19 @@ func (s *Server) handleKnowledgePage(w http.ResponseWriter, r *http.Request) {
 	doc, markdown, err := s.knowledgeDomainBackend.KnowledgePage(r.Context(), path)
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, knowledgePageResponse{Path: doc.Path, Title: doc.Title, Scope: doc.Scope, Markdown: markdown})
+		writeJSON(w, http.StatusOK, knowledgePageResponse{
+			Path:        doc.Path,
+			Title:       doc.Title,
+			Scope:       doc.Scope,
+			Markdown:    markdown,
+			Type:        doc.Type,
+			Description: doc.Description,
+			Updated:     doc.Updated,
+			Sources:     nonNilStrings(doc.Sources),
+			LinksOut:    nonNilLinks(doc.LinksOut),
+			Unresolved:  nonNilStrings(doc.Unresolved),
+			LinksIn:     nonNilBacklinks(doc.LinksIn),
+		})
 	case errors.Is(err, fs.ErrNotExist):
 		writeAPIError(w, http.StatusNotFound, "not_found", "page not found")
 	case errors.Is(err, ErrKnowledgeUnavailable):
@@ -326,14 +365,122 @@ func (s *Server) handleKnowledgePage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleReviewList serves GET /v1/review (API-DKN-006).
+// handleKnowledgeGraph serves GET /v1/knowledge/graph (API-KGR-001).
+func (s *Server) handleKnowledgeGraph(w http.ResponseWriter, r *http.Request) {
+	if s.knowledgeDomainBackend == nil {
+		s.logger.Error("web: knowledge domain backend is not configured")
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	query := r.URL.Query()
+	scope := strings.TrimSpace(query.Get("scope"))
+	if scope == "" {
+		scope = "all"
+	}
+	if !validKnowledgeScope(scope) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "scope must be all, shared, or an agent name")
+		return
+	}
+	journals, ok := knowledgeBoolFlag(query.Get("journals"))
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "journals must be 0 or 1")
+		return
+	}
+	sources, ok := knowledgeBoolFlag(query.Get("sources"))
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "sources must be 0 or 1")
+		return
+	}
+	graph, err := s.knowledgeDomainBackend.KnowledgeGraph(r.Context(), scope, journals, sources)
+	if err != nil {
+		s.writeKnowledgeDomainError(w, "knowledge graph", err)
+		return
+	}
+	if graph.Nodes == nil {
+		graph.Nodes = []core.KnowledgeGraphNode{}
+	}
+	if graph.Hubs == nil {
+		graph.Hubs = []core.KnowledgeGraphHub{}
+	}
+	if graph.Edges == nil {
+		graph.Edges = []core.KnowledgeGraphEdge{}
+	}
+	writeJSON(w, http.StatusOK, graph)
+}
+
+// handleKnowledgeActivity serves GET /v1/knowledge/activity (API-KGR-004).
+func (s *Server) handleKnowledgeActivity(w http.ResponseWriter, r *http.Request) {
+	if s.knowledgeDomainBackend == nil {
+		s.logger.Error("web: knowledge domain backend is not configured")
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	query := r.URL.Query()
+	limit := knowledgeActivityDefaultLimit
+	if raw := strings.TrimSpace(query.Get("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > knowledgeActivityMaxLimit {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "limit must be between 1 and 200")
+			return
+		}
+		limit = value
+	}
+	before, ok := parseActivityBefore(query.Get("before"))
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "before must be an RFC 3339 or YYYY-MM-DDTHH:MM time")
+		return
+	}
+	kind := strings.TrimSpace(query.Get("kind"))
+	if !validActivityKind(kind) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "kind must be run, promotion, write, review, lint, error, other, or writes")
+		return
+	}
+	page, err := s.knowledgeDomainBackend.KnowledgeActivity(r.Context(), limit, before, kind)
+	if err != nil {
+		s.writeKnowledgeDomainError(w, "knowledge activity", err)
+		return
+	}
+	if page.Entries == nil {
+		page.Entries = []core.KnowledgeActivityEntry{}
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// handleKnowledgeHealth serves GET /v1/knowledge/health (API-KGR-005).
+func (s *Server) handleKnowledgeHealth(w http.ResponseWriter, r *http.Request) {
+	if s.knowledgeDomainBackend == nil {
+		s.logger.Error("web: knowledge domain backend is not configured")
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	health, err := s.knowledgeDomainBackend.KnowledgeHealth(r.Context())
+	if err != nil {
+		s.writeKnowledgeDomainError(w, "knowledge health", err)
+		return
+	}
+	if health.Memory == nil {
+		health.Memory = []core.KnowledgeHealthMemory{}
+	}
+	writeJSON(w, http.StatusOK, health)
+}
+
+// handleReviewList serves GET /v1/review (API-DKN-006, API-KGR-003). The
+// status query is "pending" (default) or "decided".
 func (s *Server) handleReviewList(w http.ResponseWriter, r *http.Request) {
 	if s.knowledgeDomainBackend == nil {
 		s.logger.Error("web: knowledge domain backend is not configured")
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-	items, err := s.knowledgeDomainBackend.ReviewItems(r.Context())
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	if status == "" {
+		status = "pending"
+	}
+	if status != "pending" && status != "decided" {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "status must be pending or decided")
+		return
+	}
+	items, err := s.knowledgeDomainBackend.ReviewItems(r.Context(), status)
 	if err != nil {
 		s.writeKnowledgeDomainError(w, "review list", err)
 		return
@@ -411,4 +558,60 @@ func validKnowledgePagePath(ref string) bool {
 	default:
 		return false
 	}
+}
+
+// knowledgeBoolFlag parses a 0/1 query flag (API-KGR-001). An empty value is
+// false; anything but "", "0", and "1" is invalid.
+func knowledgeBoolFlag(raw string) (value, ok bool) {
+	switch strings.TrimSpace(raw) {
+	case "", "0":
+		return false, true
+	case "1":
+		return true, true
+	default:
+		return false, false
+	}
+}
+
+// parseActivityBefore parses the before query of API-KGR-004: an RFC 3339 time
+// or "YYYY-MM-DDTHH:MM" in the local zone. An empty value is the zero time (no
+// filter).
+func parseActivityBefore(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, true
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, true
+	}
+	if t, err := time.ParseInLocation("2006-01-02T15:04", raw, time.Local); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+// validActivityKind reports whether kind is a valid API-KGR-004 filter: "" (no
+// filter), one of the kinds, or "writes".
+func validActivityKind(kind string) bool {
+	switch kind {
+	case "", "run", "promotion", "write", "review", "lint", "error", "other", "writes":
+		return true
+	}
+	return false
+}
+
+// nonNilLinks returns refs, or an empty list when it is nil.
+func nonNilLinks(refs []core.KnowledgeLinkRef) []core.KnowledgeLinkRef {
+	if refs == nil {
+		return []core.KnowledgeLinkRef{}
+	}
+	return refs
+}
+
+// nonNilBacklinks returns in, or an empty list when it is nil.
+func nonNilBacklinks(in []core.KnowledgeBacklink) []core.KnowledgeBacklink {
+	if in == nil {
+		return []core.KnowledgeBacklink{}
+	}
+	return in
 }

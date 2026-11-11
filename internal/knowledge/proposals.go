@@ -76,6 +76,25 @@ func (i *Index) PendingProposals() ([]Proposal, error) {
 	return i.queryProposals("SELECT "+proposalColumns+" FROM proposals WHERE status = ? ORDER BY created_at DESC, id DESC", proposalPending)
 }
 
+// DecidedProposals returns every proposal in one of statuses, newest decided
+// first, at most limit (REQ-KGR-030). A limit of 0 returns every row.
+func (i *Index) DecidedProposals(statuses []string, limit int) ([]Proposal, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	query := "SELECT " + proposalColumns + " FROM proposals WHERE status IN (" + placeholders(len(statuses)) + ")"
+	args := make([]any, 0, len(statuses)+1)
+	for _, status := range statuses {
+		args = append(args, status)
+	}
+	query += " ORDER BY decided_at DESC, id DESC"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+	return i.queryProposals(query, args...)
+}
+
 // SetProposal moves one proposal to status with a result and a decided time.
 // An unknown id wraps sql.ErrNoRows.
 func (i *Index) SetProposal(id, status, result string, at int64) error {

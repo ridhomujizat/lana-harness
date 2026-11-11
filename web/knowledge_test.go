@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
@@ -40,8 +41,21 @@ type fakeKnowledgeBackend struct {
 	pageDoc        core.KnowledgeDoc
 	pageMarkdown   string
 	pageErr        error
+	graph          core.KnowledgeGraph
+	graphErr       error
+	graphScope     string
+	graphJournals  bool
+	graphSources   bool
+	activity       core.KnowledgeActivityPage
+	activityErr    error
+	activityLimit  int
+	activityBefore time.Time
+	activityKind   string
+	health         core.KnowledgeHealth
+	healthErr      error
 	reviewItems    []core.ReviewItem
 	reviewErr      error
+	reviewStatus   string
 	decideStatus   string
 	decideErr      error
 	decideCalls    []reviewDecision
@@ -75,7 +89,31 @@ func (b *fakeKnowledgeBackend) KnowledgePage(_ context.Context, _ string) (core.
 	return b.pageDoc, b.pageMarkdown, nil
 }
 
-func (b *fakeKnowledgeBackend) ReviewItems(context.Context) ([]core.ReviewItem, error) {
+func (b *fakeKnowledgeBackend) KnowledgeGraph(_ context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error) {
+	b.graphScope, b.graphJournals, b.graphSources = scope, journals, sources
+	if b.graphErr != nil {
+		return core.KnowledgeGraph{}, b.graphErr
+	}
+	return b.graph, nil
+}
+
+func (b *fakeKnowledgeBackend) KnowledgeActivity(_ context.Context, limit int, before time.Time, kind string) (core.KnowledgeActivityPage, error) {
+	b.activityLimit, b.activityBefore, b.activityKind = limit, before, kind
+	if b.activityErr != nil {
+		return core.KnowledgeActivityPage{}, b.activityErr
+	}
+	return b.activity, nil
+}
+
+func (b *fakeKnowledgeBackend) KnowledgeHealth(context.Context) (core.KnowledgeHealth, error) {
+	if b.healthErr != nil {
+		return core.KnowledgeHealth{}, b.healthErr
+	}
+	return b.health, nil
+}
+
+func (b *fakeKnowledgeBackend) ReviewItems(_ context.Context, status string) ([]core.ReviewItem, error) {
+	b.reviewStatus = status
 	if b.reviewErr != nil {
 		return nil, b.reviewErr
 	}
@@ -734,6 +772,9 @@ func TestKnowledgeDomainWithoutPortIs500(t *testing.T) {
 	}{
 		{http.MethodGet, "/v1/knowledge/pages"},
 		{http.MethodGet, "/v1/knowledge/page?path=wiki/a.md"},
+		{http.MethodGet, "/v1/knowledge/graph"},
+		{http.MethodGet, "/v1/knowledge/activity"},
+		{http.MethodGet, "/v1/knowledge/health"},
 		{http.MethodGet, "/v1/review"},
 		{http.MethodPost, "/v1/review/p_1/approve"},
 	}
@@ -748,8 +789,325 @@ func TestKnowledgeDomainRequiresAuth(t *testing.T) {
 	backend := newFakeKnowledgeBackend()
 	s, _ := newSessionTestServer(t, backend)
 
-	for _, target := range []string{"/v1/knowledge/pages", "/v1/knowledge/page?path=wiki/a.md", "/v1/review"} {
+	for _, target := range []string{
+		"/v1/knowledge/pages", "/v1/knowledge/page?path=wiki/a.md", "/v1/review",
+		"/v1/knowledge/graph", "/v1/knowledge/activity", "/v1/knowledge/health",
+	} {
 		rr := serveAuth(s, authRequest(http.MethodGet, target, ""))
 		assertAuthError(t, rr, http.StatusUnauthorized, "unauthenticated")
+	}
+}
+
+// sampleKnowledgeGraph is a populated API-KGR-001 body.
+func sampleKnowledgeGraph() core.KnowledgeGraph {
+	return core.KnowledgeGraph{
+		Nodes: []core.KnowledgeGraphNode{
+			{ID: "wiki/A.md", Title: "A", Scope: "shared", Kind: "page", Type: "topic", Updated: "2026-11-11", Degree: 1},
+		},
+		Hubs:   []core.KnowledgeGraphHub{{Scope: "shared", Pages: 1}},
+		Edges:  []core.KnowledgeGraphEdge{{Source: "wiki/A.md", Target: "wiki/B.md"}},
+		Counts: core.KnowledgeGraphCounts{Pages: 1, Links: 1, Broken: 0},
+	}
+}
+
+// TestKnowledgeGraphShape covers the API-KGR-001 success body and query.
+func TestKnowledgeGraphShape(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.graph = sampleKnowledgeGraph()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/graph?scope=dana&journals=1&sources=1", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got core.KnowledgeGraph
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if !reflect.DeepEqual(got, backend.graph) {
+		t.Fatalf("graph = %+v, want %+v", got, backend.graph)
+	}
+	if backend.graphScope != "dana" || !backend.graphJournals || !backend.graphSources {
+		t.Fatalf("arguments = scope %q journals %v sources %v", backend.graphScope, backend.graphJournals, backend.graphSources)
+	}
+	for _, key := range []string{`"nodes":[`, `"hubs":[`, `"edges":[`, `"counts":{"pages":1,"links":1,"broken":0}`, `"truncated":false`} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
+	}
+}
+
+// TestKnowledgeGraphDefaultsAndEmpty covers the default scope and a never-null
+// empty graph.
+func TestKnowledgeGraphDefaultsAndEmpty(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/graph", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if backend.graphScope != "all" || backend.graphJournals || backend.graphSources {
+		t.Fatalf("arguments = scope %q journals %v sources %v", backend.graphScope, backend.graphJournals, backend.graphSources)
+	}
+	for _, key := range []string{`"nodes":[]`, `"hubs":[]`, `"edges":[]`} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
+	}
+}
+
+// TestKnowledgeGraphInvalidIs400 covers the API-KGR-001 validation (AC-KGR-005).
+func TestKnowledgeGraphInvalidIs400(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	for _, target := range []string{
+		"/v1/knowledge/graph?scope=Bad",
+		"/v1/knowledge/graph?scope=bad!",
+		"/v1/knowledge/graph?journals=2",
+		"/v1/knowledge/graph?journals=x",
+		"/v1/knowledge/graph?sources=yes",
+	} {
+		rr := serveAuth(s, sessionTestRequest(http.MethodGet, target, "", cookie, ""))
+		assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+	}
+}
+
+// TestKnowledgeGraphUnavailableIs503 covers API-KGR-001 without a service.
+func TestKnowledgeGraphUnavailableIs503(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.graphErr = ErrKnowledgeUnavailable
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/graph", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "unavailable")
+}
+
+// sampleKnowledgeActivity is a populated API-KGR-004 body.
+func sampleKnowledgeActivity() core.KnowledgeActivityPage {
+	return core.KnowledgeActivityPage{
+		Entries: []core.KnowledgeActivityEntry{
+			{At: "2026-11-11T06:44:00+07:00", Heading: "consolidation", Kind: "run", Actor: "", Lines: []string{"journaled 11 sessions"}},
+		},
+		NextBefore: "2026-11-10T13:42:00+07:00",
+	}
+}
+
+// TestKnowledgeActivityShape covers the API-KGR-004 success body and query.
+func TestKnowledgeActivityShape(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.activity = sampleKnowledgeActivity()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/activity?limit=10&kind=writes&before=2026-11-11T06:00", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got core.KnowledgeActivityPage
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if !reflect.DeepEqual(got, backend.activity) {
+		t.Fatalf("activity = %+v, want %+v", got, backend.activity)
+	}
+	if backend.activityLimit != 10 || backend.activityKind != "writes" {
+		t.Fatalf("arguments = limit %d kind %q", backend.activityLimit, backend.activityKind)
+	}
+	if !backend.activityBefore.Equal(time.Date(2026, 11, 11, 6, 0, 0, 0, time.Local)) {
+		t.Fatalf("before = %v", backend.activityBefore)
+	}
+	for _, key := range []string{`"entries":[`, `"at":"2026-11-11T06:44:00+07:00"`, `"kind":"run"`, `"actor":""`, `"next_before":"2026-11-10T13:42:00+07:00"`} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
+	}
+}
+
+// TestKnowledgeActivityDefaults covers the default limit and an empty,
+// never-null entries list.
+func TestKnowledgeActivityDefaults(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/activity", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if backend.activityLimit != 50 || backend.activityKind != "" || !backend.activityBefore.IsZero() {
+		t.Fatalf("arguments = limit %d kind %q before %v", backend.activityLimit, backend.activityKind, backend.activityBefore)
+	}
+	if !strings.Contains(rr.Body.String(), `"entries":[]`) {
+		t.Fatalf("body has no empty entries: %s", rr.Body.String())
+	}
+}
+
+// TestKnowledgeActivityRFC3339Before covers the RFC 3339 before form.
+func TestKnowledgeActivityRFC3339Before(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/activity?before=2026-11-11T06:00:00%2B07:00", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	want, _ := time.Parse(time.RFC3339, "2026-11-11T06:00:00+07:00")
+	if !backend.activityBefore.Equal(want) {
+		t.Fatalf("before = %v, want %v", backend.activityBefore, want)
+	}
+}
+
+// TestKnowledgeActivityInvalidIs400 covers the API-KGR-004 validation
+// (AC-KGR-005).
+func TestKnowledgeActivityInvalidIs400(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	for _, target := range []string{
+		"/v1/knowledge/activity?limit=0",
+		"/v1/knowledge/activity?limit=201",
+		"/v1/knowledge/activity?limit=abc",
+		"/v1/knowledge/activity?before=2026-11-11",
+		"/v1/knowledge/activity?before=garbage",
+		"/v1/knowledge/activity?kind=bogus",
+	} {
+		rr := serveAuth(s, sessionTestRequest(http.MethodGet, target, "", cookie, ""))
+		assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+	}
+}
+
+// sampleKnowledgeHealth is a populated API-KGR-005 body.
+func sampleKnowledgeHealth() core.KnowledgeHealth {
+	return core.KnowledgeHealth{
+		LastRun:       &core.KnowledgeHealthRun{At: "2026-11-11T06:44:00+07:00", Journaled: 11, Applied: 2, Skipped: 0},
+		NextAt:        "2026-11-12T03:00:00+07:00",
+		Lint:          &core.KnowledgeHealthLint{Date: "2026-11-11", Path: "reports/lint-2026-11-11.md", Pages: 2, Orphans: 1},
+		ReviewPending: 0,
+		Memory:        []core.KnowledgeHealthMemory{{Agent: "lana", Characters: 5210, Limit: 8000}},
+	}
+}
+
+// TestKnowledgeHealthShape covers the API-KGR-005 success body.
+func TestKnowledgeHealthShape(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.health = sampleKnowledgeHealth()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/health", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var got core.KnowledgeHealth
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if !reflect.DeepEqual(got, backend.health) {
+		t.Fatalf("health = %+v, want %+v", got, backend.health)
+	}
+	for _, key := range []string{
+		`"last_run":{"at":"2026-11-11T06:44:00+07:00"`, `"next_at":"2026-11-12T03:00:00+07:00"`,
+		`"lint":{"date":"2026-11-11"`, `"review_pending":0`, `"memory":[{"agent":"lana","characters":5210,"limit":8000}]`,
+	} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
+	}
+}
+
+// TestKnowledgeHealthEmptyNeverNull covers the never-null memory list and the
+// null last_run and lint.
+func TestKnowledgeHealthEmptyNeverNull(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/health", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	for _, key := range []string{`"last_run":null`, `"lint":null`, `"memory":[]`} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
+	}
+}
+
+// TestKnowledgeHealthUnavailableIs503 covers API-KGR-005 without a service.
+func TestKnowledgeHealthUnavailableIs503(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.healthErr = ErrKnowledgeUnavailable
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/health", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusServiceUnavailable, "unavailable")
+}
+
+// TestReviewListDefaultPending covers the unchanged default review response.
+func TestReviewListDefaultPending(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/review", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if backend.reviewStatus != "pending" {
+		t.Fatalf("status = %q, want pending", backend.reviewStatus)
+	}
+}
+
+// TestReviewListDecided covers API-KGR-003: the decided response and its extra
+// fields.
+func TestReviewListDecided(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.reviewItems = []core.ReviewItem{
+		{ID: "p_1", Kind: "knowledge", Agent: "karin", From: "dana", Title: "Gaji Pasar 2026", Action: "append", Body: "…", Status: "applied", Result: "append Gaji", CreatedAt: 1762800000, DecidedAt: 1762810000, OldText: "gaji lama"},
+	}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/review?status=decided", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if backend.reviewStatus != "decided" {
+		t.Fatalf("status = %q, want decided", backend.reviewStatus)
+	}
+	var got reviewListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if !reflect.DeepEqual(got.Items, backend.reviewItems) {
+		t.Fatalf("items = %+v, want %+v", got.Items, backend.reviewItems)
+	}
+	for _, key := range []string{`"status":"applied"`, `"result":"append Gaji"`, `"decided_at":1762810000`, `"old_text":"gaji lama"`} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
+	}
+}
+
+// TestReviewListBadStatusIs400 covers the API-KGR-003 status validation
+// (AC-KGR-005).
+func TestReviewListBadStatusIs400(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/review?status=weird", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+}
+
+// TestKnowledgePageDetailNeverNull covers the API-KGR-002 never-null lists.
+func TestKnowledgePageDetailNeverNull(t *testing.T) {
+	backend := newFakeKnowledgeBackend()
+	backend.pageDoc = core.KnowledgeDoc{Path: "wiki/A.md", Title: "A", Scope: "shared"}
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/knowledge/page?path=wiki/A.md", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	for _, key := range []string{`"type":""`, `"sources":[]`, `"links_out":[]`, `"unresolved":[]`, `"links_in":[]`} {
+		if !strings.Contains(rr.Body.String(), key) {
+			t.Fatalf("body has no %s: %s", key, rr.Body.String())
+		}
 	}
 }

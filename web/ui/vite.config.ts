@@ -7,6 +7,8 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { icons as lucide } from "lucide";
 
+const devDaemon = process.env.LANA_DEV_DAEMON || "http://127.0.0.1:18300";
+
 const root = dirname(fileURLToPath(import.meta.url));
 
 /* A deterministic hash of the dashboard sources. It is written into the built
@@ -126,14 +128,15 @@ export default defineConfig({
   },
   server: {
     /* The daemon rejects a state-changing request whose Origin is not its own
-       address, so the dev proxy presents the daemon's origin instead of Vite's. */
+       address, so the dev proxy presents the daemon's origin instead of Vite's.
+       LANA_DEV_DAEMON points the proxy at another daemon (a branch build). */
     proxy: {
       "/v1": {
-        target: "http://127.0.0.1:18300",
+        target: devDaemon,
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on("proxyReq", (req) => {
-            if (req.getHeader("origin")) req.setHeader("origin", "http://127.0.0.1:18300");
+            if (req.getHeader("origin")) req.setHeader("origin", devDaemon);
           });
         },
       },
