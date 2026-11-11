@@ -105,3 +105,41 @@ type Notice struct {
 	DecisionID   string   // "" = no buttons
 	Choices      []string // apply, run_only, skip, stop, approve, deny
 }
+
+// AssistEnv is what a workflow can use, told to the guardian assistant so it
+// builds with what exists instead of asking the owner (REQ-WF-010 revision):
+// the agents, the MCP tools a tool node can call, the names (never values)
+// of the owner's secrets, and whether bash nodes see those secrets.
+type AssistEnv struct {
+	Agents []EnvAgent
+	// MCPTools are the tools of the configured MCP servers, named
+	// mcp__<server>__<tool>; MCPUnavailable names servers that did not start.
+	MCPTools       []EnvTool
+	MCPUnavailable map[string]string
+	// Secrets are the names in secrets.env and the provider keys lana knows.
+	Secrets []string
+	// BashSeesSecrets reports whether bash nodes get the secrets as env vars.
+	BashSeesSecrets bool
+}
+
+// EnvAgent is one agent a bot or worker node can run.
+type EnvAgent struct {
+	Name        string
+	Description string
+	Model       string
+	MCP         []string
+}
+
+// EnvTool is one tool a tool node can call: its name, description and input
+// schema (compact JSON).
+type EnvTool struct {
+	Name        string
+	Description string
+	Input       string
+}
+
+// AssistEnvProvider is an optional Deps extension that describes the
+// environment for the assistant prompt. Deps without it give an empty one.
+type AssistEnvProvider interface {
+	AssistEnv(ctx context.Context, wf Workflow) AssistEnv
+}
