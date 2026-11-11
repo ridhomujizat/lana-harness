@@ -70,7 +70,9 @@ func DangerousCommand(command, workspace string) bool {
 	}
 	segments, analyzable := pattern.SplitCommand(command)
 	if !analyzable {
-		return true
+		// Subshells, background jobs and the like: split on the shell's
+		// separators and check every piece instead of asking for all of them.
+		segments = roughSegments(command)
 	}
 	for _, segment := range segments {
 		if dangerousSegment(segment, workspace) {
@@ -147,4 +149,17 @@ func dangerousSegment(segment, workspace string) bool {
 		return has("-9", "-KILL") && len(args) > 0 && args[len(args)-1] == "1"
 	}
 	return false
+}
+
+var shellSeparators = regexp.MustCompile(`&&|\|\||[;&|()\n` + "`" + `]|\$\(`)
+
+// roughSegments splits a command the precise splitter cannot analyze.
+func roughSegments(command string) []string {
+	var out []string
+	for _, part := range shellSeparators.Split(command, -1) {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
