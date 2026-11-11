@@ -652,10 +652,12 @@
   max-height: 320px;
   padding: 6px;
   overflow-y: auto;
-  border: 1px solid var(--border);
+  /* One raised surface in both themes: a step above the page, a strong
+     border and a deep shadow, so the menu reads in dark mode too. */
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.16));
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.1);
 }
 
 .slash-menu-head {
@@ -688,7 +690,7 @@
 
 .slash-option.is-active,
 .slash-option:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
 .slash-option-icon {
@@ -697,14 +699,15 @@
   place-items: center;
   width: 32px;
   height: 32px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md, 8px);
   background: var(--surface);
   color: var(--text-2);
 }
 
 .slash-option.is-active .slash-option-icon {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -743,16 +746,16 @@
   gap: 14px;
   margin-top: 4px;
   padding: 6px 8px 2px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-strong);
   color: var(--text-3);
   font-size: var(--fs-2xs);
 }
 
 .slash-menu-foot kbd {
   padding: 0 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
-  background: var(--surface-2);
+  background: var(--surface);
   font-family: inherit;
   font-size: inherit;
 }
@@ -763,9 +766,9 @@
   gap: 10px;
   margin: 0 0 var(--s-2);
   padding: 8px 10px;
-  border: 1px solid var(--accent-soft, var(--border));
+  border: 1px solid var(--accent-line);
   border-radius: var(--r-md, 8px);
-  background: var(--accent-soft, var(--surface-2));
+  background: var(--accent-soft);
 }
 
 .new-session-icon {
