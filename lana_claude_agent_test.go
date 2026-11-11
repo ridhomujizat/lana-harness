@@ -61,6 +61,7 @@ func buildFakeClaude(t *testing.T) string {
 func claudeAgentConfig(bin, workspace, extra string) string {
 	return fmt.Sprintf(`
 [agents.claude]
+toolset = "custom"
 runtime = "claude-code"
 binary = %q
 workspace = %q
@@ -233,6 +234,7 @@ func TestClaudeAgentScheduledRuns(t *testing.T) {
 	bin := buildFakeClaude(t)
 	cfg := claudeAgentConfig(bin, t.TempDir(), "") + `
 [agents.cron]
+toolset = "custom"
 runtime = "claude-code"
 binary = "` + bin + `"
 allow_scheduled = true
@@ -242,10 +244,12 @@ kind = "openai_compat"
 base_url = "http://127.0.0.1:1"
 
 [agents.mixed]
+toolset = "custom"
 model = "claude-code/opus"
 fallback = ["ds/deepseek-flash"]
 
 [agents.plain]
+toolset = "custom"
 model = "ds/deepseek-flash"
 `
 	rt, _ := routedRuntime(t, cfg)

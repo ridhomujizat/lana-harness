@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -62,7 +62,7 @@ func runtimeNames() []string {
 	return names
 }
 
-var teamKeys = []string{"description", "lead", "members"}
+var teamKeys = []string{"description", "discuss", "display_name", "extra_rounds", "lead", "learn", "members", "mode", "room_memory", "rounds", "share_summary", "telegram_all"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
@@ -649,9 +649,16 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			add(path+".vision", typeMsg("boolean", val))
 		}
 	}
+	if val, ok := v["toolset"]; ok {
+		if s, ok := val.(string); !ok {
+			add(path+".toolset", typeMsg("string", val))
+		} else if !contains([]string{"standard", "custom"}, s) {
+			add(path+".toolset", enumMsg(s, []string{"standard", "custom"}))
+		}
+	}
 	if val, ok := v["permission"]; ok {
-		if s, ok := val.(string); ok && !contains([]string{"ask", "never", "trust"}, s) {
-			add(path+".permission", enumMsg(s, []string{"ask", "never", "trust"}))
+		if s, ok := val.(string); ok && !contains([]string{"ask", "auto", "never", "trust"}, s) {
+			add(path+".permission", enumMsg(s, []string{"ask", "auto", "never", "trust"}))
 		}
 	}
 	if val, ok := v["reasoning_effort"]; ok {
@@ -752,6 +759,47 @@ func validateTeam(v map[string]any, path string, add func(string, string)) {
 			add(path+".description", typeMsg("string", raw))
 		} else if n := utf8.RuneCountInString(s); n > maxTeamDescription {
 			add(path+".description", fmt.Sprintf("must be at most %d characters", maxTeamDescription))
+		}
+	}
+	if raw, ok := v["display_name"]; ok {
+		s, ok := raw.(string)
+		if !ok {
+			add(path+".display_name", typeMsg("string", raw))
+		} else if n := utf8.RuneCountInString(s); n > maxAgentDisplayName {
+			add(path+".display_name", fmt.Sprintf("must be at most %d characters", maxAgentDisplayName))
+		}
+	}
+	// Spec 47 REQ-RDS-001: discussion settings.
+	enum := func(key string, allowed ...string) {
+		raw, ok := v[key]
+		if !ok {
+			return
+		}
+		s, ok := raw.(string)
+		if !ok {
+			add(path+"."+key, typeMsg("string", raw))
+			return
+		}
+		if !contains(allowed, s) {
+			add(path+"."+key, fmt.Sprintf("must be one of %s", strings.Join(allowed, ", ")))
+		}
+	}
+	enum("discuss", "auto", "ask")
+	enum("mode", "group", "lead")
+	enum("extra_rounds", "once", "ask", "never")
+	if raw, ok := v["rounds"]; ok {
+		n, ok := asInt(raw)
+		if !ok {
+			add(path+".rounds", typeMsg("integer", raw))
+		} else if n < 1 || n > 5 {
+			add(path+".rounds", "must be between 1 and 5")
+		}
+	}
+	for _, key := range []string{"room_memory", "share_summary", "learn", "telegram_all"} {
+		if raw, ok := v[key]; ok {
+			if _, ok := raw.(bool); !ok {
+				add(path+"."+key, typeMsg("boolean", raw))
+			}
 		}
 	}
 }

@@ -819,10 +819,10 @@ func validateSetupAgent(body *setupRequest, plan *setupPlan) *setupInputError {
 	}
 	permission := strings.TrimSpace(body.Agent.Permission)
 	if permission == "" {
-		permission = "ask"
+		permission = string(core.DefaultPolicy)
 	}
 	if !validAgentPermission(permission) {
-		return setupFieldError("agent.permission", "permission must be one of ask, trust, never")
+		return setupFieldError("agent.permission", "permission must be one of ask, auto, trust, never")
 	}
 	if strings.TrimSpace(body.Persona.AgentMD) == "" {
 		return setupFieldError("persona.agent_md", "agent_md is required")

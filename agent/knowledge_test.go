@@ -132,6 +132,22 @@ func (f *fakeDomainRecall) ScopeStats(context.Context) ([]core.KnowledgeScopeSta
 	return nil, nil
 }
 
+func (f *fakeDomainRecall) Graph(context.Context, string, bool, bool) (core.KnowledgeGraph, error) {
+	return core.KnowledgeGraph{}, nil
+}
+
+func (f *fakeDomainRecall) Activity(context.Context, int, time.Time, string) (core.KnowledgeActivityPage, error) {
+	return core.KnowledgeActivityPage{}, nil
+}
+
+func (f *fakeDomainRecall) Health(context.Context) (core.KnowledgeHealth, error) {
+	return core.KnowledgeHealth{}, nil
+}
+
+func (f *fakeDomainRecall) DecidedProposals(context.Context, int) ([]core.KnowledgeProposal, error) {
+	return nil, nil
+}
+
 // newKnowledgeHarness builds a harness whose agent offers agentTools and whose
 // registry has knowledge.
 func newKnowledgeHarness(t *testing.T, agentTools []string, knowledge core.Knowledge) *harness {

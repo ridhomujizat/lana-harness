@@ -303,6 +303,11 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 			entry := agenthome.RosterEntry{Name: name}
 			if delegate, ok := agents[name]; ok {
 				entry.Description = delegate.Description
+				entry.Can = core.AgentCapabilities(delegate)
+			}
+			// A team lead picks discussion members by what they know.
+			if teamName != "" {
+				entry.Knows = rn.reg.knowsSummary(ctx, name)
 			}
 			roster = append(roster, entry)
 		}
@@ -330,7 +335,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
 		workspace:       workspace,
-		tools:           cfg.Tools,
+		tools:           core.EffectiveTools(cfg),
 		disabled:        cfg.DisabledTools,
 		mcp:             mcpServers,
 		skills:          cfg.Skills,
@@ -372,12 +377,16 @@ func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]s
 	// cannot drift.
 	_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
 	_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
+	_, sendFileRegistered := rn.reg.tools.Get(SendFileTool)
+	_, discussRegistered := rn.reg.tools.Get(DiscussTools[0])
 	for _, name := range AutoOfferedTools(AutoOfferState{
 		Root:                !resolved.child,
 		MCPManageRegistered: mcpManageRegistered,
 		VisibleSkills:       len(skills) > 0,
 		Team:                resolved.team != "" || len(resolved.delegates) > 0,
 		CalendarRegistered:  calendarRegistered,
+		SendFileRegistered:  sendFileRegistered,
+		Discussion:          resolved.team != "" && !resolved.child && discussRegistered,
 	}) {
 		if !containsString(tools, name) {
 			tools = append(tools, name)
@@ -417,7 +426,9 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		Skills:        resolved.skills,
 		SkillWrite:    resolved.cfg.SkillWrite,
 		Questions:     rn.reg.questions,
+		Files:         rn.reg.files,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+		Discussions:   rn.discussionRunner(resolved),
 		MCPAdmin:      mcpAdmin,
 		MCPStatus:     rn.reg.ServerStatus,
 		AllowedAgents: resolved.delegates,
@@ -426,6 +437,20 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		Sessions:      sessions,
 		Knowledge:     rn.reg.knowledgeService(),
 	}
+}
+
+// discussionRunner is the discussion service of a team lead's root turn
+// (REQ-RDS-010); nil for every other turn.
+func (rn *Runner) discussionRunner(resolved resolvedAgent) core.DiscussionService {
+	if resolved.team == "" || resolved.child {
+		return nil
+	}
+	_, teams := rn.reg.configSnapshot()
+	team, ok := teams[resolved.team]
+	if !ok || len(team.Members) == 0 {
+		return nil
+	}
+	return &discussionRunner{reg: rn.reg, team: resolved.team, lead: team.Lead, cfg: team, allowed: resolved.delegates}
 }
 
 // mergeDelegates joins groups in order and drops duplicates.
@@ -509,6 +534,18 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
 		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, ToolNotes: notes, HasMCP: hasMCP,
+	}
+	// Spec 47 REQ-RDS-017: a team lead's root turn learns how to discuss.
+	if res.team != "" && !res.child {
+		if _, teams := rn.reg.configSnapshot(); len(teams) > 0 {
+			if team, ok := teams[res.team]; ok {
+				d := &agenthome.DiscussionPrompt{Team: res.team, Purpose: team.Description, Mode: team.DiscussMode(), Rounds: team.RoundLimit(), Extra: team.ExtraMode()}
+				if team.KeepsRoomMemory() {
+					d.Memory = rn.reg.RoomMemory().Prompt(res.team, discussionMemoryLimit)
+				}
+				in.Discussion = d
+			}
+		}
 	}
 	// REQ-JOB-017: the session's jobs go into the turn <context> block. Ended
 	// jobs are marked announced so they appear in one turn only.
@@ -821,6 +858,12 @@ func allowScheduled(llm core.LLMRegistry, target core.LLMTarget, cfg core.AgentC
 // any output, it runs in lana's own loop with the rest of the chain
 // (REQ-CCT-004).
 func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) TurnResult {
+	// Group rooms: everyone talks, @mentions route (owner, 2026-11-11).
+	if continueReason == "" {
+		if team, room, ok := rn.groupMode(ctx); ok {
+			return rn.runGroupTurn(ctx, initial, turnID, team, room)
+		}
+	}
 	resolved, err := rn.resolve(ctx)
 	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(rn.reg.llm, resolved.fullChain[0]) {
 		// REQ-CCT-008: a scheduled run uses Claude Code only with

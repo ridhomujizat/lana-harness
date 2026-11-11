@@ -7,6 +7,7 @@ import {
   toolStatusWord,
   userMessageText,
 } from "../lib/format";
+import { isAttachmentBlock } from "../lib/attachment-blocks";
 
 /* Pure projection of the session event log into the Trajectory ledger
    (REQ-TRJ-002..REQ-TRJ-010). The builder walks the log once, in seq order, and
@@ -273,7 +274,10 @@ function toolUseCount(content: unknown): number {
 }
 
 function imageCount(content: unknown): number {
-  return blocksOf(content).filter((block) => block.type === "image").length;
+  /* REQ-CHF-001: file attachments count like images. */
+  return blocksOf(content).filter(
+    (block) => block.type === "image" || isAttachmentBlock(block)
+  ).length;
 }
 
 function parseJsonObject(text: string): Record<string, unknown> | null {

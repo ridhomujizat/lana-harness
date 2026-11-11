@@ -294,7 +294,7 @@ func TestJournalSessionSkipsAgentWithoutKnowledgeTool(t *testing.T) {
 	provider := &fakeProvider{text: `{"notes": ["a note"]}`}
 	env := newJournalEnv(t, provider, core.KnowledgeConfig{})
 	env.svc.LookupAgent = func(string) (core.AgentConfig, bool) {
-		return core.AgentConfig{Provider: "mock", Model: "m", Tools: []string{"shell"}}, true
+		return core.AgentConfig{Provider: "mock", Model: "m", Tools: []string{"shell"}, Toolset: core.ToolsetCustom}, true
 	}
 	env.store.setRows(twoTurnRows(env.info, time.Now()))
 

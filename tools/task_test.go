@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -127,8 +128,8 @@ func TestTaskSpawn(t *testing.T) {
 	if out.Status != core.ToolStatusSuccess || out.Output != `{"session_id":"child"}` {
 		t.Fatalf("output=%+v", out)
 	}
-	want := core.SpawnRequest{ParentSessionID: "parent", ParentCallID: "call_1", Depth: 1, Agent: "explorer", Prompt: "Find the notes", Title: "Notes"}
-	if runner.spawnReq != want {
+	want := core.SpawnRequest{ParentSessionID: "parent", ParentCallID: "call_1", Depth: 1, Agent: "explorer", Prompt: "Find the notes", Title: "Notes", WithNotes: true}
+	if !reflect.DeepEqual(runner.spawnReq, want) {
 		t.Fatalf("request=%+v want %+v", runner.spawnReq, want)
 	}
 }

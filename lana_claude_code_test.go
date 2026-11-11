@@ -86,6 +86,7 @@ cooldown = "0s"
 background_model = "ds/deepseek-flash"
 
 [agents.bima]
+toolset = "custom"
 runtime = "claude-code"
 model = "haiku"
 binary = "` + bin + `"
@@ -94,6 +95,7 @@ permission = "trust"
 tools = ["memory_write"]
 
 [agents.combo]
+toolset = "custom"
 model = "c"
 binary = "` + bin + `"
 workspace = "` + ws + `"

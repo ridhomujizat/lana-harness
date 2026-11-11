@@ -44,6 +44,7 @@ const (
 	KindToolResultPruned  = "tool_result_pruned"
 	KindMemoryCaptured    = "memory/captured"
 	KindKnowledgeCompiled = "knowledge/compiled"
+	KindFileSent          = "file/sent"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -164,6 +165,18 @@ type AssistantMessage struct {
 	// decode unchanged.
 	Source     string `json:"source,omitempty"`
 	SourceName string `json:"source_name,omitempty"`
+	// Group rooms: Passed marks an agent that had nothing to add (no
+	// content), Failed one that could not answer; Tools, Notes and Files are
+	// what the agent used and changed for the reply.
+	Passed bool           `json:"passed,omitempty"`
+	Failed bool           `json:"failed,omitempty"`
+	Tools  map[string]int `json:"tools,omitempty"`
+	Notes  []string       `json:"notes,omitempty"`
+	Files  []string       `json:"files,omitempty"`
+	// ChildSessionID and ChildTurnID point at the agent's own turn that made
+	// the reply, so the room can show its steps like a chat.
+	ChildSessionID string `json:"child_session_id,omitempty"`
+	ChildTurnID    string `json:"child_turn_id,omitempty"`
 }
 
 // ReplyRef is the automation message an owner reply points back to: the seq of
@@ -253,6 +266,18 @@ type QuestionAnswered struct {
 	Responder string           `json:"responder"`
 	Reason    string           `json:"reason,omitempty"`
 	Answers   []QuestionAnswer `json:"answers,omitempty"`
+}
+
+// FileSentPayload is the payload of a file/sent event (API-AGF-001). Path is
+// the workspace-relative attachments path API-ATT-003 serves; Size is bytes.
+type FileSentPayload struct {
+	V         int    `json:"v"`
+	CallID    string `json:"call_id"`
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Size      int64  `json:"size"`
+	Caption   string `json:"caption,omitempty"`
 }
 
 type ModelSelection struct {

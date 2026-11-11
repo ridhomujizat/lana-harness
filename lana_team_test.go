@@ -13,21 +13,25 @@ import (
 
 const teamConfig = `
 [agents.lead]
+toolset = "custom"
 provider = "local"
 model = "lead"
 permission = "trust"
 subagents = ["explorer"]
 
 [agents.researcher]
+toolset = "custom"
 provider = "local"
 model = "researcher"
 description = "Finds sources"
 
 [agents.writer]
+toolset = "custom"
 provider = "local"
 model = "writer"
 
 [agents.explorer]
+toolset = "custom"
 provider = "local"
 model = "explorer"
 

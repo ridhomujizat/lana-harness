@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,12 +42,21 @@ type Client struct {
 	base  string
 	token string
 	http  *http.Client
-	sleep func(context.Context, time.Duration) error
+	// upload sends multipart file uploads with a longer timeout: a file up to
+	// 20 MB takes longer than a JSON call on a slow link (REQ-AGF-004).
+	upload *http.Client
+	sleep  func(context.Context, time.Duration) error
 }
 
 // NewClient creates a client for base (e.g. https://api.telegram.org) and token.
 func NewClient(base, token string) *Client {
-	return &Client{base: strings.TrimRight(base, "/"), token: token, http: &http.Client{Timeout: 60 * time.Second}, sleep: sleepCtx}
+	return &Client{
+		base:   strings.TrimRight(base, "/"),
+		token:  token,
+		http:   &http.Client{Timeout: 60 * time.Second},
+		upload: &http.Client{Timeout: 2 * time.Minute},
+		sleep:  sleepCtx,
+	}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -69,15 +80,28 @@ type apiResponse struct {
 	} `json:"parameters"`
 }
 
-// call posts params as JSON to method and decodes the result into out. A 429 response
-// is retried after retry_after, at most 3 times.
+// call posts params as JSON to method and decodes the result into out.
 func (c *Client) call(ctx context.Context, method string, params, out any) error {
 	body, err := json.Marshal(params)
 	if err != nil {
 		return err
 	}
+	return c.callBody(ctx, method, "application/json", body, out)
+}
+
+// callBody posts body to method with the shared client and decodes the result
+// into out. A 429 response is retried after retry_after, at most 3 times.
+func (c *Client) callBody(ctx context.Context, method, contentType string, body []byte, out any) error {
+	return c.callBodyClient(ctx, c.http, method, contentType, body, out)
+}
+
+// callBodyClient posts body to method with client and decodes the result into
+// out. A 429 response is retried after retry_after, at most 3 times. body is
+// rebuilt into a fresh reader on each attempt, so a multipart upload re-sends
+// its bytes rather than the exhausted first reader.
+func (c *Client) callBodyClient(ctx context.Context, client *http.Client, method, contentType string, body []byte, out any) error {
 	for attempt := 0; ; attempt++ {
-		err := c.do(ctx, method, body, out)
+		err := c.doBody(ctx, client, method, contentType, body, out)
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.Code == http.StatusTooManyRequests && attempt < 3 {
 			wait := time.Duration(apiErr.RetryAfter) * time.Second
@@ -93,13 +117,13 @@ func (c *Client) call(ctx context.Context, method string, params, out any) error
 	}
 }
 
-func (c *Client) do(ctx context.Context, method string, body []byte, out any) error {
+func (c *Client) doBody(ctx context.Context, client *http.Client, method, contentType string, body []byte, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+c.token+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return c.scrub(err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := client.Do(req)
 	if err != nil {
 		return c.scrub(err)
 	}
@@ -355,6 +379,59 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opt
 	var msg Message
 	err := c.call(ctx, "sendMessage", params, &msg)
 	return msg.MessageID, err
+}
+
+// SendPhoto sends an image with sendPhoto and returns the message ID
+// (REQ-AGF-004). The file streams into one multipart request; the 429 retry
+// reuses the built body.
+func (c *Client) SendPhoto(ctx context.Context, chatID int64, filename string, r io.Reader, caption string) (int64, error) {
+	return c.sendFile(ctx, "sendPhoto", "photo", chatID, filename, r, caption)
+}
+
+// SendDocument sends a file with sendDocument and returns the message ID
+// (REQ-AGF-004).
+func (c *Client) SendDocument(ctx context.Context, chatID int64, filename string, r io.Reader, caption string) (int64, error) {
+	return c.sendFile(ctx, "sendDocument", "document", chatID, filename, r, caption)
+}
+
+// sendFile posts one multipart file to method. field is "photo" or "document".
+func (c *Client) sendFile(ctx context.Context, method, field string, chatID int64, filename string, r io.Reader, caption string) (int64, error) {
+	fields := map[string]string{"chat_id": strconv.FormatInt(chatID, 10)}
+	if caption != "" {
+		fields["caption"] = caption
+	}
+	body, contentType, err := multipartForm(fields, field, filename, r)
+	if err != nil {
+		return 0, err
+	}
+	var msg Message
+	if err := c.callBodyClient(ctx, c.upload, method, contentType, body, &msg); err != nil {
+		return 0, err
+	}
+	return msg.MessageID, nil
+}
+
+// multipartForm builds one multipart/form-data body with text fields and a
+// single file part.
+func multipartForm(fields map[string]string, field, filename string, r io.Reader) (body []byte, contentType string, err error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for name, value := range fields {
+		if err := w.WriteField(name, value); err != nil {
+			return nil, "", err
+		}
+	}
+	part, err := w.CreateFormFile(field, filename)
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := io.Copy(part, r); err != nil {
+		return nil, "", err
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), w.FormDataContentType(), nil
 }
 
 // EditMessageText replaces the text of a message. A nil keyboard removes the buttons.

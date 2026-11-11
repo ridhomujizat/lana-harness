@@ -1,4 +1,5 @@
 import type { SessionEvent } from "../api/sessions";
+import { isAttachmentBlock } from "./attachment-blocks";
 
 export interface HistoryItem {
   key: string;
@@ -203,14 +204,16 @@ export function userMessageText(payload: Record<string, unknown>): string {
     return "";
   }
   const count = payload.context_blocks;
-  if (typeof count === "number" && count > 0) {
-    return contentText(content.slice(count));
-  }
   let index = 0;
-  while (index < content.length && isInjectedContextBlock(content[index])) {
-    index += 1;
+  if (typeof count === "number" && count > 0) {
+    index = count;
+  } else {
+    while (index < content.length && isInjectedContextBlock(content[index])) {
+      index += 1;
+    }
   }
-  return contentText(content.slice(index));
+  /* REQ-CHF-001: attachment blocks render as file cards, not as text. */
+  return contentText(content.slice(index).filter((block) => !isAttachmentBlock(block)));
 }
 
 /* REQ-MEM-030: one line per captured operation. add and replace name the saved

@@ -51,8 +51,15 @@ type ToolCtx struct {
 	OwnerTurn bool
 	// Questions asks the owner through the session's channel.
 	Questions QuestionService
+	// Files records and delivers the files the send_file tool sends
+	// (REQ-AGF-003, REQ-AGF-004). Nil when the runtime has no file service;
+	// the tool then reports that sending is not available.
+	Files FileSender
 	// Subagents runs child sessions for the task tools.
 	Subagents SubagentRunner
+	// Discussions runs the room discussion of a team lead's root turn for the
+	// discuss_* tools (spec 47). Nil elsewhere.
+	Discussions DiscussionService
 	// MCPAdmin changes MCP servers for the mcp_manage tool. Nil when the
 	// runtime has no MCP registry.
 	MCPAdmin MCPAdmin
@@ -185,6 +192,11 @@ type SpawnRequest struct {
 	Prompt string
 	// Title is the child session title. Empty means the agent name.
 	Title string
+	// Context lists earlier child sessions of the same parent whose last
+	// answers the child receives with the prompt (spec 47 team work).
+	Context []string
+	// WithNotes adds the agent's knowledge pages that match the prompt.
+	WithNotes bool
 }
 
 // ContinueRequest is one follow-up to an existing child session.

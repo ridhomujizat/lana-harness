@@ -410,3 +410,46 @@ enabled = true
 		t.Fatalf("GET after delete status = %d, body = %q", response.code, response.body)
 	}
 }
+
+// TestTeamDiscussionSettings covers spec 47 API-RDS-010: GET fills the
+// defaults, PUT writes only non-default keys and keeps omitted ones.
+func TestTeamDiscussionSettings(t *testing.T) {
+	s, store, cookie, csrf := newTeamTestServer(t, teamTestConfig)
+	before := teamVersion(t, s, "research-squad", cookie)
+	if before.Discuss != "auto" || before.Rounds != 3 || before.ExtraRounds != "once" || !before.RoomMemory || !before.ShareSummary || !before.Learn || !before.TelegramAll {
+		t.Fatalf("defaults = %+v", before.teamDiscussionJSON)
+	}
+	body := teamJSONBody(t, map[string]any{
+		"lead": "lead", "members": []string{"researcher"}, "description": "Old description",
+		"expected_version": before.Version, "discuss": "ask", "rounds": 2, "telegram_all": false,
+		"display_name": "Research squad",
+	})
+	response := serveTeam(t, s, http.MethodPut, "/v1/teams/research-squad", body, cookie, csrf)
+	if response.code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body = %q", response.code, response.body)
+	}
+	file := string(readTeamFile(t, store.path))
+	for _, want := range []string{"discuss = 'ask'", "rounds = 2", "telegram_all = false", "display_name = 'Research squad'"} {
+		if !strings.Contains(file, want) {
+			t.Fatalf("config lacks %q:\n%s", want, file)
+		}
+	}
+	if strings.Contains(file, "extra_rounds") || strings.Contains(file, "room_memory") {
+		t.Fatalf("default keys written:\n%s", file)
+	}
+	// A second PUT without the settings keeps them.
+	mid := teamVersion(t, s, "research-squad", cookie)
+	body = teamJSONBody(t, map[string]any{"lead": "lead", "members": []string{"researcher", "writer"}, "description": "x", "expected_version": mid.Version})
+	response = serveTeam(t, s, http.MethodPut, "/v1/teams/research-squad", body, cookie, csrf)
+	var after teamJSON
+	response.json(t, &after)
+	if response.code != http.StatusOK || after.Discuss != "ask" || after.Rounds != 2 || after.TelegramAll {
+		t.Fatalf("second PUT = %d %+v", response.code, after)
+	}
+	// A bad value fails config.Check.
+	last := teamVersion(t, s, "research-squad", cookie)
+	body = teamJSONBody(t, map[string]any{"lead": "lead", "members": []string{"researcher"}, "description": "x", "expected_version": last.Version, "rounds": 9})
+	if response = serveTeam(t, s, http.MethodPut, "/v1/teams/research-squad", body, cookie, csrf); response.code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad rounds status = %d, body = %q", response.code, response.body)
+	}
+}

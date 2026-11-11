@@ -126,6 +126,7 @@ func TestNextTurnDisabledToolsNotOffered(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			table := `[agents.coder]
+toolset = "custom"
 provider = "mock"
 model = "m"
 permission = "ask"
@@ -165,6 +166,7 @@ func TestToolCatalog(t *testing.T) {
 	// example obscura) would add an "installed" group to the catalog.
 	t.Setenv("PATH", "/usr/bin:/bin")
 	table := `[agents.coder]
+toolset = "custom"
 provider = "mock"
 model = "m"
 permission = "ask"
@@ -231,6 +233,7 @@ func TestToolCatalogRealState(t *testing.T) {
 	// example obscura) would add an "installed" group to the catalog.
 	t.Setenv("PATH", "/usr/bin:/bin")
 	table := `[agents.coder]
+toolset = "custom"
 provider = "mock"
 model = "m"
 permission = "ask"

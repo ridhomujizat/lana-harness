@@ -535,6 +535,79 @@ func TestRoomsNotFoundAndBadQuery(t *testing.T) {
 	}
 }
 
+// userMessageText (the room list preview) hides the per-attachment text blocks
+// attach writes and summarizes them as a trailing "· N files" marker.
+func TestRoomPreviewAttachmentCount(t *testing.T) {
+	notes := "Attachment attachments/2026-11-09/notes.md (text/markdown):\n# Notes"
+	scan := "Attachment attachments/2026-11-09/scan.pdf (PDF, 2 pages) has no text layer. It is probably a scan: ask the owner to send photos or screenshots of the pages instead."
+	cases := []struct {
+		name string
+		msg  core.UserMessage
+		want string
+	}{
+		{
+			name: "context and text with two attachments",
+			msg: core.UserMessage{V: 1, ContextBlocks: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockText, Text: "<context>injected</context>"},
+				{Kind: core.BlockText, Text: "pelajari materi ini"},
+				{Kind: core.BlockText, Text: notes},
+				{Kind: core.BlockText, Text: scan},
+			}},
+			want: "pelajari materi ini · 2 files",
+		},
+		{
+			name: "attachments only",
+			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockText, Text: notes},
+				{Kind: core.BlockText, Text: scan},
+			}},
+			want: "2 files",
+		},
+		{
+			name: "files-only placeholder",
+			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockText, Text: "(attachments)"},
+				{Kind: core.BlockText, Text: notes},
+			}},
+			want: "1 file",
+		},
+		{
+			name: "one image",
+			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockImage, MediaType: "image/png", Path: "attachments/x.png"},
+			}},
+			want: "1 file",
+		},
+		{
+			name: "plain text",
+			msg:  core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "halo"}}},
+			want: "halo",
+		},
+		{
+			name: "empty",
+			msg:  core.UserMessage{V: 1},
+			want: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			backend := newFakeWebBackend()
+			backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+			info := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 1000, UpdatedAt: 1000})
+			addSessionEvent(t, backend, info.ID, core.KindUserMessage, c.msg)
+			s, cookie, _ := newLoggedInSessionServer(t, backend)
+			row := roomRowForTest(t, s, cookie, "dana")
+			got := ""
+			if row.LastMessage != nil {
+				got = row.LastMessage.Preview
+			}
+			if got != c.want {
+				t.Fatalf("preview = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func waitForOpenApproval(t *testing.T, s *Server) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -557,4 +630,57 @@ func waitForNoApproval(t *testing.T, s *Server) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatal("approval never closed")
+}
+
+// TestRoomSendDiscussNote covers API-RDS-013: Discuss on adds the runtime note.
+func TestRoomSendDiscussNote(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agentNames["squad"] = true
+	backend.agents = []Agent{{Name: "squad", Kind: "team", Lead: "lana", Members: []string{"k", "d"}}}
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/squad/messages", `{"text":"ambil ga?","discuss":true}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body roomSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	backend.mu.Lock()
+	note := backend.sentNotes[body.SessionID]
+	backend.mu.Unlock()
+	if note != core.DiscussRequestNote {
+		t.Fatalf("note = %q", note)
+	}
+}
+
+// An agent at work in a team room shows where in its own chat row, not a
+// bare "Thinking", so the owner's chat with it does not look busy.
+func TestPresenceWorkingInTeamRoom(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "karin", Kind: "agent"}, {Name: "template-email", Kind: "team"}}
+	room := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "template-email", Channel: "web", Address: "owner", Status: "running", CreatedAt: 1000, UpdatedAt: 2000})
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "karin", Channel: "web", Address: "owner", Status: "running", ParentSessionID: room.ID, CreatedAt: 1000, UpdatedAt: 2000})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	row := roomRowForTest(t, s, cookie, "karin")
+	if row.Presence.State != "working" || row.Presence.Label != "Working in template-email" {
+		t.Fatalf("presence = %+v, want working in template-email", row.Presence)
+	}
+}
+
+// The agent's own chat running beside its team room work shows its own
+// status: the two run in parallel.
+func TestPresenceOwnChatBeatsTeamRoom(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "karin", Kind: "agent"}, {Name: "template-email", Kind: "team"}}
+	room := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "template-email", Channel: "web", Address: "owner", Status: "running", CreatedAt: 1000, UpdatedAt: 2000})
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "karin", Channel: "web", Address: "owner", Status: "running", CreatedAt: 1000, UpdatedAt: 1500})
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "karin", Channel: "web", Address: "owner", Status: "running", ParentSessionID: room.ID, CreatedAt: 1000, UpdatedAt: 3000})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	row := roomRowForTest(t, s, cookie, "karin")
+	if row.Presence.State != "working" || strings.HasPrefix(row.Presence.Label, "Working in") {
+		t.Fatalf("presence = %+v, want the own chat's status", row.Presence)
+	}
 }

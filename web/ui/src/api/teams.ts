@@ -2,8 +2,33 @@ import { request } from "./client";
 
 /* Team calls of API-TEAM-007 through API-TEAM-010. */
 
-export interface TeamRecord {
+/* Spec 47 API-RDS-010: the discussion settings of a team. */
+export interface TeamDiscussionSettings {
+  mode: "group" | "lead";
+  discuss: "auto" | "ask";
+  rounds: number;
+  extra_rounds: "once" | "ask" | "never";
+  room_memory: boolean;
+  share_summary: boolean;
+  learn: boolean;
+  telegram_all: boolean;
+}
+
+export const TEAM_DISCUSSION_DEFAULTS: TeamDiscussionSettings = {
+  mode: "group",
+  discuss: "auto",
+  rounds: 3,
+  extra_rounds: "once",
+  room_memory: true,
+  share_summary: true,
+  learn: true,
+  telegram_all: true,
+};
+
+export interface TeamRecord extends Partial<TeamDiscussionSettings> {
   name: string;
+  /* Spec 47: the room name people see; "" shows the team name. */
+  display_name?: string;
   lead: string;
   members: string[];
   description: string;
@@ -28,15 +53,17 @@ export interface TeamDeletedResponse {
   restart_required: boolean;
 }
 
-export interface CreateTeamRequest {
+export interface CreateTeamRequest extends Partial<TeamDiscussionSettings> {
   name: string;
+  display_name?: string;
   lead: string;
   members: string[];
   description?: string;
   expected_version: string;
 }
 
-export interface SaveTeamRequest {
+export interface SaveTeamRequest extends Partial<TeamDiscussionSettings> {
+  display_name?: string;
   lead: string;
   members: string[];
   description?: string;
@@ -69,9 +96,15 @@ export function deleteTeam(
   name: string,
   expectedVersion: string
 ): Promise<TeamDeletedResponse> {
+  /* API-TEAM-010 takes expected_version as a query parameter. */
   return request<TeamDeletedResponse>(
     "DELETE",
-    "/v1/teams/" + encodeURIComponent(name),
-    { expected_version: expectedVersion }
+    "/v1/teams/" + encodeURIComponent(name) + "?expected_version=" + encodeURIComponent(expectedVersion)
   );
+}
+
+/* The config version a team create or save must name (expected_version). */
+export async function configVersion(): Promise<string> {
+  const config = await request<{ version?: string }>("GET", "/v1/config");
+  return config && config.version ? String(config.version) : "";
 }

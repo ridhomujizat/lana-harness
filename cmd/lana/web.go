@@ -33,6 +33,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/internal/models"
+	"github.com/ridhomujizat/lana-harness/internal/roommemory"
 	"github.com/ridhomujizat/lana-harness/internal/stats"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/router"
@@ -551,7 +552,8 @@ func (b *webBackend) KnowledgePages(ctx context.Context, scope, q string, limit 
 	return pages, total, nil
 }
 
-// KnowledgePage implements web.KnowledgeDomainBackend (API-DKN-005).
+// KnowledgePage implements web.KnowledgeDomainBackend (API-DKN-005,
+// API-KGR-002).
 func (b *webBackend) KnowledgePage(ctx context.Context, path string) (core.KnowledgeDoc, string, error) {
 	if b.rt == nil {
 		return core.KnowledgeDoc{}, "", web.ErrKnowledgeUnavailable
@@ -559,12 +561,51 @@ func (b *webBackend) KnowledgePage(ctx context.Context, path string) (core.Knowl
 	return b.rt.KnowledgePage(ctx, path)
 }
 
-// ReviewItems implements web.KnowledgeDomainBackend (API-DKN-006).
-func (b *webBackend) ReviewItems(ctx context.Context) ([]core.ReviewItem, error) {
+// KnowledgeGraph implements web.KnowledgeDomainBackend (API-KGR-001).
+func (b *webBackend) KnowledgeGraph(ctx context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error) {
 	if b.rt == nil {
+		return core.KnowledgeGraph{}, web.ErrKnowledgeUnavailable
+	}
+	graph, err := b.rt.KnowledgeGraph(ctx, scope, journals, sources)
+	if err != nil {
+		return core.KnowledgeGraph{}, knowledgeDomainError(err)
+	}
+	return graph, nil
+}
+
+// KnowledgeActivity implements web.KnowledgeDomainBackend (API-KGR-004).
+func (b *webBackend) KnowledgeActivity(ctx context.Context, limit int, before time.Time, kind string) (core.KnowledgeActivityPage, error) {
+	if b.rt == nil {
+		return core.KnowledgeActivityPage{}, web.ErrKnowledgeUnavailable
+	}
+	page, err := b.rt.KnowledgeActivity(ctx, limit, before, kind)
+	if err != nil {
+		return core.KnowledgeActivityPage{}, knowledgeDomainError(err)
+	}
+	return page, nil
+}
+
+// KnowledgeHealth implements web.KnowledgeDomainBackend (API-KGR-005).
+func (b *webBackend) KnowledgeHealth(ctx context.Context) (core.KnowledgeHealth, error) {
+	if b.rt == nil {
+		return core.KnowledgeHealth{}, web.ErrKnowledgeUnavailable
+	}
+	health, err := b.rt.KnowledgeHealth(ctx)
+	if err != nil {
+		return core.KnowledgeHealth{}, knowledgeDomainError(err)
+	}
+	return health, nil
+}
+
+// ReviewItems implements web.KnowledgeDomainBackend (API-DKN-006, API-KGR-003).
+func (b *webBackend) ReviewItems(ctx context.Context, status string) ([]core.ReviewItem, error) {
+	if b.rt == nil {
+		if status == "decided" {
+			return []core.ReviewItem{}, web.ErrKnowledgeUnavailable
+		}
 		return []core.ReviewItem{}, nil
 	}
-	items, err := b.rt.ReviewItems(ctx)
+	items, err := b.rt.ReviewItems(ctx, status)
 	if err != nil {
 		return nil, knowledgeDomainError(err)
 	}
@@ -836,6 +877,7 @@ func (b *webBackend) Agents() []web.Agent {
 			Skills:    skillNames,
 			MCP:       mcp,
 			MCPStatus: mcpStatus,
+			Can:       b.rt.AgentCapabilities(name),
 		})
 	}
 	for _, name := range b.rt.TeamNames() {
@@ -850,6 +892,7 @@ func (b *webBackend) Agents() []web.Agent {
 			Lead:        team.Lead,
 			Members:     append([]string{}, team.Members...),
 			Description: team.Description,
+			Mode:        team.ConversationMode(),
 		})
 	}
 	return agents
@@ -1390,6 +1433,18 @@ func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments 
 	}
 	return b.Send(ctx, id, text, attachments, replyTo)
 }
+
+// StopDiscussion implements the web discussion extension (API-RDS-011).
+func (b *webBackend) StopDiscussion(ctx context.Context, id, mode string) (bool, error) {
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return b.rt.StopDiscussion(ctx, info.ID, mode)
+}
+
+// RoomMemory implements the web discussion extension (API-RDS-012).
+func (b *webBackend) RoomMemory() *roommemory.Store { return b.rt.RoomMemory() }
 
 // SaveAttachment stores one uploaded file in the session workspace
 // (API-ATT-001, REQ-ATT-001).

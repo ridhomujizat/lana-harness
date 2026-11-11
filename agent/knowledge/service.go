@@ -134,6 +134,11 @@ func (s *Service) open() (*kv.Vault, *kv.Index, error) {
 	if s.vault != nil && s.index != nil {
 		return s.vault, s.index, nil
 	}
+	// A runtime without a home folder (a library user, a test) has no vault;
+	// a relative path would write "knowledge/" into the working directory.
+	if s.home == "" && !filepath.IsAbs(s.vaultPath) {
+		return nil, nil, errors.New("knowledge needs a home folder")
+	}
 	vault, err := kv.Open(s.vaultPath)
 	if err != nil {
 		return nil, nil, err
@@ -564,6 +569,24 @@ func (s *Service) PendingProposals(ctx context.Context) ([]core.KnowledgeProposa
 	return out, nil
 }
 
+// DecidedProposals returns the latest decided proposals (applied, approved,
+// rejected), newest decided first, at most limit (API-KGR-003, REQ-KGR-030).
+func (s *Service) DecidedProposals(ctx context.Context, limit int) ([]core.KnowledgeProposal, error) {
+	_, idx, err := s.open()
+	if err != nil {
+		return nil, err
+	}
+	stored, err := idx.DecidedProposals([]string{proposalStatusApplied, proposalStatusApproved, proposalStatusRejected}, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.KnowledgeProposal, 0, len(stored))
+	for _, p := range stored {
+		out = append(out, coreProposal(p))
+	}
+	return out, nil
+}
+
 // DecideProposal approves or rejects one pending proposal (REQ-DKN-061). An
 // unknown or already-decided id wraps os.ErrNotExist.
 func (s *Service) DecideProposal(ctx context.Context, id string, approve bool) (core.KnowledgeProposal, error) {
@@ -656,10 +679,12 @@ func (s *Service) Pages(ctx context.Context, scope, q string, limit int) ([]core
 }
 
 // Page returns the document and raw markdown of one vault file by path
-// (API-DKN-005). A path outside the wiki and journal folders is refused; a
-// missing file wraps os.ErrNotExist.
+// (API-DKN-005), with the API-KGR-002 detail fields: type, description, updated,
+// frontmatter sources, outgoing resolved links, unresolved targets, and
+// backlinks with their line context. A path outside the wiki and journal folders
+// is refused; a missing file wraps os.ErrNotExist.
 func (s *Service) Page(ctx context.Context, ref string) (core.KnowledgeDoc, string, error) {
-	vault, _, err := s.open()
+	vault, idx, err := s.open()
 	if err != nil {
 		return core.KnowledgeDoc{}, "", err
 	}
@@ -678,7 +703,110 @@ func (s *Service) Page(ctx context.Context, ref string) (core.KnowledgeDoc, stri
 	raw := string(data)
 	doc := newDoc(rel, raw, 0, 0)
 	doc.Scope = kv.ScopeOf(rel)
+	meta := kv.ParsePage(rel, raw).Meta
+	doc.Type = meta.Type
+	doc.Description = meta.Description
+	doc.Updated = meta.Updated
+	doc.Sources = sourceTargets(meta.Sources)
+	// The graph reads resolve links from the index, so index this file first.
+	if err := idx.Sync(ctx); err != nil {
+		return core.KnowledgeDoc{}, "", err
+	}
+	out, unresolved, in, err := idx.PageLinks(ctx, rel)
+	if err != nil {
+		return core.KnowledgeDoc{}, "", err
+	}
+	doc.LinksOut = linkRefs(out)
+	doc.Unresolved = unresolved
+	if doc.Unresolved == nil {
+		doc.Unresolved = []string{}
+	}
+	doc.LinksIn = backlinks(in)
 	return doc, raw, nil
+}
+
+// sourceTargets renders frontmatter sources for the API: a source stored as a
+// wikilink is returned as its target, without the brackets or a display label
+// (API-KGR-002).
+func sourceTargets(sources []string) []string {
+	out := make([]string, 0, len(sources))
+	for _, s := range sources {
+		out = append(out, sourceTarget(s))
+	}
+	return out
+}
+
+// sourceTarget returns one source as its link target.
+func sourceTarget(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]") {
+		s = strings.TrimSuffix(strings.TrimPrefix(s, "[["), "]]")
+	}
+	if i := strings.IndexByte(s, '|'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+// linkRefs maps resolved outgoing links to the core shape.
+func linkRefs(refs []kv.FileRef) []core.KnowledgeLinkRef {
+	out := make([]core.KnowledgeLinkRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, core.KnowledgeLinkRef{Path: ref.Path, Title: ref.Title, Scope: ref.Scope})
+	}
+	return out
+}
+
+// backlinks maps resolved inbound links to the core shape.
+func backlinks(in []kv.Backlink) []core.KnowledgeBacklink {
+	out := make([]core.KnowledgeBacklink, 0, len(in))
+	for _, b := range in {
+		out = append(out, core.KnowledgeBacklink{
+			Path: b.Path, Title: b.Title, Scope: b.Scope, Context: b.Context,
+		})
+	}
+	return out
+}
+
+// graphNodeMax is the node cap Graph asks the index for (REQ-KGR-012).
+const graphNodeMax = 2000
+
+// Graph returns the knowledge graph of the vault: page nodes (plus journals and
+// sources when asked), resolved page-to-page edges, one hub per scope, and the
+// page, link, and broken counts (API-KGR-001, REQ-KGR-010–012). It runs Sync
+// first, like Pages, so files added outside lana are seen.
+func (s *Service) Graph(ctx context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error) {
+	graph := core.KnowledgeGraph{
+		Nodes: []core.KnowledgeGraphNode{},
+		Hubs:  []core.KnowledgeGraphHub{},
+		Edges: []core.KnowledgeGraphEdge{},
+	}
+	_, idx, err := s.open()
+	if err != nil {
+		return graph, err
+	}
+	if err := idx.Sync(ctx); err != nil {
+		return graph, err
+	}
+	g, err := idx.Graph(ctx, kv.GraphQuery{Scope: scope, Journals: journals, Sources: sources, Max: graphNodeMax})
+	if err != nil {
+		return graph, err
+	}
+	for _, n := range g.Nodes {
+		graph.Nodes = append(graph.Nodes, core.KnowledgeGraphNode{
+			ID: n.ID, Title: n.Title, Scope: n.Scope, Kind: n.Kind, Type: n.Type,
+			Updated: n.Updated, Degree: n.Degree,
+		})
+	}
+	for _, e := range g.Edges {
+		graph.Edges = append(graph.Edges, core.KnowledgeGraphEdge{Source: e.Source, Target: e.Target})
+	}
+	for _, h := range g.Hubs {
+		graph.Hubs = append(graph.Hubs, core.KnowledgeGraphHub{Scope: h.Scope, Pages: h.Pages})
+	}
+	graph.Counts = core.KnowledgeGraphCounts{Pages: g.Pages, Links: g.Links, Broken: g.Broken}
+	graph.Truncated = g.Truncated
+	return graph, nil
 }
 
 // DomainStats returns the "What it knows" stats of one agent's domain

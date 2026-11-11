@@ -100,6 +100,7 @@ models = ["a/x", "b/y"]
 cooldown = "0s"
 
 [agents.assistant]
+toolset = "custom"
 %s
 
 [[routes]]
@@ -239,7 +240,7 @@ func TestRouterApplyConfigLive(t *testing.T) {
 	oaURL := oa.URL
 	t.Setenv("OA_API_KEY", "oa-test-key")
 
-	base := fmt.Sprintf("[providers.a]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nmodel = \"a/x\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", a.server.URL)
+	base := fmt.Sprintf("[providers.a]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nmodel = \"a/x\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", a.server.URL)
 	rt, _ := routedRuntime(t, base)
 	result, err := rt.Run(context.Background(), Request{Prompt: "hi"})
 	if err != nil || result.Text != "from a" {
@@ -249,7 +250,7 @@ func TestRouterApplyConfigLive(t *testing.T) {
 		t.Fatalf("AgentModel=%q", got)
 	}
 
-	next := fmt.Sprintf("[providers.a]\nkind = \"openai_compat\"\nbase_url = %q\n\n[providers.oa]\nkind = \"openai\"\nbase_url = %q\n\n[agents.assistant]\nmodel = \"oa/gpt-5-mini\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", a.server.URL, oaURL)
+	next := fmt.Sprintf("[providers.a]\nkind = \"openai_compat\"\nbase_url = %q\n\n[providers.oa]\nkind = \"openai\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nmodel = \"oa/gpt-5-mini\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", a.server.URL, oaURL)
 	loaded, err := config.Load(context.Background(), config.Options{Layers: []config.Layer{{Name: "next", TOML: []byte(next)}}})
 	if err != nil {
 		t.Fatal(err)

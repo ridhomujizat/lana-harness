@@ -194,6 +194,7 @@ func New(cfg Config) (*Server, error) {
 	s.routes()
 	s.registerSessionRoutes()
 	s.registerRoomRoutes()
+	s.registerDiscussionRoutes()
 	s.registerTurnRoutes()
 	s.registerStreamRoutes()
 	s.registerApprovalRoutes()

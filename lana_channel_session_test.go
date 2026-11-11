@@ -12,7 +12,7 @@ import (
 func newChannelTestRuntime(t *testing.T) *Runtime {
 	t.Helper()
 	home := t.TempDir()
-	cfg := "[providers.local]\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:1\"\n\n[agents.helper]\nprovider = \"local\"\nmodel = \"m\"\n\n[agents.coder]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = \"" + t.TempDir() + "\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"helper\"\n"
+	cfg := "[providers.local]\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:1\"\n\n[agents.helper]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\n\n[agents.coder]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\nworkspace = \"" + t.TempDir() + "\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"helper\"\n"
 	rt, err := New(context.Background(), Options{Home: home, Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
 	if err != nil {
 		t.Fatal(err)

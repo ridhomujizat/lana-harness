@@ -19,6 +19,10 @@ export interface RoomRow {
   name: string;
   kind: string;
   title: string;
+  /* Spec 47 team work: what an agent can do ("web", "files"…). */
+  can?: string[];
+  /* A team's conversation mode: "group" (everyone talks) or "lead". */
+  mode?: string;
   /* display_name is the human name, "" when unset (falls back to name). */
   display_name?: string;
   color: string;
@@ -146,6 +150,8 @@ export interface SendRoomRequest {
   new_topic?: boolean;
   /* API-ROOM-003: the seq of the automation message this send replies to. */
   reply_to?: number;
+  /* API-RDS-013: ask the lead to open a discussion. */
+  discuss?: boolean;
 }
 
 export interface SendRoomResponse {

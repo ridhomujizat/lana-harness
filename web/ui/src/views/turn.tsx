@@ -1,3 +1,8 @@
+import { applyDiscussionEvent } from "../lib/discussion";
+import { DiscussionCard } from "./discussion";
+import type { DiscussionLog } from "../lib/discussion";
+import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
+import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { useEffect, useState } from "react";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
@@ -21,11 +26,14 @@ const WRITE_TOOLS = new Set(["write_file", "edit_file", "memory_write"]);
 const COMMAND_TOOLS = new Set(["bash", "terminal"]);
 const FETCH_TOOLS = new Set(["web_fetch", "web_search"]);
 const DELEGATE_TOOLS = new Set(["task", "task_continue"]);
+/* REQ-AGF-006: send_file counts as its own category ("Sent 2 files"). */
+const SEND_TOOLS = new Set(["send_file"]);
 
 const CATEGORY_ORDER = [
   "read",
   "search",
   "write",
+  "send",
   "command",
   "fetch",
   "delegate",
@@ -88,22 +96,16 @@ export function quoteLine(text: string, max = 90): string {
   return cut((first || "").trim(), max);
 }
 
-/* UserAttachmentRef is a stored image block of an owner message: the reader
-   turns it into a URL (API-ATT-003). */
+/* UserAttachmentRef is a stored attachment of an owner message: an image block,
+   or (REQ-CHF-001) the text block of another file. The reader turns it into a
+   URL (API-ATT-003). */
 export interface UserAttachmentRef {
   path: string;
   mediaType: string;
+  file?: MessageFile;
 }
 
-/* UserAttachment is the renderable form of an attachment: a local object URL
-   for a pending file, or a served URL for a stored one. */
-export interface UserAttachment {
-  key: string;
-  name: string;
-  src: string;
-  alt: string;
-  isImage: boolean;
-}
+export type { UserAttachment };
 
 export type TurnSegment =
   | {
@@ -117,11 +119,27 @@ export type TurnSegment =
          source ("workflow") and the source's name. */
       source?: string;
       sourceName?: string;
+      /* Group rooms: an agent's reply and what it used. */
+      agentMeta?: AgentReplyMeta;
     }
   | { kind: "thinking"; key: string; text: string }
   | { kind: "step"; key: string; step: TurnStep };
 
+/* Group rooms: a reply's pass/fail state and the tools, notes and files the
+   agent used (assistant/message with source "agent"). */
+export interface AgentReplyMeta {
+  /* The agent's own turn behind the reply, to show its steps like a chat. */
+  childSessionId: string;
+  childTurnId: string;
+  passed: boolean;
+  failed: boolean;
+  tools: Record<string, number>;
+  notes: string[];
+  files: string[];
+}
+
 export interface TurnGroup {
+  agentMeta?: AgentReplyMeta;
   kind: "text" | "thinking" | "activity";
   key: string;
   text?: string;
@@ -152,6 +170,7 @@ export interface Turn {
   currentStep?: number;
   /* REQ-MEM-030: muted memory-capture lines, one per applied operation. */
   notes?: string[];
+  sentFiles?: SentFileRef[];
   [key: string]: unknown;
 }
 
@@ -172,6 +191,21 @@ export interface ChatTurn extends Turn {
   stepCount: number;
   currentStep: number;
   notes: string[];
+  /* REQ-AGF-005: the files the agent sent in this turn (file/sent events). */
+  sentFiles: SentFileRef[];
+  /* Spec 47: the room discussion of this turn, if the lead opened one. */
+  discussion: DiscussionLog | null;
+}
+
+/* SentFileRef is one file/sent event (API-AGF-001). */
+export interface SentFileRef {
+  key: string;
+  path: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  caption: string;
+  at: number;
 }
 
 export type ThreadItem =
@@ -346,6 +380,9 @@ function toolCategory(name: string | null | undefined): string {
   if (WRITE_TOOLS.has(tool)) {
     return "write";
   }
+  if (SEND_TOOLS.has(tool)) {
+    return "send";
+  }
   if (COMMAND_TOOLS.has(tool)) {
     return "command";
   }
@@ -374,6 +411,8 @@ function categoryText(
       return (running ? "Searching " : "Searched ") + plural(count, "time");
     case "write":
       return (running ? "Writing " : "Wrote ") + plural(count, "file");
+    case "send":
+      return (running ? "Sending " : "Sent ") + plural(count, "file");
     case "command":
       return (running ? "Running " : "Ran ") + plural(count, "command");
     case "fetch":
@@ -436,6 +475,8 @@ export function stepIntent(name: string | null | undefined): string {
       return "Write a file";
     case "edit_file":
       return "Edit a file";
+    case "send_file":
+      return "Send a file";
     case "bash":
     case "terminal":
       return "Run a command";
@@ -478,21 +519,11 @@ function stepStatusText(step: TurnStep): string {
   return "Running.";
 }
 
-function Icon({ name, className = "icon-20" }: { name: string; className?: string }) {
-  return (
-    <img
-      className={className}
-      src={"/assets/icons/" + name + ".svg"}
-      alt=""
-      aria-hidden="true"
-    />
-  );
-}
-
 const CATEGORY_ICONS: Record<string, string> = {
   read: "file-text",
   search: "search",
   write: "pencil",
+  send: "send",
   command: "terminal",
   fetch: "globe",
   delegate: "users",
@@ -774,6 +805,8 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
+  /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
+  sessionId?: string;
   onContinue?: (() => void) | null;
   continueBusy?: boolean;
   /* API-TFB-003: the refusal text of a failed Continue, shown in the card. */
@@ -802,6 +835,7 @@ export function TurnBlock({
   continueBusy = false,
   continueError = "",
   onReply = null,
+  sessionId = "",
 }: TurnBlockProps) {
   /* Spec 43: an agent with a generated avatar shows it through AgentFace. */
   const storedAvatar = useAgentAvatar(agent);
@@ -883,7 +917,17 @@ export function TurnBlock({
         waitingForInput={waitingForInput}
         turnKey={String(turn.key || turn.id || "turn")}
       />
-      {parts.answer.map((segment) => (
+      {parts.answer.map((segment) =>
+        segment.source === "discussion" ? (
+          /* Spec 47 REQ-RDS-053: a discussion summary shared into a member's
+             room shows as a card. */
+          <DiscussionCard
+            key={segment.key}
+            team={segment.sourceName || ""}
+            text={segment.text || ""}
+            at={Number(turn.startedAt) || 0}
+          />
+        ) : (
         <div className="turn-text turn-answer" key={segment.key}>
           {segment.source ? (
             <div className="turn-via muted">
@@ -915,7 +959,15 @@ export function TurnBlock({
           ) : null}
           <Markdown text={segment.text || ""} />
         </div>
-      ))}
+        )
+      )}
+      {sessionId && (turn.sentFiles || []).length > 0 ? (
+        <AgentFiles
+          sessionId={sessionId}
+          files={turn.sentFiles || []}
+          sender={agentLabel || agent}
+        />
+      ) : null}
       {(turn.notes || []).length > 0 ? (
         <div>
           {(turn.notes || []).map((note, index) => (
@@ -1014,6 +1066,8 @@ export function ReplyChip({
   );
 }
 
+const ATTACHMENTS_PLACEHOLDER = "(attachments)";
+
 export function UserBubble({
   text,
   continue: isContinue = false,
@@ -1028,41 +1082,24 @@ export function UserBubble({
       </div>
     );
   }
+  /* REQ-CHF-002: files sit above the bubble as cards; the bubble holds only
+     the owner's text and is left out when there is none. A files-only send is
+     stored with the placeholder text "(attachments)", which is not shown. */
+  if (attachments.length > 0 && text.trim() === ATTACHMENTS_PLACEHOLDER) {
+    text = "";
+  }
   return (
     <div className="chat-user-row">
-      <div className="chat-bubble">
-        {replyTo ? (
-          <span className="chat-bubble-quote" title={replyQuoteLabel(replyTo)}>
-            {replyQuoteLabel(replyTo)}
-          </span>
-        ) : null}
-        {text ? <span className="chat-bubble-text">{text}</span> : null}
-        {attachments.length > 0 ? (
-          <div className="chat-bubble-attachments">
-            {attachments.map((attachment) =>
-              attachment.isImage && attachment.src ? (
-                <a
-                  className="chat-attachment-image"
-                  key={attachment.key}
-                  href={attachment.src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img
-                    src={attachment.src}
-                    loading="lazy"
-                    alt={attachment.alt}
-                  />
-                </a>
-              ) : (
-                <span className="chat-attachment-file" key={attachment.key}>
-                  <Icon name="file" className="icon-16" />
-                  <span className="chat-attachment-name">
-                    {attachment.name}
-                  </span>
-                </span>
-              )
-            )}
+      <div className="chat-user-stack">
+        {attachments.length > 0 ? <MessageFiles attachments={attachments} /> : null}
+        {text || replyTo ? (
+          <div className="chat-bubble">
+            {replyTo ? (
+              <span className="chat-bubble-quote" title={replyQuoteLabel(replyTo)}>
+                {replyQuoteLabel(replyTo)}
+              </span>
+            ) : null}
+            {text ? <FoldText text={text} /> : null}
           </div>
         ) : null}
       </div>
@@ -1088,6 +1125,8 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     stepCount: 0,
     currentStep: 0,
     notes: [],
+    sentFiles: [],
+    discussion: null,
   };
 }
 
@@ -1096,8 +1135,9 @@ function pushStep(turn: ChatTurn, step: TurnStep): void {
   turn.steps.push(step);
 }
 
-/* userMessageAttachments collects the image blocks of an owner message. The
-   web API keeps the path and media type and drops the bytes (API-ATT-004). */
+/* userMessageAttachments collects the image blocks and file blocks of an owner
+   message in order. The web API keeps an image's path and media type and drops
+   the bytes (API-ATT-004). */
 function userMessageAttachments(
   payload: Record<string, unknown>
 ): UserAttachmentRef[] {
@@ -1117,6 +1157,14 @@ function userMessageAttachments(
         mediaType:
           typeof value.media_type === "string" ? value.media_type : "",
       });
+      continue;
+    }
+    const file =
+      value.type === "text" && typeof value.text === "string"
+        ? parseAttachmentBlock(value.text)
+        : null;
+    if (file) {
+      refs.push({ path: file.path, mediaType: file.mediaType, file });
     }
   }
   return refs;
@@ -1242,10 +1290,11 @@ export function buildTurns(
           });
         }
         const text = contentText(payload.content);
-        if (text) {
+        const source = stringOf(payload.source);
+        const agentReply = source === "agent";
+        if (text || (agentReply && payload.passed === true)) {
           /* API-WF-005: an out-of-band message names its source, shown as a
              muted "via …" line above the answer. */
-          const source = stringOf(payload.source);
           const sourceName = stringOf(payload.source_name);
           turn.segments.push({
             kind: "text",
@@ -1253,6 +1302,7 @@ export function buildTurns(
             text,
             seq: event.seq,
             ...(source ? { source, sourceName } : {}),
+            ...(agentReply ? { agentMeta: agentMetaOf(payload) } : {}),
           });
         }
         break;
@@ -1329,6 +1379,31 @@ export function buildTurns(
             step.approval.decided = record.decided;
           }
         }
+        break;
+      }
+      case "file/sent": {
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        const path = stringOf(payload.path);
+        if (path) {
+          turn.sentFiles.push({
+            key: "sent-" + event.seq,
+            path,
+            name: stringOf(payload.name) || path.split("/").pop() || path,
+            mediaType: stringOf(payload.media_type),
+            size: Number(payload.size) || 0,
+            caption: stringOf(payload.caption),
+            at: createdAt,
+          });
+        }
+        break;
+      }
+      case "discussion/started":
+      case "discussion/message":
+      case "discussion/ended": {
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        turn.discussion = applyDiscussionEvent(turn.discussion, event.kind, payload, event.seq, createdAt);
         break;
       }
       case "turn/end": {
@@ -1441,4 +1516,27 @@ export function buildTurns(
     items.push({ kind: "turn", key: turn.key, turn });
   }
   return items;
+}
+
+function agentMetaOf(payload: Record<string, unknown>): AgentReplyMeta {
+  const tools: Record<string, number> = {};
+  if (payload.tools && typeof payload.tools === "object") {
+    for (const [name, count] of Object.entries(payload.tools as Record<string, unknown>)) {
+      const n = Number(count);
+      if (Number.isFinite(n) && n > 0) {
+        tools[name] = n;
+      }
+    }
+  }
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
+  return {
+    childSessionId: typeof payload.child_session_id === "string" ? payload.child_session_id : "",
+    childTurnId: typeof payload.child_turn_id === "string" ? payload.child_turn_id : "",
+    passed: payload.passed === true,
+    failed: payload.failed === true,
+    tools,
+    notes: list(payload.notes),
+    files: list(payload.files),
+  };
 }

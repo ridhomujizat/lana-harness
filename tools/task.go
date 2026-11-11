@@ -10,7 +10,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-var taskSpec = json.RawMessage(`{"type":"object","required":["agent","prompt"],"properties":{"agent":{"type":"string","description":"Name of an agent from the roster"},"prompt":{"type":"string","description":"Complete instructions. The agent sees nothing else from this conversation"},"title":{"type":"string","description":"Short label for the task"}}}`)
+var taskSpec = json.RawMessage(`{"type":"object","required":["agent","prompt"],"properties":{"agent":{"type":"string","description":"Name of an agent from the roster"},"prompt":{"type":"string","description":"Complete instructions. The agent sees nothing else from this conversation"},"title":{"type":"string","description":"Short label for the task"},"context":{"type":"array","items":{"type":"string"},"description":"Session ids from earlier task results whose answers this agent should build on"}}}`)
 
 var taskContinueSpec = json.RawMessage(`{"type":"object","required":["session_id","prompt"],"properties":{"session_id":{"type":"string","description":"Child session id from a task result"},"prompt":{"type":"string","description":"Follow-up instructions for the child"}}}`)
 
@@ -32,9 +32,10 @@ func (t *taskTool) ParallelSafe() bool             { return true }
 
 func (t *taskTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessage) (core.ToolOutput, error) {
 	var in struct {
-		Agent  string `json:"agent"`
-		Prompt string `json:"prompt"`
-		Title  string `json:"title"`
+		Agent   string   `json:"agent"`
+		Prompt  string   `json:"prompt"`
+		Title   string   `json:"title"`
+		Context []string `json:"context"`
 	}
 	if err := decodeInput(raw, &in); err != nil {
 		return inputErrorOutput(err)
@@ -61,6 +62,8 @@ func (t *taskTool) Call(ctx context.Context, tc core.ToolCtx, raw json.RawMessag
 		Agent:           in.Agent,
 		Prompt:          in.Prompt,
 		Title:           in.Title,
+		Context:         in.Context,
+		WithNotes:       true,
 	})
 }
 

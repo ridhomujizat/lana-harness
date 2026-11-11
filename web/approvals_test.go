@@ -376,6 +376,7 @@ provider = "mock"
 model = "m"
 workspace = %q
 tools = ["write_file"]
+permission = "ask"
 
 [[routes]]
 channel = "web"

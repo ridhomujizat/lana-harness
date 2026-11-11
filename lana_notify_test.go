@@ -22,7 +22,7 @@ func newNotifyTestRuntime(t *testing.T, replies ...string) *Runtime {
 		text := replies[i]
 		responses = append(responses, mock.Response{Events: []mock.Event{{Text: &text}, {Stop: &end}}})
 	}
-	cfg := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.coder]\nprovider = \"mock\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"coder\"\n"
+	cfg := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.coder]\ntoolset = \"custom\"\nprovider = \"mock\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"coder\"\n"
 	rt, err := New(context.Background(), Options{
 		Home:      t.TempDir(),
 		Layers:    []config.Layer{{Name: "test", TOML: []byte(cfg)}},

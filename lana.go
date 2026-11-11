@@ -28,10 +28,12 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/calendar"
+	"github.com/ridhomujizat/lana-harness/internal/file"
 	"github.com/ridhomujizat/lana-harness/internal/jobs"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
+	"github.com/ridhomujizat/lana-harness/internal/roommemory"
 	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
@@ -73,6 +75,18 @@ type runtimeOptions struct {
 	approveChannels map[string]bool
 	ask             AskFunc
 	askChannels     map[string]bool
+	file            FileFunc
+	discussionPost  DiscussionPostFunc
+}
+
+// DiscussionPostFunc delivers one room discussion message to the session's
+// channel (spec 47 REQ-RDS-033). name is the speaker's display name.
+type DiscussionPostFunc = func(ctx context.Context, sessionID, name, text string)
+
+// DiscussionPostWith installs the channel delivery of discussion messages.
+// Without it a discussion is shown only in the web room.
+func DiscussionPostWith(fn DiscussionPostFunc) Option {
+	return func(o *runtimeOptions) { o.discussionPost = fn }
 }
 
 // ApproveFunc answers approvals for the library channel.
@@ -111,6 +125,16 @@ func AskChannels(channels ...string) Option {
 			o.askChannels[channel] = true
 		}
 	}
+}
+
+// FileFunc delivers a file sent by the send_file tool to the session's channel.
+type FileFunc = func(ctx context.Context, req core.FileSendRequest) core.FileSendOutcome
+
+// FileWith installs the file sender for the send_file tool. Without it the
+// service writes the file/sent event and reports no delivery (the web chat
+// reads the event from the stream).
+func FileWith(fn FileFunc) Option {
+	return func(o *runtimeOptions) { o.file = fn }
 }
 
 var (
@@ -172,7 +196,7 @@ var toolCatalogGroupOrder = []struct {
 	Label string
 	Names []string
 }{
-	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep"}},
+	{ID: "files", Label: "Files", Names: []string{"read_file", "write_file", "edit_file", "glob", "grep", "send_file"}},
 	{ID: "shell", Label: "Shell", Names: []string{"bash"}},
 	{ID: "web", Label: "Web", Names: []string{"web_search", "web_fetch"}},
 	{ID: "memory", Label: "Memory", Names: []string{"memory_read", "memory_write", "session_search"}},
@@ -182,7 +206,7 @@ var toolCatalogGroupOrder = []struct {
 	{ID: "calendar", Label: "Calendar", Names: []string{"calendar"}},
 	{ID: "workflows", Label: "Workflows", Names: []string{"workflow"}},
 	{ID: "stats", Label: "Stats", Names: []string{"usage_stats"}},
-	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
+	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user", "discuss_start", "discuss_ask", "discuss_more", "discuss_end"}},
 }
 
 // Runtime is the library runtime.
@@ -392,6 +416,8 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	questionService := question.New(coreCtx.Sessions, coreCtx.Hooks)
 	coreCtx.Questions = questionService
 	registry.SetQuestions(questionService)
+	fileService := file.New(coreCtx.Sessions, coreCtx.Hooks)
+	registry.SetFiles(fileService)
 	if opts.Approval == PolicyTrust {
 		coreCtx.Hooks.ToolsPreExecute.Use(func(context.Context, core.ToolsPreExecuteInput, core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 			return core.ToolDecision{Allowed: true}, nil
@@ -445,6 +471,18 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 			return outcome, nil
 		})
 	}
+	if runtimeOpts.file != nil {
+		fn := runtimeOpts.file
+		coreCtx.Hooks.FileSend.Use(func(ctx context.Context, req core.FileSendRequest, _ core.Next[core.FileSendRequest, core.FileSendOutcome]) (outcome core.FileSendOutcome, err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					outcome = core.FileSendOutcome{}
+					err = nil
+				}
+			}()
+			return fn(ctx, req), nil
+		})
+	}
 	root, cancel := context.WithCancel(context.Background())
 	rt := &Runtime{
 		ctx: root, cancel: cancel, coreCtx: coreCtx, result: result,
@@ -453,6 +491,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		toolboxNames: map[string]bool{},
 	}
 	rt.attachRouterStores()
+	// Spec 47: after a discussion, members get the summary in their own room
+	// and the session's channel gets every message.
+	registry.SetDiscussionShare(&discussionShare{rt: rt, post: runtimeOpts.discussionPost})
 	// Spec 40: name sessions in the background after their first turn.
 	rt.startTitles()
 	// Spec 38, spec 39: Claude Code turns report usage, plan windows, and the
@@ -1310,6 +1351,14 @@ func (rt *Runtime) AgentModel(agentName string) string {
 	return ""
 }
 
+// AgentCapabilities names what an agent can do (spec 47 team work).
+func (rt *Runtime) AgentCapabilities(agentName string) []string {
+	if agentCfg, ok := rt.agentConfig(agentName); ok {
+		return core.AgentCapabilities(agentCfg)
+	}
+	return nil
+}
+
 // AgentPolicy returns the agent's initial policy; for a team it is the lead's.
 func (rt *Runtime) AgentPolicy(agentName string) string {
 	if agentCfg, ok := rt.agentConfig(agentName); ok {
@@ -1374,12 +1423,16 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 	}
 	_, mcpManageRegistered := registry.Get("mcp_manage")
 	_, calendarRegistered := registry.Get(agent.CalendarTool)
+	_, sendFileRegistered := registry.Get(agent.SendFileTool)
+	_, discussRegistered := registry.Get(agent.DiscussTools[0])
 	autoOffered := agent.AutoOfferedTools(agent.AutoOfferState{
 		Root:                true,
 		MCPManageRegistered: mcpManageRegistered,
 		VisibleSkills:       visibleSkills,
 		Team:                inTeam || len(agentCfg.Subagents) > 0,
 		CalendarRegistered:  calendarRegistered,
+		SendFileRegistered:  sendFileRegistered,
+		Discussion:          inTeam && discussRegistered,
 	})
 	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
 	for _, group := range toolCatalogGroupOrder {
@@ -1389,7 +1442,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 			if !ok {
 				continue
 			}
-			listed := slices.Contains(agentCfg.Tools, name)
+			listed := slices.Contains(core.EffectiveTools(agentCfg), name)
 			auto := !listed && slices.Contains(autoOffered, name)
 			source := "not_listed"
 			if listed {
@@ -1422,7 +1475,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 		if _, ok := tool.(*toolboxCommandTool); !ok {
 			continue
 		}
-		listed := slices.Contains(agentCfg.Tools, name)
+		listed := slices.Contains(core.EffectiveTools(agentCfg), name)
 		source := "not_listed"
 		if listed {
 			source = "listed"
@@ -1756,6 +1809,29 @@ func (rt *Runtime) Cancel(ctx context.Context, sessionID string) error {
 		return err
 	}
 	return rt.coreCtx.Agents.Cancel(ctx, sessionID)
+}
+
+// StopDiscussion stops the open discussion of a session (spec 47
+// API-RDS-011).
+func (rt *Runtime) StopDiscussion(ctx context.Context, sessionID, mode string) (bool, error) {
+	if err := rt.closedError(); err != nil {
+		return false, err
+	}
+	if rt.registry == nil {
+		return false, nil
+	}
+	return rt.registry.StopDiscussion(ctx, sessionID, mode)
+}
+
+// RoomMemory returns the room memory store (spec 47 API-RDS-012).
+func (rt *Runtime) RoomMemory() *roommemory.Store {
+	if rt.registry != nil {
+		return rt.registry.RoomMemory()
+	}
+	if rt.home == "" {
+		return nil
+	}
+	return roommemory.New(rt.home)
 }
 
 // Policy returns the session's effective policy.
@@ -2219,12 +2295,102 @@ func (rt *Runtime) KnowledgePage(ctx context.Context, path string) (core.Knowled
 	return domains.Page(ctx, path)
 }
 
-// ReviewItems returns the pending review queue, newest first (API-DKN-006). It
-// merges the knowledge proposals of the knowledge service with the skill
-// proposals of the agent home; a runtime without a knowledge service still
-// lists the skill proposals.
-func (rt *Runtime) ReviewItems(ctx context.Context) ([]core.ReviewItem, error) {
+// KnowledgeGraph returns the knowledge graph of the vault for GET
+// /v1/knowledge/graph (API-KGR-001, REQ-KGR-010). Without a knowledge service
+// it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeGraph(ctx context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeGraph{}, ErrKnowledgeUnavailable
+	}
+	return domains.Graph(ctx, scope, journals, sources)
+}
+
+// KnowledgeActivity returns the newest log entries for GET
+// /v1/knowledge/activity (API-KGR-004, REQ-KGR-040). Without a knowledge
+// service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeActivity(ctx context.Context, limit int, before time.Time, kind string) (core.KnowledgeActivityPage, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeActivityPage{}, ErrKnowledgeUnavailable
+	}
+	return domains.Activity(ctx, limit, before, kind)
+}
+
+// KnowledgeHealth returns the upkeep health for GET /v1/knowledge/health
+// (API-KGR-005, REQ-KGR-041). It adds the pending skill proposals and the
+// MEMORY.md block of every agent with a domain, like KnowledgeStatus. Without a
+// knowledge service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeHealth(ctx context.Context) (core.KnowledgeHealth, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeHealth{}, ErrKnowledgeUnavailable
+	}
+	health, err := domains.Health(ctx)
+	if err != nil {
+		return core.KnowledgeHealth{}, err
+	}
+	if rt.home != "" {
+		if proposals, err := agenthome.SkillProposals(rt.home); err == nil {
+			health.ReviewPending += len(proposals)
+		}
+	}
+	health.Memory = rt.knowledgeMemory(domains)
+	return health, nil
+}
+
+// knowledgeMemory returns the MEMORY.md character count and limit of every
+// agent that has a knowledge domain, in name order (REQ-KGR-041).
+func (rt *Runtime) knowledgeMemory(domains core.KnowledgeDomains) []core.KnowledgeHealthMemory {
+	out := []core.KnowledgeHealthMemory{}
+	agents := rt.agents()
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !domains.HasDomain(name) {
+			continue
+		}
+		entries, err := agenthome.ReadEntries(agenthome.Paths(rt.home, name).Memory)
+		if err != nil {
+			entries = nil
+		}
+		out = append(out, core.KnowledgeHealthMemory{
+			Agent:      name,
+			Characters: agenthome.Size(entries),
+			Limit:      agenthome.MemoryLimit,
+		})
+	}
+	return out
+}
+
+// reviewDecidedMax is the number of decided proposals GET /v1/review?status=decided
+// returns (API-KGR-003, REQ-KGR-030).
+const reviewDecidedMax = 20
+
+// ReviewItems returns one list of the review queue (API-DKN-006, API-KGR-003).
+// status "pending" (the default) is the pending queue: the knowledge proposals
+// of the knowledge service plus the skill proposals of the agent home, newest
+// first. status "decided" is the latest decided knowledge proposals, newest
+// decided first; without a knowledge service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) ReviewItems(ctx context.Context, status string) ([]core.ReviewItem, error) {
 	items := make([]core.ReviewItem, 0)
+	if status == "decided" {
+		domains := rt.knowledgeDomains()
+		if domains == nil {
+			return items, ErrKnowledgeUnavailable
+		}
+		proposals, err := domains.DecidedProposals(ctx, reviewDecidedMax)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range proposals {
+			items = append(items, reviewItemDecided(p))
+		}
+		return items, nil
+	}
 	if domains := rt.knowledgeDomains(); domains != nil {
 		proposals, err := domains.PendingProposals(ctx)
 		if err != nil {
@@ -2328,7 +2494,8 @@ func (rt *Runtime) knowledgeAgentName(name string) string {
 }
 
 // reviewItemFromProposal maps one knowledge proposal to a review item
-// (API-DKN-006).
+// (API-DKN-006). OldText carries the op's OldText for replace and supersede
+// (API-KGR-003).
 func reviewItemFromProposal(p core.KnowledgeProposal) core.ReviewItem {
 	return core.ReviewItem{
 		ID:        p.ID,
@@ -2341,7 +2508,18 @@ func reviewItemFromProposal(p core.KnowledgeProposal) core.ReviewItem {
 		OwnerTurn: p.OwnerTurn,
 		SessionID: p.SessionID,
 		CreatedAt: p.CreatedAt,
+		OldText:   p.Write.OldText,
 	}
+}
+
+// reviewItemDecided maps one decided knowledge proposal to a review item with
+// its decision status, result, and time (API-KGR-003).
+func reviewItemDecided(p core.KnowledgeProposal) core.ReviewItem {
+	item := reviewItemFromProposal(p)
+	item.Status = p.Status
+	item.Result = p.Result
+	item.DecidedAt = p.DecidedAt
+	return item
 }
 
 // reviewItemFromSkill maps one skill proposal to a review item (API-DKN-006).

@@ -106,7 +106,7 @@ function routeContent(
     case "chats":
       return <ChatsPage />;
     case "chat":
-      return <ChatsPage roomName={params.name} />;
+      return <ChatsPage roomName={params.name} draft={params.draft} />;
     case "logs":
       return <LogsPage />;
     case "tools":

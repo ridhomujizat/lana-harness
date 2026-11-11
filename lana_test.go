@@ -18,7 +18,7 @@ import (
 
 func newTestRuntime(t *testing.T, baseURL string, mutate func(string) string) *Runtime {
 	t.Helper()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", baseURL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", baseURL)
 	if mutate != nil {
 		cfg = mutate(cfg)
 	}
@@ -64,7 +64,7 @@ func (d dummyTool) Call(context.Context, core.ToolCtx, json.RawMessage) (core.To
 func TestNewToolConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
 	_, err := New(context.Background(), Options{
 		Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}},
 		Tools:  []core.Tool{dummyTool{name: "read_file"}},
@@ -85,7 +85,7 @@ func TestNewUnknownAgentToolWarns(t *testing.T) {
 	slog.SetDefault(slog.New(capture))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"missing_tool\"]\n", srv.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"missing_tool\"]\n", srv.URL)
 	rt, err := New(context.Background(), Options{Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
 	if err != nil {
 		t.Fatalf("New with an unknown agent tool: %v", err)
@@ -159,7 +159,7 @@ func TestRunEmptyPrompt(t *testing.T) {
 func TestNoRoute(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\n", srv.URL)
 	rt, err := New(context.Background(), Options{Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
 	if err != nil {
 		t.Fatal(err)

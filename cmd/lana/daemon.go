@@ -267,7 +267,36 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 	if webServer != nil {
 		questionRouter.web = webQuestionResponder(webServer.Questions())
 	}
-	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"))
+	fileRouter := &FileRouter{
+		sessionInfo: func(ctx context.Context, sessionID string) (core.SessionInfo, error) {
+			if rt == nil {
+				return core.SessionInfo{}, errors.New("runtime is not ready")
+			}
+			return rt.SessionInfo(ctx, sessionID)
+		},
+	}
+	if telegramActive {
+		fileRouter.telegram = func(ctx context.Context, sessionID string, f core.SentFile) error {
+			if channel == nil {
+				return errors.New("telegram is not ready")
+			}
+			return channel.SendFile(ctx, sessionID, f)
+		}
+	}
+	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"), lana.FileWith(fileRouter.Send), lana.DiscussionPostWith(func(ctx context.Context, sessionID, name, text string) {
+		// REQ-RDS-033: a team session on Telegram shows every discussion
+		// message; other channels read the events.
+		if channel == nil || rt == nil {
+			return
+		}
+		info, err := rt.SessionInfo(ctx, sessionID)
+		if err != nil || info.Channel != "telegram" {
+			return
+		}
+		if err := channel.SendDiscussion(ctx, sessionID, name, text); err != nil {
+			slog.Warn("telegram: discussion post failed", "session_id", sessionID, "error", err)
+		}
+	}))
 	if err != nil {
 		return errorf(2, "%v", err)
 	}
@@ -757,6 +786,32 @@ func (r *QuestionRouter) Ask(ctx context.Context, req core.QuestionRequest) core
 		}
 	}
 	return noQuestionResponder()
+}
+
+// FileRouter delivers a file sent by the send_file tool to the session's
+// channel (REQ-AGF-004). Telegram delivers the file; every other channel has
+// nothing to do because the web chat reads the file/sent event from the
+// stream.
+type FileRouter struct {
+	sessionInfo func(context.Context, string) (core.SessionInfo, error)
+	telegram    func(ctx context.Context, sessionID string, f core.SentFile) error
+}
+
+// Send routes req to the channel of the session. A session without a bound
+// channel, or a delivery error, becomes the tool's delivery note.
+func (r *FileRouter) Send(ctx context.Context, req core.FileSendRequest) core.FileSendOutcome {
+	if r == nil || r.sessionInfo == nil {
+		return core.FileSendOutcome{}
+	}
+	info, err := r.sessionInfo(ctx, req.SessionID)
+	if err != nil || info.Channel != "telegram" || r.telegram == nil {
+		return core.FileSendOutcome{}
+	}
+	if err := r.telegram(ctx, info.ID, req.File); err != nil {
+		slog.Warn("file delivery failed", "session", info.ID, "name", req.File.Name, "error", err)
+		return core.FileSendOutcome{Note: "Telegram delivery failed: " + err.Error()}
+	}
+	return core.FileSendOutcome{}
 }
 
 // questionBroker is the web question broker as the router sees it.

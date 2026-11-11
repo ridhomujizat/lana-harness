@@ -163,6 +163,11 @@ type Agent struct {
 	Skills      []string
 	MCP         []string
 	MCPStatus   []MCPStatus
+	// Can names what the agent can do ("Claude Code", "web", "files"…),
+	// for the team room (spec 47 team work).
+	Can []string
+	// Mode is a team's conversation mode, "group" or "lead".
+	Mode string
 }
 
 // Holder values for the session in_use field and the status event.

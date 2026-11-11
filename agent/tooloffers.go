@@ -15,18 +15,30 @@ type AutoOfferState struct {
 	Team bool
 	// CalendarRegistered is true when the registry has the calendar tool.
 	CalendarRegistered bool
+	// SendFileRegistered is true when the registry has the send_file tool.
+	SendFileRegistered bool
+	// Discussion is true for a team lead's root turn (spec 47 REQ-RDS-010).
+	Discussion bool
 }
+
+// DiscussTools are the room discussion tools a team lead is offered.
+var DiscussTools = []string{"discuss_start", "discuss_ask", "discuss_more", "discuss_end"}
 
 // CalendarTool is the calendar tool name. REQ-CAL-009: every agent is offered
 // it without listing it in [agents.<name>].tools, root turn or child session,
 // unless the owner lists it in disabled_tools.
 const CalendarTool = "calendar"
 
+// SendFileTool is the send_file tool name. REQ-AGF-002: every agent is offered
+// it without listing it, like the calendar tool, unless the owner lists it in
+// disabled_tools.
+const SendFileTool = "send_file"
+
 // AutoOfferedTools returns the auto-offered built-in tools in offer order.
 // Tools listed in [agents.<name>].tools are not part of this list; callers
 // combine both sources and then apply disabled_tools.
 func AutoOfferedTools(state AutoOfferState) []string {
-	names := make([]string, 0, 5)
+	names := make([]string, 0, 6)
 	if state.VisibleSkills {
 		names = append(names, "skill_load")
 	}
@@ -38,6 +50,12 @@ func AutoOfferedTools(state AutoOfferState) []string {
 	}
 	if state.CalendarRegistered {
 		names = append(names, CalendarTool)
+	}
+	if state.SendFileRegistered {
+		names = append(names, SendFileTool)
+	}
+	if state.Discussion {
+		names = append(names, DiscussTools...)
 	}
 	return names
 }
