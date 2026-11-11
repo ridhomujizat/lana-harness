@@ -29,6 +29,15 @@ struct MenuContent: View {
 
             Divider().padding(.horizontal, 10)
             section {
+                MenuRow(
+                    title: "Open lana",
+                    symbol: "macwindow.on.rectangle",
+                    shortcut: "⌘O",
+                    help: "Opens the dashboard in the lana window, with its own Dock icon."
+                ) {
+                    model.openWindow()
+                }
+                .keyboardShortcut("o", modifiers: .command)
                 ForEach([DashboardPage.chat, .workflows, .calendar], id: \.self) { page in
                     pageRow(page)
                 }
@@ -96,7 +105,7 @@ struct MenuContent: View {
             title: signIn ? "Sign In and Open \(page.title.replacingOccurrences(of: "Open ", with: ""))…" : page.title,
             symbol: signIn ? "key" : page.symbol,
             enabled: model.status.running && model.status.webEnabled,
-            help: "Opens \(model.status.dashboardBase)\(page.hash). Hold ⌥ to sign in with a one-time link first."
+            help: (model.settings.openInWindow ? "Opens \(page.hash) in the lana window." : "Opens \(model.status.dashboardBase)\(page.hash).") + " Hold ⌥ to sign in to the browser with a one-time link first."
         ) {
             model.open(page)
         }

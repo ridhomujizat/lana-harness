@@ -21,7 +21,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The bundle sets LSUIElement; this keeps the Dock icon away when the
         // binary runs outside the bundle too (swift run, --dump-status tests).
+        // The lana window turns the Dock icon on while it is open (spec #52).
         NSApp.setActivationPolicy(.accessory)
+        let atLogin = Self.launchedAsLoginItem()
+        guard !atLogin, Bundle.main.bundleURL.pathExtension == "app", AppSettings().windowAtLaunch else {
+            return
+        }
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { WebWindowController.shared.show() }
+        }
+    }
+
+    /// Opening Lana.app again (Finder, Spotlight, the Dock, `open -a`) while it
+    /// runs shows the lana window.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        MainActor.assumeIsolated { WebWindowController.shared.show() }
+        return true
+    }
+
+    /// launchedAsLoginItem reads the open-application Apple event: macOS marks
+    /// a launch at login with keyAELaunchedAsLogInItem.
+    static func launchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent, event.eventID == AEEventID(kAEOpenApplication) else {
+            return false
+        }
+        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
     }
 }
 

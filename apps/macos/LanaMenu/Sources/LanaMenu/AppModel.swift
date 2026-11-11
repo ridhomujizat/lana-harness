@@ -43,7 +43,23 @@ enum DashboardPage: String, CaseIterable {
 struct AppSettings {
     static let homeKey = "lanaHome"
     static let binaryKey = "lanaBinary"
+    static let openInWindowKey = "openPagesInWindow"
+    static let windowAtLaunchKey = "openWindowAtLaunch"
     private let defaults = UserDefaults.standard
+
+    /// openInWindow sends the menu pages and notification clicks to the lana
+    /// window (spec #52) instead of the browser. On by default.
+    var openInWindow: Bool {
+        get { defaults.object(forKey: Self.openInWindowKey) as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: Self.openInWindowKey) }
+    }
+
+    /// windowAtLaunch opens the lana window when the owner starts Lana.app
+    /// (not when it starts at login). On by default.
+    var windowAtLaunch: Bool {
+        get { defaults.object(forKey: Self.windowAtLaunchKey) as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: Self.windowAtLaunchKey) }
+    }
 
     var homeOverride: String? {
         get { defaults.string(forKey: Self.homeKey) }
@@ -104,6 +120,20 @@ final class AppModel: ObservableObject {
         // Ask for notification permission and subscribe once the app runs.
         DispatchQueue.main.async { [notifier] in
             notifier.start()
+        }
+        let window = WebWindowController.shared
+        window.home = { AppSettings().home }
+        window.startDaemon = { [weak self] in
+            self?.refresh()
+            if self?.status.running == false {
+                self?.start()
+            }
+        }
+        window.openSettings = { [weak self] in
+            guard let self else {
+                return
+            }
+            SettingsWindow.show(model: self)
         }
     }
 
@@ -216,7 +246,7 @@ final class AppModel: ObservableObject {
     }
 
     func resolveBinaryNow() {
-        binary = resolveBinary(setting: settings.binaryOverride, loginShellBinary: shell?.lanaBinary, userHome: NSHomeDirectory())
+        binary = resolveBinary(setting: settings.binaryOverride, loginShellBinary: shell?.lanaBinary, userHome: NSHomeDirectory(), bundled: bundledBinary(bundleURL: Bundle.main.bundleURL))
     }
 
     /// settingsChanged applies a new home or binary path.
@@ -234,11 +264,20 @@ final class AppModel: ObservableObject {
             signIn(next: page.hash)
             return
         }
+        if settings.openInWindow {
+            WebWindowController.shared.show(hash: page.hash)
+            return
+        }
         guard let url = status.dashboardURL(hash: page.hash) else {
             return
         }
         // The browser comes to the front, which dismisses the menu window.
         NSWorkspace.shared.open(url)
+    }
+
+    /// openWindow shows the lana window with the page it showed last (spec #52).
+    func openWindow() {
+        WebWindowController.shared.show()
     }
 
     /// signIn asks the daemon for a one-time sign-in link and opens it. next

@@ -143,8 +143,13 @@ final class Notifier: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: completion)
     }
 
-    /// open shows a dashboard hash in the browser.
+    /// open shows a dashboard hash in the lana window, or in the browser when
+    /// the owner turned the window off (spec #52).
     func open(hash: String) {
+        if AppSettings().openInWindow {
+            WebWindowController.shared.show(hash: hash.hasPrefix("#") ? hash : "#" + hash)
+            return
+        }
         let status = readStatus(home: home())
         guard let url = dashboardURL(addr: status.addr, hash: hash) else {
             return

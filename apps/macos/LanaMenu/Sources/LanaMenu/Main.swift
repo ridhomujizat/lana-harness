@@ -11,6 +11,8 @@ import UserNotifications
 ///   --watch-events      print the daemon's notification events as JSON lines
 ///   --write-iconset DIR write the app icon PNGs for iconutil (make macos-app)
 ///   --snapshot PNG      render the open menu with live data to a PNG
+///   --window-snapshot P open the lana window (spec #52), wait for the dashboard,
+///                       and write a PNG of it with a JSON report
 ///   --help
 @main
 enum Main {
@@ -19,6 +21,7 @@ enum Main {
         if args.contains("--help") || args.contains("-h") {
             print("""
             usage: LanaMenu [--dump-status [--samples N]] [--snapshot PNG [--dark] [--seconds N]] [--write-iconset DIR]
+                            [--window-snapshot PNG [--page HASH] [--seconds N]]
                             [--simulate-event JSON] [--watch-events [--seconds N] [--answer allowed_once|rejected]]
               (no flags)       run the menu bar app
               --dump-status    print the status and usage JSON the menu would show, with the
@@ -29,6 +32,9 @@ enum Main {
                                notification plan; --answer answers approvals like the
                                Allow once / Reject actions; stops after --seconds (default 60)
               --snapshot       render the open menu with live data to a PNG
+              --window-snapshot PNG [--page HASH] [--seconds N]
+                               open the lana window on the running daemon, wait for the
+                               dashboard, write a PNG, and print what it loaded as JSON
               --write-iconset  write the app icon PNGs into DIR for iconutil
             """)
             return
@@ -56,6 +62,21 @@ enum Main {
                 seconds = n
             }
             exit(Snapshot.run(path: args[i + 1], dark: args.contains("--dark"), seconds: seconds))
+        }
+        if let i = args.firstIndex(of: "--window-snapshot") {
+            guard i + 1 < args.count else {
+                fputs("error: --window-snapshot needs a file path\n", stderr)
+                exit(2)
+            }
+            var seconds = 3.0
+            if let j = args.firstIndex(of: "--seconds"), j + 1 < args.count, let n = Double(args[j + 1]) {
+                seconds = n
+            }
+            var page: String?
+            if let j = args.firstIndex(of: "--page"), j + 1 < args.count {
+                page = args[j + 1]
+            }
+            exit(WindowSnapshot.run(path: args[i + 1], hash: page, seconds: seconds))
         }
         if let i = args.firstIndex(of: "--simulate-event") {
             guard i + 1 < args.count else {
@@ -120,7 +141,7 @@ enum DumpStatus {
             }
         }
         let shell = probeLoginShell()
-        let binary = resolveBinary(setting: settings.binaryOverride, loginShellBinary: shell.lanaBinary, userHome: NSHomeDirectory())
+        let binary = resolveBinary(setting: settings.binaryOverride, loginShellBinary: shell.lanaBinary, userHome: NSHomeDirectory(), bundled: bundledBinary(bundleURL: Bundle.main.bundleURL))
         var links: [String: String] = [:]
         for item in DashboardPage.allCases {
             links[item.rawValue] = status.dashboardURL(hash: item.hash)?.absoluteString
