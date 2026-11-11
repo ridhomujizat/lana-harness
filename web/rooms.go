@@ -713,7 +713,9 @@ func (s *Server) roomWebSession(ctx context.Context, backend Backend, room Agent
 // roomMentionNote returns the runtime note for a team room whose text starts
 // with a member mention, or "" (API-ROOM-003, AC-ROOM-013).
 func roomMentionNote(room Agent, text string) string {
-	if room.Kind != "team" {
+	// A group room routes @mentions itself; only a lead-mode team needs the
+	// lead told to hand off.
+	if room.Kind != "team" || room.Mode == core.TeamModeGroup {
 		return ""
 	}
 	mention := mentionTarget(text)

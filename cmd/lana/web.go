@@ -892,6 +892,7 @@ func (b *webBackend) Agents() []web.Agent {
 			Lead:        team.Lead,
 			Members:     append([]string{}, team.Members...),
 			Description: team.Description,
+			Mode:        team.ConversationMode(),
 		})
 	}
 	return agents
