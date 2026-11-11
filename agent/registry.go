@@ -67,6 +67,7 @@ type Registry struct {
 	mcp        mcpAdmin
 	hooks      *core.Hooks
 	questions  core.QuestionService
+	files      core.FileSender
 	compaction core.Compactor
 	memory     core.MemoryCapturer
 	titler     core.SessionTitler

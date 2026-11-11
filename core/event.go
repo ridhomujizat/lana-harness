@@ -44,6 +44,7 @@ const (
 	KindToolResultPruned  = "tool_result_pruned"
 	KindMemoryCaptured    = "memory/captured"
 	KindKnowledgeCompiled = "knowledge/compiled"
+	KindFileSent          = "file/sent"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -253,6 +254,18 @@ type QuestionAnswered struct {
 	Responder string           `json:"responder"`
 	Reason    string           `json:"reason,omitempty"`
 	Answers   []QuestionAnswer `json:"answers,omitempty"`
+}
+
+// FileSentPayload is the payload of a file/sent event (API-AGF-001). Path is
+// the workspace-relative attachments path API-ATT-003 serves; Size is bytes.
+type FileSentPayload struct {
+	V         int    `json:"v"`
+	CallID    string `json:"call_id"`
+	Path      string `json:"path"`
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Size      int64  `json:"size"`
+	Caption   string `json:"caption,omitempty"`
 }
 
 type ModelSelection struct {

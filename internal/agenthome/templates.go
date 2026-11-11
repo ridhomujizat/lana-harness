@@ -22,7 +22,7 @@ type Template struct {
 // allTools is the full built-in tool set shared by every template.
 var allTools = []string{
 	"read_file", "write_file", "edit_file", "glob", "grep",
-	"bash", "web_fetch", "memory_read", "memory_write", "skill_write", "ask_user",
+	"bash", "web_fetch", "memory_read", "memory_write", "skill_write", "ask_user", "send_file",
 }
 
 // newTemplate returns the built-in template with the given name.

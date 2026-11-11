@@ -235,7 +235,7 @@ func TestTemplates(t *testing.T) {
 }
 
 func TestTemplateToolsFullSet(t *testing.T) {
-	wantTools := []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "web_fetch", "memory_read", "memory_write", "skill_write", "ask_user"}
+	wantTools := []string{"read_file", "write_file", "edit_file", "glob", "grep", "bash", "web_fetch", "memory_read", "memory_write", "skill_write", "ask_user", "send_file"}
 	for _, name := range TemplateNames() {
 		tpl, ok := LookupTemplate(name)
 		if !ok {

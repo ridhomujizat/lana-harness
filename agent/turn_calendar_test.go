@@ -101,3 +101,19 @@ func TestAutoOfferedToolsCalendar(t *testing.T) {
 		t.Fatalf("AutoOfferedTools = %v, calendar without registration", got)
 	}
 }
+
+// TestAutoOfferedToolsSendFile covers the shared helper: send_file is
+// auto-offered only when the registry has it, after the calendar tool
+// (REQ-AGF-002).
+func TestAutoOfferedToolsSendFile(t *testing.T) {
+	if got := AutoOfferedTools(AutoOfferState{SendFileRegistered: true}); !slices.Equal(got, []string{SendFileTool}) {
+		t.Fatalf("AutoOfferedTools = %v, want [send_file]", got)
+	}
+	if got := AutoOfferedTools(AutoOfferState{Root: true}); slices.Contains(got, SendFileTool) {
+		t.Fatalf("AutoOfferedTools = %v, send_file without registration", got)
+	}
+	both := AutoOfferedTools(AutoOfferState{CalendarRegistered: true, SendFileRegistered: true})
+	if !slices.Equal(both, []string{CalendarTool, SendFileTool}) {
+		t.Fatalf("AutoOfferedTools = %v, want [calendar send_file]", both)
+	}
+}

@@ -352,6 +352,15 @@ func TestPublicEventPayloadStripsImageData(t *testing.T) {
 	}
 }
 
+// TestPublicEventPayloadFileSentUnchanged covers API-AGF-001: a file/sent
+// payload carries no image data and is served byte-identical.
+func TestPublicEventPayloadFileSentUnchanged(t *testing.T) {
+	payload := json.RawMessage(`{"v":1,"call_id":"toolu_1","path":"attachments/2026-11-11/a.png","name":"a.png","media_type":"image/png","size":319488}`)
+	if got := publicEventPayload(core.KindFileSent, payload); string(got) != string(payload) {
+		t.Fatalf("file/sent payload changed: %s", got)
+	}
+}
+
 // TestEventsEndpointOmitsImageData covers API-ATT-004 at the events endpoint:
 // the body contains no data key but keeps the path.
 func TestEventsEndpointOmitsImageData(t *testing.T) {

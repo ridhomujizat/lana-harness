@@ -2887,6 +2887,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
                 <TurnBlock
                   key={item.key}
                   turn={item.turn}
+                  sessionId={id}
                   agent={agent}
                   agentLabel={agentLabel}
                   team={team}

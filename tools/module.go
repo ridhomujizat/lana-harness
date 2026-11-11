@@ -27,6 +27,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewReadFile(guard),
 		NewWriteFile(guard),
 		NewEditFile(guard),
+		NewSendFile(guard),
 		NewGlob(guard),
 		NewGrep(guard),
 		NewBash(guard),

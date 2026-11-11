@@ -356,6 +356,7 @@ type Hooks struct {
 	ToolsPostExecute  *Waterfall[ToolsPostExecuteInput, ToolOutput]
 	ApprovalRequest   *Waterfall[ApprovalRequest, ApprovalOutcome]
 	QuestionAsk       *Waterfall[QuestionRequest, QuestionOutcome]
+	FileSend          *Waterfall[FileSendRequest, FileSendOutcome]
 	AgentTurnStopping *Serial[TurnStopInput, StopVote]
 	SessionEvent      *Observe[SessionEvent]
 }
@@ -373,6 +374,7 @@ func newHooks() *Hooks {
 		ToolsPostExecute:  NewWaterfall[ToolsPostExecuteInput, ToolOutput](),
 		ApprovalRequest:   NewWaterfall[ApprovalRequest, ApprovalOutcome](),
 		QuestionAsk:       NewWaterfall[QuestionRequest, QuestionOutcome](),
+		FileSend:          NewWaterfall[FileSendRequest, FileSendOutcome](),
 		AgentTurnStopping: NewSerial[TurnStopInput, StopVote](),
 		SessionEvent:      NewObserve[SessionEvent](),
 	}
