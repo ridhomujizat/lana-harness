@@ -102,7 +102,7 @@ func callBuilder(t *testing.T, svc WorkflowBuilderService, sessionID, input stri
 func TestWorkflowBuilderRefusesOtherSessions(t *testing.T) {
 	svc := &fakeBuilderService{session: "chat"}
 	out := callBuilder(t, svc, "other", `{"action":"get"}`)
-	if !(out.Status == core.ToolStatusError) || !strings.Contains(out.Output, "editor chat") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "editor chat") {
 		t.Fatalf("out = %+v", out)
 	}
 }
@@ -122,7 +122,7 @@ func TestWorkflowBuilderGetAndSave(t *testing.T) {
 	if !strings.Contains(out.Output, "Nothing was saved") || !strings.Contains(out.Output, "a cycle") {
 		t.Fatalf("save with issues = %+v", out)
 	}
-	if out := callBuilder(t, svc, "chat", `{"action":"save"}`); !(out.Status == core.ToolStatusError) {
+	if out := callBuilder(t, svc, "chat", `{"action":"save"}`); out.Status != core.ToolStatusError {
 		t.Fatalf("save without graph should fail: %+v", out)
 	}
 }
@@ -153,7 +153,7 @@ func TestWorkflowBuilderPublishAndDiscard(t *testing.T) {
 	}
 	svc.publishErr = workflow.ErrVersionConflict
 	out = callBuilder(t, svc, "chat", `{"action":"publish"}`)
-	if !(out.Status == core.ToolStatusError) || !strings.Contains(out.Output, "version conflict") {
+	if out.Status != core.ToolStatusError || !strings.Contains(out.Output, "version conflict") {
 		t.Fatalf("conflict = %+v", out)
 	}
 	out = callBuilder(t, svc, "chat", `{"action":"discard"}`)
