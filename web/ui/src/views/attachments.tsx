@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, DragEvent } from "react";
 import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS } from "../api/attachments";
 import { Ic } from "../ui/icons";
+import { fileTypeName, formatBytes } from "../lib/attachment-blocks";
+import { FileTypeTile } from "./message-files";
 import { Chip, IconButton } from "../ui/gr8r";
 
 /* The shared attachment affordances of the session and new-session composers
@@ -133,6 +135,12 @@ export function useAttachmentDraft(): AttachmentDraft {
   return { items, notice, addFiles, remove, clear, restore };
 }
 
+/* draftFileMeta is the second line of a chosen file's card: its type and size
+   (REQ-CHF-007). */
+export function draftFileMeta(file: File): string {
+  return fileTypeName(file.name, file.type) + " · " + formatBytes(file.size);
+}
+
 /* AttachmentChips shows the chosen files above the composer. Each chip has a
    remove button labelled with the file name. */
 export function AttachmentChips({
@@ -161,11 +169,14 @@ export function AttachmentChips({
                 alt={item.file.name}
               />
             ) : (
-              <span className="attach-chip-icon" aria-hidden="true">
-                <Ic name="file" size={13} />
-              </span>
+              <FileTypeTile name={item.file.name} mediaType={item.file.type} />
             )}
-            <span className="attach-chip-name">{item.file.name}</span>
+            <span className="attach-chip-text">
+              <span className="attach-chip-name" title={item.file.name}>
+                {item.file.name}
+              </span>
+              <span className="attach-chip-type">{draftFileMeta(item.file)}</span>
+            </span>
           </Chip>
         </li>
       ))}

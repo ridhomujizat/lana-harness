@@ -1,3 +1,4 @@
+import { fileMeta } from "../lib/attachment-blocks";
 import {
   useCallback,
   useEffect,
@@ -92,6 +93,7 @@ import {
   AttachmentChips,
   AttachmentDropOverlay,
   AttachButton,
+  draftFileMeta,
   pasteImageFiles,
   revokeAttachmentURLs,
   useAttachmentDraft,
@@ -183,14 +185,18 @@ export function storedAttachments(
   id: string,
   refs: UserAttachmentRef[] | undefined
 ): UserAttachment[] {
-  return (refs || []).map((ref) => {
-    const image = ref.mediaType.startsWith("image/");
+  return (refs || []).map((ref, index) => {
+    const image = !ref.file && ref.mediaType.startsWith("image/");
+    const meta = ref.file ? fileMeta(ref.file) : null;
     return {
-      key: ref.path,
+      key: ref.path + "#" + index,
       name: attachmentName(ref.path),
-      src: image ? attachmentURL(id, ref.path) : "",
+      src: attachmentURL(id, ref.path),
       alt: ref.path,
       isImage: image,
+      path: ref.path,
+      ...(ref.file ? { file: ref.file } : {}),
+      ...(meta ? { meta: meta.text, warn: meta.warn } : {}),
     };
   });
 }
@@ -204,6 +210,7 @@ function pendingAttachments(files: DraftAttachment[]): UserAttachment[] {
     src: file.url,
     alt: file.file.name,
     isImage: file.isImage,
+    meta: draftFileMeta(file.file),
   }));
 }
 

@@ -1,0 +1,253 @@
+/* REQ-CHF-002..REQ-CHF-007: files of an owner message, the file preview, the
+   folded long text, and the composer file cards. Design: "Chat files" page. */
+
+/* Owner row: files above the text bubble, both right aligned. */
+.chat-user-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(536px, 100%);
+}
+
+.mf {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+}
+.mf-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mf-files {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 528px;
+}
+
+/* Type tile: MD, PDF, CSV … tinted by family. */
+.ft-tile {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.ft-tile.ft-lg { width: 40px; height: 40px; border-radius: 10px; font-size: 11.5px; }
+.ft-doc { background: color-mix(in srgb, var(--violet) 12%, var(--surface)); color: var(--violet); }
+.ft-pdf { background: color-mix(in srgb, var(--red) 12%, var(--surface)); color: var(--red); }
+.ft-data { background: color-mix(in srgb, var(--green) 13%, var(--surface)); color: var(--green); }
+.ft-image { background: color-mix(in srgb, var(--amber) 15%, var(--surface)); color: var(--amber); }
+.ft-code { background: color-mix(in srgb, var(--blue) 12%, var(--surface)); color: var(--blue); }
+
+.mf-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 260px;
+  max-width: 100%;
+  min-height: 60px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.mf-card.is-button {
+  cursor: pointer;
+  transition: border-color var(--dur), background var(--dur), box-shadow var(--dur);
+}
+.mf-card.is-button:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+.mf-card.is-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.mf-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mf-card-name,
+.mf-card-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mf-card-name { font-size: 13.5px; font-weight: 500; line-height: 20px; }
+.mf-card-meta { font-size: 12px; line-height: 16px; color: var(--text-3); }
+.mf-card-meta.is-warn { color: var(--red); }
+
+.mf-more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 260px;
+  max-width: 100%;
+  min-height: 60px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.mf-more:hover { background: var(--surface-3); }
+.mf-more-count { font-size: 13.5px; font-weight: 500; }
+.mf-more-names {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* Long owner text folds after twelve lines. */
+.chat-bubble-text { display: block; }
+.chat-bubble-text.is-folded {
+  max-height: calc(12 * 1.5em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 70%, transparent);
+  mask-image: linear-gradient(#000 70%, transparent);
+}
+.chat-bubble-more {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-bubble-more:hover { text-decoration: underline; }
+
+/* ------------------------------------------------------------------ */
+/* Preview                                                            */
+/* ------------------------------------------------------------------ */
+
+.modal.file-preview {
+  max-width: 760px;
+  height: min(880px, 84vh);
+  max-height: 84vh;
+}
+.modal-wrap:has(.file-preview) { padding-top: 6vh; }
+.file-preview .modal-h { padding: 20px 20px 0 24px; align-items: flex-start; }
+.file-preview .modal-h > div { min-width: 0; flex: 1; }
+.fp-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.fp-title-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.fp-meta { font-size: 12.5px; font-weight: 400; color: var(--text-3); }
+.file-preview .modal-b {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 0 0;
+  gap: 0;
+  overflow: hidden;
+}
+.fp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 24px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.fp-actions { display: flex; gap: 8px; }
+.fp-note {
+  margin: 12px 24px 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+.fp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+}
+.fp-md { font-size: 14.5px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
+.fp-source {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.fp-pages { display: flex; flex-direction: column; gap: 20px; }
+.fp-page-n {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.fp-pages .fp-note { margin: 0; }
+.fp-empty { padding: 40px 0; text-align: center; color: var(--text-2); }
+.fp-empty p { margin: 0 0 4px; }
+.fp-count { font-size: 12.5px; color: var(--text-3); }
+
+/* ------------------------------------------------------------------ */
+/* Composer cards                                                     */
+/* ------------------------------------------------------------------ */
+
+.attach-chip { min-height: 52px; padding: 0 6px 0 8px; border-radius: 12px; background: var(--surface); }
+.attach-chip .ft-tile { width: 34px; height: 34px; }
+.attach-chip-thumb { width: 34px; height: 34px; border-radius: 8px; }
+
+/* ------------------------------------------------------------------ */
+/* Phones                                                             */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .chat-user-stack { max-width: 100%; }
+  .mf-files { max-width: 300px; }
+  .mf-card,
+  .mf-more { width: 280px; }
+
+  /* The preview becomes a bottom sheet. */
+  .modal-wrap:has(.file-preview) { align-items: flex-end; padding: 0; }
+  .modal.file-preview {
+    max-width: none;
+    height: calc(100dvh - 48px);
+    max-height: none;
+    border-radius: 16px 16px 0 0;
+  }
+  .file-preview .modal-h { padding: 18px 16px 0 20px; }
+  .fp-bar { padding: 0 20px 12px; }
+  .fp-body { padding: 16px 20px 20px; }
+  .fp-actions .btn:not(:last-child) { display: none; }
+}
+
+/* PDF text reads as prose, not code. */
+.fp-pages .fp-source { font-family: inherit; font-size: 14px; line-height: 1.6; }
