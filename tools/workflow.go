@@ -367,6 +367,11 @@ func (t *workflowTool) run(ctx context.Context, id, ref string) (core.ToolOutput
 	if err != nil {
 		return errorOutput(err.Error())
 	}
+	return workflowJSON(workflowRunDetailOf(detail))
+}
+
+// workflowRunDetailOf renders one run with its node steps.
+func workflowRunDetailOf(detail workflow.RunDetail) workflowRunDetailView {
 	out := workflowRunDetailView{
 		Number:     detail.Run.Number,
 		ID:         detail.Run.ID,
@@ -387,7 +392,7 @@ func (t *workflowTool) run(ctx context.Context, id, ref string) (core.ToolOutput
 			Output:     workflowNodeOutput(nr.Output),
 		})
 	}
-	return workflowJSON(out)
+	return out
 }
 
 func (t *workflowTool) start(ctx context.Context, tc core.ToolCtx, in workflowInput) (core.ToolOutput, error) {

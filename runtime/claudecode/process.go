@@ -32,10 +32,13 @@ var scrubbedEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_
 // inherited value (owner decision 2026-11-08, REQ-CCT-006): auto-memory and the
 // claude.ai connectors (Gmail, Drive, Calendar, Postman) are off, since a
 // headless run cannot complete their OAuth. An inherited value of the same name
-// is dropped first, like scrubbedEnv.
+// is dropped first, like scrubbedEnv. MCP_TOOL_TIMEOUT (ms) lets a lana tool
+// call outlive Claude Code's 60 s MCP default: ask_user waits up to 30 minutes
+// for the owner and a workflow test up to 2 minutes (spec 51).
 var isolatedEnv = []string{
 	"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
 	"ENABLE_CLAUDEAI_MCP_SERVERS=false",
+	"MCP_TOOL_TIMEOUT=1860000",
 }
 
 // configDirEnv is the variable that points Claude Code at an account's

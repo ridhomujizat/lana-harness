@@ -269,7 +269,7 @@ func (ex *runExec) confirmSoftDrift(ctx context.Context, node Node, item int, pa
 	case DriftRule:
 		refs := RuleViolations(params, scriptOut)
 		note := "rule dropped: " + ruleRefsText(refs)
-		if _, err := ex.e.saveRuleDrop(ctx, ex.wf.ID, node.ID, refs); err != nil {
+		if _, err := ex.e.saveRuleDrop(ctx, ex.wf.ID, ex.run.CandidateID, node.ID, refs); err != nil {
 			note = "rule drop failed: " + err.Error()
 		}
 		ex.putDecision(Decision{
@@ -361,7 +361,7 @@ func (ex *runExec) afterFallback(ctx context.Context, node Node, item int, param
 
 		if rerr == nil && newScript != "" {
 			newRev := rev + 1
-			dropped, serr := ex.e.saveScriptVersion(ctx, ex.wf.ID, node.ID, oldScript, newScript, newRev, drift.Code, fallbackTokens)
+			dropped, serr := ex.e.saveScriptVersion(ctx, ex.wf.ID, ex.run.CandidateID, node.ID, oldScript, newScript, newRev, drift.Code, fallbackTokens)
 			if serr != nil {
 				dropped = serr.Error()
 			}
@@ -653,31 +653,32 @@ func scriptFallbackNote(onDrift, script string, regenDone bool) string {
 	}
 }
 
+// scriptUpdateDropped is the drop reason of a script write-back whose node
+// changed under it (REQ-SP-008).
+const scriptUpdateDropped = "owner changed the node; update dropped"
+
+// graphNodeIndex returns the index of the node with id in g, or -1.
+func graphNodeIndex(g Graph, id string) int {
+	for i := range g.Nodes {
+		if g.Nodes[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 // saveScriptVersion saves a regenerated script as a new workflow version
 // (REQ-SP-008). It loads the current version, requires the node to still hold
 // oldScript, and merges script, script_rev and baseline_tokens into a copy of
 // the node params. It returns a drop reason when the node is gone or its script
-// changed; on ErrVersionConflict it reloads once and retries once.
-func (e *Engine) saveScriptVersion(ctx context.Context, wfID, nodeID, oldScript, newScript string, newRev int64, driftCode string, baseline int64) (string, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		wf, err := e.store.GetWorkflow(ctx, wfID)
-		if err != nil {
-			return "", err
-		}
-		cur, err := e.store.GetVersion(ctx, wfID, wf.Version)
-		if err != nil {
-			return "", err
-		}
-		g := cur.Graph
-		idx := -1
-		for i := range g.Nodes {
-			if g.Nodes[i].ID == nodeID {
-				idx = i
-				break
-			}
-		}
+// changed; on ErrVersionConflict it reloads once and retries once. For a
+// candidate test run (candidateID > 0) it patches the candidate instead and
+// saves no version (spec 51 REQ-WFC-005).
+func (e *Engine) saveScriptVersion(ctx context.Context, wfID string, candidateID int64, nodeID, oldScript, newScript string, newRev int64, driftCode string, baseline int64) (string, error) {
+	drop, err := e.patchGraph(ctx, wfID, candidateID, "guardian", 2, func(g *Graph) (string, string, error) {
+		idx := graphNodeIndex(*g, nodeID)
 		if idx < 0 || paramString(g.Nodes[idx].Params, "script") != oldScript {
-			return "owner changed the node; update dropped", nil
+			return "", scriptUpdateDropped, nil
 		}
 		n := g.Nodes[idx]
 		g.Nodes[idx].Params = mergeParams(n.Params, map[string]any{
@@ -685,17 +686,12 @@ func (e *Engine) saveScriptVersion(ctx context.Context, wfID, nodeID, oldScript,
 			"script_rev":      newRev,
 			"baseline_tokens": baseline,
 		})
-		summary := fmt.Sprintf("script %s: rev %d (%s)", nodeName(n), newRev, driftCode)
-		if _, err := e.store.SaveVersion(ctx, wfID, wf.Version, g, "guardian", summary); err != nil {
-			if errors.Is(err, ErrVersionConflict) {
-				continue
-			}
-			return "", err
-		}
-		e.changed(wfID, "")
-		return "", nil
+		return fmt.Sprintf("script %s: rev %d (%s)", nodeName(n), newRev, driftCode), "", nil
+	})
+	if errors.Is(err, ErrVersionConflict) {
+		return scriptUpdateDropped, nil
 	}
-	return "owner changed the node; update dropped", nil
+	return drop, err
 }
 
 // saveRuleDrop saves a new workflow version with the violated rule tokens
@@ -703,41 +699,22 @@ func (e *Engine) saveScriptVersion(ctx context.Context, wfID, nodeID, oldScript,
 // applies DropRules to the stored node params, and saves with the guardian as
 // the author and a summary naming the dropped tokens. It returns a drop reason
 // when the node is gone; on ErrVersionConflict it reloads once and retries once,
-// like saveScriptVersion.
-func (e *Engine) saveRuleDrop(ctx context.Context, wfID, nodeID string, refs []RuleRef) (string, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		wf, err := e.store.GetWorkflow(ctx, wfID)
-		if err != nil {
-			return "", err
-		}
-		cur, err := e.store.GetVersion(ctx, wfID, wf.Version)
-		if err != nil {
-			return "", err
-		}
-		g := cur.Graph
-		idx := -1
-		for i := range g.Nodes {
-			if g.Nodes[i].ID == nodeID {
-				idx = i
-				break
-			}
-		}
+// like saveScriptVersion. For a candidate test run it patches the candidate
+// instead (spec 51 REQ-WFC-005).
+func (e *Engine) saveRuleDrop(ctx context.Context, wfID string, candidateID int64, nodeID string, refs []RuleRef) (string, error) {
+	drop, err := e.patchGraph(ctx, wfID, candidateID, "guardian", 2, func(g *Graph) (string, string, error) {
+		idx := graphNodeIndex(*g, nodeID)
 		if idx < 0 {
-			return "node no longer exists; update dropped", nil
+			return "", "node no longer exists; update dropped", nil
 		}
 		n := g.Nodes[idx]
 		g.Nodes[idx].Params = DropRules(n.Params, refs)
-		summary := fmt.Sprintf("rules %s: dropped %s", nodeName(n), ruleRefsText(refs))
-		if _, err := e.store.SaveVersion(ctx, wfID, wf.Version, g, "guardian", summary); err != nil {
-			if errors.Is(err, ErrVersionConflict) {
-				continue
-			}
-			return "", err
-		}
-		e.changed(wfID, "")
-		return "", nil
+		return fmt.Sprintf("rules %s: dropped %s", nodeName(n), ruleRefsText(refs)), "", nil
+	})
+	if errors.Is(err, ErrVersionConflict) {
+		return scriptUpdateDropped, nil
 	}
-	return "owner changed the node; update dropped", nil
+	return drop, err
 }
 
 // ResetScriptPause clears the regeneration pause of a node (REQ-SP-009): every
@@ -782,35 +759,26 @@ func (e *Engine) answerScript(ctx context.Context, d Decision, choice string) (R
 
 // revertScript saves a new workflow version that restores the previous script of
 // a script_update decision (REQ-SP-012). The node's script_rev advances by one,
-// the author is the owner and the old and new revisions are named.
+// the author is the owner and the old and new revisions are named. A decision of
+// a candidate test run patches that candidate instead (spec 51 REQ-WFC-005).
 func (e *Engine) revertScript(ctx context.Context, d Decision) error {
-	wf, err := e.store.GetWorkflow(ctx, d.WorkflowID)
-	if err != nil {
-		return err
+	var candidateID int64
+	if run, err := e.store.GetRun(ctx, d.RunID); err == nil {
+		candidateID = run.CandidateID
 	}
-	cur, err := e.store.GetVersion(ctx, d.WorkflowID, wf.Version)
-	if err != nil {
-		return err
-	}
-	g := cur.Graph
-	idx := -1
-	for i := range g.Nodes {
-		if g.Nodes[i].ID == d.NodeID {
-			idx = i
-			break
+	_, err := e.patchGraph(ctx, d.WorkflowID, candidateID, "owner", 1, func(g *Graph) (string, string, error) {
+		idx := graphNodeIndex(*g, d.NodeID)
+		if idx < 0 {
+			return "", "", errors.New("node no longer exists")
 		}
-	}
-	if idx < 0 {
-		return errors.New("node no longer exists")
-	}
-	n := g.Nodes[idx]
-	prev, _ := d.Fix["previous_script"].(string)
-	g.Nodes[idx].Params = mergeParams(n.Params, map[string]any{
-		"script":     prev,
-		"script_rev": scriptRev(n.Params) + 1,
+		n := g.Nodes[idx]
+		prev, _ := d.Fix["previous_script"].(string)
+		g.Nodes[idx].Params = mergeParams(n.Params, map[string]any{
+			"script":     prev,
+			"script_rev": scriptRev(n.Params) + 1,
+		})
+		return fmt.Sprintf("revert script %s to rev %v", nodeName(n), d.Fix["rev_from"]), "", nil
 	})
-	summary := fmt.Sprintf("revert script %s to rev %v", nodeName(n), d.Fix["rev_from"])
-	_, err = e.store.SaveVersion(ctx, d.WorkflowID, wf.Version, g, "owner", summary)
 	return err
 }
 
@@ -819,6 +787,11 @@ func (e *Engine) revertScript(ctx context.Context, d Decision) error {
 // for the same node is throttled to one per 24 h unless always is true; a
 // script_update notice passes always = true. The throttle lives in memory.
 func (ex *runExec) scriptNotice(node Node, drift *DriftError, note string, always bool) {
+	// A candidate test run tells the owner nothing: the guardian reads the
+	// script decisions of its own test (spec 51 REQ-WFC-005).
+	if ex.run.CandidateID > 0 {
+		return
+	}
 	e := ex.e
 	key := ex.wf.ID + "/" + node.ID
 

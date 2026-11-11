@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  askAssistant,
-  getChat,
+  ensureAssistantSession,
+  getAssistant,
   getRun,
   getWorkflow,
   listWorkflows,
   lockPreview,
+  newAssistantSession,
   normalizeGraph,
+  sendAssistant,
 } from "./workflows";
 
 /* Older servers sent nil Go slices as null (a new workflow had
@@ -94,9 +96,6 @@ describe("api/workflows normalization", () => {
       .mockResolvedValueOnce(response({ tools: [{ tool: "bash", used_by: null, risk: "admin" }] }))
       .mockResolvedValueOnce(
         response({ messages: [{ id: 1, role: "guardian", text: "ok", change: { added: null, removed: null, changed: null } }] })
-      )
-      .mockResolvedValueOnce(
-        response({ message: { id: 2, role: "guardian", text: "ok" }, workflow: wireWorkflow, tokens: 1 })
       );
     const list = await listWorkflows();
     expect(list.workflows[0]!.triggers).toEqual([]);
@@ -104,9 +103,52 @@ describe("api/workflows normalization", () => {
     expect(list.attention).toEqual([]);
     const lock = await lockPreview("hi");
     expect(lock.tools[0]!.used_by).toEqual([]);
-    const chat = await getChat("hi");
+    const chat = await getAssistant("hi");
     expect(chat.messages[0]!.change).toMatchObject({ added: [], removed: [], changed: [] });
-    const assist = await askAssistant("hi", "add a step", 1);
-    expect(assist.workflow.graph.edges).toEqual([]);
+    /* An older server sends no session_id: the chat has no session yet. */
+    expect(chat.session_id).toBe("");
+  });
+});
+
+describe("api/workflows guardian session (spec 51)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("calls the assistant routes with the documented bodies", async () => {
+    fetchMock
+      .mockResolvedValueOnce(response({ session_id: "s1", messages: null }))
+      .mockResolvedValueOnce(response({ session_id: "s1" }))
+      .mockResolvedValueOnce(response({ session_id: "s1", turn: "started", turn_id: "t1" }))
+      .mockResolvedValueOnce(response({ session_id: "s1", turn: "started", turn_id: "t2" }))
+      .mockResolvedValueOnce(response({ session_id: "s2" }));
+    expect(await getAssistant("hi")).toEqual({ session_id: "s1", messages: [] });
+    expect(await ensureAssistantSession("hi")).toEqual({ session_id: "s1" });
+    expect(await sendAssistant("hi", "add a step")).toMatchObject({ turn_id: "t1" });
+    await sendAssistant("hi", "see file", ["attachments/a.png"]);
+    expect(await newAssistantSession("hi")).toEqual({ session_id: "s2" });
+    const calls = fetchMock.mock.calls.map((call) => [
+      call[0],
+      (call[1] as RequestInit | undefined)?.method || "GET",
+      (call[1] as RequestInit | undefined)?.body ?? null,
+    ]);
+    expect(calls).toEqual([
+      ["/v1/workflows/hi/assistant", "GET", null],
+      ["/v1/workflows/hi/assistant/session", "POST", null],
+      ["/v1/workflows/hi/assistant", "POST", JSON.stringify({ message: "add a step" })],
+      [
+        "/v1/workflows/hi/assistant",
+        "POST",
+        JSON.stringify({ message: "see file", attachments: ["attachments/a.png"] }),
+      ],
+      ["/v1/workflows/hi/assistant/new", "POST", null],
+    ]);
   });
 });

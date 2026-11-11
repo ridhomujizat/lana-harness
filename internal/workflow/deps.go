@@ -143,3 +143,19 @@ type EnvTool struct {
 type AssistEnvProvider interface {
 	AssistEnv(ctx context.Context, wf Workflow) AssistEnv
 }
+
+// AssistantRuntime is the optional Deps extension behind the guardian chat
+// session of spec 51 (REQ-WFC-001, REQ-WFC-009). Deps without it make the
+// guardian chat unavailable.
+type AssistantRuntime interface {
+	// CreateAssistantSession creates the guardian's chat session for wf on
+	// channel "workflow", address = the workflow id.
+	CreateAssistantSession(ctx context.Context, wf Workflow) (string, error)
+	// AssistantSessionExists reports whether the session still exists and
+	// belongs to agent (a new guardian gets a new session).
+	AssistantSessionExists(ctx context.Context, sessionID, agent string) bool
+	// RunAssistantTurn appends note as a hidden runtime note (when not
+	// empty), runs text with attachments as an owner turn on the session and
+	// blocks until the turn ends. It returns the final assistant text.
+	RunAssistantTurn(ctx context.Context, sessionID, note, text string, attachments []string) (AgentResult, error)
+}

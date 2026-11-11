@@ -4,13 +4,16 @@ import type { DragEvent as ReactDragEvent, ReactNode } from "react";
 import { ApiError, errorMessage } from "../api/client";
 import {
   activateWorkflow,
-  askAssistant,
   createWorkflow,
-  getChat,
+  ensureAssistantSession,
+  getAssistant,
+  getWorkflow,
   lockPreview,
+  newAssistantSession,
   pauseWorkflow,
   restoreVersion,
   resumeWorkflow,
+  sendAssistant,
   startRun,
   updateWorkflow,
 } from "../api/workflows";
@@ -19,6 +22,7 @@ import type {
   Graph,
   Issue,
   LockTool,
+  SendAssistantResponse,
   WfNode,
   Workflow,
 } from "../api/workflows";
@@ -167,8 +171,9 @@ function issuesOf(error: unknown): Issue[] {
   return first && Array.isArray(first.issues) ? first.issues : [];
 }
 
-/* How long the guardian may take to answer (the server's assist timeout). */
-const ASSIST_WAIT_MS = 3 * 60 * 1000;
+function openWorkflow(id: string) {
+  window.location.hash = "#/workflows/" + encodeURIComponent(id);
+}
 
 export function WorkflowEditor({
   workflow,
@@ -188,6 +193,8 @@ export function WorkflowEditor({
   const [selected, setSelected] = useState("");
   const [panel, setPanel] = useState<"chat" | "node">("chat");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /* Spec 51: the guardian chat session, "" until first use. */
+  const [sessionId, setSessionId] = useState("");
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState("");
   const [lockTools, setLockTools] = useState<LockTool[] | null>(null);
@@ -232,37 +239,26 @@ export function WorkflowEditor({
       return;
     }
     let live = true;
-    getChat(workflow.id)
+    getAssistant(workflow.id)
       .then((response) => {
         if (!live) {
           return;
         }
-        /* Keep an optimistic owner message that the server has not stored yet. */
-        setMessages((current) => {
-          const pending = current.filter((message) => message.id < 0 && !response.messages.some((m) => m.role === "owner" && m.text === message.text));
-          return response.messages.concat(pending);
-        });
+        /* Spec 51: the owner's messages live in the guardian session; the
+           stored chat holds legacy messages and change cards. Local notes
+           (negative ids, such as an Undo) stay. */
+        setMessages((current) =>
+          response.messages.concat(current.filter((message) => message.id < 0))
+        );
+        if (response.session_id) {
+          setSessionId(response.session_id);
+        }
       })
       .catch(() => undefined);
     return () => {
       live = false;
     };
   }, [workflow?.id, chatTick]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /* The guardian is still answering when the newest message is the owner's and
-     is younger than the assistant timeout, also after a remount. */
-  const [awaitingReply, setAwaitingReply] = useState(false);
-  useEffect(() => {
-    const last = messages.length > 0 ? messages[messages.length - 1] : null;
-    const left = last && last.role === "owner" ? ASSIST_WAIT_MS - (Date.now() - last.created_at) : 0;
-    if (left <= 0) {
-      setAwaitingReply(false);
-      return undefined;
-    }
-    setAwaitingReply(true);
-    const timer = window.setTimeout(() => setAwaitingReply(false), left);
-    return () => window.clearTimeout(timer);
-  }, [messages]);
 
   useEffect(() => {
     if (!workflow) {
@@ -362,7 +358,10 @@ export function WorkflowEditor({
     setPanel("chat");
   }
 
-  async function ensureCreated(graph: Graph, wantName?: string): Promise<Workflow> {
+  /* open=false leaves the move to #/workflows/<id> to the caller, which opens
+     it once the first message is sent (spec 51: the new editor then finds
+     the guardian session). */
+  async function ensureCreated(graph: Graph, wantName?: string, open = true): Promise<Workflow> {
     if (workflow) {
       return workflow;
     }
@@ -376,7 +375,9 @@ export function WorkflowEditor({
           graph: graph.nodes.length > 0 ? graph : undefined,
         });
         onSaved(created);
-        window.location.hash = "#/workflows/" + encodeURIComponent(created.id);
+        if (open) {
+          openWorkflow(created.id);
+        }
         return created;
       } catch (error) {
         if (error instanceof ApiError && error.code === "workflow_exists") {
@@ -474,30 +475,72 @@ export function WorkflowEditor({
     }
   }
 
-  async function send(text: string) {
-    const owner: ChatMessage = { id: -Date.now(), role: "owner", text, created_at: Date.now() };
-    setMessages((list) => [...list, owner]);
+  /* Spec 51: the message starts a turn on the guardian session. A new
+     workflow is created first and opened once the turn started, so its
+     editor loads the session. Unsaved canvas edits are saved first, so the
+     guardian sees them. */
+  async function send(text: string, attachments: string[]): Promise<SendAssistantResponse | null> {
     setBusy(true);
     try {
       let current = workflow;
+      const created = !current;
       if (!current) {
-        current = await ensureCreated(draft, text.split(/\s+/).slice(0, 4).join(" "));
+        current = await ensureCreated(draft, text.split(/\s+/).slice(0, 4).join(" "), false);
       } else if (dirty) {
         current = await save();
         if (!current) {
           throw new Error("Save the canvas first.");
         }
       }
-      const response = await askAssistant(current.id, text, current.version);
-      setMessages((list) => [...list, response.message]);
-      onSaved(response.workflow);
-      setDraft(response.workflow.graph);
-    } catch (error) {
-      setMessages((list) => list.filter((message) => message.id !== owner.id));
-      throw error;
+      const response = await sendAssistant(current.id, text, attachments);
+      if (created) {
+        openWorkflow(current.id);
+        return null;
+      }
+      if (response.session_id) {
+        setSessionId(response.session_id);
+      }
+      return response;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function ensureSession(): Promise<string> {
+    if (!workflow) {
+      throw new Error("Send a message first to attach files.");
+    }
+    if (sessionId) {
+      return sessionId;
+    }
+    const response = await ensureAssistantSession(workflow.id);
+    setSessionId(response.session_id);
+    return response.session_id;
+  }
+
+  async function newSession(): Promise<void> {
+    if (!workflow) {
+      return;
+    }
+    const response = await newAssistantSession(workflow.id);
+    setSessionId(response.session_id);
+    toast.show({ title: "New guardian chat", body: "The old chat stays in History.", tone: "ok" });
+  }
+
+  /* A guardian turn ended: it may have published a version and stored a
+     change card. */
+  function turnEnded() {
+    if (!workflow) {
+      return;
+    }
+    setChatTick((tick) => tick + 1);
+    getWorkflow(workflow.id)
+      .then((next) => {
+        if (next.version !== workflow.version || next.status !== workflow.status) {
+          onSaved(next);
+        }
+      })
+      .catch(() => undefined);
   }
 
   async function undo(version: number) {
@@ -715,10 +758,14 @@ export function WorkflowEditor({
               guardian={guardian || "default"}
               agents={agents}
               messages={messages}
-              busy={busy || awaitingReply}
+              sessionId={sessionId}
+              busy={busy}
               lockTools={lockTools}
               onGuardian={setGuardian}
               onSend={send}
+              onEnsureSession={ensureSession}
+              onNewSession={newSession}
+              onTurnEnd={turnEnded}
               onUndo={(version) => void undo(version)}
               onActivate={() => void activate()}
               onReviewLock={() => setLockOpen(true)}

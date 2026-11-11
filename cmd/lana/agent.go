@@ -385,7 +385,7 @@ func agentList() int {
 		user, memory := memorySizes(home, agenthome.Paths(home, name))
 		permission := agent.Permission
 		if permission == "" {
-			permission = "ask"
+			permission = string(core.DefaultPolicy)
 		}
 		fmt.Printf("%s  %s  %s  persona=%s  user=%s  memory=%s\n", name, llmcall.Display(agent.Provider, agent.Model), permission, source, user, memory)
 	}

@@ -27,18 +27,22 @@ type MemStore struct {
 	state     map[string]map[string]StateEntry
 	chat      map[string][]ChatMessage
 	chatSeq   int64
+	// candidates holds every candidate by id (spec 51).
+	candidates   map[int64]Candidate
+	candidateSeq int64
 }
 
 // NewMemStore returns an empty in-memory store.
 func NewMemStore() *MemStore {
 	return &MemStore{
-		workflows: map[string]Workflow{},
-		versions:  map[string][]Version{},
-		runs:      map[string]Run{},
-		nodeRuns:  map[string][]NodeRun{},
-		decisions: map[string]Decision{},
-		state:     map[string]map[string]StateEntry{},
-		chat:      map[string][]ChatMessage{},
+		workflows:  map[string]Workflow{},
+		versions:   map[string][]Version{},
+		runs:       map[string]Run{},
+		nodeRuns:   map[string][]NodeRun{},
+		decisions:  map[string]Decision{},
+		state:      map[string]map[string]StateEntry{},
+		chat:       map[string][]ChatMessage{},
+		candidates: map[int64]Candidate{},
 	}
 }
 
@@ -183,6 +187,11 @@ func (s *MemStore) DeleteWorkflow(_ context.Context, id string) error {
 	for decisionID, d := range s.decisions {
 		if d.WorkflowID == id {
 			delete(s.decisions, decisionID)
+		}
+	}
+	for candidateID, c := range s.candidates {
+		if c.WorkflowID == id {
+			delete(s.candidates, candidateID)
 		}
 	}
 	return nil
@@ -425,6 +434,90 @@ func (s *MemStore) ListChat(_ context.Context, workflowID string, limit int) ([]
 		out = append(out, cloneChat(m))
 	}
 	return out, nil
+}
+
+// CreateCandidate marks any open candidate of the workflow superseded and
+// stores c as the new open candidate (spec 51 REQ-WFC-003). It sets ID, Status
+// "open", CreatedAt and UpdatedAt, and returns ErrNotFound for an unknown
+// workflow.
+func (s *MemStore) CreateCandidate(_ context.Context, c Candidate) (Candidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.workflows[c.WorkflowID]; !ok {
+		return Candidate{}, ErrNotFound
+	}
+	now := time.Now().UnixMilli()
+	for id, existing := range s.candidates {
+		if existing.WorkflowID == c.WorkflowID && existing.Status == CandidateOpen {
+			existing.Status = CandidateSuperseded
+			existing.UpdatedAt = now
+			s.candidates[id] = existing
+		}
+	}
+	s.candidateSeq++
+	c.ID = s.candidateSeq
+	c.Status = CandidateOpen
+	c.CreatedAt = now
+	c.UpdatedAt = now
+	s.candidates[c.ID] = cloneCandidate(c)
+	return cloneCandidate(c), nil
+}
+
+// GetCandidate returns one candidate by id, or ErrNotFound.
+func (s *MemStore) GetCandidate(_ context.Context, id int64) (Candidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.candidates[id]
+	if !ok {
+		return Candidate{}, ErrNotFound
+	}
+	return cloneCandidate(c), nil
+}
+
+// OpenCandidate returns the workflow's open candidate, or ErrNotFound. When
+// several are open (never after CreateCandidate) the newest wins.
+func (s *MemStore) OpenCandidate(_ context.Context, workflowID string) (Candidate, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var best Candidate
+	for _, c := range s.candidates {
+		if c.WorkflowID == workflowID && c.Status == CandidateOpen && c.ID > best.ID {
+			best = c
+		}
+	}
+	if best.ID == 0 {
+		return Candidate{}, ErrNotFound
+	}
+	return cloneCandidate(best), nil
+}
+
+// UpdateCandidate writes graph, summary, status, published_version and
+// updated_at of an existing candidate, or returns ErrNotFound. A zero
+// UpdatedAt becomes the current time.
+func (s *MemStore) UpdateCandidate(_ context.Context, c Candidate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.candidates[c.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	current.Graph = cloneGraph(c.Graph)
+	current.Summary = c.Summary
+	current.Status = c.Status
+	current.PublishedVersion = c.PublishedVersion
+	current.UpdatedAt = c.UpdatedAt
+	if current.UpdatedAt == 0 {
+		current.UpdatedAt = time.Now().UnixMilli()
+	}
+	s.candidates[c.ID] = current
+	return nil
+}
+
+// cloneCandidate deep copies a candidate and its graph.
+func cloneCandidate(c Candidate) Candidate {
+	out := c
+	out.Graph = cloneGraph(c.Graph)
+	return out
 }
 
 // containsRunStatus reports whether statuses holds status.

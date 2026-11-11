@@ -27,7 +27,7 @@ var allTools = []string{
 
 // newTemplate returns the built-in template with the given name.
 func newTemplate(name string) Template {
-	return Template{Name: name, Permission: "ask", Tools: slices.Clone(allTools)}
+	return Template{Name: name, Permission: "trust", Tools: slices.Clone(allTools)}
 }
 
 var templates = map[string]Template{

@@ -42,7 +42,7 @@ const (
 	subscriberBuffer    = 64
 	defaultRunLimit     = 50
 	maxRunLimit         = 200
-	assistTimeout       = 3 * time.Minute
+	assistTimeout       = 15 * time.Minute
 	// assistEnvTimeout bounds starting MCP servers to list their tools.
 	assistEnvTimeout = 20 * time.Second
 )
@@ -119,6 +119,11 @@ type Service struct {
 
 	slotMu     sync.RWMutex
 	slotFilter SlotFilter
+
+	// assistNoted is what the last guardian chat note told each session
+	// (spec 51 REQ-WFC-002), guarded by assistMu.
+	assistMu    sync.Mutex
+	assistNoted map[string]assistNote
 
 	ctxMu      sync.Mutex
 	rootCtx    context.Context
@@ -307,16 +312,17 @@ func (s *Service) Runs(ctx context.Context, id string, limit, before int) ([]Run
 	return s.store.ListRuns(ctx, RunFilter{WorkflowID: id, Limit: limit, Before: before})
 }
 
-// RunDetail returns one run with the version graph, node runs and decisions
-// (API-WF-013, REQ-WF-004). ref is a run id or a run number.
+// RunDetail returns one run with the graph it ran, node runs and decisions
+// (API-WF-013, REQ-WF-004): the version graph, or the candidate graph of a
+// candidate test run (spec 51). ref is a run id or a run number.
 func (s *Service) RunDetail(ctx context.Context, id, ref string) (RunDetail, error) {
 	run, err := s.resolveRun(ctx, id, ref)
 	if err != nil {
 		return RunDetail{}, err
 	}
 	var graph Graph
-	if ver, err := s.store.GetVersion(ctx, run.WorkflowID, run.Version); err == nil {
-		graph = ver.Graph.Normalized()
+	if g, err := runGraph(ctx, s.store, run); err == nil {
+		graph = g.Normalized()
 	}
 	nodes, _ := s.store.ListNodeRuns(ctx, run.ID)
 	decisions, _ := s.store.ListDecisions(ctx, DecisionFilter{RunID: run.ID})
@@ -601,6 +607,14 @@ func (s *Service) Resume(ctx context.Context, id string) (Detail, error) {
 // StartRun creates and launches a run (API-WF-011, REQ-WF-003). It refuses to
 // start while a run of the workflow is already running.
 func (s *Service) StartRun(ctx context.Context, id, trigger string, input json.RawMessage) (Run, error) {
+	return s.startRun(ctx, id, trigger, input, nil)
+}
+
+// startRun creates and launches a run of the current version, or of candidate
+// when it is not nil (spec 51 REQ-WFC-005): the run then carries the
+// candidate id and its base version. It refuses with ErrRunActive while a run
+// of the workflow is running.
+func (s *Service) startRun(ctx context.Context, id, trigger string, input json.RawMessage, candidate *Candidate) (Run, error) {
 	wf, err := s.store.GetWorkflow(ctx, id)
 	if err != nil {
 		return Run{}, err
@@ -620,21 +634,32 @@ func (s *Service) StartRun(ctx context.Context, id, trigger string, input json.R
 		return Run{}, ErrRunActive
 	}
 
-	ver, err := s.store.GetVersion(ctx, id, wf.Version)
-	if err != nil {
-		return Run{}, err
+	version := wf.Version
+	var graph Graph
+	var candidateID int64
+	if candidate != nil {
+		version = candidate.BaseVersion
+		graph = candidate.Graph
+		candidateID = candidate.ID
+	} else {
+		ver, err := s.store.GetVersion(ctx, id, wf.Version)
+		if err != nil {
+			return Run{}, err
+		}
+		graph = ver.Graph
 	}
 	if len(input) == 0 {
 		input = json.RawMessage("{}")
 	}
 	run, err := s.store.CreateRun(ctx, Run{
-		WorkflowID: id,
-		Version:    wf.Version,
-		Trigger:    trigger,
-		Input:      input,
-		Status:     RunQueued,
-		StartedAt:  s.now().UnixMilli(),
-		NodesTotal: len(ver.Graph.Nodes),
+		WorkflowID:  id,
+		Version:     version,
+		CandidateID: candidateID,
+		Trigger:     trigger,
+		Input:       input,
+		Status:      RunQueued,
+		StartedAt:   s.now().UnixMilli(),
+		NodesTotal:  len(graph.Nodes),
 	})
 	if err != nil {
 		return Run{}, err
@@ -714,122 +739,6 @@ func (s *Service) RotateWebhook(ctx context.Context, id string) (string, error) 
 	}
 	s.broadcast(id, "")
 	return token, nil
-}
-
-// Assist runs one guardian assistant turn (API-WF-017, REQ-WF-010).
-func (s *Service) Assist(ctx context.Context, id string, baseVersion int, message string) (AssistResult, error) {
-	wf, err := s.store.GetWorkflow(ctx, id)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	ver, err := s.store.GetVersion(ctx, id, wf.Version)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	if baseVersion != wf.Version {
-		return AssistResult{}, ErrVersionConflict
-	}
-	old := ver.Graph
-
-	history, _ := s.store.ListChat(ctx, id, 10)
-	if _, err := s.store.AppendChat(ctx, ChatMessage{
-		WorkflowID: id, Role: "owner", Text: message, CreatedAt: s.now().UnixMilli(),
-	}); err != nil {
-		return AssistResult{}, err
-	}
-
-	var env AssistEnv
-	if provider, ok := s.deps.(AssistEnvProvider); ok {
-		ectx, ecancel := context.WithTimeout(ctx, assistEnvTimeout)
-		env = provider.AssistEnv(ectx, wf)
-		ecancel()
-	}
-	var last *RunDetail
-	if runs, err := s.store.ListRuns(ctx, RunFilter{WorkflowID: id, Limit: 1}); err == nil && len(runs) > 0 {
-		if detail, err := s.RunDetail(ctx, id, runs[0].ID); err == nil {
-			last = &detail
-		}
-	}
-	prompt := BuildAssistantPromptEnv(wf, old, history, message, env, last)
-	actx, cancel := context.WithTimeout(ctx, assistTimeout)
-	defer cancel()
-	// The reply is machine-readable (a graph proposal), so the turn is lana
-	// background work on the guardian's background chain (spec 39 revision 5).
-	res, err := s.deps.RunAgent(actx, AgentRequest{
-		WorkflowID: id, RunID: "", NodeID: "assistant", Agent: wf.Guardian, Prompt: prompt,
-		Background: true,
-	})
-	var background *GuardianBackgroundError
-	if errors.As(err, &background) {
-		return AssistResult{}, background
-	}
-	if err != nil {
-		return AssistResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, err)
-	}
-	reply, err := ParseAssistantReply(res.Text)
-	if err != nil {
-		return AssistResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, err)
-	}
-
-	now := s.now().UnixMilli()
-	var msg ChatMessage
-	switch reply.Graph {
-	case nil:
-		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, CreatedAt: now}
-	default:
-		graph := reply.Graph.Normalized()
-		issues := Validate(graph, s.deps.AgentExists)
-		if len(issues) > 0 {
-			// An invalid graph saves no version and reports the problems
-			// (AC-WF-018).
-			text := reply.Reply
-			if strings.TrimSpace(text) == "" {
-				text = "I could not apply that change."
-			}
-			msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: text, Issues: issues, CreatedAt: now}
-			break
-		}
-		summary := reply.Summary
-		if summary == "" {
-			summary = "assistant change"
-		}
-		newVer, err := s.store.SaveVersion(ctx, id, baseVersion, graph, "guardian", summary)
-		if err != nil {
-			return AssistResult{}, err
-		}
-		change := DiffGraphs(old, graph)
-		change.FromVersion = baseVersion
-		change.ToVersion = newVer.Version
-		change.Summary = reply.Summary
-		if current, err := s.store.GetWorkflow(ctx, id); err == nil {
-			if current.Status == StatusActive && !LockCovers(current.Lock, graph) {
-				current.Status = StatusDraft
-				current.UpdatedAt = now
-				_ = s.store.UpdateWorkflow(ctx, current)
-			}
-		}
-		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, Change: &change, CreatedAt: now}
-	}
-
-	// The guardian asked for a test run of the saved graph: start it now and
-	// say so; its result reaches the guardian as "Last run" next time.
-	if reply.Test && len(msg.Issues) == 0 {
-		if run, err := s.StartRun(ctx, id, "manual", nil); err == nil {
-			msg.Text = strings.TrimSpace(msg.Text + fmt.Sprintf("\n\nTest run #%d started.", run.Number))
-		} else {
-			msg.Text = strings.TrimSpace(msg.Text + "\n\nThe test run did not start: " + err.Error())
-		}
-	}
-	stored, err := s.store.AppendChat(ctx, msg)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	s.broadcast(id, "")
-	detail, err := s.Get(ctx, id)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	return AssistResult{Message: stored, Workflow: detail, Tokens: res.Tokens}, nil
 }
 
 // ---- triggers -------------------------------------------------------------
