@@ -43,7 +43,8 @@ import {
   Select,
   Skeleton,
 } from "../ui/gr8r";
-import { AgentAvatar, AgentAvatarStack, agentFallbackColor } from "./agent-avatar";
+import { TeamAvatar } from "./discussion";
+import { AgentAvatar, agentFallbackColor } from "./agent-avatar";
 import type { BadgeTone } from "../ui/gr8r";
 
 /* REQ-ROOM-011: the alive roster. The Agents page shows a team pulse and one
@@ -434,22 +435,34 @@ function matchesQuery(agent: AgentLike, query: string): boolean {
   return haystack.includes(query);
 }
 
+/* The model of an address like "commandcode/deepseek/deepseek-v4-flash"
+   without its provider part, which the label already names. */
+function withoutProvider(model: string, provider: string): string {
+  return provider && model.startsWith(provider + "/") ? model.slice(provider.length + 1) : model;
+}
+
 /* One roster card (design rooms-3). The body opens the profile; the footer
    holds the one context button. */
 function AgentCard({
   agent,
   row,
+  rows,
   onOpen,
 }: {
   agent: Agent;
   row: RoomRow | undefined;
+  /* Every room row, for the lead's display name on a team card. */
+  rows?: Record<string, RoomRow>;
   onOpen: (event: MouseEvent<HTMLElement>, name: string) => void;
 }) {
   const team = isTeam(agent);
   const state = roomState(row);
   const presence = row ? row.presence : null;
+  /* A problem's detail (often a long error) goes under the name in place of
+     the preview; the badge keeps a short word so the card does not overflow. */
+  const problemText = state === "problem" && presence && presence.label ? presence.label : "";
   const statusWord =
-    presence && presence.label
+    presence && presence.label && !problemText
       ? presence.label
       : STATE_FALLBACK[state] || "Idle";
   const action = cardAction(state, agent.name);
@@ -463,13 +476,16 @@ function AgentCard({
       : preview;
   const members = memberCount(row);
   const role = team
-    ? "Team" + (row && row.lead ? " · lead " + row.lead : "")
+    ? "Team" + (row && row.lead ? " · lead " + displayLabel(rows && rows[row.lead] ? rows[row.lead] : { name: row.lead }) : "")
     : (agent.title || "Agent") + (agent.default ? " · default" : "");
   const foot = team
     ? members > 0
       ? members + (members === 1 ? " member" : " members")
       : "Team"
-    : Number(row ? row.turns_7d : 0) + " tasks · 7d";
+    : (() => {
+        const turns = Number(row ? row.turns_7d : 0);
+        return turns + (turns === 1 ? " task" : " tasks") + " · 7d";
+      })();
   const model = splitModel(agent);
   /* Spec 39 (API-CCT-006): an agent on Claude Code shows the Claude mark;
      its model is the address, for example claude-code/opus. */
@@ -478,7 +494,7 @@ function AgentCard({
     ? String(agent.model || "")
     : model.model
       ? model.provider
-        ? providerLabel(model.provider) + " · " + model.model
+        ? providerLabel(model.provider) + " · " + withoutProvider(model.model, model.provider)
         : model.model
       : "";
 
@@ -486,9 +502,8 @@ function AgentCard({
     <article className="pcard" onClick={(event) => onOpen(event, agent.name)}>
       <div className="agent-card-head">
         {team ? (
-          <AgentAvatarStack
-            size="md"
-            max={3}
+          <TeamAvatar
+            size={40}
             items={rosterNames(agent).map((name) => ({
               name,
               color: agentColor(name),
@@ -504,21 +519,31 @@ function AgentCard({
         )}
         <div className="agent-card-id">
           <a className="agent-card-name" href={agentHref(agent.name)}>
-            {displayLabel(agent)}
+            {displayLabel(agent.display_name ? agent : row && row.display_name ? row : agent)}
           </a>
           <span className="agent-card-role">{role}</span>
         </div>
-        <Badge tone={stateTone(state)} dot>
-          {statusWord}
+        <Badge tone={stateTone(state)} dot className="agent-card-state" title={statusWord}>
+          <span className="agent-card-clip">{statusWord}</span>
         </Badge>
       </div>
 
-      <p className="agent-card-preview">{description}</p>
+      {problemText ? (
+        <p className="agent-card-preview agent-card-problem" title={problemText}>
+          {problemText}
+        </p>
+      ) : (
+        <p className="agent-card-preview">{description}</p>
+      )}
 
       {modelLabel || claude ? (
         <div className="agent-card-meta">
           {claude ? <ClaudeCodeBadge /> : null}
-          {modelLabel ? <Lbl color="var(--text-4)">{modelLabel}</Lbl> : null}
+          {modelLabel ? (
+            <Lbl color="var(--text-4)" className="agent-card-model" title={modelLabel}>
+              <span className="agent-card-clip">{modelLabel}</span>
+            </Lbl>
+          ) : null}
         </div>
       ) : null}
 
@@ -754,6 +779,7 @@ export function AgentsPage() {
               key={agent.name}
               agent={agent}
               row={byName[agent.name]}
+              rows={byName}
               onOpen={openCard}
             />
           ))}
