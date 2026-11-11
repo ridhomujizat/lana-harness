@@ -134,6 +134,11 @@ func (s *Service) open() (*kv.Vault, *kv.Index, error) {
 	if s.vault != nil && s.index != nil {
 		return s.vault, s.index, nil
 	}
+	// A runtime without a home folder (a library user, a test) has no vault;
+	// a relative path would write "knowledge/" into the working directory.
+	if s.home == "" && !filepath.IsAbs(s.vaultPath) {
+		return nil, nil, errors.New("knowledge needs a home folder")
+	}
 	vault, err := kv.Open(s.vaultPath)
 	if err != nil {
 		return nil, nil, err
