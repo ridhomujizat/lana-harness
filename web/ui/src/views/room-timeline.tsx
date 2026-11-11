@@ -287,9 +287,11 @@ type TimelineNode =
 
 export interface RoomViewProps {
   room: RoomRow;
+  /* Spec 48: composer text prefilled from the route (?draft=). */
+  initialDraft?: string;
 }
 
-export function RoomView({ room }: RoomViewProps) {
+export function RoomView({ room, initialDraft }: RoomViewProps) {
   /* API-WF-021: the reply of a workflow chat command shown above the composer. */
   const [commandReply, setCommandReply] = useState("");
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -311,7 +313,7 @@ export function RoomView({ room }: RoomViewProps) {
   const [question, setQuestion] = useState<OpenQuestion | null>(null);
   const [questionBusy, setQuestionBusy] = useState(false);
   const [closedQuestionIds, setClosedQuestionIds] = useState<string[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(initialDraft || "");
   /* API reply: the automation message the next send replies to. */
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [newTopic, setNewTopic] = useState(false);
