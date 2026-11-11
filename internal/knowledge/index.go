@@ -25,11 +25,15 @@ import (
 
 // Index sizing and schema constants (design §3).
 const (
-	indexSchemaVersion = 3
+	indexSchemaVersion = 4
 	indexSyncInterval  = 10 * time.Second
 	embedBatchSize     = 64
 	indexCatalogMax    = 400
 )
+
+// linksBackfillKey is the upkeep key that asks the next syncAll to fill the
+// links of the already indexed markdown files (design §1).
+const linksBackfillKey = "links_backfill"
 
 // Index kinds for the top-level vault folders (design §3).
 const (
@@ -118,6 +122,15 @@ CREATE TABLE proposals (
 CREATE INDEX proposals_agent ON proposals(agent, status);
 `
 
+// indexSchemaV4 is the schema version 4 migration: the link store (design §1).
+// A fresh database runs it right after indexSchemaV3; an existing one runs it
+// over its schema, keeping its chunks, vectors, and files.
+const indexSchemaV4 = `
+CREATE TABLE links (src TEXT NOT NULL, ord INTEGER NOT NULL, target TEXT NOT NULL,
+  norm TEXT NOT NULL, context TEXT NOT NULL DEFAULT '', PRIMARY KEY (src, ord));
+CREATE INDEX links_norm ON links(norm);
+`
+
 // Index is the derived SQLite index of one vault (REQ-KNW-030). It lives
 // outside the vault and can be rebuilt from the files at any time.
 type Index struct {
@@ -140,7 +153,7 @@ type Index struct {
 }
 
 // OpenIndex opens or creates the index database and applies the schema up to
-// version 3 (design §2, §3). vaultRoot is the folder the index describes.
+// version 4 (design §2, §3). vaultRoot is the folder the index describes.
 func OpenIndex(dbPath, vaultRoot string) (*Index, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
@@ -212,6 +225,20 @@ func (i *Index) migrate(ctx context.Context) error {
 				_ = tx.Rollback()
 				return err
 			}
+		}
+	}
+	if version < 4 {
+		// The link store is new. Existing chunks, vectors, and files stay; the
+		// next Sync fills the links from the vault files (REQ-KGR-002).
+		if _, err := tx.ExecContext(ctx, indexSchemaV4); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO upkeep (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+			linksBackfillKey, "1"); err != nil {
+			_ = tx.Rollback()
+			return err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", indexSchemaVersion)); err != nil {
@@ -318,6 +345,9 @@ func (i *Index) syncAll(ctx context.Context) error {
 	}
 	if dirty {
 		i.dropVectors()
+	}
+	if err := i.backfillLinks(ctx); err != nil {
+		return err
 	}
 	return i.embedMissing(ctx)
 }
@@ -465,6 +495,11 @@ func (i *Index) syncOne(ctx context.Context, tx *sql.Tx, rel string) error {
 			return err
 		}
 	}
+	if ext == ".md" {
+		if err := writeLinks(ctx, tx, rel, raw); err != nil {
+			return err
+		}
+	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO files (path, kind, title, type, description, aliases, updated, scope, mtime, size, hash)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -476,7 +511,7 @@ ON CONFLICT(path) DO UPDATE SET
 	return err
 }
 
-// deleteFile removes a file row and its chunks and vectors.
+// deleteFile removes a file row and its chunks, vectors, and links.
 func (i *Index) deleteFile(ctx context.Context, tx *sql.Tx, rel string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE path = ?)", rel); err != nil {
 		return err
@@ -484,8 +519,65 @@ func (i *Index) deleteFile(ctx context.Context, tx *sql.Tx, rel string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM chunks WHERE path = ?", rel); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM links WHERE src = ?", rel); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, "DELETE FROM files WHERE path = ?", rel)
 	return err
+}
+
+// backfillLinks rewrites the links of every indexed markdown file on the first
+// sync after the v4 migration, then clears the request key. A file that cannot
+// be read is skipped (design §1).
+func (i *Index) backfillLinks(ctx context.Context) error {
+	if v, ok, err := i.UpkeepValue(linksBackfillKey); err != nil {
+		return err
+	} else if !ok || v == "" {
+		return nil
+	}
+	rows, err := i.db.QueryContext(ctx, "SELECT path FROM files")
+	if err != nil {
+		return err
+	}
+	var paths []string
+	for rows.Next() {
+		var rel string
+		if err := rows.Scan(&rel); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		paths = append(paths, rel)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	sort.Strings(paths)
+
+	tx, err := i.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, rel := range paths {
+		if strings.ToLower(filepath.Ext(rel)) != ".md" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(i.root, filepath.FromSlash(rel)))
+		if err != nil {
+			i.logger.Warn("knowledge index: link backfill skipped", "path", rel, "error", err)
+			continue
+		}
+		if err := writeLinks(ctx, tx, rel, string(data)); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM upkeep WHERE key = ?", linksBackfillKey); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 // relPath normalizes an absolute or vault-relative path to the forward-slash

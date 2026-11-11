@@ -366,9 +366,9 @@ func TestIndexPDFText(t *testing.T) {
 	}
 }
 
-// Design §2, REQ-DKN-004: a v1 index is upgraded to version 3 in place, gains
-// the v3 tables, and drops its file rows so the next Sync reindexes the vault
-// with scopes. The vault file is untouched.
+// Design §2, REQ-DKN-004: a v1 index is upgraded to version 4 in place, gains
+// the v3 and v4 tables, and drops its file rows so the next Sync reindexes the
+// vault with scopes. The vault file is untouched.
 func TestIndexMigrateV1ToV3(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "knowledge.db")
@@ -401,11 +401,11 @@ func TestIndexMigrateV1ToV3(t *testing.T) {
 	if err := idx.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("version = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("version = %d, want 4", version)
 	}
 
-	for _, table := range []string{"journal_marks", "promote_marks", "upkeep", "proposals"} {
+	for _, table := range []string{"journal_marks", "promote_marks", "upkeep", "proposals", "links"} {
 		var name string
 		if err := idx.db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name); err != nil {
 			t.Fatalf("table %s missing after migration: %v", table, err)
@@ -433,7 +433,7 @@ func TestIndexMigrateV1ToV3(t *testing.T) {
 	}
 }
 
-// Design §2, REQ-DKN-004: a v2 index migrates to v3, drops its rows, and after
+// Design §2, REQ-DKN-004: a v2 index migrates to v4, drops its rows, and after
 // Sync the vault files carry their scopes; only domain wiki/journal files are
 // indexed.
 func TestIndexMigrateV2ToV3(t *testing.T) {
@@ -474,8 +474,8 @@ func TestIndexMigrateV2ToV3(t *testing.T) {
 	if err := idx.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("version = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("version = %d, want 4", version)
 	}
 	var count int
 	if err := idx.db.QueryRow("SELECT COUNT(*) FROM files").Scan(&count); err != nil {
@@ -757,5 +757,150 @@ func TestIndexPagesFilterLimitTotal(t *testing.T) {
 	}
 	if oTotal != 3 || len(one) != 1 || one[0].Path != "agents/dana/wiki/Gaji.md" {
 		t.Fatalf("limited pages = %+v, total %d", one, oTotal)
+	}
+}
+
+// linkCount returns the stored link count of one file.
+func linkCount(t *testing.T, idx *Index, src string) int {
+	t.Helper()
+	var n int
+	if err := idx.db.QueryRow("SELECT COUNT(*) FROM links WHERE src = ?", src).Scan(&n); err != nil {
+		t.Fatalf("count links: %v", err)
+	}
+	return n
+}
+
+// tableCount returns the row count of a table.
+func tableCount(t *testing.T, idx *Index, table string) int {
+	t.Helper()
+	var n int
+	if err := idx.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
+// AC-KGR-001: Sync stores the links of a markdown page, an edit replaces them,
+// and deleting the file removes them.
+func TestIndexLinksSyncEditDelete(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Open(dir); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	writeVaultFile(t, dir, "wiki/Page.md", "# Page\n\n[[A]] and [[A|x]] and [[A#h]] and [[agents/dana/wiki/B]].\n")
+
+	idx := newIndex(t, dir)
+	clock := &fakeClock{t: testNow}
+	idx.now = clock.now
+	ctx := context.Background()
+	if err := idx.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if n := linkCount(t, idx, "wiki/Page.md"); n != 4 {
+		t.Fatalf("links = %d, want 4", n)
+	}
+
+	clock.advance(11 * time.Second)
+	writeVaultFile(t, dir, "wiki/Page.md", "# Page\n\nOnly [[C]].\n")
+	if err := idx.Sync(ctx); err != nil {
+		t.Fatalf("Sync edit: %v", err)
+	}
+	if n := linkCount(t, idx, "wiki/Page.md"); n != 1 {
+		t.Fatalf("links after edit = %d, want 1", n)
+	}
+
+	clock.advance(11 * time.Second)
+	if err := os.Remove(filepath.Join(dir, "wiki", "Page.md")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := idx.Sync(ctx); err != nil {
+		t.Fatalf("Sync delete: %v", err)
+	}
+	if n := linkCount(t, idx, "wiki/Page.md"); n != 0 {
+		t.Fatalf("links after delete = %d, want 0", n)
+	}
+}
+
+// AC-KGR-001: a v3 index migrates to v4 with the link store, keeping its chunks
+// and vectors, and backfills links on the next Sync.
+func TestIndexMigrateV3ToV4(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "knowledge.db")
+	writeVaultFile(t, dir, "wiki/B.md", "# B\n\nSee [[A]].\n")
+	info, err := os.Stat(filepath.Join(dir, "wiki", "B.md"))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	for _, schema := range []string{indexSchema, indexSchemaV2, indexSchemaV3} {
+		if _, err := db.Exec(schema); err != nil {
+			t.Fatalf("create schema: %v", err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
+		t.Fatalf("set version: %v", err)
+	}
+	if _, err := db.Exec(
+		"INSERT INTO files (path, kind, title, type, description, aliases, updated, scope, mtime, size, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"wiki/B.md", kindPage, "B", "", "", "[]", "", ScopeShared, info.ModTime().UnixNano(), info.Size(), "h"); err != nil {
+		t.Fatalf("insert file: %v", err)
+	}
+	res, err := db.Exec(
+		"INSERT INTO chunks (path, ord, title, heading, start_line, text) VALUES (?, ?, ?, ?, ?, ?)",
+		"wiki/B.md", 0, "B", "", 1, "See [[A]].")
+	if err != nil {
+		t.Fatalf("insert chunk: %v", err)
+	}
+	chunkID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("chunk id: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO vectors (chunk_id, model, dim, vec) VALUES (?, ?, ?, ?)",
+		chunkID, "fake", 1, []byte{0, 0, 128, 63}); err != nil {
+		t.Fatalf("insert vector: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	idx := newIndex(t, dir)
+	idx.now = (&fakeClock{t: testNow}).now
+	ctx := context.Background()
+
+	var version int
+	if err := idx.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version != 4 {
+		t.Fatalf("version = %d, want 4", version)
+	}
+	if v, ok, err := idx.UpkeepValue(linksBackfillKey); err != nil || !ok || v != "1" {
+		t.Fatalf("links_backfill = %q, %v, %v; want 1 set", v, ok, err)
+	}
+	if n := tableCount(t, idx, "chunks"); n != 1 {
+		t.Fatalf("chunks after migration = %d, want 1", n)
+	}
+	if n := tableCount(t, idx, "vectors"); n != 1 {
+		t.Fatalf("vectors after migration = %d, want 1", n)
+	}
+
+	if err := idx.Sync(ctx); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if n := tableCount(t, idx, "chunks"); n != 1 {
+		t.Fatalf("chunks after backfill = %d, want 1", n)
+	}
+	if n := tableCount(t, idx, "vectors"); n != 1 {
+		t.Fatalf("vectors after backfill = %d, want 1", n)
+	}
+	if n := linkCount(t, idx, "wiki/B.md"); n != 1 {
+		t.Fatalf("backfilled links = %d, want 1", n)
+	}
+	if _, ok, err := idx.UpkeepValue(linksBackfillKey); err != nil || ok {
+		t.Fatalf("links_backfill not cleared: ok=%v err=%v", ok, err)
 	}
 }
