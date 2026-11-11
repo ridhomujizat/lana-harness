@@ -482,11 +482,15 @@ describe("Room composer (REQ-ROOM-003)", () => {
     const input = (await screen.findByLabelText("Message dana")) as HTMLTextAreaElement;
     expect(screen.queryByRole("button", { name: "New topic" })).toBeNull();
 
-    /* "/new" alone arms the next message. */
-    fireEvent.change(input, { target: { value: "/new" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    /* Typing "/" opens the command menu; Enter on /new arms the next message. */
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /New session/ })).toBeTruthy();
+    fireEvent.change(input, { target: { value: "/ne" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(vi.mocked(sendToRoom)).not.toHaveBeenCalled();
-    expect(await screen.findByText(/your next message starts a fresh session/)).toBeTruthy();
+    expect(await screen.findByText(/Your next message starts a fresh conversation/)).toBeTruthy();
+    expect(input.value).toBe("");
     fireEvent.change(input, { target: { value: "halo" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => {

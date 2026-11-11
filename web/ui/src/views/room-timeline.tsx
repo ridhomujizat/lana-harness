@@ -22,6 +22,9 @@ import { RoomSettings } from "./room-settings";
 import type { RoomSettingsTab } from "./room-settings";
 import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
+import { compactSession } from "../api/turns";
+import { NewSessionBanner, SlashMenu, useSlashMenu } from "./slash-menu";
+import type { SlashCommand } from "./slash-menu";
 import type { SessionEvent } from "../api/sessions";
 import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
 import { useSessionPresence } from "../lib/session-presence";
@@ -372,6 +375,33 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
 
   const team = room.kind === "team";
   const mentions = useMentions(draft, setDraft, team ? mentionNames : []);
+  /* The slash command menu (owner 2026-11-11). */
+  const slashCommands: SlashCommand[] = [
+    {
+      name: "new",
+      title: "New session",
+      description: "Start a fresh conversation; the messages above stay but are not sent again.",
+      icon: "square-pen",
+      run: () => setNewTopic(true),
+    },
+    {
+      name: "compact",
+      title: "Compact",
+      description: "Summarize this session so far to save tokens, then keep going.",
+      icon: "minimize-2",
+      run: () => void compactNow(),
+    },
+  ];
+  if (team) {
+    slashCommands.push({
+      name: "discuss",
+      title: "Discuss",
+      description: "Ask the lead to open a discussion on your next message.",
+      icon: "messages-square",
+      run: () => setDiscuss(true),
+    });
+  }
+  const slash = useSlashMenu(draft, setDraft, slashCommands);
 
   const loadEvents = useCallback(async (ids: string[]) => {
     if (ids.length === 0) {
@@ -1221,7 +1251,28 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     }
   }
 
+  async function compactNow() {
+    if (!currentWebSessionId) {
+      setActionError("Nothing to compact yet.");
+      return;
+    }
+    setActionError("");
+    setCommandReply("Compacting this session…");
+    try {
+      const result = await compactSession(currentWebSessionId);
+      setCommandReply(
+        "Session compacted: " + result.tokens_before.toLocaleString() + " → " + result.tokens_after.toLocaleString() + " tokens."
+      );
+    } catch (failure) {
+      setCommandReply("");
+      setActionError(errorMessage(failure));
+    }
+  }
+
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (slash.onKeyDown(event)) {
+      return;
+    }
     if (mentions.onKeyDown(event)) {
       return;
     }
@@ -1479,14 +1530,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             />
           ) : null}
         </div>
-        {newTopic ? (
-          <div className="room-newtopic">
-            New topic · your next message starts a fresh session
-            <button type="button" className="room-newtopic-cancel" onClick={() => setNewTopic(false)}>
-              Cancel
-            </button>
-          </div>
-        ) : null}
+
         <div className="cbox">
           {replyTarget ? (
             <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />
@@ -1505,6 +1549,10 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               Uploading…
             </p>
           ) : null}
+          <SlashMenu state={slash} />
+          {newTopic ? (
+            <NewSessionBanner name={team ? "The team" : displayLabel(room)} onCancel={() => setNewTopic(false)} />
+          ) : null}
           {mentions.open ? (
             <MentionList
               names={mentions.matches}
@@ -1522,6 +1570,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             onChange={(event) => {
               setDraft(event.target.value);
               mentions.reset();
+              slash.reset();
             }}
             onKeyDown={composerKeyDown}
             onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
