@@ -8,13 +8,25 @@
   height: var(--box);
   flex-shrink: 0;
 }
-.team-av .team-av-face {
+/* Each face is a soft coin: a tinted circle with the agent's shape or
+   letter inside, ringed by the surface so overlapping faces stay apart. */
+.team-av .av.team-av-face {
   position: absolute;
   --sz: var(--face);
   width: var(--face);
   height: var(--face);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--c, var(--gray)) 16%, var(--surface));
+  box-shadow: 0 0 0 2px var(--surface);
   font-size: calc(var(--face) * 0.42);
-  box-shadow: 0 0 0 1.5px var(--surface);
+}
+.team-av .av.team-av-face .av-svg,
+.team-av .av.team-av-face .av-img {
+  width: 76%;
+  height: 76%;
 }
 .team-av-2 .team-av-top {
   left: 0;
@@ -36,7 +48,7 @@
   right: 0;
   bottom: 0;
 }
-.team-av .team-av-more {
+.team-av .av.team-av-more {
   display: inline-grid;
   place-items: center;
   border-radius: 50%;
