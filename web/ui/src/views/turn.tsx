@@ -999,6 +999,8 @@ export function ReplyChip({
   );
 }
 
+const ATTACHMENTS_PLACEHOLDER = "(attachments)";
+
 export function UserBubble({
   text,
   continue: isContinue = false,
@@ -1014,7 +1016,11 @@ export function UserBubble({
     );
   }
   /* REQ-CHF-002: files sit above the bubble as cards; the bubble holds only
-     the owner's text and is left out when there is none. */
+     the owner's text and is left out when there is none. A files-only send is
+     stored with the placeholder text "(attachments)", which is not shown. */
+  if (attachments.length > 0 && text.trim() === ATTACHMENTS_PLACEHOLDER) {
+    text = "";
+  }
   return (
     <div className="chat-user-row">
       <div className="chat-user-stack">

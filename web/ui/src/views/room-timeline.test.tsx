@@ -368,3 +368,39 @@ describe("Reply to a workflow message (API reply)", () => {
     });
   });
 });
+
+describe("Drop files (REQ-CHF-009)", () => {
+  function dropOn(target: Element, files: File[]) {
+    const dataTransfer = { types: ["Files"], files };
+    fireEvent.dragEnter(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+  }
+
+  it("adds dropped files to the composer", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [userText(1, "t1", "halo")],
+      last_seq: 1,
+    });
+    installRows([room({ name: "dana" })]);
+    const { container } = render(<ChatsPage roomName="dana" />);
+    await screen.findByText("halo");
+    const view = container.querySelector(".room-view") as Element;
+    dropOn(view, [new File(["# hi"], "notes.md", { type: "text/markdown" })]);
+    expect(await screen.findByText("notes.md")).toBeTruthy();
+    expect(screen.getByText("Markdown · 4 B")).toBeTruthy();
+  });
+
+  it("asks for a first message in a room with no web session", async () => {
+    installRows([room({ name: "dana" })]);
+    const { container } = render(<ChatsPage roomName="dana" />);
+    await screen.findByLabelText("Message dana");
+    const view = container.querySelector(".room-view") as Element;
+    dropOn(view, [new File(["x"], "a.txt", { type: "text/plain" })]);
+    expect(await screen.findByText("Send a message first to attach files.")).toBeTruthy();
+    expect(screen.queryByText("a.txt")).toBeNull();
+  });
+});

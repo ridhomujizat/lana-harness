@@ -30,8 +30,10 @@ import type { ApprovalItem } from "./approval";
 import {
   AttachButton,
   AttachmentChips,
+  AttachmentDropOverlay,
   pasteImageFiles,
   useAttachmentDraft,
+  useFileDrop,
 } from "./attachments";
 import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
 import type { FaceRef } from "./presence";
@@ -759,6 +761,22 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     return "";
   }, [segments]);
 
+  /* REQ-CHF-009: files dropped anywhere on the room become draft files, like
+     the paperclip. Uploads go to the room's web session, so a room without one
+     asks for a first message instead. */
+  const addAttachmentFiles = attachmentDraft.addFiles;
+  const dropFiles = useCallback(
+    (files: File[]) => {
+      if (!currentWebSessionId) {
+        setActionError("Send a message first to attach files.");
+        return;
+      }
+      addAttachmentFiles(files);
+    },
+    [currentWebSessionId, addAttachmentFiles]
+  );
+  const fileDrop = useFileDrop(dropFiles);
+
   const allEvents = useMemo(() => {
     const out: SessionEvent[] = [];
     for (const segment of segments) {
@@ -1157,7 +1175,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   }
 
   return (
-    <div className="room-view">
+    <div className="room-view" {...fileDrop.handlers}>
+      <AttachmentDropOverlay active={fileDrop.active} />
       <header className="room-head">
         <a className="ibtn ibtn-sm room-back" href="#/chats" aria-label="All chats">
           <Ic name="chevron-left" size={18} />

@@ -564,6 +564,14 @@ func TestRoomPreviewAttachmentCount(t *testing.T) {
 			want: "2 files",
 		},
 		{
+			name: "files-only placeholder",
+			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockText, Text: "(attachments)"},
+				{Kind: core.BlockText, Text: notes},
+			}},
+			want: "1 file",
+		},
+		{
 			name: "one image",
 			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
 				{Kind: core.BlockImage, MediaType: "image/png", Path: "attachments/x.png"},

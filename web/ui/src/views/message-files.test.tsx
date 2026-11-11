@@ -152,3 +152,15 @@ describe("owner message with files", () => {
     expect(screen.getByText("Show less")).toBeTruthy();
   });
 });
+
+describe("files-only send", () => {
+  it("hides the (attachments) placeholder text", () => {
+    const items = buildTurns([userEvent(["(attachments)", MD])]);
+    const refs = userItem(items)?.attachments;
+    const { container } = render(
+      <UserBubble text={userItem(items)?.text || ""} attachments={storedAttachments("s1", refs)} />
+    );
+    expect(container.querySelector(".chat-bubble")).toBeNull();
+    expect(container.querySelectorAll(".mf-card").length).toBe(1);
+  });
+});

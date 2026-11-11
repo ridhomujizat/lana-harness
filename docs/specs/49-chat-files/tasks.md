@@ -27,6 +27,13 @@ The web UI is coded directly; Go goes through `dsh-coder`.
 - Scratch daemon (:18399) through Vite: a session with the five Omnix files and a long pasted log;
   screenshots of the thread, the Markdown and PDF previews, dark mode, and 390 px.
 
+### T-004 Drag and drop in Chats
+
+- Status: Done 2026-11-11 (owner: "setup agar bisa drag n drop"). Evidence: vitest 585/585 (drop
+  into a room, no-session notice, placeholder hidden); Go preview test for the placeholder.
+- Files: `views/room-timeline.tsx`, `views/turn.tsx`, `web/rooms.go` + tests.
+- Covers: REQ-CHF-009.
+
 ## Live check 2026-11-11
 
 - Scratch daemon (:18399) rebuilt from this branch, viewed through Vite. A session for
