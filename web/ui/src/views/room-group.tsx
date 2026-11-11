@@ -1,6 +1,6 @@
 import { AgentFiles } from "./message-files";
 import { Fragment, useCallback, useMemo, useState } from "react";
-import { DiscussionThread, SummaryButton } from "./discussion";
+import { DiscussionThread, NotesTag, SummaryButton } from "./discussion";
 import { displayLabel } from "./agent-label";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import type { RoomRow } from "../api/rooms";
@@ -33,6 +33,8 @@ export interface HandoffChip {
   agent: string;
   title: string;
   state: "working" | "done" | "failed";
+  /* Spec 47 team work: the notes the member used, once it answered. */
+  notes: number;
 }
 
 export type GroupItem =
@@ -44,7 +46,12 @@ export type GroupItem =
       text: string;
       at: number;
       tools: number;
+      /* Spec 47 team work: tool calls by name, notes used, files changed. */
+      toolsUsed: Record<string, number>;
+      notes: string[];
+      files: string[];
     }
+  | { kind: "passed"; key: string; from: string[]; to: string }
   | { kind: "working"; key: string; agent: string; title: string }
   | { kind: "discussion"; key: string };
 
@@ -150,6 +157,7 @@ function rootFrames(turn: ChatTurn): TeamEvent[] {
 export function groupItems(turn: ChatTurn): GroupItem[] {
   const delegations = new Map<string, Delegation>();
   const returns = new Map<string, Return>();
+  const agentByChild = new Map<string, string>();
   for (const step of teamSteps(rootFrames(turn)).steps) {
     if (!step.callId) {
       continue;
@@ -158,6 +166,9 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
       delegations.set(step.callId, step);
     } else if (step.kind === "return") {
       returns.set(step.callId, step);
+      if (step.childId) {
+        agentByChild.set(step.childId, step.agent);
+      }
     }
   }
 
@@ -225,9 +236,18 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
         counter += 1;
         items.push(lead);
       }
-      lead.chips.push({ key: "chip-" + out.key, agent: out.agent, title, state });
+      lead.chips.push({ key: "chip-" + out.key, agent: out.agent, title, state, notes: ret ? ret.notes.length : 0 });
       if (!lead.at) {
         lead.at = out.startedAt;
+      }
+      /* Spec 47: a task that builds on earlier answers says whose. */
+      if (out.context.length > 0) {
+        const from = out.context
+          .map((id) => agentByChild.get(id) || "")
+          .filter((name, index, list) => name && list.indexOf(name) === index);
+        if (from.length > 0) {
+          items.push({ kind: "passed", key: "passed-" + out.key, from, to: out.agent });
+        }
       }
       if (ret) {
         items.push({
@@ -237,6 +257,9 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
           text: ret.answer,
           at: ret.endedAt || turn.lastAt,
           tools: toolCount(stepByCall.get(step.callId)),
+          toolsUsed: ret.tools,
+          notes: ret.notes,
+          files: ret.files,
         });
       } else if (turn.running) {
         items.push({ kind: "working", key: "working-" + out.key, agent: out.agent, title });
@@ -256,30 +279,41 @@ export interface RoomGroupProps {
   /* Spec 47: "Answer directly instead" and "View room memory". */
   onDirect?: () => void;
   onMemory?: () => void;
+  /* Spec 47 team work: what each agent can do ("web", "files"…). */
+  can?: Record<string, string[]>;
 }
 
 function HandoffChipView({
   chip,
   faces,
+  can,
 }: {
   chip: HandoffChip;
   faces: Record<string, FaceRef>;
+  can?: string[];
 }) {
   const face = faces[chip.agent];
   const colors = agentFaceColors(face ? face.color : undefined);
-  const text = faceLabel(faces, chip.agent) + " · " + chip.title + " · " + chip.state;
+  const label = faceLabel(faces, chip.agent);
+  const text = label + " · " + chip.title + " · " + chip.state;
   return (
-    <span
-      className={"handoff-chip handoff-" + chip.state}
-      style={{ background: colors.bg, color: colors.fg }}
-      aria-label={text}
-    >
+    <span className={"handoff-chip handoff-" + chip.state} aria-label={text}>
       <AgentAvatar
         name={chip.agent}
         color={gr8rColor(face ? face.color : undefined)}
         size="sm"
       />
-      <span className="handoff-text">{text}</span>
+      <span className="handoff-name" style={{ color: colors.fg }}>
+        {label}
+      </span>
+      <span className="handoff-text">{chip.title}</span>
+      {(can || []).slice(0, 3).map((word) => (
+        <span key={word} className="handoff-tool">
+          {word}
+        </span>
+      ))}
+      {chip.notes > 0 ? <span className="handoff-notes">{"▤ " + chip.notes + (chip.notes === 1 ? " note" : " notes")}</span> : null}
+      <span className="handoff-state">{chip.state}</span>
     </span>
   );
 }
@@ -288,10 +322,12 @@ function LeadMessage({
   item,
   lead,
   faces,
+  can,
 }: {
   item: Extract<GroupItem, { kind: "lead" }>;
   lead: string;
   faces: Record<string, FaceRef>;
+  can?: Record<string, string[]>;
 }) {
   const face = faces[lead];
   const color = agentFaceColors(face ? face.color : undefined).fg;
@@ -317,11 +353,14 @@ function LeadMessage({
           </div>
         ) : null}
         {item.chips.length > 0 ? (
-          <div className="group-chips">
-            {item.chips.map((chip) => (
-              <HandoffChipView key={chip.key} chip={chip} faces={faces} />
+          <ol className="group-plan">
+            {item.chips.map((chip, index) => (
+              <li key={chip.key} className="group-plan-step">
+                {item.chips.length > 1 ? <span className="group-plan-n">{index + 1}</span> : null}
+                <HandoffChipView chip={chip} faces={faces} can={can ? can[chip.agent] : undefined} />
+              </li>
             ))}
-          </div>
+          </ol>
         ) : null}
       </div>
     </div>
@@ -339,7 +378,10 @@ function MemberMessage({
 }) {
   const color = agentFaceColors(face ? face.color : undefined).fg;
   const memberLabel = face && face.label ? face.label : item.agent;
-  const tools = item.tools === 1 ? "1 tool" : item.tools + " tools";
+  const named = Object.entries(item.toolsUsed || {})
+    .filter(([name]) => !name.startsWith("knowledge_"))
+    .sort((a, b) => b[1] - a[1]);
+  const tools = named.length > 0 ? "" : item.tools === 1 ? "1 tool" : item.tools > 0 ? item.tools + " tools" : "";
   const meta = ["replying to " + lead, formatClock(item.at), tools]
     .filter(Boolean)
     .join(" · ");
@@ -356,10 +398,25 @@ function MemberMessage({
             {memberLabel}
           </span>
           <span className="group-msg-meta">{meta}</span>
+          {named.slice(0, 2).map(([name, count]) => (
+            <span key={name} className="disc-chip">
+              {name + (count > 1 ? " ×" + count : "")}
+            </span>
+          ))}
+          <NotesTag notes={item.notes || []} />
         </div>
         <div className="turn-text group-msg-text">
           <Markdown text={item.text} />
         </div>
+        {(item.files || []).length > 0 ? (
+          <div className="group-files-changed">
+            {(item.files || []).slice(0, 6).map((file) => (
+              <span key={file} className="disc-chip">
+                {file.split("/").pop()}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -391,7 +448,7 @@ function WorkingRow({
   );
 }
 
-export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemory }: RoomGroupProps) {
+export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemory, can }: RoomGroupProps) {
   const lead = room.lead || "lead";
   const items = useMemo(() => {
     const list = groupItems(turn);
@@ -441,9 +498,18 @@ export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemor
         if (item.kind === "lead") {
           return (
             <Fragment key={item.key}>
-              <LeadMessage item={item} lead={lead} faces={faces} />
+              <LeadMessage item={item} lead={lead} faces={faces} can={can} />
               {tail}
             </Fragment>
+          );
+        }
+        if (item.kind === "passed") {
+          return (
+            <div key={item.key} className="disc-pass group-passed">
+              <span>
+                {"↳ " + faceLabel(faces, lead) + " passed " + item.from.map((name) => faceLabel(faces, name) + "'s").join(" and ") + " findings to " + faceLabel(faces, item.to)}
+              </span>
+            </div>
           );
         }
         if (item.kind === "working") {

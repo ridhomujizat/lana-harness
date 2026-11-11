@@ -196,3 +196,46 @@ describe("new group room", () => {
     expect(screen.getByRole("note").textContent).toContain("bigger rooms cost more");
   });
 });
+
+describe("team work by knowledge and tools", () => {
+  it("numbers the handoffs and shows tools, notes, files and the passed findings", () => {
+    const result = (id: string, agent: string, extra: Record<string, unknown>) =>
+      JSON.stringify({ session_id: id, agent, status: "end_turn", answer: agent + " done.", steps: 2, tool_calls: 3, ...extra });
+    const turn = turnOf([
+      ev(2, "tool/call", { call_id: "t1", name: "task", input: { agent: "rasya", prompt: "Cek format", title: "Format & library" } }),
+      ev(3, "tool/result", { call_id: "t1", status: "success", output: result("c1", "rasya", { tools: { web_fetch: 3, knowledge_read: 2 }, notes: ["csv-guide", "invoice-template"] }) }),
+      ev(4, "tool/call", { call_id: "t2", name: "task", input: { agent: "omnix", prompt: "Implement", title: "Endpoint + test", context: ["c1"] } }),
+      ev(5, "tool/result", { call_id: "t2", status: "success", output: result("c2", "omnix", { tools: { Edit: 4 }, files: ["invoice/export.go"] }) }),
+      ev(6, "assistant/message", { content: [{ type: "text", text: "Sudah jadi." }] }),
+      ev(7, "turn/end", { reason: "end_turn" }),
+    ]);
+    const devRoom = { ...room, members: ["rasya", "omnix"] } as RoomRow;
+    render(<RoomGroup turn={turn} room={devRoom} faces={{}} can={{ rasya: ["web", "knowledge"], omnix: ["Claude Code", "files"] }} />);
+    expect(screen.getByLabelText("rasya · Format & library · done")).toBeTruthy();
+    expect(screen.getAllByText("Claude Code").length).toBeGreaterThan(0);
+    expect(screen.getByText("web_fetch ×3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "▤ Used 2 notes" }));
+    expect(screen.getByText("▤ csv-guide")).toBeTruthy();
+    expect(screen.getByText("export.go")).toBeTruthy();
+    expect(screen.getByText(/passed rasya's findings to omnix/i)).toBeTruthy();
+  });
+
+  it("shows who knows what when a discussion opens", () => {
+    const started = ev(2, "discussion/started", {
+      id: "d2",
+      topic: "pgloader atau replication?",
+      opening: "Saya ajak yang punya catatan.",
+      lead: "lana",
+      members: [{ agent: "omnix", angle: "implementasi", notes: 6, titles: ["migrasi-fase-2", "rollback-plan"] }],
+      skipped: [{ agent: "cody", reason: "no notes on this" }],
+      rounds: 3,
+    });
+    const reply = ev(3, "discussion/message", { id: "d2", role: "member", agent: "omnix", text: "Logical replication.", notes: ["migrasi-fase-2"], new_point: true, round: 1 });
+    render(<RoomGroup turn={turnOf([started, reply], true)} room={room} faces={{}} />);
+    expect(screen.getByText("Cody not invited · no notes on this")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Omnix · implementasi/ }));
+    expect(screen.getByText("Why Omnix")).toBeTruthy();
+    expect(screen.getByText("New point")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "▤ Used 1 note" })).toBeTruthy();
+  });
+});

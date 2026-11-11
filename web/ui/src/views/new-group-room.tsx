@@ -5,7 +5,7 @@ import type { TeamDiscussionSettings } from "../api/teams";
 import { Button, Checkbox, Field, Input, Modal, SearchInput } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
 import { displayLabel } from "./agent-label";
-import { TeamAvatar } from "./discussion";
+import { AgentKnows, TeamAvatar } from "./discussion";
 import { DiscussionSettingsForm, discussionSummaryLine } from "./discussion-settings";
 import { gr8rColor, refreshRooms } from "./presence";
 
@@ -164,6 +164,7 @@ export function NewGroupRoom({
                 <span className="ng-row-text">
                   <span className="ng-row-name">{displayLabel(agent)}</span>
                   <span className="ng-row-role">{agent.title || "Agent"}</span>
+                <AgentKnows name={agent.name} can={agent.can} />
                 </span>
                 {isLead ? (
                   <span className="disc-chip disc-chip-lead">Lead</span>

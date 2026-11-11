@@ -8,7 +8,7 @@ import { Button, Checkbox, Input, Modal, SearchInput, Seg } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
 import { displayLabel } from "./agent-label";
 import { DiscussionSettingsForm } from "./discussion-settings";
-import { TeamAvatar } from "./discussion";
+import { AgentKnows, TeamAvatar } from "./discussion";
 import { gr8rColor, refreshRooms } from "./presence";
 
 /* Spec 47 REQ-RDS-054: Room settings with tabs Members, Memory and
@@ -115,6 +115,7 @@ function MembersTab({
               <span className="ng-row-text">
                 <span className="ng-row-name">{displayLabel(agent)}</span>
                 <span className="ng-row-role">{agent.title || "Agent"}</span>
+                <AgentKnows name={agent.name} can={agent.can} />
               </span>
               {isLead ? (
                 <span className="disc-chip disc-chip-lead">Lead</span>

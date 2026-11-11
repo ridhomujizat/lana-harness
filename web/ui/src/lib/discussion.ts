@@ -26,6 +26,8 @@ export type DiscussionEntry =
       quote: string;
       passed: boolean;
       failed: boolean;
+      notes: string[];
+      newPoint: boolean;
       at: number;
     }
   | { kind: "extra"; key: string; text: string; round: number; at: number }
@@ -48,7 +50,8 @@ export interface DiscussionLog {
   topic: string;
   opening: string;
   lead: string;
-  members: { agent: string; angle: string }[];
+  members: { agent: string; angle: string; notes: number; titles: string[] }[];
+  skipped: { agent: string; reason: string }[];
   rounds: number;
   extraRounds: string;
   requested: boolean;
@@ -110,11 +113,21 @@ export function applyDiscussionEvent(
           }
           const record = item as Payload;
           const agent = str(record.agent);
-          return agent ? [{ agent, angle: str(record.angle) }] : [];
+          return agent ? [{ agent, angle: str(record.angle), notes: num(record.notes), titles: strings(record.titles) }] : [];
+        })
+      : [];
+    const skipped = Array.isArray(payload.skipped)
+      ? (payload.skipped as unknown[]).flatMap((item) => {
+          if (!item || typeof item !== "object") {
+            return [];
+          }
+          const record = item as Payload;
+          return str(record.agent) ? [{ agent: str(record.agent), reason: str(record.reason) }] : [];
         })
       : [];
     return {
       id: str(payload.id),
+      skipped,
       topic: str(payload.topic),
       opening: str(payload.opening),
       lead: str(payload.lead),
@@ -154,6 +167,8 @@ export function applyDiscussionEvent(
         quote: str(payload.quote),
         passed: payload.passed === true,
         failed: payload.failed === true,
+        notes: strings(payload.notes),
+        newPoint: payload.new_point === true,
         at,
       };
     }
@@ -234,7 +249,14 @@ export function discussionStatus(log: DiscussionLog): DiscussionStatus {
       pending.push(entry.agent);
     }
   }
-  const faces = log.members.map(({ agent }) => {
+  /* A team member the lead asked without inviting it joins the faces. */
+  const everyone = log.members.map((m) => m.agent);
+  for (const entry of log.entries) {
+    if (entry.kind === "ask" && entry.agent && !everyone.includes(entry.agent)) {
+      everyone.push(entry.agent);
+    }
+  }
+  const faces = everyone.map((agent) => {
     let state: FaceState = "waiting";
     if (pending.includes(agent)) {
       state = "speaking";

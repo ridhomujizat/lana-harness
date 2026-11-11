@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { knowledgeSummary } from "../api/discussion";
+import type { KnowledgeSummary } from "../api/discussion";
 import type { CSSProperties, ReactNode } from "react";
 import { Markdown } from "../lib/markdown";
 import { discussionStatus } from "../lib/discussion";
@@ -70,6 +72,77 @@ export function TeamAvatar({ items, size = 44, className }: { items: TeamAvatarI
 }
 
 /* ------------------------------------------------------------------ */
+/* Knowledge tags (spec 47 knowledge-aware discussions and team work)  */
+/* ------------------------------------------------------------------ */
+
+/* "▤ Used N notes": opens the list of the notes a reply used. */
+export function NotesTag({ notes }: { notes: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (notes.length === 0) {
+    return null;
+  }
+  return (
+    <span className="notes-tag-wrap">
+      <button type="button" className="notes-tag" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {"▤ Used " + notes.length + (notes.length === 1 ? " note" : " notes")}
+      </button>
+      {open ? (
+        <span className="notes-pop" role="note">
+          {notes.map((note) => (
+            <a key={note} className="notes-pop-item" href={"#/knowledge?q=" + encodeURIComponent(note)}>
+              {"▤ " + note}
+            </a>
+          ))}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function KnowsChip({
+  agent,
+  angle,
+  notes,
+  titles,
+  faces,
+}: {
+  agent: string;
+  angle: string;
+  notes: number;
+  titles: string[];
+  faces: Faces;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = faces[agent];
+  const colors = agentFaceColors(ref ? ref.color : undefined);
+  return (
+    <span className="notes-tag-wrap">
+      <button
+        type="button"
+        className="disc-chip knows-chip"
+        style={{ background: colors.bg, color: colors.fg }}
+        aria-expanded={open}
+        disabled={titles.length === 0}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {label(faces, agent) + (angle ? " · " + angle : "")}
+        {notes > 0 ? <span className="knows-n">{"▤ " + notes + (notes === 1 ? " note" : " notes")}</span> : null}
+      </button>
+      {open ? (
+        <span className="notes-pop" role="note">
+          <span className="notes-pop-title">{"Why " + label(faces, agent)}</span>
+          {titles.map((title) => (
+            <a key={title} className="notes-pop-item" href={"#/knowledge?q=" + encodeURIComponent(title)}>
+              {"▤ " + title}
+            </a>
+          ))}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* The discussion as a group chat                                      */
 /* ------------------------------------------------------------------ */
 
@@ -81,6 +154,7 @@ function Msg({
   at,
   children,
   working,
+  tags,
 }: {
   name: string;
   faces: Faces;
@@ -89,6 +163,7 @@ function Msg({
   at?: number;
   children?: ReactNode;
   working?: boolean;
+  tags?: ReactNode;
 }) {
   const f = face(faces, name);
   return (
@@ -102,6 +177,7 @@ function Msg({
           {lead ? <span className="group-lead-pill">lead</span> : null}
           {at ? <span className="group-msg-time">{clock(at)}</span> : null}
           {meta ? <span className="group-msg-meta">{meta}</span> : null}
+          {tags}
         </div>
         {children}
       </div>
@@ -156,7 +232,18 @@ function Entry({ entry, log, faces }: { entry: DiscussionEntry; log: DiscussionL
         );
       }
       return (
-        <Msg name={entry.agent} faces={faces} at={entry.at} meta={entry.replyTo ? "replying to " + label(faces, entry.replyTo) : undefined}>
+        <Msg
+          name={entry.agent}
+          faces={faces}
+          at={entry.at}
+          meta={entry.replyTo ? "replying to " + label(faces, entry.replyTo) : undefined}
+          tags={
+            <>
+              <NotesTag notes={entry.notes} />
+              {entry.newPoint ? <span className="disc-chip new-point">New point</span> : null}
+            </>
+          }
+        >
           {entry.replyTo && entry.quote ? (
             <div className="disc-quote" style={{ borderColor: face(faces, entry.replyTo).fg }}>
               {label(faces, entry.replyTo) + ": " + entry.quote}
@@ -192,16 +279,15 @@ export function DiscussionThread({ log, faces, running, onDirect }: DiscussionTh
           </div>
         ) : null}
         <div className="disc-setup">
-          {log.members.map((member) => {
-            const ref = faces[member.agent];
-            const colors = agentFaceColors(ref ? ref.color : undefined);
-            return (
-              <span key={member.agent} className="disc-chip" style={{ background: colors.bg, color: colors.fg }}>
-                {label(faces, member.agent) + (member.angle ? " · " + member.angle : "")}
-              </span>
-            );
-          })}
+          {log.members.map((member) => (
+            <KnowsChip key={member.agent} {...member} faces={faces} />
+          ))}
           <span className="disc-chip">{"Up to " + log.rounds + " rounds"}</span>
+          {log.skipped.map((skip) => (
+            <span key={skip.agent} className="disc-skipped">
+              {label(faces, skip.agent) + " not invited · " + skip.reason}
+            </span>
+          ))}
           {onDirect && status.open && running ? (
             <button type="button" className="disc-link" onClick={onDirect}>
               Answer directly instead
@@ -459,5 +545,49 @@ export function DiscussionCard({ team, text, at }: { team: string; text: string;
         Open discussion
       </a>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* What an agent knows and can do (Room settings › Members, New room)  */
+/* ------------------------------------------------------------------ */
+
+const summaryCache = new Map<string, KnowledgeSummary>();
+
+export function AgentKnows({ name, can }: { name: string; can?: string[] }) {
+  const [summary, setSummary] = useState<KnowledgeSummary | null>(() => summaryCache.get(name) || null);
+  useEffect(() => {
+    if (summaryCache.has(name)) {
+      return undefined;
+    }
+    let live = true;
+    knowledgeSummary(name)
+      .then((value) => {
+        summaryCache.set(name, value);
+        if (live) {
+          setSummary(value);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [name]);
+  const words = (can || []).slice(0, 4);
+  if ((!summary || summary.pages === 0) && words.length === 0) {
+    return null;
+  }
+  return (
+    <span className="agent-knows">
+      {summary && summary.pages > 0 ? (
+        <span className="agent-knows-pages">{"▤ " + summary.pages + (summary.pages === 1 ? " page" : " pages")}</span>
+      ) : null}
+      {summary && summary.topics.length > 0 ? <span className="agent-knows-topics">{"· " + summary.topics.join(", ")}</span> : null}
+      {words.map((word) => (
+        <span key={word} className="handoff-tool">
+          {word}
+        </span>
+      ))}
+    </span>
   );
 }

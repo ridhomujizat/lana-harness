@@ -19,6 +19,8 @@ export interface RoomRow {
   name: string;
   kind: string;
   title: string;
+  /* Spec 47 team work: what an agent can do ("web", "files"…). */
+  can?: string[];
   /* display_name is the human name, "" when unset (falls back to name). */
   display_name?: string;
   color: string;

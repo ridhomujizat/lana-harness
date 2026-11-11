@@ -55,3 +55,24 @@ sementara"), Go and web.
 - Screens checked at 1440 and 390: the group chat, Summary dialog, member card in Karin's room,
   Room settings › Memory, New group room. Fixed during the check: the lead's answer showed the
   turn's start time.
+
+### T-006 Knowledge-aware discussions and team work (owner, 2026-11-11)
+
+- Design: frames "Knowledge · Development/Trading – discussion/members" and "Work · Development/Trading"
+  on the Room discussion page; exports `room-discussion-17..22-*.png`.
+- Go (98a9faf): `core.AgentCapabilities`; the lead roster lists each member's knowledge (pages and
+  topics) and capabilities; `discuss_start` checks each team member's matching notes, records
+  them and the members left out, and tells the lead; a member's briefing lists its matching pages;
+  replies carry `notes` (from a trailing "Notes:" line and knowledge_read calls) and `new_point`;
+  any team member can be asked mid-discussion. `task` takes `context` (earlier child sessions whose
+  answers the child receives) and adds the agent's matching pages; the task result reports
+  `tools` by name, `notes` and `files`. Room rows carry `can`.
+- Web: numbered handoff rows with capabilities, notes and state; tool tags, "Used N notes" popover,
+  changed-file chips and "passed X's findings to Y" on team work; knowledge chips with "Why X",
+  "not invited" lines and "New point" in discussions; knowledge and capabilities per agent in
+  Room settings › Members and New group room.
+- Live check (scratch :18399): "Karin then Dana" request — the lead delegated to Karin naming her
+  notes, then to Dana with `context` = Karin's session; results reported knowledge_read ×4 with 4
+  notes (Karin) and 2 notes (Dana); the room showed the numbered plan, tags and the pass line.
+- Not built: the "waiting" state of a planned step (the lead does not declare a plan before the
+  first task).

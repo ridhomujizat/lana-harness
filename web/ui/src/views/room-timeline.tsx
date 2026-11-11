@@ -1086,6 +1086,17 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
         workingLabel(workingMembers.map((name) => agentLabel(name, byName)))
       : "");
 
+  /* Spec 47 team work: what each agent can do, for the handoff rows. */
+  const canByName = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const row of roomRows) {
+      if (row.can && row.can.length > 0) {
+        out[row.name] = row.can;
+      }
+    }
+    return out;
+  }, [roomRows]);
+
   /* REQ-RDS-051: the newest running turn with an open discussion. */
   const openDiscussion = useMemo(() => {
     if (!team) {
@@ -1196,6 +1207,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 sessionId={node.sessionId}
                 onDirect={() => void stopRoomDiscussion(node.sessionId, "direct")}
                 onMemory={() => setSettingsTab("memory")}
+                can={canByName}
               />
             ) : (
               <TurnBlock

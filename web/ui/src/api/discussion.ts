@@ -44,3 +44,19 @@ export function updateRoomNote(room: string, id: string, change: { kind?: RoomNo
 export function deleteRoomNote(room: string, id: string): Promise<{ deleted: boolean }> {
   return request<{ deleted: boolean }>("DELETE", memoryPath(room) + "/" + encodeURIComponent(id));
 }
+
+/* What an agent knows: its domain page count and a few page titles, from the
+   knowledge pages list (API-DKN-004). */
+export interface KnowledgeSummary {
+  pages: number;
+  topics: string[];
+}
+
+export async function knowledgeSummary(agent: string): Promise<KnowledgeSummary> {
+  const page = await request<{ pages?: { title?: string }[]; total?: number }>(
+    "GET",
+    "/v1/knowledge/pages?scope=" + encodeURIComponent(agent) + "&limit=3"
+  );
+  const titles = (page && Array.isArray(page.pages) ? page.pages : []).map((p) => String(p.title || "")).filter(Boolean);
+  return { pages: Number(page && page.total) || 0, topics: titles };
+}
