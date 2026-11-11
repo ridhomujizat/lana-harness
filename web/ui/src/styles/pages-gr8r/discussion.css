@@ -779,9 +779,15 @@
   place-items: center;
   border-radius: 50%;
   background: color-mix(in srgb, var(--c, var(--gray)) 16%, var(--surface));
+  /* The circle is 5% larger than a plain avatar; the face keeps its size. */
+  --sz: calc(36px * 1.05);
+  width: var(--sz);
+  height: var(--sz);
+  /* Take the same 44px column as a team avatar so every name lines up. */
+  margin-inline: calc((44px - var(--sz)) / 2);
 }
 .rooms-row .av.chat-coin .av-svg,
 .rooms-row .av.chat-coin .av-img {
-  width: 74%;
-  height: 74%;
+  width: 70%;
+  height: 70%;
 }
