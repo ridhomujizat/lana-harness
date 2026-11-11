@@ -38,7 +38,6 @@ export function ContextMeter({
 
   const load = useCallback(() => {
     if (!sessionId) {
-      setUsage(null);
       return;
     }
     getSessionUsage(sessionId)
