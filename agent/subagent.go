@@ -87,6 +87,7 @@ func (s *subagentRunner) taskPrompt(ctx context.Context, parentID string, req co
 		fmt.Fprintf(&b, "\n\n### From %s\n%s", info.Agent, answer)
 	}
 	if req.WithNotes {
+		b.WriteString("\n\nFinish the work before you answer: carry it to the end, check it, and report what is done. Do not hand the result to a background process and answer \"in progress\"; wait for it.")
 		if notes := s.reg.relevantNotes(ctx, req.Prompt, []string{req.Agent})[req.Agent]; len(notes) > 0 {
 			b.WriteString("\n\nYour knowledge pages that match this task (read them with knowledge_read when you need detail):")
 			for _, n := range notes {

@@ -43,8 +43,8 @@ func TestKnowledgeAgentOverrideWins(t *testing.T) {
 // reason.
 func TestKnowledgeAgentNone(t *testing.T) {
 	cfg := core.Config{Agents: map[string]core.AgentConfig{
-		"alpha": {Tools: []string{"shell"}},
-		"beta":  {Tools: []string{"read_file"}},
+		"alpha": {Tools: []string{"shell"}, Toolset: core.ToolsetCustom},
+		"beta":  {Tools: []string{"read_file"}, Toolset: core.ToolsetCustom},
 	}}
 	name, reason := knowledgeAgent(cfg)
 	if name != "" {
@@ -62,7 +62,7 @@ func TestHasKnowledgeTool(t *testing.T) {
 			t.Fatalf("hasKnowledgeTool does not accept %q", tool)
 		}
 	}
-	if hasKnowledgeTool(core.AgentConfig{Tools: []string{"shell"}}) {
+	if hasKnowledgeTool(core.AgentConfig{Tools: []string{"shell"}, Toolset: core.ToolsetCustom}) {
 		t.Fatal("hasKnowledgeTool accepted an agent without a knowledge tool")
 	}
 }
@@ -80,5 +80,13 @@ func TestKnowledgeAgentAllowsClaudeCodeAgents(t *testing.T) {
 	cfg.Knowledge.Agent = "beta"
 	if name, reason := knowledgeAgent(cfg); name != "beta" || reason != "" {
 		t.Fatalf("knowledgeAgent = %q, %q", name, reason)
+	}
+}
+
+// The standard toolset gives every agent the knowledge tools, so an agent
+// without a tools list owns a domain (owner decision 2026-11-11).
+func TestStandardToolsetHasKnowledge(t *testing.T) {
+	if !hasKnowledgeTool(core.AgentConfig{}) {
+		t.Fatal("an agent on the standard toolset has no knowledge tool")
 	}
 }

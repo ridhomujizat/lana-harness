@@ -73,6 +73,7 @@ kind = "openai_compat"
 base_url = "mock://local"
 
 [agents.assistant]
+toolset = "custom"
 provider = "mock"
 model = "m"
 `

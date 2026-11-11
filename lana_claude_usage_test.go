@@ -52,6 +52,7 @@ auth = "api_key"
 api_key_env = "CLAUDE_KEY"
 
 [agents.builtin]
+toolset = "custom"
 model = "claude-code/haiku"
 binary = "`+bin+`"
 permission = "trust"

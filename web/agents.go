@@ -61,6 +61,7 @@ var agentKeys = map[string]bool{
 	"compaction_retain":    true,
 	"memory_capture":       true,
 	"workspace_only":       true,
+	"toolset":              true,
 	"vision":               true,
 	"description":          true,
 	"title":                true,
@@ -172,6 +173,8 @@ type agentJSON struct {
 	// WorkspaceOnly keeps the file tools inside the workspace; an absent key
 	// means off.
 	WorkspaceOnly bool `json:"workspace_only"`
+	// Toolset is "standard" (the default) or "custom".
+	Toolset string `json:"toolset"`
 	// Vision overrides the model's catalog vision flag (API-ATT-005). nil means
 	// the key is absent and the catalog decides.
 	Vision *bool `json:"vision,omitempty"`
@@ -239,6 +242,8 @@ type agentRecord struct {
 	// WorkspaceOnly keeps the file tools inside the workspace; an absent key
 	// means off.
 	WorkspaceOnly bool
+	// Toolset is "" (standard) or "custom".
+	Toolset string
 	// Vision is nil when the key is absent; the model catalog decides then
 	// (API-ATT-005).
 	Vision      *bool
@@ -407,6 +412,10 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				row.MemoryCapture = *record.MemoryCapture
 			}
 			row.WorkspaceOnly = record.WorkspaceOnly
+			row.Toolset = record.Toolset
+			if row.Toolset == "" {
+				row.Toolset = "standard"
+			}
 			if record.Vision != nil {
 				vision := *record.Vision
 				row.Vision = &vision
@@ -1171,6 +1180,19 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.WorkspaceOnly = value
 		return nil
+	case "toolset":
+		var value string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if value != "standard" && value != "custom" && value != "" {
+			return errors.New("toolset must be standard or custom")
+		}
+		if value == "standard" {
+			value = ""
+		}
+		record.Toolset = value
+		return nil
 	case "vision":
 		// API-ATT-005: a boolean that overrides the catalog vision flag.
 		var value bool
@@ -1403,7 +1425,7 @@ func validateAgentDisplayName(value string) string {
 }
 
 func validAgentPermission(value string) bool {
-	for _, allowed := range []string{"ask", "trust", "never"} {
+	for _, allowed := range []string{"ask", "auto", "trust", "never"} {
 		if value == allowed {
 			return true
 		}
@@ -1544,6 +1566,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		CompactionRetain:    mapAgentFloat(table, "compaction_retain"),
 		MemoryCapture:       mapAgentBoolPtr(table, "memory_capture"),
 		WorkspaceOnly:       mapAgentBool(table, "workspace_only"),
+		Toolset:             mapAgentString(table, "toolset"),
 		Vision:              mapAgentBoolPtr(table, "vision"),
 		Description:         mapAgentString(table, "description"),
 		Title:               mapAgentString(table, "title"),
@@ -1635,6 +1658,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentString(&b, "prompt_file", record.PromptFile)
 	writeAgentString(&b, "workspace", record.Workspace)
 	writeAgentStrings(&b, "tools", record.Tools)
+	writeAgentString(&b, "toolset", record.Toolset)
 	writeAgentStrings(&b, "disabled_tools", record.DisabledTools)
 	writeAgentStrings(&b, "subagents", record.Subagents)
 	writeAgentStrings(&b, "mcp", record.MCP)

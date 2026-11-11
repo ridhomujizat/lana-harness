@@ -1442,7 +1442,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 			if !ok {
 				continue
 			}
-			listed := slices.Contains(agentCfg.Tools, name)
+			listed := slices.Contains(core.EffectiveTools(agentCfg), name)
 			auto := !listed && slices.Contains(autoOffered, name)
 			source := "not_listed"
 			if listed {
@@ -1475,7 +1475,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 		if _, ok := tool.(*toolboxCommandTool); !ok {
 			continue
 		}
-		listed := slices.Contains(agentCfg.Tools, name)
+		listed := slices.Contains(core.EffectiveTools(agentCfg), name)
 		source := "not_listed"
 		if listed {
 			source = "listed"

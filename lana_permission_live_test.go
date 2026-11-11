@@ -24,7 +24,7 @@ func TestApplyConfigUpdatesPermissionEngine(t *testing.T) {
 			mock.Response{Events: []mock.Event{{Text: &text}, {Stop: &end}}},
 		)
 	}
-	base := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.assistant]\nprovider = \"mock\"\nmodel = \"m\"\npermission = \"ask\"\ntools = [\"write_probe\"]\n\n[[routes]]\nchannel = \"cli\"\nagent = \"assistant\"\n"
+	base := "[providers.mock]\nkind = \"openai_compat\"\nbase_url = \"mock://local\"\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"mock\"\nmodel = \"m\"\npermission = \"ask\"\ntools = [\"write_probe\"]\n\n[[routes]]\nchannel = \"cli\"\nagent = \"assistant\"\n"
 	approved := 0
 	rt, err := New(context.Background(), Options{
 		Home:      t.TempDir(),

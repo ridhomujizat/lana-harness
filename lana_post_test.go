@@ -24,6 +24,7 @@ kind = "openai_compat"
 base_url = "mock://local"
 
 [agents.coder]
+toolset = "custom"
 provider = "mock"
 model = "m"
 

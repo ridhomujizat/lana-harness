@@ -15,7 +15,7 @@ func AgentCapabilities(cfg AgentConfig) []string {
 		out = append(out, "Claude Code")
 	}
 	has := map[string]bool{}
-	for _, tool := range cfg.Tools {
+	for _, tool := range EffectiveTools(cfg) {
 		has[tool] = true
 	}
 	for _, tool := range cfg.DisabledTools {

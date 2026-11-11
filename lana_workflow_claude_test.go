@@ -26,6 +26,7 @@ cooldown = "0s"
 ` + extra + `
 
 [agents.bima]
+toolset = "custom"
 model = "claude-code/haiku"
 binary = "` + bin + `"
 workspace = "` + ws + `"

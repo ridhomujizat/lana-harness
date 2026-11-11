@@ -69,7 +69,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 			return reject("failed to read parent log: " + err.Error()), nil
 		}
 		parentAgent := cfg.Agents[parentInfo.Agent]
-		parentFallback := core.PolicyAsk
+		parentFallback := core.DefaultPolicy
 		if parentAgent.Permission != "" {
 			parentFallback = core.Policy(parentAgent.Permission)
 		}
@@ -170,6 +170,10 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if in.Call.Risk == core.RiskRead {
 		return allow(core.ApprovalOutcome("")), nil
 	}
+	// Hermes-style auto: run unless the call is dangerous (auto.go).
+	if policy == core.PolicyAuto && autoAllows(in.Call.Name, arg, workspace) {
+		return allow(core.ApprovalOutcome("")), nil
+	}
 	if policy == core.PolicyNever {
 		return reject("policy never"), nil
 	}
@@ -243,7 +247,7 @@ func fallbackPolicy(agent core.AgentConfig) core.Policy {
 	if agent.Permission != "" {
 		return core.Policy(agent.Permission)
 	}
-	return core.PolicyAsk
+	return core.DefaultPolicy
 }
 
 // requestApproval asks the owner about one tool call. A child approval is

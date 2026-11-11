@@ -36,7 +36,7 @@ func knowledgeAgent(cfg core.Config) (name string, reason string) {
 // hasKnowledgeTool reports whether agentCfg lists any knowledge tool
 // (REQ-KNU-003, REQ-KNU-030).
 func hasKnowledgeTool(agentCfg core.AgentConfig) bool {
-	for _, tool := range agentCfg.Tools {
+	for _, tool := range core.EffectiveTools(agentCfg) {
 		for _, name := range knowledgeToolNames {
 			if tool == name {
 				return true

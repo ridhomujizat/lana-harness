@@ -258,7 +258,7 @@ func roster(entries []RosterEntry) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "When a task fits a teammate's role, use the task tool to delegate it, and task_continue to follow up on it; this keeps each session focused on its own work. Pick the teammate whose knowledge and tools fit the work (research to one with web or knowledge, code changes to one with files and shell or Claude Code). For work in steps, pass earlier results on with task's context field (the session ids from earlier task results) instead of copying them.")
+	lines = append(lines, "When a task fits a teammate's role, use the task tool to delegate it, and task_continue to follow up on it; this keeps each session focused on its own work. Pick the teammate whose knowledge and tools fit the work (research to one with web or knowledge, code changes to one with files and shell or Claude Code). For work in steps, pass earlier results on with task's context field (the session ids from earlier task results) instead of copying them. When the owner says who does what, including later steps (\"then @karin tests it\"), hand each step to that member when its turn comes and do not do it yourself. If a member cannot do its step (missing tool, error), tell the owner instead of quietly doing it for them.")
 	return strings.Join(lines, "\n")
 }
 

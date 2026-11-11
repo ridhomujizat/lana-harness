@@ -77,7 +77,7 @@ func (p *blockingProvider) Stream(_ context.Context, _ core.ChatRequest) (core.C
 
 func newContinueRuntime(t *testing.T, provider core.Provider) *Runtime {
 	t.Helper()
-	cfg := "[providers.local]\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:1\"\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n"
+	cfg := "[providers.local]\nkind = \"openai_compat\"\nbase_url = \"http://127.0.0.1:1\"\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n"
 	rt, err := New(context.Background(), Options{
 		Layers:    []config.Layer{{Name: "test", TOML: []byte(cfg)}},
 		Providers: map[string]core.Provider{"local": provider},

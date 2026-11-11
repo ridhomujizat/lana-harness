@@ -91,7 +91,7 @@ data: [DONE]
 
 func runtimeWithServer(t *testing.T, srv *sseServer, mutate func(string) string, options ...Option) *Runtime {
 	t.Helper()
-	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL)
+	cfg := fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL)
 	if mutate != nil {
 		cfg = mutate(cfg)
 	}
@@ -292,7 +292,7 @@ func TestCustomToolPipeline(t *testing.T) {
 	)
 	tool := &customTool{}
 	rt2, err := New(context.Background(), Options{
-		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"lookup_order\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL))}},
+		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\ntools = [\"lookup_order\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL))}},
 		Tools:  []core.Tool{tool},
 	})
 	if err != nil {
@@ -315,7 +315,7 @@ func TestApprovalNeverDefault(t *testing.T) {
 		sseResponse{body: textSSE("done")},
 	)
 	rt := runtimeWithServer(t, srv, func(cfg string) string {
-		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\nworkspace = \""+ws+"\"\ntools = [\"write_file\"]", 1)
+		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\npermission = \"ask\"\nworkspace = \""+ws+"\"\ntools = [\"write_file\"]", 1)
 	})
 	result, err := rt.Run(context.Background(), Request{Prompt: "hi"})
 	if err != nil {
@@ -326,6 +326,25 @@ func TestApprovalNeverDefault(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ws, "x.txt")); !os.IsNotExist(err) {
 		t.Fatalf("file was written: %v", err)
+	}
+}
+
+// TestApprovalAutoDefault: an agent with no permission runs on auto, so a
+// write inside the workspace needs no approver (owner decision 2026-11-11).
+func TestApprovalAutoDefault(t *testing.T) {
+	ws := t.TempDir()
+	srv := newSSEServer(t,
+		sseResponse{body: toolSSE("write_file", `{"path":"x.txt","content":"x"}`)},
+		sseResponse{body: textSSE("done")},
+	)
+	rt := runtimeWithServer(t, srv, func(cfg string) string {
+		return strings.Replace(cfg, "model = \"m\"", "model = \"m\"\nworkspace = \""+ws+"\"\ntools = [\"write_file\"]", 1)
+	})
+	if _, err := rt.Run(context.Background(), Request{Prompt: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "x.txt")); err != nil {
+		t.Fatalf("file was not written under auto: %v", err)
 	}
 }
 
@@ -341,7 +360,7 @@ func TestApprovalTrust(t *testing.T) {
 	// runtimeWithServer does not accept options; recreate it with PolicyTrust.
 	_ = rt
 	rt2, err := New(context.Background(), Options{
-		Layers:   []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
+		Layers:   []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
 		Approval: PolicyTrust,
 	})
 	if err != nil {
@@ -389,7 +408,7 @@ func TestApproveWithLibraryChannel(t *testing.T) {
 		sseResponse{body: textSSE("done")},
 	)
 	rt, err := New(context.Background(), Options{
-		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
+		Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
 	}, ApproveWith(func(context.Context, core.ApprovalRequest) core.ApprovalOutcome {
 		return core.OutcomeAllowedOnce
 	}))
@@ -428,7 +447,7 @@ func TestApproveChannels(t *testing.T) {
 				return core.OutcomeAllowedOnce
 			})}, tc.options...)
 			rt, err := New(context.Background(), Options{
-				Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
+				Layers: []config.Layer{{Name: "test", TOML: []byte(fmt.Sprintf("[providers.local]\nkind = \"openai_compat\"\nbase_url = %q\n\n[agents.assistant]\ntoolset = \"custom\"\nprovider = \"local\"\nmodel = \"m\"\nworkspace = %q\ntools = [\"write_file\"]\npermission = \"ask\"\n\n[[routes]]\nchannel = \"library\"\nagent = \"assistant\"\n", srv.server.URL, ws))}},
 			}, options...)
 			if err != nil {
 				t.Fatal(err)

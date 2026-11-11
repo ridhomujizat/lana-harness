@@ -493,7 +493,7 @@ func agentShow(args []string) int {
 	user, memory := memorySizes(home, paths)
 	permission := agent.Permission
 	if permission == "" {
-		permission = "ask"
+		permission = string(core.DefaultPolicy)
 	}
 	fmt.Printf("agent       %s\nmodel       %s\npermission  %s\ntools       %s\npersona     %s (%s)\nhome        %s\nuser        %s characters\nmemory      %s characters\n",
 		name, llmcall.Display(agent.Provider, agent.Model), permission, strings.Join(agent.Tools, ", "), source, personaPath, paths.Dir, user, memory)

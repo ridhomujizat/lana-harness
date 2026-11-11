@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -649,9 +649,16 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			add(path+".vision", typeMsg("boolean", val))
 		}
 	}
+	if val, ok := v["toolset"]; ok {
+		if s, ok := val.(string); !ok {
+			add(path+".toolset", typeMsg("string", val))
+		} else if !contains([]string{"standard", "custom"}, s) {
+			add(path+".toolset", enumMsg(s, []string{"standard", "custom"}))
+		}
+	}
 	if val, ok := v["permission"]; ok {
-		if s, ok := val.(string); ok && !contains([]string{"ask", "never", "trust"}, s) {
-			add(path+".permission", enumMsg(s, []string{"ask", "never", "trust"}))
+		if s, ok := val.(string); ok && !contains([]string{"ask", "auto", "never", "trust"}, s) {
+			add(path+".permission", enumMsg(s, []string{"ask", "auto", "never", "trust"}))
 		}
 	}
 	if val, ok := v["reasoning_effort"]; ok {

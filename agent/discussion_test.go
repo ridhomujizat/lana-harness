@@ -359,7 +359,7 @@ func TestToolCallFacts(t *testing.T) {
 
 func TestRosterCapabilities(t *testing.T) {
 	got := core.AgentCapabilities(core.AgentConfig{Model: "claude-code/sonnet", Tools: []string{"bash", "write_file", "web_fetch"}, MCP: []string{"broker"}})
-	if strings.Join(got, ",") != "Claude Code,web,files,shell,broker" {
+	if strings.Join(got, ",") != "Claude Code,web,files,shell,knowledge,broker" {
 		t.Fatalf("capabilities = %v", got)
 	}
 }

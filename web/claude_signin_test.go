@@ -265,8 +265,8 @@ func TestClaudeAccountLabel(t *testing.T) {
 
 	for body, code := range map[string]int{
 		`{"label":"` + strings.Repeat("x", 61) + `"}`: http.StatusUnprocessableEntity,
-		`{"label":"a\nb"}`:                            http.StatusUnprocessableEntity,
-		`{}`:                                          http.StatusUnprocessableEntity,
+		`{"label":"a\nb"}`: http.StatusUnprocessableEntity,
+		`{}`:               http.StatusUnprocessableEntity,
 		`{"label":"x","expected_version":"stale"}`: http.StatusConflict,
 	} {
 		if got := serveMCP(t, s, http.MethodPut, path, body, cookie, csrf); got.code != code {

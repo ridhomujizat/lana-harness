@@ -335,7 +335,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
 		workspace:       workspace,
-		tools:           cfg.Tools,
+		tools:           core.EffectiveTools(cfg),
 		disabled:        cfg.DisabledTools,
 		mcp:             mcpServers,
 		skills:          cfg.Skills,

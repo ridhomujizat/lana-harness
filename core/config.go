@@ -114,12 +114,15 @@ type ProviderConfig struct {
 const ClaudeCodeKind = "claude-code"
 
 type AgentConfig struct {
-	Provider      string   `toml:"provider"`
-	Model         string   `toml:"model"`
-	Fallback      []string `toml:"fallback"`
-	PromptFile    string   `toml:"prompt_file"`
-	Workspace     string   `toml:"workspace"`
-	Tools         []string `toml:"tools"`
+	Provider   string   `toml:"provider"`
+	Model      string   `toml:"model"`
+	Fallback   []string `toml:"fallback"`
+	PromptFile string   `toml:"prompt_file"`
+	Workspace  string   `toml:"workspace"`
+	Tools      []string `toml:"tools"`
+	// Toolset is "standard" (the default: the standard tools plus Tools) or
+	// "custom" (only Tools).
+	Toolset       string   `toml:"toolset"`
 	DisabledTools []string `toml:"disabled_tools"`
 	Subagents     []string `toml:"subagents"`
 	MCP           []string `toml:"mcp"`
