@@ -187,3 +187,44 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Long status words, errors and model addresses stay inside the card. */
+.agents-page .pcard {
+  min-width: 0;
+}
+.agents-page .agent-card-state {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agent-card-problem {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--red, #d64545);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.agents-page .agent-card-meta {
+  min-width: 0;
+}
+.agents-page .agent-card-model {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agents-page .agent-card-state > .dot,
+.agents-page .agent-card-model > i {
+  flex: none;
+}
+.agents-page .agent-card-clip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
