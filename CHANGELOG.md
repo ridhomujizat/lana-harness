@@ -7,6 +7,30 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.4.0-beta.2] - 2026-11-11
+
+### Added
+- Agents build workflows from chat: the `workflow` tool gains `create` (a draft built by the
+  guardian from a plain-language request, returned with its link), `edit` (asks the guardian for a
+  change), and `test` (runs it now and waits up to two minutes for the result with each step's
+  output). Under `auto`, create, edit, and test run without asking; `start` and `cancel` still ask.
+- `calendar` and `workflow` join the standard toolset. Agents offer a calendar reminder or habit
+  for time-based or repeating reminders, a workflow for repeating work with steps, and nothing for
+  a one-off, and ask before building an automation the owner did not ask for.
+- The workflow assistant knows what exists: its prompt lists the agents, the tools of every
+  configured MCP server, the names of the owner's secrets, and whether bash nodes see them, plus
+  the newest run with each node's status and output or error. It prefers a `tool` node for MCP
+  calls, asks only for unknown facts, never promises later work, and can start a test run
+  (`"test": true`) whose result it reads on the next message.
+- Param docs for the `tool`, `bash`, `webfetch`, `agent`, `bot`, and `worker` nodes in the
+  assistant's node catalog.
+
+### Fixed
+- The first message of a new workflow and the guardian's reply show without a refresh after the
+  page moves from `#/workflows/new` to the workflow.
+- Agent cards keep a long model address, status, or error inside the card; a problem's error shows
+  under the name; team cards use display names and the compact team avatar; "1 task" is singular.
+
 ## [0.4.0-beta.1] - 2026-11-11
 
 ### Added
