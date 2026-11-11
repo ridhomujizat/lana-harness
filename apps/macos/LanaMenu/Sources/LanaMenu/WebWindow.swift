@@ -267,7 +267,7 @@ final class WebWindowController: NSObject {
     }
 
     /// layoutTrafficLights centres the close, minimize, and zoom buttons in a
-    /// 52 pt top row, 20 pt from the left, as Electron's trafficLightPosition
+    /// 46 pt top row, 20 pt from the left, as Electron's trafficLightPosition
     /// does: the title bar container grows to the row and each button moves.
     /// AppKit lays them out again on resize and full screen changes, so the
     /// window delegate calls this again.

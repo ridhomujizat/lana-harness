@@ -165,7 +165,7 @@ them, one seamless window. Only in the app window; a browser looks exactly as be
 
 - The window is `.fullSizeContentView` with a transparent, title-less title bar (the title stays
   for the Window menu and Mission Control). The close, minimize, and zoom buttons sit centred in a
-  52 pt top row, 20 pt from the left; the app moves them back whenever AppKit lays them out again.
+  46 pt top row (the dashboard topbar height), 20 pt from the left; the app moves them back whenever AppKit lays them out again.
   The window background is the dashboard sidebar colour (#151514 dark, #F4F3F0 light), and the
   window appearance follows the dashboard theme (`html[data-theme]`), so no seam shows.
 - A user script at document start sets `html[data-shell="macos-app"]` (plus
@@ -174,7 +174,7 @@ them, one seamless window. Only in the app window; a browser looks exactly as be
   the lights hide.
 - With the attribute the dashboard adds a sidebar top row (`.side-chrome`) that leaves the lights'
   width free and holds the collapse toggle; the LANA logo and host line stay below it. The topbar is
-  52 px tall. With the collapsed rail the topbar leaves the rest of the lights' width free and
+  as tall as in a browser (46 px). With the collapsed rail the topbar leaves the rest of the lights' width free and
   carries the expand toggle; on a narrow window (drawer) the topbar leaves the full width free.
 - The sidebar top row and the topbar carry `data-drag-region`. A primary mouse-down there that is
   not on a control (button, link, input, textarea, select, label, summary, `role=button|link|tab|

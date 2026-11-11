@@ -4,8 +4,8 @@ import XCTest
 
 final class WindowShellTests: XCTestCase {
     func testLayout() {
-        XCTAssertEqual(ShellLayout.buttonY(height: 14), 19)
-        XCTAssertEqual(ShellLayout.buttonY(height: 16), 18)
+        XCTAssertEqual(ShellLayout.buttonY(height: 14), 16)
+        XCTAssertEqual(ShellLayout.buttonY(height: 16), 15)
         XCTAssertEqual(ShellLayout.lightsWidth(zoomMaxX: 74), 84)
         XCTAssertEqual(ShellLayout.lightsWidth(zoomMaxX: 73.5), 84)
     }

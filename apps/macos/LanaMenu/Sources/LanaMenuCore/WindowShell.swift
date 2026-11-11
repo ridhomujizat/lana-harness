@@ -5,9 +5,9 @@ import Foundation
 // the window. These parts need no AppKit, so the tests cover them.
 
 /// ShellLayout is where the traffic lights go: vertically centred in a top
-/// row as tall as the dashboard topbar in the app (52 pt), 20 pt from the left.
+/// row as tall as the dashboard topbar (46 pt), 20 pt from the left.
 public enum ShellLayout {
-    public static let rowHeight: Double = 52
+    public static let rowHeight: Double = 46
     public static let leftInset: Double = 20
     /// gap is the space between the zoom button and the first control after it.
     public static let gap: Double = 10

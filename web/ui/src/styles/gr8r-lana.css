@@ -371,10 +371,6 @@
   display: none;
 }
 
-html[data-shell="macos-app"] {
-  --topbar-h: 52px;
-}
-
 html[data-shell="macos-app"] .side-chrome {
   display: flex;
   align-items: center;
