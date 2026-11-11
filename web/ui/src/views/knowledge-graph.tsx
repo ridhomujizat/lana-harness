@@ -229,7 +229,10 @@ export function PageSummary({
   const change = doc ? latestChange(doc.markdown) : null;
   const out = doc?.links_out || [];
   const incoming = doc?.links_in || [];
-  const sources = doc?.sources || [];
+  /* Front matter sources are often written as [[path]]. */
+  const sources = (doc?.sources || []).map((item) =>
+    item.replace(/^\s*\[\[/, "").replace(/\]\]\s*$/, "")
+  );
 
   return (
     <aside className="kg-panel" aria-label="Page summary" data-testid="graph-panel">
