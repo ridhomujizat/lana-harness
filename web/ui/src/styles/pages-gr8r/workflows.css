@@ -675,8 +675,27 @@ button.wf-item:hover { background: var(--surface-2); }
 .wf-side-decisions { align-self: stretch; text-align: left; display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 
 /* ---------- assistant ---------- */
-.wf-asst { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.wf-asst-list { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.wf-asst { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.wf-asst-list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* Spec 51: the guardian session timeline uses the main chat's turn, step and
+   bubble components. The column is narrow (~384px), so every block may
+   shrink, long words wrap, and code scrolls inside its own block. */
+.wf-thread { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.wf-turn { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.wf-thread .turn,
+.wf-thread .turn-text,
+.wf-thread .turn-process,
+.wf-thread .chat-user-stack { min-width: 0; max-width: 100%; }
+.wf-thread .turn-text { overflow-wrap: anywhere; }
+.wf-thread .chat-bubble { max-width: 100%; }
+.wf-thread pre,
+.wf-thread .md-pre { max-width: 100%; overflow-x: auto; }
+.wf-thread table { display: block; max-width: 100%; overflow-x: auto; }
+.wf-thread img { max-width: 100%; height: auto; }
+.wf-thread .step-row { min-width: 0; }
+.wf-turn-change { display: flex; flex-direction: column; gap: 6px; }
+.wf-asst-slot { max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 .wf-msg { display: flex; gap: 10px; animation: wfIn 0.2s ease-out; }
 .wf-msg.owner { justify-content: flex-end; }
 .wf-msg.owner .wf-msg-b {
@@ -758,16 +777,21 @@ button.wf-item:hover { background: var(--surface-2); }
   border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   background: var(--surface);
-  padding: 10px 52px 10px 12px;
+  padding: 10px 10px 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 .wf-composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .wf-composer textarea,
 .wf-composer textarea:focus,
 .wf-composer textarea:focus-visible { border: 0; outline: 0; box-shadow: none; padding: 0; border-radius: 0; resize: none; width: 100%; font: inherit; color: var(--text); background: transparent; min-height: 44px; display: block; }
+.wf-composer .wf-hint { margin: 0; }
+.wf-composer-bar { display: flex; align-items: center; gap: 6px; }
+.wf-composer-spacer { flex: 1; }
 .wf-send {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
+  flex: none;
   width: 32px;
   height: 32px;
   border-radius: var(--r);
@@ -778,6 +802,7 @@ button.wf-item:hover { background: var(--surface-2); }
   place-items: center;
 }
 .wf-send:disabled { opacity: 0.4; }
+.wf-send.stop { background: var(--surface-3); color: var(--text); border: 1px solid var(--border-strong); }
 
 /* ---------- lock table ---------- */
 .wf-locktable { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
