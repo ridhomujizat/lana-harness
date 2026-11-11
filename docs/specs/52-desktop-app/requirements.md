@@ -127,6 +127,36 @@ install onto it. Without `--yes` it only prints the steps. It never stops or res
 Old installs keep working: the `lana` command still resolves (symlink), the running daemon keeps its
 process, and its next restart in place execs `~/.local/bin/lana`, which is now the bundled binary.
 
+### REQ-DSK-012: Dev variant "Lana Dev"
+
+Owner follow-up (2026-11-12): "untuk development-nya Lana.app dibedakan dengan logo warna kuning,
+sedangkan prod seperti biasa."
+
+`make app-dev` (same as `make macos-app VARIANT=dev`) shall build `dist/Lana Dev.app`:
+
+| | Production (`VARIANT=prod`, default) | Development (`VARIANT=dev`) |
+|---|---|---|
+| Bundle | `dist/Lana.app` | `dist/Lana Dev.app` |
+| Bundle id (notification and Login Items identity) | `dev.lana.menubar` | `dev.lana.menubar.dev` |
+| `CFBundleName` / `CFBundleDisplayName` | lana | Lana Dev |
+| Info.plist `LanaVariant` / `LanaHome` | `prod` / empty | `dev` / `~/.lana-dev` |
+| App icon | dark tile, white mark | yellow tile (#F5C400), dark mark ([lana-dev-icon.png](lana-dev-icon.png)) |
+| Menu bar icon | monochrome template mark | the mark in yellow (#F5C400 on a dark menu bar, #C99A00 on a light one) |
+| Menu header, window title | lana | lana dev, "<page> · dev" |
+| Installed by | `make install-app` → `/Applications` | `make install-app-dev` → `~/Applications` |
+
+The home order is: the settings override, then Info.plist `LanaHome`, then `LANA_HOME` from the
+environment, then `~/.lana`. `LanaHome` comes before the environment so the dev app never follows a
+`LANA_HOME` meant for production. Every file the app reads (config.toml, daemon.lock,
+daemon.secret, the menubar daemon log), the event stream, the app link, and **Start lana**
+(`LANA_HOME` passed to the daemon) follow the resolved home. UserDefaults and the WebKit data store
+are per bundle id, so the two apps share no settings or cookies.
+
+`install-app.sh` reads the variant from the bundle: the dev app installs under its own name, its CLI
+link would be `lana-dev` and its launchd agent `dev.lana.daemon.dev` with
+`EnvironmentVariables.LANA_HOME = ~/.lana-dev`. `make install-app-dev` skips both (`--no-cli-link
+--no-launchd --no-open`), so it never touches the production app, CLI, or agent.
+
 ## Contract
 
 ### API-DSK-001: `POST /v1/local/app-link`

@@ -71,14 +71,20 @@ struct AppSettings {
         nonmutating set { defaults.set(newValue?.isEmpty == true ? nil : newValue, forKey: Self.binaryKey) }
     }
 
-    /// home is the setting, then LANA_HOME from the launch environment, then ~/.lana.
+    /// bundleHomePath is Info.plist LanaHome: ~/.lana-dev in the dev app.
+    static var bundleHomePath: String? {
+        bundleHome(info: Bundle.main.infoDictionary, userHome: NSHomeDirectory())
+    }
+
+    /// home is the setting, then the bundle's LanaHome, then LANA_HOME from
+    /// the launch environment, then ~/.lana.
     var home: LanaHome {
-        LanaHome.resolve(override: homeOverride, environment: ProcessInfo.processInfo.environment, userHome: NSHomeDirectory())
+        LanaHome.resolve(override: homeOverride, bundleHome: Self.bundleHomePath, environment: ProcessInfo.processInfo.environment, userHome: NSHomeDirectory())
     }
 
     /// defaultHome is the home without the setting, shown as the placeholder.
     var defaultHome: String {
-        LanaHome.resolve(override: nil, environment: ProcessInfo.processInfo.environment, userHome: NSHomeDirectory()).path
+        LanaHome.resolve(override: nil, bundleHome: Self.bundleHomePath, environment: ProcessInfo.processInfo.environment, userHome: NSHomeDirectory()).path
     }
 }
 

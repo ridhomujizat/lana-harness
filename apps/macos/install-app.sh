@@ -18,6 +18,11 @@
 #
 # It never stops or restarts the daemon. A running daemon keeps its process;
 # it runs the bundled binary after its next restart (the printed commands).
+#
+# The dev app ("Lana Dev.app", bundle id dev.lana.menubar.dev) installs under
+# its own name, and its CLI link and launchd agent are lana-dev and
+# dev.lana.daemon.dev with LANA_HOME ~/.lana-dev, so it never touches the
+# production app, CLI, or agent. make install-app-dev skips both anyway.
 set -euo pipefail
 
 usage() {
@@ -51,7 +56,6 @@ cli_link=1
 launchd=1
 register=1
 open_app=1
-label="dev.lana.daemon"
 lsregister="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 
 while [ $# -gt 0 ]; do
@@ -87,16 +91,27 @@ src="${src%/}"
 [ -x "$src/Contents/MacOS/lana" ] || { echo "install-app: $src has no Contents/MacOS/lana; rebuild with make app" >&2; exit 1; }
 codesign --verify --strict "$src" || { echo "install-app: $src has an invalid signature" >&2; exit 1; }
 bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Contents/Info.plist")"
+variant="$(/usr/libexec/PlistBuddy -c 'Print :LanaVariant' "$src/Contents/Info.plist" 2>/dev/null || echo prod)"
+app_home="$(/usr/libexec/PlistBuddy -c 'Print :LanaHome' "$src/Contents/Info.plist" 2>/dev/null || true)"
 version="$("$src/Contents/MacOS/lana" --version | head -n 1)"
-dest="${app_dir%/}/Lana.app"
+app_file="$(basename "$src")"
+dest="${app_dir%/}/$app_file"
 lana="$dest/Contents/MacOS/lana"
+if [ "$variant" = dev ]; then
+  label="dev.lana.daemon.dev"
+  cli_name="lana-dev"
+  [ "$backup_dir" = "$HOME/Library/Application Support/lana-app" ] && backup_dir="$HOME/Library/Application Support/lana-app-dev"
+else
+  label="dev.lana.daemon"
+  cli_name="lana"
+fi
 
-echo "Lana.app: $src"
-echo "  bundle id $bundle_id, daemon binary: $version"
+echo "$app_file: $src"
+echo "  bundle id $bundle_id, variant $variant${app_home:+, LANA_HOME $app_home}, daemon binary: $version"
 [ "$apply" = 1 ] || echo "Dry run: nothing changes. Add --yes to apply."
 
 echo "1. Install $dest"
-if [ "$bundle_id" != "dev.lana.menubar" ]; then
+if [ "$bundle_id" != "dev.lana.menubar" ] && [ "$bundle_id" != "dev.lana.menubar.dev" ]; then
   echo "  warning: $src has the test bundle id $bundle_id; build the installed app with plain make app"
 fi
 pid="$(pgrep -f "^$dest/Contents/MacOS/LanaMenu" || true)"
@@ -117,7 +132,7 @@ fi
 run mkdir -p "$app_dir"
 run rm -rf "$dest.new"
 run ditto "$src" "$dest.new"
-backup="$backup_dir/Lana.app.previous.zip"
+backup="$backup_dir/$app_file.previous.zip"
 if [ -e "$dest" ]; then
   run mkdir -p "$backup_dir"
   run rm -f "$backup"
@@ -134,14 +149,14 @@ if [ "$register" = 1 ]; then
     [ -e "$stale" ] && continue
     echo "  forget $stale (gone)"
     run "$lsregister" -u "$stale"
-  done < <("$lsregister" -dump 2>/dev/null | sed -n 's/^path: *\(.*\/Lana\.app\) (0x[0-9a-f]*)$/\1/p' | sort -u)
+  done < <("$lsregister" -dump 2>/dev/null | sed -n 's/^path: *\(.*\.app\) (0x[0-9a-f]*)$/\1/p' | awk -v name="/$app_file" 'substr($0, length($0) - length(name) + 1) == name' | sort -u)
   run "$lsregister" -f "$dest"
 else
   echo "  skipped (--no-register)"
 fi
 
 echo "3. lana CLI"
-link="$bin_dir/lana"
+link="$bin_dir/$cli_name"
 if [ "$cli_link" = 0 ]; then
   echo "  skipped (--no-cli-link)"
 elif [ -L "$link" ] && [ "$(readlink "$link")" = "$lana" ]; then
@@ -172,6 +187,14 @@ elif [ -f "$plist" ]; then
     run "$buddy" -c 'Delete :AssociatedBundleIdentifiers' "$plist"
   fi
   run "$buddy" -c 'Add :AssociatedBundleIdentifiers array' -c "Add :AssociatedBundleIdentifiers:0 string $bundle_id" "$plist"
+  if [ -n "$app_home" ]; then
+    home_value="${app_home/#\~/$HOME}"
+    $buddy -c 'Print :EnvironmentVariables' "$plist" >/dev/null 2>&1 || run "$buddy" -c 'Add :EnvironmentVariables dict' "$plist"
+    if $buddy -c 'Print :EnvironmentVariables:LANA_HOME' "$plist" >/dev/null 2>&1; then
+      run "$buddy" -c 'Delete :EnvironmentVariables:LANA_HOME' "$plist"
+    fi
+    run "$buddy" -c "Add :EnvironmentVariables:LANA_HOME string $home_value" "$plist"
+  fi
   run plutil -lint "$plist"
 else
   echo "  no agent yet: write $plist (not loaded)"
@@ -179,12 +202,16 @@ else
   if [ "$apply" = 1 ]; then
     mkdir -p "$agents_dir" "$HOME/Library/Logs/lana"
     sed -e "s#@LANA@#$lana#g" -e "s#@HOME@#$HOME#g" -e "s#@PATH@#$path_value#g" -e "s#@BUNDLE_ID@#$bundle_id#g" \
-      "$here/$label.plist.in" > "$plist"
+      -e "s#<string>dev.lana.daemon</string>#<string>$label</string>#" \
+      "$here/dev.lana.daemon.plist.in" > "$plist"
+    if [ -n "$app_home" ]; then
+      /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LANA_HOME string ${app_home/#\~/$HOME}" "$plist"
+    fi
     plutil -lint "$plist"
   fi
 fi
 
-echo "5. Open Lana.app"
+echo "5. Open $app_file"
 if [ "$open_app" = 1 ]; then
   run open "$dest"
 else
@@ -192,9 +219,14 @@ else
 fi
 
 uid="$(id -u)"
+echo
+echo "Done$( [ "$apply" = 1 ] || echo " (dry run)" ). The daemon was not restarted."
+if [ "$cli_link" = 0 ] && [ "$launchd" = 0 ]; then
+  echo "The lana CLI and the launchd agent were left alone; the running daemon is not affected."
+  echo "Undo: unzip $backup over $dest, or delete $dest."
+  exit 0
+fi
 cat <<EOF
-
-Done$( [ "$apply" = 1 ] || echo " (dry run)" ). The daemon was not restarted.
 It runs $lana after its next restart:
   - Dashboard → Settings → Restart (waits for running turns), or
   - launchctl kickstart -k gui/$uid/$label (stops running turns now).

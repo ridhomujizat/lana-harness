@@ -36,6 +36,7 @@ enum Main {
                                open the lana window on the running daemon, wait for the
                                dashboard, write a PNG, and print what it loaded as JSON
               --write-iconset  write the app icon PNGs into DIR for iconutil
+                               (--variant dev draws the yellow dev icon)
             """)
             return
         }
@@ -45,7 +46,11 @@ enum Main {
                 exit(2)
             }
             do {
-                try LanaMark.writeIconset(to: URL(fileURLWithPath: args[i + 1]))
+                var variant = AppVariant.current
+                if let j = args.firstIndex(of: "--variant"), j + 1 < args.count {
+                    variant = AppVariant(rawValue: args[j + 1]) ?? .prod
+                }
+                try LanaMark.writeIconset(to: URL(fileURLWithPath: args[i + 1]), variant: variant)
             } catch {
                 fputs("error: \(error)\n", stderr)
                 exit(1)

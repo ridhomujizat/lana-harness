@@ -94,8 +94,9 @@ public enum LanaMark {
     }
 
     /// renderAppIcon draws the app icon (the dark rounded tile of
-    /// app-icon.svg with the white mark) at pixels × pixels.
-    public static func renderAppIcon(pixels: Int) -> CGImage? {
+    /// app-icon.svg with the white mark, or the yellow tile with the dark
+    /// mark of the dev app) at pixels × pixels.
+    public static func renderAppIcon(pixels: Int, variant: AppVariant = .prod) -> CGImage? {
         guard let ctx = CGContext(
             data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -113,21 +114,21 @@ public enum LanaMark {
             ctx.setShadow(offset: CGSize(width: 0, height: -size * 0.01), blur: size * 0.02, color: CGColor(gray: 0, alpha: 0.3))
         }
         ctx.addPath(CGPath(roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil))
-        ctx.setFillColor(CGColor(srgbRed: 0x0B / 255, green: 0x0F / 255, blue: 0x14 / 255, alpha: 1))
+        ctx.setFillColor(variant.tileColor)
         ctx.fillPath()
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
         let markRect = tile.insetBy(dx: tileSide * 0.2, dy: tileSide * 0.2)
-        draw(in: ctx, rect: markRect, style: .color(CGColor(gray: 1, alpha: 1)))
+        draw(in: ctx, rect: markRect, style: .color(variant.markColor))
         return ctx.makeImage()
     }
 
     /// writeIconset writes the PNGs `iconutil -c icns` expects into dir.
-    public static func writeIconset(to dir: URL) throws {
+    public static func writeIconset(to dir: URL, variant: AppVariant = .prod) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for base in [16, 32, 128, 256, 512] {
             for scale in [1, 2] {
                 let name = scale == 1 ? "icon_\(base)x\(base).png" : "icon_\(base)x\(base)@2x.png"
-                guard let image = renderAppIcon(pixels: base * scale) else {
+                guard let image = renderAppIcon(pixels: base * scale, variant: variant) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
                 let url = dir.appendingPathComponent(name)

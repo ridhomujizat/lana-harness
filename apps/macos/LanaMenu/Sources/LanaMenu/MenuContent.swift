@@ -117,7 +117,7 @@ struct MenuContent: View {
                 .resizable()
                 .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text("lana")
+                Text(AppVariant.current.displayName)
                     .font(.system(size: 14, weight: .semibold))
                 HStack(spacing: 5) {
                     Circle()

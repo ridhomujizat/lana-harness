@@ -12,7 +12,7 @@ enum SettingsWindow {
         if window == nil {
             let host = NSHostingController(rootView: SettingsView(model: model))
             let window = NSWindow(contentViewController: host)
-            window.title = "lana Menu Settings"
+            window.title = AppVariant.current == .dev ? "lana dev Settings" : "lana Menu Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()

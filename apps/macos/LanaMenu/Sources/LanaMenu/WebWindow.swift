@@ -188,7 +188,7 @@ final class WebWindowController: NSObject {
             backing: .buffered,
             defer: false
         )
-        window.title = "lana"
+        window.title = AppVariant.current.displayName
         window.contentView = webView
         window.minSize = NSSize(width: 420, height: 400)
         window.isReleasedWhenClosed = false
@@ -199,8 +199,10 @@ final class WebWindowController: NSObject {
         window.setFrameAutosaveName("LanaDashboard")
         observations.append(webView.observe(\.title, options: [.new]) { [weak window] view, _ in
             Task { @MainActor in
+                // The dev app says so in every window title (spec #52).
+                let name = AppVariant.current.displayName
                 let title = view.title ?? ""
-                window?.title = title.isEmpty ? "lana" : title
+                window?.title = title.isEmpty ? name : (AppVariant.current == .dev ? "\(title) · dev" : title)
             }
         })
         observations.append(webView.observe(\.url, options: [.new]) { view, _ in
