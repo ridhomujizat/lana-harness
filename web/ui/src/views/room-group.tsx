@@ -177,12 +177,15 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
       if (!group.text) {
         continue;
       }
+      /* Text after a discussion is the lead's answer: it carries the turn's
+         end time, not its start. */
+      const afterDiscussion = items.some((item) => item.kind === "discussion");
       lead = {
         kind: "lead",
         key: "lead-" + turn.key + "-" + counter,
         text: group.text,
         chips: [],
-        at: turn.startedAt,
+        at: afterDiscussion ? turn.endedAt || turn.lastAt || turn.startedAt : turn.startedAt,
       };
       counter += 1;
       items.push(lead);

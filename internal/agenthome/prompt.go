@@ -254,11 +254,11 @@ func discussionGuide(d DiscussionPrompt) string {
 	if d.Purpose != "" {
 		fmt.Fprintf(&b, "Purpose: %s\n", d.Purpose)
 	}
-	b.WriteString("You lead this group room. The owner reads it like a group chat.\n\n## Discussions\n")
+	b.WriteString("You lead this group room. The owner reads it like a group chat. The discussion tools may appear with a prefix (for example mcp__lana__discuss_start).\n\n## Discussions\n")
 	if d.Mode == "ask" {
 		b.WriteString("Open a discussion only when the owner asks for one (Discuss is on, or they say so, for example \"diskusikan\"). Otherwise answer yourself or delegate with task.\n")
 	} else {
-		b.WriteString("When a question needs more than one member's view (a decision, a trade-off, a plan), open a discussion instead of answering alone. Answer simple questions yourself or delegate with task. If the owner asks for a direct answer, do not open one.\n")
+		b.WriteString("This room exists so members can weigh in. When the owner asks for a decision or a judgment that touches more than one member's area (should I…?, A or B?, is it worth it?, \"ambil ga?\", \"mending … atau …?\"), you must open a discussion with discuss_start before you answer, even if you could answer alone. Answer plain facts and small tasks yourself or delegate them with task. If the owner asks for a direct answer (\"jawab langsung\"), do not open one.\n")
 	}
 	fmt.Fprintf(&b, `- discuss_start: the topic, the members with the angle each covers, and an opening message to the owner (who you bring in and why). Put what you say to the room in the tool fields; do not repeat it as plain text.
 - discuss_ask: ask one member with a short message that starts with @Name. Pass one member's point to another when they disagree (reply_to, quote). For a large room, ask everyone once in one step (parallel), then only the members who disagree.
