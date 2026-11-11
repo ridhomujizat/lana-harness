@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/attach"
 	"github.com/ridhomujizat/lana-harness/internal/avatar"
 	"github.com/ridhomujizat/lana-harness/internal/toolfmt"
 )
@@ -449,7 +450,9 @@ func (s *Server) roomLastMessage(info core.SessionInfo, events []core.SessionEve
 }
 
 // userMessageText returns the owner text of a user message, skipping the
-// leading context blocks lana injected (REQ-LTC-001).
+// leading context blocks lana injected (REQ-LTC-001) and the per-attachment
+// text blocks attach writes. Remaining attachments are summarized as a trailing
+// "· N files" marker; a message that carries only attachments reads "N files".
 func userMessageText(payload core.UserMessage) string {
 	blocks := payload.Content
 	if payload.ContextBlocks > 0 {
@@ -459,7 +462,31 @@ func userMessageText(payload core.UserMessage) string {
 			blocks = blocks[payload.ContextBlocks:]
 		}
 	}
-	return strings.TrimSpace(core.TextContent(blocks))
+	kept := make([]core.ContentBlock, 0, len(blocks))
+	attachments := 0
+	for _, block := range blocks {
+		if block.Kind == core.BlockImage {
+			attachments++
+			continue
+		}
+		if block.Kind == core.BlockText && attach.IsBlockText(block.Text) {
+			attachments++
+			continue
+		}
+		kept = append(kept, block)
+	}
+	text := strings.TrimSpace(core.TextContent(kept))
+	if attachments == 0 {
+		return text
+	}
+	label := fmt.Sprintf("%d files", attachments)
+	if attachments == 1 {
+		label = "1 file"
+	}
+	if text == "" {
+		return label
+	}
+	return text + " · " + label
 }
 
 // roomPreview normalizes whitespace and cuts a preview to the room limit.

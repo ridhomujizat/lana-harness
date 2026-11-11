@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -520,12 +521,66 @@ func cutText(body, rel string) string {
 	return string(r[:InlineChars]) + "\n" + notice
 }
 
+// The block builders below and IsBlockText share these fixed pieces, so the
+// text a block emits and the text IsBlockText accepts cannot drift apart.
+const (
+	attachPrefix = "Attachment "
+	attachSep    = " ("
+	attachClose  = "):"
+
+	attachPDF   = "PDF, "
+	attachPages = " pages"
+
+	attachReadSep   = " could not be read: "
+	attachSavedTail = ") was saved, but this file type cannot be read."
+	attachScanTail  = ") has no text layer. It is probably a scan: ask the owner to send photos or screenshots of the pages instead."
+)
+
+// IsBlockText reports whether text is one of the attachment blocks the builders
+// below write. Only the first line is inspected: it opens with the attachment
+// prefix and carries a non-empty path followed by one of the five headers.
+// Owner text such as "Attachment is fine, thanks" is not a block.
+func IsBlockText(text string) bool {
+	line, _, _ := strings.Cut(text, "\n")
+	if !strings.HasPrefix(line, attachPrefix) {
+		return false
+	}
+	body := line[len(attachPrefix):]
+	switch {
+	case strings.HasSuffix(body, attachClose):
+		_, _, ok := attachmentHead(strings.TrimSuffix(body, attachClose))
+		return ok
+	case strings.HasSuffix(body, attachSavedTail):
+		_, _, ok := attachmentHead(strings.TrimSuffix(body, attachSavedTail))
+		return ok
+	case strings.HasSuffix(body, attachScanTail):
+		_, desc, ok := attachmentHead(strings.TrimSuffix(body, attachScanTail))
+		return ok && strings.HasPrefix(desc, attachPDF) && strings.HasSuffix(desc, attachPages)
+	case strings.Contains(body, attachReadSep):
+		rel, _, _ := strings.Cut(body, attachReadSep)
+		return rel != ""
+	}
+	return false
+}
+
+// attachmentHead splits the part of an attachment first line that follows the
+// prefix into the workspace-relative path and the parenthesized descriptor. A
+// path may itself contain " (", so the last separator wins.
+func attachmentHead(body string) (rel, desc string, ok bool) {
+	i := strings.LastIndex(body, attachSep)
+	if i <= 0 {
+		return "", "", false
+	}
+	rel, desc = body[:i], body[i+len(attachSep):]
+	return rel, desc, rel != "" && desc != ""
+}
+
 // couldNotRead is the block for an image or PDF that could not be read.
 func couldNotRead(rel string, err error) core.ContentBlock {
 	msg := strings.TrimSuffix(err.Error(), ".")
 	return core.ContentBlock{
 		Kind: core.BlockText,
-		Text: fmt.Sprintf("Attachment %s could not be read: %s.", rel, msg),
+		Text: attachPrefix + rel + attachReadSep + msg + ".",
 	}
 }
 
@@ -533,7 +588,7 @@ func couldNotRead(rel string, err error) core.ContentBlock {
 func scannedPDF(rel string, pages int) core.ContentBlock {
 	return core.ContentBlock{
 		Kind: core.BlockText,
-		Text: fmt.Sprintf("Attachment %s (PDF, %d pages) has no text layer. It is probably a scan: ask the owner to send photos or screenshots of the pages instead.", rel, pages),
+		Text: attachPrefix + rel + attachSep + attachPDF + strconv.Itoa(pages) + attachPages + attachScanTail,
 	}
 }
 
@@ -541,7 +596,7 @@ func scannedPDF(rel string, pages int) core.ContentBlock {
 func savedOther(rel, mt string) core.ContentBlock {
 	return core.ContentBlock{
 		Kind: core.BlockText,
-		Text: fmt.Sprintf("Attachment %s (%s) was saved, but this file type cannot be read.", rel, mt),
+		Text: attachPrefix + rel + attachSep + mt + attachSavedTail,
 	}
 }
 
@@ -549,7 +604,7 @@ func savedOther(rel, mt string) core.ContentBlock {
 func textBlock(rel, mt, content string) core.ContentBlock {
 	return core.ContentBlock{
 		Kind: core.BlockText,
-		Text: fmt.Sprintf("Attachment %s (%s):", rel, mt) + "\n" + cutText(content, rel),
+		Text: attachPrefix + rel + attachSep + mt + attachClose + "\n" + cutText(content, rel),
 	}
 }
 
@@ -566,7 +621,7 @@ func pdfTextBlock(rel string, pages []string) core.ContentBlock {
 	}
 	return core.ContentBlock{
 		Kind: core.BlockText,
-		Text: fmt.Sprintf("Attachment %s (PDF, %d pages):", rel, len(pages)) + "\n" + cutText(b.String(), rel),
+		Text: attachPrefix + rel + attachSep + attachPDF + strconv.Itoa(len(pages)) + attachPages + attachClose + "\n" + cutText(b.String(), rel),
 	}
 }
 

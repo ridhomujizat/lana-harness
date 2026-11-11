@@ -535,6 +535,71 @@ func TestRoomsNotFoundAndBadQuery(t *testing.T) {
 	}
 }
 
+// userMessageText (the room list preview) hides the per-attachment text blocks
+// attach writes and summarizes them as a trailing "· N files" marker.
+func TestRoomPreviewAttachmentCount(t *testing.T) {
+	notes := "Attachment attachments/2026-11-09/notes.md (text/markdown):\n# Notes"
+	scan := "Attachment attachments/2026-11-09/scan.pdf (PDF, 2 pages) has no text layer. It is probably a scan: ask the owner to send photos or screenshots of the pages instead."
+	cases := []struct {
+		name string
+		msg  core.UserMessage
+		want string
+	}{
+		{
+			name: "context and text with two attachments",
+			msg: core.UserMessage{V: 1, ContextBlocks: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockText, Text: "<context>injected</context>"},
+				{Kind: core.BlockText, Text: "pelajari materi ini"},
+				{Kind: core.BlockText, Text: notes},
+				{Kind: core.BlockText, Text: scan},
+			}},
+			want: "pelajari materi ini · 2 files",
+		},
+		{
+			name: "attachments only",
+			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockText, Text: notes},
+				{Kind: core.BlockText, Text: scan},
+			}},
+			want: "2 files",
+		},
+		{
+			name: "one image",
+			msg: core.UserMessage{V: 1, Content: []core.ContentBlock{
+				{Kind: core.BlockImage, MediaType: "image/png", Path: "attachments/x.png"},
+			}},
+			want: "1 file",
+		},
+		{
+			name: "plain text",
+			msg:  core.UserMessage{V: 1, Content: []core.ContentBlock{{Kind: core.BlockText, Text: "halo"}}},
+			want: "halo",
+		},
+		{
+			name: "empty",
+			msg:  core.UserMessage{V: 1},
+			want: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			backend := newFakeWebBackend()
+			backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+			info := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 1000, UpdatedAt: 1000})
+			addSessionEvent(t, backend, info.ID, core.KindUserMessage, c.msg)
+			s, cookie, _ := newLoggedInSessionServer(t, backend)
+			row := roomRowForTest(t, s, cookie, "dana")
+			got := ""
+			if row.LastMessage != nil {
+				got = row.LastMessage.Preview
+			}
+			if got != c.want {
+				t.Fatalf("preview = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func waitForOpenApproval(t *testing.T, s *Server) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

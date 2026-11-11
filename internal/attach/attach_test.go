@@ -535,6 +535,37 @@ func TestTextCut(t *testing.T) {
 	}
 }
 
+func TestIsBlockText(t *testing.T) {
+	cutBody := textBlock("attachments/notes.md", "text/markdown", strings.Repeat("x", InlineChars+1)).Text
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"text file", textBlock("attachments/notes.md", "text/markdown", "# Notes").Text, true},
+		{"text file with parens in name", textBlock("attachments/2026-11-09/05-backend-roadmap (1).md", "text/markdown", "# Roadmap").Text, true},
+		{"pdf text", pdfTextBlock("attachments/doc.pdf", []string{"one", "two"}).Text, true},
+		{"scanned pdf", scannedPDF("attachments/scan.pdf", 3).Text, true},
+		{"saved other", savedOther("attachments/a.zip", "application/zip").Text, true},
+		{"could not read", couldNotRead("attachments/bad.png", errors.New("png: invalid format")).Text, true},
+		{"could not read with parens in name", couldNotRead("attachments/2026-11-09/05-backend-roadmap (1).md", errors.New("boom")).Text, true},
+		{"cut body", cutBody, true},
+		{"owner text with attachment word", "Attachment is fine, thanks", false},
+		{"plain text", "halo", false},
+		{"empty", "", false},
+		{"prefix only", "Attachment", false},
+		{"missing colon", "Attachment attachments/x.txt (text/plain)", false},
+		{"missing closing paren", "Attachment attachments/x.txt (text/plain:", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsBlockText(c.text); got != c.want {
+				t.Errorf("IsBlockText(%q) = %v, want %v", c.text, got, c.want)
+			}
+		})
+	}
+}
+
 func TestKind(t *testing.T) {
 	img := opaque(2, 2)
 	webpData := decodeWebP(t)
