@@ -371,6 +371,12 @@
   display: none;
 }
 
+/* In the app the topbar wears the sidebar colour, so the traffic-light row
+   and the topbar read as one band with no seam. A browser keeps --surface. */
+html[data-shell="macos-app"] .topbar {
+  background: var(--bg-side);
+}
+
 html[data-shell="macos-app"] .side-chrome {
   display: flex;
   align-items: center;

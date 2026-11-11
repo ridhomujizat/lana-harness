@@ -285,9 +285,7 @@ svg.logo {
   gap: 6px;
   padding: 0 12px 0 var(--gutter);
   border-bottom: 1px solid var(--border);
-  /* The sidebar colour, so the topbar and the sidebar read as one band (and
-     the Lana.app window's traffic-light row has no seam). */
-  background: var(--bg-side);
+  background: var(--surface);
   position: relative;
   z-index: 5;
 }
