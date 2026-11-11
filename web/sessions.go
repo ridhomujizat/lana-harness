@@ -465,6 +465,17 @@ type sessionUsageResponse struct {
 	InputTokens       int64 `json:"input_tokens"`
 	OutputTokens      int64 `json:"output_tokens"`
 	CachedInputTokens int64 `json:"cached_input_tokens"`
+	// The chat's context meter: the size of the last model call (its input
+	// plus its answer), the context window, and the size at which the
+	// session compacts on its own. Zero when unknown.
+	ContextTokens int64 `json:"context_tokens"`
+	ContextWindow int64 `json:"context_window"`
+	CompactAt     int64 `json:"compact_at"`
+}
+
+// contextWindower is an optional Backend extension for the context meter.
+type contextWindower interface {
+	ContextWindow(ctx context.Context, id string) (window, compactAt int64, err error)
 }
 
 func (s *Server) handleSessionUsage(w http.ResponseWriter, r *http.Request) {
@@ -478,23 +489,41 @@ func (s *Server) handleSessionUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var usage core.Usage
+	var last int64
 	for _, event := range page.Events {
-		if event.Kind != core.KindStepEnd {
-			continue
+		switch event.Kind {
+		case core.KindStepEnd:
+			var payload core.StepEnd
+			if json.Unmarshal(event.Payload, &payload) != nil {
+				continue
+			}
+			usage.InputTokens += payload.Usage.InputTokens
+			usage.OutputTokens += payload.Usage.OutputTokens
+			usage.CachedInputTokens += payload.Usage.CachedInputTokens
+			last = int64(payload.Usage.InputTokens + payload.Usage.OutputTokens)
+		case core.KindCompactionSummary:
+			// A compaction shrinks the history: until the next call, the
+			// meter shows the size it reported after compacting.
+			var payload struct {
+				TokensAfter int64 `json:"tokens_after"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil {
+				last = payload.TokensAfter
+			}
 		}
-		var payload core.StepEnd
-		if json.Unmarshal(event.Payload, &payload) != nil {
-			continue
-		}
-		usage.InputTokens += payload.Usage.InputTokens
-		usage.OutputTokens += payload.Usage.OutputTokens
-		usage.CachedInputTokens += payload.Usage.CachedInputTokens
 	}
-	writeJSON(w, http.StatusOK, sessionUsageResponse{
+	res := sessionUsageResponse{
 		InputTokens:       usage.InputTokens,
 		OutputTokens:      usage.OutputTokens,
 		CachedInputTokens: usage.CachedInputTokens,
-	})
+		ContextTokens:     last,
+	}
+	if windower, ok := backend.(contextWindower); ok {
+		if window, compactAt, err := windower.ContextWindow(r.Context(), r.PathValue("id")); err == nil {
+			res.ContextWindow, res.CompactAt = window, compactAt
+		}
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {

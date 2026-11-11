@@ -1575,6 +1575,20 @@ func (b *webBackend) Continue(ctx context.Context, id string) (web.SendResult, e
 	return web.SendResult{Turn: "started", TurnID: turnID}, nil
 }
 
+// ContextWindow reports the session's context window and auto-compact size
+// (web.contextWindower).
+func (b *webBackend) ContextWindow(ctx context.Context, id string) (window, compactAt int64, err error) {
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return 0, 0, err
+	}
+	res, err := b.rt.ContextWindow(ctx, info.ID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return res.Window, res.CompactAt, nil
+}
+
 // Compact summarizes the session now.
 func (b *webBackend) Compact(ctx context.Context, id string) (web.CompactResult, error) {
 	info, err := b.resolveSession(ctx, id)

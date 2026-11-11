@@ -711,3 +711,23 @@ func (s *Service) stream(ctx context.Context, in core.LLMStreamInput, next core.
 	in.Request.Messages = messages
 	return next(ctx, in)
 }
+
+// ContextWindow reports the session's context window and its pressure
+// trigger, resolved the way a compaction would (core.ContextWindower).
+func (s *Service) ContextWindow(ctx context.Context, sessionID string) (core.ContextWindowInfo, error) {
+	info, err := s.Store.Info(ctx, sessionID)
+	if err != nil {
+		return core.ContextWindowInfo{}, err
+	}
+	events, err := s.Store.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return core.ContextWindowInfo{}, err
+	}
+	req := core.CompactRequest{SessionID: sessionID, AgentName: info.Agent}
+	chain, _, err := s.resolveChain(req, info.Agent, events)
+	if err != nil {
+		return core.ContextWindowInfo{}, err
+	}
+	pol := s.resolvePolicy(info.Agent, chain, 0, "")
+	return core.ContextWindowInfo{Window: pol.window, CompactAt: pol.trigger()}, nil
+}

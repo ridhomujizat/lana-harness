@@ -24,6 +24,7 @@ import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import { compactSession } from "../api/turns";
 import { NewSessionBanner, SlashMenu, useSlashMenu } from "./slash-menu";
+import { ContextMeter } from "./context-meter";
 import type { SlashCommand } from "./slash-menu";
 import type { SessionEvent } from "../api/sessions";
 import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
@@ -1611,6 +1612,11 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               </Button>
             ) : null}
             <span className="room-composer-spacer"></span>
+            <ContextMeter
+              sessionId={currentWebSessionId || ""}
+              refreshKey={(turnRunning ? "run-" : "idle-") + (liveTurnId || "")}
+              busy={turnRunning || sending}
+            />
             <Button
               size="sm"
               variant="primary"
