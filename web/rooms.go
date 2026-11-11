@@ -541,10 +541,16 @@ func (s *Server) roomWaiting(ctx context.Context) map[string]presenceJSON {
 	if s.questions != nil {
 		requests = append(requests, s.questions.openRequests()...)
 	}
+	if s.secretRequests != nil {
+		requests = append(requests, s.secretRequests.openRequests()...)
+	}
 	for _, request := range requests {
 		label := "Waiting for your answer"
-		if request.Kind == "approval" {
+		switch request.Kind {
+		case "approval":
 			label = "Waiting for your approval: " + request.Tool
+		case "secret":
+			label = "Waiting for a secret: " + request.Tool
 		}
 		presence := presenceJSON{
 			State:     "waiting",

@@ -144,6 +144,13 @@ type AssistEnvProvider interface {
 	AssistEnv(ctx context.Context, wf Workflow) AssistEnv
 }
 
+// AssistSecretsProvider is an optional Deps extension that lists the owner's
+// secret names cheaply, so a later guardian note names a secret added since
+// the first note (spec 53). Names only, never values.
+type AssistSecretsProvider interface {
+	AssistSecrets(ctx context.Context) []string
+}
+
 // AssistantRuntime is the optional Deps extension behind the guardian chat
 // session of spec 51 (REQ-WFC-001, REQ-WFC-009). Deps without it make the
 // guardian chat unavailable.

@@ -140,6 +140,18 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Secret requests (spec 53 API-SEC-003) subscribe the same way. The
+	// event carries the name and description, never a value.
+	secretReplay, secretEvents, unsubscribeSecrets := s.secretRequests.subscribe(id, func(childID string) string {
+		return sessionRoot(r.Context(), backend, childID)
+	})
+	defer unsubscribeSecrets()
+	for _, event := range secretReplay {
+		if err := writeSSE(w, flusher, "secret_request", "", event); err != nil {
+			return
+		}
+	}
+
 	var frames chan core.LiveFrame
 	if sub != nil {
 		frames = make(chan core.LiveFrame)
@@ -198,6 +210,10 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 			}
 		case event := <-questionEvents:
 			if err := writeSSE(w, flusher, "question", "", event); err != nil {
+				return
+			}
+		case event := <-secretEvents:
+			if err := writeSSE(w, flusher, "secret_request", "", event); err != nil {
 				return
 			}
 		case <-poll.C:

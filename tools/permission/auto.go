@@ -20,7 +20,7 @@ var autoTools = map[string]bool{
 	"web_fetch": true, "web_search": true,
 	"memory_read": true, "memory_write": true,
 	"knowledge_search": true, "knowledge_read": true, "knowledge_write": true, "knowledge_ingest": true,
-	"ask_user": true, "session_search": true, "skill_load": true, "skill_write": true,
+	"ask_user": true, "secret_request": true, "session_search": true, "skill_load": true, "skill_write": true,
 	"task": true, "task_continue": true,
 	"discuss_start": true, "discuss_ask": true, "discuss_more": true, "discuss_end": true,
 	"send_file": true, "calendar": true, "usage_stats": true,

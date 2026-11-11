@@ -39,6 +39,10 @@ vi.mock("../api/agents", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/agents")>();
   return { ...actual, listAgents: vi.fn(() => Promise.resolve({ agents: [] })) };
 });
+vi.mock("../api/secret-requests", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/secret-requests")>();
+  return { ...actual, saveSecretRequest: vi.fn(), cancelSecretRequest: vi.fn() };
+});
 vi.mock("../api/toolbox", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/toolbox")>();
   return { ...actual, listPackages: vi.fn(() => Promise.resolve({ packages: [] })) };
@@ -47,6 +51,7 @@ vi.mock("../api/toolbox", async (importOriginal) => {
 import { openStream } from "../api/client";
 import type { StreamHandlers } from "../api/client";
 import { uploadAttachments } from "../api/attachments";
+import { saveSecretRequest } from "../api/secret-requests";
 import { getSession, listEvents } from "../api/sessions";
 import type { SessionDetail, SessionEvent } from "../api/sessions";
 import {
@@ -158,7 +163,10 @@ describe("workflow guardian chat (spec 51)", () => {
     const { container } = renderEditor();
     const reply = await screen.findByText("Published v2 after a green test.");
     expect(listEvents).toHaveBeenCalledWith("s1", 0);
-    expect(openStream).toHaveBeenCalledWith("s1", expect.objectContaining({ fromSeq: 5 }));
+    /* The stream opens in an effect after the log renders. */
+    await waitFor(() =>
+      expect(openStream).toHaveBeenCalledWith("s1", expect.objectContaining({ fromSeq: 5 }))
+    );
     /* The owner message of the session and the collapsed process row. */
     expect(screen.getByText("add a summary")).toBeTruthy();
     const head = container.querySelector(".wf-thread .tp-head") as HTMLButtonElement;
@@ -267,5 +275,55 @@ describe("workflow guardian chat (spec 51)", () => {
     });
     renderEditor();
     expect(await screen.findByText("Send a real message to the team during the test?")).toBeTruthy();
+  });
+
+  it("shows the secret_request card from the stream and saves the value once (spec 53)", async () => {
+    vi.mocked(getAssistant).mockResolvedValue({ session_id: "s1", messages: [] });
+    vi.mocked(getSession).mockResolvedValue(session(true));
+    vi.mocked(saveSecretRequest).mockResolvedValue({ outcome: "saved", name: "NOTION_TOKEN" });
+    renderEditor();
+    await waitFor(() => expect(handlers).not.toBeNull());
+    act(() => {
+      handlers!.onSecretRequest!({
+        request_id: "sr1",
+        name: "NOTION_TOKEN",
+        description: "The workflow reads your Notion pages.",
+        link: "https://www.notion.so/my-integrations",
+        replaces: false,
+        expires_at: Date.now() + 60_000,
+      });
+    });
+    expect(await screen.findByText("The workflow reads your Notion pages.")).toBeTruthy();
+    const input = screen.getByLabelText("Value") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    fireEvent.change(input, { target: { value: "secret_abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(saveSecretRequest).toHaveBeenCalledWith("sr1", "secret_abc"));
+    expect(saveSecretRequest).toHaveBeenCalledTimes(1);
+    expect((await screen.findByRole("status")).textContent).toContain("Saved NOTION_TOKEN");
+    expect(screen.queryByLabelText("Value")).toBeNull();
+  });
+
+  it("shows a replace warning for a secret/requested event in the log", async () => {
+    vi.mocked(getAssistant).mockResolvedValue({ session_id: "s1", messages: [] });
+    vi.mocked(getSession).mockResolvedValue(session(true));
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [
+        ev(1, "user/message", "t1", { content: [{ type: "text", text: "rotate the key" }] }),
+        ev(2, "secret/requested", "t1", {
+          request_id: "sr2",
+          call_id: "c1",
+          name: "GITHUB_TOKEN",
+          description: "Rotate the token.",
+          replaces: true,
+          expires_at: Date.now() + 60_000,
+        }),
+      ],
+      last_seq: 2,
+    });
+    renderEditor();
+    expect(await screen.findByText("Rotate the token.")).toBeTruthy();
+    expect(screen.getByRole("note").textContent).toContain("Saving replaces the current value.");
+    expect(screen.getByRole("button", { name: "Replace value" })).toBeTruthy();
   });
 });

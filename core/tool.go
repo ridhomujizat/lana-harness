@@ -55,6 +55,10 @@ type ToolCtx struct {
 	// (REQ-AGF-003, REQ-AGF-004). Nil when the runtime has no file service;
 	// the tool then reports that sending is not available.
 	Files FileSender
+	// Secrets opens the secure secret input card of the secret_request tool
+	// (spec 53). Nil when the runtime has no secret request service; the tool
+	// then reports that it is not available.
+	Secrets SecretRequester
 	// Subagents runs child sessions for the task tools.
 	Subagents SubagentRunner
 	// Discussions runs the room discussion of a team lead's root turn for the

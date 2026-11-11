@@ -8,6 +8,7 @@ import {
   skipAllQuestions as skipAllQuestionsRequest,
 } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
+import type { SecretRequestEvent } from "../api/secret-requests";
 import { getSession, listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
 import { cancelTurn as cancelTurnRequest, continueSession } from "../api/turns";
@@ -16,6 +17,8 @@ import { revokeAttachmentURLs } from "./attachments";
 import type { DraftAttachment } from "./attachments";
 import { openQuestionFromEvents } from "./question";
 import type { OpenQuestion } from "./question";
+import { useSecretRequest } from "./secret-request";
+import type { SecretRequestState } from "./secret-request";
 import type { TeamChildRequest } from "./team";
 import { buildTurns } from "./turn";
 import type { ThreadItem } from "./turn";
@@ -76,6 +79,8 @@ export interface LiveSession {
   submitQuestion: (request: QuestionEvent, body: QuestionAnswerRequest) => Promise<unknown>;
   skipQuestion: (request: QuestionEvent) => Promise<unknown>;
   expireQuestion: (request: QuestionEvent) => void;
+  /* Spec 53: the secure secret input card (SecretRequestCard). */
+  secrets: SecretRequestState;
 }
 
 function stringOf(value: unknown): string {
@@ -108,6 +113,8 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
   const [questionBusy, setQuestionBusy] = useState(false);
   const [continueBusy, setContinueBusy] = useState(false);
   const [continueError, setContinueError] = useState("");
+  const secrets = useSecretRequest(events, childEvents);
+  const receiveSecret = secrets.receive;
 
   const lastSeqRef = useRef(0);
   const runningRef = useRef(false);
@@ -354,13 +361,16 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
               }
         );
       },
+      onSecretRequest: (incoming: SecretRequestEvent) => {
+        receiveSecret(incoming);
+      },
       onShutdown: () => setStreamState("reconnecting"),
       onError: () => setStreamState("reconnecting"),
     });
     return () => {
       stream.close();
     };
-  }, [id, streamReady, finishTurn, markDecided, closeQuestion]);
+  }, [id, streamReady, finishTurn, markDecided, closeQuestion, receiveSecret]);
 
   const thread = useMemo(
     () => buildTurns(events, { running, turnId: liveTurnId, startedAt: liveStartedAt }),
@@ -607,5 +617,6 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
     submitQuestion,
     skipQuestion,
     expireQuestion,
+    secrets,
   };
 }

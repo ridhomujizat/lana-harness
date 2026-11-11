@@ -205,9 +205,9 @@ func (s *Store) appendLocked(sess *session, drafts []core.EventDraft) ([]core.Se
 			turnCount++
 		case core.KindTurnEnd:
 			status = "idle"
-		case core.KindQuestionAsked:
+		case core.KindQuestionAsked, core.KindSecretRequested:
 			status = "waiting_input"
-		case core.KindQuestionAnswered:
+		case core.KindQuestionAnswered, core.KindSecretResolved:
 			status = "running"
 		}
 	}

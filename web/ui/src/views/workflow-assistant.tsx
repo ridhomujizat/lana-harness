@@ -25,6 +25,7 @@ import type { DraftAttachment } from "./attachments";
 import { ContextMeter } from "./context-meter";
 import { useLiveSession } from "./live-session";
 import { QuestionCard } from "./question";
+import { SecretRequestCard } from "./secret-request";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import { storedAttachments } from "./session";
 import { SlashMenu, useSlashMenu } from "./slash-menu";
@@ -433,7 +434,7 @@ export function WorkflowAssistant({
                     rootEvents={live.turnEvents.get(item.turn.id) || []}
                     childEvents={live.childEvents}
                     onLoadChildren={live.loadChildren}
-                    waitingForInput={Boolean(live.question)}
+                    waitingForInput={Boolean(live.question) || Boolean(live.secrets.request && !live.secrets.request.outcome)}
                     showStatusCard={item.key === endKey && !running}
                     onContinue={() => void live.continueTurn()}
                     continueBusy={live.continueBusy}
@@ -515,7 +516,7 @@ export function WorkflowAssistant({
         ) : null}
       </div>
       <div className="wf-asst-foot">
-        {live.approval || live.question ? (
+        {live.approval || live.question || live.secrets.request ? (
           <div className="wf-asst-slot">
             {live.approval ? (
               <ApprovalCard
@@ -537,6 +538,17 @@ export function WorkflowAssistant({
                 onSubmit={live.submitQuestion}
                 onSkipAll={live.skipQuestion}
                 onExpire={live.expireQuestion}
+              />
+            ) : null}
+            {live.secrets.request ? (
+              <SecretRequestCard
+                key={"secret-" + live.secrets.request.request_id}
+                request={live.secrets.request}
+                agentLabel={agentName}
+                onSave={live.secrets.save}
+                onCancel={live.secrets.cancel}
+                onExpire={live.secrets.expire}
+                onDismiss={live.secrets.dismiss}
               />
             ) : null}
           </div>

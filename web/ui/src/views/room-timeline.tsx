@@ -48,6 +48,7 @@ import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
 import type { FaceRef } from "./presence";
 import { agentLabel, displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
+import { SecretRequestCard, useSecretRequest, useSecretStream } from "./secret-request";
 import type { OpenQuestion } from "./question";
 import {
   MentionChips,
@@ -329,6 +330,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const [question, setQuestion] = useState<OpenQuestion | null>(null);
   const [questionBusy, setQuestionBusy] = useState(false);
   const [closedQuestionIds, setClosedQuestionIds] = useState<string[]>([]);
+  /* Spec 53: secret_request stream events, read by useSecretRequest below. */
+  const secretStream = useSecretStream();
+  const receiveSecret = secretStream.receive;
   const [draft, setDraft] = useState(initialDraft || "");
   /* API reply: the automation message the next send replies to. */
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
@@ -655,6 +659,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               }
         );
       },
+      onSecretRequest: (incoming) => {
+        receiveSecret(incoming);
+      },
       onShutdown: () => {
         setStreamState("reconnecting");
       },
@@ -662,7 +669,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     return () => {
       stream.close();
     };
-  }, [newestId, finishLive]);
+  }, [newestId, finishLive, receiveSecret]);
 
   /* REQ-ROOM-005: the room is marked read one second after open or a new
      message, so a burst of rows does not spam the endpoint. */
@@ -877,6 +884,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   }, [allEvents, question, closedQuestionIds]);
 
   const activeApproval = approvals.find((item) => !item.decided) || null;
+  const secrets = useSecretRequest(allEvents, childEvents, secretStream);
 
   /* AC-ROOM-003: scrolling to the top loads the previous page of segments and
      holds the visible position. */
@@ -1528,6 +1536,17 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               onSubmit={handleQuestionSubmit}
               onSkipAll={handleQuestionSkipAll}
               onExpire={handleQuestionExpire}
+            />
+          ) : null}
+          {secrets.request ? (
+            <SecretRequestCard
+              key={"secret-" + secrets.request.request_id}
+              request={secrets.request}
+              agentLabel={displayLabel(room)}
+              onSave={secrets.save}
+              onCancel={secrets.cancel}
+              onExpire={secrets.expire}
+              onDismiss={secrets.dismiss}
             />
           ) : null}
         </div>

@@ -17,6 +17,14 @@ but their config keys, events, and tools may still change between betas.
   `apps/macos/install-app.sh` (`make install-app`) installs the app, points `~/.local/bin/lana` and
   the `dev.lana.daemon` launchd agent at it, and ties the agent to Lana.app with
   `AssociatedBundleIdentifiers`, so Login Items shows lana with its icon instead of an executable.
+- Agents add secrets through a secure input card (spec 53). The new standard tool
+  `secret_request` (name, why it is needed, optional link) opens a card in the web chat, the room
+  and the workflow guardian chat with a masked field, a show/hide toggle, Save and Cancel. Save
+  writes Settings > Secrets directly; the agent gets only `saved`, `cancelled` or `expired`, and
+  the value never reaches the model, the session log, the stream, the logs or the audit file. A
+  name that already has a value shows a clear replace warning. Telegram sessions get an error that
+  sends the owner to the web. New events `secret/requested` and `secret/resolved`, SSE event
+  `secret_request`, and `POST /v1/secret-requests/{request_id}`.
 
 ### Changed
 - Self-update signs Lana.app again (ad-hoc) after it replaces or restores the bundled binary.

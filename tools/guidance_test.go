@@ -31,6 +31,11 @@ func TestPromptGuidance(t *testing.T) {
 			want: []string{"decision belongs to them", "Do not ask for something the tools can find out"},
 		},
 		{
+			name: "secret_request",
+			tool: NewSecretRequest(),
+			want: []string{"call secret_request instead of asking the owner to paste it in chat", "Never ask for a secret value in plain chat", "Reuse an existing secret name"},
+		},
+		{
 			name: "memory_write",
 			tool: NewMemoryWrite(),
 			want: []string{"replace or remove that entry instead of adding a second one", "workaround that a tool now covers", "passwords, API keys, and tokens"},

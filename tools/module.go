@@ -49,6 +49,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewTask(),
 		NewTaskContinue(),
 		NewAskUser(),
+		NewSecretRequest(),
 	}
 	builtins = append(builtins, NewDiscussTools()...)
 	for _, tool := range builtins {
