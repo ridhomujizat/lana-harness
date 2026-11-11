@@ -2043,6 +2043,23 @@ func (rt *Runtime) Compact(ctx context.Context, sessionID string) (core.Compacti
 	return compactor.CompactNow(ctx, sessionID)
 }
 
+// ContextWindow reports the session's context window and the size at which
+// it compacts on its own, for the chat's context meter.
+func (rt *Runtime) ContextWindow(ctx context.Context, sessionID string) (core.ContextWindowInfo, error) {
+	if err := rt.closedError(); err != nil {
+		return core.ContextWindowInfo{}, err
+	}
+	service, ok := rt.coreCtx.Lookup(core.ServiceCompaction)
+	if !ok {
+		return core.ContextWindowInfo{}, errors.New("compaction service not available")
+	}
+	windower, ok := service.(core.ContextWindower)
+	if !ok {
+		return core.ContextWindowInfo{}, errors.New("compaction service has no context window")
+	}
+	return windower.ContextWindow(ctx, sessionID)
+}
+
 // knowledgeIngestTitleMax caps a title taken from the source text
 // (REQ-KNU-012).
 const knowledgeIngestTitleMax = 80

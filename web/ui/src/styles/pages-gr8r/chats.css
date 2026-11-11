@@ -800,3 +800,143 @@
   color: var(--text-2);
   font-size: var(--fs-xs);
 }
+
+/* ---------------------------------------------------------------- */
+/* Context meter by the send button (owner 2026-11-12)              */
+/* ---------------------------------------------------------------- */
+
+.ctx-meter {
+  position: relative;
+  display: inline-flex;
+}
+
+.ctx-ring {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.ctx-ring:hover,
+.ctx-ring.on {
+  background: var(--surface-2);
+}
+
+.ctx-ring-track {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 2.4;
+}
+
+.ctx-ring-fill {
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.3s ease;
+}
+
+.ctx-ring.warn .ctx-ring-fill {
+  stroke: var(--amber, #d4a020);
+}
+
+.ctx-ring.danger .ctx-ring-fill {
+  stroke: var(--red, #d64545);
+}
+
+.ctx-pop {
+  position: absolute;
+  right: -8px;
+  bottom: calc(100% + 10px);
+  z-index: 45;
+  width: 300px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.ctx-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ctx-pop-title {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.ctx-pop-value {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-bar {
+  position: relative;
+  height: 6px;
+  margin: 10px 0 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.ctx-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: var(--text-2);
+}
+
+.ctx-bar-fill.warn {
+  background: var(--amber, #d4a020);
+}
+
+.ctx-bar-fill.danger {
+  background: var(--red, #d64545);
+}
+
+.ctx-bar-mark {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--text-3);
+}
+
+.ctx-pop-note {
+  margin: 0 0 8px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.ctx-pop-btn {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md, 8px);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.ctx-pop-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.ctx-pop-btn:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
