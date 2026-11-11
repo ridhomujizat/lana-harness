@@ -17,9 +17,13 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-const workflowColumns = "id, name, description, guardian, status, version, lock_json, failure_json, webhook_token, consecutive_failures, created_at, updated_at"
+const workflowColumns = "id, name, description, guardian, status, version, lock_json, failure_json, webhook_token, consecutive_failures, created_at, updated_at, assistant_session"
 
-const runColumns = "id, workflow_id, number, version, trigger, input_json, status, waiting_reason, wake_at, error, tokens, nodes_done, nodes_total, summary, overrides_json, started_at, ended_at"
+const runColumns = "id, workflow_id, number, version, trigger, input_json, status, waiting_reason, wake_at, error, tokens, nodes_done, nodes_total, summary, overrides_json, started_at, ended_at, candidate_id"
+
+const chatColumns = "id, workflow_id, role, text, change_json, issues_json, created_at, session_id, turn_id"
+
+const candidateColumns = "id, workflow_id, base_version, graph_json, summary, author, status, published_version, created_at, updated_at"
 
 const nodeRunColumns = "run_id, node_id, item_index, status, attempts_json, input_json, output_json, port, error, logs_json, tokens, session_id, started_at, ended_at, via"
 
@@ -55,7 +59,7 @@ func newRunID() (string, error) {
 func scanWorkflow(row rowScanner) (workflow.Workflow, error) {
 	var w workflow.Workflow
 	var status, lockJSON, failureJSON string
-	if err := row.Scan(&w.ID, &w.Name, &w.Description, &w.Guardian, &status, &w.Version, &lockJSON, &failureJSON, &w.WebhookToken, &w.ConsecutiveFailures, &w.CreatedAt, &w.UpdatedAt); err != nil {
+	if err := row.Scan(&w.ID, &w.Name, &w.Description, &w.Guardian, &status, &w.Version, &lockJSON, &failureJSON, &w.WebhookToken, &w.ConsecutiveFailures, &w.CreatedAt, &w.UpdatedAt, &w.AssistantSession); err != nil {
 		return workflow.Workflow{}, err
 	}
 	w.Status = workflow.Status(status)
@@ -77,7 +81,7 @@ func scanWorkflow(row rowScanner) (workflow.Workflow, error) {
 func scanRun(row rowScanner) (workflow.Run, error) {
 	var r workflow.Run
 	var input, overrides string
-	if err := row.Scan(&r.ID, &r.WorkflowID, &r.Number, &r.Version, &r.Trigger, &input, &r.Status, &r.WaitingReason, &r.WakeAt, &r.Error, &r.Tokens, &r.NodesDone, &r.NodesTotal, &r.Summary, &overrides, &r.StartedAt, &r.EndedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.WorkflowID, &r.Number, &r.Version, &r.Trigger, &input, &r.Status, &r.WaitingReason, &r.WakeAt, &r.Error, &r.Tokens, &r.NodesDone, &r.NodesTotal, &r.Summary, &overrides, &r.StartedAt, &r.EndedAt, &r.CandidateID); err != nil {
 		return workflow.Run{}, err
 	}
 	r.Input = parseRaw(input)
@@ -155,8 +159,8 @@ func (s *Store) CreateWorkflow(ctx context.Context, w workflow.Workflow, g workf
 			return err
 		}
 		w.Version = 1
-		if _, err := conn.ExecContext(ctx, "INSERT INTO workflows (id, name, description, guardian, status, version, lock_json, failure_json, webhook_token, consecutive_failures, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			w.ID, w.Name, w.Description, w.Guardian, string(w.Status), w.Version, lockJSON, string(failureJSON), w.WebhookToken, w.ConsecutiveFailures, w.CreatedAt, w.UpdatedAt); err != nil {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO workflows (id, name, description, guardian, status, version, lock_json, failure_json, webhook_token, consecutive_failures, created_at, updated_at, assistant_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			w.ID, w.Name, w.Description, w.Guardian, string(w.Status), w.Version, lockJSON, string(failureJSON), w.WebhookToken, w.ConsecutiveFailures, w.CreatedAt, w.UpdatedAt, w.AssistantSession); err != nil {
 			return err
 		}
 		_, err = conn.ExecContext(ctx, "INSERT INTO workflow_versions (workflow_id, version, graph_json, author, summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -225,8 +229,8 @@ func (s *Store) UpdateWorkflow(ctx context.Context, w workflow.Workflow) error {
 		if err != nil {
 			return err
 		}
-		res, err := conn.ExecContext(ctx, "UPDATE workflows SET name = ?, description = ?, guardian = ?, status = ?, lock_json = ?, failure_json = ?, webhook_token = ?, consecutive_failures = ?, updated_at = ? WHERE id = ?",
-			w.Name, w.Description, w.Guardian, string(w.Status), lockJSON, string(failureJSON), w.WebhookToken, w.ConsecutiveFailures, w.UpdatedAt, w.ID)
+		res, err := conn.ExecContext(ctx, "UPDATE workflows SET name = ?, description = ?, guardian = ?, status = ?, lock_json = ?, failure_json = ?, webhook_token = ?, consecutive_failures = ?, updated_at = ?, assistant_session = ? WHERE id = ?",
+			w.Name, w.Description, w.Guardian, string(w.Status), lockJSON, string(failureJSON), w.WebhookToken, w.ConsecutiveFailures, w.UpdatedAt, w.AssistantSession, w.ID)
 		if err != nil {
 			return err
 		}
@@ -375,8 +379,8 @@ func (s *Store) CreateRun(ctx context.Context, r workflow.Run) (workflow.Run, er
 			}
 			overrides = string(b)
 		}
-		_, err := conn.ExecContext(ctx, "INSERT INTO workflow_runs (id, workflow_id, number, version, trigger, input_json, status, waiting_reason, wake_at, error, tokens, nodes_done, nodes_total, summary, overrides_json, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			r.ID, r.WorkflowID, r.Number, r.Version, r.Trigger, rawText(r.Input), string(r.Status), r.WaitingReason, r.WakeAt, r.Error, r.Tokens, r.NodesDone, r.NodesTotal, r.Summary, overrides, r.StartedAt, r.EndedAt)
+		_, err := conn.ExecContext(ctx, "INSERT INTO workflow_runs (id, workflow_id, number, version, trigger, input_json, status, waiting_reason, wake_at, error, tokens, nodes_done, nodes_total, summary, overrides_json, started_at, ended_at, candidate_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			r.ID, r.WorkflowID, r.Number, r.Version, r.Trigger, rawText(r.Input), string(r.Status), r.WaitingReason, r.WakeAt, r.Error, r.Tokens, r.NodesDone, r.NodesTotal, r.Summary, overrides, r.StartedAt, r.EndedAt, r.CandidateID)
 		return err
 	})
 	if err != nil {
@@ -397,8 +401,8 @@ func (s *Store) UpdateRun(ctx context.Context, r workflow.Run) error {
 			}
 			overrides = string(b)
 		}
-		res, err := conn.ExecContext(ctx, "UPDATE workflow_runs SET version = ?, trigger = ?, input_json = ?, status = ?, waiting_reason = ?, wake_at = ?, error = ?, tokens = ?, nodes_done = ?, nodes_total = ?, summary = ?, overrides_json = ?, started_at = ?, ended_at = ? WHERE id = ?",
-			r.Version, r.Trigger, rawText(r.Input), string(r.Status), r.WaitingReason, r.WakeAt, r.Error, r.Tokens, r.NodesDone, r.NodesTotal, r.Summary, overrides, r.StartedAt, r.EndedAt, r.ID)
+		res, err := conn.ExecContext(ctx, "UPDATE workflow_runs SET version = ?, trigger = ?, input_json = ?, status = ?, waiting_reason = ?, wake_at = ?, error = ?, tokens = ?, nodes_done = ?, nodes_total = ?, summary = ?, overrides_json = ?, started_at = ?, ended_at = ?, candidate_id = ? WHERE id = ?",
+			r.Version, r.Trigger, rawText(r.Input), string(r.Status), r.WaitingReason, r.WakeAt, r.Error, r.Tokens, r.NodesDone, r.NodesTotal, r.Summary, overrides, r.StartedAt, r.EndedAt, r.CandidateID, r.ID)
 		if err != nil {
 			return err
 		}
@@ -671,8 +675,8 @@ func (s *Store) AppendChat(ctx context.Context, m workflow.ChatMessage) (workflo
 			}
 			issues = string(b)
 		}
-		res, err := conn.ExecContext(ctx, "INSERT INTO workflow_chat (workflow_id, role, text, change_json, issues_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-			m.WorkflowID, m.Role, m.Text, change, issues, m.CreatedAt)
+		res, err := conn.ExecContext(ctx, "INSERT INTO workflow_chat (workflow_id, role, text, change_json, issues_json, created_at, session_id, turn_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			m.WorkflowID, m.Role, m.Text, change, issues, m.CreatedAt, m.SessionID, m.TurnID)
 		if err != nil {
 			return err
 		}
@@ -691,10 +695,10 @@ func (s *Store) ListChat(ctx context.Context, workflowID string, limit int) ([]w
 	if err := s.assertOpen(); err != nil {
 		return nil, err
 	}
-	query := "SELECT id, workflow_id, role, text, change_json, issues_json, created_at FROM workflow_chat WHERE workflow_id = ? ORDER BY id"
+	query := "SELECT " + chatColumns + " FROM workflow_chat WHERE workflow_id = ? ORDER BY id"
 	args := []any{workflowID}
 	if limit > 0 {
-		query = "SELECT id, workflow_id, role, text, change_json, issues_json, created_at FROM workflow_chat WHERE workflow_id = ? ORDER BY id DESC LIMIT ?"
+		query = "SELECT " + chatColumns + " FROM workflow_chat WHERE workflow_id = ? ORDER BY id DESC LIMIT ?"
 		args = append(args, limit)
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -706,7 +710,7 @@ func (s *Store) ListChat(ctx context.Context, workflowID string, limit int) ([]w
 	for rows.Next() {
 		var m workflow.ChatMessage
 		var change, issues string
-		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Role, &m.Text, &change, &issues, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.WorkflowID, &m.Role, &m.Text, &change, &issues, &m.CreatedAt, &m.SessionID, &m.TurnID); err != nil {
 			return nil, err
 		}
 		if change != "" {
@@ -730,6 +734,115 @@ func (s *Store) ListChat(ctx context.Context, workflowID string, limit int) ([]w
 		}
 	}
 	return out, nil
+}
+
+func scanCandidate(row rowScanner) (workflow.Candidate, error) {
+	var c workflow.Candidate
+	var graphJSON string
+	if err := row.Scan(&c.ID, &c.WorkflowID, &c.BaseVersion, &graphJSON, &c.Summary, &c.Author, &c.Status, &c.PublishedVersion, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		return workflow.Candidate{}, err
+	}
+	if err := json.Unmarshal([]byte(graphJSON), &c.Graph); err != nil {
+		return workflow.Candidate{}, err
+	}
+	return c, nil
+}
+
+// CreateCandidate marks any open candidate of the workflow superseded and
+// stores c as the new open candidate in one write transaction (spec 51
+// REQ-WFC-003). It sets ID, Status "open", CreatedAt and UpdatedAt.
+func (s *Store) CreateCandidate(ctx context.Context, c workflow.Candidate) (workflow.Candidate, error) {
+	err := s.withWrite(ctx, func(conn *sql.Conn) error {
+		var exists int
+		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM workflows WHERE id = ?", c.WorkflowID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return workflow.ErrNotFound
+		}
+		graphJSON, err := json.Marshal(c.Graph)
+		if err != nil {
+			return err
+		}
+		now := nowMS()
+		if _, err := conn.ExecContext(ctx, "UPDATE workflow_candidates SET status = ?, updated_at = ? WHERE workflow_id = ? AND status = ?",
+			workflow.CandidateSuperseded, now, c.WorkflowID, workflow.CandidateOpen); err != nil {
+			return err
+		}
+		c.Status = workflow.CandidateOpen
+		c.CreatedAt = now
+		c.UpdatedAt = now
+		res, err := conn.ExecContext(ctx, "INSERT INTO workflow_candidates (workflow_id, base_version, graph_json, summary, author, status, published_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			c.WorkflowID, c.BaseVersion, string(graphJSON), c.Summary, c.Author, c.Status, c.PublishedVersion, c.CreatedAt, c.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		c.ID, err = res.LastInsertId()
+		return err
+	})
+	if err != nil {
+		return workflow.Candidate{}, err
+	}
+	return c, nil
+}
+
+// GetCandidate returns one candidate by id, or ErrNotFound (spec 51).
+func (s *Store) GetCandidate(ctx context.Context, id int64) (workflow.Candidate, error) {
+	if err := s.assertOpen(); err != nil {
+		return workflow.Candidate{}, err
+	}
+	c, err := scanCandidate(s.db.QueryRowContext(ctx, "SELECT "+candidateColumns+" FROM workflow_candidates WHERE id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return workflow.Candidate{}, workflow.ErrNotFound
+	}
+	if err != nil {
+		return workflow.Candidate{}, err
+	}
+	return c, nil
+}
+
+// OpenCandidate returns the workflow's open candidate, or ErrNotFound (spec 51).
+func (s *Store) OpenCandidate(ctx context.Context, workflowID string) (workflow.Candidate, error) {
+	if err := s.assertOpen(); err != nil {
+		return workflow.Candidate{}, err
+	}
+	c, err := scanCandidate(s.db.QueryRowContext(ctx, "SELECT "+candidateColumns+" FROM workflow_candidates WHERE workflow_id = ? AND status = ? ORDER BY id DESC LIMIT 1", workflowID, workflow.CandidateOpen))
+	if errors.Is(err, sql.ErrNoRows) {
+		return workflow.Candidate{}, workflow.ErrNotFound
+	}
+	if err != nil {
+		return workflow.Candidate{}, err
+	}
+	return c, nil
+}
+
+// UpdateCandidate writes graph, summary, status, published_version and
+// updated_at of an existing candidate, or returns ErrNotFound (spec 51). A
+// zero UpdatedAt becomes the current time.
+func (s *Store) UpdateCandidate(ctx context.Context, c workflow.Candidate) error {
+	return s.withWrite(ctx, func(conn *sql.Conn) error {
+		graphJSON, err := json.Marshal(c.Graph)
+		if err != nil {
+			return err
+		}
+		updated := c.UpdatedAt
+		if updated == 0 {
+			updated = nowMS()
+		}
+		res, err := conn.ExecContext(ctx, "UPDATE workflow_candidates SET graph_json = ?, summary = ?, status = ?, published_version = ?, updated_at = ? WHERE id = ?",
+			string(graphJSON), c.Summary, c.Status, c.PublishedVersion, updated, c.ID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return workflow.ErrNotFound
+		}
+		return nil
+	})
 }
 
 var _ workflow.Store = (*Store)(nil)

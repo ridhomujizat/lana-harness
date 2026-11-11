@@ -312,16 +312,17 @@ func (s *Service) Runs(ctx context.Context, id string, limit, before int) ([]Run
 	return s.store.ListRuns(ctx, RunFilter{WorkflowID: id, Limit: limit, Before: before})
 }
 
-// RunDetail returns one run with the version graph, node runs and decisions
-// (API-WF-013, REQ-WF-004). ref is a run id or a run number.
+// RunDetail returns one run with the graph it ran, node runs and decisions
+// (API-WF-013, REQ-WF-004): the version graph, or the candidate graph of a
+// candidate test run (spec 51). ref is a run id or a run number.
 func (s *Service) RunDetail(ctx context.Context, id, ref string) (RunDetail, error) {
 	run, err := s.resolveRun(ctx, id, ref)
 	if err != nil {
 		return RunDetail{}, err
 	}
 	var graph Graph
-	if ver, err := s.store.GetVersion(ctx, run.WorkflowID, run.Version); err == nil {
-		graph = ver.Graph.Normalized()
+	if g, err := runGraph(ctx, s.store, run); err == nil {
+		graph = g.Normalized()
 	}
 	nodes, _ := s.store.ListNodeRuns(ctx, run.ID)
 	decisions, _ := s.store.ListDecisions(ctx, DecisionFilter{RunID: run.ID})
@@ -606,6 +607,14 @@ func (s *Service) Resume(ctx context.Context, id string) (Detail, error) {
 // StartRun creates and launches a run (API-WF-011, REQ-WF-003). It refuses to
 // start while a run of the workflow is already running.
 func (s *Service) StartRun(ctx context.Context, id, trigger string, input json.RawMessage) (Run, error) {
+	return s.startRun(ctx, id, trigger, input, nil)
+}
+
+// startRun creates and launches a run of the current version, or of candidate
+// when it is not nil (spec 51 REQ-WFC-005): the run then carries the
+// candidate id and its base version. It refuses with ErrRunActive while a run
+// of the workflow is running.
+func (s *Service) startRun(ctx context.Context, id, trigger string, input json.RawMessage, candidate *Candidate) (Run, error) {
 	wf, err := s.store.GetWorkflow(ctx, id)
 	if err != nil {
 		return Run{}, err
@@ -625,21 +634,32 @@ func (s *Service) StartRun(ctx context.Context, id, trigger string, input json.R
 		return Run{}, ErrRunActive
 	}
 
-	ver, err := s.store.GetVersion(ctx, id, wf.Version)
-	if err != nil {
-		return Run{}, err
+	version := wf.Version
+	var graph Graph
+	var candidateID int64
+	if candidate != nil {
+		version = candidate.BaseVersion
+		graph = candidate.Graph
+		candidateID = candidate.ID
+	} else {
+		ver, err := s.store.GetVersion(ctx, id, wf.Version)
+		if err != nil {
+			return Run{}, err
+		}
+		graph = ver.Graph
 	}
 	if len(input) == 0 {
 		input = json.RawMessage("{}")
 	}
 	run, err := s.store.CreateRun(ctx, Run{
-		WorkflowID: id,
-		Version:    wf.Version,
-		Trigger:    trigger,
-		Input:      input,
-		Status:     RunQueued,
-		StartedAt:  s.now().UnixMilli(),
-		NodesTotal: len(ver.Graph.Nodes),
+		WorkflowID:  id,
+		Version:     version,
+		CandidateID: candidateID,
+		Trigger:     trigger,
+		Input:       input,
+		Status:      RunQueued,
+		StartedAt:   s.now().UnixMilli(),
+		NodesTotal:  len(graph.Nodes),
 	})
 	if err != nil {
 		return Run{}, err

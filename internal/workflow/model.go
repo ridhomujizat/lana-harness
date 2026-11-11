@@ -157,6 +157,7 @@ type Workflow struct {
 	FailureDefault      FailurePolicy `json:"failure_default"`
 	WebhookToken        string        `json:"-"`
 	ConsecutiveFailures int           `json:"consecutive_failures"`
+	AssistantSession    string        `json:"assistant_session"` // guardian chat session (spec 51)
 	CreatedAt           int64         `json:"created_at"`
 	UpdatedAt           int64         `json:"updated_at"`
 }
@@ -189,8 +190,11 @@ type Run struct {
 	Summary       string          `json:"summary"`
 	// Overrides holds "this run only" parameter patches by node id.
 	Overrides map[string]map[string]any `json:"overrides,omitempty"`
-	StartedAt int64                     `json:"started_at"`
-	EndedAt   int64                     `json:"ended_at"`
+	// CandidateID >0 marks a test run of that candidate (spec 51 REQ-WFC-005);
+	// Version then holds the candidate's base version.
+	CandidateID int64 `json:"candidate_id,omitempty"`
+	StartedAt   int64 `json:"started_at"`
+	EndedAt     int64 `json:"ended_at"`
 }
 
 // Attempt is one try of a node run.
@@ -257,7 +261,33 @@ type ChatMessage struct {
 	Text       string       `json:"text"`
 	Change     *GraphChange `json:"change,omitempty"`
 	Issues     []Issue      `json:"issues,omitempty"`
-	CreatedAt  int64        `json:"created_at"`
+	// SessionID and TurnID point at the guardian session turn that produced
+	// this message (spec 51); both are empty on messages from before it.
+	SessionID string `json:"session_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// Candidate statuses (spec 51 REQ-WFC-003).
+const (
+	CandidateOpen       = "open"
+	CandidateSuperseded = "superseded"
+	CandidatePublished  = "published"
+	CandidateDiscarded  = "discarded"
+)
+
+// Candidate is a saved but unpublished graph (spec 51 REQ-WFC-003).
+type Candidate struct {
+	ID               int64  `json:"id"`
+	WorkflowID       string `json:"-"`
+	BaseVersion      int    `json:"base_version"`
+	Graph            Graph  `json:"graph"`
+	Summary          string `json:"summary"`
+	Author           string `json:"author"`
+	Status           string `json:"status"` // open|superseded|published|discarded
+	PublishedVersion int    `json:"published_version,omitempty"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
 }
 
 // GraphChange summarizes what an assistant edit changed between two versions.
