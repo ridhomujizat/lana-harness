@@ -393,3 +393,9 @@ function getSnapshot(): RoomsState {
 export function useRooms(): RoomsState {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
+
+/* Reloads the room rows now, for example after a team was created or saved
+   (spec 47 New group room, Room settings). */
+export function refreshRooms(): Promise<void> {
+  return poll();
+}

@@ -15,6 +15,11 @@ import type { StreamState } from "../api/client";
 import { answerQuestion, skipAllQuestions } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
 import { markRoomRead, roomSegments, sendToRoom } from "../api/rooms";
+import { stopDiscussion } from "../api/discussion";
+import { discussionStatus } from "../lib/discussion";
+import { DiscussionBar, TeamAvatar } from "./discussion";
+import { RoomSettings } from "./room-settings";
+import type { RoomSettingsTab } from "./room-settings";
 import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
@@ -24,7 +29,7 @@ import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import { Badge, Button, Skeleton } from "../ui/gr8r";
-import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
+import { AgentAvatar } from "./agent-avatar";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
 import {
@@ -319,6 +324,10 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   /* API reply: the automation message the next send replies to. */
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [newTopic, setNewTopic] = useState(false);
+  /* Spec 47 REQ-RDS-020: Discuss on for the next message. */
+  const [discuss, setDiscuss] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<RoomSettingsTab | null>(null);
+  const [stoppingId, setStoppingId] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -329,7 +338,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const startedRef = useRef(false);
   const handledSessionRef = useRef("");
   const attachmentDraft = useAttachmentDraft();
-  const { byName } = useRooms();
+  const { byName, rows: roomRows } = useRooms();
 
   /* REQ-ROOM-008: the faces of the room, its lead and its members, with each
      agent's configured color for the group chat. */
@@ -972,6 +981,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
       if (topic) {
         body.new_topic = true;
       }
+      if (discuss && team) {
+        body.discuss = true;
+      }
       if (replyTarget) {
         body.reply_to = replyTarget.seq;
       }
@@ -980,6 +992,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
          carries its own reply_to. */
       setReplyTarget(null);
       setNewTopic(false);
+      setDiscuss(false);
       attachmentDraft.clear();
       if (result.command) {
         /* API-WF-021: a workflow chat command started a run, not a turn. */
@@ -1073,6 +1086,32 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
         workingLabel(workingMembers.map((name) => agentLabel(name, byName)))
       : "");
 
+  /* REQ-RDS-051: the newest running turn with an open discussion. */
+  const openDiscussion = useMemo(() => {
+    if (!team) {
+      return null;
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const node = nodes[index];
+      if (node && node.kind === "turn" && node.turn.discussion) {
+        const log = node.turn.discussion;
+        return node.turn.running && discussionStatus(log).open ? { log, sessionId: node.sessionId } : null;
+      }
+    }
+    return null;
+  }, [nodes, team]);
+
+  async function stopRoomDiscussion(sessionId: string, mode: "stop" | "direct") {
+    if (openDiscussion) {
+      setStoppingId(openDiscussion.log.id);
+    }
+    try {
+      await stopDiscussion(sessionId, mode);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    }
+  }
+
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (mentions.onKeyDown(event)) {
       return;
@@ -1150,7 +1189,14 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
         return (
           <div className="msg-enter" key={node.key}>
             {team ? (
-              <RoomGroup turn={node.turn} room={room} faces={faces} sessionId={node.sessionId} />
+              <RoomGroup
+                turn={node.turn}
+                room={room}
+                faces={faces}
+                sessionId={node.sessionId}
+                onDirect={() => void stopRoomDiscussion(node.sessionId, "direct")}
+                onMemory={() => setSettingsTab("memory")}
+              />
             ) : (
               <TurnBlock
                 turn={node.turn}
@@ -1183,9 +1229,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
           <Ic name="chevron-left" size={18} />
         </a>
         {team ? (
-          <AgentAvatarStack
-            size="lg"
-            max={3}
+          <TeamAvatar
+            size={44}
             items={teamFaces.map((face) => ({
               name: face.name,
               color: gr8rColor(face.color),
@@ -1220,15 +1265,32 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
           </div>
         </div>
         <div className="room-head-actions">
-          <Button
-            as="a"
-            size="sm"
-            href={"#/agents/" + encodeURIComponent(room.name)}
-          >
-            View profile
-          </Button>
+          {team ? (
+            <Button size="sm" onClick={() => setSettingsTab("members")}>
+              Members
+            </Button>
+          ) : (
+            <Button
+              as="a"
+              size="sm"
+              href={"#/agents/" + encodeURIComponent(room.name)}
+            >
+              View profile
+            </Button>
+          )}
         </div>
       </header>
+      {settingsTab && team ? (
+        <RoomSettings room={room} rows={roomRows} initialTab={settingsTab} onClose={() => setSettingsTab(null)} />
+      ) : null}
+      {openDiscussion ? (
+        <DiscussionBar
+          log={openDiscussion.log}
+          faces={faces}
+          stopping={stoppingId === openDiscussion.log.id}
+          onStop={() => void stopRoomDiscussion(openDiscussion.sessionId, "stop")}
+        />
+      ) : null}
 
       {loadError ? (
         <div className="alert danger room-notices" role="alert">
@@ -1366,6 +1428,20 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 onFiles={attachmentDraft.addFiles}
               />
             </span>
+            {team ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="messages-square"
+                className={"room-discuss" + (discuss ? " on" : "")}
+                aria-pressed={discuss}
+                title="Ask the lead to open a discussion"
+                disabled={sending}
+                onClick={() => setDiscuss((value) => !value)}
+              >
+                Discuss
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="ghost"
@@ -1412,9 +1488,8 @@ function RoomEmpty({
   return (
     <div className="room-empty">
       {team && teamFaces.length > 0 ? (
-        <AgentAvatarStack
-          size="xl"
-          max={3}
+        <TeamAvatar
+          size={64}
           items={teamFaces.map((face) => ({
             name: face.name,
             color: gr8rColor(face.color),
@@ -1429,13 +1504,27 @@ function RoomEmpty({
         />
       )}
       <h2 className="room-empty-title">
-        {team
-          ? "Ask the team something — " +
-            leadLabel +
-            " will hand work to the right member"
-          : "Start a conversation with " + displayLabel(room)}
+        {team ? displayLabel(room) + " is ready" : "Start a conversation with " + displayLabel(room)}
       </h2>
-      {room.title ? (
+      {team ? (
+        <>
+          <p className="room-empty-text muted">
+            {"Ask anything here. " +
+              leadLabel +
+              " answers, brings in a member when needed, and opens a discussion when a question needs more than one view."}
+          </p>
+          <div className="room-empty-members">
+            {teamFaces.map((face) => (
+              <span key={face.name} className="room-empty-member">
+                <AgentAvatar name={face.name} color={gr8rColor(face.color)} size="sm" />
+                <span>{face.label || face.name}</span>
+                {face.name === room.lead ? <span className="muted">lead</span> : null}
+              </span>
+            ))}
+          </div>
+          {room.title ? <p className="room-empty-text muted">{room.title}</p> : null}
+        </>
+      ) : room.title ? (
         <p className="room-empty-text muted">{room.title}</p>
       ) : null}
     </div>

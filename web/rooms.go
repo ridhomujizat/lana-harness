@@ -344,6 +344,12 @@ func (s *Server) roomAgentMeta(ctx context.Context) map[string]agentMeta {
 		record := agentRecordFromMap(table)
 		meta[name] = agentMeta{title: record.Title, displayName: record.DisplayName, color: record.Color}
 	}
+	// Spec 47: a team's display_name names its room.
+	if document, err := parseTeamDocument(file.Raw); err == nil {
+		for name, table := range document.Teams {
+			meta[name] = agentMeta{displayName: mapAgentString(table, "display_name")}
+		}
+	}
 	return meta
 }
 
@@ -364,6 +370,9 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 		row.Lead = agent.Lead
 		row.Members = nonNilStrings(agent.Members)
 		row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(agent.Name), avatar.Default
+		if m, ok := meta[agent.Name]; ok {
+			row.DisplayName = m.displayName
+		}
 	} else {
 		if m, ok := meta[agent.Name]; ok {
 			row.Title = m.title

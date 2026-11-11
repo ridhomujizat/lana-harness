@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoomRow } from "../api/rooms";
 import { gr8rColor, PresenceLabel, useRooms } from "./presence";
 import { displayLabel } from "./agent-label";
@@ -7,11 +7,15 @@ import {
   Badge,
   Button,
   EmptyState,
+  Menu,
+  MenuItem,
   SearchInput,
   Seg,
   Skeleton,
 } from "../ui/gr8r";
-import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
+import { AgentAvatar } from "./agent-avatar";
+import { TeamAvatar } from "./discussion";
+import { NewGroupRoom } from "./new-group-room";
 import type { BadgeTone } from "../ui/gr8r";
 
 /* The Chats page of REQ-ROOM-001 to REQ-ROOM-005: the room list column and the
@@ -64,12 +68,13 @@ function rowStatus(row: RoomRow) {
   return <span className="rooms-row-preview">{preview || "No messages yet"}</span>;
 }
 
-function RowFace({ row }: { row: RoomRow }) {
+function RowFace({ row, colors }: { row: RoomRow; colors: Record<string, string> }) {
   if (row.kind === "team") {
+    /* REQ-RDS-056: two faces, three faces, or two faces and +N. */
     const items = [row.lead, ...(row.members || [])]
       .filter(Boolean)
-      .map((name) => ({ name: String(name), color: gr8rColor(row.color) }));
-    return <AgentAvatarStack items={items} max={2} size="lg" />;
+      .map((name) => ({ name: String(name), color: gr8rColor(colors[String(name)]) }));
+    return <TeamAvatar items={items} size={44} />;
   }
   const state = rowState(row);
   return (
@@ -90,6 +95,16 @@ function isPhoneWidth(): boolean {
 
 export function ChatsPage({ roomName, draft }: ChatsPageProps) {
   const { rows, loading } = useRooms();
+  const newRef = useRef<HTMLSpanElement>(null);
+  const [newOpen, setNewOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const colors = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const row of rows) {
+      out[row.name] = row.color;
+    }
+    return out;
+  }, [rows]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
 
@@ -155,9 +170,32 @@ export function ChatsPage({ roomName, draft }: ChatsPageProps) {
       <aside className="rooms-list" aria-label="Chats">
         <header className="rooms-list-head">
           <h1 className="rooms-list-title">Chats</h1>
-          <Button as="a" href="#/agents" size="sm" icon="plus">
-            New agent
-          </Button>
+          <span ref={newRef} className="rooms-new">
+            <Button size="sm" icon="plus" aria-haspopup="menu" aria-expanded={newOpen} onClick={() => setNewOpen((v) => !v)}>
+              New
+            </Button>
+          </span>
+          <Menu anchorRef={newRef} open={newOpen} onClose={() => setNewOpen(false)} className="new-menu">
+            <MenuItem
+              icon="user-plus"
+              onClick={() => {
+                setNewOpen(false);
+                window.location.hash = "#/agents";
+              }}
+            >
+              New agent
+            </MenuItem>
+            <MenuItem
+              icon="users"
+              onClick={() => {
+                setNewOpen(false);
+                setCreating(true);
+              }}
+            >
+              New group room
+            </MenuItem>
+          </Menu>
+          {creating ? <NewGroupRoom rows={rows} defaultLead="lana" onClose={() => setCreating(false)} /> : null}
         </header>
         <SearchInput
           wrapClassName="rooms-search"
@@ -224,7 +262,7 @@ export function ChatsPage({ roomName, draft }: ChatsPageProps) {
                       href={"#/chats/" + encodeURIComponent(row.name)}
                       aria-current={active ? "page" : undefined}
                     >
-                      <RowFace row={row} />
+                      <RowFace row={row} colors={colors} />
                       <span className="rooms-row-body">
                         <span className="rooms-row-top">
                           <span className="rooms-row-name">{displayLabel(row)}</span>

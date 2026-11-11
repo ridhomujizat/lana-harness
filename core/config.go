@@ -184,6 +184,9 @@ type AgentRules struct {
 
 // TeamConfig is the [teams.<name>] table. Lead and members name agents.
 type TeamConfig struct {
+	// DisplayName is the room name people see ("Career plan"); "" shows the
+	// team name (spec 47 New group room).
+	DisplayName string   `toml:"display_name"`
 	Description string   `toml:"description"`
 	Lead        string   `toml:"lead"`
 	Members     []string `toml:"members"`

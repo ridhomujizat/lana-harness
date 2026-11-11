@@ -62,7 +62,7 @@ func runtimeNames() []string {
 	return names
 }
 
-var teamKeys = []string{"description", "discuss", "extra_rounds", "lead", "learn", "members", "room_memory", "rounds", "share_summary", "telegram_all"}
+var teamKeys = []string{"description", "discuss", "display_name", "extra_rounds", "lead", "learn", "members", "room_memory", "rounds", "share_summary", "telegram_all"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
@@ -752,6 +752,14 @@ func validateTeam(v map[string]any, path string, add func(string, string)) {
 			add(path+".description", typeMsg("string", raw))
 		} else if n := utf8.RuneCountInString(s); n > maxTeamDescription {
 			add(path+".description", fmt.Sprintf("must be at most %d characters", maxTeamDescription))
+		}
+	}
+	if raw, ok := v["display_name"]; ok {
+		s, ok := raw.(string)
+		if !ok {
+			add(path+".display_name", typeMsg("string", raw))
+		} else if n := utf8.RuneCountInString(s); n > maxAgentDisplayName {
+			add(path+".display_name", fmt.Sprintf("must be at most %d characters", maxAgentDisplayName))
 		}
 	}
 	// Spec 47 REQ-RDS-001: discussion settings.

@@ -1,3 +1,6 @@
+import { applyDiscussionEvent } from "../lib/discussion";
+import { DiscussionCard } from "./discussion";
+import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { useEffect, useState } from "react";
@@ -174,6 +177,8 @@ export interface ChatTurn extends Turn {
   notes: string[];
   /* REQ-AGF-005: the files the agent sent in this turn (file/sent events). */
   sentFiles: SentFileRef[];
+  /* Spec 47: the room discussion of this turn, if the lead opened one. */
+  discussion: DiscussionLog | null;
 }
 
 /* SentFileRef is one file/sent event (API-AGF-001). */
@@ -896,7 +901,17 @@ export function TurnBlock({
         waitingForInput={waitingForInput}
         turnKey={String(turn.key || turn.id || "turn")}
       />
-      {parts.answer.map((segment) => (
+      {parts.answer.map((segment) =>
+        segment.source === "discussion" ? (
+          /* Spec 47 REQ-RDS-053: a discussion summary shared into a member's
+             room shows as a card. */
+          <DiscussionCard
+            key={segment.key}
+            team={segment.sourceName || ""}
+            text={segment.text || ""}
+            at={Number(turn.startedAt) || 0}
+          />
+        ) : (
         <div className="turn-text turn-answer" key={segment.key}>
           {segment.source ? (
             <div className="turn-via muted">
@@ -928,7 +943,8 @@ export function TurnBlock({
           ) : null}
           <Markdown text={segment.text || ""} />
         </div>
-      ))}
+        )
+      )}
       {sessionId && (turn.sentFiles || []).length > 0 ? (
         <AgentFiles
           sessionId={sessionId}
@@ -1094,6 +1110,7 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     currentStep: 0,
     notes: [],
     sentFiles: [],
+    discussion: null,
   };
 }
 
@@ -1361,6 +1378,14 @@ export function buildTurns(
             at: createdAt,
           });
         }
+        break;
+      }
+      case "discussion/started":
+      case "discussion/message":
+      case "discussion/ended": {
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        turn.discussion = applyDiscussionEvent(turn.discussion, event.kind, payload, event.seq, createdAt);
         break;
       }
       case "turn/end": {

@@ -1,5 +1,7 @@
 import { AgentFiles } from "./message-files";
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
+import { DiscussionThread, SummaryButton } from "./discussion";
+import { displayLabel } from "./agent-label";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import type { RoomRow } from "../api/rooms";
 import { Markdown } from "../lib/markdown";
@@ -43,7 +45,8 @@ export type GroupItem =
       at: number;
       tools: number;
     }
-  | { kind: "working"; key: string; agent: string; title: string };
+  | { kind: "working"; key: string; agent: string; title: string }
+  | { kind: "discussion"; key: string };
 
 type Delegation = Extract<TeamStep, { kind: "delegation" }>;
 type Return = Extract<TeamStep, { kind: "return" }>;
@@ -189,6 +192,15 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
       continue;
     }
     for (const step of group.steps) {
+      /* Spec 47: the discussion renders as one block where the lead opened
+         it; later lead text follows it. */
+      if (turn.discussion && String(step.name || "").startsWith("discuss_")) {
+        if (!items.some((item) => item.kind === "discussion")) {
+          items.push({ kind: "discussion", key: "discussion-" + turn.key });
+          lead = null;
+        }
+        continue;
+      }
       if (!step.callId || !isDelegation(step.name)) {
         continue;
       }
@@ -238,6 +250,9 @@ export interface RoomGroupProps {
   faces: Record<string, FaceRef>;
   /* REQ-AGF-005: the session of the turn, for the URLs of sent files. */
   sessionId?: string;
+  /* Spec 47: "Answer directly instead" and "View room memory". */
+  onDirect?: () => void;
+  onMemory?: () => void;
 }
 
 function HandoffChipView({
@@ -373,17 +388,60 @@ function WorkingRow({
   );
 }
 
-export function RoomGroup({ turn, room, faces, sessionId = "" }: RoomGroupProps) {
+export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemory }: RoomGroupProps) {
   const lead = room.lead || "lead";
-  const items = useMemo(() => groupItems(turn), [turn]);
+  const items = useMemo(() => {
+    const list = groupItems(turn);
+    /* A discussion whose steps are not in the turn yet (live) still shows. */
+    if (turn.discussion && !list.some((item) => item.kind === "discussion")) {
+      list.unshift({ kind: "discussion", key: "discussion-" + turn.key });
+    }
+    return list;
+  }, [turn]);
   if (items.length === 0) {
     return null;
   }
+  const discussion = turn.discussion;
+  /* REQ-RDS-052: the Summary button sits under the lead's last message after
+     the discussion, or under the discussion when the lead wrote nothing. */
+  const discussionIndex = items.findIndex((item) => item.kind === "discussion");
+  let summaryAfter = -1;
+  if (discussion && discussion.ended) {
+    summaryAfter = discussionIndex;
+    items.forEach((item, index) => {
+      if (index > discussionIndex && item.kind === "lead") {
+        summaryAfter = index;
+      }
+    });
+  }
+  const summary =
+    discussion && discussion.ended ? (
+      <div className="disc-after" key="disc-summary">
+        <SummaryButton log={discussion} faces={faces} room={displayLabel(room)} onMemory={onMemory} />
+      </div>
+    ) : null;
   return (
     <div className="room-group">
-      {items.map((item) => {
+      {items.map((item, index) => {
+        const tail = index === summaryAfter ? summary : null;
+        if (item.kind === "discussion" && discussion) {
+          return (
+            <Fragment key={item.key}>
+              <DiscussionThread log={discussion} faces={faces} running={turn.running} onDirect={onDirect} />
+              {tail}
+            </Fragment>
+          );
+        }
+        if (item.kind === "discussion") {
+          return null;
+        }
         if (item.kind === "lead") {
-          return <LeadMessage key={item.key} item={item} lead={lead} faces={faces} />;
+          return (
+            <Fragment key={item.key}>
+              <LeadMessage item={item} lead={lead} faces={faces} />
+              {tail}
+            </Fragment>
+          );
         }
         if (item.kind === "working") {
           return <WorkingRow key={item.key} item={item} face={faces[item.agent]} />;

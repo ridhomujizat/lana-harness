@@ -422,13 +422,14 @@ func TestTeamDiscussionSettings(t *testing.T) {
 	body := teamJSONBody(t, map[string]any{
 		"lead": "lead", "members": []string{"researcher"}, "description": "Old description",
 		"expected_version": before.Version, "discuss": "ask", "rounds": 2, "telegram_all": false,
+		"display_name": "Research squad",
 	})
 	response := serveTeam(t, s, http.MethodPut, "/v1/teams/research-squad", body, cookie, csrf)
 	if response.code != http.StatusOK {
 		t.Fatalf("PUT status = %d, body = %q", response.code, response.body)
 	}
 	file := string(readTeamFile(t, store.path))
-	for _, want := range []string{"discuss = 'ask'", "rounds = 2", "telegram_all = false"} {
+	for _, want := range []string{"discuss = 'ask'", "rounds = 2", "telegram_all = false", "display_name = 'Research squad'"} {
 		if !strings.Contains(file, want) {
 			t.Fatalf("config lacks %q:\n%s", want, file)
 		}
