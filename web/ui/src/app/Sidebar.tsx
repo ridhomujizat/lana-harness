@@ -660,7 +660,9 @@ export function Sidebar({
       </div>
 
       <div className="side-scroll">
-        {collapsed ? (
+        {/* Spec 52: in the Lana.app window the topbar carries the expand
+            toggle next to the traffic lights, so the rail does not. */}
+        {collapsed && !shell ? (
           <button
             type="button"
             className="sitem"

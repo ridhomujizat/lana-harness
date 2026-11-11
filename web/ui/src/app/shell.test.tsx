@@ -74,5 +74,13 @@ describe("macOS app shell (spec 52)", () => {
     renderSidebar(true);
     expect(document.querySelector(".side-chrome")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Collapse sidebar" })).toBeNull();
+    /* The topbar carries the expand toggle, so the rail has none. */
+    expect(screen.queryByRole("button", { name: "Expand sidebar" })).toBeNull();
+  });
+
+  it("keeps the rail's expand toggle in a browser", () => {
+    delete document.documentElement.dataset.shell;
+    renderSidebar(true);
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
   });
 });
