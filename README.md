@@ -211,6 +211,27 @@ For debugging, `LanaMenu --watch-events` prints the events as they arrive,
 
 `dist/Lana.app/Contents/MacOS/LanaMenu --dump-status` prints the same status and usage as JSON.
 
+### Lana window and the bundled daemon
+
+`Lana.app` also opens the dashboard in its own window: **Open lana** in the menu bar (⌘O), opening
+Lana.app from Finder or Spotlight, or clicking a notification. While the window is open lana has a
+Dock icon and a menu bar with Edit, View (⌘R reload, zoom), and Go (⌘1–⌘5 for Chat, Workflows,
+Calendar, Dashboard, Router). The window signs itself in through the daemon, so you never type the
+password there and your browsers stay signed in. Links to other sites open in your browser. In
+**Settings…** you can send pages back to the browser.
+
+`make app` (same as `make macos-app`) puts the lana daemon binary inside the bundle, at
+`Lana.app/Contents/MacOS/lana`. To switch an existing install to it:
+
+```sh
+nix develop -c make app            # or: make app LANA_BIN=/path/to/the/lana/you/run
+apps/macos/install-app.sh          # dry run: prints each step
+apps/macos/install-app.sh --yes    # copies to /Applications, links ~/.local/bin/lana, updates launchd
+```
+
+The script never restarts the daemon; it prints how. Details and the undo steps are in
+[spec #52](docs/specs/52-desktop-app/requirements.md).
+
 ## Router
 
 Every model call goes through the router: chat turns, compaction, memory, knowledge, and the proxy

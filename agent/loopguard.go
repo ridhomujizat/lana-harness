@@ -159,9 +159,10 @@ func (g *loopGuard) reset() {
 // loopGuardUntracked lists the tools that are transparent to every detector:
 // they neither count nor reset anything (REQ-TRL-012).
 var loopGuardUntracked = map[string]bool{
-	"ask_user":   true,
-	"job_output": true,
-	"job_list":   true,
+	"ask_user":       true,
+	"secret_request": true,
+	"job_output":     true,
+	"job_list":       true,
 }
 
 // loopGuardReadOnly lists the tools whose repeated identical result is the

@@ -379,6 +379,7 @@ func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]s
 	_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
 	_, sendFileRegistered := rn.reg.tools.Get(SendFileTool)
 	_, discussRegistered := rn.reg.tools.Get(DiscussTools[0])
+	_, builderRegistered := rn.reg.tools.Get(WorkflowBuilderTool)
 	for _, name := range AutoOfferedTools(AutoOfferState{
 		Root:                !resolved.child,
 		MCPManageRegistered: mcpManageRegistered,
@@ -387,6 +388,7 @@ func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]s
 		CalendarRegistered:  calendarRegistered,
 		SendFileRegistered:  sendFileRegistered,
 		Discussion:          resolved.team != "" && !resolved.child && discussRegistered,
+		WorkflowBuilder:     resolved.channel == "workflow" && !resolved.child && builderRegistered,
 	}) {
 		if !containsString(tools, name) {
 			tools = append(tools, name)
@@ -427,6 +429,7 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		SkillWrite:    resolved.cfg.SkillWrite,
 		Questions:     rn.reg.questions,
 		Files:         rn.reg.files,
+		Secrets:       rn.reg.secretReqs,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
 		Discussions:   rn.discussionRunner(resolved),
 		MCPAdmin:      mcpAdmin,

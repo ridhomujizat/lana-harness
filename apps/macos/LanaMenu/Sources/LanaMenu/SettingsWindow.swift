@@ -12,7 +12,7 @@ enum SettingsWindow {
         if window == nil {
             let host = NSHostingController(rootView: SettingsView(model: model))
             let window = NSWindow(contentViewController: host)
-            window.title = "lana Menu Settings"
+            window.title = AppVariant.current == .dev ? "lana dev Settings" : "lana Menu Settings"
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()
@@ -64,10 +64,12 @@ struct SettingsView: View {
                         .lineLimit(2)
                 }
             } footer: {
-                Text("Empty fields use the defaults: LANA_HOME from the environment or ~/.lana, and lana from your login shell PATH, ~/.local/bin, ~/go/bin, /opt/homebrew/bin, or /usr/local/bin.")
+                Text("Empty fields use the defaults: LANA_HOME from the environment or ~/.lana, and lana from Lana.app, your login shell PATH, ~/.local/bin, ~/go/bin, /opt/homebrew/bin, or /usr/local/bin.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            WindowSection(settings: model.settings)
 
             NotificationSection(notifier: model.notifier)
 
@@ -106,6 +108,34 @@ struct SettingsView: View {
         panel.message = "Choose the lana binary"
         if panel.runModal() == .OK, let url = panel.url {
             binary = url.path
+        }
+    }
+}
+
+/// WindowSection holds the lana window settings of spec #52.
+struct WindowSection: View {
+    let settings: AppSettings
+    @State private var openInWindow: Bool
+    @State private var windowAtLaunch: Bool
+
+    init(settings: AppSettings) {
+        self.settings = settings
+        _openInWindow = State(initialValue: settings.openInWindow)
+        _windowAtLaunch = State(initialValue: settings.windowAtLaunch)
+    }
+
+    var body: some View {
+        Section {
+            Toggle("Open pages and notifications in the lana window", isOn: $openInWindow)
+                .onChange(of: openInWindow) { settings.openInWindow = $0 }
+            Toggle("Open the lana window when Lana.app starts", isOn: $windowAtLaunch)
+                .onChange(of: windowAtLaunch) { settings.windowAtLaunch = $0 }
+        } header: {
+            Text("Window")
+        } footer: {
+            Text("Off sends Chat, Workflows, Calendar, and notification clicks to the browser. A start at login never opens the window.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

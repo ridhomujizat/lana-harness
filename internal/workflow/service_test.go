@@ -12,8 +12,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
@@ -277,112 +275,6 @@ func TestServiceCommand(t *testing.T) {
 
 // ---- AC-WF-017 / AC-WF-018 ------------------------------------------------
 
-func TestAssistAddNodeAndRestore(t *testing.T) {
-	st := NewMemStore()
-	deps := newFakeDeps()
-	svc := newTestService(t, st, deps, &testClock{})
-	ctx := context.Background()
-
-	g := Graph{Nodes: []Node{wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true})}}
-	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
-
-	deps.replies = []fakeReply{{
-		contains: "You are the guardian of workflow",
-		tokens:   77,
-		text: `{"reply":"Menambahkan Kirim","graph":{"nodes":[` +
-			`{"id":"start","type":"trigger.manual","name":"Start","params":{"enabled":true}},` +
-			`{"id":"kirim","type":"message","name":"Kirim","params":{"text":"hai"}}],` +
-			`"edges":[{"id":"e1","from":"start","from_port":"out","to":"kirim"}]},"summary":"add Kirim"}`,
-	}}
-
-	res, err := svc.Assist(ctx, "w", 1, "tambah node")
-	if err != nil {
-		t.Fatalf("assist: %v", err)
-	}
-	if res.Workflow.Version != 2 || res.Workflow.VersionAuthor != "guardian" {
-		t.Fatalf("workflow=%+v", res.Workflow.Workflow)
-	}
-	if res.Message.Change == nil || len(res.Message.Change.Added) != 1 || res.Message.Change.Added[0] != "Kirim" {
-		t.Fatalf("change=%+v", res.Message.Change)
-	}
-	if res.Tokens != 77 {
-		t.Fatalf("tokens=%d want 77", res.Tokens)
-	}
-
-	restored, err := svc.Restore(ctx, "w", 1)
-	if err != nil {
-		t.Fatalf("restore: %v", err)
-	}
-	if restored.Version != 3 {
-		t.Fatalf("restore version=%d want 3", restored.Version)
-	}
-	v1, _ := st.GetVersion(ctx, "w", 1)
-	v3, _ := st.GetVersion(ctx, "w", 3)
-	if !reflect.DeepEqual(v1.Graph, v3.Graph) {
-		t.Fatalf("restored graph=%+v want %+v", v3.Graph, v1.Graph)
-	}
-}
-
-func TestAssistInvalidGraph(t *testing.T) {
-	st := NewMemStore()
-	deps := newFakeDeps()
-	svc := newTestService(t, st, deps, &testClock{})
-	ctx := context.Background()
-
-	g := Graph{Nodes: []Node{wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true})}}
-	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
-
-	deps.replies = []fakeReply{{
-		contains: "You are the guardian of workflow",
-		text:     `{"reply":"","graph":{"nodes":[{"id":"a","type":"bogus","name":"A","params":{}}],"edges":[]},"summary":"x"}`,
-	}}
-
-	res, err := svc.Assist(ctx, "w", 1, "x")
-	if err != nil {
-		t.Fatalf("assist: %v", err)
-	}
-	if res.Workflow.Version != 1 {
-		t.Fatalf("version=%d want 1 (no version saved)", res.Workflow.Version)
-	}
-	if len(res.Message.Issues) == 0 {
-		t.Fatalf("message=%+v want issues", res.Message)
-	}
-	if res.Message.Text != "I could not apply that change." {
-		t.Fatalf("text=%q", res.Message.Text)
-	}
-}
-
-// Spec 39 revision 5: the assistant turn is a structured call on the
-// guardian's background chain, and a guardian on Claude Code without a
-// background model answers its own error, not ErrGuardianUnavailable.
-func TestAssistGuardianBackground(t *testing.T) {
-	st := NewMemStore()
-	deps := newFakeDeps()
-	svc := newTestService(t, st, deps, &testClock{})
-	ctx := context.Background()
-
-	g := Graph{Nodes: []Node{wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true})}}
-	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "bima"}, g)
-
-	deps.replies = []fakeReply{{contains: "You are the guardian of workflow", text: `{"reply":"ok","graph":null}`}}
-	if _, err := svc.Assist(ctx, "w", 1, "hi"); err != nil {
-		t.Fatalf("assist: %v", err)
-	}
-	if len(deps.agentCalls) != 1 || !deps.agentCalls[0].Background || deps.agentCalls[0].Agent != "bima" {
-		t.Fatalf("calls=%+v want one background call", deps.agentCalls)
-	}
-
-	deps.replies = []fakeReply{{contains: "You are the guardian of workflow", err: &GuardianBackgroundError{Agent: "bima"}}}
-	_, err := svc.Assist(ctx, "w", 1, "hi")
-	var needs *GuardianBackgroundError
-	if !errors.As(err, &needs) || errors.Is(err, ErrGuardianUnavailable) || needs.Agent != "bima" {
-		t.Fatalf("err=%v", err)
-	}
-	if !strings.Contains(err.Error(), "The guardian bima runs on Claude Code. Set a background model in Router") {
-		t.Fatalf("message=%q", err.Error())
-	}
-}
-
 // ---- activate / lock / draft ----------------------------------------------
 
 func TestServiceActivateLockAndDraft(t *testing.T) {
@@ -636,55 +528,5 @@ func TestServiceSubscribeChange(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no change received after create")
-	}
-}
-
-// envDeps is fakeDeps with an environment for the assistant prompt.
-type envDeps struct {
-	*fakeDeps
-	env AssistEnv
-}
-
-func (d envDeps) AssistEnv(context.Context, Workflow) AssistEnv { return d.env }
-
-// The assistant sees the environment (MCP tools, secret names) and can start
-// a test run of the graph it saved.
-func TestAssistEnvAndTestRun(t *testing.T) {
-	st := NewMemStore()
-	fake := newFakeDeps()
-	deps := envDeps{fakeDeps: fake, env: AssistEnv{
-		MCPTools: []EnvTool{{Name: "mcp__hub__task_list", Description: "List tasks", Input: `{"type":"object"}`}},
-		Secrets:  []string{"HUB_TOKEN"},
-	}}
-	svc := newTestService(t, st, deps, &testClock{})
-	ctx := context.Background()
-
-	g := Graph{Nodes: []Node{wfNode("start", "trigger.manual", "Start", map[string]any{"enabled": true})}}
-	seedWorkflow(t, st, Workflow{ID: "w", Name: "W", Guardian: "g"}, g)
-
-	fake.replies = []fakeReply{{
-		contains: "mcp__hub__task_list",
-		text: `{"reply":"Pakai tool MCP langsung","graph":{"nodes":[` +
-			`{"id":"start","type":"trigger.manual","name":"Start","params":{"enabled":true}},` +
-			`{"id":"fetch","type":"tool","name":"Ambil task","params":{"name":"mcp__hub__task_list","input":{}}}],` +
-			`"edges":[{"id":"e1","from":"start","from_port":"out","to":"fetch"}]},"summary":"tool node","test":true}`,
-	}}
-
-	res, err := svc.Assist(ctx, "w", 1, "coba test sendiri")
-	if err != nil {
-		t.Fatalf("assist: %v", err)
-	}
-	if !strings.Contains(res.Message.Text, "Test run #1 started") {
-		t.Fatalf("message = %q, want the test run note", res.Message.Text)
-	}
-	prompt := fake.agentCalls[0].Prompt
-	for _, want := range []string{"HUB_TOKEN", "Bash nodes do NOT get them", "Never promise to do something later"} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt misses %q", want)
-		}
-	}
-	runs, _ := st.ListRuns(ctx, RunFilter{WorkflowID: "w"})
-	if len(runs) != 1 || runs[0].Version != 2 {
-		t.Fatalf("runs = %+v, want one run of version 2", runs)
 	}
 }

@@ -203,3 +203,19 @@ export function regenerateSessionTitle(id: string): Promise<SessionDetail> {
     "/v1/sessions/" + encodeURIComponent(id) + "/title/regenerate"
   );
 }
+
+/* The session's token totals and its context meter: the size of the last
+   model call, the context window and the size at which it compacts on its
+   own (0 when unknown). */
+export interface SessionUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens: number;
+  context_tokens: number;
+  context_window: number;
+  compact_at: number;
+}
+
+export function getSessionUsage(id: string): Promise<SessionUsage> {
+  return request<SessionUsage>("GET", "/v1/sessions/" + encodeURIComponent(id) + "/usage");
+}

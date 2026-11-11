@@ -7,6 +7,59 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.1] - 2026-11-12
+
+### Added
+- The workflow guardian chat is a real agent session (spec 51). The editor's assistant column now works like the main chat:
+  - It shows owner messages with file chips, turns with tool steps, the final markdown reply, `ask_user` and approval cards, Stop, file upload (button, paste, drop), `/new` and the context meter.
+  - Each workflow has one guardian session on channel `workflow`. A hidden context note goes before each owner message: the full guide the first time, then only what changed.
+  - New routes: `GET /v1/workflows/{id}/assistant` (the session id plus change cards), `POST …/assistant` (202, the turn streams on the session), and `POST …/assistant/session` and `…/assistant/new`.
+- The guardian tests before it reports (spec 51). The new `workflow_builder` tool is offered in the guardian chat with these actions:
+  - `get`
+  - `save`: stores the graph as a **candidate**, so the current version stays untouched.
+  - `test`: a run with trigger `test` on the candidate; the tool waits up to 2 minutes.
+  - `publish`: saves the new version and adds a change card with Undo under that turn.
+  - `discard`
+
+  Candidate test runs:
+  - do not count toward the 3-failure Error rule;
+  - skip guardian diagnosis and owner failure notices;
+  - patch the candidate when they learn a Script Parse script.
+
+  The guardian asks with `ask_user` before a test that would reach other people or outside systems, and when a request is ambiguous.
+- Lana.app opens the dashboard in its own window (spec #52): **Open lana** in the menu bar (⌘O),
+  a start of Lana.app, or a notification click shows it, with a Dock icon and a main menu while it
+  is open. The window signs in with a one-time app link from the daemon
+  (`POST /v1/local/app-link`, `GET /v1/auth/app`), so no password is typed or changed. Settings can
+  send pages back to the browser.
+- `make app` bundles the lana daemon binary as `Lana.app/Contents/MacOS/lana`, and
+  `apps/macos/install-app.sh` (`make install-app`) installs the app, points `~/.local/bin/lana` and
+  the `dev.lana.daemon` launchd agent at it, and ties the agent to Lana.app with
+  `AssociatedBundleIdentifiers`, so Login Items shows lana with its icon instead of an executable.
+- Agents add secrets through a secure input card (spec 53). The new standard tool
+  `secret_request` (name, why it is needed, optional link) opens a card in the web chat, the room
+  and the workflow guardian chat with a masked field, a show/hide toggle, Save and Cancel. Save
+  writes Settings > Secrets directly; the agent gets only `saved`, `cancelled` or `expired`, and
+  the value never reaches the model, the session log, the stream, the logs or the audit file. A
+  name that already has a value shows a clear replace warning. Telegram sessions get an error that
+  sends the owner to the web. New events `secret/requested` and `secret/resolved`, SSE event
+  `secret_request`, and `POST /v1/secret-requests/{request_id}`.
+
+### Changed
+- Agents run on `trust` by default: an agent that sets no permission runs every tool without asking (it was `auto`). The agent templates and the `lana init` seed also use `trust`.
+- The standard toolset now holds every built-in tool that works without context. Newly added: `send_file`, `web_search`, `session_search`, `knowledge_ingest`, `skill_write`, `usage_stats` and `secret_request`. Tools that need context are still offered only where they apply: `skill_load`, `mcp_manage`, `task`, `discuss_*` and `workflow_builder`.
+- The workflow assistant answers in a chat turn on the guardian's own model chain, Claude Code included. It no longer makes a structured call on the background model. Failure diagnosis still uses the background chain (spec 39 revision 5).
+- In the Lana.app window, the topbar uses the sidebar colour, and only one expand toggle shows with the sidebar collapsed.
+- Self-update signs Lana.app again (ad-hoc) after it replaces or restores the bundled binary.
+
+- The database moves to schema version 11 on first start. It adds workflow candidates, `candidate_id` on runs, `assistant_session` on workflows, and session/turn ids on workflow chat messages. Back up `$LANA_HOME/lana.db` first if you may need to roll back to 0.4.
+
+### Fixed
+- A Claude Code agent's `ask_user`, and any other lana tool call longer than 60 s, no longer fails with "The operation timed out". lana sets `MCP_TOOL_TIMEOUT` to 31 minutes for Claude Code.
+- Hovering an online agent's avatar no longer squeezes its name tooltip into the presence dot.
+- The workflow composer has one focus ring, and long Proposed fix values wrap in a scrollable code block instead of overflowing the run panel.
+- A question from a workflow session is recorded as answered on the web.
+
 ## [0.4.0-beta.2] - 2026-11-11
 
 ### Added

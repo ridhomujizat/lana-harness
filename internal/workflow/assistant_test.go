@@ -2,22 +2,19 @@ package workflow
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 )
 
-// TestBuildAssistantPrompt checks that the prompt carries the workflow, the
-// graph JSON, the chat, the owner message and the reply contract.
-func TestBuildAssistantPrompt(t *testing.T) {
-	w := Workflow{ID: "riset-harian", Name: "Riset harian", Description: "Scrape 5 tech sources"}
+// TestBuildAssistantGuide checks that the first chat note carries the
+// workflow, the graph JSON, the rules and the save-test-publish working order
+// (spec 51 REQ-WFC-002, REQ-WFC-004).
+func TestBuildAssistantGuide(t *testing.T) {
+	w := Workflow{ID: "riset-harian", Name: "Riset harian", Description: "Scrape 5 tech sources", Version: 3}
 	g := researchGraph()
-	history := []ChatMessage{
-		{Role: "owner", Text: "add a summarize step"},
-		{Role: "guardian", Text: "done"},
-	}
-	prompt := BuildAssistantPrompt(w, g, history, "now also send to telegram")
+	cand := &Candidate{ID: 7, BaseVersion: 3, Summary: "add telegram"}
+	note := BuildAssistantGuide(w, g, AssistEnv{}, nil, cand)
 
 	graphJSON, err := json.MarshalIndent(g, "", "  ")
 	if err != nil {
@@ -27,101 +24,41 @@ func TestBuildAssistantPrompt(t *testing.T) {
 		"Riset harian",
 		"riset-harian",
 		"Scrape 5 tech sources",
+		"Current graph, version 3",
 		string(graphJSON),
-		"owner: add a summarize step",
-		"guardian: done",
-		"now also send to telegram",
-		"Reply with ONE JSON object only, no prose around it",
-		"Do not call tools",
-		`"reply"`,
-		`"graph"`,
-		`"summary"`,
 		"{{ nodes.<id>.output.<path> }}",
 		"prefer script_parse over agent",
 		`leave the script_parse param "script" empty`,
 		`always give a script_parse "output_schema"`,
-		"rule tokens may follow the type",
-		`"integer >0"`,
 		`"audit_every"`,
+		"workflow_builder",
+		"publish only after a test passed",
+		"ask_user",
+		"Open candidate #7 (based on version 3, not published): add telegram",
 	}
 	for _, want := range wants {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt is missing %q\n---\n%s", want, prompt)
+		if !strings.Contains(note, want) {
+			t.Fatalf("guide is missing %q\n---\n%s", want, note)
+		}
+	}
+	for _, gone := range []string{"Reply with ONE JSON object", "Do not call tools"} {
+		if strings.Contains(note, gone) {
+			t.Fatalf("guide still has the old contract %q", gone)
 		}
 	}
 }
 
-// TestBuildAssistantPromptHistoryLimit keeps only the last ten messages.
-func TestBuildAssistantPromptHistoryLimit(t *testing.T) {
-	var history []ChatMessage
-	for i := 0; i < 15; i++ {
-		history = append(history, ChatMessage{Role: "owner", Text: fmt.Sprintf("m%d", i)})
+// TestBuildAssistantDelta sends only what changed.
+func TestBuildAssistantDelta(t *testing.T) {
+	w := Workflow{ID: "w", Name: "W", Version: 5}
+	if got := BuildAssistantDelta(w, nil, nil); got != "" {
+		t.Fatalf("delta with nothing new = %q, want empty", got)
 	}
-	prompt := BuildAssistantPrompt(Workflow{ID: "w", Name: "W"}, Graph{}, history, "hi")
-	for _, dropped := range []string{"m0", "m1", "m2", "m3", "m4"} {
-		if strings.Contains(prompt, "owner: "+dropped+"\n") {
-			t.Fatalf("prompt should not keep %q", dropped)
-		}
+	g := Graph{Nodes: []Node{{ID: "start", Type: "trigger.manual"}}}
+	got := BuildAssistantDelta(w, &g, nil)
+	if !strings.Contains(got, "current version is now 5") || !strings.Contains(got, `"trigger.manual"`) {
+		t.Fatalf("delta = %q", got)
 	}
-	for _, kept := range []string{"m5", "m10", "m14"} {
-		if !strings.Contains(prompt, "owner: "+kept+"\n") {
-			t.Fatalf("prompt should keep %q\n%s", kept, prompt)
-		}
-	}
-}
-
-// TestParseAssistantReply covers a fenced JSON answer, prose only and a null
-// graph.
-func TestParseAssistantReply(t *testing.T) {
-	t.Run("fenced null graph", func(t *testing.T) {
-		text := "Here you go:\n```json\n{\"reply\":\"oke\",\"graph\":null,\"summary\":\"none\"}\n```\nBye."
-		reply, err := ParseAssistantReply(text)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if reply.Reply != "oke" || reply.Summary != "none" || reply.Graph != nil {
-			t.Fatalf("ParseAssistantReply = %+v", reply)
-		}
-	})
-
-	t.Run("missing graph key", func(t *testing.T) {
-		reply, err := ParseAssistantReply(`{"reply":"no change","summary":""}`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if reply.Reply != "no change" || reply.Graph != nil {
-			t.Fatalf("ParseAssistantReply = %+v", reply)
-		}
-	})
-
-	t.Run("prose only", func(t *testing.T) {
-		reply, err := ParseAssistantReply("  I would add a summarize step.  ")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if reply.Reply != "I would add a summarize step." || reply.Graph != nil || reply.Summary != "" {
-			t.Fatalf("ParseAssistantReply = %+v", reply)
-		}
-	})
-
-	t.Run("full graph", func(t *testing.T) {
-		g := researchGraph()
-		raw, err := json.Marshal(g)
-		if err != nil {
-			t.Fatal(err)
-		}
-		text := `{"reply":"added one node","graph":` + string(raw) + `,"summary":"+1 node"}`
-		reply, err := ParseAssistantReply(text)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if reply.Reply != "added one node" || reply.Summary != "+1 node" {
-			t.Fatalf("ParseAssistantReply = %+v", reply)
-		}
-		if reply.Graph == nil || len(reply.Graph.Nodes) != len(g.Nodes) || len(reply.Graph.Edges) != len(g.Edges) {
-			t.Fatalf("ParseAssistantReply graph = %+v", reply.Graph)
-		}
-	})
 }
 
 // TestDiffGraphs covers added, removed, changed and position-only moves.
@@ -193,22 +130,21 @@ func TestDiffGraphsPositionOnly(t *testing.T) {
 	}
 }
 
-func TestBuildAssistantPromptLastRun(t *testing.T) {
+func TestBuildAssistantGuideLastRun(t *testing.T) {
 	last := &RunDetail{
-		Run:   Run{ID: "r1", Number: 4, Trigger: "manual", Version: 3, Status: RunFailed, Error: "node fetch failed"},
+		Run: Run{ID: "r1", Number: 4, Trigger: "manual", Version: 3, Status: RunFailed, Error: "node fetch failed"},
 		Nodes: []NodeRun{
 			{NodeID: "start", Status: "succeeded", Output: json.RawMessage(`{"ok":true}`)},
 			{NodeID: "fetch", Status: NodeFailed, Error: "unknown tool mcp__x__y"},
 		},
 	}
-	prompt := BuildAssistantPromptEnv(Workflow{ID: "w", Name: "W"}, Graph{}, nil, "kenapa gagal?", AssistEnv{}, last)
+	note := BuildAssistantGuide(Workflow{ID: "w", Name: "W"}, Graph{}, AssistEnv{}, last, nil)
 	for _, want := range []string{"Last run: #4 (manual, version 3) failed", "node fetch failed: unknown tool mcp__x__y", `node start succeeded: output {"ok":true}`} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("prompt misses %q:\n%s", want, prompt)
+		if !strings.Contains(note, want) {
+			t.Fatalf("guide misses %q:\n%s", want, note)
 		}
 	}
-	reply, err := ParseAssistantReply(`{"reply":"ok","graph":null,"test":true}`)
-	if err != nil || !reply.Test {
-		t.Fatalf("reply = %+v, %v; want test", reply, err)
+	if delta := BuildAssistantDelta(Workflow{ID: "w"}, nil, last); !strings.Contains(delta, "Last run: #4") {
+		t.Fatalf("delta misses the run: %q", delta)
 	}
 }

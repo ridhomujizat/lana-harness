@@ -51,6 +51,7 @@ base_url = "mock://local"
 toolset = "custom"
 provider = "mock"
 model = "m"
+permission = "auto"
 tools = [%s]
 `, strings.Join(names, ", "))
 	rt, err := New(context.Background(), Options{

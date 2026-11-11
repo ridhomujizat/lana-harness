@@ -1,7 +1,6 @@
 package web
 
 import (
-	"crypto/subtle"
 	"errors"
 	"net"
 	"net/http"
@@ -41,6 +40,7 @@ func (s *Server) registerLocalRoutes() {
 	// would otherwise answer a wrong method with 404 before the mux could
 	// return 405. handleLocalSignInLink rejects non-POST itself.
 	s.mux.HandleFunc(LocalSignInPath, s.handleLocalSignInLink)
+	s.mux.HandleFunc(LocalAppLinkPath, s.handleLocalAppLink)
 }
 
 // handleLocalSignInLink answers POST /v1/local/sign-in-link (API-WLG-008). A
@@ -54,14 +54,7 @@ func (s *Server) handleLocalSignInLink(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "only POST is allowed")
 		return
 	}
-	secret := s.localSecretValue()
-	got := r.Header.Get(LocalSecretHeader)
-	if secret == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(secret)) != 1 {
-		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "local control secret is missing or invalid")
-		return
-	}
-	if !isLoopbackRemote(r.RemoteAddr) {
-		writeAPIError(w, http.StatusForbidden, "forbidden_remote", "local control is loopback only")
+	if !s.localControlAllowed(w, r) {
 		return
 	}
 	link, err := s.SignInLinkTo(r.URL.Query().Get("next"))

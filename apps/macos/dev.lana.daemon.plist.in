@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The launchd agent that runs the lana daemon from Lana.app (spec #52).
+  apps/macos/install-app.sh fills in the @...@ values and writes it to
+  ~/Library/LaunchAgents/dev.lana.daemon.plist when no agent exists yet.
+  AssociatedBundleIdentifiers ties the agent to Lana.app, so System Settings →
+  General → Login Items & Extensions shows it with the lana name and icon.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.lana.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@LANA@</string>
+    <string>daemon</string>
+  </array>
+  <key>AssociatedBundleIdentifiers</key>
+  <array>
+    <string>@BUNDLE_ID@</string>
+  </array>
+  <key>WorkingDirectory</key><string>@HOME@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>@PATH@</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key><false/>
+  </dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>@HOME@/Library/Logs/lana/daemon.log</string>
+  <key>StandardErrorPath</key><string>@HOME@/Library/Logs/lana/daemon.log</string>
+</dict>
+</plist>

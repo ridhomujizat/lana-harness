@@ -233,6 +233,10 @@ func (s *Service) responder(ctx context.Context, sessionID string, outcome core.
 	switch info.Channel {
 	case "web", "telegram", "cli":
 		return info.Channel
+	case "workflow":
+		// A workflow session's question is answered on the web (design
+		// §Wiring; spec 51 guardian chat).
+		return "web"
 	}
 	return "none"
 }

@@ -471,7 +471,7 @@ describe("Empty room (REQ-ROOM-002)", () => {
 });
 
 describe("Room composer (REQ-ROOM-003)", () => {
-  it("sends with new_topic after New topic is picked", async () => {
+  it("starts a new session only with /new, like Hermes", async () => {
     vi.mocked(roomSegments).mockResolvedValue({
       segments: [segment({ session_id: "s_web" })],
       has_more: false,
@@ -480,15 +480,29 @@ describe("Room composer (REQ-ROOM-003)", () => {
 
     render(<ChatsPage roomName="dana" />);
     const input = (await screen.findByLabelText("Message dana")) as HTMLTextAreaElement;
-    fireEvent.change(input, { target: { value: "halo" } });
-    fireEvent.click(screen.getByRole("button", { name: "New topic" }));
-    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.queryByRole("button", { name: "New topic" })).toBeNull();
 
+    /* Typing "/" opens the command menu; Enter on /new arms the next message. */
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /New session/ })).toBeTruthy();
+    fireEvent.change(input, { target: { value: "/ne" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(vi.mocked(sendToRoom)).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Your next message starts a fresh conversation/)).toBeTruthy();
+    expect(input.value).toBe("");
+    fireEvent.change(input, { target: { value: "halo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => {
-      expect(vi.mocked(sendToRoom)).toHaveBeenCalledWith("dana", {
-        text: "halo",
-        new_topic: true,
-      });
+      expect(vi.mocked(sendToRoom)).toHaveBeenCalledWith("dana", { text: "halo", new_topic: true });
+    });
+
+    /* "/new <message>" sends it in a fresh session at once. */
+    vi.mocked(sendToRoom).mockClear();
+    fireEvent.change(input, { target: { value: "/new rencana minggu depan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => {
+      expect(vi.mocked(sendToRoom)).toHaveBeenCalledWith("dana", { text: "rencana minggu depan", new_topic: true });
     });
   });
 });

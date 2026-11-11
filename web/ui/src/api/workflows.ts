@@ -88,6 +88,8 @@ export interface Workflow {
   updated_at: number;
   /* Per script_parse node (spec #44, API-SP-009). */
   script_stats?: Record<string, ScriptStat>;
+  /* Spec 51 REQ-WFC-001: the guardian chat session, "" until first use. */
+  assistant_session?: string;
 }
 
 export interface ScriptStat {
@@ -255,6 +257,11 @@ export interface ChatMessage {
   change?: GraphChange | null;
   issues?: Issue[] | null;
   created_at: number;
+  /* Spec 51: a change card the guardian published from its chat session
+     points at the session and the turn that published it. Messages from
+     before spec 51 have neither. */
+  session_id?: string;
+  turn_id?: string;
 }
 
 export interface VersionInfo {
@@ -507,31 +514,55 @@ export function deleteState(id: string, key?: string): Promise<void> {
   );
 }
 
-export function getChat(id: string): Promise<{ messages: ChatMessage[] }> {
-  return request<{ messages: ChatMessage[] }>("GET", wf(id) + "/assistant").then(
-    (res) => ({ messages: list(res.messages).map(normalizeChatMessage) })
-  );
+/* Spec 51 API: the guardian chat of a workflow is a real agent session.
+   GET returns the session id ("" until first use) and the stored chat
+   messages (legacy messages and change cards). */
+export interface AssistantChat {
+  session_id: string;
+  messages: ChatMessage[];
 }
 
-export interface AssistResponse {
-  message: ChatMessage;
-  workflow: Workflow;
-  tokens: number;
+export function getAssistant(id: string): Promise<AssistantChat> {
+  return request<{ session_id?: string | null; messages?: ChatMessage[] | null }>(
+    "GET",
+    wf(id) + "/assistant"
+  ).then((res) => ({
+    session_id: res.session_id || "",
+    messages: list(res.messages).map(normalizeChatMessage),
+  }));
 }
 
-export function askAssistant(
+/* Ensures the guardian session exists (lazy create), so the UI can upload
+   attachments before the first message. */
+export function ensureAssistantSession(id: string): Promise<{ session_id: string }> {
+  return request<{ session_id: string }>("POST", wf(id) + "/assistant/session");
+}
+
+export interface SendAssistantResponse {
+  session_id: string;
+  /* "started" or "queued", as the session message route answers. */
+  turn: string;
+  turn_id?: string;
+}
+
+/* Starts (or queues) an owner turn on the guardian session. attachments are
+   the paths returned by the session attachment upload; the key is sent only
+   when there are paths. */
+export function sendAssistant(
   id: string,
   message: string,
-  baseVersion: number
-): Promise<AssistResponse> {
-  return request<AssistResponse>("POST", wf(id) + "/assistant", {
-    message,
-    base_version: baseVersion,
-  }).then((res) => ({
-    ...res,
-    message: normalizeChatMessage(res.message),
-    workflow: normalizeWorkflow(res.workflow),
-  }));
+  attachments?: string[]
+): Promise<SendAssistantResponse> {
+  const body: { message: string; attachments?: string[] } = { message };
+  if (attachments && attachments.length > 0) {
+    body.attachments = attachments;
+  }
+  return request<SendAssistantResponse>("POST", wf(id) + "/assistant", body);
+}
+
+/* The /new command: a fresh guardian session; the old one stays in History. */
+export function newAssistantSession(id: string): Promise<{ session_id: string }> {
+  return request<{ session_id: string }>("POST", wf(id) + "/assistant/new");
 }
 
 export function rotateWebhook(id: string): Promise<{ token: string }> {

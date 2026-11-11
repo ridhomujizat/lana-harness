@@ -61,4 +61,14 @@ type Store interface {
 	AppendChat(ctx context.Context, m ChatMessage) (ChatMessage, error)
 	// ListChat returns the last limit messages of a workflow, oldest first.
 	ListChat(ctx context.Context, workflowID string, limit int) ([]ChatMessage, error)
+
+	// CreateCandidate marks any open candidate of the workflow superseded and
+	// stores c as the new open candidate; it sets ID, Status "open" and times.
+	CreateCandidate(ctx context.Context, c Candidate) (Candidate, error)
+	// GetCandidate returns one candidate by id, or ErrNotFound.
+	GetCandidate(ctx context.Context, id int64) (Candidate, error)
+	// OpenCandidate returns the workflow's open candidate, or ErrNotFound.
+	OpenCandidate(ctx context.Context, workflowID string) (Candidate, error)
+	// UpdateCandidate writes graph, summary, status, published_version, updated_at.
+	UpdateCandidate(ctx context.Context, c Candidate) error
 }

@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"sort"
 
 	"github.com/ridhomujizat/lana-harness/core"
-	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 )
 
@@ -70,11 +68,13 @@ func (d workflowDeps) AssistEnv(ctx context.Context, wf workflow.Workflow) workf
 		}
 	}
 
-	if secrets, err := webfiles.ReadSecrets(filepath.Join(rt.home, "secrets.env")); err == nil {
-		for name := range secrets {
-			env.Secrets = append(env.Secrets, name)
-		}
-		sort.Strings(env.Secrets)
-	}
+	env.Secrets = secretNames(rt.home)
 	return env
+}
+
+// AssistSecrets returns the names in secrets.env, so a guardian chat's later
+// note names a secret the owner added meanwhile, for example through
+// secret_request (spec 53). Values never leave this function.
+func (d workflowDeps) AssistSecrets(context.Context) []string {
+	return secretNames(d.rt.home)
 }

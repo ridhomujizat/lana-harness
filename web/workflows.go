@@ -54,8 +54,17 @@ type WorkflowBackend interface {
 	SetState(ctx context.Context, id, key string, value json.RawMessage) (workflow.StateEntry, error)
 	// DeleteState clears all entries when key is empty (API-WF-016).
 	DeleteState(ctx context.Context, id, key string) error
-	Chat(ctx context.Context, id string) ([]workflow.ChatMessage, error)
-	Assist(ctx context.Context, id string, baseVersion int, message string) (workflow.AssistResult, error)
+	// AssistantChat returns the guardian chat session ("" before first use)
+	// and the workflow chat messages (spec 51 API-WF-017 revision).
+	AssistantChat(ctx context.Context, id string) (string, []workflow.ChatMessage, error)
+	// EnsureAssistantSession returns the guardian chat session, creating it
+	// on first use (REQ-WFC-001).
+	EnsureAssistantSession(ctx context.Context, id string) (string, error)
+	// NewAssistantSession starts a fresh guardian chat session (REQ-WFC-001).
+	NewAssistantSession(ctx context.Context, id string) (string, error)
+	// AssistantNote builds the hidden context note for the next owner
+	// message; commit marks it sent (REQ-WFC-002).
+	AssistantNote(ctx context.Context, id, sessionID string) (string, func(), error)
 	RotateWebhook(ctx context.Context, id string) (string, error)
 	// Webhook authenticates an inbound hook and starts a run (API-WF-020).
 	Webhook(ctx context.Context, id, token string, body []byte) (workflow.Run, error)
@@ -131,6 +140,8 @@ func (s *Server) registerWorkflowRoutes() {
 	s.Handle("DELETE /v1/workflows/{id}/state/{key}", http.HandlerFunc(s.handleWorkflowDeleteState))
 	s.Handle("GET /v1/workflows/{id}/assistant", http.HandlerFunc(s.handleWorkflowChat))
 	s.Handle("POST /v1/workflows/{id}/assistant", http.HandlerFunc(s.handleWorkflowAssist))
+	s.Handle("POST /v1/workflows/{id}/assistant/session", http.HandlerFunc(s.handleWorkflowAssistSession))
+	s.Handle("POST /v1/workflows/{id}/assistant/new", http.HandlerFunc(s.handleWorkflowAssistNew))
 	s.Handle("POST /v1/workflows/{id}/webhook/rotate", http.HandlerFunc(s.handleWorkflowRotateWebhook))
 	// Script Parse routes (spec #44, API-SP-002..005).
 	s.registerWorkflowScriptRoutes()
@@ -536,13 +547,14 @@ func (s *Server) handleWorkflowDeleteState(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleWorkflowChat serves API-WF-017 (REQ-WF-010).
+// handleWorkflowChat serves API-WF-017 (REQ-WF-010, spec 51 revision): the
+// guardian chat session id and the workflow chat messages.
 func (s *Server) handleWorkflowChat(w http.ResponseWriter, r *http.Request) {
 	backend := s.workflowsOrError(w)
 	if backend == nil {
 		return
 	}
-	messages, err := backend.Chat(r.Context(), r.PathValue("id"))
+	sessionID, messages, err := backend.AssistantChat(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.writeWorkflowError(w, "workflow assistant chat", err)
 		return
@@ -551,29 +563,90 @@ func (s *Server) handleWorkflowChat(w http.ResponseWriter, r *http.Request) {
 		messages = []workflow.ChatMessage{}
 	}
 	writeJSON(w, http.StatusOK, struct {
-		Messages []workflow.ChatMessage `json:"messages"`
-	}{Messages: messages})
+		SessionID string                 `json:"session_id"`
+		Messages  []workflow.ChatMessage `json:"messages"`
+	}{SessionID: sessionID, Messages: messages})
 }
 
-// handleWorkflowAssist serves API-WF-017 (REQ-WF-010).
-func (s *Server) handleWorkflowAssist(w http.ResponseWriter, r *http.Request) {
+// assistSessionResponse is the body of the assistant session routes.
+type assistSessionResponse struct {
+	SessionID string `json:"session_id"`
+}
+
+// handleWorkflowAssistSession ensures the guardian chat session, so the web
+// can upload a file before the first message (spec 51 REQ-WFC-001).
+func (s *Server) handleWorkflowAssistSession(w http.ResponseWriter, r *http.Request) {
 	backend := s.workflowsOrError(w)
 	if backend == nil {
 		return
 	}
+	sessionID, err := backend.EnsureAssistantSession(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeWorkflowError(w, "workflow assistant session", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, assistSessionResponse{SessionID: sessionID})
+}
+
+// handleWorkflowAssistNew starts a fresh guardian chat session (spec 51
+// REQ-WFC-001, the /new command).
+func (s *Server) handleWorkflowAssistNew(w http.ResponseWriter, r *http.Request) {
+	backend := s.workflowsOrError(w)
+	if backend == nil {
+		return
+	}
+	sessionID, err := backend.NewAssistantSession(r.Context(), r.PathValue("id"))
+	if err != nil {
+		s.writeWorkflowError(w, "new workflow assistant session", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, assistSessionResponse{SessionID: sessionID})
+}
+
+// handleWorkflowAssist serves API-WF-017 (spec 51 REQ-WFC-002): it sends the
+// owner message to the guardian chat session as a normal turn, with the
+// workflow context as a hidden runtime note before it, and answers 202 like a
+// chat message. The web follows the session stream.
+func (s *Server) handleWorkflowAssist(w http.ResponseWriter, r *http.Request) {
+	workflows := s.workflowsOrError(w)
+	if workflows == nil {
+		return
+	}
+	sessions := s.backendOrError(w)
+	if sessions == nil {
+		return
+	}
 	var body struct {
-		Message     string `json:"message"`
-		BaseVersion int    `json:"base_version"`
+		Message     string   `json:"message"`
+		Attachments []string `json:"attachments"`
 	}
 	if !decodeJSONObject(w, r, workflowBodyLimit, &body) {
 		return
 	}
-	result, err := backend.Assist(r.Context(), r.PathValue("id"), body.BaseVersion, body.Message)
+	id := r.PathValue("id")
+	sessionID, err := workflows.EnsureAssistantSession(r.Context(), id)
+	if err != nil {
+		s.writeWorkflowError(w, "workflow assistant session", err)
+		return
+	}
+	note, commit, err := workflows.AssistantNote(r.Context(), id, sessionID)
 	if err != nil {
 		s.writeWorkflowError(w, "workflow assistant", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	// The chat message path validates the text and the attachments and
+	// starts (or queues) the turn with the note before the owner message.
+	text := body.Message
+	result, ok := s.sendSessionMessage(w, r, sessions, sessionID, messageBody{Text: &text, Attachments: body.Attachments}, note)
+	if !ok {
+		return
+	}
+	commit()
+	writeJSON(w, http.StatusAccepted, struct {
+		SessionID string `json:"session_id"`
+		Turn      string `json:"turn"`
+		TurnID    string `json:"turn_id,omitempty"`
+	}{SessionID: sessionID, Turn: result.Turn, TurnID: result.TurnID})
 }
 
 // handleWorkflowRotateWebhook serves API-WF-018 (REQ-WF-003).

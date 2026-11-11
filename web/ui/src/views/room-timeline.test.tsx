@@ -24,12 +24,18 @@ vi.mock("../api/sessions", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/sessions")>();
   return { ...actual, listEvents: vi.fn() };
 });
+vi.mock("../api/secret-requests", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/secret-requests")>();
+  return { ...actual, saveSecretRequest: vi.fn(), cancelSecretRequest: vi.fn() };
+});
 vi.mock("../api/attachments", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/attachments")>();
   return { ...actual, uploadAttachments: vi.fn() };
 });
 
 import { openStream } from "../api/client";
+import type { StreamHandlers } from "../api/client";
+import { cancelSecretRequest } from "../api/secret-requests";
 import { openRoomsStream, roomSegments, sendToRoom } from "../api/rooms";
 import type { RoomRow, RoomsStreamHandlers, Segment } from "../api/rooms";
 import { listEvents } from "../api/sessions";
@@ -402,5 +408,56 @@ describe("Drop files (REQ-CHF-009)", () => {
     dropOn(view, [new File(["x"], "a.txt", { type: "text/plain" })]);
     expect(await screen.findByText("Send a message first to attach files.")).toBeTruthy();
     expect(screen.queryByText("a.txt")).toBeNull();
+  });
+});
+
+describe("Secret request card (spec 53)", () => {
+  it("shows the card from the session log and from the stream, and cancels", async () => {
+    let handlers: StreamHandlers | null = null;
+    vi.mocked(openStream).mockImplementation((_id, options) => {
+      handlers = options || null;
+      return { close: () => {} };
+    });
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web", channel: "web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [
+        userText(1, "t1", "connect my calendar"),
+        ev(2, "secret/requested", "t1", {
+          request_id: "sr1",
+          call_id: "c1",
+          name: "CAL_API_KEY",
+          description: "Needed to read your calendar.",
+          replaces: false,
+          expires_at: Date.now() + 60_000,
+        }),
+      ],
+      last_seq: 2,
+    });
+    vi.mocked(cancelSecretRequest).mockResolvedValue({ outcome: "cancelled", name: "CAL_API_KEY" });
+    installRows([room({ name: "dana" })]);
+
+    render(<ChatsPage roomName="dana" />);
+
+    expect(await screen.findByText("Needed to read your calendar.")).toBeTruthy();
+    expect((screen.getByLabelText("Value") as HTMLInputElement).type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(cancelSecretRequest).toHaveBeenCalledWith("sr1"));
+    expect((await screen.findByRole("status")).textContent).toContain("Cancelled");
+
+    await waitFor(() => expect(handlers).not.toBeNull());
+    act(() => {
+      handlers!.onSecretRequest!({
+        request_id: "sr2",
+        name: "OTHER_KEY",
+        description: "A second key.",
+        replaces: true,
+        expires_at: Date.now() + 60_000,
+      });
+    });
+    expect(await screen.findByText("A second key.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Replace value" })).toBeTruthy();
   });
 });

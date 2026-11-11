@@ -40,6 +40,8 @@ func PrimaryArg(name string, input json.RawMessage) string {
 		raw = get("target")
 	case "memory_write":
 		raw = strings.TrimSpace(get("action") + " " + get("target"))
+	case "secret_request":
+		raw = get("name")
 	case "ask_user":
 		if count := questionCount(value); count == 1 {
 			raw = "1 question"

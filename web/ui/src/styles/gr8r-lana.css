@@ -360,3 +360,62 @@
   align-items: center;
   gap: 6px;
 }
+
+/* Spec 52: the Lana.app window has no title bar. html[data-shell="macos-app"]
+   is set by the app before the page loads; the macOS traffic lights sit at the
+   top left, in a row as tall as the topbar. --shell-lights-w is the width the
+   lights need (the app sets it from the real buttons). In full screen the
+   lights hide (data-shell-fullscreen) and the inset goes away. A browser has
+   none of these attributes, so nothing below applies there. */
+.side-chrome {
+  display: none;
+}
+
+/* In the app the topbar wears the sidebar colour, so the traffic-light row
+   and the topbar read as one band with no seam. A browser keeps --surface. */
+html[data-shell="macos-app"] .topbar {
+  background: var(--bg-side);
+}
+
+html[data-shell="macos-app"] .side-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-shrink: 0;
+  height: var(--topbar-h);
+  padding: 0 8px 0 var(--shell-lights-w, 78px);
+}
+
+html[data-shell="macos-app"] .side-top {
+  padding-top: 0;
+}
+
+/* The collapsed rail (52px) is narrower than the lights: the topbar makes
+   room for the rest of them and carries the expand toggle instead. */
+html[data-shell="macos-app"] .shell.collapsed .topbar {
+  padding-left: max(12px, calc(var(--shell-lights-w, 78px) - 52px));
+}
+
+html[data-shell="macos-app"] .topbar-toggle {
+  margin-right: 6px;
+}
+
+html[data-shell="macos-app"][data-shell-fullscreen] .side-chrome {
+  padding-left: 8px;
+}
+
+html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
+  padding-left: var(--gutter);
+}
+
+/* A narrow window turns the sidebar into a drawer: the topbar holds the
+   lights and the menu button. */
+@media (max-width: 900px) {
+  html[data-shell="macos-app"] .topbar {
+    padding-left: var(--shell-lights-w, 78px);
+  }
+
+  html[data-shell="macos-app"][data-shell-fullscreen] .topbar {
+    padding-left: 12px;
+  }
+}

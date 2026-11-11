@@ -363,32 +363,26 @@ func (e *Engine) Answer(ctx context.Context, decisionID, choice string) (Run, er
 }
 
 // saveFixVersion saves the guardian's fix as a new workflow version
-// (REQ-WF-008, AC-WF-014).
+// (REQ-WF-008, AC-WF-014). For a candidate test run it patches the candidate
+// instead (spec 51 REQ-WFC-005).
 func (e *Engine) saveFixVersion(ctx context.Context, run Run, d Decision) {
-	wf, err := e.store.GetWorkflow(ctx, run.WorkflowID)
-	if err != nil {
+	if len(d.Fix) == 0 {
 		return
 	}
-	cur, err := e.store.GetVersion(ctx, wf.ID, wf.Version)
-	if err != nil {
-		return
-	}
-	name := d.NodeID
-	g := cur.Graph.Normalized()
-	for i := range g.Nodes {
-		if g.Nodes[i].ID != d.NodeID {
-			continue
+	_, _ = e.patchGraph(ctx, run.WorkflowID, run.CandidateID, "guardian", 1, func(g *Graph) (string, string, error) {
+		*g = g.Normalized()
+		name := d.NodeID
+		for i := range g.Nodes {
+			if g.Nodes[i].ID != d.NodeID {
+				continue
+			}
+			if g.Nodes[i].Name != "" {
+				name = g.Nodes[i].Name
+			}
+			g.Nodes[i].Params = mergeParams(g.Nodes[i].Params, d.Fix)
 		}
-		if g.Nodes[i].Name != "" {
-			name = g.Nodes[i].Name
-		}
-		g.Nodes[i].Params = mergeParams(g.Nodes[i].Params, d.Fix)
-	}
-	if len(d.Fix) > 0 {
-		summary := fmt.Sprintf("fix %s: %s", name, strings.Join(sortedKeys(d.Fix), ", "))
-		_, _ = e.store.SaveVersion(ctx, wf.ID, wf.Version, g, "guardian", summary)
-		e.changed(wf.ID, "")
-	}
+		return fmt.Sprintf("fix %s: %s", name, strings.Join(sortedKeys(d.Fix), ", ")), "", nil
+	})
 }
 
 // applyOverride stores the fix in the run's per-node overrides so a restart
@@ -468,7 +462,7 @@ func (e *Engine) execute(ctx context.Context, runID string) {
 	if err != nil {
 		return
 	}
-	ver, err := e.store.GetVersion(ctx, run.WorkflowID, run.Version)
+	graph, err := runGraph(ctx, e.store, run)
 	if err != nil {
 		return
 	}
@@ -478,7 +472,7 @@ func (e *Engine) execute(ctx context.Context, runID string) {
 		ctx:      ctx,
 		run:      run,
 		wf:       wf,
-		graph:    ver.Graph,
+		graph:    graph,
 		nodes:    map[string]Node{},
 		rows:     map[string]*NodeRun{},
 		outputs:  map[string]any{},
@@ -486,10 +480,10 @@ func (e *Engine) execute(ctx context.Context, runID string) {
 		itemVals: map[int]any{},
 		state:    map[string]any{},
 	}
-	for _, n := range ver.Graph.Nodes {
+	for _, n := range graph.Nodes {
 		ex.nodes[n.ID] = n
 	}
-	ex.topLevel = topoOrder(topLevelNodes(ver.Graph), ver.Graph.Edges)
+	ex.topLevel = topoOrder(topLevelNodes(graph), graph.Edges)
 
 	nrs, _ := e.store.ListNodeRuns(ctx, runID)
 	for i := range nrs {
@@ -512,7 +506,7 @@ func (e *Engine) execute(ctx context.Context, runID string) {
 	if ex.run.StartedAt == 0 {
 		ex.run.StartedAt = e.now().UnixMilli()
 	}
-	ex.run.NodesTotal = len(ver.Graph.Nodes)
+	ex.run.NodesTotal = len(graph.Nodes)
 	ex.saveRun()
 
 	ex.runTopLevel()
@@ -889,6 +883,15 @@ func (ex *runExec) escalate(ctx context.Context, node Node, item int, row *NodeR
 		return
 	}
 
+	// A candidate test run never asks the guardian: the guardian reads the
+	// failure in its chat, so the node and the run fail here (spec 51
+	// REQ-WFC-005).
+	if ex.run.CandidateID > 0 {
+		ex.failNode(row, msg)
+		ex.failRun(node, msg)
+		return
+	}
+
 	// guardian: one diagnosis per node per item and run.
 	if ex.guardianDecisionExists(node.ID, item) {
 		if ex.fixFailedInLoop(node, item, row) {
@@ -1123,6 +1126,13 @@ func (ex *runExec) finish() {
 	ex.run.WaitingReason = ""
 	ex.run.EndedAt = ex.now()
 	ex.saveRun()
+
+	// A candidate test run leaves the failure counter and the status alone and
+	// tells the owner nothing: the guardian reads the result (spec 51
+	// REQ-WFC-005).
+	if ex.run.CandidateID > 0 {
+		return
+	}
 
 	wf, err := ex.e.store.GetWorkflow(ex.ctx, ex.wf.ID)
 	if err == nil {

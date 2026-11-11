@@ -35,6 +35,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/question"
 	"github.com/ridhomujizat/lana-harness/internal/roommemory"
 	"github.com/ridhomujizat/lana-harness/internal/routerdb"
+	"github.com/ridhomujizat/lana-harness/internal/secretreq"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
@@ -77,6 +78,23 @@ type runtimeOptions struct {
 	askChannels     map[string]bool
 	file            FileFunc
 	discussionPost  DiscussionPostFunc
+	secret          SecretFunc
+	secretChannels  []string
+}
+
+// SecretFunc shows the secure secret input card of the secret_request tool in
+// the session's channel and returns the outcome (spec 53). It writes the value
+// to the secret store itself and never returns it.
+type SecretFunc = func(ctx context.Context, req core.SecretRequest) core.SecretOutcome
+
+// SecretRequestWith installs the secret request responder and the session
+// channels it answers. Without it secret_request reports that it needs the
+// web chat; a Telegram session always gets that error.
+func SecretRequestWith(fn SecretFunc, channels ...string) Option {
+	return func(o *runtimeOptions) {
+		o.secret = fn
+		o.secretChannels = append([]string(nil), channels...)
+	}
 }
 
 // DiscussionPostFunc delivers one room discussion message to the session's
@@ -206,7 +224,7 @@ var toolCatalogGroupOrder = []struct {
 	{ID: "calendar", Label: "Calendar", Names: []string{"calendar"}},
 	{ID: "workflows", Label: "Workflows", Names: []string{"workflow"}},
 	{ID: "stats", Label: "Stats", Names: []string{"usage_stats"}},
-	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user", "discuss_start", "discuss_ask", "discuss_more", "discuss_end"}},
+	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user", "secret_request", "discuss_start", "discuss_ask", "discuss_more", "discuss_end"}},
 }
 
 // Runtime is the library runtime.
@@ -418,6 +436,13 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	registry.SetQuestions(questionService)
 	fileService := file.New(coreCtx.Sessions, coreCtx.Hooks)
 	registry.SetFiles(fileService)
+	// Spec 53: secret_request writes only names and outcomes; the responder
+	// (the web broker) writes the value to secrets.env itself.
+	secretService := secretreq.New(coreCtx.Sessions, secretExists(opts.Home))
+	if runtimeOpts.secret != nil {
+		secretService.SetResponder(runtimeOpts.secret, runtimeOpts.secretChannels...)
+	}
+	registry.SetSecretRequests(secretService)
 	if opts.Approval == PolicyTrust {
 		coreCtx.Hooks.ToolsPreExecute.Use(func(context.Context, core.ToolsPreExecuteInput, core.Next[core.ToolsPreExecuteInput, core.ToolDecision]) (core.ToolDecision, error) {
 			return core.ToolDecision{Allowed: true}, nil
@@ -2041,6 +2066,23 @@ func (rt *Runtime) Compact(ctx context.Context, sessionID string) (core.Compacti
 		return core.CompactionResult{}, errors.New("compaction service is incompatible")
 	}
 	return compactor.CompactNow(ctx, sessionID)
+}
+
+// ContextWindow reports the session's context window and the size at which
+// it compacts on its own, for the chat's context meter.
+func (rt *Runtime) ContextWindow(ctx context.Context, sessionID string) (core.ContextWindowInfo, error) {
+	if err := rt.closedError(); err != nil {
+		return core.ContextWindowInfo{}, err
+	}
+	service, ok := rt.coreCtx.Lookup(core.ServiceCompaction)
+	if !ok {
+		return core.ContextWindowInfo{}, errors.New("compaction service not available")
+	}
+	windower, ok := service.(core.ContextWindower)
+	if !ok {
+		return core.ContextWindowInfo{}, errors.New("compaction service has no context window")
+	}
+	return windower.ContextWindow(ctx, sessionID)
 }
 
 // knowledgeIngestTitleMax caps a title taken from the source text

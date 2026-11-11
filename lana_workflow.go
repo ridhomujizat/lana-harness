@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/agent"
+	"github.com/ridhomujizat/lana-harness/agent/titles"
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pathenv"
@@ -111,6 +112,48 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 		return agentResult, err
 	}
 	return agentResult, nil
+}
+
+// CreateAssistantSession creates the guardian chat session of a workflow on
+// channel "workflow", address = the workflow id (spec 51 REQ-WFC-001). It is
+// an owner chat, so it is neither scheduled nor background work.
+func (d workflowDeps) CreateAssistantSession(ctx context.Context, wf workflow.Workflow) (string, error) {
+	title := titles.Fixed(workflowChatTitlePrefix, wf.Name)
+	session, err := d.rt.createChannelSession(ctx, "workflow", wf.ID, wf.Guardian, title)
+	if err != nil {
+		return "", err
+	}
+	return session.ID, nil
+}
+
+// AssistantSessionExists reports whether a guardian chat session still exists
+// and belongs to agent (spec 51 REQ-WFC-001).
+func (d workflowDeps) AssistantSessionExists(ctx context.Context, sessionID, agent string) bool {
+	info, err := d.rt.store.Info(ctx, sessionID)
+	if err != nil {
+		return false
+	}
+	return info.Agent == agent && info.Channel == "workflow"
+}
+
+// RunAssistantTurn runs one owner turn on a guardian chat session and waits
+// for it (spec 51 REQ-WFC-009): the note goes first as a hidden runtime note.
+func (d workflowDeps) RunAssistantTurn(ctx context.Context, sessionID, note, text string, attachments []string) (workflow.AgentResult, error) {
+	rt := d.rt
+	info, err := rt.store.Info(ctx, sessionID)
+	if err != nil {
+		return workflow.AgentResult{}, err
+	}
+	if err := rt.AppendRuntimeNote(ctx, sessionID, note); err != nil {
+		return workflow.AgentResult{}, err
+	}
+	result, err := rt.Run(ctx, Request{Agent: info.Agent, Prompt: text, SessionID: sessionID, Attachments: attachments})
+	return workflow.AgentResult{
+		Text:       result.Text,
+		SessionID:  sessionID,
+		Tokens:     int64(result.Usage.InputTokens + result.Usage.OutputTokens),
+		StopReason: result.StopReason,
+	}, err
 }
 
 // backgroundRunAllowed checks a workflow guardian's structured call before it
@@ -353,6 +396,9 @@ func (rt *Runtime) registerWorkflowTool() {
 	}
 	if err := rt.coreCtx.Tools.Register(tools.NewWorkflow(rt.workflows)); err != nil {
 		slog.Warn("workflow: register tool", "error", err)
+	}
+	if err := rt.coreCtx.Tools.Register(tools.NewWorkflowBuilder(rt.workflows)); err != nil {
+		slog.Warn("workflow: register builder tool", "error", err)
 	}
 }
 

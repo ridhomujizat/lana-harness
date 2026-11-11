@@ -22,6 +22,10 @@ import { RoomSettings } from "./room-settings";
 import type { RoomSettingsTab } from "./room-settings";
 import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
+import { compactSession } from "../api/turns";
+import { NewSessionBanner, SlashMenu, useSlashMenu } from "./slash-menu";
+import { ContextMeter } from "./context-meter";
+import type { SlashCommand } from "./slash-menu";
 import type { SessionEvent } from "../api/sessions";
 import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
 import { useSessionPresence } from "../lib/session-presence";
@@ -44,6 +48,7 @@ import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
 import type { FaceRef } from "./presence";
 import { agentLabel, displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
+import { SecretRequestCard, useSecretRequest, useSecretStream } from "./secret-request";
 import type { OpenQuestion } from "./question";
 import {
   MentionChips,
@@ -325,6 +330,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const [question, setQuestion] = useState<OpenQuestion | null>(null);
   const [questionBusy, setQuestionBusy] = useState(false);
   const [closedQuestionIds, setClosedQuestionIds] = useState<string[]>([]);
+  /* Spec 53: secret_request stream events, read by useSecretRequest below. */
+  const secretStream = useSecretStream();
+  const receiveSecret = secretStream.receive;
   const [draft, setDraft] = useState(initialDraft || "");
   /* API reply: the automation message the next send replies to. */
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
@@ -372,6 +380,33 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
 
   const team = room.kind === "team";
   const mentions = useMentions(draft, setDraft, team ? mentionNames : []);
+  /* The slash command menu (owner 2026-11-11). */
+  const slashCommands: SlashCommand[] = [
+    {
+      name: "new",
+      title: "New session",
+      description: "Start a fresh conversation; the messages above stay but are not sent again.",
+      icon: "square-pen",
+      run: () => setNewTopic(true),
+    },
+    {
+      name: "compact",
+      title: "Compact",
+      description: "Summarize this session so far to save tokens, then keep going.",
+      icon: "minimize-2",
+      run: () => void compactNow(),
+    },
+  ];
+  if (team) {
+    slashCommands.push({
+      name: "discuss",
+      title: "Discuss",
+      description: "Ask the lead to open a discussion on your next message.",
+      icon: "messages-square",
+      run: () => setDiscuss(true),
+    });
+  }
+  const slash = useSlashMenu(draft, setDraft, slashCommands);
 
   const loadEvents = useCallback(async (ids: string[]) => {
     if (ids.length === 0) {
@@ -624,6 +659,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               }
         );
       },
+      onSecretRequest: (incoming) => {
+        receiveSecret(incoming);
+      },
       onShutdown: () => {
         setStreamState("reconnecting");
       },
@@ -631,7 +669,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     return () => {
       stream.close();
     };
-  }, [newestId, finishLive]);
+  }, [newestId, finishLive, receiveSecret]);
 
   /* REQ-ROOM-005: the room is marked read one second after open or a new
      message, so a burst of rows does not spam the endpoint. */
@@ -846,6 +884,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   }, [allEvents, question, closedQuestionIds]);
 
   const activeApproval = approvals.find((item) => !item.decided) || null;
+  const secrets = useSecretRequest(allEvents, childEvents, secretStream);
 
   /* AC-ROOM-003: scrolling to the top loads the previous page of segments and
      holds the visible position. */
@@ -985,13 +1024,27 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setApprovals((current) => current.filter((item) => !item.decided));
   }, []);
 
-  /* REQ-ROOM-003: send to the room's current web session; "New topic" asks the
-     server to create a new one first (AC-ROOM-004, AC-ROOM-005). */
+  /* REQ-ROOM-003: send to the room's current web session; a new topic asks
+     the server to create a new one first (AC-ROOM-004, AC-ROOM-005). A new
+     session starts only from the /new command, like Hermes and Telegram
+     (owner 2026-11-11): "/new" alone arms it for the next message, and
+     "/new <message>" sends that message in a fresh session. */
   async function sendMessage() {
-    const text = draft.trim();
+    let text = draft.trim();
     const files = attachmentDraft.items.slice();
     if ((!text && files.length === 0) || sending) {
       return;
+    }
+    let startNew = newTopic;
+    const command = /^\/new(?:\s+([\s\S]*))?$/i.exec(text);
+    if (command) {
+      text = (command[1] || "").trim();
+      startNew = true;
+      if (!text && files.length === 0) {
+        setNewTopic(true);
+        setDraft("");
+        return;
+      }
     }
     setSending(true);
     setActionError("");
@@ -999,7 +1052,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setCommandReply("");
     setDraft("");
     pinToBottom(scrollRef, stickRef);
-    const topic = newTopic;
+    const topic = startNew;
     try {
       let paths: string[] = [];
       if (files.length > 0 && currentWebSessionId) {
@@ -1207,7 +1260,28 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     }
   }
 
+  async function compactNow() {
+    if (!currentWebSessionId) {
+      setActionError("Nothing to compact yet.");
+      return;
+    }
+    setActionError("");
+    setCommandReply("Compacting this session…");
+    try {
+      const result = await compactSession(currentWebSessionId);
+      setCommandReply(
+        "Session compacted: " + result.tokens_before.toLocaleString() + " → " + result.tokens_after.toLocaleString() + " tokens."
+      );
+    } catch (failure) {
+      setCommandReply("");
+      setActionError(errorMessage(failure));
+    }
+  }
+
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (slash.onKeyDown(event)) {
+      return;
+    }
     if (mentions.onKeyDown(event)) {
       return;
     }
@@ -1464,8 +1538,19 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               onExpire={handleQuestionExpire}
             />
           ) : null}
+          {secrets.request ? (
+            <SecretRequestCard
+              key={"secret-" + secrets.request.request_id}
+              request={secrets.request}
+              agentLabel={displayLabel(room)}
+              onSave={secrets.save}
+              onCancel={secrets.cancel}
+              onExpire={secrets.expire}
+              onDismiss={secrets.dismiss}
+            />
+          ) : null}
         </div>
-        {newTopic ? <div className="room-newtopic">New topic</div> : null}
+
         <div className="cbox">
           {replyTarget ? (
             <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />
@@ -1484,6 +1569,10 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               Uploading…
             </p>
           ) : null}
+          <SlashMenu state={slash} />
+          {newTopic ? (
+            <NewSessionBanner name={team ? "The team" : displayLabel(room)} onCancel={() => setNewTopic(false)} />
+          ) : null}
           {mentions.open ? (
             <MentionList
               names={mentions.matches}
@@ -1501,6 +1590,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             onChange={(event) => {
               setDraft(event.target.value);
               mentions.reset();
+              slash.reset();
             }}
             onKeyDown={composerKeyDown}
             onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
@@ -1540,16 +1630,12 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 Discuss
               </Button>
             ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              className={newTopic ? "on" : undefined}
-              disabled={sending}
-              onClick={() => setNewTopic((value) => !value)}
-            >
-              New topic
-            </Button>
             <span className="room-composer-spacer"></span>
+            <ContextMeter
+              sessionId={currentWebSessionId || ""}
+              refreshKey={(turnRunning ? "run-" : "idle-") + (liveTurnId || "")}
+              busy={turnRunning || sending}
+            />
             <Button
               size="sm"
               variant="primary"

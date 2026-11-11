@@ -77,6 +77,7 @@ import { isTeam, rosterNames } from "./agent-common";
 import { displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
 import type { OpenQuestion } from "./question";
+import { SecretRequestCard, useSecretRequest } from "./secret-request";
 import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
 import type { ReplyTarget, UserAttachment, UserAttachmentRef } from "./turn";
 import { TrajectoryView } from "./trajectory";
@@ -1484,6 +1485,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
     Record<string, SessionEvent[]>
   >({});
   const [childLive, setChildLive] = useState<Record<string, ChildLiveTurn>>({});
+  /* Spec 53: the secure secret input card. */
+  const secrets = useSecretRequest(events, childEvents);
+  const receiveSecret = secrets.receive;
 
   const lastSeqRef = useRef(0);
   const childSeenRef = useRef(new Set<string>());
@@ -2256,6 +2260,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
           );
         }
       },
+      onSecretRequest: (incoming) => {
+        receiveSecret(incoming);
+      },
       onTitle: (frame: StreamFrame) => {
         /* REQ-TTL-011: the automatic title arrived or a rename elsewhere. */
         const update = titleUpdateFrom(id, frame);
@@ -2289,6 +2296,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
     markApprovalDecided,
     closeQuestion,
     announceQuestionResult,
+    receiveSecret,
   ]);
 
   const thread = useMemo(
@@ -2959,6 +2967,17 @@ export function SessionPage({ id, view }: SessionPageProps) {
                 onSubmit={handleQuestionSubmit}
                 onSkipAll={handleQuestionSkipAll}
                 onExpire={handleQuestionExpired}
+              />
+            ) : null}
+            {secrets.request ? (
+              <SecretRequestCard
+                key={"secret-" + secrets.request.request_id}
+                request={secrets.request}
+                agentLabel={agentLabel}
+                onSave={secrets.save}
+                onCancel={secrets.cancel}
+                onExpire={secrets.expire}
+                onDismiss={secrets.dismiss}
               />
             ) : null}
           </div>

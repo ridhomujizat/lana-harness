@@ -61,6 +61,7 @@ type Server struct {
 	index            []byte
 	credentials      *credentialStore
 	signInCodes      *signInCodeStore
+	appCodes         *signInCodeStore
 	resetCodes       *resetCodeStore
 	loginLock        *loginLock
 	sessions         *browserSessions
@@ -97,6 +98,8 @@ type Server struct {
 	telegramReset  TelegramResetSender
 	approvals      *Approvals
 	questions      *Questions
+	// secretRequests is the secure secret input broker (spec 53).
+	secretRequests *SecretRequests
 	// roomHub pushes changed room rows to the room streams (REQ-ROOM-007).
 	roomHub *roomHub
 	// roomLocks guards "find or create the current web session" per room
@@ -169,12 +172,15 @@ func New(cfg Config) (*Server, error) {
 		sessions:  newBrowserSessions(""),
 		approvals: newApprovals(),
 		questions: newQuestions(),
-		heartbeat: defaultHeartbeatInterval,
-		poll:      defaultStreamPoll,
-		stop:      make(chan struct{}),
-		done:      make(chan struct{}),
+		// Spec 53: the secure secret input broker.
+		secretRequests: newSecretRequests(),
+		heartbeat:      defaultHeartbeatInterval,
+		poll:           defaultStreamPoll,
+		stop:           make(chan struct{}),
+		done:           make(chan struct{}),
 	}
 	s.signInCodes = newSignInCodeStore(s.nowTime)
+	s.appCodes = newAppCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
 	s.loginLock = newLoginLock(s.nowTime)
 	s.roomHub = newRoomHub(s)
@@ -199,6 +205,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerStreamRoutes()
 	s.registerApprovalRoutes()
 	s.registerQuestionRoutes()
+	s.registerSecretRequestRoutes()
 	s.registerConfigRoutes()
 	s.registerSecretRoutes()
 	s.registerAgentRoutes()
@@ -390,6 +397,7 @@ func (s *Server) routes() {
 	// are unauthenticated (an owner has no session yet); they keep the Host and
 	// Origin checks.
 	s.mux.Handle("GET /v1/auth/state", s.checkHost(http.HandlerFunc(s.handleAuthState)))
+	s.mux.Handle("GET "+AppSignInPath, s.checkHost(http.HandlerFunc(s.handleAppSignIn)))
 	s.mux.Handle("POST /v1/auth/claim", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleClaim))))
 	s.mux.Handle("POST /v1/auth/login", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleLogin))))
 	s.mux.Handle("POST /v1/auth/reset/telegram", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetTelegram))))

@@ -244,7 +244,7 @@ func TestTemplateToolsFullSet(t *testing.T) {
 		if !slices.Equal(tpl.Tools, wantTools) {
 			t.Fatalf("%s tools = %v", name, tpl.Tools)
 		}
-		if tpl.Permission != "ask" {
+		if tpl.Permission != "trust" {
 			t.Fatalf("%s permission = %q", name, tpl.Permission)
 		}
 	}

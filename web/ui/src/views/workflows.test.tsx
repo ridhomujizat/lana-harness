@@ -10,7 +10,7 @@ vi.mock("../api/workflows", async (importOriginal) => {
   return {
     ...actual,
     listWorkflows: vi.fn(),
-    getChat: vi.fn(),
+    getAssistant: vi.fn(),
     lockPreview: vi.fn(),
     updateWorkflow: vi.fn(),
     listRuns: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock("../api/agents", async (importOriginal) => {
 
 import { answerApproval } from "../api/approvals";
 import {
-  getChat,
+  getAssistant,
   getRun,
   listRuns,
   listWorkflows,
@@ -118,7 +118,7 @@ describe("workflows list", () => {
 
 describe("workflow editor", () => {
   it("AC-WF-020: a dropped palette node, connected and saved, is in the saved graph", async () => {
-    vi.mocked(getChat).mockResolvedValue({ messages: [] });
+    vi.mocked(getAssistant).mockResolvedValue({ session_id: "", messages: [] });
     vi.mocked(lockPreview).mockResolvedValue({ tools: [] });
     vi.mocked(updateWorkflow).mockImplementation(async (_id, body) =>
       workflow({ version: 2, graph: body.graph || graph })
@@ -170,7 +170,7 @@ describe("workflow page", () => {
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify(wire) }) as Response)
     );
-    vi.mocked(getChat).mockResolvedValue({ messages: [] });
+    vi.mocked(getAssistant).mockResolvedValue({ session_id: "", messages: [] });
     vi.mocked(lockPreview).mockResolvedValue({ tools: [] });
     try {
       const { container } = wrap(<WorkflowPage id="hi" tab="editor" />);

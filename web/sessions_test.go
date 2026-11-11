@@ -933,6 +933,10 @@ func TestSessionUsageIncludesCachedTokens(t *testing.T) {
 	if usage.InputTokens != 150 || usage.OutputTokens != 8 || usage.CachedInputTokens != 90 {
 		t.Fatalf("usage = %+v", usage)
 	}
+	// The context meter is the last call's size: 50 in + 3 out.
+	if usage.ContextTokens != 53 {
+		t.Fatalf("context tokens = %d, want 53", usage.ContextTokens)
+	}
 
 	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/missing/usage", "", cookie, ""))
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")

@@ -451,17 +451,28 @@ func (s *Server) applyPassword(password string, keep *[sha256.Size]byte) error {
 
 // issueSession creates a browser session and answers with its CSRF value.
 func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
+	sess, err := s.startSession(w, r)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		CSRF string `json:"csrf"`
+	}{CSRF: sess.csrf})
+}
+
+// startSession creates a browser session and sets its cookie on w. It logs a
+// failure; the caller answers the request.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request) (session, error) {
 	cookie, err := randomToken()
 	if err != nil {
 		s.logger.Error("web: generate session cookie", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
-		return
+		return session{}, err
 	}
 	sess, err := s.sessions.add(cookie, r.UserAgent(), s.nowTime())
 	if err != nil {
 		s.logger.Error("web: save browser session", "error", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
-		return
+		return session{}, err
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -470,9 +481,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	writeJSON(w, http.StatusOK, struct {
-		CSRF string `json:"csrf"`
-	}{CSRF: sess.csrf})
+	return sess, nil
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

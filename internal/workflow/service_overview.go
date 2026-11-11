@@ -76,8 +76,8 @@ func (s *Service) decisionNodeName(ctx context.Context, d Decision, cache map[st
 	}
 	name := d.NodeID
 	if run, err := s.store.GetRun(ctx, d.RunID); err == nil {
-		if ver, err := s.store.GetVersion(ctx, run.WorkflowID, run.Version); err == nil {
-			name = graphNodeName(ver.Graph, d.NodeID)
+		if g, err := runGraph(ctx, s.store, run); err == nil {
+			name = graphNodeName(g, d.NodeID)
 		}
 	}
 	cache[key] = name

@@ -659,7 +659,7 @@
 .presence {
   position: relative;
 }
-.presence::after {
+.presence::before {
   content: '';
   position: absolute;
   right: -1px;
@@ -669,6 +669,7 @@
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 0 2px var(--surface);
+  z-index: 1;
 }
 
 /* progress */

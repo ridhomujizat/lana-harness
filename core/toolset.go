@@ -1,19 +1,28 @@
 package core
 
 // StandardTools is the toolset every agent gets unless its toolset is
-// "custom": files, shell, web, memory, knowledge, asking the owner, the
-// calendar and workflows
-// (Hermes-style default; owner decision 2026-11-11).
+// "custom": every built-in lana tool that works without context (owner
+// decision 2026-11-12, extending the Hermes-style default of 2026-11-11):
+// files, shell, web, memory and session search, knowledge, skills, asking the
+// owner, sending files, the calendar, workflows and usage stats. Tools that
+// need context stay auto-offered where they apply: skill_load (visible
+// skills), mcp_manage (root turns), task/task_continue (delegates),
+// discuss_* (team leads) and workflow_builder (the guardian chat).
 var StandardTools = []string{
-	"read_file", "write_file", "edit_file", "glob", "grep",
+	"read_file", "write_file", "edit_file", "glob", "grep", "send_file",
 	"bash",
-	"web_fetch",
-	"memory_read", "memory_write",
-	"knowledge_search", "knowledge_read", "knowledge_write",
+	"web_search", "web_fetch",
+	"memory_read", "memory_write", "session_search",
+	"knowledge_search", "knowledge_read", "knowledge_write", "knowledge_ingest",
+	"skill_write",
 	"ask_user",
+	// The secure secret input card (spec 53): the owner types the value, so
+	// it is safe for every agent.
+	"secret_request",
 	// Calendar items and workflows, so any agent can set a reminder or build
 	// and test an automation from chat (owner request 2026-11-11).
 	"calendar", "workflow",
+	"usage_stats",
 }
 
 // ToolsetCustom limits an agent to its own tools list.
@@ -43,5 +52,6 @@ func EffectiveTools(cfg AgentConfig) []string {
 	return out
 }
 
-// DefaultPolicy is the permission of an agent that sets none.
-const DefaultPolicy = PolicyAuto
+// DefaultPolicy is the permission of an agent that sets none: trust, so an
+// agent runs every tool without asking (owner decision 2026-11-12).
+const DefaultPolicy = PolicyTrust

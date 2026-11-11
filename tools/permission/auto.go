@@ -20,7 +20,7 @@ var autoTools = map[string]bool{
 	"web_fetch": true, "web_search": true,
 	"memory_read": true, "memory_write": true,
 	"knowledge_search": true, "knowledge_read": true, "knowledge_write": true, "knowledge_ingest": true,
-	"ask_user": true, "session_search": true, "skill_load": true, "skill_write": true,
+	"ask_user": true, "secret_request": true, "session_search": true, "skill_load": true, "skill_write": true,
 	"task": true, "task_continue": true,
 	"discuss_start": true, "discuss_ask": true, "discuss_more": true, "discuss_end": true,
 	"send_file": true, "calendar": true, "usage_stats": true,
@@ -50,9 +50,12 @@ func autoAllows(tool string, arg pattern.Argument, workspace string) bool {
 
 // autoDraftWorkflow lets auto create, change or test a workflow (the
 // workflow tool's write actions): a draft does nothing until the owner
-// activates it. Starting or cancelling a run is exec and still asks.
+// activates it. Starting or cancelling a run is exec and still asks. The
+// guardian's workflow_builder (spec 51) is the same kind of work, asked for
+// by the owner in the editor chat: a candidate is tested before it is
+// published, and a change outside the lock sends the workflow back to draft.
 func autoDraftWorkflow(tool string, risk core.Risk) bool {
-	return tool == "workflow" && risk == core.RiskWrite
+	return (tool == "workflow" || tool == "workflow_builder") && (risk == core.RiskWrite || risk == core.RiskRead)
 }
 
 var (

@@ -46,3 +46,16 @@ type Compactor interface {
 // CheckpointPreamble frames a summary in the derived history. It is the
 // deepseek-harness "Conversation checkpoint preamble" (REQ-LTC-014).
 const CheckpointPreamble = "This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint."
+
+// ContextWindowInfo is a session's context window and the size at which it
+// compacts on its own.
+type ContextWindowInfo struct {
+	Window    int64
+	CompactAt int64
+}
+
+// ContextWindower is an optional Compactor extension that reports a
+// session's context window, for the chat's context meter.
+type ContextWindower interface {
+	ContextWindow(ctx context.Context, sessionID string) (ContextWindowInfo, error)
+}

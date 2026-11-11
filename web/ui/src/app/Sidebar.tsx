@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { Ic, LanaMark } from "../ui/icons";
 import { getKnowledge, REVIEW_CHANGED_EVENT } from "../api/knowledge";
 import type { Route } from "./router";
+import { dragRegion, isMacAppShell } from "./shell";
 
 export const SIDEBAR_KEY = "lana.sidebar";
 /* The Router tree's manual open/closed choice ("open" | "closed"). */
@@ -613,8 +614,29 @@ export function Sidebar({
   /* The icon-only rail; the mobile drawer keeps the full tree. */
   const rail = collapsed && !narrow;
   const reviewPending = useReviewPending();
+  /* Spec 52: in the Lana.app window the traffic lights and the collapse
+     toggle share the top row, and the brand moves below it. */
+  const shell = isMacAppShell();
+  const collapseButton = (
+    <button
+      type="button"
+      className="ibtn ibtn-sm hide-m"
+      aria-label="Collapse sidebar"
+      aria-expanded={true}
+      aria-controls="sidebar-nav"
+      title="Collapse sidebar"
+      onClick={onToggle}
+    >
+      <Ic name="panel-left" size={15} />
+    </button>
+  );
   return (
     <nav id="sidebar-nav" className="side" aria-label="Main">
+      {shell ? (
+        <div className="side-chrome" {...dragRegion(shell)}>
+          {collapsed ? null : collapseButton}
+        </div>
+      ) : null}
       <div className="side-top">
         <div className="row" style={{ gap: 2 }}>
           <a
@@ -633,24 +655,14 @@ export function Sidebar({
               </span>
             </span>
           </a>
-          {collapsed ? null : (
-            <button
-              type="button"
-              className="ibtn ibtn-sm hide-m"
-              aria-label="Collapse sidebar"
-              aria-expanded={true}
-              aria-controls="sidebar-nav"
-              title="Collapse sidebar"
-              onClick={onToggle}
-            >
-              <Ic name="panel-left" size={15} />
-            </button>
-          )}
+          {collapsed || shell ? null : collapseButton}
         </div>
       </div>
 
       <div className="side-scroll">
-        {collapsed ? (
+        {/* Spec 52: in the Lana.app window the topbar carries the expand
+            toggle next to the traffic lights, so the rail does not. */}
+        {collapsed && !shell ? (
           <button
             type="button"
             className="sitem"

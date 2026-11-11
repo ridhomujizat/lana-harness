@@ -7,40 +7,23 @@ import (
 	"strings"
 )
 
-// This file holds the guardian assistant prompt, its reply parsing and the
-// graph diff of REQ-WF-010 (design section "Guardian prompts").
+// This file holds the guardian chat guide, its per-turn context notes and the
+// graph diff of REQ-WF-010 and spec 51 (REQ-WFC-002, REQ-WFC-004).
 
-// assistantReplyContract is the exact reply contract given to the guardian at
-// the end of the assistant prompt.
-const assistantReplyContract = `Reply with ONE JSON object only, no prose around it: {"reply": "<answer in the owner's language>", "graph": <the full new graph> or null when nothing changes, "summary": "<one line of what changed>", "test": true to start a test run of the saved graph now, else false}. Do not call tools.`
-
-// BuildAssistantPrompt builds the guardian assistant prompt of REQ-WF-010: the
-// workflow goal, the current graph as indented JSON, the node catalog, the
-// editing rules, the last ten chat messages, the owner message and the reply
-// contract.
-func BuildAssistantPrompt(w Workflow, g Graph, history []ChatMessage, message string) string {
-	return BuildAssistantPromptEnv(w, g, history, message, AssistEnv{}, nil)
-}
-
-// BuildAssistantPromptEnv is BuildAssistantPrompt with the environment the
-// workflow can use and the newest run, so the guardian builds with what
-// exists, reads test results, and does not ask the owner for known facts.
-func BuildAssistantPromptEnv(w Workflow, g Graph, history []ChatMessage, message string, env AssistEnv, last *RunDetail) string {
+// BuildAssistantGuide builds the first runtime note of a guardian chat session
+// (spec 51 REQ-WFC-002): who the guardian is, the workflow goal, the current
+// graph, the node catalog, the editing rules, the environment, the newest run,
+// any open candidate and how to work with the workflow_builder tool.
+func BuildAssistantGuide(w Workflow, g Graph, env AssistEnv, last *RunDetail, cand *Candidate) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are the guardian of workflow %q (%s).\n", w.Name, w.ID)
+	fmt.Fprintf(&b, "You are the guardian of workflow %q (%s). The owner is chatting with you in the workflow editor; this note is lana's context for that chat, not an owner message.\n", w.Name, w.ID)
 	goal := w.Description
 	if goal == "" {
 		goal = w.Name
 	}
 	fmt.Fprintf(&b, "Goal: %s\n\n", goal)
 
-	b.WriteString("Current graph (JSON):\n")
-	graphJSON, err := json.MarshalIndent(g, "", "  ")
-	if err != nil {
-		graphJSON = []byte("{}")
-	}
-	b.Write(graphJSON)
-	b.WriteString("\n\n")
+	writeGraph(&b, fmt.Sprintf("Current graph, version %d (JSON):\n", w.Version), g)
 
 	b.WriteString("Node catalog:\n")
 	for _, t := range NodeTypes() {
@@ -70,76 +53,55 @@ func BuildAssistantPromptEnv(w Workflow, g Graph, history []ChatMessage, message
 
 	writeAssistEnv(&b, env)
 	writeLastRun(&b, last)
+	writeCandidate(&b, cand)
 
-	b.WriteString("How to answer:\n")
-	b.WriteString("- Use the environment above. Never ask the owner for an agent, MCP server, URL, tool name or secret name it lists; use it.\n")
+	b.WriteString("How to work in this chat:\n")
+	b.WriteString("- Change the workflow only with the workflow_builder tool. The canvas shows the current version; a saved candidate is not live until you publish it.\n")
+	b.WriteString("- For every change: (1) workflow_builder save with the full new graph and a one-line summary, and fix any issues it returns; (2) workflow_builder test, with an input object when the trigger needs one, and read every node's status, output and error; (3) when a node failed or the output is not what the owner wants, fix the graph, save and test again; (4) publish only after a test passed, then tell the owner what changed and what the test produced.\n")
+	b.WriteString("- Never say it works unless a test in this chat passed. When you cannot test (a trigger needs real outside data you do not have), say so plainly.\n")
+	b.WriteString("- Before a test that does something real outside lana that the owner may not want (messages other people, posts publicly, buys, deletes, writes to an outside system), ask with ask_user first, for example: test now / publish without testing / change it first. Messages only to the owner are fine.\n")
+	b.WriteString("- When the request is ambiguous and the answer changes the graph, ask with ask_user (up to 3 questions, each with options) instead of guessing. Never ask for an agent, MCP server, URL, tool name or secret name the environment lists; use it.\n")
+	b.WriteString("- When the workflow needs a credential (API key, token, password) that the environment's secrets do not list, call secret_request with the name, why it is needed and where to get it; the owner types it into a secure card. Never ask for a secret value in chat. Reuse a listed secret name instead of asking again.\n")
+	b.WriteString("- You may use your other tools to explore before building, for example call an MCP tool once or fetch a page to see the real data shape, then write templates and schemas against it.\n")
 	b.WriteString("- To call an API that has an MCP server, prefer a tool node with the MCP tool name and its input: no model per run, and lana adds the server's auth.\n")
-	b.WriteString("- Ask the owner only for a fact that is not above and that you cannot leave as a sensible default; then ask once, for everything at the same time.\n")
-	b.WriteString("- You cannot run commands, read files or call tools in this chat, and nothing carries over to a later chat. Never promise to do something later; do it now in the graph, or say plainly what the owner must do.\n")
-	b.WriteString("- When the owner asks you to try or test it, or after a change you are unsure works, save the graph and set \"test\": true; the next message shows the run result above as \"Last run\". Read it and fix what failed.\n")
-	b.WriteString("- Keep the reply short: what you changed, and why if it is not what the owner asked.\n\n")
-
-	if len(history) > 10 {
-		history = history[len(history)-10:]
-	}
-	if len(history) > 0 {
-		b.WriteString("Recent chat:\n")
-		for _, m := range history {
-			fmt.Fprintf(&b, "%s: %s\n", chatRole(m.Role), m.Text)
-		}
-		b.WriteString("\n")
-	}
-
-	fmt.Fprintf(&b, "Owner: %s\n\n", message)
-	b.WriteString(assistantReplyContract)
-	b.WriteString("\n")
+	b.WriteString("- A test cannot start while another run of this workflow is running; wait for it or tell the owner.\n")
+	b.WriteString("- If publish reports a version conflict, the owner changed the canvas meanwhile: get the current graph, apply your change to it, save and test again.\n")
+	b.WriteString("- A question about the workflow needs no save: just answer it.\n")
+	b.WriteString("- Answer in the owner's language. Keep replies short: what you changed, what the test showed, and what the owner must do, if anything.\n")
 	return b.String()
 }
 
-// AssistantReply is a parsed assistant answer (REQ-WF-010): the reply text, an
-// optional full new graph and a one-line summary of the change.
-type AssistantReply struct {
-	Reply   string
-	Graph   *Graph
-	Summary string
-	// Test asks for a test run of the saved graph.
-	Test bool
+// BuildAssistantDelta builds a later runtime note of a guardian chat session
+// (spec 51 REQ-WFC-002): only what changed since the last note. g is set when
+// the current version moved, last when there is a newer run. It is empty when
+// nothing changed.
+func BuildAssistantDelta(w Workflow, g *Graph, last *RunDetail) string {
+	var b strings.Builder
+	if g != nil {
+		writeGraph(&b, fmt.Sprintf("Workflow update: the current version is now %d (JSON):\n", w.Version), *g)
+	}
+	writeLastRun(&b, last)
+	return strings.TrimSpace(b.String())
 }
 
-// ParseAssistantReply parses the guardian assistant answer (REQ-WF-010). A text
-// without a JSON object is treated as a plain reply; a null or missing "graph"
-// means no change.
-func ParseAssistantReply(text string) (AssistantReply, error) {
-	v, err := ExtractJSON(text)
+// writeGraph writes a heading and the indented graph JSON.
+func writeGraph(b *strings.Builder, heading string, g Graph) {
+	b.WriteString(heading)
+	graphJSON, err := json.MarshalIndent(g, "", "  ")
 	if err != nil {
-		return AssistantReply{Reply: strings.TrimSpace(text)}, nil
+		graphJSON = []byte("{}")
 	}
-	obj, ok := v.(map[string]any)
-	if !ok {
-		return AssistantReply{Reply: strings.TrimSpace(text)}, nil
+	b.Write(graphJSON)
+	b.WriteString("\n\n")
+}
+
+// writeCandidate writes the open candidate, when there is one.
+func writeCandidate(b *strings.Builder, c *Candidate) {
+	if c == nil || c.ID == 0 {
+		return
 	}
-	var reply AssistantReply
-	if s, ok := obj["reply"].(string); ok {
-		reply.Reply = s
-	}
-	if s, ok := obj["summary"].(string); ok {
-		reply.Summary = s
-	}
-	if t, ok := obj["test"].(bool); ok {
-		reply.Test = t
-	}
-	if gv, ok := obj["graph"]; ok && gv != nil {
-		raw, err := json.Marshal(gv)
-		if err != nil {
-			return AssistantReply{}, fmt.Errorf("workflow: bad assistant graph: %w", err)
-		}
-		var g Graph
-		if err := json.Unmarshal(raw, &g); err != nil {
-			return AssistantReply{}, fmt.Errorf("workflow: bad assistant graph: %w", err)
-		}
-		reply.Graph = &g
-	}
-	return reply, nil
+	fmt.Fprintf(b, "Open candidate #%d (based on version %d, not published): %s\n", c.ID, c.BaseVersion, c.Summary)
+	b.WriteString("Use workflow_builder get to read it; test, publish or discard it.\n\n")
 }
 
 // DiffGraphs compares two graphs by node id (REQ-WF-010). Added, Removed and
@@ -266,14 +228,6 @@ func portsList(nodeType string, spec NodeSpec) string {
 		return "(none)"
 	}
 	return strings.Join(spec.Ports, ", ")
-}
-
-// chatRole names the speaker of one chat message.
-func chatRole(role string) string {
-	if role == "" {
-		return "owner"
-	}
-	return role
 }
 
 // writeAssistEnv writes the environment section of the assistant prompt.
