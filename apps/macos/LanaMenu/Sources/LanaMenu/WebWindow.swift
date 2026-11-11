@@ -43,8 +43,28 @@ final class WebWindowController: NSObject {
         config.websiteDataStore = .default()
         config.applicationNameForUserAgent = "Lana/" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
         config.userContentController.add(ScriptMessageProxy(target: self), name: "lana")
+        // The title-bar-less window (spec #52): mark the page and let it move
+        // the window from its drag regions.
+        config.userContentController.add(ScriptMessageProxy(target: self, shell: true), name: "lanaShell")
+        config.userContentController.addUserScript(WKUserScript(
+            source: shellBootstrapScript(variant: AppVariant.current, lightsWidth: lightsWidth),
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         return config
     }()
+
+    /// lightsWidth is the inset the page leaves for the traffic lights,
+    /// measured from the real buttons when the window is made.
+    private(set) var lightsWidth = ShellLayout.lightsWidth(zoomMaxX: 74)
+    /// lastMouseDown is the newest primary mouse-down in a lana window, which
+    /// a "drag" message from the page turns into a window drag.
+    private var lastMouseDown: NSEvent?
+    private var mouseMonitor: Any?
+    /// lightObservers watch the traffic light buttons: AppKit puts them back
+    /// at its own place on several layouts (first display, key changes,
+    /// appearance changes), and this moves them back to the top row.
+    private var lightObservers: [NSObjectProtocol] = []
 
     var isVisible: Bool {
         window?.isVisible == true
@@ -169,12 +189,33 @@ final class WebWindowController: NSObject {
         if let window {
             return window
         }
+        // The window first: the page's inset comes from the real lights.
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        // No title bar: the dashboard draws the whole window and the traffic
+        // lights sit in its top row. The title stays for the Window menu and
+        // Mission Control.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.backgroundColor = Self.shellBackground
+        layoutTrafficLights(in: window)
+        if let zoomButton = window.standardWindowButton(.zoomButton) {
+            lightsWidth = ShellLayout.lightsWidth(zoomMaxX: Double(zoomButton.frame.maxX))
+        }
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800), configuration: configuration)
+        // The window background shows until the page paints, so no white
+        // flash and no seam.
+        webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
-        webView.underPageBackgroundColor = .windowBackgroundColor
+        webView.underPageBackgroundColor = Self.shellBackground
         if #available(macOS 13.3, *) {
             webView.isInspectable = true
         }
@@ -182,12 +223,6 @@ final class WebWindowController: NSObject {
         if zoom > 0 {
             webView.pageZoom = zoom
         }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
         window.title = AppVariant.current.displayName
         window.contentView = webView
         window.minSize = NSSize(width: 420, height: 400)
@@ -214,8 +249,144 @@ final class WebWindowController: NSObject {
         })
         self.window = window
         self.webView = webView
+        startMouseMonitor()
+        watchTrafficLights(in: window)
+        layoutTrafficLights(in: window)
         MainMenu.install(controller: self)
         return window
+    }
+
+    // MARK: Title-bar-less window (spec #52)
+
+    /// shellBackground is the sidebar colour of the dashboard theme
+    /// (--bg-side), so the window shows no seam while the page loads.
+    static let shellBackground = NSColor(name: "LanaShellBackground") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0x15 / 255, green: 0x15 / 255, blue: 0x14 / 255, alpha: 1)
+            : NSColor(srgbRed: 0xF4 / 255, green: 0xF3 / 255, blue: 0xF0 / 255, alpha: 1)
+    }
+
+    /// layoutTrafficLights centres the close, minimize, and zoom buttons in a
+    /// 52 pt top row, 20 pt from the left, as Electron's trafficLightPosition
+    /// does: the title bar container grows to the row and each button moves.
+    /// AppKit lays them out again on resize and full screen changes, so the
+    /// window delegate calls this again.
+    func layoutTrafficLights(in window: NSWindow) {
+        guard !window.styleMask.contains(.fullScreen),
+              let close = window.standardWindowButton(.closeButton),
+              let mini = window.standardWindowButton(.miniaturizeButton),
+              let zoom = window.standardWindowButton(.zoomButton),
+              let container = close.superview?.superview
+        else {
+            return
+        }
+        let row = CGFloat(ShellLayout.rowHeight)
+        var frame = container.frame
+        frame.size.height = row
+        frame.origin.y = window.frame.height - row
+        if container.frame != frame {
+            container.frame = frame
+        }
+        let spacing = lightSpacing ?? max(mini.frame.minX - close.frame.minX, 20)
+        lightSpacing = spacing
+        for (index, button) in [close, mini, zoom].enumerated() {
+            let origin = NSPoint(
+                x: CGFloat(ShellLayout.leftInset) + CGFloat(index) * spacing,
+                y: CGFloat(ShellLayout.buttonY(height: Double(button.frame.height)))
+            )
+            // Moving only when needed keeps the frame observer from looping.
+            if button.frame.origin != origin {
+                button.setFrameOrigin(origin)
+            }
+        }
+    }
+
+    /// lightSpacing is the system distance between two traffic lights,
+    /// read once before the first move.
+    private var lightSpacing: CGFloat?
+
+    private func watchTrafficLights(in window: NSWindow) {
+        let buttons: [NSView] = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window.standardWindowButton($0) }
+        let views = buttons + buttons.compactMap { $0.superview?.superview }
+        for view in views {
+            view.postsFrameChangedNotifications = true
+            lightObservers.append(NotificationCenter.default.addObserver(
+                forName: NSView.frameDidChangeNotification, object: view, queue: .main
+            ) { [weak self, weak window] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let window else {
+                        return
+                    }
+                    self.layoutTrafficLights(in: window)
+                }
+            })
+        }
+    }
+
+    /// trafficLightFrames reports the button frames in window coordinates
+    /// (top-left origin), for --window-snapshot.
+    func trafficLightFrames() -> [String: [Int]] {
+        guard let window else {
+            return [:]
+        }
+        var out: [String: [Int]] = [:]
+        let names: [(String, NSWindow.ButtonType)] = [("close", .closeButton), ("minimize", .miniaturizeButton), ("zoom", .zoomButton)]
+        for (name, type) in names {
+            guard let button = window.standardWindowButton(type), let superview = button.superview else {
+                continue
+            }
+            let rect = superview.convert(button.frame, to: nil)
+            let top = window.frame.height - rect.maxY
+            out[name] = [Int(rect.minX.rounded()), Int(top.rounded()), Int(rect.width.rounded()), Int(rect.height.rounded())]
+        }
+        return out
+    }
+
+    private func startMouseMonitor() {
+        guard mouseMonitor == nil else {
+            return
+        }
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            self?.lastMouseDown = event
+            return event
+        }
+    }
+
+    fileprivate func handleShellMessage(_ body: Any) {
+        guard let message = ShellMessage.parse(body) else {
+            return
+        }
+        let target = lastMouseDown?.window ?? NSApp.keyWindow ?? window
+        switch message {
+        case .drag:
+            guard let event = lastMouseDown, let window = event.window, window === target else {
+                return
+            }
+            // The page posts during the mouse-down; performDrag follows the
+            // mouse until the button goes up.
+            window.performDrag(with: event)
+        case .doubleClick:
+            guard let window = target else {
+                return
+            }
+            switch DoubleClickAction.from(setting: UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick")) {
+            case .zoom: window.performZoom(nil)
+            case .minimize: window.performMiniaturize(nil)
+            case .none: break
+            }
+        case let .theme(dark):
+            // The lights and the loading background follow the dashboard
+            // theme, which may differ from the system one.
+            window?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        }
+    }
+
+    private func syncFullscreenAttribute() {
+        guard let window, let webView else {
+            return
+        }
+        webView.evaluateJavaScript(fullscreenScript(window.styleMask.contains(.fullScreen)), completionHandler: nil)
     }
 
     /// becomeRegularApp gives the app a Dock icon and a menu bar while a
@@ -322,6 +493,45 @@ final class WebWindowController: NSObject {
 // MARK: - NSWindowDelegate
 
 extension WebWindowController: NSWindowDelegate {
+    func windowDidResize(_ notification: Notification) {
+        if let resized = notification.object as? NSWindow, resized === window {
+            layoutTrafficLights(in: resized)
+        }
+    }
+
+    /// windowDidUpdate runs once per event loop pass of the window: the last
+    /// net for a layout that moved the lights without a frame notification
+    /// (AppKit sometimes swaps the zoom button). It only compares frames when
+    /// nothing moved.
+    func windowDidUpdate(_ notification: Notification) {
+        if let updated = notification.object as? NSWindow, updated === window {
+            layoutTrafficLights(in: updated)
+        }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        if let key = notification.object as? NSWindow, key === window {
+            layoutTrafficLights(in: key)
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        if let other = notification.object as? NSWindow, other === window {
+            layoutTrafficLights(in: other)
+        }
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        webView?.evaluateJavaScript(fullscreenScript(true), completionHandler: nil)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        if let window {
+            layoutTrafficLights(in: window)
+        }
+        webView?.evaluateJavaScript(fullscreenScript(false), completionHandler: nil)
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow else {
             return
@@ -375,6 +585,9 @@ extension WebWindowController: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if webView === self.webView {
+            syncFullscreenAttribute()
+        }
         if webView === self.webView, !showingPlaceholder {
             onPageLoad?(webView.url)
         }
@@ -523,14 +736,26 @@ extension WebWindowController: WKDownloadDelegate {
 /// controller and the window controller.
 private final class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
     weak var target: WebWindowController?
+    /// shell routes the message to the window chrome handler (lanaShell).
+    let shell: Bool
 
-    init(target: WebWindowController) {
+    init(target: WebWindowController, shell: Bool = false) {
         self.target = target
+        self.shell = shell
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         let body = message.body
-        Task { @MainActor in self.target?.handleScriptMessage(body) }
+        let shell = self.shell
+        // Run the drag on the main thread right away: performDrag needs the
+        // mouse button still down.
+        MainActor.assumeIsolated {
+            if shell {
+                self.target?.handleShellMessage(body)
+            } else {
+                self.target?.handleScriptMessage(body)
+            }
+        }
     }
 }
 

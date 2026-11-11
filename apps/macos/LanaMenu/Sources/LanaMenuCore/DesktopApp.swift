@@ -116,7 +116,7 @@ public func placeholderHTML(title: String, detail: String, canStart: Bool) -> St
     p { margin: 0; color: var(--muted); max-width: 420px; line-height: 1.5; }
     button { margin-top: 8px; border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; font-weight: 600;
       background: var(--btn); color: var(--btnfg); cursor: pointer; }
-    </style></head><body><main>
+    </style></head><body><main data-drag-region>
     <h1>\(escape(title))</h1><p>\(escape(detail))</p>\(button)
     </main></body></html>
     """

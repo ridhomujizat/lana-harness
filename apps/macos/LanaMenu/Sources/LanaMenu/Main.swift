@@ -32,7 +32,7 @@ enum Main {
                                notification plan; --answer answers approvals like the
                                Allow once / Reject actions; stops after --seconds (default 60)
               --snapshot       render the open menu with live data to a PNG
-              --window-snapshot PNG [--page HASH] [--seconds N]
+              --window-snapshot PNG [--page HASH] [--seconds N] [--hold N] [--eval JS]
                                open the lana window on the running daemon, wait for the
                                dashboard, write a PNG, and print what it loaded as JSON
               --write-iconset  write the app icon PNGs into DIR for iconutil
@@ -81,7 +81,15 @@ enum Main {
             if let j = args.firstIndex(of: "--page"), j + 1 < args.count {
                 page = args[j + 1]
             }
-            exit(WindowSnapshot.run(path: args[i + 1], hash: page, seconds: seconds))
+            var hold = 0.0
+            if let j = args.firstIndex(of: "--hold"), j + 1 < args.count, let n = Double(args[j + 1]) {
+                hold = n
+            }
+            var eval: String?
+            if let j = args.firstIndex(of: "--eval"), j + 1 < args.count {
+                eval = args[j + 1]
+            }
+            exit(WindowSnapshot.run(path: args[i + 1], hash: page, seconds: seconds, hold: hold, eval: eval))
         }
         if let i = args.firstIndex(of: "--simulate-event") {
             guard i + 1 < args.count else {

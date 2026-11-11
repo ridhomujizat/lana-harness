@@ -16,6 +16,7 @@ import { DEFAULT_ROUTE, ROUTE_REDIRECTS, parseRoute, safeNextHash } from "./rout
 import type { Route } from "./router";
 import { Sidebar, readCollapsed, saveCollapsed } from "./Sidebar";
 import type { DaemonCard } from "./Sidebar";
+import { dragRegion, isMacAppShell, topbarToggle } from "./shell";
 import { useAnnounce } from "../ui/ui";
 import { useAgentLabel } from "../views/agent-label";
 import { Ic } from "../ui/icons";
@@ -548,6 +549,7 @@ export function App() {
 
   const daemon = daemonCard(daemonInfo);
   const crumbs = crumbsFor(route, label);
+  const shell = isMacAppShell();
   return (
     <div
       className={
@@ -570,7 +572,7 @@ export function App() {
         />
       ) : null}
       <div className="main">
-        <header className="topbar">
+        <header className="topbar" {...dragRegion(shell)}>
           <button
             type="button"
             className="ibtn mnav-btn"
@@ -579,6 +581,19 @@ export function App() {
           >
             <Ic name="menu" size={17} />
           </button>
+          {topbarToggle(shell, collapsed) ? (
+            <button
+              type="button"
+              className="ibtn ibtn-sm hide-m topbar-toggle"
+              aria-label="Expand sidebar"
+              aria-expanded={false}
+              aria-controls="sidebar-nav"
+              title="Expand sidebar"
+              onClick={toggleSidebar}
+            >
+              <Ic name="panel-left" size={15} />
+            </button>
+          ) : null}
           <nav className="crumbs trunc" aria-label="Breadcrumb">
             {crumbs.map((crumb, index) => (
               <Fragment key={crumb.label + "-" + index}>

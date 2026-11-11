@@ -157,6 +157,32 @@ link would be `lana-dev` and its launchd agent `dev.lana.daemon.dev` with
 `EnvironmentVariables.LANA_HOME = ~/.lana-dev`. `make install-app-dev` skips both (`--no-cli-link
 --no-launchd --no-open`), so it never touches the production app, CLI, or agent.
 
+### REQ-DSK-013: No title bar in the app window
+
+Owner follow-up (2026-11-12): "bisa ga tampilannya dirapihin" — like Monocode Native: no separate
+title bar, the traffic lights inside the dark sidebar's top row, the sidebar toggle right after
+them, one seamless window. Only in the app window; a browser looks exactly as before.
+
+- The window is `.fullSizeContentView` with a transparent, title-less title bar (the title stays
+  for the Window menu and Mission Control). The close, minimize, and zoom buttons sit centred in a
+  52 pt top row, 20 pt from the left; the app moves them back whenever AppKit lays them out again.
+  The window background is the dashboard sidebar colour (#151514 dark, #F4F3F0 light), and the
+  window appearance follows the dashboard theme (`html[data-theme]`), so no seam shows.
+- A user script at document start sets `html[data-shell="macos-app"]` (plus
+  `data-shell-variant="dev"` in Lana Dev) and `--shell-lights-w` (the lights' width plus 10 pt,
+  measured from the real buttons). The app toggles `data-shell-fullscreen` in full screen, where
+  the lights hide.
+- With the attribute the dashboard adds a sidebar top row (`.side-chrome`) that leaves the lights'
+  width free and holds the collapse toggle; the LANA logo and host line stay below it. The topbar is
+  52 px tall. With the collapsed rail the topbar leaves the rest of the lights' width free and
+  carries the expand toggle; on a narrow window (drawer) the topbar leaves the full width free.
+- The sidebar top row and the topbar carry `data-drag-region`. A primary mouse-down there that is
+  not on a control (button, link, input, textarea, select, label, summary, `role=button|link|tab|
+  menuitem`, contenteditable) posts `drag` to `messageHandlers.lanaShell`; the app calls
+  `NSWindow.performDrag(with:)` with the latest mouse-down. A double click posts `dblclick`, which
+  zooms, minimizes, or does nothing per "Double-click a window's title bar" (AppleActionOnDoubleClick).
+- Without the attribute (any browser) none of this renders or applies.
+
 ## Contract
 
 ### API-DSK-001: `POST /v1/local/app-link`

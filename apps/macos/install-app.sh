@@ -29,7 +29,7 @@ usage() {
   cat <<'EOF'
 usage: apps/macos/install-app.sh [--yes] [--app PATH] [--app-dir DIR]
                                  [--bin-dir DIR] [--agents-dir DIR] [--backup-dir DIR]
-                                 [--no-cli-link] [--no-launchd] [--no-register] [--no-open]
+                                 [--no-cli-link] [--no-launchd] [--no-register] [--no-open] [--no-quit]
   --yes           apply the steps (default: print them only)
   --app PATH      the built bundle (default: dist/Lana.app)
   --app-dir DIR   where Lana.app goes (default: /Applications)
@@ -41,6 +41,8 @@ usage: apps/macos/install-app.sh [--yes] [--app PATH] [--app-dir DIR]
   --no-launchd    leave the launchd agent as it is
   --no-register   skip LaunchServices (for test installs)
   --no-open       do not open Lana.app at the end
+  --no-quit       replace the bundle without quitting a running copy (it keeps
+                  running the old code until you restart it)
 EOF
 }
 
@@ -56,6 +58,7 @@ cli_link=1
 launchd=1
 register=1
 open_app=1
+quit_app=1
 lsregister="/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
 
 while [ $# -gt 0 ]; do
@@ -70,6 +73,7 @@ while [ $# -gt 0 ]; do
     --no-launchd) launchd=0 ;;
     --no-register) register=0 ;;
     --no-open) open_app=0 ;;
+    --no-quit) quit_app=0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "install-app: unknown argument $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -115,7 +119,9 @@ if [ "$bundle_id" != "dev.lana.menubar" ] && [ "$bundle_id" != "dev.lana.menubar
   echo "  warning: $src has the test bundle id $bundle_id; build the installed app with plain make app"
 fi
 pid="$(pgrep -f "^$dest/Contents/MacOS/LanaMenu" || true)"
-if [ -n "$pid" ]; then
+if [ -n "$pid" ] && [ "$quit_app" = 0 ]; then
+  echo "  $app_file runs (pid $pid); left running (--no-quit), restart it to use the new build"
+elif [ -n "$pid" ]; then
   installed_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$dest/Contents/Info.plist" 2>/dev/null || echo "$bundle_id")"
   echo "  quit the running Lana.app (pid $pid); the daemon keeps running"
   run osascript -e "tell application id \"$installed_id\" to quit"
