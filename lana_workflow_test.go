@@ -387,10 +387,32 @@ func TestWorkflowSubscribeSessionEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	appendEvent(lib.ID)
-	first := waitFor(lib.ID)
+	// The subscription starts in a goroutine, so append library events until
+	// one arrives: that proves the subscriber is live before the real check.
+	var first seen
+	deadline := time.Now().Add(3 * time.Second)
+	for got := false; !got; {
+		appendEvent(lib.ID)
+		wait := time.Now().Add(100 * time.Millisecond)
+		for !got && time.Now().Before(wait) {
+			select {
+			case ev := <-events:
+				if ev.sessionID == lib.ID {
+					first, got = ev, true
+				}
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+		if !got && time.Now().After(deadline) {
+			t.Fatalf("no event for session %s", lib.ID)
+		}
+	}
 	if first.kind != core.KindUserMessage || first.agent != "assistant" {
 		t.Fatalf("event=%+v", first)
+	}
+	// Drop the extra library events of the warm-up.
+	for len(events) > 0 {
+		<-events
 	}
 
 	// The workflow event sits between two library events, so receiving the
