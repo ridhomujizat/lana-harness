@@ -7,6 +7,60 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.4.0-beta.1] - 2026-11-11
+
+### Added
+- Group rooms (spec 47): a team is one shared conversation. A message with no @mention goes to
+  every member (lead first), an @mention goes straight to that agent, and an agent that
+  @mentions a teammate hands over to it. Each agent answers as itself in its own session with its
+  own tools, briefed on the room, its teammates, what they know and can do, and the room memory;
+  agents with nothing to add pass. Replies show like a chat turn (worked for, the steps, the
+  answer), live while the agent works. `[teams.<name>] mode = "lead"` keeps the lead-first room.
+- Room discussions (spec 47): the Discuss toggle asks the lead to run a moderated discussion with
+  `discuss_start` / `discuss_ask` / `discuss_more` / `discuss_end`. Members answer in rounds
+  (`rounds`, `extra_rounds`, never more than 5), may pass, and the owner can stop it. The end
+  writes a summary (Summary button), saves room memory (`<home>/rooms/<team>/memory.json`), shares
+  the summary to member rooms, and journals it for members with a domain. Team keys: `discuss`,
+  `rounds`, `extra_rounds`, `room_memory`, `share_summary`, `learn`, `telegram_all`,
+  `display_name`, `mode`.
+- Knowledge-aware team work: the lead's roster lists what each member knows and can do,
+  discussions invite the members with matching notes, and `task` passes earlier teammates'
+  answers (`context`) and the agent's matching pages. Results report tools, notes used, and files.
+- New group room dialog, room settings ("How the room talks", discussion settings, room memory),
+  team avatars (two faces, three for three, two plus "+N" above), and agent faces in tinted
+  circles in the Chats list.
+- Standard toolset: every agent gets files, shell, web, memory, knowledge, and `ask_user` on top
+  of its `tools`, unless `toolset = "custom"`.
+- Permission `auto` (the new default): standard and team tools run without asking; dangerous
+  shell commands (sudo, `rm -rf`, force push, publish, piping a download into a shell, remote
+  hosts, paths outside the workspace), writes outside the workspace, and other tools (MCP
+  servers, workflows) still ask.
+- Knowledge graph and tabbed Knowledge page (spec 48): Graph, Pages with resolved `[[links]]` and
+  backlinks, Review, and Activity; wikilinks are indexed.
+- Files in chat (spec 49): attached files render as cards with a preview (Markdown, text, PDF),
+  and files can be dropped into a chat room.
+- `send_file` (spec 50): an agent sends a workspace file or image to the owner; the web shows
+  images in a grid with a full-screen viewer and other files as cards, and Telegram delivers them
+  with `sendPhoto` or `sendDocument`.
+
+### Changed
+- An agent's Chats row shows its own chat's status; while it works only in a team room the row
+  reads "Working in <room>".
+
+### Fixed
+- `auto` checks subshell and background commands piece by piece instead of asking for each.
+- Agent saves from the dashboard keep the `toolset` key.
+- A runtime without a home folder no longer creates `knowledge/` in the working directory.
+
+### Upgrade notes
+- Agents without `permission` now run as `auto` instead of `ask`, and agents with a `tools` list
+  also get the standard toolset. Set `permission = "ask"` or `toolset = "custom"` to keep the old
+  behavior.
+- Teams default to group mode. Set `mode = "lead"` on a team to keep the lead answering first.
+- Known issue: the agent form has no Auto choice yet and shows an agent on `auto` as Ask; saving
+  that form writes `permission = "ask"`.
+- Every agent with the knowledge tools journals its sessions, so background model calls grow.
+
 ## [0.3.0-beta.5] - 2026-11-10
 
 ### Added
