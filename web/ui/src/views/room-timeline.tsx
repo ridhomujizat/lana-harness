@@ -477,6 +477,11 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
       fromSeq: 0,
       onState: (state) => setStreamState(state),
       onEvent: (event) => {
+        /* Child sessions (a member's own session in a team room) stream their
+           events too; the room shows only its own conversation. */
+        if (typeof (event as { child_session_id?: unknown }).child_session_id === "string") {
+          return;
+        }
         setEvents((current) => {
           const list = current[id] || [];
           if (list.some((entry) => entry.seq === event.seq)) {
