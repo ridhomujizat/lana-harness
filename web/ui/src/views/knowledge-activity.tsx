@@ -116,8 +116,10 @@ function TimelineEntry({
   colors: ScopeColors;
 }) {
   const label = useAgentLabel();
+  /* "proposals applied:" with nothing after it says nothing. */
+  const lines = entry.lines.filter((line) => !/:\s*$/.test(line));
   return (
-    <li className={"ka-entry ka-" + entry.kind} data-testid="activity-entry">
+    <li className={"ka-entry ka-k-" + entry.kind} data-testid="activity-entry">
       <time className="ka-time" dateTime={entry.at} title={fullTime(entry.at)}>
         {clock(entry.at)}
       </time>
@@ -126,9 +128,9 @@ function TimelineEntry({
       </span>
       <div className="ka-body">
         <p className="ka-title">{entryTitle(entry, label)}</p>
-        {entry.lines.length ? (
+        {lines.length ? (
           <div className="ka-lines">
-            <Markdown text={entry.lines.map((line) => "- " + line).join("\n")} wikiLink={wikiOpen} />
+            <Markdown text={lines.map((line) => "- " + line).join("\n")} wikiLink={wikiOpen} />
           </div>
         ) : null}
       </div>

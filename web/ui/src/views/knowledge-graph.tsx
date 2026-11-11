@@ -13,6 +13,7 @@ import { useAgentLabel } from "./agent-label";
 import {
   askHref,
   firstParagraph,
+  isSourcePath,
   latestChange,
   makeScopeColors,
   pageHref,
@@ -227,11 +228,17 @@ export function PageSummary({
   const agent = scope && scope !== "shared" ? scope : defaultAgent;
   const summary = doc ? doc.description || firstParagraph(doc.markdown) : "";
   const change = doc ? latestChange(doc.markdown) : null;
-  const out = doc?.links_out || [];
+  const allOut = doc?.links_out || [];
+  const out = allOut.filter((link) => !isSourcePath(link.path));
   const incoming = doc?.links_in || [];
   /* Front matter sources are often written as [[path]]. */
-  const sources = (doc?.sources || []).map((item) =>
-    item.replace(/^\s*\[\[/, "").replace(/\]\]\s*$/, "")
+  const sources = Array.from(
+    new Set([
+      ...(doc?.sources || []).map((item) =>
+        item.replace(/^\s*\[\[/, "").replace(/\]\]\s*$/, "")
+      ),
+      ...allOut.filter((link) => isSourcePath(link.path)).map((link) => link.path.replace(/\.md$/, "")),
+    ])
   );
 
   return (
@@ -570,7 +577,21 @@ export function GraphTab({
           }
         });
         const charge = (call("d3Force", "charge") as { strength?: (v: number) => void } | undefined);
-        charge?.strength?.(-70);
+        charge?.strength?.(-60);
+        /* A gentle pull to the centre keeps separate clusters (an agent with
+           no links to the others) on screen. */
+        let pulled: GraphNodeDatum[] = [];
+        const gravity = Object.assign(
+          (alpha: number) => {
+            for (const node of pulled) {
+              const item = node as GraphNodeDatum & { vx?: number; vy?: number };
+              item.vx = (item.vx || 0) - (item.x || 0) * 0.06 * alpha;
+              item.vy = (item.vy || 0) - (item.y || 0) * 0.06 * alpha;
+            }
+          },
+          { initialize: (nodes: GraphNodeDatum[]) => { pulled = nodes; } }
+        );
+        call("d3Force", "gravity", gravity);
         instanceRef.current = instance;
         const resize = () => {
           const rect = element.getBoundingClientRect();

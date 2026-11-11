@@ -185,6 +185,20 @@ export function shortDate(value: string): string {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/* Plain text of a line that may hold [[target|label]] links. */
+export function plainLinks(text: string): string {
+  return String(text || "").replace(
+    /\[\[([^\]|#]+)(#[^\]|]*)?(\|([^\]]*))?\]\]/g,
+    (_m, target: string, _h, _b, label: string | undefined) => String(label || target).trim()
+  );
+}
+
+/* Journals, inbox sources and reports are where a page came from, not pages
+   it links to; the views list them under "Learned from". */
+export function isSourcePath(path: string): boolean {
+  return /(^|\/)(journal|inbox|sources|reports)\//.test(path);
+}
+
 export function Note({ children }: { children: ReactNode }) {
   return <p className="knowledge-note">{children}</p>;
 }

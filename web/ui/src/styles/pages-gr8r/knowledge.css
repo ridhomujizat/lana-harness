@@ -706,7 +706,7 @@
 .ka-lines .md { font-size: 12.5px; color: var(--text-3); }
 .ka-lines .md ul { margin: 0; padding-left: 0; list-style: none; }
 .ka-lines .md li { margin: 1px 0; }
-.ka-error .ka-title { color: var(--red); }
+.ka-k-error .ka-title { color: var(--red); }
 .ka-health { border-radius: 12px; background: var(--surface-2); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
 .ka-health h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .ka-health h4 { margin: 8px 0 0; }
@@ -736,7 +736,7 @@
   .kg-stage.has-panel { grid-template-columns: 1fr; }
   .kg-canvas-wrap { min-height: 440px; height: 62vh; }
   .kg-panel {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; max-height: 62vh;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; max-height: 52vh;
     border-radius: 16px 16px 0 0; border-bottom: 0; box-shadow: var(--shadow-pop);
     animation: kgSheetIn .22s var(--ease, ease);
   }

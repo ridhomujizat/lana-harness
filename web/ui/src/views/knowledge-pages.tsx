@@ -21,6 +21,7 @@ import {
   makeScopeColors,
   pageBody,
   pageHref,
+  plainLinks,
   ScopeDot,
   scopeLabel,
   shortDate,
@@ -192,7 +193,7 @@ export function PageReader({
                     <ScopeDot color={colors(link.scope)} />
                     {link.title}
                   </span>
-                  {link.context ? <span className="kg-backlink-c">{link.context}</span> : null}
+                  {link.context ? <span className="kg-backlink-c">{plainLinks(link.context)}</span> : null}
                 </a>
               </li>
             ))}
