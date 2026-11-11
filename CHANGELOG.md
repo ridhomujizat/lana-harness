@@ -51,6 +51,8 @@ but their config keys, events, and tools may still change between betas.
 - `auto` checks subshell and background commands piece by piece instead of asking for each.
 - Agent saves from the dashboard keep the `toolset` key.
 - A runtime without a home folder no longer creates `knowledge/` in the working directory.
+- The web stream subscribes to live frames before its first status event, so a turn that starts
+  right after a page opens no longer loses its first text.
 
 ### Upgrade notes
 - Agents without `permission` now run as `auto` instead of `ask`, and agents with a `tools` list

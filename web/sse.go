@@ -94,6 +94,16 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	// Subscribe before the first status and the replay, so a turn that starts
+	// once the client sees the stream is open is not missed. Frames are
+	// best-effort; the log poll below is the source of truth.
+	sub, err := backend.Subscribe(r.Context(), id)
+	if err != nil {
+		s.logger.Warn("web: stream subscribe", "session", id, "error", err)
+	}
+	if sub != nil {
+		defer sub.Close()
+	}
 	lastStatus := statusFromHolder(holder, running)
 	if err := writeSSE(w, flusher, "status", "", lastStatus); err != nil {
 		return
@@ -130,15 +140,8 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Subscribe before replaying so a turn that starts during replay is not
-	// missed. Frames are best-effort; the log poll below is the source of truth.
-	sub, err := backend.Subscribe(r.Context(), id)
-	if err != nil {
-		s.logger.Warn("web: stream subscribe", "session", id, "error", err)
-	}
 	var frames chan core.LiveFrame
 	if sub != nil {
-		defer sub.Close()
 		frames = make(chan core.LiveFrame)
 		go pumpFrames(r.Context(), sub, frames)
 	}
