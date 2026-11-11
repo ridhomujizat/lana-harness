@@ -13,6 +13,8 @@ var defaultBaseURLs = map[string]string{
 	"deepseek":   "https://api.deepseek.com/v1",
 	"openrouter": "https://openrouter.ai/api/v1",
 	"anthropic":  "https://api.anthropic.com",
+	// commandcode is the Command Code CLI API (providers/commandcode).
+	"commandcode": "https://api.commandcode.ai",
 }
 
 // DefaultBaseURL returns the base URL a provider of kind uses when its
@@ -24,10 +26,11 @@ func DefaultBaseURL(kind string) string {
 // testModels are the cheapest chat models of each preset kind, used for a
 // one-token connection test.
 var testModels = map[string]string{
-	"deepseek":   "deepseek-flash",
-	"openai":     "gpt-5-mini",
-	"anthropic":  "claude-haiku-5-5",
-	"openrouter": "openai/gpt-5-mini",
+	"deepseek":    "deepseek-flash",
+	"openai":      "gpt-5-mini",
+	"anthropic":   "claude-haiku-5-5",
+	"openrouter":  "openai/gpt-5-mini",
+	"commandcode": "deepseek/deepseek-v4-flash",
 }
 
 // TestModel returns the model a connection test of a provider of kind uses

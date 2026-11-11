@@ -7,6 +7,14 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+- Router provider kind `commandcode` (Command Code, commandcode.ai), ported from 9router-go. It
+  speaks the command-code CLI wire (`POST /alpha/generate`, NDJSON events) with text, reasoning,
+  tool calls, images, and usage with cache reads; the model list comes from
+  `/provider/v1/models`. The key is `COMMANDCODE_API_KEY` (or `api_key_env`), pasted on the new
+  Command Code card of Router → Providers. Address models as `commandcode/<model>`, e.g.
+  `commandcode/deepseek/deepseek-v4-flash`.
+
 ## [0.4.0-beta.1] - 2026-11-11
 
 ### Added
