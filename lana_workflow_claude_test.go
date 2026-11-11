@@ -55,78 +55,89 @@ func newGuardianWorkflow(t *testing.T, rt *Runtime) workflow.Detail {
 	return detail
 }
 
-// Spec 39 revision 5: the Workflow assistant of a workflow guarded by a
-// Claude Code agent runs on the agent's background chain ([router]
-// background_model): the reply comes from the background provider and
-// Claude Code never starts.
-func TestWorkflowAssistantClaudeGuardianUsesBackgroundModel(t *testing.T) {
-	bin := buildFakeClaude(t)
-	logPath := filepath.Join(t.TempDir(), "fake.jsonl")
-	t.Setenv("FAKECLAUDE_LOG", logPath)
+// Spec 51 REQ-WFC-001, REQ-WFC-002, REQ-WFC-009 (supersedes spec 39
+// revision 5 for the assistant): the Workflow assistant is a turn on the
+// guardian's own chat session on channel "workflow", with the workflow
+// context as a hidden runtime note before the owner message; the reply is the
+// turn's text.
+func TestWorkflowAssistantRunsGuardianChatTurn(t *testing.T) {
 	ds := newSSEServer(t,
-		sseResponse{body: textSSE(`{"reply":"I can plan that.","graph":null}`)},
+		sseResponse{body: textSSE("I can plan that.")},
 		sseResponse{body: textSSE("[]")},
 		sseResponse{body: textSSE("[]")},
 		sseResponse{body: textSSE("[]")},
 	)
-	cfg := guardianClaudeConfig(bin, t.TempDir(), ds.server.URL, `background_model = "ds/deepseek-flash"`)
+	cfg := `
+[providers.ds]
+kind = "openai_compat"
+base_url = "` + ds.server.URL + `"
+
+[router]
+cooldown = "0s"
+
+[agents.bima]
+toolset = "custom"
+model = "ds/deepseek-flash"
+workspace = "` + t.TempDir() + `"
+permission = "trust"
+tools = ["memory_read"]
+`
 	st := openRouterTestStore(t)
 	rt, err := New(context.Background(), Options{Home: t.TempDir(), Store: st, Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed := false
-	defer func() {
-		if !closed {
-			_ = rt.Close()
-		}
-	}()
+	defer func() { _ = rt.Close() }()
 	wf := newGuardianWorkflow(t, rt)
 	result, err := rt.Workflows().Assist(context.Background(), wf.ID, wf.Version, "add a step")
 	if err != nil {
 		t.Fatalf("assist: %v", err)
 	}
-	if result.Message.Role != "guardian" || result.Message.Text != "I can plan that." {
+	if result.Message.Role != "guardian" || result.Message.Text != "I can plan that." || result.Message.SessionID == "" {
 		t.Fatalf("assistant message = %+v", result.Message)
 	}
-	if n := claudeStartCount(t, logPath); n != 0 {
-		t.Fatalf("claude code started %d times for a guardian structured call", n)
-	}
-	if ds.requests.Load() < 1 {
-		t.Fatal("the background provider was not called")
-	}
-	closed = true
-	if err := rt.Close(); err != nil {
+	info, err := rt.SessionInfo(context.Background(), result.Message.SessionID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	turns := routerCalls(t, st, "turn")
-	if len(turns) == 0 {
-		t.Fatal("no turn call records")
+	if info.Channel != "workflow" || info.Address != wf.ID || info.Agent != "bima" {
+		t.Fatalf("session = %+v", info)
 	}
-	first := turns[0]
-	if first.Provider != "ds" || first.Agent != "bima" || first.Requested != "ds/deepseek-flash" || first.Outcome != "ok" {
-		t.Fatalf("guardian call record = %+v", first)
+	sid, _, err := rt.Workflows().AssistantChat(context.Background(), wf.ID)
+	if err != nil || sid != info.ID {
+		t.Fatalf("workflow session = %q, %v; want %q", sid, err, info.ID)
 	}
-	for _, c := range turns {
-		if c.Provider == "claude-code" {
-			t.Fatalf("a guardian call went to claude code: %+v", c)
+	events, err := st.ChainEvents(context.Background(), info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawNote bool
+	for _, ev := range events {
+		if ev.Kind == "user/message" && strings.Contains(string(ev.Payload), "You are the guardian of workflow") {
+			sawNote = true
 		}
+	}
+	if !sawNote {
+		t.Fatal("the context note was not written before the owner message")
 	}
 }
 
-// Spec 39 revision 5: without a background model the assistant answers the
-// clear error, not "the guardian is not available", and nothing runs.
-func TestWorkflowAssistantClaudeGuardianNeedsBackgroundModel(t *testing.T) {
+// Spec 39 revision 5: a failure decision (diagnosis) is a structured call on
+// the guardian's background chain; without a background model it answers the
+// clear error and nothing runs.
+func TestWorkflowDiagnosisClaudeGuardianNeedsBackgroundModel(t *testing.T) {
 	bin := buildFakeClaude(t)
 	logPath := filepath.Join(t.TempDir(), "fake.jsonl")
 	t.Setenv("FAKECLAUDE_LOG", logPath)
 	ds := newSSEServer(t)
 	rt, _ := routedRuntime(t, guardianClaudeConfig(bin, t.TempDir(), ds.server.URL, ""))
 	wf := newGuardianWorkflow(t, rt)
-	_, err := rt.Workflows().Assist(context.Background(), wf.ID, wf.Version, "add a step")
+	_, err := rt.WorkflowDeps().RunAgent(context.Background(), workflow.AgentRequest{
+		WorkflowID: wf.ID, NodeID: "n1", Agent: "bima", Prompt: "decide", Background: true,
+	})
 	var needs *workflow.GuardianBackgroundError
 	if !errors.As(err, &needs) || errors.Is(err, workflow.ErrGuardianUnavailable) {
-		t.Fatalf("assist err = %v", err)
+		t.Fatalf("diagnosis err = %v", err)
 	}
 	const want = "The guardian bima runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes."
 	if err.Error() != want {
@@ -134,12 +145,6 @@ func TestWorkflowAssistantClaudeGuardianNeedsBackgroundModel(t *testing.T) {
 	}
 	if n := claudeStartCount(t, logPath); n != 0 || ds.requests.Load() != 0 {
 		t.Fatalf("a call ran: claude starts %d, provider requests %d", n, ds.requests.Load())
-	}
-	// A failure decision (diagnosis) is the same structured call.
-	if _, err := rt.WorkflowDeps().RunAgent(context.Background(), workflow.AgentRequest{
-		WorkflowID: wf.ID, NodeID: "n1", Agent: "bima", Prompt: "decide", Background: true,
-	}); !errors.As(err, &needs) {
-		t.Fatalf("diagnosis err = %v", err)
 	}
 }
 
