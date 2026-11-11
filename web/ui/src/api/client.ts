@@ -1,5 +1,6 @@
 import type { ApprovalEvent } from "./approvals";
 import type { QuestionEvent } from "./questions";
+import type { SecretRequestEvent } from "./secret-requests";
 import type { SessionEvent } from "./sessions";
 import { watchVisibility } from "./visibility";
 
@@ -176,6 +177,8 @@ export interface StreamHandlers {
   onTurn?: (payload: StreamFrame) => void;
   onApproval?: (payload: ApprovalEvent) => void;
   onQuestion?: (payload: QuestionEvent) => void;
+  /* Spec 53 API-SEC-003: an open secure secret input card. */
+  onSecretRequest?: (payload: SecretRequestEvent) => void;
   onApprovalClosed?: (payload: StreamFrame) => void;
   onShutdown?: (payload: StreamFrame) => void;
   /* Spec 40, REQ-TTL-011: the session title, its source, or the pending flag
@@ -274,6 +277,12 @@ function dispatchBlock(
   if (eventName === "question") {
     if (handlers.onQuestion) {
       handlers.onQuestion(payload as QuestionEvent);
+    }
+    return;
+  }
+  if (eventName === "secret_request") {
+    if (handlers.onSecretRequest) {
+      handlers.onSecretRequest(payload as SecretRequestEvent);
     }
     return;
   }

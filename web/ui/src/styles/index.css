@@ -34,6 +34,7 @@
 @import "./gr8r/views/table.css" layer(gr8r);
 @import "./gr8r/overlays.css" layer(gr8r);
 @import "./gr8r/states.css" layer(gr8r);
+@import "./secret-request.css" layer(gr8r);
 @import "./gr8r/pages/settings.css" layer(gr8r);
 @import "./gr8r/pages/auth.css" layer(gr8r);
 @import "./gr8r/motion.css" layer(gr8r);
