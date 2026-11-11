@@ -631,3 +631,25 @@ func waitForNoApproval(t *testing.T, s *Server) {
 	}
 	t.Fatal("approval never closed")
 }
+
+// TestRoomSendDiscussNote covers API-RDS-013: Discuss on adds the runtime note.
+func TestRoomSendDiscussNote(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agentNames["squad"] = true
+	backend.agents = []Agent{{Name: "squad", Kind: "team", Lead: "lana", Members: []string{"k", "d"}}}
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/squad/messages", `{"text":"ambil ga?","discuss":true}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body roomSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	backend.mu.Lock()
+	note := backend.sentNotes[body.SessionID]
+	backend.mu.Unlock()
+	if note != core.DiscussRequestNote {
+		t.Fatalf("note = %q", note)
+	}
+}

@@ -94,6 +94,7 @@ args = ["-test.run=^$"]
 env = { LANA_MCP_TEST_SERVER = "1" }
 
 [agents.lana]
+toolset = "custom"
 provider = "mock"
 model = "m"
 
@@ -147,6 +148,7 @@ kind = "openai_compat"
 base_url = "mock://local"
 
 [agents.lana]
+toolset = "custom"
 provider = "mock"
 model = "old-model"
 
@@ -229,6 +231,7 @@ kind = "openai_compat"
 base_url = "mock://local"
 
 [agents.lana]
+toolset = "custom"
 provider = "mock"
 model = "old-model"
 

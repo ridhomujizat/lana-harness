@@ -12,6 +12,10 @@ const (
 	PolicyTrust Policy = "trust"
 	PolicyAsk   Policy = "ask"
 	PolicyNever Policy = "never"
+	// PolicyAuto runs tools without asking, except dangerous shell commands,
+	// writes outside the workspace, and tools outside the standard set, which
+	// ask the owner (Hermes-style default).
+	PolicyAuto Policy = "auto"
 )
 
 // ApprovalOutcome is the answer to an approval.

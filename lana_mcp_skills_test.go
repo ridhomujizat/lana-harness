@@ -28,16 +28,19 @@ kind = "openai_compat"
 base_url = "http://127.0.0.1:1"
 
 [agents.assistant]
+toolset = "custom"
 provider = "local"
 model = "m"
 skills = ["demo"]
 
 [agents.with_mcp]
+toolset = "custom"
 provider = "local"
 model = "m"
 mcp = ["fake"]
 
 [agents.plain]
+toolset = "custom"
 provider = "local"
 model = "m"
 

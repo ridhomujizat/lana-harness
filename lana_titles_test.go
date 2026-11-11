@@ -49,6 +49,7 @@ kind = "openai_compat"
 base_url = %q
 
 [agents.assistant]
+toolset = "custom"
 model = "a/x"
 
 [[routes]]

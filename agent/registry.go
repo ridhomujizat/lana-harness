@@ -13,6 +13,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/roommemory"
 )
 
 // TurnResult is the result of one turn.
@@ -76,6 +77,14 @@ type Registry struct {
 	secrets    core.Secrets
 	home       string
 	defaultWS  string
+
+	// Room discussions (spec 47): the open discussion per session, the
+	// after-discussion share hook, and the room memory store.
+	disc       discussions
+	groups     groupState
+	discMu     sync.Mutex
+	discShare  core.DiscussionShare
+	roomMemory *roommemory.Store
 
 	mu      sync.Mutex
 	runners map[string]*Runner

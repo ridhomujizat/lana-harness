@@ -11,7 +11,7 @@ import (
 func EffectivePolicy(events []core.SessionEvent, def core.Policy) core.Policy {
 	policy := def
 	if policy == "" {
-		policy = core.PolicyAsk
+		policy = core.DefaultPolicy
 	}
 	for _, event := range events {
 		if event.Kind != core.KindApprovalPolicy {
@@ -26,7 +26,7 @@ func EffectivePolicy(events []core.SessionEvent, def core.Policy) core.Policy {
 }
 
 func validPolicy(p core.Policy) bool {
-	return p == core.PolicyTrust || p == core.PolicyAsk || p == core.PolicyNever
+	return p == core.PolicyTrust || p == core.PolicyAsk || p == core.PolicyNever || p == core.PolicyAuto
 }
 
 // Grant is a session permission matching a whole tool.
@@ -73,8 +73,10 @@ func ChildPolicy(parent, child core.Policy) core.Policy {
 			return 0
 		case core.PolicyAsk:
 			return 1
-		case core.PolicyTrust:
+		case core.PolicyAuto:
 			return 2
+		case core.PolicyTrust:
+			return 3
 		}
 		return 1
 	}

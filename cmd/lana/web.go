@@ -33,6 +33,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/internal/models"
+	"github.com/ridhomujizat/lana-harness/internal/roommemory"
 	"github.com/ridhomujizat/lana-harness/internal/stats"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 	"github.com/ridhomujizat/lana-harness/router"
@@ -876,6 +877,7 @@ func (b *webBackend) Agents() []web.Agent {
 			Skills:    skillNames,
 			MCP:       mcp,
 			MCPStatus: mcpStatus,
+			Can:       b.rt.AgentCapabilities(name),
 		})
 	}
 	for _, name := range b.rt.TeamNames() {
@@ -890,6 +892,7 @@ func (b *webBackend) Agents() []web.Agent {
 			Lead:        team.Lead,
 			Members:     append([]string{}, team.Members...),
 			Description: team.Description,
+			Mode:        team.ConversationMode(),
 		})
 	}
 	return agents
@@ -1430,6 +1433,18 @@ func (b *webBackend) SendNote(ctx context.Context, id, text string, attachments 
 	}
 	return b.Send(ctx, id, text, attachments, replyTo)
 }
+
+// StopDiscussion implements the web discussion extension (API-RDS-011).
+func (b *webBackend) StopDiscussion(ctx context.Context, id, mode string) (bool, error) {
+	info, err := b.resolveSession(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return b.rt.StopDiscussion(ctx, info.ID, mode)
+}
+
+// RoomMemory implements the web discussion extension (API-RDS-012).
+func (b *webBackend) RoomMemory() *roommemory.Store { return b.rt.RoomMemory() }
 
 // SaveAttachment stores one uploaded file in the session workspace
 // (API-ATT-001, REQ-ATT-001).

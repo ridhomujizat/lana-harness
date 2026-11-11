@@ -50,6 +50,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewTaskContinue(),
 		NewAskUser(),
 	}
+	builtins = append(builtins, NewDiscussTools()...)
 	for _, tool := range builtins {
 		if err := registry.Register(tool); err != nil {
 			return err

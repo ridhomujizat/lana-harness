@@ -68,6 +68,11 @@ type roomJSON struct {
 	Name  string `json:"name"`
 	Kind  string `json:"kind"`
 	Title string `json:"title"`
+	// Can names what an agent can do (spec 47 team work); empty for a team.
+	Can []string `json:"can"`
+	// Mode is a team's conversation mode, "group" or "lead"; empty for an
+	// agent.
+	Mode string `json:"mode,omitempty"`
 	// DisplayName is the human name shown in the UI, "" when unset.
 	DisplayName string `json:"display_name"`
 	Color       string `json:"color"`
@@ -235,6 +240,8 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		Attachments []string `json:"attachments"`
 		NewTopic    bool     `json:"new_topic"`
 		ReplyTo     *int64   `json:"reply_to"`
+		// Discuss asks the lead to open a discussion (API-RDS-013).
+		Discuss bool `json:"discuss"`
 	}
 	if !decodeJSONObject(w, r, roomSendBody, &body) {
 		return
@@ -248,6 +255,9 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	note := roomMentionNote(room, text)
+	if body.Discuss && room.Kind == "team" {
+		note = strings.TrimSpace(note + "\n" + core.DiscussRequestNote)
+	}
 
 	// One create per room: the mutex guards "find or create the current web
 	// session" (design §Concurrency).
@@ -318,6 +328,7 @@ type agentMeta struct {
 	title       string
 	displayName string
 	color       string
+	mode        string
 }
 
 // roomAgentMeta reads the [agents.<name>] tables for the title and color, the
@@ -339,6 +350,12 @@ func (s *Server) roomAgentMeta(ctx context.Context) map[string]agentMeta {
 		record := agentRecordFromMap(table)
 		meta[name] = agentMeta{title: record.Title, displayName: record.DisplayName, color: record.Color}
 	}
+	// Spec 47: a team's display_name names its room.
+	if document, err := parseTeamDocument(file.Raw); err == nil {
+		for name, table := range document.Teams {
+			meta[name] = agentMeta{displayName: mapAgentString(table, "display_name"), mode: mapAgentString(table, "mode")}
+		}
+	}
 	return meta
 }
 
@@ -347,6 +364,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 	row := roomJSON{
 		Name:    agent.Name,
 		Kind:    "agent",
+		Can:     nonNilStrings(agent.Can),
 		Members: []string{},
 		Color:   core.ResolveAgentColor(agent.Name, ""),
 	}
@@ -359,6 +377,13 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 		row.Lead = agent.Lead
 		row.Members = nonNilStrings(agent.Members)
 		row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(agent.Name), avatar.Default
+		row.Mode = core.TeamModeGroup
+		if m, ok := meta[agent.Name]; ok {
+			row.DisplayName = m.displayName
+			if m.mode == core.TeamModeLead {
+				row.Mode = core.TeamModeLead
+			}
+		}
 	} else {
 		if m, ok := meta[agent.Name]; ok {
 			row.Title = m.title
@@ -688,7 +713,9 @@ func (s *Server) roomWebSession(ctx context.Context, backend Backend, room Agent
 // roomMentionNote returns the runtime note for a team room whose text starts
 // with a member mention, or "" (API-ROOM-003, AC-ROOM-013).
 func roomMentionNote(room Agent, text string) string {
-	if room.Kind != "team" {
+	// A group room routes @mentions itself; only a lead-mode team needs the
+	// lead told to hand off.
+	if room.Kind != "team" || room.Mode == core.TeamModeGroup {
 		return ""
 	}
 	mention := mentionTarget(text)

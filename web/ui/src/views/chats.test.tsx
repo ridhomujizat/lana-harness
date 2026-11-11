@@ -464,7 +464,7 @@ describe("Empty room (REQ-ROOM-002)", () => {
 
     expect(
       await screen.findByText(
-        "Ask the team something — lana will hand work to the right member"
+        "research-squad is ready"
       )
     ).toBeTruthy();
   });

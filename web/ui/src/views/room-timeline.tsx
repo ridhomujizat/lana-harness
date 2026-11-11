@@ -15,6 +15,11 @@ import type { StreamState } from "../api/client";
 import { answerQuestion, skipAllQuestions } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
 import { markRoomRead, roomSegments, sendToRoom } from "../api/rooms";
+import { stopDiscussion } from "../api/discussion";
+import { discussionStatus } from "../lib/discussion";
+import { DiscussionBar, TeamAvatar } from "./discussion";
+import { RoomSettings } from "./room-settings";
+import type { RoomSettingsTab } from "./room-settings";
 import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
@@ -24,7 +29,7 @@ import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import { Badge, Button, Skeleton } from "../ui/gr8r";
-import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
+import { AgentAvatar } from "./agent-avatar";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
 import {
@@ -310,6 +315,11 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const [liveText, setLiveText] = useState("");
   const [liveThinking, setLiveThinking] = useState(false);
   const [liveTool, setLiveTool] = useState("");
+  /* Group rooms: the agent whose turn it is, its session, and the events of
+     every agent session behind the room's replies. */
+  const [liveSpeaker, setLiveSpeaker] = useState("");
+  const [liveChild, setLiveChild] = useState("");
+  const [childEvents, setChildEvents] = useState<Record<string, SessionEvent[]>>({});
   const [streamState, setStreamState] = useState<StreamState>("connected");
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [question, setQuestion] = useState<OpenQuestion | null>(null);
@@ -319,6 +329,10 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   /* API reply: the automation message the next send replies to. */
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [newTopic, setNewTopic] = useState(false);
+  /* Spec 47 REQ-RDS-020: Discuss on for the next message. */
+  const [discuss, setDiscuss] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<RoomSettingsTab | null>(null);
+  const [stoppingId, setStoppingId] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -329,7 +343,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const startedRef = useRef(false);
   const handledSessionRef = useRef("");
   const attachmentDraft = useAttachmentDraft();
-  const { byName } = useRooms();
+  const { byName, rows: roomRows } = useRooms();
 
   /* REQ-ROOM-008: the faces of the room, its lead and its members, with each
      agent's configured color for the group chat. */
@@ -419,6 +433,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setLiveText("");
     setLiveThinking(false);
     setLiveTool("");
+    setLiveSpeaker("");
+    setLiveChild("");
     setLiveTurnId("");
     setLiveStartedAt(0);
   }, []);
@@ -465,6 +481,22 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
       fromSeq: 0,
       onState: (state) => setStreamState(state),
       onEvent: (event) => {
+        /* Child sessions (a member's own session in a team room) stream their
+           events too; the room shows only its own conversation. */
+        const childId = (event as { child_session_id?: unknown }).child_session_id;
+        if (typeof childId === "string" && childId) {
+          setChildEvents((current) => {
+            const list = current[childId] || [];
+            if (list.some((entry) => entry.seq === event.seq)) {
+              return current;
+            }
+            return { ...current, [childId]: list.concat([event]).sort((a, b) => a.seq - b.seq) };
+          });
+          if (event.kind === "turn/start") {
+            setLiveChild(childId);
+          }
+          return;
+        }
         setEvents((current) => {
           const list = current[id] || [];
           if (list.some((entry) => entry.seq === event.seq)) {
@@ -511,6 +543,20 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
            agent (API-TEAM-011). The group room builds the member row from the
            delegation, so a child frame leaves the lead's live state alone. */
         if (stringOf(frame.child_session_id)) {
+          /* Group rooms: a teammate's tool calls show who works on what. */
+          if (frame.kind === "tool_call") {
+            const agent = stringOf(frame.agent);
+            if (agent) {
+              setLiveSpeaker(agent);
+            }
+            setLiveTool(stringOf(frame.name));
+          }
+          return;
+        }
+        if (frame.kind === "speaker") {
+          setLiveSpeaker(stringOf(frame.name));
+          setLiveTool("");
+          setLiveText("");
           return;
         }
         const turnId = stringOf(frame.turn_id);
@@ -972,6 +1018,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
       if (topic) {
         body.new_topic = true;
       }
+      if (discuss && team) {
+        body.discuss = true;
+      }
       if (replyTarget) {
         body.reply_to = replyTarget.seq;
       }
@@ -980,6 +1029,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
          carries its own reply_to. */
       setReplyTarget(null);
       setNewTopic(false);
+      setDiscuss(false);
       attachmentDraft.clear();
       if (result.command) {
         /* API-WF-021: a workflow chat command started a run, not a turn. */
@@ -1039,9 +1089,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     ? (room.members.length + 1) + " agents · " + room.turns_7d + " turns this week"
     : room.turns_7d + " turns this week";
   const placeholder = team
-    ? "Message the team…   " +
-      (room.lead ? agentLabel(room.lead, byName) : "The lead") +
-      " answers, or type @ to ask one agent"
+    ? room.mode === "lead"
+      ? "Message the team…   " + (room.lead ? agentLabel(room.lead, byName) : "The lead") + " answers, or type @ to ask one agent"
+      : "Message the team…   everyone can answer, or @ someone"
     : "Message " + displayLabel(room) + "…   Type @ to bring in another agent";
   const attachDisabled = !currentWebSessionId || sending || uploading;
   const activity = liveTool ? activityPhrase(liveTool) : "thinking";
@@ -1072,6 +1122,90 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
       ? " · " +
         workingLabel(workingMembers.map((name) => agentLabel(name, byName)))
       : "");
+
+  /* Group rooms: load the agent sessions behind replies in loaded history. */
+  const childIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of Object.values(events)) {
+      for (const event of list) {
+        if (event.kind !== "assistant/message") {
+          continue;
+        }
+        const payload = (event.payload || {}) as Record<string, unknown>;
+        if (payload.source === "agent" && typeof payload.child_session_id === "string" && payload.child_session_id) {
+          ids.add(payload.child_session_id);
+        }
+      }
+    }
+    return Array.from(ids);
+  }, [events]);
+  useEffect(() => {
+    const missing = childIds.filter((id) => !childEvents[id]);
+    if (missing.length === 0) {
+      return undefined;
+    }
+    let live = true;
+    void Promise.all(
+      missing.map((id) =>
+        listEvents(id, 0)
+          .then((page) => [id, page && Array.isArray(page.events) ? page.events : []] as const)
+          .catch(() => [id, [] as SessionEvent[]] as const)
+      )
+    ).then((pairs) => {
+      if (!live) {
+        return;
+      }
+      setChildEvents((current) => {
+        const next = { ...current };
+        for (const [id, list] of pairs) {
+          if (!next[id] || next[id].length < list.length) {
+            next[id] = list;
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [childIds, childEvents]);
+
+  /* Spec 47 team work: what each agent can do, for the handoff rows. */
+  const canByName = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const row of roomRows) {
+      if (row.can && row.can.length > 0) {
+        out[row.name] = row.can;
+      }
+    }
+    return out;
+  }, [roomRows]);
+
+  /* REQ-RDS-051: the newest running turn with an open discussion. */
+  const openDiscussion = useMemo(() => {
+    if (!team) {
+      return null;
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const node = nodes[index];
+      if (node && node.kind === "turn" && node.turn.discussion) {
+        const log = node.turn.discussion;
+        return node.turn.running && discussionStatus(log).open ? { log, sessionId: node.sessionId } : null;
+      }
+    }
+    return null;
+  }, [nodes, team]);
+
+  async function stopRoomDiscussion(sessionId: string, mode: "stop" | "direct") {
+    if (openDiscussion) {
+      setStoppingId(openDiscussion.log.id);
+    }
+    try {
+      await stopDiscussion(sessionId, mode);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    }
+  }
 
   function composerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (mentions.onKeyDown(event)) {
@@ -1150,7 +1284,17 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
         return (
           <div className="msg-enter" key={node.key}>
             {team ? (
-              <RoomGroup turn={node.turn} room={room} faces={faces} sessionId={node.sessionId} />
+              <RoomGroup
+                turn={node.turn}
+                room={room}
+                faces={faces}
+                sessionId={node.sessionId}
+                onDirect={() => void stopRoomDiscussion(node.sessionId, "direct")}
+                onMemory={() => setSettingsTab("memory")}
+                can={canByName}
+                childEvents={childEvents}
+                liveChild={node.sessionId === newestId && node.turn.running ? liveChild : ""}
+              />
             ) : (
               <TurnBlock
                 turn={node.turn}
@@ -1183,9 +1327,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
           <Ic name="chevron-left" size={18} />
         </a>
         {team ? (
-          <AgentAvatarStack
-            size="lg"
-            max={3}
+          <TeamAvatar
+            size={44}
             items={teamFaces.map((face) => ({
               name: face.name,
               color: gr8rColor(face.color),
@@ -1220,15 +1363,32 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
           </div>
         </div>
         <div className="room-head-actions">
-          <Button
-            as="a"
-            size="sm"
-            href={"#/agents/" + encodeURIComponent(room.name)}
-          >
-            View profile
-          </Button>
+          {team ? (
+            <Button size="sm" onClick={() => setSettingsTab("members")}>
+              Members
+            </Button>
+          ) : (
+            <Button
+              as="a"
+              size="sm"
+              href={"#/agents/" + encodeURIComponent(room.name)}
+            >
+              View profile
+            </Button>
+          )}
         </div>
       </header>
+      {settingsTab && team ? (
+        <RoomSettings room={room} rows={roomRows} initialTab={settingsTab} onClose={() => setSettingsTab(null)} />
+      ) : null}
+      {openDiscussion ? (
+        <DiscussionBar
+          log={openDiscussion.log}
+          faces={faces}
+          stopping={stoppingId === openDiscussion.log.id}
+          onStop={() => void stopRoomDiscussion(openDiscussion.sessionId, "stop")}
+        />
+      ) : null}
 
       {loadError ? (
         <div className="alert danger room-notices" role="alert">
@@ -1253,11 +1413,11 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             {loadingOlder ? (
               <p className="room-older muted">Loading earlier messages…</p>
             ) : null}
-            {turnRunning ? (
+            {turnRunning && !(team && liveChild) ? (
               <div className="room-live" role="status">
                 <TypingDots />
                 <span className="room-live-text">
-                  {displayLabel(room) + " is " + activity + "…"}
+                  {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}
                 </span>
               </div>
             ) : null}
@@ -1366,6 +1526,20 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 onFiles={attachmentDraft.addFiles}
               />
             </span>
+            {team ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="messages-square"
+                className={"room-discuss" + (discuss ? " on" : "")}
+                aria-pressed={discuss}
+                title="Ask the lead to open a discussion"
+                disabled={sending}
+                onClick={() => setDiscuss((value) => !value)}
+              >
+                Discuss
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="ghost"
@@ -1412,9 +1586,8 @@ function RoomEmpty({
   return (
     <div className="room-empty">
       {team && teamFaces.length > 0 ? (
-        <AgentAvatarStack
-          size="xl"
-          max={3}
+        <TeamAvatar
+          size={64}
           items={teamFaces.map((face) => ({
             name: face.name,
             color: gr8rColor(face.color),
@@ -1429,13 +1602,27 @@ function RoomEmpty({
         />
       )}
       <h2 className="room-empty-title">
-        {team
-          ? "Ask the team something — " +
-            leadLabel +
-            " will hand work to the right member"
-          : "Start a conversation with " + displayLabel(room)}
+        {team ? displayLabel(room) + " is ready" : "Start a conversation with " + displayLabel(room)}
       </h2>
-      {room.title ? (
+      {team ? (
+        <>
+          <p className="room-empty-text muted">
+            {"Ask anything here. " +
+              leadLabel +
+              " answers, brings in a member when needed, and opens a discussion when a question needs more than one view."}
+          </p>
+          <div className="room-empty-members">
+            {teamFaces.map((face) => (
+              <span key={face.name} className="room-empty-member">
+                <AgentAvatar name={face.name} color={gr8rColor(face.color)} size="sm" />
+                <span>{face.label || face.name}</span>
+                {face.name === room.lead ? <span className="muted">lead</span> : null}
+              </span>
+            ))}
+          </div>
+          {room.title ? <p className="room-empty-text muted">{room.title}</p> : null}
+        </>
+      ) : room.title ? (
         <p className="room-empty-text muted">{room.title}</p>
       ) : null}
     </div>

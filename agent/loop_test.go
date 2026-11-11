@@ -69,6 +69,14 @@ func newHarness(t *testing.T, script mock.Script, agents map[string]core.AgentCo
 	if agents == nil {
 		agents = map[string]core.AgentConfig{"assistant": {Provider: "mock", Model: "m"}}
 	}
+	// The tests name the tools an agent offers; the standard toolset stays out
+	// unless a test asks for it.
+	for name, cfg := range agents {
+		if cfg.Toolset == "" {
+			cfg.Toolset = core.ToolsetCustom
+			agents[name] = cfg
+		}
+	}
 	cfg := core.Config{
 		Providers: map[string]core.ProviderConfig{"mock": {Kind: "openai_compat"}},
 		Agents:    agents,

@@ -141,6 +141,7 @@ interface TeamCall {
   childId: string;
   agent: string;
   result: Record<string, unknown> | null;
+  context: string[];
   prompt: string;
   startedAt: number;
   endedAt: number;
@@ -158,6 +159,8 @@ interface TeamDelegationStep {
   status: string;
   startedAt: number;
   endedAt: number;
+  /* Spec 47 team work: earlier child sessions this task builds on. */
+  context: string[];
 }
 
 interface TeamReturnStep {
@@ -173,6 +176,10 @@ interface TeamReturnStep {
   status: string;
   startedAt: number;
   endedAt: number;
+  /* Spec 47 team work: tool calls by name, notes used, files changed. */
+  tools: Record<string, number>;
+  notes: string[];
+  files: string[];
 }
 
 export type TeamStep = TeamDelegationStep | TeamReturnStep;
@@ -246,6 +253,7 @@ export function teamSteps(
       childId,
       agent,
       result,
+      context: Array.isArray(input.context) ? input.context.map(String) : [],
       prompt: String(input.prompt || ""),
       startedAt: Number(event.created_at) || 0,
       endedAt: found ? found.createdAt : 0,
@@ -267,6 +275,7 @@ export function teamSteps(
       status: call.result ? "done" : "running",
       startedAt: call.startedAt,
       endedAt: call.endedAt,
+      context: call.context,
     });
     if (!call.result) {
       continue;
@@ -290,6 +299,9 @@ export function teamSteps(
       status: String(parsed.status || call.result.status || ""),
       startedAt: call.startedAt,
       endedAt: call.endedAt,
+      tools: toolCounts(parsed.tools),
+      notes: stringList(parsed.notes),
+      files: stringList(parsed.files),
     });
   }
 
@@ -966,4 +978,21 @@ export function TeamBlock({
       />
     </article>
   );
+}
+
+function toolCounts(value: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (value && typeof value === "object") {
+    for (const [name, count] of Object.entries(value as Record<string, unknown>)) {
+      const n = Number(count);
+      if (name && Number.isFinite(n) && n > 0) {
+        out[name] = n;
+      }
+    }
+  }
+  return out;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
 }

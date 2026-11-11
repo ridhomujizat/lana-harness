@@ -114,12 +114,15 @@ type ProviderConfig struct {
 const ClaudeCodeKind = "claude-code"
 
 type AgentConfig struct {
-	Provider      string   `toml:"provider"`
-	Model         string   `toml:"model"`
-	Fallback      []string `toml:"fallback"`
-	PromptFile    string   `toml:"prompt_file"`
-	Workspace     string   `toml:"workspace"`
-	Tools         []string `toml:"tools"`
+	Provider   string   `toml:"provider"`
+	Model      string   `toml:"model"`
+	Fallback   []string `toml:"fallback"`
+	PromptFile string   `toml:"prompt_file"`
+	Workspace  string   `toml:"workspace"`
+	Tools      []string `toml:"tools"`
+	// Toolset is "standard" (the default: the standard tools plus Tools) or
+	// "custom" (only Tools).
+	Toolset       string   `toml:"toolset"`
 	DisabledTools []string `toml:"disabled_tools"`
 	Subagents     []string `toml:"subagents"`
 	MCP           []string `toml:"mcp"`
@@ -184,10 +187,94 @@ type AgentRules struct {
 
 // TeamConfig is the [teams.<name>] table. Lead and members name agents.
 type TeamConfig struct {
+	// DisplayName is the room name people see ("Career plan"); "" shows the
+	// team name (spec 47 New group room).
+	DisplayName string   `toml:"display_name"`
 	Description string   `toml:"description"`
 	Lead        string   `toml:"lead"`
 	Members     []string `toml:"members"`
+	// Discussion settings (spec 47 REQ-RDS-001). Empty or nil means the
+	// default; read them through the methods below.
+	// Mode is "group" (the default: everyone talks, @mentions route) or
+	// "lead" (the lead answers and hands off).
+	Mode         string `toml:"mode"`
+	Discuss      string `toml:"discuss"`
+	Rounds       int    `toml:"rounds"`
+	ExtraRounds  string `toml:"extra_rounds"`
+	RoomMemory   *bool  `toml:"room_memory"`
+	ShareSummary *bool  `toml:"share_summary"`
+	Learn        *bool  `toml:"learn"`
+	TelegramAll  *bool  `toml:"telegram_all"`
 }
+
+// Team discussion defaults (REQ-RDS-001).
+const (
+	TeamDiscussAuto   = "auto"
+	TeamDiscussAsk    = "ask"
+	TeamExtraOnce     = "once"
+	TeamExtraAsk      = "ask"
+	TeamExtraNever    = "never"
+	TeamRoundsDefault = 3
+	TeamRoundsMax     = 5
+)
+
+// Team conversation modes.
+const (
+	TeamModeGroup = "group"
+	TeamModeLead  = "lead"
+)
+
+// ConversationMode is "group" (default) or "lead".
+func (t TeamConfig) ConversationMode() string {
+	if t.Mode == TeamModeLead {
+		return TeamModeLead
+	}
+	return TeamModeGroup
+}
+
+// DiscussMode is "auto" (the lead decides) or "ask" (only when the owner asks).
+func (t TeamConfig) DiscussMode() string {
+	if t.Discuss == TeamDiscussAsk {
+		return TeamDiscussAsk
+	}
+	return TeamDiscussAuto
+}
+
+// RoundLimit is the normal round limit, 1..5.
+func (t TeamConfig) RoundLimit() int {
+	if t.Rounds < 1 || t.Rounds > TeamRoundsMax {
+		return TeamRoundsDefault
+	}
+	return t.Rounds
+}
+
+// ExtraMode is "once", "ask" or "never".
+func (t TeamConfig) ExtraMode() string {
+	switch t.ExtraRounds {
+	case TeamExtraAsk, TeamExtraNever:
+		return t.ExtraRounds
+	}
+	return TeamExtraOnce
+}
+
+func boolDefault(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
+}
+
+// KeepsRoomMemory reports room_memory (default true).
+func (t TeamConfig) KeepsRoomMemory() bool { return boolDefault(t.RoomMemory, true) }
+
+// SharesSummary reports share_summary (default true).
+func (t TeamConfig) SharesSummary() bool { return boolDefault(t.ShareSummary, true) }
+
+// Learns reports learn (default true).
+func (t TeamConfig) Learns() bool { return boolDefault(t.Learn, true) }
+
+// TelegramAllMessages reports telegram_all (default true).
+func (t TeamConfig) TelegramAllMessages() bool { return boolDefault(t.TelegramAll, true) }
 
 type RouteConfig struct {
 	Channel string         `toml:"channel"`

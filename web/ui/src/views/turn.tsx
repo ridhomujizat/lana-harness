@@ -1,3 +1,6 @@
+import { applyDiscussionEvent } from "../lib/discussion";
+import { DiscussionCard } from "./discussion";
+import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { useEffect, useState } from "react";
@@ -116,11 +119,27 @@ export type TurnSegment =
          source ("workflow") and the source's name. */
       source?: string;
       sourceName?: string;
+      /* Group rooms: an agent's reply and what it used. */
+      agentMeta?: AgentReplyMeta;
     }
   | { kind: "thinking"; key: string; text: string }
   | { kind: "step"; key: string; step: TurnStep };
 
+/* Group rooms: a reply's pass/fail state and the tools, notes and files the
+   agent used (assistant/message with source "agent"). */
+export interface AgentReplyMeta {
+  /* The agent's own turn behind the reply, to show its steps like a chat. */
+  childSessionId: string;
+  childTurnId: string;
+  passed: boolean;
+  failed: boolean;
+  tools: Record<string, number>;
+  notes: string[];
+  files: string[];
+}
+
 export interface TurnGroup {
+  agentMeta?: AgentReplyMeta;
   kind: "text" | "thinking" | "activity";
   key: string;
   text?: string;
@@ -174,6 +193,8 @@ export interface ChatTurn extends Turn {
   notes: string[];
   /* REQ-AGF-005: the files the agent sent in this turn (file/sent events). */
   sentFiles: SentFileRef[];
+  /* Spec 47: the room discussion of this turn, if the lead opened one. */
+  discussion: DiscussionLog | null;
 }
 
 /* SentFileRef is one file/sent event (API-AGF-001). */
@@ -896,7 +917,17 @@ export function TurnBlock({
         waitingForInput={waitingForInput}
         turnKey={String(turn.key || turn.id || "turn")}
       />
-      {parts.answer.map((segment) => (
+      {parts.answer.map((segment) =>
+        segment.source === "discussion" ? (
+          /* Spec 47 REQ-RDS-053: a discussion summary shared into a member's
+             room shows as a card. */
+          <DiscussionCard
+            key={segment.key}
+            team={segment.sourceName || ""}
+            text={segment.text || ""}
+            at={Number(turn.startedAt) || 0}
+          />
+        ) : (
         <div className="turn-text turn-answer" key={segment.key}>
           {segment.source ? (
             <div className="turn-via muted">
@@ -928,7 +959,8 @@ export function TurnBlock({
           ) : null}
           <Markdown text={segment.text || ""} />
         </div>
-      ))}
+        )
+      )}
       {sessionId && (turn.sentFiles || []).length > 0 ? (
         <AgentFiles
           sessionId={sessionId}
@@ -1094,6 +1126,7 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     currentStep: 0,
     notes: [],
     sentFiles: [],
+    discussion: null,
   };
 }
 
@@ -1257,10 +1290,11 @@ export function buildTurns(
           });
         }
         const text = contentText(payload.content);
-        if (text) {
+        const source = stringOf(payload.source);
+        const agentReply = source === "agent";
+        if (text || (agentReply && payload.passed === true)) {
           /* API-WF-005: an out-of-band message names its source, shown as a
              muted "via …" line above the answer. */
-          const source = stringOf(payload.source);
           const sourceName = stringOf(payload.source_name);
           turn.segments.push({
             kind: "text",
@@ -1268,6 +1302,7 @@ export function buildTurns(
             text,
             seq: event.seq,
             ...(source ? { source, sourceName } : {}),
+            ...(agentReply ? { agentMeta: agentMetaOf(payload) } : {}),
           });
         }
         break;
@@ -1361,6 +1396,14 @@ export function buildTurns(
             at: createdAt,
           });
         }
+        break;
+      }
+      case "discussion/started":
+      case "discussion/message":
+      case "discussion/ended": {
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        turn.discussion = applyDiscussionEvent(turn.discussion, event.kind, payload, event.seq, createdAt);
         break;
       }
       case "turn/end": {
@@ -1473,4 +1516,27 @@ export function buildTurns(
     items.push({ kind: "turn", key: turn.key, turn });
   }
   return items;
+}
+
+function agentMetaOf(payload: Record<string, unknown>): AgentReplyMeta {
+  const tools: Record<string, number> = {};
+  if (payload.tools && typeof payload.tools === "object") {
+    for (const [name, count] of Object.entries(payload.tools as Record<string, unknown>)) {
+      const n = Number(count);
+      if (Number.isFinite(n) && n > 0) {
+        tools[name] = n;
+      }
+    }
+  }
+  const list = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
+  return {
+    childSessionId: typeof payload.child_session_id === "string" ? payload.child_session_id : "",
+    childTurnId: typeof payload.child_turn_id === "string" ? payload.child_turn_id : "",
+    passed: payload.passed === true,
+    failed: payload.failed === true,
+    tools,
+    notes: list(payload.notes),
+    files: list(payload.files),
+  };
 }

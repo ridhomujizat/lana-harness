@@ -27,10 +27,12 @@ binary = "` + bin + `"
 config_dir = "` + homeDir + `"
 
 [agents.work]
+toolset = "custom"
 model = "claude-work/haiku"
 permission = "trust"
 
 [agents.home]
+toolset = "custom"
 model = "claude-home/sonnet"
 permission = "trust"
 
@@ -81,6 +83,7 @@ func TestClaudeCodeAccounts(t *testing.T) {
 
 	cfg := claudeAccountsConfig(bin, homeDir, `
 [agents.builtin]
+toolset = "custom"
 model = "claude-code/haiku"
 binary = "`+bin+`"
 permission = "trust"

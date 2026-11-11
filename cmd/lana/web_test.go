@@ -206,6 +206,7 @@ base_url = "mock://local"
 provider = "mock"
 model = "m"
 permission = "ask"
+toolset = "custom"
 tools = ["bash"]
 
 [[routes]]
@@ -1352,6 +1353,7 @@ kind = "openai_compat"
 base_url = "mock://local"
 
 [agents.lana]
+toolset = "custom"
 provider = "mock"
 model = "deepseek-flash"
 

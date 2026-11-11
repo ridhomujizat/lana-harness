@@ -33,6 +33,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 	"github.com/ridhomujizat/lana-harness/internal/question"
+	"github.com/ridhomujizat/lana-harness/internal/roommemory"
 	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/internal/toolbox"
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
@@ -75,6 +76,17 @@ type runtimeOptions struct {
 	ask             AskFunc
 	askChannels     map[string]bool
 	file            FileFunc
+	discussionPost  DiscussionPostFunc
+}
+
+// DiscussionPostFunc delivers one room discussion message to the session's
+// channel (spec 47 REQ-RDS-033). name is the speaker's display name.
+type DiscussionPostFunc = func(ctx context.Context, sessionID, name, text string)
+
+// DiscussionPostWith installs the channel delivery of discussion messages.
+// Without it a discussion is shown only in the web room.
+func DiscussionPostWith(fn DiscussionPostFunc) Option {
+	return func(o *runtimeOptions) { o.discussionPost = fn }
 }
 
 // ApproveFunc answers approvals for the library channel.
@@ -194,7 +206,7 @@ var toolCatalogGroupOrder = []struct {
 	{ID: "calendar", Label: "Calendar", Names: []string{"calendar"}},
 	{ID: "workflows", Label: "Workflows", Names: []string{"workflow"}},
 	{ID: "stats", Label: "Stats", Names: []string{"usage_stats"}},
-	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user"}},
+	{ID: "chat", Label: "Chat", Names: []string{"task", "task_continue", "ask_user", "discuss_start", "discuss_ask", "discuss_more", "discuss_end"}},
 }
 
 // Runtime is the library runtime.
@@ -479,6 +491,9 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 		toolboxNames: map[string]bool{},
 	}
 	rt.attachRouterStores()
+	// Spec 47: after a discussion, members get the summary in their own room
+	// and the session's channel gets every message.
+	registry.SetDiscussionShare(&discussionShare{rt: rt, post: runtimeOpts.discussionPost})
 	// Spec 40: name sessions in the background after their first turn.
 	rt.startTitles()
 	// Spec 38, spec 39: Claude Code turns report usage, plan windows, and the
@@ -1336,6 +1351,14 @@ func (rt *Runtime) AgentModel(agentName string) string {
 	return ""
 }
 
+// AgentCapabilities names what an agent can do (spec 47 team work).
+func (rt *Runtime) AgentCapabilities(agentName string) []string {
+	if agentCfg, ok := rt.agentConfig(agentName); ok {
+		return core.AgentCapabilities(agentCfg)
+	}
+	return nil
+}
+
 // AgentPolicy returns the agent's initial policy; for a team it is the lead's.
 func (rt *Runtime) AgentPolicy(agentName string) string {
 	if agentCfg, ok := rt.agentConfig(agentName); ok {
@@ -1401,6 +1424,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 	_, mcpManageRegistered := registry.Get("mcp_manage")
 	_, calendarRegistered := registry.Get(agent.CalendarTool)
 	_, sendFileRegistered := registry.Get(agent.SendFileTool)
+	_, discussRegistered := registry.Get(agent.DiscussTools[0])
 	autoOffered := agent.AutoOfferedTools(agent.AutoOfferState{
 		Root:                true,
 		MCPManageRegistered: mcpManageRegistered,
@@ -1408,6 +1432,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 		Team:                inTeam || len(agentCfg.Subagents) > 0,
 		CalendarRegistered:  calendarRegistered,
 		SendFileRegistered:  sendFileRegistered,
+		Discussion:          inTeam && discussRegistered,
 	})
 	groups := make([]ToolGroup, 0, len(toolCatalogGroupOrder)+len(mcpCfg))
 	for _, group := range toolCatalogGroupOrder {
@@ -1417,7 +1442,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 			if !ok {
 				continue
 			}
-			listed := slices.Contains(agentCfg.Tools, name)
+			listed := slices.Contains(core.EffectiveTools(agentCfg), name)
 			auto := !listed && slices.Contains(autoOffered, name)
 			source := "not_listed"
 			if listed {
@@ -1450,7 +1475,7 @@ func (rt *Runtime) ToolCatalog(agentName string) ([]ToolGroup, error) {
 		if _, ok := tool.(*toolboxCommandTool); !ok {
 			continue
 		}
-		listed := slices.Contains(agentCfg.Tools, name)
+		listed := slices.Contains(core.EffectiveTools(agentCfg), name)
 		source := "not_listed"
 		if listed {
 			source = "listed"
@@ -1784,6 +1809,29 @@ func (rt *Runtime) Cancel(ctx context.Context, sessionID string) error {
 		return err
 	}
 	return rt.coreCtx.Agents.Cancel(ctx, sessionID)
+}
+
+// StopDiscussion stops the open discussion of a session (spec 47
+// API-RDS-011).
+func (rt *Runtime) StopDiscussion(ctx context.Context, sessionID, mode string) (bool, error) {
+	if err := rt.closedError(); err != nil {
+		return false, err
+	}
+	if rt.registry == nil {
+		return false, nil
+	}
+	return rt.registry.StopDiscussion(ctx, sessionID, mode)
+}
+
+// RoomMemory returns the room memory store (spec 47 API-RDS-012).
+func (rt *Runtime) RoomMemory() *roommemory.Store {
+	if rt.registry != nil {
+		return rt.registry.RoomMemory()
+	}
+	if rt.home == "" {
+		return nil
+	}
+	return roommemory.New(rt.home)
 }
 
 // Policy returns the session's effective policy.

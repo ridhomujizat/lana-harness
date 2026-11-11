@@ -123,8 +123,8 @@ describe("Group room items (AC-ROOM-012)", () => {
 
     render(<RoomGroup turn={turn.turn} room={teamRoom()} faces={FACES} />);
 
-    expect(screen.getByText("karin · Cek gaji · done")).toBeTruthy();
-    expect(screen.getByText("karin")).toBeTruthy();
+    expect(screen.getByLabelText("karin · Cek gaji · done")).toBeTruthy();
+    expect(screen.getAllByText("karin").length).toBeGreaterThan(0);
     expect(screen.getByText(/Gaji pasar untuk posisi ini/)).toBeTruthy();
     expect(screen.getByText(/replying to lana/)).toBeTruthy();
     expect(screen.getByText("Kesimpulan: layak.")).toBeTruthy();
@@ -150,7 +150,7 @@ describe("Group room items (AC-ROOM-012)", () => {
 
     render(<RoomGroup turn={turn.turn} room={teamRoom()} faces={FACES} />);
 
-    expect(screen.getByText("karin · Cek gaji · working")).toBeTruthy();
+    expect(screen.getByLabelText("karin · Cek gaji · working")).toBeTruthy();
     expect(screen.getByText(/is working on Cek gaji/)).toBeTruthy();
   });
 });
