@@ -650,21 +650,32 @@ func (s *Server) roomWorking(ctx context.Context, name string) (label string, si
 		s.logger.Debug("web: rooms working scan", "room", name, "error", err)
 		return "", 0, "", false
 	}
-	for _, info := range sessions {
+	// The agent's own chat wins over its work elsewhere: it runs in parallel
+	// with a team room, and the row is the owner's chat with it.
+	var elsewhere *core.SessionInfo
+	for i, info := range sessions {
 		if info.Status != SessionStatusRunning || !s.backend.TurnActive(info.ID) {
 			continue
 		}
-		label, since = s.roomRunningLabel(ctx, info)
-		// An agent at work in a team room says where, so its own chat row
-		// does not look busy with the owner's chat.
 		if info.ParentSessionID != "" {
-			if team := s.teamRoomOf(ctx, info.ParentSessionID); team != "" {
-				label = "Working in " + team
+			if elsewhere == nil {
+				elsewhere = &sessions[i]
 			}
+			continue
 		}
+		label, since = s.roomRunningLabel(ctx, info)
 		return label, since, info.ID, true
 	}
-	return "", 0, "", false
+	if elsewhere == nil {
+		return "", 0, "", false
+	}
+	label, since = s.roomRunningLabel(ctx, *elsewhere)
+	// An agent at work in a team room says where, so its own chat row
+	// does not look busy with the owner's chat.
+	if team := s.teamRoomOf(ctx, elsewhere.ParentSessionID); team != "" {
+		label = "Working in " + team
+	}
+	return label, since, elsewhere.ID, true
 }
 
 // teamRoomOf returns the display name of the team room a session belongs to,

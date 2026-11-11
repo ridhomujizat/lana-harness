@@ -668,3 +668,19 @@ func TestPresenceWorkingInTeamRoom(t *testing.T) {
 		t.Fatalf("presence = %+v, want working in template-email", row.Presence)
 	}
 }
+
+// The agent's own chat running beside its team room work shows its own
+// status: the two run in parallel.
+func TestPresenceOwnChatBeatsTeamRoom(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "karin", Kind: "agent"}, {Name: "template-email", Kind: "team"}}
+	room := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "template-email", Channel: "web", Address: "owner", Status: "running", CreatedAt: 1000, UpdatedAt: 2000})
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "karin", Channel: "web", Address: "owner", Status: "running", CreatedAt: 1000, UpdatedAt: 1500})
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "karin", Channel: "web", Address: "owner", Status: "running", ParentSessionID: room.ID, CreatedAt: 1000, UpdatedAt: 3000})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	row := roomRowForTest(t, s, cookie, "karin")
+	if row.Presence.State != "working" || strings.HasPrefix(row.Presence.Label, "Working in") {
+		t.Fatalf("presence = %+v, want the own chat's status", row.Presence)
+	}
+}
