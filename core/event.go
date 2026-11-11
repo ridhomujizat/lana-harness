@@ -165,6 +165,14 @@ type AssistantMessage struct {
 	// decode unchanged.
 	Source     string `json:"source,omitempty"`
 	SourceName string `json:"source_name,omitempty"`
+	// Group rooms: Passed marks an agent that had nothing to add (no
+	// content), Failed one that could not answer; Tools, Notes and Files are
+	// what the agent used and changed for the reply.
+	Passed bool           `json:"passed,omitempty"`
+	Failed bool           `json:"failed,omitempty"`
+	Tools  map[string]int `json:"tools,omitempty"`
+	Notes  []string       `json:"notes,omitempty"`
+	Files  []string       `json:"files,omitempty"`
 }
 
 // ReplyRef is the automation message an owner reply points back to: the seq of

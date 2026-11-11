@@ -81,6 +81,7 @@ type Registry struct {
 	// Room discussions (spec 47): the open discussion per session, the
 	// after-discussion share hook, and the room memory store.
 	disc       discussions
+	groups     groupState
 	discMu     sync.Mutex
 	discShare  core.DiscussionShare
 	roomMemory *roommemory.Store

@@ -37,6 +37,7 @@ type teamCreateRequest struct {
 // default on POST.
 type teamDiscussionInput struct {
 	DisplayName  *string `json:"display_name,omitempty"`
+	Mode         *string `json:"mode,omitempty"`
 	Discuss      *string `json:"discuss,omitempty"`
 	Rounds       *int    `json:"rounds,omitempty"`
 	ExtraRounds  *string `json:"extra_rounds,omitempty"`
@@ -50,6 +51,9 @@ type teamDiscussionInput struct {
 func (in teamDiscussionInput) apply(record *teamRecord) {
 	if in.DisplayName != nil {
 		record.DisplayName = strings.TrimSpace(*in.DisplayName)
+	}
+	if in.Mode != nil {
+		record.Mode = *in.Mode
 	}
 	if in.Discuss != nil {
 		record.Discuss = *in.Discuss
@@ -99,6 +103,7 @@ type teamJSON struct {
 // (API-RDS-010).
 type teamDiscussionJSON struct {
 	DisplayName  string `json:"display_name"`
+	Mode         string `json:"mode"`
 	Discuss      string `json:"discuss"`
 	Rounds       int    `json:"rounds"`
 	ExtraRounds  string `json:"extra_rounds"`
@@ -110,10 +115,11 @@ type teamDiscussionJSON struct {
 
 // discussionJSON fills the defaults of record's discussion settings.
 func (record teamRecord) discussionJSON() teamDiscussionJSON {
-	t := core.TeamConfig{Discuss: record.Discuss, Rounds: record.Rounds, ExtraRounds: record.ExtraRounds,
+	t := core.TeamConfig{Mode: record.Mode, Discuss: record.Discuss, Rounds: record.Rounds, ExtraRounds: record.ExtraRounds,
 		RoomMemory: record.RoomMemory, ShareSummary: record.ShareSummary, Learn: record.Learn, TelegramAll: record.TelegramAll}
 	return teamDiscussionJSON{
 		DisplayName: record.DisplayName,
+		Mode:        t.ConversationMode(),
 		Discuss:     t.DiscussMode(), Rounds: t.RoundLimit(), ExtraRounds: t.ExtraMode(),
 		RoomMemory: t.KeepsRoomMemory(), ShareSummary: t.SharesSummary(), Learn: t.Learns(), TelegramAll: t.TelegramAllMessages(),
 	}
@@ -146,6 +152,7 @@ type teamRecord struct {
 	// Spec 47: the room name people see, and the discussion settings; zero
 	// or nil is the default and is not written.
 	DisplayName  string
+	Mode         string
 	Discuss      string
 	Rounds       int
 	ExtraRounds  string
@@ -482,6 +489,7 @@ func teamRecordFromMap(table map[string]any) teamRecord {
 		Members:      mapAgentStrings(table, "members"),
 		Description:  mapAgentString(table, "description"),
 		DisplayName:  mapAgentString(table, "display_name"),
+		Mode:         mapAgentString(table, "mode"),
 		Discuss:      mapAgentString(table, "discuss"),
 		Rounds:       mapAgentInt(table, "rounds"),
 		ExtraRounds:  mapAgentString(table, "extra_rounds"),
@@ -511,6 +519,9 @@ func renderTeamTable(name string, record teamRecord) string {
 		fmt.Fprintf(&b, "display_name = %s\n", agentTOMLString(record.DisplayName))
 	}
 	// API-RDS-010: a setting equal to its default is not written.
+	if record.Mode != "" && record.Mode != core.TeamModeGroup {
+		fmt.Fprintf(&b, "mode = %s\n", agentTOMLString(record.Mode))
+	}
 	if record.Discuss != "" && record.Discuss != core.TeamDiscussAuto {
 		fmt.Fprintf(&b, "discuss = %s\n", agentTOMLString(record.Discuss))
 	}

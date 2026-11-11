@@ -195,6 +195,9 @@ type TeamConfig struct {
 	Members     []string `toml:"members"`
 	// Discussion settings (spec 47 REQ-RDS-001). Empty or nil means the
 	// default; read them through the methods below.
+	// Mode is "group" (the default: everyone talks, @mentions route) or
+	// "lead" (the lead answers and hands off).
+	Mode         string `toml:"mode"`
 	Discuss      string `toml:"discuss"`
 	Rounds       int    `toml:"rounds"`
 	ExtraRounds  string `toml:"extra_rounds"`
@@ -214,6 +217,20 @@ const (
 	TeamRoundsDefault = 3
 	TeamRoundsMax     = 5
 )
+
+// Team conversation modes.
+const (
+	TeamModeGroup = "group"
+	TeamModeLead  = "lead"
+)
+
+// ConversationMode is "group" (default) or "lead".
+func (t TeamConfig) ConversationMode() string {
+	if t.Mode == TeamModeLead {
+		return TeamModeLead
+	}
+	return TeamModeGroup
+}
 
 // DiscussMode is "auto" (the lead decides) or "ask" (only when the owner asks).
 func (t TeamConfig) DiscussMode() string {

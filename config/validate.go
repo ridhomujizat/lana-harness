@@ -62,7 +62,7 @@ func runtimeNames() []string {
 	return names
 }
 
-var teamKeys = []string{"description", "discuss", "display_name", "extra_rounds", "lead", "learn", "members", "room_memory", "rounds", "share_summary", "telegram_all"}
+var teamKeys = []string{"description", "discuss", "display_name", "extra_rounds", "lead", "learn", "members", "mode", "room_memory", "rounds", "share_summary", "telegram_all"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
@@ -785,6 +785,7 @@ func validateTeam(v map[string]any, path string, add func(string, string)) {
 		}
 	}
 	enum("discuss", "auto", "ask")
+	enum("mode", "group", "lead")
 	enum("extra_rounds", "once", "ask", "never")
 	if raw, ok := v["rounds"]; ok {
 		n, ok := asInt(raw)

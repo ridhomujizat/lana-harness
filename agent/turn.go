@@ -858,6 +858,12 @@ func allowScheduled(llm core.LLMRegistry, target core.LLMTarget, cfg core.AgentC
 // any output, it runs in lana's own loop with the rest of the chain
 // (REQ-CCT-004).
 func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) TurnResult {
+	// Group rooms: everyone talks, @mentions route (owner, 2026-11-11).
+	if continueReason == "" {
+		if team, room, ok := rn.groupMode(ctx); ok {
+			return rn.runGroupTurn(ctx, initial, turnID, team, room)
+		}
+	}
 	resolved, err := rn.resolve(ctx)
 	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(rn.reg.llm, resolved.fullChain[0]) {
 		// REQ-CCT-008: a scheduled run uses Claude Code only with

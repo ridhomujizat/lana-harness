@@ -25,6 +25,9 @@ func newDiscussionHarness(t *testing.T, script mock.Script, team core.TeamConfig
 	}
 	team.Lead = "lana"
 	team.Members = []string{"karin", "dana"}
+	if team.Mode == "" {
+		team.Mode = core.TeamModeLead
+	}
 	h.reg.config.Teams = map[string]core.TeamConfig{"career": team}
 	h.reg.home = t.TempDir()
 	newSubagentParent(t, h, "career")

@@ -32,7 +32,7 @@ func newTeamHarness(t *testing.T, script mock.Script) *harness {
 		"explorer":   {Provider: "member", Model: "member-model"},
 	})
 	h.reg.config.Teams = map[string]core.TeamConfig{
-		"research-squad": {Description: "Research team", Lead: "lead", Members: []string{"researcher", "writer"}},
+		"research-squad": {Description: "Research team", Lead: "lead", Members: []string{"researcher", "writer"}, Mode: core.TeamModeLead},
 	}
 	for _, name := range []string{"task", "task_continue"} {
 		if err := h.tools.Register(stubTeamTool{name: name}); err != nil {
