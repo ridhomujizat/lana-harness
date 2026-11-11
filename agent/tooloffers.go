@@ -19,6 +19,10 @@ type AutoOfferState struct {
 	SendFileRegistered bool
 	// Discussion is true for a team lead's root turn (spec 47 REQ-RDS-010).
 	Discussion bool
+	// WorkflowBuilder is true for a root turn on channel "workflow" when the
+	// registry has the workflow_builder tool (spec 51 REQ-WFC-003). The tool
+	// itself refuses sessions that are not a guardian chat.
+	WorkflowBuilder bool
 }
 
 // DiscussTools are the room discussion tools a team lead is offered.
@@ -33,6 +37,9 @@ const CalendarTool = "calendar"
 // it without listing it, like the calendar tool, unless the owner lists it in
 // disabled_tools.
 const SendFileTool = "send_file"
+
+// WorkflowBuilderTool is the workflow_builder tool name (spec 51).
+const WorkflowBuilderTool = "workflow_builder"
 
 // AutoOfferedTools returns the auto-offered built-in tools in offer order.
 // Tools listed in [agents.<name>].tools are not part of this list; callers
@@ -56,6 +63,9 @@ func AutoOfferedTools(state AutoOfferState) []string {
 	}
 	if state.Discussion {
 		names = append(names, DiscussTools...)
+	}
+	if state.WorkflowBuilder {
+		names = append(names, WorkflowBuilderTool)
 	}
 	return names
 }

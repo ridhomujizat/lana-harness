@@ -28,6 +28,9 @@ var (
 const (
 	workflowTitlePrefix = "Workflow"
 	calendarTitlePrefix = "Calendar"
+	// workflowChatTitlePrefix titles a workflow's guardian chat session
+	// (spec 51): "Workflow chat · <workflow name>".
+	workflowChatTitlePrefix = "Workflow chat"
 )
 
 // startTitles installs the session title service on the agent registry

@@ -42,7 +42,7 @@ const (
 	subscriberBuffer    = 64
 	defaultRunLimit     = 50
 	maxRunLimit         = 200
-	assistTimeout       = 3 * time.Minute
+	assistTimeout       = 15 * time.Minute
 	// assistEnvTimeout bounds starting MCP servers to list their tools.
 	assistEnvTimeout = 20 * time.Second
 )
@@ -119,6 +119,11 @@ type Service struct {
 
 	slotMu     sync.RWMutex
 	slotFilter SlotFilter
+
+	// assistNoted is what the last guardian chat note told each session
+	// (spec 51 REQ-WFC-002), guarded by assistMu.
+	assistMu    sync.Mutex
+	assistNoted map[string]assistNote
 
 	ctxMu      sync.Mutex
 	rootCtx    context.Context
@@ -714,122 +719,6 @@ func (s *Service) RotateWebhook(ctx context.Context, id string) (string, error) 
 	}
 	s.broadcast(id, "")
 	return token, nil
-}
-
-// Assist runs one guardian assistant turn (API-WF-017, REQ-WF-010).
-func (s *Service) Assist(ctx context.Context, id string, baseVersion int, message string) (AssistResult, error) {
-	wf, err := s.store.GetWorkflow(ctx, id)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	ver, err := s.store.GetVersion(ctx, id, wf.Version)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	if baseVersion != wf.Version {
-		return AssistResult{}, ErrVersionConflict
-	}
-	old := ver.Graph
-
-	history, _ := s.store.ListChat(ctx, id, 10)
-	if _, err := s.store.AppendChat(ctx, ChatMessage{
-		WorkflowID: id, Role: "owner", Text: message, CreatedAt: s.now().UnixMilli(),
-	}); err != nil {
-		return AssistResult{}, err
-	}
-
-	var env AssistEnv
-	if provider, ok := s.deps.(AssistEnvProvider); ok {
-		ectx, ecancel := context.WithTimeout(ctx, assistEnvTimeout)
-		env = provider.AssistEnv(ectx, wf)
-		ecancel()
-	}
-	var last *RunDetail
-	if runs, err := s.store.ListRuns(ctx, RunFilter{WorkflowID: id, Limit: 1}); err == nil && len(runs) > 0 {
-		if detail, err := s.RunDetail(ctx, id, runs[0].ID); err == nil {
-			last = &detail
-		}
-	}
-	prompt := BuildAssistantPromptEnv(wf, old, history, message, env, last)
-	actx, cancel := context.WithTimeout(ctx, assistTimeout)
-	defer cancel()
-	// The reply is machine-readable (a graph proposal), so the turn is lana
-	// background work on the guardian's background chain (spec 39 revision 5).
-	res, err := s.deps.RunAgent(actx, AgentRequest{
-		WorkflowID: id, RunID: "", NodeID: "assistant", Agent: wf.Guardian, Prompt: prompt,
-		Background: true,
-	})
-	var background *GuardianBackgroundError
-	if errors.As(err, &background) {
-		return AssistResult{}, background
-	}
-	if err != nil {
-		return AssistResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, err)
-	}
-	reply, err := ParseAssistantReply(res.Text)
-	if err != nil {
-		return AssistResult{}, fmt.Errorf("%w: %v", ErrGuardianUnavailable, err)
-	}
-
-	now := s.now().UnixMilli()
-	var msg ChatMessage
-	switch reply.Graph {
-	case nil:
-		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, CreatedAt: now}
-	default:
-		graph := reply.Graph.Normalized()
-		issues := Validate(graph, s.deps.AgentExists)
-		if len(issues) > 0 {
-			// An invalid graph saves no version and reports the problems
-			// (AC-WF-018).
-			text := reply.Reply
-			if strings.TrimSpace(text) == "" {
-				text = "I could not apply that change."
-			}
-			msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: text, Issues: issues, CreatedAt: now}
-			break
-		}
-		summary := reply.Summary
-		if summary == "" {
-			summary = "assistant change"
-		}
-		newVer, err := s.store.SaveVersion(ctx, id, baseVersion, graph, "guardian", summary)
-		if err != nil {
-			return AssistResult{}, err
-		}
-		change := DiffGraphs(old, graph)
-		change.FromVersion = baseVersion
-		change.ToVersion = newVer.Version
-		change.Summary = reply.Summary
-		if current, err := s.store.GetWorkflow(ctx, id); err == nil {
-			if current.Status == StatusActive && !LockCovers(current.Lock, graph) {
-				current.Status = StatusDraft
-				current.UpdatedAt = now
-				_ = s.store.UpdateWorkflow(ctx, current)
-			}
-		}
-		msg = ChatMessage{WorkflowID: id, Role: "guardian", Text: reply.Reply, Change: &change, CreatedAt: now}
-	}
-
-	// The guardian asked for a test run of the saved graph: start it now and
-	// say so; its result reaches the guardian as "Last run" next time.
-	if reply.Test && len(msg.Issues) == 0 {
-		if run, err := s.StartRun(ctx, id, "manual", nil); err == nil {
-			msg.Text = strings.TrimSpace(msg.Text + fmt.Sprintf("\n\nTest run #%d started.", run.Number))
-		} else {
-			msg.Text = strings.TrimSpace(msg.Text + "\n\nThe test run did not start: " + err.Error())
-		}
-	}
-	stored, err := s.store.AppendChat(ctx, msg)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	s.broadcast(id, "")
-	detail, err := s.Get(ctx, id)
-	if err != nil {
-		return AssistResult{}, err
-	}
-	return AssistResult{Message: stored, Workflow: detail, Tokens: res.Tokens}, nil
 }
 
 // ---- triggers -------------------------------------------------------------

@@ -81,8 +81,10 @@ type fakeWorkflowBackend struct {
 	chat    []workflow.ChatMessage
 	chatErr error
 
-	assist    workflow.AssistResult
-	assistErr error
+	assistSession string
+	assistNote    string
+	noteCommits   int
+	assistErr     error
 
 	rotateToken string
 	rotateErr   error
@@ -256,16 +258,42 @@ func (f *fakeWorkflowBackend) DeleteState(_ context.Context, _, _ string) error 
 	return f.deleteStateErr
 }
 
-func (f *fakeWorkflowBackend) Chat(_ context.Context, _ string) ([]workflow.ChatMessage, error) {
+func (f *fakeWorkflowBackend) AssistantChat(_ context.Context, _ string) (string, []workflow.ChatMessage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.chat, f.chatErr
+	return f.assistSession, f.chat, f.chatErr
 }
 
-func (f *fakeWorkflowBackend) Assist(_ context.Context, _ string, _ int, _ string) (workflow.AssistResult, error) {
+func (f *fakeWorkflowBackend) EnsureAssistantSession(_ context.Context, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.assist, f.assistErr
+	if f.assistErr != nil {
+		return "", f.assistErr
+	}
+	if f.assistSession == "" {
+		f.assistSession = "wf-chat-1"
+	}
+	return f.assistSession, nil
+}
+
+func (f *fakeWorkflowBackend) NewAssistantSession(_ context.Context, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.assistErr != nil {
+		return "", f.assistErr
+	}
+	f.assistSession = "wf-chat-2"
+	return f.assistSession, nil
+}
+
+func (f *fakeWorkflowBackend) AssistantNote(_ context.Context, _, _ string) (string, func(), error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.assistNote, func() {
+		f.mu.Lock()
+		f.noteCommits++
+		f.mu.Unlock()
+	}, nil
 }
 
 func (f *fakeWorkflowBackend) RotateWebhook(_ context.Context, _ string) (string, error) {
@@ -501,27 +529,69 @@ func TestWorkflowInvalidGraph(t *testing.T) {
 	assertAuthError(t, rr, http.StatusBadRequest, "unknown_agent")
 }
 
-// API-WF-017, spec 39 revision 5: a guardian on Claude Code without a
-// background model answers 503 guardian_needs_background_model with the
-// message the assistant shows; another failure stays guardian_unavailable.
-func TestWorkflowAssistGuardianNeedsBackgroundModel(t *testing.T) {
+// API-WF-017, spec 51 REQ-WFC-002: an owner message goes to the guardian
+// chat session as a chat turn with the workflow context note before it.
+func TestWorkflowAssistSendsToSession(t *testing.T) {
 	backend := newFakeWorkflowBackend()
-	backend.assistErr = &workflow.GuardianBackgroundError{Agent: "bima"}
+	backend.assistNote = "You are the guardian of workflow"
+	web := newFakeWebBackend()
+	s, cookie, csrf := newLoggedInSessionServer(t, web)
+	s.SetWorkflows(backend)
+	web.mu.Lock()
+	web.sessions = append(web.sessions, core.SessionInfo{ID: "wf-chat-1", Agent: "lana", Channel: "workflow"})
+	web.mu.Unlock()
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"tambah kirim ke telegram"}`, cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+		Turn      string `json:"turn"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.SessionID != "wf-chat-1" || out.Turn != "started" {
+		t.Fatalf("response = %+v", out)
+	}
+	web.mu.Lock()
+	note, texts := web.sentNotes["wf-chat-1"], web.sentText["wf-chat-1"]
+	web.mu.Unlock()
+	if note != backend.assistNote || len(texts) != 1 || texts[0] != "tambah kirim ke telegram" {
+		t.Fatalf("note = %q, texts = %v", note, texts)
+	}
+	if backend.noteCommits != 1 {
+		t.Fatalf("note commits = %d, want 1", backend.noteCommits)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"  "}`, cookie, csrf))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("empty message status = %d", rr.Code)
+	}
+}
+
+// Spec 51 REQ-WFC-001: the session routes ensure and replace the session; a
+// guardian that cannot start answers guardian_unavailable.
+func TestWorkflowAssistSessionRoutes(t *testing.T) {
+	backend := newFakeWorkflowBackend()
 	s, cookie, csrf := newWorkflowTestServer(t, backend)
 
-	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi","base_version":1}`, cookie, csrf))
-	assertAuthError(t, rr, http.StatusServiceUnavailable, "guardian_needs_background_model")
-	var env errorEnvelope
-	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
-		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/workflows/riset-harian/assistant", "", cookie, csrf))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"session_id":""`) {
+		t.Fatalf("chat before use = %d %q", rr.Code, rr.Body.String())
 	}
-	const want = "The guardian bima runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes."
-	if env.Error.Message != want {
-		t.Fatalf("message = %q", env.Error.Message)
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant/session", "", cookie, csrf))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"session_id":"wf-chat-1"`) {
+		t.Fatalf("ensure = %d %q", rr.Code, rr.Body.String())
+	}
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant/new", "", cookie, csrf))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"session_id":"wf-chat-2"`) {
+		t.Fatalf("new = %d %q", rr.Code, rr.Body.String())
 	}
 
 	backend.assistErr = workflow.ErrGuardianUnavailable
-	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi","base_version":1}`, cookie, csrf))
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/workflows/riset-harian/assistant", `{"message":"hi"}`, cookie, csrf))
 	assertAuthError(t, rr, http.StatusServiceUnavailable, "guardian_unavailable")
 }
 
