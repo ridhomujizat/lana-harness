@@ -322,8 +322,9 @@ func (rn *Runner) groupBriefing(ctx context.Context, room string, team core.Team
 ## How this room works
 - Everyone sees the same conversation. Talk like a teammate in a work chat: short, in the owner's language, as yourself.
 - Do your own part with your own tools; do not do a teammate's part. Finish your work before you reply, and do not leave it to a background process.
-- To hand over or ask a teammate, @mention them by name (for example @` + firstOther(people, speaker) + `). They answer after you.
-- If the owner @mentioned someone else, or you have nothing to add, reply exactly PASS.
+- Answer what the owner asked in their latest message, at the size they asked for. A question gets an answer, not a build; do not pick up older work or extra improvements unless the owner asks.
+- An @mention makes that teammate work next, so @mention only to hand over a step or ask something you need now (for example @` + firstOther(people, speaker) + `). To refer to a teammate, write their name without @. Do not @mention to thank, to report that you are done, or to ask for a review the owner did not ask for.
+- When the request is answered, stop: no new handoffs. If the owner @mentioned someone else, or you have nothing to add, reply exactly PASS.
 `)
 	if speaker == team.Lead {
 		b.WriteString("- You coordinate. For a bigger request, post a short plan with one @mention per step, in order, and let each teammate do its step; for a small one, answer only if it is yours or nobody else covered it. Do not repeat what teammates said.\n")
