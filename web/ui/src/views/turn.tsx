@@ -128,6 +128,9 @@ export type TurnSegment =
 /* Group rooms: a reply's pass/fail state and the tools, notes and files the
    agent used (assistant/message with source "agent"). */
 export interface AgentReplyMeta {
+  /* The agent's own turn behind the reply, to show its steps like a chat. */
+  childSessionId: string;
+  childTurnId: string;
   passed: boolean;
   failed: boolean;
   tools: Record<string, number>;
@@ -1528,6 +1531,8 @@ function agentMetaOf(payload: Record<string, unknown>): AgentReplyMeta {
   const list = (value: unknown) =>
     Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item !== "") : [];
   return {
+    childSessionId: typeof payload.child_session_id === "string" ? payload.child_session_id : "",
+    childTurnId: typeof payload.child_turn_id === "string" ? payload.child_turn_id : "",
     passed: payload.passed === true,
     failed: payload.failed === true,
     tools,

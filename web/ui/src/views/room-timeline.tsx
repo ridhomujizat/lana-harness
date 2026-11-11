@@ -315,8 +315,11 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   const [liveText, setLiveText] = useState("");
   const [liveThinking, setLiveThinking] = useState(false);
   const [liveTool, setLiveTool] = useState("");
-  /* Group rooms: the agent whose turn it is. */
+  /* Group rooms: the agent whose turn it is, its session, and the events of
+     every agent session behind the room's replies. */
   const [liveSpeaker, setLiveSpeaker] = useState("");
+  const [liveChild, setLiveChild] = useState("");
+  const [childEvents, setChildEvents] = useState<Record<string, SessionEvent[]>>({});
   const [streamState, setStreamState] = useState<StreamState>("connected");
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [question, setQuestion] = useState<OpenQuestion | null>(null);
@@ -431,6 +434,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     setLiveThinking(false);
     setLiveTool("");
     setLiveSpeaker("");
+    setLiveChild("");
     setLiveTurnId("");
     setLiveStartedAt(0);
   }, []);
@@ -479,7 +483,18 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
       onEvent: (event) => {
         /* Child sessions (a member's own session in a team room) stream their
            events too; the room shows only its own conversation. */
-        if (typeof (event as { child_session_id?: unknown }).child_session_id === "string") {
+        const childId = (event as { child_session_id?: unknown }).child_session_id;
+        if (typeof childId === "string" && childId) {
+          setChildEvents((current) => {
+            const list = current[childId] || [];
+            if (list.some((entry) => entry.seq === event.seq)) {
+              return current;
+            }
+            return { ...current, [childId]: list.concat([event]).sort((a, b) => a.seq - b.seq) };
+          });
+          if (event.kind === "turn/start") {
+            setLiveChild(childId);
+          }
           return;
         }
         setEvents((current) => {
@@ -1108,6 +1123,53 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
         workingLabel(workingMembers.map((name) => agentLabel(name, byName)))
       : "");
 
+  /* Group rooms: load the agent sessions behind replies in loaded history. */
+  const childIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of Object.values(events)) {
+      for (const event of list) {
+        if (event.kind !== "assistant/message") {
+          continue;
+        }
+        const payload = (event.payload || {}) as Record<string, unknown>;
+        if (payload.source === "agent" && typeof payload.child_session_id === "string" && payload.child_session_id) {
+          ids.add(payload.child_session_id);
+        }
+      }
+    }
+    return Array.from(ids);
+  }, [events]);
+  useEffect(() => {
+    const missing = childIds.filter((id) => !childEvents[id]);
+    if (missing.length === 0) {
+      return undefined;
+    }
+    let live = true;
+    void Promise.all(
+      missing.map((id) =>
+        listEvents(id, 0)
+          .then((page) => [id, page && Array.isArray(page.events) ? page.events : []] as const)
+          .catch(() => [id, [] as SessionEvent[]] as const)
+      )
+    ).then((pairs) => {
+      if (!live) {
+        return;
+      }
+      setChildEvents((current) => {
+        const next = { ...current };
+        for (const [id, list] of pairs) {
+          if (!next[id] || next[id].length < list.length) {
+            next[id] = list;
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [childIds, childEvents]);
+
   /* Spec 47 team work: what each agent can do, for the handoff rows. */
   const canByName = useMemo(() => {
     const out: Record<string, string[]> = {};
@@ -1230,6 +1292,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 onDirect={() => void stopRoomDiscussion(node.sessionId, "direct")}
                 onMemory={() => setSettingsTab("memory")}
                 can={canByName}
+                childEvents={childEvents}
+                liveChild={node.sessionId === newestId && node.turn.running ? liveChild : ""}
               />
             ) : (
               <TurnBlock
@@ -1349,7 +1413,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             {loadingOlder ? (
               <p className="room-older muted">Loading earlier messages…</p>
             ) : null}
-            {turnRunning ? (
+            {turnRunning && !(team && liveChild) ? (
               <div className="room-live" role="status">
                 <TypingDots />
                 <span className="room-live-text">

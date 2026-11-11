@@ -255,3 +255,23 @@ describe("group rooms", () => {
     expect(screen.queryByText(/replying to/)).toBeNull();
   });
 });
+
+describe("group replies like a chat", () => {
+  it("shows the agent's own turn with its steps", () => {
+    const child: SessionEvent[] = [
+      { seq: 1, kind: "turn/start", turn_id: "k1", created_at: 1762876680000, payload: { turn_id: "k1" } },
+      { seq: 2, kind: "tool/call", turn_id: "k1", created_at: 1762876681000, payload: { call_id: "b1", name: "bash", input: { command: "npm test" } } },
+      { seq: 3, kind: "tool/result", turn_id: "k1", created_at: 1762876682000, payload: { call_id: "b1", status: "success", output: "ok" } },
+      { seq: 4, kind: "assistant/message", turn_id: "k1", created_at: 1762876683000, payload: { content: [{ type: "text", text: "Semua test lulus." }] } },
+      { seq: 5, kind: "turn/end", turn_id: "k1", created_at: 1762876684000, payload: { reason: "end_turn" } },
+    ];
+    const turn = turnOf([
+      ev(2, "assistant/message", { source: "agent", source_name: "karin", child_session_id: "kid", child_turn_id: "k1", content: [{ type: "text", text: "Semua test lulus." }] }),
+      ev(3, "turn/end", { reason: "end_turn" }),
+    ]);
+    const { container } = render(<RoomGroup turn={turn} room={room} faces={{}} childEvents={{ kid: child }} />);
+    expect(container.querySelector(".group-turn")).toBeTruthy();
+    expect(screen.getByText("Semua test lulus.")).toBeTruthy();
+    expect(container.textContent).toMatch(/Ran 1 command/);
+  });
+});

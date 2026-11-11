@@ -223,6 +223,7 @@ func (s *subagentRunner) resultOutput(ctx context.Context, child core.SessionInf
 		Agent:      child.Agent,
 		Status:     result.StopReason,
 		Answer:     answer,
+		TurnID:     result.TurnID,
 		Tools:      tools,
 		Notes:      mergeNotes(named, notes),
 		Files:      mergeNotes(files, nil),
@@ -254,6 +255,8 @@ type taskResult struct {
 	Steps      int    `json:"steps"`
 	ToolCalls  int    `json:"tool_calls"`
 	DurationMS int64  `json:"duration_ms"`
+	// TurnID is the child turn that produced the answer.
+	TurnID string `json:"turn_id,omitempty"`
 	// Spec 47 team work: tool calls by name, the knowledge pages the child
 	// used, and the files it changed.
 	Tools map[string]int `json:"tools,omitempty"`

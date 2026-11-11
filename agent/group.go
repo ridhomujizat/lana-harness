@@ -171,6 +171,7 @@ func (rn *Runner) runGroupTurn(ctx context.Context, initial inboxItem, turnID st
 		msg := core.AssistantMessage{
 			V: core.PayloadVersion, StopReason: "end_turn", Source: GroupSource, SourceName: speaker,
 			Passed: passed, Failed: meta.failed, Tools: meta.tools, Notes: meta.notes, Files: meta.files,
+			ChildSessionID: meta.child, ChildTurnID: meta.turn,
 		}
 		if !passed {
 			msg.Content = []core.ContentBlock{{Kind: core.BlockText, Text: reply}}
@@ -228,6 +229,8 @@ func (rn *Runner) postGroupReply(ctx context.Context, speaker, text string) {
 }
 
 type groupMeta struct {
+	child  string
+	turn   string
 	usage  *core.Usage
 	tools  map[string]int
 	notes  []string
@@ -273,6 +276,7 @@ func (rn *Runner) groupReply(ctx context.Context, runner *subagentRunner, room s
 	kid.seen = last
 	rn.reg.groups.set(rn.sessionID, speaker, kid)
 	meta.tools, meta.notes, meta.files = task.Tools, task.Notes, task.Files
+	meta.child, meta.turn = task.SessionID, task.TurnID
 	return strings.TrimSpace(task.Answer), meta, nil
 }
 

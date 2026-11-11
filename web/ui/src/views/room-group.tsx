@@ -4,6 +4,7 @@ import { DiscussionThread, NotesTag, SummaryButton } from "./discussion";
 import { displayLabel } from "./agent-label";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import type { RoomRow } from "../api/rooms";
+import type { SessionEvent } from "../api/sessions";
 import { Markdown } from "../lib/markdown";
 import { Button } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
@@ -11,7 +12,7 @@ import { agentFaceColors, gr8rColor, TypingDots } from "./presence";
 import type { FaceRef } from "./presence";
 import { teamSteps } from "./team";
 import type { TeamEvent, TeamStep } from "./team";
-import { formatClock } from "./turn";
+import { buildTurns, formatClock, TurnBlock } from "./turn";
 import type { ChatTurn, TurnStep } from "./turn";
 
 /* The group room of REQ-ROOM-008 (design rooms-4). A team turn renders as a
@@ -52,6 +53,8 @@ export type GroupItem =
       files: string[];
       /* Group rooms: said to the room, not an answer to the lead. */
       direct?: boolean;
+      childSessionId?: string;
+      childTurnId?: string;
     }
   | { kind: "passed"; key: string; from: string[]; to: string }
   | { kind: "pass"; key: string; agent: string }
@@ -204,6 +207,8 @@ export function groupItems(turn: ChatTurn): GroupItem[] {
           notes: group.agentMeta.notes,
           files: group.agentMeta.files,
           direct: true,
+          childSessionId: group.agentMeta.childSessionId,
+          childTurnId: group.agentMeta.childTurnId,
         });
       }
       lead = null;
@@ -306,6 +311,10 @@ export interface RoomGroupProps {
   onMemory?: () => void;
   /* Spec 47 team work: what each agent can do ("web", "files"…). */
   can?: Record<string, string[]>;
+  /* Group rooms: the events of each agent's own session, so a reply shows
+     its steps like a chat, and the session of the agent working now. */
+  childEvents?: Record<string, SessionEvent[]>;
+  liveChild?: string;
 }
 
 function HandoffChipView({
@@ -473,7 +482,7 @@ function WorkingRow({
   );
 }
 
-export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemory, can }: RoomGroupProps) {
+export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemory, can, childEvents, liveChild }: RoomGroupProps) {
   const lead = room.lead || "lead";
   const items = useMemo(() => {
     const list = groupItems(turn);
@@ -528,6 +537,23 @@ export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemor
             </Fragment>
           );
         }
+        if (item.kind === "member" && item.direct && item.childSessionId && childEvents && childEvents[item.childSessionId]) {
+          const childTurn = childTurnOf(childEvents[item.childSessionId] || [], item.childTurnId || "");
+          if (childTurn) {
+            const face = faces[item.agent];
+            return (
+              <div key={item.key} className="group-turn">
+                <TurnBlock
+                  turn={childTurn}
+                  agent={item.agent}
+                  agentLabel={faceLabel(faces, item.agent)}
+                  agentColor={face ? face.color : undefined}
+                  sessionId={item.childSessionId}
+                />
+              </div>
+            );
+          }
+        }
         if (item.kind === "pass") {
           return (
             <div key={item.key} className="disc-pass">
@@ -556,6 +582,9 @@ export function RoomGroup({ turn, room, faces, sessionId = "", onDirect, onMemor
           />
         );
       })}
+      {turn.running && liveChild && childEvents && childEvents[liveChild] ? (
+        <LiveChildTurn events={childEvents[liveChild] || []} faces={faces} childId={liveChild} />
+      ) : null}
       {sessionId && turn.sentFiles.length > 0 ? (
         <div className="group-files">
           <AgentFiles sessionId={sessionId} files={turn.sentFiles} sender={faceLabel(faces, lead)} />
@@ -702,4 +731,52 @@ export function useMentions(
   );
 
   return { open, matches, index: active, insert, reset, onKeyDown };
+}
+
+/* Group rooms: the agent's own turn that made a reply, built from its
+   session's events. */
+function childTurnOf(events: SessionEvent[], turnId: string): ChatTurn | null {
+  if (!turnId) {
+    return null;
+  }
+  for (const item of buildTurns(events)) {
+    if (item.kind === "turn" && item.turn.id === turnId) {
+      return item.turn;
+    }
+  }
+  return null;
+}
+
+/* The turn an agent is running now in a group room, shown live like a chat. */
+function LiveChildTurn({ events, faces, childId }: { events: SessionEvent[]; faces: Record<string, FaceRef>; childId: string }) {
+  let turnId = "";
+  let startedAt = 0;
+  let agent = "";
+  for (const event of events) {
+    if (event.kind === "turn/start") {
+      turnId = event.turn_id || "";
+      startedAt = event.created_at;
+    }
+    if (event.kind === "turn/end" && event.turn_id === turnId) {
+      turnId = "";
+    }
+    const tagged = (event as { agent?: unknown }).agent;
+    if (typeof tagged === "string" && tagged) {
+      agent = tagged;
+    }
+  }
+  if (!turnId) {
+    return null;
+  }
+  const items = buildTurns(events, { running: true, turnId, startedAt });
+  const live = items.find((item) => item.kind === "turn" && item.turn.id === turnId);
+  if (!live || live.kind !== "turn") {
+    return null;
+  }
+  const face = faces[agent];
+  return (
+    <div className="group-turn">
+      <TurnBlock turn={live.turn} agent={agent || "agent"} agentLabel={faceLabel(faces, agent)} agentColor={face ? face.color : undefined} sessionId={childId} />
+    </div>
+  );
 }
