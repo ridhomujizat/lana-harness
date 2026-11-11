@@ -375,6 +375,7 @@ function CopyButton({ code }: { code: string }) {
 
   return h(
     "button",
+    // eslint-disable-next-line react-hooks/refs -- copy reads the timer ref only in the click handler, not during render
     {
       type: "button",
       className: "md-copy",
