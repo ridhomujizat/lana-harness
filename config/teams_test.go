@@ -392,3 +392,46 @@ func quoteList(names []string) string {
 	}
 	return strings.Join(quoted, ", ")
 }
+
+// TestTeamsDiscussionSettings covers spec 47 REQ-RDS-001: the discussion keys
+// load, and bad values are rejected.
+func TestTeamsDiscussionSettings(t *testing.T) {
+	res, errs := checkTeams(t, teamsConfig(teamTestAgents, `[teams.research-squad]
+lead = "lead"
+members = ["researcher", "writer"]
+discuss = "ask"
+rounds = 2
+extra_rounds = "never"
+room_memory = false
+telegram_all = false
+`))
+	if errs != nil {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	team := res.Config.Teams["research-squad"]
+	if team.DiscussMode() != "ask" || team.RoundLimit() != 2 || team.ExtraMode() != "never" || team.KeepsRoomMemory() || team.TelegramAllMessages() || !team.SharesSummary() || !team.Learns() {
+		t.Fatalf("team=%+v", team)
+	}
+	_, errs = checkTeams(t, teamsConfig(teamTestAgents, `[teams.research-squad]
+lead = "lead"
+members = ["researcher"]
+discuss = "maybe"
+rounds = 9
+extra_rounds = 1
+learn = "yes"
+`))
+	got := map[string]string{}
+	for _, e := range errs {
+		got[e.Key] = e.Msg
+	}
+	for key, want := range map[string]string{
+		"teams.research-squad.discuss":      "must be one of auto, ask",
+		"teams.research-squad.rounds":       "must be between 1 and 5",
+		"teams.research-squad.extra_rounds": "must be string, got integer",
+		"teams.research-squad.learn":        "must be boolean, got string",
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %q, want %q (all: %v)", key, got[key], want, errs)
+		}
+	}
+}

@@ -187,7 +187,71 @@ type TeamConfig struct {
 	Description string   `toml:"description"`
 	Lead        string   `toml:"lead"`
 	Members     []string `toml:"members"`
+	// Discussion settings (spec 47 REQ-RDS-001). Empty or nil means the
+	// default; read them through the methods below.
+	Discuss      string `toml:"discuss"`
+	Rounds       int    `toml:"rounds"`
+	ExtraRounds  string `toml:"extra_rounds"`
+	RoomMemory   *bool  `toml:"room_memory"`
+	ShareSummary *bool  `toml:"share_summary"`
+	Learn        *bool  `toml:"learn"`
+	TelegramAll  *bool  `toml:"telegram_all"`
 }
+
+// Team discussion defaults (REQ-RDS-001).
+const (
+	TeamDiscussAuto   = "auto"
+	TeamDiscussAsk    = "ask"
+	TeamExtraOnce     = "once"
+	TeamExtraAsk      = "ask"
+	TeamExtraNever    = "never"
+	TeamRoundsDefault = 3
+	TeamRoundsMax     = 5
+)
+
+// DiscussMode is "auto" (the lead decides) or "ask" (only when the owner asks).
+func (t TeamConfig) DiscussMode() string {
+	if t.Discuss == TeamDiscussAsk {
+		return TeamDiscussAsk
+	}
+	return TeamDiscussAuto
+}
+
+// RoundLimit is the normal round limit, 1..5.
+func (t TeamConfig) RoundLimit() int {
+	if t.Rounds < 1 || t.Rounds > TeamRoundsMax {
+		return TeamRoundsDefault
+	}
+	return t.Rounds
+}
+
+// ExtraMode is "once", "ask" or "never".
+func (t TeamConfig) ExtraMode() string {
+	switch t.ExtraRounds {
+	case TeamExtraAsk, TeamExtraNever:
+		return t.ExtraRounds
+	}
+	return TeamExtraOnce
+}
+
+func boolDefault(b *bool, def bool) bool {
+	if b == nil {
+		return def
+	}
+	return *b
+}
+
+// KeepsRoomMemory reports room_memory (default true).
+func (t TeamConfig) KeepsRoomMemory() bool { return boolDefault(t.RoomMemory, true) }
+
+// SharesSummary reports share_summary (default true).
+func (t TeamConfig) SharesSummary() bool { return boolDefault(t.ShareSummary, true) }
+
+// Learns reports learn (default true).
+func (t TeamConfig) Learns() bool { return boolDefault(t.Learn, true) }
+
+// TelegramAllMessages reports telegram_all (default true).
+func (t TeamConfig) TelegramAllMessages() bool { return boolDefault(t.TelegramAll, true) }
 
 type RouteConfig struct {
 	Channel string         `toml:"channel"`

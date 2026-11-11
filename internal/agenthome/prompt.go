@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+// DiscussionPrompt is what a team lead's prompt says about room discussions
+// (spec 47 REQ-RDS-017, REQ-RDS-041).
+type DiscussionPrompt struct {
+	Team    string
+	Purpose string
+	// Mode is "auto" (the lead decides) or "ask" (only when the owner asks).
+	Mode   string
+	Rounds int
+	// Extra is "once", "ask" or "never".
+	Extra string
+	// Memory is the room memory lines, or "".
+	Memory string
+}
+
 // RosterEntry is one teammate in the team roster section of a prompt.
 type RosterEntry struct {
 	Name        string
@@ -27,9 +41,11 @@ type PromptInput struct {
 	ToolNotes []ToolNote
 	// HasMCP reports whether the agent has at least one MCP server configured
 	// (REQ-ECX-012).
-	HasMCP         bool
-	Skills         []Skill
-	Roster         []RosterEntry
+	HasMCP bool
+	Skills []Skill
+	Roster []RosterEntry
+	// Discussion is set for a team lead's turn (spec 47 REQ-RDS-017).
+	Discussion     *DiscussionPrompt
 	Agent          string
 	Channel        string
 	Workspace      string
@@ -87,7 +103,11 @@ func BuildSections(in PromptInput) []Section {
 		sections = append(sections, Section{Name: SectionPersona, Text: persona})
 	}
 	if len(in.Roster) > 0 {
-		sections = append(sections, Section{Name: SectionTeam, Text: "# Your team\n" + roster(in.Roster)})
+		text := "# Your team\n" + roster(in.Roster)
+		if in.Discussion != nil {
+			text += "\n\n" + discussionGuide(*in.Discussion)
+		}
+		sections = append(sections, Section{Name: SectionTeam, Text: text})
 	}
 	if len(in.User) > 0 {
 		sections = append(sections, Section{Name: SectionUser, Text: "# About the user\n" + section(in.User, UserLimit)})
@@ -225,6 +245,38 @@ func roster(entries []RosterEntry) string {
 	}
 	lines = append(lines, "When a task fits a teammate's role, use the task tool to delegate it, and task_continue to follow up on it; this keeps each session focused on its own work.")
 	return strings.Join(lines, "\n")
+}
+
+// discussionGuide tells a team lead how to run room discussions.
+func discussionGuide(d DiscussionPrompt) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Room %q\n", d.Team)
+	if d.Purpose != "" {
+		fmt.Fprintf(&b, "Purpose: %s\n", d.Purpose)
+	}
+	b.WriteString("You lead this group room. The owner reads it like a group chat.\n\n## Discussions\n")
+	if d.Mode == "ask" {
+		b.WriteString("Open a discussion only when the owner asks for one (Discuss is on, or they say so, for example \"diskusikan\"). Otherwise answer yourself or delegate with task.\n")
+	} else {
+		b.WriteString("When a question needs more than one member's view (a decision, a trade-off, a plan), open a discussion instead of answering alone. Answer simple questions yourself or delegate with task. If the owner asks for a direct answer, do not open one.\n")
+	}
+	fmt.Fprintf(&b, `- discuss_start: the topic, the members with the angle each covers, and an opening message to the owner (who you bring in and why). Put what you say to the room in the tool fields; do not repeat it as plain text.
+- discuss_ask: ask one member with a short message that starts with @Name. Pass one member's point to another when they disagree (reply_to, quote). For a large room, ask everyone once in one step (parallel), then only the members who disagree.
+- Stop when members agree, or when two replies in a row bring nothing new. A difference of priorities (values, not facts) is not settled by more rounds: end and put both views to the owner.
+- The round limit is %d: each member can be asked at most that many times. `, d.Rounds)
+	switch d.Extra {
+	case "never":
+		b.WriteString("Extra rounds are off.\n")
+	case "ask":
+		b.WriteString("discuss_more asks the owner for one more round; use it only when the last round brought something new and one concrete question is still open.\n")
+	default:
+		b.WriteString("discuss_more adds one round on its own once, then asks the owner; use it only when the last round brought something new and one concrete question is still open. Never more than 5 rounds.\n")
+	}
+	b.WriteString("- discuss_end: the reason, a one-sentence conclusion, agreed / still different / open points with the member each came from, each member's part, and notes worth keeping in room memory (decisions, facts, open questions; mark a note that replaces an older one). Then answer the owner in 2–4 sentences.\n")
+	if d.Memory != "" {
+		fmt.Fprintf(&b, "\n## Room memory\n%s\n", d.Memory)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func section(entries []string, limit int) string {

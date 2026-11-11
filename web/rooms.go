@@ -235,6 +235,8 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		Attachments []string `json:"attachments"`
 		NewTopic    bool     `json:"new_topic"`
 		ReplyTo     *int64   `json:"reply_to"`
+		// Discuss asks the lead to open a discussion (API-RDS-013).
+		Discuss bool `json:"discuss"`
 	}
 	if !decodeJSONObject(w, r, roomSendBody, &body) {
 		return
@@ -248,6 +250,9 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	note := roomMentionNote(room, text)
+	if body.Discuss && room.Kind == "team" {
+		note = strings.TrimSpace(note + "\n" + core.DiscussRequestNote)
+	}
 
 	// One create per room: the mutex guards "find or create the current web
 	// session" (design §Concurrency).

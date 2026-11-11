@@ -62,7 +62,7 @@ func runtimeNames() []string {
 	return names
 }
 
-var teamKeys = []string{"description", "lead", "members"}
+var teamKeys = []string{"description", "discuss", "extra_rounds", "lead", "learn", "members", "room_memory", "rounds", "share_summary", "telegram_all"}
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
@@ -752,6 +752,38 @@ func validateTeam(v map[string]any, path string, add func(string, string)) {
 			add(path+".description", typeMsg("string", raw))
 		} else if n := utf8.RuneCountInString(s); n > maxTeamDescription {
 			add(path+".description", fmt.Sprintf("must be at most %d characters", maxTeamDescription))
+		}
+	}
+	// Spec 47 REQ-RDS-001: discussion settings.
+	enum := func(key string, allowed ...string) {
+		raw, ok := v[key]
+		if !ok {
+			return
+		}
+		s, ok := raw.(string)
+		if !ok {
+			add(path+"."+key, typeMsg("string", raw))
+			return
+		}
+		if !contains(allowed, s) {
+			add(path+"."+key, fmt.Sprintf("must be one of %s", strings.Join(allowed, ", ")))
+		}
+	}
+	enum("discuss", "auto", "ask")
+	enum("extra_rounds", "once", "ask", "never")
+	if raw, ok := v["rounds"]; ok {
+		n, ok := asInt(raw)
+		if !ok {
+			add(path+".rounds", typeMsg("integer", raw))
+		} else if n < 1 || n > 5 {
+			add(path+".rounds", "must be between 1 and 5")
+		}
+	}
+	for _, key := range []string{"room_memory", "share_summary", "learn", "telegram_all"} {
+		if raw, ok := v[key]; ok {
+			if _, ok := raw.(bool); !ok {
+				add(path+"."+key, typeMsg("boolean", raw))
+			}
 		}
 	}
 }

@@ -373,6 +373,7 @@ func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]s
 	_, mcpManageRegistered := rn.reg.tools.Get("mcp_manage")
 	_, calendarRegistered := rn.reg.tools.Get(CalendarTool)
 	_, sendFileRegistered := rn.reg.tools.Get(SendFileTool)
+	_, discussRegistered := rn.reg.tools.Get(DiscussTools[0])
 	for _, name := range AutoOfferedTools(AutoOfferState{
 		Root:                !resolved.child,
 		MCPManageRegistered: mcpManageRegistered,
@@ -380,6 +381,7 @@ func (rn *Runner) offeredTools(ctx context.Context, resolved resolvedAgent) ([]s
 		Team:                resolved.team != "" || len(resolved.delegates) > 0,
 		CalendarRegistered:  calendarRegistered,
 		SendFileRegistered:  sendFileRegistered,
+		Discussion:          resolved.team != "" && !resolved.child && discussRegistered,
 	}) {
 		if !containsString(tools, name) {
 			tools = append(tools, name)
@@ -421,6 +423,7 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		Questions:     rn.reg.questions,
 		Files:         rn.reg.files,
 		Subagents:     &subagentRunner{reg: rn.reg, allowed: resolved.delegates},
+		Discussions:   rn.discussionRunner(resolved),
 		MCPAdmin:      mcpAdmin,
 		MCPStatus:     rn.reg.ServerStatus,
 		AllowedAgents: resolved.delegates,
@@ -429,6 +432,20 @@ func (rn *Runner) toolCtx(ctx context.Context, resolved resolvedAgent, turnID st
 		Sessions:      sessions,
 		Knowledge:     rn.reg.knowledgeService(),
 	}
+}
+
+// discussionRunner is the discussion service of a team lead's root turn
+// (REQ-RDS-010); nil for every other turn.
+func (rn *Runner) discussionRunner(resolved resolvedAgent) core.DiscussionService {
+	if resolved.team == "" || resolved.child {
+		return nil
+	}
+	_, teams := rn.reg.configSnapshot()
+	team, ok := teams[resolved.team]
+	if !ok || len(team.Members) == 0 {
+		return nil
+	}
+	return &discussionRunner{reg: rn.reg, team: resolved.team, lead: team.Lead, cfg: team, allowed: resolved.delegates}
 }
 
 // mergeDelegates joins groups in order and drops duplicates.
@@ -512,6 +529,18 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
 		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, ToolNotes: notes, HasMCP: hasMCP,
+	}
+	// Spec 47 REQ-RDS-017: a team lead's root turn learns how to discuss.
+	if res.team != "" && !res.child {
+		if _, teams := rn.reg.configSnapshot(); len(teams) > 0 {
+			if team, ok := teams[res.team]; ok {
+				d := &agenthome.DiscussionPrompt{Team: res.team, Purpose: team.Description, Mode: team.DiscussMode(), Rounds: team.RoundLimit(), Extra: team.ExtraMode()}
+				if team.KeepsRoomMemory() {
+					d.Memory = rn.reg.RoomMemory().Prompt(res.team, discussionMemoryLimit)
+				}
+				in.Discussion = d
+			}
+		}
 	}
 	// REQ-JOB-017: the session's jobs go into the turn <context> block. Ended
 	// jobs are marked announced so they appear in one turn only.

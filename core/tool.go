@@ -57,6 +57,9 @@ type ToolCtx struct {
 	Files FileSender
 	// Subagents runs child sessions for the task tools.
 	Subagents SubagentRunner
+	// Discussions runs the room discussion of a team lead's root turn for the
+	// discuss_* tools (spec 47). Nil elsewhere.
+	Discussions DiscussionService
 	// MCPAdmin changes MCP servers for the mcp_manage tool. Nil when the
 	// runtime has no MCP registry.
 	MCPAdmin MCPAdmin

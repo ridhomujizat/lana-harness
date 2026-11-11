@@ -10,6 +10,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -28,6 +29,45 @@ type teamCreateRequest struct {
 	Members         []string `json:"members"`
 	Description     string   `json:"description"`
 	ExpectedVersion string   `json:"expected_version"`
+	teamDiscussionInput
+}
+
+// teamDiscussionInput is the discussion settings part of a team write
+// (spec 47 API-RDS-010). A nil field keeps the current value on PUT and the
+// default on POST.
+type teamDiscussionInput struct {
+	Discuss      *string `json:"discuss,omitempty"`
+	Rounds       *int    `json:"rounds,omitempty"`
+	ExtraRounds  *string `json:"extra_rounds,omitempty"`
+	RoomMemory   *bool   `json:"room_memory,omitempty"`
+	ShareSummary *bool   `json:"share_summary,omitempty"`
+	Learn        *bool   `json:"learn,omitempty"`
+	TelegramAll  *bool   `json:"telegram_all,omitempty"`
+}
+
+// apply copies the set fields onto record.
+func (in teamDiscussionInput) apply(record *teamRecord) {
+	if in.Discuss != nil {
+		record.Discuss = *in.Discuss
+	}
+	if in.Rounds != nil {
+		record.Rounds = *in.Rounds
+	}
+	if in.ExtraRounds != nil {
+		record.ExtraRounds = *in.ExtraRounds
+	}
+	if in.RoomMemory != nil {
+		record.RoomMemory = in.RoomMemory
+	}
+	if in.ShareSummary != nil {
+		record.ShareSummary = in.ShareSummary
+	}
+	if in.Learn != nil {
+		record.Learn = in.Learn
+	}
+	if in.TelegramAll != nil {
+		record.TelegramAll = in.TelegramAll
+	}
 }
 
 // teamSaveRequest is the PUT /v1/teams/{name} body. The name is the path and
@@ -37,6 +77,7 @@ type teamSaveRequest struct {
 	Members         []string `json:"members"`
 	Description     string   `json:"description"`
 	ExpectedVersion string   `json:"expected_version"`
+	teamDiscussionInput
 }
 
 // teamJSON is the GET and PUT response body of API-TEAM-008 and API-TEAM-009.
@@ -47,6 +88,29 @@ type teamJSON struct {
 	Description     string   `json:"description"`
 	Version         string   `json:"version"`
 	RestartRequired bool     `json:"restart_required"`
+	teamDiscussionJSON
+}
+
+// teamDiscussionJSON is every discussion setting with its default filled in
+// (API-RDS-010).
+type teamDiscussionJSON struct {
+	Discuss      string `json:"discuss"`
+	Rounds       int    `json:"rounds"`
+	ExtraRounds  string `json:"extra_rounds"`
+	RoomMemory   bool   `json:"room_memory"`
+	ShareSummary bool   `json:"share_summary"`
+	Learn        bool   `json:"learn"`
+	TelegramAll  bool   `json:"telegram_all"`
+}
+
+// discussionJSON fills the defaults of record's discussion settings.
+func (record teamRecord) discussionJSON() teamDiscussionJSON {
+	t := core.TeamConfig{Discuss: record.Discuss, Rounds: record.Rounds, ExtraRounds: record.ExtraRounds,
+		RoomMemory: record.RoomMemory, ShareSummary: record.ShareSummary, Learn: record.Learn, TelegramAll: record.TelegramAll}
+	return teamDiscussionJSON{
+		Discuss: t.DiscussMode(), Rounds: t.RoundLimit(), ExtraRounds: t.ExtraMode(),
+		RoomMemory: t.KeepsRoomMemory(), ShareSummary: t.SharesSummary(), Learn: t.Learns(), TelegramAll: t.TelegramAllMessages(),
+	}
 }
 
 // teamCreatedResponse is the POST /v1/teams response body of API-TEAM-007.
@@ -73,6 +137,15 @@ type teamRecord struct {
 	Lead        string
 	Members     []string
 	Description string
+	// Spec 47 discussion settings; zero or nil is the default and is not
+	// written.
+	Discuss      string
+	Rounds       int
+	ExtraRounds  string
+	RoomMemory   *bool
+	ShareSummary *bool
+	Learn        *bool
+	TelegramAll  *bool
 }
 
 // teamDocument is the [teams.*] and [agents.*] view used for existence and
@@ -147,6 +220,7 @@ func (s *Server) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		Members:     body.Members,
 		Description: body.Description,
 	}
+	body.apply(&record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), agentChecker(store), file.Raw, teamHeader(body.Name), renderTeamTable(body.Name, record))
 	if err != nil {
 		s.writeTeamSaveError(w, "create team", err)
@@ -212,7 +286,8 @@ func (s *Server) handleGetTeam(w http.ResponseWriter, r *http.Request) {
 		// provider list report restart_required. The loaded config is only
 		// exposed as its startup version, so a team-level comparison would
 		// need a second effective-config port.
-		RestartRequired: file.Version != store.ConfigLoadedVersion(),
+		RestartRequired:    file.Version != store.ConfigLoadedVersion(),
+		teamDiscussionJSON: record.discussionJSON(),
 	})
 }
 
@@ -264,11 +339,9 @@ func (s *Server) handlePutTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	record := teamRecord{
-		Lead:        body.Lead,
-		Members:     body.Members,
-		Description: body.Description,
-	}
+	record := teamRecordFromMap(document.Teams[name])
+	record.Lead, record.Members, record.Description = body.Lead, body.Members, body.Description
+	body.apply(&record)
 	candidate, changed, err := webfiles.RewriteTable(r.Context(), agentChecker(store), file.Raw, teamHeader(name), renderTeamTable(name, record))
 	if err != nil {
 		s.writeTeamSaveError(w, "save team", err)
@@ -284,12 +357,13 @@ func (s *Server) handlePutTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	applied := s.applyLiveConfig(r.Context(), store, candidate)
 	writeJSON(w, http.StatusOK, teamJSON{
-		Name:            name,
-		Lead:            record.Lead,
-		Members:         nonNilStrings(record.Members),
-		Description:     record.Description,
-		Version:         webfiles.ConfigVersion(candidate),
-		RestartRequired: !applied,
+		Name:               name,
+		Lead:               record.Lead,
+		Members:            nonNilStrings(record.Members),
+		Description:        record.Description,
+		Version:            webfiles.ConfigVersion(candidate),
+		RestartRequired:    !applied,
+		teamDiscussionJSON: record.discussionJSON(),
 	})
 }
 
@@ -397,9 +471,16 @@ func tableMap(value any) map[string]map[string]any {
 
 func teamRecordFromMap(table map[string]any) teamRecord {
 	return teamRecord{
-		Lead:        mapAgentString(table, "lead"),
-		Members:     mapAgentStrings(table, "members"),
-		Description: mapAgentString(table, "description"),
+		Lead:         mapAgentString(table, "lead"),
+		Members:      mapAgentStrings(table, "members"),
+		Description:  mapAgentString(table, "description"),
+		Discuss:      mapAgentString(table, "discuss"),
+		Rounds:       mapAgentInt(table, "rounds"),
+		ExtraRounds:  mapAgentString(table, "extra_rounds"),
+		RoomMemory:   mapAgentBoolPtr(table, "room_memory"),
+		ShareSummary: mapAgentBoolPtr(table, "share_summary"),
+		Learn:        mapAgentBoolPtr(table, "learn"),
+		TelegramAll:  mapAgentBoolPtr(table, "telegram_all"),
 	}
 }
 
@@ -417,6 +498,24 @@ func renderTeamTable(name string, record teamRecord) string {
 	}
 	if record.Description != "" {
 		fmt.Fprintf(&b, "description = %s\n", agentTOMLString(record.Description))
+	}
+	// API-RDS-010: a setting equal to its default is not written.
+	if record.Discuss != "" && record.Discuss != core.TeamDiscussAuto {
+		fmt.Fprintf(&b, "discuss = %s\n", agentTOMLString(record.Discuss))
+	}
+	if record.Rounds != 0 && record.Rounds != core.TeamRoundsDefault {
+		fmt.Fprintf(&b, "rounds = %d\n", record.Rounds)
+	}
+	if record.ExtraRounds != "" && record.ExtraRounds != core.TeamExtraOnce {
+		fmt.Fprintf(&b, "extra_rounds = %s\n", agentTOMLString(record.ExtraRounds))
+	}
+	for _, kv := range []struct {
+		key string
+		val *bool
+	}{{"room_memory", record.RoomMemory}, {"share_summary", record.ShareSummary}, {"learn", record.Learn}, {"telegram_all", record.TelegramAll}} {
+		if kv.val != nil && !*kv.val {
+			fmt.Fprintf(&b, "%s = false\n", kv.key)
+		}
 	}
 	return b.String()
 }

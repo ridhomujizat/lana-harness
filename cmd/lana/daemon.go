@@ -283,7 +283,20 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 			return channel.SendFile(ctx, sessionID, f)
 		}
 	}
-	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"), lana.FileWith(fileRouter.Send))
+	rt, _, _, _, err = runtimeFor(runCtx, home, "", router.Approve, lana.ApproveChannels("telegram", "web", "workflow"), lana.AskWith(questionRouter.Ask), lana.AskChannels("telegram", "web", "workflow"), lana.FileWith(fileRouter.Send), lana.DiscussionPostWith(func(ctx context.Context, sessionID, name, text string) {
+		// REQ-RDS-033: a team session on Telegram shows every discussion
+		// message; other channels read the events.
+		if channel == nil || rt == nil {
+			return
+		}
+		info, err := rt.SessionInfo(ctx, sessionID)
+		if err != nil || info.Channel != "telegram" {
+			return
+		}
+		if err := channel.SendDiscussion(ctx, sessionID, name, text); err != nil {
+			slog.Warn("telegram: discussion post failed", "session_id", sessionID, "error", err)
+		}
+	}))
 	if err != nil {
 		return errorf(2, "%v", err)
 	}
