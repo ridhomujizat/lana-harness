@@ -45,6 +45,10 @@ did the same.
   "Show more · N lines" control.
 - **REQ-CHF-007** The composer shows chosen files as the same cards (type tile, name, type and
   size) with a remove button.
+- **REQ-CHF-009** Files dropped anywhere on a chat room become draft files, like the paperclip,
+  with the same drop overlay as Sessions. A room with no web session yet says "Send a message
+  first to attach files." A files-only send's stored placeholder text "(attachments)" is not shown
+  in the bubble or the room preview.
 - **REQ-CHF-008** The room list preview of an owner message leaves out attachment text and adds
   " · N files" (or "N files" alone when there is no text).
 

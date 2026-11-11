@@ -479,6 +479,9 @@ func userMessageText(payload core.UserMessage) string {
 	if attachments == 0 {
 		return text
 	}
+	if text == "(attachments)" { // a files-only send stores this placeholder
+		text = ""
+	}
 	label := fmt.Sprintf("%d files", attachments)
 	if attachments == 1 {
 		label = "1 file"
