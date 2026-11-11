@@ -83,7 +83,7 @@ function RowFace({ row, colors }: { row: RoomRow; colors: Record<string, string>
       color={gr8rColor(row.color)}
       size="lg"
       presence={Boolean(row.presence)}
-      className={state ? "state-" + state : undefined}
+      className={"chat-coin" + (state ? " state-" + state : "")}
     />
   );
 }
