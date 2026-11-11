@@ -3,6 +3,7 @@ package permission
 import (
 	"testing"
 
+	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
@@ -39,5 +40,14 @@ func TestAutoPolicy(t *testing.T) {
 		if got := autoAllows(tc.tool, tc.arg, ws); got != tc.want {
 			t.Errorf("autoAllows(%s, %q) = %v, want %v", tc.tool, tc.arg.Value, got, tc.want)
 		}
+	}
+}
+
+func TestAutoDraftWorkflow(t *testing.T) {
+	if !autoDraftWorkflow("workflow", core.RiskWrite) {
+		t.Fatal("auto should create a draft workflow")
+	}
+	if autoDraftWorkflow("workflow", core.RiskExec) || autoDraftWorkflow("bash", core.RiskWrite) {
+		t.Fatal("auto should still ask for runs and other writes")
 	}
 }

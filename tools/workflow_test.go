@@ -377,3 +377,67 @@ func TestWorkflowToolRunTruncatesOutput(t *testing.T) {
 		t.Fatalf("truncated output = %q", text[:80])
 	}
 }
+
+// editorWorkflowService is the fake plus create and assist.
+type editorWorkflowService struct {
+	*fakeWorkflowService
+	createIn    workflow.CreateInput
+	assistID    string
+	assistMsg   string
+	assistBase  int
+	assistReply workflow.AssistResult
+}
+
+func (f *editorWorkflowService) Create(_ context.Context, in workflow.CreateInput) (workflow.Detail, error) {
+	f.createIn = in
+	return workflow.Detail{Workflow: workflow.Workflow{ID: "daily-tickets", Name: in.Name, Version: 1, Status: workflow.StatusDraft}}, nil
+}
+
+func (f *editorWorkflowService) Assist(_ context.Context, id string, base int, msg string) (workflow.AssistResult, error) {
+	f.assistID, f.assistBase, f.assistMsg = id, base, msg
+	return f.assistReply, nil
+}
+
+func TestWorkflowToolCreateAsksTheGuardian(t *testing.T) {
+	svc := &editorWorkflowService{fakeWorkflowService: &fakeWorkflowService{}}
+	svc.assistReply = workflow.AssistResult{
+		Message:  workflow.ChatMessage{Text: "Sudah kubuat", Change: &workflow.GraphChange{Added: []string{"Setiap jam 8"}}},
+		Workflow: workflow.Detail{Workflow: workflow.Workflow{ID: "daily-tickets", Name: "Daily tickets", Version: 2, Status: workflow.StatusDraft}},
+	}
+	tool := NewWorkflow(svc)
+	out, err := tool.Call(context.Background(), core.ToolCtx{AgentName: "karin"}, json.RawMessage(`{"action":"create","name":"Daily tickets","request":"tiap jam 8 kirim ticket terbuka"}`))
+	if err != nil || out.Status != core.ToolStatusSuccess {
+		t.Fatalf("create: %v %+v", err, out)
+	}
+	if svc.createIn.Guardian != "karin" || svc.assistID != "daily-tickets" || svc.assistBase != 1 || svc.assistMsg != "tiap jam 8 kirim ticket terbuka" {
+		t.Fatalf("create %+v assist %s/%d/%q", svc.createIn, svc.assistID, svc.assistBase, svc.assistMsg)
+	}
+	for _, want := range []string{`"link": "#/workflows/daily-tickets"`, `"guardian_reply": "Sudah kubuat"`, "Draft:"} {
+		if !strings.Contains(out.Output, want) {
+			t.Fatalf("output misses %s: %s", want, out.Output)
+		}
+	}
+	if risk := tool.Risk(json.RawMessage(`{"action":"create"}`)); risk != core.RiskWrite {
+		t.Fatalf("create risk = %s, want write", risk)
+	}
+	if risk := tool.Risk(json.RawMessage(`{"action":"test"}`)); risk != core.RiskWrite {
+		t.Fatalf("test risk = %s, want write", risk)
+	}
+	if risk := tool.Risk(json.RawMessage(`{"action":"start"}`)); risk != core.RiskExec {
+		t.Fatalf("start risk = %s, want exec", risk)
+	}
+}
+
+func TestWorkflowToolTestWaitsForTheRun(t *testing.T) {
+	svc := &fakeWorkflowService{
+		started:   workflow.Run{ID: "r1", Number: 3, Status: workflow.RunQueued},
+		runDetail: workflow.RunDetail{Run: workflow.Run{ID: "r1", Number: 3, Status: workflow.RunSucceeded}, Nodes: []workflow.NodeRun{{NodeID: "fetch", Status: "succeeded", Output: json.RawMessage(`{"text":"3 tickets"}`)}}},
+	}
+	out, err := NewWorkflow(svc).Call(context.Background(), core.ToolCtx{}, json.RawMessage(`{"action":"test","id":"daily-tickets"}`))
+	if err != nil || out.Status != core.ToolStatusSuccess {
+		t.Fatalf("test: %v %+v", err, out)
+	}
+	if !svc.startCalled || !strings.Contains(out.Output, `"status": "succeeded"`) || !strings.Contains(out.Output, "3 tickets") {
+		t.Fatalf("output = %s", out.Output)
+	}
+}
