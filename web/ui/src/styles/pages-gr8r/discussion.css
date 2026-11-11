@@ -771,3 +771,17 @@
   white-space: nowrap;
   max-width: 320px;
 }
+
+/* Chats list: an agent's face sits in a tinted coin like the faces of a
+   team avatar (owner, 2026-11-11). */
+.rooms-row .av.chat-coin {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c, var(--gray)) 16%, var(--surface));
+}
+.rooms-row .av.chat-coin .av-svg,
+.rooms-row .av.chat-coin .av-img {
+  width: 74%;
+  height: 74%;
+}
