@@ -842,6 +842,9 @@ func (s *updateService) install(job *updateJob, lock *daemonLock, stderr io.Writ
 		s.recordResult(selfupdate.OutcomeFailed, to, "the new binary did not start and the old one could not be restored: "+err.Error())
 		return code
 	}
+	if err := selfupdate.ResealAppBundle(exe); err != nil {
+		slog.Warn("update: sign the app bundle again", "error", err)
+	}
 	_ = selfupdate.RemovePending(s.paths)
 	return failOld("the new binary could not be started")
 }

@@ -272,6 +272,7 @@ func Restore(dir, home, exePath string) error {
 			if err := CopyFile(src, exePath, 0o755); err != nil {
 				return fmt.Errorf("restore the binary: %w", err)
 			}
+			resealAfterReplace(exePath)
 		}
 	}
 	return nil
@@ -347,12 +348,14 @@ func copyContents(src, dst string, mode os.FileMode) error {
 // ReplaceExecutable moves the verified download src over exePath. A rename
 // works when both are on one filesystem; otherwise src is copied to
 // <exe_dir>/.lana-new-<pid> first and renamed from there (design.md,
-// installing). The new file is 0755.
+// installing). The new file is 0755. A binary inside a macOS app bundle gets
+// the bundle signed again (spec #52).
 func ReplaceExecutable(src, exePath string) error {
 	if err := os.Chmod(src, 0o755); err != nil {
 		return err
 	}
 	if err := os.Rename(src, exePath); err == nil {
+		resealAfterReplace(exePath)
 		return nil
 	}
 	staged := filepath.Join(filepath.Dir(exePath), ".lana-new-"+strconv.Itoa(os.Getpid()))
@@ -364,5 +367,6 @@ func ReplaceExecutable(src, exePath string) error {
 		return err
 	}
 	_ = os.Remove(src)
+	resealAfterReplace(exePath)
 	return nil
 }
