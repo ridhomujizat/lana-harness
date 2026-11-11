@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { fileMeta, parseAttachmentBlock } from "../lib/attachment-blocks";
 import { userMessageText } from "../lib/format";
-import { buildTurns, UserBubble } from "./turn";
+import { buildTurns, TurnBlock, turnSummary, UserBubble } from "./turn";
 import { storedAttachments } from "./session";
 import type { SessionEvent } from "../api/sessions";
 
@@ -162,5 +162,68 @@ describe("files-only send", () => {
     );
     expect(container.querySelector(".chat-bubble")).toBeNull();
     expect(container.querySelectorAll(".mf-card").length).toBe(1);
+  });
+});
+
+describe("files from an agent (spec 50)", () => {
+  function sent(seq: number, path: string, mediaType: string, size: number, caption = ""): SessionEvent {
+    return {
+      seq,
+      kind: "file/sent",
+      turn_id: "t1",
+      created_at: 1762876680000,
+      payload: { v: 1, call_id: "c" + seq, path, name: path.split("/").pop(), media_type: mediaType, size, ...(caption ? { caption } : {}) },
+    };
+  }
+  function agentTurn() {
+    const items = buildTurns([
+      userEvent(["kirim screenshot dan ringkasan"]),
+      { seq: 2, kind: "tool/call", turn_id: "t1", created_at: 2, payload: { call_id: "c3", name: "send_file", input: { path: "a.png" } } },
+      { seq: 3, kind: "tool/result", turn_id: "t1", created_at: 3, payload: { call_id: "c3", status: "ok", output: "Sent a.png" } },
+      sent(3, "attachments/2026-11-11/staging.png", "image/png", 319488, "Dashboard staging"),
+      sent(4, "attachments/2026-11-11/error log.png", "image/png", 2048),
+      sent(5, "attachments/2026-11-11/ringkasan.md", "text/markdown", 6144),
+      { seq: 6, kind: "assistant/message", turn_id: "t1", created_at: 6, payload: { content: [{ type: "text", text: "Sudah jadi." }] } },
+      { seq: 7, kind: "turn/end", turn_id: "t1", created_at: 7, payload: { reason: "end_turn" } },
+    ]);
+    const item = items.find((entry) => entry.kind === "turn");
+    if (!item || item.kind !== "turn") throw new Error("no turn");
+    return item.turn;
+  }
+
+  it("collects file/sent events on the turn", () => {
+    const turn = agentTurn();
+    expect(turn.sentFiles.map((file) => file.name)).toEqual(["staging.png", "error log.png", "ringkasan.md"]);
+    expect(turn.sentFiles[0]?.caption).toBe("Dashboard staging");
+    expect(turnSummary(turn.steps)).toContain("Sent 1 file");
+  });
+
+  it("shows images as a grid and other files as cards with download", () => {
+    const { container } = render(<TurnBlock turn={agentTurn()} agent="omnix" agentLabel="Omnix" sessionId="s1" />);
+    expect(container.querySelectorAll(".af-img").length).toBe(2);
+    const download = screen.getByLabelText("Download ringkasan.md") as HTMLAnchorElement;
+    expect(download.getAttribute("href")).toBe("/v1/sessions/s1/attachments/2026-11-11/ringkasan.md");
+    expect(screen.getByText("Markdown · 6 KB")).toBeTruthy();
+  });
+
+  it("opens the image viewer and moves with the keyboard", () => {
+    render(<TurnBlock turn={agentTurn()} agent="omnix" agentLabel="Omnix" sessionId="s1" />);
+    fireEvent.click(screen.getByLabelText("View staging.png"));
+    const dialog = screen.getByRole("dialog", { name: "staging.png" });
+    expect(dialog.textContent).toContain("sent by Omnix");
+    expect(screen.getByText("Dashboard staging")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    expect(screen.getByRole("dialog", { name: "error log.png" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("says a sent file is gone when it can no longer be loaded", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 404 })));
+    render(<TurnBlock turn={agentTurn()} agent="omnix" agentLabel="Omnix" sessionId="s1" />);
+    fireEvent.click(screen.getByLabelText("Open ringkasan.md"));
+    await waitFor(() => expect(screen.getByText("This file was moved or deleted.")).toBeTruthy());
+    expect(screen.getByText("1 file in this reply")).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 });

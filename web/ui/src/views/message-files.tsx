@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { attachmentURL } from "../api/attachments";
 import {
   fileFamily,
   fileMeta,
@@ -232,12 +234,15 @@ export function FilePreview({
   count,
   onMove,
   onClose,
+  scope = "in this message",
 }: {
   attachment: UserAttachment;
   index: number;
   count: number;
   onMove: (index: number) => void;
   onClose: () => void;
+  /* Where the files come from, e.g. "in this message" or "in this reply". */
+  scope?: string;
 }) {
   const file = attachment.file as MessageFile;
   const kind = previewKind(file);
@@ -267,7 +272,10 @@ export function FilePreview({
   }, [index, count, onMove]);
 
   const text = loaded.state === "ready" ? loaded.text : file.text;
-  const fallback = textual && loaded.state === "failed";
+  /* REQ-AGF-007: with no text to fall back on, a failed load means the file
+     is gone from the workspace. */
+  const missing = textual && loaded.state === "failed" && !file.text;
+  const fallback = textual && loaded.state === "failed" && !missing;
 
   const metaParts: string[] = [];
   if (kind === "pdf" && file.pages > 0) {
@@ -291,7 +299,14 @@ export function FilePreview({
   const canToggle = kind === "markdown";
 
   let body;
-  if (kind === "none") {
+  if (missing) {
+    body = (
+      <div className="fp-empty">
+        <p>This file was moved or deleted.</p>
+        <p className="muted">It is no longer in the agent's workspace.</p>
+      </div>
+    );
+  } else if (kind === "none") {
     body = (
       <div className="fp-empty">
         <p>
@@ -306,7 +321,12 @@ export function FilePreview({
     /* The dashboard forbids framing, so a PDF shows the text the agent read,
        page by page, and opens in its own tab. */
     body =
-      file.status === "scan" ? (
+      file.status === "ok" && !file.text ? (
+        <div className="fp-empty">
+          <p>Open the PDF to read it.</p>
+          <p className="muted">The dashboard does not show PDFs inside the page.</p>
+        </div>
+      ) : file.status === "scan" ? (
         <div className="fp-empty">
           <p>This PDF is a scan with no text layer, so the agent could not read it.</p>
           <p className="muted">Open it to look at the pages, or send photos of them instead.</p>
@@ -345,7 +365,7 @@ export function FilePreview({
       footer={
         <>
           <span className="fp-count">
-            {count > 1 ? "File " + (index + 1) + " of " + count + " in this message" : "1 file in this message"}
+            {count > 1 ? "File " + (index + 1) + " of " + count + " " + scope : "1 file " + scope}
           </span>
           <span className="sp" />
           {count > 1 ? (
@@ -470,5 +490,286 @@ export function FoldText({ text }: { text: string }) {
         {open ? "Show less" : "Show more · " + lines + (lines === 1 ? " line" : " lines")}
       </button>
     </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Files from an agent (spec 50)                                      */
+/* ------------------------------------------------------------------ */
+
+export interface SentFile {
+  key: string;
+  path: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  caption: string;
+  at: number;
+}
+
+const VIEWABLE_IMAGES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+
+function isViewableImage(file: SentFile): boolean {
+  return VIEWABLE_IMAGES.has(file.mediaType) || fileFamily(file.name, file.mediaType) === "image";
+}
+
+function sentTime(at: number): string {
+  if (!at) return "";
+  const ms = at > 1e12 ? at : at * 1000;
+  return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function sentAttachment(sessionId: string, file: SentFile): UserAttachment {
+  return {
+    key: file.key,
+    name: file.name,
+    src: attachmentURL(sessionId, file.path),
+    alt: file.caption || file.name,
+    isImage: false,
+    path: file.path,
+    file: {
+      path: file.path,
+      name: file.name,
+      mediaType: file.mediaType,
+      pages: 0,
+      text: "",
+      truncated: false,
+      status: "ok",
+      note: "",
+    },
+    meta:
+      fileTypeName(file.name, file.mediaType) +
+      (file.size > 0 ? " · " + formatBytes(file.size) : ""),
+  };
+}
+
+/* AgentFiles shows the files of one agent turn under its reply: images as a
+   grid, other files as cards with a download button (REQ-AGF-005). */
+export function AgentFiles({
+  sessionId,
+  files,
+  sender,
+}: {
+  sessionId: string;
+  files: SentFile[];
+  sender: string;
+}) {
+  const [openFile, setOpenFile] = useState<number | null>(null);
+  const [openImage, setOpenImage] = useState<number | null>(null);
+  const images = files.filter(isViewableImage);
+  const others = files.filter((file) => !isViewableImage(file));
+  const cards = others.map((file) => sentAttachment(sessionId, file));
+  const current = openFile === null ? null : cards[openFile] || null;
+
+  return (
+    <div className="af">
+      {images.length > 0 ? (
+        <div className={"af-grid" + (images.length === 1 ? " is-single" : "")}>
+          {images.map((image, index) => (
+            <button
+              type="button"
+              key={image.key}
+              className="af-img"
+              aria-label={"View " + image.name}
+              title={image.caption || image.name}
+              onClick={() => setOpenImage(index)}
+            >
+              <img src={attachmentURL(sessionId, image.path)} loading="lazy" alt={image.caption || image.name} />
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {cards.length > 0 ? (
+        <div className="af-files">
+          {cards.map((card, index) => (
+            <div className="mf-card is-agent" key={card.key} title={others[index]?.caption || undefined}>
+              <button
+                type="button"
+                className="mf-card-open"
+                aria-label={"Open " + card.name}
+                onClick={() => setOpenFile(index)}
+              >
+                <FileTypeTile name={card.name} mediaType={card.file?.mediaType || ""} />
+                <span className="mf-card-text">
+                  <span className="mf-card-name">{card.name}</span>
+                  <span className="mf-card-meta">{card.meta}</span>
+                </span>
+              </button>
+              <a
+                className="mf-card-download"
+                href={card.src}
+                download={card.name}
+                aria-label={"Download " + card.name}
+              >
+                <Ic name="download" size={14} />
+              </a>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {current && openFile !== null ? (
+        <FilePreview
+          attachment={current}
+          index={openFile}
+          count={cards.length}
+          onMove={setOpenFile}
+          onClose={() => setOpenFile(null)}
+          scope="in this reply"
+        />
+      ) : null}
+      {openImage !== null && images[openImage] ? (
+        <ImageViewer
+          sessionId={sessionId}
+          images={images}
+          index={openImage}
+          sender={sender}
+          onMove={setOpenImage}
+          onClose={() => setOpenImage(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* ImageViewer is the full-screen image view of REQ-AGF-005. */
+export function ImageViewer({
+  sessionId,
+  images,
+  index,
+  sender,
+  onMove,
+  onClose,
+}: {
+  sessionId: string;
+  images: SentFile[];
+  index: number;
+  sender: string;
+  onMove: (index: number) => void;
+  onClose: () => void;
+}) {
+  const image = images[index] as SentFile;
+  const src = attachmentURL(sessionId, image.path);
+  const [dims, setDims] = useState<{ key: string; text: string }>({ key: "", text: "" });
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    closeRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (previous instanceof HTMLElement) previous.focus({ preventScroll: true });
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === "ArrowLeft" && index > 0) {
+        onMove(index - 1);
+      } else if (event.key === "ArrowRight" && index < images.length - 1) {
+        onMove(index + 1);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [index, images.length, onMove, onClose]);
+
+  const meta = [
+    fileTypeLabel(image.name, image.mediaType),
+    dims.key === image.key ? dims.text : "",
+    image.size > 0 ? formatBytes(image.size) : "",
+    ["sent by " + sender, sentTime(image.at)].filter(Boolean).join(" "),
+  ].filter(Boolean);
+
+  return createPortal(
+    <div
+      className="iv"
+      role="dialog"
+      aria-modal="true"
+      aria-label={image.name}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="iv-bar">
+        <div className="iv-title">
+          <span className="iv-name">{image.name}</span>
+          <span className="iv-meta">{meta.join(" · ")}</span>
+        </div>
+        <div className="iv-actions">
+          <a className="iv-btn iv-btn-text" href={src} target="_blank" rel="noopener noreferrer">
+            Open original
+          </a>
+          <a className="iv-btn iv-btn-text" href={src} download={image.name} aria-label={"Download " + image.name}>
+            <Ic name="download" size={15} />
+            <span className="iv-btn-label">Download</span>
+          </a>
+          <button ref={closeRef} type="button" className="iv-btn iv-close" aria-label="Close" onClick={onClose}>
+            <Ic name="x" size={18} />
+          </button>
+        </div>
+      </div>
+      <div
+        className="iv-stage"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
+      >
+        {images.length > 1 ? (
+          <button
+            type="button"
+            className="iv-nav iv-prev"
+            aria-label="Previous image"
+            disabled={index === 0}
+            onClick={() => onMove(index - 1)}
+          >
+            <Ic name="chevron-left" size={22} />
+          </button>
+        ) : null}
+        <img
+          className="iv-img"
+          key={image.key}
+          src={src}
+          alt={image.caption || image.name}
+          onLoad={(event) => {
+            const img = event.currentTarget;
+            setDims({ key: image.key, text: img.naturalWidth + " × " + img.naturalHeight });
+          }}
+        />
+        {images.length > 1 ? (
+          <button
+            type="button"
+            className="iv-nav iv-next"
+            aria-label="Next image"
+            disabled={index >= images.length - 1}
+            onClick={() => onMove(index + 1)}
+          >
+            <Ic name="chevron-right" size={22} />
+          </button>
+        ) : null}
+      </div>
+      {image.caption ? <p className="iv-caption">{image.caption}</p> : null}
+      {images.length > 1 ? (
+        <div className="iv-strip">
+          {images.map((thumb, at) => (
+            <button
+              type="button"
+              key={thumb.key}
+              className={"iv-thumb" + (at === index ? " is-on" : "")}
+              aria-label={"Image " + (at + 1) + " of " + images.length}
+              aria-current={at === index ? "true" : undefined}
+              onClick={() => onMove(at)}
+            >
+              <img src={attachmentURL(sessionId, thumb.path)} alt="" loading="lazy" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <p className="iv-hint">
+        {(index + 1) + " of " + images.length + (images.length > 1 ? " · ← → to move" : "") + " · Esc to close"}
+      </p>
+    </div>,
+    document.body
   );
 }

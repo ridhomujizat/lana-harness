@@ -1,5 +1,5 @@
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
-import { FoldText, MessageFiles, type UserAttachment } from "./message-files";
+import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { useEffect, useState } from "react";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
@@ -23,11 +23,14 @@ const WRITE_TOOLS = new Set(["write_file", "edit_file", "memory_write"]);
 const COMMAND_TOOLS = new Set(["bash", "terminal"]);
 const FETCH_TOOLS = new Set(["web_fetch", "web_search"]);
 const DELEGATE_TOOLS = new Set(["task", "task_continue"]);
+/* REQ-AGF-006: send_file counts as its own category ("Sent 2 files"). */
+const SEND_TOOLS = new Set(["send_file"]);
 
 const CATEGORY_ORDER = [
   "read",
   "search",
   "write",
+  "send",
   "command",
   "fetch",
   "delegate",
@@ -148,6 +151,7 @@ export interface Turn {
   currentStep?: number;
   /* REQ-MEM-030: muted memory-capture lines, one per applied operation. */
   notes?: string[];
+  sentFiles?: SentFileRef[];
   [key: string]: unknown;
 }
 
@@ -168,6 +172,19 @@ export interface ChatTurn extends Turn {
   stepCount: number;
   currentStep: number;
   notes: string[];
+  /* REQ-AGF-005: the files the agent sent in this turn (file/sent events). */
+  sentFiles: SentFileRef[];
+}
+
+/* SentFileRef is one file/sent event (API-AGF-001). */
+export interface SentFileRef {
+  key: string;
+  path: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  caption: string;
+  at: number;
 }
 
 export type ThreadItem =
@@ -342,6 +359,9 @@ function toolCategory(name: string | null | undefined): string {
   if (WRITE_TOOLS.has(tool)) {
     return "write";
   }
+  if (SEND_TOOLS.has(tool)) {
+    return "send";
+  }
   if (COMMAND_TOOLS.has(tool)) {
     return "command";
   }
@@ -370,6 +390,8 @@ function categoryText(
       return (running ? "Searching " : "Searched ") + plural(count, "time");
     case "write":
       return (running ? "Writing " : "Wrote ") + plural(count, "file");
+    case "send":
+      return (running ? "Sending " : "Sent ") + plural(count, "file");
     case "command":
       return (running ? "Running " : "Ran ") + plural(count, "command");
     case "fetch":
@@ -432,6 +454,8 @@ export function stepIntent(name: string | null | undefined): string {
       return "Write a file";
     case "edit_file":
       return "Edit a file";
+    case "send_file":
+      return "Send a file";
     case "bash":
     case "terminal":
       return "Run a command";
@@ -478,6 +502,7 @@ const CATEGORY_ICONS: Record<string, string> = {
   read: "file-text",
   search: "search",
   write: "pencil",
+  send: "send",
   command: "terminal",
   fetch: "globe",
   delegate: "users",
@@ -759,6 +784,8 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
+  /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
+  sessionId?: string;
   onContinue?: (() => void) | null;
   continueBusy?: boolean;
   /* API-TFB-003: the refusal text of a failed Continue, shown in the card. */
@@ -787,6 +814,7 @@ export function TurnBlock({
   continueBusy = false,
   continueError = "",
   onReply = null,
+  sessionId = "",
 }: TurnBlockProps) {
   /* Spec 43: an agent with a generated avatar shows it through AgentFace. */
   const storedAvatar = useAgentAvatar(agent);
@@ -901,6 +929,13 @@ export function TurnBlock({
           <Markdown text={segment.text || ""} />
         </div>
       ))}
+      {sessionId && (turn.sentFiles || []).length > 0 ? (
+        <AgentFiles
+          sessionId={sessionId}
+          files={turn.sentFiles || []}
+          sender={agentLabel || agent}
+        />
+      ) : null}
       {(turn.notes || []).length > 0 ? (
         <div>
           {(turn.notes || []).map((note, index) => (
@@ -1058,6 +1093,7 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     stepCount: 0,
     currentStep: 0,
     notes: [],
+    sentFiles: [],
   };
 }
 
@@ -1307,6 +1343,23 @@ export function buildTurns(
           if (step && step.approval) {
             step.approval.decided = record.decided;
           }
+        }
+        break;
+      }
+      case "file/sent": {
+        const turn = turnFor(event, payload);
+        turn.lastAt = Math.max(turn.lastAt, createdAt);
+        const path = stringOf(payload.path);
+        if (path) {
+          turn.sentFiles.push({
+            key: "sent-" + event.seq,
+            path,
+            name: stringOf(payload.name) || path.split("/").pop() || path,
+            mediaType: stringOf(payload.media_type),
+            size: Number(payload.size) || 0,
+            caption: stringOf(payload.caption),
+            at: createdAt,
+          });
         }
         break;
       }

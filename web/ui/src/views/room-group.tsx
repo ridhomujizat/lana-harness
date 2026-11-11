@@ -1,3 +1,4 @@
+import { AgentFiles } from "./message-files";
 import { useCallback, useMemo, useState } from "react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import type { RoomRow } from "../api/rooms";
@@ -235,6 +236,8 @@ export interface RoomGroupProps {
   turn: ChatTurn;
   room: RoomRow;
   faces: Record<string, FaceRef>;
+  /* REQ-AGF-005: the session of the turn, for the URLs of sent files. */
+  sessionId?: string;
 }
 
 function HandoffChipView({
@@ -370,7 +373,7 @@ function WorkingRow({
   );
 }
 
-export function RoomGroup({ turn, room, faces }: RoomGroupProps) {
+export function RoomGroup({ turn, room, faces, sessionId = "" }: RoomGroupProps) {
   const lead = room.lead || "lead";
   const items = useMemo(() => groupItems(turn), [turn]);
   if (items.length === 0) {
@@ -394,6 +397,11 @@ export function RoomGroup({ turn, room, faces }: RoomGroupProps) {
           />
         );
       })}
+      {sessionId && turn.sentFiles.length > 0 ? (
+        <div className="group-files">
+          <AgentFiles sessionId={sessionId} files={turn.sentFiles} sender={faceLabel(faces, lead)} />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1150,13 +1150,14 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
         return (
           <div className="msg-enter" key={node.key}>
             {team ? (
-              <RoomGroup turn={node.turn} room={room} faces={faces} />
+              <RoomGroup turn={node.turn} room={room} faces={faces} sessionId={node.sessionId} />
             ) : (
               <TurnBlock
                 turn={node.turn}
                 agent={room.name}
                 agentLabel={displayLabel(room)}
                 agentColor={room.color}
+                sessionId={node.sessionId}
                 onReply={setReplyTarget}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
