@@ -2219,12 +2219,102 @@ func (rt *Runtime) KnowledgePage(ctx context.Context, path string) (core.Knowled
 	return domains.Page(ctx, path)
 }
 
-// ReviewItems returns the pending review queue, newest first (API-DKN-006). It
-// merges the knowledge proposals of the knowledge service with the skill
-// proposals of the agent home; a runtime without a knowledge service still
-// lists the skill proposals.
-func (rt *Runtime) ReviewItems(ctx context.Context) ([]core.ReviewItem, error) {
+// KnowledgeGraph returns the knowledge graph of the vault for GET
+// /v1/knowledge/graph (API-KGR-001, REQ-KGR-010). Without a knowledge service
+// it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeGraph(ctx context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeGraph{}, ErrKnowledgeUnavailable
+	}
+	return domains.Graph(ctx, scope, journals, sources)
+}
+
+// KnowledgeActivity returns the newest log entries for GET
+// /v1/knowledge/activity (API-KGR-004, REQ-KGR-040). Without a knowledge
+// service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeActivity(ctx context.Context, limit int, before time.Time, kind string) (core.KnowledgeActivityPage, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeActivityPage{}, ErrKnowledgeUnavailable
+	}
+	return domains.Activity(ctx, limit, before, kind)
+}
+
+// KnowledgeHealth returns the upkeep health for GET /v1/knowledge/health
+// (API-KGR-005, REQ-KGR-041). It adds the pending skill proposals and the
+// MEMORY.md block of every agent with a domain, like KnowledgeStatus. Without a
+// knowledge service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) KnowledgeHealth(ctx context.Context) (core.KnowledgeHealth, error) {
+	domains := rt.knowledgeDomains()
+	if domains == nil {
+		return core.KnowledgeHealth{}, ErrKnowledgeUnavailable
+	}
+	health, err := domains.Health(ctx)
+	if err != nil {
+		return core.KnowledgeHealth{}, err
+	}
+	if rt.home != "" {
+		if proposals, err := agenthome.SkillProposals(rt.home); err == nil {
+			health.ReviewPending += len(proposals)
+		}
+	}
+	health.Memory = rt.knowledgeMemory(domains)
+	return health, nil
+}
+
+// knowledgeMemory returns the MEMORY.md character count and limit of every
+// agent that has a knowledge domain, in name order (REQ-KGR-041).
+func (rt *Runtime) knowledgeMemory(domains core.KnowledgeDomains) []core.KnowledgeHealthMemory {
+	out := []core.KnowledgeHealthMemory{}
+	agents := rt.agents()
+	names := make([]string, 0, len(agents))
+	for name := range agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !domains.HasDomain(name) {
+			continue
+		}
+		entries, err := agenthome.ReadEntries(agenthome.Paths(rt.home, name).Memory)
+		if err != nil {
+			entries = nil
+		}
+		out = append(out, core.KnowledgeHealthMemory{
+			Agent:      name,
+			Characters: agenthome.Size(entries),
+			Limit:      agenthome.MemoryLimit,
+		})
+	}
+	return out
+}
+
+// reviewDecidedMax is the number of decided proposals GET /v1/review?status=decided
+// returns (API-KGR-003, REQ-KGR-030).
+const reviewDecidedMax = 20
+
+// ReviewItems returns one list of the review queue (API-DKN-006, API-KGR-003).
+// status "pending" (the default) is the pending queue: the knowledge proposals
+// of the knowledge service plus the skill proposals of the agent home, newest
+// first. status "decided" is the latest decided knowledge proposals, newest
+// decided first; without a knowledge service it returns ErrKnowledgeUnavailable.
+func (rt *Runtime) ReviewItems(ctx context.Context, status string) ([]core.ReviewItem, error) {
 	items := make([]core.ReviewItem, 0)
+	if status == "decided" {
+		domains := rt.knowledgeDomains()
+		if domains == nil {
+			return items, ErrKnowledgeUnavailable
+		}
+		proposals, err := domains.DecidedProposals(ctx, reviewDecidedMax)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range proposals {
+			items = append(items, reviewItemDecided(p))
+		}
+		return items, nil
+	}
 	if domains := rt.knowledgeDomains(); domains != nil {
 		proposals, err := domains.PendingProposals(ctx)
 		if err != nil {
@@ -2328,7 +2418,8 @@ func (rt *Runtime) knowledgeAgentName(name string) string {
 }
 
 // reviewItemFromProposal maps one knowledge proposal to a review item
-// (API-DKN-006).
+// (API-DKN-006). OldText carries the op's OldText for replace and supersede
+// (API-KGR-003).
 func reviewItemFromProposal(p core.KnowledgeProposal) core.ReviewItem {
 	return core.ReviewItem{
 		ID:        p.ID,
@@ -2341,7 +2432,18 @@ func reviewItemFromProposal(p core.KnowledgeProposal) core.ReviewItem {
 		OwnerTurn: p.OwnerTurn,
 		SessionID: p.SessionID,
 		CreatedAt: p.CreatedAt,
+		OldText:   p.Write.OldText,
 	}
+}
+
+// reviewItemDecided maps one decided knowledge proposal to a review item with
+// its decision status, result, and time (API-KGR-003).
+func reviewItemDecided(p core.KnowledgeProposal) core.ReviewItem {
+	item := reviewItemFromProposal(p)
+	item.Status = p.Status
+	item.Result = p.Result
+	item.DecidedAt = p.DecidedAt
+	return item
 }
 
 // reviewItemFromSkill maps one skill proposal to a review item (API-DKN-006).

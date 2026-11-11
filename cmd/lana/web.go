@@ -551,7 +551,8 @@ func (b *webBackend) KnowledgePages(ctx context.Context, scope, q string, limit 
 	return pages, total, nil
 }
 
-// KnowledgePage implements web.KnowledgeDomainBackend (API-DKN-005).
+// KnowledgePage implements web.KnowledgeDomainBackend (API-DKN-005,
+// API-KGR-002).
 func (b *webBackend) KnowledgePage(ctx context.Context, path string) (core.KnowledgeDoc, string, error) {
 	if b.rt == nil {
 		return core.KnowledgeDoc{}, "", web.ErrKnowledgeUnavailable
@@ -559,12 +560,51 @@ func (b *webBackend) KnowledgePage(ctx context.Context, path string) (core.Knowl
 	return b.rt.KnowledgePage(ctx, path)
 }
 
-// ReviewItems implements web.KnowledgeDomainBackend (API-DKN-006).
-func (b *webBackend) ReviewItems(ctx context.Context) ([]core.ReviewItem, error) {
+// KnowledgeGraph implements web.KnowledgeDomainBackend (API-KGR-001).
+func (b *webBackend) KnowledgeGraph(ctx context.Context, scope string, journals, sources bool) (core.KnowledgeGraph, error) {
 	if b.rt == nil {
+		return core.KnowledgeGraph{}, web.ErrKnowledgeUnavailable
+	}
+	graph, err := b.rt.KnowledgeGraph(ctx, scope, journals, sources)
+	if err != nil {
+		return core.KnowledgeGraph{}, knowledgeDomainError(err)
+	}
+	return graph, nil
+}
+
+// KnowledgeActivity implements web.KnowledgeDomainBackend (API-KGR-004).
+func (b *webBackend) KnowledgeActivity(ctx context.Context, limit int, before time.Time, kind string) (core.KnowledgeActivityPage, error) {
+	if b.rt == nil {
+		return core.KnowledgeActivityPage{}, web.ErrKnowledgeUnavailable
+	}
+	page, err := b.rt.KnowledgeActivity(ctx, limit, before, kind)
+	if err != nil {
+		return core.KnowledgeActivityPage{}, knowledgeDomainError(err)
+	}
+	return page, nil
+}
+
+// KnowledgeHealth implements web.KnowledgeDomainBackend (API-KGR-005).
+func (b *webBackend) KnowledgeHealth(ctx context.Context) (core.KnowledgeHealth, error) {
+	if b.rt == nil {
+		return core.KnowledgeHealth{}, web.ErrKnowledgeUnavailable
+	}
+	health, err := b.rt.KnowledgeHealth(ctx)
+	if err != nil {
+		return core.KnowledgeHealth{}, knowledgeDomainError(err)
+	}
+	return health, nil
+}
+
+// ReviewItems implements web.KnowledgeDomainBackend (API-DKN-006, API-KGR-003).
+func (b *webBackend) ReviewItems(ctx context.Context, status string) ([]core.ReviewItem, error) {
+	if b.rt == nil {
+		if status == "decided" {
+			return []core.ReviewItem{}, web.ErrKnowledgeUnavailable
+		}
 		return []core.ReviewItem{}, nil
 	}
-	items, err := b.rt.ReviewItems(ctx)
+	items, err := b.rt.ReviewItems(ctx, status)
 	if err != nil {
 		return nil, knowledgeDomainError(err)
 	}

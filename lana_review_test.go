@@ -19,6 +19,7 @@ import (
 // pass-through tests.
 type fakeDomains struct {
 	pending    []core.KnowledgeProposal
+	decided    []core.KnowledgeProposal
 	decisions  map[string]core.KnowledgeProposal
 	hasDomain  map[string]bool
 	pages      []core.KnowledgePageInfo
@@ -57,6 +58,22 @@ func (f *fakeDomains) Pages(context.Context, string, string, int) ([]core.Knowle
 
 func (f *fakeDomains) Page(context.Context, string) (core.KnowledgeDoc, string, error) {
 	return core.KnowledgeDoc{}, "", nil
+}
+
+func (f *fakeDomains) Graph(context.Context, string, bool, bool) (core.KnowledgeGraph, error) {
+	return core.KnowledgeGraph{}, nil
+}
+
+func (f *fakeDomains) Activity(context.Context, int, time.Time, string) (core.KnowledgeActivityPage, error) {
+	return core.KnowledgeActivityPage{}, nil
+}
+
+func (f *fakeDomains) Health(context.Context) (core.KnowledgeHealth, error) {
+	return core.KnowledgeHealth{}, nil
+}
+
+func (f *fakeDomains) DecidedProposals(context.Context, int) ([]core.KnowledgeProposal, error) {
+	return f.decided, nil
 }
 
 func (f *fakeDomains) DomainStats(context.Context, string, time.Time) (core.KnowledgeDomainStats, error) {
@@ -125,7 +142,7 @@ func TestReviewItemsMergeOrder(t *testing.T) {
 	}}
 	rt := newDomainsRuntime(t, home, domains)
 
-	items, err := rt.ReviewItems(context.Background())
+	items, err := rt.ReviewItems(context.Background(), "pending")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +174,7 @@ func TestReviewItemsSkillExistsAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := newDomainsRuntime(t, home, &fakeDomains{})
-	items, err := rt.ReviewItems(context.Background())
+	items, err := rt.ReviewItems(context.Background(), "pending")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,5 +363,61 @@ func TestReviewItemFromSkill(t *testing.T) {
 	item := reviewItemFromSkill(agenthome.SkillProposal{Agent: "dana", Name: "payroll", Description: "d", Body: "b", Exists: true, SessionID: "s1", OwnerTurn: true, CreatedAt: 5})
 	if item.ID != "s_dana.payroll" || item.Kind != "skill" || item.Action != "update" || item.From != "dana" {
 		t.Fatalf("item = %+v", item)
+	}
+}
+
+// TestReviewItemsDecided covers API-KGR-003: the decided list maps status,
+// result, decided_at, and old_text, newest decided first.
+func TestReviewItemsDecided(t *testing.T) {
+	domains := &fakeDomains{decided: []core.KnowledgeProposal{
+		{ID: "p_2", Agent: "karin", FromAgent: "dana", Title: "Gaji", Status: "applied", Result: "append Gaji", CreatedAt: 100, DecidedAt: 200, Write: core.KnowledgeWrite{Action: "replace", OldText: "gaji lama", NewText: "gaji baru"}},
+		{ID: "p_1", Agent: "dana", Title: "Budget", Status: "rejected", DecidedAt: 50, Write: core.KnowledgeWrite{Action: "append", Text: "x"}},
+	}}
+	rt := newDomainsRuntime(t, t.TempDir(), domains)
+
+	items, err := rt.ReviewItems(context.Background(), "decided")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %+v", items)
+	}
+	if items[0].ID != "p_2" || items[0].Status != "applied" || items[0].Result != "append Gaji" || items[0].DecidedAt != 200 || items[0].OldText != "gaji lama" {
+		t.Fatalf("item = %+v", items[0])
+	}
+	if items[0].Kind != "knowledge" || items[0].From != "dana" {
+		t.Fatalf("kind/from = %+v", items[0])
+	}
+	if items[1].ID != "p_1" || items[1].Status != "rejected" || items[1].OldText != "" {
+		t.Fatalf("item = %+v", items[1])
+	}
+}
+
+// TestReviewItemsPendingOldText covers API-KGR-003: a pending knowledge item
+// carries the op's OldText and no decision fields.
+func TestReviewItemsPendingOldText(t *testing.T) {
+	domains := &fakeDomains{pending: []core.KnowledgeProposal{
+		{ID: "p_1", Agent: "rio", FromAgent: "dana", Title: "Gaji", CreatedAt: 5, Write: core.KnowledgeWrite{Action: "supersede", OldText: "gaji lama", NewText: "gaji baru"}},
+	}}
+	rt := newDomainsRuntime(t, t.TempDir(), domains)
+
+	items, err := rt.ReviewItems(context.Background(), "pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %+v", items)
+	}
+	if items[0].OldText != "gaji lama" || items[0].Status != "" || items[0].DecidedAt != 0 {
+		t.Fatalf("item = %+v", items[0])
+	}
+}
+
+// TestReviewItemsDecidedUnavailable covers API-KGR-003 without a knowledge
+// service.
+func TestReviewItemsDecidedUnavailable(t *testing.T) {
+	rt := &Runtime{}
+	if _, err := rt.ReviewItems(context.Background(), "decided"); !errors.Is(err, ErrKnowledgeUnavailable) {
+		t.Fatalf("err = %v, want ErrKnowledgeUnavailable", err)
 	}
 }

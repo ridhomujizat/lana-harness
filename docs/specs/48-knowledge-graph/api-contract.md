@@ -32,7 +32,7 @@ Response 200:
 ```
 
 `kind` is `page`, `journal`, or `source`. Edges only join nodes in `nodes`. Hub edges are not
-listed; every node joins the hub of its `scope`. 400 `invalid` on a bad parameter.
+listed; every node joins the hub of its `scope`. 400 `invalid_request` on a bad parameter (all routes below too).
 
 ## API-KGR-002 `GET /v1/knowledge/page` (extended)
 
@@ -80,7 +80,7 @@ strictly older); `kind` (optional, one of the kinds below, or `writes` = promoti
 ```
 
 Kinds: `run`, `promotion`, `write`, `review`, `lint`, `error`, `other`. Lines drop the leading
-`- `. `next_before` is empty when there is nothing older. Times are local (vault time zone).
+`- `. A page cut at `limit` also takes every further entry with the same `at` as its last entry (log times have minute resolution), so `before` = `next_before` loses nothing. `next_before` is empty when there is nothing older. Times are local (vault time zone).
 
 ## API-KGR-005 `GET /v1/knowledge/health`
 

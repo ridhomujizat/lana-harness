@@ -133,6 +133,22 @@ func (f *fakeKnowledgeDomains) ScopeStats(context.Context) ([]core.KnowledgeScop
 	return nil, nil
 }
 
+func (f *fakeKnowledgeDomains) Graph(context.Context, string, bool, bool) (core.KnowledgeGraph, error) {
+	return core.KnowledgeGraph{}, nil
+}
+
+func (f *fakeKnowledgeDomains) Activity(context.Context, int, time.Time, string) (core.KnowledgeActivityPage, error) {
+	return core.KnowledgeActivityPage{}, nil
+}
+
+func (f *fakeKnowledgeDomains) Health(context.Context) (core.KnowledgeHealth, error) {
+	return core.KnowledgeHealth{}, nil
+}
+
+func (f *fakeKnowledgeDomains) DecidedProposals(context.Context, int) ([]core.KnowledgeProposal, error) {
+	return nil, nil
+}
+
 func callKnowledgeTool(t *testing.T, tool core.Tool, tc core.ToolCtx, input string) core.ToolOutput {
 	t.Helper()
 	out, err := tool.Call(context.Background(), tc, json.RawMessage(input))
