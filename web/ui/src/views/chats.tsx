@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoomRow } from "../api/rooms";
 import { gr8rColor, PresenceLabel, useRooms } from "./presence";
+import type { AvatarMood } from "../lib/avatar-motion";
 import { displayLabel } from "./agent-label";
 import { relativeShort, RoomView } from "./room-timeline";
 import {
@@ -68,6 +69,23 @@ function rowStatus(row: RoomRow) {
   return <span className="rooms-row-preview">{preview || "No messages yet"}</span>;
 }
 
+/* The chat list avatar moves like the turn head, only while its room works
+   or waits on you; a quiet room stays still. "Running bash" style labels
+   name a tool, so they show the tool ring. */
+function rowMood(row: RoomRow): AvatarMood | undefined {
+  const presence = row.presence;
+  switch (presence ? presence.state : "") {
+    case "working": {
+      const label = String(presence?.label || "").toLowerCase();
+      return label.startsWith("running") || label.startsWith("using") ? "tool" : "thinking";
+    }
+    case "waiting":
+      return "ask";
+    default:
+      return undefined;
+  }
+}
+
 function RowFace({ row, colors }: { row: RoomRow; colors: Record<string, string> }) {
   if (row.kind === "team") {
     /* REQ-RDS-056: two faces, three faces, or two faces and +N. */
@@ -83,6 +101,7 @@ function RowFace({ row, colors }: { row: RoomRow; colors: Record<string, string>
       color={gr8rColor(row.color)}
       size="lg"
       presence={Boolean(row.presence)}
+      mood={rowMood(row)}
       className={"chat-coin" + (state ? " state-" + state : "")}
     />
   );

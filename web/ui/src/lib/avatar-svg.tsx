@@ -111,6 +111,9 @@ function build(node: Element, root: boolean, state: BuildState): ReactElement | 
     props[name] = value;
   }
   const children: ReactElement[] = [];
+  /* The root's element children, kept beside their built elements so the
+     eyes can be told apart from the body (see rigged). */
+  const sources: Element[] = [];
   for (const child of Array.from(node.childNodes)) {
     if (child.nodeType === 1) {
       const element = build(child as Element, false, state);
@@ -118,6 +121,7 @@ function build(node: Element, root: boolean, state: BuildState): ReactElement | 
         return null;
       }
       children.push(element);
+      sources.push(child as Element);
     } else if (child.nodeType === 3 || child.nodeType === 4) {
       if ((child.textContent || "").trim() !== "") {
         return null;
@@ -137,9 +141,76 @@ function build(node: Element, root: boolean, state: BuildState): ReactElement | 
     props.height = "100%";
     props["aria-hidden"] = "true";
     props.focusable = "false";
-    props.className = "av-svg";
+    const rig = rigged(children, sources, state);
+    props.className = rig.eyes ? "av-svg has-eyes" : "av-svg";
+    return createElement(tag, props, rig.root);
   }
   return createElement(tag, props, ...children);
+}
+
+/* White marks the eye holes: the sanitizer allows only currentColor (the
+   body) and #ffffff (the eyes). */
+function isWhite(node: Element): boolean {
+  /* The fill may sit on an enclosing group. */
+  let at: Element | null = node;
+  while (at && !at.hasAttribute("fill")) {
+    at = at.parentElement;
+  }
+  const fill = at ? (at.getAttribute("fill") || "").trim().toLowerCase() : "";
+  return fill === "#ffffff" || fill === "#fff";
+}
+
+/* An eye is a white shape, or a group holding only white shapes. */
+function isEye(node: Element): boolean {
+  if (node.localName !== "g") {
+    return isWhite(node);
+  }
+  const shapes = Array.from(node.querySelectorAll("*")).filter(
+    (child) => child.localName !== "g"
+  );
+  return shapes.length > 0 && shapes.every(isWhite);
+}
+
+/* A shape that mixes body and eyes in one group cannot move its eyes alone. */
+function mixesEyes(node: Element): boolean {
+  return (
+    node.localName === "g" &&
+    !isEye(node) &&
+    Array.from(node.querySelectorAll("*")).some(isWhite)
+  );
+}
+
+/* rigged wraps the avatar for the motion of lib/avatar-motion: the whole face
+   sits in g.av-squash (breathing), and the eyes move to the top inside
+   g.av-look (pointer gaze) > g.av-gaze (mood gaze) > g.av-eye (blinks). When
+   no eye stands alone at the top level, the face is wrapped without eye rig. */
+function rigged(
+  children: ReactElement[],
+  sources: Element[],
+  state: BuildState
+): { root: ReactElement; eyes: boolean } {
+  const eyes = sources.map(isEye);
+  const canRig = eyes.some(Boolean) && !sources.some(mixesEyes);
+  const body: ReactElement[] = [];
+  const eyeParts: ReactElement[] = [];
+  children.forEach((child, index) => {
+    if (canRig && eyes[index]) {
+      state.key += 1;
+      eyeParts.push(createElement("g", { key: state.key, className: "av-eye" }, child));
+    } else {
+      body.push(child);
+    }
+  });
+  if (eyeParts.length > 0) {
+    state.key += 1;
+    const gaze = createElement("g", { key: "gaze", className: "av-gaze" }, ...eyeParts);
+    body.push(createElement("g", { key: state.key, className: "av-look" }, gaze));
+  }
+  state.key += 1;
+  return {
+    root: createElement("g", { key: state.key, className: "av-squash" }, ...body),
+    eyes: eyeParts.length > 0,
+  };
 }
 
 function parse(svg: string): ReactElement | null {

@@ -5,7 +5,8 @@ import { avatarFor } from "../lib/avatar";
 import { agentCssColor, parseAvatarSvg } from "../lib/avatar-svg";
 import { useAgentAvatar } from "../lib/avatar-store";
 import type { StoredAvatar } from "../lib/avatar-store";
-import { Avatar } from "../ui/gr8r";
+import { Avatar, MoodLayer, moodHostProps } from "../ui/gr8r";
+import type { AvatarMood } from "../lib/avatar-motion";
 import type { AvatarSize } from "../ui/gr8r";
 import { cn } from "../ui/gr8r";
 
@@ -42,6 +43,8 @@ export interface AgentAvatarProps
   svg?: string;
   /* The agent color (token or hex) for the SVG body when `svg` is passed. */
   bodyColor?: string;
+  /* The motion mood (lib/avatar-motion); only a generated avatar moves. */
+  mood?: AvatarMood;
 }
 
 const LEGACY_SIZES: readonly string[] = ["20", "22", "24", "26", "28", "36", "56", "auto"];
@@ -137,6 +140,7 @@ export function AgentAvatar({
   presence,
   svg,
   bodyColor,
+  mood,
   className,
   style,
   ...rest
@@ -153,9 +157,16 @@ export function AgentAvatar({
     let inner: ReactNode;
     let look: CSSProperties | undefined = style;
     let tone = "";
+    const px = size === "auto" ? undefined : Number(size);
+    const moving = shape ? moodHostProps(mood, px) : {};
     if (shape) {
-      inner = parseAvatarSvg(shape.svg);
-      look = { ...style, color: shape.color };
+      inner = (
+        <>
+          {parseAvatarSvg(shape.svg)}
+          <MoodLayer mood={mood} px={px} />
+        </>
+      );
+      look = { ...style, ...moving.style, color: shape.color };
     } else if (!image.failed) {
       inner = <AvatarImage src={image.src} onError={image.onError} />;
     } else {
@@ -168,6 +179,7 @@ export function AgentAvatar({
         className={cn("agent-avatar", sizeClass, tone || "has-svg", className)}
         aria-hidden="true"
         style={look}
+        data-mood={moving["data-mood"]}
         {...rest}
       >
         {inner}
@@ -183,6 +195,7 @@ export function AgentAvatar({
         svg={shape.svg}
         size={size}
         presence={presence}
+        mood={mood}
         className={className}
         style={style}
         {...rest}
