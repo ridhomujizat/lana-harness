@@ -93,5 +93,7 @@ describe("turnMood", () => {
     const answered: Turn = { running: true, groups: [{ kind: "text", key: "t", text: "Hi" }] };
     expect(turnMood(answered)).toBe("talk");
     expect(turnMood(answered, { thinking: true })).toBe("thinking");
+    expect(turnMood(running, { tool: true })).toBe("tool");
+    expect(turnMood(running, { tool: true, streaming: true })).toBe("talk");
   });
 });

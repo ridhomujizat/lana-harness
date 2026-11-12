@@ -1378,6 +1378,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 sessionId={node.sessionId}
                 onReply={setReplyTarget}
                 liveAvatar
+                liveTool={node.sessionId === newestId && node.turn.running ? liveTool : ""}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""

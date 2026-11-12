@@ -812,6 +812,8 @@ export interface TurnBlockProps {
   /* The room chat: the head avatar moves while the turn works, and the head
      stays in view (lib/avatar-motion). Other views keep a still avatar. */
   liveAvatar?: boolean;
+  /* The tool the room's live stream reports running, "" when none. */
+  liveTool?: string;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
   onContinue?: (() => void) | null;
@@ -827,7 +829,7 @@ export interface TurnBlockProps {
    runs a tool, writes its answer, or thinks; a finished turn rests. */
 export function turnMood(
   turn: Turn,
-  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean } = {}
+  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean; tool?: boolean } = {}
 ): AvatarMood {
   if (!turn.running) {
     return "rest";
@@ -838,6 +840,10 @@ export function turnMood(
     return "ask";
   }
   if (steps.some(stepIsRunning)) {
+    return "tool";
+  }
+  /* The room's live stream names a running tool before its step arrives. */
+  if (live.tool && !live.thinking && !live.streaming) {
     return "tool";
   }
   if (live.thinking) {
@@ -854,7 +860,7 @@ export function turnMood(
    loaded already finished just rests. */
 export function useTurnMood(
   turn: Turn,
-  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean }
+  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean; tool?: boolean }
 ): AvatarMood {
   const running = Boolean(turn.running);
   const wasRunning = useRef(running);
@@ -893,6 +899,7 @@ export function TurnBlock({
   onLoadChildren = null,
   showStatusCard = false,
   liveAvatar = false,
+  liveTool = "",
   onContinue = null,
   continueBusy = false,
   continueError = "",
@@ -907,6 +914,7 @@ export function TurnBlock({
     waitingForInput,
     thinking,
     streaming: Boolean(streamingText),
+    tool: Boolean(liveTool),
   });
   const mood = liveAvatar && turnMoodNow !== "rest" ? turnMoodNow : undefined;
 
