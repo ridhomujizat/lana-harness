@@ -7,6 +7,22 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.4] - 2026-11-13
+
+### Added
+- Agent avatars move while the agent works. In an agent chat room the working row shows the
+  agent's avatar with the typing dots and "Bima is thinking (3s)…": the avatar sways while
+  thinking, wobbles inside a spinning ring while a tool runs ("running bash"), hops while
+  writing, and nods with an amber halo while waiting for you. When the turn ends it hops once
+  (or shakes on an error).
+- The Chats list avatar of an agent shows the same motion while its room works or waits on
+  you. Quiet rooms stay still, and reduced motion keeps the moods readable without movement.
+
+### Changed
+- An agent chat room's turns have no head row any more, since the room header already shows
+  the agent. The working row turns into the turn's foot in the same place, so the page does
+  not jump: a Copy button for the answer, then "worked for 9s - 03:39 AM".
+
 ## [0.5.0-beta.3] - 2026-11-13
 
 ### Added
