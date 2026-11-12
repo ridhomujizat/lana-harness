@@ -1,0 +1,410 @@
+/* Avatar motion (lib/avatar-motion, prototype design/prototypes/avatar-motion.html).
+   A generated avatar is rigged by lib/avatar-svg:
+     svg.av-svg.has-eyes > g.av-squash > body + g.av-look > g.av-gaze > g.av-eye
+   The host (.av, .agent-avatar or .agent-face) carries data-mood and --avpx,
+   its pixel size; MoodLayer adds the marks after the svg. Only a working
+   turn's head avatar in the room chat carries a mood, so nothing else on the
+   page animates. */
+
+/* ---------------- rig ---------------- */
+
+.av-svg {
+  transform-origin: 50% 92%;
+}
+.av-svg .av-squash {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.av-svg .av-gaze,
+.av-svg .av-eye {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 0.3s cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+
+/* ---------------- hosts ---------------- */
+
+:is(.av, .agent-avatar)[data-mood] {
+  position: relative;
+}
+[data-mood] {
+  isolation: isolate;
+}
+
+/* ---------------- moods ---------------- */
+
+/* idle: slow breathing */
+[data-mood='idle'] > .av-svg .av-squash {
+  animation: av-breathe 2.8s ease-in-out infinite;
+}
+@keyframes av-breathe {
+  0%,
+  100% { transform: scale(1, 1); }
+  50% { transform: scale(1.07, 0.93); }
+}
+
+/* thinking: a slow sway, the eyes wander up */
+[data-mood='thinking'] > .av-svg {
+  animation: av-sway 2.4s ease-in-out infinite;
+}
+[data-mood='thinking'] > .av-svg .av-gaze {
+  animation: av-wander 2.4s ease-in-out infinite;
+}
+@keyframes av-sway {
+  0%,
+  100% { transform: rotate(-10deg); }
+  25% { transform: rotate(0deg) translateY(-6%); }
+  50% { transform: rotate(10deg); }
+  75% { transform: rotate(0deg) translateY(-6%); }
+}
+@keyframes av-wander {
+  0%,
+  100% { transform: translate(-5px, -6px); }
+  40%,
+  58% { transform: translate(5.5px, -6.5px); }
+}
+
+/* tool: eyes down on the work, a busy wobble, the orbit ring */
+[data-mood='tool'] > .av-svg {
+  animation: av-busy 0.8s ease-in-out infinite;
+}
+[data-mood='tool'] > .av-svg .av-gaze {
+  transform: translate(4px, 5px);
+}
+@keyframes av-busy {
+  0%,
+  100% { transform: rotate(0deg) scale(1.04, 0.96); }
+  25% { transform: rotate(-8deg) translateY(-8%) scale(0.97, 1.03); }
+  50% { transform: rotate(0deg) scale(1.04, 0.96); }
+  75% { transform: rotate(8deg) translateY(-8%) scale(0.97, 1.03); }
+}
+
+/* talk: the answer streams, small rhythmic hops */
+[data-mood='talk'] > .av-svg {
+  animation: av-talk 0.5s ease-in-out infinite;
+}
+[data-mood='talk'] > .av-svg .av-eye {
+  animation: av-talk-eye 0.92s ease-in-out infinite;
+}
+@keyframes av-talk {
+  0%,
+  100% { transform: translateY(0) scale(1.1, 0.9); }
+  50% { transform: translateY(-16%) scale(0.94, 1.08); }
+}
+@keyframes av-talk-eye {
+  0%,
+  100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.7); }
+}
+
+/* ask: waiting for you, a hopeful nod and the amber halo */
+[data-mood='ask'] > .av-svg {
+  animation: av-nod 1.8s ease-in-out infinite;
+}
+[data-mood='ask'] > .av-svg .av-gaze {
+  transform: translateY(2px) scale(1.1);
+}
+@keyframes av-nod {
+  0%,
+  60%,
+  100% { transform: none; }
+  68% { transform: translateY(-16%) rotate(-12deg); }
+  76% { transform: none; }
+  84% { transform: translateY(-8%) rotate(9deg); }
+  92% { transform: none; }
+}
+
+/* error: one shake, squinted eyes, the red badge */
+[data-mood='error'] > .av-svg {
+  animation: av-shake 0.7s ease-in-out 2;
+}
+[data-mood='error'] > .av-svg .av-eye {
+  transform: scaleY(0.38);
+}
+[data-mood='error'] > .av-svg .av-gaze {
+  transform: translateY(3px);
+}
+@keyframes av-shake {
+  0% { transform: none; }
+  17% { transform: translateX(-16%) rotate(-10deg); }
+  33% { transform: translateX(14%) rotate(8deg); }
+  50% { transform: translateX(-10%) rotate(-5deg); }
+  67% { transform: translateX(6%); }
+  83% { transform: translateX(-2%); }
+  100% { transform: none; }
+}
+
+/* done: one happy hop, squinted smile eyes, sparks */
+[data-mood='done'] > .av-svg {
+  animation: av-hop 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) 2;
+}
+[data-mood='done'] > .av-svg .av-eye {
+  transform: scale(1.1, 0.3);
+}
+[data-mood='done'] > .av-svg .av-gaze {
+  transform: translateY(-1.5px);
+}
+@keyframes av-hop {
+  0% { transform: none; }
+  14% { transform: scale(1.12, 0.86); }
+  41% { transform: translateY(-45%) rotate(-8deg) scale(0.9, 1.12); }
+  68% { transform: scale(1.1, 0.9); }
+  86% { transform: scale(0.97, 1.03); }
+  100% { transform: none; }
+}
+
+/* sleep: grey, eyes shut (a peek on hover), slow breath, z's */
+[data-mood='sleep'] > .av-svg {
+  filter: saturate(0.2);
+  opacity: 0.7;
+}
+[data-mood='sleep'] > .av-svg .av-eye {
+  transform: scaleY(0.1);
+}
+[data-mood='sleep']:hover > .av-svg .av-eye {
+  transform: scaleY(0.45);
+}
+[data-mood='sleep'] > .av-svg .av-gaze {
+  transform: translateY(3px);
+}
+[data-mood='sleep'] > .av-svg .av-squash {
+  animation: av-breathe 4.8s ease-in-out infinite;
+}
+
+/* ---------------- marks (MoodLayer) ---------------- */
+
+.av-ring,
+.av-halo,
+.av-badge,
+.av-spark,
+.av-bubble,
+.av-zzz {
+  position: absolute;
+  pointer-events: none;
+}
+
+.av-ring {
+  inset: -16%;
+  animation: av-fade-in 0.3s ease-out both;
+}
+.av-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  animation: av-spin 1.2s linear infinite;
+}
+.av-ring circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 22 14;
+  opacity: 0.85;
+}
+@keyframes av-spin {
+  to { transform: rotate(360deg); }
+}
+
+.av-halo {
+  inset: 4%;
+  z-index: -1;
+  border-radius: 50%;
+  background: var(--amber);
+  opacity: 0;
+  animation: av-halo 1.4s ease-out infinite;
+}
+@keyframes av-halo {
+  0% { opacity: 0.6; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2); }
+}
+
+.av-badge {
+  right: -6%;
+  top: -6%;
+  width: max(8px, 30%);
+  height: max(8px, 30%);
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--surface);
+  display: grid;
+  place-items: center;
+  animation: av-pop 0.35s cubic-bezier(0.3, 1.6, 0.5, 1) both;
+}
+.av-badge::after {
+  content: '!';
+  color: #ffffff;
+  font: 700 max(6px, calc(var(--avpx, 32px) * 0.22)) / 1 var(--font, sans-serif);
+}
+@keyframes av-pop {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+@keyframes av-fade-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.av-spark {
+  inset: 0;
+}
+.av-spark > span {
+  position: absolute;
+  inset: 0;
+  rotate: var(--a);
+}
+.av-spark i {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  width: max(3px, 9%);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 1.5px;
+  background: currentColor;
+  opacity: 0;
+  animation: av-burst 0.9s ease-out 0.15s 2 both;
+}
+.av-spark > span:nth-child(even) i {
+  background: var(--amber);
+  border-radius: 50%;
+}
+@keyframes av-burst {
+  0% { top: 30%; opacity: 0; scale: 0.3; }
+  20% { opacity: 1; }
+  100% { top: -42%; opacity: 0; scale: 1; rotate: 45deg; }
+}
+
+.av-bubble {
+  right: -26%;
+  top: -22%;
+  display: flex;
+  gap: max(2px, calc(var(--avpx, 32px) * 0.03));
+  padding: calc(var(--avpx, 32px) * 0.045) calc(var(--avpx, 32px) * 0.07);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  transform-origin: 0 100%;
+  animation: av-bubble-in 0.35s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+.av-bubble i {
+  width: max(3px, calc(var(--avpx, 32px) * 0.055));
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: av-dot 1.2s ease-in-out infinite;
+}
+.av-bubble i:nth-child(2) { animation-delay: 0.15s; }
+.av-bubble i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes av-bubble-in {
+  from { opacity: 0; transform: scale(0.5) translateY(20%); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes av-dot {
+  0%,
+  60%,
+  100% { transform: none; opacity: 0.5; }
+  30% { transform: translateY(-40%); opacity: 1; }
+}
+
+.av-zzz {
+  right: -4%;
+  top: -10%;
+  font: 600 max(9px, calc(var(--avpx, 32px) * 0.2)) / 1 var(--font, sans-serif);
+  color: var(--text-3);
+}
+.av-zzz i {
+  position: absolute;
+  font-style: normal;
+  opacity: 0;
+  animation: av-zz 3s linear infinite;
+}
+.av-zzz i:nth-child(2) { animation-delay: 1s; }
+.av-zzz i:nth-child(3) { animation-delay: 2s; }
+@keyframes av-zz {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(var(--avpx, 32px) * 0.28), calc(var(--avpx, 32px) * -0.42)) scale(1.15); }
+}
+
+/* ---------------- reduced motion ---------------- */
+/* Moods stay readable from the eyes, the ring, the halo and the badge; nothing
+   travels. */
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion='full']) [data-mood] > .av-svg,
+  :root:not([data-motion='full']) [data-mood] > .av-svg *,
+  :root:not([data-motion='full']) [data-mood] > span,
+  :root:not([data-motion='full']) [data-mood] > span * {
+    animation: none !important;
+    transition: none !important;
+  }
+  :root:not([data-motion='full']) .av-halo {
+    opacity: 0.3;
+    transform: scale(1.3);
+  }
+  :root:not([data-motion='full']) .av-zzz i,
+  :root:not([data-motion='full']) .av-bubble {
+    opacity: 0.8;
+  }
+  :root:not([data-motion='full']) .av-spark {
+    display: none;
+  }
+}
+:root[data-motion='reduce'] [data-mood] > .av-svg,
+:root[data-motion='reduce'] [data-mood] > .av-svg *,
+:root[data-motion='reduce'] [data-mood] > span,
+:root[data-motion='reduce'] [data-mood] > span * {
+  animation: none !important;
+  transition: none !important;
+}
+:root[data-motion='reduce'] .av-halo {
+  opacity: 0.3;
+  transform: scale(1.3);
+}
+:root[data-motion='reduce'] .av-zzz i,
+:root[data-motion='reduce'] .av-bubble {
+  opacity: 0.8;
+}
+:root[data-motion='reduce'] .av-spark {
+  display: none;
+}
+
+/* ---------------- room live row ---------------- */
+/* Before an agent room's running turn appears, and in group rooms. */
+.room-live.room-live-agent {
+  gap: 10px;
+  padding-left: 4px;
+  min-height: 30px;
+}
+
+/* ---------------- agent room turn foot ---------------- */
+/* One row in one place: the loading row while the turn works, then
+   "worked for 8s - 03:34" with the done avatar and then Copy before it.
+   Both shapes keep one height so the switch does not move the page. */
+.turn-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  margin-top: -4px;
+  color: var(--text-3);
+  font-size: var(--fs-xs, 12px);
+}
+.turn-foot > .av,
+.turn-foot > .agent-avatar {
+  margin-left: 1px;
+}
+.turn-foot .turn-copy {
+  margin-left: -2px;
+  color: var(--text-3);
+}
+.turn-foot-meta {
+  font-variant-numeric: tabular-nums;
+}
+.turn-foot-live {
+  color: var(--accent);
+  font-size: var(--fs-sm, 13px);
+}
+.turn-foot-live-text {
+  font-variant-numeric: tabular-nums;
+}

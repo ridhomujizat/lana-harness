@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Prototype: motion for the spec 43 blob avatars (solid body + white eye holes).
+   Tokens copied from web/ui/src/styles/gr8r/tokens.css. */
+:root {
+  --bg: #fbfaf8; --bg-side: #f4f3f0; --surface: #ffffff; --surface-2: #f6f5f2; --surface-3: #eeede9;
+  --border: #e9e7e2; --border-strong: #dad7d0;
+  --text: #1d1c1a; --text-2: #57544e; --text-3: #6b6760; --text-4: #8c8880;
+  --green: #25754b; --amber: #8f5e0e; --red: #b23c30; --blue: #3570c4; --violet: #7652c2; --gray: #8a867e;
+  --accent: #1a1831; --on-accent: #ffffff;
+  --shadow-pop: 0 12px 32px -10px rgba(29,28,26,.22), 0 0 0 1px var(--border);
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1a19; --bg-side: #151514; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+    --border: #2c2b29; --border-strong: #3a3936;
+    --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+    --green: #5cba86; --amber: #d8a443; --red: #e57d70; --blue: #72a5ea; --violet: #a98deb; --gray: #8f8b84;
+    --accent: #49447e; --on-accent: #ffffff;
+    --shadow-pop: 0 16px 40px -10px rgba(0,0,0,.6), 0 0 0 1px var(--border-strong);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19; --bg-side: #151514; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+  --border: #2c2b29; --border-strong: #3a3936;
+  --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+  --green: #5cba86; --amber: #d8a443; --red: #e57d70; --blue: #72a5ea; --violet: #a98deb; --gray: #8f8b84;
+  --accent: #49447e; --on-accent: #ffffff;
+  --shadow-pop: 0 16px 40px -10px rgba(0,0,0,.6), 0 0 0 1px var(--border-strong);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+code { font: 12px/1.4 var(--mono); color: var(--text-2); background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 28px 16px 80px; }
+header.top { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+header.top h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+header.top p { margin: 0; color: var(--text-3); max-width: 56ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.seg { display: inline-flex; background: var(--surface-3); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 4px 10px; border-radius: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 0 0 1px var(--border); }
+.seg-label { font-size: 11px; color: var(--text-4); text-transform: uppercase; letter-spacing: .06em; margin-right: 6px; align-self: center; }
+.ctl { display: inline-flex; align-items: center; }
+
+h2 { font-size: 15px; font-weight: 600; margin: 40px 0 4px; }
+.sub { color: var(--text-3); margin: 0 0 16px; font-size: 13.5px; }
+
+/* ---------------- avatar ---------------- */
+.ava {
+  --sz: 64px; --c: var(--violet);
+  position: relative; display: inline-block; flex-shrink: 0;
+  width: var(--sz); height: var(--sz); color: var(--c);
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.ava .poker, .ava .mover { display: block; width: 100%; height: 100%; transform-origin: 50% 92%; }
+.ava svg.face { display: block; width: 100%; height: 100%; overflow: visible; transition: filter .4s, opacity .4s; }
+.ava .squash { transform-box: fill-box; transform-origin: 50% 100%; }
+.ava .look { transition: transform .22s cubic-bezier(.3,.7,.4,1); }
+.ava .gaze { transform-box: fill-box; transform-origin: 50% 50%; transition: transform .35s cubic-bezier(.3,.7,.4,1); }
+.ava .eye { transform-box: fill-box; transform-origin: 50% 50%; transition: transform .22s cubic-bezier(.3,.7,.4,1); }
+
+/* blink: random, driven by JS */
+.ava.blink .eye { animation: blink .17s ease-in-out; }
+@keyframes blink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.08); } }
+
+/* hover: eyes open a bit wider, body does a jelly squish on enter */
+.ava:hover:is([data-state="idle"],[data-state="rest"],[data-state="talk"],[data-state="tool"],[data-state="ask"],[data-state="thinking"]) .eye { transform: scale(1.12); }
+.ava.poke .poker { animation: jelly .55s ease-out; }
+@keyframes jelly {
+  0% { transform: scale(1,1); } 25% { transform: scale(1.14,.86); } 45% { transform: scale(.92,1.08); }
+  65% { transform: scale(1.05,.96); } 85% { transform: scale(.99,1.01); } 100% { transform: scale(1,1); }
+}
+/* click: boop */
+.ava.boop .poker { animation: boop .6s cubic-bezier(.3,.7,.4,1); }
+@keyframes boop {
+  0% { transform: none; } 20% { transform: translateY(4%) scale(1.12,.86); }
+  45% { transform: translateY(-18%) rotate(-10deg) scale(.94,1.06); } 70% { transform: translateY(0) rotate(6deg) scale(1.06,.94); }
+  100% { transform: none; }
+}
+/* enter: a new message arrives */
+.ava.enter .poker { animation: pop .55s cubic-bezier(.3,1.5,.5,1) both; }
+@keyframes pop { 0% { transform: scale(0) rotate(-24deg); opacity: 0; } 40% { opacity: 1; } 100% { transform: scale(1) rotate(0); } }
+
+/* idle: slow breathing */
+.ava[data-state="idle"] .squash { animation: breathe 3.4s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { transform: scale(1,1); } 50% { transform: scale(1.035,.965); } }
+
+/* thinking: sway, eyes wander up */
+.ava[data-state="thinking"] .mover { animation: sway 3.2s ease-in-out infinite; }
+.ava[data-state="thinking"] .gaze { animation: wander 3.2s ease-in-out infinite; }
+@keyframes sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+@keyframes wander { 0%, 100% { transform: translate(-3px,-4px); } 40%, 58% { transform: translate(3.5px,-4.5px); } }
+
+/* tool: orbit ring, eyes look down at the work, busy wobble */
+.ava .ring { position: absolute; left: -16%; top: -16%; width: 132%; height: 132%; pointer-events: none; opacity: 0; transform: scale(.8); transition: opacity .3s, transform .3s; color: var(--c); }
+.ava .ring circle { fill: none; stroke: currentColor; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 20 14; opacity: .6; }
+.ava[data-state="tool"] .ring { opacity: 1; transform: scale(1); }
+.ava[data-state="tool"] .ring svg { animation: spin 1.6s linear infinite; }
+.ava .ring svg { width: 100%; height: 100%; display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ava[data-state="tool"] .gaze { transform: translate(2.5px,3.5px); }
+.ava[data-state="tool"] .mover { animation: busy .9s ease-in-out infinite; }
+@keyframes busy { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-3deg) translateY(-2%); } 75% { transform: rotate(3deg); } }
+
+/* talk: streaming tokens, small bouncy hops */
+.ava[data-state="talk"] .mover { animation: talk .46s ease-in-out infinite; }
+.ava[data-state="talk"] .eye { animation: talkeye .92s ease-in-out infinite; }
+@keyframes talk { 0%, 100% { transform: translateY(0) scale(1.05,.95); } 50% { transform: translateY(-6%) scale(.97,1.04); } }
+@keyframes talkeye { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.82); } }
+
+/* ask: waiting for you, amber halo and a hopeful nod */
+.ava .halo { position: absolute; inset: 4%; border-radius: 50%; pointer-events: none; }
+.ava[data-state="ask"] .halo { animation: halo 1.8s ease-out infinite; }
+@keyframes halo {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 55%, transparent); }
+  100% { box-shadow: 0 0 0 calc(var(--sz) * .3) color-mix(in srgb, var(--amber) 0%, transparent); }
+}
+.ava[data-state="ask"] .gaze { transform: translateY(2px) scale(1.1); }
+.ava[data-state="ask"] .mover { animation: nod 2.4s ease-in-out infinite; }
+@keyframes nod {
+  0%, 60%, 100% { transform: none; } 68% { transform: translateY(-7%) rotate(-7deg); }
+  76% { transform: none; } 84% { transform: translateY(-3%) rotate(5deg); } 92% { transform: none; }
+}
+
+/* error: shake, squinted eyes, red badge */
+.ava[data-state="error"] .mover { animation: shake 2.6s ease-in-out infinite; }
+.ava[data-state="error"] .eye { transform: scaleY(.38); }
+.ava[data-state="error"] .gaze { transform: translateY(3px); }
+@keyframes shake {
+  0% { transform: none; } 3% { transform: translateX(-8%) rotate(-4deg); } 6% { transform: translateX(7%) rotate(3deg); }
+  9% { transform: translateX(-5%); } 12% { transform: translateX(3%); } 15% { transform: translateX(-1%); } 18%, 100% { transform: none; }
+}
+.ava .badge {
+  position: absolute; right: -6%; top: -6%; width: max(12px, 30%); height: max(12px, 30%); border-radius: 50%;
+  background: var(--red); color: #fff; display: grid; place-items: center;
+  font: 700 max(8px, calc(var(--sz) * .2))/1 var(--font); box-shadow: 0 0 0 2px var(--surface);
+  transform: scale(0); transition: transform .3s cubic-bezier(.3,1.6,.5,1); pointer-events: none;
+}
+.ava[data-state="error"] .badge { transform: scale(1); }
+
+/* done: hop + happy squint + sparks */
+.ava[data-state="done"] .mover { animation: hop 2.4s cubic-bezier(.3,.7,.4,1) infinite; }
+.ava[data-state="done"] .eye { transform: scale(1.1,.3); }
+.ava[data-state="done"] .gaze { transform: translateY(-1.5px); }
+@keyframes hop {
+  0% { transform: none; } 6% { transform: scale(1.12,.86); } 18% { transform: translateY(-26%) scale(.92,1.1); }
+  30% { transform: scale(1.1,.9); } 38% { transform: scale(.97,1.03); } 44%, 100% { transform: none; }
+}
+.ava .spark { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; }
+.ava .spark i {
+  --s: max(3px, calc(var(--sz) * .075));
+  position: absolute; left: calc(var(--s) / -2); top: calc(var(--s) / -2); width: var(--s); height: var(--s);
+  border-radius: 1.5px; background: var(--c); opacity: 0;
+}
+.ava .spark i:nth-child(even) { background: var(--amber); border-radius: 50%; }
+.ava[data-state="done"] .spark i { animation: burst 2.4s ease-out infinite; }
+@keyframes burst {
+  0%, 12% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--sz) * -.3)) scale(.3); }
+  20% { opacity: 1; }
+  44%, 100% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--sz) * -.9)) scale(1) rotate(45deg); }
+}
+
+/* sleep: offline / disabled */
+.ava[data-state="sleep"] svg.face { filter: saturate(.2); opacity: .7; }
+.ava[data-state="sleep"] .eye { transform: scaleY(.1); }
+.ava[data-state="sleep"]:hover .eye { transform: scaleY(.45); }
+.ava[data-state="sleep"] .gaze { transform: translateY(3px); }
+.ava[data-state="sleep"] .squash { animation: breathe 4.8s ease-in-out infinite; }
+.ava .zzz { position: absolute; right: -4%; top: -10%; pointer-events: none; font: 600 max(9px, calc(var(--sz) * .2))/1 var(--font); color: var(--text-3); }
+.ava .zzz i { position: absolute; font-style: normal; opacity: 0; }
+.ava[data-state="sleep"] .zzz i { animation: zz 3s linear infinite; }
+.ava .zzz i:nth-child(2) { animation-delay: 1s; }
+.ava .zzz i:nth-child(3) { animation-delay: 2s; }
+@keyframes zz {
+  0% { opacity: 0; transform: translate(0,0) scale(.6); } 20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(var(--sz) * .28), calc(var(--sz) * -.42)) scale(1.15); }
+}
+
+/* thought bubble (large sizes only) */
+.ava .bubble {
+  position: absolute; right: -26%; top: -22%; display: flex; gap: max(2px, calc(var(--sz) * .03));
+  padding: calc(var(--sz) * .045) calc(var(--sz) * .07); border-radius: 999px; background: var(--surface);
+  box-shadow: var(--shadow-pop); opacity: 0; transform: scale(.5) translateY(20%); transform-origin: 0 100%;
+  transition: opacity .25s, transform .35s cubic-bezier(.3,1.5,.5,1); pointer-events: none;
+}
+.ava[data-state="thinking"] .bubble { opacity: 1; transform: none; }
+.ava .bubble i { width: max(3px, calc(var(--sz) * .055)); aspect-ratio: 1; border-radius: 50%; background: var(--text-3); animation: dot 1.2s ease-in-out infinite; }
+.ava .bubble i:nth-child(2) { animation-delay: .15s; }
+.ava .bubble i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { transform: none; opacity: .5; } 30% { transform: translateY(-40%); opacity: 1; } }
+.ava.compact .bubble, .ava.compact .zzz { display: none; }
+
+/* presence dot */
+.ava .dot { position: absolute; right: -2%; bottom: -2%; width: max(7px, 26%); height: max(7px, 26%); border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--surface); transition: background .3s; }
+.ava[data-state="ask"] .dot { background: var(--amber); }
+.ava[data-state="error"] .dot { background: var(--red); }
+.ava[data-state="sleep"] .dot { background: var(--gray); }
+.ava:not([data-presence]) .dot { display: none; }
+
+/* one-shot variant used in chat: done plays once */
+.ava[data-once] .mover, .ava[data-once] .spark i { animation-iteration-count: 1 !important; }
+
+/* reduced motion: states stay readable, nothing moves except blinks */
+.rm .ava, .rm .ava * { animation: none !important; transition: none !important; }
+.rm .ava.blink .eye { animation: blink .17s ease-in-out !important; }
+.rm .ava[data-state="ask"] .halo { box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 50%, transparent); }
+.rm .ava[data-state="sleep"] .zzz i { opacity: .8; }
+.rm .ava .zzz i:nth-child(2) { transform: translate(calc(var(--sz) * .14), calc(var(--sz) * -.2)); }
+.rm .ava .zzz i:nth-child(3) { transform: translate(calc(var(--sz) * .28), calc(var(--sz) * -.4)); }
+
+/* ---------------- state gallery ---------------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; }
+.stage { height: 132px; display: grid; place-items: center; background: var(--surface-2); border-bottom: 1px solid var(--border); position: relative; }
+.card .meta { padding: 10px 12px 12px; }
+.card .name { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.card .when { color: var(--text-3); font-size: 12.5px; margin-top: 2px; }
+.card .trig { margin-top: 8px; }
+.replay { position: absolute; right: 8px; top: 8px; border: 1px solid var(--border); background: var(--surface); border-radius: 7px; font-size: 11.5px; padding: 2px 8px; cursor: pointer; color: var(--text-2); }
+.replay:hover { background: var(--surface-3); }
+
+/* ---------------- playground ---------------- */
+.play { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; }
+.play .big { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; min-height: 320px; display: grid; place-items: center; background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 16px 16px; }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.panel label.l { font-size: 11px; color: var(--text-4); text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 3px 9px; font-size: 12.5px; cursor: pointer; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+.chip:hover { background: var(--surface-2); }
+.chip[aria-pressed="true"] { border-color: var(--text); color: var(--text); }
+.chip .sw { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.chip.shape { padding: 3px; }
+input[type=range] { width: 100%; accent-color: var(--text); }
+
+/* ---------------- chat demo ---------------- */
+.chat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; max-width: 760px; display: flex; flex-direction: column; }
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.chat-head .t { font-weight: 600; }
+.chat-head .s { color: var(--text-3); font-size: 12.5px; }
+.stack { display: inline-flex; margin-left: auto; gap: 4px; }
+.msgs { padding: 16px 14px; display: flex; flex-direction: column; gap: 14px; min-height: 420px; max-height: 560px; overflow-y: auto; scroll-behavior: smooth; }
+.empty { color: var(--text-4); text-align: center; margin: auto; font-size: 13px; }
+.row { display: flex; gap: 10px; align-items: flex-start; animation: rowin .3s ease-out; }
+@keyframes rowin { from { opacity: 0; transform: translateY(6px); } }
+.rm .row { animation: none; }
+.row.user { justify-content: flex-end; }
+.row.user .b { background: var(--surface-3); border-radius: 14px 14px 4px 14px; padding: 8px 12px; max-width: 70%; }
+.row .col { min-width: 0; flex: 1; }
+.row .who { font-size: 12.5px; font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
+.row .who span { font-weight: 400; color: var(--text-4); font-size: 11.5px; }
+.row .content { margin-top: 2px; color: var(--text); }
+.typing { display: inline-flex; gap: 4px; padding: 8px 0; }
+.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-4); animation: dot 1.2s ease-in-out infinite; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+.tool { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: var(--surface-2); border-radius: 9px; padding: 5px 10px; font-size: 12.5px; margin: 4px 0; }
+.tool code { background: transparent; padding: 0; }
+.tool .sp { width: 12px; height: 12px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--c) 30%, transparent); border-top-color: var(--c); animation: spin .8s linear infinite; }
+.tool.ok .sp { animation: none; border-color: var(--green); background: var(--green); }
+.tool.bad { border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
+.tool.bad .sp { animation: none; border-color: var(--red); background: var(--red); }
+.tool .msg { color: var(--text-3); }
+.q { border: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border)); background: color-mix(in srgb, var(--amber) 7%, var(--surface)); border-radius: 12px; padding: 10px 12px; margin-top: 4px; max-width: 420px; }
+.q .qt { font-weight: 500; margin-bottom: 8px; }
+.q .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.q button { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
+.q button:hover { background: var(--surface-2); }
+.q button:disabled { opacity: .5; cursor: default; }
+.composer { border-top: 1px solid var(--border); padding: 10px 14px; display: flex; gap: 10px; align-items: center; }
+.composer .fake { flex: 1; color: var(--text-4); background: var(--surface-2); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.btn { border: 0; background: var(--accent); color: var(--on-accent); border-radius: 9px; padding: 7px 14px; font-weight: 500; font-size: 13px; cursor: pointer; }
+.btn:hover { filter: brightness(1.15); }
+
+.notes { margin-top: 12px; max-width: 760px; color: var(--text-3); font-size: 13px; }
+.notes li { margin: 4px 0; }
+
+@media (max-width: 720px) {
+  .play { grid-template-columns: minmax(0, 1fr); }
+  .play .big { min-height: 240px; }
+  .row.user .b { max-width: 85%; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Avatar motion</h1>
+      <p>Animasi untuk avatar blob (spec 43). Dekatkan kursor ke avatar mana pun: matanya melirik, saat disentuh badannya mengenyal, klik untuk boop.</p>
+    </div>
+    <div class="controls">
+      <span class="ctl"><span class="seg-label">Tema</span><span class="seg" id="theme"><button data-v="auto" aria-pressed="true">Auto</button><button data-v="light">Terang</button><button data-v="dark">Gelap</button></span></span>
+      <span class="ctl"><span class="seg-label">Mata</span><span class="seg" id="gaze"><button data-v="near" aria-pressed="true">Dekat</button><button data-v="always">Selalu</button></span></span>
+      <span class="ctl"><span class="seg-label">Gerak</span><span class="seg" id="motion"><button data-v="full" aria-pressed="true">Penuh</button><button data-v="reduce">Kurangi</button></span></span>
+    </div>
+  </header>
+
+  <h2>Keadaan</h2>
+  <p class="sub">Satu keadaan per status sesi agen. Pemicu di bawah tiap kartu adalah usulan pemetaan ke event Lana.</p>
+  <div class="grid" id="states"></div>
+
+  <h2>Playground</h2>
+  <p class="sub">Coba kombinasi bentuk, warna, ukuran, dan keadaan. Ukuran kecil (22–30px) dipakai di chat dan header room.</p>
+  <div class="play">
+    <div class="big" id="bigStage"></div>
+    <div class="panel">
+      <div><label class="l">Bentuk</label><div class="chips" id="pShape"></div></div>
+      <div><label class="l">Warna</label><div class="chips" id="pColor"></div></div>
+      <div><label class="l">Ukuran <span id="pSizeV">120px</span></label><input type="range" id="pSize" min="20" max="180" value="120"></div>
+      <div><label class="l">Keadaan</label><div class="chips" id="pState"></div></div>
+      <div><label class="l">Sekali jalan</label><div class="chips"><button class="chip" id="pEnter">Masuk</button><button class="chip" id="pPoke">Hover</button><button class="chip" id="pBoop">Klik</button><button class="chip" id="pBlink">Kedip</button></div></div>
+    </div>
+  </div>
+
+  <h2>Di chat</h2>
+  <p class="sub">Simulasi room grup. Avatar di header ikut keadaan agen yang aktif, dan agen lain melirik ke yang sedang bicara.</p>
+  <div class="chat">
+    <div class="chat-head">
+      <div><div class="t">Riset harga</div><div class="s" id="roomStatus">3 agen · semua siap</div></div>
+      <div class="stack" id="stack"></div>
+    </div>
+    <div class="msgs" id="msgs"><div class="empty">Tekan “Putar demo” untuk mulai.</div></div>
+    <div class="composer"><div class="fake">Tulis pesan…</div><button class="btn" id="playBtn">Putar demo</button></div>
+  </div>
+  <ul class="notes">
+    <li>Pesan lama turun ke keadaan <code>rest</code> (hanya berkedip), jadi hanya avatar yang aktif yang bergerak.</li>
+    <li><code>done</code> main sekali di chat lalu kembali ke <code>rest</code>; di galeri diulang supaya terlihat.</li>
+    <li>Mode “Kurangi” mengikuti <code>prefers-reduced-motion</code>: keadaan tetap terbaca dari mata, cincin, badge, dan warna titik.</li>
+  </ul>
+</div>
+
+<script>
+/* ---------- shapes: the six canonical blobs from web/ui/src/preview/avatar-fixtures.ts ---------- */
+function pill(x, y, w, h, a) {
+  const cx = x + w / 2, cy = y + h / 2;
+  return `<g class="eye"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${w / 2}" fill="#ffffff" transform="rotate(${a} ${cx} ${cy})"/></g>`;
+}
+function eye(cx, cy, rx, ry) {
+  return `<g class="eye"><ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#ffffff"/></g>`;
+}
+const SHAPES = {
+  squircle: { body: '<rect x="15" y="15" width="70" height="70" rx="26" fill="currentColor" transform="rotate(-8 50 50)"/>', eyes: pill(37, 40, 7, 17, 6) + pill(56, 42, 7, 17, 6) },
+  circle: { body: '<path d="M50 12 C 72 12 88 28 88 50 C 88 72 72 88 50 88 C 28 88 12 72 12 50 C 12 28 28 12 50 12 Z" fill="currentColor"/>', eyes: pill(54, 30, 7, 18, -28) + pill(68, 28, 7, 18, -28) },
+  triangle: { body: '<path d="M50 13 C 56 13 60 17 64 24 L 87 66 C 93 78 85 88 70 88 L 30 88 C 15 88 7 78 13 66 L 36 24 C 40 17 44 13 50 13 Z" fill="currentColor"/>', eyes: eye(43, 58, 3.5, 5.5) + eye(58, 58, 3.5, 5.5) },
+  cloud: { body: '<circle cx="36" cy="58" r="22" fill="currentColor"/><circle cx="58" cy="40" r="22" fill="currentColor"/><circle cx="66" cy="64" r="20" fill="currentColor"/><ellipse cx="50" cy="70" rx="26" ry="16" fill="currentColor"/>', eyes: pill(41, 46, 7, 17, 8) + pill(57, 47, 7, 17, 8) },
+  teardrop: { body: '<path d="M44 14 C 48 12 52 14 56 18 L 76 40 C 86 51 86 68 76 78 C 66 88 49 90 37 82 C 24 73 20 58 26 46 L 40 20 C 41 17 42 15 44 14 Z" fill="currentColor"/>', eyes: eye(46, 62, 4.5, 6.5) + eye(60, 58, 3.5, 3.5) },
+  ellipse: { body: '<ellipse cx="50" cy="54" rx="40" ry="32" fill="currentColor"/>', eyes: pill(34, 38, 7, 18, 24) + pill(52, 37, 7, 18, -10) },
+};
+const COLORS = ["violet", "green", "amber", "red", "blue", "gray"];
+
+let reduce = false;
+let gazeMode = "near";
+
+/* ---------- avatar factory ---------- */
+function makeAva({ shape = "squircle", color = "violet", state = "idle", size = 64, presence = false, compact = false, label = "" }) {
+  const el = document.createElement("span");
+  el.className = "ava" + (compact ? " compact" : "");
+  el.style.setProperty("--sz", size + "px");
+  el.style.setProperty("--c", `var(--${color})`);
+  el.dataset.state = state;
+  if (presence) el.dataset.presence = "";
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", label || "avatar");
+  const s = SHAPES[shape];
+  const sparks = [0, 72, 144, 216, 288].map((a) => `<i style="--a:${a}deg"></i>`).join("");
+  el.innerHTML =
+    `<span class="halo"></span>` +
+    `<span class="ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46"/></svg></span>` +
+    `<span class="poker"><span class="mover"><svg class="face" viewBox="0 0 100 100" aria-hidden="true">` +
+    `<g class="squash">${s.body}<g class="look"><g class="gaze">${s.eyes}</g></g></g></svg></span></span>` +
+    `<span class="spark">${sparks}</span>` +
+    `<span class="bubble"><i></i><i></i><i></i></span>` +
+    `<span class="zzz"><i>z</i><i>z</i><i>z</i></span>` +
+    `<span class="badge">!</span><span class="dot"></span>`;
+  scheduleBlink(el);
+  return el;
+}
+function setShape(el, shape) {
+  const s = SHAPES[shape];
+  el.querySelector(".squash").innerHTML = `${s.body}<g class="look"><g class="gaze">${s.eyes}</g></g>`;
+}
+function setState(el, state, once = false) {
+  if (!el) return;
+  el.dataset.state = state;
+  if (once) el.dataset.once = ""; else delete el.dataset.once;
+}
+function oneShot(el, cls) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  const poker = el.querySelector(".poker");
+  const done = () => { el.classList.remove(cls); poker.removeEventListener("animationend", done); };
+  poker.addEventListener("animationend", done);
+  setTimeout(done, 900);
+}
+
+/* ---------- blinking: random, sometimes a double blink ---------- */
+function scheduleBlink(el) {
+  const wait = 2200 + Math.random() * 3800;
+  setTimeout(() => {
+    if (!el.isConnected) return;
+    const st = el.dataset.state;
+    if (st !== "sleep" && st !== "done" && st !== "error") {
+      blink(el);
+      if (Math.random() < 0.18) setTimeout(() => blink(el), 260);
+    }
+    scheduleBlink(el);
+  }, wait);
+}
+function blink(el) {
+  el.classList.remove("blink");
+  void el.offsetWidth;
+  el.classList.add("blink");
+  setTimeout(() => el.classList.remove("blink"), 200);
+}
+
+/* ---------- eyes follow the pointer ---------- */
+let px = -1e5, py = -1e5, raf = 0;
+function setLook(el, x, y) {
+  const look = el.querySelector(".look");
+  if (look) look.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`;
+}
+function track() {
+  raf = 0;
+  for (const el of document.querySelectorAll(".ava")) {
+    if (el.dataset.lock !== undefined) continue;
+    if (reduce || el.dataset.state === "sleep") { setLook(el, 0, 0); continue; }
+    const r = el.getBoundingClientRect();
+    const dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2);
+    const d = Math.hypot(dx, dy);
+    const reach = gazeMode === "always" ? Infinity : Math.max(r.width * 1.8, 110);
+    if (d > reach) { setLook(el, 0, 0); continue; }
+    const k = Math.min(d / Math.max(r.width * 0.9, 30), 1) * 4.2;
+    setLook(el, (dx / (d || 1)) * k, (dy / (d || 1)) * k);
+  }
+}
+addEventListener("pointermove", (e) => { px = e.clientX; py = e.clientY; if (!raf) raf = requestAnimationFrame(track); });
+addEventListener("scroll", () => { if (!raf) raf = requestAnimationFrame(track); }, { passive: true });
+document.documentElement.addEventListener("pointerleave", () => { px = py = -1e5; track(); });
+
+/* hover squish and click boop, delegated */
+document.addEventListener("pointerover", (e) => {
+  const el = e.target.closest && e.target.closest(".ava");
+  if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+  if (!el.classList.contains("enter")) oneShot(el, "poke");
+});
+document.addEventListener("click", (e) => {
+  const el = e.target.closest && e.target.closest(".ava");
+  if (el) oneShot(el, "boop");
+});
+
+/* ---------- top controls ---------- */
+function seg(id, onPick) {
+  const root = document.getElementById(id);
+  root.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    root.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    onPick(b.dataset.v);
+  });
+  return root;
+}
+seg("theme", (v) => { if (v === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme = v; });
+seg("gaze", (v) => { gazeMode = v; track(); });
+const motionSeg = seg("motion", (v) => { reduce = v === "reduce"; document.documentElement.classList.toggle("rm", reduce); track(); });
+if (matchMedia("(prefers-reduced-motion: reduce)").matches) motionSeg.querySelector('[data-v="reduce"]').click();
+
+/* ---------- state gallery ---------- */
+const STATES = [
+  { id: "idle", name: "Idle", when: "Online, tidak ada giliran. Bernapas pelan dan berkedip.", trig: "agent online", shape: "squircle", color: "violet" },
+  { id: "thinking", name: "Berpikir", when: "Model dipanggil, token pertama belum datang.", trig: "turn.start", shape: "cloud", color: "blue" },
+  { id: "tool", name: "Pakai tool", when: "Tool sedang jalan. Mata melihat ke bawah, cincin berputar.", trig: "tool_call running", shape: "ellipse", color: "green" },
+  { id: "talk", name: "Bicara", when: "Token sedang di-stream. Lompatan kecil berirama.", trig: "message.delta", shape: "circle", color: "violet" },
+  { id: "ask", name: "Menunggu kamu", when: "Ada pertanyaan untukmu. Halo amber dan anggukan.", trig: "question pending", shape: "teardrop", color: "amber" },
+  { id: "error", name: "Gagal", when: "Run gagal atau tool error. Goyang, mata menyipit, badge.", trig: "turn.error", shape: "triangle", color: "red" },
+  { id: "done", name: "Selesai", when: "Turn selesai. Lompat senang, lalu kembali idle.", trig: "turn.done (sekali)", shape: "squircle", color: "green" },
+  { id: "sleep", name: "Tidur", when: "Agen nonaktif atau daemon offline. Abu-abu, zzz.", trig: "agent disabled", shape: "cloud", color: "gray" },
+  { id: "enter", name: "Masuk", when: "Avatar muncul di pesan baru. Pop dengan sedikit putaran.", trig: "row mount", shape: "teardrop", color: "blue" },
+];
+const grid = document.getElementById("states");
+for (const s of STATES) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  const a = makeAva({ shape: s.shape, color: s.color, state: s.id === "enter" ? "idle" : s.id, size: 64, presence: true, label: s.name });
+  stage.appendChild(a);
+  if (s.id === "enter") {
+    const b = document.createElement("button");
+    b.className = "replay"; b.textContent = "Ulangi";
+    b.onclick = () => oneShot(a, "enter");
+    stage.appendChild(b);
+    setInterval(() => { if (!document.hidden) oneShot(a, "enter"); }, 3200);
+  }
+  card.appendChild(stage);
+  card.insertAdjacentHTML("beforeend", `<div class="meta"><div class="name">${s.name} <code>${s.id}</code></div><div class="when">${s.when}</div><div class="trig"><code>${s.trig}</code></div></div>`);
+  grid.appendChild(card);
+}
+
+/* ---------- playground ---------- */
+const P = { shape: "squircle", color: "violet", size: 120, state: "idle" };
+const big = makeAva({ ...P, presence: true, label: "Playground" });
+document.getElementById("bigStage").appendChild(big);
+function chipGroup(id, items, key, render, apply) {
+  const root = document.getElementById(id);
+  for (const it of items) {
+    const b = document.createElement("button");
+    b.className = "chip" + (key === "shape" ? " shape" : "");
+    b.setAttribute("aria-pressed", String(P[key] === it));
+    b.innerHTML = render(it);
+    b.onclick = () => {
+      P[key] = it;
+      root.querySelectorAll(".chip").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      apply(it);
+    };
+    root.appendChild(b);
+  }
+}
+chipGroup("pShape", Object.keys(SHAPES), "shape", (k) => {
+  const mini = makeAva({ shape: k, color: P.color, size: 26, state: "rest", label: k });
+  mini.dataset.lock = "";
+  return mini.outerHTML;
+}, (k) => setShape(big, k));
+chipGroup("pColor", COLORS, "color", (c) => `<span class="sw" style="--c:var(--${c})"></span>${c}`, (c) => big.style.setProperty("--c", `var(--${c})`));
+chipGroup("pState", ["idle", "thinking", "tool", "talk", "ask", "error", "done", "sleep", "rest"], "state", (s) => s, (s) => setState(big, s));
+document.getElementById("pSize").oninput = (e) => {
+  big.style.setProperty("--sz", e.target.value + "px");
+  big.classList.toggle("compact", e.target.value < 40);
+  document.getElementById("pSizeV").textContent = e.target.value + "px";
+};
+document.getElementById("pEnter").onclick = () => oneShot(big, "enter");
+document.getElementById("pPoke").onclick = () => oneShot(big, "poke");
+document.getElementById("pBoop").onclick = () => oneShot(big, "boop");
+document.getElementById("pBlink").onclick = () => blink(big);
+
+/* ---------- chat demo ---------- */
+const AGENTS = {
+  lana: { name: "Lana", shape: "squircle", color: "violet" },
+  nara: { name: "Nara", shape: "cloud", color: "green" },
+  bima: { name: "Bima", shape: "teardrop", color: "amber" },
+};
+const stack = document.getElementById("stack");
+const stackAva = {};
+for (const [id, a] of Object.entries(AGENTS)) {
+  const el = makeAva({ ...a, size: 24, presence: true, compact: true, label: a.name });
+  el.title = a.name;
+  stackAva[id] = el;
+  stack.appendChild(el);
+}
+const msgs = document.getElementById("msgs");
+const roomStatus = document.getElementById("roomStatus");
+let rowAva = {};      // latest message avatar per agent
+let speaker = null;
+
+function now() { return new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }); }
+function scrollDown() { msgs.scrollTop = msgs.scrollHeight; }
+
+/* the stack avatars glance at whoever is speaking */
+function lookAtSpeaker() {
+  for (const [id, el] of Object.entries(stackAva)) {
+    if (!speaker) { delete el.dataset.lock; continue; }
+    el.dataset.lock = "";
+    if (id === speaker) { setLook(el, 0, 2); continue; }
+    const r = el.getBoundingClientRect(), t = stackAva[speaker].getBoundingClientRect();
+    const dx = t.left - r.left;
+    setLook(el, Math.sign(dx) * 4, 0.5);
+  }
+}
+function agentState(id, state, once = false) {
+  setState(rowAva[id], state, once);
+  setState(stackAva[id], state, once);
+  if (["thinking", "tool", "talk", "ask"].includes(state)) speaker = id;
+  if (state === "rest" && speaker === id) speaker = null;
+  lookAtSpeaker();
+  const label = { thinking: "sedang berpikir", tool: "memakai tool", talk: "sedang menulis", ask: "menunggu jawabanmu", error: "kena error", done: "selesai" }[state];
+  roomStatus.textContent = label ? `${AGENTS[id].name} ${label}` : "3 agen · semua siap";
+}
+function addUser(text) {
+  const row = document.createElement("div");
+  row.className = "row user";
+  row.innerHTML = `<div class="b"></div>`;
+  row.querySelector(".b").textContent = text;
+  msgs.appendChild(row);
+  scrollDown();
+}
+function addAgent(id) {
+  for (const [other, el] of Object.entries(rowAva)) if (other !== id) setState(el, "rest");
+  if (rowAva[id]) setState(rowAva[id], "rest");
+  const a = AGENTS[id];
+  const row = document.createElement("div");
+  row.className = "row";
+  const ava = makeAva({ ...a, size: 30, compact: true, label: a.name });
+  row.appendChild(ava);
+  oneShot(ava, "enter");
+  const col = document.createElement("div");
+  col.className = "col";
+  col.style.setProperty("--c", `var(--${a.color})`);
+  col.innerHTML = `<div class="who">${a.name}<span>${now()}</span></div><div class="content"></div>`;
+  row.appendChild(col);
+  msgs.appendChild(row);
+  rowAva[id] = ava;
+  scrollDown();
+  return col.querySelector(".content");
+}
+const TYPING = `<span class="typing"><i></i><i></i><i></i></span>`;
+function toolChip(name, msg) { return `<span class="tool"><span class="sp"></span><code>${name}</code><span class="msg">${msg}</span></span>`; }
+function setTool(box, cls, msg) { const t = box.querySelector(".tool:last-of-type"); t.classList.add(cls); t.querySelector(".msg").textContent = msg; }
+
+let runId = 0;
+function waiter(id) {
+  return (ms) => new Promise((res, rej) => setTimeout(() => (id === runId ? res() : rej(new Error("stop"))), ms));
+}
+async function stream(box, text, w) {
+  const p = document.createElement("p");
+  p.style.margin = "4px 0 0";
+  box.appendChild(p);
+  const words = text.split(/(\s+)/);
+  for (const word of words) { p.textContent += word; scrollDown(); await w(28 + Math.random() * 40); }
+}
+
+async function play() {
+  const id = ++runId;
+  const w = waiter(id);
+  msgs.innerHTML = "";
+  rowAva = {};
+  speaker = null;
+  for (const id2 of Object.keys(stackAva)) agentState(id2, "idle");
+  try {
+    await w(300);
+    addUser("Tolong cek harga 3 kompetitor minggu ini, lalu rangkum.");
+    await w(700);
+
+    /* Lana: think, tool, stream, done */
+    let box = addAgent("lana");
+    agentState("lana", "thinking");
+    box.innerHTML = TYPING;
+    await w(1700);
+    agentState("lana", "tool");
+    box.innerHTML = toolChip("web_search", "mencari harga kompetitor…");
+    await w(2100);
+    setTool(box, "ok", "3 sumber ditemukan");
+    agentState("lana", "talk");
+    await stream(box, "Sudah ketemu. Kompetitor A turun 8%, B stabil, C naik tipis 2%. Nara, bisa cocokkan dengan sheet penjualan kita?", w);
+    agentState("lana", "done", true);
+    await w(1500);
+    agentState("lana", "rest");
+    setState(stackAva.lana, "idle");
+
+    /* Nara: tool fails once, retries */
+    box = addAgent("nara");
+    agentState("nara", "thinking");
+    box.innerHTML = TYPING;
+    await w(1300);
+    agentState("nara", "tool");
+    box.innerHTML = toolChip("sheets.read", "membuka Penjualan Q4…");
+    await w(1800);
+    setTool(box, "bad", "timeout setelah 30 dtk");
+    agentState("nara", "error");
+    await w(2200);
+    agentState("nara", "tool");
+    box.insertAdjacentHTML("beforeend", "<br>" + toolChip("sheets.read", "coba lagi…"));
+    await w(1600);
+    setTool(box, "ok", "214 baris");
+    agentState("nara", "talk");
+    await stream(box, "Penjualan produk yang bersaing dengan A turun 5% minggu ini. Polanya cocok.", w);
+    agentState("nara", "done", true);
+    await w(1500);
+    agentState("nara", "rest");
+    setState(stackAva.nara, "idle");
+
+    /* Bima: asks the user and waits */
+    box = addAgent("bima");
+    agentState("bima", "thinking");
+    box.innerHTML = TYPING;
+    await w(1400);
+    agentState("bima", "ask");
+    box.innerHTML = `<div class="q"><div class="qt">Untuk rangkuman, harga dikonversi pakai kurs apa?</div><div class="opts"><button>Kurs hari ini</button><button>Rata-rata minggu ini</button></div></div>`;
+    scrollDown();
+    const answer = await new Promise((res, rej) => {
+      box.querySelectorAll(".q button").forEach((b) => (b.onclick = () => res(b.textContent)));
+      const check = setInterval(() => { if (id !== runId) { clearInterval(check); rej(new Error("stop")); } }, 200);
+    });
+    box.querySelectorAll(".q button").forEach((b) => (b.disabled = true));
+    addUser(answer);
+    await w(500);
+    box = addAgent("bima");
+    agentState("bima", "talk");
+    await stream(box, `Oke, pakai ${answer.toLowerCase()}. Rangkuman sudah kusimpan di Knowledge.`, w);
+    agentState("bima", "done", true);
+    await w(1500);
+    agentState("bima", "rest");
+    setState(stackAva.bima, "idle");
+  } catch (e) { /* replaced by a newer run */ }
+}
+document.getElementById("playBtn").onclick = play;
+if (location.hash === "#play") play();
+</script>
+</body>
+</html>

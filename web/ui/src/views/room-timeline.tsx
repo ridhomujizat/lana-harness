@@ -57,7 +57,7 @@ import {
   useMentions,
 } from "./room-group";
 import { storedAttachments } from "./session";
-import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
+import { buildTurns, ReplyChip, TurnBlock, turnMood, UserBubble } from "./turn";
 import type { ChatTurn, ReplyTarget, ThreadItem } from "./turn";
 
 /* The room timeline of REQ-ROOM-002 to REQ-ROOM-005. It joins the room's
@@ -1296,6 +1296,13 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     }
   }
 
+  /* The live row's clock starts with the running turn, even when the page
+     opened mid-turn. */
+  const liveSince = nodes.reduce(
+    (at, node) => (node.kind === "turn" && node.turn.running ? Number(node.turn.startedAt) || at : at),
+    0
+  );
+
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1377,6 +1384,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 agentColor={room.color}
                 sessionId={node.sessionId}
                 onReply={setReplyTarget}
+                roomAgent
+                liveActivity={node.sessionId === newestId && node.turn.running ? activity : ""}
+                liveTool={node.sessionId === newestId && node.turn.running ? liveTool : ""}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1487,8 +1497,28 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             {loadingOlder ? (
               <p className="room-older muted">Loading earlier messages…</p>
             ) : null}
-            {turnRunning && !(team && liveChild) ? (
-              <div className="room-live" role="status">
+            {/* An agent room shows its working state in the turn's foot; this
+                row is for group rooms, and for an agent room only until the
+                running turn appears. */}
+            {turnRunning && !(team && liveChild) && (team || !liveSince) ? (
+              <div className={"room-live" + (team ? "" : " room-live-agent")} role="status">
+                {team ? null : (
+                  <AgentAvatar
+                    name={room.name}
+                    color={gr8rColor(room.color)}
+                    size="md"
+                    aria-hidden="true"
+                    mood={turnMood(
+                      { running: true },
+                      {
+                        waitingForInput: Boolean(activeQuestion),
+                        thinking: liveThinking,
+                        streaming: Boolean(liveText),
+                        tool: Boolean(liveTool),
+                      }
+                    )}
+                  />
+                )}
                 <TypingDots />
                 <span className="room-live-text">
                   {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}

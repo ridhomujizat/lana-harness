@@ -3,13 +3,14 @@ import { DiscussionCard } from "./discussion";
 import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { AvatarMood } from "../lib/avatar-motion";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { Ic } from "../ui/icons";
 import { Button } from "../ui/gr8r";
-import { AgentFace } from "./presence";
+import { AgentFace, gr8rColor, TypingDots } from "./presence";
 import { useAgentAvatar } from "../lib/avatar-store";
 import { AgentAvatar } from "./agent-avatar";
 import { TeamBlock } from "./team";
@@ -808,6 +809,15 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
+  /* An agent room: the room header already shows the agent, so the turn has
+     no head. While it works the room's live row carries the moving avatar and
+     the time; when done, a foot under the answer has Copy and
+     "worked for 8s - 03:34". */
+  roomAgent?: boolean;
+  /* The room's live activity for this turn ("running bash"), "" when none. */
+  liveActivity?: string;
+  /* The tool the room's live stream reports running, "" when none. */
+  liveTool?: string;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
   onContinue?: (() => void) | null;
@@ -817,6 +827,36 @@ export interface TurnBlockProps {
   /* API reply: when set, a sourced automation message shows a Reply action that
      calls this with the message's target. */
   onReply?: ((target: ReplyTarget) => void) | null;
+}
+
+/* The avatar mood of a turn (lib/avatar-motion): a running turn waits for you,
+   runs a tool, writes its answer, or thinks; a finished turn rests. */
+export function turnMood(
+  turn: Turn,
+  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean; tool?: boolean } = {}
+): AvatarMood {
+  if (!turn.running) {
+    return "rest";
+  }
+  const groups = turn.groups || [];
+  const steps = groups.flatMap((group) => group.steps || []);
+  if (live.waitingForInput || steps.some((step) => step.approval && !step.approval.decided)) {
+    return "ask";
+  }
+  if (steps.some(stepIsRunning)) {
+    return "tool";
+  }
+  /* The room's live stream names a running tool before its step arrives. */
+  if (live.tool && !live.thinking && !live.streaming) {
+    return "tool";
+  }
+  if (live.thinking) {
+    return "thinking";
+  }
+  if (live.streaming || groups.some((group) => group.kind === "text" && group.text)) {
+    return "talk";
+  }
+  return "thinking";
 }
 
 export function TurnBlock({
@@ -834,6 +874,9 @@ export function TurnBlock({
   childLive = {},
   onLoadChildren = null,
   showStatusCard = false,
+  roomAgent = false,
+  liveActivity = "",
+  liveTool = "",
   onContinue = null,
   continueBusy = false,
   continueError = "",
@@ -898,20 +941,28 @@ export function TurnBlock({
   const statusCard = showStatusCard ? turnEndCard(turn) : null;
   const parts = splitTurn(turn.groups);
   const shownAgent = agentLabel || agent;
+  const liveMood = turnMood(turn, {
+    waitingForInput,
+    thinking,
+    streaming: Boolean(streamingText),
+    tool: Boolean(liveTool),
+  });
 
   return (
     <article className="turn">
-      <div className="turn-head">
-        {agentColor || (storedAvatar && storedAvatar.svg) ? (
-          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
-        ) : (
-          <AgentAvatar name={agent || "agent"} size="auto" />
-        )}
-        <span className="turn-agent">{shownAgent}</span>
-        <span className="turn-status">{statusText}</span>
-        <span className="turn-spacer"></span>
-        <span className="turn-time">{formatClock(startedAt)}</span>
-      </div>
+      {roomAgent ? null : (
+        <div className="turn-head">
+          {agentColor || (storedAvatar && storedAvatar.svg) ? (
+            <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
+          ) : (
+            <AgentAvatar name={agent || "agent"} size="auto" />
+          )}
+          <span className="turn-agent">{shownAgent}</span>
+          <span className="turn-status">{statusText}</span>
+          <span className="turn-spacer"></span>
+          <span className="turn-time">{formatClock(startedAt)}</span>
+        </div>
+      )}
       <TurnProcess
         groups={parts.process}
         running={Boolean(turn.running)}
@@ -985,6 +1036,31 @@ export function TurnBlock({
           <Markdown text={streamingText} />
         </div>
       ) : null}
+      {roomAgent ? (
+        <TurnFoot
+          running={Boolean(turn.running)}
+          stopReason={String(turn.stopReason || "")}
+          agent={agent}
+          color={agentColor ? gr8rColor(agentColor) : undefined}
+          mood={liveMood}
+          liveText={
+            shownAgent +
+            " is " +
+            (liveMood === "ask"
+              ? "waiting for you"
+              : liveMood === "talk"
+                ? "writing"
+                : liveMood === "tool"
+                  ? liveActivity || "using a tool"
+                  : "thinking") +
+            (duration ? " (" + duration + ")" : "") +
+            "…"
+          }
+          text={parts.answer.map((segment) => segment.text || "").filter(Boolean).join("\n\n")}
+          at={formatClock(startedAt)}
+          status={statusText}
+        />
+      ) : null}
       {statusCard && !cardDismissed ? (
         <div className="card" role="status" aria-live="polite">
           <p>{statusCard.text}</p>
@@ -1016,6 +1092,90 @@ export function TurnBlock({
         </div>
       ) : null}
     </article>
+  );
+}
+
+/* The foot of an agent-room turn, one row in one place: while the turn works
+   it is the loading row (the moving avatar, typing dots, "Bima is thinking
+   (3s)…"); when the turn ends the avatar plays done (or error) once beside
+   "worked for 8s - 03:34", then Copy takes its place. */
+function TurnFoot({
+  running,
+  stopReason,
+  agent,
+  color,
+  mood,
+  liveText,
+  text,
+  at,
+  status,
+}: {
+  running: boolean;
+  stopReason: string;
+  agent: string;
+  color?: string;
+  mood: AvatarMood;
+  liveText: string;
+  text: string;
+  at: string;
+  status: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const wasRunning = useRef(running);
+  const [endMood, setEndMood] = useState<AvatarMood | null>(null);
+  useEffect(() => {
+    if (!copied) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  useEffect(() => {
+    const was = wasRunning.current;
+    wasRunning.current = running;
+    if (running || !was || stopReason === "cancelled") {
+      return undefined;
+    }
+    setEndMood(stopReason === "error" ? "error" : "done");
+    const timer = setTimeout(() => setEndMood(null), 1900);
+    return () => clearTimeout(timer);
+  }, [running, stopReason]);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+  const avatar = (face: AvatarMood) => (
+    <AgentAvatar name={agent} color={color} size="md" mood={face} aria-hidden="true" />
+  );
+  if (running) {
+    return (
+      <div className="turn-foot turn-foot-live" role="status">
+        {avatar(mood)}
+        <TypingDots />
+        <span className="turn-foot-live-text">{liveText}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="turn-foot">
+      {endMood ? (
+        avatar(endMood)
+      ) : text ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={copied ? "check" : "copy"}
+          className="turn-copy"
+          aria-label={copied ? "Copied" : "Copy reply"}
+          onClick={() => void copy()}
+        />
+      ) : null}
+      <span className="turn-foot-meta">{status ? status + " - " + at : at}</span>
+    </div>
   );
 }
 
