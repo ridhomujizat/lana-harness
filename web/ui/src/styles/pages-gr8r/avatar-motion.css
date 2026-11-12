@@ -370,31 +370,41 @@
 }
 
 /* ---------------- room live row ---------------- */
-/* An agent room's working row: the moving avatar, the typing dots, then
-   "Bima is thinking (3s)…". */
+/* Before an agent room's running turn appears, and in group rooms. */
 .room-live.room-live-agent {
   gap: 10px;
   padding-left: 4px;
-  min-height: 34px;
-}
-.room-live-time {
-  font-variant-numeric: tabular-nums;
+  min-height: 30px;
 }
 
 /* ---------------- agent room turn foot ---------------- */
-/* Under a finished answer: Copy, then "03:34 (worked for 8s)". */
+/* One row in one place: the loading row while the turn works, then
+   "03:34 (worked for 8s)" with the done avatar and then Copy before it.
+   Both shapes keep one height so the switch does not move the page. */
 .turn-foot {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  min-height: 30px;
   margin-top: -4px;
   color: var(--text-3);
   font-size: var(--fs-xs, 12px);
 }
+.turn-foot > .av,
+.turn-foot > .agent-avatar {
+  margin-left: 1px;
+}
 .turn-foot .turn-copy {
-  margin-left: -6px;
+  margin-left: -2px;
   color: var(--text-3);
 }
 .turn-foot-meta {
+  font-variant-numeric: tabular-nums;
+}
+.turn-foot-live {
+  color: var(--accent);
+  font-size: var(--fs-sm, 13px);
+}
+.turn-foot-live-text {
   font-variant-numeric: tabular-nums;
 }

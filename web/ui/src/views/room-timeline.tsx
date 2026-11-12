@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { AvatarMood } from "../lib/avatar-motion";
 import { answerApproval } from "../api/approvals";
 import type { ApprovalEvent } from "../api/approvals";
 import { uploadAttachments } from "../api/attachments";
@@ -58,7 +57,7 @@ import {
   useMentions,
 } from "./room-group";
 import { storedAttachments } from "./session";
-import { buildTurns, formatDuration, ReplyChip, TurnBlock, turnMood, UserBubble } from "./turn";
+import { buildTurns, ReplyChip, TurnBlock, turnMood, UserBubble } from "./turn";
 import type { ChatTurn, ReplyTarget, ThreadItem } from "./turn";
 
 /* The room timeline of REQ-ROOM-002 to REQ-ROOM-005. It joins the room's
@@ -1304,30 +1303,6 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     0
   );
 
-  /* When the live turn ends, the live row's avatar plays its end mood once
-     before the row goes (done hops twice in 1.8 s). */
-  const lastStopRef = useRef("");
-  lastStopRef.current = nodes.reduce(
-    (stop, node) => (node.kind === "turn" ? String(node.turn.stopReason || "") : stop),
-    ""
-  );
-  const wasRunningRef = useRef(turnRunning);
-  const [endMood, setEndMood] = useState<AvatarMood | null>(null);
-  useEffect(() => {
-    const was = wasRunningRef.current;
-    wasRunningRef.current = turnRunning;
-    if (turnRunning) {
-      setEndMood(null);
-      return undefined;
-    }
-    if (!was || lastStopRef.current === "cancelled") {
-      return undefined;
-    }
-    setEndMood(lastStopRef.current === "error" ? "error" : "done");
-    const timer = setTimeout(() => setEndMood(null), 1900);
-    return () => clearTimeout(timer);
-  }, [turnRunning]);
-
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1410,6 +1385,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 sessionId={node.sessionId}
                 onReply={setReplyTarget}
                 roomAgent
+                liveActivity={node.sessionId === newestId && node.turn.running ? activity : ""}
+                liveTool={node.sessionId === newestId && node.turn.running ? liveTool : ""}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1520,7 +1497,10 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             {loadingOlder ? (
               <p className="room-older muted">Loading earlier messages…</p>
             ) : null}
-            {turnRunning && !(team && liveChild) ? (
+            {/* An agent room shows its working state in the turn's foot; this
+                row is for group rooms, and for an agent room only until the
+                running turn appears. */}
+            {turnRunning && !(team && liveChild) && (team || !liveSince) ? (
               <div className={"room-live" + (team ? "" : " room-live-agent")} role="status">
                 {team ? null : (
                   <AgentAvatar
@@ -1541,16 +1521,8 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 )}
                 <TypingDots />
                 <span className="room-live-text">
-                  {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity}
-                  {team ? null : <LiveClock since={liveSince || liveStartedAt} />}
-                  {"…"}
+                  {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}
                 </span>
-              </div>
-            ) : !team && endMood ? (
-              /* The turn just ended: the avatar plays done (or error) once,
-                 then the row goes. */
-              <div className="room-live room-live-agent" aria-hidden="true">
-                <AgentAvatar name={room.name} color={gr8rColor(room.color)} size="md" mood={endMood} />
               </div>
             ) : null}
           </div>
@@ -1774,19 +1746,6 @@ function RoomEmpty({
 }
 
 /* The loading placeholders of REQ-ROOM-013, matching the room list. */
-/* The working time of the live turn, " (3s)" inside the live row's text. */
-function LiveClock({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  if (!since) {
-    return null;
-  }
-  return <span className="room-live-time">{" (" + formatDuration(Math.max(0, now - since)) + ")"}</span>;
-}
-
 function SkeletonHint() {
   return (
     <div className="room-skeleton" aria-hidden="true">

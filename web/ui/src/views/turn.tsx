@@ -3,14 +3,14 @@ import { DiscussionCard } from "./discussion";
 import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AvatarMood } from "../lib/avatar-motion";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { Ic } from "../ui/icons";
 import { Button } from "../ui/gr8r";
-import { AgentFace } from "./presence";
+import { AgentFace, gr8rColor, TypingDots } from "./presence";
 import { useAgentAvatar } from "../lib/avatar-store";
 import { AgentAvatar } from "./agent-avatar";
 import { TeamBlock } from "./team";
@@ -814,6 +814,10 @@ export interface TurnBlockProps {
      the time; when done, a foot under the answer has Copy and
      "03:34 (worked for 8s)". */
   roomAgent?: boolean;
+  /* The room's live activity for this turn ("running bash"), "" when none. */
+  liveActivity?: string;
+  /* The tool the room's live stream reports running, "" when none. */
+  liveTool?: string;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
   onContinue?: (() => void) | null;
@@ -871,6 +875,8 @@ export function TurnBlock({
   onLoadChildren = null,
   showStatusCard = false,
   roomAgent = false,
+  liveActivity = "",
+  liveTool = "",
   onContinue = null,
   continueBusy = false,
   continueError = "",
@@ -935,6 +941,12 @@ export function TurnBlock({
   const statusCard = showStatusCard ? turnEndCard(turn) : null;
   const parts = splitTurn(turn.groups);
   const shownAgent = agentLabel || agent;
+  const liveMood = turnMood(turn, {
+    waitingForInput,
+    thinking,
+    streaming: Boolean(streamingText),
+    tool: Boolean(liveTool),
+  });
 
   return (
     <article className="turn">
@@ -1024,8 +1036,26 @@ export function TurnBlock({
           <Markdown text={streamingText} />
         </div>
       ) : null}
-      {roomAgent && !turn.running ? (
+      {roomAgent ? (
         <TurnFoot
+          running={Boolean(turn.running)}
+          stopReason={String(turn.stopReason || "")}
+          agent={agent}
+          color={agentColor ? gr8rColor(agentColor) : undefined}
+          mood={liveMood}
+          liveText={
+            shownAgent +
+            " is " +
+            (liveMood === "ask"
+              ? "waiting for you"
+              : liveMood === "talk"
+                ? "writing"
+                : liveMood === "tool"
+                  ? liveActivity || "using a tool"
+                  : "thinking") +
+            (duration ? " (" + duration + ")" : "") +
+            "…"
+          }
           text={parts.answer.map((segment) => segment.text || "").filter(Boolean).join("\n\n")}
           at={formatClock(startedAt)}
           status={statusText}
@@ -1065,10 +1095,34 @@ export function TurnBlock({
   );
 }
 
-/* The foot of a finished agent-room turn: copy the answer, then when it
-   started and how long it worked. */
-function TurnFoot({ text, at, status }: { text: string; at: string; status: string }) {
+/* The foot of an agent-room turn, one row in one place: while the turn works
+   it is the loading row (the moving avatar, typing dots, "Bima is thinking
+   (3s)…"); when the turn ends the avatar plays done (or error) once beside
+   "03:34 (worked for 8s)", then Copy takes its place. */
+function TurnFoot({
+  running,
+  stopReason,
+  agent,
+  color,
+  mood,
+  liveText,
+  text,
+  at,
+  status,
+}: {
+  running: boolean;
+  stopReason: string;
+  agent: string;
+  color?: string;
+  mood: AvatarMood;
+  liveText: string;
+  text: string;
+  at: string;
+  status: string;
+}) {
   const [copied, setCopied] = useState(false);
+  const wasRunning = useRef(running);
+  const [endMood, setEndMood] = useState<AvatarMood | null>(null);
   useEffect(() => {
     if (!copied) {
       return undefined;
@@ -1076,6 +1130,16 @@ function TurnFoot({ text, at, status }: { text: string; at: string; status: stri
     const timer = setTimeout(() => setCopied(false), 1500);
     return () => clearTimeout(timer);
   }, [copied]);
+  useEffect(() => {
+    const was = wasRunning.current;
+    wasRunning.current = running;
+    if (running || !was || stopReason === "cancelled") {
+      return undefined;
+    }
+    setEndMood(stopReason === "error" ? "error" : "done");
+    const timer = setTimeout(() => setEndMood(null), 1900);
+    return () => clearTimeout(timer);
+  }, [running, stopReason]);
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
@@ -1084,9 +1148,23 @@ function TurnFoot({ text, at, status }: { text: string; at: string; status: stri
       setCopied(false);
     }
   }
+  const avatar = (face: AvatarMood) => (
+    <AgentAvatar name={agent} color={color} size="md" mood={face} aria-hidden="true" />
+  );
+  if (running) {
+    return (
+      <div className="turn-foot turn-foot-live" role="status">
+        {avatar(mood)}
+        <TypingDots />
+        <span className="turn-foot-live-text">{liveText}</span>
+      </div>
+    );
+  }
   return (
     <div className="turn-foot">
-      {text ? (
+      {endMood ? (
+        avatar(endMood)
+      ) : text ? (
         <Button
           size="sm"
           variant="ghost"
