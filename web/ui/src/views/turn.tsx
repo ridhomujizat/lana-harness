@@ -809,6 +809,9 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
+  /* The newest agent turn of the chat: its avatar idles (breathes) instead of
+     resting, so the conversation's current face stays alive. */
+  latest?: boolean;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
   onContinue?: (() => void) | null;
@@ -889,6 +892,7 @@ export function TurnBlock({
   childLive = {},
   onLoadChildren = null,
   showStatusCard = false,
+  latest = false,
   onContinue = null,
   continueBusy = false,
   continueError = "",
@@ -899,11 +903,12 @@ export function TurnBlock({
   const storedAvatar = useAgentAvatar(agent);
   const [now, setNow] = useState(() => Date.now());
   const [cardDismissed, setCardDismissed] = useState(false);
-  const mood = useTurnMood(turn, {
+  const turnMoodNow = useTurnMood(turn, {
     waitingForInput,
     thinking,
     streaming: Boolean(streamingText),
   });
+  const mood = turnMoodNow === "rest" && latest ? "idle" : turnMoodNow;
 
   useEffect(() => {
     if (!turn.running) {

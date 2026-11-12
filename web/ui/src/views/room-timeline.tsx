@@ -1297,6 +1297,11 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     }
   }
 
+  const lastTurnNodeKey = nodes.reduce(
+    (key, node) => (node.kind === "turn" ? node.key : key),
+    ""
+  );
+
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1378,6 +1383,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 agentColor={room.color}
                 sessionId={node.sessionId}
                 onReply={setReplyTarget}
+                latest={node.key === lastTurnNodeKey}
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1491,6 +1497,13 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             ) : null}
             {turnRunning && !(team && liveChild) ? (
               <div className="room-live" role="status">
+                <AgentAvatar
+                  name={liveSpeaker || room.name}
+                  color={gr8rColor(liveSpeaker ? faces[liveSpeaker]?.color : room.color)}
+                  size="md"
+                  mood={activeQuestion ? "ask" : liveTool ? "tool" : "thinking"}
+                  aria-hidden="true"
+                />
                 <TypingDots />
                 <span className="room-live-text">
                   {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}

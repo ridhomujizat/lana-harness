@@ -45,16 +45,16 @@
 }
 @keyframes av-jelly {
   0% { scale: 1 1; }
-  25% { scale: 1.14 0.86; }
-  45% { scale: 0.92 1.08; }
-  65% { scale: 1.05 0.96; }
+  25% { scale: 1.22 0.8; }
+  45% { scale: 0.88 1.14; }
+  65% { scale: 1.07 0.94; }
   85% { scale: 0.99 1.01; }
   100% { scale: 1 1; }
 }
 :is(.av, .agent-avatar, .agent-face):hover:not([data-mood='sleep'], [data-mood='done'], [data-mood='error'])
   > .av-svg
   .av-eye {
-  transform: scale(1.12);
+  transform: scale(1.2);
 }
 
 /* click: a boop hop with a twist */
@@ -64,7 +64,7 @@
 @keyframes av-boop {
   0% { translate: 0 0; rotate: 0deg; scale: 1 1; }
   20% { translate: 0 4%; scale: 1.12 0.86; }
-  45% { translate: 0 -18%; rotate: -10deg; scale: 0.94 1.06; }
+  45% { translate: 0 -35%; rotate: -16deg; scale: 0.92 1.1; }
   70% { translate: 0 0; rotate: 6deg; scale: 1.06 0.94; }
   100% { translate: 0 0; rotate: 0deg; scale: 1 1; }
 }
@@ -82,68 +82,71 @@
 
 /* idle: slow breathing */
 [data-mood='idle'] > .av-svg .av-squash {
-  animation: av-breathe 3.4s ease-in-out infinite;
+  animation: av-breathe 2.8s ease-in-out infinite;
 }
 @keyframes av-breathe {
   0%,
   100% { transform: scale(1, 1); }
-  50% { transform: scale(1.035, 0.965); }
+  50% { transform: scale(1.07, 0.93); }
 }
 
 /* thinking: a slow sway, the eyes wander up */
 [data-mood='thinking'] > .av-svg {
-  animation: av-sway 3.2s ease-in-out infinite;
+  animation: av-sway 2.4s ease-in-out infinite;
 }
 [data-mood='thinking'] > .av-svg .av-gaze {
-  animation: av-wander 3.2s ease-in-out infinite;
+  animation: av-wander 2.4s ease-in-out infinite;
 }
 @keyframes av-sway {
   0%,
-  100% { transform: rotate(-5deg); }
-  50% { transform: rotate(5deg); }
+  100% { transform: rotate(-10deg); }
+  25% { transform: rotate(0deg) translateY(-6%); }
+  50% { transform: rotate(10deg); }
+  75% { transform: rotate(0deg) translateY(-6%); }
 }
 @keyframes av-wander {
   0%,
-  100% { transform: translate(-3px, -4px); }
+  100% { transform: translate(-5px, -6px); }
   40%,
-  58% { transform: translate(3.5px, -4.5px); }
+  58% { transform: translate(5.5px, -6.5px); }
 }
 
 /* tool: eyes down on the work, a busy wobble, the orbit ring */
 [data-mood='tool'] > .av-svg {
-  animation: av-busy 0.9s ease-in-out infinite;
+  animation: av-busy 0.8s ease-in-out infinite;
 }
 [data-mood='tool'] > .av-svg .av-gaze {
-  transform: translate(2.5px, 3.5px);
+  transform: translate(4px, 5px);
 }
 @keyframes av-busy {
   0%,
-  100% { transform: rotate(0deg); }
-  25% { transform: rotate(-3deg) translateY(-2%); }
-  75% { transform: rotate(3deg); }
+  100% { transform: rotate(0deg) scale(1.04, 0.96); }
+  25% { transform: rotate(-8deg) translateY(-8%) scale(0.97, 1.03); }
+  50% { transform: rotate(0deg) scale(1.04, 0.96); }
+  75% { transform: rotate(8deg) translateY(-8%) scale(0.97, 1.03); }
 }
 
 /* talk: the answer streams, small rhythmic hops */
 [data-mood='talk'] > .av-svg {
-  animation: av-talk 0.46s ease-in-out infinite;
+  animation: av-talk 0.5s ease-in-out infinite;
 }
 [data-mood='talk'] > .av-svg .av-eye {
   animation: av-talk-eye 0.92s ease-in-out infinite;
 }
 @keyframes av-talk {
   0%,
-  100% { transform: translateY(0) scale(1.05, 0.95); }
-  50% { transform: translateY(-6%) scale(0.97, 1.04); }
+  100% { transform: translateY(0) scale(1.1, 0.9); }
+  50% { transform: translateY(-16%) scale(0.94, 1.08); }
 }
 @keyframes av-talk-eye {
   0%,
   100% { transform: scaleY(1); }
-  50% { transform: scaleY(0.82); }
+  50% { transform: scaleY(0.7); }
 }
 
 /* ask: waiting for you, a hopeful nod and the amber halo */
 [data-mood='ask'] > .av-svg {
-  animation: av-nod 2.4s ease-in-out infinite;
+  animation: av-nod 1.8s ease-in-out infinite;
 }
 [data-mood='ask'] > .av-svg .av-gaze {
   transform: translateY(2px) scale(1.1);
@@ -152,15 +155,15 @@
   0%,
   60%,
   100% { transform: none; }
-  68% { transform: translateY(-7%) rotate(-7deg); }
+  68% { transform: translateY(-16%) rotate(-12deg); }
   76% { transform: none; }
-  84% { transform: translateY(-3%) rotate(5deg); }
+  84% { transform: translateY(-8%) rotate(9deg); }
   92% { transform: none; }
 }
 
 /* error: one shake, squinted eyes, the red badge */
 [data-mood='error'] > .av-svg {
-  animation: av-shake 0.55s ease-in-out 1;
+  animation: av-shake 0.7s ease-in-out 2;
 }
 [data-mood='error'] > .av-svg .av-eye {
   transform: scaleY(0.38);
@@ -170,17 +173,17 @@
 }
 @keyframes av-shake {
   0% { transform: none; }
-  17% { transform: translateX(-8%) rotate(-4deg); }
-  33% { transform: translateX(7%) rotate(3deg); }
-  50% { transform: translateX(-5%); }
-  67% { transform: translateX(3%); }
-  83% { transform: translateX(-1%); }
+  17% { transform: translateX(-16%) rotate(-10deg); }
+  33% { transform: translateX(14%) rotate(8deg); }
+  50% { transform: translateX(-10%) rotate(-5deg); }
+  67% { transform: translateX(6%); }
+  83% { transform: translateX(-2%); }
   100% { transform: none; }
 }
 
 /* done: one happy hop, squinted smile eyes, sparks */
 [data-mood='done'] > .av-svg {
-  animation: av-hop 1s cubic-bezier(0.3, 0.7, 0.4, 1) 1;
+  animation: av-hop 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) 2;
 }
 [data-mood='done'] > .av-svg .av-eye {
   transform: scale(1.1, 0.3);
@@ -191,7 +194,7 @@
 @keyframes av-hop {
   0% { transform: none; }
   14% { transform: scale(1.12, 0.86); }
-  41% { transform: translateY(-26%) scale(0.92, 1.1); }
+  41% { transform: translateY(-45%) rotate(-8deg) scale(0.9, 1.12); }
   68% { transform: scale(1.1, 0.9); }
   86% { transform: scale(0.97, 1.03); }
   100% { transform: none; }
@@ -235,15 +238,15 @@
   display: block;
   width: 100%;
   height: 100%;
-  animation: av-spin 1.6s linear infinite;
+  animation: av-spin 1.2s linear infinite;
 }
 .av-ring circle {
   fill: none;
   stroke: currentColor;
-  stroke-width: 4;
+  stroke-width: 6;
   stroke-linecap: round;
-  stroke-dasharray: 20 14;
-  opacity: 0.6;
+  stroke-dasharray: 22 14;
+  opacity: 0.85;
 }
 @keyframes av-spin {
   to { transform: rotate(360deg); }
@@ -255,11 +258,11 @@
   border-radius: 50%;
   background: var(--amber);
   opacity: 0;
-  animation: av-halo 1.8s ease-out infinite;
+  animation: av-halo 1.4s ease-out infinite;
 }
 @keyframes av-halo {
-  0% { opacity: 0.45; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.75); }
+  0% { opacity: 0.6; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2); }
 }
 
 .av-badge {
@@ -306,7 +309,7 @@
   border-radius: 1.5px;
   background: currentColor;
   opacity: 0;
-  animation: av-burst 0.9s ease-out 0.15s 1 both;
+  animation: av-burst 0.9s ease-out 0.15s 2 both;
 }
 .av-spark > span:nth-child(even) i {
   background: var(--amber);

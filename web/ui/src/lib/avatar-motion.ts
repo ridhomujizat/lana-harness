@@ -40,7 +40,7 @@ const NO_BLINK = new Set(["sleep", "done", "error"]);
 const HOSTS = ".av, .agent-avatar, .agent-face";
 
 /* The largest eye travel, in avatar units (the viewBox is 100 wide). */
-const GAZE_UNITS = 4.2;
+const GAZE_UNITS = 6;
 
 function reducedMotion(): boolean {
   const root = document.documentElement;
@@ -111,12 +111,12 @@ function track(): void {
     const dx = pointerX - (box.left + box.width / 2);
     const dy = pointerY - (box.top + box.height / 2);
     const distance = Math.hypot(dx, dy);
-    const reach = Math.max(box.width * 1.8, 110);
+    const reach = Math.max(box.width * 5, 260);
     if (distance > reach) {
       moves.push([look, 0, 0]);
       continue;
     }
-    const pull = Math.min(distance / Math.max(box.width * 0.9, 30), 1) * GAZE_UNITS;
+    const pull = Math.min(distance / Math.max(box.width * 1.2, 40), 1) * GAZE_UNITS;
     moves.push([look, (dx / (distance || 1)) * pull, (dy / (distance || 1)) * pull]);
   }
   for (const [look, x, y] of moves) {
@@ -133,14 +133,38 @@ function schedule(): void {
   }
 }
 
+/* The moods where the face is free to glance around on its own. */
+const GLANCE = new Set(["rest", "idle"]);
+
+/* A resting face looks somewhere else for a moment, then back, unless the
+   pointer already holds its gaze. */
+function glance(svg: Element): void {
+  const gaze = svg.querySelector<SVGGElement>(".av-gaze");
+  const look = svg.querySelector<SVGGElement>(".av-look");
+  if (!gaze || !look || look.style.transform || reducedMotion()) {
+    return;
+  }
+  const x = (Math.random() < 0.5 ? -1 : 1) * (3 + Math.random() * 3);
+  const y = (Math.random() - 0.6) * 5;
+  gaze.style.transform = "translate(" + x.toFixed(1) + "px, " + y.toFixed(1) + "px)";
+  window.setTimeout(() => {
+    gaze.style.transform = "";
+  }, 900 + Math.random() * 700);
+}
+
 /* Every 250 ms each visible face blinks with a 1-in-16 chance, about once in
-   four seconds, sometimes twice in a row. */
+   four seconds, sometimes twice in a row; a resting face glances around
+   about once in ten seconds. */
 function blinkTick(): void {
   if (document.hidden) {
     return;
   }
   for (const svg of Array.from(document.querySelectorAll(".av-svg.has-eyes"))) {
-    if (Math.random() >= 1 / 16 || NO_BLINK.has(moodOf(svg))) {
+    const mood = moodOf(svg);
+    if (GLANCE.has(mood) && Math.random() < 1 / 40) {
+      glance(svg);
+    }
+    if (Math.random() >= 1 / 16 || NO_BLINK.has(mood)) {
       continue;
     }
     play(svg, "av-blink", 200);
