@@ -3,7 +3,8 @@ import { DiscussionCard } from "./discussion";
 import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { AvatarMood } from "../lib/avatar-motion";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
@@ -819,6 +820,60 @@ export interface TurnBlockProps {
   onReply?: ((target: ReplyTarget) => void) | null;
 }
 
+/* The avatar mood of a turn (lib/avatar-motion): a running turn waits for you,
+   runs a tool, writes its answer, or thinks; a finished turn rests. */
+export function turnMood(
+  turn: Turn,
+  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean } = {}
+): AvatarMood {
+  if (!turn.running) {
+    return "rest";
+  }
+  const groups = turn.groups || [];
+  const steps = groups.flatMap((group) => group.steps || []);
+  if (live.waitingForInput || steps.some((step) => step.approval && !step.approval.decided)) {
+    return "ask";
+  }
+  if (steps.some(stepIsRunning)) {
+    return "tool";
+  }
+  if (live.thinking) {
+    return "thinking";
+  }
+  if (live.streaming || groups.some((group) => group.kind === "text" && group.text)) {
+    return "talk";
+  }
+  return "thinking";
+}
+
+/* turnMood plus the end of the turn as it is watched: a turn that finishes
+   while on screen hops once ("done") or shakes ("error"), then rests. A turn
+   loaded already finished just rests. */
+export function useTurnMood(
+  turn: Turn,
+  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean }
+): AvatarMood {
+  const running = Boolean(turn.running);
+  const wasRunning = useRef(running);
+  const [flash, setFlash] = useState<AvatarMood | null>(null);
+  const stopReason = String(turn.stopReason || "");
+  useEffect(() => {
+    const was = wasRunning.current;
+    wasRunning.current = running;
+    if (running || !was || stopReason === "cancelled") {
+      return undefined;
+    }
+    const end: AvatarMood = stopReason === "error" ? "error" : "done";
+    setFlash(end);
+    const timer = setTimeout(() => setFlash(null), end === "error" ? 4000 : 2600);
+    return () => clearTimeout(timer);
+  }, [running, stopReason]);
+  if (running) {
+    return turnMood(turn, live);
+  }
+  return flash || "rest";
+}
+
 export function TurnBlock({
   turn,
   agent,
@@ -844,6 +899,11 @@ export function TurnBlock({
   const storedAvatar = useAgentAvatar(agent);
   const [now, setNow] = useState(() => Date.now());
   const [cardDismissed, setCardDismissed] = useState(false);
+  const mood = useTurnMood(turn, {
+    waitingForInput,
+    thinking,
+    streaming: Boolean(streamingText),
+  });
 
   useEffect(() => {
     if (!turn.running) {
@@ -903,9 +963,9 @@ export function TurnBlock({
     <article className="turn">
       <div className="turn-head">
         {agentColor || (storedAvatar && storedAvatar.svg) ? (
-          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
+          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} mood={mood} />
         ) : (
-          <AgentAvatar name={agent || "agent"} size="auto" />
+          <AgentAvatar name={agent || "agent"} size="auto" mood={mood} />
         )}
         <span className="turn-agent">{shownAgent}</span>
         <span className="turn-status">{statusText}</span>

@@ -45,6 +45,7 @@ import {
   useFileDrop,
 } from "./attachments";
 import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
+import { moodFromPresence } from "../lib/avatar-motion";
 import type { FaceRef } from "./presence";
 import { agentLabel, displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
@@ -1414,6 +1415,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             color={gr8rColor(room.color)}
             size="lg"
             presence={Boolean(room.presence)}
+            mood={moodFromPresence(room.presence ? room.presence.state : "")}
           />
         )}
         <div className="room-head-main">
@@ -1685,6 +1687,7 @@ function RoomEmpty({
           color={gr8rColor(room.color)}
           size="xl"
           presence={Boolean(room.presence)}
+          mood="idle"
         />
       )}
       <h2 className="room-empty-title">

@@ -11,6 +11,7 @@ import type {
 import { Ic } from "../icons";
 import { cn, initials } from "./util";
 import { parseAvatarSvg } from "../../lib/avatar-svg";
+import type { AvatarMood } from "../../lib/avatar-motion";
 
 /* ------------------------------------------------------------------ */
 /* Button                                                             */
@@ -226,6 +227,83 @@ export function Chip({
 
 export type AvatarSize = "sm" | "md" | "lg" | "xl";
 
+/* The pixel side of each Gr8r avatar size (components.css .av). */
+export const AVATAR_PX: Record<AvatarSize | "default", number> = {
+  default: 22,
+  sm: 20,
+  md: 26,
+  lg: 36,
+  xl: 64,
+};
+
+const SPARK_ANGLES = [0, 72, 144, 216, 288];
+
+/* The extra marks of an avatar mood (styles/pages-gr8r/avatar-motion.css):
+   the tool ring, the waiting halo, the error badge, the done sparks, and on
+   avatars of 44 px and up the thought bubble and the sleeping z's. The host
+   carries data-mood and --avpx (see moodHostProps). */
+export function MoodLayer({ mood, px }: { mood?: AvatarMood; px?: number }) {
+  const big = (px || 0) >= 44;
+  switch (mood) {
+    case "tool":
+      return (
+        <span className="av-ring" aria-hidden="true">
+          <svg viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="46" />
+          </svg>
+        </span>
+      );
+    case "ask":
+      return <span className="av-halo" aria-hidden="true" />;
+    case "error":
+      return <span className="av-badge" aria-hidden="true" />;
+    case "done":
+      return (
+        <span className="av-spark" aria-hidden="true">
+          {SPARK_ANGLES.map((angle) => (
+            <span key={angle} style={{ "--a": angle + "deg" } as CSSProperties}>
+              <i />
+            </span>
+          ))}
+        </span>
+      );
+    case "thinking":
+      return big ? (
+        <span className="av-bubble" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      ) : null;
+    case "sleep":
+      return big ? (
+        <span className="av-zzz" aria-hidden="true">
+          <i>z</i>
+          <i>z</i>
+          <i>z</i>
+        </span>
+      ) : null;
+    default:
+      return null;
+  }
+}
+
+/* The host attributes of a moving avatar: its mood and its pixel size for
+   the mood marks. A mood of undefined leaves the avatar still apart from the
+   gaze, blinks and hover of lib/avatar-motion. */
+export function moodHostProps(
+  mood: AvatarMood | undefined,
+  px: number | undefined
+): { "data-mood"?: AvatarMood; style?: CSSProperties } {
+  if (!mood) {
+    return {};
+  }
+  return {
+    "data-mood": mood,
+    style: px ? ({ "--avpx": px + "px" } as CSSProperties) : undefined,
+  };
+}
+
 export interface AvatarProps extends HTMLAttributes<HTMLSpanElement> {
   name?: string | null;
   color?: string;
@@ -235,6 +313,8 @@ export interface AvatarProps extends HTMLAttributes<HTMLSpanElement> {
   /* Spec 43: a sanitized generated avatar. It replaces the letter when it
      passes the allowlist of lib/avatar-svg; the body takes `color`. */
   svg?: string;
+  /* The motion mood of a generated avatar (lib/avatar-motion). */
+  mood?: AvatarMood;
 }
 
 export function Avatar({
@@ -244,6 +324,7 @@ export function Avatar({
   presence,
   empty,
   svg,
+  mood,
   className,
   style,
   children,
@@ -262,15 +343,19 @@ export function Avatar({
       </span>
     );
   }
+  const px = AVATAR_PX[size || "default"];
+  const moving = shape ? moodHostProps(mood, px) : {};
   return (
     <span
       className={cn("av", shape && "has-svg", size, presence && "presence", className)}
-      style={{ ...style, "--c": color } as CSSProperties}
+      style={{ ...style, ...moving.style, "--c": color } as CSSProperties}
       data-tip={label}
       aria-label={label}
+      data-mood={moving["data-mood"]}
       {...rest}
     >
       {children ?? shape ?? initials(label)}
+      {shape ? <MoodLayer mood={mood} px={px} /> : null}
     </span>
   );
 }

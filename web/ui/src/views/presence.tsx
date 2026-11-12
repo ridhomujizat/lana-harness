@@ -3,6 +3,9 @@ import type { CSSProperties } from "react";
 import { listRooms, openRoomsStream } from "../api/rooms";
 import { agentCssColor, isHexColor, parseAvatarSvg } from "../lib/avatar-svg";
 import { useAgentAvatar } from "../lib/avatar-store";
+import { moodFromPresence } from "../lib/avatar-motion";
+import type { AvatarMood } from "../lib/avatar-motion";
+import { MoodLayer, moodHostProps } from "../ui/gr8r";
 import { AvatarImage, useAvatarImage } from "./agent-avatar";
 import type { Presence, RoomRow } from "../api/rooms";
 
@@ -78,6 +81,8 @@ export interface AgentFaceProps {
   size?: FaceSize;
   className?: string;
   style?: CSSProperties;
+  /* The motion mood (lib/avatar-motion); defaults to the presence's. */
+  mood?: AvatarMood;
 }
 
 export function AgentFace({
@@ -87,6 +92,7 @@ export function AgentFace({
   size = 32,
   className = "",
   style,
+  mood,
 }: AgentFaceProps) {
   const face = agentFaceColors(color);
   const stored = useAgentAvatar(name);
@@ -100,6 +106,9 @@ export function AgentFace({
   const look: CSSProperties = blob
     ? { background: "transparent", color: gr8rColor(stored?.color || color) }
     : { background: face.bg, color: face.fg };
+  const moving = shape
+    ? moodHostProps(mood || (presence ? moodFromPresence(state) : undefined), size)
+    : {};
   return (
     <span
       className={
@@ -110,7 +119,8 @@ export function AgentFace({
       }
       role="img"
       aria-label={label}
-      style={{ ...look, ...style }}
+      style={{ ...look, ...moving.style, ...style }}
+      data-mood={moving["data-mood"]}
     >
       {shape ??
         (!image.failed ? (
@@ -118,6 +128,7 @@ export function AgentFace({
         ) : (
           initialOf(name)
         ))}
+      {shape ? <MoodLayer mood={moving["data-mood"]} px={size} /> : null}
       {state === "working" ? (
         <span className="agent-face-ring" aria-hidden="true" />
       ) : null}

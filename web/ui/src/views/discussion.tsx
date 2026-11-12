@@ -168,7 +168,7 @@ function Msg({
   const f = face(faces, name);
   return (
     <div className={"group-msg disc-msg" + (lead ? " group-lead-msg" : " group-member-msg")}>
-      <AgentAvatar name={name} color={f.color} size="md" presence={working} />
+      <AgentAvatar name={name} color={f.color} size="md" presence={working} mood={working ? "thinking" : undefined} />
       <div className="group-msg-main">
         <div className="group-msg-head">
           <span className="group-msg-name" style={{ color: f.fg }}>
@@ -301,7 +301,7 @@ export function DiscussionThread({ log, faces, running, onDirect }: DiscussionTh
       {running && status.open
         ? status.pending.map((agent) => (
             <div className="group-msg group-member-msg group-working" role="status" key={"pending-" + agent}>
-              <AgentAvatar name={agent} color={face(faces, agent).color} presence size="md" />
+              <AgentAvatar name={agent} color={face(faces, agent).color} presence size="md" mood="thinking" />
               <div className="group-msg-main">
                 <span className="group-working-text">
                   <TypingDots />
