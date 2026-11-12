@@ -66,6 +66,9 @@ func newFakeBotAPI(t *testing.T) *fakeBotAPI {
 	t.Helper()
 	api := &fakeBotAPI{username: "lana_bot"}
 	api.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		token, method, ok := botAPIPath(r.URL.Path)
 		if !ok {
 			http.NotFound(w, r)

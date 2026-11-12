@@ -282,6 +282,9 @@ function turnEndAnnouncement(reason: string, error: unknown): string {
   if (reason === "loop") {
     return "Turn stopped: repeated a step without progress.";
   }
+  if (reason === "max_tokens") {
+    return "Turn stopped: reply cut off by the model's output limit.";
+  }
   return "Turn finished: " + stopReasonWords(reason) + ".";
 }
 

@@ -282,6 +282,24 @@ function emit(): void {
   }
 }
 
+/* API-ROOM-001 order, as the server's sortRoomRows: last_active_at descending,
+   ties by name; rooms with no session last, by name. A live `room` event
+   updates one row, so the list is re-sorted here or a new or newly active
+   room would keep its old place. */
+export function sortRooms(rows: RoomRow[]): RoomRow[] {
+  return rows.slice().sort((a, b) => {
+    const at = Number(a.last_active_at) || 0;
+    const bt = Number(b.last_active_at) || 0;
+    if (at > 0 && bt > 0 && at !== bt) {
+      return bt - at;
+    }
+    if (at > 0 !== bt > 0) {
+      return at > 0 ? -1 : 1;
+    }
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
+}
+
 function setState(patch: Partial<RoomsState>): void {
   roomsState = { ...roomsState, ...patch };
   emit();
@@ -338,7 +356,8 @@ function ensureStream(): void {
       const rows = exists
         ? roomsState.rows.map((item) => (item.name === row.name ? row : item))
         : [...roomsState.rows, row];
-      setState({ rows, byName: indexRows(rows), loading: false });
+      const sorted = sortRooms(rows);
+      setState({ rows: sorted, byName: indexRows(sorted), loading: false });
     },
     onState(connected) {
       setState({ connected });

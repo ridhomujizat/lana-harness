@@ -1206,6 +1206,9 @@ func TestWebShutdownCancelsTurn(t *testing.T) {
 	llmStarted := make(chan struct{}, 1)
 	stop := make(chan struct{})
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		select {
 		case llmStarted <- struct{}{}:
 		default:

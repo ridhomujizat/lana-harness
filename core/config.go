@@ -130,10 +130,13 @@ type AgentConfig struct {
 	// SkillWrite selects how skill_write handles a skill: "approve" (the
 	// default) stages it for owner review, "direct" writes it at once
 	// (spec 46 REQ-DKN-050).
-	SkillWrite    string `toml:"skill_write"`
-	Permission    string `toml:"permission"`
-	MaxSteps      int    `toml:"max_steps"`
-	ContextWindow int    `toml:"context_window"`
+	SkillWrite string `toml:"skill_write"`
+	Permission string `toml:"permission"`
+	MaxSteps   int    `toml:"max_steps"`
+	// MaxTokens caps the output tokens of every model step of the agent's
+	// turns. 0 means the provider default (REQ-TFB-008 item 6).
+	MaxTokens     int `toml:"max_tokens"`
+	ContextWindow int `toml:"context_window"`
 	// ReasoningEffort is "off", "low", "high", or "max"; "" uses the model's
 	// catalog default (REQ-MDL-001).
 	ReasoningEffort string `toml:"reasoning_effort"`

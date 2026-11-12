@@ -80,6 +80,9 @@ func TestRunWithoutAskReturnsNoResponder(t *testing.T) {
 	var mu sync.Mutex
 	var bodies []string
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		raw, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		bodies = append(bodies, string(raw))

@@ -32,6 +32,9 @@ type tgServer struct {
 func newTGServer(t *testing.T, chatID int64, text string) *tgServer {
 	s := &tgServer{}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		s.mu.Lock()
 		s.calls++
 		s.mu.Unlock()
@@ -475,6 +478,9 @@ func TestDaemonAnswersAndStops(t *testing.T) {
 	t.Setenv("LANA_HOME", home)
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123:abc")
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		data, _ := os.ReadFile(filepath.Join("..", "..", "providers", "openai", "testdata", "text.sse"))
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write(data)
@@ -508,6 +514,9 @@ func TestDaemonCancelsRunningTurn(t *testing.T) {
 	started := make(chan struct{}, 1)
 	stop := make(chan struct{})
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		select {
 		case started <- struct{}{}:
 		default:

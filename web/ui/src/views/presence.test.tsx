@@ -16,6 +16,7 @@ import {
   PresenceLabel,
   SkeletonRows,
   TeamFace,
+  sortRooms,
   useRooms,
 } from "./presence";
 
@@ -96,6 +97,25 @@ describe("SkeletonRows (REQ-ROOM-013)", () => {
   it("renders one skeleton per row", () => {
     const { container } = render(<SkeletonRows count={5} />);
     expect(container.querySelectorAll(".skeleton-row")).toHaveLength(5);
+  });
+});
+
+describe("sortRooms (API-ROOM-001)", () => {
+  it("puts the most recently active room first and idle rooms last", () => {
+    const rows = [
+      room({ name: "lana", last_active_at: 300 }),
+      room({ name: "zed", last_active_at: 0 }),
+      room({ name: "omnix", last_active_at: 100 }),
+      room({ name: "alpha", last_active_at: 0 }),
+      room({ name: "example", last_active_at: 500 }),
+    ];
+    expect(sortRooms(rows).map((r) => r.name)).toEqual([
+      "example",
+      "lana",
+      "omnix",
+      "alpha",
+      "zed",
+    ]);
   });
 });
 

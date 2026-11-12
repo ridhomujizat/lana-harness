@@ -26,6 +26,12 @@ func newStatusServer(t *testing.T, code int, body string) *statusServer {
 	t.Helper()
 	s := &statusServer{}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The router warms each provider's model list at boot: that GET is not
+		// a chat call, so it does not count toward the request assertions.
+		if isModelListRequest(r) {
+			writeEmptyModelList(w)
+			return
+		}
 		s.requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)

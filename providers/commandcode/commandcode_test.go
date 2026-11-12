@@ -198,7 +198,7 @@ func userText(text string) core.Message {
 
 func TestStreamDefaults(t *testing.T) {
 	env := buildEnvelope(core.ChatRequest{Model: "m", Messages: []core.Message{userText("hi")}}, time.Date(2026, 11, 11, 0, 0, 0, 0, time.UTC))
-	if env.Params.MaxTokens != defaultMaxTokens || env.Params.Temperature != defaultTemperature || env.Params.ReasoningEffort != "" {
+	if env.Params.MaxTokens != maxTokensDefault || env.Params.Temperature != defaultTemperature || env.Params.ReasoningEffort != "" {
 		t.Errorf("params = %+v", env.Params)
 	}
 	if env.Config.Date != "2026-11-11" || env.Config.Environment == "" {
@@ -207,6 +207,28 @@ func TestStreamDefaults(t *testing.T) {
 	data, _ := json.Marshal(env)
 	if !strings.Contains(string(data), `"structure":[]`) || strings.Contains(string(data), `"tools"`) {
 		t.Errorf("body = %s", data)
+	}
+}
+
+func TestClampMaxTokens(t *testing.T) {
+	tests := []struct {
+		name  string
+		n     int
+		model string
+		want  int
+	}{
+		{"unknown model uses default", 0, "mystery-model", maxTokensDefault},
+		{"catalog model uses its output limit", 0, "claude-haiku-4-5", 64000},
+		{"catalog model over ceiling is clamped", 0, "deepseek-flash", maxTokensLimit},
+		{"explicit budget is kept", 5000, "mystery-model", 5000},
+		{"explicit budget over ceiling is clamped", 999999, "mystery-model", maxTokensLimit},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clampMaxTokens(tc.n, tc.model); got != tc.want {
+				t.Errorf("clampMaxTokens(%d, %q) = %d, want %d", tc.n, tc.model, got, tc.want)
+			}
+		})
 	}
 }
 

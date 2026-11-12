@@ -173,7 +173,10 @@ type resolvedAgent struct {
 	mcp        []string
 	skills     []string
 	maxSteps   int
-	child      bool
+	// maxTokens is the agent's output budget for each model step; 0 means the
+	// provider default (REQ-TFB-008 item 6).
+	maxTokens int
+	child     bool
 	// vision reports whether the model can see images. The agent key wins over
 	// the catalog (REQ-ATT-003).
 	vision bool
@@ -266,6 +269,8 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// REQ-LTC-040: max_steps is opt-in; 0 means no limit for root and child
 	// sessions alike.
 	maxSteps := cfg.MaxSteps
+	// REQ-TFB-008 item 6: max_tokens is opt-in; 0 means the provider default.
+	maxTokens := cfg.MaxTokens
 	// REQ-MDL-001: the session's reasoning_effort wins, else the agent's, else
 	// the catalog default for the resolved model, else the provider default ("").
 	effort := cfg.ReasoningEffort
@@ -340,6 +345,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		mcp:             mcpServers,
 		skills:          cfg.Skills,
 		maxSteps:        maxSteps,
+		maxTokens:       maxTokens,
 		child:           info.ParentSessionID != "",
 		vision:          vision,
 		workspaceOnly:   cfg.WorkspaceOnly,
@@ -933,6 +939,12 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 	toolCalls := 0
 	lastAssistantText := ""
 	guarded := false
+	// The empty truncated step guard state (REQ-TFB-008 item 5).
+	maxTokensGuarded := false
+	// lastStop is the stop reason of the last model step. A turn whose last
+	// step was cut off by the output limit ends as max_tokens rather than
+	// end_turn (REQ-TFB-008 item 5).
+	lastStop := ""
 	// toolCallTextNudges counts the malformed tool-call nudges done this turn
 	// (REQ-MEM-020); at most maxToolCallTextNudges per turn.
 	toolCallTextNudges := 0
@@ -1044,6 +1056,13 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				if toolCallTextNudges < maxToolCallTextNudges && looksLikeToolCallText(lastAssistantText) {
 					toolCallTextNudges++
 					claimedText = toolCallTextNote
+					runtimeNote = true
+				} else if !maxTokensGuarded && lastStop == "max_tokens" && lastAssistantText == "" {
+					// REQ-TFB-008 item 5: a step cut off by the output limit
+					// before any answer runs exactly one more step asking for a
+					// short answer.
+					maxTokensGuarded = true
+					claimedText = maxTokensNote
 					runtimeNote = true
 				} else if !guarded && toolCalls > 0 && lastAssistantText == "" {
 					// REQ-TFB-008 item 4: a turn that would end with end_turn
@@ -1277,6 +1296,13 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			reason = "error"
 			goto finished
 		}
+		// REQ-TFB-008 item 6: a hook that sets max_tokens wins; otherwise the
+		// agent's max_tokens is the budget of every step. 0 means the provider
+		// default.
+		maxTokens := resolved.maxTokens
+		if control.MaxTokens > 0 {
+			maxTokens = control.MaxTokens
+		}
 		// REQ-LTC-010: check for context pressure before every model call,
 		// including steps that only carry tool results. A failure is logged
 		// and the step continues.
@@ -1285,7 +1311,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				SessionID: rn.sessionID, TurnID: turnID, AgentName: resolved.name,
 				Provider: resolved.provider, Model: resolved.model,
 				Targets: resolved.chain, Requested: resolved.requested, System: prompt,
-				Tools: specs, MaxTokens: control.MaxTokens,
+				Tools: specs, MaxTokens: maxTokens,
 				ReasoningEffort: resolved.reasoningEffort, Trigger: "pressure",
 			}); cerr != nil {
 				slog.Warn("compaction failed", "session_id", rn.sessionID, "turn_id", turnID, "error", cerr)
@@ -1303,7 +1329,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			history = core.TextForImages(history)
 		}
 		req := core.ChatRequest{Model: resolved.model, System: prompt, Messages: history, Tools: specs}
-		req.MaxTokens = control.MaxTokens
+		req.MaxTokens = maxTokens
 		req.Temperature = control.Temperature
 		req.ReasoningEffort = resolved.reasoningEffort
 
@@ -1399,6 +1425,9 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 		// and the tool calls of the whole turn (REQ-TFB-008 item 4).
 		lastAssistantText = text
 		toolCalls += len(toolBlocks)
+		// The stop reason of the last step decides the turn end reason
+		// (REQ-TFB-008 item 5).
+		lastStop = stop
 
 		if len(toolBlocks) > 0 {
 			calls := make([]core.ToolCall, 0, len(toolBlocks))
@@ -1590,6 +1619,12 @@ finished:
 		} else {
 			reason = "max_steps"
 		}
+	} else if lastStop == "max_tokens" && reason == "end_turn" {
+		// REQ-TFB-008 item 5: when the final step was cut off by the output
+		// limit, the turn ends as max_tokens instead of end_turn. It is
+		// sticky: a later normal step overwrites lastStop, and a step-cap or
+		// loop-guard end keeps its own reason.
+		reason = "max_tokens"
 	}
 	end := core.TurnEnd{V: core.PayloadVersion, TurnID: turnID, Reason: reason, Error: payloadErr}
 	if err := writeTurnEnd(writeCtx, events, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
@@ -1756,7 +1791,7 @@ func containsString(list []string, name string) bool {
 // captureEligible reports whether a finished turn qualifies for a background
 // memory-capture pass (REQ-MEM-010).
 func captureEligible(reason string, child, ownerMessage bool, specs []core.ToolSpec, cfg core.AgentConfig) bool {
-	if reason != "end_turn" && reason != "max_steps" {
+	if reason != "end_turn" && reason != "max_steps" && reason != "max_tokens" {
 		return false
 	}
 	if child || !ownerMessage || !hasToolSpec(specs, "memory_write") {
@@ -1778,6 +1813,11 @@ func hasToolSpec(specs []core.ToolSpec, name string) bool {
 // emptyAnswerNote is the runtime note of the empty-answer guard (REQ-TFB-008
 // item 4). It is the user-role message of the one extra step.
 const emptyAnswerNote = "Tell the owner what you did, what failed, and what is still needed."
+
+// maxTokensNote is the runtime note of the empty truncated step guard
+// (REQ-TFB-008 item 5). It is the user-role message of the one extra step a
+// model step cut off by the output limit before any answer runs.
+const maxTokensNote = "Your last reply hit the output limit before any answer. Answer the owner now, briefly; keep reasoning short."
 
 // toolCallTextNote is the runtime note of the malformed tool-call nudge
 // (REQ-MEM-020). It is the user-role message of one extra step.
