@@ -174,11 +174,12 @@ func TestRuleViolationMessage(t *testing.T) {
 // router; providers may import router; nothing else may.
 func TestRouterRules(t *testing.T) {
 	ok := checkRules(map[string][]string{
-		"router":             {modulePath + "/core", modulePath + "/internal/models"},
-		"router/openaiproxy": {modulePath + "/router", modulePath + "/core"},
-		"providers/openai":   {modulePath + "/router", modulePath + "/core"},
-		"":                   {modulePath + "/router"},
-		"examples/router":    {modulePath + "/router", modulePath + "/providers/mock"},
+		"router":                {modulePath + "/core", modulePath + "/internal/models"},
+		"router/openaiproxy":    {modulePath + "/router", modulePath + "/core"},
+		"providers/openai":      {modulePath + "/router", modulePath + "/core"},
+		"providers/commandcode": {modulePath + "/router", modulePath + "/core"},
+		"":                      {modulePath + "/router"},
+		"examples/router":       {modulePath + "/router", modulePath + "/providers/mock"},
 	})
 	if len(ok) > 0 {
 		t.Fatalf("unexpected violations: %v", ok)

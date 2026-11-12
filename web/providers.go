@@ -34,11 +34,12 @@ var providerEnvRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // providerKinds are the kinds a provider form may save (API-RTR-001).
 var providerKinds = map[string]bool{
 	"openai": true, "deepseek": true, "openrouter": true, "anthropic": true, "openai_compat": true,
+	"commandcode":       true,
 	core.ClaudeCodeKind: true,
 }
 
 // providerKindsMessage is the error text for a kind outside providerKinds.
-const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, openai_compat, claude-code"
+const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, commandcode, openai_compat, claude-code"
 
 // claudeTestModel is the model of a Claude Code account test without one: the
 // cheapest alias.

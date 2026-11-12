@@ -197,6 +197,7 @@ export const KIND_PRESETS: KindPreset[] = [
   { value: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1" },
   { value: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com" },
   { value: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { value: "commandcode", label: "Command Code", baseUrl: "https://api.commandcode.ai" },
   { value: "openai_compat", label: "Custom (OpenAI-compatible)", baseUrl: "" },
 ];
 
