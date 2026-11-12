@@ -441,3 +441,36 @@ func TestWorkflowToolTestWaitsForTheRun(t *testing.T) {
 		t.Fatalf("output = %s", out.Output)
 	}
 }
+
+// guardianChatService is the editor fake whose session chat-1 is the
+// guardian chat of daily-tickets.
+type guardianChatService struct{ *editorWorkflowService }
+
+func (f *guardianChatService) AssistantWorkflow(_ context.Context, sessionID string) (workflow.Workflow, bool) {
+	if sessionID == "chat-1" {
+		return workflow.Workflow{ID: "daily-tickets"}, true
+	}
+	return workflow.Workflow{}, false
+}
+
+// Spec 51: edit from a workflow's own guardian chat would start a second
+// turn on the calling session and fail as busy, so it points the guardian at
+// workflow_builder instead.
+func TestWorkflowToolEditFromOwnGuardianChatPointsToBuilder(t *testing.T) {
+	svc := &guardianChatService{&editorWorkflowService{fakeWorkflowService: &fakeWorkflowService{
+		detail: workflow.Detail{Workflow: workflow.Workflow{ID: "daily-tickets", Version: 7}},
+	}}}
+	tool := NewWorkflow(svc)
+	in := json.RawMessage(`{"action":"edit","id":"daily-tickets","request":"fix grouping"}`)
+	out, err := tool.Call(context.Background(), core.ToolCtx{SessionID: "chat-1"}, in)
+	if err != nil || out.Status != core.ToolStatusError || !strings.Contains(out.Output, "workflow_builder") {
+		t.Fatalf("own chat edit: %v %+v", err, out)
+	}
+	if svc.assistID != "" {
+		t.Fatalf("assist ran from the guardian chat: %q", svc.assistID)
+	}
+	out, err = tool.Call(context.Background(), core.ToolCtx{SessionID: "web-1"}, in)
+	if err != nil || out.Status != core.ToolStatusSuccess || svc.assistID != "daily-tickets" {
+		t.Fatalf("main chat edit: %v %+v assist=%q", err, out, svc.assistID)
+	}
+}
