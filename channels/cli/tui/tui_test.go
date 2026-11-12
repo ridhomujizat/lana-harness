@@ -272,6 +272,14 @@ func (b *loopBackend) RunTurn(_ context.Context, sessionID, _ string) (TurnResul
 	return TurnResult{Text: "here is my report.", StopReason: "loop"}, nil
 }
 
+// maxTokensBackend ends its turn cut off by the model's output limit.
+type maxTokensBackend struct{ *fakeBackend }
+
+func (b *maxTokensBackend) RunTurn(_ context.Context, sessionID, _ string) (TurnResult, error) {
+	b.obs.Publish(core.LiveFrame{SessionID: sessionID, Kind: "text_delta", Text: "a partial answer"})
+	return TurnResult{Text: "a partial answer", StopReason: "max_tokens"}, nil
+}
+
 // REQ-LPG-010: a loop stop prints its own line, styled like the max_steps one.
 func TestLoopStopLine(t *testing.T) {
 	observer := core.NewObserve[core.LiveFrame]()
@@ -292,6 +300,40 @@ func TestLoopStopLine(t *testing.T) {
 		t.Fatalf("send input: %v", err)
 	}
 	waitFor(t, &out, "⚠ turn stopped: repeated a step without progress")
+	if _, err := writer.Write([]byte("/exit\r")); err != nil {
+		t.Fatalf("send exit: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("program did not finish")
+	}
+}
+
+// REQ-TFB-008 item 5: an output-limit cut prints its own warn line, like the
+// max_steps and loop ones.
+func TestMaxTokensStopLine(t *testing.T) {
+	observer := core.NewObserve[core.LiveFrame]()
+	backend := &maxTokensBackend{&fakeBackend{obs: observer}}
+	reader, writer := io.Pipe()
+	var out syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Options{
+			Backend: backend, Agent: "default", Model: "mock:mock", Policy: "ask",
+			SessionID: "S1", Cwd: "/tmp", Version: "test", Home: t.TempDir(),
+			In: reader, Out: &out,
+		})
+	}()
+	if _, err := writer.Write([]byte("hello\r")); err != nil {
+		t.Fatalf("send input: %v", err)
+	}
+	waitFor(t, &out, "⚠ reply cut off by the output token limit")
 	if _, err := writer.Write([]byte("/exit\r")); err != nil {
 		t.Fatalf("send exit: %v", err)
 	}

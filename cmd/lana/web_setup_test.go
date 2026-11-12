@@ -55,6 +55,9 @@ func newSetupFakeProvider(t *testing.T) (*httptest.Server, *setupFakeProvider) {
 	t.Helper()
 	fake := &setupFakeProvider{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		fake.mu.Lock()
 		fake.requests++
 		fake.auth = r.Header.Get("Authorization")

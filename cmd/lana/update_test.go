@@ -142,6 +142,9 @@ func newUpdateFixture(t *testing.T, current string, sumsFor []byte) *updateFixtu
 	}
 	asset := selfupdate.AssetName("linux", "amd64")
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/bin":
 			_, _ = w.Write(f.payload)
@@ -661,6 +664,9 @@ func TestUpdateCancelDownloading(t *testing.T) {
 	f := newUpdateFixture(t, "0.1.0-beta.1", nil)
 	release := make(chan struct{})
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		select {
 		case <-release:
 		case <-r.Context().Done():

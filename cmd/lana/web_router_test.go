@@ -390,6 +390,9 @@ func TestProviderTestUsesKindAdapter(t *testing.T) {
 	const key = "sk-ant-inline"
 	var path, apiKey string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		path, apiKey = r.URL.Path, r.Header.Get("x-api-key")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)

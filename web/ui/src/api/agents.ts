@@ -77,6 +77,7 @@ export interface AgentWriteFields {
   permission?: string;
   description?: string;
   max_steps?: number;
+  max_tokens?: number;
   context_window?: number;
   memory_capture?: boolean;
   workspace_only?: boolean;

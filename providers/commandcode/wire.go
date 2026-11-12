@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // maxTokensLimit is the ceiling /alpha/generate enforces on max_tokens; a
@@ -19,9 +20,12 @@ import (
 // commandCodeMaxTokensLimit).
 const maxTokensLimit = 200000
 
-// defaultMaxTokens is the budget of a request without one. The free tier
-// rejects larger budgets (9router-go commandcodeMaxTokens).
-const defaultMaxTokens = 1024
+// maxTokensDefault is the budget of a request without one, and of a model
+// outside the catalog. It matches the Command Code CLI default
+// (max_tokens: maxOutputTokens ?? 64000). A live probe on 2026-11-13
+// accepted 8192 and 32000 on /alpha/generate, so the old free-tier cap was
+// wrong.
+const maxTokensDefault = 64000
 
 // defaultTemperature is the temperature the CLI sends when the caller sets
 // none (9router-go buildCommandcodeBody).
@@ -114,7 +118,7 @@ func buildEnvelope(req core.ChatRequest, now time.Time) envelope {
 		Model:       req.Model,
 		Messages:    convertMessages(req.Messages),
 		Stream:      true,
-		MaxTokens:   clampMaxTokens(req.MaxTokens),
+		MaxTokens:   clampMaxTokens(req.MaxTokens, req.Model),
 		Temperature: defaultTemperature,
 		System:      req.System,
 	}
@@ -143,11 +147,18 @@ func buildEnvelope(req core.ChatRequest, now time.Time) envelope {
 	}
 }
 
-// clampMaxTokens returns the budget sent: the request's, else the default,
-// never above the provider ceiling.
-func clampMaxTokens(n int) int {
+// clampMaxTokens returns the budget sent: the request's, else the model's
+// catalog output limit, else the default, never above the provider ceiling.
+func clampMaxTokens(n int, model string) int {
 	if n <= 0 {
-		return defaultMaxTokens
+		m, ok := models.Lookup(model)
+		if !ok || m.MaxOutput <= 0 {
+			return maxTokensDefault
+		}
+		if m.MaxOutput > maxTokensLimit {
+			return maxTokensLimit
+		}
+		return m.MaxOutput
 	}
 	if n > maxTokensLimit {
 		return maxTokensLimit

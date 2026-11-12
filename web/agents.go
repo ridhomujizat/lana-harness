@@ -54,6 +54,7 @@ var agentKeys = map[string]bool{
 	"skills":               true,
 	"permission":           true,
 	"max_steps":            true,
+	"max_tokens":           true,
 	"context_window":       true,
 	"reasoning_effort":     true,
 	"compaction_headroom":  true,
@@ -232,6 +233,7 @@ type agentRecord struct {
 	Skills              []string
 	Permission          string
 	MaxSteps            int
+	MaxTokens           int
 	ContextWindow       int
 	ReasoningEffort     string
 	CompactionHeadroom  int
@@ -1119,6 +1121,18 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		}
 		record.MaxSteps = value
 		return nil
+	case "max_tokens":
+		var value int
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		// REQ-TFB-008 item 6: max_tokens is opt-in; 0 means the provider
+		// default.
+		if value < 0 {
+			return errors.New("max_tokens must be 0 or greater")
+		}
+		record.MaxTokens = value
+		return nil
 	case "context_window":
 		var value int
 		if err := json.Unmarshal(raw, &value); err != nil {
@@ -1347,6 +1361,8 @@ func clearAgentField(record *agentRecord, key string) {
 		record.Subagents = nil
 	case "max_steps":
 		record.MaxSteps = 0
+	case "max_tokens":
+		record.MaxTokens = 0
 	case "compaction_headroom":
 		record.CompactionHeadroom = 0
 	case "compaction_threshold":
@@ -1559,6 +1575,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		Skills:              mapAgentStrings(table, "skills"),
 		Permission:          mapAgentString(table, "permission"),
 		MaxSteps:            mapAgentInt(table, "max_steps"),
+		MaxTokens:           mapAgentInt(table, "max_tokens"),
 		ContextWindow:       mapAgentInt(table, "context_window"),
 		ReasoningEffort:     mapAgentString(table, "reasoning_effort"),
 		CompactionHeadroom:  mapAgentInt(table, "compaction_headroom"),
@@ -1665,6 +1682,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentStrings(&b, "skills", record.Skills)
 	writeAgentString(&b, "permission", record.Permission)
 	writeAgentInt(&b, "max_steps", record.MaxSteps)
+	writeAgentInt(&b, "max_tokens", record.MaxTokens)
 	writeAgentInt(&b, "context_window", record.ContextWindow)
 	writeAgentString(&b, "reasoning_effort", record.ReasoningEffort)
 	writeAgentInt(&b, "compaction_headroom", record.CompactionHeadroom)

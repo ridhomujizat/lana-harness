@@ -349,6 +349,8 @@ export function panelStatus({
       return { tone: "gray", text: "Stopped · " + total + " steps" };
     case "loop":
       return { tone: "gray", text: "Stopped · " + total + " steps" };
+    case "max_tokens":
+      return { tone: "gray", text: "Cut off · " + total + " steps" };
     default:
       return {
         tone: "success",

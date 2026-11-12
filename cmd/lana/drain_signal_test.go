@@ -43,6 +43,9 @@ func newGatedLLM(t *testing.T) *gatedLLM {
 	}
 	g := &gatedLLM{started: make(chan struct{}, 1), release: make(chan struct{})}
 	g.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		select {
 		case g.started <- struct{}{}:
 		default:
