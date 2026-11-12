@@ -406,7 +406,7 @@ describe("Older segments (AC-ROOM-003)", () => {
 });
 
 describe("Live turn (AC-ROOM-006)", () => {
-  it("shows the typing dots with the activity text while a turn runs", async () => {
+  it("shows the agent's avatar, the activity text and the clock while a turn runs", async () => {
     let handlers: StreamHandlers | null = null;
     vi.mocked(openStream).mockImplementation((_id, options) => {
       handlers = options || null;
@@ -428,8 +428,12 @@ describe("Live turn (AC-ROOM-006)", () => {
       handlers?.onFrame?.({ kind: "tool_call", name: "bash", call_id: "c1", turn_id: "t1" });
     });
 
-    expect(await screen.findByLabelText("Typing")).toBeTruthy();
-    expect(screen.getByText(/running bash/)).toBeTruthy();
+    expect(await screen.findByText(/running bash/)).toBeTruthy();
+    const row = document.querySelector(".room-live.room-live-agent");
+    /* An agent room shows the agent's avatar in place of the typing dots. */
+    expect(row?.querySelector(".av, .agent-avatar, .agent-face")).not.toBeNull();
+    expect(row?.querySelector(".typing-dots")).toBeNull();
+    expect(row?.querySelector(".room-live-time")?.textContent).toMatch(/s$/);
   });
 });
 

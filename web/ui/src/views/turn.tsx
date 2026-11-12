@@ -3,7 +3,7 @@ import { DiscussionCard } from "./discussion";
 import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AvatarMood } from "../lib/avatar-motion";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
@@ -809,11 +809,10 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
-  /* The room chat: the head avatar moves while the turn works, and the head
-     stays in view (lib/avatar-motion). Other views keep a still avatar. */
-  liveAvatar?: boolean;
-  /* The tool the room's live stream reports running, "" when none. */
-  liveTool?: string;
+  /* An agent room: the room header already shows the agent, so the turn head
+     drops its avatar, and while the turn works the room's live row carries
+     the moving avatar and the timer (room-timeline LiveRow). */
+  roomAgent?: boolean;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
   onContinue?: (() => void) | null;
@@ -855,34 +854,6 @@ export function turnMood(
   return "thinking";
 }
 
-/* turnMood plus the end of the turn as it is watched: a turn that finishes
-   while on screen hops once ("done") or shakes ("error"), then rests. A turn
-   loaded already finished just rests. */
-export function useTurnMood(
-  turn: Turn,
-  live: { waitingForInput?: boolean; thinking?: boolean; streaming?: boolean; tool?: boolean }
-): AvatarMood {
-  const running = Boolean(turn.running);
-  const wasRunning = useRef(running);
-  const [flash, setFlash] = useState<AvatarMood | null>(null);
-  const stopReason = String(turn.stopReason || "");
-  useEffect(() => {
-    const was = wasRunning.current;
-    wasRunning.current = running;
-    if (running || !was || stopReason === "cancelled") {
-      return undefined;
-    }
-    const end: AvatarMood = stopReason === "error" ? "error" : "done";
-    setFlash(end);
-    const timer = setTimeout(() => setFlash(null), end === "error" ? 4000 : 2600);
-    return () => clearTimeout(timer);
-  }, [running, stopReason]);
-  if (running) {
-    return turnMood(turn, live);
-  }
-  return flash || "rest";
-}
-
 export function TurnBlock({
   turn,
   agent,
@@ -898,8 +869,7 @@ export function TurnBlock({
   childLive = {},
   onLoadChildren = null,
   showStatusCard = false,
-  liveAvatar = false,
-  liveTool = "",
+  roomAgent = false,
   onContinue = null,
   continueBusy = false,
   continueError = "",
@@ -910,13 +880,6 @@ export function TurnBlock({
   const storedAvatar = useAgentAvatar(agent);
   const [now, setNow] = useState(() => Date.now());
   const [cardDismissed, setCardDismissed] = useState(false);
-  const turnMoodNow = useTurnMood(turn, {
-    waitingForInput,
-    thinking,
-    streaming: Boolean(streamingText),
-    tool: Boolean(liveTool),
-  });
-  const mood = liveAvatar && turnMoodNow !== "rest" ? turnMoodNow : undefined;
 
   useEffect(() => {
     if (!turn.running) {
@@ -973,15 +936,15 @@ export function TurnBlock({
   const shownAgent = agentLabel || agent;
 
   return (
-    <article className={mood ? "turn turn-live" : "turn"}>
+    <article className="turn">
       <div className="turn-head">
-        {agentColor || (storedAvatar && storedAvatar.svg) ? (
-          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} mood={mood} />
+        {roomAgent ? null : agentColor || (storedAvatar && storedAvatar.svg) ? (
+          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
         ) : (
-          <AgentAvatar name={agent || "agent"} size="auto" mood={mood} />
+          <AgentAvatar name={agent || "agent"} size="auto" />
         )}
         <span className="turn-agent">{shownAgent}</span>
-        <span className="turn-status">{statusText}</span>
+        {roomAgent && turn.running ? null : <span className="turn-status">{statusText}</span>}
         <span className="turn-spacer"></span>
         <span className="turn-time">{formatClock(startedAt)}</span>
       </div>

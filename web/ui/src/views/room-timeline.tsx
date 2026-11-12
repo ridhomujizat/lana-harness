@@ -57,7 +57,7 @@ import {
   useMentions,
 } from "./room-group";
 import { storedAttachments } from "./session";
-import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
+import { buildTurns, formatDuration, ReplyChip, TurnBlock, turnMood, UserBubble } from "./turn";
 import type { ChatTurn, ReplyTarget, ThreadItem } from "./turn";
 
 /* The room timeline of REQ-ROOM-002 to REQ-ROOM-005. It joins the room's
@@ -1296,6 +1296,13 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     }
   }
 
+  /* The live row's clock starts with the running turn, even when the page
+     opened mid-turn. */
+  const liveSince = nodes.reduce(
+    (at, node) => (node.kind === "turn" && node.turn.running ? Number(node.turn.startedAt) || at : at),
+    0
+  );
+
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1377,8 +1384,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 agentColor={room.color}
                 sessionId={node.sessionId}
                 onReply={setReplyTarget}
-                liveAvatar
-                liveTool={node.sessionId === newestId && node.turn.running ? liveTool : ""}
+                roomAgent
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1490,11 +1496,30 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
               <p className="room-older muted">Loading earlier messages…</p>
             ) : null}
             {turnRunning && !(team && liveChild) ? (
-              <div className="room-live" role="status">
-                <TypingDots />
+              <div className={"room-live" + (team ? "" : " room-live-agent")} role="status">
+                {team ? (
+                  <TypingDots />
+                ) : (
+                  <AgentAvatar
+                    name={room.name}
+                    color={gr8rColor(room.color)}
+                    size="md"
+                    aria-hidden="true"
+                    mood={turnMood(
+                      { running: true },
+                      {
+                        waitingForInput: Boolean(activeQuestion),
+                        thinking: liveThinking,
+                        streaming: Boolean(liveText),
+                        tool: Boolean(liveTool),
+                      }
+                    )}
+                  />
+                )}
                 <span className="room-live-text">
                   {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}
                 </span>
+                {team ? null : <LiveClock since={liveSince || liveStartedAt} />}
               </div>
             ) : null}
           </div>
@@ -1718,6 +1743,19 @@ function RoomEmpty({
 }
 
 /* The loading placeholders of REQ-ROOM-013, matching the room list. */
+/* The working time of the live turn, at the right end of the live row. */
+function LiveClock({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  if (!since) {
+    return null;
+  }
+  return <span className="room-live-time">{formatDuration(Math.max(0, now - since))}</span>;
+}
+
 function SkeletonHint() {
   return (
     <div className="room-skeleton" aria-hidden="true">
