@@ -430,9 +430,9 @@ describe("Live turn (AC-ROOM-006)", () => {
 
     expect(await screen.findByText(/running bash/)).toBeTruthy();
     const row = document.querySelector(".room-live.room-live-agent");
-    /* An agent room shows the agent's avatar in place of the typing dots. */
+    /* An agent room shows the agent's avatar before the typing dots. */
     expect(row?.querySelector(".av, .agent-avatar, .agent-face")).not.toBeNull();
-    expect(row?.querySelector(".typing-dots")).toBeNull();
+    expect(row?.querySelector(".typing-dots")).not.toBeNull();
     expect(row?.querySelector(".room-live-time")?.textContent).toMatch(/s$/);
   });
 });

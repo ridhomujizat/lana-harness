@@ -1497,9 +1497,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             ) : null}
             {turnRunning && !(team && liveChild) ? (
               <div className={"room-live" + (team ? "" : " room-live-agent")} role="status">
-                {team ? (
-                  <TypingDots />
-                ) : (
+                {team ? null : (
                   <AgentAvatar
                     name={room.name}
                     color={gr8rColor(room.color)}
@@ -1516,6 +1514,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                     )}
                   />
                 )}
+                <TypingDots />
                 <span className="room-live-text">
                   {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}
                 </span>
