@@ -2,10 +2,9 @@
    A generated avatar is rigged by lib/avatar-svg:
      svg.av-svg.has-eyes > g.av-squash > body + g.av-look > g.av-gaze > g.av-eye
    The host (.av, .agent-avatar or .agent-face) carries data-mood and --avpx,
-   its pixel size; MoodLayer adds the marks after the svg. Whole-face moods
-   animate the svg's `transform`; the hover squish and the click boop use the
-   separate `scale`, `translate` and `rotate` properties so they stack on top
-   of a mood instead of cutting it off. */
+   its pixel size; MoodLayer adds the marks after the svg. Only a working
+   turn's head avatar in the room chat carries a mood, so nothing else on the
+   page animates. */
 
 /* ---------------- rig ---------------- */
 
@@ -16,57 +15,11 @@
   transform-box: fill-box;
   transform-origin: 50% 100%;
 }
-.av-svg .av-look {
-  transition: transform 0.22s cubic-bezier(0.3, 0.7, 0.4, 1);
-}
 .av-svg .av-gaze,
 .av-svg .av-eye {
   transform-box: fill-box;
   transform-origin: 50% 50%;
   transition: transform 0.3s cubic-bezier(0.3, 0.7, 0.4, 1);
-}
-
-.av-svg.av-blink .av-eye {
-  animation: av-blink 0.17s ease-in-out;
-}
-@keyframes av-blink {
-  0%,
-  100% {
-    transform: scaleY(1);
-  }
-  50% {
-    transform: scaleY(0.08);
-  }
-}
-
-/* hover: a jelly squish, eyes open a little wider */
-.av-svg.av-poke {
-  animation: av-jelly 0.55s ease-out;
-}
-@keyframes av-jelly {
-  0% { scale: 1 1; }
-  25% { scale: 1.22 0.8; }
-  45% { scale: 0.88 1.14; }
-  65% { scale: 1.07 0.94; }
-  85% { scale: 0.99 1.01; }
-  100% { scale: 1 1; }
-}
-:is(.av, .agent-avatar, .agent-face):hover:not([data-mood='sleep'], [data-mood='done'], [data-mood='error'])
-  > .av-svg
-  .av-eye {
-  transform: scale(1.2);
-}
-
-/* click: a boop hop with a twist */
-.av-svg.av-boop {
-  animation: av-boop 0.6s cubic-bezier(0.3, 0.7, 0.4, 1);
-}
-@keyframes av-boop {
-  0% { translate: 0 0; rotate: 0deg; scale: 1 1; }
-  20% { translate: 0 4%; scale: 1.12 0.86; }
-  45% { translate: 0 -35%; rotate: -16deg; scale: 0.92 1.1; }
-  70% { translate: 0 0; rotate: 6deg; scale: 1.06 0.94; }
-  100% { translate: 0 0; rotate: 0deg; scale: 1 1; }
 }
 
 /* ---------------- hosts ---------------- */
@@ -375,7 +328,7 @@
 
 /* ---------------- reduced motion ---------------- */
 /* Moods stay readable from the eyes, the ring, the halo and the badge; nothing
-   travels. Blinks stay. lib/avatar-motion also stops the gaze, hover and boop. */
+   travels. */
 
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion='full']) [data-mood] > .av-svg,
@@ -384,9 +337,6 @@
   :root:not([data-motion='full']) [data-mood] > span * {
     animation: none !important;
     transition: none !important;
-  }
-  :root:not([data-motion='full']) [data-mood] > .av-svg.av-blink .av-eye {
-    animation: av-blink 0.17s ease-in-out !important;
   }
   :root:not([data-motion='full']) .av-halo {
     opacity: 0.3;
@@ -406,9 +356,6 @@
 :root[data-motion='reduce'] [data-mood] > span * {
   animation: none !important;
   transition: none !important;
-}
-:root[data-motion='reduce'] [data-mood] > .av-svg.av-blink .av-eye {
-  animation: av-blink 0.17s ease-in-out !important;
 }
 :root[data-motion='reduce'] .av-halo {
   opacity: 0.3;

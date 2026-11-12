@@ -471,7 +471,6 @@ function WorkingRow({
         color={gr8rColor(face ? face.color : undefined)}
         presence
         size="md"
-        mood="thinking"
       />
       <div className="group-msg-main">
         <span className="group-working-text">

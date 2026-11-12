@@ -1,6 +1,5 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { moodFromPresence } from "./avatar-motion";
 import { parseAvatarSvg } from "./avatar-svg";
 import { turnMood } from "../views/turn";
 import type { Turn, TurnStep } from "../views/turn";
@@ -94,16 +93,5 @@ describe("turnMood", () => {
     const answered: Turn = { running: true, groups: [{ kind: "text", key: "t", text: "Hi" }] };
     expect(turnMood(answered)).toBe("talk");
     expect(turnMood(answered, { thinking: true })).toBe("thinking");
-  });
-});
-
-describe("moodFromPresence", () => {
-  it("maps the room presence", () => {
-    expect(moodFromPresence("working")).toBe("thinking");
-    expect(moodFromPresence("waiting")).toBe("ask");
-    expect(moodFromPresence("problem")).toBe("error");
-    expect(moodFromPresence("online")).toBe("idle");
-    expect(moodFromPresence("resting")).toBe("rest");
-    expect(moodFromPresence(undefined)).toBe("rest");
   });
 });

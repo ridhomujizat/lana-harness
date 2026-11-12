@@ -2910,7 +2910,6 @@ export function SessionPage({ id, view }: SessionPageProps) {
                   onLoadChildren={loadChildEvents}
                   waitingForInput={waitingForInput}
                   showStatusCard={item.key === lastTurnKey && !turnRunning}
-                  latest={item.key === lastTurnKey}
                   onContinue={continueLastTurn}
                   continueBusy={continueBusy}
                   continueError={continueError}

@@ -45,7 +45,6 @@ import {
   useFileDrop,
 } from "./attachments";
 import { gr8rColor, PresenceLabel, TypingDots, useRooms } from "./presence";
-import { moodFromPresence } from "../lib/avatar-motion";
 import type { FaceRef } from "./presence";
 import { agentLabel, displayLabel } from "./agent-label";
 import { openQuestionFromEvents, QuestionCard } from "./question";
@@ -1297,11 +1296,6 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     }
   }
 
-  const lastTurnNodeKey = nodes.reduce(
-    (key, node) => (node.kind === "turn" ? node.key : key),
-    ""
-  );
-
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1383,7 +1377,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 agentColor={room.color}
                 sessionId={node.sessionId}
                 onReply={setReplyTarget}
-                latest={node.key === lastTurnNodeKey}
+                liveAvatar
                 waitingForInput={Boolean(activeQuestion)}
                 streamingText={
                   node.sessionId === newestId && node.turn.running ? liveText : ""
@@ -1421,7 +1415,6 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
             color={gr8rColor(room.color)}
             size="lg"
             presence={Boolean(room.presence)}
-            mood={moodFromPresence(room.presence ? room.presence.state : "")}
           />
         )}
         <div className="room-head-main">
@@ -1693,7 +1686,6 @@ function RoomEmpty({
           color={gr8rColor(room.color)}
           size="xl"
           presence={Boolean(room.presence)}
-          mood="idle"
         />
       )}
       <h2 className="room-empty-title">

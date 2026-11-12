@@ -809,9 +809,9 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
-  /* The newest agent turn of the chat: its avatar idles (breathes) instead of
-     resting, so the conversation's current face stays alive. */
-  latest?: boolean;
+  /* The room chat: the head avatar moves while the turn works, and the head
+     stays in view (lib/avatar-motion). Other views keep a still avatar. */
+  liveAvatar?: boolean;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
   onContinue?: (() => void) | null;
@@ -892,7 +892,7 @@ export function TurnBlock({
   childLive = {},
   onLoadChildren = null,
   showStatusCard = false,
-  latest = false,
+  liveAvatar = false,
   onContinue = null,
   continueBusy = false,
   continueError = "",
@@ -908,7 +908,7 @@ export function TurnBlock({
     thinking,
     streaming: Boolean(streamingText),
   });
-  const mood = turnMoodNow === "rest" && latest ? "idle" : turnMoodNow;
+  const mood = liveAvatar && turnMoodNow !== "rest" ? turnMoodNow : undefined;
 
   useEffect(() => {
     if (!turn.running) {
@@ -965,7 +965,7 @@ export function TurnBlock({
   const shownAgent = agentLabel || agent;
 
   return (
-    <article className={turn.running || turnMoodNow === "done" || turnMoodNow === "error" ? "turn turn-live" : "turn"}>
+    <article className={mood ? "turn turn-live" : "turn"}>
       <div className="turn-head">
         {agentColor || (storedAvatar && storedAvatar.svg) ? (
           <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} mood={mood} />

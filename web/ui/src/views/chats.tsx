@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoomRow } from "../api/rooms";
 import { gr8rColor, PresenceLabel, useRooms } from "./presence";
-import { moodFromPresence } from "../lib/avatar-motion";
 import { displayLabel } from "./agent-label";
 import { relativeShort, RoomView } from "./room-timeline";
 import {
@@ -84,7 +83,6 @@ function RowFace({ row, colors }: { row: RoomRow; colors: Record<string, string>
       color={gr8rColor(row.color)}
       size="lg"
       presence={Boolean(row.presence)}
-      mood={moodFromPresence(state)}
       className={"chat-coin" + (state ? " state-" + state : "")}
     />
   );

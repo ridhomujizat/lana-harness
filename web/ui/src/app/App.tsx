@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { startAvatarMotion } from "../lib/avatar-motion";
 import { authSession, logout as apiLogout } from "../api/auth";
 import { setCSRF, setUnauthorizedHandler } from "../api/client";
 import { daemonInfo as fetchDaemonInfo } from "../api/daemon";
@@ -375,11 +374,6 @@ export function App() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [mnav, setMnav] = useState(false);
   const [daemonInfo, setDaemonInfo] = useState<DaemonState | null>(null);
-
-  /* The shared avatar gaze, blinks and hover (lib/avatar-motion). */
-  useEffect(() => {
-    startAvatarMotion();
-  }, []);
 
   useEffect(() => {
     applyTheme(theme);

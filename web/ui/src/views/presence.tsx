@@ -3,7 +3,6 @@ import type { CSSProperties } from "react";
 import { listRooms, openRoomsStream } from "../api/rooms";
 import { agentCssColor, isHexColor, parseAvatarSvg } from "../lib/avatar-svg";
 import { useAgentAvatar } from "../lib/avatar-store";
-import { moodFromPresence } from "../lib/avatar-motion";
 import type { AvatarMood } from "../lib/avatar-motion";
 import { MoodLayer, moodHostProps } from "../ui/gr8r";
 import { AvatarImage, useAvatarImage } from "./agent-avatar";
@@ -81,7 +80,7 @@ export interface AgentFaceProps {
   size?: FaceSize;
   className?: string;
   style?: CSSProperties;
-  /* The motion mood (lib/avatar-motion); defaults to the presence's. */
+  /* The motion mood (lib/avatar-motion). */
   mood?: AvatarMood;
 }
 
@@ -107,7 +106,7 @@ export function AgentFace({
     ? { background: "transparent", color: gr8rColor(stored?.color || color) }
     : { background: face.bg, color: face.fg };
   const moving = shape
-    ? moodHostProps(mood || (presence ? moodFromPresence(state) : undefined), size)
+    ? moodHostProps(mood, size)
     : {};
   return (
     <span
