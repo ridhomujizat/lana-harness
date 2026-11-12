@@ -370,18 +370,31 @@
 }
 
 /* ---------------- room live row ---------------- */
-/* An agent room's working row: the moving avatar, what the agent does, and
-   the working time at the right end. */
+/* An agent room's working row: the moving avatar, the typing dots, then
+   "Bima is thinking (3s)…". */
 .room-live.room-live-agent {
-  gap: 12px;
+  gap: 10px;
   padding-left: 4px;
-}
-.room-live.room-live-agent .room-live-text {
-  flex: 1 1 auto;
-  min-width: 0;
+  min-height: 34px;
 }
 .room-live-time {
-  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- agent room turn foot ---------------- */
+/* Under a finished answer: Copy, then "03:34 (worked for 8s)". */
+.turn-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: -4px;
   color: var(--text-3);
+  font-size: var(--fs-xs, 12px);
+}
+.turn-foot .turn-copy {
+  margin-left: -6px;
+  color: var(--text-3);
+}
+.turn-foot-meta {
   font-variant-numeric: tabular-nums;
 }

@@ -433,7 +433,7 @@ describe("Live turn (AC-ROOM-006)", () => {
     /* An agent room shows the agent's avatar before the typing dots. */
     expect(row?.querySelector(".av, .agent-avatar, .agent-face")).not.toBeNull();
     expect(row?.querySelector(".typing-dots")).not.toBeNull();
-    expect(row?.querySelector(".room-live-time")?.textContent).toMatch(/s$/);
+    expect(row?.querySelector(".room-live-time")?.textContent).toMatch(/^ \(\d+s\)$/);
   });
 });
 

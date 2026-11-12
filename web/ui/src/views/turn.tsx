@@ -809,9 +809,10 @@ export interface TurnBlockProps {
   onLoadChildren?: ((requests: TeamChildRequest[]) => void) | null;
   /* REQ-TFB-004: the status card shows under the session's last turn only. */
   showStatusCard?: boolean;
-  /* An agent room: the room header already shows the agent, so the turn head
-     drops its avatar, and while the turn works the room's live row carries
-     the moving avatar and the timer (room-timeline LiveRow). */
+  /* An agent room: the room header already shows the agent, so the turn has
+     no head. While it works the room's live row carries the moving avatar and
+     the time; when done, a foot under the answer has Copy and
+     "03:34 (worked for 8s)". */
   roomAgent?: boolean;
   /* REQ-AGF-005: the session the turn belongs to, for sent-file URLs. */
   sessionId?: string;
@@ -937,17 +938,19 @@ export function TurnBlock({
 
   return (
     <article className="turn">
-      <div className="turn-head">
-        {roomAgent ? null : agentColor || (storedAvatar && storedAvatar.svg) ? (
-          <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
-        ) : (
-          <AgentAvatar name={agent || "agent"} size="auto" />
-        )}
-        <span className="turn-agent">{shownAgent}</span>
-        {roomAgent && turn.running ? null : <span className="turn-status">{statusText}</span>}
-        <span className="turn-spacer"></span>
-        <span className="turn-time">{formatClock(startedAt)}</span>
-      </div>
+      {roomAgent ? null : (
+        <div className="turn-head">
+          {agentColor || (storedAvatar && storedAvatar.svg) ? (
+            <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
+          ) : (
+            <AgentAvatar name={agent || "agent"} size="auto" />
+          )}
+          <span className="turn-agent">{shownAgent}</span>
+          <span className="turn-status">{statusText}</span>
+          <span className="turn-spacer"></span>
+          <span className="turn-time">{formatClock(startedAt)}</span>
+        </div>
+      )}
       <TurnProcess
         groups={parts.process}
         running={Boolean(turn.running)}
@@ -1021,6 +1024,13 @@ export function TurnBlock({
           <Markdown text={streamingText} />
         </div>
       ) : null}
+      {roomAgent && !turn.running ? (
+        <TurnFoot
+          text={parts.answer.map((segment) => segment.text || "").filter(Boolean).join("\n\n")}
+          at={formatClock(startedAt)}
+          status={statusText}
+        />
+      ) : null}
       {statusCard && !cardDismissed ? (
         <div className="card" role="status" aria-live="polite">
           <p>{statusCard.text}</p>
@@ -1052,6 +1062,42 @@ export function TurnBlock({
         </div>
       ) : null}
     </article>
+  );
+}
+
+/* The foot of a finished agent-room turn: copy the answer, then when it
+   started and how long it worked. */
+function TurnFoot({ text, at, status }: { text: string; at: string; status: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+  return (
+    <div className="turn-foot">
+      {text ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={copied ? "check" : "copy"}
+          className="turn-copy"
+          aria-label={copied ? "Copied" : "Copy reply"}
+          onClick={() => void copy()}
+        />
+      ) : null}
+      <span className="turn-foot-meta">{at + (status ? " (" + status + ")" : "")}</span>
+    </div>
   );
 }
 

@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { AvatarMood } from "../lib/avatar-motion";
 import { answerApproval } from "../api/approvals";
 import type { ApprovalEvent } from "../api/approvals";
 import { uploadAttachments } from "../api/attachments";
@@ -1303,6 +1304,30 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
     0
   );
 
+  /* When the live turn ends, the live row's avatar plays its end mood once
+     before the row goes (done hops twice in 1.8 s). */
+  const lastStopRef = useRef("");
+  lastStopRef.current = nodes.reduce(
+    (stop, node) => (node.kind === "turn" ? String(node.turn.stopReason || "") : stop),
+    ""
+  );
+  const wasRunningRef = useRef(turnRunning);
+  const [endMood, setEndMood] = useState<AvatarMood | null>(null);
+  useEffect(() => {
+    const was = wasRunningRef.current;
+    wasRunningRef.current = turnRunning;
+    if (turnRunning) {
+      setEndMood(null);
+      return undefined;
+    }
+    if (!was || lastStopRef.current === "cancelled") {
+      return undefined;
+    }
+    setEndMood(lastStopRef.current === "error" ? "error" : "done");
+    const timer = setTimeout(() => setEndMood(null), 1900);
+    return () => clearTimeout(timer);
+  }, [turnRunning]);
+
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1516,9 +1541,16 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
                 )}
                 <TypingDots />
                 <span className="room-live-text">
-                  {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity + "…"}
+                  {(liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room)) + " is " + activity}
+                  {team ? null : <LiveClock since={liveSince || liveStartedAt} />}
+                  {"…"}
                 </span>
-                {team ? null : <LiveClock since={liveSince || liveStartedAt} />}
+              </div>
+            ) : !team && endMood ? (
+              /* The turn just ended: the avatar plays done (or error) once,
+                 then the row goes. */
+              <div className="room-live room-live-agent" aria-hidden="true">
+                <AgentAvatar name={room.name} color={gr8rColor(room.color)} size="md" mood={endMood} />
               </div>
             ) : null}
           </div>
@@ -1742,7 +1774,7 @@ function RoomEmpty({
 }
 
 /* The loading placeholders of REQ-ROOM-013, matching the room list. */
-/* The working time of the live turn, at the right end of the live row. */
+/* The working time of the live turn, " (3s)" inside the live row's text. */
 function LiveClock({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1752,7 +1784,7 @@ function LiveClock({ since }: { since: number }) {
   if (!since) {
     return null;
   }
-  return <span className="room-live-time">{formatDuration(Math.max(0, now - since))}</span>;
+  return <span className="room-live-time">{" (" + formatDuration(Math.max(0, now - since)) + ")"}</span>;
 }
 
 function SkeletonHint() {
