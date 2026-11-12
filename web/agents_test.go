@@ -606,6 +606,65 @@ func TestAgentsMaxStepsRange(t *testing.T) {
 	}
 }
 
+// TestAgentsMaxTokensRange covers REQ-TFB-008 item 6: the agent save accepts
+// any max_tokens >= 0 (0 or absent means the provider default), clears the key
+// when it is 0, and rejects a negative value.
+func TestAgentsMaxTokensRange(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	save := func(t *testing.T, tokens int) (int, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := json.Marshal(map[string]any{
+			"expected_version": webfiles.ConfigVersion(raw),
+			"max_tokens":       tokens,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		return rr.Code, rr.Body.Bytes()
+	}
+
+	for _, tokens := range []int{1, 4096} {
+		code, body := save(t, tokens)
+		if code != http.StatusOK {
+			t.Fatalf("max_tokens=%d status = %d, body = %q", tokens, code, body)
+		}
+		tables := t016ReadAgentTables(t, store.path)
+		if got := agentRecordFromMap(tables["coder"]).MaxTokens; got != tokens {
+			t.Fatalf("saved max_tokens = %d, want %d", got, tokens)
+		}
+	}
+
+	// Clearing max_tokens drops the key from the table.
+	if code, body := save(t, 0); code != http.StatusOK {
+		t.Fatalf("max_tokens=0 status = %d, body = %q", code, body)
+	}
+	raw, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "max_tokens") {
+		t.Fatalf("max_tokens not cleared:\n%s", raw)
+	}
+
+	code, body := save(t, -1)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("max_tokens=-1 status = %d, body = %q", code, body)
+	}
+	envelope := decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("max_tokens=-1 error = %+v", envelope.Error)
+	}
+	if message, _ := envelope.Error.Details[0]["message"].(string); message != "max_tokens must be 0 or greater" {
+		t.Fatalf("max_tokens=-1 detail = %+v", envelope.Error.Details[0])
+	}
+}
+
 // TestAgentsMemoryCaptureRoundTrip covers the memory_capture field of
 // REQ-MEM-010: an absent key reads as true, and both values round-trip through
 // the agent save.

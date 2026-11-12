@@ -105,6 +105,23 @@ func TestLoopEndShowsContinue(t *testing.T) {
 	})
 }
 
+// REQ-TFB-008 item 5: an output-limit cut shows its reason line and a Continue
+// button.
+func TestMaxTokensEndShowsContinue(t *testing.T) {
+	api := newFakeAPI(t)
+	backend := newFakeBackend()
+	backend.turn = func(ctx context.Context, session, prompt string) (TurnResult, error) {
+		return TurnResult{StopReason: "max_tokens"}, nil
+	}
+	startChannel(t, api, backend)
+
+	api.text(ownerChat, "private", ownerID, "work")
+	api.waitCall("editMessageText", func(p map[string]any) bool {
+		text, _ := p["text"].(string)
+		return strings.Contains(text, "⚠ Reply cut off by the model") && continueButton(p, "S1")
+	})
+}
+
 // A refused press answers the callback with the refusal text (API-TFB-003).
 func TestContinueRefusedPressAnswersCallback(t *testing.T) {
 	api := newFakeAPI(t)

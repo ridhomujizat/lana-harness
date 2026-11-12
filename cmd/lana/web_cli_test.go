@@ -33,6 +33,9 @@ func TestWebResetLoginWithDaemonCoversACWLG011(t *testing.T) {
 
 	seen := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != web.LocalSignInPath {
 			http.NotFound(w, r)
 			return

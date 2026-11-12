@@ -277,6 +277,13 @@ describe("turnEndCard", () => {
     ).toBe("Stopped after the step limit (25 steps).");
   });
 
+  /* REQ-TFB-008 item 5: a reply cut off by the output-token cap gets a card. */
+  it("renders the reason for a max_tokens end", () => {
+    expect(turnEndCard({ stopReason: "max_tokens" })?.text).toBe(
+      "Reply cut off by the model's output limit."
+    );
+  });
+
   /* REQ-LPG-010: a loop end gets its own reason line. */
   it("renders the reason for a loop end", () => {
     expect(turnEndCard({ stopReason: "loop" })?.text).toBe(

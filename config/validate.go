@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "max_tokens", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -597,7 +597,7 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			}
 		}
 	}
-	for _, key := range []string{"max_steps", "context_window"} {
+	for _, key := range []string{"max_steps", "max_tokens", "context_window"} {
 		if val, ok := v[key]; ok {
 			n, isInt := asInt(val)
 			if !isInt {
@@ -608,6 +608,11 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			// no upper bound.
 			if key == "max_steps" && n < 0 {
 				add(path+"."+key, "must be 0 (no limit) or greater")
+			}
+			// REQ-TFB-008 item 6: max_tokens is opt-in; 0 means the provider
+			// default.
+			if key == "max_tokens" && n < 0 {
+				add(path+"."+key, "max_tokens must be 0 or greater")
 			}
 			if key == "context_window" && n <= 0 {
 				add(path+"."+key, "must be greater than 0")

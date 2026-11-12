@@ -355,6 +355,9 @@ export function turnEndCard(turn: Turn): TurnEndCard | null {
     text = "Stopped after the step limit (" + count + " steps).";
   } else if (reason === "loop") {
     text = "Stopped: lana kept repeating a step without progress.";
+  } else if (reason === "max_tokens") {
+    /* REQ-TFB-008 item 5: the final step hit the output-token cap. */
+    text = "Reply cut off by the model's output limit.";
   } else {
     return null;
   }

@@ -219,7 +219,7 @@ func (r *Registry) titleTurnEnd(reason string, child, owner bool, req core.Title
 	if r.titler == nil || child || !owner {
 		return
 	}
-	if reason != "end_turn" && reason != "max_steps" && reason != "loop" {
+	if reason != "end_turn" && reason != "max_steps" && reason != "max_tokens" && reason != "loop" {
 		return
 	}
 	r.titler.TurnEnded(req)

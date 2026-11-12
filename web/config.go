@@ -99,6 +99,7 @@ type ConfigAgent struct {
 	Skills        []string    `json:"skills,omitempty"`
 	Permission    string      `json:"permission,omitempty"`
 	MaxSteps      int         `json:"max_steps,omitempty"`
+	MaxTokens     int         `json:"max_tokens,omitempty"`
 	ContextWindow int         `json:"context_window,omitempty"`
 	Rules         ConfigRules `json:"rules"`
 	// ReasoningEffort and the runtime keys of a Claude Agent (API-CCR-001).

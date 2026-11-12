@@ -34,6 +34,9 @@ func TestProviderTestAdapterFakeServer(t *testing.T) {
 		Stream    bool   `json:"stream"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		requests.Add(1)
 		auth = r.Header.Get("Authorization")
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
@@ -83,6 +86,9 @@ func TestProviderTestAdapterFakeServer(t *testing.T) {
 	// error, with the provider status.
 	requests.Store(0)
 	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -138,6 +144,9 @@ func TestProviderTestEnvKey(t *testing.T) {
 	}
 	var auth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if skipModelList(w, r) {
+			return
+		}
 		auth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))

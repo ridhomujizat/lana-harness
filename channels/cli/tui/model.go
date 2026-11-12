@@ -942,6 +942,8 @@ func (m *Model) finishTurn(outcome turnOutcome) tea.Cmd {
 		cmds = append(cmds, tea.Println(styleMuted.Render("· turn cancelled")))
 	case outcome.result.StopReason == "max_steps":
 		cmds = append(cmds, tea.Println(styleWarn.Render("⚠ turn stopped due to max_steps")))
+	case outcome.result.StopReason == "max_tokens":
+		cmds = append(cmds, tea.Println(styleWarn.Render("⚠ reply cut off by the output token limit")))
 	case outcome.result.StopReason == "loop":
 		cmds = append(cmds, tea.Println(styleWarn.Render("⚠ turn stopped: repeated a step without progress")))
 	}

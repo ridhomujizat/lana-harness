@@ -300,6 +300,8 @@ export function stopReasonWords(reason: unknown): string {
       return "end of turn";
     case "max_steps":
       return "maximum steps reached";
+    case "max_tokens":
+      return "cut off by the output limit";
     case "loop":
       return "stopped: no progress";
     case "cancelled":

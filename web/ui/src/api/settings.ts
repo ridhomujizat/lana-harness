@@ -80,6 +80,7 @@ export interface ConfigAgent {
   skills?: string[];
   permission?: string;
   max_steps?: number;
+  max_tokens?: number;
   context_window?: number;
   memory_capture?: boolean;
   workspace_only?: boolean;

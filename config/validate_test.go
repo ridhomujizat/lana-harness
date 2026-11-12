@@ -155,6 +155,33 @@ func TestMaxStepsRange(t *testing.T) {
 	}
 }
 
+// REQ-TFB-008 item 6: max_tokens accepts 0 (the provider default) and any
+// positive value, and rejects a negative value.
+func TestMaxTokensRange(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\nmax_tokens = 4096\n")
+	if _, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)}); err != nil {
+		t.Fatalf("max_tokens = 4096 rejected: %v", err)
+	}
+
+	home = t.TempDir()
+	writeFile(t, filepath.Join(home, "config.toml"), "[agents.x]\nmax_tokens = -1\n")
+	_, err := Load(context.Background(), Options{Home: home, Env: envMap(nil)})
+	var errs Errors
+	if !errors.As(err, &errs) {
+		t.Fatalf("error is not Errors: %v", err)
+	}
+	found := false
+	for _, e := range errs {
+		if e.Key == "agents.x.max_tokens" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("negative max_tokens not rejected: %v", errs)
+	}
+}
+
 // REQ-LTC-030: a provider timeout that parses to <= 0 is rejected.
 func TestProviderTimeoutsRejectNonPositive(t *testing.T) {
 	home := t.TempDir()

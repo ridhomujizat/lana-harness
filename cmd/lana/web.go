@@ -1247,6 +1247,7 @@ func settingsFromConfig(cfg core.Config) web.ConfigSettings {
 			Skills:        append([]string(nil), agent.Skills...),
 			Permission:    agent.Permission,
 			MaxSteps:      agent.MaxSteps,
+			MaxTokens:     agent.MaxTokens,
 			ContextWindow: agent.ContextWindow,
 			Rules: web.ConfigRules{
 				Allow: append([]string(nil), agent.Rules.Allow...),

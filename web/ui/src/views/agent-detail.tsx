@@ -107,6 +107,7 @@ type GeneralKey =
   | "fallback"
   | "permission"
   | "max_steps"
+  | "max_tokens"
   | "context_window"
   | "memory_capture"
   | "workspace_only";
@@ -122,6 +123,7 @@ const GENERAL_KEYS: readonly GeneralKey[] = [
   "fallback",
   "permission",
   "max_steps",
+  "max_tokens",
   "context_window",
   "memory_capture",
   "workspace_only",
@@ -178,6 +180,7 @@ interface AgentValues {
   fallback: string[];
   permission: Permission;
   max_steps: number;
+  max_tokens: number;
   context_window: number;
   memory_capture: boolean;
   workspace_only: boolean;
@@ -194,6 +197,7 @@ interface AgentForm {
   fallback: string[];
   permission: Permission;
   max_steps: string;
+  max_tokens: string;
   context_window: string;
   memory_capture: boolean;
   workspace_only: boolean;
@@ -318,6 +322,7 @@ function initialValues(agent: Agent, configAgent: ConfigAgent): AgentValues {
       pickText(record.permission, agent.permission, agent.policy)
     ),
     max_steps: Number(record.max_steps) || 0,
+    max_tokens: Number(record.max_tokens) || 0,
     context_window: Number(record.context_window) || 0,
     // REQ-MEM-010: memory_capture is on unless the config says false.
     memory_capture: record.memory_capture !== false,
@@ -338,6 +343,7 @@ function formValues(initial: AgentValues): AgentForm {
     fallback: Array.isArray(initial.fallback) ? initial.fallback.slice() : [],
     permission: normalizePermission(initial.permission),
     max_steps: initial.max_steps ? String(initial.max_steps) : "",
+    max_tokens: initial.max_tokens ? String(initial.max_tokens) : "",
     context_window: initial.context_window ? String(initial.context_window) : "",
     memory_capture: initial.memory_capture !== false,
     workspace_only: initial.workspace_only === true,
@@ -356,6 +362,7 @@ function canonical(form: AgentForm): AgentValues {
     fallback: Array.isArray(form.fallback) ? form.fallback.slice() : [],
     permission: normalizePermission(form.permission),
     max_steps: numberValue(form.max_steps),
+    max_tokens: numberValue(form.max_tokens),
     context_window: numberValue(form.context_window),
     memory_capture: form.memory_capture === true,
     workspace_only: form.workspace_only === true,
@@ -396,6 +403,15 @@ function validateForm(form: AgentForm, baseline: AgentValues): string {
     const steps = Number(stepsText);
     if (!Number.isInteger(steps) || steps < 0) {
       return "Max steps per turn must be a whole number of 0 or more, or empty for no limit.";
+    }
+  }
+
+  /* REQ-TFB-008 item 6: an empty max_tokens keeps the provider default. */
+  const tokensText = String(form.max_tokens || "").trim();
+  if (tokensText !== "") {
+    const tokens = Number(tokensText);
+    if (!Number.isInteger(tokens) || tokens < 0) {
+      return "Max output tokens must be a whole number of 0 or more, or empty for the provider default.";
     }
   }
 
@@ -452,6 +468,8 @@ function patchFor(current: AgentValues, keys: GeneralKey[]): AgentWriteFields {
       patch.permission = current.permission;
     } else if (key === "max_steps") {
       patch.max_steps = current.max_steps;
+    } else if (key === "max_tokens") {
+      patch.max_tokens = current.max_tokens;
     } else if (key === "context_window") {
       patch.context_window = current.context_window;
     } else if (key === "memory_capture") {
@@ -1914,6 +1932,33 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     disabled={saving}
                     onChange={(event) =>
                       updateField("max_steps", event.target.value)
+                    }
+                  />
+                </div>
+              </div>
+              <div className="srow">
+                <div className="agent-srow-text">
+                  <label className="t" htmlFor="agent-max-tokens">
+                    Max output tokens
+                  </label>
+                  <div className="d">
+                    Per model reply, thinking included. Leave empty for the
+                    provider default.
+                  </div>
+                </div>
+                <div className="agent-ctl">
+                  <Input
+                    id="agent-max-tokens"
+                    className="agent-number-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputMode="numeric"
+                    value={form.max_tokens}
+                    placeholder="Default"
+                    disabled={saving}
+                    onChange={(event) =>
+                      updateField("max_tokens", event.target.value)
                     }
                   />
                 </div>

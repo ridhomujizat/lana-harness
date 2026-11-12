@@ -4,6 +4,7 @@ package models
 import (
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // PricesAsOf is the date the catalog prices were last checked. Prices go
@@ -77,6 +78,42 @@ var catalog = map[string]Model{
 		ID:            "deepseek-v4-flash",
 		Name:          "DeepSeek V4 Flash",
 		Description:   "Accepted alias of deepseek-flash.",
+		ContextWindow: 1048576,
+		MaxOutput:     384000,
+		Kind:          "deepseek",
+		Thinking:      "deepseek",
+		DefaultEffort: "high",
+		Vision:        true,
+	},
+	// REQ-MDL-010: the V4.1 flash line. The catalog carries their facts so a
+	// provider list is not needed for them; they are lookup-only, like the
+	// deepseek-v4-flash alias, so they stay out of the picker.
+	"deepseek-v4.1-flash": {
+		ID:            "deepseek-v4.1-flash",
+		Name:          "DeepSeek V4.1 Flash",
+		Description:   "Fast DeepSeek V4.1 model with thinking and a 1M-token context.",
+		ContextWindow: 1000000,
+		MaxOutput:     384000,
+		Kind:          "deepseek",
+		Thinking:      "deepseek",
+		DefaultEffort: "high",
+		Vision:        true,
+	},
+	"deepseek-v4.1-flash-fast": {
+		ID:            "deepseek-v4.1-flash-fast",
+		Name:          "DeepSeek V4.1 Flash Fast",
+		Description:   "Faster DeepSeek V4.1 Flash with thinking and a 1M-token context.",
+		ContextWindow: 1000000,
+		MaxOutput:     384000,
+		Kind:          "deepseek",
+		Thinking:      "deepseek",
+		DefaultEffort: "high",
+		Vision:        true,
+	},
+	"deepseek-v4.1-flash-ultrafast": {
+		ID:            "deepseek-v4.1-flash-ultrafast",
+		Name:          "DeepSeek V4.1 Flash UltraFast",
+		Description:   "The fastest DeepSeek V4.1 Flash with thinking and a 1M-token context.",
 		ContextWindow: 1048576,
 		MaxOutput:     384000,
 		Kind:          "deepseek",
@@ -327,12 +364,43 @@ var catalog = map[string]Model{
 	},
 }
 
+// fallbackMu guards fallback. The catalog is process-wide, so the fallback
+// is too: it is registered once by the daemon and read on every lookup.
+var (
+	fallbackMu sync.RWMutex
+	fallback   func(address string) (Model, bool)
+)
+
+// SetFallback registers fn to resolve the facts of a model the static
+// catalog does not know, for example from a provider's own model list
+// (REQ-MDL-010). Lookup tries the static catalog first and calls fn with its
+// original argument only on a miss, so the static catalog always wins and a
+// model it knows never pays for the fallback. A nil fn (the default)
+// restores the catalog-only behavior. It is safe for concurrent use.
+func SetFallback(fn func(address string) (Model, bool)) {
+	fallbackMu.Lock()
+	fallback = fn
+	fallbackMu.Unlock()
+}
+
+// lookupFallback calls the registered fallback, if any.
+func lookupFallback(address string) (Model, bool) {
+	fallbackMu.RLock()
+	fn := fallback
+	fallbackMu.RUnlock()
+	if fn == nil {
+		return Model{}, false
+	}
+	return fn(address)
+}
+
 // Lookup returns the catalog entry for a model. It accepts a bare model ID,
 // a model address "provider/model", and an OpenRouter-style "vendor/model"
 // ID: the prefix up to each "/" is dropped in turn until an entry matches.
 // OpenRouter's dotted Claude IDs ("claude-sonnet-4.6") also match the dashed
-// catalog ID. An unknown model returns false; callers keep their current
-// defaults.
+// catalog ID. A model the static catalog does not know is handed to the
+// registered fallback (REQ-MDL-010); without one, unknown returns false and
+// callers keep their current defaults.
 func Lookup(model string) (Model, bool) {
 	for candidate := model; candidate != ""; {
 		if entry, ok := catalog[candidate]; ok {
@@ -349,7 +417,7 @@ func Lookup(model string) (Model, bool) {
 		}
 		candidate = rest
 	}
-	return Model{}, false
+	return lookupFallback(model)
 }
 
 // deepseekPicker is the picker order of the DeepSeek models. The

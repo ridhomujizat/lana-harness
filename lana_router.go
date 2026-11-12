@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/routerdb"
 	"github.com/ridhomujizat/lana-harness/router"
 )
@@ -288,6 +289,25 @@ func (rt *Runtime) attachRouterStores() {
 	}
 	rt.router.AttachStores(rec, limits)
 	rt.loadClaudeCodeModels()
+	rt.wireModelFacts()
+}
+
+// wireModelFacts connects the router's cached provider model lists to the
+// static model catalog (REQ-MDL-010): a model the catalog does not know still
+// gets its real context window and max output from its provider's own list,
+// so compaction and the context meter no longer fall back to the default
+// window. It registers the router's CachedModel as the catalog fallback and
+// warms every configured provider's model list in the background so the first
+// lookup hits. Claude Code accounts are warming-free: they list nothing in
+// the router and their model list comes from the runtime. A live config
+// apply reuses this router (Apply swaps its snapshot), so one registration
+// covers reloads.
+func (rt *Runtime) wireModelFacts() {
+	if rt.router == nil {
+		return
+	}
+	models.SetFallback(rt.router.CachedModel)
+	rt.router.WarmModels(rt.ctx)
 }
 
 // closeRouterStores flushes the router's limit snapshots and the buffered

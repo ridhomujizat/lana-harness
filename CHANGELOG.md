@@ -7,6 +7,31 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.3] - 2026-11-13
+
+### Added
+- Agent setting `max_tokens` (config `[agents.<name>] max_tokens`, agent page "Max output
+  tokens"): the output budget of every model step of that agent. Empty or 0 keeps the provider
+  default.
+- Model facts fall back to the provider's own model list (cached by the router, warmed at
+  startup) when the built-in catalog does not know a model. The catalog also knows
+  `deepseek-v4.1-flash`, `-fast`, and `-ultrafast`.
+
+### Changed
+- The `commandcode` provider sends `max_tokens` 64000 (the Command Code CLI default), or the
+  model's catalog output limit, instead of 1024.
+
+### Fixed
+- A turn no longer ends silently with an empty reply when the model hits its output-token
+  limit. A step cut off before any answer gets one extra step; a turn whose last step was cut
+  off ends with reason `max_tokens` and shows "Reply cut off by the model's output limit." in
+  the web UI, Telegram (with Continue), and the terminal.
+- Agents on models outside the built-in catalog, such as `commandcode/deepseek/deepseek-v4.1-flash`,
+  no longer get the 128K default context window; the context meter and compaction use the
+  model's real window (1M).
+- The Chats list re-sorts on live updates, so a new or newly active chat moves to its place
+  instead of staying at the bottom.
+
 ## [0.5.0-beta.2] - 2026-11-12
 
 ### Added

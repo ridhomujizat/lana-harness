@@ -150,6 +150,7 @@ const OUTCOME_COLORS: Record<string, string> = {
   end_turn: "var(--green)",
   "": "var(--green)",
   max_steps: "var(--amber)",
+  max_tokens: "var(--amber)",
   loop: "var(--orange)",
   cancelled: "var(--gray)",
   error: "var(--red)",

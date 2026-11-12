@@ -38,6 +38,13 @@ func newSSEServer(t *testing.T, responses ...sseResponse) *sseServer {
 	t.Helper()
 	s := &sseServer{queue: responses, started: make(chan struct{})}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The router warms each provider's model list at boot: that GET is not
+		// a chat completion, so it neither consumes a scripted response nor
+		// counts as a call.
+		if isModelListRequest(r) {
+			writeEmptyModelList(w)
+			return
+		}
 		s.requests.Add(1)
 		s.once.Do(func() { close(s.started) })
 		s.mu.Lock()
@@ -65,6 +72,19 @@ func newSSEServer(t *testing.T, responses ...sseResponse) *sseServer {
 	}))
 	t.Cleanup(s.server.Close)
 	return s
+}
+
+// isModelListRequest reports whether r is a provider model-list request. The
+// router warms those in the background at boot (REQ-MDL-010); the scripted
+// test servers answer them without consuming a chat response or counting.
+func isModelListRequest(r *http.Request) bool {
+	return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models")
+}
+
+// writeEmptyModelList answers a model-list request with an empty list.
+func writeEmptyModelList(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"data":[]}`))
 }
 
 func textSSE(text string) string {
