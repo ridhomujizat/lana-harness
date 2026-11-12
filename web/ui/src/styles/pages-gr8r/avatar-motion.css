@@ -379,7 +379,7 @@
 
 /* ---------------- agent room turn foot ---------------- */
 /* One row in one place: the loading row while the turn works, then
-   "03:34 (worked for 8s)" with the done avatar and then Copy before it.
+   "worked for 8s - 03:34" with the done avatar and then Copy before it.
    Both shapes keep one height so the switch does not move the page. */
 .turn-foot {
   display: flex;

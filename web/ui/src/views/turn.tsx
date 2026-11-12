@@ -812,7 +812,7 @@ export interface TurnBlockProps {
   /* An agent room: the room header already shows the agent, so the turn has
      no head. While it works the room's live row carries the moving avatar and
      the time; when done, a foot under the answer has Copy and
-     "03:34 (worked for 8s)". */
+     "worked for 8s - 03:34". */
   roomAgent?: boolean;
   /* The room's live activity for this turn ("running bash"), "" when none. */
   liveActivity?: string;
@@ -1098,7 +1098,7 @@ export function TurnBlock({
 /* The foot of an agent-room turn, one row in one place: while the turn works
    it is the loading row (the moving avatar, typing dots, "Bima is thinking
    (3s)…"); when the turn ends the avatar plays done (or error) once beside
-   "03:34 (worked for 8s)", then Copy takes its place. */
+   "worked for 8s - 03:34", then Copy takes its place. */
 function TurnFoot({
   running,
   stopReason,
@@ -1174,7 +1174,7 @@ function TurnFoot({
           onClick={() => void copy()}
         />
       ) : null}
-      <span className="turn-foot-meta">{at + (status ? " (" + status + ")" : "")}</span>
+      <span className="turn-foot-meta">{status ? status + " - " + at : at}</span>
     </div>
   );
 }
