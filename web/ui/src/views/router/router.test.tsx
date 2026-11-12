@@ -1185,6 +1185,7 @@ describe("provider presets and logos", () => {
   it("matches compat entries by host and native entries by kind", () => {
     expect(presetFor({ name: "x", kind: "openai_compat", base_url: "https://api.x.ai/v1" })?.id).toBe("xai");
     expect(presetFor({ name: "x", kind: "anthropic" })?.id).toBe("anthropic");
+    expect(presetFor({ name: "cmc", kind: "commandcode" })?.id).toBe("commandcode");
     expect(presetFor({ name: "x", kind: "openai_compat", base_url: "http://127.0.0.1:9/v1" })).toBeUndefined();
   });
 

@@ -639,7 +639,30 @@ func (t *workflowTool) edit(ctx context.Context, tc core.ToolCtx, in workflowInp
 	if err != nil {
 		return errorOutput(err.Error())
 	}
+	if t.isOwnGuardianChat(ctx, tc.SessionID, detail.ID) {
+		return errorOutput(fmt.Sprintf("this is the guardian chat of workflow %s, and edit would run a second turn in this same chat (it fails as \"session is busy\"). Change it here with the workflow_builder tool: get, save the full new graph, test, then publish after the test passes.", detail.ID))
+	}
 	return t.assist(ctx, editor, detail.ID, detail.Version, in.Request)
+}
+
+// guardianChats is the optional part of the service that maps a session to
+// the workflow whose guardian chat it is (spec 51).
+type guardianChats interface {
+	AssistantWorkflow(ctx context.Context, sessionID string) (workflow.Workflow, bool)
+}
+
+var _ guardianChats = (*workflow.Service)(nil)
+
+// isOwnGuardianChat reports whether sessionID is the guardian chat of
+// workflow id. edit from there would start a turn on the calling session
+// itself, so the guardian must use workflow_builder instead.
+func (t *workflowTool) isOwnGuardianChat(ctx context.Context, sessionID, id string) bool {
+	chats, ok := t.svc.(guardianChats)
+	if !ok || sessionID == "" {
+		return false
+	}
+	wf, ok := chats.AssistantWorkflow(ctx, sessionID)
+	return ok && wf.ID == id
 }
 
 // assist runs one guardian assistant turn and reports what changed.

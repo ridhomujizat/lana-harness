@@ -7,6 +7,22 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.2] - 2026-11-12
+
+### Added
+- Router provider kind `commandcode` (Command Code, commandcode.ai), ported from 9router-go. It
+  speaks the command-code CLI wire (`POST /alpha/generate`, NDJSON events) with text, reasoning,
+  tool calls, images, and usage with cache reads; the model list comes from
+  `/provider/v1/models`. The key is `COMMANDCODE_API_KEY` (or `api_key_env`), pasted on the new
+  Command Code card of Router → Providers. Address models as `commandcode/<model>`, e.g.
+  `commandcode/deepseek/deepseek-v4-flash`.
+
+### Fixed
+- In a workflow's own guardian chat, asking to change the workflow no longer fails with
+  "guardian unavailable: session is busy". The `workflow` tool's `edit` action started a second turn
+  on that same chat; it now refuses there and points the guardian at `workflow_builder` (save, test,
+  publish), and the guardian guide says so too.
+
 ## [0.5.0-beta.1] - 2026-11-12
 
 ### Added

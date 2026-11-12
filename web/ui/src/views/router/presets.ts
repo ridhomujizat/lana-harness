@@ -2,7 +2,8 @@
    Providers revision 2). A preset is a card that is always shown; each
    [providers.<name>] entry is one connection of the card it matches:
 
-   - a native kind (openai, anthropic, deepseek, openrouter) matches by kind;
+   - a native kind (openai, anthropic, deepseek, openrouter, commandcode)
+     matches by kind;
    - an openai_compat entry matches the preset whose base URL host it uses
      (Gemini, Grok, Groq, …, and the native presets' own hosts);
    - any other openai_compat entry is a custom "compatible" provider. */
@@ -28,7 +29,7 @@ export interface ProviderPreset {
   blurb: string;
 }
 
-export const NATIVE_KINDS = ["openai", "anthropic", "deepseek", "openrouter"];
+export const NATIVE_KINDS = ["openai", "anthropic", "deepseek", "openrouter", "commandcode"];
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
@@ -74,6 +75,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keysUrl: "https://openrouter.ai/settings/keys",
     testModel: "openai/gpt-5-mini",
     blurb: "Hundreds of models from many labs behind one key.",
+  },
+  {
+    id: "commandcode",
+    label: "Command Code",
+    kind: "commandcode",
+    baseUrl: "https://api.commandcode.ai",
+    keyEnv: "COMMANDCODE_API_KEY",
+    /* No vendored logo: the card shows a monogram. */
+    logo: "commandcode",
+    keysUrl: "https://commandcode.ai",
+    testModel: "deepseek/deepseek-v4-flash",
+    blurb: "DeepSeek, Kimi, GLM, Qwen, and more through a Command Code key (cmd login).",
   },
   {
     id: "gemini",

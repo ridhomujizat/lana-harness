@@ -69,7 +69,7 @@ var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module
 var webKeys = []string{"addr", "enabled", "open_browser"}
 
 // providerKinds are the accepted providers.<name>.kind values (API-RTR-001).
-var providerKinds = []string{"anthropic", core.ClaudeCodeKind, "deepseek", "openai", "openai_compat", "openrouter"}
+var providerKinds = []string{"anthropic", core.ClaudeCodeKind, "commandcode", "deepseek", "openai", "openai_compat", "openrouter"}
 
 // embeddingKinds are the provider kinds that can serve knowledge embeddings
 // (REQ-RTR-007).

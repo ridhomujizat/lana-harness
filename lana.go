@@ -40,6 +40,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/workflow"
 	_ "github.com/ridhomujizat/lana-harness/mcp"
 	_ "github.com/ridhomujizat/lana-harness/providers/anthropic"
+	_ "github.com/ridhomujizat/lana-harness/providers/commandcode"
 	_ "github.com/ridhomujizat/lana-harness/providers/openai"
 	"github.com/ridhomujizat/lana-harness/router"
 	"github.com/ridhomujizat/lana-harness/runtime/mcphost"

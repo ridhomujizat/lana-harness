@@ -57,6 +57,7 @@ func BuildAssistantGuide(w Workflow, g Graph, env AssistEnv, last *RunDetail, ca
 
 	b.WriteString("How to work in this chat:\n")
 	b.WriteString("- Change the workflow only with the workflow_builder tool. The canvas shows the current version; a saved candidate is not live until you publish it.\n")
+	b.WriteString("- Do not use the workflow tool's edit action for this workflow: it would start a second turn in this same chat and fail as \"session is busy\".\n")
 	b.WriteString("- For every change: (1) workflow_builder save with the full new graph and a one-line summary, and fix any issues it returns; (2) workflow_builder test, with an input object when the trigger needs one, and read every node's status, output and error; (3) when a node failed or the output is not what the owner wants, fix the graph, save and test again; (4) publish only after a test passed, then tell the owner what changed and what the test produced.\n")
 	b.WriteString("- Never say it works unless a test in this chat passed. When you cannot test (a trigger needs real outside data you do not have), say so plainly.\n")
 	b.WriteString("- Before a test that does something real outside lana that the owner may not want (messages other people, posts publicly, buys, deletes, writes to an outside system), ask with ask_user first, for example: test now / publish without testing / change it first. Messages only to the owner are fine.\n")

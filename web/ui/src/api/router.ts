@@ -15,6 +15,7 @@ export type ProviderKind =
   | "deepseek"
   | "anthropic"
   | "openrouter"
+  | "commandcode"
   | "openai_compat";
 
 export interface ProviderRow {
