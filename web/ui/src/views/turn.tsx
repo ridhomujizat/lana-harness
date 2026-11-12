@@ -965,7 +965,7 @@ export function TurnBlock({
   const shownAgent = agentLabel || agent;
 
   return (
-    <article className="turn">
+    <article className={turn.running || turnMoodNow === "done" || turnMoodNow === "error" ? "turn turn-live" : "turn"}>
       <div className="turn-head">
         {agentColor || (storedAvatar && storedAvatar.svg) ? (
           <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} mood={mood} />

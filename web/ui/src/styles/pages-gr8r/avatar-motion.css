@@ -421,3 +421,16 @@
 :root[data-motion='reduce'] .av-spark {
   display: none;
 }
+
+/* ---------------- live turn head ---------------- */
+/* A running turn keeps its head (the moving avatar and "working for…") in
+   view while a long answer streams below it, so one avatar shows the mood
+   the whole time. */
+.room-timeline .turn.turn-live > .turn-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: -8px calc(var(--gutter) * -1) 0;
+  padding: 8px var(--gutter);
+  background: var(--surface);
+}
