@@ -24,7 +24,7 @@ const (
 	compilePartRunes      = 24000
 	compileMaxParts       = 8
 	compileMaxOps         = 12
-	compileMaxTokens      = 8192
+	compileMaxTokens      = 16384
 	compileCallTimeout    = 180 * time.Second
 	compileCatalogMax     = 400
 	compileRelatedMax     = 8
@@ -70,6 +70,22 @@ type compiledOp struct {
 	Text        string   `json:"text"`
 	OldText     string   `json:"old_text"`
 	NewText     string   `json:"new_text"`
+	Content     string   `json:"content"`
+	Markdown    string   `json:"markdown"`
+}
+
+// foldBody moves a page body the model gave under the alias key "content" or
+// "markdown" into Body when neither "body" nor "text" is set (REQ-KBG-053).
+func (op *compiledOp) foldBody() {
+	if strings.TrimSpace(op.Body) != "" || strings.TrimSpace(op.Text) != "" {
+		return
+	}
+	switch {
+	case strings.TrimSpace(op.Content) != "":
+		op.Body = op.Content
+	case strings.TrimSpace(op.Markdown) != "":
+		op.Body = op.Markdown
+	}
 }
 
 // compileInput is one compile request: the text to compile, the wikilink the
@@ -283,6 +299,11 @@ func (s *Service) finishSource(idx *kv.Index, st kv.SourceState, ops []core.Know
 // compilePart makes one provider call for a part of the source and returns its
 // reply text and usage (design §5 step 3).
 func (s *Service) compilePart(ctx context.Context, vault *kv.Vault, idx *kv.Index, call agentCall, in compileInput, part, total int, text string) (string, core.Usage, error) {
+	// REQ-KBG-032: a compile is not cancelled midway; it waits for the quiet
+	// window before its model call.
+	if err := s.act.waitQuiet(ctx); err != nil {
+		return "", core.Usage{}, err
+	}
 	callCtx, cancel := context.WithTimeout(ctx, compileCallTimeout)
 	defer cancel()
 	instruction := s.compileInstruction(callCtx, vault, idx, in, part, total, text)
@@ -291,7 +312,8 @@ func (s *Service) compilePart(ctx context.Context, vault *kv.Vault, idx *kv.Inde
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: instruction},
 		}}},
-		MaxTokens: compileMaxTokens,
+		MaxTokens:       compileMaxTokens,
+		ReasoningEffort: "off",
 	})
 	if err != nil {
 		return "", core.Usage{}, err
@@ -382,6 +404,7 @@ func (s *Service) relatedPagesIn(ctx context.Context, vault *kv.Vault, idx *kv.I
 // compile actor and merges the source wikilink into create and append ops
 // (design §5 step 5).
 func (s *Service) applyCompiledOp(vault *kv.Vault, in compileInput, op compiledOp) (kv.Result, error) {
+	op.Title = kv.CleanTitle(op.Title)
 	if strings.TrimSpace(op.Op) == "" || strings.TrimSpace(op.Title) == "" {
 		return kv.Result{}, errors.New("operation is missing op or title")
 	}
@@ -552,16 +575,16 @@ func splitParagraphs(text string) []string {
 	return out
 }
 
-// parseCompiledOps strips a ```json fence and parses the reply as a JSON array
-// of operations, skipping an element whose shape does not decode so one bad
-// operation does not drop the whole reply (design §5 step 4).
+// parseCompiledOps parses the reply as a JSON array of operations, tolerating a
+// ```json fence and prose around the value, and skipping an element whose shape
+// does not decode so one bad operation does not drop the whole reply. An empty
+// reply fails (REQ-KBG-004, design §5 step 4).
 func parseCompiledOps(text string) ([]compiledOp, error) {
-	trimmed := stripFence(strings.TrimSpace(text))
-	if !strings.HasPrefix(trimmed, "[") {
-		return nil, errors.New("compile reply is not a JSON array")
+	if strings.TrimSpace(text) == "" {
+		return nil, errors.New("empty reply")
 	}
 	var raw []json.RawMessage
-	if err := decodeLLMJSON(trimmed, &raw); err != nil {
+	if err := decodeLLMJSON(text, &raw); err != nil {
 		return nil, err
 	}
 	var ops []compiledOp
@@ -571,6 +594,7 @@ func parseCompiledOps(text string) ([]compiledOp, error) {
 			slog.Debug("knowledge compile: op skipped: malformed JSON", "error", err)
 			continue
 		}
+		op.foldBody()
 		ops = append(ops, op)
 	}
 	return ops, nil

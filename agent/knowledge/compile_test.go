@@ -25,6 +25,23 @@ func TestParseCompiledOpsRejectsInvalid(t *testing.T) {
 	}
 }
 
+// REQ-KBG-004: parseCompiledOps tolerates a fence and prose around the array,
+// and rejects an empty reply.
+func TestParseCompiledOpsToleratesProse(t *testing.T) {
+	for _, reply := range []string{
+		"```json\n[{\"op\":\"create\",\"title\":\"A\"}]\n```",
+		`Here are the ops: [{"op":"create","title":"A"}]`,
+	} {
+		ops, err := parseCompiledOps(reply)
+		if err != nil || len(ops) != 1 || ops[0].Title != "A" {
+			t.Fatalf("parseCompiledOps(%q) = %+v, %v", reply, ops, err)
+		}
+	}
+	if _, err := parseCompiledOps(""); err == nil || err.Error() != "empty reply" {
+		t.Fatalf("empty reply error = %v, want empty reply", err)
+	}
+}
+
 // REQ-KNW-022: at most compileMaxParts parts are compiled; the source is cut.
 func TestSplitPartsCapsAtEight(t *testing.T) {
 	big := strings.Repeat("x", compilePartRunes)

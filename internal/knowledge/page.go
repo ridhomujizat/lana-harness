@@ -44,7 +44,32 @@ const titleMax = 120
 // forbiddenTitleChars must not appear in a title (REQ-KNW-013).
 const forbiddenTitleChars = `/\:*?"<>|#^[]`
 
+// titleSpaceRuns and titleDashRuns collapse the runs CleanTitle may produce
+// (REQ-KBG-051).
+var (
+	titleSpaceRuns = regexp.MustCompile(`\s+`)
+	titleDashRuns  = regexp.MustCompile(`-+`)
+)
+
 var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// CleanTitle turns a model-supplied title into a legal page title
+// (REQ-KBG-051): every forbidden character becomes "-", runs of whitespace and
+// of "-" collapse to one space and one "-", and the result keeps no outer space
+// or "-". "UI SDK (vercel-labs/ui)" becomes "UI SDK (vercel-labs-ui)".
+func CleanTitle(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if strings.ContainsRune(forbiddenTitleChars, r) {
+			return '-'
+		}
+		return r
+	}, s)
+	s = titleSpaceRuns.ReplaceAllString(s, " ")
+	s = titleDashRuns.ReplaceAllString(s, "-")
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "-")
+	return strings.TrimSpace(s)
+}
 
 // ParsePage splits path's text into frontmatter and body. A missing or invalid
 // frontmatter block yields empty meta and the whole file as body, so
