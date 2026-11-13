@@ -7,6 +7,32 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.5] - 2026-11-14
+
+### Changed
+- Knowledge journals are written in the background right after the work, not only at the
+  nightly run: two minutes after the last turn ends, the next upkeep tick journals one
+  session, at most once per 30 minutes per session. When a new turn starts, a running
+  journal pass is cancelled and queued again, so it never slows a reply.
+- The nightly consolidation still runs at `consolidate_at`. When the laptop was off at that
+  time, the catch-up now waits until no turn has run for two minutes.
+- Knowledge calls (journal, compile, promotion, lint) turn the model's thinking off and get
+  larger output budgets. The commandcode provider now sends `reasoning_effort: "off"`.
+- The consolidation log counts only journals that were written, and lists failed and
+  preempted sessions separately. `GET /v1/knowledge` reports `journal_failed`.
+
+### Fixed
+- Journal passes on `commandcode/deepseek-v4.1-flash` failed with `journal reply is not a JSON
+  object` or `unexpected end of JSON input`: the model spent the 2048-token budget on
+  reasoning. The same applied to source compiles at 8192 tokens.
+- Journal and compile replies with text around the JSON value are accepted.
+- Domain promotion retries an op once in the other scope when the page lives there (it
+  failed with `page not found` for pages in the shared wiki).
+- Page titles with characters such as `/` are cleaned (`vercel-labs/ui` becomes
+  `vercel-labs-ui`) instead of being dropped.
+- Promotion creates are no longer skipped as `invalid: empty page`: the prompt shows a full
+  create example, and `content` or `markdown` count as the page body.
+
 ## [0.5.0-beta.4] - 2026-11-13
 
 ### Added
