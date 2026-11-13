@@ -24,7 +24,7 @@ import (
 const (
 	domainMemoryTrigger      = 6000
 	domainMaxOps             = 12
-	domainMaxTokens          = 8192
+	domainMaxTokens          = 16384
 	domainCallTimeout        = 180 * time.Second
 	domainCatalogMax         = 400
 	domainRelatedRunes       = 6000
@@ -439,7 +439,8 @@ func (s *Service) domainPart(ctx context.Context, call agentCall, instruction st
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: instruction},
 		}}},
-		MaxTokens: domainMaxTokens,
+		MaxTokens:       domainMaxTokens,
+		ReasoningEffort: "off",
 	})
 	if err != nil {
 		return "", err

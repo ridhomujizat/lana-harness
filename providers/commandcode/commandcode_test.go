@@ -210,6 +210,26 @@ func TestStreamDefaults(t *testing.T) {
 	}
 }
 
+// AC-KBG-001 (REQ-KBG-001): effort "off" serialises as reasoning_effort "off",
+// while "" omits the field entirely.
+func TestBuildEnvelopeReasoningEffort(t *testing.T) {
+	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	off := buildEnvelope(core.ChatRequest{Model: "m", ReasoningEffort: "off", Messages: []core.Message{userText("hi")}}, now)
+	if off.Params.ReasoningEffort != "off" {
+		t.Fatalf("ReasoningEffort = %q, want off", off.Params.ReasoningEffort)
+	}
+	data, _ := json.Marshal(off)
+	if !strings.Contains(string(data), `"reasoning_effort":"off"`) {
+		t.Errorf("off body = %s", data)
+	}
+
+	none := buildEnvelope(core.ChatRequest{Model: "m", Messages: []core.Message{userText("hi")}}, now)
+	data, _ = json.Marshal(none)
+	if strings.Contains(string(data), "reasoning_effort") {
+		t.Errorf("empty effort body = %s", data)
+	}
+}
+
 func TestClampMaxTokens(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -374,15 +374,42 @@ func TestJournalNotesFiltering(t *testing.T) {
 	}
 }
 
-// design §4: parseJournalNotes strips a fence and rejects a non-JSON reply.
+// AC-KBG-003 (REQ-KBG-004): parseJournalNotes strips a fence, tolerates prose
+// around the JSON value, and rejects an empty reply.
 func TestParseJournalNotes(t *testing.T) {
-	notes, err := parseJournalNotes("```json\n{\"notes\": [\"a\"]}\n```")
-	if err != nil || len(notes) != 1 || notes[0] != "a" {
-		t.Fatalf("notes = %v err = %v", notes, err)
+	for _, reply := range []string{
+		"```json\n{\"notes\": [\"a\"]}\n```",
+		`Here you go: {"notes": ["a"]}`,
+	} {
+		notes, err := parseJournalNotes(reply)
+		if err != nil || len(notes) != 1 || notes[0] != "a" {
+			t.Fatalf("parseJournalNotes(%q) = %v, %v", reply, notes, err)
+		}
+	}
+	if _, err := parseJournalNotes(""); err == nil || err.Error() != "empty reply" {
+		t.Fatalf("empty reply error = %v, want empty reply", err)
 	}
 	for _, reply := range []string{"not json", `["a"]`, `{"notes": }`} {
 		if _, err := parseJournalNotes(reply); err == nil {
 			t.Fatalf("parseJournalNotes(%q) accepted an invalid reply", reply)
 		}
+	}
+}
+
+// AC-KBG-002 (REQ-KBG-002, -003): a journal pass turns thinking off and uses the
+// larger output budget.
+func TestJournalRequestReasoningOff(t *testing.T) {
+	provider := &fakeProvider{text: `{"notes": ["a note"]}`}
+	env := newJournalEnv(t, provider, core.KnowledgeConfig{})
+	env.store.setRows(twoTurnRows(env.info, time.Now()))
+
+	env.svc.journalSession(context.Background(), env.info)
+
+	recorded := provider.recorded()
+	if len(recorded) != 1 {
+		t.Fatalf("provider calls = %d, want 1", len(recorded))
+	}
+	if req := recorded[0]; req.ReasoningEffort != "off" || req.MaxTokens != journalMaxTokens {
+		t.Fatalf("request effort = %q max = %d, want off/%d", req.ReasoningEffort, req.MaxTokens, journalMaxTokens)
 	}
 }

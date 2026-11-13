@@ -20,7 +20,7 @@ const (
 	journalMaxRunes    = 40000
 	journalMaxNotes    = 12
 	journalNoteRunes   = 500
-	journalMaxTokens   = 2048
+	journalMaxTokens   = 8192
 	journalCallTimeout = 120 * time.Second
 )
 
@@ -135,7 +135,8 @@ func (s *Service) journalRequest(ctx context.Context, info core.SessionInfo, age
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: journalExcerpt(rows)},
 		}}},
-		MaxTokens: journalMaxTokens,
+		MaxTokens:       journalMaxTokens,
+		ReasoningEffort: "off",
 	})
 	if err != nil {
 		return "", err
@@ -239,15 +240,15 @@ func hasOwnerRow(rows []core.TextRow) bool {
 	return false
 }
 
-// parseJournalNotes strips a code fence and parses the reply as
-// {"notes": [...]} (design §4).
+// parseJournalNotes parses the reply as {"notes": [...]}. It tolerates a code
+// fence and prose around the JSON value; an empty reply fails (REQ-KBG-004,
+// design §4).
 func parseJournalNotes(text string) ([]string, error) {
-	trimmed := stripFence(strings.TrimSpace(text))
-	if !strings.HasPrefix(trimmed, "{") {
-		return nil, errors.New("journal reply is not a JSON object")
+	if strings.TrimSpace(text) == "" {
+		return nil, errors.New("empty reply")
 	}
 	var reply journalReply
-	if err := decodeLLMJSON(trimmed, &reply); err != nil {
+	if err := decodeLLMJSON(text, &reply); err != nil {
 		return nil, err
 	}
 	return reply.Notes, nil

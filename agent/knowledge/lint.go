@@ -27,7 +27,7 @@ const (
 	lintMaxLLMPages    = 20
 	lintMaxLinkedPages = 3
 	lintPageRunes      = 4000
-	lintMaxTokens      = 1024
+	lintMaxTokens      = 8192
 	lintCallTimeout    = 90 * time.Second
 	lintMaxItems       = 5
 )
@@ -427,7 +427,8 @@ func (s *Service) lintPageContradictions(ctx context.Context, call agentCall, l 
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: b.String()},
 		}}},
-		MaxTokens: lintMaxTokens,
+		MaxTokens:       lintMaxTokens,
+		ReasoningEffort: "off",
 	})
 	if err != nil {
 		return nil, err

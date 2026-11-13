@@ -24,7 +24,7 @@ const (
 	compilePartRunes      = 24000
 	compileMaxParts       = 8
 	compileMaxOps         = 12
-	compileMaxTokens      = 8192
+	compileMaxTokens      = 16384
 	compileCallTimeout    = 180 * time.Second
 	compileCatalogMax     = 400
 	compileRelatedMax     = 8
@@ -291,7 +291,8 @@ func (s *Service) compilePart(ctx context.Context, vault *kv.Vault, idx *kv.Inde
 		Messages: []core.Message{{Role: core.RoleUser, Content: []core.ContentBlock{
 			{Kind: core.BlockText, Text: instruction},
 		}}},
-		MaxTokens: compileMaxTokens,
+		MaxTokens:       compileMaxTokens,
+		ReasoningEffort: "off",
 	})
 	if err != nil {
 		return "", core.Usage{}, err
@@ -552,16 +553,16 @@ func splitParagraphs(text string) []string {
 	return out
 }
 
-// parseCompiledOps strips a ```json fence and parses the reply as a JSON array
-// of operations, skipping an element whose shape does not decode so one bad
-// operation does not drop the whole reply (design §5 step 4).
+// parseCompiledOps parses the reply as a JSON array of operations, tolerating a
+// ```json fence and prose around the value, and skipping an element whose shape
+// does not decode so one bad operation does not drop the whole reply. An empty
+// reply fails (REQ-KBG-004, design §5 step 4).
 func parseCompiledOps(text string) ([]compiledOp, error) {
-	trimmed := stripFence(strings.TrimSpace(text))
-	if !strings.HasPrefix(trimmed, "[") {
-		return nil, errors.New("compile reply is not a JSON array")
+	if strings.TrimSpace(text) == "" {
+		return nil, errors.New("empty reply")
 	}
 	var raw []json.RawMessage
-	if err := decodeLLMJSON(trimmed, &raw); err != nil {
+	if err := decodeLLMJSON(text, &raw); err != nil {
 		return nil, err
 	}
 	var ops []compiledOp
