@@ -70,6 +70,22 @@ type compiledOp struct {
 	Text        string   `json:"text"`
 	OldText     string   `json:"old_text"`
 	NewText     string   `json:"new_text"`
+	Content     string   `json:"content"`
+	Markdown    string   `json:"markdown"`
+}
+
+// foldBody moves a page body the model gave under the alias key "content" or
+// "markdown" into Body when neither "body" nor "text" is set (REQ-KBG-053).
+func (op *compiledOp) foldBody() {
+	if strings.TrimSpace(op.Body) != "" || strings.TrimSpace(op.Text) != "" {
+		return
+	}
+	switch {
+	case strings.TrimSpace(op.Content) != "":
+		op.Body = op.Content
+	case strings.TrimSpace(op.Markdown) != "":
+		op.Body = op.Markdown
+	}
 }
 
 // compileInput is one compile request: the text to compile, the wikilink the
@@ -383,6 +399,7 @@ func (s *Service) relatedPagesIn(ctx context.Context, vault *kv.Vault, idx *kv.I
 // compile actor and merges the source wikilink into create and append ops
 // (design §5 step 5).
 func (s *Service) applyCompiledOp(vault *kv.Vault, in compileInput, op compiledOp) (kv.Result, error) {
+	op.Title = kv.CleanTitle(op.Title)
 	if strings.TrimSpace(op.Op) == "" || strings.TrimSpace(op.Title) == "" {
 		return kv.Result{}, errors.New("operation is missing op or title")
 	}
@@ -572,6 +589,7 @@ func parseCompiledOps(text string) ([]compiledOp, error) {
 			slog.Debug("knowledge compile: op skipped: malformed JSON", "error", err)
 			continue
 		}
+		op.foldBody()
 		ops = append(ops, op)
 	}
 	return ops, nil

@@ -47,7 +47,9 @@ const domainSystem = `You maintain the domain knowledge of one agent, written as
 - Never include passwords, API keys, or tokens.
 Return valid JSON: escape newlines inside strings as \n.
 Reply with only a JSON object: {"ops": [...], "applied_proposals": [...], "prune": [...]}. Ops use the compile op shapes plus "scope" and "confidence" keys; a "create" op needs a "type", one of person, project, organization, place, topic, source, and:
-{"op": "supersede", "scope": "domain", "confidence": 0.8, "title": "Page", "old_text": "one exact line", "new_text": "the new fact", "source": "optional title"}`
+{"op": "create", "scope": "domain", "confidence": 0.8, "type": "topic", "title": "Page title", "description": "one line", "body": "markdown text of the page"}
+{"op": "supersede", "scope": "domain", "confidence": 0.8, "title": "Page", "old_text": "one exact line", "new_text": "the new fact", "source": "optional title"}
+A create without a body is dropped.`
 
 // domainResult is what one domain promotion applied and wrote to the log
 // (design §4.2).
@@ -198,6 +200,7 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 		}
 		for _, op := range ops {
 			op.Op = domainOpAlias(op.Op)
+			op.Title = kv.CleanTitle(op.Title)
 			id := strings.TrimSpace(op.Proposal)
 			if id != "" {
 				// An op that names a proposal references it whether or not it
@@ -208,6 +211,16 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 			reason := domainOpSkipReason(op, proposalStatus)
 			if reason == "" {
 				r, err := s.applyDomainOp(vault, agent, op, journalLinks)
+				if err != nil && op.Op != "create" && errors.Is(err, kv.ErrPageNotFound) {
+					// REQ-KBG-050: the page may live in the other scope, so an
+					// op that missed it in the requested scope is retried once
+					// there; the write then logs the scope that was used.
+					alt := op
+					alt.Scope = domainOtherScope(op.Scope, agent)
+					if ra, errA := s.applyDomainOp(vault, agent, alt, journalLinks); errA == nil {
+						r, err = ra, nil
+					}
+				}
 				if err == nil {
 					res.Applied++
 					appliedOps = append(appliedOps, r.Op+" "+titleOfPath(r.Path))
@@ -396,6 +409,7 @@ func domainType(typ string) string {
 // writes the shared wiki. A journal-derived op cites the journal days read this
 // run (design §4.2 step 4).
 func (s *Service) applyDomainOp(vault *kv.Vault, agent string, op domainOp, journalLinks []string) (kv.Result, error) {
+	op.Title = kv.CleanTitle(op.Title)
 	if strings.TrimSpace(op.Op) == "create" {
 		op.Type = domainType(op.Type)
 		// REQ-DKN-031 (design §4.2 step 4): a create op may carry its page text
@@ -427,6 +441,15 @@ func (s *Service) applyDomainOp(vault *kv.Vault, agent string, op domainOp, jour
 		ko.Sources = journalLinks
 	}
 	return vault.Apply(ko, "promotion "+agent)
+}
+
+// domainOtherScope returns the fallback scope of a promotion op: the agent's
+// domain for a shared op and the shared wiki for a domain op (REQ-KBG-050).
+func domainOtherScope(scope, agent string) string {
+	if strings.TrimSpace(scope) == kv.ScopeShared {
+		return agent
+	}
+	return kv.ScopeShared
 }
 
 // domainPart makes one provider call of a domain promotion and returns its raw
@@ -756,6 +779,7 @@ func parseDomainReply(text string) (domainReply, error) {
 			slog.Debug("knowledge promotion: op skipped: malformed JSON", "error", err)
 			continue
 		}
+		op.foldBody()
 		reply.Ops = append(reply.Ops, op)
 	}
 	return reply, nil

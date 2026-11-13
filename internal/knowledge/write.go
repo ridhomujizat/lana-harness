@@ -17,6 +17,10 @@ import (
 // (REQ-KNW-003).
 var knowledgeTypes = []string{"person", "project", "organization", "place", "topic", "source"}
 
+// ErrPageNotFound reports that an op targets a page missing from its scope, so
+// a caller can retry in another scope (REQ-KBG-050).
+var ErrPageNotFound = errors.New("page not found")
+
 // logVerbs maps an effective action to its log bullet verb (REQ-KNW-004).
 var logVerbs = map[string]string{
 	"create":    "created",
@@ -146,7 +150,7 @@ func (v *Vault) resolveTarget(op Op) (string, string, Op, error) {
 		}
 	}
 	if !found {
-		return "", "", op, fmt.Errorf("page not found: %s", op.Title)
+		return "", "", op, fmt.Errorf("%w: %s", ErrPageNotFound, op.Title)
 	}
 	return page.Path, op.Action, op, nil
 }
