@@ -34,20 +34,31 @@ type KnowledgeAdmin interface {
 // KnowledgeStatus mirrors the GET /v1/knowledge response (API-KNU-003). Times
 // are Unix milliseconds; 0 means never. Lists are never null.
 type KnowledgeStatus struct {
-	Available        bool                     `json:"available"`
-	Path             string                   `json:"path"`
-	Exists           bool                     `json:"exists"`
-	Counts           KnowledgeCounts          `json:"counts"`
-	SourcesPending   []string                 `json:"sources_pending"`
-	SourcesFailed    []KnowledgeSourceError   `json:"sources_failed"`
-	InboxUnsupported []string                 `json:"inbox_unsupported"`
-	Embedding        KnowledgeEmbeddingStatus `json:"embedding"`
-	Agent            string                   `json:"agent"`
-	AgentError       string                   `json:"agent_error"`
-	Consolidation    KnowledgeConsolidation   `json:"consolidation"`
-	Log              []KnowledgeLogEntry      `json:"log"`
-	Scopes           []KnowledgeScopeStat     `json:"scopes"`
-	ReviewPending    int                      `json:"review_pending"`
+	Available        bool                      `json:"available"`
+	Path             string                    `json:"path"`
+	Exists           bool                      `json:"exists"`
+	Counts           KnowledgeCounts           `json:"counts"`
+	SourcesPending   []string                  `json:"sources_pending"`
+	SourcesFailed    []KnowledgeSourceError    `json:"sources_failed"`
+	InboxUnsupported []string                  `json:"inbox_unsupported"`
+	Embedding        KnowledgeEmbeddingStatus  `json:"embedding"`
+	Agent            string                    `json:"agent"`
+	AgentError       string                    `json:"agent_error"`
+	Consolidation    KnowledgeConsolidation    `json:"consolidation"`
+	Log              []KnowledgeLogEntry       `json:"log"`
+	Scopes           []KnowledgeScopeStat      `json:"scopes"`
+	ReviewPending    int                       `json:"review_pending"`
+	JournalFailed    []KnowledgeJournalFailure `json:"journal_failed"`
+}
+
+// KnowledgeJournalFailure is the most recent failed journal pass of one session
+// shown by GET /v1/knowledge (REQ-KBG-012). At is Unix milliseconds; Failures
+// counts the consecutive failures.
+type KnowledgeJournalFailure struct {
+	SessionID string `json:"session_id"`
+	Error     string `json:"error"`
+	At        int64  `json:"at"`
+	Failures  int    `json:"failures"`
 }
 
 // KnowledgeScopeStat is the page count, journal-day count, and newest mtime of

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,7 @@ const (
 type upkeepState struct {
 	once          sync.Once
 	running       atomic.Bool
+	bgJournal     atomic.Bool
 	mu            sync.Mutex
 	unsupported   []string
 	lastScan      time.Time
@@ -99,6 +101,9 @@ func (s *Service) upkeepTick(ctx context.Context) {
 		}
 		return
 	}
+	// REQ-KBG-021: after the consolidation check, run one background journal
+	// pass while the owner is quiet, before the inbox scan.
+	s.backgroundJournal(ctx)
 	if s.inboxScanDue(now) {
 		if err := s.scanInbox(ctx); err != nil {
 			slog.Warn("knowledge upkeep: inbox scan failed", "error", err)
@@ -136,8 +141,8 @@ func (s *Service) consolidateAt() (hour, minute int, ok bool) {
 }
 
 // consolidationDue reports whether the nightly run is due: now is at or past
-// today's consolidate_at and the last run was before it (REQ-KNU-020,
-// design §5).
+// today's consolidate_at, the last run was before it, and the owner is quiet
+// (REQ-KNU-020, REQ-KBG-040, design §5).
 func (s *Service) consolidationDue(now time.Time) bool {
 	hour, minute, ok := s.consolidateAt()
 	if !ok {
@@ -147,8 +152,15 @@ func (s *Service) consolidationDue(now time.Time) bool {
 	if now.Before(at) {
 		return false
 	}
-	last, ok := s.lastConsolidation()
-	return !ok || last.Before(at)
+	if last, ok := s.lastConsolidation(); ok && !last.Before(at) {
+		return false
+	}
+	// REQ-KBG-040: a catch-up after the laptop wakes waits until the owner has
+	// been idle for the quiet window.
+	if s.act != nil && !s.act.quiet(now) {
+		return false
+	}
+	return true
 }
 
 // nextConsolidationAt returns the next scheduled run time in Unix milliseconds,
@@ -188,11 +200,11 @@ func (s *Service) Consolidate(ctx context.Context) error {
 		lines = append(lines, "- error: inbox: "+err.Error())
 	}
 
-	if n, err := s.journalPasses(ctx); err != nil {
+	if counts, err := s.journalPasses(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("journal: %w", err))
 		lines = append(lines, "- error: journal: "+err.Error())
-	} else if n > 0 {
-		lines = append(lines, fmt.Sprintf("- journaled %d sessions", n))
+	} else {
+		lines = append(lines, formatJournalLines(counts)...)
 	}
 
 	promotions, err := s.promote(ctx)
@@ -240,25 +252,73 @@ func (s *Service) Consolidate(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// journalFailure is one session whose journal pass failed, with the error text
+// the consolidation log shows (REQ-KBG-011).
+type journalFailure struct {
+	sessionID string
+	err       string
+}
+
+// journalPassCounts tallies the outcomes of one journal pass and lists the
+// failed sessions (REQ-KBG-011).
+type journalPassCounts struct {
+	written   int
+	empty     int
+	skipped   int
+	failed    int
+	preempted int
+	failures  []journalFailure
+}
+
+// Journal-log bounds (REQ-KBG-011): at most journalFailedLogMax failed-session
+// lines, each error cut to journalFailRunes runes.
+const (
+	journalFailedLogMax = 10
+	journalFailRunes    = 120
+)
+
+// formatJournalLines renders the journal lines of one consolidation entry: the
+// journaled count (written plus empty), the failed block, and the preempted
+// count (REQ-KBG-011).
+func formatJournalLines(c journalPassCounts) []string {
+	var lines []string
+	if n := c.written + c.empty; n > 0 {
+		lines = append(lines, fmt.Sprintf("- journaled %d sessions", n))
+	}
+	if c.failed > 0 {
+		lines = append(lines, fmt.Sprintf("- journal failed: %d sessions", c.failed))
+		for i, f := range c.failures {
+			if i >= journalFailedLogMax {
+				break
+			}
+			lines = append(lines, "  - "+f.sessionID+": "+firstRunes(f.err, journalFailRunes))
+		}
+	}
+	if c.preempted > 0 {
+		lines = append(lines, fmt.Sprintf("- journal preempted: %d sessions (queued again)", c.preempted))
+	}
+	return lines
+}
+
 // journalPasses journals every eligible session with unread text, one at a
-// time, and returns how many sessions had unread text (REQ-KNU-003b,
-// design §5).
-func (s *Service) journalPasses(ctx context.Context) (int, error) {
+// time, and returns the per-outcome counts of the pass (REQ-KNU-003b,
+// REQ-KBG-011, design §5).
+func (s *Service) journalPasses(ctx context.Context) (journalPassCounts, error) {
+	var counts journalPassCounts
 	reader, ok := s.store.(core.SessionTextReader)
 	if !ok || reader == nil {
-		return 0, nil
+		return counts, nil
 	}
 	if s.cfg.Journal != nil && !*s.cfg.Journal {
-		return 0, nil
+		return counts, nil
 	}
 	heads, err := reader.TextHeads(ctx)
 	if err != nil {
-		return 0, err
+		return counts, err
 	}
-	count := 0
 	for _, head := range heads {
 		if err := ctx.Err(); err != nil {
-			return count, err
+			return counts, err
 		}
 		agentCfg, ok := s.lookupAgent(head.Session.Agent)
 		if !ok || !hasKnowledgeTool(agentCfg) {
@@ -266,19 +326,162 @@ func (s *Service) journalPasses(ctx context.Context) (int, error) {
 		}
 		_, idx, err := s.open()
 		if err != nil {
-			return count, err
+			return counts, err
 		}
 		mark, err := idx.JournalMark(head.Session.ID)
 		if err != nil {
-			return count, err
+			return counts, err
 		}
 		if head.MaxSeq <= mark {
 			continue
 		}
-		s.journalSession(ctx, head.Session)
-		count++
+		// REQ-KBG-030: each pass runs on a context a turn/start can cancel. A
+		// preempted pass is queued again after the next quiet window
+		// (REQ-KBG-031).
+		passCtx, release := s.act.preemptible(ctx)
+		outcome, errText := s.journalSession(passCtx, head.Session)
+		release()
+		switch outcome {
+		case journalWritten:
+			counts.written++
+		case journalEmpty:
+			counts.empty++
+		case journalSkipped:
+			counts.skipped++
+		case journalFailed:
+			counts.failed++
+			counts.failures = append(counts.failures, journalFailure{sessionID: head.Session.ID, err: errText})
+		case journalPreempted:
+			if err := ctx.Err(); err != nil {
+				return counts, err
+			}
+			counts.preempted++
+			if err := s.act.waitQuiet(ctx); err != nil {
+				return counts, err
+			}
+		}
 	}
-	return count, nil
+	return counts, nil
+}
+
+// recordJournalDone records the time of a successful background journal pass of
+// one session, so the cooldown applies before the next background try
+// (REQ-KBG-021).
+func (s *Service) recordJournalDone(sessionID string) {
+	s.journalDoneMu.Lock()
+	if s.journalDone == nil {
+		s.journalDone = map[string]time.Time{}
+	}
+	s.journalDone[sessionID] = s.now()
+	s.journalDoneMu.Unlock()
+}
+
+// lastJournalDone returns the time of the last successful background journal
+// pass of one session (REQ-KBG-021).
+func (s *Service) lastJournalDone(sessionID string) (time.Time, bool) {
+	s.journalDoneMu.Lock()
+	defer s.journalDoneMu.Unlock()
+	at, ok := s.journalDone[sessionID]
+	return at, ok
+}
+
+// backgroundEligible reports whether a session may run a background journal pass
+// now: its last successful pass is at least journalCooldown old, or it has none,
+// and it has not failed journalMaxFailures times in a row nor failed within the
+// cooldown (REQ-KBG-021, REQ-KBG-022).
+func (s *Service) backgroundEligible(sessionID string) bool {
+	now := s.now()
+	if done, ok := s.lastJournalDone(sessionID); ok && now.Sub(done) < journalCooldown {
+		return false
+	}
+	s.journalFailMu.Lock()
+	f := s.journalFail[sessionID]
+	s.journalFailMu.Unlock()
+	if f.failures >= journalMaxFailures {
+		return false
+	}
+	if f.failures > 0 && now.Sub(f.at) < journalCooldown {
+		return false
+	}
+	return true
+}
+
+// backgroundJournal runs at most one background journal pass of the oldest
+// eligible session, in a goroutine, while the owner is quiet (REQ-KBG-021,
+// REQ-KBG-022). The pass is preemptible (REQ-KBG-030) and never blocks the
+// caller.
+func (s *Service) backgroundJournal(ctx context.Context) {
+	if s.act == nil || !s.act.quiet(s.now()) {
+		return
+	}
+	if !s.upkeep.bgJournal.CompareAndSwap(false, true) {
+		return
+	}
+	info, ok := s.pickBackgroundSession(ctx)
+	if !ok {
+		s.upkeep.bgJournal.Store(false)
+		return
+	}
+	passCtx, release := s.act.preemptible(s.base)
+	go func() {
+		defer s.upkeep.bgJournal.Store(false)
+		defer release()
+		outcome, _ := s.journalSession(passCtx, info)
+		switch outcome {
+		case journalWritten, journalEmpty, journalSkipped:
+			// REQ-KBG-021: the cooldown starts at the last successful pass.
+			s.recordJournalDone(info.ID)
+		case journalPreempted:
+			// REQ-KBG-031: the mark stays, no failure count, and the session is
+			// eligible again after the next quiet window.
+			slog.Debug("knowledge journal: background pass preempted", "session_id", info.ID)
+		}
+	}()
+}
+
+// pickBackgroundSession returns the oldest eligible session for a background
+// journal pass: one whose agent has a knowledge tool, that has text after its
+// journal mark, and that is past its cooldown (REQ-KBG-021). It reports false
+// when none is eligible.
+func (s *Service) pickBackgroundSession(ctx context.Context) (core.SessionInfo, bool) {
+	reader, ok := s.store.(core.SessionTextReader)
+	if !ok || reader == nil {
+		return core.SessionInfo{}, false
+	}
+	if s.cfg.Journal != nil && !*s.cfg.Journal {
+		return core.SessionInfo{}, false
+	}
+	heads, err := reader.TextHeads(ctx)
+	if err != nil {
+		slog.Warn("knowledge journal: reading text heads failed", "error", err)
+		return core.SessionInfo{}, false
+	}
+	_, idx, err := s.open()
+	if err != nil {
+		slog.Warn("knowledge journal: open failed", "error", err)
+		return core.SessionInfo{}, false
+	}
+	var eligible []core.SessionInfo
+	for _, head := range heads {
+		agentCfg, ok := s.lookupAgent(head.Session.Agent)
+		if !ok || !hasKnowledgeTool(agentCfg) {
+			continue
+		}
+		mark, err := idx.JournalMark(head.Session.ID)
+		if err != nil {
+			slog.Warn("knowledge journal: reading mark failed", "session_id", head.Session.ID, "error", err)
+			continue
+		}
+		if head.MaxSeq <= mark || !s.backgroundEligible(head.Session.ID) {
+			continue
+		}
+		eligible = append(eligible, head.Session)
+	}
+	if len(eligible) == 0 {
+		return core.SessionInfo{}, false
+	}
+	sort.SliceStable(eligible, func(i, j int) bool { return eligible[i].UpdatedAt < eligible[j].UpdatedAt })
+	return eligible[0], true
 }
 
 // appendUpkeepLog appends one consolidation entry to log.md (REQ-KNU-024,
@@ -359,8 +562,9 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 			Provider: s.cfg.EmbeddingProvider,
 			Model:    s.cfg.EmbeddingModel,
 		},
-		Log:    []core.KnowledgeLogEntry{},
-		Scopes: []core.KnowledgeScopeStat{},
+		Log:           []core.KnowledgeLogEntry{},
+		Scopes:        []core.KnowledgeScopeStat{},
+		JournalFailed: []core.KnowledgeJournalFailure{},
 	}
 	if _, err := os.Stat(s.vaultPath); err == nil {
 		status.Exists = true
@@ -399,6 +603,8 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 		status.Consolidation.Report = value
 	}
 	status.Log = s.recentLog(vault.Root(), 20)
+	// REQ-KBG-012: the most recent failed journal pass of each session.
+	status.JournalFailed = s.journalFailureStatus()
 	// REQ-DKN-012, API-DKN-003: per-scope counts and the pending review count
 	// (the web layer adds pending skill proposals later).
 	if stats, err := idx.ScopeStats(); err == nil {

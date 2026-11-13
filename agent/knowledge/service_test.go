@@ -23,7 +23,8 @@ func (f fakeLLM) Provider(string) (core.Provider, bool) { return f.provider, tru
 func (f fakeLLM) Names() []string                       { return []string{"mock"} }
 
 // fakeProvider is a scripted provider. A non-nil gate blocks Stream until it is
-// closed, so a test can hold a compile in flight.
+// closed, so a test can hold a compile in flight. A non-nil route chooses the
+// reply from the request, so a test can answer sessions differently.
 type fakeProvider struct {
 	mu       sync.Mutex
 	text     string
@@ -31,6 +32,7 @@ type fakeProvider struct {
 	err      error
 	errAt    int
 	gate     chan struct{}
+	route    func(core.ChatRequest) string
 	calls    int
 	requests []core.ChatRequest
 }
@@ -41,6 +43,9 @@ func (p *fakeProvider) Stream(ctx context.Context, req core.ChatRequest) (core.C
 	n := p.calls
 	p.requests = append(p.requests, req)
 	text, usage, err, gate := p.text, p.usage, p.err, p.gate
+	if p.route != nil {
+		text = p.route(req)
+	}
 	if p.errAt > 0 && n == p.errAt {
 		err = errors.New("provider failure")
 	}

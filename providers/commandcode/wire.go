@@ -167,9 +167,12 @@ func clampMaxTokens(n int, model string) int {
 }
 
 // reasoningEffort maps lana's effort ("", off, low, high, max) to the
-// OpenAI-style value the provider takes. "" and off send none.
+// OpenAI-style value the provider takes. "" sends no field; off turns thinking
+// off at the provider (REQ-KBG-001).
 func reasoningEffort(effort string) string {
 	switch effort {
+	case "off":
+		return "off"
 	case "low":
 		return "low"
 	case "high", "max":

@@ -145,6 +145,31 @@ func TestValidTitle(t *testing.T) {
 	}
 }
 
+// REQ-KBG-051: CleanTitle turns a model-supplied title into a legal one.
+func TestCleanTitle(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"UI SDK (vercel-labs/ui)", "UI SDK (vercel-labs-ui)"},
+		{"a / b", "a - b"},
+		{"a//b", "a-b"},
+		{"a  b", "a b"},
+		{"a<b>c", "a-b-c"},
+		{"  Pak Budi  ", "Pak Budi"},
+		{"- leading and trailing -", "leading and trailing"},
+		{`a\b`, "a-b"},
+		{"a:b", "a-b"},
+		{"Tab\there", "Tab here"},
+		{"///", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := CleanTitle(c.in); got != c.want {
+			t.Errorf("CleanTitle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // REQ-DKN-002: FindPageIn resolves a title (or alias) inside one scope only;
 // FindPage stays the shared wiki.
 func TestFindPageInScope(t *testing.T) {

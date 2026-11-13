@@ -77,6 +77,25 @@ func (m *Module) Install(b *core.Builder, _ core.ModuleConfig) error {
 			}
 		}
 	}
+	// REQ-KBG-020: track owner activity so a background pass waits for a quiet
+	// window and a running pass is preempted by the next turn/start. The
+	// subscription ends with the service base context.
+	if hooks := b.Hooks(); hooks != nil && hooks.SessionEvent != nil {
+		sub := hooks.SessionEvent.Subscribe()
+		go func() {
+			defer sub.Close()
+			for {
+				received, err := sub.Recv(base)
+				if err != nil {
+					return
+				}
+				if received.Lagged > 0 {
+					continue
+				}
+				m.service.act.observe(received.Value)
+			}
+		}()
+	}
 	m.service.start()
 	return b.Provide(core.ServiceKnowledge, m.service)
 }

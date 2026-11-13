@@ -935,3 +935,59 @@ func TestStatusScopesAfterPromotion(t *testing.T) {
 		t.Fatalf("dana stat = %+v, domain folder holds %d pages", byScope["dana"], len(folder))
 	}
 }
+
+// AC-KBG-007 (REQ-KBG-050): a supersede whose scope says "domain" but whose
+// page lives only in the shared wiki is retried in the shared scope and applied
+// there.
+func TestPromoteDomainSupersedeFallsBackToShared(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"supersede","title":"Kebijakan","old_text":"Gaji lama 10 juta","new_text":"Gaji baru 12 juta","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+	ctx := context.Background()
+
+	env.writeVault("wiki/Kebijakan.md", "---\ntype: topic\ndescription: d\n---\nGaji lama 10 juta\n")
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- kebijakan baru\n")
+
+	res, err := env.svc.promoteDomain(ctx, "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 1 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 1 and 0", res.Applied, res.Skipped)
+	}
+	page := env.readVault("wiki/Kebijakan.md")
+	if !strings.Contains(page, "~~Gaji lama 10 juta~~") || !strings.Contains(page, "Gaji baru 12 juta") {
+		t.Fatalf("shared page was not superseded:\n%s", page)
+	}
+	if env.exists("agents/dana/wiki/Kebijakan.md") {
+		t.Fatal("the fallback wrote the domain scope instead of the shared wiki")
+	}
+}
+
+// AC-KBG-008 (REQ-KBG-051, REQ-KBG-053): a create title with a "/" is cleaned
+// into the file name, and a create that gives its page text under "content"
+// instead of "body" still writes a non-empty page.
+func TestPromoteDomainCleansTitleAndReadsBodyAlias(t *testing.T) {
+	provider := &fakeProvider{text: `{"ops":[
+		{"op":"create","title":"UI SDK (vercel-labs/ui)","type":"topic","description":"d","body":"isi","scope":"domain","confidence":0.9},
+		{"op":"create","title":"Konten","type":"topic","description":"d","content":"isi dari content","scope":"domain","confidence":0.9}
+	],"applied_proposals":[],"prune":[]}`}
+	env := newDomainPromoteEnv(t, provider)
+
+	env.writeVault("agents/dana/journal/2026-11-01.md", "# 2026-11-01\n\n- catatan\n")
+	res, err := env.svc.promoteDomain(context.Background(), "dana")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Applied != 2 || res.Skipped != 0 {
+		t.Fatalf("applied=%d skipped=%d, want 2 and 0", res.Applied, res.Skipped)
+	}
+	if !env.exists("agents/dana/wiki/UI SDK (vercel-labs-ui).md") {
+		t.Fatalf("cleaned title page missing:\n%s", env.readLog())
+	}
+	page := env.readVault("agents/dana/wiki/Konten.md")
+	if !strings.Contains(page, "isi dari content") {
+		t.Fatalf("create did not use content as its body:\n%s", page)
+	}
+}
