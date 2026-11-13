@@ -299,6 +299,11 @@ func (s *Service) finishSource(idx *kv.Index, st kv.SourceState, ops []core.Know
 // compilePart makes one provider call for a part of the source and returns its
 // reply text and usage (design §5 step 3).
 func (s *Service) compilePart(ctx context.Context, vault *kv.Vault, idx *kv.Index, call agentCall, in compileInput, part, total int, text string) (string, core.Usage, error) {
+	// REQ-KBG-032: a compile is not cancelled midway; it waits for the quiet
+	// window before its model call.
+	if err := s.act.waitQuiet(ctx); err != nil {
+		return "", core.Usage{}, err
+	}
 	callCtx, cancel := context.WithTimeout(ctx, compileCallTimeout)
 	defer cancel()
 	instruction := s.compileInstruction(callCtx, vault, idx, in, part, total, text)

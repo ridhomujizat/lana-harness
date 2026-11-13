@@ -234,11 +234,19 @@ func (s *Service) journalRequest(ctx context.Context, info core.SessionInfo, age
 
 // JournalSoon runs one journal pass for a session on the service base context,
 // in a new goroutine (REQ-KNU-003a, design §4). It is the compaction observer.
+// REQ-KBG-023: while a turn runs it queues the session instead of calling the
+// model; the background tick picks it up, since the session stays eligible by
+// its mark.
 func (s *Service) JournalSoon(sessionID, agent string) {
 	if s.store == nil || sessionID == "" {
 		return
 	}
+	if s.act != nil && !s.act.quiet(s.now()) {
+		return
+	}
+	passCtx, release := s.act.preemptible(s.base)
 	go func() {
+		defer release()
 		info, err := s.store.Info(s.base, sessionID)
 		if err != nil {
 			slog.Warn("knowledge journal: session lookup failed", "session_id", sessionID, "error", err)
@@ -247,7 +255,7 @@ func (s *Service) JournalSoon(sessionID, agent string) {
 		if agent != "" {
 			info.Agent = agent
 		}
-		s.journalSession(s.base, info)
+		s.journalSession(passCtx, info)
 	}()
 }
 

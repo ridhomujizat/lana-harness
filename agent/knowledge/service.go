@@ -91,6 +91,15 @@ type Service struct {
 	journalFailMu sync.Mutex
 	journalFail   map[string]journalFailMemory
 
+	// journalDoneMu guards journalDone, the in-memory time of the last
+	// successful background journal pass per session (REQ-KBG-021).
+	journalDoneMu sync.Mutex
+	journalDone   map[string]time.Time
+
+	// act tracks owner activity from Hooks.SessionEvent and gates background
+	// passes on it (REQ-KBG-020).
+	act *activity
+
 	// now is the service clock: time.Now in production, injectable in tests.
 	now func() time.Time
 
@@ -112,7 +121,7 @@ func NewService(base context.Context, home string, cfg core.KnowledgeConfig, sto
 	if base == nil {
 		base = context.Background()
 	}
-	return &Service{
+	svc := &Service{
 		base:      base,
 		home:      home,
 		cfg:       cfg,
@@ -123,6 +132,10 @@ func NewService(base context.Context, home string, cfg core.KnowledgeConfig, sto
 		indexPath: filepath.Join(home, "knowledge.db"),
 		queue:     make(chan string, queueSize),
 	}
+	// The gate reads the service clock through a closure so a test that
+	// replaces now after NewService is seen (REQ-KBG-020).
+	svc.act = newActivity(func() time.Time { return svc.now() })
+	return svc
 }
 
 // IndexPath returns the derived index database path.

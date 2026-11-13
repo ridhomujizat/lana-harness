@@ -404,6 +404,11 @@ func (l *lintLookup) changedSince(sinceMS int64) []lintPage {
 // lintPageContradictions makes the one provider call of a page and parses its
 // reply (design §8).
 func (s *Service) lintPageContradictions(ctx context.Context, call agentCall, l *lintLookup, p lintPage) ([]lintContradiction, error) {
+	// REQ-KBG-032: lint is not cancelled midway; it waits for the quiet window
+	// before its model call.
+	if err := s.act.waitQuiet(ctx); err != nil {
+		return nil, err
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "## %s\n%s\n", p.page.Title, firstRunes(p.page.Body, lintPageRunes))
 	linked := 0

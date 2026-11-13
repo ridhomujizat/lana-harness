@@ -185,6 +185,11 @@ func (s *Service) promoteDomain(ctx context.Context, agent string) (domainResult
 		}
 	}()
 	for i, part := range parts {
+		// REQ-KBG-032: a promotion is not cancelled midway; it waits for the
+		// quiet window before its model call.
+		if err := s.act.waitQuiet(ctx); err != nil {
+			return res, err
+		}
 		instruction := domainInstruction(job, catalog, relatedBodies, part, i == 0, proposals, memory)
 		reply, err := s.domainPart(ctx, call, instruction)
 		if err != nil {
