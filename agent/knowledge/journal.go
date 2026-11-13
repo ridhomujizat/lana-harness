@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,32 @@ type journalReply struct {
 	Notes []string `json:"notes"`
 }
 
+// journalOutcome is the result of one journal pass (REQ-KBG-010).
+type journalOutcome int
+
+const (
+	// journalWritten means notes were appended to the vault; the mark moves.
+	journalWritten journalOutcome = iota
+	// journalEmpty means the model returned no notes; the mark moves.
+	journalEmpty
+	// journalSkipped means the pass did not run; the mark is unchanged unless
+	// the session had no owner text, which moves it.
+	journalSkipped
+	// journalFailed means the request or parse failed; the mark stays.
+	journalFailed
+	// journalPreempted means the pass context was cancelled; the mark stays and
+	// the pass is eligible again (REQ-KBG-031).
+	journalPreempted
+)
+
+// journalFailMemory is the service's in-memory record of the most recent failed
+// journal pass of one session (REQ-KBG-012).
+type journalFailMemory struct {
+	err      string
+	at       time.Time
+	failures int
+}
+
 // journalFlight is the per-session in-flight set of journal passes. A second
 // pass for a session already running is dropped; the next trigger catches up
 // (design §4).
@@ -44,8 +71,12 @@ var journalFlight = struct {
 
 // journalSession appends the notes of one session to the journal of the day of
 // its newest row. REQ-KNU-001–004: it reads at most journalMaxRunes of unread
-// conversation text, makes one model call, and moves the journal mark.
-func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) {
+// conversation text, makes one model call, and moves the journal mark. It
+// reports the pass outcome (REQ-KBG-010) and, for a failed pass, the error text.
+func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) (outcome journalOutcome, errText string) {
+	outcome = journalSkipped
+	defer func() { s.recordJournalOutcome(info.ID, outcome, errText) }()
+
 	agentCfg, ok := s.lookupAgent(info.Agent)
 	if !ok || !hasKnowledgeTool(agentCfg) {
 		return
@@ -64,41 +95,37 @@ func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) {
 
 	vault, idx, err := s.open()
 	if err != nil {
-		slog.Warn("knowledge journal: open failed", "session_id", info.ID, "error", err)
-		return
+		return s.logJournalFailure(ctx, info.ID, "knowledge journal: open failed", err)
 	}
 	mark, err := idx.JournalMark(info.ID)
 	if err != nil {
-		slog.Warn("knowledge journal: reading mark failed", "session_id", info.ID, "error", err)
-		return
+		return s.logJournalFailure(ctx, info.ID, "knowledge journal: reading mark failed", err)
 	}
 	rows, err := reader.TextRows(ctx, info.ID, mark, journalMaxRunes)
 	if err != nil {
-		slog.Warn("knowledge journal: reading text failed", "session_id", info.ID, "error", err)
-		return
+		return s.logJournalFailure(ctx, info.ID, "knowledge journal: reading text failed", err)
 	}
 	if len(rows) == 0 {
-		return
+		return journalSkipped, ""
 	}
 	last := rows[len(rows)-1]
 	// REQ-KNU-002: text with no owner message moves the mark without a model
 	// call.
 	if !hasOwnerRow(rows) {
 		s.setJournalMark(idx, info.ID, last.Seq)
-		return
+		return journalSkipped, ""
 	}
 
 	reply, err := s.journalRequest(ctx, info, agentCfg, rows)
 	if err != nil {
-		slog.Warn("knowledge journal: request failed", "session_id", info.ID, "error", err)
-		return
+		return s.logJournalFailure(ctx, info.ID, "knowledge journal: request failed", err)
 	}
 	notes, err := parseJournalNotes(reply)
 	if err != nil {
-		slog.Warn("knowledge journal: parsing reply failed", "session_id", info.ID, "error", err)
-		return
+		return s.logJournalFailure(ctx, info.ID, "knowledge journal: parsing reply failed", err)
 	}
 	notes = journalNotes(notes)
+	wrote := false
 	if len(notes) > 0 {
 		at := time.UnixMilli(last.CreatedAt)
 		block := journalBlock(info, at, notes)
@@ -111,14 +138,74 @@ func (s *Service) journalSession(ctx context.Context, info core.SessionInfo) {
 		}
 		rel, err := vault.AppendJournalIn(scope, at.Format("2006-01-02"), block)
 		if err != nil {
-			slog.Warn("knowledge journal: appending failed", "session_id", info.ID, "error", err)
-			return
+			return s.logJournalFailure(ctx, info.ID, "knowledge journal: appending failed", err)
 		}
 		if err := idx.SyncFile(filepath.Join(vault.Root(), filepath.FromSlash(rel))); err != nil {
 			slog.Warn("knowledge journal: re-index failed", "path", rel, "error", err)
 		}
+		wrote = true
 	}
 	s.setJournalMark(idx, info.ID, last.Seq)
+	if wrote {
+		return journalWritten, ""
+	}
+	return journalEmpty, ""
+}
+
+// logJournalFailure maps one model or storage error to an outcome and logs it:
+// a preempted pass logs at debug only (REQ-KBG-031), any other failure at warn.
+func (s *Service) logJournalFailure(ctx context.Context, sessionID, msg string, err error) (journalOutcome, string) {
+	outcome, errText := journalFailureOutcome(ctx, err)
+	if outcome == journalPreempted {
+		slog.Debug("knowledge journal: preempted", "session_id", sessionID)
+	} else {
+		slog.Warn(msg, "session_id", sessionID, "error", err)
+	}
+	return outcome, errText
+}
+
+// journalFailureOutcome maps a model or storage error to journalPreempted when
+// the error is a cancellation and the pass context itself is done, else to
+// journalFailed with the error text (REQ-KBG-010, REQ-KBG-031).
+func journalFailureOutcome(ctx context.Context, err error) (journalOutcome, string) {
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return journalPreempted, ""
+	}
+	return journalFailed, err.Error()
+}
+
+// recordJournalOutcome updates the in-memory failure memory of one session
+// (REQ-KBG-012): a failure sets the error, stamps the time, and counts one more
+// consecutive failure; a written or empty outcome clears it. A preempted or
+// skipped outcome leaves it unchanged.
+func (s *Service) recordJournalOutcome(sessionID string, outcome journalOutcome, errText string) {
+	s.journalFailMu.Lock()
+	defer s.journalFailMu.Unlock()
+	switch outcome {
+	case journalFailed:
+		if s.journalFail == nil {
+			s.journalFail = map[string]journalFailMemory{}
+		}
+		prev := s.journalFail[sessionID]
+		s.journalFail[sessionID] = journalFailMemory{err: errText, at: s.now(), failures: prev.failures + 1}
+	case journalWritten, journalEmpty:
+		delete(s.journalFail, sessionID)
+	}
+}
+
+// journalFailureStatus returns the sessions whose most recent pass failed,
+// newest first (REQ-KBG-012). The result is never nil.
+func (s *Service) journalFailureStatus() []core.KnowledgeJournalFailure {
+	s.journalFailMu.Lock()
+	defer s.journalFailMu.Unlock()
+	out := make([]core.KnowledgeJournalFailure, 0, len(s.journalFail))
+	for id, f := range s.journalFail {
+		out = append(out, core.KnowledgeJournalFailure{
+			SessionID: id, Error: f.err, At: f.at.UnixMilli(), Failures: f.failures,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At > out[j].At })
+	return out
 }
 
 // journalRequest makes the one model call of a journal pass and returns its

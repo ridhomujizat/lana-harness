@@ -48,6 +48,13 @@ export interface KnowledgeStatus {
   /* Spec 46 additions; older daemons leave them out. */
   scopes?: KnowledgeScopeStat[];
   review_pending?: number;
+  /* Spec 54 REQ-KBG-012: the most recent failed journal pass per session. */
+  journal_failed?: {
+    session_id: string;
+    error: string;
+    at: number;
+    failures: number;
+  }[];
   available: boolean;
   path: string;
   exists: boolean;

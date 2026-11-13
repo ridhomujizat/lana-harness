@@ -86,6 +86,11 @@ type Service struct {
 	// upkeep is the state of the background upkeep loop (design §5).
 	upkeep upkeepState
 
+	// journalFailMu guards journalFail, the in-memory record of the most recent
+	// failed journal pass per session (REQ-KBG-012).
+	journalFailMu sync.Mutex
+	journalFail   map[string]journalFailMemory
+
 	// now is the service clock: time.Now in production, injectable in tests.
 	now func() time.Time
 

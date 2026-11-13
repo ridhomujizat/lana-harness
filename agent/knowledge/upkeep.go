@@ -188,11 +188,11 @@ func (s *Service) Consolidate(ctx context.Context) error {
 		lines = append(lines, "- error: inbox: "+err.Error())
 	}
 
-	if n, err := s.journalPasses(ctx); err != nil {
+	if counts, err := s.journalPasses(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("journal: %w", err))
 		lines = append(lines, "- error: journal: "+err.Error())
-	} else if n > 0 {
-		lines = append(lines, fmt.Sprintf("- journaled %d sessions", n))
+	} else {
+		lines = append(lines, formatJournalLines(counts)...)
 	}
 
 	promotions, err := s.promote(ctx)
@@ -240,25 +240,73 @@ func (s *Service) Consolidate(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// journalFailure is one session whose journal pass failed, with the error text
+// the consolidation log shows (REQ-KBG-011).
+type journalFailure struct {
+	sessionID string
+	err       string
+}
+
+// journalPassCounts tallies the outcomes of one journal pass and lists the
+// failed sessions (REQ-KBG-011).
+type journalPassCounts struct {
+	written   int
+	empty     int
+	skipped   int
+	failed    int
+	preempted int
+	failures  []journalFailure
+}
+
+// Journal-log bounds (REQ-KBG-011): at most journalFailedLogMax failed-session
+// lines, each error cut to journalFailRunes runes.
+const (
+	journalFailedLogMax = 10
+	journalFailRunes    = 120
+)
+
+// formatJournalLines renders the journal lines of one consolidation entry: the
+// journaled count (written plus empty), the failed block, and the preempted
+// count (REQ-KBG-011).
+func formatJournalLines(c journalPassCounts) []string {
+	var lines []string
+	if n := c.written + c.empty; n > 0 {
+		lines = append(lines, fmt.Sprintf("- journaled %d sessions", n))
+	}
+	if c.failed > 0 {
+		lines = append(lines, fmt.Sprintf("- journal failed: %d sessions", c.failed))
+		for i, f := range c.failures {
+			if i >= journalFailedLogMax {
+				break
+			}
+			lines = append(lines, "  - "+f.sessionID+": "+firstRunes(f.err, journalFailRunes))
+		}
+	}
+	if c.preempted > 0 {
+		lines = append(lines, fmt.Sprintf("- journal preempted: %d sessions (queued again)", c.preempted))
+	}
+	return lines
+}
+
 // journalPasses journals every eligible session with unread text, one at a
-// time, and returns how many sessions had unread text (REQ-KNU-003b,
-// design §5).
-func (s *Service) journalPasses(ctx context.Context) (int, error) {
+// time, and returns the per-outcome counts of the pass (REQ-KNU-003b,
+// REQ-KBG-011, design §5).
+func (s *Service) journalPasses(ctx context.Context) (journalPassCounts, error) {
+	var counts journalPassCounts
 	reader, ok := s.store.(core.SessionTextReader)
 	if !ok || reader == nil {
-		return 0, nil
+		return counts, nil
 	}
 	if s.cfg.Journal != nil && !*s.cfg.Journal {
-		return 0, nil
+		return counts, nil
 	}
 	heads, err := reader.TextHeads(ctx)
 	if err != nil {
-		return 0, err
+		return counts, err
 	}
-	count := 0
 	for _, head := range heads {
 		if err := ctx.Err(); err != nil {
-			return count, err
+			return counts, err
 		}
 		agentCfg, ok := s.lookupAgent(head.Session.Agent)
 		if !ok || !hasKnowledgeTool(agentCfg) {
@@ -266,19 +314,31 @@ func (s *Service) journalPasses(ctx context.Context) (int, error) {
 		}
 		_, idx, err := s.open()
 		if err != nil {
-			return count, err
+			return counts, err
 		}
 		mark, err := idx.JournalMark(head.Session.ID)
 		if err != nil {
-			return count, err
+			return counts, err
 		}
 		if head.MaxSeq <= mark {
 			continue
 		}
-		s.journalSession(ctx, head.Session)
-		count++
+		outcome, errText := s.journalSession(ctx, head.Session)
+		switch outcome {
+		case journalWritten:
+			counts.written++
+		case journalEmpty:
+			counts.empty++
+		case journalSkipped:
+			counts.skipped++
+		case journalFailed:
+			counts.failed++
+			counts.failures = append(counts.failures, journalFailure{sessionID: head.Session.ID, err: errText})
+		case journalPreempted:
+			counts.preempted++
+		}
 	}
-	return count, nil
+	return counts, nil
 }
 
 // appendUpkeepLog appends one consolidation entry to log.md (REQ-KNU-024,
@@ -359,8 +419,9 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 			Provider: s.cfg.EmbeddingProvider,
 			Model:    s.cfg.EmbeddingModel,
 		},
-		Log:    []core.KnowledgeLogEntry{},
-		Scopes: []core.KnowledgeScopeStat{},
+		Log:           []core.KnowledgeLogEntry{},
+		Scopes:        []core.KnowledgeScopeStat{},
+		JournalFailed: []core.KnowledgeJournalFailure{},
 	}
 	if _, err := os.Stat(s.vaultPath); err == nil {
 		status.Exists = true
@@ -399,6 +460,8 @@ func (s *Service) Status(ctx context.Context) (core.KnowledgeStatus, error) {
 		status.Consolidation.Report = value
 	}
 	status.Log = s.recentLog(vault.Root(), 20)
+	// REQ-KBG-012: the most recent failed journal pass of each session.
+	status.JournalFailed = s.journalFailureStatus()
 	// REQ-DKN-012, API-DKN-003: per-scope counts and the pending review count
 	// (the web layer adds pending skill proposals later).
 	if stats, err := idx.ScopeStats(); err == nil {

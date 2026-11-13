@@ -351,12 +351,12 @@ func TestKnowledgeStatusShape(t *testing.T) {
 	if err := json.Unmarshal(data, &top); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"available", "path", "exists", "counts", "sources_pending", "sources_failed", "inbox_unsupported", "embedding", "agent", "agent_error", "consolidation", "log"} {
+	for _, key := range []string{"available", "path", "exists", "counts", "sources_pending", "sources_failed", "inbox_unsupported", "embedding", "agent", "agent_error", "consolidation", "log", "journal_failed"} {
 		if _, ok := top[key]; !ok {
 			t.Fatalf("status JSON missing %q: %s", key, data)
 		}
 	}
-	for _, key := range []string{"sources_pending", "sources_failed", "inbox_unsupported", "log"} {
+	for _, key := range []string{"sources_pending", "sources_failed", "inbox_unsupported", "log", "journal_failed"} {
 		if string(top[key]) == "null" {
 			t.Fatalf("status list %q is null: %s", key, data)
 		}
