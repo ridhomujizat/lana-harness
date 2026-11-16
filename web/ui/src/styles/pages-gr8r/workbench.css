@@ -1,0 +1,1907 @@
+/* Spec 55: the Workbench page (gr8r layer). Design: figcraft page
+   "Workbench (agent terminal)", frames "Lana web · …". */
+
+.wb-page {
+  /* Light (GoRex look): cards over a soft gradient; the terminal shares the
+     card background. Dark mode swaps the same tokens below. */
+  --wb-term: #fdfcfa;
+  --wb-term-head: #fdfcfa;
+  --wb-term-line: rgba(29, 28, 26, 0.07);
+  --wb-term-text: #2a2825;
+  --wb-term-dim: #8a867e;
+  --wb-card-idle: #f8f5f0;
+  --wb-card-border: rgba(29, 28, 26, 0.07);
+  --wb-card-shadow: 0 1px 2px rgba(29, 28, 26, 0.05), 0 8px 24px -12px rgba(29, 28, 26, 0.12);
+  --wb-btn-hover: rgba(29, 28, 26, 0.06);
+  --wb-bg: linear-gradient(135deg, #eee6f6 0%, #f4eef0 45%, #f3ece2 100%);
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wb-spacer {
+  flex: 1 1 auto;
+}
+
+/* ---------------------------------------------------------------- */
+/* Status dots                                                      */
+/* ---------------------------------------------------------------- */
+
+.wb-status {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+
+.wb-status-working {
+  background: var(--green);
+}
+
+.wb-status-blocked {
+  background: var(--orange, var(--amber));
+}
+
+.wb-status-idle,
+.wb-status-exited {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-4);
+}
+
+/* ---------------------------------------------------------------- */
+/* Panel: Spaces + Agents                                           */
+/* ---------------------------------------------------------------- */
+
+.wb-panel {
+  position: relative;
+  display: flex;
+  flex: 0 0 288px;
+  flex-direction: column;
+  width: 288px;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wb-spaces,
+.wb-agents {
+  display: flex;
+  flex: 1 1 50%;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: var(--s-3) var(--s-2);
+  overflow-y: auto;
+}
+
+.wb-agents {
+  border-top: 1px solid var(--border);
+}
+
+.wb-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px var(--s-2) var(--s-2);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.wb-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.wb-icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-icon-btn-lg {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+}
+
+.wb-tile {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-space {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.wb-space-btn {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md, 8px);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-space-btn:hover {
+  background: var(--surface-2);
+}
+
+.wb-space.is-active .wb-space-btn {
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs, 0 1px 2px rgba(0, 0, 0, 0.04));
+  font-weight: 500;
+}
+
+.wb-space-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-space-meta {
+  margin-left: auto;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+.wb-space-x {
+  position: absolute;
+  right: 4px;
+  opacity: 0;
+}
+
+.wb-space:hover .wb-space-x {
+  opacity: 1;
+}
+
+.wb-add-space,
+.wb-orphans {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--s-1);
+  padding: 6px var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-add-space:hover,
+.wb-orphans:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-orphans {
+  color: var(--orange, var(--amber));
+}
+
+.wb-space-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+}
+
+.wb-space-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.wb-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.wb-toggle button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+}
+
+.wb-toggle button.is-on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.wb-group-head {
+  padding: var(--s-3) var(--s-2) var(--s-1);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.wb-count {
+  margin-left: 4px;
+  color: var(--text-4);
+  font-weight: 400;
+}
+
+.wb-agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md, 8px);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-agent:hover {
+  background: var(--surface-2);
+}
+
+.wb-agent.is-active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wb-agent-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-agent-label b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.wb-agent-title.muted {
+  color: var(--text-4);
+}
+
+.wb-age {
+  flex: none;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+.wb-empty-note {
+  padding: var(--s-2);
+  color: var(--text-4);
+  font-size: var(--fs-sm);
+}
+
+.wb-prog {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: 5px;
+  background: #3a3936;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.wb-prog-claude {
+  background: #d97757;
+}
+
+.wb-prog-codex {
+  background: #2f2e2b;
+}
+
+.wb-prog-shell {
+  background: #3a3936;
+  font-family: var(--mono);
+}
+
+.wb-lana-av {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.wb-lana-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 3px;
+  border-radius: 999px;
+  background: #2f2d3f;
+  color: #cfcbf5;
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- */
+/* Main: tabs + workspace                                           */
+/* ---------------------------------------------------------------- */
+
+.wb-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-error {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--red);
+  border-radius: var(--r-md, 8px);
+  color: var(--red);
+  font-size: var(--fs-sm);
+}
+
+.wb-tabs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 8px var(--s-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+
+.wb-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.wb-tab.is-on {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.wb-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 4px 5px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.wb-tab.is-on .wb-tab-btn {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.wb-tab-x {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-4);
+  opacity: 0;
+  cursor: pointer;
+}
+
+.wb-tab:hover .wb-tab-x,
+.wb-tab.is-on .wb-tab-x {
+  opacity: 1;
+}
+
+.wb-tab-x:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-tab-new {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.wb-tab-new:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.wb-attached {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.wb-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.wb-workspace > .wb-pane,
+.wb-workspace > .wb-split {
+  flex: 1 1 auto;
+}
+
+.wb-split {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-split-row {
+  flex-direction: row;
+}
+
+.wb-split-col {
+  flex-direction: column;
+}
+
+.wb-split > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------- */
+/* Pane                                                             */
+/* ---------------------------------------------------------------- */
+
+.wb-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #2a2927;
+  border-radius: 10px;
+  background: var(--wb-term);
+}
+
+.wb-pane.is-focused {
+  border-color: var(--acc-l, #1a1831);
+  box-shadow: 0 0 0 1px var(--acc-l, #1a1831);
+}
+
+.wb-pane-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--wb-term-line);
+  background: var(--wb-term-head);
+  color: var(--wb-term-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.wb-pane-title {
+  font-weight: 600;
+}
+
+.wb-pane-dir {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.wb-pane-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--wb-term-dim);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.wb-pane-state-working {
+  color: #7fd39a;
+}
+
+.wb-pane-state-blocked,
+.wb-pane-state-exited {
+  color: #f0a860;
+}
+
+.wb-pane-tools {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.wb-pane-tools button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-term-dim);
+  cursor: pointer;
+}
+
+.wb-pane-tools button:hover {
+  background: #33312e;
+  color: var(--wb-term-text);
+}
+
+.wb-pane-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 4px 4px 10px;
+}
+
+.wb-pane-missing {
+  color: var(--wb-term-dim);
+  font-size: 13px;
+}
+
+.wb-xterm {
+  width: 100%;
+  height: 100%;
+}
+
+.wb-xterm .xterm {
+  height: 100%;
+}
+
+/* View mode on a phone: the terminal keeps the session's size and the pane
+   scrolls sideways instead of reflowing a full-screen program. */
+.wb-xterm-fixed {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.wb-xterm-fixed .xterm {
+  width: max-content;
+  height: auto;
+}
+
+.wb-xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+.wb-exited {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid #4a3a22;
+  background: #2c2419;
+  color: #f0a860;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.wb-exited .wb-status {
+  background: #e0892b;
+  box-shadow: none;
+}
+
+.wb-dark-btn {
+  padding: 4px 10px;
+  border: 1px solid #5a4a30;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-term-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wb-dark-btn:hover {
+  background: #3a3022;
+}
+
+/* ---------------------------------------------------------------- */
+/* Phone (REQ-WB-055)                                               */
+/* ---------------------------------------------------------------- */
+
+.wb-phone {
+  flex-direction: column;
+}
+
+.wb-phone-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-3) var(--s-4) var(--s-2);
+}
+
+.wb-phone-head h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.wb-phone-panel {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.wb-phone-panel .wb-panel {
+  flex: 1 1 auto;
+  width: 100%;
+  border-right: 0;
+}
+
+.wb-phone-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 6px 4px;
+}
+
+.wb-back {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.wb-phone-title {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-phone-title b {
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+.wb-phone-title span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.wb-strip {
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.wb-strip-scroll {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-strip-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  max-width: 160px;
+  padding: 5px 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wb-chip.is-on {
+  background: var(--acc-l, #1a1831);
+  color: #fff;
+}
+
+.wb-strip-count {
+  display: grid;
+  place-items: center;
+  padding: 0 14px 0 12px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wb-strip-count span {
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 22px;
+  border: 1.5px solid var(--text-2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--wb-term);
+  color: var(--wb-term-text);
+  font-size: 13px;
+}
+
+.wb-switcher button {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--wb-term-dim);
+}
+
+.wb-switcher button:disabled {
+  opacity: 0.35;
+}
+
+.wb-dots {
+  display: inline-flex;
+  gap: 5px;
+}
+
+.wb-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4a4845;
+}
+
+.wb-dots i.is-on {
+  background: var(--wb-term-text);
+}
+
+.wb-switch-count {
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wb-phone-term {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px 4px 6px 8px;
+  background: var(--wb-term);
+}
+
+.wb-phone-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.wb-phone-bar > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-phone-bar b {
+  font-size: 13.5px;
+}
+
+.wb-phone-bar span {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.wb-keybar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--surface-3, #ecebe6);
+}
+
+.wb-keybar-keys {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.wb-keybar-keys::-webkit-scrollbar {
+  display: none;
+}
+
+.wb-keybar button {
+  flex: 1 0 auto;
+  min-width: 30px;
+  height: 32px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.wb-keybar button.is-on {
+  border-color: var(--acc-l, #1a1831);
+  background: var(--acc-l, #1a1831);
+  color: #fff;
+}
+
+.wb-keybar .wb-keybar-done {
+  flex: none;
+  border-color: var(--acc-l, #1a1831);
+  background: var(--acc-l, #1a1831);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.wb-size-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-bottom: 1px solid #4a3a22;
+  background: #2c2419;
+  color: #f0a860;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.wb-size-bar b {
+  margin-left: auto;
+  color: #fff;
+  font-weight: 600;
+}
+
+.wb-sheet-back {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(29, 28, 26, 0.45);
+}
+
+.wb-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-height: 82vh;
+  padding: 8px 14px calc(18px + env(safe-area-inset-bottom));
+  border-radius: 18px 18px 0 0;
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.wb-sheet-grip {
+  align-self: center;
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border-strong);
+}
+
+.wb-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wb-sheet-head > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-sheet-head b {
+  font-size: 17px;
+}
+
+.wb-sheet-head span {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.wb-sheet-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.wb-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  font: inherit;
+  text-align: left;
+}
+
+.wb-card.is-on {
+  border: 2px solid var(--acc-l, #1a1831);
+}
+
+.wb-card-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  height: 56px;
+  padding: 8px 9px;
+  background: var(--wb-term);
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wb-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 9px 8px;
+}
+
+.wb-card-foot > span:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-card-foot b {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-card-sub {
+  color: var(--text-4);
+  font-size: 10.5px;
+}
+
+.wb-card-sub-blocked {
+  color: var(--orange, var(--amber));
+}
+
+/* ---------------------------------------------------------------- */
+/* GoRex look: dark tokens, gradient workspace, card panes          */
+/* ---------------------------------------------------------------- */
+
+:root[data-theme="dark"] .wb-page {
+  --wb-term: #191817;
+  --wb-term-head: #191817;
+  --wb-term-line: rgba(255, 255, 255, 0.06);
+  --wb-term-text: #e8e6e1;
+  --wb-term-dim: #8a867e;
+  --wb-card-idle: #1d1c1b;
+  --wb-card-border: rgba(255, 255, 255, 0.07);
+  --wb-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+  --wb-btn-hover: rgba(255, 255, 255, 0.07);
+  --wb-bg: linear-gradient(135deg, #1f1c26 0%, #1a1918 50%, #201d18 100%);
+}
+
+.wb-main {
+  background: var(--wb-bg);
+}
+
+.wb-tabs {
+  gap: 6px;
+  padding: 8px 10px 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.wb-tab {
+  border: 0;
+  border-radius: 10px;
+}
+
+.wb-tab.is-on {
+  background: var(--wb-term);
+  box-shadow: var(--wb-card-shadow);
+}
+
+.wb-tab-btn {
+  padding: 7px 4px 7px 12px;
+}
+
+.wb-tab-new:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wb-panel-toggle {
+  margin-right: 2px;
+}
+
+.wb-tabs-space {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  margin-right: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.wb-workspace {
+  padding: 8px 10px 10px;
+  background: transparent;
+}
+
+.wb-split {
+  gap: 10px;
+}
+
+.wb-pane {
+  border: 1px solid var(--wb-card-border);
+  border-radius: 14px;
+  background: var(--wb-card-idle);
+  box-shadow: var(--wb-card-shadow);
+}
+
+.wb-pane.is-focused {
+  border-color: var(--wb-card-border);
+  background: var(--wb-term);
+  box-shadow: var(--wb-card-shadow), 0 0 0 1.5px color-mix(in srgb, var(--acc-l, #1a1831) 35%, transparent);
+}
+
+.wb-pane:not(.is-focused) .wb-xterm {
+  opacity: 0.92;
+}
+
+.wb-pane-head {
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--wb-term-text);
+  font-size: 13.5px;
+}
+
+.wb-pane-title {
+  font-weight: 600;
+}
+
+.wb-pane-dir {
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.wb-pane-tools button {
+  color: var(--wb-term-dim);
+}
+
+.wb-pane-tools button:hover {
+  background: var(--wb-btn-hover);
+  color: var(--wb-term-text);
+}
+
+.wb-pane-body {
+  padding: 0 6px 6px 14px;
+}
+
+.wb-pane .xterm-viewport,
+.wb-pane .xterm-screen canvas {
+  background-color: transparent !important;
+}
+
+.wb-pane:not(.is-focused) .xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+
+.wb-prog-plain {
+  display: inline-grid;
+  place-items: center;
+  background: transparent;
+  color: var(--wb-term-text);
+}
+
+.wb-pane-state {
+  font-weight: 500;
+}
+
+:root:not([data-theme="dark"]) .wb-pane-state-working {
+  color: #2f8a4e;
+}
+
+:root:not([data-theme="dark"]) .wb-pane-state-blocked,
+:root:not([data-theme="dark"]) .wb-pane-state-exited {
+  color: #b5651d;
+}
+
+:root:not([data-theme="dark"]) .wb-exited {
+  border-top-color: #efd9bd;
+  background: #fbf1e3;
+  color: #9a5414;
+}
+
+:root:not([data-theme="dark"]) .wb-dark-btn {
+  border-color: #e3cba8;
+  color: #4a3a22;
+}
+
+:root:not([data-theme="dark"]) .wb-dark-btn:hover {
+  background: #f5e4cc;
+}
+
+/* The phone keeps the terminal dark-on-light the same way. */
+.wb-switcher {
+  border-bottom: 1px solid var(--wb-term-line);
+}
+
+:root:not([data-theme="dark"]) .wb-dots i {
+  background: #d9d5ce;
+}
+
+.wb-sec-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Drag the panel's right edge to resize it (double-click resets). */
+.wb-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 3;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.wb-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: "";
+  transition: background var(--dur, 0.15s);
+}
+
+.wb-resizer:hover::after,
+body.wb-resizing .wb-resizer::after {
+  background: var(--acc-l, #1a1831);
+  opacity: 0.35;
+}
+
+body.wb-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* The Workbench page hides the shell topbar and takes the full height. */
+.main.is-bare > .topbar {
+  display: none;
+}
+
+.wb-phone-head {
+  justify-content: flex-start;
+  gap: 6px;
+  padding-left: 6px;
+}
+
+.wb-phone-head h1 {
+  flex: 1;
+}
+
+/* Phone space view: pinned to the visual viewport (inline style), so it fills
+   the screen above the keyboard. */
+.wb-phone-space {
+  background: var(--surface);
+}
+
+.wb-phone-space .wb-phone-term {
+  flex: 1 1 auto;
+}
+
+.wb-font {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.wb-font button {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-font button sup {
+  font-size: 9px;
+}
+
+.wb-font button:disabled {
+  opacity: 0.35;
+}
+
+.wb-keybar .wb-keybar-done {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+}
+
+/* Clear selection states (owner feedback 2026-11-17: the focused space, agent
+   and tab were hard to see, mostly in dark mode). */
+.wb-space.is-active .wb-space-btn,
+.wb-agent.is-active {
+  position: relative;
+  border-color: var(--border-strong);
+  background: var(--surface-3, var(--surface-2));
+  box-shadow: none;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.wb-space.is-active .wb-space-btn::before,
+.wb-agent.is-active::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -1px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--acc-l, #1a1831);
+  content: "";
+}
+
+:root[data-theme="dark"] .wb-space.is-active .wb-space-btn::before,
+:root[data-theme="dark"] .wb-agent.is-active::before {
+  background: #b9a6f2;
+}
+
+.wb-agent.is-active .wb-agent-title {
+  color: var(--text);
+}
+
+.wb-tab.is-on {
+  outline: 1px solid var(--border-strong);
+  outline-offset: -1px;
+}
+
+.wb-tab.is-on .wb-tab-btn {
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .wb-tab.is-on {
+  background: #2a2826;
+}
+
+:root[data-theme="dark"] .wb-chip.is-on {
+  background: #b9a6f2;
+  color: #1a1831;
+}
+
+/* Vertical drags are handled in TermPane (scrollback or wheel reports);
+   sideways pans stay native for the scrollable phone view. */
+.wb-xterm {
+  touch-action: pan-x;
+}
+
+/* Phone home: the page title is a small header, not a hero. */
+.wb-phone .wb-phone-head h1 {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* Agent brand logos (src/views/agent-logo.tsx). Monochrome logos use
+   currentColor and follow the text color. */
+.wb-agent-logo {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--text);
+}
+
+.wb-pane .wb-agent-logo {
+  color: var(--wb-term-text);
+}
+
+.wb-agent-logo svg {
+  width: 100%;
+  height: 100%;
+}
+
+.wb-agent-mono {
+  border-radius: 5px;
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+/* Space and tab actions (rename, close). The ⋯ button shows on hover, and
+   always on touch screens. */
+.wb-space-more {
+  position: absolute;
+  right: 4px;
+  opacity: 0;
+}
+
+.wb-space:hover .wb-space-more,
+.wb-space.is-active .wb-space-more,
+.wb-space-more:focus-visible {
+  opacity: 1;
+}
+
+.wb-space:hover .wb-space-meta,
+.wb-space.is-active .wb-space-meta {
+  visibility: hidden;
+}
+
+@media (hover: none) {
+  .wb-space-more {
+    opacity: 1;
+  }
+
+  .wb-space-meta {
+    visibility: hidden;
+  }
+}
+
+.wb-chip {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.wb-card-wrap {
+  position: relative;
+}
+
+.wb-card-wrap .wb-card {
+  width: 100%;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.wb-card-x {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+.wb-rename {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-rename-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+}
+
+/* Spec 56: Claude accounts plugin (tab-bar button, popover, phone sheet). */
+.wb-acc-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  padding: 5px 10px 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.wb-acc-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.wb-acc-pop {
+  max-height: min(680px, 80vh);
+  overflow-y: auto;
+  padding: 0;
+}
+
+.wb-acc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.wb-acc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-acc-sub {
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+.wb-acc-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--fs-sm);
+}
+
+.wb-acc-note {
+  margin: 0;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+.wb-acc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wb-acc-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.wb-acc-item.is-active {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+.wb-acc-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-acc-num {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #d97757;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wb-acc-name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-acc-name b {
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-acc-name span {
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+.wb-acc-tag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.wb-acc-tag.is-best {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+
+.wb-acc-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wb-acc-bar {
+  display: grid;
+  grid-template-columns: 44px 1fr 38px 56px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.wb-acc-bar-label {
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-acc-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-3, var(--surface-2));
+}
+
+.wb-acc-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green);
+}
+
+.wb-acc-fill.is-amber {
+  background: var(--amber);
+}
+
+.wb-acc-fill.is-red {
+  background: var(--red);
+}
+
+.wb-acc-pct {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.wb-acc-reset {
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-acc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wb-acc-actions .btn {
+  gap: 5px;
+}
+
+.spin {
+  animation: wb-spin 1s linear infinite;
+}
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Claude accounts, compact pass (owner feedback 2026-11-17). */
+.wb-acc-pop {
+  width: 440px !important;
+  max-width: calc(100vw - 24px);
+}
+
+.wb-acc {
+  gap: 6px;
+  padding: 10px;
+}
+
+.wb-acc-head {
+  padding: 2px 2px 4px;
+  white-space: nowrap;
+}
+
+.wb-acc-head b {
+  font-size: 14px;
+}
+
+.wb-acc-list {
+  gap: 6px;
+}
+
+.wb-acc-item {
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.wb-acc-top {
+  gap: 8px;
+}
+
+.wb-acc-num {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+}
+
+.wb-acc-name {
+  line-height: 1.25;
+}
+
+.wb-acc-name b,
+.wb-acc-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-acc-name b {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-acc-name span {
+  font-size: 11.5px;
+}
+
+.wb-acc-tag {
+  padding: 1px 7px;
+  font-size: 10.5px;
+}
+
+.wb-acc-bars {
+  gap: 3px;
+}
+
+.wb-acc-bar {
+  grid-template-columns: 38px 1fr 34px 48px;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.wb-acc-track {
+  height: 5px;
+}
+
+.wb-acc-note {
+  font-size: 11px;
+}
+
+.wb-acc-actions {
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.wb-acc-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-acc-act:hover {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-acc-act.is-main {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.wb-acc-act:disabled {
+  opacity: 0.5;
+}
+
+.wb-acc-act.is-danger {
+  color: var(--text-4);
+}
+
+.wb-acc-act.is-danger:hover,
+.wb-acc-act.is-danger.is-armed {
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+/* Remove account: an × at the card's top right; the first click arms it
+   (red trash), the second removes. */
+.wb-acc-x {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-right: -4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+}
+
+.wb-acc-x:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-acc-x.is-armed {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  color: var(--red);
+}
+
+/* The rename dialog fits above the phone keyboard (top/height set from the
+   visual viewport in RenameDialog). */
+.modal-wrap:has(.wb-rename-modal) .modal {
+  max-height: calc(100% - 24px);
+}
+
+/* Tabs and phone chips show the agent's logo before the title (herdr). */
+.wb-tab-btn,
+.wb-chip {
+  max-width: 240px;
+}
+
+.wb-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-sound {
+  margin-left: auto;
+  margin-right: 4px;
+}
+
+.wb-sound.is-on {
+  color: var(--text-2);
+}

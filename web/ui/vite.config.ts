@@ -134,8 +134,13 @@ export default defineConfig({
       "/v1": {
         target: devDaemon,
         changeOrigin: true,
+        /* Spec 55: the Workbench attach is a WebSocket. */
+        ws: true,
         configure: (proxy) => {
           proxy.on("proxyReq", (req) => {
+            if (req.getHeader("origin")) req.setHeader("origin", devDaemon);
+          });
+          proxy.on("proxyReqWs", (req) => {
             if (req.getHeader("origin")) req.setHeader("origin", devDaemon);
           });
         },

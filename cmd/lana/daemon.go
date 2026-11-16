@@ -24,6 +24,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/browser"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/internal/selfupdate"
+	"github.com/ridhomujizat/lana-harness/internal/workbench"
 	"github.com/ridhomujizat/lana-harness/web"
 )
 
@@ -359,6 +360,22 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 			webServer.SetCalendarGoogle(google)
 		}
 		webServer.SetToolbox(rt.Toolbox())
+		// Spec 55: the Workbench page proxies the terminal core. The core is
+		// started lazily on the first API call and is never stopped here, so
+		// its sessions outlive the daemon (REQ-WB-002, REQ-WB-003).
+		wbBackend := newWorkbenchBackend(home)
+		webServer.SetWorkbench(wbBackend)
+		// Spec 55 A5: agent-finished and agent-needs-you banners. The watcher
+		// subscribes to a core the browser starts through the backend's onLive
+		// hook, and to one already running at start; it never starts a core.
+		notifyWatcher := newWorkbenchWatcher(rt.Notifications())
+		wbBackend.setOnLive(notifyWatcher.attach)
+		go notifyWatcher.run(runCtx)
+		if _, err := os.Stat(workbench.SocketPath(home)); err == nil {
+			if client, err := workbench.Dial(runCtx, home); err == nil {
+				notifyWatcher.attach(client)
+			}
+		}
 		// Spec #42: the menu bar app reads the notification bus from GET
 		// /v1/local/events; the runtime feeds it replies and workflow runs,
 		// the web brokers approvals and questions.

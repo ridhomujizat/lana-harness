@@ -106,6 +106,7 @@ final class Notifier: NSObject, ObservableObject {
     func deliver(_ event: LanaEvent) {
         switch planNotification(event, settings: settings) {
         case let .post(plan):
+            SoundPlayer.shared.play(kind: event.kind, sound: plan.sound)
             Self.post(plan) { error in
                 if let error {
                     Task { @MainActor in self.lastError = error.localizedDescription }
@@ -132,7 +133,10 @@ final class Notifier: NSObject, ObservableObject {
         content.body = plan.body
         content.threadIdentifier = plan.threadIdentifier
         content.categoryIdentifier = plan.category
-        content.sound = plan.sound ? .default : nil
+        // The banner is always silent: the app plays the sound itself, at full
+        // volume (spec #55), so it does not depend on the alert volume and does
+        // not sound twice.
+        content.sound = nil
         content.interruptionLevel = plan.timeSensitive ? .timeSensitive : .active
         var info: [String: String] = ["url": plan.url]
         if let id = plan.approvalId {
@@ -190,9 +194,10 @@ func permissionText(_ status: UNAuthorizationStatus) -> String {
 }
 
 extension Notifier: UNUserNotificationCenterDelegate {
-    /// The menu bar app is always active, so banners show in front too.
+    /// The menu bar app is always active, so banners show in front too. The
+    /// sound is not the system one: the app plays it itself (spec #55).
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list, .sound])
+        completionHandler([.banner, .list])
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {

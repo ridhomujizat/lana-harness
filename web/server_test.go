@@ -34,8 +34,9 @@ func TestWebServerSecurityHeaders(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET / status = %d", resp.StatusCode)
 	}
-	if got := resp.Header.Get("Content-Security-Policy"); got != "default-src 'self'; frame-ancestors 'none'" {
-		t.Fatalf("CSP = %q", got)
+	wantCSP := "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://" + s.Addr() + " wss://" + s.Addr() + "; frame-ancestors 'none'"
+	if got := resp.Header.Get("Content-Security-Policy"); got != wantCSP {
+		t.Fatalf("CSP = %q, want %q", got, wantCSP)
 	}
 	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q", got)

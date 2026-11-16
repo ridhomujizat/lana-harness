@@ -266,6 +266,8 @@ enum NotifyDebug {
             fputs("error: notifications are \(allowed) for lana; start Lana.app once and allow them\n", stderr)
             return 4
         }
+        // Same playback path as deliver, so the debounce state is shared.
+        SoundPlayer.shared.play(kind: event.kind, sound: plan.sound)
         let error: String? = wait {
             await withCheckedContinuation { continuation in
                 UNUserNotificationCenter.current().setNotificationCategories(Notifier.categories)

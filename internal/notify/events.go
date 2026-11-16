@@ -18,6 +18,8 @@ const (
 	QuestionMax = 140
 	// ErrorMax caps a workflow error excerpt.
 	ErrorMax = 140
+	// AgentMax caps a workbench agent banner body.
+	AgentMax = 140
 	// titlePartMax caps a session title or workflow name inside a title.
 	titlePartMax = 60
 )
@@ -43,6 +45,9 @@ func ChatURL(agent string) string {
 func WorkflowURL(workflowID string) string {
 	return "#/workflows/" + workflowID
 }
+
+// WorkbenchURL is the dashboard hash of the Workbench page.
+const WorkbenchURL = "#/workbench"
 
 // WorkflowRunURL is the dashboard hash of one workflow run. number is the run
 // number; 0 falls back to the run id.
@@ -190,6 +195,35 @@ func QuestionAnswered(questionID string, target ApprovalTarget) Event {
 		Silent:     true,
 		Thread:     target.thread(),
 		Key:        "question_answered:" + questionID,
+	}
+}
+
+// AgentFinished is the banner of a workbench coding agent that finished a
+// turn: "<name> finished" over the session title. occurrence makes the key
+// unique per transition, so the bus does not dedupe a real repeat.
+func AgentFinished(name, body, sessionID, occurrence string) Event {
+	return agentEvent(KindAgentFinished, name, "finished", body, sessionID, occurrence)
+}
+
+// AgentNeedsYou is the banner of a workbench coding agent that waits for the
+// owner: "<name> needs you" over the session title.
+func AgentNeedsYou(name, body, sessionID, occurrence string) Event {
+	return agentEvent(KindAgentNeedsYou, name, "needs you", body, sessionID, occurrence)
+}
+
+// agentEvent builds a workbench agent banner. The title is "<name> <verb>",
+// name being the readable agent label, and the body the session title excerpt.
+func agentEvent(kind Kind, name, verb, body, sessionID, occurrence string) Event {
+	name = OneLine(name, titlePartMax)
+	return Event{
+		Kind:      kind,
+		SessionID: sessionID,
+		Agent:     name,
+		Title:     strings.TrimSpace(name + " " + verb),
+		Body:      OneLine(body, AgentMax),
+		URL:       WorkbenchURL,
+		Thread:    sessionID,
+		Key:       string(kind) + ":" + sessionID + ":" + occurrence,
 	}
 }
 

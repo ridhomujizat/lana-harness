@@ -35,11 +35,13 @@
    full-height Lana workspaces (Chats, the sessions workspace, the session
    chat) used to size themselves against the viewport via .app-content; size
    them against .content instead, so they fill it and scroll internally. */
-.content:has(> .rooms-page) {
+.content:has(> .rooms-page),
+.content:has(> .wb-page) {
   overflow: hidden;
 }
 
-.content > .rooms-page {
+.content > .rooms-page,
+.content > .wb-page {
   height: 100%;
   min-height: 0;
 }
