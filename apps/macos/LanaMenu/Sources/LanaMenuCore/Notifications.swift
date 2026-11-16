@@ -89,6 +89,10 @@ public enum EventKind {
     public static let workflowFinished = "workflow_finished"
     public static let workflowFailed = "workflow_failed"
     public static let workflowWaiting = "workflow_waiting"
+    /// agentFinished and agentNeedsYou are the workbench coding agent kinds
+    /// of spec #55.
+    public static let agentFinished = "agent_finished"
+    public static let agentNeedsYou = "agent_needs_you"
 }
 
 /// NotificationSettings are the notification toggles of the Settings window.
@@ -184,6 +188,10 @@ public enum NotificationAction: Equatable, Sendable {
 /// The placeholder body of a reply or question when previews are off.
 public let hiddenPreviewBody = "New message"
 
+/// workbenchURL is the dashboard hash of the Workbench page (spec #55); a
+/// workbench agent event without a url opens it.
+public let workbenchURL = "#/workbench"
+
 /// approvalIdentifier is the banner identifier of an approval, so a decision
 /// made elsewhere can remove it.
 public func approvalIdentifier(_ approvalId: String) -> String { "approval-" + approvalId }
@@ -233,6 +241,13 @@ public func planNotification(_ event: LanaEvent, settings: NotificationSettings)
     case EventKind.questionAnswered:
         guard let id = event.questionId, !id.isEmpty else { return .skip("no question id") }
         return .remove([questionIdentifier(id)])
+    case EventKind.agentFinished, EventKind.agentNeedsYou:
+        // Workbench agent events are always on, sound, and lift the banner to
+        // the Workbench page; a "needs you" is time sensitive like an approval.
+        if let sessionId = event.sessionId, !sessionId.isEmpty { plan.threadIdentifier = sessionId }
+        if plan.url.isEmpty { plan.url = workbenchURL }
+        plan.sound = true
+        plan.timeSensitive = event.kind == EventKind.agentNeedsYou
     default:
         return .skip("unknown kind " + event.kind)
     }
