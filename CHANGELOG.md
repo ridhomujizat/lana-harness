@@ -7,6 +7,33 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.6] - 2026-11-17
+
+### Added
+- **Workbench** (spec 55): terminals for coding agents that stay alive. A separate core
+  process (`lana workbench serve`, started on first use) owns every terminal, so sessions
+  survive daemon restarts and upgrades. The Workbench page has a Spaces and Agents panel in
+  the herdr layout, tabs and split panes rendered with xterm.js, and a phone view with a tab
+  strip, an all-tabs sheet, a key bar above the keyboard and touch scrolling.
+- Agent detection follows herdr (Apache-2.0): Claude Code, Codex, Cursor, Gemini CLI,
+  OpenCode, Copilot and 18 more are recognized, with working / blocked / idle read from the
+  screen. Agents show their real logos and conversation titles.
+- Spaces are named after the folder of their active terminal; `+` opens a new space in the
+  home folder, and new terminals open in the folder of the last one. Spaces and tabs can be
+  renamed and closed.
+- A chime in the browser when an agent finishes or needs you, and `agent_finished` /
+  `agent_needs_you` notifications for the menu bar app.
+- **Plugins** (spec 56): the Tools page is now Tools & plugins. The Claude accounts plugin
+  turns on once the new **Claude Swap** tool (`cswap`) is installed and shows every Claude
+  Code account with its 5-hour, weekly and per-model usage: make default, open on an account
+  in a new tab or beside the focused pane, add, re-login and remove.
+
+### Changed
+- The menu bar app plays notification sounds itself at full volume (Glass) instead of the
+  macOS alert volume, which was often too quiet.
+- The dashboard's Content-Security-Policy allows `ws:` to the daemon and inline styles
+  (xterm.js).
+
 ## [0.5.0-beta.5] - 2026-11-14
 
 ### Changed
