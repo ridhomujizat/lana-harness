@@ -35,6 +35,10 @@ const (
 	KindWorkflowFailed Kind = "workflow_failed"
 	// KindWorkflowWaiting is a workflow run that waits for the owner.
 	KindWorkflowWaiting Kind = "workflow_waiting"
+	// KindAgentFinished is a workbench coding agent that finished a turn.
+	KindAgentFinished Kind = "agent_finished"
+	// KindAgentNeedsYou is a workbench coding agent that waits for the owner.
+	KindAgentNeedsYou Kind = "agent_needs_you"
 )
 
 // Control reports whether k only updates earlier banners (it removes them)

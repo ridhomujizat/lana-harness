@@ -1,0 +1,26 @@
+internal/workbench/agentdetect
+================================
+
+This package contains a Go port of herdr's coding-agent detection, and its
+bundled agent detection manifests.
+
+Upstream:  https://github.com/herdrdev/herdr
+Commit:    ee5bfb5041bb3e4a49d591c72308aae3c81ecdde
+Licence:   Apache License, Version 2.0 (see LICENSE-herdr)
+
+The following are derived from herdr:
+
+  * The agent list, canonical labels and aliases, and the process-job
+    identification rules in agents.go (herdr's src/detect/mod.rs).
+  * The screen-manifest engine in manifest.go (herdr's src/detect/manifest.rs).
+  * The agent manifests in manifests/*.toml (herdr's src/detect/manifests/).
+
+The following minimal changes were made to the copied manifests so that every
+pattern compiles under Go's RE2 regexp engine:
+
+  * antigravity.toml, droid.toml, kimi.toml: \uXXXX escapes were rewritten as
+    \x{XXXX}, which RE2 understands.
+  * hermes.toml: \u{XXXX} escapes were rewritten as \x{XXXX}.
+  * cursor.toml, qodercli.toml: \uXXXX was rewritten as \x{XXXX}, and
+    \p{Alphabetic} was replaced with the \p{L} letter category, since RE2 does
+    not expose the Alphabetic property.

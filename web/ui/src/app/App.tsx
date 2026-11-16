@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { authSession, logout as apiLogout } from "../api/auth";
 import { setCSRF, setUnauthorizedHandler } from "../api/client";
@@ -49,6 +49,9 @@ import { McpPage, McpDetailPage } from "../views/mcp";
 import { SetupWizard, setupNeeded } from "../views/setup";
 import { ChannelsPage, TelegramPage } from "../views/channels";
 import { UpdateCard } from "../views/update-card";
+
+/* Spec 55: xterm.js is large, so the Workbench page loads on first visit. */
+const WorkbenchPage = lazy(() => import("../views/workbench").then((m) => ({ default: m.WorkbenchPage })));
 
 type AuthState = "checking" | "loggedIn" | "loggedOut";
 
@@ -120,6 +123,12 @@ function routeContent(
       return <CalendarPage params={route.params || {}} />;
     case "workflows":
       return <WorkflowsPage />;
+    case "workbench":
+      return (
+        <Suspense fallback={<main id="main" className="page"><p className="muted">Opening Workbench.</p></main>}>
+          <WorkbenchPage />
+        </Suspense>
+      );
     case "workflow-new":
       return <WorkflowPage key="new" tab="editor" />;
     case "workflow":
@@ -216,15 +225,17 @@ export function crumbsFor(
     case "logs":
       return [{ label: "Logs" }];
     case "tools":
-      return [{ label: "Tools" }];
+      return [{ label: "Tools & plugins" }];
     case "tool":
-      return [{ label: "Tools", href: "#/tools" }, { label: params.id || "Tool" }];
+      return [{ label: "Tools & plugins", href: "#/tools" }, { label: params.id || "Tool" }];
     case "schedules":
       return [{ label: "Schedules" }];
     case "calendar":
       return [{ label: "Calendar" }];
     case "workflows":
       return [{ label: "Workflows" }];
+    case "workbench":
+      return [{ label: "Workbench" }];
     case "workflow-new":
       return [{ label: "Workflows", href: "#/workflows" }, { label: "New workflow" }];
     case "workflow":
@@ -373,6 +384,13 @@ export function App() {
   const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [mnav, setMnav] = useState(false);
+  /* Pages without the topbar (the Workbench) open the phone navigation
+     drawer with this event. */
+  useEffect(() => {
+    const open = () => setMnav(true);
+    window.addEventListener("lana:open-nav", open);
+    return () => window.removeEventListener("lana:open-nav", open);
+  }, []);
   const [daemonInfo, setDaemonInfo] = useState<DaemonState | null>(null);
 
   useEffect(() => {
@@ -571,7 +589,9 @@ export function App() {
           onClick={() => setMnav(false)}
         />
       ) : null}
-      <div className="main">
+      {/* Spec 55: the Workbench fills the whole height; its own bars carry the
+          navigation, so the shell topbar is hidden there. */}
+      <div className={route.view === "workbench" ? "main is-bare" : "main"}>
         <header className="topbar" {...dragRegion(shell)}>
           <button
             type="button"

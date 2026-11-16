@@ -88,6 +88,11 @@ type Server struct {
 	// calendar holds the calendar and Google ports of the /v1/calendar routes
 	// (spec #35) and the pending Google OAuth states.
 	calendar calendarPort
+	// workbench is the Workbench terminal core port of the /v1/workbench
+	// routes (spec 55). It is guarded by workbenchMu so SetWorkbench may run
+	// after Start; nil makes every route answer 503 workbench_unavailable.
+	workbench   WorkbenchBackend
+	workbenchMu sync.RWMutex
 	// routerBackend is the Router page and proxy port (spec 37). It is
 	// guarded by routerMu because the proxy reads it on every request.
 	routerBackend  RouterBackend
@@ -229,7 +234,8 @@ func New(cfg Config) (*Server, error) {
 	s.registerToolboxRoutes()
 	s.registerCalendarRoutes()
 	s.registerRouterRoutes()
-	s.handler = securityHeaders(s.mux)
+	s.registerWorkbenchRoutes()
+	s.handler = s.securityHeaders(s.mux)
 	return s, nil
 }
 
@@ -436,10 +442,10 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, info.Name(), info.ModTime(), bytes.NewReader(data))
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", s.contentSecurityPolicy())
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		if isAPIPath(r.URL.Path) {
@@ -447,6 +453,15 @@ func securityHeaders(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// contentSecurityPolicy is the shell policy. The Workbench page renders
+// terminals with xterm.js, which injects <style> elements (style-src
+// 'unsafe-inline') and opens a WebSocket to the same address (connect-src ws:
+// and wss:, which Safari requires explicitly).
+func (s *Server) contentSecurityPolicy() string {
+	addr := s.Addr()
+	return "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://" + addr + " wss://" + addr + "; frame-ancestors 'none'"
 }
 
 func isAPIPath(path string) bool {

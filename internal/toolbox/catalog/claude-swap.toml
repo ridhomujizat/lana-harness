@@ -1,0 +1,41 @@
+id = "claude-swap"
+name = "Claude Swap"
+description = "Several Claude Code accounts on one machine: usage per account, switch the default, run on any account"
+homepage = "https://pypi.org/project/claude-swap/"
+icon = "users"
+category = "Coding agents"
+
+[detect]
+binary = "cswap"
+
+[[install]]
+label = "uv"
+command = "uv tool install claude-swap"
+requires = ["uv"]
+
+[[install]]
+label = "pipx"
+command = "pipx install claude-swap"
+requires = ["pipx"]
+
+[uninstall]
+command = "uv tool uninstall claude-swap || pipx uninstall claude-swap"
+
+# The Workbench "Claude accounts" plugin (spec 56) reads these.
+[[commands]]
+name = "list"
+description = "List the Claude Code accounts with their 5-hour, weekly and per-model usage"
+args = ["list", "--json"]
+risk = "read"
+timeout_secs = 60
+output = "json"
+
+[[commands]]
+name = "switch"
+description = "Make an account the default login of plain `claude`"
+args = ["switch", "{{account}}"]
+risk = "admin"
+timeout_secs = 60
+
+[commands.input]
+account = { type = "string", description = "Account number or email", required = true }

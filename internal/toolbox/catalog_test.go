@@ -12,7 +12,7 @@ import (
 // (REQ-TB-001, REQ-TB-009, REQ-TB-011).
 func TestCatalogLoads(t *testing.T) {
 	svc := testService(t)
-	for _, id := range []string{"ffmpeg", "obscura", "pandoc", "yt-dlp"} {
+	for _, id := range []string{"claude-swap", "ffmpeg", "obscura", "pandoc", "yt-dlp"} {
 		manifest, ok := svc.catalog.byID[id]
 		if !ok {
 			t.Fatalf("catalog is missing %q: %+v", id, svc.catalog.byID)
@@ -21,8 +21,8 @@ func TestCatalogLoads(t *testing.T) {
 			t.Fatalf("%s issues: %+v", id, issues)
 		}
 	}
-	if len(svc.catalog.manifests) != 4 {
-		t.Fatalf("catalog has %d manifests want 4", len(svc.catalog.manifests))
+	if len(svc.catalog.manifests) != 5 {
+		t.Fatalf("catalog has %d manifests want 5", len(svc.catalog.manifests))
 	}
 
 	obscura := svc.catalog.byID["obscura"]

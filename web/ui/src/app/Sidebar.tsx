@@ -14,6 +14,7 @@ import type {
 import { createPortal } from "react-dom";
 import { Ic, LanaMark } from "../ui/icons";
 import { getKnowledge, REVIEW_CHANGED_EVENT } from "../api/knowledge";
+import { useWorkbenchAttention } from "../views/workbench-attention";
 import type { Route } from "./router";
 import { dragRegion, isMacAppShell } from "./shell";
 
@@ -107,6 +108,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "home", label: "Home", icon: "house", href: "#/home" },
       { key: "chats", label: "Chats", icon: "messages-square", href: "#/chats" },
       { key: "workflows", label: "Workflows", icon: "workflow", href: "#/workflows" },
+      /* Spec 55 REQ-WB-050. */
+      { key: "workbench", label: "Workbench", icon: "terminal", href: "#/workbench" },
       { key: "calendar", label: "Calendar", icon: "calendar-days", href: "#/calendar" },
     ],
   },
@@ -125,7 +128,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { key: "agents", label: "Agents", icon: "bot", href: "#/agents" },
       { key: "knowledge", label: "Knowledge", icon: "book-open", href: "#/knowledge" },
       { key: "skills", label: "Skills", icon: "sparkles", href: "#/skills" },
-      { key: "tools", label: "Tools", icon: "package", href: "#/tools" },
+      { key: "tools", label: "Tools & plugins", icon: "package", href: "#/tools" },
       { key: "mcp", label: "MCP", icon: "plug", href: "#/mcp" },
       { key: "channels", label: "Channels", icon: "radio-tower", href: "#/channels" },
     ],
@@ -614,6 +617,7 @@ export function Sidebar({
   /* The icon-only rail; the mobile drawer keeps the full tree. */
   const rail = collapsed && !narrow;
   const reviewPending = useReviewPending();
+  const workbenchAttention = useWorkbenchAttention();
   /* Spec 52: in the Lana.app window the traffic lights and the collapse
      toggle share the top row, and the brand moves below it. */
   const shell = isMacAppShell();
@@ -685,7 +689,7 @@ export function Sidebar({
               active={isActive(item, route)}
               collapsed={collapsed}
               onNavigate={onNavigate}
-              count={item.key === "knowledge" ? reviewPending : undefined}
+              count={item.key === "knowledge" ? reviewPending : item.key === "workbench" ? workbenchAttention : undefined}
             />
           ));
           const tree = !section.routerTree ? null : rail ? (

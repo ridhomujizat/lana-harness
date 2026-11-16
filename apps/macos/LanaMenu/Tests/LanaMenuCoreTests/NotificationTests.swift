@@ -76,6 +76,48 @@ final class NotificationPlanTests: XCTestCase {
         XCTAssertEqual(plan(planNotification(event("workflow_finished"), settings: .init()))?.sound, true)
     }
 
+    func testAgentFinished() {
+        guard let p = plan(planNotification(event("agent_finished"), settings: .init())) else { return }
+        XCTAssertEqual(p.identifier, "event-b-1")
+        XCTAssertEqual(p.title, "T")
+        XCTAssertEqual(p.body, "B")
+        XCTAssertEqual(p.threadIdentifier, "s1")
+        XCTAssertEqual(p.url, "#/sessions/s1")
+        XCTAssertEqual(p.category, NotificationCategory.plain)
+        XCTAssertTrue(p.sound)
+        XCTAssertFalse(p.timeSensitive)
+        XCTAssertNil(p.approvalId)
+    }
+
+    func testAgentNeedsYou() {
+        guard let p = plan(planNotification(event("agent_needs_you"), settings: .init())) else { return }
+        XCTAssertEqual(p.threadIdentifier, "s1")
+        XCTAssertEqual(p.url, "#/sessions/s1")
+        XCTAssertEqual(p.category, NotificationCategory.plain)
+        XCTAssertTrue(p.sound)
+        XCTAssertTrue(p.timeSensitive)
+    }
+
+    func testAgentURLFallsBackToWorkbench() {
+        // No url on the event opens the Workbench page, and the session id is
+        // the thread even when the event carries no thread.
+        let empty = LanaEvent(id: "b-2", kind: "agent_finished", sessionId: "s9", agent: "coder", title: "Coder finished", body: "Fix the bug", url: "", thread: "")
+        guard let p = plan(planNotification(empty, settings: .init())) else { return }
+        XCTAssertEqual(p.url, workbenchURL)
+        XCTAssertEqual(p.threadIdentifier, "s9")
+        // Without a session id the thread falls back to the event id.
+        let orphan = LanaEvent(id: "b-3", kind: "agent_needs_you", title: "Coder needs you", body: "Pick one", url: "")
+        guard let o = plan(planNotification(orphan, settings: .init())) else { return }
+        XCTAssertEqual(o.url, workbenchURL)
+        XCTAssertEqual(o.threadIdentifier, "b-3")
+        XCTAssertTrue(o.timeSensitive)
+    }
+
+    func testExistingKindsKeepTheirSound() {
+        XCTAssertEqual(plan(planNotification(event("reply"), settings: .init()))?.sound, true)
+        XCTAssertEqual(plan(planNotification(event("workflow_started"), settings: .init()))?.sound, false)
+    }
+
     func testSettingsFilters() {
         func skipped(_ kind: String, _ settings: NotificationSettings, approval: String? = nil) -> Bool {
             if case .skip = planNotification(event(kind, approval: approval), settings: settings) { return true }

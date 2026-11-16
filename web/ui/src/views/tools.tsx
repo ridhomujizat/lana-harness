@@ -6,6 +6,8 @@ import type { PackageState, PackageView } from "../api/toolbox";
 import { Ic } from "../ui/icons";
 import { Badge, Button, EmptyState, ErrorState, Modal, SearchInput, Textarea, useToast } from "../ui/gr8r";
 import type { BadgeTone } from "../ui/gr8r";
+import { AgentLogo } from "./agent-logo";
+import { PLUGINS, toolReady, type PluginDef } from "./plugins";
 
 /* Configure → Tools (spec #34 r2): an app list. Lana ships a small catalog
    (REQ-TB-001); the owner installs an app with one click (REQ-TB-009). Custom
@@ -188,6 +190,71 @@ function AppCard({ pkg, onInstall, busy }: { pkg: PackageView; onInstall: (pkg: 
   );
 }
 
+/* Spec 56: a plugin card. The plugin turns on once its tool is installed;
+   until then the card offers to install that tool. */
+function PluginCard({
+  plugin,
+  tool,
+  busy,
+  onInstall,
+}: {
+  plugin: PluginDef;
+  tool: PackageView | undefined;
+  busy: boolean;
+  onInstall: (pkg: PackageView) => void;
+}) {
+  const ready = toolReady(tool);
+  const canInstall = Boolean(tool && (tool.auto_method ?? 0) >= 0 && tool.install.length > 0);
+  return (
+    <div className={"tl-card tl-plugin" + (ready ? " on" : "")}>
+      <div className="tl-card-top">
+        {plugin.logo ? (
+          <span className="tl-plugin-logo">
+            <AgentLogo agent={plugin.logo} size={26} />
+          </span>
+        ) : (
+          <span className="tl-plugin-logo">
+            <Ic name={plugin.icon || "puzzle"} size={20} />
+          </span>
+        )}
+        <div className="tl-card-title">
+          <b>{plugin.name}</b>
+          <span>Plugin · {plugin.where}</span>
+        </div>
+      </div>
+      <p className="tl-card-desc">{plugin.description}</p>
+      <p className="tl-card-gives">Needs the {tool?.name || plugin.requires} tool</p>
+      <div className="tl-card-foot">
+        {ready ? (
+          <>
+            <span className="tl-plugin-on">
+              <Ic name="check" size={13} /> On
+            </span>
+            <a className="tl-open" href={plugin.href}>
+              Open {plugin.where} <Ic name="arrow-right" size={13} />
+            </a>
+          </>
+        ) : tool?.installing ? (
+          <StateBadge pkg={tool} />
+        ) : (
+          <>
+            <span className="muted tl-card-note">Install {tool?.name || plugin.requires} first</span>
+            {tool && canInstall ? (
+              <Button size="sm" variant="primary" icon="download" loading={busy} onClick={() => onInstall(tool)}>
+                Install tool
+              </Button>
+            ) : tool ? (
+              <a className="tl-open" href={"#/tools/" + encodeURIComponent(tool.id)}>
+                How to install <Ic name="arrow-right" size={13} />
+              </a>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ToolsPage() {
   const toast = useToast();
   const [packages, setPackages] = useState<PackageView[] | null>(null);
@@ -234,8 +301,8 @@ export function ToolsPage() {
     <main id="main" className="page tl-page">
       <header className="ph">
         <div>
-          <h1>Tools</h1>
-          <p>Apps lana can use for you. Install one with a click, then let agents and workflows use it.</p>
+          <h1>Tools &amp; plugins</h1>
+          <p>Apps lana can use for you, and plugins that add features once their tool is installed.</p>
         </div>
         <div className="acts">
           <Button icon="plus" onClick={() => setAdding(true)}>
@@ -260,9 +327,26 @@ export function ToolsPage() {
         </div>
       ) : null}
 
+      {packages ? (
+        <>
+          <h2 className="tl-h2">Plugins</h2>
+          <div className="tl-grid-apps">
+            {PLUGINS.map((plugin) => (
+              <PluginCard
+                key={plugin.id}
+                plugin={plugin}
+                tool={packages.find((p) => p.id === plugin.requires)}
+                busy={busy === plugin.requires}
+                onInstall={(pkg) => void install(pkg)}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+
       {installed.length > 0 ? (
         <>
-          <h2 className="tl-h2">Installed</h2>
+          <h2 className="tl-h2">Installed tools</h2>
           <div className="tl-grid-apps">
             {installed.map((pkg) => (
               <AppCard key={pkg.id} pkg={pkg} onInstall={(item) => void install(item)} busy={busy === pkg.id} />
@@ -273,7 +357,7 @@ export function ToolsPage() {
 
       {available.length > 0 ? (
         <>
-          <h2 className="tl-h2">Available</h2>
+          <h2 className="tl-h2">Available tools</h2>
           <div className="tl-grid-apps">
             {available.map((pkg) => (
               <AppCard key={pkg.id} pkg={pkg} onInstall={(item) => void install(item)} busy={busy === pkg.id} />
