@@ -130,7 +130,7 @@ describe("sidebar router tree", () => {
     const labels = Array.from(configure.querySelectorAll(":scope > .stree > .stree-row > a, :scope > a.sitem")).map(
       (node) => node.getAttribute("aria-label")
     );
-    expect(labels).toEqual(["Router", "Agents", "Knowledge", "Skills", "Tools", "MCP", "Channels"]);
+    expect(labels).toEqual(["Router", "Agents", "Knowledge", "Skills", "Tools & plugins", "MCP", "Channels"]);
     expect(screen.getByRole("link", { name: "Router" }).getAttribute("href")).toBe("#/router/providers");
     expect(treeLabels()).toEqual(ROUTER_PAGES);
   });

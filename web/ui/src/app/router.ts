@@ -86,6 +86,7 @@ export type RouteView =
   | "schedules"
   | "calendar"
   | "workflows"
+  | "workbench"
   | "workflow-new"
   | "workflow"
   | "workflow-runs"
@@ -137,6 +138,7 @@ export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/schedules", view: "schedules", section: "schedules" },
   { path: "#/calendar", view: "calendar", section: "calendar" },
   { path: "#/workflows", view: "workflows", section: "workflows" },
+  { path: "#/workbench", view: "workbench", section: "workbench" },
   { path: "#/workflows/new", view: "workflow-new", section: "workflows" },
   { path: "#/workflows/{id}", view: "workflow", section: "workflows" },
   { path: "#/workflows/{id}/runs", view: "workflow-runs", section: "workflows" },

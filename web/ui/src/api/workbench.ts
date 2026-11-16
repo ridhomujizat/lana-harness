@@ -1,0 +1,127 @@
+import { request } from "./client";
+
+/* Spec 55: the Workbench API. Sessions live in the workbench core process;
+   the daemon proxies them under /v1/workbench (REQ-WB-040, REQ-WB-041). */
+
+export type SessionState = "working" | "idle" | "exited";
+
+export interface WorkbenchSession {
+  id: string;
+  title: string;
+  command: string[];
+  dir: string;
+  labels?: Record<string, string>;
+  pid: number;
+  created: string;
+  cols: number;
+  rows: number;
+  program: string;
+  cwd?: string;
+  state: SessionState;
+  exit_code: number;
+  needs_you: boolean;
+  last_output: string;
+  attached: number;
+  /* The coding agent running in the session (herdr labels: claude, codex,
+     cursor, omp, opencode, …) and its screen-derived state. */
+  agent?: string;
+  agent_state?: "idle" | "working" | "blocked" | "unknown" | "";
+}
+
+export interface CreateSessionInput {
+  command?: string[];
+  dir?: string;
+  cols?: number;
+  rows?: number;
+  title?: string;
+  labels?: Record<string, string>;
+}
+
+export type AttachMode = "control" | "view";
+
+export function listWorkbenchSessions(): Promise<{ sessions: WorkbenchSession[] }> {
+  return request("GET", "/v1/workbench/sessions");
+}
+
+export function createWorkbenchSession(input: CreateSessionInput): Promise<WorkbenchSession> {
+  return request("POST", "/v1/workbench/sessions", input);
+}
+
+export function killWorkbenchSession(id: string): Promise<unknown> {
+  return request("DELETE", "/v1/workbench/sessions/" + encodeURIComponent(id));
+}
+
+export function restartWorkbenchSession(id: string): Promise<WorkbenchSession> {
+  return request("POST", "/v1/workbench/sessions/" + encodeURIComponent(id) + "/restart");
+}
+
+export function resizeWorkbenchSession(id: string, cols: number, rows: number): Promise<unknown> {
+  return request("POST", "/v1/workbench/sessions/" + encodeURIComponent(id) + "/resize", { cols, rows });
+}
+
+export function getWorkbenchLayout(): Promise<unknown> {
+  return request("GET", "/v1/workbench/layout");
+}
+
+export function putWorkbenchLayout(layout: unknown): Promise<unknown> {
+  return request("PUT", "/v1/workbench/layout", layout);
+}
+
+/* The WebSocket URL of one attachment (REQ-WB-041). Same origin, so the
+   session cookie goes with it. */
+export function attachURL(id: string, mode: AttachMode): string {
+  const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return (
+    scheme + "//" + window.location.host + "/v1/workbench/sessions/" +
+    encodeURIComponent(id) + "/attach?mode=" + mode
+  );
+}
+
+export type WorkbenchEvent =
+  | { type: "session.created" | "session.updated"; session: WorkbenchSession }
+  | { type: "session.removed"; session: WorkbenchSession }
+  | { type: "layout.changed"; layout: unknown };
+
+const EVENT_TYPES = ["session.created", "session.updated", "session.removed", "layout.changed"] as const;
+
+/* Subscribes to the core events over SSE (REQ-WB-030, REQ-WB-040). The
+   browser's EventSource reconnects by itself; onOpen fires on every
+   (re)connect so the caller can reload the full list. */
+export function subscribeWorkbench(
+  onEvent: (event: WorkbenchEvent) => void,
+  onOpen?: () => void
+): () => void {
+  if (typeof EventSource === "undefined") {
+    return () => {};
+  }
+  const source = new EventSource("/v1/workbench/events", { withCredentials: true });
+  const handlers = EVENT_TYPES.map((type) => {
+    const handler = (message: MessageEvent) => {
+      try {
+        const data = JSON.parse(String(message.data)) as Record<string, unknown>;
+        if (type === "layout.changed") {
+          onEvent({ type, layout: data.layout ?? data });
+        } else {
+          const session = (data.session ?? data) as WorkbenchSession;
+          onEvent({ type, session } as WorkbenchEvent);
+        }
+      } catch {
+        /* A malformed event is skipped. */
+      }
+    };
+    source.addEventListener(type, handler as EventListener);
+    return [type, handler] as const;
+  });
+  if (onOpen) {
+    source.addEventListener("open", onOpen);
+  }
+  return () => {
+    for (const [type, handler] of handlers) {
+      source.removeEventListener(type, handler as EventListener);
+    }
+    if (onOpen) {
+      source.removeEventListener("open", onOpen);
+    }
+    source.close();
+  };
+}

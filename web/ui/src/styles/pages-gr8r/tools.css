@@ -181,3 +181,23 @@
 .tl-methods-list li.off { opacity: 0.6; }
 .tl-manifest-view { max-height: 320px; }
 .tl-row-acts { display: flex; gap: 8px; margin-top: 10px; }
+
+/* Spec 56: plugin cards. */
+.tl-plugin-logo {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.tl-plugin-on {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--green);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
