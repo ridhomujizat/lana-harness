@@ -375,6 +375,19 @@
   white-space: nowrap;
 }
 
+.wb-restored-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #24323a;
+  color: #a9cfdf;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------- */
 /* Main: tabs + workspace                                           */
 /* ---------------------------------------------------------------- */

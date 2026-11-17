@@ -377,6 +377,16 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 				notifyWatcher.attach(client)
 			}
 		}
+		// Spec 60 REQ-WR-030: when a previous core left running sessions, start
+		// the core in the background so they come back without a browser. The
+		// daemon start is not delayed and a failure is only logged.
+		if workbench.PendingRestore(home) {
+			go func() {
+				if _, err := wbBackend.conn(runCtx); err != nil {
+					slog.Warn("workbench: restoring sessions", "error", err)
+				}
+			}()
+		}
 		// Spec #42: the menu bar app reads the notification bus from GET
 		// /v1/local/events; the runtime feeds it replies and workflow runs,
 		// the web brokers approvals and questions.

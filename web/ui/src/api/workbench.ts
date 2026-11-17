@@ -26,6 +26,11 @@ export interface WorkbenchSession {
      cursor, omp, opencode, …) and its screen-derived state. */
   agent?: string;
   agent_state?: "idle" | "working" | "blocked" | "unknown" | "";
+  /* Spec 60: set when the core brought the session back after a restart,
+     until its program exits or it is restarted; resumed_agent names the
+     agent whose resume command was typed into it. */
+  restored?: string;
+  resumed_agent?: string;
   /* Client only, never sent by the core: the agent finished while its pane
      was not in view (herdr's "done"). */
   done?: boolean;
