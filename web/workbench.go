@@ -122,6 +122,7 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.Handle("PUT /v1/workbench/layout", http.HandlerFunc(s.handleWorkbenchSetLayout))
 	s.Handle("GET /v1/workbench/events", http.HandlerFunc(s.handleWorkbenchEvents))
 	s.Handle("GET /v1/workbench/sessions/{id}/attach", http.HandlerFunc(s.handleWorkbenchAttach))
+	s.Handle("POST /v1/workbench/drops", http.HandlerFunc(s.handleWorkbenchDrops))
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.

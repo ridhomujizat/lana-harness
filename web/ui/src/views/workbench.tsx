@@ -48,7 +48,11 @@ import {
   statusOf,
   tabSessions,
   toggleZoom,
+  paneInDirection,
+  tabAtShortcut,
+  workbenchShortcut,
   type PaneNode,
+  type WbShortcut,
   type Status,
   type WbLayout,
   type WbSpace,
@@ -369,11 +373,25 @@ interface PaneActions {
   onRestart: (id: string) => void;
 }
 
-function PaneView({ id, session, focused, zoomed, actions }: { id: string; session?: WorkbenchSession; focused: boolean; zoomed: boolean; actions: PaneActions }) {
+function PaneView({
+  id,
+  session,
+  focused,
+  zoomed,
+  actions,
+  fontSize,
+}: {
+  id: string;
+  session?: WorkbenchSession;
+  focused: boolean;
+  zoomed: boolean;
+  actions: PaneActions;
+  fontSize?: number;
+}) {
   const access = usePaneAccess();
   const status = statusOf(session);
   return (
-    <div className={"wb-pane" + (focused ? " is-focused" : "")}>
+    <div className={"wb-pane" + (focused ? " is-focused" : "")} data-session={id}>
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
         <ProgramIcon session={session} />
         <span className="wb-pane-title">{programName(session)}</span>
@@ -386,16 +404,16 @@ function PaneView({ id, session, focused, zoomed, actions }: { id: string; sessi
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}
         </span>
         <span className="wb-pane-tools">
-          <button type="button" aria-label="Split right" data-tip="Split right" onClick={() => actions.onSplit(id, "row")}>
+          <button type="button" aria-label="Split right" data-tip="Split right ⌘D" onClick={() => actions.onSplit(id, "row")}>
             <Ic name="columns-2" size={14} />
           </button>
-          <button type="button" aria-label="Split down" data-tip="Split down" onClick={() => actions.onSplit(id, "col")}>
+          <button type="button" aria-label="Split down" data-tip="Split down ⇧⌘D" onClick={() => actions.onSplit(id, "col")}>
             <Ic name="rows-2" size={14} />
           </button>
-          <button type="button" aria-label={zoomed ? "Unzoom" : "Zoom"} data-tip={zoomed ? "Unzoom" : "Zoom"} onClick={() => actions.onZoom(id)}>
+          <button type="button" aria-label={zoomed ? "Unzoom" : "Zoom"} data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"} onClick={() => actions.onZoom(id)}>
             <Ic name={zoomed ? "minimize-2" : "maximize-2"} size={14} />
           </button>
-          <button type="button" aria-label="Close" data-tip="Close" onClick={() => actions.onClose(id)}>
+          <button type="button" aria-label="Close" data-tip="Close ⌘W" onClick={() => actions.onClose(id)}>
             <Ic name="x" size={14} />
           </button>
         </span>
@@ -408,6 +426,7 @@ function PaneView({ id, session, focused, zoomed, actions }: { id: string; sessi
             mode={access.mode}
             onControlLost={access.onControlLost}
             focused={focused}
+            fontSize={fontSize}
             onFocus={() => actions.onFocus(id)}
             sessionSize={{ cols: session.cols, rows: session.rows }}
           />
@@ -432,14 +451,42 @@ function PaneView({ id, session, focused, zoomed, actions }: { id: string; sessi
   );
 }
 
-function PaneTree({ node, tab, sessions, actions }: { node: PaneNode; tab: WbTab; sessions: Sessions; actions: PaneActions }) {
+function PaneTree({
+  node,
+  tab,
+  sessions,
+  actions,
+  fontSize,
+}: {
+  node: PaneNode;
+  tab: WbTab;
+  sessions: Sessions;
+  actions: PaneActions;
+  fontSize?: number;
+}) {
   if (node.type === "pane") {
-    return <PaneView id={node.session} session={sessions[node.session]} focused={tab.focus === node.session} zoomed={tab.zoom === node.session} actions={actions} />;
+    return (
+      <PaneView
+        id={node.session}
+        session={sessions[node.session]}
+        focused={tab.focus === node.session}
+        zoomed={tab.zoom === node.session}
+        actions={actions}
+        fontSize={fontSize}
+      />
+    );
   }
   return (
     <div className={"wb-split wb-split-" + node.dir}>
       {node.children.map((child, i) => (
-        <PaneTree key={child.type === "pane" ? child.session : "s" + i} node={child} tab={tab} sessions={sessions} actions={actions} />
+        <PaneTree
+          key={child.type === "pane" ? child.session : "s" + i}
+          node={child}
+          tab={tab}
+          sessions={sessions}
+          actions={actions}
+          fontSize={fontSize}
+        />
       ))}
     </div>
   );
@@ -648,7 +695,7 @@ function PhoneWorkbench(props: PhoneProps) {
               >
                 <ProgramIcon session={sessions[t.focus || tabSessions(t)[0] || ""]} size={14} />
                 <span className="wb-tab-label">{tabLabel(t, sessions)}</span>
-                {s === "working" || s === "blocked" ? <StatusDot status={s} /> : null}
+                {s === "working" || s === "blocked" || s === "done" ? <StatusDot status={s} /> : null}
               </button>
             );
           })}
@@ -864,6 +911,75 @@ function readPanelOpen(): boolean {
   }
 }
 
+/* herdr's "done" set, kept per browser so a reload keeps the blue dots. */
+const DONE_KEY = "lana.workbench.done";
+
+function readDone(): Set<string> {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(DONE_KEY) || "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDone(ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(DONE_KEY, JSON.stringify([...ids]));
+  } catch {
+    /* Storage is optional. */
+  }
+}
+
+function dropDone(ids: Set<string>, id: string): Set<string> {
+  if (!ids.has(id)) return ids;
+  const next = new Set(ids);
+  next.delete(id);
+  return next;
+}
+
+function readWindowActive(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus();
+}
+
+/* The owner is looking at a session: it is the focused pane of the shown tab
+   and the window is in front. */
+function inView(layout: WbLayout, id: string): boolean {
+  const t = pickTab(pickSpace(layout));
+  return !!t && t.focus === id && readWindowActive();
+}
+
+/* Desktop terminal text size (⌘+ ⌘− ⌘0). */
+const DESK_FONT_KEY = "lana.workbench.fontSize";
+const DESK_FONT = 13;
+const DESK_FONT_MIN = 9;
+const DESK_FONT_MAX = 24;
+
+function readDeskFont(): number {
+  try {
+    const n = Number(window.localStorage.getItem(DESK_FONT_KEY));
+    return n >= DESK_FONT_MIN && n <= DESK_FONT_MAX ? n : DESK_FONT;
+  } catch {
+    return DESK_FONT;
+  }
+}
+
+function saveDeskFont(n: number): void {
+  try {
+    window.localStorage.setItem(DESK_FONT_KEY, String(n));
+  } catch {
+    /* Storage is optional. */
+  }
+}
+
+/* The pane boxes on screen, for ⌥⌘ arrows. */
+function paneRects(): { id: string; left: number; top: number; right: number; bottom: number }[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".wb-workspace .wb-pane[data-session]")).map((el) => {
+    const r = el.getBoundingClientRect();
+    return { id: el.dataset.session || "", left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  });
+}
+
 export function WorkbenchPage() {
   const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
   /* Spec 57 (REQ-RA-085): a remote browser attaches in view mode until it
@@ -908,8 +1024,34 @@ export function WorkbenchPage() {
       return !open;
     });
   };
-  const [sessions, setSessions] = useState<Sessions>({});
-  const sessionsRef = useRef(sessions);
+  const [liveSessions, setSessions] = useState<Sessions>({});
+  const sessionsRef = useRef(liveSessions);
+  /* herdr's "done": agents that finished while their pane was not in view.
+     Kept per browser; cleared when the pane is focused in a focused window. */
+  const [doneIds, setDoneIds] = useState<Set<string>>(readDone);
+  useEffect(() => saveDone(doneIds), [doneIds]);
+  const sessions = useMemo<Sessions>(() => {
+    if (doneIds.size === 0) return liveSessions;
+    const next: Sessions = { ...liveSessions };
+    for (const id of doneIds) {
+      const s = next[id];
+      if (s) next[id] = { ...s, done: true };
+    }
+    return next;
+  }, [liveSessions, doneIds]);
+  const [windowActive, setWindowActive] = useState(readWindowActive);
+  useEffect(() => {
+    const sync = () => setWindowActive(readWindowActive());
+    window.addEventListener("focus", sync);
+    window.addEventListener("blur", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.removeEventListener("focus", sync);
+      window.removeEventListener("blur", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
+  const [deskFont, setDeskFont] = useState(readDeskFont);
   const chimedAt = useRef<Record<string, number>>({});
   const [soundOn, setSoundOn] = useState(soundEnabled);
   useEffect(() => {
@@ -923,8 +1065,8 @@ export function WorkbenchPage() {
     };
   }, []);
   useEffect(() => {
-    sessionsRef.current = sessions;
-  }, [sessions]);
+    sessionsRef.current = liveSessions;
+  }, [liveSessions]);
   const [layout, setLayoutState] = useState<WbLayout>(emptyLayout());
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
@@ -990,10 +1132,16 @@ export function WorkbenchPage() {
             delete next[event.session.id];
             return next;
           });
+          setDoneIds((prev) => dropDone(prev, event.session.id));
           return;
         }
         const before = sessionsRef.current[event.session.id];
         const after = event.session;
+        if (after.state === "working" || after.state === "exited" || after.needs_you) {
+          setDoneIds((prev) => dropDone(prev, after.id));
+        } else if (before?.state === "working" && after.state === "idle" && isAgent(after) && !inView(layoutRef.current, after.id)) {
+          setDoneIds((prev) => (prev.has(after.id) ? prev : new Set(prev).add(after.id)));
+        }
         if (before && after.agent) {
           const now = Date.now();
           const last = chimedAt.current[after.id] || 0;
@@ -1017,6 +1165,11 @@ export function WorkbenchPage() {
 
   const space = pickSpace(layout);
   const tab = pickTab(space);
+  const viewFocus = tab?.focus;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- dropDone returns the same set when nothing changes.
+    if (windowActive && viewFocus) setDoneIds((prev) => dropDone(prev, viewFocus));
+  }, [windowActive, viewFocus]);
 
   const placedIds = useMemo(() => new Set(layout.spaces.flatMap((s) => s.tabs.flatMap(tabSessions))), [layout]);
   const orphans = useMemo(() => Object.values(sessions).filter((s) => !placedIds.has(s.id)), [sessions, placedIds]);
@@ -1233,6 +1386,95 @@ export function WorkbenchPage() {
     </>
   );
 
+  /* GoRex-style shortcuts (workbenchShortcut). */
+  const runShortcut = (sc: WbShortcut) => {
+    const sp = pickSpace(layoutRef.current);
+    const t = pickTab(sp);
+    const ids = t ? tabSessions(t) : [];
+    const focus = t?.focus && ids.includes(t.focus) ? t.focus : ids[0];
+    switch (sc.kind) {
+      case "new-tab":
+        void newTerminal();
+        break;
+      case "new-space":
+        void newSpace();
+        break;
+      case "split":
+        if (focus) void actions.onSplit(focus, sc.dir);
+        else void newTerminal();
+        break;
+      case "close-pane":
+        if (focus) actions.onClose(focus);
+        break;
+      case "close-tab":
+        if (sp && t) closeTabNow(sp.id, t.id);
+        break;
+      case "zoom":
+        if (focus) actions.onZoom(focus);
+        break;
+      case "focus": {
+        const next = focus ? paneInDirection(paneRects(), focus, sc.dir) : null;
+        if (next) actions.onFocus(next);
+        break;
+      }
+      case "tab": {
+        const i = sp ? tabAtShortcut(sp.tabs.length, sc.index) : -1;
+        const target = sp && i >= 0 ? sp.tabs[i] : undefined;
+        if (sp && target) update((l) => selectTab(l, sp.id, target.id));
+        break;
+      }
+      case "tab-step": {
+        if (!sp || !t || sp.tabs.length < 2) break;
+        const i = sp.tabs.findIndex((x) => x.id === t.id);
+        const target = sp.tabs[(i + sc.step + sp.tabs.length) % sp.tabs.length];
+        if (target) update((l) => selectTab(l, sp.id, target.id));
+        break;
+      }
+      case "rename-tab":
+        if (sp && t) openRenameTab(sp.id, t.id);
+        break;
+      case "clear":
+        if (focus) window.dispatchEvent(new CustomEvent("lana:wb-clear", { detail: focus }));
+        break;
+      case "font":
+        setDeskFont((n) => {
+          const next = sc.step === 0 ? DESK_FONT : Math.min(DESK_FONT_MAX, Math.max(DESK_FONT_MIN, n + sc.step));
+          saveDeskFont(next);
+          return next;
+        });
+        break;
+    }
+  };
+  const shortcutRef = useRef(runShortcut);
+  const modalRef = useRef(false);
+  useEffect(() => {
+    shortcutRef.current = runShortcut;
+    modalRef.current = menu !== null || dialog !== null || accountsAnchor !== null || accountsSheet;
+  });
+  useEffect(() => {
+    if (phone) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || modalRef.current) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (
+        target &&
+        !target.classList.contains("xterm-helper-textarea") &&
+        target.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")
+      ) {
+        return;
+      }
+      const sc = workbenchShortcut(e);
+      if (!sc) return;
+      /* Before xterm.js and before the app menu (⌘W would close the window). */
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat && sc.kind !== "focus" && sc.kind !== "tab-step" && sc.kind !== "font") return;
+      shortcutRef.current(sc);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [phone]);
+
   const openSession = (id: string) => {
     const where = locate(layoutRef.current, id);
     if (where) {
@@ -1373,7 +1615,7 @@ export function WorkbenchPage() {
                 >
                   <ProgramIcon session={sessions[t.focus || tabSessions(t)[0] || ""]} size={15} />
                   <span className="wb-tab-label">{tabLabel(t, sessions)}</span>
-                  {s === "working" || s === "blocked" ? <StatusDot status={s} /> : null}
+                  {s === "working" || s === "blocked" || s === "done" ? <StatusDot status={s} /> : null}
                 </button>
                 <button
                   type="button"
@@ -1386,7 +1628,7 @@ export function WorkbenchPage() {
               </div>
             );
           })}
-          <button type="button" className="wb-tab-new" aria-label="New terminal" onClick={newTerminal}>
+          <button type="button" className="wb-tab-new" aria-label="New terminal" data-tip="New tab ⌘T" onClick={newTerminal}>
             <Ic name="plus" size={15} />
           </button>
           <span className="wb-spacer" />
@@ -1413,9 +1655,9 @@ export function WorkbenchPage() {
             <p className="wb-empty-note">Opening Workbench…</p>
           ) : tab ? (
             zoomed ? (
-              <PaneView id={zoomed} session={sessions[zoomed]} focused zoomed actions={actions} />
+              <PaneView id={zoomed} session={sessions[zoomed]} focused zoomed actions={actions} fontSize={deskFont} />
             ) : (
-              <PaneTree node={tab.root} tab={tab} sessions={sessions} actions={actions} />
+              <PaneTree node={tab.root} tab={tab} sessions={sessions} actions={actions} fontSize={deskFont} />
             )
           ) : (
             <div className="wb-empty">

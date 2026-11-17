@@ -328,6 +328,14 @@ func (s *session) fanoutLocked(data []byte) {
 	}
 }
 
+// redrawNudgeDelay is how long an attach leaves the pty one row short before
+// restoring it (REQ-WB-022). The wait is what makes the nudge work: a program
+// that redraws only when its SIGWINCH handler reads a changed size (Node, e.g.
+// Claude Code) sees the shorter size on the first signal, and the restore a
+// moment later is a second change it can redraw from. It is a variable so tests
+// can shorten the wait.
+var redrawNudgeDelay = 150 * time.Millisecond
+
 // attach turns a connection into a terminal stream: it gets the ring buffer,
 // then live output, and what it writes reaches the pty in control mode only.
 func (s *session) attach(conn net.Conn, mode string, cols, rows int, initial []byte) {
@@ -363,9 +371,25 @@ func (s *session) attach(conn net.Conn, mode string, cols, rows int, initial []b
 	}
 	if mode == modeControl {
 		// REQ-WB-022: force a full-screen program to redraw for this client.
+		// The size is nudged one row short and restored a moment later, off
+		// the input loop. A program that redraws only when a SIGWINCH handler
+		// sees the size change (Node, e.g. Claude Code) would miss two
+		// back-to-back resizes, since it reads the same size again by the time
+		// it runs.
 		if height > 1 {
 			_ = p.resize(width, height-1)
-			_ = p.resize(width, height)
+			time.AfterFunc(redrawNudgeDelay, func() {
+				s.mu.Lock()
+				cols, rows, exited, cur := s.cols, s.rows, s.exited, s.p
+				s.mu.Unlock()
+				// Restore to whatever the session size is now, so a resize
+				// another client made in the meantime wins; skip it when the
+				// session ended or the program restarted on a new pty, whose
+				// size is already the session size.
+				if !exited && cur == p {
+					_ = cur.resize(cols, rows)
+				}
+			})
 		}
 		if len(initial) > 0 {
 			s.writeInput(p, initial)

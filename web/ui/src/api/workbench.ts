@@ -26,6 +26,9 @@ export interface WorkbenchSession {
      cursor, omp, opencode, …) and its screen-derived state. */
   agent?: string;
   agent_state?: "idle" | "working" | "blocked" | "unknown" | "";
+  /* Client only, never sent by the core: the agent finished while its pane
+     was not in view (herdr's "done"). */
+  done?: boolean;
 }
 
 export interface CreateSessionInput {
@@ -124,4 +127,15 @@ export function subscribeWorkbench(
     }
     source.close();
   };
+}
+
+/* Files dropped on a terminal in a browser: the daemon saves them and returns
+   their absolute paths, which the page types into the session. The macOS app
+   sends real paths instead (LanaWebView). */
+export function uploadWorkbenchDrops(files: File[]): Promise<string[]> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file, file.name);
+  return request<{ paths?: string[] }>("POST", "/v1/workbench/drops", form).then(
+    (response) => (response && response.paths) || [],
+  );
 }
