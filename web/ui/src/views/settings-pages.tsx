@@ -42,6 +42,7 @@ import { RestartDaemonDialog, useDaemonRestart } from "./restart-dialog";
 
 const SETTINGS_TABS = [
   { key: "general", label: "General", icon: "sliders-horizontal" },
+  { key: "remote", label: "Remote access", icon: "smartphone" },
   { key: "secrets", label: "Secrets", icon: "key-round" },
   { key: "config", label: "Config file", icon: "file-code" },
   { key: "audit", label: "Audit log", icon: "scroll-text" },

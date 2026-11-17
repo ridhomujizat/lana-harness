@@ -118,3 +118,65 @@
     width: 100%;
   }
 }
+
+/* Spec 57 (REQ-RA-084): the Tailscale identity chip on a remote sign-in. */
+.auth-remote {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin: 0 0 var(--s-4);
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  text-align: left;
+}
+
+.auth-remote .grow {
+  min-width: 0;
+}
+
+.auth-remote .t {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 600;
+  font-size: var(--fs);
+}
+
+.auth-remote .d {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.auth-remote-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+.auth-remote-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin: var(--s-4) 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-align: left;
+}
+
+.auth-remote-note > svg {
+  flex: none;
+  margin-top: 2px;
+}

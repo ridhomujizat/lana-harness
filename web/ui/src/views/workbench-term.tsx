@@ -101,6 +101,9 @@ export interface TermPaneProps {
   claimRef?: MutableRefObject<(() => void) | null>;
   /* Filled with focus/blur of the terminal (the phone keyboard toggle). */
   keyboardRef?: MutableRefObject<{ focus: () => void; blur: () => void } | null>;
+  /* Spec 57 (REQ-RA-035): told when the server closes a control attachment
+     because remote control locked (close code 4403). */
+  onControlLost?: () => void;
 }
 
 const encoder = new TextEncoder();
@@ -124,6 +127,7 @@ export function TermPane({
   onOwnerChange,
   claimRef,
   keyboardRef,
+  onControlLost,
 }: TermPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [isOwner, setIsOwner] = useState(false);
@@ -133,6 +137,10 @@ export function TermPane({
   useEffect(() => {
     ownerCbRef.current = onOwnerChange;
   }, [onOwnerChange]);
+  const lostCbRef = useRef(onControlLost);
+  useEffect(() => {
+    lostCbRef.current = onControlLost;
+  }, [onControlLost]);
   const termRef = useRef<Terminal | null>(null);
   const followRef = useRef<((cols: number, rows: number) => void) | null>(null);
   const refitRef = useRef<(() => void) | null>(null);
@@ -299,6 +307,12 @@ export function TermPane({
            session is gone; 1008: the server refused (auth/origin). A restart
            remounts the pane, so none of these reconnect. */
         if (event.code === 1000 || event.code === 4404 || event.code === 1008) return;
+        /* 4403: remote control locked (spec 57). The page switches the pane
+           to view mode, which remounts it. */
+        if (event.code === 4403) {
+          lostCbRef.current?.();
+          return;
+        }
         retry = Math.min(retry + 1, 5);
         retryTimer = setTimeout(connect, retry * 1000);
       };

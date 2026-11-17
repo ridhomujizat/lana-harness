@@ -320,6 +320,267 @@ func TestBrowserSessionsRequestRules(t *testing.T) {
 	}
 }
 
+// newTestBrowserSessions returns a persisted store that starts with no records.
+func newTestBrowserSessions(t *testing.T) (*browserSessions, string) {
+	t.Helper()
+	home := t.TempDir()
+	st, err := loadBrowserSessions(home, time.Now())
+	if err != nil {
+		t.Fatalf("loadBrowserSessions: %v", err)
+	}
+	return st, home
+}
+
+// TestBrowserSessionsRemoteFields covers REQ-RA-020 and REQ-RA-024: a remote
+// add, touch, list, and stored record carry the Tailscale identity.
+func TestBrowserSessionsRemoteFields(t *testing.T) {
+	st, home := newTestBrowserSessions(t)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	sess, err := st.addRemote("remote-cookie", "Safari on iPhone", remoteIdentity{Login: "ridho@github", Device: "iPhone 15", IP: "100.64.0.1"}, now)
+	if err != nil {
+		t.Fatalf("addRemote: %v", err)
+	}
+	if !sess.remote || sess.login != "ridho@github" || sess.device != "iPhone 15" {
+		t.Fatalf("added session = %+v, want the remote identity", sess)
+	}
+	if !sess.controlUntil.IsZero() {
+		t.Fatalf("added controlUntil = %v, want the zero time while locked", sess.controlUntil)
+	}
+	if want := now.Add(remoteIdleDefault); !sess.expiresAt.Equal(want) {
+		t.Fatalf("expiresAt = %v, want %v", sess.expiresAt, want)
+	}
+
+	touched, ok, err := st.touch("remote-cookie", now.Add(time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("touch = %v, %v, want ok", ok, err)
+	}
+	if !touched.remote || touched.login != "ridho@github" || touched.device != "iPhone 15" {
+		t.Fatalf("touched session = %+v, want the remote identity", touched)
+	}
+
+	infos := st.list(sess.key, now.Add(2*time.Minute))
+	if len(infos) != 1 {
+		t.Fatalf("listed sessions = %d, want 1", len(infos))
+	}
+	info := infos[0]
+	if !info.Remote || info.Login != "ridho@github" || info.Device != "iPhone 15" || info.IP != "100.64.0.1" {
+		t.Fatalf("listed row = %+v, want the remote identity", info)
+	}
+	if !info.Current {
+		t.Fatalf("listed row is not current: %+v", info)
+	}
+	if info.ControlUntil != 0 {
+		t.Fatalf("control_until = %d, want 0 while locked", info.ControlUntil)
+	}
+
+	file := readSessionsFileForTest(t, home)
+	if len(file.Sessions) != 1 {
+		t.Fatalf("stored sessions = %d, want 1", len(file.Sessions))
+	}
+	stored := file.Sessions[0]
+	if !stored.Remote || stored.Login != "ridho@github" || stored.Device != "iPhone 15" || stored.IP != "100.64.0.1" {
+		t.Fatalf("stored record = %+v, want the remote identity", stored)
+	}
+}
+
+// TestBrowserSessionsLocalStaysLocal covers REQ-RA-020: a local record keeps
+// every remote field empty.
+func TestBrowserSessionsLocalStaysLocal(t *testing.T) {
+	st, home := newTestBrowserSessions(t)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	sess, err := st.add("local-cookie", "Local browser", now)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if sess.remote || sess.login != "" || sess.device != "" || !sess.controlUntil.IsZero() {
+		t.Fatalf("local session = %+v, want the remote fields empty", sess)
+	}
+	infos := st.list(sess.key, now)
+	if len(infos) != 1 || infos[0].Remote || infos[0].Login != "" || infos[0].ControlUntil != 0 {
+		t.Fatalf("listed rows = %+v, want one local row", infos)
+	}
+	if stored := readSessionsFileForTest(t, home).Sessions; len(stored) != 1 || stored[0].Remote {
+		t.Fatalf("stored records = %+v, want one local record", stored)
+	}
+}
+
+// TestBrowserSessionsRemoteIdleExpiry covers REQ-RA-021: a remote session ends
+// after the remote idle limit.
+func TestBrowserSessionsRemoteIdleExpiry(t *testing.T) {
+	st, home := newTestBrowserSessions(t)
+	st.setRemoteLimits(30*time.Minute, 168*time.Hour)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	if _, err := st.addRemote("c", "ua", remoteIdentity{Login: "l"}, now); err != nil {
+		t.Fatalf("addRemote: %v", err)
+	}
+	if _, ok, _ := st.touch("c", now.Add(29*time.Minute)); !ok {
+		t.Fatal("remote session expired before the idle limit")
+	}
+	if _, ok, _ := st.touch("c", now.Add(time.Hour)); ok {
+		t.Fatal("remote session survived past the idle limit")
+	}
+	if got := len(readSessionsFileForTest(t, home).Sessions); got != 0 {
+		t.Fatalf("stored sessions after expiry = %d, want 0", got)
+	}
+}
+
+// TestBrowserSessionsRemoteMaxAgeExpiry covers REQ-RA-021: max age ends a
+// remote session even while it is in active use.
+func TestBrowserSessionsRemoteMaxAgeExpiry(t *testing.T) {
+	st, _ := newTestBrowserSessions(t)
+	st.setRemoteLimits(24*time.Hour, 2*time.Hour)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	if _, err := st.addRemote("c", "ua", remoteIdentity{Login: "l"}, now); err != nil {
+		t.Fatalf("addRemote: %v", err)
+	}
+	if _, ok, _ := st.touch("c", now.Add(2*time.Hour-time.Minute)); !ok {
+		t.Fatal("remote session expired before max age")
+	}
+	// Still inside the idle window, but past max age.
+	if _, ok, _ := st.touch("c", now.Add(2*time.Hour+time.Minute)); ok {
+		t.Fatal("remote session survived past max age")
+	}
+}
+
+// TestBrowserSessionsLocalKeepsIdleTTL covers REQ-RA-021: the remote limits do
+// not shorten a local session's 12-hour idle limit.
+func TestBrowserSessionsLocalKeepsIdleTTL(t *testing.T) {
+	st, _ := newTestBrowserSessions(t)
+	st.setRemoteLimits(30*time.Minute, time.Hour)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	if _, err := st.add("local-cookie", "ua", now); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	// Six hours of idle is fine for a local session, though the remote idle
+	// limit is 30 minutes.
+	if _, ok, _ := st.touch("local-cookie", now.Add(6*time.Hour)); !ok {
+		t.Fatal("local session expired before sessionIdleTTL")
+	}
+	if _, ok, _ := st.touch("local-cookie", now.Add(6*time.Hour+sessionIdleTTL)); ok {
+		t.Fatal("local session survived past sessionIdleTTL")
+	}
+}
+
+// TestBrowserSessionsRevokeByID covers REQ-RA-025: one session is removed by
+// its 12-hex display id.
+func TestBrowserSessionsRevokeByID(t *testing.T) {
+	st, home := newTestBrowserSessions(t)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	sess, err := st.addRemote("c", "ua", remoteIdentity{Login: "l"}, now)
+	if err != nil {
+		t.Fatalf("addRemote: %v", err)
+	}
+	display := hex.EncodeToString(sess.key[:])[:sessionIDDisplayHex]
+
+	if _, ok, err := st.revokeByID("000000000000"); err != nil || ok {
+		t.Fatalf("revokeByID(unknown) = %v, %v, want no match", ok, err)
+	}
+	if _, ok, err := st.revokeByID("abc"); err != nil || ok {
+		t.Fatalf("revokeByID(short) = %v, %v, want no match", ok, err)
+	}
+
+	key, ok, err := st.revokeByID(display)
+	if err != nil || !ok {
+		t.Fatalf("revokeByID(%q) = %v, %v, want a match", display, ok, err)
+	}
+	if key != sess.key {
+		t.Fatalf("revokeByID key = %x, want %x", key, sess.key)
+	}
+	if len(st.records) != 0 {
+		t.Fatalf("records after revoke = %d, want 0", len(st.records))
+	}
+	if got := len(readSessionsFileForTest(t, home).Sessions); got != 0 {
+		t.Fatalf("stored sessions after revoke = %d, want 0", got)
+	}
+}
+
+// TestBrowserSessionsRevokeRemoteLeavesLocal covers REQ-RA-025: revoke-remote
+// ends every remote session and keeps the local ones.
+func TestBrowserSessionsRevokeRemoteLeavesLocal(t *testing.T) {
+	st, home := newTestBrowserSessions(t)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	local, err := st.add("local-cookie", "Local", now)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	for _, login := range []string{"a@github", "b@github"} {
+		if _, err := st.addRemote("remote-"+login, "ua", remoteIdentity{Login: login, Device: "phone", IP: "100.64.0.9"}, now); err != nil {
+			t.Fatalf("addRemote: %v", err)
+		}
+	}
+	if got := len(st.remoteKeys()); got != 2 {
+		t.Fatalf("remoteKeys = %d, want 2", got)
+	}
+	revoked, err := st.revokeRemote()
+	if err != nil {
+		t.Fatalf("revokeRemote: %v", err)
+	}
+	if revoked != 2 {
+		t.Fatalf("revokeRemote = %d, want 2", revoked)
+	}
+	if got := len(st.remoteKeys()); got != 0 {
+		t.Fatalf("remoteKeys after revoke = %d, want 0", got)
+	}
+	if _, ok := st.records[local.key]; !ok {
+		t.Fatal("local record was revoked")
+	}
+	if _, ok, _ := st.touch("local-cookie", now.Add(time.Minute)); !ok {
+		t.Fatal("local session was revoked")
+	}
+	stored := readSessionsFileForTest(t, home).Sessions
+	if len(stored) != 1 || stored[0].Remote {
+		t.Fatalf("stored records after revoke = %+v, want one local record", stored)
+	}
+	if got, err := st.revokeRemote(); err != nil || got != 0 {
+		t.Fatalf("second revokeRemote = %d, %v, want 0, nil", got, err)
+	}
+}
+
+// TestBrowserSessionsControlUntilPersists covers REQ-RA-032 and REQ-RA-034:
+// the control deadline survives a reload and clearing it relocks control.
+func TestBrowserSessionsControlUntilPersists(t *testing.T) {
+	st, home := newTestBrowserSessions(t)
+	st.setRemoteLimits(time.Hour, 168*time.Hour)
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	sess, err := st.addRemote("c", "ua", remoteIdentity{Login: "l"}, now)
+	if err != nil {
+		t.Fatalf("addRemote: %v", err)
+	}
+	until := now.Add(15 * time.Minute)
+	if err := st.setControlUntil(sess.key, until); err != nil {
+		t.Fatalf("setControlUntil: %v", err)
+	}
+	infos := st.list(sess.key, now)
+	if len(infos) != 1 || infos[0].ControlUntil != until.UnixMilli() {
+		t.Fatalf("listed rows = %+v, want control_until %d", infos, until.UnixMilli())
+	}
+	if got := readSessionsFileForTest(t, home).Sessions[0].ControlUntil; got != until.UnixMilli() {
+		t.Fatalf("stored control_until = %d, want %d", got, until.UnixMilli())
+	}
+
+	reloaded, err := loadBrowserSessions(home, now)
+	if err != nil {
+		t.Fatalf("loadBrowserSessions: %v", err)
+	}
+	touched, ok, err := reloaded.touch("c", now.Add(time.Minute))
+	if err != nil || !ok {
+		t.Fatalf("touch after reload = %v, %v, want ok", ok, err)
+	}
+	if !touched.controlUntil.Equal(until) {
+		t.Fatalf("touched controlUntil = %v, want %v", touched.controlUntil, until)
+	}
+	if rows := reloaded.list(touched.key, now.Add(time.Minute)); len(rows) != 1 || rows[0].ControlUntil != until.UnixMilli() {
+		t.Fatalf("reloaded rows = %+v, want control_until %d", rows, until.UnixMilli())
+	}
+
+	if err := reloaded.setControlUntil(touched.key, time.Time{}); err != nil {
+		t.Fatalf("setControlUntil(zero): %v", err)
+	}
+	if got := readSessionsFileForTest(t, home).Sessions[0].ControlUntil; got != 0 {
+		t.Fatalf("stored control_until after lock = %d, want 0", got)
+	}
+}
+
 func TestBrowserSessionsUserAgentTruncated(t *testing.T) {
 	s, token := newAuthServerWithToken(t)
 	long := strings.Repeat("a", 200)

@@ -654,3 +654,386 @@
     transition: none;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Settings > Remote access (spec 57)                                 */
+/* ------------------------------------------------------------------ */
+
+.remote-state {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.remote-lead {
+  margin: var(--s-2) 0 var(--s-3);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.remote-steps {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.remote-step {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.remote-step:last-child {
+  border-bottom: 0;
+}
+
+.remote-step .t,
+.remote-check .t,
+.remote-choice .t,
+.remote-note .t,
+.remote-limits .t,
+.remote-choice-opts .t,
+.remote-device .t {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 500;
+  font-size: var(--fs);
+}
+
+.remote-step .d,
+.remote-check .d,
+.remote-choice .d,
+.remote-note .d,
+.remote-limits .d,
+.remote-device .d,
+.remote-footer .d {
+  display: block;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.remote-step-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.remote-step-ic.ok {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.remote-step-ic.fail {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.remote-step-ic.warn {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.remote-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+
+.remote-footer .d {
+  margin: 0;
+}
+
+.remote-note {
+  display: flex;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  padding: 12px 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.remote-note > svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.remote-address {
+  display: flex;
+  gap: var(--s-5);
+  align-items: flex-start;
+  margin-top: var(--s-3);
+}
+
+.remote-address .grow {
+  min-width: 0;
+}
+
+.remote-address p.d {
+  margin: 0 0 var(--s-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.remote-url {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.remote-url .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.remote-checks {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.remote-checks li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.remote-checks .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--green);
+}
+
+.remote-checks .dot.bad {
+  background: var(--amber);
+}
+
+.remote-qr {
+  flex: none;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  text-align: center;
+}
+
+.remote-qr-svg {
+  display: block;
+  width: 128px;
+  height: 128px;
+  border-radius: var(--r-sm);
+}
+
+.remote-qr figcaption {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.remote-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+  cursor: pointer;
+}
+
+.remote-check > input {
+  margin-top: 3px;
+}
+
+.remote-logins {
+  margin-top: var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.remote-login {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--divider);
+  font-size: var(--fs);
+}
+
+.remote-login.d {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.remote-login.add {
+  border-bottom: 0;
+}
+
+.remote-login.add .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.remote-login .grow {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.remote-login-av {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.remote-choices {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.remote-choice {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.remote-choice.on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.remote-choice-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+
+.remote-choice-head > input {
+  margin-top: 3px;
+}
+
+.remote-choice-opts,
+.remote-limits {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  gap: var(--s-3);
+}
+
+.remote-choice-opts {
+  padding: 0 14px 14px 42px;
+}
+
+.remote-choice-opts label,
+.remote-limits label {
+  display: grid;
+  gap: 6px;
+}
+
+.remote-limits {
+  grid-template-columns: repeat(2, minmax(0, 260px));
+  margin-bottom: var(--s-2);
+}
+
+.remote-devices {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.remote-device {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.remote-device:last-child {
+  border-bottom: 0;
+}
+
+.remote-device .grow {
+  min-width: 0;
+}
+
+.remote-device-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.remote-device-last {
+  flex: none;
+  width: 92px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.remote-control.on {
+  color: var(--amber);
+}
+
+@media (max-width: 720px) {
+  .remote-address {
+    flex-direction: column;
+  }
+
+  .remote-url {
+    flex-wrap: wrap;
+  }
+
+  .remote-choice-opts,
+  .remote-limits {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remote-choice-opts {
+    padding-left: 14px;
+  }
+
+  .remote-device {
+    flex-wrap: wrap;
+  }
+
+  .remote-device-last {
+    width: auto;
+  }
+
+  .remote-footer {
+    flex-wrap: wrap;
+  }
+}

@@ -17,6 +17,9 @@ const (
 	SessionsFileVersion = 1
 	// MaxUserAgentChars is the user-agent label limit of API-WEB-024.
 	MaxUserAgentChars = 120
+	// MaxRemoteLabelChars is the limit of the login, device, and IP labels of a
+	// remote session (REQ-RA-020), like MaxUserAgentChars.
+	MaxRemoteLabelChars = 256
 )
 
 // ErrSessionFile is returned when web-sessions.json cannot be read, parsed, or
@@ -31,6 +34,13 @@ type SessionRecord struct {
 	CreatedAt  int64  `json:"created_at"`
 	LastUsedAt int64  `json:"last_used_at"`
 	UserAgent  string `json:"user_agent"`
+	// The remote-access fields (REQ-RA-020) are empty on a local session, so
+	// an old file loads unchanged and a local record keeps its old shape.
+	Remote       bool   `json:"remote,omitempty"`
+	Login        string `json:"login,omitempty"`
+	Device       string `json:"device,omitempty"`
+	IP           string `json:"ip,omitempty"`
+	ControlUntil int64  `json:"control_until,omitempty"`
 }
 
 // SessionsFile is the on-disk form of $LANA_HOME/web-sessions.json.
@@ -74,6 +84,9 @@ func ReadSessionsFile(path string) (SessionsFile, error) {
 		}
 		seen[record.IDHash] = struct{}{}
 		record.UserAgent = truncateUserAgent(record.UserAgent)
+		record.Login = truncateRemoteLabel(record.Login)
+		record.Device = truncateRemoteLabel(record.Device)
+		record.IP = truncateRemoteLabel(record.IP)
 	}
 	return file, nil
 }
@@ -94,6 +107,9 @@ func WriteSessionsFile(path string, file SessionsFile) error {
 			return sessionFileError(path, fmt.Sprintf("sessions[%d].csrf_hash must be 64 lowercase hex characters", i))
 		}
 		record.UserAgent = truncateUserAgent(record.UserAgent)
+		record.Login = truncateRemoteLabel(record.Login)
+		record.Device = truncateRemoteLabel(record.Device)
+		record.IP = truncateRemoteLabel(record.IP)
 	}
 	data, err := json.Marshal(file)
 	if err != nil {
@@ -116,6 +132,15 @@ func truncateUserAgent(value string) string {
 	}
 	runes := []rune(value)
 	return string(runes[:MaxUserAgentChars])
+}
+
+// truncateRemoteLabel keeps at most MaxRemoteLabelChars characters (not bytes).
+func truncateRemoteLabel(value string) string {
+	if utf8.RuneCountInString(value) <= MaxRemoteLabelChars {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:MaxRemoteLabelChars])
 }
 
 func isHexSHA256(value string) bool {

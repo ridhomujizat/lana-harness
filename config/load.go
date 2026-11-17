@@ -257,6 +257,7 @@ func decodeConfig(value map[string]any) (core.Config, error) {
 // the loopback address when addr is not set.
 func applyWebDefaults(cfg *core.Config, value map[string]any) {
 	cfg.Web = core.WebConfig{Enabled: true, Addr: core.DefaultWebAddr, OpenBrowser: true}
+	cfg.Web.Remote = core.DefaultWebRemoteConfig()
 	table, ok := asMap(value["web"])
 	if !ok {
 		return
@@ -270,6 +271,70 @@ func applyWebDefaults(cfg *core.Config, value map[string]any) {
 	if v, ok := table["addr"].(string); ok && v != "" {
 		cfg.Web.Addr = v
 	}
+	if remote, ok := asMap(table["remote"]); ok {
+		applyWebRemote(&cfg.Web.Remote, remote)
+	}
+}
+
+// applyWebRemote reads the [web.remote] table (REQ-RA-010) over the defaults
+// from DefaultWebRemoteConfig. The validation pass has already checked the keys
+// and types.
+func applyWebRemote(remote *core.WebRemoteConfig, table map[string]any) {
+	if v, ok := table["enabled"].(bool); ok {
+		remote.Enabled = v
+	}
+	if v, ok := table["host"].(string); ok {
+		remote.Host = normalizeRemoteHost(v)
+	}
+	if v, ok := table["require_identity"].(bool); ok {
+		remote.RequireIdentity = v
+	}
+	if v, ok := table["allowed_logins"]; ok {
+		if list, ok := asStringSlice(v); ok {
+			remote.AllowedLogins = normalizeRemoteLogins(list)
+		}
+	}
+	if v, ok := table["terminal"].(string); ok && v != "" {
+		remote.Terminal = v
+	}
+	if v, ok := table["confirm_with"].(string); ok && v != "" {
+		remote.ConfirmWith = v
+	}
+	if v, ok := table["control_minutes"]; ok {
+		if n, ok := asInt(v); ok {
+			remote.ControlMinutes = int(n)
+		}
+	}
+	if v, ok := table["idle_minutes"]; ok {
+		if n, ok := asInt(v); ok {
+			remote.IdleMinutes = int(n)
+		}
+	}
+	if v, ok := table["max_age_hours"]; ok {
+		if n, ok := asInt(v); ok {
+			remote.MaxAgeHours = int(n)
+		}
+	}
+	if v, ok := table["notify_sign_in"].(bool); ok {
+		remote.NotifySignIn = v
+	}
+}
+
+// normalizeRemoteHost trims a remote host, lower-cases it, and drops a trailing
+// dot, so it matches the Tailscale-User-Login and X-Forwarded-Host comparisons
+// (REQ-RA-002, REQ-RA-003).
+func normalizeRemoteHost(s string) string {
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(s)), ".")
+}
+
+// normalizeRemoteLogins trims and lower-cases each Tailscale login
+// (REQ-RA-003).
+func normalizeRemoteLogins(list []string) []string {
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		out = append(out, strings.ToLower(strings.TrimSpace(item)))
+	}
+	return out
 }
 
 // applyUpdateDefaults fills [update] defaults: channel "stable" and check true

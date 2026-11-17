@@ -174,6 +174,7 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 			Home:        home,
 			Stderr:      stderr,
 			OpenBrowser: result.Config.Web.OpenBrowser,
+			Remote:      result.Config.Web.Remote,
 		})
 		if err != nil {
 			return errorf(2, "%v", err)
@@ -400,7 +401,11 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 		webServer.SetSkillStore(backend)
 		if telegramActive {
 			webServer.SetTelegramStatus(telegramStatusFunc(tgcfg, true, channel))
-			webServer.SetTelegramResetSender(newTelegramResetSender(channel, tgcfg))
+			// Spec 57 REQ-RA-070: the same sender delivers reset codes and the
+			// remote sign-in notice to the owner chats.
+			resetSender := newTelegramResetSender(channel, tgcfg)
+			webServer.SetTelegramResetSender(resetSender)
+			webServer.SetTelegramOwnerMessenger(resetSender)
 		} else {
 			webServer.SetTelegramStatus(telegramStatusFunc(tgcfg, false, nil))
 		}

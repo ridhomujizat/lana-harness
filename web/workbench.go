@@ -156,6 +156,10 @@ type workbenchCreateBody struct {
 
 // handleWorkbenchCreate serves the POST of REQ-WB-040 (REQ-WB-043 audit).
 func (s *Server) handleWorkbenchCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAllowed(r) {
+		refuseControlLocked(w)
+		return
+	}
 	backend := s.workbenchOrError(w)
 	if backend == nil {
 		return
@@ -183,6 +187,10 @@ func (s *Server) handleWorkbenchCreate(w http.ResponseWriter, r *http.Request) {
 
 // handleWorkbenchKill serves the DELETE of REQ-WB-040 (REQ-WB-043 audit).
 func (s *Server) handleWorkbenchKill(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAllowed(r) {
+		refuseControlLocked(w)
+		return
+	}
 	backend := s.workbenchOrError(w)
 	if backend == nil {
 		return
@@ -199,6 +207,10 @@ func (s *Server) handleWorkbenchKill(w http.ResponseWriter, r *http.Request) {
 
 // handleWorkbenchRestart serves the restart of REQ-WB-040 (REQ-WB-043 audit).
 func (s *Server) handleWorkbenchRestart(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAllowed(r) {
+		refuseControlLocked(w)
+		return
+	}
 	backend := s.workbenchOrError(w)
 	if backend == nil {
 		return
@@ -216,6 +228,10 @@ func (s *Server) handleWorkbenchRestart(w http.ResponseWriter, r *http.Request) 
 
 // handleWorkbenchResize serves the resize of REQ-WB-040.
 func (s *Server) handleWorkbenchResize(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAllowed(r) {
+		refuseControlLocked(w)
+		return
+	}
 	backend := s.workbenchOrError(w)
 	if backend == nil {
 		return
@@ -342,13 +358,19 @@ func (s *Server) handleWorkbenchAttach(w http.ResponseWriter, r *http.Request) {
 	if backend == nil {
 		return
 	}
-	if origin := r.Header.Get("Origin"); origin != "http://"+s.Addr() {
+	if origin := r.Header.Get("Origin"); origin != s.expectedOrigin(r) {
 		writeAPIError(w, http.StatusForbidden, "forbidden_origin", "origin is not allowed")
 		return
 	}
 	mode := r.URL.Query().Get("mode")
 	if mode != workbenchModeView && mode != workbenchModeControl {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "mode must be view or control")
+		return
+	}
+	// REQ-RA-031: a remote browser with locked control attaches in view mode
+	// only. The check runs before the upgrade so the client sees a plain 403.
+	if mode == workbenchModeControl && !s.controlAllowed(r) {
+		refuseControlLocked(w)
 		return
 	}
 	id := r.PathValue("id")
@@ -383,6 +405,18 @@ func (s *Server) handleWorkbenchAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	if mode == workbenchModeControl {
 		s.auditWorkbench("attach", id, browser)
+	}
+	// REQ-RA-035: a control attachment of a remote confirm session ends when
+	// its control lapses or is locked. The registry signals it at once on a
+	// lock; the watcher polls for expiry and a session that went away.
+	if mode == workbenchModeControl && s.controlWatchable(r) {
+		att := &controlAttachment{}
+		var onceLocked sync.Once
+		locked := func() {
+			onceLocked.Do(func() { _ = conn.Close(workbenchCloseControlLocked, controlLockedReason) })
+		}
+		controlAttachments.add(browser.key, att, locked)
+		go s.watchControl(ctx, browser.key, att, locked)
 	}
 
 	// Either direction ending closes both: cancel stops the WebSocket read and
