@@ -5,6 +5,7 @@ package workbench
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -198,4 +199,76 @@ func cString(b []byte) string {
 		b = b[:i]
 	}
 	return string(b)
+}
+
+// Darwin proc_info(2) arguments used to read a process's open file descriptors
+// and the paths behind them.
+//
+// proc_info(PROC_INFO_CALL_PIDINFO, pid, PROC_PIDLISTFDS, 0, buf, size) fills an
+// array of struct proc_fdinfo (sys/proc_info.h):
+//
+//	struct proc_fdinfo { int32_t proc_fd; uint32_t proc_fdtype; };
+//
+// proc_info(PROC_INFO_CALL_PIDFDINFO, pid, PROC_PIDFDVNODEPATHINFO, fd, buf, size)
+// fills a struct vnode_fdinfowithpath:
+//
+//	struct vnode_fdinfowithpath { struct proc_fileinfo pfi; struct vnode_info_path pvip; };
+//
+// struct proc_fileinfo is 24 bytes; struct vnode_info_path is a 152-byte
+// vnode_info plus char vip_path[MAXPATHLEN], so the path starts at offset 176
+// and the whole struct is 1200 bytes. herdr reads the same fds for the same
+// purpose (spec 60 REQ-WR-010).
+const (
+	procInfoCallPidFdInfo   = 3
+	procPidListFDs          = 1
+	procPidFDVnodePathInfo  = 2
+	proxFdTypeVnode         = 1
+	procFdInfoSize          = 8
+	procFdInfoMax           = 4096
+	vnodeFdPathOffset       = 24 + 152
+	vnodeFdInfoPathSize     = 1024
+	vnodeFdInfoWithPathSize = vnodeFdPathOffset + vnodeFdInfoPathSize
+)
+
+// openFiles returns the absolute paths of the regular files pid has open, read
+// with proc_info(PROC_PIDLISTFDS) and proc_info(PROC_PIDFDVNODEPATHINFO). It
+// returns nil when the pid is gone or the read is denied (spec 60 REQ-WR-010).
+func openFiles(pid int) []string {
+	if pid <= 0 {
+		return nil
+	}
+	var fds [procFdInfoMax * procFdInfoSize]byte
+	n, _, errno := syscall.Syscall6(unix.SYS_PROC_INFO, //nolint:staticcheck // proc_info has no libSystem wrapper; darwinCwd uses it too.
+		procInfoCallPidInfo, uintptr(pid), procPidListFDs, 0,
+		uintptr(unsafe.Pointer(&fds[0])), uintptr(len(fds)))
+	if errno != 0 || n == 0 {
+		return nil
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for i := 0; i < int(n)/procFdInfoSize; i++ {
+		entry := fds[i*procFdInfoSize : (i+1)*procFdInfoSize]
+		fd := int(int32(binary.NativeEndian.Uint32(entry[:4])))
+		if binary.NativeEndian.Uint32(entry[4:8]) != proxFdTypeVnode {
+			continue
+		}
+		var info [vnodeFdInfoWithPathSize]byte
+		m, _, errno := syscall.Syscall6(unix.SYS_PROC_INFO, //nolint:staticcheck // proc_info has no libSystem wrapper; darwinCwd uses it too.
+			procInfoCallPidFdInfo, uintptr(pid), procPidFDVnodePathInfo, uintptr(fd),
+			uintptr(unsafe.Pointer(&info[0])), uintptr(len(info)))
+		if errno != 0 || m == 0 {
+			continue
+		}
+		path := cString(info[vnodeFdPathOffset : vnodeFdPathOffset+vnodeFdInfoPathSize])
+		if !strings.HasPrefix(path, "/") || seen[path] {
+			continue
+		}
+		st, err := os.Stat(path)
+		if err != nil || !st.Mode().IsRegular() {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths
 }

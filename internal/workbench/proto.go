@@ -95,6 +95,12 @@ type Session struct {
 	// and AgentState is its screen-derived state (spec 55 A3).
 	Agent      string `json:"agent"`
 	AgentState string `json:"agent_state"`
+	// Restored is when the session was brought back after a core restart,
+	// omitted when it was not; ResumedAgent is the agent whose conversation was
+	// typed into it at restore, omitted when nothing was typed (spec 60
+	// REQ-WR-040). Both are additive to protocol version 1.
+	Restored     *time.Time `json:"restored,omitempty"`
+	ResumedAgent string     `json:"resumed_agent,omitempty"`
 }
 
 // Event is one line of a subscription stream (REQ-WB-030): what happened, and

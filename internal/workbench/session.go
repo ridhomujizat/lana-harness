@@ -20,8 +20,11 @@ type session struct {
 	path    string
 	dir     string
 	env     []string
-	labels  map[string]string
-	created time.Time
+	// extraEnv is the caller's env from create time: the only environment the
+	// core persists (env is the full environment and is never written to disk).
+	extraEnv []string
+	labels   map[string]string
+	created  time.Time
 	// program names what runs in the session. REQ-WB-013 keeps it on the
 	// pty's foreground process, falling back to the started program's name.
 	program string
@@ -59,9 +62,25 @@ type session struct {
 	cwdRead    time.Time
 	agent      string
 	agentState string
-	bellOsc    bool
-	bellEsc    bool
-	done       chan struct{}
+	// Persisted agent tracking (spec 60 REQ-WR-005): rAgent, agentSession and
+	// agentCwd outlive an agent leaving the foreground, unlike the live agent
+	// and agentState above, which clear at once. agentSeen is when the agent
+	// was last in the foreground; agentPID, agentStarted and agentLookupAt
+	// drive the conversation-id lookup (REQ-WR-010).
+	rAgent        string
+	agentSession  string
+	agentCwd      string
+	agentSeen     time.Time
+	agentPID      int
+	agentStarted  time.Time
+	agentLookupAt time.Time
+	// restored and resumedAgent mark a session brought back after a core
+	// restart (spec 60 REQ-WR-024); both clear when it exits or restarts.
+	restored     time.Time
+	resumedAgent string
+	bellOsc      bool
+	bellEsc      bool
+	done         chan struct{}
 }
 
 // attached is a connection attached to a session, whose output a goroutine
@@ -129,7 +148,7 @@ func newSession(id string, o CreateOptions, notify func()) (*session, error) {
 	}
 	s := &session{
 		id: id, title: o.Title, command: argv, path: path, dir: dir, env: env,
-		labels: o.Labels, created: time.Now(), program: filepath.Base(path),
+		extraEnv: o.Env, labels: o.Labels, created: time.Now(), program: filepath.Base(path),
 		notify: notify,
 		p:      p, ring: newRing(ringSize), clients: map[*attached]struct{}{},
 		cols: cols, rows: rows, procCwd: physicalDir(dir), done: make(chan struct{}),
@@ -137,6 +156,102 @@ func newSession(id string, o CreateOptions, notify func()) (*session, error) {
 	s.emu = newScreen(cols, rows, s.onProgress, s.onWorkingDirectory)
 	s.run(p)
 	return s, nil
+}
+
+// consts for the restore of an agent conversation.
+const (
+	// agentPersistTTL is how long the persisted agent fields survive an agent
+	// leaving the foreground (spec 60 REQ-WR-005).
+	agentPersistTTL = 10 * time.Minute
+	// agentLookupInterval is the shortest gap between two conversation-id
+	// lookups for the same agent pid (spec 60 REQ-WR-010).
+	agentLookupInterval = 5 * time.Second
+	// agentStartSkew is subtracted from the moment an agent pid is first seen,
+	// so a session file it wrote just before is not filtered as too old.
+	agentStartSkew = 5 * time.Second
+	// resumeDelay is how long the core waits for a restored shell's first
+	// output before typing the resume command anyway (spec 60 REQ-WR-022).
+	resumeDelay = 1500 * time.Millisecond
+	// resumePoll is how often typeResume checks for that first output.
+	resumePoll = 50 * time.Millisecond
+)
+
+// newExitedSession builds a session that is already exited, without a pty: the
+// form a restored record whose program had ended comes back as, and the form a
+// running non-shell record comes back as when it must not be started (spec 60
+// REQ-WR-021, REQ-WR-022). Its restart starts the command fresh.
+func newExitedSession(rec sessionRecord) (*session, error) {
+	path, argv, _, err := shellCommand(rec.Command)
+	if err != nil {
+		if len(rec.Command) == 0 {
+			return nil, err
+		}
+		// Keep the argv so restart can report the failure; the path falls back
+		// to argv[0].
+		path, argv = rec.Command[0], rec.Command
+	}
+	cols, rows := rec.Cols, rec.Rows
+	if cols <= 0 {
+		cols = defaultCols
+	}
+	if rows <= 0 {
+		rows = defaultRows
+	}
+	dir := rec.Dir
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		dir, _ = os.UserHomeDir()
+	}
+	done := make(chan struct{})
+	close(done)
+	s := &session{
+		id: rec.ID, title: rec.Title, command: argv, path: path, dir: dir,
+		env: sessionEnv(rec.ID, rec.Env), extraEnv: rec.Env, labels: rec.Labels,
+		created: rec.Created, program: filepath.Base(path),
+		ring: newRing(ringSize), clients: map[*attached]struct{}{},
+		cols: cols, rows: rows, procCwd: physicalDir(dir),
+		exited: true, exitCode: rec.ExitCode, done: done,
+		rAgent: rec.Agent, agentSession: rec.AgentSession, agentCwd: rec.AgentCwd,
+		agentSeen: rec.AgentSeen,
+	}
+	// There is no pty and no output, so the session has no screen: a screen
+	// would start an answer-pipe drain that never ends. The emulator users
+	// (attach, resize, restart) handle a nil one.
+	return s, nil
+}
+
+// pid returns the session's process id, or 0 when it has no pty (an exited
+// session restored without one).
+func (s *session) pid() int {
+	if s.p == nil {
+		return 0
+	}
+	return s.p.pid()
+}
+
+// typeResume types line and a carriage return into the session's pty, once the
+// shell has printed its first output or resumeDelay has passed, whichever comes
+// first (spec 60 REQ-WR-022). It runs in its own goroutine and types only once.
+func (s *session) typeResume(line string) {
+	if line == "" {
+		return
+	}
+	deadline := time.Now().Add(resumeDelay)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		exited, printed := s.exited, !s.lastOutput.IsZero()
+		s.mu.Unlock()
+		if exited || printed {
+			break
+		}
+		time.Sleep(resumePoll)
+	}
+	s.mu.Lock()
+	p, exited := s.p, s.exited
+	s.mu.Unlock()
+	if exited || p == nil {
+		return
+	}
+	_, _ = p.write([]byte(line + "\r"))
 }
 
 // onProgress records the OSC 9;4 progress report, e.g. "4;0;100". It is called
@@ -344,7 +459,9 @@ func (s *session) attach(conn net.Conn, mode string, cols, rows int, initial []b
 	p := s.p
 	if cols > 0 && rows > 0 {
 		s.cols, s.rows = cols, rows
-		s.emu.resize(cols, rows)
+		if s.emu != nil {
+			s.emu.resize(cols, rows)
+		}
 	}
 	if mode == modeControl {
 		s.bellNeeds = false
@@ -454,7 +571,9 @@ func (s *session) resize(cols, rows int) {
 	}
 	s.mu.Lock()
 	s.cols, s.rows = cols, rows
-	s.emu.resize(cols, rows)
+	if s.emu != nil {
+		s.emu.resize(cols, rows)
+	}
 	p, exited := s.p, s.exited
 	s.mu.Unlock()
 	if !exited {
@@ -501,13 +620,18 @@ func (s *session) restart() error {
 	s.p = p
 	s.exited, s.exitCode, s.bellNeeds = false, 0, false
 	s.ring = newRing(ringSize)
-	s.emu.close()
+	if s.emu != nil {
+		s.emu.close()
+	}
 	s.emu = newScreen(cols, rows, s.onProgress, s.onWorkingDirectory)
 	s.lastOutput = time.Time{}
 	s.oscTitle, s.oscProgress, s.oscBuf = "", "", nil
 	s.oscDir, s.oscAt = "", time.Time{}
 	s.cwd, s.procCwd, s.procAt, s.cwdRead = "", physicalDir(dir), time.Time{}, time.Time{}
 	s.agent, s.agentState = "", ""
+	// A restart is a fresh run, not a restore, so the restored markers go away
+	// (spec 60 REQ-WR-024, REQ-WR-025).
+	s.restored, s.resumedAgent = time.Time{}, ""
 	s.bellOsc, s.bellEsc = false, false
 	s.done = make(chan struct{})
 	notify := s.notify
@@ -535,14 +659,25 @@ func (s *session) refreshProgram() {
 		program, cwd = filepath.Base(fallback), ""
 	}
 	var label, state string
+	var agentPID int
 	var skip bool
 	if job, jobOK := foregroundJob(p.fd()); jobOK {
-		if identified, _, agentOK := agentdetect.Identify(job); agentOK {
+		if identified, pid, agentOK := agentdetect.Identify(job); agentOK {
 			label = identified
+			agentPID = pid
 			program = identified
 			state, skip = s.detectAgent(identified)
 		}
 	}
+	now := time.Now()
+	// The conversation-id lookup reads files, so it runs outside the session
+	// lock: the fields it needs are snapshotted here and its result applied
+	// below (spec 60 REQ-WR-010).
+	var (
+		lookup    bool
+		lookupPID int
+		query     agentQuery
+	)
 	s.mu.Lock()
 	if !s.exited {
 		s.program = program
@@ -553,6 +688,9 @@ func (s *session) refreshProgram() {
 			// state goes away and any agent-derived needs-you goes with it; a
 			// bell from before stays ignored (spec 55 A6).
 			s.agent, s.agentState = "", ""
+			// The persisted agent fields outlive that, then expire (spec 60
+			// REQ-WR-005).
+			s.expireAgentLocked(now)
 		default:
 			s.agent = label
 			// A screen that only shows an agent-owned viewer keeps the last
@@ -560,9 +698,57 @@ func (s *session) refreshProgram() {
 			if !skip {
 				s.agentState = state
 			}
+			s.rAgent, s.agentSeen = label, now
+			if agentPID != s.agentPID {
+				s.agentPID = agentPID
+				s.agentStarted = now.Add(-agentStartSkew)
+				s.agentSession, s.agentCwd = "", ""
+				s.agentLookupAt = time.Time{}
+			}
+			_, hasAdapter := adapterFor(label)
+			if hasAdapter && s.agentSession == "" && now.Sub(s.agentLookupAt) >= agentLookupInterval {
+				s.agentLookupAt = now
+				lookup, lookupPID = true, s.agentPID
+				home, _ := os.UserHomeDir()
+				query = agentQuery{
+					Home: home, Env: s.env, PID: s.agentPID,
+					Cwd: s.cwd, Started: s.agentStarted,
+				}
+			}
 		}
 	}
 	s.mu.Unlock()
+	if !lookup {
+		return
+	}
+	id, dir, ok := lookupAgentSession(label, query)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	if !s.exited && s.rAgent == label && s.agentPID == lookupPID {
+		s.agentSession = id
+		// The adapter's directory is authoritative; an empty one keeps the
+		// directory the core already knows.
+		if dir == "" {
+			dir = s.cwd
+		}
+		s.agentCwd = dir
+	}
+	s.mu.Unlock()
+}
+
+// expireAgentLocked clears the persisted agent fields once an agent has been
+// out of the foreground for agentPersistTTL, so an agent quit right before a
+// reboot is offered back but an old one is not (spec 60 REQ-WR-005). The
+// session lock is held.
+func (s *session) expireAgentLocked(now time.Time) {
+	if s.rAgent == "" || now.Sub(s.agentSeen) <= agentPersistTTL {
+		return
+	}
+	s.rAgent, s.agentSession, s.agentCwd = "", "", ""
+	s.agentSeen = time.Time{}
+	s.agentPID, s.agentStarted, s.agentLookupAt = 0, time.Time{}, time.Time{}
 }
 
 // physicalDir resolves dir's symlinks, the form the OS reports a process's
@@ -645,13 +831,23 @@ func (s *session) info() Session {
 		// The caller gave no title, so the terminal's window title is used.
 		title = s.oscTitle
 	}
-	return Session{
+	out := Session{
 		ID: s.id, Title: title, Command: s.command, Dir: s.dir, Labels: s.labels,
-		PID: s.p.pid(), Created: s.created, Cols: s.cols, Rows: s.rows,
+		PID: s.pid(), Created: s.created, Cols: s.cols, Rows: s.rows,
 		Program: s.program, Cwd: s.cwd, State: state, ExitCode: s.exitCode,
 		NeedsYou: s.needsYouLocked(), LastOutput: s.lastOutput, Attached: len(s.clients),
 		Agent: s.agent, AgentState: s.agentState,
 	}
+	// The restored markers are reported only while the program is running; they
+	// go away when it exits or is restarted (spec 60 REQ-WR-024).
+	if !s.exited {
+		if !s.restored.IsZero() {
+			restored := s.restored
+			out.Restored = &restored
+		}
+		out.ResumedAgent = s.resumedAgent
+	}
+	return out
 }
 
 // needsYouLocked reports the session's "needs you" (spec 55 A6). An agent's
