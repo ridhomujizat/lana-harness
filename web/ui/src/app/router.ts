@@ -36,6 +36,7 @@ export const DEFAULT_AGENT_TAB = AGENT_TABS[0];
    #/settings/providers redirects to #/router/providers. */
 export const SETTINGS_TABS = [
   "general",
+  "remote",
   "secrets",
   "config",
   "audit",

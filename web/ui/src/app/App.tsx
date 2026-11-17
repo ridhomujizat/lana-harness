@@ -34,6 +34,7 @@ import { CalendarPage } from "../views/calendar";
 import { WorkflowPage } from "../views/workflow-page";
 import { NotFoundPage } from "../views/placeholder";
 import { SettingsGeneralPage } from "../views/settings-general";
+import { SettingsRemotePage } from "../views/settings-remote";
 import { SessionsWorkspace } from "../views/sessions";
 import { RouterPage, routerCrumbs } from "../views/router/router-page";
 import {
@@ -179,6 +180,8 @@ function routeContent(
           return (
             <SettingsGeneralPage theme={theme} onThemeChange={onThemeChange} />
           );
+        case "remote":
+          return <SettingsRemotePage />;
         case "secrets":
           return <SettingsSecretsPage />;
         case "config":
@@ -287,7 +290,12 @@ export function crumbsFor(
     case "settings":
       return [
         { label: "Settings", href: "#/settings/general" },
-        { label: titleCase(params.tab || "general") },
+        {
+          label:
+            params.tab === "remote"
+              ? "Remote access"
+              : titleCase(params.tab || "general"),
+        },
       ];
     default:
       return [{ label: "Not found" }];

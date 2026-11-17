@@ -79,6 +79,8 @@ describe("route table", () => {
     }
     expect(AGENT_TABS).toContain("workspace");
     expect(SETTINGS_TABS).toContain("audit");
+    /* Spec 57: Settings > Remote access. */
+    expect(SETTINGS_TABS).toContain("remote");
     expect(LEGACY_SETTINGS_TABS).toContain("agents");
     expect(SETUP_STEPS).toContain("ready");
   });
@@ -212,5 +214,13 @@ describe("route table", () => {
     expect(route.view).toBe("welcome");
     expect(route.params.code).toBe("abc");
     expect(safeNextHash(route.params.next)).toBe("#/calendar");
+  });
+});
+
+describe("spec 57 remote access route", () => {
+  it("opens Settings > Remote access", () => {
+    const route = parseRoute("#/settings/remote");
+    expect(route.view).toBe("settings");
+    expect(route.params.tab).toBe("remote");
   });
 });
