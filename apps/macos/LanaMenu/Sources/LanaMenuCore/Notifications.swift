@@ -93,6 +93,8 @@ public enum EventKind {
     /// of spec #55.
     public static let agentFinished = "agent_finished"
     public static let agentNeedsYou = "agent_needs_you"
+    /// remoteSignIn is the remote access sign-in kind of spec #57.
+    public static let remoteSignIn = "remote_sign_in"
 }
 
 /// NotificationSettings are the notification toggles of the Settings window.
@@ -192,6 +194,10 @@ public let hiddenPreviewBody = "New message"
 /// workbench agent event without a url opens it.
 public let workbenchURL = "#/workbench"
 
+/// remoteSettingsURL is the dashboard hash of the Remote access settings page
+/// (spec #57); a remote sign-in event without a url opens it.
+public let remoteSettingsURL = "#/settings/remote"
+
 /// approvalIdentifier is the banner identifier of an approval, so a decision
 /// made elsewhere can remove it.
 public func approvalIdentifier(_ approvalId: String) -> String { "approval-" + approvalId }
@@ -248,6 +254,13 @@ public func planNotification(_ event: LanaEvent, settings: NotificationSettings)
         if plan.url.isEmpty { plan.url = workbenchURL }
         plan.sound = true
         plan.timeSensitive = event.kind == EventKind.agentNeedsYou
+    case EventKind.remoteSignIn:
+        // Remote sign-ins are always on, sound, and time sensitive; a missing
+        // url opens the Remote access settings page.
+        plan.threadIdentifier = "remote-sign-in"
+        if plan.url.isEmpty { plan.url = remoteSettingsURL }
+        plan.sound = true
+        plan.timeSensitive = true
     default:
         return .skip("unknown kind " + event.kind)
     }

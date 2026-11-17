@@ -113,6 +113,36 @@ final class NotificationPlanTests: XCTestCase {
         XCTAssertTrue(o.timeSensitive)
     }
 
+    func testRemoteSignIn() {
+        guard let p = plan(planNotification(event("remote_sign_in"), settings: .init())) else { return }
+        XCTAssertEqual(p.identifier, "event-b-1")
+        XCTAssertEqual(p.title, "T")
+        XCTAssertEqual(p.body, "B")
+        XCTAssertEqual(p.threadIdentifier, "remote-sign-in")
+        XCTAssertEqual(p.url, "#/sessions/s1")
+        XCTAssertEqual(p.category, NotificationCategory.plain)
+        XCTAssertTrue(p.sound)
+        XCTAssertTrue(p.timeSensitive)
+        XCTAssertNil(p.approvalId)
+    }
+
+    func testRemoteSignInURLFallsBackToSettings() {
+        let empty = LanaEvent(id: "b-2", kind: "remote_sign_in", title: "New remote sign-in", body: "Safari on iPhone signed in over Tailscale.", url: "", timeSensitive: true)
+        guard let p = plan(planNotification(empty, settings: .init())) else { return }
+        XCTAssertEqual(p.url, remoteSettingsURL)
+        XCTAssertEqual(p.threadIdentifier, "remote-sign-in")
+    }
+
+    func testRemoteSignInAlwaysOn() {
+        // Remote sign-ins ignore the settings toggles: they post with sound and
+        // time sensitive even when every toggle is off.
+        let off = NotificationSettings(messages: false, approvals: false, questions: false, workflowStarted: false, workflowFinished: false)
+        guard let p = plan(planNotification(event("remote_sign_in"), settings: off)) else { return }
+        XCTAssertTrue(p.sound)
+        XCTAssertTrue(p.timeSensitive)
+        XCTAssertEqual(p.threadIdentifier, "remote-sign-in")
+    }
+
     func testExistingKindsKeepTheirSound() {
         XCTAssertEqual(plan(planNotification(event("reply"), settings: .init()))?.sound, true)
         XCTAssertEqual(plan(planNotification(event("workflow_started"), settings: .init()))?.sound, false)
