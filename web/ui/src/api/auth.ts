@@ -8,11 +8,22 @@ export interface AuthState {
   password_set: boolean;
   telegram_reset: boolean;
   locked_until: number | null;
+  /* Spec 57 (REQ-RA-027): set for a request that came through Tailscale Serve. */
+  remote?: boolean;
+  login?: string;
+  device?: string;
 }
 
 export interface AuthSession {
   csrf: string;
   expires_at: number;
+  /* Spec 57 (REQ-RA-026): the remote fields of this browser session. */
+  remote?: boolean;
+  login?: string;
+  device?: string;
+  terminal?: "view" | "confirm" | "full";
+  control_until?: number;
+  telegram_code?: boolean;
 }
 
 /* The sign-in endpoints answer with the CSRF value of the new browser
@@ -35,6 +46,12 @@ export interface BrowserSessionInfo {
   created_at: number;
   last_used_at: number;
   current: boolean;
+  /* Spec 57 (REQ-RA-024). */
+  remote?: boolean;
+  login?: string;
+  device?: string;
+  ip?: string;
+  control_until?: number;
 }
 
 export interface ListBrowserSessionsResponse {

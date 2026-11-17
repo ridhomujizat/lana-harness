@@ -1,0 +1,19 @@
+{
+  "BackendState": "Running",
+  "Self": {
+    "DNSName": "ridho-mbp.tail3f2a1.ts.net.",
+    "UserID": 123456789
+  },
+  "User": {
+    "123456789": {
+      "LoginName": "ridho@github"
+    }
+  },
+  "CurrentTailnet": {
+    "Name": "tail3f2a1.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": [
+    "ridho-mbp.tail3f2a1.ts.net"
+  ]
+}

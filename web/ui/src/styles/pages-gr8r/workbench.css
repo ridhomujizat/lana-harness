@@ -1905,3 +1905,84 @@ body.wb-resizing {
 .wb-sound.is-on {
   color: var(--text-2);
 }
+
+/* ------------------------------------------------------------------ */
+/* Remote control bar and unlock sheet (spec 57, REQ-RA-085)          */
+/* ------------------------------------------------------------------ */
+
+.wb-remote-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-remote-bar.on {
+  background: var(--amber-soft);
+}
+
+.wb-remote-bar .grow {
+  min-width: 0;
+}
+
+.wb-remote-bar .t {
+  display: block;
+  font-weight: 600;
+  font-size: var(--fs);
+}
+
+.wb-remote-bar .d {
+  display: block;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-remote-ic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+.wb-remote-bar.on .wb-remote-ic {
+  color: var(--amber);
+}
+
+/* The phone page fills the screen, so the bar sits over its bottom edge. */
+.wb-phone ~ .wb-remote-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.wb-phone:has(~ .wb-remote-bar) {
+  padding-bottom: 64px;
+}
+
+.wb-unlock-form {
+  display: grid;
+  gap: var(--s-3);
+}
+
+.wb-unlock-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}

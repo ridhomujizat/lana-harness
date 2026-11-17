@@ -21,6 +21,7 @@ type telegramResetSender struct {
 }
 
 var _ web.TelegramResetSender = (*telegramResetSender)(nil)
+var _ web.TelegramOwnerMessenger = (*telegramResetSender)(nil)
 
 func newTelegramResetSender(channel *telegram.Channel, cfg telegram.Config) *telegramResetSender {
 	return &telegramResetSender{channel: channel, owners: cfg.OwnerIDs, routes: cfg.Routes}
@@ -44,7 +45,18 @@ func (t *telegramResetSender) ResetAvailable() bool {
 // SendOwnerCode sends the reset code to every owner private chat and returns
 // how many messages were sent.
 func (t *telegramResetSender) SendOwnerCode(ctx context.Context, code string) (int, error) {
-	text := telegramResetMessage(code)
+	return t.sendOwners(ctx, telegramResetMessage(code))
+}
+
+// SendOwnerMessage sends a plain-text owner message to every owner private
+// chat and returns how many were sent (REQ-RA-070).
+func (t *telegramResetSender) SendOwnerMessage(ctx context.Context, text string) (int, error) {
+	return t.sendOwners(ctx, text)
+}
+
+// sendOwners delivers one plain-text message to every owner that has a
+// private-chat route.
+func (t *telegramResetSender) sendOwners(ctx context.Context, text string) (int, error) {
 	send := t.send
 	if send == nil {
 		send = t.channel.SendOwnerMessage

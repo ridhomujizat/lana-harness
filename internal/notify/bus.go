@@ -39,6 +39,9 @@ const (
 	KindAgentFinished Kind = "agent_finished"
 	// KindAgentNeedsYou is a workbench coding agent that waits for the owner.
 	KindAgentNeedsYou Kind = "agent_needs_you"
+	// KindRemoteSignIn is a successful remote sign-in over Tailscale
+	// (REQ-RA-070).
+	KindRemoteSignIn Kind = "remote_sign_in"
 )
 
 // Control reports whether k only updates earlier banners (it removes them)

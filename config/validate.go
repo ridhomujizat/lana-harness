@@ -66,7 +66,18 @@ var teamKeys = []string{"description", "discuss", "display_name", "extra_rounds"
 var routeKeys = []string{"agent", "channel", "match"}
 var mcpKeys = []string{"args", "command", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
-var webKeys = []string{"addr", "enabled", "open_browser"}
+var webKeys = []string{"addr", "enabled", "open_browser", "remote"}
+
+// webRemoteKeys are the keys of the [web.remote] table (REQ-RA-010).
+var webRemoteKeys = []string{"allowed_logins", "confirm_with", "control_minutes", "enabled", "host", "idle_minutes", "max_age_hours", "notify_sign_in", "require_identity", "terminal"}
+
+// webRemoteTerminals are the accepted [web.remote] terminal values
+// (REQ-RA-030).
+var webRemoteTerminals = []string{core.WebRemoteTerminalView, core.WebRemoteTerminalConfirm, core.WebRemoteTerminalFull}
+
+// webRemoteConfirms are the accepted [web.remote] confirm_with values
+// (REQ-RA-032).
+var webRemoteConfirms = []string{core.WebRemoteConfirmPassword, core.WebRemoteConfirmPasswordOrTelegram}
 
 // providerKinds are the accepted providers.<name>.kind values (API-RTR-001).
 var providerKinds = []string{"anthropic", core.ClaudeCodeKind, "commandcode", "deepseek", "openai", "openai_compat", "openrouter"}
@@ -960,6 +971,98 @@ func validateWeb(v map[string]any, path string, add func(string, string)) {
 		if _, ok := val.(string); !ok {
 			add(path+".addr", typeMsg("string", val))
 		}
+	}
+	if raw, ok := v["remote"]; ok {
+		table, ok := asMap(raw)
+		if !ok {
+			add(path+".remote", typeMsg("table", raw))
+		} else {
+			validateWebRemote(table, path+".remote", add)
+		}
+	}
+}
+
+// validateWebRemote checks the [web.remote] table (REQ-RA-010): the keys, the
+// types, the terminal and confirm_with enums, the ranges, and the required host
+// when remote access is enabled.
+func validateWebRemote(v map[string]any, path string, add func(string, string)) {
+	for _, key := range sortedKeys(v) {
+		if !contains(webRemoteKeys, key) {
+			add(path+"."+key, unknownKeyMsg(key, webRemoteKeys))
+		}
+	}
+	for _, key := range []string{"enabled", "notify_sign_in", "require_identity"} {
+		if val, ok := v[key]; ok {
+			if _, ok := val.(bool); !ok {
+				add(path+"."+key, typeMsg("boolean", val))
+			}
+		}
+	}
+	if val, ok := v["host"]; ok {
+		if _, ok := val.(string); !ok {
+			add(path+".host", typeMsg("string", val))
+		}
+	}
+	if val, ok := v["allowed_logins"]; ok {
+		list, ok := asStringSlice(val)
+		if !ok {
+			add(path+".allowed_logins", typeMsg("array string", val))
+		} else {
+			for i, login := range list {
+				if strings.TrimSpace(login) == "" {
+					add(fmt.Sprintf("%s.allowed_logins.%d", path, i), "must not be empty")
+				}
+			}
+		}
+	}
+	if val, ok := v["terminal"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".terminal", typeMsg("string", val))
+		} else if !contains(webRemoteTerminals, s) {
+			add(path+".terminal", enumMsg(s, webRemoteTerminals))
+		}
+	}
+	if val, ok := v["confirm_with"]; ok {
+		s, ok := val.(string)
+		if !ok {
+			add(path+".confirm_with", typeMsg("string", val))
+		} else if !contains(webRemoteConfirms, s) {
+			add(path+".confirm_with", enumMsg(s, webRemoteConfirms))
+		}
+	}
+	for _, key := range []string{"control_minutes", "idle_minutes", "max_age_hours"} {
+		val, ok := v[key]
+		if !ok {
+			continue
+		}
+		n, isInt := asInt(val)
+		if !isInt {
+			add(path+"."+key, typeMsg("integer", val))
+			continue
+		}
+		lo, hi := webRemoteRange(key)
+		if n < int64(lo) || n > int64(hi) {
+			add(path+"."+key, fmt.Sprintf("must be between %d and %d", lo, hi))
+		}
+	}
+	if enabled, _ := v["enabled"].(bool); enabled {
+		if host, _ := v["host"].(string); strings.TrimSpace(host) == "" {
+			add(path+".host", "is required when enabled is true")
+		}
+	}
+}
+
+// webRemoteRange returns the accepted range of a [web.remote] minutes or hours
+// value (REQ-RA-010).
+func webRemoteRange(key string) (int, int) {
+	switch key {
+	case "control_minutes":
+		return core.WebRemoteControlMin, core.WebRemoteControlMax
+	case "idle_minutes":
+		return core.WebRemoteIdleMin, core.WebRemoteIdleMax
+	default:
+		return core.WebRemoteMaxAgeMin, core.WebRemoteMaxAgeMax
 	}
 }
 

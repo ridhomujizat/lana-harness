@@ -60,6 +60,7 @@ import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from 
 import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
+import { PaneAccessContext, RemoteControlBar, usePaneAccess, useRemoteControl, type PaneAccess } from "./workbench-remote";
 
 /* Spec 55: the Workbench page. Desktop: panel (Spaces + Agents), tab strip,
    split panes (REQ-WB-051..054). Phone: home, space view with one pane at a
@@ -369,6 +370,7 @@ interface PaneActions {
 }
 
 function PaneView({ id, session, focused, zoomed, actions }: { id: string; session?: WorkbenchSession; focused: boolean; zoomed: boolean; actions: PaneActions }) {
+  const access = usePaneAccess();
   const status = statusOf(session);
   return (
     <div className={"wb-pane" + (focused ? " is-focused" : "")}>
@@ -401,9 +403,10 @@ function PaneView({ id, session, focused, zoomed, actions }: { id: string; sessi
       <div className="wb-pane-body">
         {session ? (
           <TermPane
-            key={id + ":" + session.pid}
+            key={id + ":" + session.pid + ":" + access.mode}
             sessionId={id}
-            mode="control"
+            mode={access.mode}
+            onControlLost={access.onControlLost}
             focused={focused}
             onFocus={() => actions.onFocus(id)}
             sessionSize={{ cols: session.cols, rows: session.rows }}
@@ -502,6 +505,7 @@ function useVisualViewport(): { top: number; height: number; keyboard: boolean }
 }
 
 function PhoneWorkbench(props: PhoneProps) {
+  const access = usePaneAccess();
   const { layout, sessions, view } = props;
   const space = pickSpace(layout);
   const tab = pickTab(space);
@@ -688,9 +692,10 @@ function PhoneWorkbench(props: PhoneProps) {
           ) : null}
           <div className="wb-phone-term">
             <TermPane
-              key={current + ":" + (session?.pid ?? 0)}
+              key={current + ":" + (session?.pid ?? 0) + ":" + access.mode}
               sessionId={current}
-              mode="control"
+              mode={access.mode}
+              onControlLost={access.onControlLost}
               fontSize={fontSize}
               sendRef={sendRef}
               transformRef={transformRef}
@@ -861,6 +866,17 @@ function readPanelOpen(): boolean {
 
 export function WorkbenchPage() {
   const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
+  /* Spec 57 (REQ-RA-085): a remote browser attaches in view mode until it
+     unlocks control. */
+  const remoteControl = useRemoteControl();
+  const refreshControl = remoteControl.refresh;
+  const paneAccess = useMemo<PaneAccess>(
+    () => ({
+      mode: remoteControl.canControl ? "control" : "view",
+      onControlLost: refreshControl,
+    }),
+    [remoteControl.canControl, refreshControl]
+  );
   const [panelOpen, setPanelOpen] = useState(readPanelOpen);
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1281,7 +1297,7 @@ export function WorkbenchPage() {
 
   if (phone) {
     return (
-      <>
+      <PaneAccessContext.Provider value={paneAccess}>
         {banner}
         {overlays}
         {accountsOverlay}
@@ -1301,7 +1317,8 @@ export function WorkbenchPage() {
           onRestart={actions.onRestart}
           onClose={actions.onClose}
         />
-      </>
+        <RemoteControlBar control={remoteControl} />
+      </PaneAccessContext.Provider>
     );
   }
 
@@ -1309,6 +1326,7 @@ export function WorkbenchPage() {
   const attached = tab ? tabSessions(tab).reduce((n, id) => Math.max(n, sessions[id]?.attached || 0), 0) : 0;
 
   return (
+    <PaneAccessContext.Provider value={paneAccess}>
     <main id="main" className="wb-page">
       {overlays}
       {accountsOverlay}
@@ -1409,7 +1427,9 @@ export function WorkbenchPage() {
             </div>
           )}
         </div>
+        <RemoteControlBar control={remoteControl} />
       </section>
     </main>
+    </PaneAccessContext.Provider>
   );
 }

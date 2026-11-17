@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/ridhomujizat/lana-harness/core"
 )
 
 const (
@@ -49,6 +51,12 @@ type session struct {
 	csrf      string
 	csrfHash  [sha256.Size]byte
 	expiresAt time.Time
+	// The remote-access fields of REQ-RA-020. remote is false on a local
+	// session; controlUntil is the zero time when control is locked.
+	remote       bool
+	login        string
+	device       string
+	controlUntil time.Time
 }
 
 type contextKey int
@@ -176,7 +184,13 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 
 func (s *Server) checkHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(r.Host, s.Addr()) {
+		if remote, ok := remoteFromContext(r.Context()); ok {
+			// The gate already checked this; keep the check (REQ-RA-004).
+			if !strings.EqualFold(remote.Host, s.remoteConfig().Host) {
+				writeAPIError(w, http.StatusForbidden, "forbidden_host", "host is not allowed")
+				return
+			}
+		} else if !strings.EqualFold(r.Host, s.Addr()) {
 			writeAPIError(w, http.StatusForbidden, "forbidden_host", "host is not allowed")
 			return
 		}
@@ -184,10 +198,20 @@ func (s *Server) checkHost(next http.Handler) http.Handler {
 	})
 }
 
+// expectedOrigin is the single Origin a same-origin request may carry: the
+// ts.net https URL for a remote request, the loopback http URL otherwise
+// (REQ-RA-004).
+func (s *Server) expectedOrigin(r *http.Request) string {
+	if _, ok := remoteFromContext(r.Context()); ok {
+		return "https://" + s.remoteConfig().Host
+	}
+	return "http://" + s.Addr()
+}
+
 func (s *Server) checkOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isStateChanging(r.Method) {
-			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+s.Addr() {
+			if origin := r.Header.Get("Origin"); origin != "" && origin != s.expectedOrigin(r) {
 				writeAPIError(w, http.StatusForbidden, "forbidden_origin", "origin is not allowed")
 				return
 			}
@@ -207,12 +231,27 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 		if err != nil {
 			s.logger.Warn("web: save browser session", "error", err)
 		}
-		if !ok {
+		if !ok || !sessionMatchesRequest(r, sess) {
 			writeAPIError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionContextKey, sess)))
 	})
+}
+
+// sessionMatchesRequest applies REQ-RA-022: a remote session is valid only for
+// a remote request whose login matches, and a local session only for a local
+// request. The comparison is case-insensitive; with require_identity off, two
+// empty logins match.
+func sessionMatchesRequest(r *http.Request, sess session) bool {
+	remote, isRemote := remoteFromContext(r.Context())
+	if sess.remote != isRemote {
+		return false
+	}
+	if !isRemote {
+		return true
+	}
+	return strings.EqualFold(sess.login, remote.Login)
 }
 
 func (s *Server) checkCSRF(next http.Handler) http.Handler {
@@ -239,15 +278,24 @@ func isStateChanging(method string) bool {
 	}
 }
 
-// handleAuthState answers GET /v1/auth/state (API-WLG-001).
-func (s *Server) handleAuthState(w http.ResponseWriter, _ *http.Request) {
+// handleAuthState answers GET /v1/auth/state (API-WLG-001). For a remote
+// request it also carries the Tailscale identity chip of REQ-RA-027.
+func (s *Server) handleAuthState(w http.ResponseWriter, r *http.Request) {
 	response := struct {
 		PasswordSet   bool   `json:"password_set"`
 		TelegramReset bool   `json:"telegram_reset"`
 		LockedUntil   *int64 `json:"locked_until"`
+		Remote        bool   `json:"remote"`
+		Login         string `json:"login,omitempty"`
+		Device        string `json:"device,omitempty"`
 	}{
 		PasswordSet:   s.credentials.PasswordSet(),
 		TelegramReset: s.telegramResetAvailable(),
+	}
+	if remote, ok := remoteFromContext(r.Context()); ok {
+		response.Remote = true
+		response.Login = remote.Login
+		response.Device = s.whoisDevice(r.Context(), remote.IP)
 	}
 	if until := s.loginLock.lockedUntilTime(); !until.IsZero() {
 		ms := until.UnixMilli()
@@ -312,6 +360,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if !s.credentials.VerifyPassword(*body.Password) {
 			s.loginLock.fail()
 			s.logger.Info("web: login failed")
+			if _, ok := remoteFromContext(r.Context()); ok {
+				s.auditRemoteSignInFailed(r)
+			}
 			writeAPIError(w, http.StatusUnauthorized, "invalid_password", invalidPasswordMessage)
 			return
 		}
@@ -462,14 +513,26 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // startSession creates a browser session and sets its cookie on w. It logs a
-// failure; the caller answers the request.
+// failure; the caller answers the request. A remote request records the
+// Tailscale identity and announces the sign-in (REQ-RA-020, REQ-RA-023,
+// REQ-RA-070).
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request) (session, error) {
 	cookie, err := randomToken()
 	if err != nil {
 		s.logger.Error("web: generate session cookie", "error", err)
 		return session{}, err
 	}
-	sess, err := s.sessions.add(cookie, r.UserAgent(), s.nowTime())
+	remote, isRemote := remoteFromContext(r.Context())
+	var sess session
+	if isRemote {
+		sess, err = s.sessions.addRemote(cookie, r.UserAgent(), remoteIdentity{
+			Login:  remote.Login,
+			Device: s.whoisDevice(r.Context(), remote.IP),
+			IP:     remote.IP,
+		}, s.nowTime())
+	} else {
+		sess, err = s.sessions.add(cookie, r.UserAgent(), s.nowTime())
+	}
 	if err != nil {
 		s.logger.Error("web: save browser session", "error", err)
 		return session{}, err
@@ -480,7 +543,11 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) (session, 
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
+		Secure:   isRemote,
 	})
+	if isRemote {
+		s.announceRemoteSignIn(r, sess)
+	}
 	return sess, nil
 }
 
@@ -501,19 +568,42 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSession answers GET /v1/auth/session. Besides the CSRF value and the
+// expiry it carries the remote-access fields of REQ-RA-026.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	sess, ok := sessionFromContext(r.Context())
 	if !ok {
 		writeAPIError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
 		return
 	}
+	device := sess.device
+	if remote, isRemote := remoteFromContext(r.Context()); isRemote && device == "" {
+		device = s.whoisDevice(r.Context(), remote.IP)
+	}
+	controlUntil := int64(0)
+	if !sess.controlUntil.IsZero() {
+		controlUntil = sess.controlUntil.UnixMilli()
+	}
+	cfg := s.remoteConfig()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(struct {
-		CSRF      string `json:"csrf"`
-		ExpiresAt int64  `json:"expires_at"`
+		CSRF         string `json:"csrf"`
+		ExpiresAt    int64  `json:"expires_at"`
+		Remote       bool   `json:"remote"`
+		Login        string `json:"login,omitempty"`
+		Device       string `json:"device,omitempty"`
+		Terminal     string `json:"terminal,omitempty"`
+		ControlUntil int64  `json:"control_until"`
+		TelegramCode bool   `json:"telegram_code"`
 	}{
-		CSRF:      sess.csrf,
-		ExpiresAt: sess.expiresAt.UnixMilli(),
+		CSRF:         sess.csrf,
+		ExpiresAt:    sess.expiresAt.UnixMilli(),
+		Remote:       sess.remote,
+		Login:        sess.login,
+		Device:       device,
+		Terminal:     cfg.Terminal,
+		ControlUntil: controlUntil,
+		TelegramCode: cfg.ConfirmWith == core.WebRemoteConfirmPasswordOrTelegram && s.telegramResetAvailable(),
 	})
 }
 

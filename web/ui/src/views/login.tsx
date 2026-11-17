@@ -3,8 +3,8 @@ import type { FormEvent } from "react";
 import { errorMessage, isErrorCode, setCSRF } from "../api/client";
 import { authState, login } from "../api/auth";
 import { useAnnounce } from "../ui/ui";
-import { LanaMark } from "../ui/icons";
-import { Button, Field, IconButton, Input } from "../ui/gr8r";
+import { Ic, LanaMark } from "../ui/icons";
+import { Badge, Button, Field, IconButton, Input } from "../ui/gr8r";
 import { SetupShell } from "./setup";
 
 /* Daily login (REQ-WLG-003, mockup 2). The owner types the password they set
@@ -88,6 +88,10 @@ export interface LoginPageProps {
 export function LoginPage({ onLoggedIn }: LoginPageProps) {
   const announce = useAnnounce();
   const [passwordSet, setPasswordSet] = useState<boolean | null>(null);
+  /* Spec 57 (REQ-RA-084): the Tailscale identity of a remote sign-in. */
+  const [remote, setRemote] = useState<{ login: string; device: string } | null>(
+    null
+  );
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -98,6 +102,9 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
       .then((state) => {
         if (alive) {
           setPasswordSet(Boolean(state && state.password_set));
+          if (state && state.remote) {
+            setRemote({ login: state.login || "", device: state.device || "" });
+          }
         }
       })
       .catch(() => {
@@ -144,6 +151,26 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           : "Enter the password you made when you set up lana."}
       </p>
 
+      {remote ? (
+        <div className="auth-remote" aria-label="Signing in over Tailscale">
+          <span className="auth-remote-ic" aria-hidden="true">
+            <Ic name="globe" size={15} />
+          </span>
+          <span className="grow">
+            <span className="t">
+              via Tailscale
+              <Badge tone="green" dot>
+                Verified
+              </Badge>
+            </span>
+            <span className="d mono">
+              {[remote.login, remote.device].filter(Boolean).join(" · ") ||
+                "Tailscale identity not sent"}
+            </span>
+          </span>
+        </div>
+      ) : null}
+
       {noPassword ? null : (
         <form className="auth-form" onSubmit={submit}>
           <PasswordField
@@ -172,6 +199,14 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           </a>
         </p>
       )}
+
+      {remote ? (
+        <p className="auth-remote-note">
+          <Ic name="lock" size={13} />
+          Only devices in your tailnet can open this page. Terminals open in
+          view only until you unlock control.
+        </p>
+      ) : null}
     </SetupShell>
   );
 }
