@@ -435,3 +435,34 @@ export function ctrlKey(data: string): string {
   const map: Record<string, string> = { "[": "\x1b", "\\": "\x1c", "]": "\x1d", " ": "\x00", "?": "\x7f" };
   return map[data] ?? data;
 }
+
+/* Keys a browser terminal does not send the way a macOS terminal does.
+   Shift+Enter sends ESC CR, the newline Claude Code and other agents read
+   (same as Option+Enter). Cmd and Option editing keys follow iTerm2's
+   "Natural text editing": line start/end, word left/right, delete line.
+   Returns null for a key xterm.js handles itself. */
+export interface KeyLike {
+  key: string;
+  shiftKey: boolean;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+export function terminalKey(e: KeyLike): string | null {
+  const { key, shiftKey, altKey, ctrlKey: ctrl, metaKey: meta } = e;
+  if (ctrl) return null;
+  if (key === "Enter" && shiftKey && !altKey && !meta) return "\x1b\r";
+  if (meta && !altKey) {
+    if (key === "ArrowLeft") return "\x01";
+    if (key === "ArrowRight") return "\x05";
+    if (key === "Backspace") return "\x15";
+    return null;
+  }
+  if (altKey && !meta && !shiftKey) {
+    if (key === "ArrowLeft") return "\x1bb";
+    if (key === "ArrowRight") return "\x1bf";
+    if (key === "Backspace") return "\x1b\x7f";
+  }
+  return null;
+}

@@ -20,6 +20,7 @@ import {
   splitPane,
   statusOf,
   tabSessions,
+  terminalKey,
 } from "./workbench-model";
 
 function session(over: Partial<WorkbenchSession>): WorkbenchSession {
@@ -162,5 +163,31 @@ describe("workbench sessions", () => {
     expect(ctrlKey("C")).toBe("\x03");
     expect(ctrlKey("[")).toBe("\x1b");
     expect(ctrlKey("ab")).toBe("ab");
+  });
+});
+
+describe("terminalKey", () => {
+  const k = (key: string, mods: Partial<{ shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }> = {}) =>
+    terminalKey({ key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, ...mods });
+
+  it("maps Shift+Enter to ESC CR", () => {
+    expect(k("Enter", { shiftKey: true })).toBe("\x1b\r");
+    expect(k("Enter")).toBeNull();
+  });
+
+  it("maps macOS editing keys", () => {
+    expect(k("ArrowLeft", { metaKey: true })).toBe("\x01");
+    expect(k("ArrowRight", { metaKey: true })).toBe("\x05");
+    expect(k("Backspace", { metaKey: true })).toBe("\x15");
+    expect(k("ArrowLeft", { altKey: true })).toBe("\x1bb");
+    expect(k("ArrowRight", { altKey: true })).toBe("\x1bf");
+    expect(k("Backspace", { altKey: true })).toBe("\x1b\x7f");
+  });
+
+  it("leaves other keys to xterm", () => {
+    expect(k("c", { metaKey: true })).toBeNull();
+    expect(k("v", { metaKey: true })).toBeNull();
+    expect(k("c", { ctrlKey: true })).toBeNull();
+    expect(k("a")).toBeNull();
   });
 });
