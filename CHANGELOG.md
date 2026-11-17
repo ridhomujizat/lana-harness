@@ -7,6 +7,29 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.8] - 2026-11-17
+
+### Added
+- **Remote access over Tailscale** (spec 57): open Lana, including Workbench, from your phone
+  at `https://<mac>.<tailnet>.ts.net`. The daemon keeps listening on 127.0.0.1 only;
+  Tailscale Serve proxies to it over HTTPS inside your tailnet (never Funnel).
+- Settings > Remote access: a setup checklist (Tailscale installed, running, HTTPS
+  certificates, serve), an Enable switch that runs `tailscale serve` itself, the address with
+  a QR code, the allowed Tailscale accounts, the remote terminal policy, remote session
+  limits, and every signed-in device with its own Sign out.
+- Remote requests must come from the configured ts.net host and an allowed Tailscale login
+  (`Tailscale-User-Login`), then the Lana password. Remote sessions get a Secure cookie, are
+  bound to that login, and end after 1 hour idle or 7 days (configurable).
+- Workbench from a remote browser is view-only by default until you unlock control with the
+  password or a code sent to Telegram (15 minutes by default); it then locks again. The
+  terminal policy can also be View only or Full control.
+- A remote browser cannot change remote access, the password, or sign out other browsers.
+- Remote sign-ins show a macOS banner and a Telegram message, and every remote sign-in,
+  failed password, control unlock, setting change and sign-out is in the Audit log.
+- New `[web.remote]` config table: `enabled`, `host`, `require_identity`, `allowed_logins`,
+  `terminal`, `confirm_with`, `control_minutes`, `idle_minutes`, `max_age_hours`,
+  `notify_sign_in`.
+
 ## [0.5.0-beta.7] - 2026-11-17
 
 ### Fixed
