@@ -73,6 +73,83 @@ type WebConfig struct {
 	Enabled     bool   `toml:"enabled"`
 	Addr        string `toml:"addr"`
 	OpenBrowser bool   `toml:"open_browser"`
+	// Remote is the [web.remote] table (spec 57).
+	Remote WebRemoteConfig `toml:"remote"`
+}
+
+// WebRemoteConfig is the [web.remote] table (spec 57): phone access through
+// Tailscale Serve. config.Load fills the defaults with DefaultWebRemoteConfig.
+type WebRemoteConfig struct {
+	// Enabled allows remote requests.
+	Enabled bool `toml:"enabled"`
+	// Host is the ts.net name, e.g. "ridho-mbp.tail3f2a1.ts.net".
+	Host string `toml:"host"`
+	// RequireIdentity requires an allowed Tailscale login (REQ-RA-003).
+	RequireIdentity bool `toml:"require_identity"`
+	// AllowedLogins are the Tailscale logins allowed to sign in, e.g.
+	// "name@github".
+	AllowedLogins []string `toml:"allowed_logins"`
+	// Terminal is "view", "confirm", or "full" (REQ-RA-030).
+	Terminal string `toml:"terminal"`
+	// ConfirmWith is "password" or "password_or_telegram" (REQ-RA-032).
+	ConfirmWith string `toml:"confirm_with"`
+	// ControlMinutes is how long one unlock grants Workbench control
+	// (REQ-RA-032).
+	ControlMinutes int `toml:"control_minutes"`
+	// IdleMinutes ends a remote session after this long without a request
+	// (REQ-RA-021).
+	IdleMinutes int `toml:"idle_minutes"`
+	// MaxAgeHours ends a remote session this long after it started
+	// (REQ-RA-021).
+	MaxAgeHours int `toml:"max_age_hours"`
+	// NotifySignIn sends a notification on a remote sign-in (REQ-RA-070).
+	NotifySignIn bool `toml:"notify_sign_in"`
+}
+
+// Web remote terminal policies (REQ-RA-030): what a remote browser may do with
+// Workbench terminals.
+const (
+	// WebRemoteTerminalView never allows control.
+	WebRemoteTerminalView = "view"
+	// WebRemoteTerminalConfirm allows control for a while after an unlock.
+	WebRemoteTerminalConfirm = "confirm"
+	// WebRemoteTerminalFull always allows control.
+	WebRemoteTerminalFull = "full"
+)
+
+// Web remote unlock methods (REQ-RA-032).
+const (
+	// WebRemoteConfirmPassword accepts the Lana password only.
+	WebRemoteConfirmPassword = "password"
+	// WebRemoteConfirmPasswordOrTelegram accepts the password or a Telegram
+	// code.
+	WebRemoteConfirmPasswordOrTelegram = "password_or_telegram"
+)
+
+// Accepted ranges of the [web.remote] values (REQ-RA-010).
+const (
+	WebRemoteControlMin = 1
+	WebRemoteControlMax = 240
+	WebRemoteIdleMin    = 5
+	WebRemoteIdleMax    = 1440
+	WebRemoteMaxAgeMin  = 1
+	WebRemoteMaxAgeMax  = 2160
+)
+
+// DefaultWebRemoteConfig returns the [web.remote] defaults (REQ-RA-010):
+// remote access off, identity required, control after confirming for 15
+// minutes.
+func DefaultWebRemoteConfig() WebRemoteConfig {
+	return WebRemoteConfig{
+		RequireIdentity: true,
+		AllowedLogins:   []string{},
+		Terminal:        WebRemoteTerminalConfirm,
+		ConfirmWith:     WebRemoteConfirmPasswordOrTelegram,
+		ControlMinutes:  15,
+		IdleMinutes:     60,
+		MaxAgeHours:     168,
+		NotifySignIn:    true,
+	}
 }
 
 type ProviderConfig struct {

@@ -21,6 +21,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/notify"
+	"github.com/ridhomujizat/lana-harness/internal/tailscale"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -49,6 +50,9 @@ type Config struct {
 	// OpenBrowser opens the sign-in link on start when no password is set or
 	// a reset was requested ([web] open_browser, default true).
 	OpenBrowser bool
+	// Remote holds the [web.remote] settings (spec 57). New installs them with
+	// SetRemoteConfig.
+	Remote core.WebRemoteConfig
 }
 
 // Server serves the dashboard and the /v1 API from embedded assets.
@@ -101,8 +105,17 @@ type Server struct {
 	update         UpdateStore
 	telegramStatus func() TelegramStatus
 	telegramReset  TelegramResetSender
-	approvals      *Approvals
-	questions      *Questions
+	// telegramOwner sends plain-text owner messages (REQ-RA-070). Set by the
+	// daemon.
+	telegramOwner TelegramOwnerMessenger
+	// remote holds the [web.remote] settings (spec 57, REQ-RA-011). It is read
+	// through remoteConfig.
+	remote core.WebRemoteConfig
+	// tailscale calls the Tailscale CLI for serve status, serve, and whois
+	// (REQ-RA-051..053). A fake replaces it in tests.
+	tailscale tailscaleClient
+	approvals *Approvals
+	questions *Questions
 	// secretRequests is the secure secret input broker (spec 53).
 	secretRequests *SecretRequests
 	// roomHub pushes changed room rows to the room streams (REQ-ROOM-007).
@@ -201,6 +214,8 @@ func New(cfg Config) (*Server, error) {
 		}
 		s.credentials = credentials
 	}
+	s.tailscale = tailscale.New()
+	s.SetRemoteConfig(cfg.Remote)
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.registerSessionRoutes()
@@ -235,7 +250,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerCalendarRoutes()
 	s.registerRouterRoutes()
 	s.registerWorkbenchRoutes()
-	s.handler = s.securityHeaders(s.mux)
+	s.handler = s.remoteGate(s.securityHeaders(s.mux))
 	return s, nil
 }
 
@@ -409,11 +424,19 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /v1/auth/reset/telegram", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetTelegram))))
 	s.mux.Handle("POST /v1/auth/reset/verify", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetVerify))))
 	s.mux.Handle("POST /v1/auth/reset/restart", s.checkHost(s.checkOrigin(http.HandlerFunc(s.handleResetRestart))))
-	s.mux.Handle("POST /v1/auth/password", s.authenticate(http.HandlerFunc(s.handleChangePassword)))
+	s.mux.Handle("POST /v1/auth/password", s.authenticate(s.refuseRemote(http.HandlerFunc(s.handleChangePassword))))
 	s.mux.Handle("POST /v1/auth/logout", s.authenticate(http.HandlerFunc(s.handleLogout)))
 	s.mux.Handle("GET /v1/auth/session", s.checkHost(s.requireSession(http.HandlerFunc(s.handleSession))))
 	s.mux.Handle("GET /v1/auth/sessions", s.authenticate(http.HandlerFunc(s.handleBrowserSessions)))
-	s.mux.Handle("POST /v1/auth/sessions/revoke-others", s.authenticate(http.HandlerFunc(s.handleRevokeOtherBrowsers)))
+	s.mux.Handle("POST /v1/auth/sessions/revoke-others", s.authenticate(s.refuseRemote(http.HandlerFunc(s.handleRevokeOtherBrowsers))))
+	// Spec 57 REQ-RA-025: end one session by its display id, or every remote
+	// session.
+	s.mux.Handle("POST /v1/auth/sessions/{id}/revoke", s.authenticate(http.HandlerFunc(s.handleRevokeSession)))
+	s.mux.Handle("POST /v1/auth/sessions/revoke-remote", s.authenticate(http.HandlerFunc(s.handleRevokeRemoteSessions)))
+	// Spec 57: the remote terminal control and settings routes (REQ-RA-032,
+	// REQ-RA-060).
+	s.registerRemoteControlRoutes()
+	s.registerRemoteAPIRoutes()
 	s.registerDashboardRoutes()
 	s.registerKnowledgeRoutes()
 }
@@ -495,7 +518,7 @@ func normalizeAddr(addr string) (string, error) {
 // registerWebRoutes installs the web address save of API-WEB-029 behind the
 // owner cookie and CSRF middleware. The audit route is in web/audit.go.
 func (s *Server) registerWebRoutes() {
-	s.Handle("PUT /v1/web", http.HandlerFunc(s.handlePutWeb))
+	s.Handle("PUT /v1/web", s.refuseRemote(http.HandlerFunc(s.handlePutWeb)))
 }
 
 type putWebResponse struct {

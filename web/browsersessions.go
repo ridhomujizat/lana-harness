@@ -24,7 +24,29 @@ const (
 	// sessionIDDisplayHex is the prefix length of the session id hash that
 	// API-WEB-024 returns.
 	sessionIDDisplayHex = 12
+	// remoteIdleDefault is the idle limit of a remote session (REQ-RA-021,
+	// the idle_minutes default).
+	remoteIdleDefault = 60 * time.Minute
+	// remoteMaxAgeDefault is the absolute lifetime of a remote session
+	// (REQ-RA-021, the max_age_hours default).
+	remoteMaxAgeDefault = 168 * time.Hour
 )
+
+// remoteLimits holds the remote session TTLs (REQ-RA-021): idle is the quiet
+// time that ends a remote session and maxAge is the time from its start. Both
+// are read under the store mutex.
+type remoteLimits struct {
+	idle   time.Duration
+	maxAge time.Duration
+}
+
+// remoteIdentity is the Tailscale identity recorded for a remote session
+// (REQ-RA-020).
+type remoteIdentity struct {
+	Login  string
+	Device string
+	IP     string
+}
 
 // browserSessionRecord is one logged-in browser. Cookie and CSRF values are
 // never stored: only their SHA-256 hashes and times.
@@ -34,6 +56,14 @@ type browserSessionRecord struct {
 	lastUsedAt        time.Time
 	persistedLastUsed time.Time
 	userAgent         string
+	// The remote-access fields (REQ-RA-020). remote is false and the rest are
+	// empty on a local session. controlUntil is the zero time when control is
+	// locked.
+	remote       bool
+	login        string
+	device       string
+	ip           string
+	controlUntil time.Time
 }
 
 // browserSessionInfo is one row of GET /v1/auth/sessions (API-WEB-024).
@@ -43,6 +73,13 @@ type browserSessionInfo struct {
 	CreatedAt  int64  `json:"created_at"`
 	LastUsedAt int64  `json:"last_used_at"`
 	Current    bool   `json:"current"`
+	// The remote-access fields of REQ-RA-024. control_until is a Unix
+	// millisecond time, 0 when control is locked.
+	Remote       bool   `json:"remote"`
+	Login        string `json:"login,omitempty"`
+	Device       string `json:"device,omitempty"`
+	IP           string `json:"ip,omitempty"`
+	ControlUntil int64  `json:"control_until,omitempty"`
 }
 
 // browserSessions keeps the in-memory copy of web-sessions.json. A path of ""
@@ -51,13 +88,29 @@ type browserSessions struct {
 	path    string
 	mu      sync.Mutex
 	records map[[sha256.Size]byte]*browserSessionRecord
+	limits  remoteLimits
 }
 
 func newBrowserSessions(path string) *browserSessions {
 	return &browserSessions{
 		path:    path,
 		records: make(map[[sha256.Size]byte]*browserSessionRecord),
+		limits:  remoteLimits{idle: remoteIdleDefault, maxAge: remoteMaxAgeDefault},
 	}
+}
+
+// setRemoteLimits installs the remote session TTLs (REQ-RA-021). A value of
+// zero or less keeps the default, so a missing setting never disables expiry.
+func (st *browserSessions) setRemoteLimits(idle, maxAge time.Duration) {
+	if idle <= 0 {
+		idle = remoteIdleDefault
+	}
+	if maxAge <= 0 {
+		maxAge = remoteMaxAgeDefault
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.limits = remoteLimits{idle: idle, maxAge: maxAge}
 }
 
 // loadBrowserSessions reads $LANA_HOME/web-sessions.json. A missing file has
@@ -82,33 +135,91 @@ func (st *browserSessions) load(now time.Time) error {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	for _, record := range file.Sessions {
-		key, err := parseSessionHash(record.IDHash)
+	for _, stored := range file.Sessions {
+		key, err := parseSessionHash(stored.IDHash)
 		if err != nil {
 			return fmt.Errorf("web: %w", err)
 		}
-		csrfHash, err := parseSessionHash(record.CSRFHash)
+		csrfHash, err := parseSessionHash(stored.CSRFHash)
 		if err != nil {
 			return fmt.Errorf("web: %w", err)
 		}
-		createdAt := time.UnixMilli(record.CreatedAt)
-		lastUsedAt := time.UnixMilli(record.LastUsedAt)
-		if !now.Before(lastUsedAt.Add(sessionIdleTTL)) {
+		record := &browserSessionRecord{
+			csrfHash:          csrfHash,
+			createdAt:         time.UnixMilli(stored.CreatedAt),
+			lastUsedAt:        time.UnixMilli(stored.LastUsedAt),
+			persistedLastUsed: time.UnixMilli(stored.LastUsedAt),
+			userAgent:         truncateSessionUserAgent(stored.UserAgent),
+			remote:            stored.Remote,
+			login:             truncateRemoteLabel(stored.Login),
+			device:            truncateRemoteLabel(stored.Device),
+			ip:                truncateRemoteLabel(stored.IP),
+			controlUntil:      unixMilliOrZero(stored.ControlUntil),
+		}
+		if st.expiredLocked(record, now) {
 			continue
 		}
-		st.records[key] = &browserSessionRecord{
-			csrfHash:          csrfHash,
-			createdAt:         createdAt,
-			lastUsedAt:        lastUsedAt,
-			persistedLastUsed: lastUsedAt,
-			userAgent:         truncateSessionUserAgent(record.UserAgent),
-		}
+		st.records[key] = record
 	}
 	return nil
 }
 
-// add records a new browser session and writes the file.
+// expiredLocked reports whether a record has reached its expiry. A local
+// record expires after sessionIdleTTL idle; a remote record expires after its
+// remote idle limit or maxAge after it started, whichever comes first
+// (REQ-RA-021). The caller holds the lock.
+func (st *browserSessions) expiredLocked(record *browserSessionRecord, now time.Time) bool {
+	if !record.remote {
+		return !now.Before(record.lastUsedAt.Add(sessionIdleTTL))
+	}
+	if !now.Before(record.lastUsedAt.Add(st.limits.idle)) {
+		return true
+	}
+	return !now.Before(record.createdAt.Add(st.limits.maxAge))
+}
+
+// expiresAtLocked returns the moment a record lapses, for the session data of
+// an authenticated request. A remote record reports the earlier of its idle
+// deadline and its max-age deadline (REQ-RA-021). The caller holds the lock.
+func (st *browserSessions) expiresAtLocked(record *browserSessionRecord, now time.Time) time.Time {
+	if !record.remote {
+		return now.Add(sessionIdleTTL)
+	}
+	idle := now.Add(st.limits.idle)
+	maxAge := record.createdAt.Add(st.limits.maxAge)
+	if maxAge.Before(idle) {
+		return maxAge
+	}
+	return idle
+}
+
+// sessionLocked builds the session data of a record for an authenticated
+// request. The caller holds the lock.
+func (st *browserSessions) sessionLocked(key [sha256.Size]byte, record *browserSessionRecord, cookie string, now time.Time) session {
+	return session{
+		key:          key,
+		csrf:         csrfValue(cookie),
+		csrfHash:     record.csrfHash,
+		expiresAt:    st.expiresAtLocked(record, now),
+		remote:       record.remote,
+		login:        record.login,
+		device:       record.device,
+		controlUntil: record.controlUntil,
+	}
+}
+
+// add records a new local browser session and writes the file.
 func (st *browserSessions) add(cookie, userAgent string, now time.Time) (session, error) {
+	return st.addRecord(cookie, userAgent, remoteIdentity{}, false, now)
+}
+
+// addRemote records a new remote browser session and writes the file
+// (REQ-RA-020). id holds the Tailscale login, machine name, and client IP.
+func (st *browserSessions) addRemote(cookie, userAgent string, id remoteIdentity, now time.Time) (session, error) {
+	return st.addRecord(cookie, userAgent, id, true, now)
+}
+
+func (st *browserSessions) addRecord(cookie, userAgent string, id remoteIdentity, remote bool, now time.Time) (session, error) {
 	key := sessionKey(cookie)
 	csrf := csrfValue(cookie)
 	record := &browserSessionRecord{
@@ -117,6 +228,10 @@ func (st *browserSessions) add(cookie, userAgent string, now time.Time) (session
 		lastUsedAt:        now,
 		persistedLastUsed: now,
 		userAgent:         truncateSessionUserAgent(userAgent),
+		remote:            remote,
+		login:             truncateRemoteLabel(id.Login),
+		device:            truncateRemoteLabel(id.Device),
+		ip:                truncateRemoteLabel(id.IP),
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -126,12 +241,7 @@ func (st *browserSessions) add(cookie, userAgent string, now time.Time) (session
 		delete(st.records, key)
 		return session{}, err
 	}
-	return session{
-		key:       key,
-		csrf:      csrf,
-		csrfHash:  record.csrfHash,
-		expiresAt: now.Add(sessionIdleTTL),
-	}, nil
+	return st.sessionLocked(key, record, cookie, now), nil
 }
 
 // touch validates the cookie, refreshes its idle expiry, and persists
@@ -145,7 +255,7 @@ func (st *browserSessions) touch(cookie string, now time.Time) (session, bool, e
 	if !ok {
 		return session{}, false, nil
 	}
-	if !now.Before(record.lastUsedAt.Add(sessionIdleTTL)) {
+	if st.expiredLocked(record, now) {
 		delete(st.records, key)
 		return session{}, false, st.writeLocked()
 	}
@@ -155,12 +265,7 @@ func (st *browserSessions) touch(cookie string, now time.Time) (session, bool, e
 		record.persistedLastUsed = now
 		err = st.writeLocked()
 	}
-	return session{
-		key:       key,
-		csrf:      csrfValue(cookie),
-		csrfHash:  record.csrfHash,
-		expiresAt: now.Add(sessionIdleTTL),
-	}, true, err
+	return st.sessionLocked(key, record, cookie, now), true, err
 }
 
 // delete removes the session and writes the file.
@@ -180,16 +285,24 @@ func (st *browserSessions) list(current [sha256.Size]byte, now time.Time) []brow
 	defer st.mu.Unlock()
 	infos := make([]browserSessionInfo, 0, len(st.records))
 	for key, record := range st.records {
-		if !now.Before(record.lastUsedAt.Add(sessionIdleTTL)) {
+		if st.expiredLocked(record, now) {
 			continue
 		}
-		infos = append(infos, browserSessionInfo{
+		info := browserSessionInfo{
 			ID:         hex.EncodeToString(key[:])[:sessionIDDisplayHex],
 			UserAgent:  record.userAgent,
 			CreatedAt:  record.createdAt.UnixMilli(),
 			LastUsedAt: record.lastUsedAt.UnixMilli(),
 			Current:    key == current,
-		})
+			Remote:     record.remote,
+			Login:      record.login,
+			Device:     record.device,
+			IP:         record.ip,
+		}
+		if !record.controlUntil.IsZero() {
+			info.ControlUntil = record.controlUntil.UnixMilli()
+		}
+		infos = append(infos, info)
 	}
 	sort.Slice(infos, func(i, j int) bool {
 		if infos[i].CreatedAt != infos[j].CreatedAt {
@@ -218,11 +331,76 @@ func (st *browserSessions) revokeOthers(current [sha256.Size]byte) (int, error) 
 	return revoked, st.writeLocked()
 }
 
+// setControlUntil stores the control deadline of one session and writes the
+// file (REQ-RA-032, REQ-RA-034). A zero time locks control again. A key with
+// no record is a no-op.
+func (st *browserSessions) setControlUntil(key [sha256.Size]byte, until time.Time) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	record, ok := st.records[key]
+	if !ok {
+		return nil
+	}
+	record.controlUntil = until
+	return st.writeLocked()
+}
+
+// revokeByID removes the session whose 12-hex display id matches displayID and
+// returns its key (REQ-RA-025). ok is false when no record matches, so the
+// caller answers 404.
+func (st *browserSessions) revokeByID(displayID string) (key [sha256.Size]byte, ok bool, err error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if len(displayID) != sessionIDDisplayHex {
+		return key, false, nil
+	}
+	for candidate := range st.records {
+		if hex.EncodeToString(candidate[:])[:sessionIDDisplayHex] != displayID {
+			continue
+		}
+		delete(st.records, candidate)
+		return candidate, true, st.writeLocked()
+	}
+	return key, false, nil
+}
+
+// revokeRemote removes every remote record and returns the count (REQ-RA-025).
+func (st *browserSessions) revokeRemote() (int, error) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	revoked := 0
+	for key, record := range st.records {
+		if !record.remote {
+			continue
+		}
+		delete(st.records, key)
+		revoked++
+	}
+	if revoked == 0 {
+		return 0, nil
+	}
+	return revoked, st.writeLocked()
+}
+
+// remoteKeys returns the keys of every remote record. The daemon uses them to
+// close the control attachments when remote access goes off (REQ-RA-063).
+func (st *browserSessions) remoteKeys() [][sha256.Size]byte {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	keys := make([][sha256.Size]byte, 0)
+	for key, record := range st.records {
+		if record.remote {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
 // pruneLocked removes expired records. The caller holds the lock.
 func (st *browserSessions) pruneLocked(now time.Time) bool {
 	removed := false
 	for key, record := range st.records {
-		if !now.Before(record.lastUsedAt.Add(sessionIdleTTL)) {
+		if st.expiredLocked(record, now) {
 			delete(st.records, key)
 			removed = true
 		}
@@ -240,12 +418,21 @@ func (st *browserSessions) writeLocked() error {
 		Sessions: make([]webfiles.SessionRecord, 0, len(st.records)),
 	}
 	for key, record := range st.records {
+		controlUntil := int64(0)
+		if !record.controlUntil.IsZero() {
+			controlUntil = record.controlUntil.UnixMilli()
+		}
 		file.Sessions = append(file.Sessions, webfiles.SessionRecord{
-			IDHash:     hex.EncodeToString(key[:]),
-			CSRFHash:   hex.EncodeToString(record.csrfHash[:]),
-			CreatedAt:  record.createdAt.UnixMilli(),
-			LastUsedAt: record.lastUsedAt.UnixMilli(),
-			UserAgent:  record.userAgent,
+			IDHash:       hex.EncodeToString(key[:]),
+			CSRFHash:     hex.EncodeToString(record.csrfHash[:]),
+			CreatedAt:    record.createdAt.UnixMilli(),
+			LastUsedAt:   record.lastUsedAt.UnixMilli(),
+			UserAgent:    record.userAgent,
+			Remote:       record.remote,
+			Login:        record.login,
+			Device:       record.device,
+			IP:           record.ip,
+			ControlUntil: controlUntil,
 		})
 	}
 	sort.Slice(file.Sessions, func(i, j int) bool {
@@ -289,6 +476,24 @@ func truncateSessionUserAgent(value string) string {
 	}
 	runes := []rune(value)
 	return string(runes[:webfiles.MaxUserAgentChars])
+}
+
+// truncateRemoteLabel caps a login, device, or IP label like the user agent.
+func truncateRemoteLabel(value string) string {
+	if utf8.RuneCountInString(value) <= webfiles.MaxRemoteLabelChars {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:webfiles.MaxRemoteLabelChars])
+}
+
+// unixMilliOrZero converts a stored Unix-millisecond time. Zero means "not
+// set" and maps to the zero time, not 1970.
+func unixMilliOrZero(ms int64) time.Time {
+	if ms == 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(ms)
 }
 
 // handleBrowserSessions answers GET /v1/auth/sessions (API-WEB-024).

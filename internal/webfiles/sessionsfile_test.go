@@ -21,11 +21,16 @@ func sampleSessionRecords() SessionsFile {
 		Version: SessionsFileVersion,
 		Sessions: []SessionRecord{
 			{
-				IDHash:     testSessionHash("cookie-a"),
-				CSRFHash:   testSessionHash("csrf-a"),
-				CreatedAt:  1761825600000,
-				LastUsedAt: 1761825660000,
-				UserAgent:  "Browser A",
+				IDHash:       testSessionHash("cookie-a"),
+				CSRFHash:     testSessionHash("csrf-a"),
+				CreatedAt:    1761825600000,
+				LastUsedAt:   1761825660000,
+				UserAgent:    "Browser A",
+				Remote:       true,
+				Login:        "ridho@github",
+				Device:       "Ridho's iPhone",
+				IP:           "100.64.0.1",
+				ControlUntil: 1761825900000,
 			},
 			{
 				IDHash:     testSessionHash("cookie-b"),
@@ -197,5 +202,69 @@ func TestSessionsFileTruncatesUserAgent(t *testing.T) {
 	}
 	if n := utf8.RuneCountInString(got.Sessions[0].UserAgent); n != MaxUserAgentChars {
 		t.Fatalf("user_agent length = %d, want %d", n, MaxUserAgentChars)
+	}
+}
+
+// TestSessionsFileLoadsOldRecord covers REQ-RA-020: a file written before the
+// remote fields existed loads unchanged, with the fields empty.
+func TestSessionsFileLoadsOldRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SessionsFileName)
+	body := `{"version":1,"sessions":[{"id_hash":"` + testSessionHash("old") +
+		`","csrf_hash":"` + testSessionHash("old-csrf") +
+		`","created_at":1,"last_used_at":2,"user_agent":"Old"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadSessionsFile(path)
+	if err != nil {
+		t.Fatalf("ReadSessionsFile: %v", err)
+	}
+	if len(got.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(got.Sessions))
+	}
+	record := got.Sessions[0]
+	if record.Remote || record.Login != "" || record.Device != "" || record.IP != "" || record.ControlUntil != 0 {
+		t.Fatalf("old record = %+v, want the remote fields empty", record)
+	}
+	// Writing it back keeps the old shape: a local record omits every remote
+	// field, so the file stays byte-compatible.
+	if err := WriteSessionsFile(path, got); err != nil {
+		t.Fatalf("WriteSessionsFile: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"remote", "login", "device", `"ip"`, "control_until"} {
+		if strings.Contains(string(data), key) {
+			t.Fatalf("%s holds a remote field %q for a local record: %s", SessionsFileName, key, data)
+		}
+	}
+}
+
+func TestSessionsFileTruncatesRemoteLabels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SessionsFileName)
+	long := strings.Repeat("b", 300)
+	file := sampleSessionRecords()
+	file.Sessions = file.Sessions[:1]
+	file.Sessions[0].Remote = true
+	file.Sessions[0].Login = long
+	file.Sessions[0].Device = long
+	file.Sessions[0].IP = long
+	if err := WriteSessionsFile(path, file); err != nil {
+		t.Fatalf("WriteSessionsFile: %v", err)
+	}
+	got, err := ReadSessionsFile(path)
+	if err != nil {
+		t.Fatalf("ReadSessionsFile: %v", err)
+	}
+	for name, value := range map[string]string{
+		"login":  got.Sessions[0].Login,
+		"device": got.Sessions[0].Device,
+		"ip":     got.Sessions[0].IP,
+	} {
+		if n := utf8.RuneCountInString(value); n != MaxRemoteLabelChars {
+			t.Fatalf("%s length = %d, want %d", name, n, MaxRemoteLabelChars)
+		}
 	}
 }
