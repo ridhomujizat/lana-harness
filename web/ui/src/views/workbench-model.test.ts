@@ -21,6 +21,12 @@ import {
   statusOf,
   tabSessions,
   terminalKey,
+  shellEscapePath,
+  dropText,
+  takeNativeDragPaths,
+  workbenchShortcut,
+  tabAtShortcut,
+  paneInDirection,
 } from "./workbench-model";
 
 function session(over: Partial<WorkbenchSession>): WorkbenchSession {
@@ -189,5 +195,98 @@ describe("terminalKey", () => {
     expect(k("v", { metaKey: true })).toBeNull();
     expect(k("c", { ctrlKey: true })).toBeNull();
     expect(k("a")).toBeNull();
+  });
+});
+
+describe("drop paths", () => {
+  it("escapes spaces and shell characters with backslashes", () => {
+    expect(shellEscapePath("/Users/me/Desktop/Screenshot 2026-11-17 at 08.50.12.png")).toBe(
+      "/Users/me/Desktop/Screenshot\\ 2026-11-17\\ at\\ 08.50.12.png",
+    );
+    expect(shellEscapePath("/tmp/a'b(c)&$d.txt")).toBe("/tmp/a\\'b\\(c\\)\\&\\$d.txt");
+    expect(shellEscapePath("/tmp/caf\u00e9.png")).toBe("/tmp/caf\u00e9.png");
+  });
+
+  it("joins several paths with spaces", () => {
+    expect(dropText(["/a b", "", "/c"])).toBe("/a\\ b /c");
+  });
+
+  it("takes fresh native paths once", () => {
+    const holder: { lanaNativeDrag?: { paths?: unknown; at?: unknown } | null } = {
+      lanaNativeDrag: { paths: ["/x.png", 3, ""], at: 1000 },
+    };
+    expect(takeNativeDragPaths(holder, 2000)).toEqual(["/x.png"]);
+    expect(takeNativeDragPaths(holder, 2000)).toBeNull();
+  });
+
+  it("ignores stale or empty native paths", () => {
+    expect(takeNativeDragPaths({ lanaNativeDrag: { paths: ["/x"], at: 0 } }, 11 * 60 * 1000)).toBeNull();
+    expect(takeNativeDragPaths({ lanaNativeDrag: { paths: [], at: 5 } }, 6)).toBeNull();
+    expect(takeNativeDragPaths({}, 6)).toBeNull();
+  });
+});
+
+describe("workbenchShortcut", () => {
+  const k = (key: string, mods: Partial<{ shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean; code: string }> = {}) =>
+    workbenchShortcut({ key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: true, ...mods });
+
+  it("maps GoRex shortcuts", () => {
+    expect(k("t", { code: "KeyT" })).toEqual({ kind: "new-tab" });
+    expect(k("T", { code: "KeyT", shiftKey: true })).toEqual({ kind: "new-space" });
+    expect(k("d", { code: "KeyD" })).toEqual({ kind: "split", dir: "row" });
+    expect(k("D", { code: "KeyD", shiftKey: true })).toEqual({ kind: "split", dir: "col" });
+    expect(k("w", { code: "KeyW" })).toEqual({ kind: "close-pane" });
+    expect(k("W", { code: "KeyW", shiftKey: true })).toEqual({ kind: "close-tab" });
+    expect(k("Enter", { shiftKey: true })).toEqual({ kind: "zoom" });
+    expect(k("ArrowLeft", { altKey: true })).toEqual({ kind: "focus", dir: "left" });
+    expect(k("3", { code: "Digit3" })).toEqual({ kind: "tab", index: 2 });
+    expect(k("{", { code: "BracketLeft", shiftKey: true })).toEqual({ kind: "tab-step", step: -1 });
+    expect(k("}", { code: "BracketRight", shiftKey: true })).toEqual({ kind: "tab-step", step: 1 });
+    expect(k("Tab", { metaKey: false, ctrlKey: true })).toEqual({ kind: "tab-step", step: 1 });
+    expect(k("Tab", { metaKey: false, ctrlKey: true, shiftKey: true })).toEqual({ kind: "tab-step", step: -1 });
+    expect(k("R", { code: "KeyR", shiftKey: true })).toEqual({ kind: "rename-tab" });
+    expect(k("k", { code: "KeyK" })).toEqual({ kind: "clear" });
+    expect(k("=", { code: "Equal" })).toEqual({ kind: "font", step: 1 });
+    expect(k("-", { code: "Minus" })).toEqual({ kind: "font", step: -1 });
+    expect(k("0", { code: "Digit0" })).toEqual({ kind: "font", step: 0 });
+  });
+
+  it("leaves other keys to the terminal and the app", () => {
+    expect(k("c", { code: "KeyC" })).toBeNull();
+    expect(k("v", { code: "KeyV" })).toBeNull();
+    expect(k("ArrowLeft")).toBeNull();
+    expect(k("t", { metaKey: false })).toBeNull();
+    expect(k("t", { code: "KeyT", ctrlKey: true })).toBeNull();
+  });
+
+  it("uses the physical key on other layouts", () => {
+    expect(k("е", { code: "KeyT" })).toEqual({ kind: "new-tab" });
+  });
+});
+
+describe("tabAtShortcut", () => {
+  it("picks by position and ⌘9 is the last tab", () => {
+    expect(tabAtShortcut(3, 0)).toBe(0);
+    expect(tabAtShortcut(3, 4)).toBe(-1);
+    expect(tabAtShortcut(3, 8)).toBe(2);
+    expect(tabAtShortcut(0, 0)).toBe(-1);
+  });
+});
+
+describe("paneInDirection", () => {
+  /* a | b
+     --+--
+     c (full width) */
+  const rects = [
+    { id: "a", left: 0, top: 0, right: 100, bottom: 50 },
+    { id: "b", left: 100, top: 0, right: 200, bottom: 50 },
+    { id: "c", left: 0, top: 50, right: 200, bottom: 100 },
+  ];
+  it("finds the neighbour", () => {
+    expect(paneInDirection(rects, "a", "right")).toBe("b");
+    expect(paneInDirection(rects, "b", "left")).toBe("a");
+    expect(paneInDirection(rects, "b", "down")).toBe("c");
+    expect(paneInDirection(rects, "c", "up")).toBe("a");
+    expect(paneInDirection(rects, "a", "left")).toBeNull();
   });
 });

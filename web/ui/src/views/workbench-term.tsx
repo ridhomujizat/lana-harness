@@ -6,8 +6,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
-import { attachURL, type AttachMode } from "../api/workbench";
-import { terminalKey } from "./workbench-model";
+import { attachURL, uploadWorkbenchDrops, type AttachMode } from "../api/workbench";
+import { dropText, takeNativeDragPaths, terminalKey, type NativeDrag } from "./workbench-model";
 
 /* Spec 55 REQ-WB-053: one terminal pane. xterm.js is the emulator, so the
    browser shows exactly what the program draws; the server only relays the
@@ -108,6 +108,15 @@ export interface TermPaneProps {
 
 const encoder = new TextEncoder();
 
+const TERM_FONT = "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+/* The same font list, spelled differently: setting it makes xterm measure the
+   cell again and redraw its glyph atlas (it ignores an unchanged value). */
+const TERM_FONT_ALT = "\"Geist Mono\", ui-monospace, SFMono-Regular, Menlo, monospace";
+
+function dragHasFiles(dt: DataTransfer | null): boolean {
+  return !!dt && Array.from(dt.types).includes("Files");
+}
+
 /* Size ownership (REQ-WB-054): one pty has one size, so only the client that
    was used last sets it, like tmux's `window-size latest`. A control client
    claims the size when it is opened in a focused window, when the window gets
@@ -131,6 +140,7 @@ export function TermPane({
 }: TermPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [isOwner, setIsOwner] = useState(false);
+  const [dropping, setDropping] = useState(false);
   const docTheme = useDocTheme();
   const themeRef = useRef(docTheme);
   const ownerCbRef = useRef(onOwnerChange);
@@ -173,7 +183,7 @@ export function TermPane({
     };
 
     const term = new Terminal({
-      fontFamily: "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontFamily: TERM_FONT,
       fontSize: fontRef.current,
       lineHeight: 1.15,
       theme: themeRef.current === "dark" ? TERMINAL_THEME : TERMINAL_THEME_LIGHT,
@@ -199,6 +209,20 @@ export function TermPane({
     }
 
     const open = () => socket !== null && socket.readyState === WebSocket.OPEN;
+
+    /* Redraw every glyph. The WebGL renderer keeps glyphs in a texture atlas
+       that WebKit can lose or corrupt (sleep, a hidden tab, GPU pressure); the
+       screen then shows rows with missing characters until the atlas is
+       rebuilt. */
+    const repaint = () => {
+      if (disposed) return;
+      try {
+        term.clearTextureAtlas();
+      } catch {
+        /* Not open yet. */
+      }
+      term.refresh(0, Math.max(0, term.rows - 1));
+    };
 
     const fitBox = () => {
       if (host.clientWidth > 0 && host.clientHeight > 0) {
@@ -240,6 +264,24 @@ export function TermPane({
     refitRef.current = () => {
       if (owner) fitBox();
     };
+    /* Geist Mono is a web font. When xterm opens before it has loaded, the
+       cell is measured and the glyphs are drawn with the fallback font, and
+       later text is drawn with Geist Mono into those cells: characters overlap
+       or vanish. Once the font is in, measure and draw again. */
+    const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+    if (fonts && !fonts.check(`${fontRef.current}px 'Geist Mono'`)) {
+      Promise.all([
+        fonts.load(`400 ${fontRef.current}px 'Geist Mono'`),
+        fonts.load(`500 ${fontRef.current}px 'Geist Mono'`),
+      ])
+        .catch(() => undefined)
+        .then(() => {
+          if (disposed) return;
+          term.options.fontFamily = term.options.fontFamily === TERM_FONT ? TERM_FONT_ALT : TERM_FONT;
+          if (owner) fitBox();
+          repaint();
+        });
+    }
     if (keyboardRef) keyboardRef.current = { focus: () => term.focus(), blur: () => term.blur() };
     if (claimRef) claimRef.current = claim;
 
@@ -318,11 +360,17 @@ export function TermPane({
       };
     };
 
+    /* A pane in a hidden tab has no size; when it shows again its canvas may
+       hold an old frame, so it is redrawn. */
+    let hidden = host.clientWidth === 0 || host.clientHeight === 0;
     const observer =
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(() => {
+            const nowHidden = host.clientWidth === 0 || host.clientHeight === 0;
             if (owner) fitBox();
+            if (hidden && !nowHidden) repaint();
+            hidden = nowHidden;
           });
     observer?.observe(host);
     /* Touch scrolling (phones): xterm.js does not turn a finger drag into
@@ -381,7 +429,78 @@ export function TermPane({
     };
     const windowFocus = () => {
       if (!owner && host.isConnected && host.clientWidth > 0) claim();
+      repaint();
     };
+    const visibility = () => {
+      if (document.visibilityState === "visible") repaint();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    /* ⌘K (Workbench shortcuts): clear this terminal's screen and scrollback. */
+    const clearHandler = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === sessionId) term.clear();
+    };
+    window.addEventListener("lana:wb-clear", clearHandler);
+
+    /* Drag and drop, as in Ghostty or Terminal: a dropped file is typed as its
+       path. The macOS app gives the real paths; a browser uploads the files
+       to the daemon, which returns where it saved them. Text is typed as is.
+       The paste goes through xterm, so a program that asked for bracketed
+       paste (Claude Code) sees one paste and can attach an image path. */
+    let dragDepth = 0;
+    const acceptsDrop = (dt: DataTransfer | null) =>
+      mode === "control" && !!dt && (dragHasFiles(dt) || Array.from(dt.types).includes("text/plain"));
+    const dragEnter = (e: DragEvent) => {
+      if (!acceptsDrop(e.dataTransfer)) return;
+      e.preventDefault();
+      dragDepth++;
+      setDropping(true);
+    };
+    const dragOver = (e: DragEvent) => {
+      if (!acceptsDrop(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "copy";
+    };
+    const dragLeave = () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDropping(false);
+    };
+    const typeDrop = (text: string) => {
+      if (disposed || text === "") return;
+      onFocusRef.current?.();
+      if (!owner) claim();
+      term.focus();
+      term.paste(text);
+    };
+    const drop = (e: DragEvent) => {
+      const dt = e.dataTransfer;
+      dragDepth = 0;
+      setDropping(false);
+      if (!acceptsDrop(dt)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const holder = window as unknown as { lanaNativeDrag?: NativeDrag | null };
+      if (dragHasFiles(dt)) {
+        const native = takeNativeDragPaths(holder, Date.now());
+        if (native) {
+          typeDrop(dropText(native));
+          return;
+        }
+        const files = Array.from(dt!.files);
+        if (files.length === 0) return;
+        uploadWorkbenchDrops(files)
+          .then((paths) => typeDrop(dropText(paths)))
+          .catch(() => {
+            /* The upload failed (too large, control locked): nothing is typed. */
+          });
+        return;
+      }
+      holder.lanaNativeDrag = null;
+      typeDrop(dt!.getData("text/plain"));
+    };
+    host.addEventListener("dragenter", dragEnter);
+    host.addEventListener("dragover", dragOver);
+    host.addEventListener("dragleave", dragLeave);
+    host.addEventListener("drop", drop);
     host.addEventListener("mousedown", focusHandler);
     host.addEventListener("touchstart", focusHandler, { passive: true });
     window.addEventListener("focus", windowFocus);
@@ -403,6 +522,12 @@ export function TermPane({
       host.removeEventListener("mousedown", focusHandler);
       host.removeEventListener("touchstart", focusHandler);
       window.removeEventListener("focus", windowFocus);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("lana:wb-clear", clearHandler);
+      host.removeEventListener("dragenter", dragEnter);
+      host.removeEventListener("dragover", dragOver);
+      host.removeEventListener("dragleave", dragLeave);
+      host.removeEventListener("drop", drop);
       host.removeEventListener("touchstart", touchStart);
       host.removeEventListener("touchmove", touchMove);
       host.removeEventListener("touchend", touchEnd);
@@ -437,5 +562,14 @@ export function TermPane({
     if (focused && mode === "control") termRef.current?.focus();
   }, [focused, mode]);
 
-  return <div className={"wb-xterm" + (scrollable || (mode === "control" && !isOwner) ? " wb-xterm-fixed" : "")} ref={hostRef} />;
+  return (
+    <div
+      className={
+        "wb-xterm" +
+        (scrollable || (mode === "control" && !isOwner) ? " wb-xterm-fixed" : "") +
+        (dropping ? " is-drop" : "")
+      }
+      ref={hostRef}
+    />
+  );
 }

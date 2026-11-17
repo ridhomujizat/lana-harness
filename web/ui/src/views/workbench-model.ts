@@ -334,20 +334,25 @@ export function isAgent(session: WorkbenchSession): boolean {
   return AGENT_PROGRAMS.includes(program) || Boolean(session.labels?.["lana.agent"]);
 }
 
-export type Status = "blocked" | "working" | "idle" | "exited";
+/* "done" is herdr's blue state: an agent finished while nobody looked at its
+   pane. It stays until the pane is focused (client side, see
+   WorkbenchSession.done). */
+export type Status = "blocked" | "working" | "done" | "idle" | "exited";
 
 export function statusOf(session: WorkbenchSession | undefined): Status {
   if (!session) return "idle";
   if (session.needs_you) return "blocked";
   if (session.state === "exited") return "exited";
-  return session.state === "working" ? "working" : "idle";
+  if (session.state === "working") return "working";
+  return session.done ? "done" : "idle";
 }
 
-export const STATUS_ORDER: Status[] = ["blocked", "working", "idle", "exited"];
+export const STATUS_ORDER: Status[] = ["blocked", "working", "done", "idle", "exited"];
 
 export const STATUS_LABEL: Record<Status, string> = {
   blocked: "Blocked",
   working: "Working",
+  done: "Done",
   idle: "Idle",
   exited: "Exited",
 };
@@ -465,4 +470,144 @@ export function terminalKey(e: KeyLike): string | null {
     if (key === "Backspace") return "\x1b\x7f";
   }
   return null;
+}
+
+/* Dropped files are typed as their paths, escaped with backslashes the way
+   macOS Terminal and Ghostty do, so a shell or Claude Code reads each path as
+   one word ("Screenshot\ 2026-11-17\ at\ 08.50.12.png"). Only ASCII outside a
+   safe set is escaped; other characters pass through. */
+export function shellEscapePath(path: string): string {
+  return path.replace(/[^A-Za-z0-9_\-.,:/@%+=~\u0080-￿]/g, (ch) => "\\" + ch);
+}
+
+/* The text a drop types: the escaped paths, separated by spaces. */
+export function dropText(paths: string[]): string {
+  return paths.filter((p) => p !== "").map(shellEscapePath).join(" ");
+}
+
+/* The paths the macOS app read from the drag (window.lanaNativeDrag, set by
+   LanaWebView when the drag enters the window). A browser has none. They are
+   used once, and only while fresh, so a stale value from an earlier drag is
+   never typed. */
+export interface NativeDrag {
+  paths?: unknown;
+  at?: unknown;
+}
+
+export function takeNativeDragPaths(
+  holder: { lanaNativeDrag?: NativeDrag | null },
+  now: number,
+  maxAgeMs = 10 * 60 * 1000,
+): string[] | null {
+  const drag = holder.lanaNativeDrag;
+  holder.lanaNativeDrag = null;
+  if (!drag || !Array.isArray(drag.paths) || typeof drag.at !== "number") return null;
+  if (now - drag.at > maxAgeMs || now < drag.at - 1000) return null;
+  const paths = drag.paths.filter((p): p is string => typeof p === "string" && p !== "");
+  return paths.length > 0 ? paths : null;
+}
+
+/* GoRex-style Workbench shortcuts (macOS). ⇧⌘T opens a new space. They are
+   read before xterm.js sees the key, so a terminal never gets them. */
+export type WbShortcut =
+  | { kind: "new-tab" }
+  | { kind: "new-space" }
+  | { kind: "split"; dir: "row" | "col" }
+  | { kind: "close-pane" }
+  | { kind: "close-tab" }
+  | { kind: "zoom" }
+  | { kind: "focus"; dir: PaneDirection }
+  | { kind: "tab"; index: number }
+  | { kind: "tab-step"; step: 1 | -1 }
+  | { kind: "rename-tab" }
+  | { kind: "clear" }
+  | { kind: "font"; step: 1 | -1 | 0 };
+
+export type PaneDirection = "left" | "right" | "up" | "down";
+
+export interface ShortcutKey extends KeyLike {
+  code?: string;
+}
+
+const ARROWS: Record<string, PaneDirection> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+};
+
+export function workbenchShortcut(e: ShortcutKey): WbShortcut | null {
+  const { key, shiftKey: shift, altKey: alt, ctrlKey: ctrl, metaKey: meta } = e;
+  const code = e.code || "";
+  if (ctrl && !meta && !alt && key === "Tab") return { kind: "tab-step", step: shift ? -1 : 1 };
+  if (!meta || ctrl) return null;
+  if (alt) {
+    const dir = !shift ? ARROWS[key] : undefined;
+    return dir ? { kind: "focus", dir } : null;
+  }
+  const letter = code.startsWith("Key") ? code.slice(3).toLowerCase() : key.toLowerCase();
+  if (shift) {
+    if (letter === "t") return { kind: "new-space" };
+    if (letter === "d") return { kind: "split", dir: "col" };
+    if (letter === "w") return { kind: "close-tab" };
+    if (letter === "r") return { kind: "rename-tab" };
+    if (key === "Enter") return { kind: "zoom" };
+    if (code === "BracketLeft" || key === "{") return { kind: "tab-step", step: -1 };
+    if (code === "BracketRight" || key === "}") return { kind: "tab-step", step: 1 };
+    if (key === "+" || code === "Equal") return { kind: "font", step: 1 };
+    return null;
+  }
+  if (letter === "t") return { kind: "new-tab" };
+  if (letter === "d") return { kind: "split", dir: "row" };
+  if (letter === "w") return { kind: "close-pane" };
+  if (letter === "k") return { kind: "clear" };
+  if (key === "=" || key === "+" || code === "Equal") return { kind: "font", step: 1 };
+  if (key === "-" || code === "Minus") return { kind: "font", step: -1 };
+  if (key === "0" || code === "Digit0") return { kind: "font", step: 0 };
+  const digit = /^Digit([1-9])$/.exec(code)?.[1] ?? (/^[1-9]$/.test(key) ? key : undefined);
+  if (digit) return { kind: "tab", index: Number(digit) - 1 };
+  return null;
+}
+
+/* The tab ⌘<n> selects: ⌘1…⌘8 by position, ⌘9 the last tab (as browsers do). */
+export function tabAtShortcut(count: number, index: number): number {
+  if (count === 0) return -1;
+  if (index >= 8) return count - 1;
+  return index < count ? index : -1;
+}
+
+export interface PaneRect {
+  id: string;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/* The pane next to `from` in a direction (⌥⌘ arrows): of the panes on that
+   side, the closest one, preferring panes that overlap `from` across the
+   axis. */
+export function paneInDirection(rects: PaneRect[], from: string, dir: PaneDirection): string | null {
+  const a = rects.find((r) => r.id === from);
+  if (!a) return null;
+  const horizontal = dir === "left" || dir === "right";
+  let best: { id: string; score: number } | null = null;
+  for (const b of rects) {
+    if (b.id === from) continue;
+    let gap: number;
+    if (dir === "right") gap = b.left - a.right;
+    else if (dir === "left") gap = a.left - b.right;
+    else if (dir === "down") gap = b.top - a.bottom;
+    else gap = a.top - b.bottom;
+    if (gap < -2) continue;
+    const overlap = horizontal
+      ? Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+      : Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const across = horizontal
+      ? Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2)
+      : Math.abs((a.left + a.right) / 2 - (b.left + b.right) / 2);
+    const score = Math.max(0, gap) + (overlap > 0 ? 0 : 100000) + across / 1000;
+    if (!best || score < best.score) best = { id: b.id, score };
+  }
+  return best ? best.id : null;
 }

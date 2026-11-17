@@ -48,6 +48,10 @@
   background: var(--orange, var(--amber));
 }
 
+.wb-status-done {
+  background: var(--blue, #4c7be0);
+}
+
 .wb-status-idle,
 .wb-status-exited {
   background: transparent;
@@ -635,6 +639,13 @@
 .wb-xterm {
   width: 100%;
   height: 100%;
+}
+
+/* A file or text dragged over a control terminal (dropped as its path). */
+.wb-xterm.is-drop {
+  outline: 2px dashed var(--accent, #8aa8f0);
+  outline-offset: -4px;
+  border-radius: 6px;
 }
 
 .wb-xterm .xterm {
