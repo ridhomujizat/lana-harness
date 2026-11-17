@@ -7,6 +7,14 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.7] - 2026-11-17
+
+### Fixed
+- Workbench terminals: Shift+Enter adds a new line in Claude Code and other agents instead
+  of submitting. Cmd+Left/Right (line start/end), Cmd+Backspace (delete line),
+  Option+Left/Right (word jump) and Option+Backspace (delete word) work as in iTerm2;
+  Cmd+Left no longer goes back in browser history.
+
 ## [0.5.0-beta.6] - 2026-11-17
 
 ### Added

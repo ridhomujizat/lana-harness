@@ -7,6 +7,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
 import { attachURL, type AttachMode } from "../api/workbench";
+import { terminalKey } from "./workbench-model";
 
 /* Spec 55 REQ-WB-053: one terminal pane. xterm.js is the emulator, so the
    browser shows exactly what the program draws; the server only relays the
@@ -240,6 +241,16 @@ export function TermPane({
       socket!.send(encoder.encode(data));
     };
     if (sendRef) sendRef.current = send;
+
+    /* macOS terminal keys (Shift+Enter newline, Cmd/Option editing). The
+       browser default is cancelled too: Cmd+Left would go back in history. */
+    term.attachCustomKeyEventHandler((e) => {
+      const seq = terminalKey(e);
+      if (seq === null) return true;
+      e.preventDefault();
+      if (e.type === "keydown") send(seq);
+      return false;
+    });
 
     const dataSub = term.onData((data) => {
       const transform = transformRef?.current;
