@@ -7,6 +7,28 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.9] - 2026-11-17
+
+### Added
+- Workbench: drag files onto a terminal, as in Ghostty or Terminal. The path is typed,
+  escaped with backslashes, so Claude Code can attach a dropped screenshot. In Lana.app the
+  real path is used (Finder, the screenshot thumbnail); in a browser the file is uploaded to
+  `~/.lana/workbench/drops/` (new `POST /v1/workbench/drops`, 10 files of 20 MB) and that path
+  is typed. Dropped text is typed as is.
+- Workbench shortcuts, as in GoRex: ⌘T new tab, ⇧⌘T new space, ⌘D / ⇧⌘D split right / down,
+  ⌘W / ⇧⌘W close pane / tab, ⇧⌘↩ zoom, ⌥⌘ arrows move focus, ⌘1…⌘9, ⇧⌘[ ⇧⌘] and ⌃Tab
+  switch tabs, ⇧⌘R rename tab, ⌘K clear, ⌘+ ⌘− ⌘0 text size. ⌘W no longer closes the
+  window while Workbench is open.
+- Workbench "done" status (blue), as in herdr: an agent that finishes while its pane is not
+  in view stays done until you focus that pane.
+
+### Fixed
+- Workbench: a terminal running Claude Code no longer shows a broken screen (only the
+  changing digits, missing letters) after switching tabs or spaces. The redraw nudge on attach
+  now waits long enough for Node programs to see the size change.
+- Workbench: glyphs are measured again once the terminal font has loaded and redrawn when the
+  window or a hidden pane comes back, so characters no longer go missing.
+
 ## [0.5.0-beta.8] - 2026-11-17
 
 ### Added
