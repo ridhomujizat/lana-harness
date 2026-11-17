@@ -207,7 +207,7 @@ final class WebWindowController: NSObject {
         if let zoomButton = window.standardWindowButton(.zoomButton) {
             lightsWidth = ShellLayout.lightsWidth(zoomMaxX: Double(zoomButton.frame.maxX))
         }
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800), configuration: configuration)
+        let webView = LanaWebView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800), configuration: configuration)
         // The window background shows until the page paints, so no white
         // flash and no seam.
         webView.setValue(false, forKey: "drawsBackground")
@@ -734,6 +734,32 @@ extension WebWindowController: WKDownloadDelegate {
 
 /// ScriptMessageProxy breaks the retain cycle between the user content
 /// controller and the window controller.
+/// LanaWebView tells the page the real paths of files dragged into the
+/// window (Finder, the screenshot thumbnail), so a Workbench terminal can type
+/// them as a native terminal does. A web page only gets File objects from a
+/// drop, never their paths. The page reads window.lanaNativeDrag in its drop
+/// handler; the script runs before the drop because it is sent first.
+final class LanaWebView: WKWebView {
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        publishDragPaths(sender.draggingPasteboard)
+        return super.draggingEntered(sender)
+    }
+
+    private func publishDragPaths(_ pasteboard: NSPasteboard) {
+        let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        let paths = urls.map(\.path)
+        guard let data = try? JSONSerialization.data(withJSONObject: paths),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return
+        }
+        evaluateJavaScript("window.lanaNativeDrag = {paths: \(json), at: Date.now()}", completionHandler: nil)
+    }
+}
+
 private final class ScriptMessageProxy: NSObject, WKScriptMessageHandler {
     weak var target: WebWindowController?
     /// shell routes the message to the window chrome handler (lanaShell).
