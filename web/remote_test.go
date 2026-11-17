@@ -396,22 +396,13 @@ func TestRemoteRevokeSessions(t *testing.T) {
 	remoteOne := authCookie(t, serveAuth(s, remoteHostRequest(http.MethodPost, "/v1/auth/login", tokenLoginBody(t, token), remoteTestLogin)))
 	remoteTwo := authCookie(t, serveAuth(s, remoteHostRequest(http.MethodPost, "/v1/auth/login", tokenLoginBody(t, token), remoteTestLogin)))
 
-	rows, rr := getBrowserSessionList(t, s, localCookie)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("sessions status = %d, body = %q", rr.Code, rr.Body.String())
-	}
-	remoteIDs := make([]string, 0, 2)
-	for _, row := range rows {
-		if row.Remote {
-			remoteIDs = append(remoteIDs, row.ID)
-		}
-	}
-	if len(remoteIDs) != 2 {
-		t.Fatalf("remote rows = %v, want 2", remoteIDs)
-	}
+	// remoteOne and remoteTwo are created in the same millisecond, so the
+	// session list orders them by their random display id. The row marked
+	// current for remoteOne's own cookie identifies it without that order.
+	remoteOneID := currentRemoteSessionID(t, s, remoteOne)
 
 	// Revoke one remote session from the local session.
-	revoke := localHostRequest(http.MethodPost, "/v1/auth/sessions/"+remoteIDs[0]+"/revoke", "")
+	revoke := localHostRequest(http.MethodPost, "/v1/auth/sessions/"+remoteOneID+"/revoke", "")
 	revoke.AddCookie(localCookie)
 	revoke.Header.Set(csrfHeaderName, localCSRF)
 	if rr := serveAuth(s, revoke); rr.Code != http.StatusOK {
@@ -419,6 +410,10 @@ func TestRemoteRevokeSessions(t *testing.T) {
 	}
 	if rr := serveAuth(s, remoteSessionRequest(remoteOne)); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked remote session status = %d, want 401", rr.Code)
+	}
+	// Only remoteOne was revoked: remoteTwo still authenticates.
+	if rr := serveAuth(s, remoteSessionRequest(remoteTwo)); rr.Code != http.StatusOK {
+		t.Fatalf("other remote session status = %d, want 200", rr.Code)
 	}
 
 	// An unknown display id is 404.
@@ -431,7 +426,7 @@ func TestRemoteRevokeSessions(t *testing.T) {
 	revokeRemote := localHostRequest(http.MethodPost, "/v1/auth/sessions/revoke-remote", "")
 	revokeRemote.AddCookie(localCookie)
 	revokeRemote.Header.Set(csrfHeaderName, localCSRF)
-	rr = serveAuth(s, revokeRemote)
+	rr := serveAuth(s, revokeRemote)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("revoke remote status = %d, body = %q", rr.Code, rr.Body.String())
 	}
@@ -477,6 +472,22 @@ func remoteSessionRequest(cookie *http.Cookie) *http.Request {
 	req := remoteHostRequest(http.MethodGet, "/v1/auth/session", "", remoteTestLogin)
 	req.AddCookie(cookie)
 	return req
+}
+
+// currentRemoteSessionID returns the display id the sessions list marks current
+// for a remote cookie. Listing through the cookie's own remote request avoids
+// depending on the order of sessions created in the same millisecond.
+func currentRemoteSessionID(t *testing.T, s *Server, cookie *http.Cookie) string {
+	t.Helper()
+	req := remoteHostRequest(http.MethodGet, "/v1/auth/sessions", "", remoteTestLogin)
+	req.AddCookie(cookie)
+	for _, row := range listSessions(t, serveAuth(s, req)) {
+		if row.Current {
+			return row.ID
+		}
+	}
+	t.Fatal("no current session row for the remote cookie")
+	return ""
 }
 
 // fakeOwnerMessenger records the plain-text owner messages of REQ-RA-070.
