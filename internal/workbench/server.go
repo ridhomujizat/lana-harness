@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,6 +29,13 @@ type server struct {
 	sessions map[string]*session
 	order    []string
 	layout   json.RawMessage
+
+	// persistLast is the bytes last written to sessions.json; a snapshot equal
+	// to it is not written again. persistOff freezes the persister once the
+	// final flush is done (spec 60 REQ-WR-002, REQ-WR-004).
+	persistMu   sync.Mutex
+	persistLast []byte
+	persistOff  bool
 
 	hub      *hub
 	quit     chan struct{}
@@ -74,12 +82,132 @@ func Serve(ctx context.Context, home string) error {
 	if b, err := os.ReadFile(filepath.Join(dir, "layout.json")); err == nil && json.Valid(b) {
 		s.layout = b
 	}
+	// Bring the previous core's sessions back before the socket accepts, so the
+	// first list already shows them (spec 60 REQ-WR-020 .. 022, REQ-WR-024).
+	s.restore()
 	go s.hub.run(s.quit)
+	go s.runPersister(s.quit)
 	go func() {
 		<-ctx.Done()
 		s.shutdown()
 	}()
 	return s.serve(ln)
+}
+
+// restore brings back the sessions the previous core left in sessions.json. A
+// record that cannot be started is logged and comes back exited with code -1;
+// a failure never stops the core (spec 60 REQ-WR-020 .. 022).
+func (s *server) restore() {
+	recs, err := readRecords(s.home)
+	if err != nil {
+		logf("%v", err)
+		return
+	}
+	for _, rec := range recs {
+		ss, line, err := s.restoreOne(rec)
+		if err != nil {
+			logf("restore %s: %v", rec.ID, err)
+			rec.Exited, rec.ExitCode = true, -1
+			if ss, err = newExitedSession(rec); err != nil {
+				logf("restore %s: %v", rec.ID, err)
+				continue
+			}
+			line = ""
+		}
+		s.mu.Lock()
+		s.sessions[rec.ID] = ss
+		s.order = append(s.order, rec.ID)
+		s.mu.Unlock()
+		// Track it like a created session, so its state is polled and reported.
+		s.hub.created(ss, ss.info())
+		logf("restored session %s agent=%q resumed=%q", rec.ID, rec.Agent, line)
+	}
+}
+
+// restoreOne builds the session a record comes back as. The second return is
+// the resume line typed into it, "" when nothing was typed. A running record
+// that cannot be started returns no session and the error, so the caller
+// downgrades it to an exited session (spec 60 REQ-WR-021, REQ-WR-022).
+func (s *server) restoreOne(rec sessionRecord) (*session, string, error) {
+	notify := func() { s.hub.markDirty(rec.ID) }
+	home, _ := os.UserHomeDir()
+	switch {
+	case rec.Exited:
+		ss, err := newExitedSession(rec)
+		return ss, "", err
+	case rec.Agent != "":
+		// A session that ran an agent comes back as a login shell in the
+		// agent's directory, with the conversation resumed (REQ-WR-022).
+		dir := firstDir(rec.AgentCwd, rec.LastDir, rec.Dir, home)
+		ss, err := newSession(rec.ID, CreateOptions{
+			Dir: dir, Env: rec.Env, Cols: rec.Cols, Rows: rec.Rows,
+			Title: rec.Title, Labels: rec.Labels,
+		}, notify)
+		if err != nil {
+			return nil, "", err
+		}
+		ss.mu.Lock()
+		ss.rAgent, ss.agentSession, ss.agentCwd, ss.agentSeen =
+			rec.Agent, rec.AgentSession, rec.AgentCwd, rec.AgentSeen
+		ss.restored, ss.created = time.Now(), rec.Created
+		ss.mu.Unlock()
+		if _, hasAdapter := adapterFor(rec.Agent); !hasAdapter {
+			return ss, "", nil
+		}
+		line, _ := resumeLine(rec.Agent, rec.AgentSession)
+		ss.mu.Lock()
+		ss.resumedAgent = rec.Agent
+		ss.mu.Unlock()
+		go ss.typeResume(line)
+		return ss, line, nil
+	case len(rec.Command) == 0 || isShellCommand(rec.Command[0]):
+		// A shell comes back as itself in its last directory; what ran inside
+		// it is not re-run (REQ-WR-022).
+		dir := firstDir(rec.LastDir, rec.Dir, home)
+		ss, err := newSession(rec.ID, CreateOptions{
+			Command: rec.Command, Dir: dir, Env: rec.Env, Cols: rec.Cols,
+			Rows: rec.Rows, Title: rec.Title, Labels: rec.Labels,
+		}, notify)
+		if err != nil {
+			return nil, "", err
+		}
+		ss.mu.Lock()
+		ss.rAgent, ss.agentSession, ss.agentCwd, ss.agentSeen =
+			rec.Agent, rec.AgentSession, rec.AgentCwd, rec.AgentSeen
+		ss.restored, ss.created = time.Now(), rec.Created
+		ss.mu.Unlock()
+		return ss, "", nil
+	default:
+		// A non-shell command is not started again; it comes back exited so the
+		// owner can restart it (REQ-WR-022).
+		rec.Exited, rec.ExitCode = true, -1
+		ss, err := newExitedSession(rec)
+		return ss, "", err
+	}
+}
+
+// shellNames are the programs REQ-WR-022 restores as a shell.
+var shellNames = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "fish": true,
+	"nu": true, "dash": true, "ksh": true, "tcsh": true,
+}
+
+// isShellCommand reports whether argv0 names a shell, with a leading "-" (a
+// login shell) ignored.
+func isShellCommand(argv0 string) bool {
+	base := strings.TrimPrefix(filepath.Base(argv0), "-")
+	return shellNames[base]
+}
+
+// firstDir returns the first path that is an existing directory, or "" when
+// none is.
+func firstDir(paths ...string) string {
+	for _, p := range paths {
+		if isDir(p) {
+			return p
+		}
+	}
+	return ""
 }
 
 // serve accepts connections until the core is shut down.
@@ -110,8 +238,11 @@ func (s *server) serve(ln net.Listener) error {
 // shutdown asks the core to stop; killing the sessions happens in closeAll.
 func (s *server) shutdown() { s.quitOnce.Do(func() { close(s.quit) }) }
 
-// closeAll kills every session.
+// closeAll kills every session. It flushes one last snapshot and freezes the
+// persister first, so the kills below never turn a running session into an
+// exited one in the file (spec 60 REQ-WR-004).
 func (s *server) closeAll() {
+	s.freezePersist()
 	s.mu.Lock()
 	all := make([]*session, 0, len(s.order))
 	for _, id := range s.order {

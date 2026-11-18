@@ -111,6 +111,35 @@ func processGroupAndComm(stat string) (pgrp int, comm string, ok bool) {
 	return pgrp, stat[open+1 : close], true
 }
 
+// openFiles returns the absolute paths of the regular files pid has open, read
+// from /proc/<pid>/fd. It returns nil when the pid is gone or the read is
+// denied (spec 60 REQ-WR-010).
+func openFiles(pid int) []string {
+	if pid <= 0 {
+		return nil
+	}
+	dir := "/proc/" + strconv.Itoa(pid) + "/fd"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join(dir, entry.Name()))
+		if err != nil || !strings.HasPrefix(target, "/") || seen[target] {
+			continue
+		}
+		st, err := os.Stat(target)
+		if err != nil || !st.Mode().IsRegular() {
+			continue
+		}
+		seen[target] = true
+		paths = append(paths, target)
+	}
+	return paths
+}
+
 // linuxArgv returns a process's argv from /proc/<pid>/cmdline.
 func linuxArgv(pid int) []string {
 	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")

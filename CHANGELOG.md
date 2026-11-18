@@ -7,6 +7,21 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.10] - 2026-11-18
+
+### Added
+- Workbench sessions survive a restart of the Mac (spec 60). The core keeps its sessions in
+  `~/.lana/workbench/sessions.json` and brings them back under the same ids, so every pane
+  of the layout comes back. Shells reopen in their last directory. A session that ran
+  Claude Code or omp comes back as a shell with `claude --resume <id>` / `omp --resume <id>`
+  typed in (`--continue` when the conversation id is unknown). Other commands come back
+  exited, with Restart. The daemon starts the core at boot when there is something to
+  restore, and restored panes show a "Restored" chip. Closing a pane drops its session for good.
+
+### Changed
+- Workbench: the active space and agent rows no longer have a bar on the left; their colour
+  marks them instead.
+
 ## [0.5.0-beta.9] - 2026-11-17
 
 ### Added

@@ -134,6 +134,18 @@ function LanaChip({ session, compact }: { session?: WorkbenchSession; compact?: 
   );
 }
 
+/* Spec 60 REQ-WR-041: the session came back after a restart. */
+function RestoredChip({ session }: { session?: WorkbenchSession }) {
+  if (!session?.restored || session.state === "exited") return null;
+  const tip = session.resumed_agent ? "Restored after restart · resumed " + session.resumed_agent : "Restored after restart";
+  return (
+    <span className="wb-restored-chip" title={tip}>
+      <Ic name="history" size={11} />
+      Restored
+    </span>
+  );
+}
+
 function SpaceTile({ space, label, size = 22 }: { space: WbSpace; label: string; size?: number }) {
   const letter = label === "~" ? "~" : label.replace(/^[^\p{L}\p{N}]+/u, "")[0]?.toUpperCase() || "?";
   return (
@@ -399,6 +411,7 @@ function PaneView({
           <span className="wb-pane-dir">{(session.cwd || session.dir).replace(/^\/Users\/[^/]+/, "~")}</span>
         ) : null}
         <LanaChip session={session} />
+        <RestoredChip session={session} />
         <span className={"wb-pane-state wb-pane-state-" + status}>
           <StatusDot status={status} />
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}

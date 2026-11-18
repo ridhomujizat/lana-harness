@@ -375,6 +375,19 @@
   white-space: nowrap;
 }
 
+.wb-restored-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #24323a;
+  color: #a9cfdf;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------- */
 /* Main: tabs + workspace                                           */
 /* ---------------------------------------------------------------- */
@@ -1380,21 +1393,17 @@ body.wb-resizing {
   font-weight: 600;
 }
 
-.wb-space.is-active .wb-space-btn::before,
-.wb-agent.is-active::before {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: -1px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--acc-l, #1a1831);
-  content: "";
+/* No side bar on the active row (owner feedback 2026-11-18): the row's colour
+   alone marks it, tinted with the accent so it still stands out. */
+.wb-space.is-active .wb-space-btn,
+.wb-agent.is-active {
+  background: color-mix(in srgb, var(--acc-l, #1a1831) 7%, var(--surface-3, var(--surface-2)));
 }
 
-:root[data-theme="dark"] .wb-space.is-active .wb-space-btn::before,
-:root[data-theme="dark"] .wb-agent.is-active::before {
-  background: #b9a6f2;
+:root[data-theme="dark"] .wb-space.is-active .wb-space-btn,
+:root[data-theme="dark"] .wb-agent.is-active {
+  border-color: color-mix(in srgb, #b9a6f2 30%, var(--border-strong));
+  background: color-mix(in srgb, #b9a6f2 16%, var(--surface-3, var(--surface-2)));
 }
 
 .wb-agent.is-active .wb-agent-title {
