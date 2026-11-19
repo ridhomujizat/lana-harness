@@ -288,7 +288,28 @@ func sessionEnv(id string, extra []string) []string {
 		"COLORTERM=truecolor",
 		"LANA_WORKBENCH_SESSION="+id,
 	)
-	return append(env, extra...)
+	env = append(env, extra...)
+	// A non-login shell started from launchd has no locale: the core runs under
+	// launchd, which sets none, and a non-login shell skips /etc/zprofile,
+	// where macOS would set LANG. zsh then counts a multibyte prompt glyph in
+	// bytes, measures it too wide and redraws zle at the wrong column. C.UTF-8
+	// matches what /etc/zprofile sets and exists on modern Linux.
+	if !envHasValue(env, "LANG") && !envHasValue(env, "LC_ALL") && !envHasValue(env, "LC_CTYPE") {
+		env = append(env, "LANG=C.UTF-8")
+	}
+	return env
+}
+
+// envHasValue reports whether env gives key a non-empty value, a later entry
+// winning over an earlier one the way the OS reads the list.
+func envHasValue(env []string, key string) bool {
+	value := ""
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			value = v
+		}
+	}
+	return value != ""
 }
 
 // run reads the pty and, when the program ends, records the exit and closes
