@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { WorkbenchSession } from "../api/workbench";
 import {
@@ -27,6 +27,7 @@ import {
   workbenchShortcut,
   tabAtShortcut,
   paneInDirection,
+  openTerminalLink,
 } from "./workbench-model";
 
 function session(over: Partial<WorkbenchSession>): WorkbenchSession {
@@ -288,5 +289,27 @@ describe("paneInDirection", () => {
     expect(paneInDirection(rects, "b", "down")).toBe("c");
     expect(paneInDirection(rects, "c", "up")).toBe("a");
     expect(paneInDirection(rects, "a", "left")).toBeNull();
+  });
+});
+
+describe("openTerminalLink", () => {
+  it("opens web links directly, without an empty window first", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    openTerminalLink("https://gitlab.example.com/group/repo/-/merge_requests/54");
+    expect(open).toHaveBeenCalledWith(
+      "https://gitlab.example.com/group/repo/-/merge_requests/54",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    open.mockRestore();
+  });
+
+  it("ignores links that are not http or https", () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    openTerminalLink("file:///etc/passwd");
+    openTerminalLink("javascript:alert(1)");
+    openTerminalLink("not a url");
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
   });
 });

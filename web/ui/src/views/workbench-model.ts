@@ -611,3 +611,22 @@ export function paneInDirection(rects: PaneRect[], from: string, dir: PaneDirect
   }
   return best ? best.id : null;
 }
+
+/* Opens a link clicked in a terminal (owner report 2026-11-19: in the desktop
+   app a click asked "Do you want to navigate…? WARNING…", then Finder said
+   "The application can't be opened. -50").
+
+   xterm's default handlers call window.open() with no URL and set the new
+   window's location afterwards. The desktop app gets that empty URL, hands it
+   to macOS and fails; a browser shows a confirm first. Opening the URL itself
+   works in both, and only web links are opened. */
+export function openTerminalLink(uri: string): void {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return;
+  window.open(url.href, "_blank", "noopener,noreferrer");
+}

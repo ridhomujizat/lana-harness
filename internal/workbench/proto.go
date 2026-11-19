@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -48,6 +49,23 @@ const (
 	defaultCols = 80
 	defaultRows = 24
 )
+
+// Attach replay framing. A replay carries, in order, the pty size in effect at
+// its first byte, the bytes with a size marker wherever the size changed, and a
+// final replay-end marker. A terminal ignores an OSC string whose number it does
+// not know, so these markers pass through attach clients that do not understand
+// them; the web client (web/ui/src/views/workbench-term.tsx) consumes them to
+// replay each byte at the pty size it was produced at.
+//
+// The size marker is an OSC 7701 string, ";<cols>;<rows>" with decimal sizes,
+// and the replay-end marker is an empty OSC 7702 string.
+const replayEndMarker = "\x1b]7702\x07"
+
+// sizeMarker returns the OSC 7701 string that sets the pty size at the point it
+// appears in a replay.
+func sizeMarker(cols, rows int) []byte {
+	return []byte("\x1b]7701;" + strconv.Itoa(cols) + ";" + strconv.Itoa(rows) + "\x07")
+}
 
 // Attach modes.
 const (

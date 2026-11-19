@@ -1773,6 +1773,7 @@ pre.json {
   flex-direction: column;
   width: 280px;
   height: 100vh;
+  height: var(--app-h, 100dvh);
   position: sticky;
   top: 0;
   border-right: 1px solid var(--border-secondary);
@@ -2065,6 +2066,7 @@ pre.json {
   flex-direction: column;
   min-width: 0;
   height: 100vh;
+  height: var(--app-h, 100dvh);
   overflow: hidden;
   background: var(--bg-primary);
 }

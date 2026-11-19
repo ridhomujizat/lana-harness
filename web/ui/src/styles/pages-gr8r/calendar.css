@@ -470,7 +470,7 @@
   flex: 1;
   overflow-y: auto;
   min-height: 420px;
-  max-height: calc(100vh - 260px);
+  max-height: calc(var(--app-h, 100dvh) - 260px);
 }
 .cday-grid {
   position: relative;
