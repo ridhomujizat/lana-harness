@@ -359,6 +359,12 @@ export function TermPane({
         const size = sizeRef.current;
         if (size && (term.cols !== size.cols || term.rows !== size.rows)) term.resize(size.cols, size.rows);
       }
+      /* Show the pane again once xterm has drawn the last replayed bytes. */
+      term.write(new Uint8Array(0), () => {
+        if (disposed) return;
+        term.scrollToBottom();
+        host.style.visibility = "";
+      });
     };
     const receive = (bytes: Uint8Array) => {
       if (expectFirst) {
@@ -379,9 +385,12 @@ export function TermPane({
           const data = part.bytes;
           enqueue(() => writeAsync(data));
         } else if (part.kind === "size") {
-          const { cols, rows } = part;
+          /* Only the width matters for where a redraw lands (a wrapped
+             prompt). Height-only changes (the attach redraw nudge records two
+             per attach) would make xterm scroll and reflow for nothing. */
+          const { cols } = part;
           enqueue(() => {
-            if (replaying && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows);
+            if (replaying && term.cols !== cols) term.resize(cols, term.rows);
           });
         } else {
           parsing = false;
@@ -420,6 +429,10 @@ export function TermPane({
         expectFirst = true;
         parsing = false;
         replaying = true;
+        /* Owner report 2026-11-19: switching tabs or spaces remounts the pane
+           and Claude Code's whole history scrolled past while it replayed.
+           The pane stays hidden until the replay is drawn. */
+        host.style.visibility = "hidden";
         clearTimeout(replayTimer);
         /* A replay that never ends (a dropped marker) must not freeze the
            pane's size. */

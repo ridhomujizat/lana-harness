@@ -7,6 +7,13 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.12] - 2026-11-19
+
+### Fixed
+- Workbench: switching tabs or spaces no longer scrolls Claude Code's whole history past.
+  The pane stays hidden while the session is replayed and shows at the bottom once it is
+  drawn. During the replay only width changes are applied, so the screen no longer jumps.
+
 ## [0.5.0-beta.11] - 2026-11-19
 
 ### Fixed
