@@ -155,7 +155,7 @@
     display: none;
   }
   .sessions-workspace.has-detail > .sessions-chat-pane {
-    min-height: calc(100dvh - var(--topbar-h, 48px));
+    min-height: calc(var(--app-h, 100dvh) - var(--topbar-h, 48px));
   }
   .sessions-back {
     display: inline-flex;
