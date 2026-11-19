@@ -153,6 +153,9 @@ func newSession(id string, o CreateOptions, notify func()) (*session, error) {
 		p:      p, ring: newRing(ringSize), clients: map[*attached]struct{}{},
 		cols: cols, rows: rows, procCwd: physicalDir(dir), done: make(chan struct{}),
 	}
+	s.mu.Lock()
+	s.ring.mark(cols, rows)
+	s.mu.Unlock()
 	s.emu = newScreen(cols, rows, s.onProgress, s.onWorkingDirectory)
 	s.run(p)
 	return s, nil
@@ -213,6 +216,9 @@ func newExitedSession(rec sessionRecord) (*session, error) {
 		rAgent: rec.Agent, agentSession: rec.AgentSession, agentCwd: rec.AgentCwd,
 		agentSeen: rec.AgentSeen,
 	}
+	s.mu.Lock()
+	s.ring.mark(cols, rows)
+	s.mu.Unlock()
 	// There is no pty and no output, so the session has no screen: a screen
 	// would start an answer-pipe drain that never ends. The emulator users
 	// (attach, resize, restart) handle a nil one.
@@ -459,6 +465,7 @@ func (s *session) attach(conn net.Conn, mode string, cols, rows int, initial []b
 	p := s.p
 	if cols > 0 && rows > 0 {
 		s.cols, s.rows = cols, rows
+		s.ring.mark(cols, rows)
 		if s.emu != nil {
 			s.emu.resize(cols, rows)
 		}
@@ -495,6 +502,9 @@ func (s *session) attach(conn net.Conn, mode string, cols, rows int, initial []b
 		// it runs.
 		if height > 1 {
 			_ = p.resize(width, height-1)
+			s.mu.Lock()
+			s.ring.mark(width, height-1)
+			s.mu.Unlock()
 			time.AfterFunc(redrawNudgeDelay, func() {
 				s.mu.Lock()
 				cols, rows, exited, cur := s.cols, s.rows, s.exited, s.p
@@ -505,6 +515,9 @@ func (s *session) attach(conn net.Conn, mode string, cols, rows int, initial []b
 				// size is already the session size.
 				if !exited && cur == p {
 					_ = cur.resize(cols, rows)
+					s.mu.Lock()
+					s.ring.mark(cols, rows)
+					s.mu.Unlock()
 				}
 			})
 		}
@@ -571,6 +584,7 @@ func (s *session) resize(cols, rows int) {
 	}
 	s.mu.Lock()
 	s.cols, s.rows = cols, rows
+	s.ring.mark(cols, rows)
 	if s.emu != nil {
 		s.emu.resize(cols, rows)
 	}
@@ -620,6 +634,7 @@ func (s *session) restart() error {
 	s.p = p
 	s.exited, s.exitCode, s.bellNeeds = false, 0, false
 	s.ring = newRing(ringSize)
+	s.ring.mark(cols, rows)
 	if s.emu != nil {
 		s.emu.close()
 	}
