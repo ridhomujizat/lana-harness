@@ -7,7 +7,8 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
 import { attachURL, uploadWorkbenchDrops, type AttachMode } from "../api/workbench";
-import { dropText, takeNativeDragPaths, terminalKey, type NativeDrag } from "./workbench-model";
+import { dropText, openTerminalLink, takeNativeDragPaths, terminalKey, type NativeDrag } from "./workbench-model";
+import { splitReplay, startsWithSizeMarker } from "./workbench-replay";
 
 /* Spec 55 REQ-WB-053: one terminal pane. xterm.js is the emulator, so the
    browser shows exactly what the program draws; the server only relays the
@@ -175,6 +176,17 @@ export function TermPane({
     let resizeTimer: ReturnType<typeof setTimeout> | undefined;
     let owner = false;
     let claimedAt = 0;
+    /* Attach replay (workbench-replay.ts): while replaying, the pane takes
+       each size the core marked in the replay, and its own fitting, size
+       reports and following wait until the replay-end marker. */
+    let replaying = false;
+    let parsing = false;
+    let expectFirst = false;
+    let carry: Uint8Array = new Uint8Array(0);
+    let gen = 0;
+    let pending = 0;
+    let chain: Promise<void> = Promise.resolve();
+    let replayTimer: ReturnType<typeof setTimeout> | undefined;
     const setOwner = (value: boolean) => {
       if (owner === value) return;
       owner = value;
@@ -192,13 +204,14 @@ export function TermPane({
       scrollback: 5000,
       allowProposedApi: true,
       macOptionIsMeta: true,
+      linkHandler: { activate: (_e, uri) => openTerminalLink(uri) },
     });
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
     term.unicode.activeVersion = "11";
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddon((_e, uri) => openTerminalLink(uri)));
     term.open(host);
     try {
       const webgl = new WebglAddon();
@@ -225,6 +238,7 @@ export function TermPane({
     };
 
     const fitBox = () => {
+      if (replaying) return;
       if (host.clientWidth > 0 && host.clientHeight > 0) {
         try {
           fit.fit();
@@ -251,7 +265,7 @@ export function TermPane({
     /* Show the session at its own size. Another client's resize while this one
        owned the size means that client was used last. */
     const follow = (cols: number, rows: number) => {
-      if (disposed || cols <= 0 || rows <= 0) return;
+      if (disposed || replaying || cols <= 0 || rows <= 0) return;
       if (owner) {
         if (Date.now() - claimedAt < 1500 || (cols === term.cols && rows === term.rows)) return;
         setOwner(false);
@@ -314,10 +328,72 @@ export function TermPane({
       socket!.send(bytes);
     });
     const resizeSub = term.onResize(() => {
-      if (!owner) return;
+      if (!owner || replaying) return;
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(sendResize, 60);
     });
+
+    /* Runs fn after everything queued before it; dropped when the socket it
+       was queued for is gone. */
+    const enqueue = (fn: () => Promise<void> | void) => {
+      const mine = gen;
+      pending++;
+      chain = chain
+        .then(() => (disposed || mine !== gen ? undefined : fn()))
+        .catch(() => undefined)
+        .finally(() => {
+          pending--;
+        });
+    };
+    const writeAsync = (bytes: Uint8Array) => new Promise<void>((resolve) => term.write(bytes, resolve));
+    /* The replay is over: back to this pane's own size (owner) or the
+       session's size (follower). */
+    const finishReplay = () => {
+      clearTimeout(replayTimer);
+      if (!replaying || disposed) return;
+      replaying = false;
+      if (owner) {
+        fitBox();
+        sendResize();
+      } else {
+        const size = sizeRef.current;
+        if (size && (term.cols !== size.cols || term.rows !== size.rows)) term.resize(size.cols, size.rows);
+      }
+    };
+    const receive = (bytes: Uint8Array) => {
+      if (expectFirst) {
+        expectFirst = false;
+        /* A core without markers: plain replay, as before. */
+        parsing = startsWithSizeMarker(bytes);
+        if (!parsing) finishReplay();
+      }
+      if (!parsing) {
+        if (pending === 0) term.write(bytes);
+        else enqueue(() => writeAsync(bytes));
+        return;
+      }
+      const out = splitReplay(carry, bytes);
+      carry = out.carry;
+      for (const part of out.parts) {
+        if (part.kind === "data") {
+          const data = part.bytes;
+          enqueue(() => writeAsync(data));
+        } else if (part.kind === "size") {
+          const { cols, rows } = part;
+          enqueue(() => {
+            if (replaying && (term.cols !== cols || term.rows !== rows)) term.resize(cols, rows);
+          });
+        } else {
+          parsing = false;
+          enqueue(finishReplay);
+        }
+      }
+      if (!parsing && carry.length > 0) {
+        const rest = carry;
+        carry = new Uint8Array(0);
+        enqueue(() => writeAsync(rest));
+      }
+    };
 
     const connect = () => {
       if (disposed) return;
@@ -326,6 +402,9 @@ export function TermPane({
       socket = ws;
       ws.onopen = () => {
         retry = 0;
+        /* A replay cut short by a dropped socket is over. */
+        replaying = false;
+        clearTimeout(replayTimer);
         /* The core replays its buffer on every attach (REQ-WB-020), so the
            screen starts clean to avoid printing the history twice. */
         term.reset();
@@ -336,11 +415,21 @@ export function TermPane({
           const size = sizeRef.current;
           if (size) follow(size.cols, size.rows);
         }
+        gen++;
+        carry = new Uint8Array(0);
+        expectFirst = true;
+        parsing = false;
+        replaying = true;
+        clearTimeout(replayTimer);
+        /* A replay that never ends (a dropped marker) must not freeze the
+           pane's size. */
+        replayTimer = setTimeout(() => {
+          parsing = false;
+          enqueue(finishReplay);
+        }, 8000);
       };
       ws.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(event.data));
-        }
+        if (event.data instanceof ArrayBuffer) receive(new Uint8Array(event.data));
       };
       ws.onclose = (event) => {
         if (disposed || socket !== ws) return;
@@ -518,6 +607,7 @@ export function TermPane({
       if (claimRef && claimRef.current === claim) claimRef.current = null;
       clearTimeout(retryTimer);
       clearTimeout(resizeTimer);
+      clearTimeout(replayTimer);
       observer?.disconnect();
       host.removeEventListener("mousedown", focusHandler);
       host.removeEventListener("touchstart", focusHandler);
