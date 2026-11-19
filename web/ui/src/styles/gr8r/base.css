@@ -160,3 +160,23 @@ kbd,
     display: block;
   }
 }
+
+/* Phone viewport (owner report 2026-11-19: the page zoomed in on every input
+   focus, and the topbar slid under the browser's URL bar).
+   - #app is pinned to the visible viewport (see the #app rule in
+     gr8r-lana.css and lib/viewport.ts).
+   - iOS Safari zooms into any focused field whose text is under 16px, so touch
+     devices get 16px fields. !important in this first layer wins over every
+     later layer's rules. */
+html,
+body {
+  overscroll-behavior: none;
+}
+@media (pointer: coarse) {
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='color']),
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: 16px !important;
+  }
+}

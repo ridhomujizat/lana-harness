@@ -421,3 +421,22 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
     padding-left: 12px;
   }
 }
+
+/* lana: phone viewport (owner report 2026-11-19). The app is pinned to the
+   visual viewport, the part of the screen the user can see. iOS Safari keeps
+   the layout viewport full height when the keyboard opens and pans the visible
+   area down inside it instead, so a full-height app leaves the chat composer
+   under the keyboard. lib/viewport.ts writes the visible height (--app-h) and
+   the pan offset (--app-top) from window.visualViewport; without them the app
+   fills the dynamic viewport height.
+   Chrome on iOS draws its bottom toolbar over the page and reports the visual
+   viewport as if the toolbar were hidden, so the height is capped at 100svh
+   (the height with every browser bar shown). */
+#app {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--app-top, 0px);
+  height: 100dvh;
+  height: min(var(--app-h, 100dvh), 100svh);
+}

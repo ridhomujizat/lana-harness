@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -95,6 +96,26 @@ func readUntil(t *testing.T, r io.Reader, want string, timeout time.Duration) st
 			t.Fatalf("reading %q: %v (got %q)", want, err, got.String())
 		}
 	}
+}
+
+// readReplay reads an attach stream through its final replay-end marker and
+// returns the replay.
+func readReplay(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	conn := r.(net.Conn)
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var got []byte
+	buf := make([]byte, 4096)
+	for !bytes.Contains(got, []byte(replayEndMarker)) {
+		n, err := conn.Read(buf)
+		got = append(got, buf[:n]...)
+		if err != nil {
+			t.Fatalf("reading replay: %v (got %q)", err, got)
+		}
+	}
+	return got
 }
 
 func hasSession(list []Session, id string) bool {
@@ -201,6 +222,44 @@ func TestCreateAttachReplay(t *testing.T) {
 	}
 }
 
+// TestAttachReplayFraming checks that an attach replay is framed: it starts
+// with the size marker of the session's pty size and ends with the replay-end
+// marker, so the client can replay each byte at the size it was produced at.
+func TestAttachReplayFraming(t *testing.T) {
+	home := shortHome(t)
+	serve(t, home)
+	c := mustClient(t, home)
+	ctx := context.Background()
+	s, err := c.Create(ctx, CreateOptions{Command: []string{"/bin/sh", "-c", "printf hello; sleep 30"}, Cols: 100, Rows: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Kill(ctx, s.ID) }()
+
+	// Wait for the program's output to reach the ring, so the replay carries it
+	// as well as the framing.
+	waitFor(t, "output", func() bool {
+		g, err := c.Get(ctx, s.ID)
+		return err == nil && !g.LastOutput.IsZero()
+	})
+	stream, err := c.Attach(ctx, s.ID, "view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stream.Close() }()
+
+	got := readReplay(t, stream)
+	if !bytes.HasPrefix(got, sizeMarker(100, 40)) {
+		t.Fatalf("replay does not start with the size marker: %q", got)
+	}
+	if !bytes.HasSuffix(got, []byte(replayEndMarker)) {
+		t.Fatalf("replay does not end with the replay-end marker: %q", got)
+	}
+	if !bytes.Contains(got, []byte("hello")) {
+		t.Fatalf("replay is missing the output: %q", got)
+	}
+}
+
 func TestControlAttachEcho(t *testing.T) {
 	home := shortHome(t)
 	serve(t, home)
@@ -239,6 +298,9 @@ func TestViewInputDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = stream.Close() }()
+	// Consume the replay framing so the read below sees only what input would
+	// have produced.
+	readReplay(t, stream)
 	if _, err := stream.Write([]byte("nope\r")); err != nil {
 		t.Fatal(err)
 	}

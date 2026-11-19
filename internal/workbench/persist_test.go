@@ -236,7 +236,8 @@ func TestRestoreRunningAndExited(t *testing.T) {
 		t.Fatalf("restored exited session = %+v", gotEx)
 	}
 
-	// An exited restored session replays nothing and ends its stream at once.
+	// An exited restored session replays no output: the stream carries only the
+	// replay framing and ends at once.
 	stream, err := c2.Attach(ctx, ex.ID, "view")
 	if err != nil {
 		t.Fatal(err)
@@ -246,8 +247,9 @@ func TestRestoreRunningAndExited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("attach to an exited restored session: %v", err)
 	}
-	if len(data) != 0 {
-		t.Fatalf("exited attach replay = %q, want empty", data)
+	want := string(sizeMarker(80, 24)) + replayEndMarker
+	if string(data) != want {
+		t.Fatalf("exited attach replay = %q, want %q", data, want)
 	}
 }
 

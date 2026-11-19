@@ -3,6 +3,9 @@ import "./styles/index.css";
 import { App } from "./app/App";
 import { ToastProvider } from "./ui/gr8r";
 import { AnnouncerProvider } from "./ui/ui";
+import { installViewportFit } from "./lib/viewport";
+
+installViewportFit();
 
 const mount = document.getElementById("app");
 if (mount) {

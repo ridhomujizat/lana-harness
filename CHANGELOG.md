@@ -7,6 +7,22 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.11] - 2026-11-19
+
+### Fixed
+- Workbench: tab completion and syntax highlighting no longer draw text several columns to
+  the right of the prompt. Terminals now get `LANG=C.UTF-8` when no locale is set (the core
+  runs under launchd and the shell is not a login shell), so zsh measures prompt glyphs
+  like `▸ ⚙︎ ≡` correctly.
+- Workbench: lines no longer vanish after switching between the phone and the Mac, or after
+  a reload. The core marks each size change in the replayed output and the pane replays every
+  part at the size it was drawn for.
+- Workbench: clicking a link in a terminal opens it. In Lana.app it failed with "The
+  application can't be opened. -50", and links from Claude Code first asked "Do you want to
+  navigate…". Only http and https links open.
+- Phone: the page no longer zooms in when a field is focused, the topbar stays below the
+  browser's URL bar, and the chat input stays above the keyboard and Chrome's bottom toolbar.
+
 ## [0.5.0-beta.10] - 2026-11-18
 
 ### Added
