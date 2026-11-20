@@ -101,3 +101,28 @@ func MigrateUser(lanaHome string, candidates []string, defaultAgent string) (Mig
 func agentUserFile(lanaHome, name string) string {
 	return filepath.Join(lanaHome, "agents", name, "USER.md")
 }
+
+// MigrateAvatarSVG implements REQ-PXA-012: when an agent home still holds the
+// spec 43 blob avatar avatar.svg and no avatar.blob.svg backup, it renames the
+// file to avatar.blob.svg once, so spec 62 pixel avatars never read it. It
+// reports whether it renamed a file. A missing avatar.svg or an existing
+// avatar.blob.svg is a no-op, so a repeated run changes nothing; the caller
+// logs a failure and continues. The rename never touches avatar.json.
+func MigrateAvatarSVG(home Home) (bool, error) {
+	legacy := filepath.Join(home.Dir, "avatar.svg")
+	if _, err := os.Stat(legacy); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if _, err := os.Stat(home.AvatarBlob); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	if err := os.Rename(legacy, home.AvatarBlob); err != nil {
+		return false, err
+	}
+	return true, nil
+}
