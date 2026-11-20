@@ -148,28 +148,41 @@ func darwinArgs(pid int) []byte {
 	return bytes.TrimLeft(raw[i:], "\x00")
 }
 
-// darwinArgv returns a process's argv as KERN_PROCARGS2 reports it: exactly
-// argc NUL-terminated arguments, so environment entries are not mistaken for
-// arguments.
-func darwinArgv(pid int) []string {
+// darwinProcArgs2 reads a process's KERN_PROCARGS2 buffer and returns its argc
+// and the buffer past the exec path and the NUL padding that follows it: the
+// argc argv strings, then the environment strings. It returns false when the
+// pid is gone or the read is denied.
+func darwinProcArgs2(pid int) (argc int, rest []byte, ok bool) {
 	raw, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil || len(raw) < 4 {
-		return nil
+		return 0, nil, false
 	}
-	argc := int(int32(binary.NativeEndian.Uint32(raw[:4])))
+	argc = int(int32(binary.NativeEndian.Uint32(raw[:4])))
 	if argc < 1 {
-		return nil
+		return 0, nil, false
 	}
-	rest := raw[4:]
+	rest = raw[4:]
 	end := bytes.IndexByte(rest, 0)
 	if end < 0 {
-		return nil
+		return 0, nil, false
 	}
 	pos := end
 	for pos < len(rest) && rest[pos] == 0 {
 		pos++
 	}
+	return argc, rest[pos:], true
+}
+
+// darwinArgv returns a process's argv as KERN_PROCARGS2 reports it: exactly
+// argc NUL-terminated arguments, so environment entries are not mistaken for
+// arguments.
+func darwinArgv(pid int) []string {
+	argc, rest, ok := darwinProcArgs2(pid)
+	if !ok {
+		return nil
+	}
 	argv := make([]string, 0, argc)
+	pos := 0
 	for n := 0; n < argc && pos < len(rest); n++ {
 		next := bytes.IndexByte(rest[pos:], 0)
 		if next < 0 {
@@ -182,6 +195,32 @@ func darwinArgv(pid int) []string {
 		pos += next + 1
 	}
 	return argv
+}
+
+// processEnv returns pid's environment as KEY=VALUE strings, from the
+// KERN_PROCARGS2 buffer: the body that follows the argc arguments. It returns
+// nil when the pid is gone or the read is denied (spec 60 addendum: the agent's
+// own CLAUDE_CONFIG_DIR, which the session environment does not carry).
+func processEnv(pid int) []string {
+	argc, rest, ok := darwinProcArgs2(pid)
+	if !ok {
+		return nil
+	}
+	pos := 0
+	for n := 0; n < argc; n++ {
+		if pos >= len(rest) {
+			return nil
+		}
+		next := bytes.IndexByte(rest[pos:], 0)
+		if next < 0 {
+			return nil
+		}
+		pos += next + 1
+	}
+	if pos >= len(rest) {
+		return nil
+	}
+	return splitNul(rest[pos:])
 }
 
 // darwinArgv0 returns the basename of argv[0] with a leading dash removed, or

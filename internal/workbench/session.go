@@ -64,16 +64,19 @@ type session struct {
 	agentState string
 	// Persisted agent tracking (spec 60 REQ-WR-005): rAgent, agentSession and
 	// agentCwd outlive an agent leaving the foreground, unlike the live agent
-	// and agentState above, which clear at once. agentSeen is when the agent
-	// was last in the foreground; agentPID, agentStarted and agentLookupAt
-	// drive the conversation-id lookup (REQ-WR-010).
-	rAgent        string
-	agentSession  string
-	agentCwd      string
-	agentSeen     time.Time
-	agentPID      int
-	agentStarted  time.Time
-	agentLookupAt time.Time
+	// and agentState above, which clear at once. agentConfigDir is the explicit
+	// CLAUDE_CONFIG_DIR the conversation was found under, "" for the default
+	// account (spec 60 addendum). agentSeen is when the agent was last in the
+	// foreground; agentPID, agentStarted and agentLookupAt drive the
+	// conversation-id lookup (REQ-WR-010).
+	rAgent         string
+	agentSession   string
+	agentCwd       string
+	agentConfigDir string
+	agentSeen      time.Time
+	agentPID       int
+	agentStarted   time.Time
+	agentLookupAt  time.Time
 	// restored and resumedAgent mark a session brought back after a core
 	// restart (spec 60 REQ-WR-024); both clear when it exits or restarts.
 	restored     time.Time
@@ -214,7 +217,7 @@ func newExitedSession(rec sessionRecord) (*session, error) {
 		cols: cols, rows: rows, procCwd: physicalDir(dir),
 		exited: true, exitCode: rec.ExitCode, done: done,
 		rAgent: rec.Agent, agentSession: rec.AgentSession, agentCwd: rec.AgentCwd,
-		agentSeen: rec.AgentSeen,
+		agentConfigDir: rec.AgentConfigDir, agentSeen: rec.AgentSeen,
 	}
 	s.mu.Lock()
 	s.ring.mark(cols, rows)
@@ -738,7 +741,7 @@ func (s *session) refreshProgram() {
 			if agentPID != s.agentPID {
 				s.agentPID = agentPID
 				s.agentStarted = now.Add(-agentStartSkew)
-				s.agentSession, s.agentCwd = "", ""
+				s.agentSession, s.agentCwd, s.agentConfigDir = "", "", ""
 				s.agentLookupAt = time.Time{}
 			}
 			_, hasAdapter := adapterFor(label)
@@ -757,19 +760,24 @@ func (s *session) refreshProgram() {
 	if !lookup {
 		return
 	}
-	id, dir, ok := lookupAgentSession(label, query)
+	// The agent's own environment is read outside the session lock, like the
+	// lookup itself, so a cswap pane's CLAUDE_CONFIG_DIR is found even though
+	// the session environment does not carry it (spec 60 addendum).
+	query.ProcEnv = processEnv(lookupPID)
+	found, ok := lookupAgentSession(label, query)
 	if !ok {
 		return
 	}
 	s.mu.Lock()
 	if !s.exited && s.rAgent == label && s.agentPID == lookupPID {
-		s.agentSession = id
+		s.agentSession = found.ID
 		// The adapter's directory is authoritative; an empty one keeps the
 		// directory the core already knows.
+		dir := found.Dir
 		if dir == "" {
 			dir = s.cwd
 		}
-		s.agentCwd = dir
+		s.agentCwd, s.agentConfigDir = dir, found.ConfigDir
 	}
 	s.mu.Unlock()
 }
@@ -782,7 +790,7 @@ func (s *session) expireAgentLocked(now time.Time) {
 	if s.rAgent == "" || now.Sub(s.agentSeen) <= agentPersistTTL {
 		return
 	}
-	s.rAgent, s.agentSession, s.agentCwd = "", "", ""
+	s.rAgent, s.agentSession, s.agentCwd, s.agentConfigDir = "", "", "", ""
 	s.agentSeen = time.Time{}
 	s.agentPID, s.agentStarted, s.agentLookupAt = 0, time.Time{}, time.Time{}
 }
