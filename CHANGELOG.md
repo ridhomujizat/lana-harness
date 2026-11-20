@@ -7,6 +7,8 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.13] - 2026-11-21
+
 ### Added
 
 - Workbench file preview (spec 61): ⌘+click (Ctrl+click, or a tap on a phone) a file path printed in a terminal to open it in a panel beside the panes. HTML pages, Markdown, images, PDF and code with line numbers are shown; `path:line` jumps to the line. The daemon reads the file, so the preview also works over remote access. Only files under the home and temp folders are served, never `.ssh`, `.gnupg`, `.aws`, `secrets.env` or `.env` files, and pages run in a sandboxed frame.
@@ -20,9 +22,9 @@ but their config keys, events, and tools may still change between betas.
   gets a character picked from its name (hair, skin, eyes, accessory, outfit, or a robot),
   wearing the agent color. Small avatars show the head and shoulders in a tinted tile; the
   profile shows the whole character. A working agent nods and types.
-- The avatar dialog has Randomize, a picker for every part, and "Generate with AI" with two
-  modes: Parts (the model picks parts from your description) and Free draw (the model draws
-  a new character on the same template; an invalid drawing falls back to a random one).
+- The avatar dialog has Randomize, a picker for every part, and "Generate with AI", which
+  draws a new character on the same template from your description. When the model fails
+  twice, the dialog shows an error and keeps the character on screen.
 - Saved blob avatars are kept as `avatar.blob.svg` and no longer shown; agents use their
   pixel default until a new avatar is saved (`avatar.json`).
 
