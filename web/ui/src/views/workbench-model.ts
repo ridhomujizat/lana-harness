@@ -257,6 +257,58 @@ export function toggleZoom(layout: WbLayout, spaceId: string, tabId: string, ses
   );
 }
 
+/* Spec 61 REQ-WP-022: the focus history of a tab, so closing a pane gives the
+   focus back to the pane the user used before it rather than to the tab's
+   first one. The caller keeps it per tab, in memory. */
+export const FOCUS_HISTORY_MAX = 32;
+
+/* Moves a pane to the end of its tab's focus history, dropping an earlier
+   entry for it, and keeps the most recent FOCUS_HISTORY_MAX entries. */
+export function noteFocus(recent: string[], id: string): string[] {
+  if (!id) return recent;
+  const kept = recent.filter((x) => x !== id);
+  kept.push(id);
+  return kept.length > FOCUS_HISTORY_MAX ? kept.slice(kept.length - FOCUS_HISTORY_MAX) : kept;
+}
+
+/* Drops a pane from a tab's focus history. */
+export function forgetFocus(recent: string[], id: string): string[] {
+  if (!id) return recent;
+  return recent.filter((x) => x !== id);
+}
+
+/* The pane a tab's focus goes to when one of its panes is closed (REQ-WP-022):
+   the most recent pane of the tab's history that is still open, else the pane
+   before the closed one in tree order, then the one after. `remaining` lists
+   the tab's panes in tree order, the closed one included; other panes already
+   closing (closingIds) are never chosen. The focus is left where it is when the
+   closed pane is not the focused one. */
+export function focusAfterClose(
+  recent: string[],
+  remaining: string[],
+  focus: string | undefined,
+  closing: string,
+  closingIds: ReadonlySet<string> = new Set()
+): string | undefined {
+  if (focus !== closing) return focus;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const id = recent[i]!;
+    if (id === closing || closingIds.has(id)) continue;
+    if (remaining.includes(id)) return id;
+  }
+  const at = remaining.indexOf(closing);
+  if (at < 0) return focus;
+  for (let i = at - 1; i >= 0; i--) {
+    const id = remaining[i]!;
+    if (id !== closing && !closingIds.has(id)) return id;
+  }
+  for (let i = at + 1; i < remaining.length; i++) {
+    const id = remaining[i]!;
+    if (id !== closing && !closingIds.has(id)) return id;
+  }
+  return undefined;
+}
+
 export function setGrouping(layout: WbLayout, grouping: AgentGrouping): WbLayout {
   return { ...layout, grouping };
 }

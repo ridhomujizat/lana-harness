@@ -9,16 +9,20 @@ import "@xterm/xterm/css/xterm.css";
 import { attachURL, uploadWorkbenchDrops, type AttachMode } from "../api/workbench";
 import { dropText, openTerminalLink, takeNativeDragPaths, terminalKey, type NativeDrag } from "./workbench-model";
 import { splitReplay, startsWithSizeMarker } from "./workbench-replay";
+import { activationAllowed, matchLinksInLine } from "./workbench-links";
 
 /* Spec 55 REQ-WB-053: one terminal pane. xterm.js is the emulator, so the
    browser shows exactly what the program draws; the server only relays the
    pty bytes over a WebSocket (REQ-WB-041). */
 
+/* The dark terminal draws no background of its own (allowTransparency):
+   the pane card's colour shows through, so the focused card's brightness
+   is the terminal's too (spec 61 REQ-WP-020), as in the native app. */
 export const TERMINAL_THEME: ITheme = {
-  background: "#191817",
+  background: "#00000000",
   foreground: "#E8E6E1",
   cursor: "#E8E6E1",
-  cursorAccent: "#191817",
+  cursorAccent: "#2A2826",
   selectionBackground: "#4A4845",
   black: "#2A2927",
   red: "#F08A80",
@@ -105,6 +109,10 @@ export interface TermPaneProps {
   /* Spec 57 (REQ-RA-035): told when the server closes a control attachment
      because remote control locked (close code 4403). */
   onControlLost?: () => void;
+  /* Spec 61 REQ-WP-010: a ⌘/Ctrl+click (a tap on touch) on a file path, or an
+     OSC 8 file:// link, asks the page to preview it. The pane owns no preview
+     state. */
+  onOpenFile?: (sessionId: string, link: string) => void;
 }
 
 const encoder = new TextEncoder();
@@ -138,6 +146,7 @@ export function TermPane({
   claimRef,
   keyboardRef,
   onControlLost,
+  onOpenFile,
 }: TermPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [isOwner, setIsOwner] = useState(false);
@@ -152,6 +161,10 @@ export function TermPane({
   useEffect(() => {
     lostCbRef.current = onControlLost;
   }, [onControlLost]);
+  const openFileRef = useRef(onOpenFile);
+  useEffect(() => {
+    openFileRef.current = onOpenFile;
+  }, [onOpenFile]);
   const termRef = useRef<Terminal | null>(null);
   const followRef = useRef<((cols: number, rows: number) => void) | null>(null);
   const refitRef = useRef<(() => void) | null>(null);
@@ -198,13 +211,25 @@ export function TermPane({
       fontFamily: TERM_FONT,
       fontSize: fontRef.current,
       lineHeight: 1.15,
+      allowTransparency: true,
       theme: themeRef.current === "dark" ? TERMINAL_THEME : TERMINAL_THEME_LIGHT,
       cursorBlink: mode === "control",
       disableStdin: mode !== "control",
       scrollback: 5000,
       allowProposedApi: true,
       macOptionIsMeta: true,
-      linkHandler: { activate: (_e, uri) => openTerminalLink(uri) },
+      linkHandler: {
+        /* A file:// OSC 8 link goes to the preview on ⌘/Ctrl+click (a tap on
+           touch); everything else keeps opening in a new tab (REQ-WP-010). */
+        allowNonHttpProtocols: true,
+        activate: (event, uri) => {
+          if (uri.startsWith("file://")) {
+            if (activationAllowed(event)) openFileRef.current?.(sessionId, uri);
+            return;
+          }
+          openTerminalLink(uri);
+        },
+      },
     });
     termRef.current = term;
     const fit = new FitAddon();
@@ -213,6 +238,35 @@ export function TermPane({
     term.unicode.activeVersion = "11";
     term.loadAddon(new WebLinksAddon((_e, uri) => openTerminalLink(uri)));
     term.open(host);
+    /* Spec 61 REQ-WP-010: offer the file paths on a line to the preview. The
+       buffer range is 1-based and inclusive on both ends. */
+    const linkProvider = term.registerLinkProvider({
+      provideLinks: (lineNumber, callback) => {
+        const line = term.buffer.active.getLine(lineNumber - 1);
+        if (!line) {
+          callback(undefined);
+          return;
+        }
+        const matches = matchLinksInLine(line.translateToString(true));
+        if (!matches.length) {
+          callback(undefined);
+          return;
+        }
+        callback(
+          matches.map((match) => ({
+            range: {
+              start: { x: match.start + 1, y: lineNumber },
+              end: { x: match.end, y: lineNumber },
+            },
+            text: match.text,
+            activate: (event: MouseEvent) => {
+              if (!activationAllowed(event)) return;
+              openFileRef.current?.(sessionId, match.text);
+            },
+          }))
+        );
+      },
+    });
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => webgl.dispose());
@@ -638,6 +692,7 @@ export function TermPane({
       dataSub.dispose();
       binarySub.dispose();
       resizeSub.dispose();
+      linkProvider.dispose();
       if (sendRef && sendRef.current === send) sendRef.current = null;
       socket?.close();
       socket = null;

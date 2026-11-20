@@ -20,6 +20,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
+	github.com/yuin/goldmark v1.8.7
 	golang.org/x/crypto v0.55.0
 	golang.org/x/image v0.30.0
 	golang.org/x/net v0.58.0
