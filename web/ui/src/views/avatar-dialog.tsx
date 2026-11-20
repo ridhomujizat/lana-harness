@@ -20,7 +20,6 @@ import {
   IconButton,
   Input,
   Modal,
-  Seg,
   Select,
   Textarea,
 } from "../ui/gr8r";
@@ -82,8 +81,6 @@ export const PART_FIELDS: readonly { key: keyof AvatarCatalog & keyof AvatarPart
 ];
 
 const BACKGROUND_MODEL = "";
-
-type AiMode = "ai_parts" | "ai_draw";
 
 /* "#ABC" and "abc123" become "#aabbcc" / "#abc123"; anything else is "". */
 export function normalizeHex(value: string): string {
@@ -173,7 +170,6 @@ export function AvatarDialog({
   );
   const [hexDraft, setHexDraft] = useState(() => (isHexColor(color) ? normalizeHex(color) : ""));
   const [catalog, setCatalog] = useState<AvatarCatalog | null>(null);
-  const [aiMode, setAiMode] = useState<AiMode>("ai_parts");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(BACKGROUND_MODEL);
   const [options, setOptions] = useState<SelectOption[]>([
@@ -247,6 +243,14 @@ export function AvatarDialog({
         setError("The server returned an avatar the dashboard cannot show. Try again.");
         return;
       }
+      if (kind === "ai" && result.source === "local") {
+        /* The model failed twice; the server's random stand-in is not what
+           the owner asked for, so keep the shown character. */
+        setError(
+          "The model could not draw a valid character this time. Try again, or pick another model."
+        );
+        return;
+      }
       const source: ResultSource =
         kind === "random"
           ? "random"
@@ -285,7 +289,7 @@ export function AvatarDialog({
   }
 
   function generateWithAi() {
-    const body: GenerateAvatarRequest = { mode: aiMode, seed: randomSeed(), color: bodyColor };
+    const body: GenerateAvatarRequest = { mode: "ai_draw", seed: randomSeed(), color: bodyColor };
     const text = prompt.trim();
     if (text) {
       body.prompt = text.slice(0, PROMPT_LIMIT);
@@ -393,7 +397,7 @@ export function AvatarDialog({
             ? "Your pick of parts."
             : current.source === "local"
               ? "Random character (no model was available, or its answer did not pass the checks)."
-              : (current.avatar.kind === "drawn" ? "Drawn by " : "Parts picked by ") +
+              : (current.avatar.kind === "drawn" ? "Drawn by " : "Picked by ") +
                 (current.model || "the background model") +
                 ".";
 
@@ -444,11 +448,7 @@ export function AvatarDialog({
           </div>
           <div className="avatar-dialog-side">
             <p className="avatar-dialog-note" role="status" aria-live="polite">
-              {busy === "ai"
-                ? aiMode === "ai_draw"
-                  ? "Drawing a new character… this can take up to a minute."
-                  : "Picking parts… this can take a few seconds."
-                : sourceNote}
+              {busy === "ai" ? "Drawing a new character… this can take up to a minute." : sourceNote}
             </p>
             <div className="avatar-dialog-actions">
               <Button
@@ -605,27 +605,16 @@ export function AvatarDialog({
 
           <fieldset className="avatar-dialog-ai" disabled={locked}>
             <legend className="avatar-dialog-label">Generate with AI</legend>
-            <Seg
-              className="avatar-dialog-mode"
-              aria-label="AI mode"
-              options={[
-                { value: "ai_parts", label: "Parts", title: "The model picks parts from your description" },
-                { value: "ai_draw", label: "Free draw", title: "The model draws a new character on the template" },
-              ]}
-              value={aiMode}
-              onChange={(value) => setAiMode(value === "ai_draw" ? "ai_draw" : "ai_parts")}
-            />
+            <p className="avatar-dialog-hint">
+              The model draws a new pixel character from your description.
+            </p>
             <Textarea
               id="avatar-prompt"
               className="avatar-dialog-prompt"
               rows={2}
               maxLength={PROMPT_LIMIT}
               value={prompt}
-              placeholder={
-                aiMode === "ai_draw"
-                  ? "e.g. a wizard with a tall purple hat and a white beard"
-                  : "e.g. silver hair, round glasses, a red cap"
-              }
+              placeholder="e.g. a wizard with a tall purple hat and a white beard"
               aria-label="Description"
               onChange={(event) => setPrompt(event.target.value)}
             />

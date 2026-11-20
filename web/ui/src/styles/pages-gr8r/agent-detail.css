@@ -1367,10 +1367,6 @@
   font-size: var(--fs-sm);
 }
 
-.avatar-dialog-mode {
-  align-self: flex-start;
-}
-
 .avatar-dialog-prompt {
   width: 100%;
   resize: vertical;
@@ -1649,8 +1645,4 @@
   flex-shrink: 0;
   color: var(--text-3);
   font-size: var(--fs-2xs);
-}
-
-.avatar-dialog-mode button {
-  white-space: nowrap;
 }

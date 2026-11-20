@@ -174,7 +174,6 @@ describe("AvatarDialog", () => {
     });
     render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={vi.fn()} />);
     await waitFor(() => expect(getRouter).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("tab", { name: "Free draw" }));
     fireEvent.change(screen.getByLabelText("Description"), {
       target: { value: "  a teal wizard  " },
     });
@@ -195,7 +194,7 @@ describe("AvatarDialog", () => {
     expect((screen.getByRole("combobox", { name: "Hair" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("asks the model for parts and says when it fell back", async () => {
+  it("always asks for a free drawing and keeps the avatar when the model fails", async () => {
     vi.mocked(generateAgentAvatar).mockResolvedValueOnce({
       avatar: RANDOM,
       model: "",
@@ -205,11 +204,16 @@ describe("AvatarDialog", () => {
     render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "red cap" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
-    await waitFor(() => expect(shows("#00aa00")).toBe(true));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("could not draw a valid character");
     const body = vi.mocked(generateAgentAvatar).mock.calls[0]?.[1];
-    expect(body).toMatchObject({ mode: "ai_parts", prompt: "red cap" });
+    expect(body).toMatchObject({ mode: "ai_draw", prompt: "red cap" });
     expect(body).not.toHaveProperty("model");
-    expect(screen.getByText(/no model was available/)).toBeTruthy();
+    /* There is one AI mode: no Parts / Free draw toggle. */
+    expect(screen.queryByRole("tab", { name: "Parts" })).toBeNull();
+    /* The random stand-in is not shown; the saved avatar stays. */
+    expect(shows("#aa0000")).toBe(true);
+    expect(shows("#00aa00")).toBe(false);
   });
 
   it("re-renders a parts avatar in a new color without a new result", async () => {
