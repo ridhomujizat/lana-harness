@@ -13,3 +13,6 @@ func foregroundJob(fd uintptr) (agentdetect.Job, bool) { return agentdetect.Job{
 
 // openFiles is unavailable off macOS and Linux (spec 60 REQ-WR-010).
 func openFiles(pid int) []string { return nil }
+
+// processEnv is unavailable off macOS and Linux (spec 60 addendum).
+func processEnv(pid int) []string { return nil }

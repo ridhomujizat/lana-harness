@@ -147,14 +147,14 @@ func (s *server) restoreOne(rec sessionRecord) (*session, string, error) {
 			return nil, "", err
 		}
 		ss.mu.Lock()
-		ss.rAgent, ss.agentSession, ss.agentCwd, ss.agentSeen =
-			rec.Agent, rec.AgentSession, rec.AgentCwd, rec.AgentSeen
+		ss.rAgent, ss.agentSession, ss.agentCwd, ss.agentConfigDir, ss.agentSeen =
+			rec.Agent, rec.AgentSession, rec.AgentCwd, rec.AgentConfigDir, rec.AgentSeen
 		ss.restored, ss.created = time.Now(), rec.Created
 		ss.mu.Unlock()
 		if _, hasAdapter := adapterFor(rec.Agent); !hasAdapter {
 			return ss, "", nil
 		}
-		line, _ := resumeLine(rec.Agent, rec.AgentSession)
+		line, _ := resumeLine(rec.Agent, rec.AgentSession, rec.AgentConfigDir, home, sessionEnv(rec.ID, rec.Env))
 		ss.mu.Lock()
 		ss.resumedAgent = rec.Agent
 		ss.mu.Unlock()
@@ -172,8 +172,8 @@ func (s *server) restoreOne(rec sessionRecord) (*session, string, error) {
 			return nil, "", err
 		}
 		ss.mu.Lock()
-		ss.rAgent, ss.agentSession, ss.agentCwd, ss.agentSeen =
-			rec.Agent, rec.AgentSession, rec.AgentCwd, rec.AgentSeen
+		ss.rAgent, ss.agentSession, ss.agentCwd, ss.agentConfigDir, ss.agentSeen =
+			rec.Agent, rec.AgentSession, rec.AgentCwd, rec.AgentConfigDir, rec.AgentSeen
 		ss.restored, ss.created = time.Now(), rec.Created
 		ss.mu.Unlock()
 		return ss, "", nil
