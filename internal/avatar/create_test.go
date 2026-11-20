@@ -613,6 +613,42 @@ func TestCreateDrawPromptHasExample(t *testing.T) {
 	}
 }
 
+// REQ-PXA-006: the draw prompt asks for an own character instead of copying the
+// example, and drops the exact-proportions wording.
+func TestCreateDrawPromptDrawsFreely(t *testing.T) {
+	data, err := json.Marshal(DefaultFor("x", "#123456").Sprite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRouter{known: map[string]bool{"deepseek": true}, answer: func(int) string { return string(data) }}
+	if _, err := Create(context.Background(), r, Request{
+		Agent: "x", Config: core.AgentConfig{Model: "deepseek/chat"},
+		Mode: ModeAIDraw, Color: "#123456", Seed: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	system := r.reqs[0].System
+	if !strings.Contains(system, "Draw your own character") {
+		t.Fatalf("the draw prompt does not ask for an own character:\n%s", system)
+	}
+	if strings.Contains(system, "EXACTLY") {
+		t.Fatalf("the draw prompt still asks to copy the example:\n%s", system)
+	}
+	for _, want := range []string{
+		"only shows the format and the size",
+		"the head is about half the height",
+		"clear silhouette",
+		"strong contrast",
+		"6..14 colours",
+		"one darker shade per area on its left side",
+		"no single stray pixels",
+	} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("the draw prompt is missing %q:\n%s", want, system)
+		}
+	}
+}
+
 // REQ-PXA-005: the fallback user message is used when the description is empty.
 func TestCreateEmptyPrompt(t *testing.T) {
 	r := &fakeRouter{known: map[string]bool{"deepseek": true}, answer: func(int) string {
