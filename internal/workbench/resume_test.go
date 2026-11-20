@@ -306,7 +306,14 @@ func TestProcessEnv(t *testing.T) {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	}()
-	env := processEnv(cmd.Process.Pid)
+	// Right after Start the child may not have exec'd yet, and on Linux its
+	// /proc/<pid>/environ is still the parent's; wait for the exec.
+	var env []string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if env = processEnv(cmd.Process.Pid); envValue(env, "LANA_TEST_ENV") == "1" {
+			break
+		}
+	}
 	if got := envValue(env, "LANA_TEST_ENV"); got != "1" {
 		t.Fatalf("processEnv did not report LANA_TEST_ENV=1 (got %q)", got)
 	}
