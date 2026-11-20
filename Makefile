@@ -8,7 +8,7 @@ DIST ?= dist
 PREFIX ?= $(HOME)/.local
 PLATFORMS := "darwin arm64" "darwin amd64" "linux amd64" "linux arm64"
 
-.PHONY: build install release checksums clean web web-check tag macos-app macos-app-test app install-app app-dev install-app-dev
+.PHONY: build install release checksums clean web web-check tag macos-app macos-app-test app install-app app-dev install-app-dev desktop-dev desktop-build desktop-test
 
 # build writes ./lana for daily use, with the version, commit, and build date.
 build:
@@ -153,3 +153,17 @@ install-app:
 # macos-app-test runs the Swift unit tests of the menu bar app.
 macos-app-test:
 	cd $(MACOS_PKG) && $(SWIFT) test
+
+# desktop-dev runs the native Workbench app (spec #58) with live reload. It is
+# a separate Go module under apps/desktop, so it takes no part in the builds
+# above and MyGo never enters the root go.mod.
+desktop-dev:
+	cd apps/desktop && $(GO) tool mygo dev
+
+# desktop-build packages the native Workbench app into apps/desktop/build.
+desktop-build:
+	cd apps/desktop && $(GO) tool mygo build
+
+# desktop-test vets and tests the native Workbench app module.
+desktop-test:
+	cd apps/desktop && $(GO) vet ./... && $(GO) test ./...

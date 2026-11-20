@@ -9,6 +9,8 @@ result
 secrets.env
 dist/
 !web/dist/
+apps/desktop/build/
+apps/desktop/.mygo/
 .nix-cache/
 .gocache/
 .gomodcache/

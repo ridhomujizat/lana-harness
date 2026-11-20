@@ -1,0 +1,7 @@
+{
+  "name": "Lana Workbench",
+  "identifier": "dev.lana.workbench",
+  "version": "0.1.0",
+  "out": "build",
+  "macos": { "minimumSystemVersion": "13.0" }
+}
