@@ -46,6 +46,7 @@
   display: flex;
   flex: 1 1 auto;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   min-width: 0;
   padding: 0;
@@ -110,11 +111,6 @@ span.dock-win-who {
 .room-view.is-dock .cbox textarea {
   min-height: 22px;
   max-height: 120px;
-}
-
-.room-view.is-dock .chat-bubble,
-.room-view.is-dock .room-timeline .chat-bubble {
-  max-width: 85%;
 }
 
 .room-view.is-dock .room-timeline .turn,
