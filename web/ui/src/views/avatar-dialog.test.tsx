@@ -29,7 +29,7 @@ import type { RouterOverview } from "../api/router";
 import { getAgentAvatar, resetAvatarStore } from "../lib/avatar-store";
 import type { AvatarDoc } from "../lib/pixel-avatar";
 import { SAMPLE_PARTS, sampleAvatar, sampleDrawn } from "../test/pixel-sample";
-import { AvatarDialog } from "./avatar-dialog";
+import { AvatarDialog, MODEL_STORAGE_KEY, defaultDrawModel } from "./avatar-dialog";
 
 /* Spec 62: the pixel avatar dialog. Each test avatar wears its own shirt
    color, so the preview tells them apart by a rect fill. */
@@ -100,6 +100,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  window.localStorage.removeItem(MODEL_STORAGE_KEY);
   vi.clearAllMocks();
   vi.mocked(generateAgentAvatar).mockReset();
   resetAvatarStore();
@@ -310,5 +311,28 @@ describe("AvatarDialog", () => {
     fireEvent.click(picker);
     await waitFor(() => expect(screen.getByText("gpt-5-mini")).toBeTruthy());
     expect(screen.queryByText("Sonnet")).toBeNull();
+  });
+
+  it("starts drawings on the last pick, else a Claude Sonnet choice", () => {
+    const options = [
+      { value: "", label: "Background model" },
+      { value: "commandcode/deepseek/deepseek-v4.1-flash", label: "flash" },
+      { value: "commandcode/claude-sonnet-5-5", label: "Sonnet 5.5" },
+    ];
+    expect(defaultDrawModel(options, "")).toBe("commandcode/claude-sonnet-5-5");
+    expect(defaultDrawModel(options, "commandcode/deepseek/deepseek-v4.1-flash")).toBe(
+      "commandcode/deepseek/deepseek-v4.1-flash"
+    );
+    /* A remembered model that is gone falls back. */
+    expect(defaultDrawModel(options, "openai/gone")).toBe("commandcode/claude-sonnet-5-5");
+    expect(defaultDrawModel(options.slice(0, 2), "")).toBe("");
+  });
+
+  it("remembers the picked model for the next drawing", async () => {
+    render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={vi.fn()} />);
+    await waitFor(() => expect(getRouter).toHaveBeenCalled());
+    fireEvent.click(document.getElementById("avatar-model") as HTMLElement);
+    fireEvent.click(await screen.findByRole("option", { name: "gpt-5-mini" }));
+    expect(window.localStorage.getItem(MODEL_STORAGE_KEY)).toBe("openai/gpt-5-mini");
   });
 });

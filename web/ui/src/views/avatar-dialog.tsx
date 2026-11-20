@@ -82,6 +82,40 @@ export const PART_FIELDS: readonly { key: keyof AvatarCatalog & keyof AvatarPart
 
 const BACKGROUND_MODEL = "";
 
+/* The model the owner picked last for a drawing, kept per browser. */
+export const MODEL_STORAGE_KEY = "lana.avatar.drawModel";
+
+function storedModel(): string {
+  try {
+    return window.localStorage.getItem(MODEL_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeModel(value: string): void {
+  try {
+    if (value) {
+      window.localStorage.setItem(MODEL_STORAGE_KEY, value);
+    } else {
+      window.localStorage.removeItem(MODEL_STORAGE_KEY);
+    }
+  } catch {
+    /* Storage may be blocked; the pick still applies to this dialog. */
+  }
+}
+
+/* The model a drawing starts on: the owner's last pick when it is still
+   offered, else the first Claude Sonnet choice (it draws far better pixel
+   art than a flash model), else the background model. */
+export function defaultDrawModel(options: SelectOption[], remembered: string): string {
+  if (remembered && options.some((option) => option.value === remembered)) {
+    return remembered;
+  }
+  const sonnet = options.find((option) => /claude-sonnet/i.test(option.value));
+  return sonnet ? sonnet.value : BACKGROUND_MODEL;
+}
+
 /* "#ABC" and "abc123" become "#aabbcc" / "#abc123"; anything else is "". */
 export function normalizeHex(value: string): string {
   let text = String(value || "").trim().toLowerCase();
@@ -195,7 +229,9 @@ export function AvatarDialog({
     getRouter()
       .then((router) => {
         if (alive.current && router) {
-          setOptions(modelOptions(router.choices, router.providers, router.combos));
+          const next = modelOptions(router.choices, router.providers, router.combos);
+          setOptions(next);
+          setModel(defaultDrawModel(next, storedModel()));
         }
       })
       .catch(() => {
@@ -626,7 +662,10 @@ export function AvatarDialog({
                 options={options}
                 value={model}
                 disabled={locked}
-                onChange={setModel}
+                onChange={(value) => {
+                  setModel(value);
+                  storeModel(value);
+                }}
               />
               <Button
                 variant="secondary"

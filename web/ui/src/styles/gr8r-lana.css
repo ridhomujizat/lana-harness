@@ -419,3 +419,12 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
   height: 100dvh;
   height: min(var(--app-h, 100dvh), 100svh);
 }
+
+/* The pixel mark draws in currentColor, so no invert filter. */
+.lana-mark-pixel {
+  color: var(--text);
+}
+
+[data-theme="dark"] .lana-mark-pixel {
+  filter: none;
+}

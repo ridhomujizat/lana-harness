@@ -43,3 +43,35 @@ export function LanaMark({ size = 22 }: { size?: number }) {
     />
   );
 }
+
+/* The Lana mark as pixel art (spec 62 pixel style): the two strokes of the Λ
+   as 2 px stair steps on a 12x12 grid, the left stroke fainter as in the
+   vector mark. 24 px shows it at exactly 2x. It draws in currentColor, so it
+   follows the theme without the invert filter of the image mark. */
+const PIXEL_MARK_LEFT = [4, 4, 3, 3, 2, 2, 1, 1, 0, 0];
+const PIXEL_MARK_RIGHT = [5, 5, 6, 6, 7, 7, 8, 8, 9, 9];
+
+export function PixelLanaMark({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      className="lana-mark lana-mark-pixel"
+      width={size}
+      height={size}
+      viewBox="0 0 12 12"
+      shapeRendering="crispEdges"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <g fill="currentColor" opacity="0.55">
+        {PIXEL_MARK_LEFT.map((x, row) => (
+          <rect key={row} x={x} y={row + 1} width={3} height={1} />
+        ))}
+      </g>
+      <g fill="currentColor">
+        {PIXEL_MARK_RIGHT.map((x, row) => (
+          <rect key={row} x={x} y={row + 1} width={3} height={1} />
+        ))}
+      </g>
+    </svg>
+  );
+}
