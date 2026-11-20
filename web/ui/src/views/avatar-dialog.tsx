@@ -427,235 +427,238 @@ export function AvatarDialog({
         </>
       }
     >
-      <div className="avatar-dialog-top">
-        <div
-          className="avatar-dialog-stage"
-          aria-busy={busy === "ai" || busy === "random"}
-          style={{ "--pxc": cssColor } as CSSProperties}
-          data-testid="avatar-preview"
-        >
-          {current ? (
-            <PixelSprite sprite={current.avatar.sprite} view="full" animate />
-          ) : (
-            <span className="avatar-dialog-empty">?</span>
-          )}
-          {busy === "ai" ? <span className="avatar-dialog-drawing" aria-hidden="true" /> : null}
-        </div>
-        <div className="avatar-dialog-side">
-          <p className="avatar-dialog-note" role="status" aria-live="polite">
-            {busy === "ai"
-              ? aiMode === "ai_draw"
-                ? "Drawing a new character… this can take up to a minute."
-                : "Picking parts… this can take a few seconds."
-              : sourceNote}
-          </p>
-          <div className="avatar-dialog-actions">
-            <Button
-              variant="primary"
-              icon="shuffle"
-              loading={busy === "random"}
-              disabled={locked}
-              onClick={randomize}
-              data-autofocus
-            >
-              Randomize
-            </Button>
-            <IconButton
-              icon="undo-2"
-              label="Undo"
-              disabled={running || index <= 0}
-              onClick={() => setIndex((value) => Math.max(0, value - 1))}
-            />
-            <IconButton
-              icon="redo-2"
-              label="Redo"
-              disabled={running || index < 0 || index >= history.length - 1}
-              onClick={() => setIndex((value) => Math.min(history.length - 1, value + 1))}
-            />
+      <div className="avatar-dialog-layout">
+        <div className="avatar-dialog-aside">
+          <div
+            className="avatar-dialog-stage"
+            aria-busy={busy === "ai" || busy === "random"}
+            style={{ "--pxc": cssColor } as CSSProperties}
+            data-testid="avatar-preview"
+          >
+            {current ? (
+              <PixelSprite sprite={current.avatar.sprite} view="full" animate />
+            ) : (
+              <span className="avatar-dialog-empty">?</span>
+            )}
+            {busy === "ai" ? <span className="avatar-dialog-drawing" aria-hidden="true" /> : null}
           </div>
-          {current ? (
-            <div className="avatar-dialog-sizes" aria-hidden="true">
-              <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="xl" />
-              <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="lg" />
-              <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="md" />
+          <div className="avatar-dialog-side">
+            <p className="avatar-dialog-note" role="status" aria-live="polite">
+              {busy === "ai"
+                ? aiMode === "ai_draw"
+                  ? "Drawing a new character… this can take up to a minute."
+                  : "Picking parts… this can take a few seconds."
+                : sourceNote}
+            </p>
+            <div className="avatar-dialog-actions">
+              <Button
+                variant="primary"
+                icon="shuffle"
+                loading={busy === "random"}
+                disabled={locked}
+                onClick={randomize}
+                data-autofocus
+              >
+                Randomize
+              </Button>
+              <IconButton
+                icon="undo-2"
+                label="Undo"
+                disabled={running || index <= 0}
+                onClick={() => setIndex((value) => Math.max(0, value - 1))}
+              />
+              <IconButton
+                icon="redo-2"
+                label="Redo"
+                disabled={running || index < 0 || index >= history.length - 1}
+                onClick={() => setIndex((value) => Math.min(history.length - 1, value + 1))}
+              />
             </div>
+            {current ? (
+              <div className="avatar-dialog-sizes" aria-hidden="true">
+                <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="xl" />
+                <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="lg" />
+                <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="md" />
+              </div>
+            ) : null}
+          </div>
+          {history.length > 1 ? (
+            <div className="avatar-dialog-strip" role="group" aria-label="Results of this session">
+              {history.map((item, position) => (
+                <button
+                  key={position}
+                  type="button"
+                  className={"avatar-dialog-thumb" + (position === index ? " is-on" : "")}
+                  aria-pressed={position === index}
+                  aria-label={
+                    (item.source === "current"
+                      ? "Saved avatar"
+                      : item.source === "default"
+                        ? "Default avatar"
+                        : "Result " + (position + 1)) + (position === index ? ", selected" : "")
+                  }
+                  disabled={running}
+                  onClick={() => setIndex(position)}
+                >
+                  <AgentAvatar name={name} avatar={item.avatar} bodyColor={bodyColor} size="lg" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+        </div>
+        <div className="avatar-dialog-main">
+          {catalog ? (
+            <fieldset className="avatar-dialog-parts" disabled={locked}>
+              <legend className="avatar-dialog-label">Parts</legend>
+              {!parts && current ? (
+                <p className="avatar-dialog-hint">
+                  This character was drawn by a model. Randomize or pick a part to start from parts.
+                </p>
+              ) : null}
+              <div className="avatar-dialog-part-grid">
+                {PART_FIELDS.map((field) => {
+                  const value = parts ? String(parts[field.key] ?? "") : "";
+                  return (
+                    <label key={field.key} className="avatar-dialog-part">
+                      <span className="avatar-dialog-label">{field.label}</span>
+                      <Select
+                        size="sm"
+                        aria-label={field.label}
+                        options={itemOptions(catalog[field.key], value)}
+                        value={value}
+                        placeholder="—"
+                        disabled={!parts || locked}
+                        onChange={(next) => pickPart(field.key, next)}
+                      />
+                    </label>
+                  );
+                })}
+                <label className="avatar-dialog-part avatar-dialog-blush">
+                  <Checkbox
+                    checked={Boolean(parts && parts.blush)}
+                    disabled={!parts || locked}
+                    onChange={(checked: boolean) => pickPart("blush", checked)}
+                    aria-label="Blush"
+                  />
+                  <span className="avatar-dialog-label">Blush</span>
+                </label>
+              </div>
+            </fieldset>
+          ) : null}
+
+          <fieldset className="avatar-dialog-colors">
+            <legend className="avatar-dialog-label">Color</legend>
+            <div className="avatar-dialog-swatches" role="group" aria-label="Color presets">
+              {[...TOKEN_SWATCHES, ...PRESET_SWATCHES].map((entry) => {
+                const on = bodyColor === entry.value;
+                return (
+                  <button
+                    key={entry.value}
+                    type="button"
+                    className={"avatar-swatch" + (on ? " is-on" : "")}
+                    style={{ "--sw": agentCssColor(entry.value) } as CSSProperties}
+                    aria-pressed={on}
+                    aria-label={entry.label}
+                    title={entry.label}
+                    disabled={locked}
+                    onClick={() => pickColor(entry.value)}
+                  />
+                );
+              })}
+            </div>
+            <div className="avatar-dialog-custom">
+              <label className="avatar-dialog-label" htmlFor="avatar-hex">
+                Custom
+              </label>
+              <Input
+                id="avatar-hex"
+                className="avatar-dialog-hex"
+                type="text"
+                value={hexDraft}
+                placeholder="#ff6a00"
+                maxLength={7}
+                autoComplete="off"
+                spellCheck={false}
+                invalid={hexInvalid}
+                aria-describedby={hexInvalid ? "avatar-hex-error" : undefined}
+                disabled={locked}
+                onChange={(event) => typeHex(event.target.value)}
+              />
+              <input
+                type="color"
+                className="avatar-dialog-picker"
+                aria-label="Pick a custom color"
+                value={hexValue || "#7c5cff"}
+                disabled={locked}
+                onChange={(event) => pickColor(normalizeHex(event.target.value) || bodyColor)}
+              />
+              <span className="avatar-dialog-current">{colorLabel(bodyColor)}</span>
+            </div>
+            {hexInvalid ? (
+              <span className="err" id="avatar-hex-error">
+                <Ic name="circle-alert" size={12} />
+                Use a hex color like #ff6a00.
+              </span>
+            ) : null}
+          </fieldset>
+
+          <fieldset className="avatar-dialog-ai" disabled={locked}>
+            <legend className="avatar-dialog-label">Generate with AI</legend>
+            <Seg
+              className="avatar-dialog-mode"
+              aria-label="AI mode"
+              options={[
+                { value: "ai_parts", label: "Parts", title: "The model picks parts from your description" },
+                { value: "ai_draw", label: "Free draw", title: "The model draws a new character on the template" },
+              ]}
+              value={aiMode}
+              onChange={(value) => setAiMode(value === "ai_draw" ? "ai_draw" : "ai_parts")}
+            />
+            <Textarea
+              id="avatar-prompt"
+              className="avatar-dialog-prompt"
+              rows={2}
+              maxLength={PROMPT_LIMIT}
+              value={prompt}
+              placeholder={
+                aiMode === "ai_draw"
+                  ? "e.g. a wizard with a tall purple hat and a white beard"
+                  : "e.g. silver hair, round glasses, a red cap"
+              }
+              aria-label="Description"
+              onChange={(event) => setPrompt(event.target.value)}
+            />
+            <div className="avatar-dialog-ai-row">
+              <Select
+                id="avatar-model"
+                size="sm"
+                aria-label="Model"
+                options={options}
+                value={model}
+                disabled={locked}
+                onChange={setModel}
+              />
+              <Button
+                variant="secondary"
+                icon="sparkles"
+                loading={busy === "ai"}
+                disabled={running}
+                onClick={generateWithAi}
+              >
+                {busy === "ai" ? "Generating…" : "Generate"}
+              </Button>
+            </div>
+          </fieldset>
+
+          {error ? (
+            <p className="err avatar-dialog-error" role="alert">
+              <Ic name="circle-alert" size={12} />
+              {error}
+            </p>
           ) : null}
         </div>
       </div>
-
-      {catalog ? (
-        <fieldset className="avatar-dialog-parts" disabled={locked}>
-          <legend className="avatar-dialog-label">Parts</legend>
-          {!parts && current ? (
-            <p className="avatar-dialog-hint">
-              This character was drawn by a model. Randomize or pick a part to start from parts.
-            </p>
-          ) : null}
-          <div className="avatar-dialog-part-grid">
-            {PART_FIELDS.map((field) => {
-              const value = parts ? String(parts[field.key] ?? "") : "";
-              return (
-                <label key={field.key} className="avatar-dialog-part">
-                  <span className="avatar-dialog-label">{field.label}</span>
-                  <Select
-                    size="sm"
-                    aria-label={field.label}
-                    options={itemOptions(catalog[field.key], value)}
-                    value={value}
-                    placeholder="—"
-                    disabled={!parts || locked}
-                    onChange={(next) => pickPart(field.key, next)}
-                  />
-                </label>
-              );
-            })}
-            <label className="avatar-dialog-part avatar-dialog-blush">
-              <Checkbox
-                checked={Boolean(parts && parts.blush)}
-                disabled={!parts || locked}
-                onChange={(checked: boolean) => pickPart("blush", checked)}
-                aria-label="Blush"
-              />
-              <span className="avatar-dialog-label">Blush</span>
-            </label>
-          </div>
-        </fieldset>
-      ) : null}
-
-      <fieldset className="avatar-dialog-colors">
-        <legend className="avatar-dialog-label">Color</legend>
-        <div className="avatar-dialog-swatches" role="group" aria-label="Color presets">
-          {[...TOKEN_SWATCHES, ...PRESET_SWATCHES].map((entry) => {
-            const on = bodyColor === entry.value;
-            return (
-              <button
-                key={entry.value}
-                type="button"
-                className={"avatar-swatch" + (on ? " is-on" : "")}
-                style={{ "--sw": agentCssColor(entry.value) } as CSSProperties}
-                aria-pressed={on}
-                aria-label={entry.label}
-                title={entry.label}
-                disabled={locked}
-                onClick={() => pickColor(entry.value)}
-              />
-            );
-          })}
-        </div>
-        <div className="avatar-dialog-custom">
-          <label className="avatar-dialog-label" htmlFor="avatar-hex">
-            Custom
-          </label>
-          <Input
-            id="avatar-hex"
-            className="avatar-dialog-hex"
-            type="text"
-            value={hexDraft}
-            placeholder="#ff6a00"
-            maxLength={7}
-            autoComplete="off"
-            spellCheck={false}
-            invalid={hexInvalid}
-            aria-describedby={hexInvalid ? "avatar-hex-error" : undefined}
-            disabled={locked}
-            onChange={(event) => typeHex(event.target.value)}
-          />
-          <input
-            type="color"
-            className="avatar-dialog-picker"
-            aria-label="Pick a custom color"
-            value={hexValue || "#7c5cff"}
-            disabled={locked}
-            onChange={(event) => pickColor(normalizeHex(event.target.value) || bodyColor)}
-          />
-          <span className="avatar-dialog-current">{colorLabel(bodyColor)}</span>
-        </div>
-        {hexInvalid ? (
-          <span className="err" id="avatar-hex-error">
-            <Ic name="circle-alert" size={12} />
-            Use a hex color like #ff6a00.
-          </span>
-        ) : null}
-      </fieldset>
-
-      <fieldset className="avatar-dialog-ai" disabled={locked}>
-        <legend className="avatar-dialog-label">Generate with AI</legend>
-        <Seg
-          className="avatar-dialog-mode"
-          aria-label="AI mode"
-          options={[
-            { value: "ai_parts", label: "Parts", title: "The model picks parts from your description" },
-            { value: "ai_draw", label: "Free draw", title: "The model draws a new character on the template" },
-          ]}
-          value={aiMode}
-          onChange={(value) => setAiMode(value === "ai_draw" ? "ai_draw" : "ai_parts")}
-        />
-        <Textarea
-          id="avatar-prompt"
-          className="avatar-dialog-prompt"
-          rows={2}
-          maxLength={PROMPT_LIMIT}
-          value={prompt}
-          placeholder={
-            aiMode === "ai_draw"
-              ? "e.g. a wizard with a tall purple hat and a white beard"
-              : "e.g. silver hair, round glasses, a red cap"
-          }
-          aria-label="Description"
-          onChange={(event) => setPrompt(event.target.value)}
-        />
-        <div className="avatar-dialog-ai-row">
-          <Select
-            id="avatar-model"
-            size="sm"
-            aria-label="Model"
-            options={options}
-            value={model}
-            disabled={locked}
-            onChange={setModel}
-          />
-          <Button
-            variant="secondary"
-            icon="sparkles"
-            loading={busy === "ai"}
-            disabled={running}
-            onClick={generateWithAi}
-          >
-            {busy === "ai" ? "Generating…" : "Generate"}
-          </Button>
-        </div>
-      </fieldset>
-
-      {history.length > 1 ? (
-        <div className="avatar-dialog-strip" role="group" aria-label="Results of this session">
-          {history.map((item, position) => (
-            <button
-              key={position}
-              type="button"
-              className={"avatar-dialog-thumb" + (position === index ? " is-on" : "")}
-              aria-pressed={position === index}
-              aria-label={
-                (item.source === "current"
-                  ? "Saved avatar"
-                  : item.source === "default"
-                    ? "Default avatar"
-                    : "Result " + (position + 1)) + (position === index ? ", selected" : "")
-              }
-              disabled={running}
-              onClick={() => setIndex(position)}
-            >
-              <AgentAvatar name={name} avatar={item.avatar} bodyColor={bodyColor} size="lg" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {error ? (
-        <p className="err avatar-dialog-error" role="alert">
-          <Ic name="circle-alert" size={12} />
-          {error}
-        </p>
-      ) : null}
     </Modal>
   );
 }

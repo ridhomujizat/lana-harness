@@ -1221,6 +1221,59 @@
 /* Avatar dialog (spec 43, pixel avatars since spec 62)               */
 /* ------------------------------------------------------------------ */
 
+/* Two columns: the preview stays in view on the left (sticky inside the
+   scrolling modal body) while the parts, colors, and AI controls scroll on
+   the right. One column on a phone. */
+.avatar-dialog-layout {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: var(--s-5, 20px);
+  align-items: start;
+}
+
+.avatar-dialog-aside {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3, 12px);
+  min-width: 0;
+  z-index: 1;
+}
+
+.avatar-dialog-aside .avatar-dialog-stage {
+  width: 100%;
+}
+
+.avatar-dialog-aside .avatar-dialog-strip {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.avatar-dialog-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4, 16px);
+  min-width: 0;
+}
+
+.avatar-dialog-main .avatar-dialog-part-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+@media (max-width: 760px) {
+  .avatar-dialog-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .avatar-dialog-aside {
+    position: static;
+    align-items: center;
+  }
+  .avatar-dialog-aside .avatar-dialog-stage {
+    width: 176px;
+  }
+}
+
 .avatar-dialog-top {
   display: flex;
   gap: var(--s-4, 16px);
@@ -1596,4 +1649,8 @@
   flex-shrink: 0;
   color: var(--text-3);
   font-size: var(--fs-2xs);
+}
+
+.avatar-dialog-mode button {
+  white-space: nowrap;
 }
