@@ -75,6 +75,26 @@ export function putWorkbenchLayout(layout: unknown): Promise<unknown> {
   return request("PUT", "/v1/workbench/layout", layout);
 }
 
+/* Spec 61 REQ-WP-001, REQ-WP-002: the daemon reads a file a terminal pointed
+   at (a path with an optional :line[:col]) and reports how to show it. */
+export type WorkbenchPreviewKind = "html" | "markdown" | "image" | "pdf" | "text" | "binary";
+
+export interface WorkbenchPreview {
+  path: string;
+  name: string;
+  dir: string;
+  kind: WorkbenchPreviewKind;
+  size: number;
+  line: number;
+  col: number;
+  url: string;
+  raw_url: string;
+}
+
+export function previewWorkbenchFile(session: string, link: string, dir?: string): Promise<WorkbenchPreview> {
+  return request("POST", "/v1/workbench/preview", { session, link, dir: dir || undefined });
+}
+
 /* The WebSocket URL of one attachment (REQ-WB-041). Same origin, so the
    session cookie goes with it. */
 export function attachURL(id: string, mode: AttachMode): string {
