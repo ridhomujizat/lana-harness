@@ -12,7 +12,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { Ic, PixelLanaMark } from "../ui/icons";
+import { Ic, LanaMark } from "../ui/icons";
 import { getKnowledge, REVIEW_CHANGED_EVENT } from "../api/knowledge";
 import { useWorkbenchAttention } from "../views/workbench-attention";
 import type { Route } from "./router";
@@ -651,7 +651,7 @@ export function Sidebar({
             data-tip-pos={collapsed ? "right" : undefined}
             onClick={onNavigate}
           >
-            <PixelLanaMark size={24} />
+            <LanaMark size={24} />
             <span className="ws-text grow">
               <span className="ws-name lana-word trunc">LΛNΛ</span>
               <span className="ws-sub trunc" title={daemonTip}>
