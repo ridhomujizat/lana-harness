@@ -22,8 +22,8 @@
 .dock-win {
   display: flex;
   flex-direction: column;
-  width: 336px;
-  height: min(464px, calc(100dvh - 72px));
+  width: 386px;
+  height: min(534px, calc(100dvh - 72px));
   border: 1px solid var(--border-strong);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;

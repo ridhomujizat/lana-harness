@@ -33,7 +33,7 @@ import { RoomView } from "./room-timeline";
    dock; the agent keeps working. */
 
 const ACTIVE_MESSAGE_MS = 30 * 60 * 1000;
-const WINDOW_WIDTH = 336;
+const WINDOW_WIDTH = 386;
 const TAB_WIDTH = 196;
 const OVERFLOW_WIDTH = 56;
 const GAP = 12;
