@@ -301,9 +301,11 @@ export interface RoomViewProps {
   room: RoomRow;
   /* Spec 48: composer text prefilled from the route (?draft=). */
   initialDraft?: string;
+  /* "dock": the compact chat dock window, which draws its own header. */
+  variant?: "page" | "dock";
 }
 
-export function RoomView({ room, initialDraft }: RoomViewProps) {
+export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps) {
   /* API-WF-021: the reply of a workflow chat command shown above the composer. */
   const [commandReply, setCommandReply] = useState("");
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -1404,8 +1406,9 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
   }
 
   return (
-    <div className="room-view" {...fileDrop.handlers}>
+    <div className={variant === "dock" ? "room-view is-dock" : "room-view"} {...fileDrop.handlers}>
       <AttachmentDropOverlay active={fileDrop.active} />
+      {variant === "dock" ? null : (
       <header className="room-head">
         <a className="ibtn ibtn-sm room-back" href="#/chats" aria-label="All chats">
           <Ic name="chevron-left" size={18} />
@@ -1462,6 +1465,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
           )}
         </div>
       </header>
+      )}
       {settingsTab && team ? (
         <RoomSettings room={room} rows={roomRows} initialTab={settingsTab} onClose={() => setSettingsTab(null)} />
       ) : null}
@@ -1612,7 +1616,7 @@ export function RoomView({ room, initialDraft }: RoomViewProps) {
           ) : null}
           <textarea
             ref={inputRef}
-            rows={2}
+            rows={variant === "dock" ? 1 : 2}
             aria-label={"Message " + (team ? "the team" : displayLabel(room))}
             placeholder={placeholder}
             value={draft}

@@ -3385,8 +3385,11 @@ pre.json {
     padding: var(--space-card) var(--space-compact) 12px;
   }
 
+  /* Not a percentage: the bubble sits in a shrink-wrapped stack, so 85% of
+     it collapsed short messages to their narrowest word. The stack is
+     already capped at the row width. */
   .chat-bubble {
-    max-width: 85%;
+    max-width: 100%;
   }
 
   .chat-actions .button-ui {

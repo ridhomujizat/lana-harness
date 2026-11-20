@@ -4,6 +4,7 @@ import { ToastProvider } from "../ui/gr8r";
 import { AnnouncerProvider } from "../ui/ui";
 import { applyTheme, isThemeChoice, saveTheme } from "../app/theme";
 import { mockApi } from "./fixtures";
+import { resetDock } from "../app/chat-dock-store";
 
 /* Dev-only preview harness (web/ui/preview.html). It renders the real App tree
    with the same providers and stylesheet as src/main.tsx, but answers every
@@ -116,6 +117,27 @@ if (!window.location.hash || window.location.hash === "#") {
   } else if (requestedState === "setup") {
     window.location.hash = "#/setup/connect";
   }
+}
+
+/* ?dock=lana:open,researcher pins the chat dock: each room, ":open" for a
+   window, otherwise a minimized tab; all count as recently chatted.
+   &peek=name shows the new-reply card above that tab. */
+const requestedDock = params.get("dock");
+if (requestedDock !== null) {
+  const items = requestedDock
+    .split(",")
+    .filter(Boolean)
+    .map((entry) => {
+      const [name = "", flag] = entry.split(":");
+      return { name, open: flag === "open" };
+    });
+  const now = Date.now();
+  const peek = params.get("peek");
+  resetDock({
+    items,
+    recent: Object.fromEntries(items.map((item) => [item.name, now])),
+    peek: peek ? { name: peek, at: now } : null,
+  });
 }
 
 installMockApi();
