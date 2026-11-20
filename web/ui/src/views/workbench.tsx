@@ -63,6 +63,7 @@ import {
   type WbTab,
 } from "./workbench-model";
 import { TermPane, type SendInput } from "./workbench-term";
+import { prune as pruneTermCache } from "./workbench-term-cache";
 import { WorkbenchPreview as PreviewPanel } from "./workbench-preview";
 import { AgentLogo } from "./agent-logo";
 import { ProgramTile, TabTiles } from "./workbench-tile";
@@ -443,6 +444,7 @@ function PaneView({
             key={id + ":" + session.pid + ":" + access.mode}
             sessionId={id}
             mode={access.mode}
+            pid={session.pid}
             onControlLost={access.onControlLost}
             focused={focused}
             fontSize={fontSize}
@@ -772,6 +774,7 @@ function PhoneWorkbench(props: PhoneProps) {
               key={current + ":" + (session?.pid ?? 0) + ":" + access.mode}
               sessionId={current}
               mode={access.mode}
+              pid={session?.pid ?? 0}
               onControlLost={access.onControlLost}
               fontSize={fontSize}
               sendRef={sendRef}
@@ -1317,6 +1320,13 @@ export function WorkbenchPage() {
 
   const placedIds = useMemo(() => new Set(layout.spaces.flatMap((s) => s.tabs.flatMap(tabSessions))), [layout]);
   const orphans = useMemo(() => Object.values(sessions).filter((s) => !placedIds.has(s.id)), [sessions, placedIds]);
+  /* Spec 55: keep a terminal alive only while its session is in the layout. A
+     session that leaves the layout (closed, killed, removed) drops its cached
+     terminal; switching tabs or spaces leaves this set unchanged, so those panes
+     stay alive. */
+  useEffect(() => {
+    pruneTermCache(placedIds);
+  }, [placedIds]);
 
   const create = useCallback(
     async (dir: string, command?: string[], title?: string) => {

@@ -13,6 +13,7 @@ but their config keys, events, and tools may still change between betas.
 
 ### Changed
 
+- Workbench tab and space switches are instant again: terminals stay alive while their tab is hidden, so a Claude Code pane no longer replays its whole history on every switch.
 - Workbench panes: the focused pane is clearly brighter, terminals show the card colour, a new terminal takes the focus, closing the focused pane returns the focus to the pane used last, and panes fade in and out.
 - Workbench tabs have a fixed width with the title on the left, and programs and agents show as small landscape tiles (Claude, Codex, Cursor, Gemini, Grok, pi, omp and the rest). The side panel marks the focused agent.
 
