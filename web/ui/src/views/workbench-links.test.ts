@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activationAllowed, matchLinksInLine } from "./workbench-links";
+import { activationAllowed, matchLinksInLine, wrappedLink, type TermLine } from "./workbench-links";
 
 /* Spec 61 REQ-WP-010, REQ-WP-051: the file paths in a line of terminal text. */
 
@@ -104,5 +104,60 @@ describe("activationAllowed", () => {
   it("accepts a plain click on a touch device", () => {
     expect(activationAllowed({ metaKey: false, ctrlKey: false }, true, true)).toBe(true);
     expect(activationAllowed({ metaKey: false, ctrlKey: false }, false, true)).toBe(true);
+  });
+});
+
+/* A long path broken over terminal lines opens as one path. */
+describe("wrappedLink", () => {
+  const COLS = 40;
+  function lines(...rows: Array<string | [string, boolean]>): (row: number) => TermLine | undefined {
+    const list = rows.map((r) => (typeof r === "string" ? { text: r, wrapped: false } : { text: r[0], wrapped: r[1] }));
+    return (row) => list[row];
+  }
+  function at(getLine: (row: number) => TermLine | undefined, row: number, index = 0) {
+    const [match] = matchLinksInLine(getLine(row)!.text).slice(index);
+    return wrappedLink(getLine, row, match!, COLS);
+  }
+
+  /* Claude Code breaks the line itself and indents the rest. */
+  const hard = lines(
+    "  - Light: /private/tmp/scratch/border-l", // 40 cells: runs to the edge
+    "    ight.png",
+    "  - Dark: /private/tmp/x.png"
+  );
+
+  it("joins a hard-wrapped, indented path from its first piece", () => {
+    expect(hard(0)!.text.length).toBe(COLS);
+    const link = at(hard, 0);
+    expect(link?.text).toBe("/private/tmp/scratch/border-light.png");
+    expect(link).toMatchObject({ startRow: 0, startCol: 11, endRow: 1, endCol: 12 });
+  });
+
+  it("joins the same path from its second piece", () => {
+    expect(at(hard, 1)?.text).toBe("/private/tmp/scratch/border-light.png");
+  });
+
+  it("leaves a path alone when its line stops short of the edge", () => {
+    expect(at(hard, 2)).toBeNull();
+  });
+
+  it("joins xterm soft wraps over more than two lines", () => {
+    const soft = lines(
+      "open /aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true],
+      ["ccc/main.go now", true]
+    );
+    expect(at(soft, 0)?.text).toBe("/" + "a".repeat(35) + "b".repeat(40) + "ccc/main.go");
+    expect(at(soft, 2)?.text).toBe("/" + "a".repeat(35) + "b".repeat(40) + "ccc/main.go");
+  });
+
+  it("does not join across a blank line", () => {
+    const gap = lines("see /private/tmp/aaaaaaaaaaaaaaaaaaaaaaaa", "", "x.png");
+    expect(at(gap, 0)).toBeNull();
+  });
+
+  it("keeps the trailing punctuation out of the joined path", () => {
+    const punct = lines("file /Users/me/code/project/src/views/wo", "  rkbench.tsx).");
+    expect(at(punct, 0)?.text).toBe("/Users/me/code/project/src/views/workbench.tsx");
   });
 });

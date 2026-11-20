@@ -8,7 +8,7 @@ import type { MutableRefObject } from "react";
 import { attachURL, uploadWorkbenchDrops, type AttachMode } from "../api/workbench";
 import { dropText, openTerminalLink, takeNativeDragPaths, terminalKey, type NativeDrag } from "./workbench-model";
 import { splitReplay, startsWithSizeMarker } from "./workbench-replay";
-import { activationAllowed, matchLinksInLine } from "./workbench-links";
+import { activationAllowed, matchLinksInLine, wrappedLink, type TermLine } from "./workbench-links";
 
 /* The Workbench terminal cache (owner report 2026-11-19: switching tabs or
    spaces remounted the pane and Claude Code's whole history scrolled past while
@@ -72,7 +72,7 @@ export interface TermCacheProps {
   onFocus?: () => void;
   onOwnerChange?: (owner: boolean) => void;
   onControlLost?: () => void;
-  onOpenFile?: (sessionId: string, link: string) => void;
+  onOpenFile?: (sessionId: string, link: string, fallback?: string) => void;
   sendRef?: MutableRefObject<SendInput | null>;
   transformRef?: MutableRefObject<((data: string) => string) | null>;
   claimRef?: MutableRefObject<(() => void) | null>;
@@ -136,7 +136,7 @@ function createEntry(init: TermCacheInit): TermCacheEntry {
   let onFocus: (() => void) | undefined;
   let onOwnerChange: ((owner: boolean) => void) | undefined;
   let onControlLost: (() => void) | undefined;
-  let onOpenFile: ((sessionId: string, link: string) => void) | undefined;
+  let onOpenFile: ((sessionId: string, link: string, fallback?: string) => void) | undefined;
   let sendRef: MutableRefObject<SendInput | null> | undefined;
   let transformRef: MutableRefObject<((data: string) => string) | null> | undefined;
   let claimRef: MutableRefObject<(() => void) | null> | undefined;
@@ -190,18 +190,40 @@ function createEntry(init: TermCacheInit): TermCacheEntry {
         callback(undefined);
         return;
       }
+      /* A long path broken over lines opens as one path; the piece on this
+         line stays the fallback when the joined path does not exist. */
+      const getLine = (row: number): TermLine | undefined => {
+        const l = term.buffer.active.getLine(row);
+        return l ? { text: l.translateToString(true), wrapped: l.isWrapped } : undefined;
+      };
       callback(
-        matches.map((match) => ({
-          range: {
-            start: { x: match.start + 1, y: lineNumber },
-            end: { x: match.end, y: lineNumber },
-          },
-          text: match.text,
-          activate: (event: MouseEvent) => {
-            if (!activationAllowed(event)) return;
-            onOpenFile?.(sessionId, match.text);
-          },
-        }))
+        matches.map((match) => {
+          const joined = wrappedLink(getLine, lineNumber - 1, match, term.cols);
+          if (joined) {
+            return {
+              range: {
+                start: { x: joined.startCol + 1, y: joined.startRow + 1 },
+                end: { x: joined.endCol, y: joined.endRow + 1 },
+              },
+              text: joined.text,
+              activate: (event: MouseEvent) => {
+                if (!activationAllowed(event)) return;
+                onOpenFile?.(sessionId, joined.text, match.text);
+              },
+            };
+          }
+          return {
+            range: {
+              start: { x: match.start + 1, y: lineNumber },
+              end: { x: match.end, y: lineNumber },
+            },
+            text: match.text,
+            activate: (event: MouseEvent) => {
+              if (!activationAllowed(event)) return;
+              onOpenFile?.(sessionId, match.text);
+            },
+          };
+        })
       );
     },
   });
