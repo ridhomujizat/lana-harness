@@ -50,6 +50,7 @@ import { McpPage, McpDetailPage } from "../views/mcp";
 import { SetupWizard, setupNeeded } from "../views/setup";
 import { ChannelsPage, TelegramPage } from "../views/channels";
 import { UpdateCard } from "../views/update-card";
+import { ChatDock } from "../views/chat-dock";
 
 /* Spec 55: xterm.js is large, so the Workbench page loads on first visit. */
 const WorkbenchPage = lazy(() => import("../views/workbench").then((m) => ({ default: m.WorkbenchPage })));
@@ -655,6 +656,8 @@ export function App() {
           {routeContent(route, theme, changeTheme)}
         </div>
       </div>
+      {/* The chat dock keeps agent chats on screen on every page but Chats. */}
+      <ChatDock route={route} />
       {/* Spec 36: the self-update card floats over every signed-in page. */}
       <UpdateCard />
     </div>
