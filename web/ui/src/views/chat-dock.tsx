@@ -533,7 +533,11 @@ function DockHeads({ items, byName }: { items: DockItem[]; byName: Record<string
             key={row.name}
             row={row}
             selected={row.name === sheet}
-            onOpen={() => setSheet(row.name)}
+            onOpen={() => setSheet(row.name === sheet ? "" : row.name)}
+            onClose={() => {
+              setSheet("");
+              dockClose(row.name);
+            }}
           />
         ))}
       </div>
@@ -557,27 +561,6 @@ function DockHeads({ items, byName }: { items: DockItem[]; byName: Record<string
           >
             <Ic name="square-arrow-out-up-right" size={16} />
           </a>
-          <button
-            type="button"
-            className="ibtn ibtn-sm"
-            aria-label={"Close the chat with " + label}
-            title="Close"
-            onClick={() => {
-              setSheet("");
-              dockClose(sheetRow.name);
-            }}
-          >
-            <Ic name="x" size={16} />
-          </button>
-          <button
-            type="button"
-            className="ibtn ibtn-sm"
-            aria-label="Collapse"
-            title="Collapse"
-            onClick={() => setSheet("")}
-          >
-            <Ic name="chevron-down" size={16} />
-          </button>
         </header>
         <div className="dock-win-body">
           <RoomView key={sheetRow.name} room={sheetRow} variant="dock" />
@@ -587,26 +570,43 @@ function DockHeads({ items, byName }: { items: DockItem[]; byName: Record<string
   );
 }
 
+/* A head toggles its chat: a tap opens the sheet, a tap on the open chat's
+   head collapses it. The open chat's head carries the close button. */
 function DockHead({
   row,
   selected,
   onOpen,
+  onClose,
 }: {
   row: RoomRow;
   selected?: boolean;
   onOpen: () => void;
+  onClose?: () => void;
 }) {
   const label = displayLabel(row);
   return (
-    <button
-      type="button"
-      className={"dock-head state-" + (stateOf(row) || "idle") + (selected ? " on" : "")}
-      aria-label={"Open the chat with " + label}
-      aria-pressed={selected}
-      onClick={onOpen}
-    >
-      <RoomFace row={row} size="56" />
-      <TabBadge row={row} />
-    </button>
+    <span className="dock-head-wrap">
+      <button
+        type="button"
+        className={"dock-head state-" + (stateOf(row) || "idle") + (selected ? " on" : "")}
+        aria-label={(selected ? "Collapse the chat with " : "Open the chat with ") + label}
+        aria-expanded={selected}
+        onClick={onOpen}
+      >
+        <RoomFace row={row} size="56" />
+        {selected ? null : <TabBadge row={row} />}
+      </button>
+      {selected && onClose ? (
+        <button
+          type="button"
+          className="dock-head-x"
+          aria-label={"Close the chat with " + label}
+          title="Close"
+          onClick={onClose}
+        >
+          <Ic name="x" size={12} />
+        </button>
+      ) : null}
+    </span>
   );
 }

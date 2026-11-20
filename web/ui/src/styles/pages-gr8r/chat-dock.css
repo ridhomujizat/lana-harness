@@ -425,6 +425,26 @@ span.dock-win-who {
   box-shadow: 0 0 0 2px var(--surface);
 }
 
+.dock-head-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.dock-head-x {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--surface);
+  box-shadow: 0 0 0 2px var(--surface);
+  cursor: pointer;
+}
+
 .dock-head-label {
   display: inline-flex;
   align-items: center;

@@ -225,4 +225,20 @@ describe("ChatDock", () => {
     });
     expect(getDock().items.map((item) => item.name)).toEqual(["lana"]);
   });
+
+  it("on a phone a head toggles its sheet and the open head closes the chat", async () => {
+    setWidth(390);
+    installRows([room({ name: "dana", presence: presence("working", "Working") })]);
+    dockOpen("dana", 1);
+    render(<ChatDock route={route("home", "home")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open the chat with dana" }));
+    expect(screen.getByRole("dialog", { name: "Chat with dana" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Collapse" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse the chat with dana" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open the chat with dana" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close the chat with dana" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(getDock().items).toEqual([]);
+  });
 });
