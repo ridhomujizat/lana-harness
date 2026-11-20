@@ -7,6 +7,22 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.14] - 2026-11-21
+
+### Added
+
+- Chat dock: chats with agents stay on screen on every page except Chats, like the old Facebook chat bar. Leaving the Chats page while an agent works, waits on you, or replied in the last 30 minutes keeps that chat at the bottom right as a window with the full timeline and composer, so questions and approvals can be answered from any page. A chat you used in the last two hours comes back as a minimized tab, with a short preview card, when it starts waiting on you or a new reply arrives. Up to 2 windows (1 on smaller screens, 3 on very wide ones); the rest are tabs, with "+N" when they do not fit. On a phone the chats are floating heads: a tap opens or collapses the chat, and the open head has the close button. The dock is hidden on the Chats page.
+
+### Changed
+
+- The Workbench panel is restyled as one bordered card.
+- Markdown tables size each column to its content and scroll sideways when they are wider than the chat, instead of squeezing the columns.
+
+### Fixed
+
+- Short messages on a phone no longer wrap letter by letter in their bubble.
+- A long file path that wraps over terminal lines opens as one link in the Workbench.
+
 ## [0.5.0-beta.13] - 2026-11-21
 
 ### Added

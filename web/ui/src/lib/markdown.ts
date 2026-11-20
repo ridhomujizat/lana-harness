@@ -505,6 +505,13 @@ function tableAt(lines: string[], index: number): boolean {
   return separator.every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
+/* A table cell's content in a block with a max width: columns size to their
+   content up to that width, and a wider table scrolls in its wrap. Table
+   cells ignore max-width themselves, so the cap sits on this inner block. */
+function mdCell(children: ReturnType<typeof parseInline>): ReactElement {
+  return h("span", { className: "md-cell" }, ...children);
+}
+
 function parseTable(
   lines: string[],
   start: number
@@ -532,7 +539,7 @@ function parseTable(
         "tr",
         null,
         ...head.map((cell, cellIndex) =>
-          h("th", alignProps(aligns[cellIndex]), ...parseInline(cell))
+          h("th", alignProps(aligns[cellIndex]), mdCell(parseInline(cell)))
         )
       )
     ),
@@ -547,7 +554,7 @@ function parseTable(
             h(
               "td",
               alignProps(aligns[cellIndex]),
-              ...parseInline(row[cellIndex] || "")
+              mdCell(parseInline(row[cellIndex] || ""))
             )
           )
         )

@@ -116,7 +116,7 @@ export interface TermPaneProps {
   /* Spec 61 REQ-WP-010: a ⌘/Ctrl+click (a tap on touch) on a file path, or an
      OSC 8 file:// link, asks the page to preview it. The pane owns no preview
      state. */
-  onOpenFile?: (sessionId: string, link: string) => void;
+  onOpenFile?: (sessionId: string, link: string, fallback?: string) => void;
 }
 
 export function TermPane({

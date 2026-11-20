@@ -64,3 +64,4 @@
 @import "./mobile.css" layer(gr8r);
 @import "./pages-gr8r/update.css" layer(gr8r);
 @import "./pages-gr8r/pixel-avatar.css" layer(gr8r);
+@import "./pages-gr8r/chat-dock.css" layer(gr8r);

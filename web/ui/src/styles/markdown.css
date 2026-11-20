@@ -184,8 +184,11 @@
   overflow-x: auto;
 }
 
+/* A wide table keeps readable columns and scrolls sideways in its wrap
+   instead of being squeezed to the column width. */
 .md-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: var(--font-size-sm);
   line-height: var(--line-height-sm);
@@ -197,6 +200,12 @@
   border: 1px solid var(--divider);
   text-align: left;
   vertical-align: top;
+}
+
+.md-cell {
+  display: block;
+  max-width: 26em;
+  overflow-wrap: break-word;
 }
 
 .md-table th {
