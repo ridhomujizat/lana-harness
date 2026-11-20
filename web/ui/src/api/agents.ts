@@ -1,5 +1,6 @@
 import { request } from "./client";
 import { rememberAvatars } from "../lib/avatar-store";
+import type { AvatarDoc, AvatarParts } from "../lib/pixel-avatar";
 import type { ConfigAgent, GetConfigResponse } from "./settings";
 
 /* Agent calls of API-WEB-012, API-WEB-016, API-WEB-025, and the tab loader of
@@ -22,9 +23,9 @@ export interface Agent {
   /* A color token (brand, success, warning, error, blue, gray) or, since
      spec 43, a "#rrggbb" hex. */
   color: string;
-  /* Spec 43: the sanitized avatar of every agent and team: a saved one or
-     the default seeded from the name. Missing on an older server. */
-  avatar_svg?: string;
+  /* Spec 62: the pixel avatar of every agent and team: a saved one or the
+     default seeded from the name. Missing on an older server. */
+  avatar?: AvatarDoc;
   avatar_source?: AvatarSource;
   model: string | null;
   policy: string;
@@ -218,23 +219,48 @@ export async function loadAgentTab(name: string): Promise<AgentTabData> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Generated avatars (spec 43)                                        */
+/* Pixel avatars (spec 62)                                            */
 /* ------------------------------------------------------------------ */
 
+export type AvatarMode = "random" | "render" | "ai_parts" | "ai_draw";
+
 export interface GenerateAvatarRequest {
+  mode: AvatarMode;
+  seed?: number;
+  /* The pickers' parts, for mode "render". */
+  parts?: AvatarParts;
+  /* The agent color (token or "#rrggbb") the shirt should wear. */
+  color?: string;
+  /* The owner's description for the AI modes (at most 500 characters). */
+  prompt?: string;
   /* A router combo or "provider/model" address; omitted uses the agent's
      background model. Never a Claude Code model. */
   model?: string;
-  seed?: number;
 }
 
 export interface GenerateAvatarResponse {
-  svg: string;
+  avatar: AvatarDoc;
+  seed: number;
   /* "" when the built-in generator ran. */
   model: string;
-  seed: number;
-  /* "local" when no model was available or its output was invalid. */
+  /* "local" for random/render, or when the model failed twice. */
   source: "model" | "local";
+}
+
+export interface CatalogItem {
+  id: string;
+  label: string;
+}
+
+export interface AvatarCatalog {
+  species: CatalogItem[];
+  hair: CatalogItem[];
+  hair_color: CatalogItem[];
+  skin: CatalogItem[];
+  eyes: CatalogItem[];
+  accessory: CatalogItem[];
+  outfit: CatalogItem[];
+  pants: CatalogItem[];
 }
 
 /* "saved" for a chosen avatar, "default" for the one seeded from the name. */
@@ -242,7 +268,7 @@ export type AvatarSource = "saved" | "default";
 
 export interface PutAvatarResponse {
   name: string;
-  avatar_svg: string;
+  avatar: AvatarDoc;
   avatar_source?: AvatarSource;
   color: string;
   restart_required: boolean;
@@ -251,30 +277,38 @@ export interface PutAvatarResponse {
 /* DELETE puts the agent back on its default avatar and returns it. */
 export interface DeleteAvatarResponse {
   name: string;
-  avatar_svg: string;
+  avatar: AvatarDoc;
   avatar_source?: AvatarSource;
   color: string;
 }
 
-/* The server-rendered avatar for an <img>, colors baked in for the theme. */
-export function agentAvatarSvgUrl(name: string, theme: "light" | "dark"): string {
-  return avatarPath(name) + ".svg?theme=" + theme;
+/* The server-rendered avatar for an <img> (frame 0 of the sprite). */
+export function agentAvatarSvgUrl(
+  name: string,
+  theme: "light" | "dark",
+  view: "bust" | "full" = "bust"
+): string {
+  return avatarPath(name) + ".svg?theme=" + theme + "&view=" + view;
 }
 
 function avatarPath(name: string): string {
   return "/v1/agents/" + encodeURIComponent(name) + "/avatar";
 }
 
+export function getAvatarCatalog(): Promise<AvatarCatalog> {
+  return request<AvatarCatalog>("GET", "/v1/avatars/catalog");
+}
+
 export function generateAgentAvatar(
   name: string,
-  body: GenerateAvatarRequest = {}
+  body: GenerateAvatarRequest
 ): Promise<GenerateAvatarResponse> {
   return request<GenerateAvatarResponse>("POST", avatarPath(name) + "/generate", body);
 }
 
 export function putAgentAvatar(
   name: string,
-  body: { svg: string; color?: string }
+  body: { avatar: AvatarDoc; color?: string }
 ): Promise<PutAvatarResponse> {
   return request<PutAvatarResponse>("PUT", avatarPath(name), body);
 }

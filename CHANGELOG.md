@@ -15,6 +15,15 @@ but their config keys, events, and tools may still change between betas.
 
 - Workbench panes: the focused pane is clearly brighter, terminals show the card colour, a new terminal takes the focus, closing the focused pane returns the focus to the pane used last, and panes fade in and out.
 - Workbench tabs have a fixed width with the title on the left, and programs and agents show as small landscape tiles (Claude, Codex, Cursor, Gemini, Grok, pi, omp and the rest). The side panel marks the focused agent.
+- Agent avatars are now chibi pixel-art characters instead of blobs (spec 62). Each agent
+  gets a character picked from its name (hair, skin, eyes, accessory, outfit, or a robot),
+  wearing the agent color. Small avatars show the head and shoulders in a tinted tile; the
+  profile shows the whole character. A working agent nods and types.
+- The avatar dialog has Randomize, a picker for every part, and "Generate with AI" with two
+  modes: Parts (the model picks parts from your description) and Free draw (the model draws
+  a new character on the same template; an invalid drawing falls back to a random one).
+- Saved blob avatars are kept as `avatar.blob.svg` and no longer shown; agents use their
+  pixel default until a new avatar is saved (`avatar.json`).
 
 ## [0.5.0-beta.12] - 2026-11-19
 

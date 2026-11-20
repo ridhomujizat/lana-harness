@@ -4,7 +4,7 @@ import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { useEffect, useRef, useState } from "react";
-import type { AvatarMood } from "../lib/avatar-motion";
+import type { AvatarMood } from "../lib/pixel-avatar";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
@@ -952,7 +952,7 @@ export function TurnBlock({
     <article className="turn">
       {roomAgent ? null : (
         <div className="turn-head">
-          {agentColor || (storedAvatar && storedAvatar.svg) ? (
+          {agentColor || storedAvatar ? (
             <AgentFace name={agent} color={agentColor || storedAvatar?.color} size={32} />
           ) : (
             <AgentAvatar name={agent || "agent"} size="auto" />

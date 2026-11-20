@@ -421,6 +421,7 @@ export function AgentOverview({
           <span className="avatar-edit-wrap">
             <AgentAvatar
               size="xl"
+              view="full"
               name={data.name}
               color={gr8rColor(data.color)}
               presence={presenceState === "online" || presenceState === "working"}
@@ -429,7 +430,7 @@ export function AgentOverview({
               compact
               name={data.name}
               color={data.color}
-              svg={data.avatar_svg}
+              avatar={data.avatar}
               source={data.avatar_source}
               onSaved={() => setToken((value) => value + 1)}
             />

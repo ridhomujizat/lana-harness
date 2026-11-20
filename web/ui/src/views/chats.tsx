@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoomRow } from "../api/rooms";
 import { gr8rColor, PresenceLabel, useRooms } from "./presence";
-import type { AvatarMood } from "../lib/avatar-motion";
+import type { AvatarMood } from "../lib/pixel-avatar";
 import { displayLabel } from "./agent-label";
 import { relativeShort, RoomView } from "./room-timeline";
 import {

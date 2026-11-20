@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
 import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
+import { sampleAvatar } from "../test/pixel-sample";
 import { AgentFace } from "./workflow-common";
 
 /* Spec 43: no letter avatars for agents. Every agent avatar goes through
@@ -72,25 +73,18 @@ describe("agent avatars at call sites (spec 43)", () => {
     resetAvatarStore();
   });
 
-  it("shows the workflow guardian's svg", () => {
-    setAgentAvatar(
-      "guard",
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
-        '<rect x="15" y="15" width="70" height="70" rx="26" fill="currentColor"/>' +
-        '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
-        '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>',
-      "#ff6a00"
-    );
+  it("shows the workflow guardian's sprite", () => {
+    setAgentAvatar("guard", sampleAvatar(), "#ff6a00");
     const { container } = render(<AgentFace name="guard" />);
-    const avatar = container.querySelector(".av.has-svg") as HTMLElement;
-    expect(avatar.querySelector("svg rect")).not.toBeNull();
-    expect(avatar.style.getPropertyValue("--c")).toBe("#ff6a00");
+    const avatar = container.querySelector(".av.has-pixel") as HTMLElement;
+    expect(avatar.querySelector("svg.px-sprite rect")).not.toBeNull();
+    expect(avatar.style.getPropertyValue("--pxc")).toBe("#ff6a00");
   });
 
   it("asks the server for a guardian the store has not seen", () => {
     const { container } = render(<AgentFace name="night-bot" />);
     expect(container.querySelector("img.av-img")?.getAttribute("src")).toBe(
-      "/v1/agents/night-bot/avatar.svg?theme=light"
+      "/v1/agents/night-bot/avatar.svg?theme=light&view=bust"
     );
   });
 });

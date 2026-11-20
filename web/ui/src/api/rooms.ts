@@ -1,5 +1,6 @@
 import { queryString, request } from "./client";
 import { rememberAvatar, rememberAvatars } from "../lib/avatar-store";
+import type { AvatarDoc } from "../lib/pixel-avatar";
 import type { WorkflowCommandReply } from "./turns";
 import { watchVisibility } from "./visibility";
 
@@ -26,8 +27,8 @@ export interface RoomRow {
   /* display_name is the human name, "" when unset (falls back to name). */
   display_name?: string;
   color: string;
-  /* Spec 43: the saved or default avatar of the agent or team. */
-  avatar_svg?: string;
+  /* Spec 62: the saved or default pixel avatar of the agent or team. */
+  avatar?: AvatarDoc;
   avatar_source?: "saved" | "default";
   members: string[];
   lead: string;
@@ -119,8 +120,8 @@ export interface AgentOverview {
   kind: string;
   title: string;
   color: string;
-  /* Spec 43: the saved or default avatar of the agent or team. */
-  avatar_svg?: string;
+  /* Spec 62: the saved or default pixel avatar of the agent or team. */
+  avatar?: AvatarDoc;
   avatar_source?: "saved" | "default";
   persona_line: string;
   created_at: number;

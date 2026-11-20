@@ -1,13 +1,16 @@
 import { useSyncExternalStore } from "react";
+import { isAvatarDoc } from "./pixel-avatar";
+import type { AvatarDoc } from "./pixel-avatar";
 
-/* The shared agent avatar store (spec 43). Most avatar call sites only know an
-   agent's name, so every response that carries avatar_svg (GET /v1/agents,
-   GET /v1/rooms and its stream, the agent overview) feeds this map, and the
-   avatar dialog updates it after a save or a reset. AgentAvatar reads it, so
-   a new avatar shows everywhere without a reload. */
+/* The shared agent avatar store (spec 43, pixel avatars since spec 62). Most
+   avatar call sites only know an agent's name, so every response that carries
+   `avatar` (GET /v1/agents, GET /v1/rooms and its stream, the agent overview)
+   feeds this map, and the avatar dialog updates it after a save or a reset.
+   AgentAvatar reads it, so a new avatar shows everywhere without a reload. */
 
 export interface StoredAvatar {
-  svg: string;
+  avatar: AvatarDoc;
+  /* The agent color: a token or "#rrggbb"; "" when the row has none. */
   color: string;
   /* "saved" for a chosen avatar, "default" for the one seeded from the name;
      "" from an older server. */
@@ -17,6 +20,7 @@ export interface StoredAvatar {
 export type AvatarMap = Readonly<Record<string, StoredAvatar>>;
 
 let avatars: AvatarMap = {};
+let signatures: Record<string, string> = {};
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -28,12 +32,12 @@ function emit(): void {
 export interface AvatarRowLike {
   name?: string | null;
   color?: string | null;
-  avatar_svg?: string | null;
+  avatar?: unknown;
   avatar_source?: string | null;
 }
 
-/* rememberAvatars records the rows that carry avatar_svg. Rows from an older
-   server without the field leave the map alone. */
+/* rememberAvatars records the rows that carry a valid avatar document. Rows
+   without one (an older server) leave the map alone. */
 export function rememberAvatars(
   rows: ReadonlyArray<AvatarRowLike | null | undefined> | null | undefined
 ): void {
@@ -42,28 +46,24 @@ export function rememberAvatars(
   }
   let next: Record<string, StoredAvatar> | null = null;
   for (const row of rows) {
-    if (!row || !row.name || typeof row.avatar_svg !== "string") {
+    if (!row || !row.name || !isAvatarDoc(row.avatar)) {
       continue;
     }
     const name = String(row.name);
     const value: StoredAvatar = {
-      svg: row.avatar_svg,
+      avatar: row.avatar,
       color: typeof row.color === "string" ? row.color : "",
       source: typeof row.avatar_source === "string" ? row.avatar_source : "",
     };
-    const current = (next || avatars)[name];
-    if (
-      current &&
-      current.svg === value.svg &&
-      current.color === value.color &&
-      current.source === value.source
-    ) {
+    const signature = JSON.stringify([value.avatar, value.color, value.source]);
+    if (signatures[name] === signature) {
       continue;
     }
     if (!next) {
       next = { ...avatars };
     }
     next[name] = value;
+    signatures = { ...signatures, [name]: signature };
   }
   if (next) {
     avatars = next;
@@ -78,11 +78,11 @@ export function rememberAvatar(row: AvatarRowLike | null | undefined): void {
 /* setAgentAvatar records an avatar after a save or a reset. */
 export function setAgentAvatar(
   name: string,
-  svg: string,
+  avatar: AvatarDoc,
   color: string,
   source = "saved"
 ): void {
-  rememberAvatars([{ name, avatar_svg: svg, color, avatar_source: source }]);
+  rememberAvatars([{ name, avatar, color, avatar_source: source }]);
 }
 
 export function getAgentAvatar(name: string | null | undefined): StoredAvatar | undefined {
@@ -92,6 +92,7 @@ export function getAgentAvatar(name: string | null | undefined): StoredAvatar | 
 /* Tests start from an empty map. */
 export function resetAvatarStore(): void {
   avatars = {};
+  signatures = {};
   emit();
 }
 

@@ -1,82 +1,46 @@
 import type {
+  AvatarCatalog,
   DeleteAvatarResponse,
   GenerateAvatarResponse,
   PutAvatarResponse,
 } from "../api/agents";
+import { isAvatarDoc } from "../lib/pixel-avatar";
+import type { AvatarDoc, AvatarParts } from "../lib/pixel-avatar";
+import samples from "./pixel-avatars.json";
 
-/* Spec 43 preview fixtures: canonical blob avatars (a solid body in
-   currentColor with two white eye holes) and the avatar routes, so the
-   preview shows generated avatars and the dialog works without a daemon. */
+/* Spec 62 preview fixtures: real pixel avatars dumped from the Go renderer
+   (internal/avatar DefaultFor, RandomParts) and the avatar routes, so the
+   preview shows pixel characters and the dialog works without a daemon.
+   Regenerate pixel-avatars.json when the renderer changes. */
 
-const OPEN = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">';
-const CLOSE = "</svg>";
-
-function pill(x: number, y: number, w: number, h: number, angle: number): string {
-  const cx = x + w / 2;
-  const cy = y + h / 2;
-  return (
-    '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h +
-    '" rx="' + w / 2 + '" fill="#ffffff" transform="rotate(' + angle + " " + cx + " " + cy + ')"/>'
-  );
+interface Samples {
+  catalog: AvatarCatalog;
+  avatars: Record<string, AvatarDoc>;
+  random: AvatarDoc[];
 }
 
-function eye(cx: number, cy: number, rx: number, ry: number): string {
-  return '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + rx + '" ry="' + ry + '" fill="#ffffff"/>';
+const DATA = samples as unknown as Samples;
+
+export const AVATAR_CATALOG: AvatarCatalog = DATA.catalog;
+
+const RANDOM: AvatarDoc[] = DATA.random.filter(isAvatarDoc);
+
+function fallback(index: number): AvatarDoc {
+  return RANDOM[Math.abs(index) % RANDOM.length] as AvatarDoc;
 }
 
-export const AVATAR_CIRCLE =
-  OPEN +
-  '<path d="M50 12 C 72 12 88 28 88 50 C 88 72 72 88 50 88 C 28 88 12 72 12 50 C 12 28 28 12 50 12 Z" fill="currentColor"/>' +
-  pill(54, 30, 7, 18, -28) +
-  pill(68, 28, 7, 18, -28) +
-  CLOSE;
-
-export const AVATAR_SQUIRCLE =
-  OPEN +
-  '<rect x="15" y="15" width="70" height="70" rx="26" fill="currentColor" transform="rotate(-8 50 50)"/>' +
-  pill(37, 40, 7, 17, 6) +
-  pill(56, 42, 7, 17, 6) +
-  CLOSE;
-
-export const AVATAR_TRIANGLE =
-  OPEN +
-  '<path d="M50 13 C 56 13 60 17 64 24 L 87 66 C 93 78 85 88 70 88 L 30 88 C 15 88 7 78 13 66 L 36 24 C 40 17 44 13 50 13 Z" fill="currentColor"/>' +
-  eye(43, 58, 3.5, 5.5) +
-  eye(58, 58, 3.5, 5.5) +
-  CLOSE;
-
-export const AVATAR_CLOUD =
-  OPEN +
-  '<circle cx="36" cy="58" r="22" fill="currentColor"/>' +
-  '<circle cx="58" cy="40" r="22" fill="currentColor"/>' +
-  '<circle cx="66" cy="64" r="20" fill="currentColor"/>' +
-  '<ellipse cx="50" cy="70" rx="26" ry="16" fill="currentColor"/>' +
-  pill(41, 46, 7, 17, 8) +
-  pill(57, 47, 7, 17, 8) +
-  CLOSE;
-
-export const AVATAR_TEARDROP =
-  OPEN +
-  '<path d="M44 14 C 48 12 52 14 56 18 L 76 40 C 86 51 86 68 76 78 C 66 88 49 90 37 82 C 24 73 20 58 26 46 L 40 20 C 41 17 42 15 44 14 Z" fill="currentColor"/>' +
-  eye(46, 62, 4.5, 6.5) +
-  eye(60, 58, 3.5, 3.5) +
-  CLOSE;
-
-export const AVATAR_ELLIPSE =
-  OPEN +
-  '<ellipse cx="50" cy="54" rx="40" ry="32" fill="currentColor"/>' +
-  pill(34, 38, 7, 18, 24) +
-  pill(52, 37, 7, 18, -10) +
-  CLOSE;
-
-const SHAPES = [
-  AVATAR_SQUIRCLE,
-  AVATAR_TRIANGLE,
-  AVATAR_CLOUD,
-  AVATAR_TEARDROP,
-  AVATAR_ELLIPSE,
-  AVATAR_CIRCLE,
-];
+/* The default avatar of a fixture agent, or a stable pick for other names. */
+export function previewAvatar(name: string): AvatarDoc {
+  const known = DATA.avatars[name];
+  if (known && isAvatarDoc(known)) {
+    return known;
+  }
+  let hash = 0;
+  for (const char of name) {
+    hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  }
+  return fallback(hash);
+}
 
 let generated = 0;
 
@@ -88,26 +52,39 @@ export function mockAvatar(
   body: unknown
 ): { status: number; body: unknown } {
   const request = (body && typeof body === "object" ? body : {}) as {
+    mode?: string;
     model?: string;
     seed?: number;
-    svg?: string;
+    parts?: AvatarParts;
+    avatar?: AvatarDoc;
     color?: string;
+    prompt?: string;
   };
   if (action === "generate" && method === "POST") {
     generated += 1;
     const seed = typeof request.seed === "number" ? request.seed : generated;
+    let avatar = fallback(seed + generated);
+    if (request.mode === "render" && request.parts) {
+      /* The preview cannot render parts; it shows another sample with the
+         picked parts so the pickers follow. */
+      avatar = { ...fallback(generated), parts: { ...request.parts } };
+    }
+    if (request.mode === "ai_draw") {
+      avatar = { kind: "drawn", sprite: avatar.sprite, prompt: request.prompt || "" };
+    }
+    const ai = request.mode === "ai_parts" || request.mode === "ai_draw";
     const reply: GenerateAvatarResponse = {
-      svg: SHAPES[Math.abs(seed + generated) % SHAPES.length] || AVATAR_CIRCLE,
-      model: request.model ? request.model : generated % 3 === 0 ? "" : "openai/gpt-5-mini",
+      avatar,
       seed,
-      source: request.model || generated % 3 !== 0 ? "model" : "local",
+      model: ai ? request.model || "openai/gpt-5-mini" : "",
+      source: ai ? "model" : "local",
     };
     return { status: 200, body: reply };
   }
   if (method === "PUT") {
     const reply: PutAvatarResponse = {
       name,
-      avatar_svg: request.svg || "",
+      avatar: request.avatar && isAvatarDoc(request.avatar) ? request.avatar : previewAvatar(name),
       avatar_source: "saved",
       color: request.color || "brand",
       restart_required: false,
@@ -117,7 +94,7 @@ export function mockAvatar(
   if (method === "DELETE") {
     const reply: DeleteAvatarResponse = {
       name,
-      avatar_svg: SHAPES[name.length % SHAPES.length] || AVATAR_CIRCLE,
+      avatar: previewAvatar(name),
       avatar_source: "default",
       color: "brand",
     };

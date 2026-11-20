@@ -52,10 +52,10 @@ describe("AgentFace (REQ-ROOM-006)", () => {
       />
     );
 
-    /* Spec 43: the server-rendered avatar, then the initial if it fails. */
+    /* Spec 62: the server-rendered avatar, then the initial if it fails. */
     const face = screen.getByRole("img", { name: "dana, working" });
     const image = face.querySelector("img.av-img") as HTMLImageElement;
-    expect(image.getAttribute("src")).toBe("/v1/agents/dana/avatar.svg?theme=light");
+    expect(image.getAttribute("src")).toBe("/v1/agents/dana/avatar.svg?theme=light&view=bust");
     fireEvent.error(image);
     expect(face.textContent).toContain("D");
   });

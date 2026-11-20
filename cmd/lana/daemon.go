@@ -314,6 +314,19 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 		return errorf(2, "%v", err)
 	}
 	defer func() { _ = rt.Close() }()
+
+	// REQ-PXA-012: back up every configured agent's spec 43 blob avatar as
+	// avatar.blob.svg before spec 62 pixel avatars take over. Best-effort: a
+	// failure is logged and the daemon continues.
+	for _, agent := range rt.AgentNames() {
+		renamed, err := agenthome.MigrateAvatarSVG(agenthome.Paths(home, agent))
+		if err != nil {
+			slog.Warn("daemon: back up blob avatar", "agent", agent, "error", err)
+		} else if renamed {
+			slog.Info("daemon: backed up blob avatar", "agent", agent)
+		}
+	}
+
 	leases := newLeaseSet(rt)
 	defer leases.releaseAll()
 	// The drain gate refuses new turns while the daemon waits (REQ-TFB-002).

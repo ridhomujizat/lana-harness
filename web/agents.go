@@ -154,20 +154,20 @@ type agentJSON struct {
 	// Color is the resolved avatar color, never empty (API-ROOM-007): a
 	// palette token or a #RRGGBB hex color (spec 43).
 	Color string `json:"color"`
-	// AvatarSVG is the avatar the row shows, never empty: the saved one or
-	// the default seeded from the name (spec 43, API-AVT-005). AvatarSource
+	// Avatar is the avatar the row shows, never empty: the saved document or
+	// the default seeded from the name (spec 62, API-PXA-005). AvatarSource
 	// is "saved" or "default"; a team is always "default".
-	AvatarSVG       string   `json:"avatar_svg"`
-	AvatarSource    string   `json:"avatar_source"`
-	Default         bool     `json:"default"`
-	Provider        string   `json:"provider"`
-	Permission      string   `json:"permission"`
-	Workspace       string   `json:"workspace"`
-	DisabledTools   []string `json:"disabled_tools"`
-	ReasoningEffort string   `json:"reasoning_effort"`
-	ToolsCount      int      `json:"tools_count"`
-	SessionsCount   int      `json:"sessions_count"`
-	LastActiveAt    *int64   `json:"last_active_at"`
+	Avatar          avatar.Document `json:"avatar"`
+	AvatarSource    string          `json:"avatar_source"`
+	Default         bool            `json:"default"`
+	Provider        string          `json:"provider"`
+	Permission      string          `json:"permission"`
+	Workspace       string          `json:"workspace"`
+	DisabledTools   []string        `json:"disabled_tools"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	ToolsCount      int             `json:"tools_count"`
+	SessionsCount   int             `json:"sessions_count"`
+	LastActiveAt    *int64          `json:"last_active_at"`
 	// MemoryCapture is the background capture switch; an absent key means on
 	// (REQ-MEM-010).
 	MemoryCapture bool `json:"memory_capture"`
@@ -382,7 +382,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 				// brand color (API-ROOM-007).
 				row.Title = agent.Description
 				row.Color = "brand"
-				row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(name), avatar.Default
+				row.Avatar, row.AvatarSource = avatar.DefaultFor(name, row.Color), avatar.Default
 				if stat, ok := stats[name]; ok && stat.count > 0 {
 					row.SessionsCount = stat.count
 					lastActive := stat.lastActive
@@ -476,7 +476,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		} else {
 			row.ToolsCount = configTools
 		}
-		row.AvatarSVG, row.AvatarSource = s.agentAvatar(name)
+		row.Avatar, row.AvatarSource = s.agentAvatar(name, row.Color)
 		row.Default = defaultAgent != "" && name == defaultAgent
 		if stat, ok := stats[name]; ok && stat.count > 0 {
 			row.SessionsCount = stat.count

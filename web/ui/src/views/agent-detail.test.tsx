@@ -51,6 +51,7 @@ import { getClaudeAgent, getRouter } from "../api/router";
 import type { ClaudeAccount, RouterOverview } from "../api/router";
 import { AgentDetailPage } from "./agent-detail";
 import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
+import { sampleAvatar } from "../test/pixel-sample";
 
 function baseAgent(overrides: Partial<Agent>): Agent {
   return {
@@ -574,35 +575,29 @@ describe("agent detail header (REQ-WEB-047)", () => {
 /* Spec 43: the General tab shows the agent's generated avatar with the
    Generate avatar button, and a hex color shows as the Custom swatch. */
 describe("agent avatar on the General tab (spec 43)", () => {
-  const BLOB =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
-    '<circle cx="50" cy="50" r="38" fill="currentColor"/>' +
-    '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
-    '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>';
-
   afterEach(() => {
     resetAvatarStore();
   });
 
-  it("shows the svg, the custom color, and opens the dialog", async () => {
+  it("shows the sprite, the custom color, and opens the dialog", async () => {
     mockAgent("deepseek-flash");
     vi.mocked(listAgents).mockResolvedValue({
-      agents: [baseAgent({ model: "deepseek-flash", color: "#12b5a6", avatar_svg: BLOB })],
+      agents: [baseAgent({ model: "deepseek-flash", color: "#12b5a6", avatar: sampleAvatar() })],
     });
-    setAgentAvatar("coder", BLOB, "#12b5a6", "saved");
+    setAgentAvatar("coder", sampleAvatar(), "#12b5a6", "saved");
     const { container } = render(<AgentDetailPage name="coder" tab="general" />);
     await screen.findByLabelText("Title");
 
     const row = container.querySelector(".agent-avatar-edit");
-    expect(row?.querySelector(".av.has-svg svg")).toBeTruthy();
+    expect(row?.querySelector(".av.has-pixel svg.px-sprite")).toBeTruthy();
     const custom = screen.getByRole("radio", { name: "#12b5a6" }) as HTMLInputElement;
     expect(custom.checked).toBe(true);
 
     /* The header and the General row each have a way into the dialog. */
-    const buttons = screen.getAllByRole("button", { name: "Generate avatar" });
+    const buttons = screen.getAllByRole("button", { name: "Edit avatar" });
     expect(buttons.length).toBe(2);
     fireEvent.click(buttons[1] as HTMLElement);
-    expect(await screen.findByRole("dialog", { name: "Generate avatar" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "Agent avatar" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reset to default" })).toBeTruthy();
   });
 });
