@@ -108,6 +108,13 @@ span.dock-win-who {
   padding: 8px 10px 10px;
 }
 
+/* The page bubble is up to 460px, wider than a dock window. A fixed cap
+   (not a percentage: the bubble is shrink-wrapped, so a percentage would
+   collapse it to its narrowest word) keeps long messages inside. */
+.room-view.is-dock .chat-bubble {
+  max-width: min(310px, calc(100vw - 64px));
+}
+
 .room-view.is-dock .cbox textarea {
   min-height: 22px;
   max-height: 120px;
