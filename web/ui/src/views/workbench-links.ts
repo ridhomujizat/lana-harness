@@ -76,6 +76,122 @@ export function matchLinksInLine(line: string): LinkMatch[] {
   return links;
 }
 
+/* A long path broken over terminal lines. xterm marks its own soft wraps
+   (`wrapped`), but Claude Code and other TUIs break long lines themselves and
+   indent the rest, so a hard break counts as a wrap too when the line runs to
+   within EDGE_SLACK cells of the right edge. */
+export interface TermLine {
+  /* The line's text, trailing blanks trimmed (translateToString(true)). */
+  text: string;
+  /* xterm's isWrapped: this line continues the one above it. */
+  wrapped: boolean;
+}
+
+export interface WrappedLink {
+  text: string;
+  /* Buffer rows (0-based) and columns (0-based, end exclusive). */
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+}
+
+const EDGE_SLACK = 3;
+const MAX_WRAP_LINES = 8;
+
+interface Word {
+  start: number;
+  end: number;
+}
+
+function firstWord(text: string): Word | null {
+  const match = /\S+/.exec(text);
+  return match ? { start: match.index, end: match.index + match[0].length } : null;
+}
+
+function lastWord(text: string): Word | null {
+  const match = /\S+(?=\s*$)/.exec(text);
+  return match ? { start: match.index, end: match.index + match[0].length } : null;
+}
+
+/* Whether `line` runs on into `next`. */
+function runsOn(line: TermLine, next: TermLine | undefined, cols: number): boolean {
+  if (!next || !next.text.trim()) return false;
+  if (next.wrapped) return true;
+  return line.text.trimEnd().length >= cols - EDGE_SLACK;
+}
+
+/* The whole path when `match` (found on `row`) is one piece of a path broken
+   over lines: the last word of a line that runs on, or the first word of the
+   line after one. Null when the match stands alone. */
+export function wrappedLink(
+  getLine: (row: number) => TermLine | undefined,
+  row: number,
+  match: LinkMatch,
+  cols: number
+): WrappedLink | null {
+  const here = getLine(row);
+  if (!here) return null;
+  const first = firstWord(here.text);
+  const last = lastWord(here.text);
+  const inWord = (word: Word | null) => word !== null && match.start >= word.start && match.end <= word.end;
+  const isFirst = inWord(first);
+  const isLast = inWord(last);
+  const word = isFirst ? first : isLast ? last : null;
+  if (!word) return null;
+
+  const parts = [here.text.slice(word.start, word.end)];
+  let startRow = row;
+  let startCol = word.start;
+  let endRow = row;
+  let endCol = word.end;
+
+  if (isFirst) {
+    let cur = here;
+    for (let n = 0; n < MAX_WRAP_LINES; n++) {
+      const prev = getLine(startRow - 1);
+      if (!prev || !runsOn(prev, cur, cols)) break;
+      const piece = lastWord(prev.text);
+      if (!piece) break;
+      parts.unshift(prev.text.slice(piece.start, piece.end));
+      startRow--;
+      startCol = piece.start;
+      /* Go further up only while the piece fills its whole line. */
+      if (firstWord(prev.text)?.start !== piece.start) break;
+      cur = prev;
+    }
+  }
+  if (isLast) {
+    let cur = here;
+    for (let n = 0; n < MAX_WRAP_LINES; n++) {
+      const next = getLine(endRow + 1);
+      if (!next || !runsOn(cur, next, cols)) break;
+      const piece = firstWord(next.text);
+      if (!piece) break;
+      parts.push(next.text.slice(piece.start, piece.end));
+      endRow++;
+      endCol = piece.end;
+      if (lastWord(next.text)?.start !== piece.start) break;
+      cur = next;
+    }
+  }
+  if (parts.length < 2) return null;
+
+  const joined = parts.join("");
+  const [link] = matchLinksInLine(joined);
+  if (!link) return null;
+  /* Quotes or punctuation trimmed off the ends of the joined word. */
+  const lead = link.start;
+  const trail = joined.length - link.end;
+  return {
+    text: link.text,
+    startRow,
+    startCol: startCol + Math.min(lead, parts[0]!.length - 1),
+    endRow,
+    endCol: Math.max(endCol - trail, 1),
+  };
+}
+
 /* Activation: ⌘+click on macOS, Ctrl+click elsewhere, a plain tap on a touch
    device (REQ-WP-010). The platform is a parameter so the rules are testable. */
 export interface ActivationEvent {

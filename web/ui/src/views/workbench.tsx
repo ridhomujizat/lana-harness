@@ -382,7 +382,7 @@ interface PaneActions {
   onClose: (id: string) => void;
   onRestart: (id: string) => void;
   /* Spec 61 REQ-WP-010: a file path was activated in a terminal. */
-  onOpenFile: (id: string, link: string) => void;
+  onOpenFile: (id: string, link: string, fallback?: string) => void;
 }
 
 function PaneView({
@@ -543,7 +543,7 @@ interface PhoneProps {
   onRestart: (id: string) => void;
   onClose: (id: string) => void;
   /* Spec 61 REQ-WP-010: a file path was tapped in a terminal. */
-  onOpenFile: (id: string, link: string) => void;
+  onOpenFile: (id: string, link: string, fallback?: string) => void;
 }
 
 const PHONE_FONT_KEY = "lana.workbench.phoneFont";
@@ -1195,10 +1195,18 @@ export function WorkbenchPage() {
   /* Spec 61 REQ-WP-011: ask the daemon to read a path a terminal pointed at.
      The space's folder rides along as the relative-path fallback. A 404/403
      shows a short notice and opens nothing. */
-  const openPreview = useCallback((sessionId: string, link: string) => {
+  const openPreview = useCallback((sessionId: string, link: string, fallback?: string) => {
     const where = locate(layoutRef.current, sessionId);
     const dir = where ? spaceCwd(where.space, sessionsRef.current) || where.space.dir : "";
+    /* A path joined from wrapped lines falls back to the piece that was
+       clicked; when both are missing, the notice names the joined path. */
     previewWorkbenchFile(sessionId, link, dir)
+      .catch((err) => {
+        if (!fallback || !(err instanceof ApiError) || err.status !== 404) throw err;
+        return previewWorkbenchFile(sessionId, fallback, dir).catch(() => {
+          throw err;
+        });
+      })
       .then((data) => {
         setPreviewNotice("");
         setPreview({ session: sessionId, data });
