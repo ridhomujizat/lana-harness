@@ -12,12 +12,14 @@ import (
 
 // fakeRouter answers Provider and Resolve for the create tests and serves a
 // canned model reply through StreamChain. answer is called with the 0-based
-// attempt number; every call is recorded in metas and reqs.
+// attempt number; every call is recorded in metas and reqs. streamErr, when
+// set, makes the call fail before it answers.
 type fakeRouter struct {
-	known  map[string]bool
-	answer func(n int) string
-	metas  []core.LLMCallMeta
-	reqs   []core.ChatRequest
+	known     map[string]bool
+	answer    func(n int) string
+	streamErr func(n int) error
+	metas     []core.LLMCallMeta
+	reqs      []core.ChatRequest
 }
 
 func (r *fakeRouter) Provider(name string) (core.Provider, bool) {
@@ -50,6 +52,11 @@ func (r *fakeRouter) StreamChain(_ context.Context, chain []core.LLMTarget, req 
 	n := len(r.metas)
 	r.metas = append(r.metas, meta)
 	r.reqs = append(r.reqs, req)
+	if r.streamErr != nil {
+		if err := r.streamErr(n); err != nil {
+			return nil, core.LLMTarget{}, err
+		}
+	}
 	text := ""
 	if r.answer != nil {
 		text = r.answer(n)
@@ -271,7 +278,7 @@ func TestCreateDrawFromModel(t *testing.T) {
 // REQ-PXA-007: an invalid sprite twice falls back to the local parts.
 func TestCreateDrawInvalidFallsBack(t *testing.T) {
 	sprite := cloneSprite(DefaultFor("x", "").Sprite)
-	sprite.Head = sprite.Head[:spriteH-1]
+	setHead(&sprite, 5, 17, 's')
 	data, err := json.Marshal(sprite)
 	if err != nil {
 		t.Fatal(err)
@@ -293,6 +300,231 @@ func TestCreateDrawInvalidFallsBack(t *testing.T) {
 	}
 	if len(r.metas) != 2 {
 		t.Fatalf("the model was called %d times, want 2", len(r.metas))
+	}
+}
+
+// REQ-PXA-006: a key used in a layer but declared only in the worked example's
+// palette is repaired with the example colour and the reply is accepted.
+func TestParseDrawnRepairsExampleKey(t *testing.T) {
+	example := DefaultFor("x", "").Sprite
+	sprite := cloneSprite(example)
+	delete(sprite.Palette, "c")
+	data, err := json.Marshal(sprite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseDrawn(string(data), example.Palette)
+	if err != nil {
+		t.Fatalf("parseDrawn refused a repairable reply: %v", err)
+	}
+	if got.Palette["c"] != example.Palette["c"] {
+		t.Fatalf("repaired colour = %q, want %q", got.Palette["c"], example.Palette["c"])
+	}
+	if err := ValidateSprite(got); err != nil {
+		t.Fatalf("repaired sprite: %v", err)
+	}
+}
+
+// REQ-PXA-006: a key in neither the reply nor the example palette stays
+// invalid.
+func TestParseDrawnRefusesUnknownKey(t *testing.T) {
+	example := DefaultFor("x", "").Sprite
+	sprite := cloneSprite(example)
+	setBody(&sprite, 6, 13, 'Z')
+	data, err := json.Marshal(sprite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseDrawn(string(data), example.Palette); err == nil {
+		t.Fatal("parseDrawn accepted a key that is in no palette")
+	}
+}
+
+// REQ-PXA-006: a short row is right-padded with '.', a short layer with empty
+// rows at the bottom, and the reply is accepted.
+func TestParseDrawnPadsShortRowsAndLayers(t *testing.T) {
+	example := DefaultFor("x", "").Sprite
+	sprite := cloneSprite(example)
+	for i := range sprite.Head {
+		sprite.Head[i] = strings.TrimRight(sprite.Head[i], ".")
+	}
+	for i := range sprite.Body {
+		sprite.Body[i] = strings.TrimRight(sprite.Body[i], ".")
+	}
+	sprite.Head = sprite.Head[:spriteH-2]
+	sprite.Body = sprite.Body[:spriteH-2]
+	data, err := json.Marshal(sprite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := parseDrawn(string(data), example.Palette)
+	if err != nil {
+		t.Fatalf("parseDrawn refused a short reply: %v", err)
+	}
+	if len(got.Head) != spriteH || len(got.Body) != spriteH {
+		t.Fatalf("layers not padded to %d rows: %d, %d", spriteH, len(got.Head), len(got.Body))
+	}
+	for _, row := range append(append([]string{}, got.Head...), got.Body...) {
+		if len(row) != spriteW {
+			t.Fatalf("row not padded to %d characters: %q", spriteW, row)
+		}
+	}
+	if err := ValidateSprite(got); err != nil {
+		t.Fatalf("padded sprite: %v", err)
+	}
+}
+
+// REQ-PXA-006: a row longer than 16 characters or a layer longer than 20 rows
+// is refused.
+func TestParseDrawnRefusesLongRowsAndLayers(t *testing.T) {
+	example := DefaultFor("x", "").Sprite
+	longRow := cloneSprite(example)
+	longRow.Body[0] = longRow.Body[0] + "."
+	data, err := json.Marshal(longRow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseDrawn(string(data), example.Palette); err == nil {
+		t.Fatal("parseDrawn accepted a row longer than 16")
+	}
+	longLayer := cloneSprite(example)
+	longLayer.Head = append(longLayer.Head, strings.Repeat(".", spriteW))
+	data, err = json.Marshal(longLayer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseDrawn(string(data), example.Palette); err == nil {
+		t.Fatal("parseDrawn accepted a head layer longer than 20 rows")
+	}
+}
+
+// REQ-PXA-006: the draw retry sends the refused reply and the reason, and a
+// corrected answer yields a model result.
+func TestCreateDrawRetrySendsRefusal(t *testing.T) {
+	bad := cloneSprite(DefaultFor("x", "").Sprite)
+	setHead(&bad, 5, 17, 's')
+	badData, err := json.Marshal(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := cloneSprite(DefaultFor("x", "").Sprite)
+	good.Palette["h"] = "#ff00ff"
+	goodData, err := json.Marshal(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRouter{known: map[string]bool{"deepseek": true}}
+	r.answer = func(n int) string {
+		if n == 0 {
+			return string(badData)
+		}
+		return string(goodData)
+	}
+	got, err := Create(context.Background(), r, Request{
+		Agent: "x", Config: core.AgentConfig{Model: "deepseek/chat"},
+		Mode: ModeAIDraw, Prompt: "a wizard", Seed: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != SourceModel {
+		t.Fatalf("Create = %+v", got)
+	}
+	if got.Avatar.Sprite.Palette["h"] != "#ff00ff" {
+		t.Fatalf("the corrected answer was not kept: %+v", got.Avatar.Sprite.Palette)
+	}
+	if len(r.reqs) != 2 {
+		t.Fatalf("the model was called %d times, want 2", len(r.reqs))
+	}
+	msgs := r.reqs[1].Messages
+	if len(msgs) != 3 {
+		t.Fatalf("the retry has %d messages, want 3", len(msgs))
+	}
+	if msgs[0].Role != core.RoleUser || msgs[1].Role != core.RoleAssistant || msgs[2].Role != core.RoleUser {
+		t.Fatalf("retry roles = %v, %v, %v", msgs[0].Role, msgs[1].Role, msgs[2].Role)
+	}
+	if !strings.Contains(msgs[0].Content[0].Text, "a wizard") {
+		t.Fatalf("the retry lost the original prompt: %q", msgs[0].Content[0].Text)
+	}
+	if msgs[1].Content[0].Text != string(badData) {
+		t.Fatalf("retry assistant = %q, want the previous reply", msgs[1].Content[0].Text)
+	}
+	if !strings.Contains(msgs[2].Content[0].Text, "refused") || !strings.Contains(msgs[2].Content[0].Text, "below y 16") {
+		t.Fatalf("retry refusal = %q", msgs[2].Content[0].Text)
+	}
+}
+
+// REQ-PXA-005: the parts retry sends the refused reply and the reason, and a
+// corrected answer yields a model result.
+func TestCreatePartsRetrySendsRefusal(t *testing.T) {
+	r := &fakeRouter{known: map[string]bool{"deepseek": true}}
+	r.answer = func(n int) string {
+		if n == 0 {
+			return "I can't draw that."
+		}
+		return `{"species":"robot"}`
+	}
+	got, err := Create(context.Background(), r, Request{
+		Agent: "coder", Config: core.AgentConfig{Model: "deepseek/chat"},
+		Mode: ModeAIParts, Seed: 7, Color: "#123456",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != SourceModel || got.Avatar.Parts.Species != "robot" {
+		t.Fatalf("Create = %+v", got)
+	}
+	if len(r.reqs) != 2 {
+		t.Fatalf("the model was called %d times, want 2", len(r.reqs))
+	}
+	msgs := r.reqs[1].Messages
+	if len(msgs) != 3 {
+		t.Fatalf("the retry has %d messages, want 3", len(msgs))
+	}
+	if msgs[1].Role != core.RoleAssistant || msgs[1].Content[0].Text != "I can't draw that." {
+		t.Fatalf("retry assistant = %+v", msgs[1])
+	}
+	if !strings.Contains(msgs[2].Content[0].Text, "refused") || !strings.Contains(msgs[2].Content[0].Text, "no JSON object") {
+		t.Fatalf("retry refusal = %q", msgs[2].Content[0].Text)
+	}
+}
+
+// REQ-PXA-007: a call error (no reply text) is retried with a fresh prompt and
+// a new seed, not the conversation.
+func TestCreateDrawRetryAfterCallError(t *testing.T) {
+	data, err := json.Marshal(DefaultFor("x", "").Sprite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &fakeRouter{
+		known: map[string]bool{"deepseek": true},
+		streamErr: func(n int) error {
+			if n == 0 {
+				return errors.New("boom")
+			}
+			return nil
+		},
+		answer: func(int) string { return string(data) },
+	}
+	got, err := Create(context.Background(), r, Request{
+		Agent: "x", Config: core.AgentConfig{Model: "deepseek/chat"},
+		Mode: ModeAIDraw, Prompt: "a wizard", Seed: 9,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Source != SourceModel {
+		t.Fatalf("Create = %+v", got)
+	}
+	if len(r.reqs) != 2 {
+		t.Fatalf("the model was called %d times, want 2", len(r.reqs))
+	}
+	msgs := r.reqs[1].Messages
+	if len(msgs) != 1 {
+		t.Fatalf("the call-error retry has %d messages, want a fresh prompt", len(msgs))
+	}
+	if want := drawUserPrompt("a wizard", NextSeed(9)); msgs[0].Content[0].Text != want {
+		t.Fatalf("retry prompt = %q, want %q", msgs[0].Content[0].Text, want)
 	}
 }
 

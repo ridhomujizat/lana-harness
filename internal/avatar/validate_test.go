@@ -21,7 +21,7 @@ func TestValidateSpriteRefuses(t *testing.T) {
 				setHead(s, x, 7, 'e')
 			}
 		},
-		"eye at y 4":            func(s *Sprite) { setHead(s, 7, 4, 'e') },
+		"eye at y 12":           func(s *Sprite) { setHead(s, 7, 12, 'e') },
 		"tiny head":             tinyHead,
 		"10-cell body":          func(s *Sprite) { tenCellBody(s) },
 		"missing s":             func(s *Sprite) { delete(s.Palette, "s") },
@@ -40,6 +40,20 @@ func TestValidateSpriteRefuses(t *testing.T) {
 				t.Fatalf("%s: error %q has no reason", name, err)
 			}
 		})
+	}
+}
+
+// REQ-PXA-003: an eye at y 11 is inside the relaxed range, one at y 12 is not.
+func TestValidateSpriteEyeRange(t *testing.T) {
+	sprite := baseSprite(t)
+	setHead(&sprite, 7, 11, 'e')
+	if err := ValidateSprite(sprite); err != nil {
+		t.Fatalf("eye at y 11 refused: %v", err)
+	}
+	at12 := baseSprite(t)
+	setHead(&at12, 7, 12, 'e')
+	if err := ValidateSprite(at12); err == nil {
+		t.Fatal("eye at y 12 accepted")
 	}
 }
 

@@ -73,7 +73,7 @@ func drawSystemPrompt(agent, color string) string {
 	b.WriteString("- Palette colours are lower-case #rrggbb. The key 'e' marks the eye cells and the key 's' the main skin (or metal) tone; both keys are required.\n")
 	b.WriteString("- Every filled body cell must stay inside x 3..12, y 12..17 (the shirt, arms, pants, legs and shoes).\n")
 	b.WriteString("- Every filled head cell must be at or above y 16; hair and accessories may use x 0..15 and y 0..16.\n")
-	b.WriteString("- The head layer must show a full head in x 3..12, y 3..11 (at least 30 filled cells there) and 2..8 eye cells ('e') in y 5..10.\n")
+	b.WriteString("- The head layer must show a full head in x 3..12, y 3..11 (at least 30 filled cells there) and 2..8 eye cells ('e') in y 4..11.\n")
 	b.WriteString("- Recommended: a chin line in row y 12, x 5..10, in a dark colour.\n")
 	b.WriteString("- Do not draw any outline: the renderer adds the outline around the filled cells.\n")
 	b.WriteString("- Keep the proportions of the example below EXACTLY. Change only the hair, the face details, the accessories, the clothes and the colours.\n")
@@ -87,6 +87,21 @@ func drawSystemPrompt(agent, color string) string {
 // (or a fallback) and the seed (REQ-PXA-006).
 func drawUserPrompt(desc string, seed int64) string {
 	return promptWithSeed(desc, drawFallbackPrompt, seed)
+}
+
+// modeUserPrompt is the user message of a mode: the description (or fallback)
+// and the seed (REQ-PXA-005, REQ-PXA-006).
+func modeUserPrompt(req Request, seed int64) string {
+	if req.Mode == ModeAIDraw {
+		return drawUserPrompt(req.Prompt, seed)
+	}
+	return partsUserPrompt(req.Prompt, seed)
+}
+
+// refusalPrompt is the user message that hands a refused reply back to the
+// model on the retry (REQ-PXA-006, REQ-PXA-007).
+func refusalPrompt(reason string) string {
+	return fmt.Sprintf("Your answer was refused: %s. Answer again with the corrected JSON object only, keeping the same template.", reason)
 }
 
 // promptWithSeed joins a trimmed description (or fallback) with the seed.
@@ -150,9 +165,10 @@ func parseParts(reply string, seed int64) (Parts, error) {
 }
 
 // parseDrawn reads the first JSON object of a reply as a sprite, lower-cases
-// its palette, and validates it (REQ-PXA-006). A reply with no JSON object or
-// an invalid sprite is an error, so the caller retries.
-func parseDrawn(reply string) (Sprite, error) {
+// its palette, repairs it against the worked example's palette, and validates
+// it (REQ-PXA-006). A reply with no JSON object or an unrepairable sprite is an
+// error, so the caller retries.
+func parseDrawn(reply string, example map[string]string) (Sprite, error) {
 	obj, ok := firstJSONObject(reply)
 	if !ok {
 		return Sprite{}, errors.New("avatar: the reply has no JSON object")
@@ -166,10 +182,67 @@ func parseDrawn(reply string) (Sprite, error) {
 		palette[k] = strings.ToLower(v)
 	}
 	s.Palette = palette
+	if err := repairDrawn(&s, example); err != nil {
+		return Sprite{}, err
+	}
 	if err := ValidateSprite(s); err != nil {
 		return Sprite{}, err
 	}
 	return s, nil
+}
+
+// repairDrawn pads a model reply toward the sprite shape and fills palette
+// keys it uses but did not declare from the worked example's palette
+// (REQ-PXA-006). It only runs on a model reply: ValidateSprite stays strict for
+// a saved sprite. A row shorter than 16 characters is right-padded with '.',
+// a layer with fewer than 20 rows with empty rows at the bottom; a longer row
+// or layer is refused. A key in neither palette stays, so ValidateSprite
+// refuses it.
+func repairDrawn(sprite *Sprite, example map[string]string) error {
+	layers := []struct {
+		name string
+		rows *[]string
+	}{
+		{"head", &sprite.Head},
+		{"body", &sprite.Body},
+	}
+	for _, layer := range layers {
+		rows := *layer.rows
+		if len(rows) > spriteH {
+			return fmt.Errorf("avatar: the %s layer has %d rows, more than %d", layer.name, len(rows), spriteH)
+		}
+		fixed := make([]string, spriteH)
+		for y := 0; y < spriteH; y++ {
+			if y >= len(rows) {
+				fixed[y] = strings.Repeat(".", spriteW)
+				continue
+			}
+			row := rows[y]
+			if len(row) > spriteW {
+				return fmt.Errorf("avatar: the %s layer row %d has %d characters, more than %d", layer.name, y, len(row), spriteW)
+			}
+			fixed[y] = row + strings.Repeat(".", spriteW-len(row))
+		}
+		*layer.rows = fixed
+	}
+	for _, rows := range [][]string{sprite.Head, sprite.Body} {
+		for _, row := range rows {
+			for i := 0; i < len(row); i++ {
+				c := row[i]
+				if c == '.' {
+					continue
+				}
+				key := string(c)
+				if _, ok := sprite.Palette[key]; ok {
+					continue
+				}
+				if color, ok := example[key]; ok {
+					sprite.Palette[key] = color
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // pickIn returns value when it is one of list, else fallback.

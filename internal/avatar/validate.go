@@ -40,7 +40,7 @@ func ValidateSprite(s Sprite) error {
 		return err
 	}
 
-	// Head layer: every cell in y 0..16, eyes in y 5..10, a real head.
+	// Head layer: every cell in y 0..16, eyes in y 4..11, a real head.
 	eyeCells, headBox := 0, 0
 	for y, row := range s.Head {
 		for x := 0; x < spriteW; x++ {
@@ -56,8 +56,8 @@ func ValidateSprite(s Sprite) error {
 			}
 			if c == 'e' {
 				eyeCells++
-				if y < 5 || y > 10 {
-					return fmt.Errorf("avatar: eye cell at (%d,%d) is outside y 5..10", x, y)
+				if y < 4 || y > 11 {
+					return fmt.Errorf("avatar: eye cell at (%d,%d) is outside y 4..11", x, y)
 				}
 			}
 			if x >= 3 && x <= 12 && y >= 3 && y <= 11 {
