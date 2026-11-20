@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import { listRooms, openRoomsStream } from "../api/rooms";
-import { agentCssColor, isHexColor, parseAvatarSvg } from "../lib/avatar-svg";
+import { agentCssColor, isAvatarDoc, isHexColor, isWorkingMood } from "../lib/pixel-avatar";
+import type { AvatarMood } from "../lib/pixel-avatar";
 import { useAgentAvatar } from "../lib/avatar-store";
-import type { AvatarMood } from "../lib/avatar-motion";
-import { MoodLayer, moodHostProps } from "../ui/gr8r";
 import { AvatarImage, useAvatarImage } from "./agent-avatar";
+import { PixelBubble, PixelSprite } from "./pixel-sprite";
 import type { Presence, RoomRow } from "../api/rooms";
 
 /* The presence kit of REQ-ROOM-006 and REQ-ROOM-013: the agent face, the
@@ -95,39 +95,40 @@ export function AgentFace({
 }: AgentFaceProps) {
   const face = agentFaceColors(color);
   const stored = useAgentAvatar(name);
-  const shape = stored && stored.svg ? parseAvatarSvg(stored.svg) : null;
-  /* Spec 43: names the store has not seen use the server-rendered avatar;
+  const doc = stored && isAvatarDoc(stored.avatar) ? stored.avatar : null;
+  /* Spec 62: names the store has not seen use the server-rendered avatar;
      the letter is left for an image that fails (a deleted agent). */
-  const image = useAvatarImage(shape ? "" : name);
+  const image = useAvatarImage(doc ? "" : name);
   const state = presence ? presence.state : "";
   const label = presence ? name + ", " + state : name;
-  const blob = Boolean(shape) || !image.failed;
-  const look: CSSProperties = blob
-    ? { background: "transparent", color: gr8rColor(stored?.color || color) }
+  const pixel = Boolean(doc) || !image.failed;
+  const animate = Boolean(doc) && isWorkingMood(mood);
+  const look: CSSProperties = pixel
+    ? ({ "--pxc": gr8rColor(stored?.color || color) } as CSSProperties)
     : { background: face.bg, color: face.fg };
-  const moving = shape
-    ? moodHostProps(mood, size)
-    : {};
   return (
     <span
       className={
         "agent-face size-" +
         size +
-        (blob ? " has-svg" : "") +
+        (pixel ? " has-pixel" : "") +
+        (animate ? " is-working" : "") +
         (className ? " " + className : "")
       }
       role="img"
       aria-label={label}
-      style={{ ...look, ...moving.style, ...style }}
-      data-mood={moving["data-mood"]}
+      style={{ ...look, ...style }}
     >
-      {shape ??
-        (!image.failed ? (
-          <AvatarImage src={image.src} onError={image.onError} />
-        ) : (
-          initialOf(name)
-        ))}
-      {shape ? <MoodLayer mood={moving["data-mood"]} px={size} /> : null}
+      {doc ? (
+        <>
+          <PixelSprite sprite={doc.sprite} animate={animate} />
+          {animate && size >= 44 ? <PixelBubble /> : null}
+        </>
+      ) : !image.failed ? (
+        <AvatarImage src={image.src} onError={image.onError} />
+      ) : (
+        initialOf(name)
+      )}
       {state === "working" ? (
         <span className="agent-face-ring" aria-hidden="true" />
       ) : null}

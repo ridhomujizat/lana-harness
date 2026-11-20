@@ -7,6 +7,17 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Changed
+- Agent avatars are now chibi pixel-art characters instead of blobs (spec 62). Each agent
+  gets a character picked from its name (hair, skin, eyes, accessory, outfit, or a robot),
+  wearing the agent color. Small avatars show the head and shoulders in a tinted tile; the
+  profile shows the whole character. A working agent nods and types.
+- The avatar dialog has Randomize, a picker for every part, and "Generate with AI" with two
+  modes: Parts (the model picks parts from your description) and Free draw (the model draws
+  a new character on the same template; an invalid drawing falls back to a random one).
+- Saved blob avatars are kept as `avatar.blob.svg` and no longer shown; agents use their
+  pixel default until a new avatar is saved (`avatar.json`).
+
 ## [0.5.0-beta.12] - 2026-11-19
 
 ### Fixed

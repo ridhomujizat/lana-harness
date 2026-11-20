@@ -3,37 +3,51 @@ import type { CSSProperties } from "react";
 import {
   deleteAgentAvatar,
   generateAgentAvatar,
+  getAvatarCatalog,
   putAgentAvatar,
 } from "../api/agents";
+import type { AvatarCatalog, CatalogItem, GenerateAvatarRequest } from "../api/agents";
 import { ApiError, errorMessage } from "../api/client";
 import { getRouter } from "../api/router";
 import type { RouterChoice, RouterProvider } from "../api/router";
-import {
-  agentCssColor,
-  isHexColor,
-  parseAvatarSvg,
-} from "../lib/avatar-svg";
+import { agentCssColor, isAvatarDoc, isHexColor } from "../lib/pixel-avatar";
+import type { AvatarDoc, AvatarParts } from "../lib/pixel-avatar";
 import { setAgentAvatar, useAgentAvatar } from "../lib/avatar-store";
 import { Ic } from "../ui/icons";
-import { Avatar, Button, IconButton, Input, Modal, Select } from "../ui/gr8r";
+import {
+  Button,
+  Checkbox,
+  IconButton,
+  Input,
+  Modal,
+  Seg,
+  Select,
+  Textarea,
+} from "../ui/gr8r";
 import type { ButtonProps, SelectOption } from "../ui/gr8r";
+import { AgentAvatar } from "./agent-avatar";
 import { choiceOptions } from "./agent-runtime";
+import { PixelSprite } from "./pixel-sprite";
 import { claudeAccountNames, claudeTargetAccount } from "./router/claude-code";
 
-/* Spec 43: the "Generate avatar" dialog. The owner draws blob avatars with the
-   agent's model (or the built-in generator), picks a body color, steps back
-   and forth through this session's results, then saves one or goes back to
-   the letter avatar. The results live in component state only. */
+/* Spec 62: the avatar dialog. The owner shapes the agent's pixel character:
+   Randomize, pick each part, recolor, or ask a model to pick parts from a
+   description or to draw a new character on the template; steps back and
+   forth through this session's results; then saves one or goes back to the
+   default. The results live in component state only. */
 
 export const HISTORY_LIMIT = 10;
+export const PROMPT_LIMIT = 500;
+
+export type ResultSource = "current" | "default" | "random" | "parts" | "model" | "local";
 
 export interface AvatarResult {
-  svg: string;
+  avatar: AvatarDoc;
   model: string;
-  source: "model" | "local" | "current" | "default";
+  source: ResultSource;
 }
 
-/* The six color tokens, then vivid presets from the reference palette. */
+/* The six color tokens, then vivid presets. */
 export const TOKEN_SWATCHES: readonly { value: string; label: string }[] = [
   { value: "brand", label: "Brand" },
   { value: "success", label: "Green" },
@@ -44,18 +58,32 @@ export const TOKEN_SWATCHES: readonly { value: string; label: string }[] = [
 ];
 
 export const PRESET_SWATCHES: readonly { value: string; label: string }[] = [
-  { value: "#111111", label: "Black" },
-  { value: "#12b5a6", label: "Teal" },
-  { value: "#9b5cff", label: "Violet" },
-  { value: "#1a8cff", label: "Bright blue" },
-  { value: "#ff3d9a", label: "Pink" },
-  { value: "#ff6a00", label: "Orange" },
-  { value: "#ff9f00", label: "Bright amber" },
-  { value: "#9a6a3f", label: "Brown" },
-  { value: "#7a7a7a", label: "Stone" },
+  { value: "#7c5cff", label: "Violet" },
+  { value: "#f45bd0", label: "Pink" },
+  { value: "#ff6b2c", label: "Orange" },
+  { value: "#3d7bff", label: "Bright blue" },
+  { value: "#1fb37a", label: "Emerald" },
+  { value: "#ff3d5e", label: "Coral" },
+  { value: "#13b5c8", label: "Teal" },
+  { value: "#f5a524", label: "Bright amber" },
+  { value: "#8a867e", label: "Stone" },
+];
+
+/* The picker fields of the parts, in dialog order. */
+export const PART_FIELDS: readonly { key: keyof AvatarCatalog & keyof AvatarParts; label: string }[] = [
+  { key: "species", label: "Species" },
+  { key: "hair", label: "Hair" },
+  { key: "hair_color", label: "Hair color" },
+  { key: "skin", label: "Skin" },
+  { key: "eyes", label: "Eyes" },
+  { key: "accessory", label: "Accessory" },
+  { key: "outfit", label: "Outfit" },
+  { key: "pants", label: "Pants" },
 ];
 
 const BACKGROUND_MODEL = "";
+
+type AiMode = "ai_parts" | "ai_draw";
 
 /* "#ABC" and "abc123" become "#aabbcc" / "#abc123"; anything else is "". */
 export function normalizeHex(value: string): string {
@@ -80,7 +108,15 @@ function colorLabel(value: string): string {
   return swatch ? swatch.label : value;
 }
 
-/* The router choices the generator may use: never a Claude Code model, nor a
+function itemOptions(items: CatalogItem[] | undefined, current: string): SelectOption[] {
+  const list = (items || []).map((item) => ({ value: item.id, label: item.label }));
+  if (current && !list.some((item) => item.value === current)) {
+    list.unshift({ value: current, label: current });
+  }
+  return list;
+}
+
+/* The router choices a generation may use: never a Claude Code model, nor a
    combo that starts on one (the API answers invalid_model). */
 function modelOptions(
   choices: RouterChoice[],
@@ -98,7 +134,7 @@ function modelOptions(
 }
 
 export interface AvatarSavedResult {
-  svg: string;
+  avatar: AvatarDoc;
   color: string;
   restartRequired: boolean;
 }
@@ -107,8 +143,8 @@ export interface AvatarDialogProps {
   name: string;
   /* The agent color today: a token or a "#rrggbb" hex. */
   color: string;
-  /* The avatar SVG today (saved or default); "" only from an older server. */
-  svg: string;
+  /* The avatar today (saved or default); null only from an older server. */
+  avatar: AvatarDoc | null;
   /* "saved", "default", or "" when the server does not say. */
   source?: string;
   onClose: () => void;
@@ -118,33 +154,48 @@ export interface AvatarDialogProps {
 export function AvatarDialog({
   name,
   color,
-  svg,
+  avatar,
   source = "",
   onClose,
   onSaved,
 }: AvatarDialogProps) {
+  const initial = isAvatarDoc(avatar) ? avatar : null;
   const [history, setHistory] = useState<AvatarResult[]>(() =>
-    svg && parseAvatarSvg(svg)
-      ? [{ svg, model: "", source: source === "default" ? "default" : "current" }]
+    initial
+      ? [{ avatar: initial, model: "", source: source === "default" ? "default" : "current" }]
       : []
   );
+  const [index, setIndex] = useState(() => (initial ? 0 : -1));
   /* Whether the agent is on its default avatar, so Reset has nothing to do. */
-  const [onDefault, setOnDefault] = useState(source === "default" || !svg);
-  const [index, setIndex] = useState(() => (svg && parseAvatarSvg(svg) ? 0 : -1));
+  const [onDefault, setOnDefault] = useState(source === "default" || !initial);
   const [bodyColor, setBodyColor] = useState(() =>
     isHexColor(color) ? normalizeHex(color) : color || "brand"
   );
   const [hexDraft, setHexDraft] = useState(() => (isHexColor(color) ? normalizeHex(color) : ""));
+  const [catalog, setCatalog] = useState<AvatarCatalog | null>(null);
+  const [aiMode, setAiMode] = useState<AiMode>("ai_parts");
+  const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(BACKGROUND_MODEL);
   const [options, setOptions] = useState<SelectOption[]>([
     { value: BACKGROUND_MODEL, label: "Background model" },
   ]);
-  const [busy, setBusy] = useState<"" | "generate" | "save" | "delete">("");
+  const [busy, setBusy] = useState<"" | "random" | "render" | "ai" | "save" | "delete">("");
   const [error, setError] = useState("");
   const alive = useRef(true);
+  /* The newest render request; an older answer that lands late is dropped. */
+  const renderTicket = useRef(0);
 
   useEffect(() => {
     alive.current = true;
+    getAvatarCatalog()
+      .then((data) => {
+        if (alive.current && data) {
+          setCatalog(data);
+        }
+      })
+      .catch(() => {
+        /* Without the catalog the pickers stay hidden; Randomize and AI work. */
+      });
     getRouter()
       .then((router) => {
         if (alive.current && router) {
@@ -160,43 +211,114 @@ export function AvatarDialog({
   }, []);
 
   const current = index >= 0 ? history[index] : undefined;
+  const parts = current && current.avatar.kind === "parts" ? current.avatar.parts : undefined;
   const cssColor = agentCssColor(bodyColor);
   const hexValue = isHexColor(bodyColor) ? normalizeHex(bodyColor) : "";
   const hexInvalid = hexDraft !== "" && normalizeHex(hexDraft) === "";
   const running = busy !== "";
+  const locked = busy === "save" || busy === "delete" || busy === "ai";
 
-  async function generate() {
-    setBusy("generate");
+  function push(entry: AvatarResult) {
+    const next = [...history.slice(0, index + 1), entry].slice(-HISTORY_LIMIT);
+    setHistory(next);
+    setIndex(next.length - 1);
+  }
+
+  /* replaceCurrent swaps the shown result in place (a recolor), keeping undo
+     for real changes. */
+  function replaceCurrent(entry: AvatarResult) {
+    setHistory((list) => list.map((item, position) => (position === index ? entry : item)));
+  }
+
+  async function run(
+    kind: "random" | "render" | "ai",
+    body: GenerateAvatarRequest,
+    place: "push" | "replace" = "push"
+  ) {
+    const ticket = ++renderTicket.current;
+    setBusy(kind);
     setError("");
     try {
-      const body: { model?: string; seed: number } = { seed: randomSeed() };
-      if (model) {
-        body.model = model;
-      }
       const result = await generateAgentAvatar(name, body);
-      if (!alive.current) {
+      if (!alive.current || ticket !== renderTicket.current) {
         return;
       }
-      if (!result || !parseAvatarSvg(result.svg)) {
-        setError("The generator returned a shape the dashboard cannot show. Try again.");
+      if (!result || !isAvatarDoc(result.avatar)) {
+        setError("The server returned an avatar the dashboard cannot show. Try again.");
         return;
       }
-      const entry: AvatarResult = {
-        svg: result.svg,
-        model: result.model || "",
-        source: result.source === "local" ? "local" : "model",
-      };
-      const next = [...history, entry].slice(-HISTORY_LIMIT);
-      setHistory(next);
-      setIndex(next.length - 1);
+      const source: ResultSource =
+        kind === "random"
+          ? "random"
+          : kind === "render"
+            ? "parts"
+            : result.source === "local"
+              ? "local"
+              : "model";
+      const entry: AvatarResult = { avatar: result.avatar, model: result.model || "", source };
+      if (place === "replace" && current) {
+        replaceCurrent({ ...entry, source: current.source, model: current.model });
+      } else {
+        push(entry);
+      }
     } catch (failure) {
       if (alive.current) {
         setError(errorMessage(failure));
       }
     } finally {
-      if (alive.current) {
+      if (alive.current && ticket === renderTicket.current) {
         setBusy("");
       }
+    }
+  }
+
+  function randomize() {
+    void run("random", { mode: "random", seed: randomSeed(), color: bodyColor });
+  }
+
+  function pickPart(key: keyof AvatarParts, value: string | boolean) {
+    if (!parts) {
+      return;
+    }
+    const next = { ...parts, [key]: value, color: bodyColor } as AvatarParts;
+    void run("render", { mode: "render", parts: next, color: bodyColor });
+  }
+
+  function generateWithAi() {
+    const body: GenerateAvatarRequest = { mode: aiMode, seed: randomSeed(), color: bodyColor };
+    const text = prompt.trim();
+    if (text) {
+      body.prompt = text.slice(0, PROMPT_LIMIT);
+    }
+    if (model) {
+      body.model = model;
+    }
+    void run("ai", body);
+  }
+
+  /* A new color re-renders a parts avatar (the shirt wears it); a drawn one
+     keeps its own palette and only its tile changes. */
+  function applyColor(value: string) {
+    setBodyColor(value);
+    if (parts) {
+      void run(
+        "render",
+        { mode: "render", parts: { ...parts, color: value }, color: value },
+        "replace"
+      );
+    }
+  }
+
+  function pickColor(value: string) {
+    setHexDraft(isHexColor(value) ? value : "");
+    applyColor(value);
+  }
+
+  function typeHex(value: string) {
+    setHexDraft(value);
+    const hex = normalizeHex(value);
+    if (hex) {
+      applyColor(hex);
     }
   }
 
@@ -207,13 +329,13 @@ export function AvatarDialog({
     setBusy("save");
     setError("");
     try {
-      const saved = await putAgentAvatar(name, { svg: current.svg, color: bodyColor });
-      const savedSvg = saved && typeof saved.avatar_svg === "string" ? saved.avatar_svg : current.svg;
+      const saved = await putAgentAvatar(name, { avatar: current.avatar, color: bodyColor });
+      const savedAvatar = saved && isAvatarDoc(saved.avatar) ? saved.avatar : current.avatar;
       const savedColor = saved && saved.color ? saved.color : bodyColor;
-      setAgentAvatar(name, savedSvg, savedColor, (saved && saved.avatar_source) || "saved");
+      setAgentAvatar(name, savedAvatar, savedColor, (saved && saved.avatar_source) || "saved");
       if (onSaved) {
         onSaved({
-          svg: savedSvg,
+          avatar: savedAvatar,
           color: savedColor,
           restartRequired: Boolean(saved && saved.restart_required),
         });
@@ -234,22 +356,19 @@ export function AvatarDialog({
     try {
       const reset = await deleteAgentAvatar(name);
       const savedColor = reset && reset.color ? reset.color : color;
-      const defaultSvg = reset && typeof reset.avatar_svg === "string" ? reset.avatar_svg : "";
-      setAgentAvatar(name, defaultSvg, savedColor, "default");
-      if (onSaved) {
-        onSaved({ svg: defaultSvg, color: savedColor, restartRequired: false });
+      const defaultAvatar = reset && isAvatarDoc(reset.avatar) ? reset.avatar : null;
+      if (defaultAvatar) {
+        setAgentAvatar(name, defaultAvatar, savedColor, "default");
+        if (onSaved) {
+          onSaved({ avatar: defaultAvatar, color: savedColor, restartRequired: false });
+        }
       }
       if (!alive.current) {
         return;
       }
       setOnDefault(true);
-      if (defaultSvg && parseAvatarSvg(defaultSvg)) {
-        const next = [
-          ...history,
-          { svg: defaultSvg, model: "", source: "default" as const },
-        ].slice(-HISTORY_LIMIT);
-        setHistory(next);
-        setIndex(next.length - 1);
+      if (defaultAvatar) {
+        push({ avatar: defaultAvatar, model: "", source: "default" });
         setBodyColor(isHexColor(savedColor) ? normalizeHex(savedColor) : savedColor);
         setHexDraft(isHexColor(savedColor) ? normalizeHex(savedColor) : "");
       }
@@ -262,36 +381,28 @@ export function AvatarDialog({
     }
   }
 
-  function pickColor(value: string) {
-    setBodyColor(value);
-    setHexDraft(isHexColor(value) ? value : "");
-  }
-
-  function typeHex(value: string) {
-    setHexDraft(value);
-    const hex = normalizeHex(value);
-    if (hex) {
-      setBodyColor(hex);
-    }
-  }
-
   const sourceNote = !current
-    ? "No avatar yet. Generate one to start."
+    ? "No avatar yet. Randomize or generate one to start."
     : current.source === "current"
       ? "The saved avatar."
       : current.source === "default"
-        ? "The default avatar, drawn from the agent’s name."
-      : current.source === "local"
-        ? "Built-in generator (no model was available, or its drawing did not pass the checks)."
-        : current.model
-          ? "Drawn by " + current.model + "."
-          : "Drawn by the background model.";
+        ? "The default avatar, picked from the agent’s name."
+        : current.source === "random"
+          ? "A random character."
+          : current.source === "parts"
+            ? "Your pick of parts."
+            : current.source === "local"
+              ? "Random character (no model was available, or its answer did not pass the checks)."
+              : (current.avatar.kind === "drawn" ? "Drawn by " : "Parts picked by ") +
+                (current.model || "the background model") +
+                ".";
 
   return (
     <Modal
-      title="Generate avatar"
-      subtitle={"A blob character for " + name + "."}
+      title="Agent avatar"
+      subtitle={"A pixel character for " + name + "."}
       className="avatar-dialog"
+      size="lg"
       dismissible={busy !== "save" && busy !== "delete"}
       onClose={onClose}
       footer={
@@ -317,34 +428,37 @@ export function AvatarDialog({
       }
     >
       <div className="avatar-dialog-top">
-        <div className="avatar-dialog-stage" aria-busy={busy === "generate"}>
-          <Avatar
-            className="avatar-dialog-preview"
-            name={name}
-            color={cssColor}
-            svg={current ? current.svg : undefined}
-            data-testid="avatar-preview"
-          />
-          {busy === "generate" ? (
-            <span className="avatar-dialog-drawing" aria-hidden="true" />
-          ) : null}
+        <div
+          className="avatar-dialog-stage"
+          aria-busy={busy === "ai" || busy === "random"}
+          style={{ "--pxc": cssColor } as CSSProperties}
+          data-testid="avatar-preview"
+        >
+          {current ? (
+            <PixelSprite sprite={current.avatar.sprite} view="full" animate />
+          ) : (
+            <span className="avatar-dialog-empty">?</span>
+          )}
+          {busy === "ai" ? <span className="avatar-dialog-drawing" aria-hidden="true" /> : null}
         </div>
         <div className="avatar-dialog-side">
           <p className="avatar-dialog-note" role="status" aria-live="polite">
-            {busy === "generate" ? "Drawing a new avatar… this can take up to 40 seconds." : sourceNote}
+            {busy === "ai"
+              ? aiMode === "ai_draw"
+                ? "Drawing a new character… this can take up to a minute."
+                : "Picking parts… this can take a few seconds."
+              : sourceNote}
           </p>
           <div className="avatar-dialog-actions">
             <Button
               variant="primary"
-              icon="sparkles"
-              loading={busy === "generate"}
-              disabled={running}
-              onClick={() => void generate()}
+              icon="shuffle"
+              loading={busy === "random"}
+              disabled={locked}
+              onClick={randomize}
               data-autofocus
             >
-              {busy === "generate" ? "Generating…" : history.some((item) => item.source === "model" || item.source === "local")
-                  ? "Regenerate"
-                  : "Generate"}
+              Randomize
             </Button>
             <IconButton
               icon="undo-2"
@@ -359,43 +473,53 @@ export function AvatarDialog({
               onClick={() => setIndex((value) => Math.min(history.length - 1, value + 1))}
             />
           </div>
-          <label className="avatar-dialog-label" htmlFor="avatar-model">
-            Model
-          </label>
-          <Select
-            id="avatar-model"
-            size="sm"
-            options={options}
-            value={model}
-            disabled={running}
-            onChange={setModel}
-          />
+          {current ? (
+            <div className="avatar-dialog-sizes" aria-hidden="true">
+              <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="xl" />
+              <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="lg" />
+              <AgentAvatar name={name} avatar={current.avatar} bodyColor={bodyColor} size="md" />
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {history.length > 0 ? (
-        <div className="avatar-dialog-strip" role="group" aria-label="Results of this session">
-          {history.map((item, position) => (
-            <button
-              key={position}
-              type="button"
-              className={"avatar-dialog-thumb" + (position === index ? " is-on" : "")}
-              aria-pressed={position === index}
-              aria-label={
-                (item.source === "current"
-                  ? "Saved avatar"
-                  : item.source === "default"
-                    ? "Default avatar"
-                    : "Result " + (position + 1)) +
-                (position === index ? ", selected" : "")
-              }
-              disabled={running}
-              onClick={() => setIndex(position)}
-            >
-              <Avatar name={name} color={cssColor} svg={item.svg} size="lg" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
+      {catalog ? (
+        <fieldset className="avatar-dialog-parts" disabled={locked}>
+          <legend className="avatar-dialog-label">Parts</legend>
+          {!parts && current ? (
+            <p className="avatar-dialog-hint">
+              This character was drawn by a model. Randomize or pick a part to start from parts.
+            </p>
+          ) : null}
+          <div className="avatar-dialog-part-grid">
+            {PART_FIELDS.map((field) => {
+              const value = parts ? String(parts[field.key] ?? "") : "";
+              return (
+                <label key={field.key} className="avatar-dialog-part">
+                  <span className="avatar-dialog-label">{field.label}</span>
+                  <Select
+                    size="sm"
+                    aria-label={field.label}
+                    options={itemOptions(catalog[field.key], value)}
+                    value={value}
+                    placeholder="—"
+                    disabled={!parts || locked}
+                    onChange={(next) => pickPart(field.key, next)}
+                  />
+                </label>
+              );
+            })}
+            <label className="avatar-dialog-part avatar-dialog-blush">
+              <Checkbox
+                checked={Boolean(parts && parts.blush)}
+                disabled={!parts || locked}
+                onChange={(checked: boolean) => pickPart("blush", checked)}
+                aria-label="Blush"
+              />
+              <span className="avatar-dialog-label">Blush</span>
+            </label>
+          </div>
+        </fieldset>
       ) : null}
 
       <fieldset className="avatar-dialog-colors">
@@ -412,7 +536,7 @@ export function AvatarDialog({
                 aria-pressed={on}
                 aria-label={entry.label}
                 title={entry.label}
-                disabled={busy === "save" || busy === "delete"}
+                disabled={locked}
                 onClick={() => pickColor(entry.value)}
               />
             );
@@ -433,15 +557,15 @@ export function AvatarDialog({
             spellCheck={false}
             invalid={hexInvalid}
             aria-describedby={hexInvalid ? "avatar-hex-error" : undefined}
-            disabled={busy === "save" || busy === "delete"}
+            disabled={locked}
             onChange={(event) => typeHex(event.target.value)}
           />
           <input
             type="color"
             className="avatar-dialog-picker"
             aria-label="Pick a custom color"
-            value={hexValue || "#9b5cff"}
-            disabled={busy === "save" || busy === "delete"}
+            value={hexValue || "#7c5cff"}
+            disabled={locked}
             onChange={(event) => pickColor(normalizeHex(event.target.value) || bodyColor)}
           />
           <span className="avatar-dialog-current">{colorLabel(bodyColor)}</span>
@@ -453,6 +577,78 @@ export function AvatarDialog({
           </span>
         ) : null}
       </fieldset>
+
+      <fieldset className="avatar-dialog-ai" disabled={locked}>
+        <legend className="avatar-dialog-label">Generate with AI</legend>
+        <Seg
+          className="avatar-dialog-mode"
+          aria-label="AI mode"
+          options={[
+            { value: "ai_parts", label: "Parts", title: "The model picks parts from your description" },
+            { value: "ai_draw", label: "Free draw", title: "The model draws a new character on the template" },
+          ]}
+          value={aiMode}
+          onChange={(value) => setAiMode(value === "ai_draw" ? "ai_draw" : "ai_parts")}
+        />
+        <Textarea
+          id="avatar-prompt"
+          className="avatar-dialog-prompt"
+          rows={2}
+          maxLength={PROMPT_LIMIT}
+          value={prompt}
+          placeholder={
+            aiMode === "ai_draw"
+              ? "e.g. a wizard with a tall purple hat and a white beard"
+              : "e.g. silver hair, round glasses, a red cap"
+          }
+          aria-label="Description"
+          onChange={(event) => setPrompt(event.target.value)}
+        />
+        <div className="avatar-dialog-ai-row">
+          <Select
+            id="avatar-model"
+            size="sm"
+            aria-label="Model"
+            options={options}
+            value={model}
+            disabled={locked}
+            onChange={setModel}
+          />
+          <Button
+            variant="secondary"
+            icon="sparkles"
+            loading={busy === "ai"}
+            disabled={running}
+            onClick={generateWithAi}
+          >
+            {busy === "ai" ? "Generating…" : "Generate"}
+          </Button>
+        </div>
+      </fieldset>
+
+      {history.length > 1 ? (
+        <div className="avatar-dialog-strip" role="group" aria-label="Results of this session">
+          {history.map((item, position) => (
+            <button
+              key={position}
+              type="button"
+              className={"avatar-dialog-thumb" + (position === index ? " is-on" : "")}
+              aria-pressed={position === index}
+              aria-label={
+                (item.source === "current"
+                  ? "Saved avatar"
+                  : item.source === "default"
+                    ? "Default avatar"
+                    : "Result " + (position + 1)) + (position === index ? ", selected" : "")
+              }
+              disabled={running}
+              onClick={() => setIndex(position)}
+            >
+              <AgentAvatar name={name} avatar={item.avatar} bodyColor={bodyColor} size="lg" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {error ? (
         <p className="err avatar-dialog-error" role="alert">
@@ -483,8 +679,8 @@ export interface GenerateAvatarButtonProps
   name: string;
   /* The agent color from the page's row; the store wins after a save. */
   color: string;
-  /* The row's avatar_svg and avatar_source; the store wins after a save. */
-  svg?: string;
+  /* The row's avatar and avatar_source; the store wins after a save. */
+  avatar?: AvatarDoc | null;
   source?: string;
   onSaved?: (result: AvatarSavedResult) => void;
   label?: string;
@@ -496,10 +692,10 @@ export interface GenerateAvatarButtonProps
 export function GenerateAvatarButton({
   name,
   color,
-  svg,
+  avatar,
   source,
   onSaved,
-  label = "Generate avatar",
+  label = "Edit avatar",
   compact,
   variant = "secondary",
   icon = "sparkles",
@@ -508,9 +704,9 @@ export function GenerateAvatarButton({
 }: GenerateAvatarButtonProps) {
   const [open, setOpen] = useState(false);
   const stored = useAgentAvatar(name);
-  const currentSvg = stored && stored.svg ? stored.svg : svg || "";
+  const currentAvatar = stored && isAvatarDoc(stored.avatar) ? stored.avatar : avatar || null;
   const currentColor = stored && stored.color ? stored.color : color;
-  const currentSource = stored && stored.svg ? stored.source : source || "";
+  const currentSource = stored ? stored.source : source || "";
   return (
     <>
       {compact ? (
@@ -536,7 +732,7 @@ export function GenerateAvatarButton({
         <AvatarDialog
           name={name}
           color={currentColor}
-          svg={currentSvg}
+          avatar={currentAvatar}
           source={currentSource}
           onClose={() => setOpen(false)}
           onSaved={onSaved}

@@ -884,7 +884,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       current && current.agent
         ? {
             ...current,
-            agent: { ...current.agent, color: savedColor, avatar_svg: result.svg },
+            agent: { ...current.agent, color: savedColor, avatar: result.avatar },
           }
         : current
     );
@@ -1343,7 +1343,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                 compact
                 name={agent.name}
                 color={agent.color}
-                svg={agent.avatar_svg}
+                avatar={agent.avatar}
                 source={agent.avatar_source}
                 onSaved={avatarSaved}
               />
@@ -1524,7 +1524,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     <GenerateAvatarButton
                       name={agent.name}
                       color={form.color}
-                      svg={agent.avatar_svg}
+                      avatar={agent.avatar}
                       source={agent.avatar_source}
                       disabled={saving}
                       onSaved={avatarSaved}

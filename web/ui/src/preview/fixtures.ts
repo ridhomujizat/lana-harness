@@ -2,13 +2,7 @@ import { mockToolbox } from "./toolbox-fixtures";
 import { mockWorkflows } from "./workflow-fixtures";
 import { mockUpdate } from "./update-fixtures";
 import { mockCalendar } from "./calendar-fixtures";
-import {
-  AVATAR_CLOUD,
-  AVATAR_ELLIPSE,
-  AVATAR_SQUIRCLE,
-  AVATAR_TRIANGLE,
-  mockAvatar,
-} from "./avatar-fixtures";
+import { AVATAR_CATALOG, mockAvatar, previewAvatar } from "./avatar-fixtures";
 import type {
   Agent,
   AgentCreatedResponse,
@@ -243,7 +237,7 @@ const agentLana: Agent = {
   kind: "agent",
   title: "Chief of staff",
   color: "brand",
-  avatar_svg: AVATAR_SQUIRCLE,
+  avatar: previewAvatar("lana"),
   avatar_source: "saved",
   model: "gpt-5",
   policy: "ask",
@@ -268,7 +262,7 @@ const agentDefault: Agent = {
   kind: "agent",
   title: "General assistant",
   color: "gray",
-  avatar_svg: AVATAR_ELLIPSE,
+  avatar: previewAvatar("default"),
   avatar_source: "default",
   model: "gpt-5-mini",
   policy: "ask",
@@ -292,7 +286,7 @@ const agentResearcher: Agent = {
   kind: "agent",
   title: "Research analyst",
   color: "#ff6a00",
-  avatar_svg: AVATAR_CLOUD,
+  avatar: previewAvatar("researcher"),
   avatar_source: "saved",
   model: "claude-sonnet-4-5",
   policy: "trust",
@@ -317,7 +311,7 @@ const agentTeam: Agent = {
   kind: "team",
   title: "Nightly triage",
   color: "success",
-  avatar_svg: AVATAR_TRIANGLE,
+  avatar: previewAvatar("field-team"),
   avatar_source: "default",
   model: null,
   policy: "ask",
@@ -1052,7 +1046,7 @@ export const roomsFixture: RoomRow[] = [
     kind: "agent",
     title: "Chief of staff",
     color: "brand",
-    avatar_svg: AVATAR_SQUIRCLE,
+    avatar: previewAvatar("lana"),
     avatar_source: "saved",
     members: [],
     lead: "",
@@ -1074,7 +1068,7 @@ export const roomsFixture: RoomRow[] = [
     kind: "agent",
     title: "General assistant",
     color: "gray",
-    avatar_svg: AVATAR_ELLIPSE,
+    avatar: previewAvatar("default"),
     avatar_source: "default",
     members: [],
     lead: "",
@@ -1096,7 +1090,7 @@ export const roomsFixture: RoomRow[] = [
     kind: "agent",
     title: "Research analyst",
     color: "#ff6a00",
-    avatar_svg: AVATAR_CLOUD,
+    avatar: previewAvatar("researcher"),
     avatar_source: "saved",
     members: [],
     lead: "",
@@ -1118,7 +1112,7 @@ export const roomsFixture: RoomRow[] = [
     kind: "team",
     title: "Nightly triage",
     color: "success",
-    avatar_svg: AVATAR_TRIANGLE,
+    avatar: previewAvatar("field-team"),
     avatar_source: "default",
     members: ["researcher", "default"],
     lead: "lana",
@@ -1179,7 +1173,7 @@ export const agentOverviewFixture: AgentOverview = {
   kind: "agent",
   title: "Chief of staff",
   color: "brand",
-  avatar_svg: AVATAR_SQUIRCLE,
+  avatar: previewAvatar("lana"),
   avatar_source: "saved",
   persona_line: "Keep the workspace moving and the vault honest.",
   created_at: world - 41 * DAY,
@@ -2034,6 +2028,10 @@ export function mockApi(method: string, url: URL, body?: unknown): MockResult {
       if (at(3) === "discover") return { status: 200, body: telegramDiscoverFixture };
       if (at(3) === "connect") return { status: 200, body: telegramSaveFixture };
       return { status: 200, body: telegramSaveFixture };
+    }
+    case "avatars": {
+      if (at(2) === "catalog" && isGet) return { status: 200, body: AVATAR_CATALOG };
+      return { status: 404, body: { error: "not_found" } };
     }
     case "agents": {
       const name = at(2);
