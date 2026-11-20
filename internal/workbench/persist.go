@@ -22,24 +22,27 @@ const sessionsName = "sessions.json"
 const persistInterval = time.Second
 
 // sessionRecord is one session as the core persists it (spec 60 REQ-WR-001).
-// The fields and their JSON names are exactly the spec's.
+// The fields and their JSON names are exactly the spec's, except
+// agent_config_dir, added for claude-swap profiles (spec 60 addendum); an old
+// file without it loads with "".
 type sessionRecord struct {
-	ID           string            `json:"id"`
-	Title        string            `json:"title"`
-	Command      []string          `json:"command"`
-	Dir          string            `json:"dir"`
-	Env          []string          `json:"env,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	Created      time.Time         `json:"created"`
-	Cols         int               `json:"cols"`
-	Rows         int               `json:"rows"`
-	LastDir      string            `json:"last_dir,omitempty"`
-	Exited       bool              `json:"exited"`
-	ExitCode     int               `json:"exit_code"`
-	Agent        string            `json:"agent,omitempty"`
-	AgentSession string            `json:"agent_session,omitempty"`
-	AgentCwd     string            `json:"agent_cwd,omitempty"`
-	AgentSeen    time.Time         `json:"agent_seen"`
+	ID             string            `json:"id"`
+	Title          string            `json:"title"`
+	Command        []string          `json:"command"`
+	Dir            string            `json:"dir"`
+	Env            []string          `json:"env,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Created        time.Time         `json:"created"`
+	Cols           int               `json:"cols"`
+	Rows           int               `json:"rows"`
+	LastDir        string            `json:"last_dir,omitempty"`
+	Exited         bool              `json:"exited"`
+	ExitCode       int               `json:"exit_code"`
+	Agent          string            `json:"agent,omitempty"`
+	AgentSession   string            `json:"agent_session,omitempty"`
+	AgentCwd       string            `json:"agent_cwd,omitempty"`
+	AgentConfigDir string            `json:"agent_config_dir,omitempty"`
+	AgentSeen      time.Time         `json:"agent_seen"`
 }
 
 // sessionsFile is the shape of sessions.json: a version and its records.
@@ -171,22 +174,23 @@ func (s *session) record() sessionRecord {
 		last = s.dir
 	}
 	return sessionRecord{
-		ID:           s.id,
-		Title:        s.title,
-		Command:      s.command,
-		Dir:          s.dir,
-		Env:          s.extraEnv,
-		Labels:       s.labels,
-		Created:      s.created,
-		Cols:         s.cols,
-		Rows:         s.rows,
-		LastDir:      last,
-		Exited:       s.exited,
-		ExitCode:     s.exitCode,
-		Agent:        s.rAgent,
-		AgentSession: s.agentSession,
-		AgentCwd:     s.agentCwd,
-		AgentSeen:    s.agentSeen,
+		ID:             s.id,
+		Title:          s.title,
+		Command:        s.command,
+		Dir:            s.dir,
+		Env:            s.extraEnv,
+		Labels:         s.labels,
+		Created:        s.created,
+		Cols:           s.cols,
+		Rows:           s.rows,
+		LastDir:        last,
+		Exited:         s.exited,
+		ExitCode:       s.exitCode,
+		Agent:          s.rAgent,
+		AgentSession:   s.agentSession,
+		AgentCwd:       s.agentCwd,
+		AgentConfigDir: s.agentConfigDir,
+		AgentSeen:      s.agentSeen,
 	}
 }
 

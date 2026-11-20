@@ -3,12 +3,8 @@ import { render, screen } from "@testing-library/react";
 import type { ListSessionsResponse, Session } from "../api/sessions";
 import { SessionsPage } from "./sessions";
 import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
+import { sampleAvatar } from "../test/pixel-sample";
 
-const BLOB =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
-  '<path d="M50 12 C 72 12 88 28 88 50 C 88 72 72 88 50 88 C 28 88 12 72 12 50 C 12 28 28 12 50 12 Z" fill="currentColor"/>' +
-  '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
-  '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>';
 
 /* The session list resolves its agent labels from the shared rooms store, so
    that store is stubbed with no rows and the ID stays the fallback label. */
@@ -80,8 +76,8 @@ describe("sessions list avatars", () => {
     resetAvatarStore();
   });
 
-  it("shows the stored svg for the row's agent", async () => {
-    setAgentAvatar("lana", BLOB, "#12b5a6");
+  it("shows the stored sprite for the row's agent", async () => {
+    setAgentAvatar("lana", sampleAvatar(), "#12b5a6");
     stubSessionsFetch([
       {
         id: "abc",
@@ -100,8 +96,8 @@ describe("sessions list avatars", () => {
     ]);
     const { container } = render(<SessionsPage />);
     expect(await screen.findByText("Disk check")).toBeTruthy();
-    const avatar = container.querySelector(".session-row-meta .av.has-svg") as HTMLElement;
-    expect(avatar.querySelector("svg path")).not.toBeNull();
-    expect(avatar.style.getPropertyValue("--c")).toBe("#12b5a6");
+    const avatar = container.querySelector(".session-row-meta .av.has-pixel") as HTMLElement;
+    expect(avatar.querySelector("svg.px-sprite rect")).not.toBeNull();
+    expect(avatar.style.getPropertyValue("--pxc")).toBe("#12b5a6");
   });
 });

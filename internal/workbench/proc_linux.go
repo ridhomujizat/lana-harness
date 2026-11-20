@@ -140,6 +140,21 @@ func openFiles(pid int) []string {
 	return paths
 }
 
+// processEnv returns pid's environment as KEY=VALUE strings, read from
+// /proc/<pid>/environ. It returns nil when the pid is gone or the read is
+// denied (spec 60 addendum: the agent's own CLAUDE_CONFIG_DIR, which the
+// session environment does not carry).
+func processEnv(pid int) []string {
+	if pid <= 0 {
+		return nil
+	}
+	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
+	if err != nil || len(raw) == 0 {
+		return nil
+	}
+	return splitNul(raw)
+}
+
 // linuxArgv returns a process's argv from /proc/<pid>/cmdline.
 func linuxArgv(pid int) []string {
 	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")

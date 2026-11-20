@@ -105,6 +105,36 @@ func TestRecordsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAgentConfigDirRoundTrip(t *testing.T) {
+	home := shortHome(t)
+	dir := "/home/o/.claude-swap-backup/sessions/3-o_example.com"
+	if err := writeRecords(home, []sessionRecord{
+		{ID: "a", Agent: "claude", AgentSession: "s", AgentConfigDir: dir},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := readRecords(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].AgentConfigDir != dir {
+		t.Fatalf("round trip agent_config_dir = %+v, want %q", out, dir)
+	}
+
+	// A file written before the field existed loads with "".
+	raw := `{"version":1,"sessions":[{"id":"b","agent":"claude","agent_session":"s"}]}`
+	if err := os.WriteFile(sessionsPath(home), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err = readRecords(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].AgentConfigDir != "" || out[0].Agent != "claude" {
+		t.Fatalf("old record without agent_config_dir = %+v, want ConfigDir \"\"", out)
+	}
+}
+
 func TestReadRecordsQuarantine(t *testing.T) {
 	home := shortHome(t)
 	if err := os.MkdirAll(Dir(home), 0o700); err != nil {

@@ -69,19 +69,24 @@ type Home struct {
 	Memory string
 	// Job is JOB.md, the agent job description (API-ROOM-007).
 	Job string
-	// Avatar is avatar.svg, the generated avatar (spec 43, REQ-AVT-006).
+	// Avatar is avatar.json, the saved pixel avatar document (spec 62,
+	// API-PXA-008).
 	Avatar string
+	// AvatarBlob is avatar.blob.svg, the never-read backup of the spec 43
+	// blob avatar (REQ-PXA-012).
+	AvatarBlob string
 }
 
 // Paths returns the paths of agent name under lanaHome.
 func Paths(lanaHome, name string) Home {
 	dir := filepath.Join(lanaHome, "agents", name)
 	return Home{
-		Dir:    dir,
-		Agent:  filepath.Join(dir, "AGENT.md"),
-		Memory: filepath.Join(dir, "MEMORY.md"),
-		Job:    filepath.Join(dir, "JOB.md"),
-		Avatar: filepath.Join(dir, "avatar.svg"),
+		Dir:        dir,
+		Agent:      filepath.Join(dir, "AGENT.md"),
+		Memory:     filepath.Join(dir, "MEMORY.md"),
+		Job:        filepath.Join(dir, "JOB.md"),
+		Avatar:     filepath.Join(dir, "avatar.json"),
+		AvatarBlob: filepath.Join(dir, "avatar.blob.svg"),
 	}
 }
 

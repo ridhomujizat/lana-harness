@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import { errorMessage } from "../api/client";
+import { errorMessage, ApiError } from "../api/client";
 import {
   createWorkbenchSession,
   getWorkbenchLayout,
   killWorkbenchSession,
   listWorkbenchSessions,
+  previewWorkbenchFile,
   putWorkbenchLayout,
   restartWorkbenchSession,
   subscribeWorkbench,
+  type WorkbenchPreview,
   type WorkbenchSession,
 } from "../api/workbench";
 import { Ic } from "../ui/icons";
 import {
-  AGENT_PROGRAMS,
   KEY_SEQUENCES,
   STATUS_LABEL,
   STATUS_ORDER,
@@ -25,8 +26,11 @@ import {
   closeTab,
   ctrlKey,
   emptyLayout,
+  focusAfterClose,
   focusPane,
+  forgetFocus,
   isAgent,
+  noteFocus,
   locate,
   mergeRemote,
   paneSessions,
@@ -59,7 +63,10 @@ import {
   type WbTab,
 } from "./workbench-model";
 import { TermPane, type SendInput } from "./workbench-term";
+import { prune as pruneTermCache } from "./workbench-term-cache";
+import { WorkbenchPreview as PreviewPanel } from "./workbench-preview";
 import { AgentLogo } from "./agent-logo";
+import { ProgramTile, TabTiles } from "./workbench-tile";
 import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
 import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
@@ -71,6 +78,11 @@ import { PaneAccessContext, RemoteControlBar, usePaneAccess, useRemoteControl, t
    time, all-tabs sheet, read-only until Take over (REQ-WB-055). */
 
 const PHONE_QUERY = "(max-width: 640px)";
+
+/* Spec 61 REQ-WP-023: how long a pane fades in and out. The close delay is a
+   little longer than the CSS fade, so the fade is seen before the kill goes. */
+const ENTER_FADE_MS = 200;
+const CLOSE_FADE_MS = 170;
 
 /* The shell topbar is hidden on this page (App.tsx), so the phone drawer
    opens from here. */
@@ -104,20 +116,6 @@ function hashColor(text: string): string {
 
 export function StatusDot({ status }: { status: Status }) {
   return <span className={"wb-status wb-status-" + status} aria-label={STATUS_LABEL[status]} title={STATUS_LABEL[status]} />;
-}
-
-function ProgramIcon({ session, size = 20 }: { session?: WorkbenchSession; size?: number }) {
-  /* A recognized coding agent shows its real logo (claude, codex, cursor,
-     gemini, opencode, copilot, …); anything else gets an outline terminal
-     mark, as in GoRex. */
-  const program = (session?.program || "").toLowerCase();
-  const agent = (session?.agent || (AGENT_PROGRAMS.includes(program) ? program : "")).toLowerCase();
-  if (agent) return <AgentLogo agent={agent} size={size} />;
-  return (
-    <span className="wb-prog wb-prog-plain" style={{ width: size, height: size }} aria-hidden="true">
-      <Ic name="square-terminal" size={Math.round(size * 0.9)} />
-    </span>
-  );
 }
 
 function LanaChip({ session, compact }: { session?: WorkbenchSession; compact?: boolean }) {
@@ -209,7 +207,7 @@ function Panel(props: PanelProps) {
         className={"wb-agent" + (s.id === focusSession ? " is-active" : "")}
         onClick={() => props.onOpenSession(s.id)}
       >
-        <ProgramIcon session={s} />
+        <ProgramTile session={s} size="pane" />
         <span className="wb-agent-label">
           {showSpace ? <b>{sp ? spaceLabel(sp, sessions) : "unplaced"}</b> : null}
           <span className={showSpace ? "wb-agent-title muted" : "wb-agent-title"}>
@@ -383,6 +381,8 @@ interface PaneActions {
   onZoom: (id: string) => void;
   onClose: (id: string) => void;
   onRestart: (id: string) => void;
+  /* Spec 61 REQ-WP-010: a file path was activated in a terminal. */
+  onOpenFile: (id: string, link: string) => void;
 }
 
 function PaneView({
@@ -390,6 +390,8 @@ function PaneView({
   session,
   focused,
   zoomed,
+  closing,
+  entering,
   actions,
   fontSize,
 }: {
@@ -397,15 +399,20 @@ function PaneView({
   session?: WorkbenchSession;
   focused: boolean;
   zoomed: boolean;
+  closing?: boolean;
+  entering?: boolean;
   actions: PaneActions;
   fontSize?: number;
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
   return (
-    <div className={"wb-pane" + (focused ? " is-focused" : "")} data-session={id}>
+    <div
+      className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "")}
+      data-session={id}
+    >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
-        <ProgramIcon session={session} />
+        <ProgramTile session={session} size="pane" />
         <span className="wb-pane-title">{programName(session)}</span>
         {session?.cwd || session?.dir ? (
           <span className="wb-pane-dir">{(session.cwd || session.dir).replace(/^\/Users\/[^/]+/, "~")}</span>
@@ -437,10 +444,12 @@ function PaneView({
             key={id + ":" + session.pid + ":" + access.mode}
             sessionId={id}
             mode={access.mode}
+            pid={session.pid}
             onControlLost={access.onControlLost}
             focused={focused}
             fontSize={fontSize}
             onFocus={() => actions.onFocus(id)}
+            onOpenFile={actions.onOpenFile}
             sessionSize={{ cols: session.cols, rows: session.rows }}
           />
         ) : (
@@ -469,12 +478,16 @@ function PaneTree({
   tab,
   sessions,
   actions,
+  closing,
+  entering,
   fontSize,
 }: {
   node: PaneNode;
   tab: WbTab;
   sessions: Sessions;
   actions: PaneActions;
+  closing: ReadonlySet<string>;
+  entering: ReadonlySet<string>;
   fontSize?: number;
 }) {
   if (node.type === "pane") {
@@ -484,6 +497,8 @@ function PaneTree({
         session={sessions[node.session]}
         focused={tab.focus === node.session}
         zoomed={tab.zoom === node.session}
+        closing={closing.has(node.session)}
+        entering={entering.has(node.session)}
         actions={actions}
         fontSize={fontSize}
       />
@@ -498,6 +513,8 @@ function PaneTree({
           tab={tab}
           sessions={sessions}
           actions={actions}
+          closing={closing}
+          entering={entering}
           fontSize={fontSize}
         />
       ))}
@@ -525,6 +542,8 @@ interface PhoneProps {
   onFocus: (spaceId: string, tabId: string, id: string) => void;
   onRestart: (id: string) => void;
   onClose: (id: string) => void;
+  /* Spec 61 REQ-WP-010: a file path was tapped in a terminal. */
+  onOpenFile: (id: string, link: string) => void;
 }
 
 const PHONE_FONT_KEY = "lana.workbench.phoneFont";
@@ -706,7 +725,7 @@ function PhoneWorkbench(props: PhoneProps) {
                 }}
                 {...longPress((el) => props.onMenu({ kind: "tab", spaceId: space.id, tabId: t.id, anchor: el }))}
               >
-                <ProgramIcon session={sessions[t.focus || tabSessions(t)[0] || ""]} size={14} />
+                <TabTiles ids={tabSessions(t)} focus={t.focus} sessions={sessions} />
                 <span className="wb-tab-label">{tabLabel(t, sessions)}</span>
                 {s === "working" || s === "blocked" || s === "done" ? <StatusDot status={s} /> : null}
               </button>
@@ -724,7 +743,7 @@ function PhoneWorkbench(props: PhoneProps) {
             <button type="button" aria-label="Previous pane" onClick={() => go(-1)} disabled={ids.length < 2}>
               <Ic name="chevron-left" size={16} />
             </button>
-            <ProgramIcon session={session} size={18} />
+            <ProgramTile session={session} size="pane" />
             <b>{programName(session)}</b>
             <LanaChip session={session} compact />
             <span className="wb-spacer" />
@@ -755,6 +774,7 @@ function PhoneWorkbench(props: PhoneProps) {
               key={current + ":" + (session?.pid ?? 0) + ":" + access.mode}
               sessionId={current}
               mode={access.mode}
+              pid={session?.pid ?? 0}
               onControlLost={access.onControlLost}
               fontSize={fontSize}
               sendRef={sendRef}
@@ -763,6 +783,7 @@ function PhoneWorkbench(props: PhoneProps) {
               claimRef={claimRef}
               keyboardRef={keyboardRef}
               onOwnerChange={setOwner}
+              onOpenFile={props.onOpenFile}
             />
           </div>
           {status === "exited" ? (
@@ -857,7 +878,7 @@ function PhoneWorkbench(props: PhoneProps) {
                       {...longPress((el) => props.onMenu({ kind: "tab", spaceId: space.id, tabId: t.id, anchor: el }))}
                     >
                       <span className="wb-card-preview">
-                        <ProgramIcon session={focus} size={18} />
+                        <ProgramTile session={focus} size="pane" />
                         <span>{focus?.program || "shell"}</span>
                       </span>
                       <span className="wb-card-foot">
@@ -906,6 +927,11 @@ function readPanelWidth(): number {
   } catch {
     return PANEL_WIDTH;
   }
+}
+
+/* A daemon message as a sentence: "no such file: …" -> "No such file: …". */
+function capitalize(text: string): string {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
 function savePanelWidth(width: number): void {
@@ -1083,10 +1109,61 @@ export function WorkbenchPage() {
   const [layout, setLayoutState] = useState<WbLayout>(emptyLayout());
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  /* A preview that could not open (spec 61 REQ-WP-011): a notice with a close
+     button, not the load error's Retry; it also goes away on its own. */
+  const [previewNotice, setPreviewNotice] = useState("");
+  useEffect(() => {
+    if (!previewNotice) return;
+    const timer = window.setTimeout(() => setPreviewNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [previewNotice]);
+  /* Spec 61 REQ-WP-012: one previewed file at a time; a new activation
+     replaces it. The panel itself, not the shared layout document. */
+  const [preview, setPreview] = useState<{ session: string; data: WorkbenchPreview } | null>(null);
   const [phoneView, setPhoneView] = useState<"home" | "space">("home");
   const layoutRef = useRef(layout);
   const savedRef = useRef("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  /* Spec 61 REQ-WP-022: the pane focus history of each tab, kept in memory, so
+     closing the focused pane gives the focus back to the pane the user used
+     before it. Spec 61 REQ-WP-023: a pane fades in when it is made and out
+     when it is closed. */
+  const focusHistory = useRef<Map<string, string[]>>(new Map());
+  const lastFocus = useRef<Map<string, string>>(new Map());
+  const [closing, setClosing] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [entering, setEntering] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const closingRef = useRef(closing);
+  useEffect(() => {
+    closingRef.current = closing;
+  }, [closing]);
+  const fadeTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  useEffect(
+    () => () => {
+      for (const timer of fadeTimers.current) clearTimeout(timer);
+    },
+    []
+  );
+  const forgetSession = useCallback((sessionId: string) => {
+    for (const [tabId, ids] of focusHistory.current) {
+      const kept = forgetFocus(ids, sessionId);
+      if (kept.length) focusHistory.current.set(tabId, kept);
+      else focusHistory.current.delete(tabId);
+    }
+  }, []);
+  const markEntering = useCallback((id: string) => {
+    setEntering((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+    const timer = setTimeout(() => {
+      fadeTimers.current.delete(timer);
+      setEntering((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }, ENTER_FADE_MS);
+    fadeTimers.current.add(timer);
+  }, []);
 
   const commit = useCallback((next: WbLayout) => {
     layoutRef.current = next;
@@ -1101,6 +1178,42 @@ export function WorkbenchPage() {
   }, []);
 
   const update = useCallback((fn: (l: WbLayout) => WbLayout) => commit(fn(layoutRef.current)), [commit]);
+
+  /* Spec 61 REQ-WP-022: record the focused pane of every tab, so closing one
+     can give the focus back to the pane the user used before it. */
+  useEffect(() => {
+    for (const sp of layout.spaces) {
+      for (const t of sp.tabs) {
+        const f = t.focus;
+        if (!f || lastFocus.current.get(t.id) === f) continue;
+        lastFocus.current.set(t.id, f);
+        focusHistory.current.set(t.id, noteFocus(focusHistory.current.get(t.id) ?? [], f));
+      }
+    }
+  }, [layout]);
+
+  /* Spec 61 REQ-WP-011: ask the daemon to read a path a terminal pointed at.
+     The space's folder rides along as the relative-path fallback. A 404/403
+     shows a short notice and opens nothing. */
+  const openPreview = useCallback((sessionId: string, link: string) => {
+    const where = locate(layoutRef.current, sessionId);
+    const dir = where ? spaceCwd(where.space, sessionsRef.current) || where.space.dir : "";
+    previewWorkbenchFile(sessionId, link, dir)
+      .then((data) => {
+        setPreviewNotice("");
+        setPreview({ session: sessionId, data });
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) {
+          /* The daemon's message names the path it tried. */
+          setPreviewNotice(err.message ? capitalize(err.message) : "No such file.");
+        } else if (err instanceof ApiError && err.status === 403) {
+          setPreviewNotice("That file is not allowed.");
+        } else {
+          setPreviewNotice(errorMessage(err));
+        }
+      });
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -1140,6 +1253,27 @@ export function WorkbenchPage() {
           return;
         }
         if (event.type === "session.removed") {
+          /* Spec 61 REQ-WP-022: a session that goes away gives its tab's focus
+             to the pane the user used before it, the same as a close. */
+          const gone = event.session.id;
+          const where = locate(layoutRef.current, gone);
+          if (where) {
+            const next = focusAfterClose(
+              focusHistory.current.get(where.tab.id) ?? [],
+              tabSessions(where.tab),
+              where.tab.focus,
+              gone,
+              closingRef.current
+            );
+            update((l) => {
+              const moved =
+                where.tab.focus === gone && next && next !== gone
+                  ? focusPane(l, where.space.id, where.tab.id, next)
+                  : l;
+              return removeSession(moved, gone);
+            });
+          }
+          forgetSession(gone);
           setSessions((prev) => {
             const next = { ...prev };
             delete next[event.session.id];
@@ -1174,7 +1308,7 @@ export function WorkbenchPage() {
       stop();
       clearTimeout(saveTimer.current);
     };
-  }, [load]);
+  }, [load, update, forgetSession]);
 
   const space = pickSpace(layout);
   const tab = pickTab(space);
@@ -1186,6 +1320,13 @@ export function WorkbenchPage() {
 
   const placedIds = useMemo(() => new Set(layout.spaces.flatMap((s) => s.tabs.flatMap(tabSessions))), [layout]);
   const orphans = useMemo(() => Object.values(sessions).filter((s) => !placedIds.has(s.id)), [sessions, placedIds]);
+  /* Spec 55: keep a terminal alive only while its session is in the layout. A
+     session that leaves the layout (closed, killed, removed) drops its cached
+     terminal; switching tabs or spaces leaves this set unchanged, so those panes
+     stay alive. */
+  useEffect(() => {
+    pruneTermCache(placedIds);
+  }, [placedIds]);
 
   const create = useCallback(
     async (dir: string, command?: string[], title?: string) => {
@@ -1203,18 +1344,22 @@ export function WorkbenchPage() {
     if (!sp) return;
     try {
       const s = await create(spaceCwd(sp, sessionsRef.current));
+      /* REQ-WP-021: the new terminal takes the focus and the keyboard at once;
+         REQ-WP-023: it fades in. */
+      markEntering(s.id);
       update((l) => addTab(l, sp.id, s.id));
       setPhoneView("space");
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [create, update]);
+  }, [create, update, markEntering]);
 
   /* "+" in Spaces: a new space with one terminal in the home folder, named
      after its folder as the terminal moves. */
   const newSpace = useCallback(async () => {
     try {
       const s = await create("");
+      markEntering(s.id);
       update((l) => {
         const next = addSpace(l, "~", "");
         return addTab(next, next.activeSpace || "", s.id);
@@ -1223,7 +1368,7 @@ export function WorkbenchPage() {
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [create, update]);
+  }, [create, update, markEntering]);
 
   const actions: PaneActions = {
     onFocus: (id) => {
@@ -1237,6 +1382,9 @@ export function WorkbenchPage() {
       if (!sp || !t) return;
       try {
         const s = await create(sessions[id]?.cwd || sp.dir);
+        /* REQ-WP-021: the new pane takes the focus and the keyboard at once
+           (splitPane makes it the tab's focus); REQ-WP-023: it fades in. */
+        markEntering(s.id);
         update((l) => splitPane(l, sp.id, t.id, id, s.id, dir));
       } catch (err) {
         setError(errorMessage(err));
@@ -1248,14 +1396,44 @@ export function WorkbenchPage() {
       if (sp && t) update((l) => toggleZoom(l, sp.id, t.id, id));
     },
     onClose: (id) => {
-      update((l) => removeSession(l, id));
-      killWorkbenchSession(id).catch((err) => setError(errorMessage(err)));
+      /* Spec 61 REQ-WP-022: move the focus off the closing pane at once, so it
+         goes to the pane the user used before it (not the tab's first pane),
+         before the fade. REQ-WP-023: the card fades out, then the kill goes. */
+      const where = locate(layoutRef.current, id);
+      if (where) {
+        const next = focusAfterClose(
+          focusHistory.current.get(where.tab.id) ?? [],
+          tabSessions(where.tab),
+          where.tab.focus,
+          id,
+          closingRef.current
+        );
+        if (where.tab.focus === id && next && next !== id) {
+          update((l) => focusPane(l, where.space.id, where.tab.id, next));
+        }
+      }
+      setClosing((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+      const timer = setTimeout(() => {
+        fadeTimers.current.delete(timer);
+        setClosing((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        forgetSession(id);
+        update((l) => removeSession(l, id));
+        /* A session that already went away has nothing to kill. */
+        if (sessionsRef.current[id]) killWorkbenchSession(id).catch(() => {});
+      }, CLOSE_FADE_MS);
+      fadeTimers.current.add(timer);
     },
     onRestart: (id) => {
       restartWorkbenchSession(id)
         .then((s) => setSessions((prev) => ({ ...prev, [s.id]: s })))
         .catch((err) => setError(errorMessage(err)));
     },
+    onOpenFile: openPreview,
   };
 
   /* Spec 56: the Claude accounts plugin, on once claude-swap is installed. */
@@ -1269,6 +1447,7 @@ export function WorkbenchPage() {
       if (!sp) return;
       create(spaceCwd(sp, sessionsRef.current), argv, title)
         .then((s) => {
+          markEntering(s.id);
           update((l) => addTab(l, sp.id, s.id, title));
           setPhoneView("space");
         })
@@ -1284,7 +1463,10 @@ export function WorkbenchPage() {
       }
       const dir = sessionsRef.current[target]?.cwd || spaceCwd(sp, sessionsRef.current);
       create(dir, argv)
-        .then((s) => update((l) => splitPane(l, sp.id, t.id, target, s.id, "row")))
+        .then((s) => {
+          markEntering(s.id);
+          update((l) => splitPane(l, sp.id, t.id, target, s.id, "row"));
+        })
         .catch((err) => setError(errorMessage(err)));
     },
   };
@@ -1326,18 +1508,30 @@ export function WorkbenchPage() {
     const t = findSpace(spaceId)?.tabs.find((x) => x.id === tabId);
     if (!t) return;
     const ids = tabSessions(t);
+    focusHistory.current.delete(tabId);
+    lastFocus.current.delete(tabId);
     update((l) => closeTab(l, spaceId, tabId));
-    for (const id of ids) killWorkbenchSession(id).catch(() => {});
+    for (const id of ids) {
+      forgetSession(id);
+      killWorkbenchSession(id).catch(() => {});
+    }
   };
   const closeSpaceNow = (spaceId: string) => {
     const sp = findSpace(spaceId);
     if (!sp) return;
     const ids = spaceSessions(sp);
+    for (const t of sp.tabs) {
+      focusHistory.current.delete(t.id);
+      lastFocus.current.delete(t.id);
+    }
     update((l) => {
       const next = removeSpace(l, spaceId);
       return next.spaces.length ? next : addSpace(next, "~", "");
     });
-    for (const id of ids) killWorkbenchSession(id).catch(() => {});
+    for (const id of ids) {
+      forgetSession(id);
+      killWorkbenchSession(id).catch(() => {});
+    }
   };
   const askCloseSpace = (spaceId: string) => {
     const sp = findSpace(spaceId);
@@ -1548,6 +1742,13 @@ export function WorkbenchPage() {
         Retry
       </button>
     </div>
+  ) : previewNotice ? (
+    <div className="wb-error" role="alert">
+      {previewNotice}
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreviewNotice("")}>
+        Close
+      </button>
+    </div>
   ) : null;
 
   if (phone) {
@@ -1571,8 +1772,10 @@ export function WorkbenchPage() {
           onFocus={(sid, tid, id) => update((l) => focusPane(l, sid, tid, id))}
           onRestart={actions.onRestart}
           onClose={actions.onClose}
+          onOpenFile={openPreview}
         />
         <RemoteControlBar control={remoteControl} />
+        {preview ? <PreviewPanel data={preview.data} phone onClose={() => setPreview(null)} /> : null}
       </PaneAccessContext.Provider>
     );
   }
@@ -1626,7 +1829,7 @@ export function WorkbenchPage() {
                   onDoubleClick={() => space && openRenameTab(space.id, t.id)}
                   title={tabLabel(t, sessions)}
                 >
-                  <ProgramIcon session={sessions[t.focus || tabSessions(t)[0] || ""]} size={15} />
+                  <TabTiles ids={tabSessions(t)} focus={t.focus} sessions={sessions} />
                   <span className="wb-tab-label">{tabLabel(t, sessions)}</span>
                   {s === "working" || s === "blocked" || s === "done" ? <StatusDot status={s} /> : null}
                 </button>
@@ -1668,9 +1871,26 @@ export function WorkbenchPage() {
             <p className="wb-empty-note">Opening Workbench…</p>
           ) : tab ? (
             zoomed ? (
-              <PaneView id={zoomed} session={sessions[zoomed]} focused zoomed actions={actions} fontSize={deskFont} />
+              <PaneView
+                id={zoomed}
+                session={sessions[zoomed]}
+                focused
+                zoomed
+                closing={closing.has(zoomed)}
+                entering={entering.has(zoomed)}
+                actions={actions}
+                fontSize={deskFont}
+              />
             ) : (
-              <PaneTree node={tab.root} tab={tab} sessions={sessions} actions={actions} fontSize={deskFont} />
+              <PaneTree
+                node={tab.root}
+                tab={tab}
+                sessions={sessions}
+                actions={actions}
+                closing={closing}
+                entering={entering}
+                fontSize={deskFont}
+              />
             )
           ) : (
             <div className="wb-empty">
@@ -1684,6 +1904,7 @@ export function WorkbenchPage() {
         </div>
         <RemoteControlBar control={remoteControl} />
       </section>
+      {preview ? <PreviewPanel data={preview.data} onClose={() => setPreview(null)} /> : null}
     </main>
     </PaneAccessContext.Provider>
   );

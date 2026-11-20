@@ -7,6 +7,27 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.13] - 2026-11-21
+
+### Added
+
+- Workbench file preview (spec 61): ⌘+click (Ctrl+click, or a tap on a phone) a file path printed in a terminal to open it in a panel beside the panes. HTML pages, Markdown, images, PDF and code with line numbers are shown; `path:line` jumps to the line. The daemon reads the file, so the preview also works over remote access. Only files under the home and temp folders are served, never `.ssh`, `.gnupg`, `.aws`, `secrets.env` or `.env` files, and pages run in a sandboxed frame.
+
+### Changed
+
+- Workbench tab and space switches are instant again: terminals stay alive while their tab is hidden, so a Claude Code pane no longer replays its whole history on every switch.
+- Workbench panes: the focused pane is clearly brighter, terminals show the card colour, a new terminal takes the focus, closing the focused pane returns the focus to the pane used last, and panes fade in and out.
+- Workbench tabs have a fixed width with the title on the left, and programs and agents show as small landscape tiles (Claude, Codex, Cursor, Gemini, Grok, pi, omp and the rest). The side panel marks the focused agent.
+- Agent avatars are now chibi pixel-art characters instead of blobs (spec 62). Each agent
+  gets a character picked from its name (hair, skin, eyes, accessory, outfit, or a robot),
+  wearing the agent color. Small avatars show the head and shoulders in a tinted tile; the
+  profile shows the whole character. A working agent nods and types.
+- The avatar dialog has Randomize, a picker for every part, and "Generate with AI", which
+  draws a new character on the same template from your description. When the model fails
+  twice, the dialog shows an error and keeps the character on screen.
+- Saved blob avatars are kept as `avatar.blob.svg` and no longer shown; agents use their
+  pixel default until a new avatar is saved (`avatar.json`).
+
 ## [0.5.0-beta.12] - 2026-11-19
 
 ### Fixed

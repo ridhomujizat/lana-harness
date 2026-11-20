@@ -50,6 +50,13 @@ export function hasAgentLogo(agent: string): boolean {
   return Boolean(LOGOS[agent]);
 }
 
+/* A raw logo file by its base name (no folder, no extension), inlined for a
+   tile's glyph (spec 61 REQ-WP-032). Undefined when the file is not present. */
+export function agentLogoSvg(file: string): string | undefined {
+  const raw = FILES["../assets/agents/" + file + ".svg"];
+  return raw ? inlineSvg(raw) : undefined;
+}
+
 export function AgentLogo({ agent, size = 20 }: { agent: string; size?: number }) {
   const svg = LOGOS[agent];
   if (svg) {

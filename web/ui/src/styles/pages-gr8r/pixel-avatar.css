@@ -1,0 +1,197 @@
+/* Pixel-art agent avatars (spec 62, prototype design/prototypes/avatar-pixel.html).
+   An avatar host (.av, .agent-avatar or .agent-face) with .has-pixel shows the
+   bust of the sprite in a rounded tile tinted with the agent color (--pxc).
+   .is-full shows the whole character with no tile. A working avatar
+   (.px-sprite.is-animated) carries four frame groups; the keyframes below show
+   one at a time in the cycle [0,1,0,3,0,1,2,3], 180 ms per step
+   (REQ-PXA-011). Everything else is still. */
+
+.av.has-pixel,
+.agent-avatar.has-pixel,
+.agent-face.has-pixel {
+  position: relative;
+  border-radius: 28%;
+  border-color: transparent;
+  background: color-mix(in oklab, var(--pxc, var(--violet)) 28%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--pxc, var(--violet)) 38%, transparent);
+  color: inherit;
+  overflow: visible;
+}
+
+.has-pixel > .px-sprite,
+.has-pixel > .av-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  clip-path: inset(0 round 28%);
+}
+
+.av.has-pixel.is-full,
+.agent-avatar.has-pixel.is-full,
+.agent-face.has-pixel.is-full {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.has-pixel.is-full > .px-sprite,
+.has-pixel.is-full > .av-img {
+  clip-path: none;
+  overflow: visible;
+}
+
+.px-sprite {
+  display: block;
+}
+
+.px-ground {
+  fill: var(--text);
+  fill-opacity: 0.14;
+}
+
+/* ---------------- working frames ---------------- */
+
+.px-sprite.is-animated .px-f {
+  opacity: 0;
+  animation-duration: 1.44s;
+  animation-iteration-count: infinite;
+  animation-timing-function: steps(1, end);
+}
+.px-sprite.is-animated .px-f0 {
+  animation-name: px-f0;
+}
+.px-sprite.is-animated .px-f1 {
+  animation-name: px-f1;
+}
+.px-sprite.is-animated .px-f2 {
+  animation-name: px-f2;
+}
+.px-sprite.is-animated .px-f3 {
+  animation-name: px-f3;
+}
+
+@keyframes px-f0 {
+  0% { opacity: 1; }
+  12.5% { opacity: 0; }
+  25% { opacity: 1; }
+  37.5% { opacity: 0; }
+  50% { opacity: 1; }
+  62.5% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes px-f1 {
+  0% { opacity: 0; }
+  12.5% { opacity: 1; }
+  25% { opacity: 0; }
+  62.5% { opacity: 1; }
+  75% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes px-f2 {
+  0% { opacity: 0; }
+  75% { opacity: 1; }
+  87.5% { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes px-f3 {
+  0% { opacity: 0; }
+  37.5% { opacity: 1; }
+  50% { opacity: 0; }
+  87.5% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+/* ---------------- thought bubble ---------------- */
+
+.px-bubble {
+  position: absolute;
+  top: -24%;
+  right: -34%;
+  width: 46%;
+  aspect-ratio: 11 / 7;
+  pointer-events: none;
+  z-index: 1;
+}
+.px-bubble svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.px-bubble .px-dot {
+  animation: px-dot 1.2s steps(1, end) infinite;
+}
+.px-bubble .px-dot2 {
+  animation-delay: 0.2s;
+}
+.px-bubble .px-dot3 {
+  animation-delay: 0.4s;
+}
+@keyframes px-dot {
+  0% { opacity: 0.25; }
+  30% { opacity: 1; }
+  70% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .px-sprite.is-animated .px-f {
+    animation: none;
+    opacity: 0;
+  }
+  .px-sprite.is-animated .px-f0 {
+    opacity: 1;
+  }
+  .px-bubble .px-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Round avatar spots (chat list coins, team faces) keep the pixel tile. */
+.rooms-row .av.chat-coin.has-pixel,
+.team-av .av.team-av-face.has-pixel {
+  border-radius: 28%;
+  background: color-mix(in oklab, var(--pxc, var(--violet)) 28%, var(--surface));
+}
+
+/* Room layout rules moved from the removed avatar-motion.css (spec 62). */
+
+/* ---------------- room live row ---------------- */
+/* Before an agent room's running turn appears, and in group rooms. */
+.room-live.room-live-agent {
+  gap: 10px;
+  padding-left: 4px;
+  min-height: 30px;
+}
+
+/* ---------------- agent room turn foot ---------------- */
+/* One row in one place: the loading row while the turn works, then
+   "worked for 8s - 03:34" with the done avatar and then Copy before it.
+   Both shapes keep one height so the switch does not move the page. */
+.turn-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  margin-top: -4px;
+  color: var(--text-3);
+  font-size: var(--fs-xs, 12px);
+}
+.turn-foot > .av,
+.turn-foot > .agent-avatar {
+  margin-left: 1px;
+}
+.turn-foot .turn-copy {
+  margin-left: -2px;
+  color: var(--text-3);
+}
+.turn-foot-meta {
+  font-variant-numeric: tabular-nums;
+}
+.turn-foot-live {
+  color: var(--accent);
+  font-size: var(--fs-sm, 13px);
+}
+.turn-foot-live-text {
+  font-variant-numeric: tabular-nums;
+}

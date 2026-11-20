@@ -9,6 +9,7 @@ import {
   turnSummary,
 } from "./turn";
 import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
+import { sampleAvatar } from "../test/pixel-sample";
 import type { ReplyTarget, TurnStep } from "./turn";
 import type { SessionEvent, EventPayload } from "../api/sessions";
 
@@ -384,11 +385,11 @@ describe("turn header avatar", () => {
     /* Spec 43: no letter; the server-rendered avatar until the store knows. */
     expect(
       container.querySelector(".turn-head .agent-avatar img.av-img")?.getAttribute("src")
-    ).toBe("/v1/agents/lana/avatar.svg?theme=light");
+    ).toBe("/v1/agents/lana/avatar.svg?theme=light&view=bust");
   });
 
   /* Spec 43: the timeline speaker shows the generated avatar. */
-  it("shows the stored svg for the speaker", () => {
+  it("shows the stored sprite for the speaker", () => {
     const items = buildTurns([
       event(1, "assistant/message", "t1", {
         content: [{ type: "text", text: "the answer" }],
@@ -399,18 +400,11 @@ describe("turn header avatar", () => {
     if (!turnItem || turnItem.kind !== "turn") {
       throw new Error("expected a turn item");
     }
-    setAgentAvatar(
-      "lana",
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
-        '<circle cx="50" cy="50" r="38" fill="currentColor"/>' +
-        '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
-        '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>',
-      "#9b5cff"
-    );
+    setAgentAvatar("lana", sampleAvatar(), "#9b5cff");
     try {
       const { container } = render(<TurnBlock turn={turnItem.turn} agent="lana" />);
-      const face = container.querySelector(".turn-head .agent-face.has-svg") as HTMLElement;
-      expect(face.querySelector("svg circle")).not.toBeNull();
+      const face = container.querySelector(".turn-head .agent-face.has-pixel") as HTMLElement;
+      expect(face.querySelector("svg.px-sprite rect")).not.toBeNull();
       expect(face.textContent).toBe("");
     } finally {
       resetAvatarStore();

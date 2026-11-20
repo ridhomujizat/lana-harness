@@ -11,9 +11,9 @@ import (
 
 var _ web.AvatarBackend = (*webBackend)(nil)
 
-// GenerateAvatar implements web.AvatarBackend (spec 43, API-AVT-001).
-func (b *webBackend) GenerateAvatar(ctx context.Context, agent, model string, seed int64) (avatar.Result, error) {
-	result, err := b.rt.GenerateAvatar(ctx, agent, model, seed)
+// GenerateAvatar implements web.AvatarBackend (spec 62, API-PXA-002).
+func (b *webBackend) GenerateAvatar(ctx context.Context, agent, mode, model, prompt string, seed int64, color string) (avatar.Result, error) {
+	result, err := b.rt.GenerateAvatar(ctx, agent, mode, model, prompt, seed, color)
 	if errors.Is(err, lana.ErrUnknownAgent) {
 		return avatar.Result{}, web.ErrUnknownAgent
 	}

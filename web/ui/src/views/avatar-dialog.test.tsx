@@ -6,6 +6,7 @@ vi.mock("../api/agents", async (importOriginal) => {
   return {
     ...actual,
     generateAgentAvatar: vi.fn(),
+    getAvatarCatalog: vi.fn(),
     putAgentAvatar: vi.fn(),
     deleteAgentAvatar: vi.fn(),
   };
@@ -18,28 +19,47 @@ vi.mock("../api/router", async (importOriginal) => {
 import {
   deleteAgentAvatar,
   generateAgentAvatar,
+  getAvatarCatalog,
   putAgentAvatar,
 } from "../api/agents";
+import type { AvatarCatalog } from "../api/agents";
 import { ApiError } from "../api/client";
 import { getRouter } from "../api/router";
 import type { RouterOverview } from "../api/router";
 import { getAgentAvatar, resetAvatarStore } from "../lib/avatar-store";
-import { AvatarDialog } from "./avatar-dialog";
+import type { AvatarDoc } from "../lib/pixel-avatar";
+import { SAMPLE_PARTS, sampleAvatar, sampleDrawn } from "../test/pixel-sample";
+import { AvatarDialog, MODEL_STORAGE_KEY, defaultDrawModel } from "./avatar-dialog";
 
-/* Spec 43: the Generate avatar dialog. */
+/* Spec 62: the pixel avatar dialog. Each test avatar wears its own shirt
+   color, so the preview tells them apart by a rect fill. */
 
-function blob(shape: string): string {
-  return (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
-    shape +
-    '<ellipse cx="40" cy="46" rx="4" ry="7" fill="#ffffff"/>' +
-    '<ellipse cx="60" cy="46" rx="4" ry="7" fill="#ffffff"/></svg>'
-  );
-}
+const SAVED = sampleAvatar("#aa0000");
+const RANDOM = sampleAvatar("#00aa00");
+const PICKED: AvatarDoc = {
+  ...sampleAvatar("#0000aa"),
+  parts: { ...SAMPLE_PARTS, hair: "bob" },
+};
+const RECOLORED = sampleAvatar("#13b5c8");
+const DRAWN = sampleDrawn();
+const DEFAULT = sampleAvatar("#777777");
 
-const FIRST = blob('<circle cx="50" cy="50" r="38" fill="currentColor"/>');
-const DEFAULT = blob('<ellipse cx="50" cy="54" rx="40" ry="32" fill="currentColor"/>');
-const SECOND = blob('<rect x="14" y="14" width="72" height="72" rx="24" fill="currentColor"/>');
+const CATALOG: AvatarCatalog = {
+  species: [
+    { id: "human", label: "Human" },
+    { id: "robot", label: "Robot" },
+  ],
+  hair: [
+    { id: "short", label: "Short" },
+    { id: "bob", label: "Bob" },
+  ],
+  hair_color: [{ id: "dark", label: "Dark" }],
+  skin: [{ id: "light", label: "Light" }],
+  eyes: [{ id: "dot", label: "Dot" }],
+  accessory: [{ id: "none", label: "None" }],
+  outfit: [{ id: "plain", label: "Plain" }],
+  pants: [{ id: "denim", label: "Denim" }],
+};
 
 const ROUTER: RouterOverview = {
   version: "v1",
@@ -57,90 +77,178 @@ function preview(): HTMLElement {
   return screen.getByTestId("avatar-preview");
 }
 
+function shows(fill: string): boolean {
+  return preview().querySelector('rect[fill="' + fill + '"]') !== null;
+}
+
 beforeEach(() => {
   vi.mocked(getRouter).mockResolvedValue(ROUTER);
-  vi.mocked(generateAgentAvatar)
-    .mockResolvedValueOnce({ svg: FIRST, model: "openai/gpt-5-mini", seed: 1, source: "model" })
-    .mockResolvedValueOnce({ svg: SECOND, model: "", seed: 2, source: "local" });
+  vi.mocked(getAvatarCatalog).mockResolvedValue(CATALOG);
   vi.mocked(putAgentAvatar).mockImplementation(async (name, body) => ({
     name,
-    avatar_svg: body.svg,
+    avatar: body.avatar,
+    avatar_source: "saved",
     color: body.color || "brand",
     restart_required: false,
   }));
   vi.mocked(deleteAgentAvatar).mockResolvedValue({
     name: "lana",
-    avatar_svg: DEFAULT,
+    avatar: DEFAULT,
     avatar_source: "default",
     color: "brand",
   });
 });
 
 afterEach(() => {
+  window.localStorage.removeItem(MODEL_STORAGE_KEY);
   vi.clearAllMocks();
   vi.mocked(generateAgentAvatar).mockReset();
   resetAvatarStore();
 });
 
 describe("AvatarDialog", () => {
-  it("generates, recolors without a request, steps through results, and saves", async () => {
+  it("randomizes, picks a part, steps through results, and saves", async () => {
+    vi.mocked(generateAgentAvatar)
+      .mockResolvedValueOnce({ avatar: RANDOM, model: "", seed: 7, source: "local" })
+      .mockResolvedValueOnce({ avatar: PICKED, model: "", seed: 0, source: "local" });
     const onClose = vi.fn();
     const onSaved = vi.fn();
     render(
-      <AvatarDialog name="lana" color="brand" svg="" onClose={onClose} onSaved={onSaved} />
+      <AvatarDialog
+        name="lana"
+        color="brand"
+        avatar={SAVED}
+        source="saved"
+        onClose={onClose}
+        onSaved={onSaved}
+      />
     );
+    expect(shows("#aa0000")).toBe(true);
+    expect(preview().querySelectorAll("g.px-f")).toHaveLength(4);
+    expect(screen.getByText("The saved avatar.")).toBeTruthy();
 
-    expect(preview().querySelector("svg")).toBeNull();
-    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Randomize" }));
+    await waitFor(() => expect(shows("#00aa00")).toBe(true));
+    const randomCall = vi.mocked(generateAgentAvatar).mock.calls[0];
+    expect(randomCall?.[0]).toBe("lana");
+    expect(randomCall?.[1]).toMatchObject({ mode: "random", color: "brand" });
+    expect(screen.getByText("A random character.")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
-    await waitFor(() => expect(preview().querySelector("circle")).not.toBeNull());
-    expect(generateAgentAvatar).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(generateAgentAvatar).mock.calls[0]?.[0]).toBe("lana");
-    expect(vi.mocked(generateAgentAvatar).mock.calls[0]?.[1]).not.toHaveProperty("model");
-    expect(screen.getByText("Drawn by openai/gpt-5-mini.")).toBeTruthy();
-
-    /* A color change recolors at once and sends nothing. */
-    fireEvent.click(screen.getByRole("button", { name: "Teal" }));
-    expect(preview().style.getPropertyValue("--c")).toBe("#12b5a6");
-    expect(screen.getByRole("button", { name: "Teal" }).getAttribute("aria-pressed")).toBe("true");
-    expect(generateAgentAvatar).toHaveBeenCalledTimes(1);
-    expect(putAgentAvatar).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
-    await waitFor(() => expect(preview().querySelector("rect")).not.toBeNull());
-    expect(screen.getByText(/Built-in generator/)).toBeTruthy();
+    /* The Hair picker renders the new parts on the server. */
+    await waitFor(() => expect(getAvatarCatalog).toHaveBeenCalled());
+    const hair = await screen.findByRole("combobox", { name: "Hair" });
+    fireEvent.click(hair);
+    fireEvent.click(await screen.findByRole("option", { name: "Bob" }));
+    await waitFor(() => expect(shows("#0000aa")).toBe(true));
+    expect(vi.mocked(generateAgentAvatar).mock.calls[1]?.[1]).toMatchObject({
+      mode: "render",
+      parts: { hair: "bob", color: "brand" },
+      color: "brand",
+    });
+    expect(screen.getByText("Your pick of parts.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    expect(preview().querySelector("circle")).not.toBeNull();
+    expect(shows("#00aa00")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(shows("#aa0000")).toBe(true);
     expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
-
     fireEvent.click(screen.getByRole("button", { name: "Redo" }));
-    expect(preview().querySelector("rect")).not.toBeNull();
-    expect((screen.getByRole("button", { name: "Redo" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(shows("#00aa00")).toBe(true);
 
     /* The strip selects a result too. */
-    fireEvent.click(screen.getByRole("button", { name: "Result 1" }));
-    expect(preview().querySelector("circle")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Result 3" }));
+    expect(shows("#0000aa")).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(putAgentAvatar).toHaveBeenCalledWith("lana", { svg: FIRST, color: "#12b5a6" });
-    expect(onSaved).toHaveBeenCalledWith({
-      svg: FIRST,
-      color: "#12b5a6",
-      restartRequired: false,
-    });
-    expect(getAgentAvatar("lana")).toEqual({ svg: FIRST, color: "#12b5a6", source: "saved" });
+    expect(putAgentAvatar).toHaveBeenCalledWith("lana", { avatar: PICKED, color: "brand" });
+    expect(onSaved).toHaveBeenCalledWith({ avatar: PICKED, color: "brand", restartRequired: false });
+    expect(getAgentAvatar("lana")).toEqual({ avatar: PICKED, color: "brand", source: "saved" });
   });
 
-  it("takes a custom hex color", () => {
-    render(<AvatarDialog name="lana" color="brand" svg={FIRST} onClose={vi.fn()} />);
+  it("asks the model to draw from a description", async () => {
+    vi.mocked(generateAgentAvatar).mockResolvedValueOnce({
+      avatar: DRAWN,
+      model: "openai/gpt-5-mini",
+      seed: 3,
+      source: "model",
+    });
+    render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={vi.fn()} />);
+    await waitFor(() => expect(getRouter).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "  a teal wizard  " },
+    });
+    const picker = document.getElementById("avatar-model") as HTMLElement;
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole("option", { name: "gpt-5-mini" }));
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(shows("#13b5c8")).toBe(true));
+    expect(vi.mocked(generateAgentAvatar).mock.calls[0]?.[1]).toMatchObject({
+      mode: "ai_draw",
+      prompt: "a teal wizard",
+      model: "openai/gpt-5-mini",
+      color: "brand",
+    });
+    expect(screen.getByText("Drawn by openai/gpt-5-mini.")).toBeTruthy();
+    /* A drawn character has no parts to pick. */
+    expect(screen.getByText(/drawn by a model/)).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Hair" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("always asks for a free drawing and keeps the avatar when the model fails", async () => {
+    vi.mocked(generateAgentAvatar).mockResolvedValueOnce({
+      avatar: RANDOM,
+      model: "",
+      seed: 4,
+      source: "local",
+    });
+    render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "red cap" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("could not draw a valid character");
+    const body = vi.mocked(generateAgentAvatar).mock.calls[0]?.[1];
+    expect(body).toMatchObject({ mode: "ai_draw", prompt: "red cap" });
+    expect(body).not.toHaveProperty("model");
+    /* There is one AI mode: no Parts / Free draw toggle. */
+    expect(screen.queryByRole("tab", { name: "Parts" })).toBeNull();
+    /* The random stand-in is not shown; the saved avatar stays. */
+    expect(shows("#aa0000")).toBe(true);
+    expect(shows("#00aa00")).toBe(false);
+  });
+
+  it("re-renders a parts avatar in a new color without a new result", async () => {
+    vi.mocked(generateAgentAvatar).mockResolvedValueOnce({
+      avatar: RECOLORED,
+      model: "",
+      seed: 0,
+      source: "local",
+    });
+    render(
+      <AvatarDialog name="lana" color="brand" avatar={SAVED} source="saved" onClose={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Teal" }));
+    await waitFor(() => expect(shows("#13b5c8")).toBe(true));
+    expect(vi.mocked(generateAgentAvatar).mock.calls[0]?.[1]).toMatchObject({
+      mode: "render",
+      color: "#13b5c8",
+      parts: { color: "#13b5c8" },
+    });
+    expect(preview().style.getPropertyValue("--pxc")).toBe("#13b5c8");
+    expect(screen.getByRole("button", { name: "Teal" }).getAttribute("aria-pressed")).toBe("true");
+    /* The recolor replaced the shown result: nothing to undo. */
+    expect((screen.getByRole("button", { name: "Undo" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("The saved avatar.")).toBeTruthy();
+  });
+
+  it("recolors only the tile of a drawn avatar", () => {
+    render(<AvatarDialog name="lana" color="brand" avatar={DRAWN} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("Custom"), { target: { value: "#ABCDEF" } });
-    expect(preview().style.getPropertyValue("--c")).toBe("#abcdef");
+    expect(preview().style.getPropertyValue("--pxc")).toBe("#abcdef");
+    expect(generateAgentAvatar).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("Custom"), { target: { value: "#zz" } });
     expect(screen.getByText("Use a hex color like #ff6a00.")).toBeTruthy();
-    expect(preview().style.getPropertyValue("--c")).toBe("#abcdef");
+    expect(preview().style.getPropertyValue("--pxc")).toBe("#abcdef");
   });
 
   it("shows a color validation error inline", async () => {
@@ -150,21 +258,11 @@ describe("AvatarDialog", () => {
       ])
     );
     const onClose = vi.fn();
-    render(<AvatarDialog name="lana" color="brand" svg={FIRST} onClose={onClose} />);
+    render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Color: must be a token or #rrggbb");
     expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it("saves a color change of the saved avatar", async () => {
-    const onClose = vi.fn();
-    render(<AvatarDialog name="lana" color="brand" svg={FIRST} onClose={onClose} />);
-    expect(preview().querySelector("circle")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Pink" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(putAgentAvatar).toHaveBeenCalledWith("lana", { svg: FIRST, color: "#ff3d9a" });
   });
 
   it("resets to the default avatar and shows it", async () => {
@@ -174,31 +272,29 @@ describe("AvatarDialog", () => {
       <AvatarDialog
         name="lana"
         color="#ff3d9a"
-        svg={FIRST}
+        avatar={SAVED}
         source="saved"
         onClose={onClose}
         onSaved={onSaved}
       />
     );
     fireEvent.click(screen.getByRole("button", { name: "Reset to default" }));
-    await waitFor(() => expect(preview().querySelector("ellipse[rx='40']")).not.toBeNull());
+    await waitFor(() => expect(shows("#777777")).toBe(true));
     expect(deleteAgentAvatar).toHaveBeenCalledWith("lana");
     expect(onClose).not.toHaveBeenCalled();
-    expect(onSaved).toHaveBeenCalledWith({ svg: DEFAULT, color: "brand", restartRequired: false });
-    expect(getAgentAvatar("lana")).toEqual({ svg: DEFAULT, color: "brand", source: "default" });
-    expect(screen.getByText("The default avatar, drawn from the agent\u2019s name.")).toBeTruthy();
+    expect(onSaved).toHaveBeenCalledWith({ avatar: DEFAULT, color: "brand", restartRequired: false });
+    expect(getAgentAvatar("lana")).toEqual({ avatar: DEFAULT, color: "brand", source: "default" });
+    expect(screen.getByText("The default avatar, picked from the agent’s name.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
-    /* The strip keeps the saved avatar to step back to. */
     expect(screen.getByRole("button", { name: "Saved avatar" })).toBeTruthy();
   });
 
   it("hides Reset to default on the default avatar and shows errors inline", async () => {
-    vi.mocked(generateAgentAvatar).mockReset();
     vi.mocked(generateAgentAvatar).mockRejectedValue(
       new ApiError(400, "invalid_model", "model offline")
     );
     render(
-      <AvatarDialog name="lana" color="brand" svg={DEFAULT} source="default" onClose={vi.fn()} />
+      <AvatarDialog name="lana" color="brand" avatar={DEFAULT} source="default" onClose={vi.fn()} />
     );
     expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
@@ -207,12 +303,36 @@ describe("AvatarDialog", () => {
   });
 
   it("lists router models without Claude Code", async () => {
-    render(<AvatarDialog name="lana" color="brand" svg="" onClose={vi.fn()} />);
+    render(<AvatarDialog name="lana" color="brand" avatar={null} onClose={vi.fn()} />);
+    expect(screen.getByText("No avatar yet. Randomize or generate one to start.")).toBeTruthy();
     await waitFor(() => expect(getRouter).toHaveBeenCalled());
     const picker = document.getElementById("avatar-model") as HTMLElement;
     expect(picker.textContent).toContain("Background model");
     fireEvent.click(picker);
     await waitFor(() => expect(screen.getByText("gpt-5-mini")).toBeTruthy());
     expect(screen.queryByText("Sonnet")).toBeNull();
+  });
+
+  it("starts drawings on the last pick, else a Claude Sonnet choice", () => {
+    const options = [
+      { value: "", label: "Background model" },
+      { value: "commandcode/deepseek/deepseek-v4.1-flash", label: "flash" },
+      { value: "commandcode/claude-sonnet-5-5", label: "Sonnet 5.5" },
+    ];
+    expect(defaultDrawModel(options, "")).toBe("commandcode/claude-sonnet-5-5");
+    expect(defaultDrawModel(options, "commandcode/deepseek/deepseek-v4.1-flash")).toBe(
+      "commandcode/deepseek/deepseek-v4.1-flash"
+    );
+    /* A remembered model that is gone falls back. */
+    expect(defaultDrawModel(options, "openai/gone")).toBe("commandcode/claude-sonnet-5-5");
+    expect(defaultDrawModel(options.slice(0, 2), "")).toBe("");
+  });
+
+  it("remembers the picked model for the next drawing", async () => {
+    render(<AvatarDialog name="lana" color="brand" avatar={SAVED} onClose={vi.fn()} />);
+    await waitFor(() => expect(getRouter).toHaveBeenCalled());
+    fireEvent.click(document.getElementById("avatar-model") as HTMLElement);
+    fireEvent.click(await screen.findByRole("option", { name: "gpt-5-mini" }));
+    expect(window.localStorage.getItem(MODEL_STORAGE_KEY)).toBe("openai/gpt-5-mini");
   });
 });

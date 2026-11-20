@@ -76,12 +76,12 @@ type roomJSON struct {
 	// DisplayName is the human name shown in the UI, "" when unset.
 	DisplayName string `json:"display_name"`
 	Color       string `json:"color"`
-	// AvatarSVG is the avatar the room shows, never empty, and AvatarSource
-	// "saved" or "default" (spec 43, API-AVT-005).
-	AvatarSVG    string   `json:"avatar_svg"`
-	AvatarSource string   `json:"avatar_source"`
-	Members      []string `json:"members"`
-	Lead         string   `json:"lead"`
+	// Avatar is the avatar the room shows, never empty, and AvatarSource
+	// "saved" or "default" (spec 62, API-PXA-005).
+	Avatar       avatar.Document `json:"avatar"`
+	AvatarSource string          `json:"avatar_source"`
+	Members      []string        `json:"members"`
+	Lead         string          `json:"lead"`
 	// Presence is derived, never stored (REQ-ROOM-006).
 	Presence     presenceJSON     `json:"presence"`
 	LastMessage  *roomMessageJSON `json:"last_message"`
@@ -376,7 +376,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 		row.Color = "brand"
 		row.Lead = agent.Lead
 		row.Members = nonNilStrings(agent.Members)
-		row.AvatarSVG, row.AvatarSource = avatar.DefaultFor(agent.Name), avatar.Default
+		row.Avatar, row.AvatarSource = avatar.DefaultFor(agent.Name, row.Color), avatar.Default
 		row.Mode = core.TeamModeGroup
 		if m, ok := meta[agent.Name]; ok {
 			row.DisplayName = m.displayName
@@ -390,7 +390,7 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 			row.DisplayName = m.displayName
 			row.Color = core.ResolveAgentColor(agent.Name, m.color)
 		}
-		row.AvatarSVG, row.AvatarSource = s.agentAvatar(agent.Name)
+		row.Avatar, row.AvatarSource = s.agentAvatar(agent.Name, row.Color)
 	}
 
 	newest, events, err := s.roomNewestSession(ctx, s.backend, agent.Name)

@@ -7,11 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
@@ -19,25 +21,38 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
-// avatarBodyLimit is the largest accepted avatar request body: an 8 KB SVG
-// escaped as JSON with room to spare.
+// avatarBodyLimit is the largest accepted avatar request body: an avatar
+// document escaped as JSON with room to spare.
 const avatarBodyLimit = 64 << 10
 
 // maxAvatarSeed keeps seeds in a range every JSON client reads exactly.
 const maxAvatarSeed = 1<<31 - 1
 
+// maxAvatarPromptRunes is the longest accepted generation prompt (API-PXA-002).
+const maxAvatarPromptRunes = 500
+
+// Avatar generation modes (API-PXA-002).
+const (
+	// avatarModeRandom picks new parts from a seed, locally.
+	avatarModeRandom = "random"
+	// avatarModeRender renders the body's parts, locally.
+	avatarModeRender = "render"
+)
+
 // AvatarBackend is an optional Backend extension that draws agent avatars
-// through the router (spec 43, API-AVT-001). Without it, the generate
-// endpoint draws with the local generator.
+// through the router (spec 62, API-PXA-002). Without it, the ai modes fall
+// back to the local generator.
 type AvatarBackend interface {
-	// GenerateAvatar draws an avatar for agent with model ("" is the
-	// agent's background chain) and seed. It returns avatar.ErrClaudeCodeModel
-	// or avatar.ErrUnknownModel for a refused model and ErrUnknownAgent when
-	// the running daemon does not know the agent yet.
-	GenerateAvatar(ctx context.Context, agent, model string, seed int64) (avatar.Result, error)
+	// GenerateAvatar draws an avatar for agent with mode (avatar.ModeAIParts
+	// or avatar.ModeAIDraw), model ("" is the agent's background chain),
+	// prompt, seed, and the agent colour. It returns
+	// avatar.ErrClaudeCodeModel or avatar.ErrUnknownModel for a refused model
+	// and ErrUnknownAgent when the running daemon does not know the agent yet.
+	GenerateAvatar(ctx context.Context, agent, mode, model, prompt string, seed int64, color string) (avatar.Result, error)
 }
 
 func (s *Server) registerAvatarRoutes() {
+	s.Handle("GET /v1/avatars/catalog", http.HandlerFunc(s.handleAvatarCatalog))
 	s.Handle("POST /v1/agents/{name}/avatar/generate", http.HandlerFunc(s.handleGenerateAvatar))
 	s.Handle("PUT /v1/agents/{name}/avatar", http.HandlerFunc(s.handlePutAvatar))
 	s.Handle("DELETE /v1/agents/{name}/avatar", http.HandlerFunc(s.handleDeleteAvatar))
@@ -45,28 +60,37 @@ func (s *Server) registerAvatarRoutes() {
 }
 
 type generateAvatarRequest struct {
-	Model *string `json:"model"`
-	Seed  *int64  `json:"seed"`
+	Mode   string        `json:"mode"`
+	Seed   *int64        `json:"seed"`
+	Parts  *avatar.Parts `json:"parts"`
+	Color  *string       `json:"color"`
+	Prompt string        `json:"prompt"`
+	Model  *string       `json:"model"`
 }
 
 type generateAvatarResponse struct {
-	SVG    string `json:"svg"`
-	Model  string `json:"model"`
-	Seed   int64  `json:"seed"`
-	Source string `json:"source"`
+	Avatar avatar.Document `json:"avatar"`
+	Seed   int64           `json:"seed"`
+	Model  string          `json:"model"`
+	Source string          `json:"source"`
 }
 
 type putAvatarRequest struct {
-	SVG   string  `json:"svg"`
-	Color *string `json:"color"`
+	Avatar avatar.Document `json:"avatar"`
+	Color  *string         `json:"color"`
 }
 
 type avatarResponse struct {
-	Name            string `json:"name"`
-	AvatarSVG       string `json:"avatar_svg"`
-	AvatarSource    string `json:"avatar_source"`
-	Color           string `json:"color"`
-	RestartRequired bool   `json:"restart_required"`
+	Name            string          `json:"name"`
+	Avatar          avatar.Document `json:"avatar"`
+	AvatarSource    string          `json:"avatar_source"`
+	Color           string          `json:"color"`
+	RestartRequired bool            `json:"restart_required"`
+}
+
+// handleAvatarCatalog implements GET /v1/avatars/catalog (API-PXA-001).
+func (s *Server) handleAvatarCatalog(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, avatar.Catalog())
 }
 
 // avatarAgent reads config.toml and returns the agent's record. It writes the
@@ -102,23 +126,34 @@ func (s *Server) avatarAgent(w http.ResponseWriter, r *http.Request, store Confi
 }
 
 // handleGenerateAvatar implements POST /v1/agents/{name}/avatar/generate
-// (API-AVT-001). Nothing is stored.
+// (API-PXA-002). Nothing is stored.
 func (s *Server) handleGenerateAvatar(w http.ResponseWriter, r *http.Request) {
 	store := s.configStoreOrError(w)
 	if store == nil {
 		return
 	}
 	name := r.PathValue("name")
-	if _, _, ok := s.avatarAgent(w, r, store, name); !ok {
+	_, record, ok := s.avatarAgent(w, r, store, name)
+	if !ok {
 		return
 	}
 	var body generateAvatarRequest
 	if !decodeJSONObject(w, r, avatarBodyLimit, &body) {
 		return
 	}
-	model := ""
-	if body.Model != nil {
-		model = strings.TrimSpace(*body.Model)
+	if utf8.RuneCountInString(body.Prompt) > maxAvatarPromptRunes {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "prompt must be at most 500 characters")
+		return
+	}
+	// The colour the sprite renders with: the body colour when given, else the
+	// agent's colour (API-PXA-002).
+	color := core.ResolveAgentColor(name, record.Color)
+	if body.Color != nil {
+		if !core.ValidAgentColor(*body.Color) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", core.AgentColorMessage)
+			return
+		}
+		color = core.ResolveAgentColor(name, *body.Color)
 	}
 	seed := randomAvatarSeed()
 	if body.Seed != nil {
@@ -128,12 +163,45 @@ func (s *Server) handleGenerateAvatar(w http.ResponseWriter, r *http.Request) {
 		}
 		seed = *body.Seed
 	}
-	result := avatar.Result{SVG: avatar.Generate(seed), Seed: seed, Source: avatar.SourceLocal}
+
+	switch body.Mode {
+	case avatarModeRandom:
+		result, err := localPartsResult(seed, color)
+		if err != nil {
+			s.writeBackendError(w, "generate avatar", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, newGenerateAvatarResponse(result))
+		return
+	case avatarModeRender:
+		if body.Parts == nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "render requires parts")
+			return
+		}
+		doc, err := avatar.Normalize(avatar.Document{Kind: avatar.KindParts, Parts: body.Parts}, color)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, generateAvatarResponse{Avatar: doc, Seed: seed, Source: avatar.SourceLocal})
+		return
+	case avatar.ModeAIParts, avatar.ModeAIDraw:
+		// Handled below.
+	default:
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "mode must be random, render, ai_parts, or ai_draw")
+		return
+	}
+
+	model := ""
+	if body.Model != nil {
+		model = strings.TrimSpace(*body.Model)
+	}
 	if port, ok := s.backend.(AvatarBackend); ok {
-		generated, err := port.GenerateAvatar(r.Context(), name, model, seed)
+		generated, err := port.GenerateAvatar(r.Context(), name, body.Mode, model, body.Prompt, seed, color)
 		switch {
 		case err == nil:
-			result = generated
+			writeJSON(w, http.StatusOK, newGenerateAvatarResponse(generated))
+			return
 		case errors.Is(err, avatar.ErrClaudeCodeModel):
 			writeAPIError(w, http.StatusBadRequest, "invalid_model", "avatars cannot be generated by a Claude Code model")
 			return
@@ -148,12 +216,45 @@ func (s *Server) handleGenerateAvatar(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, generateAvatarResponse(result))
+	result, err := localPartsResult(seed, color)
+	if err != nil {
+		s.writeBackendError(w, "generate avatar", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, newGenerateAvatarResponse(result))
 }
 
-// handlePutAvatar implements PUT /v1/agents/{name}/avatar (API-AVT-002): it
-// sanitizes the SVG again, writes <agent home>/avatar.svg, and writes the
-// color key when the body carries one.
+// newGenerateAvatarResponse converts a generation result to the wire shape.
+func newGenerateAvatarResponse(result avatar.Result) generateAvatarResponse {
+	return generateAvatarResponse{
+		Avatar: result.Avatar,
+		Seed:   result.Seed,
+		Model:  result.Model,
+		Source: result.Source,
+	}
+}
+
+// localPartsResult renders the local fallback of a generation: RandomParts(seed)
+// with the agent colour, source local.
+func localPartsResult(seed int64, color string) (avatar.Result, error) {
+	parts := avatar.RandomParts(seed)
+	if color != "" {
+		parts.Color = color
+	}
+	sprite, err := avatar.Render(parts)
+	if err != nil {
+		return avatar.Result{}, err
+	}
+	return avatar.Result{
+		Avatar: avatar.Document{Kind: avatar.KindParts, Parts: &parts, Sprite: sprite},
+		Seed:   seed,
+		Source: avatar.SourceLocal,
+	}, nil
+}
+
+// handlePutAvatar implements PUT /v1/agents/{name}/avatar (API-PXA-003): it
+// validates the avatar document, writes <agent home>/avatar.json, and writes
+// the color key when the body carries one.
 func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 	store := s.configStoreOrError(w)
 	if store == nil {
@@ -162,11 +263,6 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	var body putAvatarRequest
 	if !decodeJSONObject(w, r, avatarBodyLimit, &body) {
-		return
-	}
-	svg, err := avatar.Sanitize(body.SVG)
-	if err != nil {
-		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_avatar", err.Error())
 		return
 	}
 	if body.Color != nil && !core.ValidAgentColor(*body.Color) {
@@ -187,6 +283,28 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The colour the sprite renders with: the new colour when given, else the
+	// agent's (API-PXA-003).
+	color := core.ResolveAgentColor(name, record.Color)
+	if body.Color != nil {
+		color = core.ResolveAgentColor(name, *body.Color)
+	}
+	doc, err := avatar.Normalize(body.Avatar, color)
+	if err != nil {
+		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_avatar", err.Error())
+		return
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		s.logger.Error("web: encode avatar", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if len(data) > avatar.MaxDocumentSize {
+		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_avatar", "avatar document is too large")
+		return
+	}
+
 	restart := false
 	if body.Color != nil && *body.Color != record.Color {
 		record.Color = *body.Color
@@ -211,7 +329,7 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
-	if err := webfiles.AtomicWriteMode(path, []byte(svg), 0o600); err != nil {
+	if err := webfiles.AtomicWriteMode(path, data, 0o600); err != nil {
 		s.logger.Error("web: write avatar", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
@@ -219,16 +337,16 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 	s.auditSave("agent_avatar", path, name, nil)
 	writeJSON(w, http.StatusOK, avatarResponse{
 		Name:            name,
-		AvatarSVG:       svg,
+		Avatar:          doc,
 		AvatarSource:    avatar.Saved,
-		Color:           core.ResolveAgentColor(name, record.Color),
+		Color:           color,
 		RestartRequired: restart,
 	})
 }
 
 // handleDeleteAvatar implements DELETE /v1/agents/{name}/avatar
-// (API-AVT-003): the agent goes back to its default avatar, seeded from the
-// name (REQ-AVT-008). It is idempotent.
+// (API-PXA-004): the agent goes back to its default avatar, seeded from the
+// name. It is idempotent.
 func (s *Server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	store := s.configStoreOrError(w)
 	if store == nil {
@@ -257,51 +375,59 @@ func (s *Server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	} else if err == nil {
 		s.auditSave("agent_avatar.delete", path, name, nil)
 	}
+	color := core.ResolveAgentColor(name, record.Color)
 	writeJSON(w, http.StatusOK, avatarResponse{
 		Name:         name,
-		AvatarSVG:    avatar.DefaultFor(name),
+		Avatar:       avatar.DefaultFor(name, color),
 		AvatarSource: avatar.Default,
-		Color:        core.ResolveAgentColor(name, record.Color),
+		Color:        color,
 	})
 }
 
 // agentAvatar returns the avatar an agent shows and its source: the saved
-// avatar, sanitized again, or the default one seeded from the name when there
-// is none or the file is not a valid avatar (REQ-AVT-007, REQ-AVT-008).
-func (s *Server) agentAvatar(name string) (string, string) {
-	if svg := s.savedAvatarSVG(name); svg != "" {
-		return svg, avatar.Saved
+// avatar.json, normalized so a saved parts avatar follows the agent's current
+// colour, or the default one seeded from the name when there is none or the
+// file is not a valid avatar (REQ-PXA-009, API-PXA-005).
+func (s *Server) agentAvatar(name, color string) (avatar.Document, string) {
+	if doc, ok := s.savedAvatar(name, color); ok {
+		return doc, avatar.Saved
 	}
-	return avatar.DefaultFor(name), avatar.Default
+	return avatar.DefaultFor(name, color), avatar.Default
 }
 
-// savedAvatarSVG returns the stored avatar of an agent, sanitized again, or
-// "" when there is none or the file is not a valid avatar.
-func (s *Server) savedAvatarSVG(name string) string {
+// savedAvatar returns the stored avatar of an agent, normalized, and ok false
+// when there is none or the file is not a valid avatar.
+func (s *Server) savedAvatar(name, color string) (avatar.Document, bool) {
 	home := s.agentHome()
 	if home == "" || !agenthome.ValidName(name) {
-		return ""
+		return avatar.Document{}, false
 	}
 	path := agenthome.Paths(home, name).Avatar
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > avatar.MaxSize {
-		return ""
+	if err != nil || !info.Mode().IsRegular() || info.Size() > avatar.MaxDocumentSize {
+		return avatar.Document{}, false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return avatar.Document{}, false
 	}
-	svg, err := avatar.Sanitize(string(data))
+	var doc avatar.Document
+	if err := json.Unmarshal(data, &doc); err != nil {
+		s.logger.Debug("web: stored avatar is not valid", "agent", name, "error", err)
+		return avatar.Document{}, false
+	}
+	normalized, err := avatar.Normalize(doc, color)
 	if err != nil {
 		s.logger.Debug("web: stored avatar is not valid", "agent", name, "error", err)
-		return ""
+		return avatar.Document{}, false
 	}
-	return svg
+	return normalized, true
 }
 
-// handleAvatarImage implements GET /v1/agents/{name}/avatar.svg (API-AVT-006):
-// the avatar an agent or team shows, with its color baked in for the theme
-// (?theme=light|dark), so an <img> can show it.
+// handleAvatarImage implements GET /v1/agents/{name}/avatar.svg (API-PXA-006):
+// frame 0 of the avatar an agent or team shows, with the computed outline. The
+// ?view=full query adds the ground bar; any other view is the bust. The theme
+// query is accepted and ignored.
 func (s *Server) handleAvatarImage(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	color, ok := s.avatarImageColor(r.Context(), name)
@@ -309,9 +435,8 @@ func (s *Server) handleAvatarImage(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "not_found", "agent is not configured")
 		return
 	}
-	theme := r.URL.Query().Get("theme")
-	svg, _ := s.agentAvatar(name)
-	body := []byte(avatar.Colorize(svg, avatar.ColorHex(color, theme)))
+	doc, _ := s.agentAvatar(name, color)
+	body := []byte(avatar.SVG(doc.Sprite, r.URL.Query().Get("view")))
 	sum := sha256.Sum256(body)
 	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
 	h := w.Header()

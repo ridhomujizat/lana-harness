@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="id" data-bg="tile" data-motion="on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Avatars</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Prototype: chibi pixel-art agent avatars assembled from parts (hair, skin,
+   eyes, accessory, outfit) and seeded by the agent name. A sprite is a 16x20
+   pixel grid drawn as SVG rects; the outline is computed. Small avatars show
+   the bust (head + shoulders) in a tile, large ones the full body.
+   Tokens copied from web/ui/src/styles/gr8r/tokens.css. */
+:root {
+  --bg: #fbfaf8; --surface: #ffffff; --surface-2: #f6f5f2; --surface-3: #eeede9;
+  --border: #e9e7e2; --border-strong: #dad7d0;
+  --text: #1d1c1a; --text-2: #57544e; --text-3: #6b6760; --text-4: #8c8880;
+  --accent: #1a1831; --on-accent: #ffffff;
+  --ground: rgba(29, 28, 26, .14);
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1a19; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+    --border: #2c2b29; --border-strong: #3a3936;
+    --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+    --accent: #49447e; --on-accent: #ffffff;
+    --ground: rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+  --border: #2c2b29; --border-strong: #3a3936;
+  --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+  --accent: #49447e; --on-accent: #ffffff;
+  --ground: rgba(0, 0, 0, .45);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+code { font: 12px/1.4 var(--mono); color: var(--text-2); background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 28px 16px 80px; }
+header.top { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+header.top h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+header.top p { margin: 0; color: var(--text-3); max-width: 58ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.ctl { display: inline-flex; align-items: center; }
+.seg { display: inline-flex; background: var(--surface-3); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 4px 10px; border-radius: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 0 0 1px var(--border); }
+.seg-label { font-size: 11px; color: var(--text-4); text-transform: uppercase; letter-spacing: .06em; margin-right: 6px; }
+
+section { margin-top: 40px; }
+section > h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+section > p.lead { margin: 0 0 16px; color: var(--text-3); max-width: 72ch; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+
+/* ---------------- sprite hosts ---------------- */
+
+.px { position: relative; display: inline-block; flex: none; vertical-align: middle; }
+.px svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.px svg .fr { display: none; }
+.px svg:not([data-f]) .f0,
+.px svg[data-f="0"] .f0,
+.px svg[data-f="1"] .f1,
+.px svg[data-f="2"] .f2,
+.px svg[data-f="3"] .f3 { display: inline; }
+.px .ground { fill: var(--ground); }
+
+/* bust: head and shoulders in a tile */
+.px.bust { width: var(--s); height: var(--s); border-radius: calc(var(--s) * .28); overflow: hidden; }
+[data-bg="tile"] .px.bust { background: color-mix(in oklab, var(--c) 32%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 40%, transparent); }
+[data-bg="plain"] .px.bust { background: var(--surface-3); }
+
+/* full body */
+.px.full { width: calc(16px * var(--k)); height: calc(21px * var(--k)); }
+
+/* thinking bubble (working) */
+.bubble { position: absolute; width: calc(11px * var(--bk, 4)); height: calc(8px * var(--bk, 4)); right: calc(-7px * var(--bk, 4)); top: calc(-2px * var(--bk, 4)); }
+.bubble svg { width: 100%; height: 100%; display: block; }
+.bubble .d { animation: bub 1.2s steps(1) infinite; }
+.bubble .d2 { animation-delay: .2s; }
+.bubble .d3 { animation-delay: .4s; }
+@keyframes bub { 0%, 100% { opacity: .25; } 30%, 60% { opacity: 1; } }
+[data-motion="off"] .bubble .d { animation: none; }
+
+/* ---------------- generator ---------------- */
+
+.gen { display: grid; grid-template-columns: auto 1fr; gap: 36px; align-items: start; }
+@media (max-width: 680px) { .gen { grid-template-columns: 1fr; justify-items: start; } }
+.stage { width: 200px; height: 220px; display: grid; place-items: end center; padding-bottom: 8px; border-radius: 14px; background:
+  linear-gradient(var(--surface-2), var(--surface-2)) padding-box; border: 1px solid var(--border); }
+.gen-form { display: grid; gap: 14px; min-width: 0; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 12px; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field > span { font-size: 12px; color: var(--text-3); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+input[type="text"], select { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 9px; padding: 7px 10px; min-width: 0; width: 100%; }
+input[type="text"] { max-width: 240px; }
+.btn { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 9px; padding: 7px 12px; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.chip[aria-pressed="true"] { border-color: var(--text); }
+.chip.auto { background: conic-gradient(#7c5cff, #f45bd0, #ff6b2c, #f5a524, #1fb37a, #13b5c8, #3d7bff, #7c5cff); }
+.meta { font: 12px/1.6 var(--mono); color: var(--text-3); }
+.sizes { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 22px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.sizes figure { margin: 0; display: grid; justify-items: center; gap: 6px; }
+.sizes figcaption { font: 11px var(--mono); color: var(--text-4); }
+.sizes .sep { width: 1px; align-self: stretch; background: var(--border); }
+
+/* ---------------- grids ---------------- */
+
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(var(--min, 104px), 1fr)); }
+.cell { display: grid; justify-items: center; align-content: end; gap: 6px; padding: 12px 6px 10px; border-radius: 12px; border: 1px solid transparent; background: none; }
+button.cell { cursor: pointer; }
+button.cell:hover { background: var(--surface); border-color: var(--border); }
+.cell .name { font-size: 12.5px; color: var(--text-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell .sub { font: 11px var(--mono); color: var(--text-4); margin-top: -4px; }
+
+/* ---------------- in-app mocks ---------------- */
+
+.mocks { display: grid; gap: 16px; grid-template-columns: 300px 1fr; }
+@media (max-width: 760px) { .mocks { grid-template-columns: 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; min-width: 0; }
+.panel-h { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+.panel-h .muted { font-weight: 400; color: var(--text-4); font-size: 12.5px; }
+.list-row { display: flex; gap: 10px; align-items: center; padding: 9px 14px; }
+.list-row.active { background: var(--surface-2); }
+.list-row .txt { min-width: 0; flex: 1; }
+.list-row .top { display: flex; justify-content: space-between; gap: 8px; font-weight: 500; font-size: 13.5px; }
+.list-row .top time { font-weight: 400; color: var(--text-4); font-size: 11.5px; }
+.list-row .prev { color: var(--text-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row .prev.live { color: var(--text-2); }
+.room { padding: 16px; display: grid; gap: 14px; }
+.bubble-msg { justify-self: end; max-width: 80%; background: var(--surface-3); border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.turn { display: grid; gap: 6px; max-width: 90%; }
+.turn p { margin: 0; }
+.foot { display: flex; align-items: center; gap: 8px; color: var(--text-4); font-size: 12.5px; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: dot 1.2s infinite ease-in-out; }
+.dots i:nth-child(2) { animation-delay: .15s; }
+.dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+.profile { display: flex; gap: 24px; align-items: flex-end; padding: 18px 22px 16px; }
+.profile h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.profile .role { color: var(--text-3); font-size: 13px; }
+.tag { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; background: var(--surface-3); color: var(--text-2); margin-top: 6px; margin-right: 4px; }
+.states { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end; padding: 22px; }
+.states figure { margin: 0; display: grid; justify-items: center; gap: 8px; }
+.states figcaption { font-size: 12.5px; color: var(--text-3); }
+
+ul.notes { margin: 0; padding-left: 18px; color: var(--text-2); display: grid; gap: 6px; max-width: 80ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Pixel Avatars</h1>
+      <p>Karakter chibi pixel art, dirakit dari rambut, kulit, mata, aksesori, dan baju. Semua bagian dipilih dari nama agent. Warna baju mengikuti warna agent.</p>
+    </div>
+    <div class="controls">
+      <div class="ctl"><span class="seg-label">Tema</span><div class="seg" data-ctl="theme">
+        <button data-v="auto" aria-pressed="true">Auto</button><button data-v="light">Terang</button><button data-v="dark">Gelap</button></div></div>
+      <div class="ctl"><span class="seg-label">Latar</span><div class="seg" data-ctl="bg">
+        <button data-v="tile" aria-pressed="true">Warna agent</button><button data-v="plain">Netral</button></div></div>
+      <div class="ctl"><span class="seg-label">Gerak</span><div class="seg" data-ctl="motion">
+        <button data-v="on" aria-pressed="true">Kerja</button><button data-v="off">Diam</button></div></div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Generator dari nama</h2>
+    <p class="lead">Nama yang sama selalu menghasilkan karakter yang sama. "Acak ulang" menggeser seed. Setiap bagian bisa di-override untuk mencoba kombinasi.</p>
+    <div class="card">
+      <div class="gen">
+        <div class="stage" id="gen-stage"></div>
+        <div class="gen-form">
+          <label class="field"><span>Nama agent</span><input type="text" id="gen-name" value="Bima" autocomplete="off"></label>
+          <div class="fields" id="gen-fields"></div>
+          <div class="field"><span>Warna agent (baju)</span><div class="chips" id="gen-colors"></div></div>
+          <div class="row">
+            <button class="btn primary" id="gen-roll">Acak ulang</button>
+            <button class="btn" id="gen-reset">Reset ke nama</button>
+          </div>
+          <div class="meta" id="gen-meta"></div>
+        </div>
+      </div>
+      <div class="sizes" id="gen-sizes"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Default dari nama</h2>
+    <p class="lead">Karakter otomatis untuk 24 nama tanpa override. Klik untuk membuka di generator.</p>
+    <div class="grid" id="names" style="--min: 92px"></div>
+  </section>
+
+  <section>
+    <h2>Rambut</h2>
+    <p class="lead">10 gaya rambut. Warna rambut dan kulit dipilih terpisah.</p>
+    <div class="grid" id="hair" style="--min: 92px"></div>
+  </section>
+
+  <section>
+    <h2>Aksesori dan robot</h2>
+    <p class="lead">Aksesori memakai warna kedua. Robot cocok untuk agent yang lebih "mesin", misalnya agent workflow.</p>
+    <div class="grid" id="acc" style="--min: 92px"></div>
+  </section>
+
+  <section>
+    <h2>Status</h2>
+    <p class="lead">Hanya agent yang bekerja yang bergerak: kepala mengangguk, tangan mengetik, sesekali berkedip, dengan gelembung titik-titik.</p>
+    <div class="panel"><div class="states" id="states"></div></div>
+  </section>
+
+  <section>
+    <h2>Dalam aplikasi</h2>
+    <p class="lead">Ukuran kecil memakai potongan kepala dan bahu di dalam tile. Ukuran besar memakai seluruh badan.</p>
+    <div class="mocks">
+      <div class="panel" id="mock-list"></div>
+      <div style="display:grid; gap:16px; min-width:0">
+        <div class="panel" id="mock-room"></div>
+        <div class="panel" id="mock-profile"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Catatan teknis</h2>
+    <ul class="notes">
+      <li>Sprite adalah grid 16×20 pixel. Outline hitam dihitung otomatis dari bentuk, jadi bagian baru cukup digambar sebagai mask.</li>
+      <li>Ukuran tampil sebaiknya kelipatan 16 (16, 32, 48, 64). Ukuran lain seperti 24 atau 20 membuat pixel tidak rata.</li>
+      <li>SVG berisi banyak warna, jadi sanitizer perlu aturan baru: hanya <code>rect</code> dengan palet tetap. Avatar ini sebaiknya dibuat generator lokal (Go), bukan LLM.</li>
+      <li>Animasi kerja memakai 4 frame yang ditukar setiap 180 ms. Di aplikasi ini bisa CSS <code>steps()</code>, tanpa JS per frame.</li>
+      <li>Avatar tersimpan (<code>avatar.svg</code>) tetap tampil. Avatar default semua agent berubah.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+'use strict';
+
+/* ---------------- seeds ---------------- */
+
+function seedFor(name) {
+  let h = 0xcbf29ce484222325n;
+  for (const b of new TextEncoder().encode(name)) {
+    h ^= BigInt(b);
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return Number(h % 2147483647n) + 1;
+}
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// weighted pick: list of [value, weight]
+function wpick(r, list) {
+  const total = list.reduce((s, [, w]) => s + w, 0);
+  let x = r() * total;
+  for (const [v, w] of list) { if ((x -= w) < 0) return v; }
+  return list[list.length - 1][0];
+}
+
+/* ---------------- colors ---------------- */
+
+const OUT = '#1b1820';
+function hex2rgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function rgb2hex(c) { return '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join(''); }
+function mix(a, b, t) { const x = hex2rgb(a), y = hex2rgb(b); return rgb2hex(x.map((v, i) => v + (y[i] - v) * t)); }
+const shade = (h, t = 0.3) => mix(h, OUT, t);
+
+const COLORS = [
+  ['violet', '#7c5cff'], ['pink', '#f45bd0'], ['orange', '#ff6b2c'], ['blue', '#3d7bff'], ['green', '#1fb37a'],
+  ['red', '#ff3d5e'], ['teal', '#13b5c8'], ['amber', '#f5a524'], ['gray', '#8a867e'],
+];
+const SKINS = {
+  porcelain: ['#f8d9c4', '#e2b096'], light: ['#f1c3a2', '#d69a78'], warm: ['#dba279', '#bd8059'],
+  tan: ['#b97b52', '#99613e'], brown: ['#8a5636', '#6c4027'], deep: ['#5e3a26', '#47291a'],
+};
+const HAIR_COLORS = {
+  black: ['#2e2a33', '#1f1c24'], dark: ['#4d3a33', '#3a2b26'], brown: ['#8a5a3a', '#6b4429'], blonde: ['#ecc66e', '#c9a24c'],
+  ginger: ['#e3683f', '#b94d2d'], silver: ['#e4e1d8', '#bdb8aa'], pink: ['#f38fbd', '#d06c9a'], blue: ['#5f80e6', '#4864c0'],
+  lilac: ['#ab90e8', '#8a6cc8'], mint: ['#6fd6b4', '#4fb393'],
+};
+const PANTS = { denim: '#3f5d8f', charcoal: '#34363f', khaki: '#b39a6a', black: '#27242c', olive: '#5d6b45' };
+const BLUSH = '#f2919a';
+const MOUTH = '#9b4f48';
+const ROBOT = ['#c7ceda', '#9aa3b4'];
+const GLOW = '#73f0ff';
+
+/* ---------------- masks ----------------
+   Window: 14 cols x 16 rows. Col c is pixel x = c + 1, row r is y = r.
+   The head is x 3..12, y 3..11; the eyes sit at x 7 and 11, y 7..8.
+   '#' hair (auto shade on the left), 'd' hair shade, 'a' accent, 'A' accent
+   shade, 'g' gray, 'w' light, 'k' outline color. */
+
+const HAIR = {
+  short: [
+    '..............',
+    '.....#...#....',
+    '...#########..',
+    '..###########.',
+    '.############.',
+    '.############.',
+    '.##d#....####.',
+    '.##........##.',
+    '.#............',
+  ],
+  bob: [
+    '..............',
+    '..............',
+    '...########...',
+    '..##########..',
+    '.############.',
+    '.############.',
+    '.#####...####.',
+    '.##........##.',
+    '.##........##.',
+    '.##........##.',
+    '.##.........#.',
+    '.#............',
+  ],
+  spiky: [
+    '..#...#...#...',
+    '..##.###.###..',
+    '.###########..',
+    '.############.',
+    '#############.',
+    '.############.',
+    '.##.##..#.###.',
+    '.#.........##.',
+    '.#............',
+  ],
+  long: [
+    '..............',
+    '....######....',
+    '...########...',
+    '..##########..',
+    '.############.',
+    '.############.',
+    '.####....####.',
+    '.###.......##.',
+    '.##........##.',
+    '.##........##.',
+    '.##........##.',
+    '.##........##.',
+    '##..........##',
+    '##..........##',
+    '##..........##',
+    '.#..........#.',
+  ],
+  ponytail: [
+    '..............',
+    '....######....',
+    '...#########..',
+    '.############.',
+    '#############.',
+    '#############.',
+    '##.d#....####.',
+    '##.........##.',
+    '##............',
+    '#.............',
+    '#.............',
+  ],
+  bun: [
+    '.....####.....',
+    '....######....',
+    '.....####.....',
+    '..##########..',
+    '.############.',
+    '.############.',
+    '.##d#....####.',
+    '.##........#..',
+    '.#............',
+  ],
+  curly: [
+    '...########...',
+    '..##########..',
+    '.############.',
+    '##############',
+    '##############',
+    '##############',
+    '####......####',
+    '###........###',
+    '###........###',
+    '##..........##',
+    '.#..........#.',
+  ],
+  buzz: [
+    '..............',
+    '..............',
+    '..............',
+    '...########...',
+    '..##########..',
+    '..#d......##..',
+  ],
+  mohawk: [
+    '.....###......',
+    '.....####.....',
+    '....#####.....',
+    '...d#####d....',
+    '..dd######dd..',
+    '..d........d..',
+  ],
+  swoop: [
+    '..............',
+    '......#####...',
+    '...##########.',
+    '..############',
+    '.############.',
+    '.############.',
+    '.##d########..',
+    '.##.......###.',
+    '.#.........#..',
+  ],
+};
+const HAIR_LABEL = { short: 'pendek', bob: 'bob', spiky: 'jabrik', long: 'panjang', ponytail: 'kuncir', bun: 'cepol', curly: 'keriting', buzz: 'cepak', mohawk: 'mohawk', swoop: 'poni' };
+
+const ACC = {
+  beanie: [
+    '......aa......',
+    '....aaaaaa....',
+    '...aaaaaaaa...',
+    '..aaaaaaaaaa..',
+    '.aaaaaaaaaaaa.',
+    '.AAAAAAAAAAAA.',
+  ],
+  cap: [
+    '..............',
+    '..............',
+    '....aaaaaa....',
+    '...aaaaaaaa...',
+    '..aaaaaaaaaa..',
+    '..aaaaaaaaaAAA',
+  ],
+  headphones: [
+    '..............',
+    '....gggggg....',
+    '..gg......gg..',
+    '.g..........g.',
+    '.g..........g.',
+    '.g..........g.',
+    'aa..........aa',
+    'aa..........aa',
+    'aa..........aa',
+  ],
+  hood: [
+    '..A........A..',
+    '..aA......Aa..',
+    '..aaaaaaaaaa..',
+    '.aaaaaaaaaaaa.',
+    '.aaaaaaaaaaaa.',
+    '.aaaaaaaaaaaa.',
+    '.aA........aa.',
+    '.aA.........a.',
+    '.aA.........a.',
+    '.aA.........a.',
+    '.aaA.......aa.',
+    '..aa......aa..',
+  ],
+};
+const ACC_LIST = ['none', 'glasses', 'shades', 'headphones', 'beanie', 'cap', 'hood'];
+const ACC_LABEL = { none: 'tanpa', glasses: 'kacamata', shades: 'kacamata hitam', headphones: 'headphone', beanie: 'kupluk', cap: 'topi', hood: 'tudung kucing' };
+const EYES = ['dot', 'happy', 'sleepy'];
+const EYE_LABEL = { dot: 'titik', happy: 'senyum', sleepy: 'ngantuk' };
+const OUTFITS = ['plain', 'stripe', 'collar', 'jacket', 'tie'];
+const OUTFIT_LABEL = { plain: 'polos', stripe: 'garis', collar: 'kerah', jacket: 'jaket', tie: 'dasi' };
+
+/* ---------------- spec ---------------- */
+
+// Every pick is drawn even when overridden, so an override never shifts the others.
+function spec(seed, over = {}) {
+  const r = rng(seed);
+  const s = {
+    seed,
+    species: wpick(r, [['human', 88], ['robot', 12]]),
+    skin: wpick(r, Object.keys(SKINS).map(k => [k, 1])),
+    hair: wpick(r, [['short', 3], ['bob', 2], ['spiky', 2], ['long', 2], ['ponytail', 2], ['bun', 1], ['curly', 2], ['buzz', 1], ['mohawk', 1], ['swoop', 2]]),
+    hairColor: wpick(r, [['black', 3], ['dark', 3], ['brown', 3], ['blonde', 2], ['ginger', 2], ['silver', 1], ['pink', 1], ['blue', 1], ['lilac', 1], ['mint', 1]]),
+    eyes: wpick(r, [['dot', 6], ['happy', 3], ['sleepy', 2]]),
+    acc: wpick(r, [['none', 9], ['glasses', 3], ['shades', 2], ['headphones', 3], ['beanie', 2], ['cap', 2], ['hood', 2]]),
+    outfit: wpick(r, OUTFITS.map(k => [k, 1])),
+    pants: wpick(r, Object.keys(PANTS).map(k => [k, 1])),
+    blush: r() < 0.6,
+    color: COLORS[Math.floor(r() * COLORS.length)][1],
+    accColor: COLORS[Math.floor(r() * COLORS.length)][1],
+  };
+  for (const [k, v] of Object.entries(over)) if (v) s[k] = v;
+  if (s.accColor === s.color) s.accColor = mix(s.color, '#ffffff', 0.55);
+  return s;
+}
+
+/* ---------------- sprite ---------------- */
+
+// frames: 0 rest, 1 head down + left hand up, 2 blink, 3 head down + right hand up
+const FRAMES = [
+  { head: 0, lh: 0, rh: 0, blink: false },
+  { head: 1, lh: -1, rh: 0, blink: false },
+  { head: 0, lh: 0, rh: 0, blink: true },
+  { head: 1, lh: 0, rh: -1, blink: false },
+];
+const PATTERN = [0, 1, 0, 3, 0, 1, 2, 3];
+
+function pixels(s, fr) {
+  const px = new Map();
+  const set = (x, y, c) => px.set(x + ',' + y, c);
+  const robot = s.species === 'robot';
+  const sk = robot ? ROBOT : SKINS[s.skin];
+  const shirt = s.color, shirtS = shade(shirt), light = mix(shirt, '#ffffff', 0.7);
+  const pants = PANTS[s.pants], pantsS = shade(pants, 0.25), shoes = '#2a2630';
+
+  // body
+  for (let y = 13; y <= 14; y++) for (let x = 5; x <= 10; x++) set(x, y, x === 5 ? shirtS : shirt);
+  if (s.outfit === 'stripe') for (let x = 5; x <= 10; x++) set(x, 14, x === 5 ? shade(light, .15) : light);
+  if (s.outfit === 'collar') { set(7, 13, light); set(8, 13, light); }
+  if (s.outfit === 'jacket') { set(7, 13, '#f3f1ec'); set(8, 13, '#f3f1ec'); set(7, 14, '#f3f1ec'); set(8, 14, '#dcd8cf'); }
+  if (s.outfit === 'tie') { set(7, 13, '#f3f1ec'); set(9, 13, '#f3f1ec'); set(8, 13, '#c43d4b'); set(8, 14, '#c43d4b'); }
+  set(4, 13, shirtS); set(11, 13, shirt);
+  set(4, 14 + fr.lh, sk[1]); set(11, 14 + fr.rh, sk[0]);
+  for (let x = 5; x <= 10; x++) set(x, 15, x === 5 ? pantsS : pants);
+  for (const x of [5, 6, 9, 10]) { set(x, 16, x === 5 ? pantsS : pants); set(x, 17, shoes); }
+
+  // head layer, moved down by fr.head
+  const dy = fr.head;
+  const hs = (x, y, c) => set(x, y + dy, c);
+  for (let y = 3; y <= 11; y++) {
+    const [x0, x1] = (y === 3 || y === 11) ? [4, 11] : [3, 12];
+    for (let x = x0; x <= x1; x++) hs(x, y, x <= 4 ? sk[1] : sk[0]);
+  }
+  for (let x = 5; x <= 10; x++) hs(x, 12, OUT);
+
+  // face
+  if (robot) {
+    for (let x = 5; x <= 12; x++) for (let y = 7; y <= 8; y++) hs(x, y, OUT);
+    for (const x of [7, 11]) { hs(x, 8, GLOW); if (!fr.blink) hs(x, 7, GLOW); }
+    hs(8, 1, '#8b93a3'); hs(8, 2, '#8b93a3'); hs(8, 0, s.accColor);
+    hs(2, 8, '#8b93a3'); hs(13, 8, '#8b93a3');
+    hs(9, 10, '#8b93a3'); hs(10, 10, '#8b93a3');
+  } else {
+    const eye = OUT;
+    if (s.acc !== 'shades') {
+      for (const x of [7, 11]) {
+        if (fr.blink || s.eyes === 'sleepy') { hs(x - 1, 8, eye); hs(x, 8, eye); }
+        else if (s.eyes === 'happy') { const c = x === 7 ? 6 : 11; hs(c - 1, 8, eye); hs(c, 7, eye); hs(c + 1, 8, eye); }
+        else { hs(x, 7, eye); hs(x, 8, eye); }
+      }
+    }
+    if (s.blush) { hs(5, 9, mix(sk[0], BLUSH, .65)); hs(12, 9, mix(sk[0], BLUSH, .65)); }
+    hs(9, 10, MOUTH);
+  }
+
+  // hair
+  const hc = HAIR_COLORS[s.hairColor];
+  let hair = s.hair;
+  if (['beanie', 'cap', 'hood'].includes(s.acc) && ['bun', 'mohawk', 'spiky', 'curly'].includes(hair)) hair = 'short';
+  if (!robot) stamp(HAIR[hair], (c, ch) => ch === 'd' || c <= 3 ? hc[1] : hc[0]);
+
+  // accessories
+  const ac = s.acc === 'hood' ? shirt : s.accColor, acS = shade(ac);
+  if (ACC[s.acc] && !(robot && s.acc === 'hood')) {
+    stamp(ACC[s.acc], (c, ch) => ({ a: c <= 2 ? acS : ac, A: acS, g: '#9aa0ad', w: '#f3f1ec', k: OUT }[ch]));
+  }
+  if (!robot && s.acc === 'glasses') {
+    const fc = '#2b2d3a';
+    for (const x of [6, 7, 8, 9, 10, 11, 12]) hs(x, 7, fc);
+    for (const x of [6, 8, 10, 12]) hs(x, 8, fc);
+    hs(7, 8, OUT); hs(11, 8, OUT);
+  }
+  if (!robot && s.acc === 'shades') {
+    for (let x = 5; x <= 12; x++) hs(x, 7, OUT);
+    for (const x of [6, 7, 8, 10, 11, 12]) hs(x, 8, OUT);
+    hs(7, 7, '#6d7385'); hs(11, 7, '#6d7385');
+  }
+
+  function stamp(mask, colorOf) {
+    mask.forEach((row, r) => {
+      for (let c = 0; c < row.length; c++) {
+        const ch = row[c];
+        if (ch !== '.') hs(c + 1, r, colorOf(c, ch));
+      }
+    });
+  }
+
+  // outline: every empty cell next to a filled one (4-neighbour)
+  const filled = new Set(px.keys());
+  for (let y = -1; y <= 18; y++) for (let x = -1; x <= 16; x++) {
+    const k = x + ',' + y;
+    if (filled.has(k)) continue;
+    if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => filled.has((x + a) + ',' + (y + b)))) px.set(k, OUT);
+  }
+  return px;
+}
+
+function rects(px) {
+  // run-length rects per row and color
+  const rows = new Map();
+  for (const [k, c] of px) {
+    const [x, y] = k.split(',').map(Number);
+    if (!rows.has(y)) rows.set(y, []);
+    rows.get(y).push([x, c]);
+  }
+  let out = '';
+  for (const [y, cells] of rows) {
+    cells.sort((a, b) => a[0] - b[0]);
+    let i = 0;
+    while (i < cells.length) {
+      let j = i;
+      while (j + 1 < cells.length && cells[j + 1][0] === cells[j][0] + 1 && cells[j + 1][1] === cells[i][1]) j++;
+      out += `<rect x="${cells[i][0]}" y="${y}" width="${j - i + 1}" height="1" fill="${cells[i][1]}"/>`;
+      i = j + 1;
+    }
+  }
+  return out;
+}
+
+const cache = new Map();
+function frameMarkup(s, i) {
+  const key = JSON.stringify(s) + i;
+  if (!cache.has(key)) cache.set(key, rects(pixels(s, FRAMES[i])));
+  return cache.get(key);
+}
+function svg(s, view, animated) {
+  const frames = animated ? [0, 1, 2, 3] : [0];
+  const ground = view === 'full' ? '<rect class="ground" x="2" y="19" width="12" height="1"/>' : '';
+  const vb = view === 'full' ? '-0.5 -1.5 17 21' : '0 -1 16 16';
+  return `<svg viewBox="${vb}" shape-rendering="crispEdges" aria-hidden="true">${ground}` +
+    frames.map(i => `<g class="fr f${i}">${frameMarkup(s, i)}</g>`).join('') + '</svg>';
+}
+function bubbleSvg() {
+  const g = [
+    '.kkkkkkkkk.',
+    'kwwwwwwwwwk',
+    'kw1w2w3wwwk',
+    'kwwwwwwwwwk',
+    '.kkkkkkkkk.',
+    '..kwk......',
+    '...k.......',
+  ];
+  let r = '';
+  g.forEach((row, y) => [...row].forEach((ch, x) => {
+    if (ch === 'k') r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${OUT}"/>`;
+    else if (ch === 'w') r += `<rect x="${x}" y="${y}" width="1" height="1" fill="#ffffff"/>`;
+    else if ('123'.includes(ch)) r += `<rect x="${x}" y="${y}" width="1" height="1" fill="#ffffff"/><rect class="d d${ch}" x="${x + (ch === '1' ? 0 : 0)}" y="${y}" width="1" height="1" fill="${OUT}"/>`;
+  }));
+  return `<svg viewBox="0 0 11 7" shape-rendering="crispEdges">${r}</svg>`;
+}
+// bust: square tile of size px; full: scale k (sprite is 16 x 21 cells)
+function bust(s, size, working = false) {
+  return `<span class="px bust${working ? ' working' : ''}" style="--s:${size}px;--c:${s.color}">${svg(s, 'bust', working)}</span>`;
+}
+function full(s, k, working = false, bubble = false) {
+  return `<span class="px full${working ? ' working' : ''}" style="--k:${k};--bk:${Math.max(2, Math.round(k * 0.75))}">${svg(s, 'full', working)}` +
+    (bubble ? `<span class="bubble">${bubbleSvg()}</span>` : '') + '</span>';
+}
+const byName = (n, over) => spec(seedFor(n), over);
+const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = id => document.getElementById(id);
+
+/* ---------------- generator ---------------- */
+
+const gen = { name: 'Bima', shift: 0, over: {} };
+const FIELDS = [
+  ['species', 'Spesies', ['human', 'robot'], { human: 'manusia', robot: 'robot' }],
+  ['hair', 'Rambut', Object.keys(HAIR), HAIR_LABEL],
+  ['hairColor', 'Warna rambut', Object.keys(HAIR_COLORS), null],
+  ['skin', 'Kulit', Object.keys(SKINS), null],
+  ['eyes', 'Mata', EYES, EYE_LABEL],
+  ['acc', 'Aksesori', ACC_LIST, ACC_LABEL],
+  ['outfit', 'Baju', OUTFITS, OUTFIT_LABEL],
+  ['pants', 'Celana', Object.keys(PANTS), null],
+];
+$('gen-fields').innerHTML = FIELDS.map(([k, label, opts, names]) =>
+  `<label class="field"><span>${label}</span><select data-k="${k}"><option value="">Auto</option>` +
+  opts.map(o => `<option value="${o}">${names ? names[o] : o}</option>`).join('') + '</select></label>').join('');
+$('gen-colors').innerHTML = `<button class="chip auto" data-c="" title="Auto"></button>` +
+  COLORS.map(([n, c]) => `<button class="chip" data-c="${c}" title="${n}" style="background:${c}"></button>`).join('');
+
+function genSpec() { return spec(seedFor(gen.name) + gen.shift, gen.over); }
+function renderGen() {
+  const s = genSpec();
+  $('gen-stage').innerHTML = full(s, 8, true, true);
+  $('gen-sizes').innerHTML =
+    [16, 24, 32, 48, 64].map(z => `<figure>${bust(s, z)}<figcaption>${z}px</figcaption></figure>`).join('') +
+    '<span class="sep"></span>' +
+    [2, 3, 4].map(k => `<figure>${full(s, k)}<figcaption>${k}×</figcaption></figure>`).join('');
+  $('gen-meta').textContent = `seed ${s.seed} · ${s.species} · ${s.hair} ${s.hairColor} · kulit ${s.skin} · mata ${s.eyes} · ${s.acc} · ${s.outfit} · ${s.color}`;
+  for (const sel of $('gen-fields').querySelectorAll('select')) sel.value = gen.over[sel.dataset.k] || '';
+  for (const b of $('gen-colors').children) b.setAttribute('aria-pressed', String((b.dataset.c || '') === (gen.over.color || '')));
+  tick(true);
+}
+$('gen-fields').addEventListener('change', e => { const k = e.target.dataset.k; if (k) { gen.over[k] = e.target.value; renderGen(); } });
+$('gen-colors').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) { gen.over.color = b.dataset.c; renderGen(); } });
+$('gen-name').addEventListener('input', e => { gen.name = e.target.value.trim() || 'Bima'; gen.shift = 0; renderGen(); });
+$('gen-roll').addEventListener('click', () => { gen.shift += 1; renderGen(); });
+$('gen-reset').addEventListener('click', () => { gen.shift = 0; gen.over = {}; renderGen(); });
+function openInGen(name, over) {
+  gen.name = name; gen.shift = 0; gen.over = { ...over };
+  $('gen-name').value = name;
+  renderGen();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ---------------- galleries ---------------- */
+
+const NAMES = ['Lana', 'Bima', 'Sari', 'Raka', 'Dewi', 'Arjuna', 'Nadia', 'Tio', 'Maya', 'Kirana', 'Bayu', 'Luna',
+  'Ozzy', 'Pixel', 'Scout', 'Echo', 'Nova', 'Juno', 'Rex', 'Milo', 'Ada', 'Kai', 'Zara', 'Iris'];
+$('names').innerHTML = NAMES.map(n => `<button class="cell" data-name="${n}">${full(byName(n), 4)}<span class="name">${n}</span></button>`).join('');
+$('names').addEventListener('click', e => { const b = e.target.closest('.cell'); if (b) openInGen(b.dataset.name, {}); });
+
+const hairColors = ['dark', 'ginger', 'black', 'blonde', 'brown', 'lilac', 'black', 'silver', 'pink', 'blue'];
+const skins = Object.keys(SKINS);
+$('hair').innerHTML = Object.keys(HAIR).map((h, i) => {
+  const over = { species: 'human', hair: h, hairColor: hairColors[i], skin: skins[i % skins.length], acc: 'none', eyes: 'dot', color: COLORS[i % COLORS.length][1] };
+  return `<button class="cell" data-i="${i}">${full(byName('hair-' + h, over), 4)}<span class="name">${h}</span><span class="sub">${HAIR_LABEL[h]}</span></button>`;
+}).join('');
+$('hair').addEventListener('click', e => {
+  const b = e.target.closest('.cell'); if (!b) return;
+  const i = +b.dataset.i, h = Object.keys(HAIR)[i];
+  openInGen('hair-' + h, { species: 'human', hair: h, hairColor: hairColors[i], skin: skins[i % skins.length], acc: 'none', eyes: 'dot', color: COLORS[i % COLORS.length][1] });
+});
+
+const ACC_DEMO = [
+  ['glasses', { hair: 'short', hairColor: 'dark', skin: 'light' }],
+  ['shades', { hair: 'swoop', hairColor: 'blonde', skin: 'tan' }],
+  ['headphones', { hair: 'bob', hairColor: 'black', skin: 'warm' }],
+  ['beanie', { hair: 'long', hairColor: 'ginger', skin: 'porcelain' }],
+  ['cap', { hair: 'short', hairColor: 'brown', skin: 'brown' }],
+  ['hood', { hair: 'short', hairColor: 'silver', skin: 'light' }],
+  ['robot', { species: 'robot', acc: 'none' }],
+  ['robot', { species: 'robot', acc: 'headphones' }],
+];
+$('acc').innerHTML = ACC_DEMO.map(([a, o], i) => {
+  const over = { species: 'human', eyes: i % 2 ? 'happy' : 'dot', acc: a === 'robot' ? 'none' : a, color: COLORS[(i + 2) % COLORS.length][1], ...o };
+  const label = a === 'robot' ? (o.acc === 'headphones' ? 'robot + headphone' : 'robot') : ACC_LABEL[a];
+  return `<button class="cell" data-i="${i}">${full(byName('acc-' + i, over), 4)}<span class="name">${label}</span></button>`;
+}).join('');
+$('acc').addEventListener('click', e => {
+  const b = e.target.closest('.cell'); if (!b) return;
+  const i = +b.dataset.i, [a, o] = ACC_DEMO[i];
+  openInGen('acc-' + i, { species: 'human', eyes: i % 2 ? 'happy' : 'dot', acc: a === 'robot' ? 'none' : a, color: COLORS[(i + 2) % COLORS.length][1], ...o });
+});
+
+/* ---------------- states ---------------- */
+
+const sari = byName('Sari');
+$('states').innerHTML =
+  `<figure>${full(sari, 4)}<figcaption>diam</figcaption></figure>` +
+  `<figure>${full(sari, 4, true, true)}<figcaption>bekerja</figcaption></figure>` +
+  `<figure>${bust(sari, 48)}<figcaption>diam · 48</figcaption></figure>` +
+  `<figure>${bust(sari, 48, true)}<figcaption>bekerja · 48</figcaption></figure>` +
+  `<figure>${bust(sari, 32, true)}<figcaption>bekerja · 32</figcaption></figure>`;
+
+/* ---------------- in-app mocks ---------------- */
+
+const CHATS = [
+  ['Bima', 'Refactor router selesai, 3 file berubah', '09:12', true],
+  ['Lana', 'Jadwal besok sudah saya tambahkan', '08:40'],
+  ['Sari', 'Ringkasan riset pasar siap dibaca', 'Kam'],
+  ['Pixel', 'Mockup halaman tasks versi 2', 'Rab'],
+  ['Nova', 'Workflow backup gagal di langkah 3', 'Sel'],
+  ['Kai', 'Oke, saya tunggu konfirmasinya', 'Sen'],
+];
+$('mock-list').innerHTML = `<div class="panel-h">Chats</div>` + CHATS.map(([n, p, t, w], i) =>
+  `<div class="list-row${i === 0 ? ' active' : ''}">${bust(byName(n), 32, !!w)}<div class="txt"><div class="top"><span>${n}</span><time>${t}</time></div>` +
+  `<div class="prev${w ? ' live' : ''}">${w ? 'thinking <span class="dots"><i></i><i></i><i></i></span>' : esc(p)}</div></div></div>`).join('');
+
+const bima = byName('Bima');
+$('mock-room').innerHTML = `<div class="panel-h">${bust(bima, 32)}<span>Bima</span><span class="muted">coding agent</span></div>
+  <div class="room">
+    <div class="bubble-msg">Tolong rapikan modul router, pisahkan provider per file.</div>
+    <div class="turn"><p>Sudah. <code>internal/router</code> sekarang punya satu file per provider, test lulus.</p>
+      <div class="foot">${bust(bima, 16)}<span>worked for 9s · 03:39 AM</span></div></div>
+    <div class="bubble-msg">Sekalian tambahkan retry untuk 429.</div>
+    <div class="turn"><div class="foot">${bust(bima, 32, true)}<span class="dots"><i></i><i></i><i></i></span><span>Bima is thinking (3s)…</span></div></div>
+  </div>`;
+$('mock-profile').innerHTML = `<div class="profile">${full(bima, 5, true, true)}<div style="padding-bottom:10px"><h3>Bima</h3>
+  <div class="role">Coding agent · deepseek-v4</div><span class="tag">router</span><span class="tag">go</span><span class="tag">workbench</span></div></div>`;
+
+/* ---------------- animation ticker ---------------- */
+
+const root = document.documentElement;
+let t = 0;
+function tick(now) {
+  const on = root.dataset.motion === 'on';
+  if (!now) t = (t + 1) % PATTERN.length;
+  for (const el of document.querySelectorAll('.px.working svg')) {
+    if (on) el.dataset.f = PATTERN[t]; else delete el.dataset.f;
+  }
+}
+setInterval(() => tick(false), 180);
+
+/* ---------------- controls ---------------- */
+
+for (const seg of document.querySelectorAll('.seg')) {
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    for (const x of seg.children) x.setAttribute('aria-pressed', String(x === b));
+    const ctl = seg.dataset.ctl, v = b.dataset.v;
+    if (ctl === 'theme') { if (v === 'auto') root.removeAttribute('data-theme'); else root.dataset.theme = v; }
+    else root.dataset[ctl] = v;
+    tick(true);
+  });
+}
+const hashTheme = location.hash.slice(1);
+if (hashTheme === 'light' || hashTheme === 'dark') {
+  root.dataset.theme = hashTheme;
+  for (const x of document.querySelector('[data-ctl="theme"]').children) x.setAttribute('aria-pressed', String(x.dataset.v === hashTheme));
+}
+
+renderGen();
+</script>
+</body>
+</html>

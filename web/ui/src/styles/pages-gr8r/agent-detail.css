@@ -1218,8 +1218,61 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Generate avatar dialog (spec 43)                                   */
+/* Avatar dialog (spec 43, pixel avatars since spec 62)               */
 /* ------------------------------------------------------------------ */
+
+/* Two columns: the preview stays in view on the left (sticky inside the
+   scrolling modal body) while the parts, colors, and AI controls scroll on
+   the right. One column on a phone. */
+.avatar-dialog-layout {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: var(--s-5, 20px);
+  align-items: start;
+}
+
+.avatar-dialog-aside {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3, 12px);
+  min-width: 0;
+  z-index: 1;
+}
+
+.avatar-dialog-aside .avatar-dialog-stage {
+  width: 100%;
+}
+
+.avatar-dialog-aside .avatar-dialog-strip {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.avatar-dialog-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4, 16px);
+  min-width: 0;
+}
+
+.avatar-dialog-main .avatar-dialog-part-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+@media (max-width: 760px) {
+  .avatar-dialog-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .avatar-dialog-aside {
+    position: static;
+    align-items: center;
+  }
+  .avatar-dialog-aside .avatar-dialog-stage {
+    width: 176px;
+  }
+}
 
 .avatar-dialog-top {
   display: flex;
@@ -1231,18 +1284,103 @@
   position: relative;
   display: grid;
   flex: 0 0 auto;
-  place-items: center;
-  width: 128px;
-  height: 128px;
+  place-items: end center;
+  width: 176px;
+  height: 196px;
+  padding-bottom: 10px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background:
-    radial-gradient(circle at 50% 40%, var(--surface) 0, var(--surface-2) 100%);
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--pxc, var(--violet)) 14%, var(--surface)) 0,
+      var(--surface-2) 100%
+    );
 }
 
-.avatar-dialog-preview.av {
-  --sz: 104px;
+/* The full sprite at 8x: 18 x 21 cells. */
+.avatar-dialog-stage > .px-sprite {
+  width: 144px;
+  height: 168px;
+  overflow: visible;
+}
+
+.avatar-dialog-empty {
+  align-self: center;
+  color: var(--text-4);
   font-size: 40px;
+  font-weight: 600;
+}
+
+.avatar-dialog-sizes {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  margin-top: 4px;
+}
+
+.avatar-dialog-parts,
+.avatar-dialog-ai {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2, 8px);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.avatar-dialog-parts legend,
+.avatar-dialog-ai legend {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.avatar-dialog-part-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 12px;
+}
+
+.avatar-dialog-part {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.avatar-dialog-part .select-btn {
+  width: 100%;
+}
+
+.avatar-dialog-blush {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  align-self: end;
+  min-height: 30px;
+}
+
+.avatar-dialog-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+
+.avatar-dialog-prompt {
+  width: 100%;
+  resize: vertical;
+}
+
+.avatar-dialog-ai-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.avatar-dialog-ai-row .select-btn {
+  min-width: 200px;
 }
 
 .avatar-dialog-drawing {
@@ -1303,8 +1441,8 @@
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 46px;
+  height: 46px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1425,7 +1563,7 @@
   }
 }
 
-/* The header avatar with its small "Generate avatar" button in the corner. */
+/* The header avatar with its small "Edit avatar" button in the corner. */
 .avatar-edit-wrap {
   position: relative;
   display: inline-flex;

@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="id" data-tile="grad" data-body="ink" data-motion="on">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Tiles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Prototype: character avatars in a gradient tile, replacing the spec 43
+   blob avatars. The SVG stays two-tone (body + white eyes, viewBox 100);
+   the tile, gradient and shadow are CSS on the host.
+   Tokens copied from web/ui/src/styles/gr8r/tokens.css. */
+:root {
+  --bg: #fbfaf8; --bg-side: #f4f3f0; --surface: #ffffff; --surface-2: #f6f5f2; --surface-3: #eeede9;
+  --border: #e9e7e2; --border-strong: #dad7d0;
+  --text: #1d1c1a; --text-2: #57544e; --text-3: #6b6760; --text-4: #8c8880;
+  --accent: #1a1831; --on-accent: #ffffff;
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1a19; --bg-side: #151514; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+    --border: #2c2b29; --border-strong: #3a3936;
+    --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+    --accent: #49447e; --on-accent: #ffffff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19; --bg-side: #151514; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+  --border: #2c2b29; --border-strong: #3a3936;
+  --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+  --accent: #49447e; --on-accent: #ffffff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 14px/1.5 var(--font); -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+code { font: 12px/1.4 var(--mono); color: var(--text-2); background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 28px 16px 80px; }
+header.top { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; margin-bottom: 28px; }
+header.top h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+header.top p { margin: 0; color: var(--text-3); max-width: 56ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 14px; }
+.ctl { display: inline-flex; align-items: center; }
+.seg { display: inline-flex; background: var(--surface-3); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 4px 10px; border-radius: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 0 0 1px var(--border); }
+.seg-label { font-size: 11px; color: var(--text-4); text-transform: uppercase; letter-spacing: .06em; margin-right: 6px; }
+
+section { margin-top: 40px; }
+section > h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+section > p.lead { margin: 0 0 16px; color: var(--text-3); max-width: 70ch; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+
+/* ---------------- avatar host ---------------- */
+
+.av {
+  --s: 48px;
+  --c: #7c5cff;
+  --av-body: #16121e;
+  --av-eye: #ffffff;
+  --av-pupil: #16121e;
+  --av-accent: #ffffff;
+  position: relative;
+  flex: none;
+  display: inline-block;
+  width: var(--s);
+  height: var(--s);
+  border-radius: calc(var(--s) * .3);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.av svg { position: relative; display: block; width: 100%; height: 100%; }
+.av .b { fill: var(--av-body); }
+.av .e { fill: var(--av-eye); }
+.av .p { fill: var(--av-pupil); }
+.av .a { fill: var(--av-accent); }
+
+/* tile: gradient */
+[data-tile="grad"] .av {
+  background: linear-gradient(165deg,
+    color-mix(in oklab, var(--c) 50%, white) 0%,
+    var(--c) 72%,
+    color-mix(in oklab, var(--c) 82%, black) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), inset 0 0 0 1px rgba(255,255,255,.14), 0 1px 2px rgba(0,0,0,.12);
+}
+[data-tile="grad"] .av::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 70% at 25% -5%, rgba(255,255,255,.38), transparent 60%);
+}
+[data-tile="grad"] .av.big svg { filter: drop-shadow(0 calc(var(--s) * .035) calc(var(--s) * .045) rgba(16, 8, 40, .32)); }
+
+/* tile: flat */
+[data-tile="flat"] .av { background: var(--c); }
+
+/* body: chalk (phase 2, inverted) */
+[data-body="chalk"] .av {
+  --av-body: #fbf9ff;
+  --av-eye: color-mix(in oklab, var(--c) 78%, black);
+  --av-pupil: #fbf9ff;
+  --av-accent: #16121e;
+}
+
+/* no tile: today's look, body in the agent color */
+[data-tile="bare"] .av { background: none; border-radius: 0; --av-body: var(--c); --av-eye: #fff; --av-pupil: var(--c); --av-accent: var(--text); }
+[data-tile="bare"] .av svg { transform: scale(1.2); transform-origin: 50% 58%; }
+
+/* ---------------- motion: only while the agent works ---------------- */
+
+.av .av-squash { transform-box: fill-box; transform-origin: 50% 100%; }
+.av .av-eye { transform-box: fill-box; transform-origin: 50% 50%; }
+[data-motion="on"] .av.working .av-squash { animation: av-breathe 1.5s ease-in-out infinite; }
+[data-motion="on"] .av.working .av-gaze { animation: av-glance 5.2s ease-in-out infinite; }
+[data-motion="on"] .av.working .av-eye { animation: av-blink 3.8s infinite; }
+@keyframes av-breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.05, .95); } }
+@keyframes av-glance {
+  0%, 18%, 100% { transform: translate(0, 0); }
+  24%, 42% { transform: translate(-3.5px, -1px); }
+  50%, 70% { transform: translate(3.5px, 1.5px); }
+}
+@keyframes av-blink { 0%, 88%, 100% { transform: scaleY(1); } 92% { transform: scaleY(.08); } }
+@media (prefers-reduced-motion: reduce) { .av * { animation: none !important; } }
+
+/* ---------------- generator ---------------- */
+
+.gen { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: start; }
+@media (max-width: 640px) { .gen { grid-template-columns: 1fr; justify-items: start; } }
+.gen-form { display: grid; gap: 14px; min-width: 0; }
+.field { display: grid; gap: 6px; }
+.field > span { font-size: 12px; color: var(--text-3); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+input[type="text"], select {
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 9px;
+  padding: 7px 10px; min-width: 0;
+}
+input[type="text"] { width: 220px; max-width: 100%; }
+.btn { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 9px; padding: 7px 12px; cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.chip[aria-pressed="true"] { border-color: var(--text); }
+.chip.auto { background: conic-gradient(#7c5cff, #f45bd0, #ff6b2c, #f5a524, #1fb37a, #13b5c8, #3d7bff, #7c5cff); }
+.meta { font: 12px/1.6 var(--mono); color: var(--text-3); }
+.sizes { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 18px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.sizes figure { margin: 0; display: grid; justify-items: center; gap: 6px; }
+.sizes figcaption { font: 11px var(--mono); color: var(--text-4); }
+
+/* ---------------- grids ---------------- */
+
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(var(--min, 104px), 1fr)); }
+.cell { display: grid; justify-items: center; gap: 8px; padding: 14px 8px 10px; border-radius: 12px; border: 1px solid transparent; background: none; cursor: default; }
+button.cell { cursor: pointer; }
+button.cell:hover { background: var(--surface); border-color: var(--border); }
+.cell .name { font-size: 12.5px; color: var(--text-2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cell .sub { font: 11px var(--mono); color: var(--text-4); margin-top: -6px; }
+
+/* ---------------- in-app mocks ---------------- */
+
+.mocks { display: grid; gap: 16px; grid-template-columns: 300px 1fr; }
+@media (max-width: 760px) { .mocks { grid-template-columns: 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; min-width: 0; }
+.panel-h { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+.panel-h .muted { font-weight: 400; color: var(--text-4); font-size: 12.5px; }
+.list-row { display: flex; gap: 10px; align-items: center; padding: 9px 14px; }
+.list-row.active { background: var(--surface-2); }
+.list-row .txt { min-width: 0; flex: 1; }
+.list-row .top { display: flex; justify-content: space-between; gap: 8px; font-weight: 500; font-size: 13.5px; }
+.list-row .top time { font-weight: 400; color: var(--text-4); font-size: 11.5px; }
+.list-row .prev { color: var(--text-3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list-row .prev.live { color: var(--text-2); }
+.room { padding: 16px; display: grid; gap: 14px; }
+.bubble { justify-self: end; max-width: 80%; background: var(--surface-3); border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.turn { display: grid; gap: 6px; max-width: 90%; }
+.turn p { margin: 0; color: var(--text); }
+.foot { display: flex; align-items: center; gap: 8px; color: var(--text-4); font-size: 12.5px; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 4px; height: 4px; border-radius: 50%; background: currentColor; animation: dot 1.2s infinite ease-in-out; }
+.dots i:nth-child(2) { animation-delay: .15s; }
+.dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+.profile { display: flex; gap: 16px; align-items: center; padding: 18px; }
+.profile h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.profile .role { color: var(--text-3); font-size: 13px; }
+.tag { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; background: var(--surface-3); color: var(--text-2); margin-top: 6px; margin-right: 4px; }
+
+/* ---------------- phase 2 (forced styles, win over the toggles) ---------------- */
+
+.p2 .av.av {
+  background: linear-gradient(165deg, color-mix(in oklab, var(--c) 50%, white) 0%, var(--c) 72%, color-mix(in oklab, var(--c) 82%, black) 100%);
+  border-radius: calc(var(--s) * .3);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 2px rgba(0,0,0,.12);
+}
+.p2 .av.av svg { transform: none; filter: drop-shadow(0 calc(var(--s) * .035) calc(var(--s) * .045) rgba(16, 8, 40, .28)); }
+.p2-chalk .av.av { --av-body: #fbf9ff; --av-eye: color-mix(in oklab, var(--c) 78%, black); --av-pupil: #fbf9ff; }
+.p2-accent .av.av { --av-body: #16121e; --av-eye: #fff; --av-pupil: #16121e; --av-accent: #fbf9ff; }
+
+ul.notes { margin: 0; padding-left: 18px; color: var(--text-2); display: grid; gap: 6px; max-width: 78ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Avatar Tiles</h1>
+      <p>Avatar karakter dalam tile gradasi untuk menggantikan blob gaya Grok. Bentuk, mata, dan warna diambil dari nama agent. SVG tetap dua warna.</p>
+    </div>
+    <div class="controls">
+      <div class="ctl"><span class="seg-label">Tema</span><div class="seg" data-ctl="theme">
+        <button data-v="auto" aria-pressed="true">Auto</button><button data-v="light">Terang</button><button data-v="dark">Gelap</button></div></div>
+      <div class="ctl"><span class="seg-label">Tile</span><div class="seg" data-ctl="tile">
+        <button data-v="grad" aria-pressed="true">Gradasi</button><button data-v="flat">Flat</button><button data-v="bare">Tanpa</button></div></div>
+      <div class="ctl"><span class="seg-label">Tubuh</span><div class="seg" data-ctl="body">
+        <button data-v="ink" aria-pressed="true">Tinta</button><button data-v="chalk">Kapur</button></div></div>
+      <div class="ctl"><span class="seg-label">Gerak</span><div class="seg" data-ctl="motion">
+        <button data-v="on" aria-pressed="true">Kerja</button><button data-v="off">Diam</button></div></div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Generator dari nama</h2>
+    <p class="lead">Nama yang sama selalu menghasilkan avatar yang sama, seperti <code>avatar.DefaultFor</code> sekarang. "Acak ulang" menggeser seed. Override bentuk, mata, dan warna untuk mencoba kombinasi.</p>
+    <div class="card">
+      <div class="gen">
+        <div id="gen-big"></div>
+        <div class="gen-form">
+          <label class="field"><span>Nama agent</span><input type="text" id="gen-name" value="Bima" autocomplete="off"></label>
+          <div class="row">
+            <label class="field"><span>Bentuk</span><select id="gen-family"></select></label>
+            <label class="field"><span>Mata</span><select id="gen-eyes"></select></label>
+          </div>
+          <div class="field"><span>Warna</span><div class="chips" id="gen-colors"></div></div>
+          <div class="row">
+            <button class="btn primary" id="gen-roll">Acak ulang</button>
+            <button class="btn" id="gen-reset">Reset ke nama</button>
+          </div>
+          <div class="meta" id="gen-meta"></div>
+        </div>
+      </div>
+      <div class="sizes" id="gen-sizes"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Default dari nama</h2>
+    <p class="lead">Avatar otomatis untuk 24 nama tanpa override. Ini yang dilihat agent baru sebelum pemilik menyimpan avatar sendiri.</p>
+    <div class="grid" id="names" style="--min: 96px"></div>
+  </section>
+
+  <section>
+    <h2>Bentuk</h2>
+    <p class="lead">15 bentuk tubuh. Dua terakhir duduk di tepi bawah tile dan terpotong. Klik untuk membuka di generator.</p>
+    <div class="grid" id="families" style="--min: 120px"></div>
+  </section>
+
+  <section>
+    <h2>Gaya mata</h2>
+    <p class="lead">Mata tetap bentuk putih terpisah, jadi rig kedip dan lirikan dari <code>avatar-svg.tsx</code> tetap bekerja.</p>
+    <div class="grid" id="eyes" style="--min: 104px"></div>
+  </section>
+
+  <section>
+    <h2>Dalam aplikasi</h2>
+    <p class="lead">Hanya avatar agent yang sedang bekerja yang bergerak, sesuai aturan sekarang.</p>
+    <div class="mocks">
+      <div class="panel" id="mock-list"></div>
+      <div style="display:grid; gap:16px; min-width:0">
+        <div class="panel" id="mock-room"></div>
+        <div class="panel" id="mock-profile"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fase 2 (belum masuk rencana awal)</h2>
+    <p class="lead">Tubuh terbalik (putih, mata berwarna) dan aksesori warna ketiga. Keduanya butuh aturan sanitizer baru dan penanda mata selain warna putih.</p>
+    <div class="grid p2 p2-chalk" id="p2-chalk" style="--min: 120px"></div>
+    <div class="grid p2 p2-accent" id="p2-accent" style="--min: 120px; margin-top: 8px"></div>
+  </section>
+
+  <section>
+    <h2>Catatan teknis</h2>
+    <ul class="notes">
+      <li>SVG tetap <code>viewBox="0 0 100 100"</code>, tubuh <code>currentColor</code>, mata <code>#ffffff</code>. Sanitizer fase 1 tidak berubah, kecuali batas kotak untuk bentuk yang terpotong di bawah.</li>
+      <li>Tile, gradasi, kilap, dan bayangan dibuat dengan CSS pada host avatar. Warna tile memakai warna agent.</li>
+      <li>Dengan tile, tubuh berwarna tinta gelap. Tanpa tile, tubuh berwarna agent seperti sekarang.</li>
+      <li>Generator Go mendapat family baru dan gaya mata. Prompt LLM mendapat petunjuk bentuk yang sama.</li>
+      <li>Avatar yang sudah disimpan (<code>avatar.svg</code>) tetap tampil. Avatar default semua agent berubah.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+'use strict';
+
+/* ---------------- seeds ---------------- */
+
+// FNV-1a 64, like avatar.SeedForName.
+function seedFor(name) {
+  let h = 0xcbf29ce484222325n;
+  for (const b of new TextEncoder().encode(name)) {
+    h ^= BigInt(b);
+    h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return Number(h % 2147483647n) + 1;
+}
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const u = (r, a, b) => a + r() * (b - a);
+const pick = (r, list) => list[Math.floor(r() * list.length)];
+const f = n => +n.toFixed(1);
+
+/* ---------------- path helpers ---------------- */
+
+// Polygon of [x, y, radius] points with each corner rounded by a quadratic.
+function rp(pts) {
+  const n = pts.length;
+  const P = i => pts[(i + n) % n];
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  let d = '';
+  for (let i = 0; i < n; i++) {
+    const p = P(i), a = P(i - 1), b = P(i + 1), r = p[2] || 0;
+    const la = Math.hypot(a[0] - p[0], a[1] - p[1]);
+    const lb = Math.hypot(b[0] - p[0], b[1] - p[1]);
+    const p1 = lerp(p, a, Math.min(r, la / 2) / la);
+    const p2 = lerp(p, b, Math.min(r, lb / 2) / lb);
+    d += (i ? 'L' : 'M') + f(p1[0]) + ' ' + f(p1[1]);
+    if (r > 0) d += 'Q' + f(p[0]) + ' ' + f(p[1]) + ' ' + f(p2[0]) + ' ' + f(p2[1]);
+  }
+  return d + 'Z';
+}
+function rr(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  return `M${f(x + r)} ${f(y)}H${f(x + w - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)}V${f(y + h - r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + w - r)} ${f(y + h)}H${f(x + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x)} ${f(y + h - r)}V${f(y + r)}A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)}Z`;
+}
+function circ(cx, cy, r) {
+  return `M${f(cx - r)} ${f(cy)}a${f(r)} ${f(r)} 0 1 0 ${f(2 * r)} 0a${f(r)} ${f(r)} 0 1 0 ${f(-2 * r)} 0Z`;
+}
+function ell(cx, cy, rx, ry) {
+  return `M${f(cx - rx)} ${f(cy)}a${f(rx)} ${f(ry)} 0 1 0 ${f(2 * rx)} 0a${f(rx)} ${f(ry)} 0 1 0 ${f(-2 * rx)} 0Z`;
+}
+
+/* ---------------- families ---------------- */
+// Each returns { paths: [{ d, t? }], eye: { x, y, gap, s }, tilt, accent? }.
+
+const FAMILIES = {
+  cat(r) {
+    const w = u(r, 50, 60), h = u(r, 38, 46), y1 = u(r, 80, 84), y0 = y1 - h;
+    const x0 = 50 - w / 2, x1 = 50 + w / 2, eh = u(r, 13, 20), tin = u(r, 0, 5), dip = u(r, 4, 11), cr = u(r, 7, 12);
+    return {
+      paths: [{ d: rp([[x0, y1, cr], [x0, y0, 2], [x0 + tin, y0 - eh, 3], [50, y0 + dip, 6], [x1 - tin, y0 - eh, 3], [x1, y0, 2], [x1, y1, cr]]) }],
+      eye: { x: 50, y: y1 - h * 0.4, gap: w * 0.36, s: 9 }, tilt: true,
+    };
+  },
+  pebble(r) {
+    const bw = u(r, 27, 30), tw = u(r, 22, 25), et = u(r, 13, 18), eg = tw - u(r, 1, 4), vy = et + u(r, 15, 19);
+    return {
+      paths: [{ d: rp([[50 - bw, 86, 18], [50 - tw, 46, 18], [50 - eg, et, 4], [50, vy, 14], [50 + eg, et, 4], [50 + tw, 46, 18], [50 + bw, 86, 18]]) }],
+      eye: { x: 50, y: 58, gap: 20, s: 10 }, tilt: true,
+    };
+  },
+  fox(r) {
+    const ew = u(r, 28, 32), et = u(r, 14, 22), cw = u(r, 26, 30), cy = u(r, 56, 60), chin = u(r, 84, 88), ib = u(r, 10, 14);
+    return {
+      paths: [{ d: rp([[50, chin, 12], [50 - cw, cy, 14], [50 - ew, et, 4], [50 - ib, 34, 8], [50 + ib, 34, 8], [50 + ew, et, 4], [50 + cw, cy, 14]]) }],
+      eye: { x: 50, y: 54, gap: 22, s: 9 }, tilt: true,
+    };
+  },
+  owl(r) {
+    const w = u(r, 24, 28), tx = u(r, 30, 35), ty = u(r, 14, 20), vy = u(r, 30, 34);
+    return {
+      paths: [{ d: rp([[50 - w, 86, 16], [50 - w, 42, 10], [50 - tx, ty, 3], [40, vy, 8], [60, vy, 8], [50 + tx, ty, 3], [50 + w, 42, 10], [50 + w, 86, 16]]) }],
+      eye: { x: 50, y: 56, gap: 24, s: 11 }, tilt: true,
+    };
+  },
+  spiky(r) {
+    const w = u(r, 25, 28), s1 = u(r, 18, 24), s2 = u(r, 10, 16);
+    return {
+      paths: [{ d: rp([[50 - w, 86, 14], [50 - w, 40, 8], [50 - w + 6, s1, 3], [40, 34, 4], [50, s2, 3], [60, 34, 4], [50 + w - 6, s1, 3], [50 + w, 40, 8], [50 + w, 86, 14]]) }],
+      eye: { x: 50, y: 60, gap: 24, s: 10 }, tilt: true,
+    };
+  },
+  flame(r) {
+    return {
+      paths: [{ d: rp([[27, 84, 18], [24, 54, 14], [33, u(r, 24, 30), 3], [42, 40, 5], [u(r, 50, 54), u(r, 10, 16), 3], [61, 36, 5], [71, u(r, 20, 28), 3], [78, 54, 14], [74, 84, 18]]) }],
+      eye: { x: 51, y: 64, gap: 20, s: 9 }, tilt: true,
+    };
+  },
+  ghost(r) {
+    const w = u(r, 46, 52), x0 = 50 - w / 2, x1 = 50 + w / 2, top = u(r, 26, 32), cy = top + w / 2, by = u(r, 82, 86), amp = u(r, 4, 6);
+    let d = `M${f(x0)} ${f(cy)}A${f(w / 2)} ${f(w / 2)} 0 0 1 ${f(x1)} ${f(cy)}L${f(x1)} ${f(by)}`;
+    const n = 6, step = w / n;
+    for (let i = 0; i < n; i++) {
+      const xa = x1 - step * (i + 0.5), xb = x1 - step * (i + 1);
+      d += `Q${f(xa)} ${f(by + (i % 2 ? -amp : amp))} ${f(xb)} ${f(by)}`;
+    }
+    return { paths: [{ d: d + 'Z' }], eye: { x: 50, y: cy + 4, gap: 20, s: 9 }, tilt: true };
+  },
+  bunny(r) {
+    const rx = u(r, 26, 29), ry = u(r, 20, 24), cy = u(r, 64, 68);
+    const eh = u(r, 30, 36), ew = u(r, 11, 14), a = u(r, 6, 14), base = cy - ry + 10;
+    const flop = r() < 0.35;
+    return {
+      paths: [
+        { d: rr(40 - ew / 2, base - eh, ew, eh, ew / 2), t: `rotate(${f(-a)} 40 ${f(base)})` },
+        { d: rr(60 - ew / 2, base - eh, ew, eh, ew / 2), t: `rotate(${f(flop ? 58 : a + u(r, -4, 4))} 60 ${f(base)})` },
+        { d: ell(50, cy, rx, ry) },
+      ],
+      eye: { x: 50, y: cy + 2, gap: 20, s: 8 }, tilt: true,
+    };
+  },
+  bear(r) {
+    const R = u(r, 26, 29), cy = u(r, 58, 62), er = u(r, 8, 11), ex = u(r, 19, 23);
+    return {
+      paths: [{ d: circ(50 - ex, cy - R + 4, er) }, { d: circ(50 + ex, cy - R + 4, er) }, { d: circ(50, cy, R) }],
+      eye: { x: 50, y: cy + 2, gap: 22, s: 9 }, tilt: true,
+    };
+  },
+  horns(r) {
+    const R = u(r, 26, 28), cy = u(r, 60, 63), hx = u(r, 14, 18), ht = u(r, 12, 20), hl = u(r, 0, 6);
+    const horn = side => rp([
+      [50 + side * (hx + 6), cy - R + 14, 2],
+      [50 + side * (hx + 6 + hl), ht, 3],
+      [50 + side * (hx - 8), cy - R + 6, 2],
+    ]);
+    return { paths: [{ d: horn(-1) }, { d: horn(1) }, { d: circ(50, cy, R) }], eye: { x: 50, y: cy + 1, gap: 22, s: 9 }, tilt: true };
+  },
+  sprout(r) {
+    const rx = u(r, 26, 29), ry = u(r, 22, 25), cy = u(r, 64, 67), b = cy - ry - 8;
+    return {
+      paths: [
+        { d: rr(48.6, b, 2.8, 14, 1.4) },
+        { d: `M50 ${f(b)}Q40 ${f(b - 14)} 28 ${f(b - 8)}Q38 ${f(b + 2)} 50 ${f(b)}Z` },
+        { d: `M50 ${f(b - 2)}Q62 ${f(b - 18)} 74 ${f(b - 12)}Q64 ${f(b)} 50 ${f(b - 2)}Z` },
+        { d: ell(50, cy, rx, ry) },
+      ],
+      eye: { x: 50, y: cy + 2, gap: 22, s: 9 }, tilt: true,
+    };
+  },
+  antenna(r) {
+    const w = u(r, 50, 58), h = u(r, 40, 46), y1 = u(r, 82, 85), x = 50 - w / 2, y = y1 - h, cr = u(r, 12, 18), bend = u(r, -16, 16);
+    return {
+      paths: [
+        { d: rr(48.5, y - 14, 3, 16, 1.5), t: `rotate(${f(bend)} 50 ${f(y)})` },
+        { d: circ(50, y - 15, u(r, 4.5, 6)), t: `rotate(${f(bend)} 50 ${f(y)})` },
+        { d: rr(x, y, w, h, cr) },
+      ],
+      eye: { x: 50, y: y + h * 0.5, gap: w * 0.36, s: 9 }, tilt: true,
+    };
+  },
+  slime(r) {
+    const x0 = 22, x1 = 78, top = u(r, 24, 30), by = 80;
+    let d = `M${x0} 62C${x0} ${f(top + 14)} 36 ${f(top)} 50 ${f(top)}C64 ${f(top)} ${x1} ${f(top + 14)} ${x1} 62V${by - 5}Q${x1} ${by} ${x1 - 5} ${by}`;
+    for (const [xc, len] of [[66, u(r, 0, 7)], [55, u(r, 6, 14)], [36, u(r, 4, 10)]]) {
+      if (len < 2) continue;
+      d += `L${f(xc + 3.5)} ${by}V${f(by + len)}A3.5 3.5 0 0 1 ${f(xc - 3.5)} ${f(by + len)}V${by}`;
+    }
+    d += `L${x0 + 5} ${by}Q${x0} ${by} ${x0} ${by - 5}Z`;
+    return { paths: [{ d }], eye: { x: 50, y: 54, gap: 22, s: 9 }, tilt: true };
+  },
+  peek(r) {
+    const w = u(r, 34, 38), ty = u(r, 24, 32), etx = u(r, 24, 30), vy = u(r, 38, 42);
+    return {
+      paths: [{ d: rp([[50 - w, 112, 0], [50 - w, 60, 18], [50 - etx, ty, 3], [38, vy, 10], [62, vy, 10], [50 + etx, ty, 3], [50 + w, 60, 18], [50 + w, 112, 0]]) }],
+      eye: { x: 50, y: 66, gap: 26, s: 11 }, tilt: false,
+    };
+  },
+  mound(r) {
+    const w = u(r, 31, 35), top = u(r, 28, 34), sh = top + w * 0.85;
+    const d = `M${f(50 - w)} 112V${f(sh)}C${f(50 - w)} ${f(top + w * 0.3)} ${f(50 - w * 0.6)} ${f(top)} 50 ${f(top)}C${f(50 + w * 0.6)} ${f(top)} ${f(50 + w)} ${f(top + w * 0.3)} ${f(50 + w)} ${f(sh)}V112Z`;
+    return { paths: [{ d }], eye: { x: 50, y: top + u(r, 24, 30), gap: 24, s: 11 }, tilt: false };
+  },
+};
+const FAMILY_NAMES = Object.keys(FAMILIES);
+const FAMILY_LABEL = {
+  cat: 'kucing', pebble: 'kerikil', fox: 'rubah', owl: 'burung hantu', spiky: 'jabrik', flame: 'api',
+  ghost: 'hantu', bunny: 'kelinci', bear: 'beruang', horns: 'tanduk', sprout: 'tunas', antenna: 'antena',
+  slime: 'lendir', peek: 'mengintip', mound: 'gundukan',
+};
+
+/* ---------------- eyes ---------------- */
+
+const EYES = ['oval', 'dot', 'sleepy', 'happy', 'lid', 'pupil'];
+const EYE_LABEL = { oval: 'oval', dot: 'bulat', sleepy: 'ngantuk', happy: 'senyum', lid: 'datar', pupil: 'pupil' };
+
+function eyesMarkup(e, style, r) {
+  const gap = e.gap * u(r, 0.9, 1.1), s = e.s * u(r, 0.88, 1.15), gx = u(r, -1.5, 1.5), gy = u(r, -1, 1);
+  let out = '';
+  for (const side of [-1, 1]) {
+    const cx = e.x + side * gap / 2, cy = e.y;
+    let m = '';
+    if (style === 'oval') m = `<path class="e" d="${ell(cx + gx, cy + gy, s * 0.4, s * 0.62)}"/>`;
+    else if (style === 'dot') m = `<path class="e" d="${circ(cx + gx, cy + gy, s * 0.48)}"/>`;
+    else if (style === 'sleepy') {
+      const R = s * 0.6, y = cy - R * 0.3;
+      m = `<path class="e" d="M${f(cx - R)} ${f(y)}A${f(R)} ${f(R)} 0 0 0 ${f(cx + R)} ${f(y)}Z"/>`;
+    } else if (style === 'happy') {
+      const R = s * 0.6, y = cy + R * 0.25;
+      m = `<path class="e" d="M${f(cx - R)} ${f(y)}A${f(R)} ${f(R)} 0 0 1 ${f(cx + R)} ${f(y)}Q${f(cx)} ${f(y - R * 0.55)} ${f(cx - R)} ${f(y)}Z"/>`;
+    } else if (style === 'lid') {
+      const R = s * 0.62, h = R * 0.12, t = R * 0.22;
+      const yl = cy - h + (side < 0 ? t : -t), yr = cy - h + (side < 0 ? -t : t);
+      const xl = cx - Math.sqrt(R * R - (yl - cy) ** 2), xr = cx + Math.sqrt(R * R - (yr - cy) ** 2);
+      m = `<path class="e" d="M${f(xl)} ${f(yl)}L${f(xr)} ${f(yr)}A${f(R)} ${f(R)} 0 1 1 ${f(xl)} ${f(yl)}Z"/>`;
+    } else {
+      const R = s * 0.62;
+      m = `<path class="e" d="${circ(cx, cy, R)}"/><path class="p" d="${circ(cx + gx * 1.4, cy + gy * 1.4, s * 0.3)}"/>`;
+    }
+    out += `<g class="av-eye">${m}</g>`;
+  }
+  return out;
+}
+
+/* ---------------- accents (phase 2) ---------------- */
+
+const ACCENTS = {
+  headphones: '<path class="a" d="M10 60A40 40 0 0 1 90 60H84A34 34 0 0 0 16 60Z"/>' +
+    `<path class="a" d="${rr(5, 50, 14, 26, 6)}"/><path class="a" d="${rr(81, 50, 14, 26, 6)}"/>`,
+  beanie: '<path class="a" d="M23 52C23 31 35 22 50 22C65 22 77 31 77 52Z"/>' +
+    `<path class="a" d="${rr(21, 46, 58, 9, 4.5)}"/><path class="a" d="${circ(50, 20, 6)}"/>`,
+};
+
+/* ---------------- avatar ---------------- */
+
+const COLORS = [
+  ['violet', '#7c5cff'], ['pink', '#f45bd0'], ['orange', '#ff6b2c'], ['blue', '#3d7bff'], ['green', '#1fb37a'],
+  ['red', '#ff3d5e'], ['teal', '#13b5c8'], ['amber', '#f5a524'], ['gray', '#8a867e'],
+];
+
+// spec draws from a seed; every pick is consumed even when overridden, so an
+// override never shifts the geometry.
+function spec(seed, over = {}) {
+  const r = rng(seed);
+  const family = pick(r, FAMILY_NAMES), eyes = pick(r, EYES), color = pick(r, COLORS)[1];
+  return { seed, family: over.family || family, eyes: over.eyes || eyes, color: over.color || color, accent: over.accent, eyeY: over.eyeY };
+}
+function svgFor(sp) {
+  const r = rng(sp.seed ^ 0x5bd1e995);
+  const fam = FAMILIES[sp.family](r);
+  const tilt = fam.tilt ? u(r, -5, 5) : 0;
+  const eye = sp.eyeY ? { ...fam.eye, y: sp.eyeY } : fam.eye;
+  const body = fam.paths.map(p => `<path class="b" d="${p.d}"${p.t ? ` transform="${p.t}"` : ''}/>`).join('');
+  const acc = sp.accent ? ACCENTS[sp.accent] : '';
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><g transform="rotate(${f(tilt)} 50 62)"><g class="av-squash">${body}${acc}` +
+    `<g class="av-look"><g class="av-gaze">${eyesMarkup(eye, sp.eyes, r)}</g></g></g></g></svg>`;
+}
+function avatar(sp, size, extra = '') {
+  const big = size >= 40 ? ' big' : '';
+  return `<span class="av${big}${extra ? ' ' + extra : ''}" style="--s:${size}px;--c:${sp.color}">${svgFor(sp)}</span>`;
+}
+const byName = (name, over) => spec(seedFor(name), over);
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---------------- generator ---------------- */
+
+const gen = { name: 'Bima', shift: 0, family: '', eyes: '', color: '' };
+const $ = id => document.getElementById(id);
+
+function genSpec() {
+  return spec(seedFor(gen.name) + gen.shift, { family: gen.family, eyes: gen.eyes, color: gen.color });
+}
+function renderGen() {
+  const sp = genSpec();
+  $('gen-big').innerHTML = avatar(sp, 168, 'working');
+  $('gen-sizes').innerHTML = [16, 20, 24, 32, 40, 56, 80].map(s =>
+    `<figure>${avatar(sp, s, s >= 56 ? '' : '')}<figcaption>${s}px</figcaption></figure>`).join('');
+  $('gen-meta').innerHTML = `seed ${sp.seed} · ${sp.family} (${FAMILY_LABEL[sp.family]}) · mata ${sp.eyes} · ${sp.color}`;
+  for (const b of $('gen-colors').children) b.setAttribute('aria-pressed', String((b.dataset.c || '') === gen.color));
+  $('gen-family').value = gen.family;
+  $('gen-eyes').value = gen.eyes;
+}
+$('gen-family').innerHTML = '<option value="">Auto</option>' + FAMILY_NAMES.map(n => `<option value="${n}">${n} · ${FAMILY_LABEL[n]}</option>`).join('');
+$('gen-eyes').innerHTML = '<option value="">Auto</option>' + EYES.map(n => `<option value="${n}">${n} · ${EYE_LABEL[n]}</option>`).join('');
+$('gen-colors').innerHTML = `<button class="chip auto" data-c="" title="Auto"></button>` +
+  COLORS.map(([n, c]) => `<button class="chip" data-c="${c}" title="${n}" style="background:${c}"></button>`).join('');
+$('gen-colors').addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; gen.color = b.dataset.c; renderGen(); });
+$('gen-name').addEventListener('input', e => { gen.name = e.target.value.trim() || 'Bima'; gen.shift = 0; renderGen(); });
+$('gen-family').addEventListener('change', e => { gen.family = e.target.value; renderGen(); });
+$('gen-eyes').addEventListener('change', e => { gen.eyes = e.target.value; renderGen(); });
+$('gen-roll').addEventListener('click', () => { gen.shift += 1; renderGen(); });
+$('gen-reset').addEventListener('click', () => { Object.assign(gen, { shift: 0, family: '', eyes: '', color: '' }); renderGen(); });
+
+/* ---------------- static sections ---------------- */
+
+const NAMES = ['Lana', 'Bima', 'Sari', 'Raka', 'Dewi', 'Arjuna', 'Nadia', 'Tio', 'Maya', 'Kirana', 'Bayu', 'Luna',
+  'Ozzy', 'Pixel', 'Scout', 'Echo', 'Nova', 'Juno', 'Rex', 'Milo', 'Ada', 'Kai', 'Zara', 'Iris'];
+$('names').innerHTML = NAMES.map(n =>
+  `<div class="cell">${avatar(byName(n), 56)}<span class="name">${n}</span></div>`).join('');
+
+const FAMILY_EYES = { cat: 'happy', pebble: 'oval', fox: 'lid', owl: 'pupil', spiky: 'lid', flame: 'oval', ghost: 'dot', bunny: 'dot',
+  bear: 'sleepy', horns: 'oval', sprout: 'happy', antenna: 'dot', slime: 'sleepy', peek: 'sleepy', mound: 'pupil' };
+$('families').innerHTML = FAMILY_NAMES.map((n, i) => {
+  const sp = spec(seedFor(n), { family: n, eyes: FAMILY_EYES[n], color: COLORS[i % COLORS.length][1] });
+  return `<button class="cell" data-family="${n}" data-eyes="${sp.eyes}" data-color="${sp.color}">${avatar(sp, 88)}<span class="name">${n}</span><span class="sub">${FAMILY_LABEL[n]}</span></button>`;
+}).join('');
+$('families').addEventListener('click', e => {
+  const b = e.target.closest('.cell');
+  if (!b) return;
+  Object.assign(gen, { family: b.dataset.family, eyes: b.dataset.eyes, color: b.dataset.color, shift: 0 });
+  renderGen();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+$('eyes').innerHTML = EYES.map((n, i) => {
+  const sp = spec(seedFor('eyes-cat'), { family: 'cat', eyes: n, color: COLORS[(i + 3) % COLORS.length][1] });
+  return `<div class="cell">${avatar(sp, 72)}<span class="name">${n}</span><span class="sub">${EYE_LABEL[n]}</span></div>`;
+}).join('');
+
+/* ---------------- in-app mocks ---------------- */
+
+const CHATS = [
+  ['Bima', 'Refactor router selesai, 3 file berubah', '09:12', 'working'],
+  ['Lana', 'Jadwal besok sudah saya tambahkan', '08:40'],
+  ['Sari', 'Ringkasan riset pasar siap dibaca', 'Kam'],
+  ['Pixel', 'Mockup halaman tasks versi 2', 'Rab'],
+  ['Nova', 'Workflow backup gagal di langkah 3', 'Sel'],
+  ['Kai', 'Oke, saya tunggu konfirmasinya', 'Sen'],
+];
+$('mock-list').innerHTML = `<div class="panel-h">Chats</div>` + CHATS.map(([n, p, t, w], i) =>
+  `<div class="list-row${i === 0 ? ' active' : ''}">${avatar(byName(n), 32, w || '')}<div class="txt"><div class="top"><span>${n}</span><time>${t}</time></div>` +
+  `<div class="prev${w ? ' live' : ''}">${w ? 'thinking <span class="dots"><i></i><i></i><i></i></span>' : esc(p)}</div></div></div>`).join('');
+
+const bima = byName('Bima');
+$('mock-room').innerHTML = `<div class="panel-h">${avatar(bima, 28)}<span>Bima</span><span class="muted">coding agent</span></div>
+  <div class="room">
+    <div class="bubble">Tolong rapikan modul router, pisahkan provider per file.</div>
+    <div class="turn"><p>Sudah. <code>internal/router</code> sekarang punya satu file per provider, test lulus.</p>
+      <div class="foot">${avatar(bima, 20)}<span>worked for 9s · 03:39 AM</span></div></div>
+    <div class="bubble">Sekalian tambahkan retry untuk 429.</div>
+    <div class="turn"><div class="foot">${avatar(bima, 20, 'working')}<span class="dots"><i></i><i></i><i></i></span><span>Bima is thinking (3s)…</span></div></div>
+  </div>`;
+$('mock-profile').innerHTML = `<div class="profile">${avatar(bima, 72, 'working')}<div><h3>Bima</h3>
+  <div class="role">Coding agent · deepseek-v4</div><span class="tag">router</span><span class="tag">go</span><span class="tag">workbench</span></div></div>`;
+
+/* ---------------- phase 2 ---------------- */
+
+$('p2-chalk').innerHTML = [['flame', 'oval', '#ff3d5e'], ['spiky', 'lid', '#f45bd0'], ['cat', 'happy', '#7c5cff'], ['ghost', 'pupil', '#3d7bff'], ['owl', 'dot', '#13b5c8']]
+  .map(([fam, ey, c]) => `<div class="cell">${avatar(spec(seedFor('p2' + fam), { family: fam, eyes: ey, color: c }), 88)}<span class="name">kapur · ${fam}</span></div>`).join('');
+$('p2-accent').innerHTML = [['mound', 'sleepy', '#ff6b2c', 'headphones', 0], ['ghost', 'oval', '#1fb37a', 'beanie', 64], ['mound', 'happy', '#3d7bff', 'beanie', 66]]
+  .map(([fam, ey, c, acc, eyeY]) => `<div class="cell">${avatar(spec(seedFor('acc' + fam + acc), { family: fam, eyes: ey, color: c, accent: acc, eyeY }), 88)}<span class="name">aksen · ${acc}</span></div>`).join('');
+
+/* ---------------- controls ---------------- */
+
+const root = document.documentElement;
+for (const seg of document.querySelectorAll('.seg')) {
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    for (const x of seg.children) x.setAttribute('aria-pressed', String(x === b));
+    const ctl = seg.dataset.ctl, v = b.dataset.v;
+    if (ctl === 'theme') { if (v === 'auto') root.removeAttribute('data-theme'); else root.dataset.theme = v; }
+    else root.dataset[ctl] = v;
+  });
+}
+
+// #light or #dark in the URL picks the theme (for screenshots).
+const hashTheme = location.hash.slice(1);
+if (hashTheme === 'light' || hashTheme === 'dark') {
+  root.dataset.theme = hashTheme;
+  for (const x of document.querySelector('[data-ctl="theme"]').children) x.setAttribute('aria-pressed', String(x.dataset.v === hashTheme));
+}
+
+renderGen();
+</script>
+</body>
+</html>

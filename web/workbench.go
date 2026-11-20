@@ -123,6 +123,12 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.Handle("GET /v1/workbench/events", http.HandlerFunc(s.handleWorkbenchEvents))
 	s.Handle("GET /v1/workbench/sessions/{id}/attach", http.HandlerFunc(s.handleWorkbenchAttach))
 	s.Handle("POST /v1/workbench/drops", http.HandlerFunc(s.handleWorkbenchDrops))
+	// The file preview of spec 61: the POST is authenticated like the routes
+	// above; the GET carries its own token and needs no cookie, so it is
+	// registered behind the host check alone (REQ-WP-004), like
+	// GET /v1/auth/state.
+	s.Handle("POST /v1/workbench/preview", http.HandlerFunc(s.handleWorkbenchPreview))
+	s.mux.Handle("GET /v1/workbench/preview/{token}/{name...}", s.checkHost(http.HandlerFunc(s.handleWorkbenchPreviewFile)))
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.

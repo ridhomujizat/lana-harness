@@ -97,6 +97,15 @@ type Server struct {
 	// after Start; nil makes every route answer 503 workbench_unavailable.
 	workbench   WorkbenchBackend
 	workbenchMu sync.RWMutex
+	// previewTokens is the in-memory credential store of the preview GET route
+	// (spec 61, REQ-WP-004). New creates it.
+	previewTokens *previewTokens
+	// previewHome, previewTemps and previewGitRoot override the home folder,
+	// the temp folders and the git-root lookup of the preview path policy
+	// (REQ-WP-003). Tests set them; an empty value uses the real one.
+	previewHome    string
+	previewTemps   []string
+	previewGitRoot func(string) string
 	// routerBackend is the Router page and proxy port (spec 37). It is
 	// guarded by routerMu because the proxy reads it on every request.
 	routerBackend  RouterBackend
@@ -201,6 +210,7 @@ func New(cfg Config) (*Server, error) {
 	s.appCodes = newAppCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
 	s.loginLock = newLoginLock(s.nowTime)
+	s.previewTokens = newPreviewTokens(s.nowTime)
 	s.roomHub = newRoomHub(s)
 	if cfg.Enabled {
 		sessions, err := loadBrowserSessions(cfg.Home, s.nowTime())
@@ -468,7 +478,13 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", s.contentSecurityPolicy())
+		// The Workbench file preview routes (spec 61) set their own sandbox
+		// CSP in setPreviewHeaders (REQ-WP-006); the shell policy's
+		// frame-ancestors 'none' must not be applied to them, so a same-origin
+		// iframe can load the previewed page.
+		if !isPreviewPath(r.URL.Path) {
+			h.Set("Content-Security-Policy", s.contentSecurityPolicy())
+		}
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		if isAPIPath(r.URL.Path) {

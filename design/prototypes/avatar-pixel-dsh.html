@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Piksel — Generator Karakter Agen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Prototype: chibi pixel-art avatars seeded from an agent name.
+   Design tokens copied from design/prototypes/avatar-motion.html (web/ui tokens). */
+:root {
+  --bg: #fbfaf8; --surface: #ffffff; --surface-2: #f6f5f2; --surface-3: #eeede9;
+  --border: #e9e7e2; --border-strong: #dad7d0;
+  --text: #1d1c1a; --text-2: #57544e; --text-3: #6b6760; --text-4: #8c8880;
+  --check: #f1efeb; --agent: #3b6fe0;
+  --ground: rgba(29, 28, 26, .14);
+  --shadow-pop: 0 12px 32px -10px rgba(29,28,26,.22), 0 0 0 1px var(--border);
+  --font: 'Geist', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1a19; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+    --border: #2c2b29; --border-strong: #3a3936;
+    --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+    --check: #242422;
+    --ground: rgba(0, 0, 0, .4);
+    --shadow-pop: 0 16px 40px -10px rgba(0,0,0,.6), 0 0 0 1px var(--border-strong);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19; --surface: #1d1d1c; --surface-2: #252524; --surface-3: #2d2d2b;
+  --border: #2c2b29; --border-strong: #3a3936;
+  --text: #eceae5; --text-2: #b5b2ab; --text-3: #9a968f; --text-4: #6f6c66;
+  --check: #242422;
+  --ground: rgba(0, 0, 0, .4);
+  --shadow-pop: 0 16px 40px -10px rgba(0,0,0,.6), 0 0 0 1px var(--border-strong);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 400 14px/1.55 var(--font); -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; }
+code { font: 12px/1.4 var(--mono); color: var(--text-2); background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
+a { color: inherit; }
+
+.wrap { max-width: 1080px; margin: 0 auto; padding: 30px 18px 72px; }
+
+/* ---------- header ---------- */
+header.top { display: flex; flex-wrap: wrap; gap: 18px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 30px; }
+header.top h1 { font-size: 24px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 6px; }
+header.top p { margin: 0; color: var(--text-3); max-width: 60ch; }
+
+.seg { display: inline-flex; background: var(--surface-3); border-radius: 9px; padding: 2px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 5px 11px; border-radius: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 0 0 1px var(--border); }
+
+/* ---------- section heads ---------- */
+.sec-head { display: flex; align-items: baseline; gap: 12px; margin: 44px 0 4px; }
+.sec-head h2 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin: 0; display: inline-flex; align-items: center; gap: 9px; }
+.pxmark { width: 9px; height: 9px; flex: none; opacity: .5;
+  background-image: linear-gradient(currentColor 1px, transparent 1px), linear-gradient(90deg, currentColor 1px, transparent 1px);
+  background-size: 3px 3px; }
+.sec-head p { margin: 0; color: var(--text-3); font-size: 13px; }
+
+/* ---------- generator ---------- */
+.gen { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 26px; align-items: start;
+  border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 22px; margin-top: 26px; }
+@media (max-width: 720px) { .gen { grid-template-columns: 1fr; } }
+
+.gen-controls label { display: block; font-size: 12px; color: var(--text-3); margin-bottom: 7px; }
+.field { display: flex; gap: 8px; }
+.field input { flex: 1 1 auto; min-width: 0; font: 500 15px/1 var(--font); color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px; padding: 11px 12px; }
+.field input:focus-visible { outline: 2px solid var(--agent); outline-offset: 1px; border-color: transparent; }
+.field button { flex: none; border: 0; border-radius: 10px; padding: 0 15px; cursor: pointer; font-weight: 500;
+  background: var(--text); color: var(--bg); }
+.field button:hover { opacity: .88; }
+.field button:focus-visible { outline: 2px solid var(--agent); outline-offset: 2px; }
+.hint { color: var(--text-4); font-size: 12px; margin: 10px 0 0; }
+
+.recipe { margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 12.5px; }
+.recipe dt { color: var(--text-4); }
+.recipe dd { margin: 0; color: var(--text-2); }
+.seed { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--border); color: var(--text-4); font-size: 12px; }
+.seed code { font-size: 11.5px; }
+
+.gen-stage { display: grid; grid-template-columns: 1fr auto; gap: 22px; align-items: start; }
+@media (max-width: 520px) { .gen-stage { grid-template-columns: 1fr; } }
+
+.canvas { position: relative; display: inline-flex; justify-content: center; align-items: flex-end; padding: 16px; border-radius: 12px;
+  border: 1px solid var(--border);
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(45deg, var(--check) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--check) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--check) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--check) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.sprite { display: block; image-rendering: pixelated; }
+.ground { fill: var(--ground); }
+/* only one of the four frames is visible at a time */
+.sprite .fr { display: none; }
+.sprite[data-f="1"] .f1, .sprite[data-f="2"] .f2, .sprite[data-f="3"] .f3 { display: inline; }
+.sprite[data-f="0"] .f0, .sprite:not([data-f]) .f0 { display: inline; }
+
+/* pixel thought bubble shown over the working preview */
+.bubble { position: absolute; top: 8px; right: 8px; width: 52px; height: 32px; pointer-events: none; }
+.bubble svg { display: block; width: 100%; height: 100%; }
+.bubble .d { animation: bub 1.2s steps(1) infinite; }
+.bubble .d2 { animation-delay: .2s; }
+.bubble .d3 { animation-delay: .4s; }
+@keyframes bub { 0%, 100% { opacity: .3; } 30%, 60% { opacity: 1; } }
+
+.stage-meta { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--text-4); }
+.live { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent) 20%, transparent); }
+
+.stage-small { display: flex; flex-direction: column; gap: 14px; }
+.stage-small figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.stage-small figcaption { font: 500 11px/1 var(--mono); color: var(--text-4); }
+.tile { overflow: hidden; border: 1px solid var(--border); }
+.tile-note { margin: 2px 0 0; max-width: 20ch; color: var(--text-4); font-size: 11.5px; line-height: 1.45; }
+
+/* ---------- gallery ---------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 1px;
+  background: var(--border); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.card { border: 0; background: var(--surface); padding: 16px 8px 14px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.card:hover { background: var(--surface-2); }
+.card:focus-visible { outline: 2px solid var(--agent); outline-offset: -2px; }
+.card b { font: 500 12.5px/1 var(--font); color: var(--text-2); }
+.card:hover b { color: var(--text); }
+
+footer { margin-top: 46px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--text-4); font-size: 12.5px; max-width: 68ch; }
+footer b { color: var(--text-3); font-weight: 500; }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } .bubble .d { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Avatar Piksel</h1>
+      <p>Karakter chibi yang dipahat pada kisi 16&times;20 lalu diperbesar sebagai sel SVG. Semuanya dihitung dari nama agen di peramban ini — nama yang sama selalu memberi karakter yang sama.</p>
+    </div>
+    <div class="seg" role="group" aria-label="Pilihan tema">
+      <button type="button" data-theme-set="auto" aria-pressed="true">Auto</button>
+      <button type="button" data-theme-set="light" aria-pressed="false">Terang</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Gelap</button>
+    </div>
+  </header>
+
+  <section class="gen" aria-label="Pembuat avatar">
+    <div class="gen-controls">
+      <label for="nameInput">Nama agen</label>
+      <div class="field">
+        <input id="nameInput" type="text" value="Lana" autocomplete="off" spellcheck="false">
+        <button id="rollBtn" type="button">Acak ulang</button>
+      </div>
+      <p class="hint">Nama kosong memakai &ldquo;lana&rdquo;. Tombol acak menggeser benih tanpa mengubah nama, jadi kamu bisa berkeliling varian.</p>
+      <dl class="recipe" id="recipe"></dl>
+      <p class="seed">seed <code id="seedOut">&mdash;</code></p>
+    </div>
+
+    <div class="gen-stage">
+      <div>
+        <div class="canvas" id="bigCanvas"></div>
+        <div class="stage-meta">
+          <span class="live"><i class="dot"></i>Sedang bekerja</span>
+          <span>pratinjau 8&times;</span>
+        </div>
+      </div>
+      <div class="stage-small">
+        <figure><div class="tile" id="tile32"></div><figcaption>32 px</figcaption></figure>
+        <figure><div class="tile" id="tile48"></div><figcaption>48 px</figcaption></figure>
+        <p class="tile-note">Ukuran kecil memotong kepala &amp; bahu di dalam petak tumpul berlatar warna agen.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="gallery" aria-label="Contoh nama">
+    <div class="sec-head">
+      <h2><span class="pxmark"></span>Dua puluh empat nama</h2>
+      <p>Seluruh tubuh pada 4&times;. Klik satu untuk memuatnya ke pembuat di atas.</p>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <footer>
+    <b>Cara kerjanya.</b> Nama di-hash dengan FNV-1a 64-bit, lalu sebuah PRNG mulberry32 memilih setiap bagian: gaya &amp; warna rambut, warna kulit, mata, aksesori, baju, celana, dan sepatu. Garis luar dihitung dari sel yang terisi, dan sisi kiri tiap bidang digelapkan karena cahaya datang dari kanan.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================================================================== *
+   * 1. Deterministic hashing: name -> FNV-1a 64-bit -> mulberry32 PRNG.
+   *    Same name, same character. Re-roll only shifts the seed.
+   * ================================================================== */
+  var FNV_OFFSET = 0xcbf29ce484222325n;
+  var FNV_PRIME  = 0x100000001b3n;
+  var MASK64     = 0xffffffffffffffffn;
+
+  function fnv1a64(str) {
+    var h = FNV_OFFSET;
+    var bytes = new TextEncoder().encode(str);
+    for (var i = 0; i < bytes.length; i++) {
+      h ^= BigInt(bytes[i]);
+      h = (h * FNV_PRIME) & MASK64;
+    }
+    return h;
+  }
+
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function pick(rand, arr) { return arr[Math.floor(rand() * arr.length)]; }
+
+  function hexToRgb(hex) { var n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  function rgbToHex(r, g, b) { return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1); }
+  function darken(hex, amt) {
+    var c = hexToRgb(hex);
+    return rgbToHex(Math.round(c[0] * (1 - amt)), Math.round(c[1] * (1 - amt)), Math.round(c[2] * (1 - amt)));
+  }
+  function mix(a, b, t) {
+    var ca = hexToRgb(a), cb = hexToRgb(b);
+    return rgbToHex(
+      Math.round(ca[0] * (1 - t) + cb[0] * t),
+      Math.round(ca[1] * (1 - t) + cb[1] * t),
+      Math.round(ca[2] * (1 - t) + cb[2] * t)
+    );
+  }
+
+  /* ================================================================== *
+   * 2. Palette. Every shaded area carries a base tone and one darker
+   *    tone; the darker tone sits on the side away from the light (left).
+   * ================================================================== */
+  var OUT   = '#1b1820';
+  var EYE   = '#241f2b';
+  var BLUSH = '#f2a0a0';
+  var MOUTH = '#8a4a44';
+  var GLASS = '#2b2834';
+  var MASK_ = '#cfe2ee';
+  var METAL = { c: '#c3c8d2', s: '#9aa0ac' };
+  var VISOR = '#22212c';
+  var GLOW  = '#5fe3ff';
+
+  var SKINS = [
+    { c: '#f7dcc0', s: '#e0bf9d', label: 'terang' },
+    { c: '#f0c9a0', s: '#d7ac80', label: 'kuning langsat' },
+    { c: '#e0a878', s: '#c48c5b', label: 'sawo matang' },
+    { c: '#c1885a', s: '#a06a40', label: 'cokelat' },
+    { c: '#99613c', s: '#7a4a2b', label: 'cokelat tua' },
+    { c: '#6a4029', s: '#52301c', label: 'gelap' }
+  ];
+  var HAIRS = [
+    { c: '#241f2b', s: '#14101a', label: 'hitam' },
+    { c: '#432c1d', s: '#2e1c11', label: 'cokelat gelap' },
+    { c: '#6b4526', s: '#4d3018', label: 'cokelat' },
+    { c: '#8a3a1c', s: '#6b2a13', label: 'merah bata' },
+    { c: '#c8922f', s: '#a57520', label: 'pirang' },
+    { c: '#8f8a86', s: '#6f6a66', label: 'kelabu' },
+    { c: '#e0679a', s: '#c14a7d', label: 'pink' },
+    { c: '#4a7fd6', s: '#3363b0', label: 'biru' },
+    { c: '#46ab6a', s: '#318a4f', label: 'hijau' },
+    { c: '#9a5cd6', s: '#7a42b0', label: 'ungu' },
+    { c: '#e08a2a', s: '#c06e18', label: 'jingga' },
+    { c: '#35b0b8', s: '#228a92', label: 'toska' }
+  ];
+  var AGENTS = [
+    { c: '#3b6fe0', label: 'biru' },
+    { c: '#e0563f', label: 'koral' },
+    { c: '#34a463', label: 'hijau' },
+    { c: '#a557cc', label: 'ungu' },
+    { c: '#e08a26', label: 'amber' },
+    { c: '#2aa5b0', label: 'toska' },
+    { c: '#d9457f', label: 'pink' },
+    { c: '#5f5ad6', label: 'indigo' },
+    { c: '#8aa02f', label: 'zaitun' },
+    { c: '#c9483c', label: 'merah' },
+    { c: '#2f8fd0', label: 'langit' },
+    { c: '#b06a34', label: 'cokelat' }
+  ];
+  var PANTS = [
+    { c: '#3b4763', label: 'denim' },
+    { c: '#2f2d38', label: 'arang' },
+    { c: '#8a7648', label: 'khaki' },
+    { c: '#5a4a6a', label: 'prem' }
+  ];
+  var SHOES = [
+    { c: '#f2f0ec', label: 'putih' },
+    { c: '#2b2833', label: 'hitam' },
+    { c: '#c8453c', label: 'merah' },
+    { c: '#3f6ea8', label: 'biru' }
+  ];
+  var PATTERNS = [
+    { id: 'polos',  label: 'polos' },
+    { id: 'belang', label: 'bergaris' },
+    { id: 'kerah',  label: 'berkerah' },
+    { id: 'kantong', label: 'berkantong' }
+  ];
+
+  /* Hair styles, painted onto the 16x20 canvas as rects [x0, x1, y0, y1].
+     "cap" is clipped to the head silhouette; the other groups may reach one
+     or two cells past it. The back of the head is on the left because the
+     body faces right, and the light comes from the right. */
+  var HAIR_STYLES = [
+    { id: 'pendek', label: 'pendek',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4], [3, 3, 5, 7], [12, 12, 5, 7]],
+      back: [[2, 2, 4, 10]] },
+    { id: 'bob', label: 'bob',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4], [3, 3, 5, 8], [12, 12, 5, 8]],
+      back: [[1, 2, 4, 13]], right: [[13, 14, 4, 11]] },
+    { id: 'duri', label: 'duri',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4]],
+      back: [[2, 2, 4, 9]], right: [[13, 13, 4, 9]],
+      top: [[4, 4, 1, 2], [6, 7, 1, 2], [9, 10, 1, 2]] },
+    { id: 'panjang', label: 'panjang',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4], [3, 3, 5, 8], [12, 12, 5, 8]],
+      back: [[1, 2, 4, 14]], right: [[13, 14, 4, 13]] },
+    { id: 'kuncir', label: 'kuncir',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4]],
+      back: [[2, 2, 4, 9]], right: [[13, 13, 4, 9]],
+      top: [[7, 8, 2, 2]], tail: [[1, 2, 6, 12]] },
+    { id: 'sanggul', label: 'sanggul',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4]],
+      back: [[2, 2, 4, 9]], right: [[13, 13, 4, 9]],
+      top: [[6, 9, 1, 2]] },
+    { id: 'kribo', label: 'kribo',
+      cap: [[4, 11, 3, 3], [3, 12, 4, 4]],
+      back: [[1, 2, 4, 11]], right: [[13, 14, 4, 11]],
+      top: [[4, 5, 2, 2], [7, 8, 2, 2], [10, 11, 2, 2]] },
+    { id: 'mohawk', label: 'mohawk',
+      cap: [[7, 10, 3, 3], [6, 6, 4, 4], [11, 11, 4, 4]],
+      top: [[8, 9, 1, 2]], back: [[2, 3, 10, 11]] }
+  ];
+
+  var EYES = [
+    { id: 'titik',  label: 'titik' },
+    { id: 'senyum', label: 'senyum' },
+    { id: 'tidur',  label: 'ngantuk' }
+  ];
+
+  var ACCS = [
+    { id: 'kacamata', label: 'kacamata' },
+    { id: 'kacamata-hitam', label: 'kacamata hitam' },
+    { id: 'headphone', label: 'headphone' },
+    { id: 'kupluk', label: 'kupluk' },
+    { id: 'topi', label: 'topi' },
+    { id: 'masker', label: 'masker' },
+    { id: 'bandana', label: 'bandana' }
+  ];
+
+  /* ================================================================== *
+   * 3. Canvas 16 x 20 plus the head silhouette. The head runs x 3..12,
+   *    y 3..11, with the top and bottom rows trimmed to x 4..11 so the
+   *    head reads as about half the visible height, not a giant ball.
+   * ================================================================== */
+  var GW = 16, GH = 20;
+  var HEAD_MASK = {
+    3: [4, 11], 4: [3, 12], 5: [3, 12], 6: [3, 12], 7: [3, 12],
+    8: [3, 12], 9: [3, 12], 10: [3, 12], 11: [4, 11]
+  };
+  var HEAD_ROWS = [3, 4, 5, 6, 7, 8, 9, 10, 11];
+
+  /* ================================================================== *
+   * 4. Roll every part from the seed.
+   * ================================================================== */
+  function rollParts(seed) {
+    var rand = mulberry32(Number(seed & 0xffffffffn) >>> 0);
+    var robot = rand() < 0.14;
+    var skin = pick(rand, SKINS);
+    var hair = pick(rand, HAIRS);
+    var hairStyle = pick(rand, HAIR_STYLES);
+    var eyes = pick(rand, EYES);
+    var acc = rand() < 0.5 ? null : pick(rand, ACCS);
+    var agent = pick(rand, AGENTS);
+    var pattern = pick(rand, PATTERNS);
+    var pants = pick(rand, PANTS);
+    var shoes = pick(rand, SHOES);
+    var blush = rand() < 0.6;
+
+    if (robot) { hairStyle = null; acc = null; blush = false; }
+    /* a hat hides tall hair, so those styles fall back to a short cut */
+    if (acc && (acc.id === 'kupluk' || acc.id === 'topi') && hairStyle) {
+      var tall = ['kribo', 'mohawk', 'duri', 'sanggul'].indexOf(hairStyle.id) >= 0;
+      if (tall) hairStyle = HAIR_STYLES[0];
+    }
+
+    return {
+      robot: robot,
+      skin: skin, hair: hair, hairStyle: hairStyle, eyes: eyes,
+      acc: acc, agent: agent, pattern: pattern, pants: pants, shoes: shoes,
+      shirt: { c: agent.c, s: darken(agent.c, 0.26) },
+      blush: blush,
+      seedHex: seed.toString(16)
+    };
+  }
+
+  /* ================================================================== *
+   * 5. Sprite builder: one frame -> colour map -> 1px outline -> SVG.
+   *    Head, hair, face and head-worn accessories travel together as the
+   *    head layer and drop one cell on the nodding frames.
+   * ================================================================== */
+  var FRAMES = [
+    { head: 0, lh: 0,  rh: 0,  blink: false },  // 0 rest
+    { head: 1, lh: -1, rh: 0,  blink: false },  // 1 nod down, left hand up
+    { head: 0, lh: 0,  rh: 0,  blink: true  },  // 2 blink
+    { head: 1, lh: 0,  rh: -1, blink: false }   // 3 nod down, right hand up
+  ];
+  var PATTERN = [0, 1, 0, 3, 0, 1, 2, 3];
+
+  function buildSprite(p, fr) {
+    var dy = fr.head;
+    var robot = p.robot;
+    var skC = robot ? METAL.c : p.skin.c;
+    var skS = robot ? METAL.s : p.skin.s;
+    var shirtC = p.shirt.c, shirtS = p.shirt.s;
+    var pantsC = p.pants.c, pantsS = darken(pantsC, 0.2);
+    var shoesC = p.shoes.c, shoesS = darken(shoesC, 0.22);
+    var cells = new Map();
+
+    function put(x, y, c) { if (x < 0 || y < 0 || x >= GW || y >= GH) return; cells.set(x + ',' + y, c); }
+    function rect(x0, x1, y0, y1, c) { for (var y = y0; y <= y1; y++) { for (var x = x0; x <= x1; x++) put(x, y, c); } }
+    function headRect(x0, x1, y0, y1, c) {
+      for (var y = y0; y <= y1; y++) {
+        var span = HEAD_MASK[y]; if (!span) continue;
+        for (var x = Math.max(x0, span[0]); x <= Math.min(x1, span[1]); x++) put(x, y, c);
+      }
+    }
+    /* head-layer helpers fold in the nod offset */
+    function hput(x, y, c) { put(x, y + dy, c); }
+    function hrect(x0, x1, y0, y1, c) { rect(x0, x1, y0 + dy, y1 + dy, c); }
+    function hheadRect(x0, x1, y0, y1, c) { headRect(x0, x1, y0 + dy, y1 + dy, c); }
+    function hframe(x0, x1, y0, y1, c) {
+      for (var y = y0; y <= y1; y++) {
+        for (var x = x0; x <= x1; x++) {
+          if (x === x0 || x === x1 || y === y0 || y === y1) hput(x, y, c);
+        }
+      }
+    }
+
+    /* --- torso: shirt rows, shoulder pixels, then pants, legs, shoes --- */
+    for (var by = 13; by <= 14; by++) {
+      for (var bx = 5; bx <= 10; bx++) put(bx, by, bx === 5 ? shirtS : shirtC);
+    }
+    var pat = p.pattern.id;
+    if (pat === 'belang') {
+      put(7, 13, shirtS); put(7, 14, shirtS); put(10, 13, shirtS); put(10, 14, shirtS);
+    } else if (pat === 'kerah') {
+      put(8, 13, shirtS); put(9, 13, shirtS);
+    } else if (pat === 'kantong') {
+      put(6, 14, shirtS); put(7, 14, shirtS);
+    }
+    put(4, 13, shirtS); put(11, 13, shirtC);
+
+    for (var cx = 5; cx <= 10; cx++) put(cx, 15, cx === 5 ? pantsS : pantsC);
+    var legs = [5, 6, 9, 10];
+    for (var li = 0; li < legs.length; li++) {
+      var lx = legs[li];
+      put(lx, 16, (lx === 5 || lx === 9) ? pantsS : pantsC);
+      put(lx, 17, (lx === 5 || lx === 9) ? shoesS : shoesC);
+    }
+
+    /* --- hands (skin), lifted a cell on the nodding frames --- */
+    put(4, 14 + fr.lh, skS); put(11, 14 + fr.rh, skC);
+
+    /* --- head --- */
+    for (var hi = 0; hi < HEAD_ROWS.length; hi++) {
+      var hy = HEAD_ROWS[hi], span = HEAD_MASK[hy];
+      for (var hx = span[0]; hx <= span[1]; hx++) hput(hx, hy, hx <= 4 ? skS : skC);
+    }
+    for (var ci = 5; ci <= 10; ci++) hput(ci, 12, OUT);   /* dark row under the chin */
+
+    /* --- hair --- */
+    if (!robot && p.hairStyle) {
+      var hs = p.hairStyle, hbase = p.hair.c, hshade = p.hair.s;
+      var hairKeys = {};
+      var hairDot = function (x, y) { hput(x, y, hbase); hairKeys[x + ',' + (y + dy)] = true; };
+      var m;
+      for (m = 0; m < hs.cap.length; m++) {
+        var cr = hs.cap[m];
+        for (var y2 = cr[2]; y2 <= cr[3]; y2++) {
+          var sp = HEAD_MASK[y2]; if (!sp) continue;
+          for (var x2 = Math.max(cr[0], sp[0]); x2 <= Math.min(cr[1], sp[1]); x2++) hairDot(x2, y2);
+        }
+      }
+      var free = (hs.back || []).concat(hs.right || [], hs.top || [], hs.tail || []);
+      for (m = 0; m < free.length; m++) {
+        var fr2 = free[m];
+        for (var y3 = fr2[2]; y3 <= fr2[3]; y3++) {
+          for (var x3 = fr2[0]; x3 <= fr2[1]; x3++) hairDot(x3, y3);
+        }
+      }
+      /* the left edge of the hair takes the darker tone */
+      for (var key in hairKeys) {
+        var parts = key.split(','), kx = +parts[0], ky = +parts[1];
+        if (!hairKeys[(kx - 1) + ',' + ky]) cells.set(key, hshade);
+      }
+    }
+
+    /* --- face --- */
+    var covered = !!(p.acc && (p.acc.id === 'masker' || p.acc.id === 'kacamata-hitam'));
+    if (robot) {
+      hrect(4, 12, 7, 8, VISOR);
+      for (var gy = 7; gy <= 8; gy++) { hput(6, gy, GLOW); hput(7, gy, GLOW); hput(10, gy, GLOW); hput(11, gy, GLOW); }
+      hput(9, 10, METAL.s); hput(10, 10, METAL.s);
+      hput(8, 1, METAL.s); hput(8, 2, METAL.s); hput(8, 0, GLOW);
+      hput(2, 8, METAL.s); hput(2, 9, METAL.s); hput(13, 8, METAL.s); hput(13, 9, METAL.s);
+    } else {
+      if (fr.blink) {
+        hput(7, 8, EYE); hput(8, 8, EYE); hput(11, 8, EYE); hput(12, 8, EYE);
+      } else if (p.eyes.id === 'senyum') {
+        hput(6, 8, EYE); hput(7, 7, EYE); hput(8, 8, EYE);
+        hput(10, 8, EYE); hput(11, 7, EYE); hput(12, 8, EYE);
+      } else if (p.eyes.id === 'tidur') {
+        hput(7, 8, EYE); hput(8, 8, EYE); hput(11, 8, EYE); hput(12, 8, EYE);
+      } else {
+        hput(7, 7, EYE); hput(7, 8, EYE); hput(11, 7, EYE); hput(11, 8, EYE);
+      }
+      if (p.blush && !covered) { hput(5, 9, BLUSH); hput(12, 9, BLUSH); }
+      if (!covered) hput(9, 10, MOUTH);
+    }
+
+    /* --- accessories --- */
+    if (!robot && p.acc) {
+      var a = p.acc.id;
+      if (a === 'kacamata') {
+        hframe(5, 7, 7, 8, GLASS); hframe(10, 12, 7, 8, GLASS);
+        hput(8, 7, GLASS); hput(9, 7, GLASS);
+      } else if (a === 'kacamata-hitam') {
+        hrect(5, 12, 7, 8, GLASS);
+        hput(7, 7, '#3c3a48'); hput(11, 7, '#3c3a48');
+      } else if (a === 'headphone') {
+        hrect(6, 9, 2, 2, '#3a3946');
+        hrect(2, 2, 7, 10, '#3a3946'); hrect(13, 13, 7, 10, '#3a3946');
+        hput(2, 8, '#5a586a'); hput(13, 8, '#5a586a');
+      } else if (a === 'kupluk') {
+        var hc = darken(p.hair.c, 0.05);
+        hheadRect(4, 11, 3, 3, hc);
+        hheadRect(3, 12, 4, 4, hc);
+        hheadRect(3, 12, 5, 5, darken(hc, 0.18));
+        hrect(7, 10, 1, 2, darken(hc, 0.3));
+      } else if (a === 'topi') {
+        var cc = p.agent.c;
+        hheadRect(4, 11, 3, 3, cc);
+        hheadRect(3, 12, 4, 4, cc);
+        hrect(4, 14, 5, 5, darken(cc, 0.22));
+      } else if (a === 'masker') {
+        hrect(4, 11, 9, 11, MASK_);
+        hput(3, 9, '#a9c4d4'); hput(12, 9, '#a9c4d4');
+      } else if (a === 'bandana') {
+        hheadRect(3, 12, 5, 5, '#c9483c');
+        hput(13, 5, '#a3372e'); hput(13, 6, '#a3372e');
+      }
+    }
+
+    /* --- 1px outline grown from every filled cell (4-neighbour) --- */
+    var outline = [];
+    var seen = {};
+    for (var oy = 0; oy < GH; oy++) {
+      for (var ox = 0; ox < GW; ox++) {
+        if (!cells.has(ox + ',' + oy)) continue;
+        var nb = [[ox + 1, oy], [ox - 1, oy], [ox, oy + 1], [ox, oy - 1]];
+        for (var n = 0; n < 4; n++) {
+          var nx = nb[n][0], ny = nb[n][1];
+          if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+          var nk = nx + ',' + ny;
+          if (cells.has(nk) || seen[nk]) continue;
+          seen[nk] = true; outline.push(nk);
+        }
+      }
+    }
+    for (var oi = 0; oi < outline.length; oi++) cells.set(outline[oi], OUT);
+
+    return cells;
+  }
+
+  /* Merge horizontal runs so the SVG carries a handful of wide rects per
+     row instead of one rect per cell. */
+  function serialize(cells) {
+    var rows = {};
+    cells.forEach(function (color, key) {
+      var parts = key.split(','), x = +parts[0], y = +parts[1];
+      if (!rows[y]) rows[y] = [];
+      rows[y].push([x, color]);
+    });
+    var out = '';
+    Object.keys(rows).forEach(function (y) {
+      var list = rows[y].sort(function (a, b) { return a[0] - b[0]; });
+      var i = 0;
+      while (i < list.length) {
+        var j = i;
+        while (j + 1 < list.length && list[j + 1][0] === list[j][0] + 1 && list[j + 1][1] === list[i][1]) j++;
+        out += '<rect x="' + list[i][0] + '" y="' + y + '" width="' + (j - i + 1) + '" height="1" fill="' + list[i][1] + '"/>';
+        i = j + 1;
+      }
+    });
+    return out;
+  }
+
+  /* The full body paints on a 16x20 grid with a half-cell margin so the
+     outline is never clipped; the bust crops rows -1..14 into a 16x16 tile. */
+  var FULL_VB = [-0.5, -0.5, 17, 21];
+  var BUST_VB = [0, -1, 16, 16];
+
+  function renderSprite(p, opts) {
+    var view = opts.view || 'full';
+    var scale = opts.scale || 4;
+    var vb = view === 'bust' ? BUST_VB : FULL_VB;
+    var idx = opts.animated ? [0, 1, 2, 3] : [0];
+    var open = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + vb.join(' ') + '" width="' + (vb[2] * scale) +
+               '" height="' + (vb[3] * scale) + '" shape-rendering="crispEdges" class="sprite"' +
+               (opts.animated ? ' data-anim="1"' : '') + ' aria-hidden="true">';
+    var ground = view === 'full' ? '<rect class="ground" x="2" y="19" width="12" height="1"/>' : '';
+    var body = '';
+    for (var i = 0; i < idx.length; i++) {
+      body += '<g class="fr f' + idx[i] + '">' + serialize(buildSprite(p, FRAMES[idx[i]])) + '</g>';
+    }
+    return open + ground + body + '</svg>';
+  }
+
+  /* A small pixel thought bubble with three dots for the working preview. */
+  function bubbleSVG() {
+    var grid = [
+      '..kkkkkkkkk..',
+      '.kwwwwwwwwwk.',
+      'kwwdwwdwwdwwk',
+      'kwwwwwwwwwwwk',
+      '.kwwwwwwwwwk.',
+      '..kkkkkkkkk..',
+      '...kk........',
+      '..k..........'
+    ];
+    var dots = ['d1', 'd2', 'd3'], di = 0;
+    var out = '<svg viewBox="0 0 13 8" shape-rendering="crispEdges" aria-hidden="true">';
+    for (var y = 0; y < grid.length; y++) {
+      for (var x = 0; x < grid[y].length; x++) {
+        var ch = grid[y][x];
+        if (ch === 'k') out += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="' + OUT + '"/>';
+        else if (ch === 'w') out += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="#ffffff"/>';
+        else if (ch === 'd') {
+          out += '<rect x="' + x + '" y="' + y + '" width="1" height="1" fill="#ffffff"/>' +
+                 '<rect class="d ' + dots[di] + '" x="' + x + '" y="' + y + '" width="1" height="1" fill="' + OUT + '"/>';
+          di++;
+        }
+      }
+    }
+    return out + '</svg>';
+  }
+
+  /* ================================================================== *
+   * 6. Page wiring.
+   * ================================================================== */
+  var nameInput = document.getElementById('nameInput');
+  var rollBtn = document.getElementById('rollBtn');
+  var bigCanvas = document.getElementById('bigCanvas');
+  var tile32 = document.getElementById('tile32');
+  var tile48 = document.getElementById('tile48');
+  var recipeEl = document.getElementById('recipe');
+  var seedOut = document.getElementById('seedOut');
+  var gridEl = document.getElementById('grid');
+
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var nonce = 0;
+
+  var SAMPLE = ['Lana', 'Bima', 'Sari', 'Raka', 'Dewi', 'Arjuna', 'Nadia', 'Tio',
+                'Maya', 'Kirana', 'Bayu', 'Luna', 'Ozzy', 'Pixel', 'Scout', 'Echo',
+                'Nova', 'Juno', 'Rex', 'Milo', 'Ada', 'Kai', 'Zara', 'Iris'];
+
+  function currentName() {
+    var v = (nameInput.value || '').trim().toLowerCase();
+    return v || 'lana';
+  }
+
+  function isDark() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return true;
+    if (t === 'light') return false;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+
+  function render() {
+    var seed = fnv1a64(currentName() + '#' + nonce);
+    var p = rollParts(seed);
+
+    document.documentElement.style.setProperty('--agent', p.agent.c);
+
+    /* big working preview: the only sprite that animates on the page */
+    bigCanvas.innerHTML = renderSprite(p, { view: 'full', scale: 8, animated: true }) +
+                          '<span class="bubble">' + bubbleSVG() + '</span>';
+
+    /* cropped head + shoulders tiles, tinted with the agent colour */
+    var tint = isDark() ? mix(p.agent.c, '#1d1d1c', 0.84) : mix(p.agent.c, '#fbfaf8', 0.87);
+    tile32.innerHTML = renderSprite(p, { view: 'bust', scale: 2 });
+    tile48.innerHTML = renderSprite(p, { view: 'bust', scale: 3 });
+    tile32.style.background = tint;
+    tile48.style.background = tint;
+    tile32.style.borderRadius = '7px';
+    tile48.style.borderRadius = '11px';
+
+    /* recipe + seed readouts */
+    var rows = [];
+    if (p.robot) {
+      rows.push(['Kepala', 'robot']);
+    } else {
+      rows.push(['Kulit', p.skin.label]);
+      rows.push(['Rambut', p.hairStyle.label + ' \u00b7 ' + p.hair.label]);
+      rows.push(['Mata', p.eyes.label]);
+      rows.push(['Aksesori', p.acc ? p.acc.label : 'tidak ada']);
+    }
+    rows.push(['Baju', p.agent.label + ' \u00b7 ' + p.pattern.label]);
+    rows.push(['Celana', p.pants.label]);
+    rows.push(['Sepatu', p.shoes.label]);
+    recipeEl.innerHTML = rows.map(function (r) {
+      return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>';
+    }).join('');
+    seedOut.textContent = '0x' + p.seedHex.toUpperCase();
+  }
+
+  /* ---- gallery: built once, everything inside it is static ---- */
+  function buildGallery() {
+    var html = '';
+    for (var i = 0; i < SAMPLE.length; i++) {
+      var nm = SAMPLE[i];
+      var p = rollParts(fnv1a64(nm.toLowerCase() + '#0'));
+      html += '<button type="button" class="card" data-name="' + nm + '">' +
+                renderSprite(p, { view: 'full', scale: 4 }) +
+                '<b>' + nm + '</b>' +
+              '</button>';
+    }
+    gridEl.innerHTML = html;
+    gridEl.addEventListener('click', function (ev) {
+      var card = ev.target.closest('.card');
+      if (!card) return;
+      nameInput.value = card.getAttribute('data-name');
+      nonce = 0;
+      render();
+    });
+  }
+
+  /* ---- controls ---- */
+  nameInput.addEventListener('input', function () { nonce = 0; render(); });
+  rollBtn.addEventListener('click', function () { nonce = (nonce + 1) >>> 0; render(); });
+
+  var themeBtns = document.querySelectorAll('[data-theme-set]');
+  function setTheme(mode) {
+    if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', mode);
+    for (var i = 0; i < themeBtns.length; i++) {
+      themeBtns[i].setAttribute('aria-pressed', themeBtns[i].getAttribute('data-theme-set') === mode ? 'true' : 'false');
+    }
+    render(); /* the tile tints depend on the theme */
+  }
+  for (var i = 0; i < themeBtns.length; i++) {
+    themeBtns[i].addEventListener('click', function () { setTheme(this.getAttribute('data-theme-set')); });
+  }
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+    if (!document.documentElement.getAttribute('data-theme')) render();
+  });
+
+  /* ---- frame ticker: 4 frames every 180ms, pattern [0,1,0,3,0,1,2,3] ---- */
+  var framePos = 0;
+  function tick() {
+    if (reduce.matches) { framePos = 0; return; }
+    framePos = (framePos + 1) % PATTERN.length;
+    var f = PATTERN[framePos];
+    var list = document.querySelectorAll('.sprite[data-anim]');
+    for (var i = 0; i < list.length; i++) list[i].setAttribute('data-f', String(f));
+  }
+  setInterval(tick, 180);
+
+  /* ---- go ---- */
+  buildGallery();
+  render();
+})();
+</script>
+</body>
+</html>

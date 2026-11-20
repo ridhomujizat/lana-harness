@@ -12,6 +12,11 @@
   --wb-card-idle: #f8f5f0;
   --wb-card-border: rgba(29, 28, 26, 0.07);
   --wb-card-shadow: 0 1px 2px rgba(29, 28, 26, 0.05), 0 8px 24px -12px rgba(29, 28, 26, 0.12);
+  /* Spec 61 REQ-WP-020: the focused pane is brighter than the others. */
+  --wb-pane-bg: #f8f5f0;
+  --wb-pane-bg-focused: #fdfcfa;
+  --wb-pane-border: rgba(29, 28, 26, 0.07);
+  --wb-pane-border-focused: rgba(29, 28, 26, 0.16);
   --wb-btn-hover: rgba(29, 28, 26, 0.06);
   --wb-bg: linear-gradient(135deg, #eee6f6 0%, #f4eef0 45%, #f3ece2 100%);
   display: flex;
@@ -325,29 +330,61 @@
   font-size: var(--fs-sm);
 }
 
-.wb-prog {
-  display: inline-grid;
+/* Spec 61 REQ-WP-030..REQ-WP-033: program and agent tiles (workbench-tile.tsx).
+   A tile is a landscape face with a sheen and a soft shadow, drawn from the
+   table in workbench-tiles.ts. */
+.wb-ttiles {
+  position: relative;
+  display: inline-block;
   flex: none;
+}
+
+.wb-ptile {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.wb-ptile-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 60%);
+  pointer-events: none;
+}
+
+.wb-ptile-glyph {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
   place-items: center;
-  border-radius: 5px;
-  background: #3a3936;
-  color: #fff;
-  font-size: 11px;
+}
+
+.wb-ptile-glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.wb-ptile-text {
+  position: relative;
+  z-index: 1;
   font-weight: 600;
   line-height: 1;
 }
 
-.wb-prog-claude {
-  background: #d97757;
-}
-
-.wb-prog-codex {
-  background: #2f2e2b;
-}
-
-.wb-prog-shell {
-  background: #3a3936;
-  font-family: var(--mono);
+.wb-ptile-dot {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 2;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
 }
 
 .wb-lana-av {
@@ -423,9 +460,13 @@
   overflow-x: auto;
 }
 
+/* Spec 61 REQ-WP-025: a fixed 176 px, shrinking to 96 px only when the bar
+   has no room. */
 .wb-tab {
   display: inline-flex;
-  flex: none;
+  flex: 0 1 176px;
+  width: 176px;
+  min-width: 96px;
   align-items: center;
   border: 1px solid transparent;
   border-radius: 7px;
@@ -438,7 +479,13 @@
 
 .wb-tab-btn {
   display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
   align-items: center;
+  /* A fixed-width tab keeps its tiles and title at the left (a button
+     centres its content by default). */
+  justify-content: flex-start;
+  text-align: left;
   gap: 7px;
   padding: 5px 4px 5px 11px;
   border: 0;
@@ -456,6 +503,7 @@
 
 .wb-tab-x {
   display: inline-grid;
+  flex: none;
   place-items: center;
   width: 20px;
   height: 20px;
@@ -1123,6 +1171,11 @@
   --wb-card-idle: #1d1c1b;
   --wb-card-border: rgba(255, 255, 255, 0.07);
   --wb-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+  /* Spec 61 REQ-WP-020: the native Workbench's focused/unfocused card pair. */
+  --wb-pane-bg: #1a1918;
+  --wb-pane-bg-focused: #2a2826;
+  --wb-pane-border: rgba(255, 255, 255, 0.05);
+  --wb-pane-border-focused: rgba(255, 255, 255, 0.14);
   --wb-btn-hover: rgba(255, 255, 255, 0.07);
   --wb-bg: linear-gradient(135deg, #1f1c26 0%, #1a1918 50%, #201d18 100%);
 }
@@ -1181,20 +1234,64 @@
 }
 
 .wb-pane {
-  border: 1px solid var(--wb-card-border);
+  border: 1px solid var(--wb-pane-border);
   border-radius: 14px;
-  background: var(--wb-card-idle);
+  background: var(--wb-pane-bg);
   box-shadow: var(--wb-card-shadow);
 }
 
+/* Spec 61 REQ-WP-020: the focus shows by a brighter card, never a coloured
+   border. */
 .wb-pane.is-focused {
-  border-color: var(--wb-card-border);
-  background: var(--wb-term);
-  box-shadow: var(--wb-card-shadow), 0 0 0 1.5px color-mix(in srgb, var(--acc-l, #1a1831) 35%, transparent);
+  border-color: var(--wb-pane-border-focused);
+  background: var(--wb-pane-bg-focused);
+  box-shadow: var(--wb-card-shadow);
 }
 
+/* REQ-WP-020: the unfocused terminal text is dimmed. */
 .wb-pane:not(.is-focused) .wb-xterm {
-  opacity: 0.92;
+  opacity: 0.62;
+}
+
+/* REQ-WP-023: a pane fades in as it is made and out as it is closed. */
+@keyframes wb-pane-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes wb-pane-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+.wb-pane.is-entering {
+  animation: wb-pane-in 180ms ease-out;
+}
+
+.wb-pane.is-closing {
+  animation: wb-pane-out 160ms ease-out forwards;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-pane.is-entering,
+  .wb-pane.is-closing {
+    animation: none;
+  }
 }
 
 .wb-pane-head {
@@ -1235,13 +1332,6 @@
 
 .wb-pane:not(.is-focused) .xterm .xterm-viewport {
   background-color: transparent !important;
-}
-
-.wb-prog-plain {
-  display: inline-grid;
-  place-items: center;
-  background: transparent;
-  color: var(--wb-term-text);
 }
 
 .wb-pane-state {
@@ -2005,4 +2095,176 @@ body.wb-resizing {
   color: var(--text-3);
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ */
+/* File preview (spec 61, REQ-WP-012, REQ-WP-013)                      */
+/* ------------------------------------------------------------------ */
+
+.wb-preview {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wb-preview-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.wb-preview-title {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-preview-title b {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-preview-title span {
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-preview-tools {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wb-preview-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.wb-preview-download {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.wb-preview-close {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.wb-preview-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--surface-2);
+}
+
+.wb-preview-binary {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: var(--s-4);
+  color: var(--text-3);
+  text-align: center;
+}
+
+.wb-preview-binary b {
+  color: var(--text);
+  font-size: var(--fs);
+  overflow-wrap: anywhere;
+}
+
+.wb-preview-bin-sub {
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+}
+
+/* Drag the panel's left edge to resize it. */
+.wb-preview-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 3;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.wb-preview-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: "";
+  transition: background var(--dur, 0.15s);
+}
+
+.wb-preview-resizer:hover::after,
+body.wb-resizing .wb-preview-resizer::after {
+  background: var(--acc-l, #1a1831);
+  opacity: 0.35;
+}
+
+/* Phone: a full-screen sheet (REQ-WP-012). */
+.wb-preview-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  width: auto;
+  border-left: 0;
+}
+
+.wb-preview-sheet .wb-preview-head {
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  flex-wrap: wrap;
+}
+
+.wb-preview-sheet .wb-preview-tools {
+  width: 100%;
+  justify-content: flex-end;
 }
