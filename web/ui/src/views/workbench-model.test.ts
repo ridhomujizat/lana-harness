@@ -18,6 +18,7 @@ import {
   renameTab,
   spaceLabel,
   splitPane,
+  splitSizes,
   statusOf,
   tabSessions,
   terminalKey,
@@ -107,6 +108,89 @@ describe("workbench layout", () => {
     expect(l.spaces[0]!.tabs).toHaveLength(1);
     expect(l.activeSpace).toBe("sp1");
     expect(parseLayout(null).spaces).toEqual([]);
+  });
+});
+
+describe("split sizes (spec 58)", () => {
+  function tabWith(root: unknown) {
+    const l = parseLayout({ version: 1, spaces: [{ id: "sp", name: "a", tabs: [{ id: "t", root }] }] });
+    return { l, root: l.spaces[0]!.tabs[0]!.root };
+  }
+
+  it("keeps stored sizes on parse and reads them back", () => {
+    const { root } = tabWith({
+      type: "split",
+      dir: "row",
+      sizes: [0.25, 0.75],
+      children: [
+        { type: "pane", session: "a" },
+        { type: "pane", session: "b" },
+      ],
+    });
+    expect(root.type === "split" && root.sizes).toEqual([0.25, 0.75]);
+    expect(splitSizes(root)).toEqual([0.25, 0.75]);
+  });
+
+  it("falls back to equal sizes when sizes are invalid", () => {
+    const children = [
+      { type: "pane", session: "a" },
+      { type: "pane", session: "b" },
+    ];
+    expect(splitSizes(tabWith({ type: "split", dir: "row", children }).root)).toEqual([0.5, 0.5]);
+    expect(splitSizes(tabWith({ type: "split", dir: "row", children, sizes: [1] }).root)).toEqual([0.5, 0.5]);
+    expect(splitSizes(tabWith({ type: "split", dir: "row", children, sizes: [0, 1] }).root)).toEqual([0.5, 0.5]);
+    expect(splitSizes(tabWith({ type: "split", dir: "row", children, sizes: [1, 3] }).root)).toEqual([0.25, 0.75]);
+  });
+
+  it("evens out a split a new sibling joins", () => {
+    const { l } = tabWith({
+      type: "split",
+      dir: "row",
+      sizes: [0.4, 0.6],
+      children: [
+        { type: "pane", session: "a" },
+        { type: "pane", session: "b" },
+      ],
+    });
+    const next = splitPane(l, "sp", "t", "b", "c", "row");
+    const root = next.spaces[0]!.tabs[0]!.root;
+    expect(tabSessions(next.spaces[0]!.tabs[0]!)).toEqual(["a", "b", "c"]);
+    expect(root.type === "split" && root.sizes).toBeUndefined();
+    expect(splitSizes(root)).toEqual([1 / 3, 1 / 3, 1 / 3]);
+  });
+
+  it("leaves equal splits without stored sizes", () => {
+    let l = addSpace(emptyLayout(), "a", "");
+    const sp = l.spaces[0]!;
+    l = addTab(l, sp.id, "a");
+    const t = l.spaces[0]!.tabs[0]!;
+    l = splitPane(l, sp.id, t.id, "a", "b", "row");
+    l = splitPane(l, sp.id, t.id, "a", "c", "row");
+    const root = l.spaces[0]!.tabs[0]!.root;
+    /* Three equal panes: nothing is stored. */
+    expect(root.type === "split" && root.sizes).toBeUndefined();
+    expect(tabSessions(l.spaces[0]!.tabs[0]!)).toEqual(["a", "c", "b"]);
+    const before = parseLayout({
+      version: 1,
+      spaces: [{ id: "sp", name: "a", tabs: [{ id: "t", root: { type: "split", dir: "row", children: [{ type: "pane", session: "x" }, { type: "pane", session: "y" }] } }] }],
+    });
+    const after = removeSession(splitPane(before, "sp", "t", "x", "z", "col"), "z");
+    expect(after.spaces[0]!.tabs[0]!.root).toEqual(before.spaces[0]!.tabs[0]!.root);
+  });
+
+  it("evens out a split a pane leaves", () => {
+    const { l } = tabWith({
+      type: "split",
+      dir: "row",
+      sizes: [0.2, 0.3, 0.5],
+      children: [
+        { type: "pane", session: "a" },
+        { type: "pane", session: "b" },
+        { type: "pane", session: "c" },
+      ],
+    });
+    const root = removeSession(l, "c").spaces[0]!.tabs[0]!.root;
+    expect(splitSizes(root)).toEqual([0.5, 0.5]);
   });
 });
 

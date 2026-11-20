@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { errorMessage } from "../api/client";
 import {
@@ -45,6 +45,7 @@ import {
   spaceCwd,
   spaceLabel,
   splitPane,
+  splitSizes,
   statusOf,
   tabSessions,
   toggleZoom,
@@ -368,10 +369,10 @@ interface PaneActions {
   onRestart: (id: string) => void;
 }
 
-function PaneView({ id, session, focused, zoomed, actions }: { id: string; session?: WorkbenchSession; focused: boolean; zoomed: boolean; actions: PaneActions }) {
+function PaneView({ id, session, focused, zoomed, actions, style }: { id: string; session?: WorkbenchSession; focused: boolean; zoomed: boolean; actions: PaneActions; style?: CSSProperties }) {
   const status = statusOf(session);
   return (
-    <div className={"wb-pane" + (focused ? " is-focused" : "")}>
+    <div className={"wb-pane" + (focused ? " is-focused" : "")} style={style}>
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
         <ProgramIcon session={session} />
         <span className="wb-pane-title">{programName(session)}</span>
@@ -429,14 +430,17 @@ function PaneView({ id, session, focused, zoomed, actions }: { id: string; sessi
   );
 }
 
-function PaneTree({ node, tab, sessions, actions }: { node: PaneNode; tab: WbTab; sessions: Sessions; actions: PaneActions }) {
+function PaneTree({ node, tab, sessions, actions, grow }: { node: PaneNode; tab: WbTab; sessions: Sessions; actions: PaneActions; grow?: number }) {
+  /* Spec 58 REQ-DW-022: a split's sizes set its children's flex-grow. */
+  const style = grow === undefined ? undefined : { flexGrow: grow };
   if (node.type === "pane") {
-    return <PaneView id={node.session} session={sessions[node.session]} focused={tab.focus === node.session} zoomed={tab.zoom === node.session} actions={actions} />;
+    return <PaneView id={node.session} session={sessions[node.session]} focused={tab.focus === node.session} zoomed={tab.zoom === node.session} actions={actions} style={style} />;
   }
+  const sizes = splitSizes(node);
   return (
-    <div className={"wb-split wb-split-" + node.dir}>
+    <div className={"wb-split wb-split-" + node.dir} style={style}>
       {node.children.map((child, i) => (
-        <PaneTree key={child.type === "pane" ? child.session : "s" + i} node={child} tab={tab} sessions={sessions} actions={actions} />
+        <PaneTree key={child.type === "pane" ? child.session : "s" + i} node={child} tab={tab} sessions={sessions} actions={actions} grow={sizes[i]} />
       ))}
     </div>
   );

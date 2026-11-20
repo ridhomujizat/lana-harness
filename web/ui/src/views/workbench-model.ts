@@ -4,9 +4,12 @@ import type { WorkbenchSession } from "../api/workbench";
    an opaque document, so every client (desktop, phone) shows the same spaces,
    tabs and splits. These helpers are pure: they return a new layout. */
 
+/* A split may carry sizes (spec 58 REQ-DW-022): one fraction per child,
+   summing to 1. Missing or invalid sizes mean equal sizes. The native app
+   drags dividers; the web UI shows and keeps the sizes. */
 export type PaneNode =
   | { type: "pane"; session: string }
-  | { type: "split"; dir: "row" | "col"; children: PaneNode[] };
+  | { type: "split"; dir: "row" | "col"; children: PaneNode[]; sizes?: number[] };
 
 export interface WbTab {
   id: string;
@@ -180,18 +183,44 @@ export function addTab(layout: WbLayout, spaceId: string, sessionId: string, tit
   };
 }
 
+/* The sizes of a split's children: its stored fractions when they are
+   valid (one positive number per child), else equal shares. Always sums
+   to 1. */
+export function splitSizes(node: PaneNode): number[] {
+  if (node.type !== "split") return [];
+  const n = node.children.length;
+  const sizes = node.sizes;
+  if (
+    Array.isArray(sizes) &&
+    sizes.length === n &&
+    sizes.every((v) => typeof v === "number" && Number.isFinite(v) && v > 0)
+  ) {
+    const total = sizes.reduce((a, b) => a + b, 0);
+    return sizes.map((v) => v / total);
+  }
+  return Array.from({ length: n }, () => 1 / n);
+}
+
+/* A split of the given children in equal shares: no stored sizes. A pane
+   added to or closed in a split evens it out, as the web Workbench always
+   did; dragged sizes elsewhere in the tree stay. */
+function equalSplit(node: PaneNode & { type: "split" }, children: PaneNode[]): PaneNode {
+  const { sizes: _old, ...rest } = node;
+  return { ...rest, children };
+}
+
 function splitNode(node: PaneNode, target: string, sessionId: string, dir: "row" | "col"): PaneNode {
   if (node.type === "pane") {
     if (node.session !== target) return node;
     return { type: "split", dir, children: [node, { type: "pane", session: sessionId }] };
   }
   /* Splitting a pane inside a split of the same direction adds a sibling
-     instead of nesting. */
+     instead of nesting, and the split's panes share it equally. */
   const index = node.children.findIndex((c) => c.type === "pane" && c.session === target);
   if (index >= 0 && node.dir === dir) {
     const children = [...node.children];
     children.splice(index + 1, 0, { type: "pane", session: sessionId });
-    return { ...node, children };
+    return equalSplit(node, children);
   }
   return { ...node, children: node.children.map((c) => splitNode(c, target, sessionId, dir)) };
 }
@@ -214,7 +243,9 @@ function removeNode(node: PaneNode, sessionId: string): PaneNode | null {
   const children = node.children.map((c) => removeNode(c, sessionId)).filter((c): c is PaneNode => c !== null);
   if (!children.length) return null;
   if (children.length === 1) return children[0] ?? null;
-  return { ...node, children };
+  if (children.length === node.children.length) return { ...node, children };
+  /* The panes left share the split equally. */
+  return equalSplit(node, children);
 }
 
 /* Drops a session from every tab; a tab left empty is removed. */
