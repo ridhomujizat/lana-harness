@@ -2268,3 +2268,178 @@ body.wb-resizing .wb-preview-resizer::after {
   width: 100%;
   justify-content: flex-end;
 }
+
+/* ---------------------------------------------------------------- */
+/* Panel restyle (2026-11-21): the Spaces and Agents lists sit in    */
+/* bordered cards on the same gradient as the panes, so the panel no */
+/* longer reads as herdr's flat sidebar. Style only: the markup and  */
+/* behaviour are unchanged.                                          */
+/* ---------------------------------------------------------------- */
+
+/* One gradient behind the panel card and the panes. */
+.wb-page:not(.wb-phone) {
+  background: var(--wb-bg);
+}
+
+.wb-page:not(.wb-phone) .wb-main {
+  background: transparent;
+}
+
+.wb-phone-panel {
+  background: var(--wb-bg);
+}
+
+.wb-page .wb-panel {
+  margin: 8px 0 8px 8px;
+  /* The same border as a terminal pane's card. */
+  border: 1px solid var(--wb-pane-border-focused);
+  border-radius: 14px;
+  background: var(--wb-term);
+  box-shadow: var(--wb-card-shadow);
+}
+
+/* One card split in half: Spaces on top, Agents below a hairline. */
+.wb-page .wb-spaces,
+.wb-page .wb-agents {
+  gap: 4px;
+  padding: 0 8px 10px;
+}
+
+.wb-page .wb-agents {
+  border-top: 1px solid var(--wb-card-border);
+}
+
+/* Section heads: a small caps label over a hairline, sticky in its card. */
+.wb-page .wb-panel .wb-sec-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 44px;
+  margin: 0 -8px 6px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--wb-card-border);
+  background: var(--wb-term);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wb-page .wb-panel .wb-sec-head .wb-icon-btn {
+  border: 1px solid var(--wb-card-border);
+  border-radius: 8px;
+}
+
+.wb-page .wb-panel .wb-sec-head .wb-icon-btn:hover {
+  border-color: var(--border-strong);
+  background: var(--wb-btn-hover);
+}
+
+.wb-page .wb-panel .wb-toggle {
+  padding: 2px;
+  border: 1px solid var(--wb-card-border);
+  border-radius: 9px;
+  background: transparent;
+}
+
+.wb-page .wb-panel .wb-toggle button.is-on {
+  background: var(--wb-btn-hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+/* Rows: every space and agent is a bordered chip; the active one gets
+   the accent border and tint. */
+.wb-page .wb-panel .wb-space-btn,
+.wb-page .wb-panel .wb-agent {
+  border: 1px solid var(--wb-card-border);
+  border-radius: 10px;
+  background: var(--wb-pane-bg);
+  font-weight: 400;
+}
+
+.wb-page .wb-panel .wb-space-btn:hover,
+.wb-page .wb-panel .wb-agent:hover {
+  border-color: var(--border-strong);
+  background: var(--wb-pane-bg-focused);
+}
+
+.wb-page .wb-panel .wb-space.is-active .wb-space-btn,
+.wb-page .wb-panel .wb-agent.is-active {
+  border-color: color-mix(in srgb, var(--acc-l, #1a1831) 45%, var(--border-strong));
+  background: color-mix(in srgb, var(--acc-l, #1a1831) 8%, var(--wb-pane-bg-focused));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc-l, #1a1831) 10%, transparent);
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .wb-page .wb-panel .wb-space.is-active .wb-space-btn,
+:root[data-theme="dark"] .wb-page .wb-panel .wb-agent.is-active {
+  border-color: color-mix(in srgb, #b9a6f2 55%, var(--border-strong));
+  background: color-mix(in srgb, #b9a6f2 14%, var(--wb-pane-bg-focused));
+  box-shadow: 0 0 0 3px color-mix(in srgb, #b9a6f2 12%, transparent);
+}
+
+/* Space tiles: rounder, with an inner ring. */
+.wb-page .wb-panel .wb-tile {
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* "1 tab" as a small bordered count. */
+.wb-page .wb-panel .wb-space-meta {
+  padding: 1px 7px;
+  border: 1px solid var(--wb-card-border);
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.wb-page .wb-panel .wb-space-meta:empty {
+  padding: 0;
+  border: 0;
+}
+
+/* Agent group heads: the label runs into a hairline. */
+.wb-page .wb-panel .wb-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px 2px;
+  color: var(--text-4);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.wb-page .wb-panel .wb-group-head::after {
+  flex: 1;
+  height: 1px;
+  background: var(--wb-card-border);
+  content: "";
+}
+
+.wb-page .wb-panel .wb-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wb-page .wb-panel .wb-count {
+  padding: 0 6px;
+  border: 1px solid var(--wb-card-border);
+  border-radius: 999px;
+  font-size: 10.5px;
+}
+
+.wb-page .wb-panel .wb-orphans {
+  border: 1px dashed currentColor;
+  border-radius: 10px;
+}
+
+.wb-page .wb-panel .wb-resizer {
+  right: -6px;
+}
+
+/* The phone shows the panel as its own page: the card keeps a gutter. */
+.wb-page .wb-phone-panel .wb-panel {
+  margin: 8px;
+}
