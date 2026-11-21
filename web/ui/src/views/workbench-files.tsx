@@ -13,9 +13,10 @@ import {
   type GitTreeEntry,
 } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
-import { Code, Counts, DiffView, StatusLetter } from "./workbench-changes";
+import { Code, Counts, DiffView, LINE_H, StatusLetter } from "./workbench-changes";
 import { baseName, dirName, gutterMarks, type GutterMark } from "./workbench-git-model";
 import { humanSize } from "./workbench-preview";
+import { useVirtualRows } from "./workbench-virtual";
 
 /* Spec 66 REQ-WG-064, 065: the Files tab, a lazy tree of the worktree and a
    read-only viewer with a git gutter. */
@@ -77,19 +78,20 @@ export function FilesTab({
     load("");
   }, [worktree, load]);
 
-  /* The status poll refreshes the loaded folders' badges. */
-  const changeKey = changes.map((c) => c.status + c.path).join("|");
-  const loadedRef = useRef<string[]>([]);
-  useEffect(() => {
-    loadedRef.current = Object.keys(tree).filter((d) => Array.isArray(tree[d]));
-  }, [tree]);
-  useEffect(() => {
-    for (const dir of loadedRef.current) {
-      getGitTree(worktree, dir)
-        .then((r) => setTree((t) => ({ ...t, [dir]: r.entries })))
-        .catch(() => {});
+  /* Badges come from the status the page already polls, so a change on disk
+     updates the tree without asking the daemon for every open folder. */
+  const statusOf = useMemo(() => new Map(changes.map((c) => [c.path, c.status])), [changes]);
+  const changedDirs = useMemo(() => {
+    const dirs = new Set<string>();
+    for (const c of changes) {
+      let d = dirName(c.path);
+      while (d) {
+        dirs.add(d);
+        d = dirName(d);
+      }
     }
-  }, [changeKey, worktree]);
+    return dirs;
+  }, [changes]);
 
   /* Open the folders above a selected file (a ⌘+click, REQ-WG-063). */
   useEffect(() => {
@@ -219,23 +221,24 @@ export function FilesTab({
             <Ic name={isOpen ? "chevron-down" : "chevron-right"} size={12} className="wbg-chev" />
             <Ic name={isOpen ? "folder-open" : "folder"} size={14} />
             <span className="wbg-tree-name">{label}</span>
-            {e.changed ? <span className="wbg-dot" /> : null}
+            {changedDirs.has(join(dir, e.name)) ? <span className="wbg-dot" /> : null}
           </button>
         );
         if (isOpen) walk(path, depth + 1);
       } else {
         const path = join(dir, e.name);
+        const st = statusOf.get(path);
         rows.push(
           <button
             key={path}
             type="button"
-            className={"wbg-tree-row" + (path === selected ? " is-on" : "") + (e.ignored ? " is-ignored" : "") + (e.status ? " wbg-tone-" + e.status : "")}
+            className={"wbg-tree-row" + (path === selected ? " is-on" : "") + (e.ignored ? " is-ignored" : "") + (st ? " wbg-tone-" + st : "")}
             style={{ paddingLeft: 22 + depth * 14 }}
             onClick={() => onSelect(path)}
           >
             <Ic name="file" size={14} />
             <span className="wbg-tree-name">{e.name}</span>
-            <StatusLetter status={e.status} />
+            <StatusLetter status={st} />
           </button>
         );
       }
@@ -346,14 +349,23 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
     };
   }, [worktree, path, change?.add, change?.del, change?.status, change?.binary, change]);
 
-  useEffect(() => {
-    if (!file || !line) return;
-    bodyRef.current?.querySelector('[data-line="' + line + '"]')?.scrollIntoView({ block: "center" });
-  }, [file, line]);
-
   const text = file && isTextFile(file) ? file : null;
-  const lines = useMemo(() => (text ? text.text.split("\n") : []), [text]);
-  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  const lines = useMemo(() => {
+    const all = text ? text.text.split("\n") : [];
+    if (all.length && all[all.length - 1] === "") all.pop();
+    return all;
+  }, [text]);
+  /* Only the lines on screen are rendered, so a big file stays light. */
+  const heights = useMemo(() => lines.map(() => LINE_H), [lines]);
+  const win = useVirtualRows(bodyRef, heights);
+
+  /* A ⌘+click with :line lands on that line, centred (REQ-WG-063). */
+  const { offsetOf } = win;
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || !line || !lines.length) return;
+    el.scrollTop = Math.max(0, offsetOf(line - 1) - el.clientHeight / 2);
+  }, [lines, line, offsetOf]);
 
   if (mode === "diff" && change) {
     return (
@@ -394,21 +406,27 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
           <Ic name="copy" size={14} />
         </button>
       </header>
-      {error ? (
-        <p className="wbg-note">{error}</p>
-      ) : !file ? (
-        <p className="wbg-note">Loading…</p>
-      ) : !text ? (
-        <ExternalBody data={file as WorkbenchPreview} />
-      ) : (
-        <div className="wbg-viewer-body wbg-code-view" ref={bodyRef}>
+      <div className={"wbg-viewer-body" + (text ? " wbg-code-view" : " wbg-viewer-plain")} ref={bodyRef}>
+        {error ? (
+          <p className="wbg-note">{error}</p>
+        ) : !file ? (
+          <p className="wbg-note">Loading…</p>
+        ) : !text ? (
+          <ExternalBody data={file as WorkbenchPreview} />
+        ) : (
           <table className="wbg-diff-table">
+            <colgroup>
+              <col className="wbg-col-ln" />
+              <col className="wbg-col-gutter" />
+              <col />
+            </colgroup>
             <tbody>
-              {lines.map((t, i) => {
-                const n = i + 1;
+              {win.top ? <tr className="wbg-spacer" style={{ height: win.top }} /> : null}
+              {lines.slice(win.start, win.end).map((t, k) => {
+                const n = win.start + k + 1;
                 const mark = isNew ? "add" : marks.get(n);
                 return (
-                  <tr key={n} data-line={n} className={n === line ? "is-target" : undefined}>
+                  <tr key={n} className={"wbg-dl" + (n === line ? " is-target" : "")}>
                     <td className="wbg-ln">{n}</td>
                     <td className={"wbg-gutter" + (mark ? " wbg-g-" + mark : "")} />
                     <td className="wbg-code">
@@ -417,10 +435,11 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
                   </tr>
                 );
               })}
+              {win.bottom ? <tr className="wbg-spacer" style={{ height: win.bottom }} /> : null}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
       {text ? (
         <footer className="wbg-viewer-foot">
           <span>

@@ -881,6 +881,7 @@
 
 .wbg-diff-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   color: var(--wb-term-text);
   font-family: var(--mono);
@@ -893,10 +894,58 @@
   vertical-align: top;
 }
 
+/* Fixed heights: the virtualiser in workbench-virtual.ts counts on them
+   (LINE_H 19, hunk 24, + 6 gap). */
+.wbg-dl,
+.wbg-dl > td {
+  height: 19px;
+}
+
+.wbg-hunk > td {
+  height: 24px;
+  box-sizing: border-box;
+}
+
+.wbg-hunk.wbg-hunk-gap > td {
+  height: 30px;
+  border-top: 6px solid var(--wb-term);
+  background-clip: padding-box;
+}
+
+.wbg-spacer > td,
+tr.wbg-spacer {
+  padding: 0;
+  border: 0;
+}
+
+.wbg-col-ln {
+  width: 46px;
+}
+
+.wbg-col-sign {
+  width: 16px;
+}
+
+.wbg-col-gutter {
+  width: 3px;
+}
+
+.wbg-code {
+  overflow: visible;
+}
+
+.wbg-viewer-plain {
+  display: flex;
+  flex-direction: column;
+}
+
+.wbg-viewer-plain > .wbg-frame {
+  flex: 1 1 auto;
+}
+
 .wbg-ln {
-  width: 1%;
-  min-width: 38px;
-  padding: 0 8px 0 6px !important;
+  padding: 0 8px 0 4px !important;
+  overflow: hidden;
   color: var(--wb-term-dim);
   font-size: 11px;
   text-align: right;
@@ -905,7 +954,6 @@
 }
 
 .wbg-sign {
-  width: 14px;
   user-select: none;
 }
 
@@ -932,14 +980,12 @@
 
 .wbg-hunk td {
   padding: 2px 14px !important;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   background: color-mix(in srgb, var(--violet) 12%, transparent);
   color: color-mix(in srgb, var(--violet) 65%, var(--text));
   font-size: 11.5px;
-}
-
-.wbg-hunk + .wbg-dl,
-tr.wbg-hunk:not(:first-child) td {
-  border-top: 6px solid transparent;
 }
 
 .wbg-diff-split .wbg-half {
@@ -951,7 +997,6 @@ tr.wbg-hunk:not(:first-child) td {
 }
 
 .wbg-gutter {
-  width: 3px;
   padding: 0 !important;
 }
 

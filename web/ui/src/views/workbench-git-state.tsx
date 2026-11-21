@@ -141,7 +141,7 @@ export function useWorkbenchGit({
 
   /* REQ-WG-021, 060: the badge needs the count even with the panel closed,
      so the page polls slower then. */
-  const status = useGitStatus(shown?.worktree ?? null, "uncommitted", open ? 3000 : 10000);
+  const status = useGitStatus(shown?.worktree ?? null, "uncommitted", open ? 3000 : 15000);
 
   /* A new worktree in the panel starts with no file picked. */
   useEffect(() => {
@@ -333,15 +333,20 @@ export function useWorkbenchGit({
     return (ti >= 0 ? "Tab " + (ti + 1) + " · " : "") + programName(sessions[id]);
   };
 
-  const context: WbGitContextValue = {
-    gitOf,
-    shared,
-    describe,
-    onShared: () => {
+  /* Memoised so panes re-render only when git data changes. */
+  const onSharedRef = useRef(() => {});
+  useEffect(() => {
+    onSharedRef.current = () => {
       pickTab("worktrees");
       if (!open) setOpenSaved(true);
-    },
-  };
+    };
+  });
+  const context: WbGitContextValue = useMemo(
+    () => ({ gitOf, shared, describe, onShared: () => onSharedRef.current() }),
+    // describe reads the space and sessions that gitOf and shared already follow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [gitOf, shared, space]
+  );
 
   void layout;
   const openWorktrees = () => {

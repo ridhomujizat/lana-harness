@@ -1,10 +1,16 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { errorMessage } from "../api/client";
 import { getGitDiff, getGitStatus, type GitDiff, type GitFileChange, type GitScope, type GitStatus } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
 import { readPref, savePref } from "./workbench-git-hooks";
-import { baseName, dirName, highlightLine, splitRows, unifiedRows, type Token } from "./workbench-git-model";
+import { baseName, dirName, highlightLine, splitRows, unifiedRows, type DiffRow, type SplitRow, type Token } from "./workbench-git-model";
+import { useVirtualRows } from "./workbench-virtual";
+
+/* Fixed row heights the virtualiser relies on (see workbench-git.css). */
+export const LINE_H = 19;
+const HUNK_H = 24;
+const HUNK_GAP = 6;
 
 /* Spec 66 REQ-WG-066..068: the Changes tab and the diff viewer. */
 
@@ -24,14 +30,14 @@ export function Counts({ add, del }: { add: number; del: number }) {
   );
 }
 
-export function Code({ text, language }: { text: string; language: string }) {
+export const Code = memo(function Code({ text, language }: { text: string; language: string }) {
   const tokens: Token[] = useMemo(() => highlightLine(text, language), [text, language]);
   return (
     <>
       {tokens.map((t, i) => (t.kind === "plain" ? <Fragment key={i}>{t.text}</Fragment> : <span key={i} className={"wbg-tk-" + t.kind}>{t.text}</span>))}
     </>
   );
-}
+});
 
 function languageOf(path: string): string {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
@@ -83,16 +89,22 @@ export function DiffView({
   }, [worktree, path, scope, change?.add, change?.del]);
 
   const language = languageOf(path);
-  const hunks = diff?.hunks ?? [];
+  const hunks = useMemo(() => diff?.hunks ?? [], [diff]);
   /* REQ-WG-091: a phone shows the unified diff only. */
   const narrow = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 640px)").matches;
   const layout: DiffMode = narrow ? "unified" : mode;
+
+  /* Only the rows on screen are rendered, so a long diff stays light. */
+  const rows = useMemo<(DiffRow | SplitRow)[]>(() => (layout === "unified" ? unifiedRows(hunks) : splitRows(hunks)), [hunks, layout]);
+  const heights = useMemo(() => rows.map((r, i) => (r.type === "hunk" ? (i === 0 ? HUNK_H : HUNK_H + HUNK_GAP) : LINE_H)), [rows]);
+  const hunkRows = useMemo(() => rows.flatMap((r, i) => (r.type === "hunk" ? [i] : [])), [rows]);
+  const win = useVirtualRows(bodyRef, heights);
 
   const goHunk = (next: number) => {
     if (!hunks.length) return;
     const i = Math.max(0, Math.min(hunks.length - 1, next));
     setHunk(i);
-    bodyRef.current?.querySelector('[data-hunk="' + i + '"]')?.scrollIntoView({ block: "start", behavior: "smooth" });
+    bodyRef.current?.scrollTo({ top: win.offsetOf(hunkRows[i] ?? 0), behavior: "smooth" });
   };
 
   /* ] and [ step through the hunks while the viewer has focus. */
@@ -140,36 +152,45 @@ export function DiffView({
           <p className="wbg-note">Binary file. No text diff.</p>
         ) : !hunks.length ? (
           <p className="wbg-note">No changes in this file for this scope.</p>
-        ) : layout === "unified" ? (
-          <table className="wbg-diff-table">
-            <tbody>
-              {unifiedRows(hunks).map((row, i) =>
-                row.type === "hunk" ? (
-                  <tr key={i} className="wbg-hunk" data-hunk={row.index}>
-                    <td colSpan={4}>{row.header}</td>
-                  </tr>
-                ) : (
-                  <tr key={i} className={"wbg-dl wbg-dl-" + row.line.kind}>
-                    <td className="wbg-ln">{row.line.old ?? ""}</td>
-                    <td className="wbg-ln">{row.line.new ?? ""}</td>
-                    <td className="wbg-sign">{row.line.kind === "add" ? "+" : row.line.kind === "del" ? "−" : ""}</td>
-                    <td className="wbg-code">
-                      <Code text={row.line.text} language={language} />
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
         ) : (
-          <table className="wbg-diff-table wbg-diff-split">
+          <table className={"wbg-diff-table" + (layout === "split" ? " wbg-diff-split" : "")}>
+            {layout === "unified" ? (
+              <colgroup>
+                <col className="wbg-col-ln" />
+                <col className="wbg-col-ln" />
+                <col className="wbg-col-sign" />
+                <col />
+              </colgroup>
+            ) : (
+              <colgroup>
+                <col className="wbg-col-ln" />
+                <col />
+                <col className="wbg-col-ln" />
+                <col />
+              </colgroup>
+            )}
             <tbody>
-              {splitRows(hunks).map((row, i) =>
-                row.type === "hunk" ? (
-                  <tr key={i} className="wbg-hunk" data-hunk={row.index}>
-                    <td colSpan={4}>{row.header}</td>
-                  </tr>
-                ) : (
+              {win.top ? <tr className="wbg-spacer" style={{ height: win.top }} /> : null}
+              {rows.slice(win.start, win.end).map((row, k) => {
+                const i = win.start + k;
+                if (row.type === "hunk")
+                  return (
+                    <tr key={i} className={"wbg-hunk" + (i > 0 ? " wbg-hunk-gap" : "")}>
+                      <td colSpan={4}>{row.header}</td>
+                    </tr>
+                  );
+                if (row.type === "line")
+                  return (
+                    <tr key={i} className={"wbg-dl wbg-dl-" + row.line.kind}>
+                      <td className="wbg-ln">{row.line.old ?? ""}</td>
+                      <td className="wbg-ln">{row.line.new ?? ""}</td>
+                      <td className="wbg-sign">{row.line.kind === "add" ? "+" : row.line.kind === "del" ? "−" : ""}</td>
+                      <td className="wbg-code">
+                        <Code text={row.line.text} language={language} />
+                      </td>
+                    </tr>
+                  );
+                return (
                   <tr key={i} className="wbg-dl">
                     <td className="wbg-ln">{row.left?.old ?? ""}</td>
                     <td className={"wbg-code wbg-half" + (row.left && row.left.kind === "del" ? " wbg-dl-del" : "") + (!row.left ? " wbg-blank" : "")}>
@@ -180,8 +201,9 @@ export function DiffView({
                       {row.right ? <Code text={row.right.text} language={language} /> : null}
                     </td>
                   </tr>
-                )
-              )}
+                );
+              })}
+              {win.bottom ? <tr className="wbg-spacer" style={{ height: win.bottom }} /> : null}
             </tbody>
           </table>
         )}
