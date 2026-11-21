@@ -757,3 +757,10 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
   height: 24px;
   font-size: 10px;
 }
+
+/* Lana.app, narrow window: the phone Workbench has no topbar, so its own
+   header makes room for the traffic lights (owner report 2026-11-22). */
+html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-phone .wb-phone-head,
+html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-phone .wb-phone-top {
+  padding-left: var(--shell-lights-w, 78px);
+}

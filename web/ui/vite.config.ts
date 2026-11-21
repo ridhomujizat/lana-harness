@@ -34,6 +34,7 @@ function sourceStamp(dir: string): string {
     }
   };
   walk(join(dir, "src"));
+  walk(join(dir, "public"));
   hash.update(readFileSync(join(dir, "index.html")));
   return hash.digest("hex");
 }
@@ -44,6 +45,27 @@ function sourceStampPlugin(dir: string): Plugin {
     name: "lana-source-stamp",
     transformIndexHtml(html) {
       return html.replace("<head>", `<head>\n    <!-- build: ${stamp} -->`);
+    },
+  };
+}
+
+/* The Workbench Markdown preview loads Mermaid from /assets/vendor/ (see
+   public/vendor/md-preview.js): the build copies the package's prebuilt
+   bundle there, and the dev server serves it from node_modules. */
+const MERMAID_FILE = "vendor/mermaid.min.js";
+
+function mermaidVendor(dir: string): Plugin {
+  const source = join(dir, "node_modules/mermaid/dist/mermaid.min.js");
+  return {
+    name: "lana-mermaid-vendor",
+    configureServer(server) {
+      server.middlewares.use("/assets/" + MERMAID_FILE, (_req, res) => {
+        res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+        res.end(readFileSync(source));
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: MERMAID_FILE, source: readFileSync(source) });
     },
   };
 }
@@ -120,7 +142,7 @@ function lucideSubset(dir: string): Plugin {
 
 export default defineConfig({
   base: "/assets/",
-  plugins: [react(), sourceStampPlugin(root), lucideSubset(join(root, "src"))],
+  plugins: [react(), sourceStampPlugin(root), lucideSubset(join(root, "src")), mermaidVendor(root)],
   build: {
     outDir: "../dist",
     emptyOutDir: true,

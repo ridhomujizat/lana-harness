@@ -2287,3 +2287,91 @@ body.wb-resizing .wb-preview-resizer::after {
 .wb-phone-panel {
   background: var(--wb-bg);
 }
+
+/* The tab cards are buttons: the global button height (--h-md, 30px)
+   squeezed them to one line on the phone sheet (owner report 2026-11-22). */
+.wb-sheet .wb-card {
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  height: auto;
+  line-height: 1.35;
+  font-weight: 400;
+  white-space: normal;
+}
+
+.wb-sheet .wb-card.is-on {
+  border-color: var(--accent);
+}
+
+.wb-sheet .wb-card-preview {
+  align-items: center;
+  height: 44px;
+  padding-right: 40px;
+}
+
+.wb-sheet .wb-card-foot b {
+  display: block;
+}
+
+.wb-sheet .wb-card-preview {
+  flex: none;
+}
+
+.wb-sheet .wb-card-foot {
+  align-items: center;
+}
+
+/* The close button sits on the dark preview strip, clear of the title. */
+.wb-sheet .wb-card-x {
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+}
+
+/* Sheet grips (owner, 2026-11-22): drag up for the full height, down to
+   close, tap to toggle (ui/sheet-drag.ts). The bar keeps its look; the
+   padding is the touch target. */
+.sheet-grip {
+  box-sizing: content-box;
+  flex: none;
+  padding: 10px 28px;
+  background-clip: content-box;
+  cursor: grab;
+  touch-action: none;
+}
+
+.sheet-grip:active {
+  cursor: grabbing;
+}
+
+.sheet-grip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.wb-sheet-grip.sheet-grip {
+  margin: -8px 0 -10px;
+  background-clip: content-box;
+}
+
+.wb-sheet.is-full {
+  height: calc(var(--app-h, 100dvh) - 12px - env(safe-area-inset-top));
+  max-height: none;
+}
+
+html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-sheet.is-full {
+  height: calc(var(--app-h, 100dvh) - 44px);
+}
+
+.wb-sheet,
+.wbg-panel.wbg-sheet,
+.kg-panel {
+  transition: height 200ms var(--ease-drawer, ease), max-height 200ms var(--ease-drawer, ease), top 200ms var(--ease-drawer, ease);
+}
+
+.is-sheet-dragging {
+  transition: none !important;
+}
