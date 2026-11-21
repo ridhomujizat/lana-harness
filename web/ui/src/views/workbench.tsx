@@ -630,7 +630,7 @@ function PaneView({
           >
             <ProgramTile session={session} size="pane" />
             <span className="wb-pane-grip-ic" aria-hidden="true">
-              <Ic name="grip-vertical" size={14} />
+              <Ic name="move" size={14} />
             </span>
           </span>
         ) : (
