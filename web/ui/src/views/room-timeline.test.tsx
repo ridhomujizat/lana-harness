@@ -562,3 +562,32 @@ describe("Entrance animation (perf)", () => {
     expect(screen.getByText("world").closest(".msg-enter")).toBeNull();
   });
 });
+
+/* Payload diet: the chat asks for the trimmed payloads (view=chat) on its
+   event loads and its live stream. */
+describe("Chat payload diet (view=chat)", () => {
+  it("loads events and opens the stream with view chat", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [userText(1, "t1", "hello")],
+      last_seq: 1,
+    });
+    const views: Array<unknown> = [];
+    vi.mocked(openStream).mockImplementation((_id, options) => {
+      views.push(options?.view);
+      return { close: () => {} };
+    });
+
+    render(<RoomView room={room({ name: "dana" })} />);
+    await screen.findByText("hello");
+
+    await waitFor(() => expect(views.length).toBeGreaterThan(0));
+    expect(views[views.length - 1]).toBe("chat");
+    const call = vi.mocked(listEvents).mock.calls[0];
+    expect(call?.[0]).toBe("s_web");
+    expect(call?.[2]).toEqual({ view: "chat" });
+  });
+});

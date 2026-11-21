@@ -519,7 +519,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     await Promise.all(
       ids.map(async (id) => {
         try {
-          const page = await listEvents(id, 0);
+          const page = await listEvents(id, 0, { view: "chat" });
           loaded[id] = page.events || [];
           /* Remember the page's last seq so the live stream can open from it. */
           loadedSeqRef.current[id] = Number(page.last_seq) || 0;
@@ -627,6 +627,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     const id = newestId;
     const stream = openStream(id, {
       fromSeq: loadedSeqRef.current[id] || 0,
+      view: "chat",
       onState: (state) => setStreamState(state),
       onEvent: (event) => {
         /* Child sessions (a member's own session in a team room) stream their
@@ -1301,7 +1302,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     let live = true;
     void Promise.all(
       missing.map((id) =>
-        listEvents(id, 0)
+        listEvents(id, 0, { view: "chat" })
           .then((page) => [id, page && Array.isArray(page.events) ? page.events : []] as const)
           .catch(() => [id, [] as SessionEvent[]] as const)
       )

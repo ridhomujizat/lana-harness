@@ -262,3 +262,238 @@ func stripImageData(blocks []core.ContentBlock) bool {
 	}
 	return stripped
 }
+
+// chatOutputLimit is the number of runes kept from a tool result's output and
+// from a string value of a tool call's input in the chat view. It matches the
+// slice the web UI already shows without opening a step (REQ-UI chat).
+const chatOutputLimit = 4000
+
+// chatInputMaxDepth caps the walk of a tool call's input so a deeply nested
+// argument cannot make the trim expensive.
+const chatInputMaxDepth = 6
+
+// redactedThinkingBlock is the content block type of a redacted thinking block.
+// The stored form keeps the encrypted data in the signature behind the prefix;
+// an adapter may also serve it as a data field, so both are handled.
+const redactedThinkingBlock = "redacted_thinking"
+
+// chatEventPayload trims an event payload for the opt-in chat view (view=chat).
+// It runs after publicEventPayload, so image bytes are already gone. Every
+// other kind, and a payload that cannot be parsed, is returned unchanged.
+func chatEventPayload(kind string, payload json.RawMessage) json.RawMessage {
+	switch kind {
+	case core.KindSystemMessage:
+		return chatSystemMessagePayload(payload)
+	case core.KindAssistantMessage:
+		return chatAssistantPayload(payload)
+	case core.KindStepEnd:
+		return chatStepEndPayload(payload)
+	case core.KindToolResult:
+		return chatToolResultPayload(payload)
+	case core.KindToolCall:
+		return chatToolCallPayload(payload)
+	default:
+		return payload
+	}
+}
+
+// chatSystemMessagePayload keeps the seq of a system message but drops the
+// prompt text, which the chat never shows: only the subtype (when it had one)
+// and the omitted flag remain.
+func chatSystemMessagePayload(payload json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &fields) != nil {
+		return payload
+	}
+	out := map[string]json.RawMessage{"omitted": json.RawMessage(`true`)}
+	if subtype, ok := fields["subtype"]; ok {
+		out["subtype"] = subtype
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+// chatAssistantPayload drops the provider signature of a thinking block and the
+// encrypted data of a redacted thinking block. The thinking text stays; every
+// other field of the message and of each block is kept.
+func chatAssistantPayload(payload json.RawMessage) json.RawMessage {
+	var message map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &message) != nil {
+		return payload
+	}
+	rawContent, ok := message["content"]
+	if !ok {
+		return payload
+	}
+	var content []map[string]json.RawMessage
+	if json.Unmarshal(rawContent, &content) != nil {
+		return payload
+	}
+	changed := false
+	for _, block := range content {
+		var blockKind string
+		_ = json.Unmarshal(block["type"], &blockKind)
+		switch blockKind {
+		case string(core.BlockThinking):
+			if _, ok := block["signature"]; ok {
+				delete(block, "signature")
+				changed = true
+			}
+		case redactedThinkingBlock:
+			if _, ok := block["data"]; ok {
+				delete(block, "data")
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return payload
+	}
+	encodedContent, err := json.Marshal(content)
+	if err != nil {
+		return payload
+	}
+	message["content"] = encodedContent
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+// chatStepEndPayload keeps only the step number; the chat reads no other field
+// of step/end (the context meter uses the session usage endpoint).
+func chatStepEndPayload(payload json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &fields) != nil {
+		return payload
+	}
+	out := map[string]json.RawMessage{}
+	if step, ok := fields["step"]; ok {
+		out["step"] = step
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+// chatToolResultPayload cuts an output longer than chatOutputLimit runes and
+// reports the cut with truncated and output_length. The images and every other
+// field stay as publicEventPayload left them.
+func chatToolResultPayload(payload json.RawMessage) json.RawMessage {
+	var result map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &result) != nil {
+		return payload
+	}
+	rawOutput, ok := result["output"]
+	if !ok {
+		return payload
+	}
+	var output string
+	if json.Unmarshal(rawOutput, &output) != nil {
+		return payload
+	}
+	runes := []rune(output)
+	if len(runes) <= chatOutputLimit {
+		return payload
+	}
+	cut, err := json.Marshal(string(runes[:chatOutputLimit]))
+	if err != nil {
+		return payload
+	}
+	length, err := json.Marshal(len(runes))
+	if err != nil {
+		return payload
+	}
+	result["output"] = cut
+	result["truncated"] = json.RawMessage(`true`)
+	result["output_length"] = length
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+// chatToolCallPayload cuts every string value of a tool call's input longer
+// than chatOutputLimit runes and reports the cut with input_truncated.
+func chatToolCallPayload(payload json.RawMessage) json.RawMessage {
+	var message map[string]json.RawMessage
+	if len(payload) == 0 || json.Unmarshal(payload, &message) != nil {
+		return payload
+	}
+	rawInput, ok := message["input"]
+	if !ok {
+		return payload
+	}
+	var input any
+	if json.Unmarshal(rawInput, &input) != nil {
+		return payload
+	}
+	if !cutChatStrings(&input, 0) {
+		return payload
+	}
+	encodedInput, err := json.Marshal(input)
+	if err != nil {
+		return payload
+	}
+	message["input"] = encodedInput
+	message["input_truncated"] = json.RawMessage(`true`)
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+// cutChatStrings walks objects and arrays and cuts every string value longer
+// than chatOutputLimit runes. It stops at chatInputMaxDepth and reports whether
+// it changed anything.
+func cutChatStrings(value *any, depth int) bool {
+	switch typed := (*value).(type) {
+	case string:
+		runes := []rune(typed)
+		if len(runes) <= chatOutputLimit {
+			return false
+		}
+		*value = string(runes[:chatOutputLimit])
+		return true
+	case map[string]any:
+		if depth >= chatInputMaxDepth {
+			return false
+		}
+		changed := false
+		for key := range typed {
+			child := typed[key]
+			if cutChatStrings(&child, depth+1) {
+				typed[key] = child
+				changed = true
+			}
+		}
+		return changed
+	case []any:
+		if depth >= chatInputMaxDepth {
+			return false
+		}
+		changed := false
+		for i := range typed {
+			if cutChatStrings(&typed[i], depth+1) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
+}
+
+// chatView reports whether the request opted into the trimmed payloads
+// (view=chat). Any other value leaves the response unchanged.
+func chatView(r *http.Request) bool {
+	return r.URL.Query().Get("view") == "chat"
+}

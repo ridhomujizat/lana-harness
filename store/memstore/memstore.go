@@ -376,6 +376,26 @@ func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.Sessi
 	return chain, nil
 }
 
+// ChainEventsAfter returns the ChainEvents entries with Seq > fromSeq and the
+// largest Seq over the full chain (0 when the chain is empty).
+func (s *Store) ChainEventsAfter(ctx context.Context, sessionID string, fromSeq int64) ([]core.SessionEvent, int64, error) {
+	chain, err := s.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	events := make([]core.SessionEvent, 0, len(chain))
+	var lastSeq int64
+	for _, event := range chain {
+		if event.Seq > lastSeq {
+			lastSeq = event.Seq
+		}
+		if event.Seq > fromSeq {
+			events = append(events, event)
+		}
+	}
+	return events, lastSeq, nil
+}
+
 // DeriveMessages applies core.DeriveMessages to ChainEvents.
 func (s *Store) DeriveMessages(ctx context.Context, sessionID string) ([]core.Message, error) {
 	events, err := s.ChainEvents(ctx, sessionID)

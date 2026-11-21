@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -908,6 +909,84 @@ func TestSessionEventsEqualHistory(t *testing.T) {
 		assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
 	}
 	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/missing/events", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+}
+
+// view=chat trims the payloads the chat never shows and adds the session id, so
+// a trimmed event can be fetched again in full (payload diet). Without the
+// param the response is exactly as before.
+func TestSessionEventsChatViewCoversPayloadDiet(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "helper"})
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindSystemMessage, Payload: json.RawMessage(`{"v":1,"text":"a very long system prompt"}`)})
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindToolCall, Payload: json.RawMessage(`{"v":1,"call_id":"c1","name":"bash","input":{"command":"ls"}}`)})
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindToolResult, Payload: json.RawMessage(`{"v":1,"call_id":"c1","status":"success","output":"` + strings.Repeat("x", chatOutputLimit+1) + `"}`)})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/"+info.ID+"/events?view=chat", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var page eventsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if len(page.Events) != 3 {
+		t.Fatalf("events = %+v", page.Events)
+	}
+	if string(page.Events[0].Payload) != `{"omitted":true}` {
+		t.Fatalf("system payload = %s", page.Events[0].Payload)
+	}
+	if page.Events[0].SessionID != info.ID {
+		t.Fatalf("chat event session_id = %q, want %q", page.Events[0].SessionID, info.ID)
+	}
+	if !strings.Contains(string(page.Events[2].Payload), `"truncated":true`) ||
+		!strings.Contains(string(page.Events[2].Payload), `"output_length":`+strconv.Itoa(chatOutputLimit+1)) {
+		t.Fatalf("tool result payload = %s", page.Events[2].Payload)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/"+info.ID+"/events", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("default status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "a very long system prompt") {
+		t.Fatalf("default body lost the system text: %s", body)
+	}
+	if strings.Contains(body, "omitted") || strings.Contains(body, "truncated") || strings.Contains(body, `"session_id"`) {
+		t.Fatalf("default body was trimmed or tagged: %s", body)
+	}
+}
+
+// GET /v1/sessions/{id}/events/{seq} returns one event in full (no chat trim)
+// and 404s a seq that does not exist.
+func TestSessionEventBySeq(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "helper"})
+	full := strings.Repeat("y", chatOutputLimit+1)
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindToolResult, Payload: json.RawMessage(`{"v":1,"call_id":"c1","status":"success","output":"` + full + `"}`)})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/"+info.ID+"/events/1", "", cookie, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var event eventJSON
+	if err := json.Unmarshal(rr.Body.Bytes(), &event); err != nil {
+		t.Fatalf("body %q: %v", rr.Body.String(), err)
+	}
+	if event.Seq != 1 || event.Kind != core.KindToolResult {
+		t.Fatalf("event = %+v", event)
+	}
+	if !strings.Contains(string(event.Payload), `"output":"`+full+`"`) || strings.Contains(string(event.Payload), "truncated") {
+		t.Fatalf("event payload = %s, want the full output", event.Payload)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/"+info.ID+"/events/9", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/"+info.ID+"/events/0", "", cookie, ""))
+	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+	rr = serveAuth(s, sessionTestRequest(http.MethodGet, "/v1/sessions/missing/events/1", "", cookie, ""))
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")
 }
 

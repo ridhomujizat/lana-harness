@@ -818,19 +818,15 @@ func (b *webBackend) Events(ctx context.Context, id string, fromSeq int64) (web.
 	if err != nil {
 		return web.EventPage{}, sessionLookupError(err)
 	}
-	events, err := b.rt.History(ctx, info.ID)
+	if info.LastSeq > info.InheritedSeq && fromSeq >= info.LastSeq {
+		return web.EventPage{Events: make([]core.SessionEvent, 0), LastSeq: info.LastSeq}, nil
+	}
+	events, lastSeq, err := b.rt.HistorySince(ctx, info.ID, fromSeq)
 	if err != nil {
 		return web.EventPage{}, err
 	}
-	page := web.EventPage{Events: make([]core.SessionEvent, 0, len(events))}
-	for _, event := range events {
-		if event.Seq > page.LastSeq {
-			page.LastSeq = event.Seq
-		}
-		if event.Seq > fromSeq {
-			page.Events = append(page.Events, event)
-		}
-	}
+	page := web.EventPage{Events: make([]core.SessionEvent, 0, len(events)), LastSeq: lastSeq}
+	page.Events = append(page.Events, events...)
 	if page.LastSeq == 0 {
 		page.LastSeq = info.LastSeq
 	}

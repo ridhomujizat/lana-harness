@@ -281,6 +281,7 @@ func (s *Server) registerSessionRoutes() {
 	s.Handle("GET /v1/sessions/{id}", http.HandlerFunc(s.handleGetSession))
 	s.Handle("PATCH /v1/sessions/{id}", http.HandlerFunc(s.handlePatchSession))
 	s.Handle("GET /v1/sessions/{id}/events", http.HandlerFunc(s.handleSessionEvents))
+	s.Handle("GET /v1/sessions/{id}/events/{seq}", http.HandlerFunc(s.handleSessionEvent))
 	s.Handle("GET /v1/sessions/{id}/usage", http.HandlerFunc(s.handleSessionUsage))
 	s.Handle("POST /v1/sessions/{id}/compact", http.HandlerFunc(s.handleCompactSession))
 	s.Handle("POST /v1/sessions/{id}/fork", http.HandlerFunc(s.handleForkSession))
@@ -327,6 +328,10 @@ type eventJSON struct {
 	TurnID    string          `json:"turn_id"`
 	CreatedAt int64           `json:"created_at"`
 	Payload   json.RawMessage `json:"payload"`
+	// SessionID is set only in the chat view (view=chat), so a trimmed event
+	// can be replaced with its full copy. It stays empty otherwise, keeping the
+	// default response unchanged.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // agentFacet is one entry of facets.agent (API-TEAM-005). Kind is "agent" for
@@ -442,20 +447,64 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {
 		s.writeBackendError(w, "session events", err)
 		return
 	}
+	chat := chatView(r)
 	response := eventsResponse{
 		Events:  make([]eventJSON, 0, len(page.Events)),
 		LastSeq: page.LastSeq,
 	}
 	for _, event := range page.Events {
-		response.Events = append(response.Events, eventJSON{
-			Seq:       event.Seq,
-			Kind:      event.Kind,
-			TurnID:    event.TurnID,
-			CreatedAt: event.CreatedAt,
-			Payload:   publicEventPayload(event.Kind, event.Payload),
-		})
+		response.Events = append(response.Events, eventRow(event, chat))
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+// handleSessionEvent returns one stored event in full, without the chat trim
+// (view=chat keeps only a slice of a large payload). It is the read a chat uses
+// to expand a truncated tool call or result. The seq is looked up in the
+// session's own log or, for a forked session, in its inherited chain.
+func (s *Server) handleSessionEvent(w http.ResponseWriter, r *http.Request) {
+	backend := s.backendOrError(w)
+	if backend == nil {
+		return
+	}
+	seq, err := strconv.ParseInt(r.PathValue("seq"), 10, 64)
+	if err != nil || seq < 1 {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "seq must be a positive integer")
+		return
+	}
+	// Events reads from a seq (exclusive), so asking from seq-1 puts the wanted
+	// event first without loading the whole log in the common case.
+	page, err := backend.Events(r.Context(), r.PathValue("id"), seq-1)
+	if err != nil {
+		s.writeBackendError(w, "session event", err)
+		return
+	}
+	for _, event := range page.Events {
+		if event.Seq == seq {
+			writeJSON(w, http.StatusOK, eventRow(event, false))
+			return
+		}
+	}
+	writeAPIError(w, http.StatusNotFound, "not_found", "event not found")
+}
+
+// eventRow maps a stored event to its response shape. In the chat view the
+// payload is trimmed and the owning session id is added, so a client can fetch
+// the untrimmed event again.
+func eventRow(event core.SessionEvent, chat bool) eventJSON {
+	payload := publicEventPayload(event.Kind, event.Payload)
+	row := eventJSON{
+		Seq:       event.Seq,
+		Kind:      event.Kind,
+		TurnID:    event.TurnID,
+		CreatedAt: event.CreatedAt,
+		Payload:   payload,
+	}
+	if chat {
+		row.Payload = chatEventPayload(event.Kind, payload)
+		row.SessionID = event.SessionID
+	}
+	return row
 }
 
 // sessionUsageResponse is the aggregated token usage of a session's log. The
