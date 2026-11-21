@@ -72,10 +72,12 @@ func newChildSession(t *testing.T, s *testSetup, agent string) core.SessionInfo 
 type fakeApproval struct {
 	outcome core.ApprovalOutcome
 	calls   atomic.Int32
+	last    core.ApprovalRequest
 }
 
-func (f *fakeApproval) Request(context.Context, core.ApprovalRequest) (core.ApprovalOutcome, error) {
+func (f *fakeApproval) Request(_ context.Context, req core.ApprovalRequest) (core.ApprovalOutcome, error) {
 	f.calls.Add(1)
+	f.last = req
 	return f.outcome, nil
 }
 func (f *fakeApproval) SetPolicy(context.Context, string, core.Policy) error { return nil }

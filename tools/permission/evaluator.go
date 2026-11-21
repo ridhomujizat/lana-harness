@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +21,10 @@ type Engine struct {
 	// config apply reaches the engine. Config is used when it is nil.
 	ConfigFn func() core.Config
 	Approval core.ApprovalService
+	// Home returns the owner's home directory for the hardline rules (spec 63).
+	// It is nil in production, where os.UserHomeDir is used; a test points it
+	// at a temp dir.
+	Home func() string
 }
 
 // config returns the config for one tool call.
@@ -27,6 +33,18 @@ func (e *Engine) config() core.Config {
 		return e.ConfigFn()
 	}
 	return e.Config
+}
+
+// home returns the owner's home directory for the hardline rules. A lookup
+// failure falls back to $HOME, then to no home (spec 63 failure behavior).
+func (e *Engine) home() string {
+	if e.Home != nil {
+		return e.Home()
+	}
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return h
+	}
+	return os.Getenv("HOME")
 }
 
 // Handle decides a single tool call.
@@ -104,6 +122,28 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 			return reject(fmt.Sprintf("deny rule: %s", raw)), nil
 		}
 	}
+	// The effective policy is read before the allow rules and grants so a
+	// parent's never policy binds a child even when the child allows the tool.
+	// A session's own never policy still lets its allow rules run
+	// (AC-PERM-007). A read call is still allowed under never, as before.
+	policy := EffectivePolicy(events, fallbackPolicy(agent))
+	if info.ParentSessionID != "" {
+		policy = ChildPolicy(parentPolicy, policy)
+	}
+	// The hardline floor (spec 63): a small set of catastrophic or
+	// credential-exposing calls never runs on the model's word alone, whatever
+	// the policy, allow rules, or session grants. It runs after the deny rules
+	// and before admin, allow, and grant handling. Under a never policy nobody
+	// is asked, and a session's own allow rules must not run the call either
+	// (AC-PERM-007 lets them run other calls), so the match is rejected here.
+	if m := e.matchHardline(in.Call.Name, in.Call.Input, workspace); m != nil {
+		if policy == core.PolicyNever {
+			e.appendHardlineEvent(ctx, in, m, "rejected")
+			e.logHardlineOutcome(in.Call.SessionID, m, "rejected")
+			return reject(hardlineMessage(m)), nil
+		}
+		return e.hardline(ctx, in, info, agentName, m), nil
+	}
 	// Admin calls change lana config or processes, so they always ask the
 	// owner: allow rules, session grants, and trust policy do not apply. Deny
 	// rules above still apply, and a child may never make an admin call.
@@ -117,7 +157,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		if e.Approval == nil {
 			return reject("approval is not available"), nil
 		}
-		outcome, err := e.requestApproval(ctx, in, info, agentName)
+		outcome, err := e.requestApproval(ctx, in, info, agentName, nil)
 		if err != nil {
 			return reject("approval failed: " + err.Error()), nil
 		}
@@ -127,14 +167,6 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 		default:
 			return reject("approval " + string(outcome)), nil
 		}
-	}
-	// The effective policy is read before the allow rules and grants so a
-	// parent's never policy binds a child even when the child allows the tool.
-	// A session's own never policy still lets its allow rules run
-	// (AC-PERM-007). A read call is still allowed under never, as before.
-	policy := EffectivePolicy(events, fallbackPolicy(agent))
-	if info.ParentSessionID != "" {
-		policy = ChildPolicy(parentPolicy, policy)
 	}
 	if info.ParentSessionID != "" && parentPolicy == core.PolicyNever && in.Call.Risk != core.RiskRead {
 		return reject("policy never"), nil
@@ -184,7 +216,7 @@ func (e *Engine) Handle(ctx context.Context, in core.ToolsPreExecuteInput, next 
 	if e.Approval == nil {
 		return reject("approval is not available"), nil
 	}
-	outcome, err := e.requestApproval(ctx, in, info, agentName)
+	outcome, err := e.requestApproval(ctx, in, info, agentName, nil)
 	if err != nil {
 		return reject("approval failed: " + err.Error()), nil
 	}
@@ -252,8 +284,9 @@ func fallbackPolicy(agent core.AgentConfig) core.Policy {
 
 // requestApproval asks the owner about one tool call. A child approval is
 // labelled with the child's agent name so the owner can tell it apart from the
-// parent's approvals. Root approvals keep no label.
-func (e *Engine) requestApproval(ctx context.Context, in core.ToolsPreExecuteInput, info core.SessionInfo, agentName string) (core.ApprovalOutcome, error) {
+// parent's approvals. Root approvals keep no label. hardline is set when the
+// call matched a hardline rule, and nil otherwise.
+func (e *Engine) requestApproval(ctx context.Context, in core.ToolsPreExecuteInput, info core.SessionInfo, agentName string, hardline *core.HardlineMatch) (core.ApprovalOutcome, error) {
 	label := ""
 	if info.ParentSessionID != "" {
 		label = agentName
@@ -261,8 +294,75 @@ func (e *Engine) requestApproval(ctx context.Context, in core.ToolsPreExecuteInp
 	return e.Approval.Request(ctx, core.ApprovalRequest{
 		SessionID: in.Call.SessionID, TurnID: in.Call.TurnID, CallID: in.Call.CallID,
 		AgentName: agentName, ToolName: in.Call.Name, Input: in.Call.Input, Risk: in.Call.Risk,
-		Label: label,
+		Label: label, Hardline: hardline,
 	})
+}
+
+// matchHardline runs MatchHardline. A panic inside the matcher must not allow
+// the call, so it is recovered into a synthetic Block match: the call then
+// goes through the Block path, which rejects without a verified outcome
+// (spec 63 failure behavior).
+func (e *Engine) matchHardline(tool string, input json.RawMessage, workspace string) (m *core.HardlineMatch) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.Error("permission: hardline check failed", "tool", tool, "panic", recovered)
+			m = &core.HardlineMatch{Rule: "HL-B-000", Tier: core.HardlineBlock, Reason: "hardline check failed"}
+		}
+	}()
+	return MatchHardline(tool, input, workspace, e.home())
+}
+
+// hardline decides a call that matched a hardline rule. A Block match runs only
+// after a step-up confirmation; an Escalate match runs after an ordinary
+// approval, also under trust. Neither becomes a session grant (REQ-HLF-007,
+// REQ-HLF-008).
+func (e *Engine) hardline(ctx context.Context, in core.ToolsPreExecuteInput, info core.SessionInfo, agentName string, m *core.HardlineMatch) core.ToolDecision {
+	slog.Info("permission: hardline", "session_id", in.Call.SessionID, "agent", agentName, "tool", in.Call.Name, "rule", m.Rule, "tier", m.Tier)
+	// No surface can confirm a workflow call, and a nil approval service has no
+	// one to ask: reject and record the hit (REQ-HLF-009).
+	if info.Channel == "workflow" || e.Approval == nil {
+		e.appendHardlineEvent(ctx, in, m, "rejected")
+		e.logHardlineOutcome(in.Call.SessionID, m, "rejected")
+		return reject(hardlineMessage(m))
+	}
+	outcome, err := e.requestApproval(ctx, in, info, agentName, m)
+	if err != nil {
+		e.logHardlineOutcome(in.Call.SessionID, m, string(core.OutcomeUnavailable))
+		return reject("approval failed: " + err.Error())
+	}
+	allowed := false
+	if m.Tier == core.HardlineBlock {
+		// Only a step-up confirmation allows a Block call.
+		allowed = outcome == core.OutcomeAllowedVerified
+	} else {
+		switch outcome {
+		case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeAllowedVerified:
+			allowed = true
+		}
+	}
+	if allowed {
+		e.logHardlineOutcome(in.Call.SessionID, m, string(core.OutcomeAllowedOnce))
+		return allow(core.OutcomeAllowedOnce)
+	}
+	e.logHardlineOutcome(in.Call.SessionID, m, "rejected")
+	return reject(hardlineMessage(m))
+}
+
+// appendHardlineEvent records a permission/hardline event (API-HLF-003).
+func (e *Engine) appendHardlineEvent(ctx context.Context, in core.ToolsPreExecuteInput, m *core.HardlineMatch, outcome string) {
+	payload := core.PermissionHardline{V: core.PayloadVersion, CallID: in.Call.CallID, Tool: in.Call.Name, Rule: m.Rule, Tier: m.Tier, Reason: m.Reason, Outcome: outcome}
+	if _, err := e.Store.Append(ctx, in.Call.SessionID, []core.EventDraft{{Kind: core.KindPermissionHardline, TurnID: in.Call.TurnID, Payload: payload}}); err != nil {
+		slog.Warn("permission: hardline event append failed", "session_id", in.Call.SessionID, "error", err)
+	}
+}
+
+func (e *Engine) logHardlineOutcome(sessionID string, m *core.HardlineMatch, outcome string) {
+	slog.Info("permission: hardline outcome", "session_id", sessionID, "rule", m.Rule, "tier", m.Tier, "outcome", outcome)
+}
+
+// hardlineMessage is the refusal returned to the model (REQ-HLF-010).
+func hardlineMessage(m *core.HardlineMatch) string {
+	return fmt.Sprintf("blocked by hardline rule %s (%s). Do not retry or work around it; ask the owner to run it themselves or to approve it.", m.Rule, m.Reason)
 }
 
 func allow(outcome core.ApprovalOutcome) core.ToolDecision {
