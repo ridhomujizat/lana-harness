@@ -3013,6 +3013,73 @@ pre.json {
   line-height: var(--line-height-sm);
 }
 
+/* Spec 63 REQ-HLF-007: the hardline rule and reason, the step-up inputs of a
+   block request, and their inline error. */
+.approval-hardline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--red);
+  border-radius: var(--r-sm);
+  background: var(--red-soft);
+}
+
+.approval-hardline-rule {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-error-primary);
+}
+
+.approval-hardline-sep {
+  color: var(--text-tertiary);
+}
+
+.approval-hardline-reason {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: var(--line-height-sm);
+}
+
+.approval-stepup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approval-stepup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-stepup-code-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.approval-stepup-code-row .approval-stepup-field {
+  flex: 1 1 160px;
+}
+
+.approval-stepup-code {
+  font-family: var(--mono);
+  letter-spacing: 0.15em;
+}
+
+.approval-stepup-note {
+  margin: 0;
+  color: var(--text-success-primary);
+  font-size: 13px;
+  line-height: var(--line-height-sm);
+}
+
 .composer {
   display: flex;
   flex-direction: column;

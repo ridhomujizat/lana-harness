@@ -342,7 +342,11 @@ function toolState(value: unknown): { status: RecordStatus; word: string } {
 }
 
 function approvalState(outcome: string): RecordStatus {
-  if (outcome === "allowed_once" || outcome === "allowed_session") {
+  if (
+    outcome === "allowed_once" ||
+    outcome === "allowed_verified" ||
+    outcome === "allowed_session"
+  ) {
     return "success";
   }
   if (outcome === "rejected") {

@@ -133,6 +133,12 @@ func primaryArg(name string, input json.RawMessage) string {
 	return truncateLine(raw, 88)
 }
 
+// fullArg extracts the tool's primary argument without shortening it. A
+// hardline request shows the full command or path (REQ-HLF-007).
+func fullArg(name string, input json.RawMessage) string {
+	return toolfmt.PrimaryArg(name, input)
+}
+
 func truncateLine(s string, width int) string {
 	if width < 8 {
 		width = 8

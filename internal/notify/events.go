@@ -123,24 +123,37 @@ func (t ApprovalTarget) root() string {
 // ApprovalAsked is the event of a tool approval answerable through the web
 // broker: "Approval needed · <agent>" over "<tool>: <argument>". It is time
 // sensitive and carries the broker id for the Allow once and Reject actions.
-func ApprovalAsked(approvalID, agent, tool, argument string, target ApprovalTarget) Event {
+//
+// When stepUp is true the approval is a Block-tier hardline match that the
+// macOS banner must not allow: ApprovalID is left empty so the app posts a
+// plain banner without actions, and the body ends with " Open Lana to
+// confirm." The suffix is appended after the ApprovalMax cut so it is never
+// cut, and the key still dedupes on the approval id (REQ-HLF-007, spec 63).
+func ApprovalAsked(approvalID, agent, tool, argument string, target ApprovalTarget, stepUp bool) Event {
 	body := tool
 	if arg := strings.TrimSpace(argument); arg != "" {
 		body = tool + ": " + arg
 	}
-	return Event{
+	body = OneLine(body, ApprovalMax)
+	if stepUp {
+		body += " Open Lana to confirm."
+	}
+	e := Event{
 		Kind:          KindApprovalAsked,
 		SessionID:     target.SessionID,
 		Agent:         agent,
 		Title:         joinTitle("Approval needed", agentLabel(agent)),
-		Body:          OneLine(body, ApprovalMax),
+		Body:          body,
 		URL:           target.url(),
-		ApprovalID:    approvalID,
 		WorkflowID:    target.WorkflowID,
 		TimeSensitive: true,
 		Thread:        target.thread(),
 		Key:           "approval_asked:" + approvalID,
 	}
+	if !stepUp {
+		e.ApprovalID = approvalID
+	}
+	return e
 }
 
 // ApprovalDecided closes the banner of approvalID.

@@ -226,6 +226,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.tailscale = tailscale.New()
 	s.SetRemoteConfig(cfg.Remote)
+	// A block request's step-up method follows [web.remote] confirm_with
+	// (API-HLF-004). The broker reads it through this func, like rootOf.
+	s.approvals.setConfirmWith(func() string { return s.remoteConfig().ConfirmWith })
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.registerSessionRoutes()

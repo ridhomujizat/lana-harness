@@ -4,11 +4,18 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/toolfmt"
 )
+
+// hardlineArgLimit caps the argument shown for a hardline request, so the
+// bubble stays well under the Telegram message limit (REQ-HLF-007).
+const hardlineArgLimit = 3000
 
 type approval struct {
 	id    string
@@ -17,6 +24,25 @@ type approval struct {
 	text  string
 	reply chan core.ApprovalOutcome
 	ready chan struct{}
+	// hardline is the matched rule of a hardline request (spec 63); it selects
+	// the reduced keyboard and, for the Block tier, the typed challenge
+	// (REQ-HLF-007, REQ-HLF-008).
+	hardline *core.HardlineMatch
+	// armed and challenge hold the pending typed-challenge capture of a
+	// Block-tier request. Both are guarded by *Channel.mu, the mutex of the
+	// approvals map (REQ-HLF-007).
+	armed     bool
+	challenge string
+}
+
+// newApprovalChallenge returns a random 4-digit challenge (1000-9999) for a
+// Block-tier hardline request (REQ-HLF-007).
+func newApprovalChallenge() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(9000))
+	if err != nil {
+		return "", err
+	}
+	return strconv.Itoa(1000 + int(n.Int64())), nil
 }
 
 func newApprovalID() string {
@@ -34,6 +60,14 @@ func (c *Channel) Approve(ctx context.Context, req core.ApprovalRequest) core.Ap
 		return core.OutcomeUnavailable
 	}
 	arg, liveID := w.toolArg(req.CallID)
+	if req.Hardline != nil {
+		// REQ-HLF-007: the bubble shows the full argument, not the shortened
+		// status-line one, cut only at the Telegram message limit.
+		if full := toolfmt.PrimaryArg(req.ToolName, req.Input); full != "" {
+			arg = full
+		}
+		arg = toolfmt.Cut(arg, hardlineArgLimit)
+	}
 	tool := shortTool(req.ToolName)
 	label := tool
 	if arg != "" {
@@ -44,13 +78,19 @@ func (c *Channel) Approve(ctx context.Context, req core.ApprovalRequest) core.Ap
 		tool = req.Label + " · " + tool
 		label = req.Label + " · " + label
 	}
+	text := "🔐 Allow " + label + "?"
+	if req.Hardline != nil {
+		// REQ-HLF-007: name the matched rule and its reason.
+		text += "\n⚠️ " + req.Hardline.Rule + " · " + req.Hardline.Reason
+	}
 	a := &approval{
-		id:    newApprovalID(),
-		chat:  w,
-		tool:  tool,
-		text:  "🔐 Allow " + label + "?",
-		reply: make(chan core.ApprovalOutcome, 1),
-		ready: make(chan struct{}),
+		id:       newApprovalID(),
+		chat:     w,
+		tool:     tool,
+		text:     text,
+		hardline: req.Hardline,
+		reply:    make(chan core.ApprovalOutcome, 1),
+		ready:    make(chan struct{}),
 	}
 	w.enqueueApproval(a)
 	select {
@@ -67,11 +107,7 @@ func (c *Channel) Approve(ctx context.Context, req core.ApprovalRequest) core.Ap
 // for the answer, records the outcome, and promotes the next request.
 func (c *Channel) awaitApproval(ctx context.Context, a *approval, liveID int64) core.ApprovalOutcome {
 	w := a.chat
-	keyboard := &Keyboard{Rows: [][]Button{{
-		{Text: "Allow once", Data: "a:" + a.id + ":once"},
-		{Text: "Allow for session", Data: "a:" + a.id + ":session"},
-		{Text: "Reject", Data: "a:" + a.id + ":reject"},
-	}}}
+	keyboard := approvalKeyboard(a)
 	c.mu.Lock()
 	c.approvals[a.id] = a
 	c.mu.Unlock()
@@ -119,6 +155,23 @@ func (c *Channel) awaitApproval(ctx context.Context, a *approval, liveID int64) 
 	return outcome
 }
 
+// approvalKeyboard returns the inline keyboard of a request. An ordinary request
+// keeps its three choices; a hardline request offers only "Allow once" and
+// "Reject" (REQ-HLF-007, REQ-HLF-008). A Block-tier request confirms through the
+// typed challenge, so its button carries the "verify" action.
+func approvalKeyboard(a *approval) *Keyboard {
+	once, onceData := "Allow once", "a:"+a.id+":once"
+	reject := Button{Text: "Reject", Data: "a:" + a.id + ":reject"}
+	if a.hardline != nil {
+		if a.hardline.Tier == core.HardlineBlock {
+			once, onceData = "Allow once…", "a:"+a.id+":verify"
+		}
+		return &Keyboard{Rows: [][]Button{{{Text: once, Data: onceData}, reject}}}
+	}
+	session := Button{Text: "Allow for session", Data: "a:" + a.id + ":session"}
+	return &Keyboard{Rows: [][]Button{{{Text: once, Data: onceData}, session, reject}}}
+}
+
 // enqueueApproval appends a request to the turn's FIFO and promotes it when it
 // is the head.
 func (w *chat) enqueueApproval(a *approval) {
@@ -164,10 +217,11 @@ func (w *chat) releaseApproval(a *approval, outcome core.ApprovalOutcome) {
 }
 
 // tallyOutcomeLocked counts one answered approval. Expired, cancelled, and
-// unavailable requests count as rejected.
+// unavailable requests count as rejected. A confirmed Block-tier call counts as
+// allowed, like "allow once" (REQ-HLF-007).
 func (w *chat) tallyOutcomeLocked(outcome core.ApprovalOutcome) {
 	w.approvalTotal++
-	if outcome == core.OutcomeAllowedOnce || outcome == core.OutcomeAllowedSession {
+	if outcome == core.OutcomeAllowedOnce || outcome == core.OutcomeAllowedSession || outcome == core.OutcomeAllowedVerified {
 		w.approvalAllowed++
 	} else {
 		w.approvalRejected++
@@ -197,6 +251,8 @@ func outcomeText(outcome core.ApprovalOutcome) string {
 		return "✓ allowed once"
 	case core.OutcomeAllowedSession:
 		return "✓ allowed for session"
+	case core.OutcomeAllowedVerified:
+		return "✅ Allowed (confirmed)"
 	case core.OutcomeRejected:
 		return "⊘ rejected"
 	}
@@ -213,6 +269,14 @@ func (c *Channel) answerApproval(ctx context.Context, q *CallbackQuery, data str
 	c.mu.Lock()
 	a := c.approvals[id]
 	c.mu.Unlock()
+	if a == nil {
+		c.apiErr("answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, q.ID, "this request is no longer active"))
+		return
+	}
+	if choice == "verify" {
+		c.answerApprovalVerify(ctx, q, a)
+		return
+	}
 	var outcome core.ApprovalOutcome
 	switch choice {
 	case "once":
@@ -222,7 +286,7 @@ func (c *Channel) answerApproval(ctx context.Context, q *CallbackQuery, data str
 	case "reject":
 		outcome = core.OutcomeRejected
 	}
-	if a == nil || outcome == "" {
+	if outcome == "" {
 		c.apiErr("answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, q.ID, "this request is no longer active"))
 		return
 	}
@@ -232,4 +296,84 @@ func (c *Channel) answerApproval(ctx context.Context, q *CallbackQuery, data str
 	default:
 		c.apiErr("answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, q.ID, "this request is no longer active"))
 	}
+}
+
+// answerApprovalVerify handles the "Allow once…" press of a Block-tier hardline
+// request: it generates a 4-digit challenge, edits the bubble to show it,
+// replaces the keyboard with Reject only, and arms the typed reply
+// (REQ-HLF-007, AC-HLF-014).
+func (c *Channel) answerApprovalVerify(ctx context.Context, q *CallbackQuery, a *approval) {
+	if a.hardline == nil || a.hardline.Tier != core.HardlineBlock {
+		c.apiErr("answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, q.ID, "this request is no longer active"))
+		return
+	}
+	challenge, err := newApprovalChallenge()
+	if err != nil {
+		c.apiErr("answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, q.ID, "could not start the confirmation"))
+		return
+	}
+	c.mu.Lock()
+	a.armed, a.challenge = true, challenge
+	c.mu.Unlock()
+	reject := &Keyboard{Rows: [][]Button{{{Text: "Reject", Data: "a:" + a.id + ":reject"}}}}
+	w := a.chat
+	bubbleID := int64(0)
+	if q.Message != nil {
+		bubbleID = q.Message.MessageID
+	}
+	if bubbleID == 0 {
+		w.mu.Lock()
+		bubbleID = w.bubbleID
+		w.mu.Unlock()
+	}
+	if bubbleID != 0 {
+		text := a.text + "\n\nReply with " + challenge + " to run it."
+		c.apiErr("editMessageText", c.api.EditMessageText(ctx, w.id, bubbleID, text, SendOptions{Keyboard: reject}))
+	}
+	c.apiErr("answerCallbackQuery", c.api.AnswerCallbackQuery(ctx, q.ID, ""))
+}
+
+// armedApproval returns the head approval of w when it awaits a typed
+// challenge, or nil (REQ-HLF-007).
+func (c *Channel) armedApproval(w *chat) *approval {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.approvalQueue) == 0 {
+		return nil
+	}
+	a := w.approvalQueue[0]
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !a.armed {
+		return nil
+	}
+	return a
+}
+
+// captureApprovalText consumes the owner's reply to a Block-tier hardline
+// challenge (REQ-HLF-007, AC-HLF-014). A reply that equals the challenge allows
+// the call once and verified; any other reply rejects it. Either way the text is
+// not forwarded to the agent, and the capture is disarmed after one use. It
+// returns false when no capture applies, so the text follows the inbox path.
+func (w *chat) captureApprovalText(ctx context.Context, m *Message, text string) bool {
+	if text == "" || m.From == nil || !w.ch.isOwner(m.Chat.Type, m.From.ID) {
+		return false
+	}
+	a := w.ch.armedApproval(w)
+	if a == nil {
+		return false
+	}
+	w.ch.mu.Lock()
+	challenge := a.challenge
+	a.armed = false
+	w.ch.mu.Unlock()
+	outcome := core.OutcomeRejected
+	if strings.TrimSpace(text) == challenge {
+		outcome = core.OutcomeAllowedVerified
+	}
+	select {
+	case a.reply <- outcome:
+	default:
+	}
+	return true
 }
