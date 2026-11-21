@@ -171,6 +171,9 @@ export type StreamState = "connected" | "reconnecting";
 
 export interface StreamHandlers {
   fromSeq?: number;
+  /* view=chat: the stream trims the large payloads the chat does not show.
+     The param is kept on every reconnect. */
+  view?: "chat";
   onEvent?: (payload: SessionEvent) => void;
   onFrame?: (payload: StreamFrame) => void;
   onStatus?: (payload: StreamFrame) => void;
@@ -387,11 +390,21 @@ export function openStream(id: string, options?: StreamHandlers): SSEStream {
     if (stateRef.lastSeq > 0) {
       headers["Last-Event-ID"] = String(stateRef.lastSeq);
     }
+    /* The query is rebuilt on every connect, so the chat view survives a
+       reconnect along with the resume seq. */
+    const params = new URLSearchParams();
+    if (stateRef.lastSeq > 0) {
+      params.set("from_seq", String(stateRef.lastSeq));
+    }
+    if (handlers.view) {
+      params.set("view", handlers.view);
+    }
+    const query = params.toString();
     const path =
       "/v1/sessions/" +
       encodeURIComponent(id) +
       "/stream" +
-      (stateRef.lastSeq > 0 ? "?from_seq=" + stateRef.lastSeq : "");
+      (query ? "?" + query : "");
 
     let response: Response;
     try {

@@ -159,12 +159,13 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	lastSeq := fromSeq
+	chat := chatView(r)
 	page, err := backend.Events(r.Context(), id, lastSeq)
 	if err != nil {
 		s.logger.Warn("web: stream replay", "session", id, "error", err)
 		return
 	}
-	if err := writeEventLines(w, flusher, page.Events, &lastSeq); err != nil {
+	if err := writeEventLines(w, flusher, page.Events, &lastSeq, chat); err != nil {
 		return
 	}
 	if page.LastSeq > lastSeq {
@@ -175,7 +176,7 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 	// and from_seq apply to the root's seq only (API-TEAM-011).
 	childLastSeq := map[string]int64{}
 	childAgents := map[string]string{}
-	if err := s.streamChildren(w, flusher, r.Context(), backend, id, childLastSeq, childAgents); err != nil {
+	if err := s.streamChildren(w, flusher, r.Context(), backend, id, childLastSeq, childAgents, chat); err != nil {
 		return
 	}
 
@@ -222,10 +223,10 @@ func (s *Server) handleSessionStream(w http.ResponseWriter, r *http.Request) {
 				s.logger.Warn("web: stream poll", "session", id, "error", err)
 				continue
 			}
-			if err := writeEventLines(w, flusher, page.Events, &lastSeq); err != nil {
+			if err := writeEventLines(w, flusher, page.Events, &lastSeq, chat); err != nil {
 				return
 			}
-			if err := s.streamChildren(w, flusher, r.Context(), backend, id, childLastSeq, childAgents); err != nil {
+			if err := s.streamChildren(w, flusher, r.Context(), backend, id, childLastSeq, childAgents, chat); err != nil {
 				return
 			}
 			holder, err := backend.Holder(r.Context(), id)
@@ -279,7 +280,7 @@ func pumpFrames(ctx context.Context, sub *core.Subscription[core.LiveFrame], out
 // streamChildren reads the descendants of the root newer than their last seq
 // and writes them as tagged event items. A child log that cannot be read is
 // skipped with a warn line so the root stream keeps going (API-TEAM-011).
-func (s *Server) streamChildren(w http.ResponseWriter, flusher http.Flusher, ctx context.Context, backend Backend, rootID string, lastSeq map[string]int64, agents map[string]string) error {
+func (s *Server) streamChildren(w http.ResponseWriter, flusher http.Flusher, ctx context.Context, backend Backend, rootID string, lastSeq map[string]int64, agents map[string]string, chat bool) error {
 	for _, child := range s.descendantSessions(ctx, backend, rootID) {
 		if _, ok := lastSeq[child.ID]; !ok {
 			lastSeq[child.ID] = 0
@@ -291,7 +292,7 @@ func (s *Server) streamChildren(w http.ResponseWriter, flusher http.Flusher, ctx
 			continue
 		}
 		seq := lastSeq[child.ID]
-		if err := writeChildEventLines(w, flusher, child, page.Events, &seq); err != nil {
+		if err := writeChildEventLines(w, flusher, child, page.Events, &seq, chat); err != nil {
 			return err
 		}
 		if page.LastSeq > seq {
@@ -341,19 +342,13 @@ func (s *Server) descendantSessions(ctx context.Context, backend Backend, rootID
 // writeChildEventLines emits a child's stored events as tagged event items
 // without an SSE id and never as a turn line, so a child turn/end cannot change
 // the root's running state (API-TEAM-011, AC-TEAM-034).
-func writeChildEventLines(w http.ResponseWriter, flusher http.Flusher, child core.SessionInfo, events []core.SessionEvent, lastSeq *int64) error {
+func writeChildEventLines(w http.ResponseWriter, flusher http.Flusher, child core.SessionInfo, events []core.SessionEvent, lastSeq *int64, chat bool) error {
 	for _, event := range events {
 		if event.Seq <= *lastSeq {
 			continue
 		}
 		payload := childEventJSON{
-			eventJSON: eventJSON{
-				Seq:       event.Seq,
-				Kind:      event.Kind,
-				TurnID:    event.TurnID,
-				CreatedAt: event.CreatedAt,
-				Payload:   publicEventPayload(event.Kind, event.Payload),
-			},
+			eventJSON:      eventRow(event, chat),
 			ChildSessionID: child.ID,
 			Agent:          child.Agent,
 		}
@@ -367,18 +362,12 @@ func writeChildEventLines(w http.ResponseWriter, flusher http.Flusher, child cor
 
 // writeEventLines emits one SSE event per stored event newer than lastSeq and
 // updates lastSeq. A turn/end event is followed by a turn line.
-func writeEventLines(w http.ResponseWriter, flusher http.Flusher, events []core.SessionEvent, lastSeq *int64) error {
+func writeEventLines(w http.ResponseWriter, flusher http.Flusher, events []core.SessionEvent, lastSeq *int64, chat bool) error {
 	for _, event := range events {
 		if event.Seq <= *lastSeq {
 			continue
 		}
-		payload := eventJSON{
-			Seq:       event.Seq,
-			Kind:      event.Kind,
-			TurnID:    event.TurnID,
-			CreatedAt: event.CreatedAt,
-			Payload:   publicEventPayload(event.Kind, event.Payload),
-		}
+		payload := eventRow(event, chat)
 		if err := writeSSE(w, flusher, "event", strconv.FormatInt(event.Seq, 10), payload); err != nil {
 			return err
 		}

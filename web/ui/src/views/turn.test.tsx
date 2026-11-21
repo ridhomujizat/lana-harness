@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+
+/* view=chat: StepRow reads the full event back with getEvent. */
+vi.mock("../api/sessions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/sessions")>();
+  return { ...actual, getEvent: vi.fn() };
+});
+
 import {
   buildTurns,
   ReplyChip,
@@ -8,6 +15,7 @@ import {
   turnEndCard,
   turnSummary,
 } from "./turn";
+import { getEvent } from "../api/sessions";
 import { resetAvatarStore, setAgentAvatar } from "../lib/avatar-store";
 import { sampleAvatar } from "../test/pixel-sample";
 import type { ReplyTarget, TurnStep } from "./turn";
@@ -577,5 +585,118 @@ describe("reply to an automation message", () => {
     expect(screen.getByText("Replying to workflow Daily brief")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
     expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* view=chat: the server cuts a long tool input/output; buildTurns carries the
+   flags and seqs, and StepRow fetches the full value again on demand. */
+describe("view=chat truncation (payload diet)", () => {
+  it("carries the truncation flags, seqs and session into the step", () => {
+    const items = buildTurns([
+      {
+        ...event(1, "tool/call", "t1", {
+          call_id: "c1",
+          name: "bash",
+          input: { command: "x" },
+          input_truncated: true,
+        }),
+        session_id: "s1",
+      },
+      {
+        ...event(2, "tool/result", "t1", {
+          call_id: "c1",
+          status: "ok",
+          output: "cut",
+          truncated: true,
+          output_length: 9000,
+        }),
+        session_id: "s1",
+      },
+      event(3, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    const step = turnItem.turn.steps[0];
+    expect(step?.inputTruncated).toBe(true);
+    expect(step?.callSeq).toBe(1);
+    expect(step?.outputTruncated).toBe(true);
+    expect(step?.outputLength).toBe(9000);
+    expect(step?.resultSeq).toBe(2);
+    expect(step?.sessionId).toBe("s1");
+  });
+
+  it("shows Show full for a truncated output and renders the fetched text", async () => {
+    vi.mocked(getEvent).mockReset();
+    vi.mocked(getEvent).mockResolvedValue({
+      seq: 2,
+      kind: "tool/result",
+      turn_id: "t1",
+      created_at: 2,
+      session_id: "s1",
+      payload: { call_id: "c1", status: "ok", output: "the full output" },
+    });
+    const items = buildTurns([
+      {
+        ...event(1, "tool/call", "t1", {
+          call_id: "c1",
+          name: "bash",
+          input: { command: "x" },
+        }),
+        session_id: "s1",
+      },
+      {
+        ...event(2, "tool/result", "t1", {
+          call_id: "c1",
+          status: "ok",
+          output: "cut",
+          truncated: true,
+          output_length: 9000,
+        }),
+        session_id: "s1",
+      },
+      event(3, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((entry) => entry.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    const { container } = render(<TurnBlock turn={turnItem.turn} agent="lana" />);
+    fireEvent.click(container.querySelector(".tp-head") as Element);
+    fireEvent.click(container.querySelector(".tp-row") as Element);
+    fireEvent.click(screen.getByRole("button", { name: "Show full" }));
+    expect(await screen.findByText("the full output")).toBeTruthy();
+    expect(getEvent).toHaveBeenCalledWith("s1", 2);
+  });
+
+  it("shows no Show full when nothing was truncated", () => {
+    const items = buildTurns([
+      {
+        ...event(1, "tool/call", "t1", {
+          call_id: "c1",
+          name: "bash",
+          input: { command: "x" },
+        }),
+        session_id: "s1",
+      },
+      {
+        ...event(2, "tool/result", "t1", {
+          call_id: "c1",
+          status: "ok",
+          output: "short",
+        }),
+        session_id: "s1",
+      },
+      event(3, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((entry) => entry.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    const { container } = render(<TurnBlock turn={turnItem.turn} agent="lana" />);
+    fireEvent.click(container.querySelector(".tp-head") as Element);
+    fireEvent.click(container.querySelector(".tp-row") as Element);
+    expect(screen.queryByRole("button", { name: "Show full" })).toBeNull();
   });
 });

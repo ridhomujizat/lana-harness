@@ -5,6 +5,7 @@ import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
 import { memo, useEffect, useRef, useState } from "react";
 import type { AvatarMood } from "../lib/pixel-avatar";
+import { getEvent } from "../api/sessions";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
@@ -60,6 +61,14 @@ export interface TurnStep {
   approval: TurnApproval | null;
   /* The model step the call ran in, from the turn's step/start events. */
   step?: number;
+  /* view=chat: the server cut the input or the output; the seqs of the events
+     and their session let StepRow fetch the full text on demand. */
+  inputTruncated?: boolean;
+  outputTruncated?: boolean;
+  outputLength?: number;
+  callSeq?: number;
+  resultSeq?: number;
+  sessionId?: string;
 }
 
 export interface TurnUserText {
@@ -574,8 +583,15 @@ function inputText(step: TurnStep): string {
   }
 }
 
+/* The chat trims a tool call's input and a tool result's output to 4000 runes
+   (view=chat). Opening a step fetches the full event again; this is the cap of
+   what one fetched detail line renders. */
+const FULL_DETAIL_LIMIT = 200000;
+
 /* One tool call in the process timeline: icon, what it did, the main argument
-   on one line, and its status. Opening it shows the full input and output. */
+   on one line, and its status. Opening it shows the full input and output; a
+   value the chat view cut offers a "Show full" action that reads the event
+   again without the trim. */
 function StepRow({ step }: { step: TurnStep }) {
   const [open, setOpen] = useState(false);
   const status = stepStatusIcon(step);
@@ -583,6 +599,33 @@ function StepRow({ step }: { step: TurnStep }) {
   const detailId =
     "step-detail-" + String(step.key).replace(/[^a-zA-Z0-9_-]/g, "-");
   const full = inputText(step);
+  const [fullInput, setFullInput] = useState<string | null>(null);
+  const [fullOutput, setFullOutput] = useState<string | null>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
+  const [fullError, setFullError] = useState("");
+
+  async function showFull(target: "input" | "output") {
+    const seq = target === "input" ? step.callSeq : step.resultSeq;
+    if (loadingFull || !step.sessionId || !seq) {
+      return;
+    }
+    setLoadingFull(true);
+    setFullError("");
+    try {
+      const event = await getEvent(step.sessionId, seq);
+      const payload = payloadOf(event);
+      if (target === "input") {
+        setFullInput(inputText({ ...step, input: payload.input }));
+      } else {
+        setFullOutput(stringOf(payload.output));
+      }
+    } catch {
+      setFullError("Could not load the full text.");
+    } finally {
+      setLoadingFull(false);
+    }
+  }
+
   return (
     <li className={"tp-step tone-" + status.tone}>
       <button
@@ -614,15 +657,40 @@ function StepRow({ step }: { step: TurnStep }) {
           {full ? (
             <>
               <span className="tp-detail-k">Input</span>
-              <pre className="tp-pre">{cut(full, 4000)}</pre>
+              <pre className="tp-pre">
+                {fullInput !== null ? cut(fullInput, FULL_DETAIL_LIMIT) : cut(full, 4000)}
+              </pre>
+              {step.inputTruncated && fullInput === null ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={loadingFull}
+                  onClick={() => void showFull("input")}
+                >
+                  {loadingFull ? "Loading…" : "Show full"}
+                </button>
+              ) : null}
             </>
           ) : null}
           {step.output ? (
             <>
               <span className="tp-detail-k">Output</span>
-              <pre className="tp-pre">{cut(step.output, 4000)}</pre>
+              <pre className="tp-pre">
+                {fullOutput !== null ? cut(fullOutput, FULL_DETAIL_LIMIT) : cut(step.output, 4000)}
+              </pre>
+              {step.outputTruncated && fullOutput === null ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={loadingFull}
+                  onClick={() => void showFull("output")}
+                >
+                  {loadingFull ? "Loading…" : "Show full"}
+                </button>
+              ) : null}
             </>
           ) : null}
+          {fullError ? <p className="tp-detail-status">{fullError}</p> : null}
         </div>
       ) : null}
     </li>
@@ -1351,7 +1419,17 @@ export function buildTurns(
   events: SessionEvent[] | null | undefined,
   live: LiveTurnState = {}
 ): ThreadItem[] {
-  const results = new Map<string, { status: string; output: unknown }>();
+  const results = new Map<
+    string,
+    {
+      status: string;
+      output: unknown;
+      truncated: boolean;
+      outputLength: number;
+      seq: number;
+      sessionId: string;
+    }
+  >();
   for (const event of events || []) {
     if (event.kind !== "tool/result") {
       continue;
@@ -1362,6 +1440,10 @@ export function buildTurns(
       results.set(callId, {
         status: stringOf(payload.status),
         output: payload.output,
+        truncated: payload.truncated === true,
+        outputLength: Number(payload.output_length) || 0,
+        seq: event.seq,
+        sessionId: event.session_id || "",
       });
     }
   }
@@ -1494,6 +1576,16 @@ export function buildTurns(
           output: result ? result.output : "",
           approval: null,
           step: turn.currentStep,
+          inputTruncated: payload.input_truncated === true,
+          callSeq: event.seq,
+          sessionId: event.session_id || "",
+          ...(result
+            ? {
+                outputTruncated: result.truncated,
+                outputLength: result.outputLength,
+                resultSeq: result.seq,
+              }
+            : {}),
         };
         pushStep(turn, step);
         if (step.callId) {
@@ -1517,6 +1609,14 @@ export function buildTurns(
         if (step) {
           step.status = stringOf(payload.status) || step.status;
           step.output = payload.output || "";
+          /* view=chat: keep the flags of a trimmed output and the seq of the
+             full result, so the detail can fetch it. */
+          step.outputTruncated = payload.truncated === true;
+          step.outputLength = Number(payload.output_length) || 0;
+          step.resultSeq = event.seq;
+          if (!step.sessionId) {
+            step.sessionId = event.session_id || "";
+          }
         }
         break;
       }
