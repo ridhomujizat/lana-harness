@@ -466,7 +466,7 @@ func resolvedAgentNameFromPathToken(token string) (string, bool) {
 // a name that differs from the resolved agent name wins, then a non-runtime
 // name, then a generic runtime or shell.
 func processPriority(p Process, normalizedName string) int {
-	if strings.ToLower(normalizedName) != strings.ToLower(p.Name) {
+	if !strings.EqualFold(normalizedName, p.Name) {
 		return 3
 	}
 	if !isGenericRuntimeOrShell(strings.ToLower(normalizedName)) {

@@ -721,8 +721,8 @@ func (s *session) refreshProgram() {
 	if !s.exited {
 		s.program = program
 		s.mergeCwdLocked(cwd)
-		switch {
-		case label == "":
+		switch label {
+		case "":
 			// The foreground program is no longer an agent, so its screen
 			// state goes away and any agent-derived needs-you goes with it; a
 			// bell from before stays ignored (spec 55 A6).
