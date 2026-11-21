@@ -212,6 +212,34 @@ func TestHardlineMatches(t *testing.T) {
 		{"none rm modules redirect and npm", "bash", bashInput("rm -rf node_modules > /dev/null 2>&1 && npm i > log"), "", ""},
 		{"none npm test dup tee", "bash", bashInput("npm test 2>&1 | tee test.log"), "", ""},
 
+		// Spec 63: a heredoc body fed to an interpreter or shell that reads
+		// its program from stdin is checked as code; a body fed to anything
+		// else is data and is not analyzed.
+		{"b001 py heredoc rmtree home", "bash", bashInput("python3 - <<'EOF'\nimport shutil, os\nshutil.rmtree(os.path.expanduser(\"~\"))\nEOF"), "HL-B-001", block},
+		{"b001 node heredoc rmSync home", "bash", bashInput("node <<EOF\nrequire('fs').rmSync(process.env.HOME,{recursive:true})\nEOF"), "HL-B-001", block},
+		{"b001 bash heredoc rm home", "bash", bashInput("bash <<'EOF'\nrm -rf ~\nEOF"), "HL-B-001", block},
+		{"b001 sh -s heredoc rm root", "bash", bashInput("sh -s <<EOF\nrm -rf /\nEOF"), "HL-B-001", block},
+		{"b004 py heredoc write ssh", "bash", bashInput("python3 <<EOF\nopen(os.path.expanduser('~/.ssh/authorized_keys'),'a').write('k')\nEOF"), "HL-B-004", block},
+		{"none cat heredoc rmtree text", "bash", bashInput("cat > notes.md <<'EOF'\nrm -rf ~ deletes your home, never run it\nEOF"), "", ""},
+		{"none cat heredoc dd text", "bash", bashInput("cat <<EOF > /tmp/x.txt\nsudo is needed for dd of=/dev/disk2\nEOF"), "", ""},
+		{"none git commit heredoc rm text", "bash", bashInput("git commit -F - <<'EOF'\nfix: stop rm -rf ~ in the cleanup script\nEOF"), "", ""},
+		{"b004 cat heredoc redirect ssh", "bash", bashInput("cat <<EOF > ~/.ssh/config\nHost x\nEOF"), "HL-B-004", block},
+		{"b004 tee heredoc ssh keys", "bash", bashInput("tee -a ~/.ssh/authorized_keys <<EOF\nssh-ed25519 AAAA\nEOF"), "HL-B-004", block},
+		{"none py heredoc json", "bash", bashInput("python3 - <<'EOF'\nimport json\nprint(json.dumps({'a': 1}))\nEOF"), "", ""},
+		{"none cd py heredoc edit", "bash", bashInput("cd kopi-literan && python3 - <<'EOF'\np='KONTEN.md'; t=open(p).read()\nt=t.replace('a','b')\nopen(p,'w').write(t)\nEOF\nrm -f /tmp/v7.mjs"), "", ""},
+		{"b001 bash heredoc then rm home", "bash", bashInput("bash <<'EOF'\necho hi\nEOF\nrm -rf ~"), "HL-B-001", block},
+
+		// Spec 63: a data command's heredoc can be consumed by a later stage of
+		// the same pipeline, and the operator may be glued to the command word.
+		{"b001 cat pipe bash heredoc rm home", "bash", bashInput("cat <<EOF | bash\nrm -rf ~\nEOF"), "HL-B-001", block},
+		{"b001 cat pipe py heredoc rmtree home", "bash", bashInput("cat <<'EOF' | python3 -\nimport shutil,os\nshutil.rmtree(os.path.expanduser('~'))\nEOF"), "HL-B-001", block},
+		{"b001 bash glued heredoc rm home", "bash", bashInput("bash<<EOF\nrm -rf ~\nEOF"), "HL-B-001", block},
+		{"b001 cat pipe sudo bash heredoc rm root", "bash", bashInput("cat <<EOF | sudo bash\nrm -rf /\nEOF"), "HL-B-001", block},
+		{"b001 cat pipe sh -s heredoc rm home", "bash", bashInput("cat <<EOF | sh -s\nrm -rf ~\nEOF"), "HL-B-001", block},
+		{"none cat pipe grep heredoc rm text", "bash", bashInput("cat <<EOF | grep rm\nrm -rf ~\nEOF"), "", ""},
+		{"none cat pipe py heredoc json", "bash", bashInput("cat <<'EOF' | python3 -\nimport json\nprint(1)\nEOF"), "", ""},
+		{"none printf pipe bash", "bash", bashInput("printf 'x' | bash"), "", ""},
+
 		// Other tools and bad input.
 		{"none glob", "glob", pathInput("/etc/passwd"), "", ""},
 		{"none web_fetch", "web_fetch", json.RawMessage(`{"url":"https://x"}`), "", ""},
