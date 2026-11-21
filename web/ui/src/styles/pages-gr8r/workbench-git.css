@@ -1673,3 +1673,91 @@ tr.is-target td {
 .wbg-sheet .wbg-layout-seg {
   display: none;
 }
+
+/* With the panel open the tab strip is narrow: Accounts and Attached shrink
+   to icons so the Changes button stays in view (REQ-WG-060). */
+.wb-page.wbg-open .wb-attached,
+.wb-page.wbg-open .wb-acc-btn > span:last-child {
+  display: none;
+}
+
+.wb-tabs > .wbg-toggle,
+.wb-tabs > .wbg-toggle-sep {
+  flex: none;
+}
+
+.wbg-viewer-empty {
+  justify-content: center;
+}
+
+/* Buttons used as rows start at the left (Gr8r centres button content). */
+.wbg-commit,
+.wbg-change,
+.wbg-tree-row,
+.wbg-menu-item,
+.wbg-scope {
+  justify-content: flex-start;
+}
+
+.wbg-menu-item {
+  min-height: 40px;
+  padding: 6px 8px;
+}
+
+.wbg-more-inline {
+  align-self: flex-start;
+  font-size: 12px;
+}
+
+/* Phone sheet: solid card over a scrim, labels shown, picker on its own row. */
+.wbg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgba(0, 0, 0, 0.5);
+  animation: wbgFade 200ms ease-out;
+}
+
+@keyframes wbgFade {
+  from {
+    opacity: 0;
+  }
+}
+
+.wbg-panel.wbg-sheet {
+  inset: 108px 0 0;
+  background: var(--surface);
+}
+
+.wbg-sheet .wbg-head {
+  flex-wrap: wrap;
+  height: auto;
+  row-gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.wbg-sheet .wbg-seg-label {
+  display: inline;
+}
+
+.wbg-sheet .wbg-picker-wrap {
+  order: 9;
+  flex: 1 0 100%;
+}
+
+.wbg-sheet .wbg-picker {
+  width: 100%;
+  max-width: none;
+  border: 0;
+  padding-left: 2px;
+}
+
+.wbg-sheet .wbg-picker-menu {
+  right: auto;
+  left: 0;
+  width: 100%;
+}
+
+.wbg-sheet .wbg-picker {
+  justify-content: flex-start;
+}

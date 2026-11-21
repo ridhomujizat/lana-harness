@@ -19,7 +19,8 @@ const MIN_WIDTH = 360;
 const MAX_FRACTION = 0.9;
 
 function readWidth(): number {
-  const fallback = Math.max(MIN_WIDTH, Math.round((typeof window !== "undefined" ? window.innerWidth : 1280) * 0.45));
+  /* About the design's 760 px at 1680 wide, never more than 45%. */
+  const fallback = Math.max(MIN_WIDTH, Math.min(760, Math.round((typeof window !== "undefined" ? window.innerWidth : 1280) * 0.45)));
   try {
     const v = Number(window.localStorage.getItem(WIDTH_KEY));
     return Number.isFinite(v) && v >= MIN_WIDTH ? v : fallback;
@@ -153,6 +154,8 @@ export function GitPanel(props: GitPanelProps) {
     );
 
   return (
+    <>
+    {phone ? <div className="wbg-scrim" onClick={props.onClose} aria-hidden="true" /> : null}
     <aside
       className={"wbg-panel" + (phone ? " wbg-sheet" : "") + (props.maximized ? " is-max" : "") + motion}
       style={style}
@@ -184,7 +187,7 @@ export function GitPanel(props: GitPanelProps) {
           <div className="wbg-picker-wrap">
             <button type="button" className={"wbg-picker" + (picker ? " is-open" : "")} onClick={() => setPicker((p) => !p)} title={worktree.worktree}>
               <i className="wbg-wt-dot" style={{ background: worktree.color }} />
-              <span className="wbg-picker-label">{phone ? worktree.short : worktree.branch}</span>
+              <span className="wbg-picker-label">{worktree.branch}</span>
               {props.pinned ? <Ic name="pin" size={13} /> : null}
               <Ic name="chevrons-up-down" size={13} />
             </button>
@@ -227,6 +230,7 @@ export function GitPanel(props: GitPanelProps) {
       </header>
       <div className="wbg-body">{body}</div>
     </aside>
+    </>
   );
 }
 

@@ -30,8 +30,8 @@ export function Counts({ add, del }: { add: number; del: number }) {
   );
 }
 
-export const Code = memo(function Code({ text, language }: { text: string; language: string }) {
-  const tokens: Token[] = useMemo(() => highlightLine(text, language), [text, language]);
+export const Code = memo(function Code({ text, language, inBlock }: { text: string; language: string; inBlock?: boolean }) {
+  const tokens: Token[] = useMemo(() => highlightLine(text, language, inBlock), [text, language, inBlock]);
   return (
     <>
       {tokens.map((t, i) => (t.kind === "plain" ? <Fragment key={i}>{t.text}</Fragment> : <span key={i} className={"wbg-tk-" + t.kind}>{t.text}</span>))}
@@ -360,7 +360,7 @@ export function ChangesTab({
         </>
       ) : (
         <div className="wbg-summary">
-          <span>{status ? (files.length === 1 ? "1 changed file" : files.length + " changed files") : "Loading…"}</span>
+          <span>{status ? (files.length === 0 ? "No changes" : files.length === 1 ? "1 changed file" : files.length + " changed files") : "Loading…"}</span>
           {status ? <Counts add={status.totals.add} del={status.totals.del} /> : null}
         </div>
       )}
@@ -382,17 +382,7 @@ export function ChangesTab({
             {phone ? <Ic name="chevron-right" size={14} className="wbg-row-chev" /> : null}
           </button>
         ))}
-        {status && !files.length ? (
-          <div className="wbg-empty">
-            <Ic name="circle-check" size={20} />
-            <b>Nothing to review</b>
-            <span>
-              {scopeKind === "uncommitted"
-                ? "The working tree matches HEAD. Switch the scope to compare with the base branch or the last commit."
-                : "No changes in this scope."}
-            </span>
-          </div>
-        ) : null}
+
       </div>
     </div>
   );
@@ -446,6 +436,18 @@ export function ChangesTab({
           onOpenFile={onOpenFile}
           footer={status?.merge_base && scopeKind === "branch" ? "vs merge-base " + status.merge_base : undefined}
         />
+      ) : status && !files.length ? (
+        <div className="wbg-viewer wbg-viewer-empty">
+          <div className="wbg-empty wbg-empty-full">
+            <Ic name="circle-check" size={20} />
+            <b>Nothing to review</b>
+            <span>
+              {scopeKind === "uncommitted"
+                ? "The working tree matches HEAD. Switch the scope to compare with the base branch or the last commit."
+                : "No changes in this scope."}
+            </span>
+          </div>
+        </div>
       ) : (
         <div className="wbg-viewer wbg-viewer-empty" />
       )}

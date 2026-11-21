@@ -59,7 +59,9 @@ export function WorktreesTab({
   actions,
   phone,
   newNonce = 0,
+  spaceName,
 }: {
+  spaceName?: string;
   repo: string;
   inSpace: SpaceWorktree[];
   actions: WorktreeActions;
@@ -314,7 +316,7 @@ export function WorktreesTab({
       {dialog?.kind === "new" && data ? (
         <NewWorktreeDialog
           list={data}
-          spaceName={inSpace[0] ? baseName(inSpace[0].info.worktree) : "this space"}
+          spaceName={spaceName || "this space"}
           onClose={() => setDialog(null)}
           onCreated={(w, start, newSpace) => {
             setDialog(null);
@@ -392,6 +394,7 @@ function NewWorktreeDialog({
   const [path, setPath] = useState("");
   const [pathEdited, setPathEdited] = useState(false);
   const [copy, setCopy] = useState<{ path: string; size: number; on: boolean }[]>([]);
+  const [allCopy, setAllCopy] = useState(false);
   const [start, setStart] = useState<"claude" | "shell" | "none">("claude");
   const [newSpace, setNewSpace] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -399,7 +402,14 @@ function NewWorktreeDialog({
 
   useEffect(() => {
     getCopyCandidates(list.repo)
-      .then((r) => setCopy(r.files.map((f) => ({ path: f.path, size: f.size, on: f.default }))))
+      .then((r) =>
+        setCopy(
+          r.files
+            .filter((f) => baseName(f.path) !== ".DS_Store")
+            .sort((a, b) => Number(b.default) - Number(a.default))
+            .map((f) => ({ path: f.path, size: f.size, on: f.default }))
+        )
+      )
       .catch(() => {});
   }, [list.repo]);
 
@@ -497,13 +507,20 @@ function NewWorktreeDialog({
         {copy.length ? (
           <div className="wbg-field">
             <span>Copy local files (git-ignored, not in the new checkout)</span>
-            {copy.map((c, i) => (
-              <label key={c.path} className="wbg-check">
-                <Checkbox checked={c.on} onChange={(on) => setCopy(copy.map((x, j) => (j === i ? { ...x, on } : x)))} />
-                <span className="mono">{c.path}</span>
-                <small>{c.size < 1024 ? c.size + " B" : Math.round(c.size / 1024) + " KB"}</small>
-              </label>
-            ))}
+            {copy.map((c, i) =>
+              allCopy || c.on ? (
+                <label key={c.path} className="wbg-check">
+                  <Checkbox checked={c.on} onChange={(on) => setCopy(copy.map((x, j) => (j === i ? { ...x, on } : x)))} />
+                  <span className="mono">{c.path}</span>
+                  <small>{c.size < 1024 ? c.size + " B" : Math.round(c.size / 1024) + " KB"}</small>
+                </label>
+              ) : null
+            )}
+            {!allCopy && copy.some((c) => !c.on) ? (
+              <button type="button" className="wbg-link wbg-more-inline" onClick={() => setAllCopy(true)}>
+                Show {copy.filter((c) => !c.on).length} more ignored files
+              </button>
+            ) : null}
           </div>
         ) : null}
         <div className="wbg-field">

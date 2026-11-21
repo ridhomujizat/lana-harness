@@ -110,11 +110,18 @@ const KEYWORDS = new Set(
 );
 
 const TOKEN_RE =
-  /(\/\/.*$|#(?!\[).*$|\/\*.*?\*\/|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\b\d[\d_.]*\b|[A-Za-z_$][\w$]*)/g;
+  /(\/\/.*$|#(?!\[).*$|\/\*.*?\*\/|\/\*.*$|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`|\b\d[\d_.]*\b|[A-Za-z_$][\w$]*)/g;
 
 /* A light, line-at-a-time highlighter: keywords, strings, comments, numbers,
    capitalised names and calls. Good enough for a read-only viewer. */
-export function highlightLine(text: string, language: string): Token[] {
+export function highlightLine(text: string, language: string, inBlock = false): Token[] {
+  // A line inside a block comment is comment up to its closing marker.
+  if (inBlock) {
+    const end = text.indexOf("*/");
+    if (end < 0) return [{ text, kind: "com" }];
+    const rest = highlightLine(text.slice(end + 2), language);
+    return [{ text: text.slice(0, end + 2), kind: "com" }, ...rest];
+  }
   const out: Token[] = [];
   const hashComments = language === "shell" || language === "python" || language === "yaml" || language === "toml";
   let last = 0;
@@ -142,6 +149,37 @@ export function highlightLine(text: string, language: string): Token[] {
   }
   if (last < text.length) out.push({ text: text.slice(last), kind: "plain" });
   return out;
+}
+
+const HASH_LANGS = new Set(["shell", "python", "yaml", "toml"]);
+
+// Whether each line starts inside a C-style block comment, for languages that
+// have them. One pass, strings ignored: close enough for a viewer.
+export function blockCommentStates(lines: string[], language: string): boolean[] {
+  const states = new Array<boolean>(lines.length);
+  let inside = false;
+  const cLike = !HASH_LANGS.has(language);
+  for (let i = 0; i < lines.length; i++) {
+    states[i] = inside;
+    if (!cLike) continue;
+    const line = lines[i] ?? "";
+    let at = 0;
+    for (;;) {
+      if (inside) {
+        const end = line.indexOf("*/", at);
+        if (end < 0) break;
+        inside = false;
+        at = end + 2;
+      } else {
+        const lc = line.indexOf("//", at);
+        const start = line.indexOf("/*", at);
+        if (start < 0 || (lc >= 0 && lc < start)) break;
+        inside = true;
+        at = start + 2;
+      }
+    }
+  }
+  return states;
 }
 
 /* --------------------------------------------------- worktree per session */

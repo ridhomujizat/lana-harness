@@ -1995,7 +1995,7 @@ export function WorkbenchPage() {
   return (
     <PaneAccessContext.Provider value={paneAccess}>
     <WbGitContext.Provider value={git.context}>
-    <main id="main" className={"wb-page" + (git.maximized ? " wbg-maxed" : "")}>
+    <main id="main" className={"wb-page" + (git.open ? " wbg-open" : "") + (git.maximized ? " wbg-maxed" : "")}>
       {overlays}
       {accountsOverlay}
       {panelOpen ? panel : null}

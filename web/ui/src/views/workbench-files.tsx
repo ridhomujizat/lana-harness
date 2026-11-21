@@ -14,7 +14,7 @@ import {
 } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
 import { Code, Counts, DiffView, LINE_H, StatusLetter } from "./workbench-changes";
-import { baseName, dirName, gutterMarks, type GutterMark } from "./workbench-git-model";
+import { baseName, blockCommentStates, dirName, gutterMarks, type GutterMark } from "./workbench-git-model";
 import { humanSize } from "./workbench-preview";
 import { useVirtualRows } from "./workbench-virtual";
 
@@ -357,6 +357,7 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
   }, [text]);
   /* Only the lines on screen are rendered, so a big file stays light. */
   const heights = useMemo(() => lines.map(() => LINE_H), [lines]);
+  const blocks = useMemo(() => blockCommentStates(lines, text?.language ?? ""), [lines, text?.language]);
   const win = useVirtualRows(bodyRef, heights);
 
   /* A ⌘+click with :line lands on that line, centred (REQ-WG-063). */
@@ -430,7 +431,7 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
                     <td className="wbg-ln">{n}</td>
                     <td className={"wbg-gutter" + (mark ? " wbg-g-" + mark : "")} />
                     <td className="wbg-code">
-                      <Code text={t} language={text.language} />
+                      <Code text={t} language={text.language} inBlock={blocks[n - 1]} />
                     </td>
                   </tr>
                 );

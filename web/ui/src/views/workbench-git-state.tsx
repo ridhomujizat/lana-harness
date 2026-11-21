@@ -252,6 +252,7 @@ export function useWorkbenchGit({
       inSpace={inSpace}
       phone={phone}
       newNonce={newNonce}
+      spaceName={space?.name}
       actions={{
         openTab,
         show: (dir) => {

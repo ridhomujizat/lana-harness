@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GitHunk, GitInfo } from "../api/workbench-git";
 import {
+  blockCommentStates,
   groupByWorktree,
   gutterMarks,
   highlightLine,
@@ -85,6 +86,16 @@ describe("highlightLine", () => {
   it("treats # as a comment only in hash-comment languages", () => {
     expect(highlightLine("# note", "shell")[0]?.kind).toBe("com");
     expect(highlightLine("a # b", "go").map((t) => t.text).join("")).toBe("a # b");
+  });
+});
+
+describe("block comments", () => {
+  it("tracks /* */ across lines and colours them", () => {
+    const lines = ["a /* start", "middle", "end */ b", "// x /* not", "c"];
+    expect(blockCommentStates(lines, "typescript")).toEqual([false, true, true, false, false]);
+    expect(highlightLine("middle", "typescript", true)).toEqual([{ text: "middle", kind: "com" }]);
+    expect(highlightLine("end */ b", "typescript", true)[0]).toEqual({ text: "end */", kind: "com" });
+    expect(blockCommentStates(["/* x"], "python")).toEqual([false]);
   });
 });
 
