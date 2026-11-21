@@ -129,6 +129,8 @@ func (s *Server) registerWorkbenchRoutes() {
 	// GET /v1/auth/state.
 	s.Handle("POST /v1/workbench/preview", http.HandlerFunc(s.handleWorkbenchPreview))
 	s.mux.Handle("GET /v1/workbench/preview/{token}/{name...}", s.checkHost(http.HandlerFunc(s.handleWorkbenchPreviewFile)))
+	// The git routes of spec 66 (REQ-WG-020).
+	s.registerWorkbenchGitRoutes()
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.
