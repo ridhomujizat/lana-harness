@@ -16,7 +16,7 @@
 
 ## Tasks
 
-- [ ] `T-001` Config, core types, `tool_search`, and the prompt section
+- [x] `T-001` Config, core types, `tool_search`, and the prompt section
   - Requirements: REQ-DTL-001 (config only), REQ-DTL-003, REQ-DTL-004; API-DTL-001..004
   - Scope: `core/config.go`, `config/` validation, `core/` event kind and payload, `core.ToolOutput.Loaded`,
     `core.ToolCtx.DeferredTools`, `tools/tool_search.go` (registered with the other built-ins),

@@ -1094,9 +1094,12 @@ func toolboxEnsureMCPTable(ctx context.Context, store ConfigStore, data []byte, 
 	if err != nil {
 		return data, false, err
 	}
-	if toolboxMCPEqual(mcpconfig.FromMap(document.MCP[srv.Package]), def) {
+	stored := mcpconfig.FromMap(document.MCP[srv.Package])
+	if toolboxMCPEqual(stored, def) {
 		return data, false, nil
 	}
+	// Keep an owner-set defer through a toolbox update (API-DTL-002).
+	def.Defer = stored.Defer
 	table := mcpconfig.Render(srv.Package, def)
 	next, _, err := webfiles.RewriteTable(ctx, mcpChecker(store), data, "[mcp."+srv.Package+"]", table)
 	if err != nil {

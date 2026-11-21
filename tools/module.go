@@ -45,6 +45,7 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 		NewKnowledgeIngest(),
 		NewSkillLoad(),
 		NewSkillWrite(),
+		NewToolSearch(),
 		NewMCPManage(),
 		NewTask(),
 		NewTaskContinue(),

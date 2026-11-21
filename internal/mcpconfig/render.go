@@ -18,6 +18,9 @@ func Render(name string, def Definition) string {
 		fmt.Fprintf(&b, "args = %s\n", RenderList(def.Args))
 	}
 	writeString(&b, "url", def.URL)
+	if def.Defer != nil {
+		fmt.Fprintf(&b, "defer = %t\n", *def.Defer)
+	}
 	writeValueTable(&b, "env", def.Env)
 	writeValueTable(&b, "headers", def.Headers)
 	return b.String()

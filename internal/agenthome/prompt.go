@@ -47,7 +47,10 @@ type PromptInput struct {
 	// HasMCP reports whether the agent has at least one MCP server configured
 	// (REQ-ECX-012).
 	HasMCP bool
-	Skills []Skill
+	// DeferredTools are the deferrable MCP tool names of the turn
+	// (REQ-DTL-003). Empty adds no section and does not change on load.
+	DeferredTools []string
+	Skills        []Skill
 	// Project is the rendered project section: the heading lines and the
 	// <project-context> blocks of the workspace's context files (REQ-PCX-002).
 	// Empty when the agent has no context files.
@@ -94,15 +97,16 @@ type Section struct {
 
 // The section names.
 const (
-	SectionPersona   = "persona"
-	SectionTeam      = "team"
-	SectionUser      = "user"
-	SectionMemory    = "memory"
-	SectionSkills    = "skills"
-	SectionProject   = "project"
-	SectionToolNotes = "tool_notes"
-	SectionBlockers  = "blockers"
-	SectionRuntime   = "runtime"
+	SectionPersona       = "persona"
+	SectionTeam          = "team"
+	SectionUser          = "user"
+	SectionMemory        = "memory"
+	SectionSkills        = "skills"
+	SectionProject       = "project"
+	SectionToolNotes     = "tool_notes"
+	SectionDeferredTools = "deferred_tools"
+	SectionBlockers      = "blockers"
+	SectionRuntime       = "runtime"
 )
 
 // BuildSections renders the named system prompt sections in order. Empty
@@ -141,6 +145,11 @@ func BuildSections(in PromptInput) []Section {
 	if notes := toolNotes(in.ToolNotes); notes != "" {
 		sections = append(sections, Section{Name: SectionToolNotes, Text: notes})
 	}
+	// REQ-DTL-003: the deferred tools section sits after the tool notes and
+	// before the blockers. Empty input adds no section.
+	if deferred := deferredToolsSection(in.DeferredTools); deferred != "" {
+		sections = append(sections, Section{Name: SectionDeferredTools, Text: deferred})
+	}
 	sections = append(sections, Section{Name: SectionBlockers, Text: blockerRules(in.HasMCP)})
 	sections = append(sections, Section{Name: SectionRuntime, Text: "# Runtime context\n" + runtimeContext(in)})
 	return sections
@@ -177,6 +186,56 @@ func toolNotes(notes []ToolNote) string {
 		blocks = append(blocks, "## "+note.Name+"\n"+note.Text)
 	}
 	return "# Tool notes\n" + strings.Join(blocks, "\n\n")
+}
+
+// deferredToolsSection renders the deferred tools section (REQ-DTL-003): a
+// short guide, then the deferrable names grouped by server, with servers and
+// names sorted. It contains no schema and does not change on load. Names that
+// are not mcp__<server>__<tool> are skipped, because only MCP tools are
+// deferred. "" means no section.
+func deferredToolsSection(names []string) string {
+	byServer := map[string][]string{}
+	for _, name := range names {
+		server, _, ok := splitMCPToolName(name)
+		if !ok {
+			continue
+		}
+		byServer[server] = append(byServer[server], name)
+	}
+	if len(byServer) == 0 {
+		return ""
+	}
+	servers := make([]string, 0, len(byServer))
+	for server := range byServer {
+		servers = append(servers, server)
+	}
+	sort.Strings(servers)
+	lines := []string{
+		"# Deferred tools",
+		"These MCP tools are deferred: the prompt lists only their names, not their schemas.",
+		"Call tool_search with keywords, or select:<name>, to see a tool's description and parameters and load it.",
+		"You can also call a deferred tool directly by its name.",
+	}
+	for _, server := range servers {
+		tools := byServer[server]
+		sort.Strings(tools)
+		lines = append(lines, server+": "+strings.Join(tools, ", "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// splitMCPToolName splits mcp__<server>__<tool> into its server and tool parts.
+// ok is false for any other name.
+func splitMCPToolName(name string) (server, tool string, ok bool) {
+	rest, found := strings.CutPrefix(name, "mcp__")
+	if !found {
+		return "", "", false
+	}
+	i := strings.Index(rest, "__")
+	if i <= 0 || i+2 >= len(rest) {
+		return "", "", false
+	}
+	return rest[:i], rest[i+2:], true
 }
 
 // Build renders the system prompt. Empty sections are skipped.
