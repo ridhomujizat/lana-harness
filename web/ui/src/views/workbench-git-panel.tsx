@@ -186,7 +186,7 @@ export function GitPanel(props: GitPanelProps) {
         {worktree ? (
           <div className="wbg-picker-wrap">
             <button type="button" className={"wbg-picker" + (picker ? " is-open" : "")} onClick={() => setPicker((p) => !p)} title={worktree.worktree}>
-              <i className="wbg-wt-dot" style={{ background: worktree.color }} />
+              <Ic name="git-branch" size={14} />
               <span className="wbg-picker-label">{worktree.branch}</span>
               {props.pinned ? <Ic name="pin" size={13} /> : null}
               <Ic name="chevrons-up-down" size={13} />

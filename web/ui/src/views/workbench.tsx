@@ -510,7 +510,7 @@ function PaneView({
         <span className="wb-pane-title">{programName(session)}</span>
         {info ? (
           <span className={"wbg-pane-chip" + (shared?.length ? " is-shared" : "")} title={info.branch + " · " + info.worktree}>
-            <i className="wbg-wt-dot" style={{ background: info.color }} />
+            <Ic name="git-branch" size={12} />
             <span className="wbg-pane-chip-label">{info.short}</span>
           </span>
         ) : null}
