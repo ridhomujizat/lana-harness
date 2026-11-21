@@ -18,6 +18,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/projectctx"
 )
 
 // Runner holds the state of one session.
@@ -183,6 +184,10 @@ type resolvedAgent struct {
 	// workspaceOnly keeps the file tools inside the workspace when the agent
 	// sets workspace_only = true.
 	workspaceOnly bool
+	// contextFiles are the project context file names the agent reads: the
+	// default list unless the agent set context_files, empty when it turned the
+	// feature off (REQ-PCX-001, REQ-PCX-002).
+	contextFiles []string
 	// reasoningEffort is the thinking effort of every step request; "" means
 	// the provider default (REQ-MDL-001).
 	reasoningEffort string
@@ -349,6 +354,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		child:           info.ParentSessionID != "",
 		vision:          vision,
 		workspaceOnly:   cfg.WorkspaceOnly,
+		contextFiles:    cfg.ContextFileNames(),
 		reasoningEffort: effort,
 	}, nil
 }
@@ -525,12 +531,14 @@ func (rn *Runner) promptPath(res resolvedAgent) (string, error) {
 }
 
 // promptBuild is the result of building one turn's prompt: the full head text,
-// its named sections for diffing, and the <context> block for the first user
-// message.
+// its named sections for diffing, the <context> block for the first user
+// message, and the context file paths of the project section so the turn's
+// tracker can mark them seen (REQ-PCX-002).
 type promptBuild struct {
-	text     string
-	sections []core.PromptSection
-	context  string
+	text         string
+	sections     []core.PromptSection
+	context      string
+	projectFiles []string
 }
 
 // buildPrompt assembles the system prompt from the persona, the agent home
@@ -593,7 +601,29 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	}
 	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, res.name, toolNames)
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
-	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
+	// REQ-PCX-002: the context files of the workspace chain join the prompt as
+	// the project section, top-down. Their paths are returned so the turn's
+	// tracker can mark them seen.
+	var projectFiles []string
+	if len(res.contextFiles) > 0 && res.workspace != "" {
+		files := projectctx.Discover(res.workspace, userHome(), res.contextFiles)
+		in.Project = projectctx.Section(files)
+		projectFiles = make([]string, 0, len(files))
+		for _, file := range files {
+			projectFiles = append(projectFiles, file.Path)
+		}
+	}
+	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in), projectFiles: projectFiles}, nil
+}
+
+// userHome returns the owner's home directory, or "" when it cannot be
+// resolved. The project context chain stops before it (REQ-PCX-002).
+func userHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 // memoryRelevantMax is the most entries put in one turn <context> block
@@ -962,6 +992,10 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 	loopReport := false
 	prompt := ""
 	promptBuilt := false
+	// projectTracker is the per-turn seen set of project context files, built
+	// once with the prompt and shared by every step's tool calls (REQ-PCX-003,
+	// REQ-PCX-004). Nil when the agent has no context files.
+	var projectTracker *projectctx.Tracker
 	turnTools := []string{}
 	var totalUsage core.Usage
 	// ownerMessage marks that this turn stored at least one message from the
@@ -1215,6 +1249,17 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				reason = "error"
 				goto finished
 			}
+			// REQ-PCX-003, REQ-PCX-004: one tracker per turn, seeded with the
+			// files already shown in the session since its last compaction and
+			// with this turn's prompt section.
+			if len(resolved.contextFiles) > 0 {
+				var seen []string
+				if chain, cerr := rn.reg.store.ChainEvents(ctx, rn.sessionID); cerr == nil {
+					seen = projectctx.SeenFromEvents(chain)
+				}
+				projectTracker = projectctx.NewTracker(resolved.contextFiles, userHome(), resolved.workspace, seen)
+				projectTracker.MarkSeen(built.projectFiles...)
+			}
 			head, err := rn.promptHead(ctx)
 			if err != nil {
 				runErr = runtimeError(err)
@@ -1455,6 +1500,11 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				// a root turn that stored an owner message, the same values
 				// captureEligible uses (REQ-MEM-010).
 				toolCtx.OwnerTurn = !resolved.child && ownerMessage
+				// REQ-PCX-003: a successful call appends the project context
+				// files of its directory that the session has not seen yet.
+				if projectTracker != nil {
+					toolCtx.ProjectNote = projectTracker.Note
+				}
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as
 				// usual and every result is stored in call order.

@@ -15,28 +15,30 @@
 
 ## Tasks
 
-- [ ] `T-001` Add the `context_files` config setting
+- [x] `T-001` Add the `context_files` config setting
   - Requirements: REQ-PCX-001; API-PCX-001
   - Scope: `core/config.go`, `config/validate.go`, `config/load.go` if needed, and tests
   - Verification: `nix develop -c go test ./config/ ./core/`
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commit 3ed7c5d — 1 implementer run; the web agent editor keeps the absent/empty
+    distinction. `go test ./config/ ./core/ ./web/` pass.
 
-- [ ] `T-002` Add the `internal/projectctx` package
+- [x] `T-002` Add the `internal/projectctx` package
   - Depends on: T-001
   - Requirements: REQ-PCX-002 (render), 003 (Note), 004 (SeenFromEvents), 005, 006
   - Scope: new `internal/projectctx/*.go` with tests
   - Verification: `nix develop -c go test -race ./internal/projectctx/`
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commit 67f2931 — 1 implementer run; `-race` tests pass.
 
-- [ ] `T-003` Wire the prompt section and the tool-result notes
+- [x] `T-003` Wire the prompt section and the tool-result notes
   - Depends on: T-002
   - Requirements: REQ-PCX-002, 003, 004
   - Scope: `internal/agenthome/prompt.go`, `agent/turn.go`, `agent/toolrunner.go`, and tests
   - Verification: `nix develop -c go test -race ./internal/agenthome/ ./agent/`
-  - Evidence: Pending
+  - Evidence: 2026-11-21 — 1 implementer run plus an orchestrator one-line fix: the Claude Code runtime
+    (`agent/external.go`) builds its prompt without the project section. Full `go test ./...` passes.
 
 ## Final verification
 
-- [ ] `nix develop -c go build ./...` and `nix develop -c go test ./...` pass.
+- [x] `nix develop -c go build ./...` and `nix develop -c go test ./...` pass.
 - [ ] A live check with the dev daemon: a Lana turn that reads a file in a repository shows its
       `CLAUDE.md` once.

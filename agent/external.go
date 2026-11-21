@@ -708,6 +708,9 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		slog.Warn("lana tools for claude code", "session_id", rn.sessionID, "error", err)
 		specs, tools = nil, nil
 	}
+	// Spec 64 scope: Claude Code reads its own CLAUDE.md, so its prompt gets no
+	// project section.
+	res.contextFiles = nil
 	built, err := rn.buildPrompt(res, skills, unavailable, rn.toolNotes(tools), len(res.mcp) > 0, text, tools)
 	if err != nil {
 		return externalOutcome{err: runtimeError(err)}

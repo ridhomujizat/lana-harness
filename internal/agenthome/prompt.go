@@ -48,7 +48,11 @@ type PromptInput struct {
 	// (REQ-ECX-012).
 	HasMCP bool
 	Skills []Skill
-	Roster []RosterEntry
+	// Project is the rendered project section: the heading lines and the
+	// <project-context> blocks of the workspace's context files (REQ-PCX-002).
+	// Empty when the agent has no context files.
+	Project string
+	Roster  []RosterEntry
 	// Discussion is set for a team lead's turn (spec 47 REQ-RDS-017).
 	Discussion     *DiscussionPrompt
 	Agent          string
@@ -95,6 +99,7 @@ const (
 	SectionUser      = "user"
 	SectionMemory    = "memory"
 	SectionSkills    = "skills"
+	SectionProject   = "project"
 	SectionToolNotes = "tool_notes"
 	SectionBlockers  = "blockers"
 	SectionRuntime   = "runtime"
@@ -127,6 +132,11 @@ func BuildSections(in PromptInput) []Section {
 			lines = append(lines, "- "+skill.Name+": "+skill.Description)
 		}
 		sections = append(sections, Section{Name: SectionSkills, Text: strings.Join(lines, "\n")})
+	}
+	// REQ-PCX-002: the project section sits after the skills and before the
+	// tool notes. Empty input adds no section.
+	if in.Project != "" {
+		sections = append(sections, Section{Name: SectionProject, Text: in.Project})
 	}
 	if notes := toolNotes(in.ToolNotes); notes != "" {
 		sections = append(sections, Section{Name: SectionToolNotes, Text: notes})

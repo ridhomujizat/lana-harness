@@ -45,9 +45,13 @@ type callState struct {
 	ready  bool
 }
 
-// setOutput records a call's result and its pre-spill digest.
+// setOutput records a call's result and its pre-spill digest. A digest already
+// set on out is kept, so a caller can take it before adding text that must not
+// change it (the project context note, REQ-PCX-003).
 func (s *callState) setOutput(out core.ToolOutput) {
-	out.Digest = outputDigest(out)
+	if out.Digest == "" {
+		out.Digest = outputDigest(out)
+	}
 	s.output = out
 }
 
@@ -195,6 +199,16 @@ func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.
 	if ctx.Err() != nil {
 		state.setOutput(stopToolOutput(ctx))
 		return
+	}
+	// REQ-PCX-003: a successful call appends the <project-context> blocks of
+	// its directory that the session has not seen yet. The digest is taken
+	// before the note is appended, so identical calls keep the same digest for
+	// the loop guard (REQ-LPG-003).
+	if post.Status == core.ToolStatusSuccess && tc.ProjectNote != nil {
+		if note := tc.ProjectNote(state.call.Name, state.call.Input); note != "" {
+			post.Digest = outputDigest(post)
+			post.Output += "\n\n" + note
+		}
 	}
 	state.setOutput(post)
 	tr.spillOutput(state, tc)

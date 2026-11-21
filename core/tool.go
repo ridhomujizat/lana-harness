@@ -84,6 +84,11 @@ type ToolCtx struct {
 	// Knowledge reads and changes the knowledge vault for the knowledge tools
 	// (REQ-KNW-040..043). Nil when the runtime has no knowledge service.
 	Knowledge Knowledge
+	// ProjectNote returns the <project-context> blocks to append to the result
+	// of a successful tool call, or "" when the call's directory has no context
+	// file the session has not seen yet (REQ-PCX-003). It is nil when the
+	// feature is off and for the Claude Code runtime path.
+	ProjectNote func(tool string, input json.RawMessage) string
 }
 
 // Background-job status values (REQ-JOB-010).

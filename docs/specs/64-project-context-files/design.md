@@ -22,7 +22,7 @@ flowchart TD
   imports only the standard library and `internal/pattern` (for `SplitCommand`), so `agent` and
   `internal/agenthome` can both use it.
 - `internal/agenthome` gets one new section, built like the others, so REQ-LTC-002 diffs it for free.
-- `agent.ToolRunner` gets one optional field. The tool layer (`tools/`) is unchanged.
+- `core.ToolCtx` gets one optional field. The tool layer (`tools/`) is unchanged.
 
 ## Proposed design
 
@@ -87,16 +87,21 @@ func SeenFromEvents(events []core.SessionEvent) []string
   empty, renders the files, and returns their paths in `promptBuild` so the tracker can mark them
   seen.
 
-### 4. Tool results — `agent/toolrunner.go`, `agent/turn.go`
+### 4. Tool results — `core/tool.go`, `agent/toolrunner.go`, `agent/turn.go`
 
-- `ToolRunner.Project *projectctx.Tracker`, nil when the feature is off.
+`agent.ToolRunner` is shared by every session (`rn.reg.pipeline`), so the per-turn tracker travels on the
+per-turn `core.ToolCtx` instead of on the runner.
+
+- `core.ToolCtx.ProjectNote func(tool string, input json.RawMessage) string`. It is nil when the feature is
+  off and is not serialized.
 - In `executeOne`, after `ToolsPostExecute` and before `spillOutput`: if `post.Status` is success and
-  `tr.Project != nil`, append `"\n\n" + note` to `post.Output` when the note is not empty.
+  `tc.ProjectNote != nil`, append `"\n\n" + note` to `post.Output` when the note is not empty.
   `read_file` output is never spilled, so the note stays visible. For other tools, the spill preview
   keeps the tail, where the note sits.
 - `runNativeTurn` builds the tracker once per turn: names from the agent config, `home` from
   `os.UserHomeDir`, the workspace from `resolved.workspace`, and seen from
-  `projectctx.SeenFromEvents(chain)` plus the files of this turn's prompt section.
+  `projectctx.SeenFromEvents(chain)` plus the files of this turn's prompt section. It sets
+  `toolCtx.ProjectNote = tracker.Note`. The Claude Code runtime path (`agent/external.go`) leaves it nil.
 
 ### 5. Seen set and compaction
 
