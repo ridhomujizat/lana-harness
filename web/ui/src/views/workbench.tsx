@@ -580,7 +580,13 @@ function PaneView({
               <button type="button" aria-label="Split down" data-tip="Split down ⇧⌘D" onClick={() => actions.onSplit(id, "col")}>
                 <Ic name="rows-2" size={14} />
               </button>
-              <button type="button" aria-label={zoomed ? "Unzoom" : "Zoom"} data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"} onClick={() => actions.onZoom(id)}>
+              <button
+                type="button"
+                className={zoomed ? "wbg-focus-exit" : undefined}
+                aria-label={zoomed ? "Unzoom" : "Zoom"}
+                data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"}
+                onClick={() => actions.onZoom(id)}
+              >
                 <Ic name={zoomed ? "minimize-2" : "maximize-2"} size={14} />
               </button>
             </>
