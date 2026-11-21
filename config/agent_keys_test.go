@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ridhomujizat/lana-harness/core"
 )
 
 // loadAgentKeys loads a config.toml that holds a single [agents.coder] table.
@@ -352,5 +355,89 @@ func TestAgentDisplayNameLoaded(t *testing.T) {
 	}
 	if got := res.Config.Agents["coder"].DisplayName; got != "Omnix Lead" {
 		t.Fatalf("display_name = %q, want Omnix Lead", got)
+	}
+}
+
+// TestAgentContextFilesValidation covers API-PCX-001: context_files is an
+// array of plain file names without a path separator.
+func TestAgentContextFilesValidation(t *testing.T) {
+	valid := []string{
+		"[agents.coder]\n",
+		"[agents.coder]\ncontext_files = []\n",
+		"[agents.coder]\ncontext_files = [\"AGENTS.md\", \"CLAUDE.md\"]\n",
+	}
+	for _, table := range valid {
+		if _, err := loadAgentKeys(t, table); err != nil {
+			t.Fatalf("unexpected error for %q: %v", table, err)
+		}
+	}
+	invalid := []struct {
+		name  string
+		table string
+		key   string
+		msg   string
+	}{
+		{name: "path separator", table: "[agents.coder]\ncontext_files = [\"docs/AGENTS.md\"]\n", key: "agents.coder.context_files[0]", msg: "without a path separator"},
+		{name: "windows separator", table: "[agents.coder]\ncontext_files = ['docs\\AGENTS.md']\n", key: "agents.coder.context_files[0]", msg: "without a path separator"},
+		{name: "empty item", table: "[agents.coder]\ncontext_files = [\"\"]\n", key: "agents.coder.context_files[0]", msg: "must not be empty"},
+		{name: "dot dot", table: "[agents.coder]\ncontext_files = [\"..\"]\n", key: "agents.coder.context_files[0]"},
+		{name: "dot", table: "[agents.coder]\ncontext_files = [\".\"]\n", key: "agents.coder.context_files[0]"},
+		{name: "non array", table: "[agents.coder]\ncontext_files = \"AGENTS.md\"\n", key: "agents.coder.context_files", msg: "must be array string"},
+		{name: "non string item", table: "[agents.coder]\ncontext_files = [1]\n", key: "agents.coder.context_files", msg: "must be array string"},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := agentKeyErrors(t, tt.table)
+			found := findError(errs, tt.key)
+			if found == nil {
+				t.Fatalf("no error for %s: %v", tt.key, errs)
+			}
+			if tt.msg != "" && !strings.Contains(found.Msg, tt.msg) {
+				t.Fatalf("msg = %q, want it to contain %q", found.Msg, tt.msg)
+			}
+		})
+	}
+}
+
+// TestAgentContextFilesLoaded covers API-PCX-001 and AC-PCX-002: an absent
+// setting stays nil (the default list applies), an empty list is a non-nil
+// empty slice (the feature is off), and a configured list is kept.
+func TestAgentContextFilesLoaded(t *testing.T) {
+	tests := []struct {
+		name  string
+		table string
+	}{
+		{name: "absent", table: "[agents.coder]\n"},
+		{name: "empty list", table: "[agents.coder]\ncontext_files = []\n"},
+		{name: "configured list", table: "[agents.coder]\ncontext_files = [\"AGENTS.md\"]\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := loadAgentKeys(t, tt.table)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := res.Config.Agents["coder"]
+			switch tt.name {
+			case "absent":
+				if cfg.ContextFiles != nil {
+					t.Fatalf("ContextFiles = %v, want nil", cfg.ContextFiles)
+				}
+				if got := cfg.ContextFileNames(); !reflect.DeepEqual(got, core.DefaultContextFiles) {
+					t.Fatalf("ContextFileNames() = %v, want %v", got, core.DefaultContextFiles)
+				}
+			case "empty list":
+				if cfg.ContextFiles == nil {
+					t.Fatal("ContextFiles = nil, want an empty non-nil list")
+				}
+				if got := cfg.ContextFileNames(); got == nil || len(got) != 0 {
+					t.Fatalf("ContextFileNames() = %v, want an empty non-nil slice", got)
+				}
+			default:
+				if got := cfg.ContextFileNames(); !reflect.DeepEqual(got, []string{"AGENTS.md"}) {
+					t.Fatalf("ContextFileNames() = %v, want [AGENTS.md]", got)
+				}
+			}
+		})
 	}
 }

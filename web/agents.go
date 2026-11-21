@@ -52,6 +52,7 @@ var agentKeys = map[string]bool{
 	"subagents":            true,
 	"mcp":                  true,
 	"skills":               true,
+	"context_files":        true,
 	"permission":           true,
 	"max_steps":            true,
 	"max_tokens":           true,
@@ -216,21 +217,24 @@ type putAgentResponse struct {
 type agentRecord struct {
 	// Runtime, Auth, APIKeyEnv, Binary, and AllowScheduled are the runtime
 	// keys of a Claude Agent (API-CCR-001).
-	Runtime             string
-	Auth                string
-	APIKeyEnv           string
-	Binary              string
-	AllowScheduled      bool
-	Provider            string
-	Model               string
-	Fallback            []string
-	PromptFile          string
-	Workspace           string
-	Tools               []string
-	DisabledTools       []string
-	Subagents           []string
-	MCP                 []string
-	Skills              []string
+	Runtime        string
+	Auth           string
+	APIKeyEnv      string
+	Binary         string
+	AllowScheduled bool
+	Provider       string
+	Model          string
+	Fallback       []string
+	PromptFile     string
+	Workspace      string
+	Tools          []string
+	DisabledTools  []string
+	Subagents      []string
+	MCP            []string
+	Skills         []string
+	// ContextFiles is nil when the key is absent (the default list applies);
+	// an empty non-nil list turns project context off (API-PCX-001).
+	ContextFiles        *[]string
 	Permission          string
 	MaxSteps            int
 	MaxTokens           int
@@ -1099,6 +1103,20 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		return json.Unmarshal(raw, &record.MCP)
 	case "skills":
 		return json.Unmarshal(raw, &record.Skills)
+	case "context_files":
+		// API-PCX-001: an empty list is kept as written (it turns project
+		// context off); a non-nil pointer distinguishes it from an absent key.
+		// A JSON null removes the key, so the default list applies again.
+		var value []string
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if value == nil {
+			record.ContextFiles = nil
+			return nil
+		}
+		record.ContextFiles = &value
+		return nil
 	case "permission":
 		var value string
 		if err := json.Unmarshal(raw, &value); err != nil {
@@ -1357,6 +1375,8 @@ func clearAgentField(record *agentRecord, key string) {
 		record.MCP = nil
 	case "skills":
 		record.Skills = nil
+	case "context_files":
+		record.ContextFiles = nil
 	case "subagents":
 		record.Subagents = nil
 	case "max_steps":
@@ -1573,6 +1593,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		Subagents:           mapAgentStrings(table, "subagents"),
 		MCP:                 mapAgentStrings(table, "mcp"),
 		Skills:              mapAgentStrings(table, "skills"),
+		ContextFiles:        mapAgentStringsPtr(table, "context_files"),
 		Permission:          mapAgentString(table, "permission"),
 		MaxSteps:            mapAgentInt(table, "max_steps"),
 		MaxTokens:           mapAgentInt(table, "max_tokens"),
@@ -1616,6 +1637,23 @@ func mapAgentStrings(table map[string]any, key string) []string {
 		}
 	}
 	return values
+}
+
+// mapAgentStringsPtr returns nil when the key is absent. A present list is
+// returned as a non-nil pointer, so an empty list (the feature off) is not
+// confused with an absent key (API-PCX-001).
+func mapAgentStringsPtr(table map[string]any, key string) *[]string {
+	list, ok := table[key].([]any)
+	if !ok {
+		return nil
+	}
+	values := make([]string, 0, len(list))
+	for _, item := range list {
+		if value, ok := item.(string); ok {
+			values = append(values, value)
+		}
+	}
+	return &values
 }
 
 func mapAgentInt(table map[string]any, key string) int {
@@ -1680,6 +1718,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentStrings(&b, "subagents", record.Subagents)
 	writeAgentStrings(&b, "mcp", record.MCP)
 	writeAgentStrings(&b, "skills", record.Skills)
+	writeAgentStringsPtr(&b, "context_files", record.ContextFiles)
 	writeAgentString(&b, "permission", record.Permission)
 	writeAgentInt(&b, "max_steps", record.MaxSteps)
 	writeAgentInt(&b, "max_tokens", record.MaxTokens)
@@ -1720,6 +1759,16 @@ func writeAgentStrings(b *strings.Builder, key string, values []string) {
 		return
 	}
 	fmt.Fprintf(b, "%s = %s\n", key, agentStringArray(values))
+}
+
+// writeAgentStringsPtr writes the key only when the pointer is present; it
+// writes an empty list too, because an empty list turns project context off
+// and must be distinguished from an absent key (API-PCX-001).
+func writeAgentStringsPtr(b *strings.Builder, key string, values *[]string) {
+	if values == nil {
+		return
+	}
+	fmt.Fprintf(b, "%s = %s\n", key, agentStringArray(*values))
 }
 
 func writeAgentInt(b *strings.Builder, key string, value int) {

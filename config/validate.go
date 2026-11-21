@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "max_tokens", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_files", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "max_tokens", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -604,6 +604,25 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			for _, item := range list {
 				if !validToolRef(item) {
 					add(path+".disabled_tools", fmt.Sprintf("invalid tool '%s': want <tool> or <mcp_server>/<tool>", item))
+				}
+			}
+		}
+	}
+	// API-PCX-001: context_files is a list of plain file names.
+	if val, ok := v["context_files"]; ok {
+		list, ok := asStringSlice(val)
+		if !ok {
+			add(path+".context_files", typeMsg("array string", val))
+		} else {
+			for i, item := range list {
+				itemPath := fmt.Sprintf("%s.context_files[%d]", path, i)
+				switch {
+				case item == "":
+					add(itemPath, "must not be empty")
+				case item == "." || item == "..":
+					add(itemPath, `must not be "." or ".."`)
+				case strings.ContainsAny(item, `/\`):
+					add(itemPath, "must be a file name without a path separator")
 				}
 			}
 		}
