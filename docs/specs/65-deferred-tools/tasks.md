@@ -25,4 +25,20 @@
   - Requirements: REQ-DTL-001, 002, 005, 006
   - Scope: `agent/deferred.go` (`planDeferral`, `loadedFromEvents`), `agent/turn.go`, `agent/toolrunner.go`
     if needed, web event filter if needed, and tests
-- [ ] `T-003` Live test on a scratch daemon and token measurement (main session)
+- [x] `T-003` Live test on a scratch daemon and token measurement (main session)
+
+## Live test (T-003, 2026-11-21)
+
+Scratch daemon on 127.0.0.1:18460, model `commandcode/deepseek/deepseek-v4.1-flash`, MCP server `dbx`
+(25 tools). Agent `lana` (no `defer_tools`, so deferral on) against agent `nodefer` (`defer_tools = false`),
+same prompt.
+
+| Check | Result |
+|---|---|
+| AC-DTL-017 first-step input tokens | 8,728 deferred vs 13,282 not deferred (-34%). The 50% target assumes the `lana` production set (about 150 MCP tools); with 25 tools the fixed prompt dominates. |
+| `tool_search select:` then call | tool loaded (`tools/loaded`), called natively in the next step |
+| direct call of a deferred tool | ran, then loaded |
+| invalid input on a deferred tool | `invalid input: field 'table' is required` followed by description and schema |
+| keyword `execute query` | `mcp__dbx__dbx_execute_query` first, 5 tools loaded |
+| next turn | first step 9,216 of 9,936 input tokens cached |
+| daemon restart | first step 14,080 of 14,380 cached, model sees the same loaded tools |
