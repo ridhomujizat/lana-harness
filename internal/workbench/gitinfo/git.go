@@ -91,6 +91,13 @@ func (r *Runner) Git(ctx context.Context, dir string, args ...string) ([]byte, e
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
+	return r.gitTimeout(ctx, dir, timeout, args...)
+}
+
+// gitTimeout runs "git -C dir args..." like Git but with an explicit timeout,
+// so a single call can run longer than the runner's default: creating a
+// worktree fetches origin with a 60 s window (REQ-WG-031).
+func (r *Runner) gitTimeout(ctx context.Context, dir string, timeout time.Duration, args ...string) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
