@@ -623,6 +623,12 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
     width: 52px;
   }
 
+  /* Rail items stack with no gap, so a hovered item's background square
+     touches the active item's above or below (owner report 2026-11-21). */
+  .shell.collapsed .side .sitem {
+    margin-block: 2px;
+  }
+
   .shell:not(.collapsed) .side .sitem > span:not(.pico),
   .shell:not(.collapsed) .side .sgroup-h,
   .shell:not(.collapsed) .side .ws-text {
