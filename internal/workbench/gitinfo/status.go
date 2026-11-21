@@ -525,6 +525,9 @@ func (r *Runner) untrackedChanges(worktree string, paths []string) []FileChange 
 	}
 	changes := make([]FileChange, 0, len(paths))
 	for _, rel := range paths {
+		if strings.HasSuffix(rel, "/") { // a nested repo or worktree, not a file
+			continue
+		}
 		changes = append(changes, r.untrackedChange(worktree, rel))
 	}
 	return changes

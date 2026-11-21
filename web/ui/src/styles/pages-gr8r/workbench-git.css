@@ -1761,3 +1761,209 @@ tr.is-target td {
 .wbg-sheet .wbg-picker {
   justify-content: flex-start;
 }
+
+/* ---- live-check fixes 2 ---- */
+
+/* Space row with several worktrees: name, then dots and counts below. */
+.wbg-space-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wbg-space-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.wbg-space-line-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-space-btn > .wb-space-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Viewer header: a long name ellipsises, the toggles stay. */
+.wbg-viewer-head > * {
+  flex: none;
+}
+
+.wbg-viewer-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wbg-viewer-dir {
+  flex: 0 1000 auto;
+}
+
+/* Horizontal scroll keeps the line numbers in place. */
+.wbg-diff-table {
+  tab-size: 4;
+}
+
+.wbg-ln,
+.wbg-sign,
+.wbg-gutter {
+  position: sticky;
+  z-index: 1;
+  background: var(--wb-term);
+}
+
+.wbg-diff-table:not(.wbg-diff-split) tr > .wbg-ln:first-child {
+  left: 0;
+}
+
+.wbg-diff-table:not(.wbg-diff-split) tr > .wbg-ln + .wbg-ln {
+  left: 46px;
+}
+
+.wbg-diff-table:not(.wbg-diff-split) tr > .wbg-sign {
+  left: 92px;
+}
+
+.wbg-code-view tr > .wbg-gutter {
+  left: 46px;
+}
+
+.wbg-dl-add > .wbg-ln,
+.wbg-dl-add > .wbg-sign {
+  background: color-mix(in srgb, var(--green) 16%, var(--wb-term));
+}
+
+.wbg-dl-del > .wbg-ln,
+.wbg-dl-del > .wbg-sign {
+  background: color-mix(in srgb, var(--red) 15%, var(--wb-term));
+}
+
+.wbg-code-view .wbg-gutter.wbg-g-add {
+  background: var(--green);
+}
+
+.wbg-code-view .wbg-gutter.wbg-g-mod {
+  background: var(--amber);
+}
+
+.wbg-code-view .wbg-gutter.wbg-g-del {
+  background: linear-gradient(to bottom, var(--red) 0 5px, var(--wb-term) 5px);
+}
+
+tr.is-target > .wbg-ln {
+  background: color-mix(in srgb, var(--amber) 14%, var(--wb-term));
+}
+
+/* Split halves clip instead of scrolling. */
+.wbg-diff-split .wbg-code {
+  overflow: hidden;
+}
+
+.wbg-viewer-body {
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+.wbg-viewer-body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Header: the picker shrinks before it covers the buttons. */
+.wbg-picker-wrap {
+  flex: 0 1 auto;
+  min-width: 72px;
+}
+
+.wbg-picker {
+  width: 100%;
+  max-width: 300px;
+}
+
+@container wbg-panel (max-width: 680px) {
+  .wbg-list {
+    width: 220px;
+  }
+}
+
+/* A hunk header stays readable when the diff scrolls sideways. */
+.wbg-hunk-text {
+  position: sticky;
+  left: 14px;
+}
+
+.wbg-hunk td {
+  text-overflow: clip;
+}
+
+/* The tab strip never shows a scrollbar, also while the panel slides in. */
+.wb-tabs {
+  scrollbar-width: none;
+}
+
+.wb-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Wide enough: the panel sits beside the terminals and they give it room
+   down to 380 px. Narrow (a browser with the app nav open, a small window):
+   the panel floats over the terminals instead of crushing them. */
+.wb-page:not(.wb-phone) {
+  position: relative;
+  container: wb-page / inline-size;
+}
+
+.wb-page:not(.wb-phone) > .wb-main {
+  min-width: 380px;
+}
+
+@container wb-page (max-width: 1180px) {
+  .wbg-panel:not(.wbg-sheet):not(.is-max) {
+    position: absolute;
+    /* Below the tab strip, so its Changes button stays reachable. */
+    top: 52px;
+    right: 8px;
+    bottom: 0;
+    z-index: 30;
+    width: min(var(--wbg-w, 640px), calc(100% - 48px)) !important;
+    flex-basis: auto !important;
+    margin: 0 0 8px;
+    box-shadow: -24px 0 48px -16px rgba(0, 0, 0, 0.55), var(--wb-card-shadow);
+  }
+
+  .wbg-panel:not(.wbg-sheet):not(.is-max) > .wb-preview-resizer {
+    display: none;
+  }
+
+  /* Overlaid, the panel slides in without resizing the terminals. */
+  .wbg-panel.is-entering:not(.wbg-sheet) {
+    animation: wbgOverlayIn 220ms var(--ease-drawer);
+  }
+
+  .wbg-panel.is-leaving:not(.wbg-sheet) {
+    animation: wbgOverlayOut 220ms var(--ease-drawer) forwards;
+  }
+}
+
+@keyframes wbgOverlayIn {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgOverlayOut {
+  to {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}

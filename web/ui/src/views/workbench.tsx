@@ -148,7 +148,7 @@ function RestoredChip({ session }: { session?: WorkbenchSession }) {
 
 /* Spec 66 REQ-WG-074: a space whose sessions use several worktrees shows
    their colours and "N worktrees · M terminals"; otherwise its tab count. */
-function SpaceMeta({ space, sessions }: { space: WbSpace; sessions: Sessions }) {
+function SpaceText({ space, sessions, label }: { space: WbSpace; sessions: Sessions; label: string }) {
   const git = useWbGit();
   const ids = space.tabs.flatMap(tabSessions);
   const trees = new Map<string, string>();
@@ -159,17 +159,27 @@ function SpaceMeta({ space, sessions }: { space: WbSpace; sessions: Sessions }) 
   void sessions;
   if (trees.size > 1) {
     return (
-      <span className="wb-space-meta wbg-space-meta">
-        <span className="wbg-dots">
-          {Array.from(trees.entries()).map(([w, c]) => (
-            <i key={w} className="wbg-wt-dot" style={{ background: c }} />
-          ))}
+      <span className="wbg-space-text">
+        <span className="wb-space-name">{label}</span>
+        <span className="wbg-space-line">
+          <span className="wbg-dots">
+            {Array.from(trees.entries()).map(([w, c]) => (
+              <i key={w} className="wbg-wt-dot" style={{ background: c }} />
+            ))}
+          </span>
+          <span className="wbg-space-line-text">
+            {trees.size} worktrees · {ids.length} {ids.length === 1 ? "terminal" : "terminals"}
+          </span>
         </span>
-        {trees.size} worktrees · {ids.length} {ids.length === 1 ? "terminal" : "terminals"}
       </span>
     );
   }
-  return <span className="wb-space-meta">{space.tabs.length ? space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs") : ""}</span>;
+  return (
+    <>
+      <span className="wb-space-name">{label}</span>
+      <span className="wb-space-meta">{space.tabs.length ? space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs") : ""}</span>
+    </>
+  );
 }
 
 /* Spec 66 REQ-WG-073: hovering a tab whose panes use more than one worktree
@@ -381,8 +391,7 @@ function Panel(props: PanelProps) {
               title={spaceCwd(sp, sessions) || undefined}
             >
               <SpaceTile space={sp} label={spaceLabel(sp, sessions)} />
-              <span className="wb-space-name">{spaceLabel(sp, sessions)}</span>
-              <SpaceMeta space={sp} sessions={sessions} />
+              <SpaceText space={sp} sessions={sessions} label={spaceLabel(sp, sessions)} />
             </button>
             <button
               type="button"

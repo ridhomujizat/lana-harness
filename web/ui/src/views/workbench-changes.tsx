@@ -9,6 +9,8 @@ import { useVirtualRows } from "./workbench-virtual";
 
 /* Fixed row heights the virtualiser relies on (see workbench-git.css). */
 export const LINE_H = 19;
+/* Geist Mono at 12 px. */
+export const CHAR_W = 7.25;
 const HUNK_H = 24;
 const HUNK_GAP = 6;
 
@@ -99,6 +101,10 @@ export function DiffView({
   const heights = useMemo(() => rows.map((r, i) => (r.type === "hunk" ? (i === 0 ? HUNK_H : HUNK_H + HUNK_GAP) : LINE_H)), [rows]);
   const hunkRows = useMemo(() => rows.flatMap((r, i) => (r.type === "hunk" ? [i] : [])), [rows]);
   const win = useVirtualRows(bodyRef, heights);
+  /* The widest line sets the table width once, so it does not jump while
+     scrolling and the row colours reach the end of every line. */
+  const longest = useMemo(() => hunks.reduce((m, h) => h.lines.reduce((n, l) => Math.max(n, l.text.length), m), 0), [hunks]);
+  const tableWidth = layout === "unified" ? 46 * 2 + 16 + Math.ceil(longest * CHAR_W) + 24 : undefined;
 
   const goHunk = (next: number) => {
     if (!hunks.length) return;
@@ -151,9 +157,9 @@ export function DiffView({
         ) : diff.binary ? (
           <p className="wbg-note">Binary file. No text diff.</p>
         ) : !hunks.length ? (
-          <p className="wbg-note">No changes in this file for this scope.</p>
+          <p className="wbg-note">{change?.status === "U" || change?.status === "A" ? "Empty file." : "No changes in this file for this scope."}</p>
         ) : (
-          <table className={"wbg-diff-table" + (layout === "split" ? " wbg-diff-split" : "")}>
+          <table className={"wbg-diff-table" + (layout === "split" ? " wbg-diff-split" : "")} style={tableWidth ? { minWidth: tableWidth } : undefined}>
             {layout === "unified" ? (
               <colgroup>
                 <col className="wbg-col-ln" />
@@ -176,7 +182,9 @@ export function DiffView({
                 if (row.type === "hunk")
                   return (
                     <tr key={i} className={"wbg-hunk" + (i > 0 ? " wbg-hunk-gap" : "")}>
-                      <td colSpan={4}>{row.header}</td>
+                      <td colSpan={4}>
+                        <span className="wbg-hunk-text">{row.header}</span>
+                      </td>
                     </tr>
                   );
                 if (row.type === "line")
