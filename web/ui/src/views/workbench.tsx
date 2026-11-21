@@ -14,6 +14,7 @@ import {
   type WorkbenchSession,
 } from "../api/workbench";
 import { Ic } from "../ui/icons";
+import { useSheetDrag } from "../ui/sheet-drag";
 import {
   KEY_SEQUENCES,
   STATUS_LABEL,
@@ -1033,6 +1034,7 @@ function PhoneWorkbench(props: PhoneProps) {
   const space = pickSpace(layout);
   const tab = pickTab(space);
   const [sheet, setSheet] = useState(false);
+  const { attach: tabSheetAttach, full: tabSheetFull, gripProps: tabSheetGrip } = useSheetDrag(() => setSheet(false));
   const [ctrl, setCtrl] = useState(false);
   const fontSize = usePhoneFont();
   const keyboardRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
@@ -1267,8 +1269,14 @@ function PhoneWorkbench(props: PhoneProps) {
       )}
       {sheet ? (
         <div className="wb-sheet-back" onClick={() => setSheet(false)}>
-          <div className="wb-sheet" role="dialog" aria-label="All tabs" onClick={(e) => e.stopPropagation()}>
-            <div className="wb-sheet-grip" />
+          <div
+            ref={tabSheetAttach}
+            className={"wb-sheet" + (tabSheetFull ? " is-full" : "")}
+            role="dialog"
+            aria-label="All tabs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="wb-sheet-grip sheet-grip" {...tabSheetGrip} />
             <div className="wb-sheet-head">
               <div>
                 <b>{spaceLabel(space, sessions)}</b>
@@ -1968,6 +1976,7 @@ export function WorkbenchPage() {
   const accountsReady = toolReady(claudeTool);
   const [accountsAnchor, setAccountsAnchor] = useState<HTMLElement | null>(null);
   const [accountsSheet, setAccountsSheet] = useState(false);
+  const { attach: accountsAttach, full: accountsFull, gripProps: accountsGrip } = useSheetDrag(() => setAccountsSheet(false));
   const accountActions: AccountActions = {
     newTab: (argv, title) => {
       const sp = pickSpace(layoutRef.current);
@@ -2010,8 +2019,14 @@ export function WorkbenchPage() {
         ) : null}
         {accountsSheet ? (
           <div className="wb-sheet-back" onClick={() => setAccountsSheet(false)}>
-            <div className="wb-sheet" role="dialog" aria-label="Claude accounts" onClick={(e) => e.stopPropagation()}>
-              <div className="wb-sheet-grip" />
+            <div
+              ref={accountsAttach}
+              className={"wb-sheet" + (accountsFull ? " is-full" : "")}
+              role="dialog"
+              aria-label="Claude accounts"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="wb-sheet-grip sheet-grip" {...accountsGrip} />
               <ClaudeAccountsPanel binary={claudeTool.binary_path} actions={accountActions} onClose={() => setAccountsSheet(false)} />
             </div>
           </div>

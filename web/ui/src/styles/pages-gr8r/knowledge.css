@@ -785,3 +785,9 @@
 
 @keyframes kgSheetIn { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .kg-panel { animation: none; } }
+
+/* Phone: the panel's grip drags it to the full height (ui/sheet-drag.ts). */
+@media (max-width: 760px) {
+  .kg-panel-grip.sheet-grip { margin: -2px auto -10px; }
+  .kg-panel.is-full { max-height: none; height: calc(var(--app-h, 100dvh) - 12px - env(safe-area-inset-top)); }
+}

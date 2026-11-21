@@ -2329,3 +2329,48 @@ body.wb-resizing .wb-preview-resizer::after {
   width: 24px;
   height: 24px;
 }
+
+/* Sheet grips (owner, 2026-11-22): drag up for the full height, down to
+   close, tap to toggle (ui/sheet-drag.ts). The bar keeps its look; the
+   padding is the touch target. */
+.sheet-grip {
+  box-sizing: content-box;
+  flex: none;
+  padding: 10px 28px;
+  background-clip: content-box;
+  cursor: grab;
+  touch-action: none;
+}
+
+.sheet-grip:active {
+  cursor: grabbing;
+}
+
+.sheet-grip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
+.wb-sheet-grip.sheet-grip {
+  margin: -8px 0 -10px;
+}
+
+.wb-sheet.is-full {
+  height: calc(var(--app-h, 100dvh) - 12px - env(safe-area-inset-top));
+  max-height: none;
+}
+
+html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-sheet.is-full {
+  height: calc(var(--app-h, 100dvh) - 44px);
+}
+
+.wb-sheet,
+.wbg-panel.wbg-sheet,
+.kg-panel {
+  transition: height 200ms var(--ease-drawer, ease), max-height 200ms var(--ease-drawer, ease), top 200ms var(--ease-drawer, ease);
+}
+
+.is-sheet-dragging {
+  transition: none !important;
+}

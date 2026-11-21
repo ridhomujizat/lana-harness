@@ -2626,3 +2626,16 @@ body.wb-pane-dragging [data-tip]::after {
 .wb-drag-ghost[hidden] {
   display: none;
 }
+
+/* The git sheet's grip (ui/sheet-drag.ts): full height reaches the top. */
+.wbg-grabber.sheet-grip {
+  margin: -2px auto -10px;
+}
+
+.wbg-panel.wbg-sheet.is-full {
+  top: calc(12px + env(safe-area-inset-top));
+}
+
+html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.is-full {
+  top: 44px;
+}

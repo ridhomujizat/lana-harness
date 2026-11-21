@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import type { WorkbenchPreview } from "../api/workbench";
 import { getGitStatus, listGitWorktrees, type GitInfo, type GitStatus, type GitWorktree } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
+import { useSheetDrag } from "../ui/sheet-drag";
 import { ChangesTab, readScopeKind, type ScopeKind } from "./workbench-changes";
 import { FilesTab } from "./workbench-files";
 import { useGitStatus } from "./workbench-git-hooks";
@@ -65,7 +66,17 @@ export interface GitPanelProps {
 export function GitPanel(props: GitPanelProps) {
   const { phone, tab, onTab, worktree, status } = props;
   const [width, setWidth] = useState(readWidth);
-  const asideRef = useRef<HTMLElement>(null);
+  const asideRef = useRef<HTMLElement | null>(null);
+  /* Phone: the sheet's grip drags it to the full height or closes it. */
+  const sheetDrag = useSheetDrag(props.onClose);
+  const setAside = useCallback(
+    (el: HTMLElement | null) => {
+      asideRef.current = el;
+      sheetDrag.attach(el);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sheetDrag.attach is stable (useCallback with no deps)
+    []
+  );
 
   /* In Lana.app the tab strip is the window's title row: it runs on over the
      panel. The page learns how far through --wbg-panel-space (0 when the
@@ -181,13 +192,13 @@ export function GitPanel(props: GitPanelProps) {
     <>
     {phone ? <div className="wbg-scrim" onClick={props.onClose} aria-hidden="true" /> : null}
     <aside
-      ref={asideRef}
-      className={"wbg-panel" + (phone ? " wbg-sheet" : "") + (props.maximized ? " is-max" : "") + motion}
+      ref={setAside}
+      className={"wbg-panel" + (phone ? " wbg-sheet" : "") + (phone && sheetDrag.full ? " is-full" : "") + (props.maximized ? " is-max" : "") + motion}
       style={style}
       aria-label="Files and changes"
     >
       {phone ? (
-        <span className="wbg-grabber" />
+        <span className="wbg-grabber sheet-grip" {...sheetDrag.gripProps} />
       ) : props.maximized ? null : (
         <div className="wb-preview-resizer" role="separator" aria-orientation="vertical" aria-label="Resize panel" onPointerDown={startResize} />
       )}
