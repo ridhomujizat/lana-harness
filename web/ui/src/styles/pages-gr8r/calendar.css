@@ -1026,7 +1026,7 @@
     width: 100%;
   }
   .cdr-bar {
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    padding: 10px 16px calc(10px + var(--safe-bottom));
   }
   .cdr-kind {
     max-width: 50vw;
