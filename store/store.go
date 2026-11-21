@@ -55,6 +55,7 @@ var validKinds = map[string]bool{
 	core.KindFileSent:        true,
 	core.KindSecretRequested: true, core.KindSecretResolved: true,
 	core.KindDiscussionStarted: true, core.KindDiscussionMessage: true, core.KindDiscussionEnded: true,
+	core.KindToolsLoaded: true,
 }
 
 // Store is the SQLite implementation of core.SessionStore.

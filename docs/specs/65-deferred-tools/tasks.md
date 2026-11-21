@@ -21,7 +21,7 @@
   - Scope: `core/config.go`, `config/` validation, `core/` event kind and payload, `core.ToolOutput.Loaded`,
     `core.ToolCtx.DeferredTools`, `tools/tool_search.go` (registered with the other built-ins),
     `internal/agenthome` `deferred_tools` section, and tests
-- [ ] `T-002` Agent wiring
+- [x] `T-002` Agent wiring
   - Requirements: REQ-DTL-001, 002, 005, 006
   - Scope: `agent/deferred.go` (`planDeferral`, `loadedFromEvents`), `agent/turn.go`, `agent/toolrunner.go`
     if needed, web event filter if needed, and tests
