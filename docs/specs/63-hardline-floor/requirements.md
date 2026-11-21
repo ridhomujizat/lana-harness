@@ -98,7 +98,7 @@ The following calls shall be in the Escalate tier:
 
 | ID | Matches |
 |---|---|
-| `HL-E-001` | A download piped into a shell or interpreter (`curl`/`wget` piped into `sh`, `bash`, `zsh`, `python`, `node`, or `perl`). |
+| `HL-E-001` | A download piped into a shell or interpreter that reads its program from stdin (`curl`/`wget` piped into `sh`, `bash`, `zsh`, `python`, `node`, or `perl` with no inline program, `-`, or `-s`). Piping into an interpreter that gets its program with `-c`, `-e`, `-m`, or a script file is not a match: the download is only data. |
 | `HL-E-002` | Privilege change: `sudo`, `su`, `doas`. |
 | `HL-E-003` | `git push` with `--force`, `-f`, `--force-with-lease`, `--delete`, or `--mirror`. |
 | `HL-E-004` | A recursive delete whose target is a direct child of the home directory (for example `~/coding` or `~/Documents`) (or a filtered find -delete of home, an ancestor, or a system directory). |

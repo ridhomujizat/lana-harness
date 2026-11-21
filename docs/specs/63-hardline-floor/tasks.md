@@ -75,36 +75,36 @@ flowchart LR
     may hide "Allow once" for a Block banner
   - Evidence: Pending
 
-- [ ] `T-004` Show the step-up approval card in the web UI
+- [x] `T-004` Show the step-up approval card in the web UI
   - Depends on: T-003
   - Requirements: REQ-HLF-007
   - Scope: `web/ui/src/views/approval.tsx` and its types
   - Verification: UI build and tests, and a manual check with a fake Block request
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commits a217edc + 73cc694 (dist) — 1 implementer run; typecheck, lint, 751 vitest tests, and build pass. Manual browser check still pending.
 
-- [ ] `T-005` Add the typed challenge to Telegram approvals
+- [x] `T-005` Add the typed challenge to Telegram approvals
   - Depends on: T-002
   - Requirements: REQ-HLF-007
   - Scope: `channels/telegram/approve.go`, `channels/telegram/chat.go`, and tests
   - Verification: `nix develop -c go test ./channels/telegram/`
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commit 285e2a2 — 1 implementer run; `go test ./channels/telegram/` passes.
 
-- [ ] `T-006` Add the typed challenge to the TUI and line answerer
+- [x] `T-006` Add the typed challenge to the TUI and line answerer
   - Depends on: T-002
   - Requirements: REQ-HLF-007, 008
   - Scope: `channels/cli/tui/model.go`, `cmd/lana/main.go` (`lineAnswerer`), and tests
   - Verification: `nix develop -c go test ./channels/cli/... ./cmd/lana/`
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commit d559e62 — 1 implementer run; `go test ./channels/cli/... ./cmd/lana/` pass.
 
-- [ ] `T-007` Add `lana-eval hardline-replay` and run it on the owner's DB
+- [x] `T-007` Add `lana-eval hardline-replay` and run it on the owner's DB
   - Depends on: T-001
   - Requirements: Rollout
   - Scope: `cmd/lana-eval`
   - Verification: the report on `~/.lana/lana.db`, reviewed before release
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commit 47e8422. Replay of 521 recorded calls: no Block-tier match. 15 HL-E-001 matches were all `curl … | python3 -c` JSON parsing, so HL-E-001 was narrowed to interpreters that read their program from stdin (second implementer run); the replay then reports 0 matches.
 
 ## Final verification
 
-- [ ] Every acceptance criterion has passing evidence.
-- [ ] `nix develop -c go build ./...` and `nix develop -c go test ./...` pass.
-- [ ] The replay report is reviewed and its false positives are fixed.
+- [x] Every acceptance criterion has passing evidence (AC-HLF-013 UI part: automated tests; manual check pending).
+- [x] `nix develop -c go build ./...` and `nix develop -c go test ./...` pass.
+- [x] The replay report is reviewed and its false positives are fixed.

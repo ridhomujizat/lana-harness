@@ -53,9 +53,10 @@ var hlSystemDirs = []string{
 }
 
 var (
-	// hlPipeToShell is pipeToShell (auto.go) extended with python, node, and
-	// perl (REQ-HLF-003, HL-E-001).
-	hlPipeToShell = regexp.MustCompile(`(?i)\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?((ba|z|da)?sh|python3?|node|perl)\b`)
+	// hlPipeToShell finds a curl/wget download piped (optionally through sudo)
+	// into a shell or interpreter, capturing the rest of that pipeline stage so
+	// the interpreter's arguments can be inspected (REQ-HLF-003, HL-E-001).
+	hlPipeToShell = regexp.MustCompile(`(?i)\b(?:curl|wget)\b[^|]*\|\s*(?:sudo\s+)?(?:bash|zsh|dash|sh|python3?|node|perl)\b([^|;&]*)`)
 	// hlDiskRedirect matches a redirect onto a raw disk device (HL-B-002).
 	hlDiskRedirect = regexp.MustCompile(`(?i)>\s*/dev/r?disk`)
 	// hlRedirectTarget reads the target of >, >>, 2>, or &>.
@@ -168,7 +169,7 @@ func matchBash(command, cwd, home string, depth int) *core.HardlineMatch {
 	if hlDiskRedirect.MatchString(command) {
 		matches = append(matches, blockHardline(hlB002, reasonB002))
 	}
-	if hlPipeToShell.MatchString(command) {
+	if pipesDownloadIntoInterpreter(command) {
 		matches = append(matches, escalateHardline(hlE001, reasonE001))
 	}
 	segments, analyzable := pattern.SplitCommand(command)
@@ -926,6 +927,43 @@ func interpreterCode(fields []string) (string, bool) {
 		return unquote(strings.Join(fields[i+1:], " ")), true
 	}
 	return "", false
+}
+
+// pipesDownloadIntoInterpreter reports whether command pipes a curl or wget
+// download into a shell or interpreter that reads its program from standard
+// input (HL-E-001). A piped interpreter that takes its program from an inline
+// flag (-c, -e, -m) or from a script file is only parsing the download as data,
+// so it is not a match.
+func pipesDownloadIntoInterpreter(command string) bool {
+	for _, m := range hlPipeToShell.FindAllStringSubmatch(command, -1) {
+		if interpreterReadsStdin(m[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// interpreterReadsStdin reports whether the arguments of a piped shell or
+// interpreter make it read its program from standard input. No arguments, "-",
+// or "-s" means the program is stdin. An option cluster that contains c, e, or
+// m carries the program inline (-c), as an expression (-e), or as a module
+// (-m), and the first non-option argument is a script file: for both, stdin is
+// only data.
+func interpreterReadsStdin(args string) bool {
+	fields, _ := segmentFields(args)
+	for _, a := range fields {
+		switch {
+		case a == "-" || a == "-s":
+			return true
+		case strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.ContainsAny(a[1:], "cem"):
+			return false
+		case strings.HasPrefix(a, "-"):
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // unquote drops one pair of surrounding single or double quotes.
