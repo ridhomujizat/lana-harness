@@ -1273,7 +1273,7 @@ function PhoneWorkbench(props: PhoneProps) {
               <div>
                 <b>{spaceLabel(space, sessions)}</b>
                 <span>
-                  {space.tabs.length} tabs · sorted by status
+                  {space.tabs.length} {space.tabs.length === 1 ? "tab" : "tabs"} · sorted by status
                 </span>
               </div>
               <button

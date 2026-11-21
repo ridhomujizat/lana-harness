@@ -2287,3 +2287,45 @@ body.wb-resizing .wb-preview-resizer::after {
 .wb-phone-panel {
   background: var(--wb-bg);
 }
+
+/* The tab cards are buttons: the global button height (--h-md, 30px)
+   squeezed them to one line on the phone sheet (owner report 2026-11-22). */
+.wb-sheet .wb-card {
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  height: auto;
+  line-height: 1.35;
+  font-weight: 400;
+  white-space: normal;
+}
+
+.wb-sheet .wb-card.is-on {
+  border-color: var(--accent);
+}
+
+.wb-sheet .wb-card-preview {
+  align-items: center;
+  height: 44px;
+  padding-right: 40px;
+}
+
+.wb-sheet .wb-card-foot b {
+  display: block;
+}
+
+.wb-sheet .wb-card-preview {
+  flex: none;
+}
+
+.wb-sheet .wb-card-foot {
+  align-items: center;
+}
+
+/* The close button sits on the dark preview strip, clear of the title. */
+.wb-sheet .wb-card-x {
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+}
