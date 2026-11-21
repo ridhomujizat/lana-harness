@@ -1541,14 +1541,37 @@ tr.is-target td {
   font-size: 11.5px;
 }
 
-.wbg-plus {
+/* "+" and "⌄": two buttons side by side with a thin divider. */
+.wbg-plus-group {
   display: inline-flex;
+  flex: none;
   align-items: center;
-  gap: 1px;
 }
 
-.wbg-plus.is-open {
+.wbg-plus-group > .wb-tab-new {
+  flex: none;
+}
+
+.wbg-plus-group > .wbg-plus-more {
+  position: relative;
+  width: 22px;
+  margin-left: 3px;
+}
+
+.wbg-plus-group > .wbg-plus-more::before {
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.wbg-plus-group > .wbg-plus-more.is-open {
   background: var(--surface-3);
+  color: var(--text);
 }
 
 .wbg-plus-menu {
@@ -2454,4 +2477,18 @@ html[data-shell="macos-app"] .wb-page.wbg-open:not(.wb-phone) > .wb-main > .wb-t
   position: relative;
   z-index: 2;
   margin-right: calc(-1 * var(--wbg-panel-space, 0px));
+}
+
+/* The "⌄" menu: the label is read in full, the branch chip gives way. */
+.wbg-plus-menu .mi > .trunc {
+  flex: none;
+}
+
+.wbg-plus-menu .mi > .r {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wbg-plus-menu .mi > .r .wbg-pane-chip {
+  max-width: 160px;
 }

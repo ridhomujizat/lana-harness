@@ -1740,7 +1740,7 @@ export function WorkbenchPage() {
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
   /* REQ-WG-076: the "+" menu. */
-  const plusRef = useRef<HTMLButtonElement | null>(null);
+  const plusRef = useRef<HTMLSpanElement | null>(null);
   const [plusMenu, setPlusMenu] = useState(false);
 
   const actions: PaneActions = {
@@ -2258,23 +2258,25 @@ export function WorkbenchPage() {
               </div>
             );
           })}
-          <button
-            ref={plusRef}
-            type="button"
-            className={"wb-tab-new wbg-plus" + (plusMenu ? " is-open" : "")}
-            aria-label="New tab"
-            aria-haspopup="menu"
-            data-tip="New tab ⌘T"
-            onClick={() => setPlusMenu((m) => !m)}
-          >
-            <Ic name="plus" size={15} />
-            <Ic name="chevron-down" size={11} />
-          </button>
+          {/* "+" opens a terminal at once; "⌄" next to it holds the other ways
+              to start a tab (owner, 2026-11-22). */}
+          <span className="wbg-plus-group" ref={plusRef}>
+            <button type="button" className="wb-tab-new" aria-label="New terminal" data-tip="New tab ⌘T" onClick={() => void newTerminal()}>
+              <Ic name="plus" size={15} />
+            </button>
+            <button
+              type="button"
+              className={"wb-tab-new wbg-plus-more" + (plusMenu ? " is-open" : "")}
+              aria-label="More ways to open a tab"
+              aria-haspopup="menu"
+              aria-expanded={plusMenu}
+              onClick={() => setPlusMenu((m) => !m)}
+            >
+              <Ic name="chevron-down" size={13} />
+            </button>
+          </span>
           {plusMenu ? (
             <Menu anchorRef={plusRef} open onClose={() => setPlusMenu(false)} className="wbg-plus-menu">
-              <MenuItem icon="square-terminal" kbd="⌘T" onClick={() => (setPlusMenu(false), void newTerminal())}>
-                New terminal
-              </MenuItem>
               {git.focused ? (
                 <MenuItem
                   icon="sparkles"
