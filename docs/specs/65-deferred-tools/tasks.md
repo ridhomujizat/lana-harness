@@ -36,6 +36,8 @@ same prompt.
 | Check | Result |
 |---|---|
 | AC-DTL-017 first-step input tokens | 8,728 deferred vs 13,282 not deferred (-34%). The 50% target assumes the `lana` production set (about 150 MCP tools); with 25 tools the fixed prompt dominates. |
+| AC-DTL-017 with the production `lana` MCP set (sxored-hub 77, kerjan 29, dbx 25 tools) | 11,461 deferred vs 36,967 not deferred (-69%) |
+| kerjan read-only task "show the 3 newest tickets" | `tool_search select:` loaded 3 kerjan tools, called natively, correct answer |
 | `tool_search select:` then call | tool loaded (`tools/loaded`), called natively in the next step |
 | direct call of a deferred tool | ran, then loaded |
 | invalid input on a deferred tool | `invalid input: field 'table' is required` followed by description and schema |
