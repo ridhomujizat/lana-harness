@@ -49,6 +49,9 @@ import {
   spaceCwd,
   spaceLabel,
   splitPane,
+  splitSizes,
+  resizePair,
+  setSplitSizes,
   statusOf,
   tabSessions,
   toggleZoom,
@@ -472,6 +475,9 @@ interface PaneActions {
   onRestart: (id: string) => void;
   /* Spec 61 REQ-WP-010: a file path was activated in a terminal. */
   onOpenFile: (id: string, link: string, fallback?: string) => void;
+  /* Draggable pane sizes: the shares of the split at path, or undefined for
+     equal shares. */
+  onResize: (path: number[], sizes: number[] | undefined) => void;
 }
 
 function PaneView({
@@ -483,6 +489,7 @@ function PaneView({
   entering,
   actions,
   fontSize,
+  grow,
 }: {
   id: string;
   session?: WorkbenchSession;
@@ -492,6 +499,8 @@ function PaneView({
   entering?: boolean;
   actions: PaneActions;
   fontSize?: number;
+  /* Its share of the parent split. */
+  grow?: number;
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
@@ -504,6 +513,7 @@ function PaneView({
     <div
       className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "")}
       data-session={id}
+      style={grow !== undefined ? { flexGrow: grow } : undefined}
     >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
         <ProgramTile session={session} size="pane" />
@@ -593,6 +603,8 @@ function PaneTree({
   closing,
   entering,
   fontSize,
+  path = [],
+  grow,
 }: {
   node: PaneNode;
   tab: WbTab;
@@ -601,6 +613,8 @@ function PaneTree({
   closing: ReadonlySet<string>;
   entering: ReadonlySet<string>;
   fontSize?: number;
+  path?: number[];
+  grow?: number;
 }) {
   if (node.type === "pane") {
     return (
@@ -613,23 +627,110 @@ function PaneTree({
         entering={entering.has(node.session)}
         actions={actions}
         fontSize={fontSize}
+        grow={grow}
       />
     );
   }
-  return (
-    <div className={"wb-split wb-split-" + node.dir}>
-      {node.children.map((child, i) => (
-        <PaneTree
-          key={child.type === "pane" ? child.session : "s" + i}
-          node={child}
-          tab={tab}
-          sessions={sessions}
-          actions={actions}
-          closing={closing}
-          entering={entering}
-          fontSize={fontSize}
+  return <SplitView node={node} tab={tab} sessions={sessions} actions={actions} closing={closing} entering={entering} fontSize={fontSize} path={path} grow={grow} />;
+}
+
+/* A split with draggable borders between its children. While dragging, the
+   new shares stay local and terminals hold their size (holdLayout); the
+   layout is saved once, on release. Double-click a border for equal shares. */
+const SPLIT_MIN_PX = 160;
+
+function SplitView({
+  node,
+  tab,
+  sessions,
+  actions,
+  closing,
+  entering,
+  fontSize,
+  path,
+  grow,
+}: {
+  node: Extract<PaneNode, { type: "split" }>;
+  tab: WbTab;
+  sessions: Sessions;
+  actions: PaneActions;
+  closing: ReadonlySet<string>;
+  entering: ReadonlySet<string>;
+  fontSize?: number;
+  path: number[];
+  grow?: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [live, setLive] = useState<number[] | null>(null);
+  const stored = splitSizes(node);
+  const sizes = live && live.length === stored.length ? live : stored;
+  const row = node.dir === "row";
+
+  const startDrag = (i: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    const el = ref.current;
+    if (!el) return;
+    event.preventDefault();
+    const handles = Array.from(el.children).filter((c) => c.classList.contains("wb-split-handle"));
+    const handleSpace = handles.reduce((n, h) => n + (row ? (h as HTMLElement).offsetWidth : (h as HTMLElement).offsetHeight), 0);
+    const total = Math.max(1, (row ? el.clientWidth : el.clientHeight) - handleSpace);
+    const start = row ? event.clientX : event.clientY;
+    const base = sizes;
+    const min = SPLIT_MIN_PX / total;
+    let latest = base;
+    const move = (e: PointerEvent) => {
+      latest = resizePair(base, i, ((row ? e.clientX : e.clientY) - start) / total, min);
+      holdLayout(300);
+      setLive(latest);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("wb-resizing", "wb-resizing-row", "wb-resizing-col");
+      actions.onResize(path, latest);
+      setLive(null);
+    };
+    document.body.classList.add("wb-resizing", row ? "wb-resizing-row" : "wb-resizing-col");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const parts: ReactNode[] = [];
+  node.children.forEach((child, i) => {
+    if (i > 0) {
+      parts.push(
+        <div
+          key={"h" + i}
+          className="wb-split-handle"
+          role="separator"
+          aria-orientation={row ? "vertical" : "horizontal"}
+          aria-label="Resize panes"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={(e) => startDrag(i - 1, e)}
+          onDoubleClick={() => {
+            holdLayout(300);
+            actions.onResize(path, undefined);
+          }}
         />
-      ))}
+      );
+    }
+    parts.push(
+      <PaneTree
+        key={child.type === "pane" ? child.session : "s" + i}
+        node={child}
+        tab={tab}
+        sessions={sessions}
+        actions={actions}
+        closing={closing}
+        entering={entering}
+        fontSize={fontSize}
+        path={[...path, i]}
+        grow={sizes[i]}
+      />
+    );
+  });
+  return (
+    <div ref={ref} className={"wb-split wb-split-" + node.dir} style={grow !== undefined ? { flexGrow: grow } : undefined}>
+      {parts}
     </div>
   );
 }
@@ -1643,6 +1744,11 @@ export function WorkbenchPage() {
         .catch((err) => setError(errorMessage(err)));
     },
     onOpenFile: openPreview,
+    onResize: (path, sizes) => {
+      const sp = pickSpace(layoutRef.current);
+      const t = pickTab(sp);
+      if (sp && t) update((l) => setSplitSizes(l, sp.id, t.id, path, sizes));
+    },
   };
 
   /* Spec 56: the Claude accounts plugin, on once claude-swap is installed. */

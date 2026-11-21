@@ -2020,3 +2020,72 @@ tr.is-target > .wbg-ln {
   flex: none;
   color: var(--wb-term-dim);
 }
+
+/* ------------------------------------------------------------------ */
+/* Draggable pane sizes                                                */
+/* ------------------------------------------------------------------ */
+
+/* The handle takes the place of the gap between panes. */
+.wb-split {
+  gap: 0 !important;
+}
+
+.wb-split > * {
+  flex-basis: 0;
+}
+
+.wb-split > .wb-split-handle {
+  position: relative;
+  flex: 0 0 10px;
+  min-width: 0;
+  min-height: 0;
+  touch-action: none;
+}
+
+.wb-split-row > .wb-split-handle {
+  cursor: col-resize;
+}
+
+.wb-split-col > .wb-split-handle {
+  cursor: row-resize;
+}
+
+/* A thin line shows on hover and while dragging. */
+.wb-split-handle::after {
+  position: absolute;
+  border-radius: 2px;
+  background: transparent;
+  content: "";
+  transition: background var(--dur, 160ms);
+}
+
+.wb-split-row > .wb-split-handle::after {
+  top: 30%;
+  bottom: 30%;
+  left: 4px;
+  width: 2px;
+}
+
+.wb-split-col > .wb-split-handle::after {
+  left: 30%;
+  right: 30%;
+  top: 4px;
+  height: 2px;
+}
+
+.wb-split-handle:hover::after,
+body.wb-resizing .wb-split-handle:active::after {
+  background: var(--border-strong);
+}
+
+body.wb-resizing-row,
+body.wb-resizing-row * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.wb-resizing-col,
+body.wb-resizing-col * {
+  cursor: row-resize !important;
+  user-select: none;
+}
