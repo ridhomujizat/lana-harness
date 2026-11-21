@@ -275,11 +275,9 @@ function Panel(props: PanelProps) {
   const agents = Object.values(sessions).filter(isAgent);
   const spaceOf = (id: string) => locate(layout, id)?.space;
 
-  const git = useWbGit();
   const row = (s: WorkbenchSession, showSpace: boolean) => {
     const owner = s.labels?.["lana.agent"];
     const sp = spaceOf(s.id);
-    const wt = git?.gitOf(s.id);
     return (
       <button
         key={s.id}
@@ -288,20 +286,12 @@ function Panel(props: PanelProps) {
         onClick={() => props.onOpenSession(s.id)}
       >
         <ProgramTile session={s} size="pane" />
-        <span className={"wb-agent-label" + (wt ? " wbg-agent-two" : "")}>
-          <span className="wbg-agent-main">
-            {showSpace ? <b>{sp ? spaceLabel(sp, sessions) : "unplaced"}</b> : null}
-            <span className={showSpace ? "wb-agent-title muted" : "wb-agent-title"}>
-              {showSpace ? " · " : ""}
-              {sessionTitle(s)}
-            </span>
+        <span className="wb-agent-label">
+          {showSpace ? <b>{sp ? spaceLabel(sp, sessions) : "unplaced"}</b> : null}
+          <span className={showSpace ? "wb-agent-title muted" : "wb-agent-title"}>
+            {showSpace ? " · " : ""}
+            {sessionTitle(s)}
           </span>
-          {wt ? (
-            <span className="wbg-agent-wt" title={wt.branch}>
-              <i className="wbg-wt-dot" style={{ background: wt.color }} />
-              {wt.short}
-            </span>
-          ) : null}
         </span>
         {owner ? (
           <span className="wb-lana-av" style={{ background: hashColor(owner) }} title={"Lana agent " + owner}>
