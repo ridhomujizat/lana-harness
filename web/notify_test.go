@@ -301,3 +301,39 @@ func TestSessionPresenceRoute(t *testing.T) {
 		t.Fatalf("no CSRF status = %d", rr.Code)
 	}
 }
+
+// AC-HLF-016 / API-HLF-007: a local notification cannot allow a block request;
+// the request stays open and a rejection still works.
+func TestLocalApprovalBlockRefused(t *testing.T) {
+	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
+	s.SetLocalSecret(localTestSecret)
+
+	_, events, unsubscribe := s.Approvals().subscribe("session-1")
+	defer unsubscribe()
+	outcomes := make(chan core.ApprovalOutcome, 1)
+	go func() {
+		outcomes <- s.Approvals().Ask(context.Background(), core.ApprovalRequest{
+			SessionID: "session-1", ToolName: "bash", Input: json.RawMessage(`{"command":"rm -rf ~"}`),
+			Risk:     core.RiskExec,
+			Hardline: &core.HardlineMatch{Rule: "HL-B-001", Tier: core.HardlineBlock, Reason: "recursive delete of home"},
+		})
+	}()
+	event := nextApprovalEvent(t, events)
+
+	post := func(id, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, LocalApprovalsPath+id, strings.NewReader(body))
+		req.RemoteAddr = localTestAddr
+		req.Header.Set(LocalSecretHeader, localTestSecret)
+		return serveAuth(s, req)
+	}
+	assertAuthError(t, post(event.RequestID, `{"outcome":"allowed_once"}`), http.StatusConflict, "step_up_required")
+	if _, err := s.Approvals().pending(event.RequestID); err != nil {
+		t.Fatalf("block request closed after a local allow: %v", err)
+	}
+	if rr := post(event.RequestID, `{"outcome":"rejected"}`); rr.Code != http.StatusOK {
+		t.Fatalf("local reject status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if outcome := waitApprovalOutcome(t, outcomes); outcome != core.OutcomeRejected {
+		t.Fatalf("outcome = %q, want rejected", outcome)
+	}
+}

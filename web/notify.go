@@ -307,7 +307,18 @@ func (s *Server) handleLocalApproval(w http.ResponseWriter, r *http.Request) {
 		s.answerWorkflowDecision(w, r, workflowID, decisionID, outcome)
 		return
 	}
-	err := s.approvals.answer(id, outcome)
+	pending, err := s.approvals.pending(id)
+	if err != nil {
+		writeApprovalLookupError(w, err)
+		return
+	}
+	// A block request cannot be allowed from a notification: it needs the
+	// step-up confirmation in Lana (API-HLF-007). A rejection still works.
+	if hardline := pending.event.Hardline; hardline != nil && hardline.Tier == core.HardlineBlock && outcome == core.OutcomeAllowedOnce {
+		writeAPIError(w, http.StatusConflict, "step_up_required", "open Lana to confirm this call")
+		return
+	}
+	err = s.approvals.answer(id, outcome)
 	switch {
 	case errors.Is(err, errApprovalClosed):
 		writeAPIError(w, http.StatusConflict, "approval_closed", "approval closed")

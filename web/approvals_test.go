@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -471,5 +472,270 @@ agent = "assistant"
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "blocked.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the tool ran despite the timeout: %v", err)
+	}
+}
+
+// askApproval subscribes the broker, opens a request, and returns its SSE event
+// and outcome channel. A hardline request carries the given tier.
+func askApproval(t *testing.T, broker *Approvals, sessionID string, hardline *core.HardlineMatch) (approvalEvent, <-chan core.ApprovalOutcome) {
+	t.Helper()
+	_, events, unsubscribe := broker.subscribe(sessionID)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); unsubscribe() })
+	outcomes := make(chan core.ApprovalOutcome, 1)
+	req := core.ApprovalRequest{
+		SessionID: sessionID, ToolName: "bash",
+		Input: json.RawMessage(`{"command":"echo hi"}`), Risk: core.RiskExec,
+		Hardline: hardline,
+	}
+	go func() {
+		outcomes <- broker.Ask(ctx, req)
+	}()
+	return nextApprovalEvent(t, events), outcomes
+}
+
+func askHardline(t *testing.T, broker *Approvals, sessionID, tier string) (approvalEvent, <-chan core.ApprovalOutcome) {
+	t.Helper()
+	return askApproval(t, broker, sessionID, &core.HardlineMatch{Rule: "HL-B-001", Tier: tier, Reason: "recursive delete of home"})
+}
+
+func askPlain(t *testing.T, broker *Approvals, sessionID string) (approvalEvent, <-chan core.ApprovalOutcome) {
+	t.Helper()
+	return askApproval(t, broker, sessionID, nil)
+}
+
+// approvalRequestStillOpen reports whether the broker still holds the request.
+func approvalRequestStillOpen(t *testing.T, s *Server, id string) bool {
+	t.Helper()
+	_, err := s.Approvals().pending(id)
+	return err == nil
+}
+
+// AC-HLF-013 / API-HLF-004: a block event carries hardline.step_up, "password"
+// by default and "password_or_telegram" when confirm_with allows a code.
+func TestApprovalHardlineStepUp(t *testing.T) {
+	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
+
+	block, _ := askHardline(t, s.Approvals(), "session-1", core.HardlineBlock)
+	if block.Hardline == nil || block.Hardline.StepUp != core.WebRemoteConfirmPassword {
+		t.Fatalf("default block hardline = %+v, want step_up password", block.Hardline)
+	}
+	if block.Hardline.Rule != "HL-B-001" || block.Hardline.Tier != core.HardlineBlock || block.Hardline.Reason == "" {
+		t.Fatalf("block hardline = %+v", block.Hardline)
+	}
+
+	s.SetRemoteConfig(core.DefaultWebRemoteConfig())
+	configured, _ := askHardline(t, s.Approvals(), "session-2", core.HardlineBlock)
+	if configured.Hardline == nil || configured.Hardline.StepUp != core.WebRemoteConfirmPasswordOrTelegram {
+		t.Fatalf("configured block hardline = %+v, want step_up password_or_telegram", configured.Hardline)
+	}
+
+	escalate, _ := askHardline(t, s.Approvals(), "session-3", core.HardlineEscalate)
+	if escalate.Hardline == nil || escalate.Hardline.Tier != core.HardlineEscalate || escalate.Hardline.StepUp != "" {
+		t.Fatalf("escalate hardline = %+v, want empty step_up", escalate.Hardline)
+	}
+}
+
+// AC-HLF-013 / API-HLF-005: a block allow needs exactly one good step-up proof.
+func TestApprovalHardlineBlockStepUp(t *testing.T) {
+	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
+	cookie, csrf := setPasswordViaLink(t, s, testPassword)
+	event, outcomes := askHardline(t, s.Approvals(), "session-1", core.HardlineBlock)
+
+	answer := func(body string) *httptest.ResponseRecorder {
+		return serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+event.RequestID, body, cookie, csrf))
+	}
+
+	assertAuthError(t, answer(`{"outcome":"allowed_once"}`), http.StatusBadRequest, "step_up_required")
+	if !approvalRequestStillOpen(t, s, event.RequestID) {
+		t.Fatal("request closed without a step-up proof")
+	}
+	assertAuthError(t, answer(`{"outcome":"allowed_once","password":"x","code":"y"}`), http.StatusBadRequest, "step_up_required")
+	assertAuthError(t, answer(`{"outcome":"allowed_session","password":"`+testPassword+`"}`), http.StatusBadRequest, "invalid_request")
+	if !approvalRequestStillOpen(t, s, event.RequestID) {
+		t.Fatal("request closed after allowed_session")
+	}
+	assertAuthError(t, answer(`{"outcome":"allowed_once","password":"wrong"}`), http.StatusUnauthorized, "invalid_password")
+	if !approvalRequestStillOpen(t, s, event.RequestID) {
+		t.Fatal("request closed after a wrong password")
+	}
+	assertAuthError(t, answer(`{"outcome":"allowed_once","code":"123456"}`), http.StatusBadRequest, "invalid_request")
+
+	rr := answer(`{"outcome":"allowed_once","password":"` + testPassword + `"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("password answer status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var resp approvalAnswerResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Outcome != string(core.OutcomeAllowedVerified) {
+		t.Fatalf("body outcome = %q, want allowed_verified", resp.Outcome)
+	}
+	if outcome := waitApprovalOutcome(t, outcomes); outcome != core.OutcomeAllowedVerified {
+		t.Fatalf("outcome = %q, want allowed_verified", outcome)
+	}
+}
+
+// REQ-HLF-008: an escalate request keeps the ordinary flow, and no hardline
+// request can be allowed for the session.
+func TestApprovalHardlineEscalate(t *testing.T) {
+	s, cookie, csrf := newLoggedInSessionServer(t, newFakeWebBackend())
+	event, outcomes := askHardline(t, s.Approvals(), "session-1", core.HardlineEscalate)
+
+	assertAuthError(t, serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+event.RequestID, `{"outcome":"allowed_session"}`, cookie, csrf)), http.StatusBadRequest, "invalid_request")
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+event.RequestID, `{"outcome":"allowed_once"}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("escalate allow status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if outcome := waitApprovalOutcome(t, outcomes); outcome != core.OutcomeAllowedOnce {
+		t.Fatalf("outcome = %q, want allowed_once", outcome)
+	}
+}
+
+// approvalCodeFromMessage returns the 6-digit code of the API-HLF-006 owner
+// message.
+func approvalCodeFromMessage(t *testing.T, message string) string {
+	t.Helper()
+	const prefix = "Lana approval code: "
+	i := strings.Index(message, prefix)
+	if i < 0 {
+		t.Fatalf("message %q has no approval code", message)
+	}
+	code := message[i+len(prefix):]
+	if j := strings.IndexByte(code, '\n'); j >= 0 {
+		code = code[:j]
+	}
+	if len(code) != 6 {
+		t.Fatalf("code = %q, want 6 digits", code)
+	}
+	return code
+}
+
+// requestApprovalCode calls API-HLF-006 and returns the code of the owner
+// message.
+func requestApprovalCode(t *testing.T, s *Server, id string, cookie *http.Cookie, csrf string, messenger *fakeOwnerMessenger) string {
+	t.Helper()
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+id+"/code", "", cookie, csrf))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("code request status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var sent struct {
+		SentTo int `json:"sent_to"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.SentTo != 1 || len(messenger.sent) == 0 {
+		t.Fatalf("sent_to = %d, messages = %d, want 1, 1", sent.SentTo, len(messenger.sent))
+	}
+	return approvalCodeFromMessage(t, messenger.sent[len(messenger.sent)-1])
+}
+
+// AC-HLF-013 / API-HLF-006: a Telegram code resolves a block request as
+// allowed_verified and cannot be reused.
+func TestApprovalHardlineCodeFlow(t *testing.T) {
+	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
+	s.SetRemoteConfig(core.DefaultWebRemoteConfig())
+	cookie, csrf := setPasswordViaLink(t, s, testPassword)
+	messenger := &fakeOwnerMessenger{}
+	s.SetTelegramOwnerMessenger(messenger)
+	s.SetTelegramResetSender(&fakeTelegramReset{available: true})
+
+	eventA, outcomesA := askHardline(t, s.Approvals(), "session-a", core.HardlineBlock)
+	eventB, _ := askHardline(t, s.Approvals(), "session-b", core.HardlineBlock)
+	if eventA.Hardline.StepUp != core.WebRemoteConfirmPasswordOrTelegram {
+		t.Fatalf("step_up = %q, want password_or_telegram", eventA.Hardline.StepUp)
+	}
+
+	code := requestApprovalCode(t, s, eventA.RequestID, cookie, csrf, messenger)
+
+	assertAuthError(t, serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+eventA.RequestID,
+		`{"outcome":"allowed_once","code":"000000"}`, cookie, csrf)), http.StatusUnauthorized, "invalid_code")
+	if !approvalRequestStillOpen(t, s, eventA.RequestID) {
+		t.Fatal("request closed after a wrong code")
+	}
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+eventA.RequestID,
+		`{"outcome":"allowed_once","code":"`+code+`"}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code answer status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var resp approvalAnswerResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Outcome != string(core.OutcomeAllowedVerified) {
+		t.Fatalf("body outcome = %q, want allowed_verified", resp.Outcome)
+	}
+	if outcome := waitApprovalOutcome(t, outcomesA); outcome != core.OutcomeAllowedVerified {
+		t.Fatalf("outcome = %q, want allowed_verified", outcome)
+	}
+
+	// A code is single use: it cannot answer another request.
+	assertAuthError(t, serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+eventB.RequestID,
+		`{"outcome":"allowed_once","code":"`+code+`"}`, cookie, csrf)), http.StatusUnauthorized, "invalid_code")
+}
+
+// The approval code store follows REQ-RA-032/033: single use.
+func TestApprovalCodeStoreSingleUse(t *testing.T) {
+	store := newControlCodeStore()
+	key := approvalCodeKey("req-1")
+	now := time.Unix(1_700_000_000, 0)
+	if !store.start(key, "123456", now) {
+		t.Fatal("first start was rejected")
+	}
+	if !store.verify(key, "123456", now) {
+		t.Fatal("first verify failed")
+	}
+	if store.verify(key, "123456", now) {
+		t.Fatal("code was reused")
+	}
+}
+
+// API-HLF-006: a code is only sent for an open block request whose step_up
+// allows it, and only while Telegram is connected.
+func TestApprovalCodeNotNeeded(t *testing.T) {
+	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
+	s.SetRemoteConfig(core.DefaultWebRemoteConfig())
+	cookie, csrf := setPasswordViaLink(t, s, testPassword)
+	s.SetTelegramOwnerMessenger(&fakeOwnerMessenger{})
+	s.SetTelegramResetSender(&fakeTelegramReset{available: true})
+
+	code := func(id string) *httptest.ResponseRecorder {
+		return serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+id+"/code", "", cookie, csrf))
+	}
+
+	escalate, _ := askHardline(t, s.Approvals(), "session-1", core.HardlineEscalate)
+	assertAuthError(t, code(escalate.RequestID), http.StatusConflict, "not_needed")
+
+	plain, _ := askPlain(t, s.Approvals(), "session-1")
+	assertAuthError(t, code(plain.RequestID), http.StatusConflict, "not_needed")
+
+	// With confirm_with = password the block request needs no code.
+	s.SetRemoteConfig(core.WebRemoteConfig{ConfirmWith: core.WebRemoteConfirmPassword})
+	passwordOnly, _ := askHardline(t, s.Approvals(), "session-1", core.HardlineBlock)
+	assertAuthError(t, code(passwordOnly.RequestID), http.StatusConflict, "not_needed")
+
+	// Telegram not connected makes the send unavailable.
+	s.SetRemoteConfig(core.DefaultWebRemoteConfig())
+	s.SetTelegramOwnerMessenger(nil)
+	block, _ := askHardline(t, s.Approvals(), "session-1", core.HardlineBlock)
+	assertAuthError(t, code(block.RequestID), http.StatusConflict, "telegram_unavailable")
+}
+
+// API-HLF-005: a non-hardline request keeps the old behavior exactly.
+func TestApprovalNonHardlineUnchanged(t *testing.T) {
+	s, cookie, csrf := newLoggedInSessionServer(t, newFakeWebBackend())
+	event, outcomes := askPlain(t, s.Approvals(), "session-1")
+	if event.Hardline != nil {
+		t.Fatalf("non-hardline event has hardline %+v", event.Hardline)
+	}
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/approvals/"+event.RequestID, `{"outcome":"allowed_session"}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("allowed_session status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if outcome := waitApprovalOutcome(t, outcomes); outcome != core.OutcomeAllowedSession {
+		t.Fatalf("outcome = %q, want allowed_session", outcome)
 	}
 }

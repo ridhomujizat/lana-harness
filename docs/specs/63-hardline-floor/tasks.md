@@ -47,20 +47,32 @@ flowchart LR
     false-positive cases (quotes, globs, wrappers, `bash -c` variants, inline interpreter code) matches
     expectations. Not committed.
 
-- [ ] `T-002` Wire the matcher into the evaluator and approval service
+- [x] `T-002` Wire the matcher into the evaluator and approval service
   - Depends on: T-001
   - Requirements: REQ-HLF-001, 006, 008, 009, 010
   - Scope: `core/approval.go` (`ApprovalRequest.Hardline`, `OutcomeAllowedVerified`), `core/event.go`
     (`ApprovalAsked.Hardline`, `permission/hardline`), `lana.go` (`validApprovalOutcome`),
     `tools/permission/evaluator.go`, `tools/permission/approval.go`, and their tests
   - Verification: `nix develop -c go test ./tools/permission/ ./core/ .`
-  - Evidence: Pending
+  - Evidence: 2026-11-21, commit ca4de25 — 1 implementer run plus an orchestrator fix: under the never
+    policy a hardline match now rejects directly, because a session's own allow rules (AC-PERM-007)
+    would otherwise run it. `store/store.go` learned the new event kind. All listed packages pass.
 
-- [ ] `T-003` Add step-up to the web approval API
+- [x] `T-003` Add step-up to the web approval API
   - Depends on: T-002
   - Requirements: REQ-HLF-007; API-HLF-004..007
   - Scope: `web/approvals.go`, `web/notify.go`, new code route, and tests
   - Verification: `nix develop -c go test ./web/`
+  - Evidence: 2026-11-21 — 1 implementer run. `go test ./web/ ./cmd/lana/` pass.
+  - Deviation: the macOS banner text is built in `internal/notify/events.go` (`ApprovalAsked`), so the
+    "Open Lana to confirm." suffix is follow-up `T-008`. The 409 `step_up_required` answer is in place,
+    so the banner cannot allow a Block call.
+
+- [ ] `T-008` Say "Open Lana to confirm." on a Block-tier macOS banner
+  - Depends on: T-003
+  - Requirements: REQ-HLF-007 (notification row)
+  - Scope: `internal/notify/events.go` (`ApprovalAsked` gets the tier) and its callers; the macOS app
+    may hide "Allow once" for a Block banner
   - Evidence: Pending
 
 - [ ] `T-004` Show the step-up approval card in the web UI
