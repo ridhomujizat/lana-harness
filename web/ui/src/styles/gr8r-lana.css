@@ -732,3 +732,22 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
     font-size: 11px;
   }
 }
+
+/* The expanded sidebar's foot: the avatar is centred on the icon column and
+   the name starts where the nav labels start; room below for the window's
+   rounded corner (owner report 2026-11-22). */
+.side-bot {
+  padding-bottom: 12px;
+}
+
+.side-bot .row {
+  height: var(--side-row);
+  padding: 0 8px 0 4px;
+  gap: 5px;
+}
+
+.side-bot .row > .av {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
