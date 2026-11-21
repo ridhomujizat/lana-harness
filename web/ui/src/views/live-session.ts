@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { answerApproval as answerApprovalRequest } from "../api/approvals";
-import type { ApprovalEvent } from "../api/approvals";
+import type { ApprovalEvent, ApprovalProof } from "../api/approvals";
 import { ApiError, errorMessage, openStream } from "../api/client";
 import type { StreamFrame, StreamState } from "../api/client";
 import {
@@ -71,7 +71,11 @@ export interface LiveSession {
   actionError: string;
   clearError: () => void;
   approval: ApprovalItem | null;
-  answerApproval: (approval: ApprovalEvent, outcome: string) => Promise<void>;
+  answerApproval: (
+    approval: ApprovalEvent,
+    outcome: string,
+    proof?: ApprovalProof
+  ) => Promise<void>;
   expireApproval: (approval: ApprovalEvent) => void;
   dismissApproval: () => void;
   question: QuestionEvent | null;
@@ -491,7 +495,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
   }, [id, continueBusy, started]);
 
   const answerApproval = useCallback(
-    async (approval: ApprovalEvent, outcome: string) => {
+    async (approval: ApprovalEvent, outcome: string, proof?: ApprovalProof) => {
       setActionError("");
       setApprovals((current) =>
         current.map((item) =>
@@ -499,7 +503,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
         )
       );
       try {
-        await answerApprovalRequest(approval.request_id, outcome);
+        await answerApprovalRequest(approval.request_id, outcome, undefined, proof);
         markDecided(approval.request_id, outcome);
       } catch (failure) {
         if (failure instanceof ApiError && failure.code === "approval_closed") {

@@ -281,6 +281,8 @@ export function outcomeWords(outcome: unknown): string {
   switch (outcome) {
     case "allowed_once":
       return "Allowed once";
+    case "allowed_verified":
+      return "Approved with confirmation";
     case "allowed_session":
       return "Allowed for session";
     case "rejected":

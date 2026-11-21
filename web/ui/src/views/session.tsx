@@ -22,7 +22,11 @@ import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { answerApproval } from "../api/approvals";
 import { useSessionPresence } from "../lib/session-presence";
-import type { ApprovalEvent } from "../api/approvals";
+import type {
+  ApprovalAnswerResult,
+  ApprovalEvent,
+  ApprovalProof,
+} from "../api/approvals";
 import {
   attachmentName,
   attachmentURL,
@@ -2602,7 +2606,11 @@ export function SessionPage({ id, view }: SessionPageProps) {
   );
 
   const handleApprovalAnswer = useCallback(
-    async (approval: ApprovalEvent, outcome: string) => {
+    async (
+      approval: ApprovalEvent,
+      outcome: string,
+      proof?: ApprovalProof
+    ): Promise<ApprovalAnswerResult> => {
       clearError();
       setApprovals((current) =>
         current.map((item) =>
@@ -2612,12 +2620,13 @@ export function SessionPage({ id, view }: SessionPageProps) {
         )
       );
       try {
-        await answerApproval(approval.request_id, outcome);
+        await answerApproval(approval.request_id, outcome, undefined, proof);
         markApprovalDecided(
           approval.request_id,
           outcome,
           "Approval decided: " + approvalResultWords(outcome) + "."
         );
+        return { ok: true };
       } catch (failure) {
         if (failure instanceof ApiError && failure.code === "approval_closed") {
           markApprovalDecided(
@@ -2625,16 +2634,30 @@ export function SessionPage({ id, view }: SessionPageProps) {
             "approval_closed",
             "Approval closed. Another tab answered first or the approval expired."
           );
-          return;
+          return { ok: true };
         }
-        setApprovals((current) =>
-          current.map((item) =>
-            item.request_id === approval.request_id
-              ? { ...item, deciding: false, error: errorMessage(failure) }
-              : item
-          )
-        );
-        reportError(failure, "Could not answer the approval.");
+        const code = failure instanceof ApiError ? failure.code : "";
+        /* A block-tier step-up error (API-HLF-005) is shown inline by the card;
+           every other failure keeps the previous inline and toast report. */
+        if (approval.hardline && approval.hardline.tier === "block") {
+          setApprovals((current) =>
+            current.map((item) =>
+              item.request_id === approval.request_id
+                ? { ...item, deciding: false }
+                : item
+            )
+          );
+        } else {
+          setApprovals((current) =>
+            current.map((item) =>
+              item.request_id === approval.request_id
+                ? { ...item, deciding: false, error: errorMessage(failure) }
+                : item
+            )
+          );
+          reportError(failure, "Could not answer the approval.");
+        }
+        return { ok: false, code, message: errorMessage(failure) };
       }
     },
     [clearError, markApprovalDecided, reportError]
