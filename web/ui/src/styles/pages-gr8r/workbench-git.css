@@ -1658,10 +1658,11 @@ tr.is-target td {
   display: none;
 }
 
-/* With the panel open the tab strip is narrow: Accounts and Attached shrink
-   to icons so the Changes button stays in view (REQ-WG-060). */
-.wb-page.wbg-open .wb-attached,
-.wb-page.wbg-open .wb-acc-btn > span:last-child {
+/* With the panel open the browser's tab strip is narrow: Accounts and
+   Attached shrink to icons. In Lana.app the strip runs over the panel and
+   has the room, so they stay (owner, 2026-11-22). */
+html:not([data-shell="macos-app"]) .wb-page.wbg-open .wb-attached,
+html:not([data-shell="macos-app"]) .wb-page.wbg-open .wb-acc-btn > span:last-child {
   display: none;
 }
 
