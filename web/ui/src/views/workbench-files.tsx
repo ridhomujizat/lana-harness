@@ -13,6 +13,7 @@ import {
   type GitTreeEntry,
 } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
+import { themedUrl, usePageTheme } from "../app/theme";
 import { CHAR_W, Code, Counts, DiffView, LINE_H, StatusLetter } from "./workbench-changes";
 import { baseName, blockCommentStates, dirName, gutterMarks, type GutterMark } from "./workbench-git-model";
 import { humanSize } from "./workbench-preview";
@@ -458,6 +459,7 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
 
 /* Kinds other than text reuse the spec 61 preview page (REQ-WG-009). */
 function ExternalBody({ data }: { data: WorkbenchPreview }) {
+  const theme = usePageTheme();
   if (data.kind === "binary") {
     return (
       <div className="wbg-empty">
@@ -473,7 +475,7 @@ function ExternalBody({ data }: { data: WorkbenchPreview }) {
     );
   }
   /* Never allow-same-origin (spec 61 REQ-WP-013). */
-  return <iframe className="wbg-frame" sandbox="allow-scripts allow-forms allow-popups" src={data.url} title={data.name} />;
+  return <iframe className="wbg-frame" sandbox="allow-scripts allow-forms allow-popups" src={themedUrl(data.url, theme)} title={data.name} />;
 }
 
 function ExternalView({ data }: { data: WorkbenchPreview }) {

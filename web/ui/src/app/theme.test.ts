@@ -75,3 +75,12 @@ describe("sidebar persistence", () => {
     expect(readCollapsed()).toBe(false);
   });
 });
+
+describe("themedUrl", () => {
+  it("adds the theme before a fragment", async () => {
+    const { themedUrl } = await import("./theme");
+    expect(themedUrl("/v1/workbench/preview/t/a.md?view=1", "dark")).toBe("/v1/workbench/preview/t/a.md?view=1&theme=dark");
+    expect(themedUrl("/v1/workbench/preview/t/a.go?view=1#L12", "light")).toBe("/v1/workbench/preview/t/a.go?view=1&theme=light#L12");
+    expect(themedUrl("/raw/a.png", "light")).toBe("/raw/a.png?theme=light");
+  });
+});

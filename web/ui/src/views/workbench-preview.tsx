@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 
 import type { WorkbenchPreview } from "../api/workbench";
 import { Ic } from "../ui/icons";
+import { themedUrl, usePageTheme } from "../app/theme";
 
 /* Spec 61 REQ-WP-012, REQ-WP-013: the file preview. On desktop it is a panel
    at the right of the panes with a draggable divider; on a phone it is a
@@ -67,6 +68,7 @@ export interface PreviewPanelProps {
 }
 
 export function WorkbenchPreview({ data, phone, onClose }: PreviewPanelProps) {
+  const theme = usePageTheme();
   const [width, setWidth] = useState(readWidth);
   const closeRef = useRef(onClose);
   useEffect(() => {
@@ -157,7 +159,7 @@ export function WorkbenchPreview({ data, phone, onClose }: PreviewPanelProps) {
         <iframe
           className="wb-preview-frame"
           sandbox="allow-scripts allow-forms allow-popups"
-          src={data.url}
+          src={themedUrl(data.url, theme)}
           title={data.name}
         />
       )}

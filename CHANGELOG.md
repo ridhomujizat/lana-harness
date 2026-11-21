@@ -7,6 +7,23 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.2] - 2026-11-22
+
+### Added
+
+- Mermaid diagrams in the Workbench Markdown preview: ```` ```mermaid ```` blocks render as diagrams. Each has − / % / + zoom (% fits the width), ⌘/Ctrl + scroll and pinch zoom around the pointer (25–400%), and scrolls once it is larger than its box; its text can be selected and copied. A diagram that fails to parse shows the error and its source. Mermaid 11 is served from Lana's own assets and loads only when a page has a diagram.
+- Bottom sheets with a grip (Workbench All tabs, Claude accounts, the phone Files/Changes/Worktrees sheet, the Knowledge page panel on a phone) can be dragged: up for the full height, down to bring it back or close it. A tap on the grip toggles the full height.
+
+### Changed
+
+- The Workbench file preview (Markdown, text and image pages) follows the app's light or dark theme; it was always dark.
+- Moving a Workbench pane by drag no longer selects header text (Lana.app), keeps the drag when the pointer passes over a terminal or preview, and the drop area says what a release does (Swap, Move left, right, above, below).
+
+### Fixed
+
+- The phone Workbench All tabs sheet: tab cards were squeezed to one clipped line; they now show the program strip, the title and the status. The active tab has the accent border. "1 tab" instead of "1 tabs".
+- In a narrow Lana.app window, the phone Workbench header leaves room for the window buttons.
+
 ## [0.6.0-beta.1] - 2026-11-22
 
 ### Added

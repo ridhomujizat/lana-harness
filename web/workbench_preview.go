@@ -248,12 +248,15 @@ func (s *Server) handleWorkbenchPreviewFile(w http.ResponseWriter, r *http.Reque
 	}
 	kind := preview.KindOf(resolved, info.Size())
 	if r.URL.Query().Get("view") == "1" {
+		// The client appends &theme= to the preview url; only "light" and
+		// "dark" reach the page, any other value is ignored (REQ-WP-005).
+		theme := r.URL.Query().Get("theme")
 		switch kind {
 		case preview.KindMarkdown:
-			s.servePreviewMarkdown(w, resolved)
+			s.servePreviewMarkdown(w, resolved, theme)
 			return
 		case preview.KindText:
-			s.servePreviewText(w, resolved)
+			s.servePreviewText(w, resolved, theme)
 			return
 		case preview.KindImage:
 			rel, err := filepath.Rel(root, resolved)
@@ -261,7 +264,7 @@ func (s *Server) handleWorkbenchPreviewFile(w http.ResponseWriter, r *http.Reque
 				writeAPIError(w, http.StatusNotFound, "not_found", "not found")
 				return
 			}
-			page := preview.RenderImagePage(previewRawURL(r.PathValue("token"), filepath.ToSlash(rel)))
+			page := preview.RenderImagePage(previewRawURL(r.PathValue("token"), filepath.ToSlash(rel)), theme)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(page)
@@ -271,14 +274,15 @@ func (s *Server) handleWorkbenchPreviewFile(w http.ResponseWriter, r *http.Reque
 	s.servePreviewRaw(w, r, resolved, info, kind)
 }
 
-// servePreviewMarkdown renders a Markdown file as its page (REQ-WP-005).
-func (s *Server) servePreviewMarkdown(w http.ResponseWriter, path string) {
+// servePreviewMarkdown renders a Markdown file as its page (REQ-WP-005). theme
+// is the page's light/dark choice, passed straight from the query.
+func (s *Server) servePreviewMarkdown(w http.ResponseWriter, path, theme string) {
 	source, err := os.ReadFile(path)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
-	page, err := preview.RenderMarkdownPage(source)
+	page, err := preview.RenderMarkdownPage(source, theme)
 	if err != nil {
 		s.logger.Error("web: workbench preview markdown", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -289,8 +293,9 @@ func (s *Server) servePreviewMarkdown(w http.ResponseWriter, path string) {
 	_, _ = w.Write(page)
 }
 
-// servePreviewText renders a text file as its page (REQ-WP-005).
-func (s *Server) servePreviewText(w http.ResponseWriter, path string) {
+// servePreviewText renders a text file as its page (REQ-WP-005). theme is the
+// page's light/dark choice, passed straight from the query.
+func (s *Server) servePreviewText(w http.ResponseWriter, path, theme string) {
 	source, err := os.ReadFile(path)
 	if err != nil {
 		writeAPIError(w, http.StatusNotFound, "not_found", "not found")
@@ -298,7 +303,7 @@ func (s *Server) servePreviewText(w http.ResponseWriter, path string) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(preview.RenderTextPage(source, 0))
+	_, _ = w.Write(preview.RenderTextPage(source, 0, theme))
 }
 
 // servePreviewRaw sends a file as it is, with its content type by extension and

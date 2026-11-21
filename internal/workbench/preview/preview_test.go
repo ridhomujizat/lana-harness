@@ -198,22 +198,31 @@ func TestPolicy(t *testing.T) {
 
 func TestRenderMarkdownPage(t *testing.T) {
 	src := "# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [x] done\n"
-	page, err := RenderMarkdownPage([]byte(src))
+	page, err := RenderMarkdownPage([]byte(src), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(page)
-	for _, want := range []string{"<h1", "<table>", "checkbox", "#1D1C1B", "#ECEAE5", "#262523", "Geist"} {
+	for _, want := range []string{
+		"<h1", "<table>", "checkbox", "#1D1C1B", "#ECEAE5", "#262523", "Geist",
+		"@media (prefers-color-scheme: dark)",
+		`<script src="/assets/vendor/md-preview.js" defer></script>`,
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("markdown page missing %q:\n%s", want, got)
 		}
 	}
+	// The default (no theme) page carries no data-theme attribute and follows
+	// the system through the media query.
+	if strings.Contains(got, "<html data-theme") || !strings.Contains(got, "<html>") {
+		t.Fatalf("default markdown page has a theme attribute:\n%s", got)
+	}
 
-	raw, err := RenderMarkdownPage([]byte("<script>alert(1)</script>\n"))
+	raw, err := RenderMarkdownPage([]byte("<script>alert(1)</script>\n"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "<script") {
+	if strings.Contains(string(raw), "alert(1)") {
 		t.Fatalf("raw HTML not dropped:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), "raw HTML omitted") {
@@ -222,7 +231,7 @@ func TestRenderMarkdownPage(t *testing.T) {
 }
 
 func TestRenderTextPage(t *testing.T) {
-	page := string(RenderTextPage([]byte("a < b\nsecond\n"), 2))
+	page := string(RenderTextPage([]byte("a < b\nsecond\n"), 2, ""))
 	for _, want := range []string{
 		"<pre", `id="L1"`, `id="L2"`, `id="L3"`, "row hl", "a &lt; b", ":target", "monospace",
 	} {
@@ -233,10 +242,13 @@ func TestRenderTextPage(t *testing.T) {
 	if strings.Contains(page, "a < b") {
 		t.Fatalf("text page did not escape the source:\n%s", page)
 	}
+	if strings.Contains(page, "<script") {
+		t.Fatalf("text page should have no script:\n%s", page)
+	}
 }
 
 func TestRenderImagePage(t *testing.T) {
-	page := string(RenderImagePage("/v1/workbench/preview/tok/pic.png"))
+	page := string(RenderImagePage("/v1/workbench/preview/tok/pic.png", ""))
 	for _, want := range []string{
 		`<img src="/v1/workbench/preview/tok/pic.png"`, "display: flex",
 		"justify-content: center", "max-width: 100%", "max-height: 100vh", "#1D1C1B",
@@ -245,4 +257,47 @@ func TestRenderImagePage(t *testing.T) {
 			t.Fatalf("image page missing %q:\n%s", want, page)
 		}
 	}
+	if strings.Contains(page, "<script") {
+		t.Fatalf("image page should have no script:\n%s", page)
+	}
+}
+
+// TestRenderPageTheme checks that a known theme pins the page through the
+// data-theme attribute while any other value is ignored (REQ-WP-005).
+func TestRenderPageTheme(t *testing.T) {
+	for _, theme := range []string{"light", "dark"} {
+		page := string(RenderTextPage([]byte("x\n"), 0, theme))
+		if want := `<html data-theme="` + theme + `">`; !strings.Contains(page, want) {
+			t.Fatalf("theme %q: page missing %q:\n%s", theme, want, page)
+		}
+	}
+	for _, theme := range []string{`"><script>alert(1)</script>`, "Dark", "true", "1"} {
+		page := string(RenderTextPage([]byte("x\n"), 0, theme))
+		if strings.Contains(page, "<html data-theme") {
+			t.Fatalf("theme %q: page got a data-theme attribute:\n%s", theme, page)
+		}
+		if strings.Contains(page, "<script") {
+			t.Fatalf("theme %q: page got an injected script:\n%s", theme, page)
+		}
+	}
+}
+
+// TestRenderMarkdownPageMermaid checks the GFM renderer keeps a mermaid fence
+// as a plain language-mermaid code block (the page script draws it).
+func TestRenderMarkdownPageMermaid(t *testing.T) {
+	page := renderMarkdownPage(t, "```mermaid\ngraph TD; A-->B;\n```\n")
+	if !strings.Contains(page, `<pre><code class="language-mermaid">`) {
+		t.Fatalf("mermaid fence not rendered as a language-mermaid block:\n%s", page)
+	}
+}
+
+// renderMarkdownPage renders a Markdown source with no theme and fails the
+// test on error.
+func renderMarkdownPage(t *testing.T, src string) string {
+	t.Helper()
+	page, err := RenderMarkdownPage([]byte(src), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(page)
 }

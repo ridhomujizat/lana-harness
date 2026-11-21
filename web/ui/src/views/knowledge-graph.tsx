@@ -8,6 +8,7 @@ import type {
   KnowledgeScopeStat,
 } from "../api/knowledge";
 import { Ic } from "../ui/icons";
+import { useSheetDrag } from "../ui/sheet-drag";
 import { Button, Checkbox, EmptyState, IconButton, SearchInput, Skeleton } from "../ui/gr8r";
 import { useAgentLabel } from "./agent-label";
 import {
@@ -202,6 +203,7 @@ export function PageSummary({
   onSelect: (path: string) => void;
   onClose: () => void;
 }) {
+  const { attach: sheetAttach, full: sheetFull, gripProps: sheetGrip } = useSheetDrag(onClose);
   const label = useAgentLabel();
   const [doc, setDoc] = useState<KnowledgePageDetail | null>(null);
   const [error, setError] = useState("");
@@ -244,8 +246,9 @@ export function PageSummary({
   );
 
   return (
-    <aside className="kg-panel" aria-label="Page summary" data-testid="graph-panel">
-      <div className="kg-panel-grip" aria-hidden="true" />
+    <aside ref={sheetAttach} className={"kg-panel" + (sheetFull ? " is-full" : "")} aria-label="Page summary" data-testid="graph-panel">
+      {/* Phone only (CSS): drag up for the full height, down to close. */}
+      <div className="kg-panel-grip sheet-grip" {...sheetGrip} />
       <div className="kg-panel-head">
         {doc ? (
           <>

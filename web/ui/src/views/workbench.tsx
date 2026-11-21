@@ -14,6 +14,7 @@ import {
   type WorkbenchSession,
 } from "../api/workbench";
 import { Ic } from "../ui/icons";
+import { useSheetDrag } from "../ui/sheet-drag";
 import {
   KEY_SEQUENCES,
   STATUS_LABEL,
@@ -488,15 +489,30 @@ function startPaneDrag(event: ReactPointerEvent<HTMLElement>, id: string, label:
   if (event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
-  const source = event.currentTarget.closest<HTMLElement>(".wb-pane");
-  const page = event.currentTarget.closest(".wb-workspace");
+  const grip = event.currentTarget;
+  const source = grip.closest<HTMLElement>(".wb-pane");
+  const page = grip.closest(".wb-workspace");
   if (!source || !page) return;
+  /* No text selection from the first press (WebKit starts one on
+     pointerdown even when it is prevented), and the pointer stays with the
+     grip over terminals and iframes. */
+  window.getSelection()?.removeAllRanges();
+  document.body.classList.add("wb-pane-pressing");
+  try {
+    grip.setPointerCapture(event.pointerId);
+  } catch {
+    /* Synthetic events have no active pointer. */
+  }
   const x0 = event.clientX;
   const y0 = event.clientY;
   let started = false;
   let drop: { target: string; side: PaneDropSide } | null = null;
   const marker = document.createElement("div");
   marker.className = "wb-drop-marker";
+  /* What a release does here, in the middle of the marked area. */
+  const hint = document.createElement("span");
+  hint.className = "wb-drop-hint";
+  marker.append(hint);
   const ghost = document.createElement("div");
   ghost.className = "wb-drag-ghost";
   ghost.textContent = label;
@@ -511,6 +527,7 @@ function startPaneDrag(event: ReactPointerEvent<HTMLElement>, id: string, label:
     if (!el || !target || target === id || !page.contains(el)) {
       drop = null;
       marker.hidden = true;
+      ghost.hidden = false;
       return;
     }
     const r = el.getBoundingClientRect();
@@ -537,7 +554,11 @@ function startPaneDrag(event: ReactPointerEvent<HTMLElement>, id: string, label:
               ? [r.left, r.top + half.h, r.width, half.h]
               : [r.left, r.top, r.width, r.height];
     marker.hidden = false;
+    /* Over a target the marker's hint says it all; the name under the
+       pointer only shows between panes. */
+    ghost.hidden = true;
     marker.dataset.side = side;
+    hint.textContent = side === "center" ? "Swap" : "Move " + (side === "top" ? "above" : side === "bottom" ? "below" : side);
     marker.style.cssText = "left:" + box[0] + "px;top:" + box[1] + "px;width:" + box[2] + "px;height:" + box[3] + "px";
   };
   const move = (e: PointerEvent) => {
@@ -558,7 +579,8 @@ function startPaneDrag(event: ReactPointerEvent<HTMLElement>, id: string, label:
     window.removeEventListener("keydown", key, true);
     marker.remove();
     ghost.remove();
-    document.body.classList.remove("wb-pane-dragging");
+    document.body.classList.remove("wb-pane-dragging", "wb-pane-pressing");
+    window.getSelection()?.removeAllRanges();
     source.classList.remove("is-drag-source");
     if (commit && started && drop) onDrop(drop.target, drop.side);
   };
@@ -1012,6 +1034,7 @@ function PhoneWorkbench(props: PhoneProps) {
   const space = pickSpace(layout);
   const tab = pickTab(space);
   const [sheet, setSheet] = useState(false);
+  const { attach: tabSheetAttach, full: tabSheetFull, gripProps: tabSheetGrip } = useSheetDrag(() => setSheet(false));
   const [ctrl, setCtrl] = useState(false);
   const fontSize = usePhoneFont();
   const keyboardRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
@@ -1246,13 +1269,19 @@ function PhoneWorkbench(props: PhoneProps) {
       )}
       {sheet ? (
         <div className="wb-sheet-back" onClick={() => setSheet(false)}>
-          <div className="wb-sheet" role="dialog" aria-label="All tabs" onClick={(e) => e.stopPropagation()}>
-            <div className="wb-sheet-grip" />
+          <div
+            ref={tabSheetAttach}
+            className={"wb-sheet" + (tabSheetFull ? " is-full" : "")}
+            role="dialog"
+            aria-label="All tabs"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="wb-sheet-grip sheet-grip" {...tabSheetGrip} />
             <div className="wb-sheet-head">
               <div>
                 <b>{spaceLabel(space, sessions)}</b>
                 <span>
-                  {space.tabs.length} tabs · sorted by status
+                  {space.tabs.length} {space.tabs.length === 1 ? "tab" : "tabs"} · sorted by status
                 </span>
               </div>
               <button
@@ -1947,6 +1976,7 @@ export function WorkbenchPage() {
   const accountsReady = toolReady(claudeTool);
   const [accountsAnchor, setAccountsAnchor] = useState<HTMLElement | null>(null);
   const [accountsSheet, setAccountsSheet] = useState(false);
+  const { attach: accountsAttach, full: accountsFull, gripProps: accountsGrip } = useSheetDrag(() => setAccountsSheet(false));
   const accountActions: AccountActions = {
     newTab: (argv, title) => {
       const sp = pickSpace(layoutRef.current);
@@ -1989,8 +2019,14 @@ export function WorkbenchPage() {
         ) : null}
         {accountsSheet ? (
           <div className="wb-sheet-back" onClick={() => setAccountsSheet(false)}>
-            <div className="wb-sheet" role="dialog" aria-label="Claude accounts" onClick={(e) => e.stopPropagation()}>
-              <div className="wb-sheet-grip" />
+            <div
+              ref={accountsAttach}
+              className={"wb-sheet" + (accountsFull ? " is-full" : "")}
+              role="dialog"
+              aria-label="Claude accounts"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="wb-sheet-grip sheet-grip" {...accountsGrip} />
               <ClaudeAccountsPanel binary={claudeTool.binary_path} actions={accountActions} onClose={() => setAccountsSheet(false)} />
             </div>
           </div>

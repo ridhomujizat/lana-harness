@@ -481,6 +481,25 @@ func TestWorkbenchPreviewGETView(t *testing.T) {
 	}
 }
 
+// TestWorkbenchPreviewGETViewTheme checks the view page honours &theme=dark
+// (REQ-WP-005): the html tag carries data-theme="dark".
+func TestWorkbenchPreviewGETViewTheme(t *testing.T) {
+	s, cookie, csrf, root := newPreviewServer(t)
+	cwd := filepath.Join(root, "proj")
+	writePreviewFile(t, filepath.Join(cwd, "readme.md"), "# Title\n")
+	setPreviewSession(s, "s1", cwd)
+
+	_, token := previewPOSTToken(t, s, cookie, csrf, `{"session":"s1","link":"readme.md"}`)
+	rr := previewGET(s, previewBasePath+token+"/readme.md?view=1&theme=dark")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	assertPreviewHeaders(t, rr.Header())
+	if body := rr.Body.String(); !strings.Contains(body, `<html data-theme="dark">`) {
+		t.Fatalf("view page missing data-theme:\n%s", body)
+	}
+}
+
 func TestWorkbenchPreviewGETSymlinkLeavesFolder(t *testing.T) {
 	s, cookie, csrf, root := newPreviewServer(t)
 	folderA := filepath.Join(root, "a")
