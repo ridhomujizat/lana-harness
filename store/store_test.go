@@ -555,6 +555,99 @@ func TestForkAtTurnEnd(t *testing.T) {
 	}
 }
 
+// TestChainEventsAfterMatchesChainEvents covers the incremental read of an open
+// session: for a plain session, a forked child with own events, a forked child
+// with only its session/created, and a grandchild, ChainEventsAfter must equal
+// filtering ChainEvents by Seq > fromSeq and report the chain's largest Seq.
+func TestChainEventsAfterMatchesChainEvents(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+
+	parent := createSession(t, s)
+	turns, err := s.Append(ctx, parent.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "t1", Payload: core.TurnStart{V: 1, TurnID: "t1"}},
+		{Kind: core.KindTurnEnd, TurnID: "t1", Payload: core.TurnEnd{V: 1, TurnID: "t1", Reason: "end_turn"}},
+		{Kind: core.KindTurnStart, TurnID: "t2", Payload: core.TurnStart{V: 1, TurnID: "t2"}},
+		{Kind: core.KindTurnEnd, TurnID: "t2", Payload: core.TurnEnd{V: 1, TurnID: "t2", Reason: "end_turn"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Fork(ctx, parent.ID, turns[1].Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childTurns, err := s.Append(ctx, child.ID, []core.EventDraft{
+		{Kind: core.KindTurnStart, TurnID: "c1", Payload: core.TurnStart{V: 1, TurnID: "c1"}},
+		{Kind: core.KindTurnEnd, TurnID: "c1", Payload: core.TurnEnd{V: 1, TurnID: "c1", Reason: "end_turn"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := s.Fork(ctx, parent.ID, turns[1].Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grand, err := s.Fork(ctx, child.ID, childTurns[1].Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		id   string
+	}{
+		{"plain", parent.ID},
+		{"child", child.ID},
+		{"child-only-created", leaf.ID},
+		{"grandchild", grand.ID},
+	} {
+		info, err := s.Info(ctx, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, fromSeq := range []int64{0, 1, info.InheritedSeq - 1, info.InheritedSeq, info.InheritedSeq + 1, info.LastSeq - 1, info.LastSeq, info.LastSeq + 5} {
+			assertChainEventsAfter(t, s, tc.id, fromSeq)
+		}
+	}
+}
+
+// assertChainEventsAfter checks that ChainEventsAfter(sessionID, fromSeq) equals
+// the ChainEvents entries with Seq > fromSeq, in order, and that lastSeq is the
+// largest Seq over the full chain (0 when the chain is empty).
+func assertChainEventsAfter(t *testing.T, s *Store, sessionID string, fromSeq int64) {
+	t.Helper()
+	chain, err := s.ChainEvents(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("ChainEvents: %v", err)
+	}
+	want := make([]core.SessionEvent, 0, len(chain))
+	var wantLast int64
+	for _, event := range chain {
+		if event.Seq > wantLast {
+			wantLast = event.Seq
+		}
+		if event.Seq > fromSeq {
+			want = append(want, event)
+		}
+	}
+	got, lastSeq, err := s.ChainEventsAfter(context.Background(), sessionID, fromSeq)
+	if err != nil {
+		t.Fatalf("ChainEventsAfter(%d): %v", fromSeq, err)
+	}
+	if lastSeq != wantLast {
+		t.Fatalf("fromSeq %d: lastSeq = %d, want %d", fromSeq, lastSeq, wantLast)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("fromSeq %d: %d events, want %d", fromSeq, len(got), len(want))
+	}
+	for i := range want {
+		if got[i].Seq != want[i].Seq || got[i].Kind != want[i].Kind || got[i].TurnID != want[i].TurnID || !bytes.Equal(got[i].Payload, want[i].Payload) {
+			t.Fatalf("fromSeq %d: event %d = %+v, want %+v", fromSeq, i, got[i], want[i])
+		}
+	}
+}
+
 func TestEventsFromSeq(t *testing.T) {
 	s, _ := openTest(t)
 	info := createSession(t, s)

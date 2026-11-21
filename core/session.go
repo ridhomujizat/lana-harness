@@ -65,6 +65,9 @@ type SessionStore interface {
 	Append(ctx context.Context, id string, drafts []EventDraft) ([]SessionEvent, error)
 	Events(ctx context.Context, id string, fromSeq int64) iter.Seq2[SessionEvent, error]
 	ChainEvents(ctx context.Context, id string) ([]SessionEvent, error)
+	// ChainEventsAfter returns the ChainEvents entries with Seq > fromSeq and
+	// the largest Seq over the full chain (0 when the chain is empty).
+	ChainEventsAfter(ctx context.Context, id string, fromSeq int64) ([]SessionEvent, int64, error)
 	DeriveMessages(ctx context.Context, id string) ([]Message, error)
 	List(ctx context.Context, f SessionFilter) ([]SessionInfo, error)
 	FindPrefix(ctx context.Context, prefix string) ([]SessionInfo, error)
