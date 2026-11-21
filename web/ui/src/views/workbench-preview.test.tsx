@@ -30,7 +30,8 @@ describe("preview panel", () => {
 
     const frame = container.querySelector("iframe");
     expect(frame).not.toBeNull();
-    expect(frame!.getAttribute("src")).toBe("/v1/workbench/preview/tok/README.md?view=1");
+    /* The page draws in the app's theme (jsdom: light). */
+    expect(frame!.getAttribute("src")).toBe("/v1/workbench/preview/tok/README.md?view=1&theme=light");
     const sandbox = frame!.getAttribute("sandbox") ?? "";
     expect(sandbox).toBe("allow-scripts allow-forms allow-popups");
     expect(sandbox).not.toContain("allow-same-origin");

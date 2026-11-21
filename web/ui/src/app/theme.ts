@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 /* Theme state for the dashboard shell. The choice is stored per browser. */
 
 export const THEME_KEY = "lana.theme";
@@ -82,4 +83,33 @@ export function watchSystemTheme(callback: () => void): () => void {
     return () => query.removeListener(handler);
   }
   return () => {};
+}
+
+/* The theme on <html> right now ("light" or "dark"), for a component that
+   must follow it, such as the Workbench preview iframe (owner, 2026-11-22).
+   It re-renders when the attribute changes. */
+function subscribePageTheme(callback: () => void): () => void {
+  if (typeof MutationObserver === "undefined") return () => {};
+  const observer = new MutationObserver(callback);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+
+function pageTheme(): "light" | "dark" {
+  const attr = document.documentElement.getAttribute("data-theme");
+  if (attr === "light" || attr === "dark") return attr;
+  return systemPrefersDark() ? "dark" : "light";
+}
+
+export function usePageTheme(): "light" | "dark" {
+  return useSyncExternalStore(subscribePageTheme, pageTheme, () => "light");
+}
+
+/* A preview page URL with the theme it should draw in (the daemon reads
+   ?theme=light|dark); a #fragment stays at the end. */
+export function themedUrl(url: string, theme: "light" | "dark"): string {
+  const hash = url.indexOf("#");
+  const base = hash < 0 ? url : url.slice(0, hash);
+  const frag = hash < 0 ? "" : url.slice(hash);
+  return base + (base.includes("?") ? "&" : "?") + "theme=" + theme + frag;
 }
