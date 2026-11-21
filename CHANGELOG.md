@@ -7,6 +7,18 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.17] - 2026-11-21
+
+### Changed
+
+- Lana.app window chrome: the sidebar and the top bar share one colour with no dividing lines, and each page sits in a card with rounded corners. The collapsed sidebar stays a 52px icon rail. In the Workbench the tab strip moves into the title row next to the window buttons, and Spaces and the terminals sit in the card below it; a divider separates the sidebar button from the "show panel" button when both are shown.
+- The sidebar slides between full width and the icon rail, and the Workbench Spaces panel grows and shrinks when shown or hidden. Terminals keep their size during the slide and fit once it ends. Reduced motion turns the animation off.
+
+### Fixed
+
+- The count badge in the sidebar (for example the Workbench attention count) centres its number in the circle; it sat about 2px low.
+- Tooltips in the Workbench tab strip no longer show as a light line under a hovered button.
+
 ## [0.5.0-beta.16] - 2026-11-21
 
 ### Added
