@@ -1317,10 +1317,16 @@ export function WorkbenchPage() {
   const [panelMotion, setPanelMotion] = useState<"in" | "out" | null>(null);
   const panelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(panelTimer.current), []);
-  const togglePanel = () => {
+  /* Spec 66 (owner, 2026-11-21): the git panel hides the Spaces sidebar while
+     it is open and brings it back after; a hand toggle in between wins. */
+  const sidebarAuto = useRef(false);
+  const togglePanel = (opts?: unknown) => {
+    const auto = !!opts && typeof opts === "object" && (opts as { auto?: boolean }).auto === true;
     const next = !panelOpen || panelMotion === "out";
+    if (!auto) sidebarAuto.current = false;
     try {
-      window.localStorage.setItem(PANEL_KEY, next ? "open" : "closed");
+      /* An automatic hide is not the owner's choice: keep the stored one. */
+      if (!auto) window.localStorage.setItem(PANEL_KEY, next ? "open" : "closed");
     } catch {
       /* Storage is optional. */
     }
@@ -1668,7 +1674,29 @@ export function WorkbenchPage() {
       })
       .catch((err) => setError(errorMessage(err)));
   };
-  const git = useWorkbenchGit({ layout, sessions, space, tab, phone, openTab: gitOpenTab });
+  const onGitOpenChange = (open: boolean) => {
+    if (phone) return;
+    const sidebarShown = panelOpen && panelMotion !== "out";
+    if (open && sidebarShown) {
+      togglePanel({ auto: true });
+      sidebarAuto.current = true;
+    } else if (!open && sidebarAuto.current) {
+      sidebarAuto.current = false;
+      if (!sidebarShown) togglePanel({ auto: true });
+    }
+  };
+  const git = useWorkbenchGit({ layout, sessions, space, tab, phone, openTab: gitOpenTab, onOpenChange: onGitOpenChange });
+  /* A page loaded with the git panel open hides the sidebar the same way. */
+  const gitMountSynced = useRef(false);
+  useEffect(() => {
+    if (gitMountSynced.current || phone || !loaded) return;
+    gitMountSynced.current = true;
+    if (git.open && panelOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time sync of the sidebar with a panel restored open
+      togglePanel({ auto: true });
+      sidebarAuto.current = true;
+    }
+  });
   useEffect(() => {
     showPreviewRef.current = git.showPreview;
   });

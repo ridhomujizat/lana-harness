@@ -74,6 +74,7 @@ export function useWorkbenchGit({
   tab,
   phone,
   openTab,
+  onOpenChange,
 }: {
   layout: WbLayout;
   sessions: Sessions;
@@ -82,6 +83,8 @@ export function useWorkbenchGit({
   phone: boolean;
   /* Starts a session in dir as a new tab of the active space. */
   openTab: (dir: string, program: "claude" | "shell") => void;
+  /* Told when the panel starts to open or close, so the page can make room. */
+  onOpenChange?: (open: boolean) => void;
 }): UseWorkbenchGit {
   const [open, setOpen] = useState(() => readPref(OPEN_KEY, ["open", "closed"] as const, "closed") === "open");
   const [motion, setMotion] = useState<"in" | "out" | null>(null);
@@ -152,6 +155,7 @@ export function useWorkbenchGit({
 
   const setOpenSaved = (next: boolean) => {
     savePref(OPEN_KEY, next ? "open" : "closed");
+    onOpenChange?.(next);
     clearTimeout(timer.current);
     if (phone || reducedMotion()) {
       setMotion(null);
