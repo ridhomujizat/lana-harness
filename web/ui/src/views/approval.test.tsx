@@ -126,14 +126,14 @@ describe("ApprovalCard hardline", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Send Telegram code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
     await waitFor(() => expect(sendApprovalCode).toHaveBeenCalledWith("a1"));
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toBe("Code sent to Telegram.")
     );
     /* A second send is disabled during the cooldown. */
     expect(
-      (screen.getByRole("button", { name: /Send Telegram code/ }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: /Send code/ }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
 
@@ -220,5 +220,84 @@ describe("ApprovalCard hardline", () => {
     ).toBeTruthy();
     expect(screen.queryByLabelText("Lana password")).toBeNull();
     expect(screen.getByText("$ rm -rf ~")).toBeTruthy();
+  });
+
+  it("keeps the block action row under the inputs and out of the header", () => {
+    render(
+      <ApprovalCard
+        approval={item({
+          hardline: {
+            rule: "HL-B-001",
+            tier: "block",
+            reason: "recursive delete of a system directory",
+            step_up: "password",
+          },
+        })}
+        onAnswer={vi.fn()}
+      />
+    );
+
+    const password = screen.getByLabelText("Lana password");
+    const allow = screen.getByRole("button", { name: "Allow once" });
+    const deny = screen.getByRole("button", { name: "Deny" });
+
+    /* The header holds no action buttons; both live in the bottom row. */
+    expect(document.querySelectorAll(".approval-head button").length).toBe(0);
+    expect(allow.closest(".approval-stepup-actions")).toBeTruthy();
+    expect(deny.closest(".approval-stepup-actions")).toBeTruthy();
+    /* The action row comes after the password field in document order. */
+    expect(
+      password.compareDocumentPosition(allow) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("offers no Telegram control when step_up is password", () => {
+    render(
+      <ApprovalCard
+        approval={item({
+          hardline: {
+            rule: "HL-B-001",
+            tier: "block",
+            reason: "recursive delete of a system directory",
+            step_up: "password",
+          },
+        })}
+        onAnswer={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.getByText("This command needs your Lana password to run.")
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send code" })).toBeNull();
+    expect(screen.queryByLabelText("Telegram code")).toBeNull();
+    expect(screen.queryByTestId("stepup-or")).toBeNull();
+  });
+
+  it("offers the password or a Telegram code when step_up is password_or_telegram", () => {
+    vi.mocked(sendApprovalCode).mockResolvedValue({ sent_to: 1 });
+    render(
+      <ApprovalCard
+        approval={item({
+          hardline: {
+            rule: "HL-B-002",
+            tier: "block",
+            reason: "disk destruction",
+            step_up: "password_or_telegram",
+          },
+        })}
+        onAnswer={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        "This command needs your Lana password or a Telegram code to run."
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send code" })).toBeTruthy();
+    expect(screen.getByLabelText("Telegram code")).toBeTruthy();
+    expect(screen.queryByTestId("stepup-or")).toBeTruthy();
   });
 });

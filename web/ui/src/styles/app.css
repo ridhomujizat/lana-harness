@@ -3028,6 +3028,15 @@ pre.json {
   background: var(--red-soft);
 }
 
+/* The rule id and its "·" stay on one line so the separator is never left
+   alone when the reason wraps to the next line. */
+.approval-hardline-rule-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .approval-hardline-rule {
   font-family: var(--mono);
   font-size: 12px;
@@ -3051,10 +3060,36 @@ pre.json {
   gap: 8px;
 }
 
+.approval-stepup-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: var(--line-height-sm);
+}
+
 .approval-stepup-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* The "or" divider between the password field and the Telegram code row. */
+.approval-stepup-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.approval-stepup-or-line {
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-secondary);
+}
+
+.approval-stepup-or-text {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .approval-stepup-code-row {
@@ -3078,6 +3113,15 @@ pre.json {
   color: var(--text-success-primary);
   font-size: 13px;
   line-height: var(--line-height-sm);
+}
+
+/* The block card's action row sits under the inputs, so the primary button is
+   always next to the password field. */
+.approval-stepup-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
 .composer {

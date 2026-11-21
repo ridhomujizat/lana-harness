@@ -72,7 +72,7 @@ Adds `hardline` with the fields of API-HLF-001, plus:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `hardline.step_up` | string | For tier `block`: `password` or `password_or_telegram` (from `[web.remote] confirm_with`; `password` when unset). Empty for tier `escalate`. |
+| `hardline.step_up` | string | For tier `block`: `password` or `password_or_telegram`. It is `password_or_telegram` only when `[web.remote] confirm_with` allows a Telegram code and Telegram can deliver one right now (a connected owner messenger and reset port); otherwise `password`. Empty for tier `escalate`. |
 
 ## API-HLF-005: `POST /v1/approvals/{id}`
 
