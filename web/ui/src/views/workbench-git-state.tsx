@@ -66,6 +66,7 @@ export interface UseWorkbenchGit {
   openNewWorktree: () => void;
   openWorktrees: () => void;
   focusMode: boolean;
+  setFocusMode: (on: boolean) => void;
   close: () => void;
   changeCount: number;
 }
@@ -300,6 +301,11 @@ export function useWorkbenchGit({
     </div>
   );
 
+  const changeFocusMode = (on: boolean) => {
+    savePref("lana.workbench.gitFocus", on ? "on" : "off");
+    withViewTransition(() => flushSync(() => setFocusMode(on)));
+  };
+
   const panel = open ? (
     <GitPanel
       phone={phone}
@@ -334,10 +340,7 @@ export function useWorkbenchGit({
       external={external}
       worktreesTab={worktreesTab}
       focusMode={focusMode}
-      onFocusMode={(on) => {
-        savePref("lana.workbench.gitFocus", on ? "on" : "off");
-        withViewTransition(() => flushSync(() => setFocusMode(on)));
-      }}
+      onFocusMode={(on) => changeFocusMode(on)}
     />
   ) : null;
 
@@ -400,5 +403,6 @@ export function useWorkbenchGit({
     },
     openWorktrees,
     focusMode,
+    setFocusMode: changeFocusMode,
   };
 }

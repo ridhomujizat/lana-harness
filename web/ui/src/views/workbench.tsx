@@ -505,8 +505,9 @@ function PaneView({
   fontSize?: number;
   /* Its share of the parent split. */
   grow?: number;
-  /* Focus mode: which of the tab's panes this is, and stepping to the others. */
-  cycle?: { index: number; total: number; go: (delta: number) => void };
+  /* Focus mode: which of the tab's panes this is, stepping to the others, and
+     leaving focus mode (the pane's unexpand button). */
+  cycle?: { index: number; total: number; go: (delta: number) => void; exit: () => void };
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
@@ -534,7 +535,7 @@ function PaneView({
           <button
             type="button"
             className="wbg-shared"
-            title="Two agents are editing this worktree"
+            title={"Two agents are editing this worktree: shared with " + git.describe(shared[0] ?? "")}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => git.onShared(id)}
           >
@@ -565,15 +566,25 @@ function PaneView({
           </span>
         ) : null}
         <span className="wb-pane-tools">
-          <button type="button" aria-label="Split right" data-tip="Split right ⌘D" onClick={() => actions.onSplit(id, "row")}>
-            <Ic name="columns-2" size={14} />
-          </button>
-          <button type="button" aria-label="Split down" data-tip="Split down ⇧⌘D" onClick={() => actions.onSplit(id, "col")}>
-            <Ic name="rows-2" size={14} />
-          </button>
-          <button type="button" aria-label={zoomed ? "Unzoom" : "Zoom"} data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"} onClick={() => actions.onZoom(id)}>
-            <Ic name={zoomed ? "minimize-2" : "maximize-2"} size={14} />
-          </button>
+          {cycle ? (
+            /* Focus mode: no split (the new pane would be hidden at once);
+               unexpand shows every pane again, the panel stays. */
+            <button type="button" aria-label="Show all panes" data-tip="Show all panes ⇧⌘↩" onClick={cycle.exit}>
+              <Ic name="minimize-2" size={14} />
+            </button>
+          ) : (
+            <>
+              <button type="button" aria-label="Split right" data-tip="Split right ⌘D" onClick={() => actions.onSplit(id, "row")}>
+                <Ic name="columns-2" size={14} />
+              </button>
+              <button type="button" aria-label="Split down" data-tip="Split down ⇧⌘D" onClick={() => actions.onSplit(id, "col")}>
+                <Ic name="rows-2" size={14} />
+              </button>
+              <button type="button" aria-label={zoomed ? "Unzoom" : "Zoom"} data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"} onClick={() => actions.onZoom(id)}>
+                <Ic name={zoomed ? "minimize-2" : "maximize-2"} size={14} />
+              </button>
+            </>
+          )}
           <button type="button" aria-label="Close" data-tip="Close ⌘W" onClick={() => actions.onClose(id)}>
             <Ic name="x" size={14} />
           </button>
@@ -1706,6 +1717,14 @@ export function WorkbenchPage() {
     }
   };
   const git = useWorkbenchGit({ layout, sessions, space, tab, phone, openTab: gitOpenTab, onOpenChange: onGitOpenChange });
+  /* Focus mode's single pane, for the keyboard shortcuts (split, zoom, focus). */
+  const focusOnlyRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const ids = tab ? paneSessions(tab.root) : [];
+    const zoomedNow = !!tab?.zoom && ids.includes(tab.zoom);
+    focusOnlyRef.current =
+      !phone && !zoomedNow && git.open && git.focusMode && ids.length > 1 ? (tab?.focus && ids.includes(tab.focus) ? tab.focus : ids[0]) : undefined;
+  });
   /* A page loaded with the git panel open hides the sidebar the same way. */
   const gitMountSynced = useRef(false);
   useEffect(() => {
@@ -1971,6 +1990,8 @@ export function WorkbenchPage() {
         void newSpace();
         break;
       case "split":
+        /* In focus mode a split would hide at once: show every pane first. */
+        if (focusOnlyRef.current) git.setFocusMode(false);
         if (focus) void actions.onSplit(focus, sc.dir);
         else void newTerminal();
         break;
@@ -1981,9 +2002,21 @@ export function WorkbenchPage() {
         if (sp && t) closeTabNow(sp.id, t.id);
         break;
       case "zoom":
-        if (focus) actions.onZoom(focus);
+        /* In focus mode ⇧⌘↩ is the unexpand: every pane shows again. */
+        if (focusOnlyRef.current) git.setFocusMode(false);
+        else if (focus) actions.onZoom(focus);
         break;
       case "focus": {
+        /* In focus mode only one pane is on screen: step through the tab. */
+        const only = focusOnlyRef.current;
+        if (only && t) {
+          const ids = paneSessions(t.root);
+          const d = sc.dir === "left" || sc.dir === "up" ? -1 : 1;
+          const n = ids.length;
+          const next = ids[(ids.indexOf(only) + d + n) % n];
+          if (next) withViewTransition(() => flushSync(() => actions.onFocus(next)));
+          break;
+        }
         const next = focus ? paneInDirection(paneRects(), focus, sc.dir) : null;
         if (next) actions.onFocus(next);
         break;
@@ -2337,6 +2370,7 @@ export function WorkbenchPage() {
                           const next = tabPanes[(tabPanes.indexOf(focusOnly) + d + n) % n];
                           if (next) withViewTransition(() => flushSync(() => actions.onFocus(next)));
                         },
+                        exit: () => git.setFocusMode(false),
                       }
                     : undefined
                 }

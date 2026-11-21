@@ -2381,3 +2381,40 @@ body.wb-resizing-col * {
 .wb-pane-head > .wbg-cycle + .wb-pane-tools {
   margin-left: 6px;
 }
+
+/* Long header items shrink before the switcher and tools are pushed out. */
+.wb-pane-head > .wb-pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-pane-head > .wbg-shared {
+  flex: 0 1 auto;
+  min-width: 26px;
+  overflow: hidden;
+}
+
+.wbg-shared > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-pane-head > .wbg-cycle,
+.wb-pane-head > .wb-pane-tools,
+.wb-pane-head > .wb-pane-state {
+  flex: none;
+}
+
+/* Under 680 px the shared warning is its icon (the text is its tooltip). */
+@container wb-pane (max-width: 680px) {
+  .wbg-shared > span {
+    display: none;
+  }
+
+  .wbg-shared {
+    padding: 0 6px;
+  }
+}
