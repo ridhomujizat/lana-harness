@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +61,12 @@ type approvalState struct {
 	req     core.ApprovalRequest
 	reply   chan core.ApprovalOutcome
 	choices *menu
+	// challenging is set on a Block-tier hardline request after "Yes, once":
+	// the view then asks for the typed challenge instead of showing the menu
+	// (REQ-HLF-007). challenge is the code to type and input is what was typed.
+	challenging bool
+	challenge   string
+	input       string
 }
 
 type questionMsg struct {
@@ -87,12 +96,26 @@ func newQuestionState(req core.QuestionRequest, reply chan core.QuestionOutcome)
 	return &questionState{req: req, reply: reply, answers: answers}
 }
 
-func newApprovalChoices() *menu {
-	return &menu{items: []menuItem{
-		{value: string(core.OutcomeAllowedOnce), label: "Yes, once", hint: "y"},
-		{value: string(core.OutcomeAllowedSession), label: "Yes, always for this session", hint: "a"},
-		{value: string(core.OutcomeRejected), label: "No, reject", hint: "n / esc"},
-	}}
+// newApprovalChoices builds the approval menu from the request. A hardline
+// request never offers a session grant, so "Yes, always for this session" is
+// hidden (REQ-HLF-007, REQ-HLF-008).
+func newApprovalChoices(req core.ApprovalRequest) *menu {
+	items := []menuItem{{value: string(core.OutcomeAllowedOnce), label: "Yes, once", hint: "y"}}
+	if req.Hardline == nil {
+		items = append(items, menuItem{value: string(core.OutcomeAllowedSession), label: "Yes, always for this session", hint: "a"})
+	}
+	items = append(items, menuItem{value: string(core.OutcomeRejected), label: "No, reject", hint: "n / esc"})
+	return &menu{items: items}
+}
+
+// newChallenge returns a random 4-digit step-up challenge (1000-9999) for a
+// Block-tier hardline request (REQ-HLF-007).
+func newChallenge() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(9000))
+	if err != nil {
+		return "0000"
+	}
+	return strconv.Itoa(1000 + int(n.Int64()))
 }
 
 type compactDoneMsg struct {
@@ -266,7 +289,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case turnDoneMsg:
 		return m, m.finishTurn(msg.outcome)
 	case approvalMsg:
-		m.approval = &approvalState{req: msg.req, reply: msg.reply, choices: newApprovalChoices()}
+		m.approval = &approvalState{req: msg.req, reply: msg.reply, choices: newApprovalChoices(msg.req)}
 		return m, tea.Tick(10*time.Minute, func(time.Time) tea.Msg {
 			return approvalExpiredMsg{callID: msg.req.CallID}
 		})
@@ -435,10 +458,18 @@ func (m *Model) handleSuggestKey(msg tea.KeyMsg, suggestions []slashCommand) (te
 }
 
 func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.approval.challenging {
+		return m.handleChallengeKey(msg)
+	}
 	switch strings.ToLower(msg.String()) {
 	case "y":
-		return m, m.answerApproval(core.OutcomeAllowedOnce)
+		return m, m.answerOnce()
 	case "a":
+		// A hardline request hides the session grant, so "a" does nothing
+		// (REQ-HLF-007, REQ-HLF-008).
+		if m.approval.req.Hardline != nil {
+			return m, nil
+		}
 		return m, m.answerApproval(core.OutcomeAllowedSession)
 	case "n", "esc":
 		return m, m.answerApproval(core.OutcomeRejected)
@@ -448,9 +479,65 @@ func (m *Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if picked, _ := m.approval.choices.key(msg); picked != nil {
-		return m, m.answerApproval(core.ApprovalOutcome(picked.value))
+		return m, m.pickApproval(core.ApprovalOutcome(picked.value))
 	}
 	return m, nil
+}
+
+// pickApproval answers one menu choice. "Yes, once" on a Block-tier hardline
+// request opens the challenge step instead of answering right away
+// (REQ-HLF-007).
+func (m *Model) pickApproval(outcome core.ApprovalOutcome) tea.Cmd {
+	if outcome == core.OutcomeAllowedOnce {
+		return m.answerOnce()
+	}
+	return m.answerApproval(outcome)
+}
+
+// answerOnce answers "Yes, once". A Block-tier hardline request first requires
+// the typed challenge (REQ-HLF-007).
+func (m *Model) answerOnce() tea.Cmd {
+	if h := m.approval.req.Hardline; h != nil && h.Tier == core.HardlineBlock {
+		m.approval.challenging = true
+		m.approval.challenge = newChallenge()
+		m.approval.input = ""
+		return nil
+	}
+	return m.answerApproval(core.OutcomeAllowedOnce)
+}
+
+// handleChallengeKey handles the typed step-up challenge of a Block-tier
+// hardline request (REQ-HLF-007). The keys are consumed here and never reach
+// the chat input.
+func (m *Model) handleChallengeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	approval := m.approval
+	switch msg.String() {
+	case "esc":
+		return m, m.answerApproval(core.OutcomeRejected)
+	case "ctrl+c":
+		cmd := m.answerApproval(core.OutcomeCancelled)
+		m.cancelTurn()
+		return m, cmd
+	case "enter":
+		if strings.TrimSpace(approval.input) == approval.challenge {
+			return m, m.answerApproval(core.OutcomeAllowedVerified)
+		}
+		return m, m.answerApproval(core.OutcomeRejected)
+	case "backspace":
+		runes := []rune(approval.input)
+		if len(runes) > 0 {
+			approval.input = string(runes[:len(runes)-1])
+		}
+		return m, nil
+	default:
+		switch msg.Type {
+		case tea.KeyRunes:
+			approval.input += string(msg.Runes)
+		case tea.KeySpace:
+			approval.input += " "
+		}
+		return m, nil
+	}
 }
 
 func (m *Model) answerApproval(outcome core.ApprovalOutcome) tea.Cmd {
@@ -461,6 +548,8 @@ func (m *Model) answerApproval(outcome core.ApprovalOutcome) tea.Cmd {
 		return tea.Println(styleOK.Render("  ✓ allowed once"))
 	case core.OutcomeAllowedSession:
 		return tea.Println(styleOK.Render("  ✓ allowed for session"))
+	case core.OutcomeAllowedVerified:
+		return tea.Println(styleOK.Render("  ✓ approved with confirmation"))
 	case core.OutcomeRejected:
 		return tea.Println(styleErr.Render("  ⊘ rejected"))
 	}
@@ -1449,20 +1538,55 @@ func (m *Model) renderTools() []string {
 
 func (m *Model) renderApproval() string {
 	approval := m.approval
-	label := approval.req.ToolName
-	if record := m.findTool(approval.req.CallID); record != nil {
-		label = record.Name
-		if arg := primaryArg(record.Name, record.Input); arg != "" {
-			label += ": " + arg
-		}
+	if approval.challenging {
+		return m.renderChallenge()
 	}
-	lines := []string{styleAccent.Render("? ") + "Allow " + label}
+	lines := []string{styleAccent.Render("? ") + "Allow " + m.approvalLabel(approval.req)}
+	if hardline := approval.req.Hardline; hardline != nil {
+		lines = append(lines, "  "+styleWarn.Render("⚠ "+hardline.Rule+" · "+hardline.Reason))
+	}
 	if m.verbose {
 		if record := m.findTool(approval.req.CallID); record != nil {
 			lines = append(lines, record.verboseLines(m.contentWidth())...)
 		}
 	}
 	lines = append(lines, renderList(approval.choices.items, approval.choices.index, m.contentWidth(), true)...)
+	return strings.Join(lines, "\n")
+}
+
+// approvalLabel is the "tool: argument" text of an approval. A hardline request
+// shows the full command or path, not the shortened status-line one
+// (REQ-HLF-007).
+func (m *Model) approvalLabel(req core.ApprovalRequest) string {
+	name := req.ToolName
+	input := req.Input
+	if record := m.findTool(req.CallID); record != nil {
+		name = record.Name
+		input = record.Input
+	}
+	label := name
+	arg := primaryArg(name, input)
+	if req.Hardline != nil {
+		arg = fullArg(name, input)
+	}
+	if arg != "" {
+		label += ": " + arg
+	}
+	return label
+}
+
+// renderChallenge renders the typed step-up challenge of a Block-tier hardline
+// request (REQ-HLF-007).
+func (m *Model) renderChallenge() string {
+	approval := m.approval
+	lines := []string{styleAccent.Render("? ") + "Allow " + m.approvalLabel(approval.req)}
+	if hardline := approval.req.Hardline; hardline != nil {
+		lines = append(lines, "  "+styleWarn.Render("⚠ "+hardline.Rule+" · "+hardline.Reason))
+	}
+	lines = append(lines,
+		"  Type "+styleBold.Render(approval.challenge)+" to run it, esc to reject",
+		"  "+styleAccent.Render("> ")+approval.input+styleAccent.Render("▏"),
+	)
 	return strings.Join(lines, "\n")
 }
 
@@ -1558,6 +1682,12 @@ func (m *Model) renderStatus() string {
 	right := "/ commands · ctrl+r history"
 	if m.approval != nil {
 		right = "↑/↓ enter · y/a/n"
+		if m.approval.req.Hardline != nil {
+			right = "↑/↓ enter · y/n"
+		}
+		if m.approval.challenging {
+			right = "type the challenge · enter · esc"
+		}
 	}
 	if m.compacting {
 		right = "compacting…"

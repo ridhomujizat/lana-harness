@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -605,19 +607,62 @@ func secretInFile(home, name string) bool {
 	return value != ""
 }
 
+// lineAnswerer answers an approval on /dev/tty. A hardline request prints its
+// rule and reason first, drops the session choice, and, for the Block tier,
+// requires the typed 4-digit challenge (REQ-HLF-007, REQ-HLF-008).
 func lineAnswerer(ctx context.Context, req core.ApprovalRequest) core.ApprovalOutcome {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return core.OutcomeUnavailable
 	}
 	defer func() { _ = tty.Close() }()
-	_, _ = fmt.Fprintf(tty, "approve %s [y/a/n]: ", req.ToolName)
-	line, _ := bufio.NewReader(tty).ReadString('\n')
+	return answerApprovalLine(tty, tty, req, newChallenge())
+}
+
+// newChallenge returns a random 4-digit step-up challenge (1000-9999) for a
+// Block-tier hardline request (REQ-HLF-007).
+func newChallenge() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(9000))
+	if err != nil {
+		return "0000"
+	}
+	return strconv.Itoa(1000 + int(n.Int64()))
+}
+
+// answerApprovalLine runs the line approval prompt against out and in. It is
+// split out of lineAnswerer so tests can drive it without a terminal.
+func answerApprovalLine(out io.Writer, in io.Reader, req core.ApprovalRequest, challenge string) core.ApprovalOutcome {
+	reader := bufio.NewReader(in)
+	if req.Hardline != nil {
+		_, _ = fmt.Fprintf(out, "%s · %s\n", req.Hardline.Rule, req.Hardline.Reason)
+	}
+	if req.Hardline == nil {
+		_, _ = fmt.Fprintf(out, "approve %s [y/a/n]: ", req.ToolName)
+		line, _ := reader.ReadString('\n')
+		switch strings.TrimSpace(line) {
+		case "y":
+			return core.OutcomeAllowedOnce
+		case "a":
+			return core.OutcomeAllowedSession
+		}
+		return core.OutcomeRejected
+	}
+	// REQ-HLF-007/008: a hardline request offers only once or reject, so the
+	// session key is off the prompt and "a" is treated as "y" (once).
+	_, _ = fmt.Fprintf(out, "approve %s [y/n]: ", req.ToolName)
+	line, _ := reader.ReadString('\n')
 	switch strings.TrimSpace(line) {
-	case "y":
+	case "y", "a":
+	default:
+		return core.OutcomeRejected
+	}
+	if req.Hardline.Tier != core.HardlineBlock {
 		return core.OutcomeAllowedOnce
-	case "a":
-		return core.OutcomeAllowedSession
+	}
+	_, _ = fmt.Fprintf(out, "type %s to run it: ", challenge)
+	typed, _ := reader.ReadString('\n')
+	if strings.TrimSpace(typed) == challenge {
+		return core.OutcomeAllowedVerified
 	}
 	return core.OutcomeRejected
 }
