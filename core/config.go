@@ -204,6 +204,10 @@ type AgentConfig struct {
 	Subagents     []string `toml:"subagents"`
 	MCP           []string `toml:"mcp"`
 	Skills        []string `toml:"skills"`
+	// ContextFiles are the project context file names the agent reads: nil
+	// means DefaultContextFiles, and an empty list turns the feature off
+	// (REQ-PCX-001). Read them through ContextFileNames.
+	ContextFiles *[]string `toml:"context_files"`
 	// SkillWrite selects how skill_write handles a skill: "approve" (the
 	// default) stages it for owner review, "direct" writes it at once
 	// (spec 46 REQ-DKN-050).
@@ -258,6 +262,21 @@ type AgentConfig struct {
 	// AllowScheduled lets calendar items and workflow nodes run the agent's
 	// Claude Code targets (REQ-CCT-008). The default is false.
 	AllowScheduled bool `toml:"allow_scheduled"`
+}
+
+// DefaultContextFiles is the context file list of an agent whose context_files
+// setting is absent (REQ-PCX-001).
+var DefaultContextFiles = []string{"AGENTS.md", "CLAUDE.md"}
+
+// ContextFileNames returns the agent's context file names: a copy of
+// DefaultContextFiles when context_files is absent (nil), and a copy of the
+// configured list otherwise. An empty configured list yields an empty,
+// non-nil slice, which turns project context off for the agent (REQ-PCX-001).
+func (a AgentConfig) ContextFileNames() []string {
+	if a.ContextFiles == nil {
+		return append([]string{}, DefaultContextFiles...)
+	}
+	return append([]string{}, (*a.ContextFiles)...)
 }
 
 type AgentRules struct {

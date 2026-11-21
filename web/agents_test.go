@@ -1079,3 +1079,78 @@ func TestAgentsDisplayNamePut(t *testing.T) {
 		t.Fatalf("long display_name key = %q, want agents.coder.display_name", key)
 	}
 }
+
+// TestAgentsContextFilesRoundTrip covers API-PCX-001: a configured list and an
+// empty list (the feature off) both survive a save that does not mention the
+// key, and an absent key stays absent.
+func TestAgentsContextFilesRoundTrip(t *testing.T) {
+	s, store, cookie, csrf := newT016AgentsServer(t, t016AgentsConfig)
+
+	save := func(t *testing.T, body map[string]any) (int, []byte) {
+		t.Helper()
+		raw, err := os.ReadFile(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body["expected_version"] = webfiles.ConfigVersion(raw)
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := serveAuth(s, settingsRequest(http.MethodPut, "/v1/agents/coder", string(payload), cookie, csrf))
+		return rr.Code, rr.Body.Bytes()
+	}
+	contextFiles := func(t *testing.T) any {
+		t.Helper()
+		return t016ReadAgentTables(t, store.path)["coder"]["context_files"]
+	}
+
+	// An absent key stays absent through an unrelated save.
+	if code, body := save(t, map[string]any{"model": "changed"}); code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	if got := contextFiles(t); got != nil {
+		t.Fatalf("context_files = %#v, want the key absent", got)
+	}
+
+	// A configured list round-trips and survives an unrelated save.
+	if code, body := save(t, map[string]any{"context_files": []string{"AGENTS.md"}}); code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	if got := contextFiles(t); !reflect.DeepEqual(got, []any{"AGENTS.md"}) {
+		t.Fatalf("context_files = %#v, want [AGENTS.md]", got)
+	}
+	if code, body := save(t, map[string]any{"model": "another"}); code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	if got := contextFiles(t); !reflect.DeepEqual(got, []any{"AGENTS.md"}) {
+		t.Fatalf("context_files after an unrelated save = %#v, want [AGENTS.md]", got)
+	}
+
+	// An empty list is kept as an empty list, not dropped.
+	if code, body := save(t, map[string]any{"context_files": []string{}}); code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	if got := contextFiles(t); !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("context_files = %#v, want an empty list", got)
+	}
+	if code, body := save(t, map[string]any{"model": "third"}); code != http.StatusOK {
+		t.Fatalf("save status = %d, body = %q", code, body)
+	}
+	if got := contextFiles(t); !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("context_files after an unrelated save = %#v, want an empty list", got)
+	}
+
+	// A name with a path separator is rejected (AC-PCX-003).
+	code, body := save(t, map[string]any{"context_files": []string{"docs/AGENTS.md"}})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad context_files status = %d, body = %q", code, body)
+	}
+	envelope := decodeError(t, &httptestResponse{code: code, body: body})
+	if envelope.Error.Code != "validation_failed" || len(envelope.Error.Details) == 0 {
+		t.Fatalf("bad context_files error = %+v", envelope.Error)
+	}
+	if key, _ := envelope.Error.Details[0]["key"].(string); key != "agents.coder.context_files[0]" {
+		t.Fatalf("bad context_files key = %q, want agents.coder.context_files[0]", key)
+	}
+}
