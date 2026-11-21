@@ -55,5 +55,7 @@ export function withViewTransition(change: () => void): void {
   const vt = start(change);
   vt.finished.finally(() => {
     transitionBusy = false;
+    /* Terminals refit as soon as the boxes stop moving. */
+    holdLayout(0);
   });
 }

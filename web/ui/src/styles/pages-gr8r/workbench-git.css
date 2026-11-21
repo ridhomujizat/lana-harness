@@ -2149,10 +2149,6 @@ body.wb-resizing-col * {
   view-transition-name: wb-sidebar;
 }
 
-.wb-page:not(.wb-phone) .wb-tabs {
-  view-transition-name: wb-tabs;
-}
-
 /* The page itself does not cross-fade; only the named parts move. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -2223,5 +2219,80 @@ body.wb-resizing-col * {
   ::view-transition-old(*),
   ::view-transition-new(*) {
     animation: none !important;
+  }
+}
+
+/* Panes grow or shrink from their real size: the box animates with the
+   pane's own background and corners, showing the pane as it was until the
+   end, with no cross-fade to a terminal that has not refit yet. Panes that
+   leave or come back just fade. */
+.wb-page:not(.wb-phone) .wb-pane {
+  view-transition-class: wbpane;
+}
+
+::view-transition-group(*.wbpane) {
+  overflow: hidden;
+  border-radius: 14px;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+::view-transition-image-pair(*.wbpane) {
+  isolation: auto;
+}
+
+/* The picture keeps its pixels at the top left; the rest of the growing box
+   is the pane's own colour, so it reads as one card getting bigger. */
+::view-transition-old(*.wbpane),
+::view-transition-new(*.wbpane) {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: var(--surface);
+  object-fit: none;
+  object-position: left top;
+  mix-blend-mode: normal;
+}
+
+/* A pane that stays: only its old picture, while the box grows or shrinks
+   (:not() does not work on these pseudo-elements, so :only-child below
+   overrides this for panes that leave or come back). */
+::view-transition-old(*.wbpane) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-new(*.wbpane) {
+  animation: none;
+  opacity: 0;
+}
+
+/* Hidden panes get out of the way at once; panes that come back appear
+   after the others have made room. */
+::view-transition-old(*.wbpane):only-child {
+  animation: wbgPaneOut 90ms ease-in forwards;
+}
+
+::view-transition-new(*.wbpane):only-child {
+  opacity: 1;
+  animation: wbgPaneIn 200ms ease-out both;
+}
+
+/* The sidebar leaves quickly too, so nothing stacks over the growing pane. */
+::view-transition-old(wb-sidebar):only-child {
+  animation-duration: 140ms !important;
+}
+
+@keyframes wbgPaneOut {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes wbgPaneIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
   }
 }
