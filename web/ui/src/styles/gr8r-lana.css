@@ -696,3 +696,39 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
     border-radius: 9px;
   }
 }
+
+/* The collapsed rail's foot: Settings and the owner avatar sit centred in the
+   same column as the nav tiles, with room below the avatar (owner report
+   2026-11-22). The name and Log out live in the expanded sidebar. */
+@media (min-width: 901px) {
+  .shell.collapsed .side-bot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0 12px;
+  }
+
+  .shell.collapsed .side-bot .sitem {
+    margin: 0 auto;
+  }
+
+  .shell.collapsed .side-bot .row {
+    display: flex;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .shell.collapsed .side-bot .row > :not(.av) {
+    display: none;
+  }
+
+  .shell.collapsed .side-bot .row > .av {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+}
