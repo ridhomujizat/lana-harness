@@ -89,6 +89,9 @@ type ToolCtx struct {
 	// file the session has not seen yet (REQ-PCX-003). It is nil when the
 	// feature is off and for the Claude Code runtime path.
 	ProjectNote func(tool string, input json.RawMessage) string
+	// DeferredTools holds the spec of every deferrable tool of the turn, for
+	// the tool_search tool (REQ-DTL-004). It is empty when deferral is off.
+	DeferredTools []ToolSpec
 }
 
 // Background-job status values (REQ-JOB-010).
@@ -154,6 +157,9 @@ type ToolOutput struct {
 	// (REQ-LPG-021), even after name repair. The turn counts these calls for
 	// the invalid-name strikes.
 	UnknownName bool `json:"-"`
+	// Loaded lists the deferred tools this result loaded, in load order, so a
+	// tool_search result can name them (API-DTL-004). It is empty otherwise.
+	Loaded []string `json:"loaded,omitempty"`
 	// Usage is the token usage of child turns. It is added to the parent step
 	// usage and never serialized into the tool result.
 	Usage *Usage `json:"-"`

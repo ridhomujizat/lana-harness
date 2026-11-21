@@ -234,7 +234,11 @@ type AgentConfig struct {
 	WorkspaceOnly bool `toml:"workspace_only"`
 	// Vision turns image input on or off for the agent. Nil means the catalog
 	// flag decides (API-ATT-005).
-	Vision      *bool  `toml:"vision"`
+	Vision *bool `toml:"vision"`
+	// DeferTools controls deferred MCP tool loading (API-DTL-001). Nil defers
+	// when the agent has more than 15 deferrable tools, true defers whenever
+	// it has one, false never defers.
+	DeferTools  *bool  `toml:"defer_tools"`
 	Description string `toml:"description"`
 	// Title is the agent role shown on its profile, at most 60 characters
 	// (REQ-ROOM-009, API-ROOM-006).
@@ -387,6 +391,10 @@ type MCPConfig struct {
 	URL     string            `toml:"url"`
 	Env     map[string]Secret `toml:"env"`
 	Headers map[string]Secret `toml:"headers"`
+	// Defer makes the server's tools deferrable (API-DTL-002). Nil or true
+	// means deferrable; false always sends them and never counts them toward
+	// the deferral threshold.
+	Defer *bool `toml:"defer"`
 }
 
 // ModuleRow is the effective [[modules]] row.

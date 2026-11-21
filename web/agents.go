@@ -252,7 +252,10 @@ type agentRecord struct {
 	Toolset string
 	// Vision is nil when the key is absent; the model catalog decides then
 	// (API-ATT-005).
-	Vision      *bool
+	Vision *bool
+	// DeferTools is nil when the key is absent; it holds the agent's
+	// defer_tools setting (API-DTL-001).
+	DeferTools  *bool
 	Description string
 	// Title is the agent role, "" when the key is absent (API-ROOM-007).
 	Title string
@@ -1606,6 +1609,7 @@ func agentRecordFromMap(table map[string]any) agentRecord {
 		WorkspaceOnly:       mapAgentBool(table, "workspace_only"),
 		Toolset:             mapAgentString(table, "toolset"),
 		Vision:              mapAgentBoolPtr(table, "vision"),
+		DeferTools:          mapAgentBoolPtr(table, "defer_tools"),
 		Description:         mapAgentString(table, "description"),
 		Title:               mapAgentString(table, "title"),
 		DisplayName:         mapAgentString(table, "display_name"),
@@ -1730,6 +1734,7 @@ func renderAgentTable(name string, record agentRecord) string {
 	writeAgentBoolPtr(&b, "memory_capture", record.MemoryCapture)
 	writeAgentBool(&b, "workspace_only", record.WorkspaceOnly)
 	writeAgentBoolPtr(&b, "vision", record.Vision)
+	writeAgentBoolPtr(&b, "defer_tools", record.DeferTools)
 	writeAgentString(&b, "description", record.Description)
 	writeAgentString(&b, "title", record.Title)
 	writeAgentString(&b, "display_name", record.DisplayName)

@@ -253,6 +253,9 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// API-DTL-002: the dashboard does not edit defer, so keep the stored value
+	// instead of dropping it from the rewritten table.
+	def.Defer = stored.Defer
 	mcpconfig.Normalize(&def)
 
 	table := mcpconfig.Render(name, def)

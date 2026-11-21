@@ -48,6 +48,8 @@ const (
 	KindMemoryCaptured     = "memory/captured"
 	KindKnowledgeCompiled  = "knowledge/compiled"
 	KindFileSent           = "file/sent"
+	// KindToolsLoaded records the deferred tools a step loaded (API-DTL-004).
+	KindToolsLoaded = "tools/loaded"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -295,6 +297,13 @@ type FileSentPayload struct {
 	MediaType string `json:"media_type"`
 	Size      int64  `json:"size"`
 	Caption   string `json:"caption,omitempty"`
+}
+
+// ToolsLoaded is the payload of a tools/loaded event: the deferred tools a step
+// loaded, in the order they were first loaded (API-DTL-004).
+type ToolsLoaded struct {
+	V     int      `json:"v"`
+	Names []string `json:"names"`
 }
 
 type ModelSelection struct {
