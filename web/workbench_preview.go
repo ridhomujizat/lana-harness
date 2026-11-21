@@ -181,6 +181,14 @@ func (s *Server) handleWorkbenchPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	kind := preview.KindOf(resolved, info.Size())
+	s.previewResponse(w, resolved, info.Size(), kind, line, col)
+}
+
+// previewResponse writes the spec 61 preview response for a resolved file
+// (REQ-WP-002): it issues a token for the file's folder and answers with the
+// file's kind, size and token URLs. It is shared by the preview POST and the
+// Workbench git file route (REQ-WG-009), so both answer the same shape.
+func (s *Server) previewResponse(w http.ResponseWriter, resolved string, size int64, kind preview.Kind, line, col int) {
 	token, err := s.previewTokens.issue(filepath.Dir(resolved))
 	if err != nil {
 		s.logger.Error("web: workbench preview token", "error", err)
@@ -201,7 +209,7 @@ func (s *Server) handleWorkbenchPreview(w http.ResponseWriter, r *http.Request) 
 		Name:   name,
 		Dir:    filepath.Dir(resolved),
 		Kind:   string(kind),
-		Size:   info.Size(),
+		Size:   size,
 		Line:   line,
 		Col:    col,
 		URL:    url,

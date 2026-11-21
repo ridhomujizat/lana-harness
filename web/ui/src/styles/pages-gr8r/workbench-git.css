@@ -1,0 +1,2593 @@
+/* Spec 66: Workbench files, git changes and worktrees. Design: FigCraft pages
+   "Workbench · Files & Changes" and "Workbench · Worktrees". */
+
+/* ------------------------------------------------------------------ */
+/* Changes button in the tab strip (REQ-WG-060)                        */
+/* ------------------------------------------------------------------ */
+
+.wbg-toggle-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px 0 6px;
+  background: var(--border);
+}
+
+.wbg-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.wbg-toggle:hover {
+  background: var(--wb-btn-hover);
+  color: var(--text);
+}
+
+.wbg-toggle.is-on {
+  border-color: transparent;
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.wbg-toggle-lg {
+  height: 32px;
+  padding: 0 9px;
+}
+
+.wbg-badge {
+  display: inline-grid;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  place-items: center;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--violet) 32%, transparent);
+  color: color-mix(in srgb, var(--violet) 30%, var(--text));
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel (REQ-WG-062)                                                  */
+/* ------------------------------------------------------------------ */
+
+.wbg-panel {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* The same gaps as the panes (.wb-workspace padding). */
+  margin: 8px 10px 10px 0;
+  overflow: hidden;
+  border: 1px solid var(--wb-pane-border);
+  border-radius: 14px;
+  background: var(--wb-pane-bg-focused);
+  box-shadow: var(--wb-card-shadow);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.wbg-panel .mono,
+.wbg-dialog .mono,
+.wbg-plus-menu .mono {
+  font-family: var(--mono);
+  font-size: 0.94em;
+}
+
+@keyframes wbgPanelIn {
+  from {
+    width: 0;
+    flex-basis: 0;
+    margin-left: 0;
+    opacity: 0.4;
+  }
+}
+
+@keyframes wbgPanelOut {
+  to {
+    width: 0;
+    flex-basis: 0;
+    opacity: 0.4;
+  }
+}
+
+.wbg-panel.is-entering {
+  animation: wbgPanelIn 220ms var(--ease-drawer);
+}
+
+.wbg-panel.is-leaving {
+  animation: wbgPanelOut 220ms var(--ease-drawer) forwards;
+}
+
+.wbg-panel.is-entering > *,
+.wbg-panel.is-leaving > * {
+  min-width: var(--wbg-w, 560px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wbg-panel.is-entering,
+  .wbg-panel.is-leaving {
+    animation: none !important;
+  }
+}
+
+/* Maximize: the panel takes the whole workspace (like pane zoom). */
+.wb-page.wbg-maxed > .wb-main,
+.wb-page.wbg-maxed > .wb-panel {
+  display: none;
+}
+
+.wbg-panel.is-max {
+  flex: 1 1 auto;
+  margin-left: 8px;
+}
+
+.wbg-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 46px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.wbg-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wbg-body > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Segmented control, Gr8r style. */
+.wbg-seg {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.wbg-seg > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wbg-seg > button:hover {
+  color: var(--text);
+}
+
+.wbg-seg > button.is-on {
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  color: var(--text);
+  font-weight: 550;
+}
+
+.wbg-seg > button small {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.wbg-seg-sm > button {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.wbg-seg > button.is-on .wbg-badge {
+  background: color-mix(in srgb, var(--violet) 40%, transparent);
+}
+
+@container wbg-panel (max-width: 520px) {
+  .wbg-seg-label {
+    display: none;
+  }
+}
+
+.wbg-panel {
+  container: wbg-panel / inline-size;
+}
+
+.wbg-icon-btn {
+  display: inline-grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.wbg-icon-btn:hover:not(:disabled) {
+  background: var(--wb-btn-hover);
+  color: var(--text);
+}
+
+.wbg-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Worktree picker (REQ-WG-072). */
+.wbg-picker-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.wbg-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 280px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wbg-picker:hover,
+.wbg-picker.is-open {
+  background: var(--wb-btn-hover);
+}
+
+.wbg-picker .i {
+  flex: none;
+  color: var(--text-3);
+}
+
+.wbg-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-wt-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.wbg-wt-dot-lg {
+  width: 11px;
+  height: 11px;
+  margin: 0 3px;
+}
+
+/* Menus drawn by the panel itself. */
+.wbg-menu {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 300px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.45);
+}
+
+.wbg-picker-menu {
+  top: 34px;
+  right: 0;
+  width: 330px;
+}
+
+.wbg-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbg-menu-item:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbg-menu-item.is-on {
+  background: color-mix(in srgb, var(--violet) 14%, transparent);
+}
+
+.wbg-menu-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wbg-menu-text b {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-menu-text small {
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-menu-check {
+  display: inline-grid;
+  width: 14px;
+  place-items: center;
+}
+
+.wbg-menu-count {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbg-amber {
+  color: var(--amber);
+}
+
+.wbg-menu-scroll {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.wbg-menu-sep {
+  height: 1px;
+  margin: 6px -6px;
+  background: var(--border);
+}
+
+.wbg-menu-label {
+  padding: 6px 10px 2px;
+  color: var(--text-4);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wbg-switch {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--surface-3);
+}
+
+.wbg-switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-3);
+  content: "";
+  transition: transform var(--dur, 160ms);
+}
+
+.wbg-switch.is-on {
+  background: var(--violet);
+}
+
+.wbg-switch.is-on::after {
+  background: #fff;
+  transform: translateX(12px);
+}
+
+.wbg-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px 6px;
+  color: var(--text-4);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wbg-section small {
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.wbg-filter {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-4);
+}
+
+.wbg-filter input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.wbg-filter kbd {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbg-note {
+  margin: 0;
+  padding: 16px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.wbg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 40px 24px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.wbg-empty > .i {
+  width: 44px;
+  height: 44px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.wbg-empty b {
+  color: var(--text);
+  font-weight: 550;
+}
+
+.wbg-empty span {
+  max-width: 340px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.wbg-empty-full {
+  justify-content: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* List column + viewer (REQ-WG-064..068)                              */
+/* ------------------------------------------------------------------ */
+
+.wbg-split {
+  display: flex;
+  min-height: 0;
+}
+
+.wbg-list {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  width: 268px;
+  min-height: 0;
+  padding: 10px 6px 0 10px;
+  border-right: 1px solid var(--border);
+}
+
+.wbg-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -6px 0 -4px;
+  padding: 0 4px 12px;
+  overflow: auto;
+}
+
+.wbg-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 24px;
+  padding-right: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbg-tree-row:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbg-tree-row.is-on {
+  background: color-mix(in srgb, var(--violet) 16%, transparent);
+  color: var(--text);
+  font-weight: 550;
+}
+
+.wbg-tree-row .i {
+  flex: none;
+  color: var(--text-4);
+}
+
+.wbg-tree-row.is-ignored {
+  color: var(--text-4);
+}
+
+.wbg-tree-row.wbg-tone-M {
+  color: var(--amber);
+}
+
+.wbg-tree-row.wbg-tone-U,
+.wbg-tree-row.wbg-tone-A {
+  color: var(--green);
+}
+
+.wbg-tree-row.wbg-tone-D {
+  color: var(--red);
+}
+
+.wbg-tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-hit small {
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.wbg-tree-note {
+  padding: 4px 10px;
+  color: var(--text-4);
+  font-size: 12px;
+}
+
+.wbg-st {
+  flex: none;
+  width: 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.wbg-st-m {
+  color: var(--amber);
+}
+
+.wbg-st-a {
+  color: var(--green);
+}
+
+.wbg-st-d {
+  color: var(--red);
+}
+
+.wbg-st-r {
+  color: var(--blue);
+}
+
+.wbg-counts {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbg-add {
+  color: var(--green);
+}
+
+.wbg-del {
+  color: var(--red);
+}
+
+.wbg-scope-wrap {
+  position: relative;
+}
+
+.wbg-scope {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.wbg-scope b {
+  color: var(--text);
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.wbg-scope span {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--text-4);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-scope-menu {
+  top: 36px;
+  left: 0;
+}
+
+.wbg-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.wbg-commit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbg-commit:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbg-commit.is-on {
+  background: color-mix(in srgb, var(--violet) 16%, transparent);
+}
+
+.wbg-commit code {
+  color: color-mix(in srgb, var(--violet) 55%, var(--text));
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbg-commit-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-change {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbg-change:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbg-change.is-on {
+  background: color-mix(in srgb, var(--violet) 16%, transparent);
+}
+
+.wbg-change-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wbg-change-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-change-name.is-deleted {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+.wbg-change-text small {
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-bin {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbg-row-chev {
+  color: var(--text-4);
+}
+
+/* Viewer */
+.wbg-viewer,
+.wbg-viewer-stack {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  outline: 0;
+}
+
+.wbg-viewer-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.wbg-viewer-head > .i {
+  flex: none;
+  color: var(--text-4);
+}
+
+.wbg-viewer-name {
+  font-weight: 550;
+}
+
+.wbg-viewer-dir {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.wbg-viewer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--wb-term);
+}
+
+.wbg-viewer-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+
+.wbg-foot-dim {
+  font-family: var(--mono);
+}
+
+.wbg-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #1d1c1b;
+}
+
+.wbg-diff-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  color: var(--wb-term-text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 19px;
+}
+
+.wbg-diff-table td {
+  padding: 0;
+  vertical-align: top;
+}
+
+/* Fixed heights: the virtualiser in workbench-virtual.ts counts on them
+   (LINE_H 19, hunk 24, + 6 gap). */
+.wbg-dl,
+.wbg-dl > td {
+  height: 19px;
+}
+
+.wbg-hunk > td {
+  height: 24px;
+  box-sizing: border-box;
+}
+
+.wbg-hunk.wbg-hunk-gap > td {
+  height: 30px;
+  border-top: 6px solid var(--wb-term);
+  background-clip: padding-box;
+}
+
+.wbg-spacer > td,
+tr.wbg-spacer {
+  padding: 0;
+  border: 0;
+}
+
+.wbg-col-ln {
+  width: 46px;
+}
+
+.wbg-col-sign {
+  width: 16px;
+}
+
+.wbg-col-gutter {
+  width: 3px;
+}
+
+.wbg-code {
+  overflow: visible;
+}
+
+.wbg-viewer-plain {
+  display: flex;
+  flex-direction: column;
+}
+
+.wbg-viewer-plain > .wbg-frame {
+  flex: 1 1 auto;
+}
+
+.wbg-ln {
+  padding: 0 8px 0 4px !important;
+  overflow: hidden;
+  color: var(--wb-term-dim);
+  font-size: 11px;
+  text-align: right;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.wbg-sign {
+  user-select: none;
+}
+
+.wbg-code {
+  padding-right: 12px !important;
+  white-space: pre;
+}
+
+.wbg-dl-add {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.wbg-dl-add .wbg-sign {
+  color: var(--green);
+}
+
+.wbg-dl-del {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+
+.wbg-dl-del .wbg-sign {
+  color: var(--red);
+}
+
+.wbg-hunk td {
+  padding: 2px 14px !important;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: color-mix(in srgb, var(--violet) 12%, transparent);
+  color: color-mix(in srgb, var(--violet) 65%, var(--text));
+  font-size: 11.5px;
+}
+
+.wbg-diff-split .wbg-half {
+  width: 50%;
+}
+
+.wbg-blank {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--wb-term-line) 6px 7px);
+}
+
+.wbg-gutter {
+  padding: 0 !important;
+}
+
+.wbg-code-view .wbg-code {
+  padding-left: 10px !important;
+}
+
+.wbg-g-add {
+  background: var(--green);
+}
+
+.wbg-g-mod {
+  background: var(--amber);
+}
+
+.wbg-g-del {
+  background: linear-gradient(to bottom, var(--red) 0 5px, transparent 5px);
+}
+
+tr.is-target td {
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+
+.wbg-tk-kw {
+  color: #c792ea;
+}
+
+.wbg-tk-str {
+  color: #e8b67a;
+}
+
+.wbg-tk-com {
+  color: var(--wb-term-dim);
+  font-style: italic;
+}
+
+.wbg-tk-type {
+  color: #82aaff;
+}
+
+.wbg-tk-fn {
+  color: #7fc8d6;
+}
+
+.wbg-tk-num {
+  color: #f78c6c;
+}
+
+:root[data-theme="light"] .wbg-tk-kw {
+  color: #7a3fbf;
+}
+
+:root[data-theme="light"] .wbg-tk-str {
+  color: #a35d12;
+}
+
+:root[data-theme="light"] .wbg-tk-type {
+  color: #2f5fb3;
+}
+
+:root[data-theme="light"] .wbg-tk-fn {
+  color: #1d7a8a;
+}
+
+/* ------------------------------------------------------------------ */
+/* Worktrees tab (REQ-WG-080, 081)                                     */
+/* ------------------------------------------------------------------ */
+
+.wbg-wt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 10px 0;
+}
+
+.wbg-wt-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wbg-wt-bar .wbg-filter {
+  flex: 1 1 200px;
+}
+
+.wbg-wt-bar .btn {
+  margin-left: auto;
+}
+
+.wbg-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12.5px;
+}
+
+.wbg-banner > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wbg-banner-accent {
+  border-color: color-mix(in srgb, var(--violet) 35%, transparent);
+  background: color-mix(in srgb, var(--violet) 9%, transparent);
+}
+
+.wbg-banner-accent > .i {
+  color: var(--violet);
+}
+
+.wbg-banner-blue {
+  border-color: color-mix(in srgb, var(--blue) 35%, transparent);
+  background: color-mix(in srgb, var(--blue) 8%, transparent);
+}
+
+.wbg-banner-blue > .i {
+  color: var(--blue);
+}
+
+.wbg-wt-list {
+  margin: 0 -10px;
+  padding: 0 6px 16px;
+}
+
+.wbg-wt-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+
+.wbg-wt-row:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbg-wt-row > .i {
+  flex: none;
+  color: var(--text-3);
+}
+
+.wbg-wt-row.is-dim {
+  color: var(--text-3);
+}
+
+.wbg-wt-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wbg-wt-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.wbg-wt-line b {
+  font-weight: 550;
+}
+
+.wbg-wt-text small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.wbg-chip-gray {
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+.wbg-chip-amber {
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  color: var(--amber);
+}
+
+.wbg-chip-green {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+
+.wbg-chip-red {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red);
+}
+
+.wbg-chip-blue {
+  background: color-mix(in srgb, var(--blue) 20%, transparent);
+  color: color-mix(in srgb, var(--blue) 70%, var(--text));
+}
+
+.wbg-chip-purple {
+  background: color-mix(in srgb, var(--violet) 20%, transparent);
+  color: color-mix(in srgb, var(--violet) 60%, var(--text));
+}
+
+.wbg-wt-age {
+  flex: none;
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+
+.wbg-wt-actions {
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+
+.wbg-wt-row:hover .wbg-wt-age,
+.wbg-wt-row:focus-within .wbg-wt-age {
+  display: none;
+}
+
+.wbg-wt-row:hover .wbg-wt-actions,
+.wbg-wt-row:focus-within .wbg-wt-actions {
+  display: inline-flex;
+}
+
+.wbg-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--violet);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.wbg-link:disabled {
+  color: var(--text-4);
+  cursor: default;
+}
+
+.wbg-more {
+  margin: 4px 0 0 38px;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dialogs (REQ-WG-082..085)                                           */
+/* ------------------------------------------------------------------ */
+
+.wbg-dialog {
+  width: min(600px, calc(100vw - 32px));
+}
+
+.wbg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wbg-form > .wbg-seg {
+  align-self: flex-start;
+}
+
+.wbg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wbg-field > span:first-child {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.wbg-field small,
+.wbg-check small {
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+
+.wbg-row2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.wbg-row2 > .wbg-field {
+  flex: 1 1 240px;
+}
+
+.wbg-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wbg-cmd {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.wbg-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12.5px;
+}
+
+.wbg-warn {
+  margin: 0;
+  color: var(--amber);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.wbg-ok {
+  color: var(--green);
+}
+
+.wbg-table {
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.wbg-table-head,
+.wbg-table-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wbg-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.wbg-table-row:last-child {
+  border-bottom: 0;
+}
+
+.wbg-table-row.is-dim {
+  color: var(--text-3);
+}
+
+.wbg-table-row > small {
+  color: var(--text-4);
+}
+
+.wbg-table .wbg-more {
+  margin: 8px 14px;
+}
+
+.wbg-move-to {
+  flex: 0 1 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-danger-box {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+  color: var(--amber);
+}
+
+.wbg-danger-box > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+}
+
+.wbg-danger-box b {
+  color: var(--text);
+}
+
+.wbg-danger-box small {
+  color: var(--text-4);
+}
+
+/* ------------------------------------------------------------------ */
+/* Worktree per session (REQ-WG-071..076)                              */
+/* ------------------------------------------------------------------ */
+
+.wbg-pane-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-term-line);
+  border-radius: 10px;
+  color: var(--wb-term-text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbg-pane-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wbg-shared {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  color: var(--amber);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+/* A narrow split pane keeps the tile, the chip and a state dot. */
+.wb-pane {
+  container: wb-pane / inline-size;
+}
+
+@container wb-pane (max-width: 500px) {
+  .wb-pane-title,
+  .wb-pane-dir {
+    display: none;
+  }
+
+  .wb-pane-state {
+    font-size: 0;
+    gap: 0;
+  }
+
+  .wbg-shared span {
+    display: none;
+  }
+}
+
+.wbg-space-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wbg-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.wbg-dots .wbg-wt-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.wbg-tab-card {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.wbg-tab-card-head {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.wbg-tab-card-row {
+  display: grid;
+  grid-template-columns: 10px 140px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.wbg-tab-card-items {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+/* "+" and "⌄": two buttons side by side with a thin divider. */
+.wbg-plus-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.wbg-plus-group > .wb-tab-new {
+  flex: none;
+}
+
+.wbg-plus-group > .wbg-plus-more {
+  position: relative;
+  width: 22px;
+  margin-left: 3px;
+}
+
+.wbg-plus-group > .wbg-plus-more::before {
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.wbg-plus-group > .wbg-plus-more.is-open {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.wbg-plus-menu {
+  min-width: 300px;
+}
+
+.wbg-font-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 8px 12px;
+  font-size: 13.5px;
+}
+
+.wbg-font-row .wb-font b {
+  min-width: 22px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Phone sheet (REQ-WG-091)                                            */
+/* ------------------------------------------------------------------ */
+
+.wbg-panel.wbg-sheet {
+  position: fixed;
+  inset: 96px 0 0;
+  z-index: 50;
+  margin: 0;
+  border-radius: 18px 18px 0 0;
+  box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.5);
+  animation: wbgSheetIn 240ms var(--ease-drawer);
+}
+
+@keyframes wbgSheetIn {
+  from {
+    transform: translateY(40%);
+    opacity: 0;
+  }
+}
+
+.wbg-grabber {
+  width: 40px;
+  height: 4px;
+  margin: 8px auto 0;
+  border-radius: 2px;
+  background: var(--surface-3);
+}
+
+.wbg-sheet .wbg-head {
+  height: 52px;
+}
+
+.wbg-sheet .wbg-list {
+  width: auto;
+  flex: 1 1 auto;
+  padding-right: 10px;
+  border-right: 0;
+}
+
+.wbg-sheet .wbg-change {
+  min-height: 52px;
+}
+
+.wbg-sheet .wbg-change-name {
+  font-size: 14px;
+}
+
+.wbg-phone-diff {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wbg-phone-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wbg-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--violet);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.wbg-pos {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.wbg-sheet .wbg-layout-seg {
+  display: none;
+}
+
+/* With the panel open the browser's tab strip is narrow: Accounts and
+   Attached shrink to icons. In Lana.app the strip runs over the panel and
+   has the room, so they stay (owner, 2026-11-22). */
+html:not([data-shell="macos-app"]) .wb-page.wbg-open .wb-attached,
+html:not([data-shell="macos-app"]) .wb-page.wbg-open .wb-acc-btn > span:last-child {
+  display: none;
+}
+
+.wb-tabs > .wbg-toggle,
+.wb-tabs > .wbg-toggle-sep {
+  flex: none;
+}
+
+.wbg-viewer-empty {
+  justify-content: center;
+}
+
+/* Buttons used as rows start at the left (Gr8r centres button content). */
+.wbg-commit,
+.wbg-change,
+.wbg-tree-row,
+.wbg-menu-item,
+.wbg-scope {
+  justify-content: flex-start;
+}
+
+.wbg-menu-item {
+  min-height: 40px;
+  padding: 6px 8px;
+}
+
+.wbg-more-inline {
+  align-self: flex-start;
+  font-size: 12px;
+}
+
+/* Phone sheet: solid card over a scrim, labels shown, picker on its own row. */
+.wbg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  background: rgba(0, 0, 0, 0.5);
+  animation: wbgFade 200ms ease-out;
+}
+
+@keyframes wbgFade {
+  from {
+    opacity: 0;
+  }
+}
+
+.wbg-panel.wbg-sheet {
+  inset: 108px 0 0;
+  background: var(--surface);
+}
+
+.wbg-sheet .wbg-head {
+  flex-wrap: wrap;
+  height: auto;
+  row-gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.wbg-sheet .wbg-seg-label {
+  display: inline;
+}
+
+.wbg-sheet .wbg-picker-wrap {
+  order: 9;
+  flex: 1 0 100%;
+}
+
+.wbg-sheet .wbg-picker {
+  width: 100%;
+  max-width: none;
+  border: 0;
+  padding-left: 2px;
+}
+
+.wbg-sheet .wbg-picker-menu {
+  right: auto;
+  left: 0;
+  width: 100%;
+}
+
+.wbg-sheet .wbg-picker {
+  justify-content: flex-start;
+}
+
+/* ---- live-check fixes 2 ---- */
+
+/* Space row with several worktrees: name, then dots and counts below. */
+.wbg-space-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wbg-space-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+.wbg-space-line-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-space-btn > .wb-space-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Viewer header: a long name ellipsises, the toggles stay. */
+.wbg-viewer-head > * {
+  flex: none;
+}
+
+.wbg-viewer-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wbg-viewer-dir {
+  flex: 0 1000 auto;
+}
+
+/* Horizontal scroll keeps the line numbers in place. */
+.wbg-diff-table {
+  tab-size: 4;
+}
+
+.wbg-ln,
+.wbg-sign,
+.wbg-gutter {
+  position: sticky;
+  z-index: 1;
+  background: var(--wb-term);
+}
+
+.wbg-diff-table:not(.wbg-diff-split) tr > .wbg-ln:first-child {
+  left: 0;
+}
+
+.wbg-diff-table:not(.wbg-diff-split) tr > .wbg-ln + .wbg-ln {
+  left: 46px;
+}
+
+.wbg-diff-table:not(.wbg-diff-split) tr > .wbg-sign {
+  left: 92px;
+}
+
+.wbg-code-view tr > .wbg-gutter {
+  left: 46px;
+}
+
+.wbg-dl-add > .wbg-ln,
+.wbg-dl-add > .wbg-sign {
+  background: color-mix(in srgb, var(--green) 16%, var(--wb-term));
+}
+
+.wbg-dl-del > .wbg-ln,
+.wbg-dl-del > .wbg-sign {
+  background: color-mix(in srgb, var(--red) 15%, var(--wb-term));
+}
+
+.wbg-code-view .wbg-gutter.wbg-g-add {
+  background: var(--green);
+}
+
+.wbg-code-view .wbg-gutter.wbg-g-mod {
+  background: var(--amber);
+}
+
+.wbg-code-view .wbg-gutter.wbg-g-del {
+  background: linear-gradient(to bottom, var(--red) 0 5px, var(--wb-term) 5px);
+}
+
+tr.is-target > .wbg-ln {
+  background: color-mix(in srgb, var(--amber) 14%, var(--wb-term));
+}
+
+/* Split halves clip instead of scrolling. */
+.wbg-diff-split .wbg-code {
+  overflow: hidden;
+}
+
+.wbg-viewer-body {
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+.wbg-viewer-body::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Header: the picker shrinks before it covers the buttons. */
+.wbg-picker-wrap {
+  flex: 0 1 auto;
+  min-width: 72px;
+}
+
+.wbg-picker {
+  width: 100%;
+  max-width: 300px;
+}
+
+@container wbg-panel (max-width: 680px) {
+  .wbg-list {
+    width: 220px;
+  }
+}
+
+/* A hunk header stays readable when the diff scrolls sideways. */
+.wbg-hunk-text {
+  position: sticky;
+  left: 14px;
+}
+
+.wbg-hunk td {
+  text-overflow: clip;
+}
+
+/* The tab strip never shows a scrollbar, also while the panel slides in. */
+.wb-tabs {
+  scrollbar-width: none;
+}
+
+.wb-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Wide enough: the panel sits beside the terminals and they give it room
+   down to 380 px. Narrow (a browser with the app nav open, a small window):
+   the panel floats over the terminals instead of crushing them. */
+.wb-page:not(.wb-phone) {
+  position: relative;
+  container: wb-page / inline-size;
+}
+
+.wb-page:not(.wb-phone) > .wb-main {
+  min-width: 380px;
+}
+
+@container wb-page (max-width: 1180px) {
+  .wbg-panel:not(.wbg-sheet):not(.is-max) {
+    position: absolute;
+    /* Below the tab strip, so its Changes button stays reachable, with the
+       panes' gaps. */
+    top: 54px;
+    right: 10px;
+    bottom: 10px;
+    z-index: 30;
+    width: min(var(--wbg-w, 640px), calc(100% - 48px)) !important;
+    flex-basis: auto !important;
+    margin: 0;
+    box-shadow: -24px 0 48px -16px rgba(0, 0, 0, 0.55), var(--wb-card-shadow);
+  }
+
+  .wbg-panel:not(.wbg-sheet):not(.is-max) > .wb-preview-resizer {
+    display: none;
+  }
+
+  /* Overlaid, the panel slides in without resizing the terminals. */
+  .wbg-panel.is-entering:not(.wbg-sheet) {
+    animation: wbgOverlayIn 220ms var(--ease-drawer);
+  }
+
+  .wbg-panel.is-leaving:not(.wbg-sheet) {
+    animation: wbgOverlayOut 220ms var(--ease-drawer) forwards;
+  }
+}
+
+@keyframes wbgOverlayIn {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgOverlayOut {
+  to {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+/* Tooltips inside the panel open toward its inside: right-aligned under the
+   button, and above it in the footer, so the panel edge never cuts them. */
+.wbg-panel [data-tip]:hover::after,
+.wbg-panel [data-tip]:focus-visible::after {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+.wbg-viewer-foot [data-tip]:hover::after,
+.wbg-viewer-foot [data-tip]:focus-visible::after {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.wbg-space-meta {
+  flex: none;
+}
+
+/* In Lana.app the tab strip sits in the window chrome above the card, so an
+   overlaid panel starts at the card's top gap. */
+@container wb-page (max-width: 1180px) {
+  html[data-shell="macos-app"] .wbg-panel:not(.wbg-sheet):not(.is-max) {
+    top: 8px;
+  }
+}
+
+/* One divider weight inside the panel: the list column and the viewer header
+   use the same line as the panel header. */
+.wbg-list {
+  border-right-color: var(--border-strong);
+}
+
+.wbg-viewer-head,
+.wbg-viewer-foot {
+  border-color: var(--border-strong);
+  background: var(--wb-pane-bg-focused);
+}
+
+/* The file name wins over its folder when the header is tight. */
+.wbg-viewer-head > .wbg-viewer-name {
+  flex: 0 1 auto;
+  max-width: 60%;
+}
+
+.wbg-viewer-head > .wbg-viewer-dir {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The branch badge: ⎇ and the branch name. */
+.wbg-pane-chip > .i {
+  flex: none;
+  color: var(--wb-term-dim);
+}
+
+/* ------------------------------------------------------------------ */
+/* Draggable pane sizes                                                */
+/* ------------------------------------------------------------------ */
+
+/* The handle takes the place of the gap between panes. */
+.wb-split {
+  gap: 0 !important;
+}
+
+.wb-split > * {
+  flex-basis: 0;
+}
+
+.wb-split > .wb-split-handle {
+  position: relative;
+  flex: 0 0 10px;
+  min-width: 0;
+  min-height: 0;
+  touch-action: none;
+}
+
+.wb-split-row > .wb-split-handle {
+  cursor: col-resize;
+}
+
+.wb-split-col > .wb-split-handle {
+  cursor: row-resize;
+}
+
+/* A thin line shows on hover and while dragging. */
+.wb-split-handle::after {
+  position: absolute;
+  border-radius: 2px;
+  background: transparent;
+  content: "";
+  transition: background var(--dur, 160ms);
+}
+
+.wb-split-row > .wb-split-handle::after {
+  top: 30%;
+  bottom: 30%;
+  left: 4px;
+  width: 2px;
+}
+
+.wb-split-col > .wb-split-handle::after {
+  left: 30%;
+  right: 30%;
+  top: 4px;
+  height: 2px;
+}
+
+.wb-split-handle:hover::after,
+body.wb-resizing .wb-split-handle:active::after {
+  background: var(--border-strong);
+}
+
+body.wb-resizing-row,
+body.wb-resizing-row * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.wb-resizing-col,
+body.wb-resizing-col * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+
+/* Focus mode (owner, 2026-11-21): the focused pane alone beside the panel,
+   with a small switcher to the tab's other panes. */
+.wbg-cycle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid var(--wb-term-line);
+  border-radius: 8px;
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbg-cycle > span {
+  min-width: 28px;
+  text-align: center;
+}
+
+.wbg-cycle > button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-term-dim);
+  cursor: pointer;
+}
+
+.wbg-cycle > button:hover {
+  background: var(--wb-btn-hover);
+  color: var(--wb-term-text);
+}
+
+.wbg-cycle + .wb-pane-tools {
+  margin-left: 6px;
+}
+
+.wbg-icon-btn.is-on {
+  background: color-mix(in srgb, var(--violet) 18%, transparent);
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------ */
+/* View Transitions for panel, focus mode and zoom                     */
+/* ------------------------------------------------------------------ */
+
+.wbg-panel:not(.wbg-sheet) {
+  view-transition-name: wbg-panel;
+}
+
+.wb-page:not(.wb-phone) > .wb-panel {
+  view-transition-name: wb-sidebar;
+}
+
+/* The page itself does not cross-fade; only the named parts move. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-group(*) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Terminal snapshots keep their pixels: the box resizes around them, the
+   text is never stretched. */
+::view-transition-old(*),
+::view-transition-new(*) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+}
+
+/* The panel and the sidebar slide; a pane that leaves or comes back fades. */
+::view-transition-new(wbg-panel):only-child {
+  animation: wbgVtFromRight 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(wbg-panel):only-child {
+  animation: wbgVtToRight 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+::view-transition-new(wb-sidebar):only-child {
+  animation: wbgVtFromLeft 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(wb-sidebar):only-child {
+  animation: wbgVtToLeft 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes wbgVtFromRight {
+  from {
+    transform: translateX(32px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgVtToRight {
+  to {
+    transform: translateX(32px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgVtFromLeft {
+  from {
+    transform: translateX(-32px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgVtToLeft {
+  to {
+    transform: translateX(-32px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* Panes grow or shrink from their real size: the box animates with the
+   pane's own background and corners, showing the pane as it was until the
+   end, with no cross-fade to a terminal that has not refit yet. Panes that
+   leave or come back just fade. */
+.wb-page:not(.wb-phone) .wb-pane {
+  view-transition-class: wbpane;
+}
+
+::view-transition-group(*.wbpane) {
+  overflow: hidden;
+  border-radius: 14px;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+::view-transition-image-pair(*.wbpane) {
+  isolation: auto;
+}
+
+/* The picture keeps its pixels at the top left; the rest of the growing box
+   is the pane's own colour, so it reads as one card getting bigger. */
+::view-transition-old(*.wbpane),
+::view-transition-new(*.wbpane) {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: var(--surface);
+  object-fit: none;
+  object-position: left top;
+  mix-blend-mode: normal;
+}
+
+/* A pane that stays: only its old picture, while the box grows or shrinks
+   (:not() does not work on these pseudo-elements, so :only-child below
+   overrides this for panes that leave or come back). */
+::view-transition-old(*.wbpane) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-new(*.wbpane) {
+  animation: none;
+  opacity: 0;
+}
+
+/* Hidden panes get out of the way at once; panes that come back appear
+   after the others have made room. */
+::view-transition-old(*.wbpane):only-child {
+  animation: wbgPaneOut 90ms ease-in forwards;
+}
+
+::view-transition-new(*.wbpane):only-child {
+  opacity: 1;
+  animation: wbgPaneIn 150ms ease-out 130ms both;
+}
+
+/* The sidebar leaves quickly too, so nothing stacks over the growing pane. */
+::view-transition-old(wb-sidebar):only-child {
+  animation-duration: 140ms !important;
+}
+
+@keyframes wbgPaneOut {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes wbgPaneIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* Pane header in a narrow pane: the branch chip and the folder give way, the
+   state and the tools always stay in view. */
+.wb-pane-head {
+  min-width: 0;
+}
+
+.wb-pane-head > * {
+  flex: none;
+}
+
+.wb-pane-head > .wbg-pane-chip {
+  flex: 0 1 auto;
+  min-width: 52px;
+}
+
+.wb-pane-head > .wb-pane-dir {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-pane-head > .wb-pane-tools {
+  margin-left: auto;
+}
+
+.wb-pane-head > .wbg-shared {
+  flex: 0 0 auto;
+}
+
+@container wb-pane (max-width: 420px) {
+  .wb-pane-tools button[aria-label="Split right"],
+  .wb-pane-tools button[aria-label="Split down"] {
+    display: none;
+  }
+
+  .wb-pane-head {
+    gap: 6px;
+  }
+}
+
+@container wb-pane (max-width: 300px) {
+  .wb-pane-head > .wbg-pane-chip > .wbg-pane-chip-label {
+    display: none;
+  }
+
+  .wb-pane-head > .wbg-pane-chip {
+    min-width: 0;
+    padding: 0 5px;
+  }
+}
+
+.wb-pane-head > .wbg-cycle + .wb-pane-tools {
+  margin-left: 6px;
+}
+
+/* Long header items shrink before the switcher and tools are pushed out. */
+.wb-pane-head > .wb-pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-pane-head > .wbg-shared {
+  flex: 0 1 auto;
+  min-width: 26px;
+  overflow: hidden;
+}
+
+.wbg-shared > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-pane-head > .wbg-cycle,
+.wb-pane-head > .wb-pane-tools,
+.wb-pane-head > .wb-pane-state {
+  flex: none;
+}
+
+/* Under 680 px the shared warning is its icon (the text is its tooltip). */
+@container wb-pane (max-width: 680px) {
+  .wbg-shared > span {
+    display: none;
+  }
+
+  .wbg-shared {
+    padding: 0 6px;
+  }
+}
+
+/* Pane tools sit at the right edge: their tooltips open toward the left so
+   the pane does not cut them. */
+.wb-pane-tools [data-tip]:hover::after,
+.wb-pane-tools [data-tip]:focus-visible::after,
+.wbg-cycle [data-tip]:hover::after,
+.wbg-cycle [data-tip]:focus-visible::after {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+/* Focus mode is on: its unexpand button wears the accent, like the panel's
+   focus button. */
+.wb-pane-tools .wbg-focus-exit {
+  background: color-mix(in srgb, var(--violet) 22%, transparent);
+  color: color-mix(in srgb, var(--violet) 55%, var(--wb-term-text));
+}
+
+.wb-pane-tools .wbg-focus-exit:hover {
+  background: color-mix(in srgb, var(--violet) 32%, transparent);
+  color: var(--wb-term-text);
+}
+
+/* Maximize / restore: the panel box grows or shrinks while its old and new
+   layouts cross-fade, pinned to the top left so nothing is stretched. */
+::view-transition-old(wbg-panel),
+::view-transition-new(wbg-panel) {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: var(--surface);
+  object-fit: none;
+  object-position: left top;
+}
+
+::view-transition-group(wbg-panel) {
+  overflow: hidden;
+  border-radius: 14px;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* No cross-fade between the panel's two layouts (the text would double):
+   the box grows or shrinks and reveals the new layout from the top left.
+   Opening and closing the panel (only one picture) keep their slide. */
+::view-transition-old(wbg-panel) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(wbg-panel) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-new(wbg-panel):only-child {
+  animation: wbgVtFromRight 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(wbg-panel):only-child {
+  opacity: 1;
+  animation: wbgVtToRight 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* The panel stays above returning panes while it shrinks back. */
+::view-transition-group(wbg-panel) {
+  z-index: 10;
+}
+
+/* Lana.app: the tab strip (the window's title row) runs on over the open
+   panel instead of stopping at the terminals (owner, 2026-11-22). */
+html[data-shell="macos-app"] .wb-page.wbg-open:not(.wb-phone) > .wb-main > .wb-tabs {
+  position: relative;
+  z-index: 2;
+  margin-right: calc(-1 * var(--wbg-panel-space, 0px));
+}
+
+/* The "⌄" menu: the label is read in full, the branch chip gives way. */
+.wbg-plus-menu .mi > .trunc {
+  flex: none;
+}
+
+.wbg-plus-menu .mi > .r {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wbg-plus-menu .mi > .r .wbg-pane-chip {
+  max-width: 160px;
+}
+
+/* Spec 66 REQ-WG-078: the pane's header icon is its drag handle. On hover the
+   tile gives way to a grip; dragging shows where the pane will land. */
+.wb-pane-grip {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: 6px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.wb-pane-grip > .wb-ptile {
+  transition: opacity 120ms ease;
+}
+
+.wb-pane-grip-ic {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: var(--surface-3);
+  color: var(--text);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.wb-pane-grip:hover > .wb-ptile,
+.wb-pane.is-drag-source .wb-pane-grip > .wb-ptile {
+  opacity: 0;
+}
+
+.wb-pane-grip:hover > .wb-pane-grip-ic,
+.wb-pane.is-drag-source .wb-pane-grip-ic {
+  opacity: 1;
+}
+
+body.wb-pane-dragging,
+body.wb-pane-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.wb-pane.is-drag-source {
+  opacity: 0.45;
+  transition: opacity 120ms ease;
+}
+
+.wb-drop-marker {
+  position: fixed;
+  z-index: 60;
+  box-sizing: border-box;
+  border: 2px solid var(--accent, #5b7be0);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent, #5b7be0) 16%, transparent);
+  pointer-events: none;
+  transition: left 90ms ease, top 90ms ease, width 90ms ease, height 90ms ease;
+}
+
+.wb-drop-marker[hidden] {
+  display: none;
+}
+
+.wb-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 61;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2, var(--surface));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-drop-marker {
+    transition: none;
+  }
+}
+
+/* The grip's tooltip opens to the right (the pane's left edge clips a
+   centred one) and stays away while dragging. */
+.wb-pane-grip[data-tip]:hover::after {
+  right: auto;
+  left: 0;
+  transform: none;
+}
+
+body.wb-pane-dragging [data-tip]::after {
+  display: none !important;
+}

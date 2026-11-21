@@ -49,6 +49,11 @@ import {
   spaceCwd,
   spaceLabel,
   splitPane,
+  movePane,
+  type PaneDropSide,
+  splitSizes,
+  resizePair,
+  setSplitSizes,
   statusOf,
   tabSessions,
   toggleZoom,
@@ -64,14 +69,16 @@ import {
 } from "./workbench-model";
 import { TermPane, type SendInput } from "./workbench-term";
 import { prune as pruneTermCache } from "./workbench-term-cache";
-import { WorkbenchPreview as PreviewPanel } from "./workbench-preview";
+import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
 import { AgentLogo } from "./agent-logo";
 import { ProgramTile, TabTiles } from "./workbench-tile";
 import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
 import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
-import { LAYOUT_MOTION_MS, holdLayout, reducedMotion } from "../app/layout-motion";
+import { Menu, MenuItem, MenuSeparator } from "../ui/gr8r";
+import { LAYOUT_MOTION_MS, holdLayout, reducedMotion, withViewTransition } from "../app/layout-motion";
+import { flushSync } from "react-dom";
 import { PaneAccessContext, RemoteControlBar, usePaneAccess, useRemoteControl, type PaneAccess } from "./workbench-remote";
 
 /* Spec 55: the Workbench page. Desktop: panel (Spaces + Agents), tab strip,
@@ -142,6 +149,76 @@ function RestoredChip({ session }: { session?: WorkbenchSession }) {
       <Ic name="history" size={11} />
       Restored
     </span>
+  );
+}
+
+/* Spec 66 REQ-WG-074: a space whose sessions use several worktrees shows
+   their colours and "N worktrees · M terminals"; otherwise its tab count. */
+function SpaceText({ space, sessions, label }: { space: WbSpace; sessions: Sessions; label: string }) {
+  const git = useWbGit();
+  const ids = space.tabs.flatMap(tabSessions);
+  const trees = new Map<string, string>();
+  for (const id of ids) {
+    const info = git?.gitOf(id);
+    if (info) trees.set(info.worktree, info.color);
+  }
+  void sessions;
+  const tabs = space.tabs.length ? space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs") : "";
+  /* One line, like every space row: the worktree colours sit before the
+     tab count; the full count is in the tooltip. */
+  return (
+    <>
+      <span className="wb-space-name">{label}</span>
+      <span
+        className={"wb-space-meta" + (trees.size > 1 ? " wbg-space-meta" : "")}
+        title={trees.size > 1 ? trees.size + " worktrees · " + ids.length + " terminals" : undefined}
+      >
+        {trees.size > 1 ? (
+          <span className="wbg-dots">
+            {Array.from(trees.values()).map((c, i) => (
+              <i key={i} className="wbg-wt-dot" style={{ background: c }} />
+            ))}
+          </span>
+        ) : null}
+        {tabs}
+      </span>
+    </>
+  );
+}
+
+/* Spec 66 REQ-WG-073: hovering a tab whose panes use more than one worktree
+   shows which pane works where. Fixed, so the tab strip does not clip it. */
+function TabWorktreeCard({ tabId, rect, tab, sessions }: { tabId: string; rect: DOMRect; tab: WbTab | undefined; sessions: Sessions }) {
+  const git = useWbGit();
+  if (!tab || tab.id !== tabId || !git) return null;
+  const ids = tabSessions(tab);
+  const groups = new Map<string, { color: string; short: string; items: string[] }>();
+  for (const id of ids) {
+    const info = git.gitOf(id);
+    if (!info) continue;
+    const g = groups.get(info.worktree) ?? { color: info.color, short: info.short, items: [] };
+    const st = statusOf(sessions[id]);
+    g.items.push(programName(sessions[id]) + " · " + (st === "blocked" ? "needs you" : st));
+    groups.set(info.worktree, g);
+  }
+  if (groups.size < 2) return null;
+  return (
+    <div className="wbg-tab-card" style={{ left: rect.left, top: rect.bottom + 6 }} role="tooltip">
+      <div className="wbg-tab-card-head">
+        {ids.length} panes · {groups.size} worktrees
+      </div>
+      {Array.from(groups.entries()).map(([w, g]) => (
+        <div key={w} className="wbg-tab-card-row">
+          <i className="wbg-wt-dot" style={{ background: g.color }} />
+          <span className="mono">{g.short}</span>
+          <span className="wbg-tab-card-items">
+            {g.items.map((it, i) => (
+              <span key={i}>{it}</span>
+            ))}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -310,8 +387,7 @@ function Panel(props: PanelProps) {
               title={spaceCwd(sp, sessions) || undefined}
             >
               <SpaceTile space={sp} label={spaceLabel(sp, sessions)} />
-              <span className="wb-space-name">{spaceLabel(sp, sessions)}</span>
-              <span className="wb-space-meta">{sp.tabs.length ? sp.tabs.length + (sp.tabs.length === 1 ? " tab" : " tabs") : ""}</span>
+              <SpaceText space={sp} sessions={sessions} label={spaceLabel(sp, sessions)} />
             </button>
             <button
               type="button"
@@ -394,6 +470,110 @@ interface PaneActions {
   onRestart: (id: string) => void;
   /* Spec 61 REQ-WP-010: a file path was activated in a terminal. */
   onOpenFile: (id: string, link: string, fallback?: string) => void;
+  /* Draggable pane sizes: the shares of the split at path, or undefined for
+     equal shares. */
+  onResize: (path: number[], sizes: number[] | undefined) => void;
+  /* REQ-WG-078: a pane dragged by its header icon onto another pane. */
+  onMove: (source: string, target: string, side: PaneDropSide) => void;
+}
+
+/* Spec 66 REQ-WG-078: drag a pane by its header icon onto another pane of the
+   tab. Plain pointer events (no HTML drag and drop, which the terminals use
+   for files); the drop marker and the label under the pointer are bare DOM
+   nodes, so nothing re-renders while dragging. Esc cancels. */
+const PANE_DRAG_SLOP = 4;
+const PANE_DROP_EDGE = 0.3;
+
+function startPaneDrag(event: ReactPointerEvent<HTMLElement>, id: string, label: string, onDrop: (target: string, side: PaneDropSide) => void) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const source = event.currentTarget.closest<HTMLElement>(".wb-pane");
+  const page = event.currentTarget.closest(".wb-workspace");
+  if (!source || !page) return;
+  const x0 = event.clientX;
+  const y0 = event.clientY;
+  let started = false;
+  let drop: { target: string; side: PaneDropSide } | null = null;
+  const marker = document.createElement("div");
+  marker.className = "wb-drop-marker";
+  const ghost = document.createElement("div");
+  ghost.className = "wb-drag-ghost";
+  ghost.textContent = label;
+  const place = (x: number, y: number) => {
+    /* Near the window's right or bottom edge the label goes to the other
+       side of the pointer. */
+    const gx = x + 14 + ghost.offsetWidth > window.innerWidth - 8 ? x - 14 - ghost.offsetWidth : x + 14;
+    const gy = y + 12 + ghost.offsetHeight > window.innerHeight - 8 ? y - 12 - ghost.offsetHeight : y + 12;
+    ghost.style.transform = "translate(" + gx + "px, " + gy + "px)";
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>(".wb-pane[data-session]");
+    const target = el?.dataset.session;
+    if (!el || !target || target === id || !page.contains(el)) {
+      drop = null;
+      marker.hidden = true;
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const fx = (x - r.left) / r.width;
+    const fy = (y - r.top) / r.height;
+    const edges: [PaneDropSide, number][] = [
+      ["left", fx],
+      ["right", 1 - fx],
+      ["top", fy],
+      ["bottom", 1 - fy],
+    ];
+    const near = edges.reduce((a, b) => (b[1] < a[1] ? b : a));
+    const side: PaneDropSide = near[1] > PANE_DROP_EDGE ? "center" : near[0];
+    drop = { target, side };
+    const half = { w: r.width / 2, h: r.height / 2 };
+    const box =
+      side === "left"
+        ? [r.left, r.top, half.w, r.height]
+        : side === "right"
+          ? [r.left + half.w, r.top, half.w, r.height]
+          : side === "top"
+            ? [r.left, r.top, r.width, half.h]
+            : side === "bottom"
+              ? [r.left, r.top + half.h, r.width, half.h]
+              : [r.left, r.top, r.width, r.height];
+    marker.hidden = false;
+    marker.dataset.side = side;
+    marker.style.cssText = "left:" + box[0] + "px;top:" + box[1] + "px;width:" + box[2] + "px;height:" + box[3] + "px";
+  };
+  const move = (e: PointerEvent) => {
+    if (!started) {
+      if (Math.hypot(e.clientX - x0, e.clientY - y0) < PANE_DRAG_SLOP) return;
+      started = true;
+      marker.hidden = true;
+      document.body.append(marker, ghost);
+      document.body.classList.add("wb-pane-dragging");
+      source.classList.add("is-drag-source");
+    }
+    place(e.clientX, e.clientY);
+  };
+  const end = (commit: boolean) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    window.removeEventListener("keydown", key, true);
+    marker.remove();
+    ghost.remove();
+    document.body.classList.remove("wb-pane-dragging");
+    source.classList.remove("is-drag-source");
+    if (commit && started && drop) onDrop(drop.target, drop.side);
+  };
+  const up = () => end(true);
+  const cancel = () => end(false);
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    end(false);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+  window.addEventListener("keydown", key, true);
 }
 
 function PaneView({
@@ -405,6 +585,9 @@ function PaneView({
   entering,
   actions,
   fontSize,
+  grow,
+  cycle,
+  movable,
 }: {
   id: string;
   session?: WorkbenchSession;
@@ -414,17 +597,64 @@ function PaneView({
   entering?: boolean;
   actions: PaneActions;
   fontSize?: number;
+  /* Its share of the parent split. */
+  grow?: number;
+  /* Focus mode: which of the tab's panes this is, stepping to the others, and
+     leaving focus mode (the pane's unexpand button). */
+  cycle?: { index: number; total: number; go: (delta: number) => void; exit: () => void };
+  /* REQ-WG-078: the pane can be dragged to another place in the tab (not
+     while zoomed or in focus mode, nor when it is the tab's only pane). */
+  movable?: boolean;
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
+  /* Spec 66 REQ-WG-071, 075: the pane's worktree, and a warning when another
+     agent works in the same one. */
+  const git = useWbGit();
+  const info = git?.gitOf(id);
+  const shared = git?.shared.get(id);
   return (
     <div
       className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "")}
       data-session={id}
+      style={{ ...(grow !== undefined ? { flexGrow: grow } : {}), viewTransitionName: "wbpane-" + id.replace(/[^A-Za-z0-9_-]/g, "") } as CSSProperties}
     >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
-        <ProgramTile session={session} size="pane" />
+        {movable ? (
+          <span
+            className="wb-pane-grip"
+            data-tip="Drag to move"
+            aria-label="Drag to move this pane"
+            role="button"
+            onPointerDown={(e) => startPaneDrag(e, id, programName(session), (target, side) => actions.onMove(id, target, side))}
+          >
+            <ProgramTile session={session} size="pane" />
+            <span className="wb-pane-grip-ic" aria-hidden="true">
+              <Ic name="move" size={14} />
+            </span>
+          </span>
+        ) : (
+          <ProgramTile session={session} size="pane" />
+        )}
         <span className="wb-pane-title">{programName(session)}</span>
+        {info ? (
+          <span className={"wbg-pane-chip" + (shared?.length ? " is-shared" : "")} title={info.branch + " · " + info.worktree}>
+            <Ic name="git-branch" size={12} />
+            <span className="wbg-pane-chip-label">{info.short}</span>
+          </span>
+        ) : null}
+        {info && shared?.length && git ? (
+          <button
+            type="button"
+            className="wbg-shared"
+            title={"Two agents are editing this worktree: shared with " + git.describe(shared[0] ?? "")}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => git.onShared(id)}
+          >
+            <Ic name="triangle-alert" size={12} />
+            <span>shared with {git.describe(shared[0] ?? "")}</span>
+          </button>
+        ) : null}
         {session?.cwd || session?.dir ? (
           <span className="wb-pane-dir">{(session.cwd || session.dir).replace(/^\/Users\/[^/]+/, "~")}</span>
         ) : null}
@@ -434,16 +664,45 @@ function PaneView({
           <StatusDot status={status} />
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}
         </span>
+        {cycle ? (
+          <span className="wbg-cycle" onMouseDown={(e) => e.stopPropagation()}>
+            <button type="button" aria-label="Previous pane" data-tip="Previous pane" onClick={() => cycle.go(-1)}>
+              <Ic name="chevron-left" size={14} />
+            </button>
+            <span>
+              {cycle.index + 1}/{cycle.total}
+            </span>
+            <button type="button" aria-label="Next pane" data-tip="Next pane" onClick={() => cycle.go(1)}>
+              <Ic name="chevron-right" size={14} />
+            </button>
+          </span>
+        ) : null}
         <span className="wb-pane-tools">
-          <button type="button" aria-label="Split right" data-tip="Split right ⌘D" onClick={() => actions.onSplit(id, "row")}>
-            <Ic name="columns-2" size={14} />
-          </button>
-          <button type="button" aria-label="Split down" data-tip="Split down ⇧⌘D" onClick={() => actions.onSplit(id, "col")}>
-            <Ic name="rows-2" size={14} />
-          </button>
-          <button type="button" aria-label={zoomed ? "Unzoom" : "Zoom"} data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"} onClick={() => actions.onZoom(id)}>
-            <Ic name={zoomed ? "minimize-2" : "maximize-2"} size={14} />
-          </button>
+          {cycle ? (
+            /* Focus mode: no split (the new pane would be hidden at once);
+               unexpand shows every pane again, the panel stays. */
+            <button type="button" className="wbg-focus-exit" aria-label="Show all panes" data-tip="Show all panes ⇧⌘↩" onClick={cycle.exit}>
+              <Ic name="minimize-2" size={14} />
+            </button>
+          ) : (
+            <>
+              <button type="button" aria-label="Split right" data-tip="Split right ⌘D" onClick={() => actions.onSplit(id, "row")}>
+                <Ic name="columns-2" size={14} />
+              </button>
+              <button type="button" aria-label="Split down" data-tip="Split down ⇧⌘D" onClick={() => actions.onSplit(id, "col")}>
+                <Ic name="rows-2" size={14} />
+              </button>
+              <button
+                type="button"
+                className={zoomed ? "wbg-focus-exit" : undefined}
+                aria-label={zoomed ? "Unzoom" : "Zoom"}
+                data-tip={zoomed ? "Unzoom ⇧⌘↩" : "Zoom ⇧⌘↩"}
+                onClick={() => actions.onZoom(id)}
+              >
+                <Ic name={zoomed ? "minimize-2" : "maximize-2"} size={14} />
+              </button>
+            </>
+          )}
           <button type="button" aria-label="Close" data-tip="Close ⌘W" onClick={() => actions.onClose(id)}>
             <Ic name="x" size={14} />
           </button>
@@ -492,6 +751,8 @@ function PaneTree({
   closing,
   entering,
   fontSize,
+  path = [],
+  grow,
 }: {
   node: PaneNode;
   tab: WbTab;
@@ -500,6 +761,8 @@ function PaneTree({
   closing: ReadonlySet<string>;
   entering: ReadonlySet<string>;
   fontSize?: number;
+  path?: number[];
+  grow?: number;
 }) {
   if (node.type === "pane") {
     return (
@@ -512,23 +775,111 @@ function PaneTree({
         entering={entering.has(node.session)}
         actions={actions}
         fontSize={fontSize}
+        grow={grow}
+        movable={!tab.zoom && tab.root.type === "split"}
       />
     );
   }
-  return (
-    <div className={"wb-split wb-split-" + node.dir}>
-      {node.children.map((child, i) => (
-        <PaneTree
-          key={child.type === "pane" ? child.session : "s" + i}
-          node={child}
-          tab={tab}
-          sessions={sessions}
-          actions={actions}
-          closing={closing}
-          entering={entering}
-          fontSize={fontSize}
+  return <SplitView node={node} tab={tab} sessions={sessions} actions={actions} closing={closing} entering={entering} fontSize={fontSize} path={path} grow={grow} />;
+}
+
+/* A split with draggable borders between its children. While dragging, the
+   new shares stay local and terminals hold their size (holdLayout); the
+   layout is saved once, on release. Double-click a border for equal shares. */
+const SPLIT_MIN_PX = 160;
+
+function SplitView({
+  node,
+  tab,
+  sessions,
+  actions,
+  closing,
+  entering,
+  fontSize,
+  path,
+  grow,
+}: {
+  node: Extract<PaneNode, { type: "split" }>;
+  tab: WbTab;
+  sessions: Sessions;
+  actions: PaneActions;
+  closing: ReadonlySet<string>;
+  entering: ReadonlySet<string>;
+  fontSize?: number;
+  path: number[];
+  grow?: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [live, setLive] = useState<number[] | null>(null);
+  const stored = splitSizes(node);
+  const sizes = live && live.length === stored.length ? live : stored;
+  const row = node.dir === "row";
+
+  const startDrag = (i: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    const el = ref.current;
+    if (!el) return;
+    event.preventDefault();
+    const handles = Array.from(el.children).filter((c) => c.classList.contains("wb-split-handle"));
+    const handleSpace = handles.reduce((n, h) => n + (row ? (h as HTMLElement).offsetWidth : (h as HTMLElement).offsetHeight), 0);
+    const total = Math.max(1, (row ? el.clientWidth : el.clientHeight) - handleSpace);
+    const start = row ? event.clientX : event.clientY;
+    const base = sizes;
+    const min = SPLIT_MIN_PX / total;
+    let latest = base;
+    const move = (e: PointerEvent) => {
+      latest = resizePair(base, i, ((row ? e.clientX : e.clientY) - start) / total, min);
+      holdLayout(300);
+      setLive(latest);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("wb-resizing", "wb-resizing-row", "wb-resizing-col");
+      actions.onResize(path, latest);
+      setLive(null);
+    };
+    document.body.classList.add("wb-resizing", row ? "wb-resizing-row" : "wb-resizing-col");
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const parts: ReactNode[] = [];
+  node.children.forEach((child, i) => {
+    if (i > 0) {
+      parts.push(
+        <div
+          key={"h" + i}
+          className="wb-split-handle"
+          role="separator"
+          aria-orientation={row ? "vertical" : "horizontal"}
+          aria-label="Resize panes"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={(e) => startDrag(i - 1, e)}
+          onDoubleClick={() => {
+            holdLayout(300);
+            actions.onResize(path, undefined);
+          }}
         />
-      ))}
+      );
+    }
+    parts.push(
+      <PaneTree
+        key={child.type === "pane" ? child.session : "s" + i}
+        node={child}
+        tab={tab}
+        sessions={sessions}
+        actions={actions}
+        closing={closing}
+        entering={entering}
+        fontSize={fontSize}
+        path={[...path, i]}
+        grow={sizes[i]}
+      />
+    );
+  });
+  return (
+    <div ref={ref} className={"wb-split wb-split-" + node.dir} style={grow !== undefined ? { flexGrow: grow } : undefined}>
+      {parts}
     </div>
   );
 }
@@ -555,6 +906,9 @@ interface PhoneProps {
   onClose: (id: string) => void;
   /* Spec 61 REQ-WP-010: a file path was tapped in a terminal. */
   onOpenFile: (id: string, link: string, fallback?: string) => void;
+  /* Spec 66 REQ-WG-090: the Changes button and its count. */
+  onChanges: () => void;
+  changeCount: number;
 }
 
 const PHONE_FONT_KEY = "lana.workbench.phoneFont";
@@ -569,6 +923,64 @@ function readPhoneFont(): number {
   } catch {
     return PHONE_FONT;
   }
+}
+
+/* The phone text size is shared by the terminal and the space menu, where
+   A−/A+ live since spec 66 (REQ-WG-090, D3). */
+const phoneFontListeners = new Set<() => void>();
+
+function subscribePhoneFont(fn: () => void): () => void {
+  phoneFontListeners.add(fn);
+  return () => phoneFontListeners.delete(fn);
+}
+
+function changePhoneFont(delta: number): void {
+  const next = Math.min(PHONE_FONT_MAX, Math.max(PHONE_FONT_MIN, readPhoneFont() + delta));
+  try {
+    window.localStorage.setItem(PHONE_FONT_KEY, String(next));
+  } catch {
+    /* Storage is optional. */
+  }
+  for (const fn of phoneFontListeners) fn();
+}
+
+function usePhoneFont(): number {
+  return useSyncExternalStore(subscribePhoneFont, readPhoneFont, () => PHONE_FONT);
+}
+
+/* REQ-WG-090: the Text size stepper and Files, at the top of the phone's
+   space menu. */
+function PhoneMenuExtra({ onFiles, onDone }: { onFiles: () => void; onDone: () => void }) {
+  const size = usePhoneFont();
+  return (
+    <>
+      <div className="wbg-font-row">
+        <span>Text size</span>
+        <span className="wb-font" role="group" aria-label="Text size">
+          <button type="button" aria-label="Smaller text" onClick={() => changePhoneFont(-1)} disabled={size <= PHONE_FONT_MIN}>
+            A<sup>−</sup>
+          </button>
+          <b>{size}</b>
+          <button type="button" aria-label="Larger text" onClick={() => changePhoneFont(1)} disabled={size >= PHONE_FONT_MAX}>
+            A<sup>+</sup>
+          </button>
+        </span>
+      </div>
+      <button
+        type="button"
+        role="menuitem"
+        className="mi"
+        onClick={() => {
+          onDone();
+          onFiles();
+        }}
+      >
+        <Ic name="files" size={15} />
+        <span className="trunc">Files</span>
+      </button>
+      <div className="msep" role="separator" />
+    </>
+  );
 }
 
 /* The visual viewport (the part above the on-screen keyboard). `keyboard` is
@@ -601,20 +1013,9 @@ function PhoneWorkbench(props: PhoneProps) {
   const tab = pickTab(space);
   const [sheet, setSheet] = useState(false);
   const [ctrl, setCtrl] = useState(false);
-  const [fontSize, setFontSize] = useState(readPhoneFont);
+  const fontSize = usePhoneFont();
   const keyboardRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
   const viewport = useVisualViewport();
-  const changeFont = (delta: number) => {
-    setFontSize((size) => {
-      const next = Math.min(PHONE_FONT_MAX, Math.max(PHONE_FONT_MIN, size + delta));
-      try {
-        window.localStorage.setItem(PHONE_FONT_KEY, String(next));
-      } catch {
-        /* Storage is optional. */
-      }
-      return next;
-    });
-  };
   const sendRef = useRef<SendInput | null>(null);
   const claimRef = useRef<(() => void) | null>(null);
   const [owner, setOwner] = useState(true);
@@ -695,14 +1096,10 @@ function PhoneWorkbench(props: PhoneProps) {
             <StatusDot status={counts.blocked ? "blocked" : counts.working ? "working" : "idle"} /> {summary}
           </span>
         </div>
-        <span className="wb-font" role="group" aria-label="Text size">
-          <button type="button" aria-label="Smaller text" onClick={() => changeFont(-1)} disabled={fontSize <= PHONE_FONT_MIN}>
-            A<sup>−</sup>
-          </button>
-          <button type="button" aria-label="Larger text" onClick={() => changeFont(1)} disabled={fontSize >= PHONE_FONT_MAX}>
-            A<sup>+</sup>
-          </button>
-        </span>
+        <button type="button" className="wbg-toggle wbg-toggle-lg" aria-label="Files and changes" onClick={props.onChanges}>
+          <Ic name="git-compare" size={18} />
+          {props.changeCount ? <span className="wbg-badge">{props.changeCount}</span> : null}
+        </button>
         <button type="button" className="wb-icon-btn wb-icon-btn-lg" aria-label="New terminal" onClick={props.onNewTerminal}>
           <Ic name="plus" size={18} />
         </button>
@@ -1069,15 +1466,22 @@ export function WorkbenchPage() {
   const [panelMotion, setPanelMotion] = useState<"in" | "out" | null>(null);
   const panelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(panelTimer.current), []);
-  const togglePanel = () => {
+  /* Spec 66 (owner, 2026-11-21): the git panel hides the Spaces sidebar while
+     it is open and brings it back after; a hand toggle in between wins. */
+  const sidebarAuto = useRef(false);
+  const togglePanel = (opts?: unknown) => {
+    const auto = !!opts && typeof opts === "object" && (opts as { auto?: boolean }).auto === true;
+    const instant = !!opts && typeof opts === "object" && (opts as { instant?: boolean }).instant === true;
     const next = !panelOpen || panelMotion === "out";
+    if (!auto) sidebarAuto.current = false;
     try {
-      window.localStorage.setItem(PANEL_KEY, next ? "open" : "closed");
+      /* An automatic hide is not the owner's choice: keep the stored one. */
+      if (!auto) window.localStorage.setItem(PANEL_KEY, next ? "open" : "closed");
     } catch {
       /* Storage is optional. */
     }
     clearTimeout(panelTimer.current);
-    if (reducedMotion()) {
+    if (reducedMotion() || instant) {
       setPanelMotion(null);
       setPanelOpen(next);
       return;
@@ -1146,7 +1550,9 @@ export function WorkbenchPage() {
   }, [previewNotice]);
   /* Spec 61 REQ-WP-012: one previewed file at a time; a new activation
      replaces it. The panel itself, not the shared layout document. */
-  const [preview, setPreview] = useState<{ session: string; data: WorkbenchPreview } | null>(null);
+  /* Spec 66 REQ-WG-063: a resolved ⌘+click goes to the git panel's Files tab
+     (set once the git hook below exists). */
+  const showPreviewRef = useRef<(sessionId: string, data: WorkbenchPreview) => void>(() => {});
   const [phoneView, setPhoneView] = useState<"home" | "space">("home");
   const layoutRef = useRef(layout);
   const savedRef = useRef("");
@@ -1236,7 +1642,7 @@ export function WorkbenchPage() {
       })
       .then((data) => {
         setPreviewNotice("");
-        setPreview({ session: sessionId, data });
+        showPreviewRef.current(sessionId, data);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 404) {
@@ -1405,6 +1811,61 @@ export function WorkbenchPage() {
     }
   }, [create, update, markEntering]);
 
+  /* Spec 66: Files, Changes and Worktrees. A session started from the panel
+     opens as a new tab of the active space (model A). */
+  const gitOpenTab = (dir: string, program: "claude" | "shell") => {
+    const sp = pickSpace(layoutRef.current);
+    if (!sp) return;
+    create(dir, program === "claude" ? ["claude"] : undefined, program === "claude" ? "Claude Code" : undefined)
+      .then((s) => {
+        markEntering(s.id);
+        update((l) => addTab(l, sp.id, s.id));
+        setPhoneView("space");
+      })
+      .catch((err) => setError(errorMessage(err)));
+  };
+  const onGitOpenChange = (open: boolean, instant?: boolean) => {
+    if (phone) return;
+    const sidebarShown = panelOpen && panelMotion !== "out";
+    if (open && sidebarShown) {
+      togglePanel({ auto: true, instant });
+      sidebarAuto.current = true;
+    } else if (!open && sidebarAuto.current) {
+      sidebarAuto.current = false;
+      if (!sidebarShown) togglePanel({ auto: true, instant });
+    }
+  };
+  const git = useWorkbenchGit({ layout, sessions, space, tab, phone, openTab: gitOpenTab, onOpenChange: onGitOpenChange });
+  /* Focus mode's single pane, for the keyboard shortcuts (split, zoom, focus). */
+  const focusOnlyRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const ids = tab ? paneSessions(tab.root) : [];
+    const zoomedNow = !!tab?.zoom && ids.includes(tab.zoom);
+    focusOnlyRef.current =
+      !phone && !zoomedNow && git.open && git.focusMode && ids.length > 1 ? (tab?.focus && ids.includes(tab.focus) ? tab.focus : ids[0]) : undefined;
+  });
+  /* A page loaded with the git panel open hides the sidebar the same way. */
+  const gitMountSynced = useRef(false);
+  useEffect(() => {
+    if (gitMountSynced.current || phone || !loaded) return;
+    gitMountSynced.current = true;
+    if (git.open && panelOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time sync of the sidebar with a panel restored open
+      togglePanel({ auto: true });
+      sidebarAuto.current = true;
+    }
+  });
+  useEffect(() => {
+    showPreviewRef.current = git.showPreview;
+  });
+  /* REQ-WG-073: the tab under the pointer, after a short delay. */
+  const [tabHover, setTabHover] = useState<{ id: string; rect: DOMRect } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  /* REQ-WG-076: the "+" menu. */
+  const plusRef = useRef<HTMLSpanElement | null>(null);
+  const [plusMenu, setPlusMenu] = useState(false);
+
   const actions: PaneActions = {
     onFocus: (id) => {
       const sp = pickSpace(layoutRef.current);
@@ -1428,7 +1889,7 @@ export function WorkbenchPage() {
     onZoom: (id) => {
       const sp = pickSpace(layoutRef.current);
       const t = pickTab(sp);
-      if (sp && t) update((l) => toggleZoom(l, sp.id, t.id, id));
+      if (sp && t) withViewTransition(() => flushSync(() => update((l) => toggleZoom(l, sp.id, t.id, id))));
     },
     onClose: (id) => {
       /* Spec 61 REQ-WP-022: move the focus off the closing pane at once, so it
@@ -1469,6 +1930,16 @@ export function WorkbenchPage() {
         .catch((err) => setError(errorMessage(err)));
     },
     onOpenFile: openPreview,
+    onResize: (path, sizes) => {
+      const sp = pickSpace(layoutRef.current);
+      const t = pickTab(sp);
+      if (sp && t) update((l) => setSplitSizes(l, sp.id, t.id, path, sizes));
+    },
+    onMove: (source, target, side) => {
+      const sp = pickSpace(layoutRef.current);
+      const t = pickTab(sp);
+      if (sp && t) withViewTransition(() => flushSync(() => update((l) => movePane(l, sp.id, t.id, source, target, side))));
+    },
   };
 
   /* Spec 56: the Claude accounts plugin, on once claude-swap is installed. */
@@ -1583,6 +2054,7 @@ export function WorkbenchPage() {
           onClose={() => setMenu(null)}
           onRename={() => (menu.kind === "space" ? openRenameSpace(menu.spaceId) : openRenameTab(menu.spaceId, menu.tabId))}
           onCloseTarget={() => (menu.kind === "space" ? askCloseSpace(menu.spaceId) : closeTabNow(menu.spaceId, menu.tabId))}
+          extra={phone && menu.kind === "space" ? <PhoneMenuExtra onFiles={() => git.toggle("files")} onDone={() => setMenu(null)} /> : undefined}
         />
       ) : null}
       {dialog?.kind === "rename-space" ? (
@@ -1642,6 +2114,8 @@ export function WorkbenchPage() {
         void newSpace();
         break;
       case "split":
+        /* In focus mode a split would hide at once: show every pane first. */
+        if (focusOnlyRef.current) git.setFocusMode(false);
         if (focus) void actions.onSplit(focus, sc.dir);
         else void newTerminal();
         break;
@@ -1652,9 +2126,21 @@ export function WorkbenchPage() {
         if (sp && t) closeTabNow(sp.id, t.id);
         break;
       case "zoom":
-        if (focus) actions.onZoom(focus);
+        /* In focus mode ⇧⌘↩ is the unexpand: every pane shows again. */
+        if (focusOnlyRef.current) git.setFocusMode(false);
+        else if (focus) actions.onZoom(focus);
         break;
       case "focus": {
+        /* In focus mode only one pane is on screen: step through the tab. */
+        const only = focusOnlyRef.current;
+        if (only && t) {
+          const ids = paneSessions(t.root);
+          const d = sc.dir === "left" || sc.dir === "up" ? -1 : 1;
+          const n = ids.length;
+          const next = ids[(ids.indexOf(only) + d + n) % n];
+          if (next) withViewTransition(() => flushSync(() => actions.onFocus(next)));
+          break;
+        }
         const next = focus ? paneInDirection(paneRects(), focus, sc.dir) : null;
         if (next) actions.onFocus(next);
         break;
@@ -1790,6 +2276,7 @@ export function WorkbenchPage() {
   if (phone) {
     return (
       <PaneAccessContext.Provider value={paneAccess}>
+      <WbGitContext.Provider value={git.context}>
         {banner}
         {overlays}
         {accountsOverlay}
@@ -1809,19 +2296,29 @@ export function WorkbenchPage() {
           onRestart={actions.onRestart}
           onClose={actions.onClose}
           onOpenFile={openPreview}
+          onChanges={() => git.toggle("changes")}
+          changeCount={git.changeCount}
         />
         <RemoteControlBar control={remoteControl} />
-        {preview ? <PreviewPanel data={preview.data} phone onClose={() => setPreview(null)} /> : null}
+        {git.panel}
+      </WbGitContext.Provider>
       </PaneAccessContext.Provider>
     );
   }
 
   const zoomed = tab?.zoom && tab && paneSessions(tab.root).includes(tab.zoom) ? tab.zoom : undefined;
+  /* Spec 66 (owner, 2026-11-21): with the git panel open, focus mode shows
+     only the focused pane next to it. A local view: the shared layout and
+     other clients are untouched. */
+  const tabPanes = tab ? paneSessions(tab.root) : [];
+  const focusOnly = !zoomed && git.open && git.focusMode && tabPanes.length > 1 ? (tab?.focus && tabPanes.includes(tab.focus) ? tab.focus : tabPanes[0]) : undefined;
+  const shownAlone = zoomed ?? focusOnly;
   const attached = tab ? tabSessions(tab).reduce((n, id) => Math.max(n, sessions[id]?.attached || 0), 0) : 0;
 
   return (
     <PaneAccessContext.Provider value={paneAccess}>
-    <main id="main" className="wb-page">
+    <WbGitContext.Provider value={git.context}>
+    <main id="main" className={"wb-page" + (git.open ? " wbg-open" : "") + (git.maximized ? " wbg-maxed" : "")}>
       {overlays}
       {accountsOverlay}
       {panelOpen ? panel : null}
@@ -1853,6 +2350,15 @@ export function WorkbenchPage() {
                 className={"wb-tab" + (t.id === tab?.id ? " is-on" : "")}
                 role="tab"
                 aria-selected={t.id === tab?.id}
+                onMouseEnter={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  clearTimeout(hoverTimer.current);
+                  hoverTimer.current = setTimeout(() => setTabHover({ id: t.id, rect }), 350);
+                }}
+                onMouseLeave={() => {
+                  clearTimeout(hoverTimer.current);
+                  setTabHover(null);
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   if (space) setMenu({ kind: "tab", spaceId: space.id, tabId: t.id, anchor: e.currentTarget });
@@ -1880,9 +2386,71 @@ export function WorkbenchPage() {
               </div>
             );
           })}
-          <button type="button" className="wb-tab-new" aria-label="New terminal" data-tip="New tab ⌘T" onClick={newTerminal}>
-            <Ic name="plus" size={15} />
-          </button>
+          {/* "+" opens a terminal at once; "⌄" next to it holds the other ways
+              to start a tab (owner, 2026-11-22). */}
+          <span className="wbg-plus-group" ref={plusRef}>
+            <button type="button" className="wb-tab-new" aria-label="New terminal" data-tip="New tab ⌘T" onClick={() => void newTerminal()}>
+              <Ic name="plus" size={15} />
+            </button>
+            <button
+              type="button"
+              className={"wb-tab-new wbg-plus-more" + (plusMenu ? " is-open" : "")}
+              aria-label="More ways to open a tab"
+              aria-haspopup="menu"
+              aria-expanded={plusMenu}
+              onClick={() => setPlusMenu((m) => !m)}
+            >
+              <Ic name="chevron-down" size={13} />
+            </button>
+          </span>
+          {plusMenu ? (
+            <Menu anchorRef={plusRef} open onClose={() => setPlusMenu(false)} className="wbg-plus-menu">
+              {git.focused ? (
+                <MenuItem
+                  icon="sparkles"
+                  right={
+                    <span className="wbg-pane-chip">
+                      <i className="wbg-wt-dot" style={{ background: git.focused.color }} />
+                      {git.focused.short}
+                    </span>
+                  }
+                  onClick={() => {
+                    setPlusMenu(false);
+                    const f = git.focused;
+                    if (f) gitOpenTab(f.worktree, "claude");
+                  }}
+                >
+                  Claude Code here
+                </MenuItem>
+              ) : null}
+              {git.inSpace.length ? (
+                <>
+                  <MenuSeparator />
+                  <div className="wbg-menu-label">Claude Code in worktree</div>
+                  {git.inSpace.map((w) => (
+                    <MenuItem
+                      key={w.info.worktree}
+                      onClick={() => {
+                        setPlusMenu(false);
+                        gitOpenTab(w.info.worktree, "claude");
+                      }}
+                      right={<i className="wbg-wt-dot" style={{ background: w.info.color }} />}
+                    >
+                      <span className="mono">{w.info.branch}</span>
+                    </MenuItem>
+                  ))}
+                  <MenuItem icon="folder-git-2" onClick={() => (setPlusMenu(false), git.openWorktrees())}>
+                    All worktrees…
+                  </MenuItem>
+                </>
+              ) : null}
+              <MenuSeparator />
+              <MenuItem icon="folder-plus" kbd="⇧⌘N" onClick={() => (setPlusMenu(false), git.openNewWorktree())}>
+                New worktree…
+              </MenuItem>
+            </Menu>
+          ) : null}
+          {tabHover ? <TabWorktreeCard tabId={tabHover.id} rect={tabHover.rect} tab={space?.tabs.find((x) => x.id === tabHover.id)} sessions={sessions} /> : null}
           <span className="wb-spacer" />
           {accountsReady ? (
             <button
@@ -1901,21 +2469,43 @@ export function WorkbenchPage() {
               <StatusDot status="working" /> {attached > 1 ? "Attached here · " + attached + " clients" : "Attached here"}
             </span>
           ) : null}
+          {/* The Changes button hides while the panel is open; the panel has
+              its own close (owner, 2026-11-22). */}
+          {git.open ? null : (
+            <>
+              <span className="wbg-toggle-sep" />
+              {git.toggleButton}
+            </>
+          )}
         </div>
         <div className="wb-workspace">
           {!loaded ? (
             <p className="wb-empty-note">Opening Workbench…</p>
           ) : tab ? (
-            zoomed ? (
+            shownAlone ? (
               <PaneView
-                id={zoomed}
-                session={sessions[zoomed]}
+                id={shownAlone}
+                session={sessions[shownAlone]}
                 focused
-                zoomed
-                closing={closing.has(zoomed)}
-                entering={entering.has(zoomed)}
+                zoomed={shownAlone === zoomed}
+                closing={closing.has(shownAlone)}
+                entering={entering.has(shownAlone)}
                 actions={actions}
                 fontSize={deskFont}
+                cycle={
+                  focusOnly
+                    ? {
+                        index: tabPanes.indexOf(focusOnly),
+                        total: tabPanes.length,
+                        go: (d: number) => {
+                          const n = tabPanes.length;
+                          const next = tabPanes[(tabPanes.indexOf(focusOnly) + d + n) % n];
+                          if (next) withViewTransition(() => flushSync(() => actions.onFocus(next)));
+                        },
+                        exit: () => git.setFocusMode(false),
+                      }
+                    : undefined
+                }
               />
             ) : (
               <PaneTree
@@ -1940,8 +2530,9 @@ export function WorkbenchPage() {
         </div>
         <RemoteControlBar control={remoteControl} />
       </section>
-      {preview ? <PreviewPanel data={preview.data} onClose={() => setPreview(null)} /> : null}
+      {git.panel}
     </main>
+    </WbGitContext.Provider>
     </PaneAccessContext.Provider>
   );
 }

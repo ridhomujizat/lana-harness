@@ -691,3 +691,69 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
     animation: none !important;
   }
 }
+
+/* The collapsed rail: each icon is its own rounded tile with a small gap, so
+   the hover and the active tile never touch (owner report 2026-11-22). */
+@media (min-width: 901px) {
+  .shell.collapsed .side .sitem {
+    width: 36px;
+    height: 34px;
+    margin: 4px auto;
+    border-radius: 9px;
+  }
+}
+
+/* The collapsed rail's foot: Settings and the owner avatar sit centred in the
+   same column as the nav tiles, with room below the avatar (owner report
+   2026-11-22). The name and Log out live in the expanded sidebar. */
+@media (min-width: 901px) {
+  .shell.collapsed .side-bot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0 12px;
+  }
+
+  .shell.collapsed .side-bot .sitem {
+    margin: 0 auto;
+  }
+
+  .shell.collapsed .side-bot .row {
+    display: flex;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .shell.collapsed .side-bot .row > :not(.av) {
+    display: none;
+  }
+
+  .shell.collapsed .side-bot .row > .av {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+  }
+}
+
+/* The expanded sidebar's foot: the avatar is centred on the icon column and
+   the name starts where the nav labels start; room below for the window's
+   rounded corner (owner report 2026-11-22). */
+.side-bot {
+  padding-bottom: 12px;
+}
+
+.side-bot .row {
+  height: var(--side-row);
+  padding: 0 8px 0 4px;
+  gap: 5px;
+}
+
+.side-bot .row > .av {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}

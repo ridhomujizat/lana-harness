@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent as ReactTouchEvent } from "react";
 
 import { Button, Input, Menu, MenuItem, MenuSeparator, Modal } from "../ui/gr8r";
 
@@ -64,17 +64,21 @@ export function ActionMenu({
   onClose,
   onRename,
   onCloseTarget,
+  extra,
 }: {
   target: MenuTarget;
   onClose: () => void;
   onRename: () => void;
   onCloseTarget: () => void;
+  /* Items above Rename, such as the phone's text size (spec 66). */
+  extra?: ReactNode;
 }) {
   /* The menu anchors to the element that opened it. */
   const anchorRef = useMemo(() => ({ current: target.anchor as HTMLElement | null }), [target.anchor]);
   const what = target.kind === "space" ? "space" : "tab";
   return (
     <Menu anchorRef={anchorRef} open onClose={onClose} className="wb-menu">
+      {extra}
       <MenuItem
         icon="pencil"
         onClick={() => {
