@@ -75,7 +75,8 @@ import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
 import { Menu, MenuItem, MenuSeparator } from "../ui/gr8r";
-import { LAYOUT_MOTION_MS, holdLayout, reducedMotion } from "../app/layout-motion";
+import { LAYOUT_MOTION_MS, holdLayout, reducedMotion, withViewTransition } from "../app/layout-motion";
+import { flushSync } from "react-dom";
 import { PaneAccessContext, RemoteControlBar, usePaneAccess, useRemoteControl, type PaneAccess } from "./workbench-remote";
 
 /* Spec 55: the Workbench page. Desktop: panel (Spaces + Agents), tab strip,
@@ -516,7 +517,7 @@ function PaneView({
     <div
       className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "")}
       data-session={id}
-      style={grow !== undefined ? { flexGrow: grow } : undefined}
+      style={{ ...(grow !== undefined ? { flexGrow: grow } : {}), viewTransitionName: "wbpane-" + id.replace(/[^A-Za-z0-9_-]/g, "") } as CSSProperties}
     >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
         <ProgramTile session={session} size="pane" />
@@ -1338,6 +1339,7 @@ export function WorkbenchPage() {
   const sidebarAuto = useRef(false);
   const togglePanel = (opts?: unknown) => {
     const auto = !!opts && typeof opts === "object" && (opts as { auto?: boolean }).auto === true;
+    const instant = !!opts && typeof opts === "object" && (opts as { instant?: boolean }).instant === true;
     const next = !panelOpen || panelMotion === "out";
     if (!auto) sidebarAuto.current = false;
     try {
@@ -1347,7 +1349,7 @@ export function WorkbenchPage() {
       /* Storage is optional. */
     }
     clearTimeout(panelTimer.current);
-    if (reducedMotion()) {
+    if (reducedMotion() || instant) {
       setPanelMotion(null);
       setPanelOpen(next);
       return;
@@ -1690,15 +1692,15 @@ export function WorkbenchPage() {
       })
       .catch((err) => setError(errorMessage(err)));
   };
-  const onGitOpenChange = (open: boolean) => {
+  const onGitOpenChange = (open: boolean, instant?: boolean) => {
     if (phone) return;
     const sidebarShown = panelOpen && panelMotion !== "out";
     if (open && sidebarShown) {
-      togglePanel({ auto: true });
+      togglePanel({ auto: true, instant });
       sidebarAuto.current = true;
     } else if (!open && sidebarAuto.current) {
       sidebarAuto.current = false;
-      if (!sidebarShown) togglePanel({ auto: true });
+      if (!sidebarShown) togglePanel({ auto: true, instant });
     }
   };
   const git = useWorkbenchGit({ layout, sessions, space, tab, phone, openTab: gitOpenTab, onOpenChange: onGitOpenChange });
@@ -1747,7 +1749,7 @@ export function WorkbenchPage() {
     onZoom: (id) => {
       const sp = pickSpace(layoutRef.current);
       const t = pickTab(sp);
-      if (sp && t) update((l) => toggleZoom(l, sp.id, t.id, id));
+      if (sp && t) withViewTransition(() => flushSync(() => update((l) => toggleZoom(l, sp.id, t.id, id))));
     },
     onClose: (id) => {
       /* Spec 61 REQ-WP-022: move the focus off the closing pane at once, so it
@@ -2331,7 +2333,7 @@ export function WorkbenchPage() {
                         go: (d: number) => {
                           const n = tabPanes.length;
                           const next = tabPanes[(tabPanes.indexOf(focusOnly) + d + n) % n];
-                          if (next) actions.onFocus(next);
+                          if (next) withViewTransition(() => flushSync(() => actions.onFocus(next)));
                         },
                       }
                     : undefined

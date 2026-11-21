@@ -3,7 +3,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { WorkbenchPreview, WorkbenchSession } from "../api/workbench";
 import { isGitInfo, type GitInfo } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
-import { LAYOUT_MOTION_MS, holdLayout, reducedMotion } from "../app/layout-motion";
+import { flushSync } from "react-dom";
+
+import { LAYOUT_MOTION_MS, canViewTransition, holdLayout, reducedMotion, withViewTransition } from "../app/layout-motion";
 import { GitPanel, GIT_TABS, type GitTab, type SpaceWorktree } from "./workbench-git-panel";
 import { readPref, savePref, useGitResolve, useGitStatus } from "./workbench-git-hooks";
 import { groupByWorktree, panelWorktree, relativeTo, sessionDir, sharedAgents } from "./workbench-git-model";
@@ -84,8 +86,9 @@ export function useWorkbenchGit({
   phone: boolean;
   /* Starts a session in dir as a new tab of the active space. */
   openTab: (dir: string, program: "claude" | "shell") => void;
-  /* Told when the panel starts to open or close, so the page can make room. */
-  onOpenChange?: (open: boolean) => void;
+  /* Told when the panel starts to open or close, so the page can make room;
+     instant inside a View Transition. */
+  onOpenChange?: (open: boolean, instant?: boolean) => void;
 }): UseWorkbenchGit {
   const [open, setOpen] = useState(() => readPref(OPEN_KEY, ["open", "closed"] as const, "closed") === "open");
   const [motion, setMotion] = useState<"in" | "out" | null>(null);
@@ -159,13 +162,25 @@ export function useWorkbenchGit({
 
   const setOpenSaved = (next: boolean) => {
     savePref(OPEN_KEY, next ? "open" : "closed");
-    onOpenChange?.(next);
     clearTimeout(timer.current);
     if (phone || reducedMotion()) {
+      onOpenChange?.(next);
       setMotion(null);
       setOpen(next);
       return;
     }
+    /* One View Transition moves the panel, the sidebar and the panes together. */
+    if (canViewTransition()) {
+      withViewTransition(() => {
+        flushSync(() => {
+          onOpenChange?.(next, true);
+          setMotion(null);
+          setOpen(next);
+        });
+      });
+      return;
+    }
+    onOpenChange?.(next);
     /* REQ-WG-062: slide like the sidebar, terminals refit at the end. */
     holdLayout();
     setOpen(true);
@@ -320,9 +335,8 @@ export function useWorkbenchGit({
       worktreesTab={worktreesTab}
       focusMode={focusMode}
       onFocusMode={(on) => {
-        holdLayout();
-        setFocusMode(on);
         savePref("lana.workbench.gitFocus", on ? "on" : "off");
+        withViewTransition(() => flushSync(() => setFocusMode(on)));
       }}
     />
   ) : null;

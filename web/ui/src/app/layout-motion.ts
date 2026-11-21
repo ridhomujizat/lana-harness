@@ -31,3 +31,29 @@ export function holdLayout(ms = LAYOUT_MOTION_MS): void {
     window.dispatchEvent(new Event(LAYOUT_SETTLED));
   }, ms);
 }
+
+/* Spec 66: a same-document View Transition around a layout change, so panes
+   glide to their new place and size instead of jumping. Terminals hold their
+   size until it ends and refit once. Without the API (or with reduced
+   motion) the change just happens. */
+type StartViewTransition = (cb: () => void) => { finished: Promise<void> };
+
+export function canViewTransition(): boolean {
+  return typeof document !== "undefined" && typeof (document as Document & { startViewTransition?: StartViewTransition }).startViewTransition === "function" && !reducedMotion();
+}
+
+let transitionBusy = false;
+
+export function withViewTransition(change: () => void): void {
+  if (!canViewTransition() || transitionBusy) {
+    change();
+    return;
+  }
+  transitionBusy = true;
+  holdLayout(LAYOUT_MOTION_MS + 200);
+  const start = (document as Document & { startViewTransition: StartViewTransition }).startViewTransition.bind(document);
+  const vt = start(change);
+  vt.finished.finally(() => {
+    transitionBusy = false;
+  });
+}

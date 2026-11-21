@@ -2136,3 +2136,92 @@ body.wb-resizing-col * {
   background: color-mix(in srgb, var(--violet) 18%, transparent);
   color: var(--text);
 }
+
+/* ------------------------------------------------------------------ */
+/* View Transitions for panel, focus mode and zoom                     */
+/* ------------------------------------------------------------------ */
+
+.wbg-panel:not(.wbg-sheet) {
+  view-transition-name: wbg-panel;
+}
+
+.wb-page:not(.wb-phone) > .wb-panel {
+  view-transition-name: wb-sidebar;
+}
+
+.wb-page:not(.wb-phone) .wb-tabs {
+  view-transition-name: wb-tabs;
+}
+
+/* The page itself does not cross-fade; only the named parts move. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-group(*) {
+  animation-duration: 240ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Terminal snapshots keep their pixels: the box resizes around them, the
+   text is never stretched. */
+::view-transition-old(*),
+::view-transition-new(*) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+}
+
+/* The panel and the sidebar slide; a pane that leaves or comes back fades. */
+::view-transition-new(wbg-panel):only-child {
+  animation: wbgVtFromRight 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(wbg-panel):only-child {
+  animation: wbgVtToRight 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+::view-transition-new(wb-sidebar):only-child {
+  animation: wbgVtFromLeft 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(wb-sidebar):only-child {
+  animation: wbgVtToLeft 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+@keyframes wbgVtFromRight {
+  from {
+    transform: translateX(32px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgVtToRight {
+  to {
+    transform: translateX(32px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgVtFromLeft {
+  from {
+    transform: translateX(-32px);
+    opacity: 0;
+  }
+}
+
+@keyframes wbgVtToLeft {
+  to {
+    transform: translateX(-32px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
