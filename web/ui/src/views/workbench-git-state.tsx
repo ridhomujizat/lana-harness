@@ -63,6 +63,7 @@ export interface UseWorkbenchGit {
   focused: GitInfo | undefined;
   openNewWorktree: () => void;
   openWorktrees: () => void;
+  focusMode: boolean;
   close: () => void;
   changeCount: number;
 }
@@ -94,6 +95,9 @@ export function useWorkbenchGit({
   const [chosen, setChosen] = useState<string | null>(null);
   const [file, setFile] = useState<{ path: string | null; line?: number }>({ path: null });
   const [external, setExternal] = useState<WorkbenchPreview | null>(null);
+  /* Focus mode: only the focused pane shows beside the open panel (owner,
+     2026-11-21). Kept per browser. */
+  const [focusMode, setFocusMode] = useState(() => readPref("lana.workbench.gitFocus", ["on", "off"] as const, "on") === "on");
   /* Bumped to open the New worktree dialog from the "+" menu (REQ-WG-076). */
   const [newNonce, setNewNonce] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -314,6 +318,12 @@ export function useWorkbenchGit({
       }}
       external={external}
       worktreesTab={worktreesTab}
+      focusMode={focusMode}
+      onFocusMode={(on) => {
+        holdLayout();
+        setFocusMode(on);
+        savePref("lana.workbench.gitFocus", on ? "on" : "off");
+      }}
     />
   ) : null;
 
@@ -375,5 +385,6 @@ export function useWorkbenchGit({
       setNewNonce((n) => n + 1);
     },
     openWorktrees,
+    focusMode,
   };
 }

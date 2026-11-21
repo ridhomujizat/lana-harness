@@ -58,6 +58,8 @@ export interface GitPanelProps {
   onFile: (path: string | null, line?: number) => void;
   external: WorkbenchPreview | null;
   worktreesTab: ReactNode;
+  focusMode?: boolean;
+  onFocusMode?: (on: boolean) => void;
 }
 
 export function GitPanel(props: GitPanelProps) {
@@ -80,7 +82,6 @@ export function GitPanel(props: GitPanelProps) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- another worktree drops the commit filter and the selection
     setCommit(null);
-    setChangeSel(null);
   }, [root]);
 
   const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -209,6 +210,18 @@ export function GitPanel(props: GitPanelProps) {
               />
             ) : null}
           </div>
+        ) : null}
+        {!phone && props.onFocusMode ? (
+          <button
+            type="button"
+            className={"wbg-icon-btn" + (props.focusMode ? " is-on" : "")}
+            aria-pressed={!!props.focusMode}
+            aria-label="Focus mode"
+            data-tip={props.focusMode ? "Showing the focused pane only" : "Show only the focused pane"}
+            onClick={() => props.onFocusMode?.(!props.focusMode)}
+          >
+            <Ic name="focus" size={15} />
+          </button>
         ) : null}
         <button type="button" className="wbg-icon-btn" aria-label="Refresh" data-tip="Refresh" onClick={props.onRefresh}>
           <Ic name="rotate-cw" size={15} />

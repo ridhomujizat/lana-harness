@@ -490,6 +490,7 @@ function PaneView({
   actions,
   fontSize,
   grow,
+  cycle,
 }: {
   id: string;
   session?: WorkbenchSession;
@@ -501,6 +502,8 @@ function PaneView({
   fontSize?: number;
   /* Its share of the parent split. */
   grow?: number;
+  /* Focus mode: which of the tab's panes this is, and stepping to the others. */
+  cycle?: { index: number; total: number; go: (delta: number) => void };
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
@@ -545,6 +548,19 @@ function PaneView({
           <StatusDot status={status} />
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}
         </span>
+        {cycle ? (
+          <span className="wbg-cycle" onMouseDown={(e) => e.stopPropagation()}>
+            <button type="button" aria-label="Previous pane" data-tip="Previous pane" onClick={() => cycle.go(-1)}>
+              <Ic name="chevron-left" size={14} />
+            </button>
+            <span>
+              {cycle.index + 1}/{cycle.total}
+            </span>
+            <button type="button" aria-label="Next pane" data-tip="Next pane" onClick={() => cycle.go(1)}>
+              <Ic name="chevron-right" size={14} />
+            </button>
+          </span>
+        ) : null}
         <span className="wb-pane-tools">
           <button type="button" aria-label="Split right" data-tip="Split right ⌘D" onClick={() => actions.onSplit(id, "row")}>
             <Ic name="columns-2" size={14} />
@@ -2130,6 +2146,12 @@ export function WorkbenchPage() {
   }
 
   const zoomed = tab?.zoom && tab && paneSessions(tab.root).includes(tab.zoom) ? tab.zoom : undefined;
+  /* Spec 66 (owner, 2026-11-21): with the git panel open, focus mode shows
+     only the focused pane next to it. A local view: the shared layout and
+     other clients are untouched. */
+  const tabPanes = tab ? paneSessions(tab.root) : [];
+  const focusOnly = !zoomed && git.open && git.focusMode && tabPanes.length > 1 ? (tab?.focus && tabPanes.includes(tab.focus) ? tab.focus : tabPanes[0]) : undefined;
+  const shownAlone = zoomed ?? focusOnly;
   const attached = tab ? tabSessions(tab).reduce((n, id) => Math.max(n, sessions[id]?.attached || 0), 0) : 0;
 
   return (
@@ -2291,16 +2313,29 @@ export function WorkbenchPage() {
           {!loaded ? (
             <p className="wb-empty-note">Opening Workbench…</p>
           ) : tab ? (
-            zoomed ? (
+            shownAlone ? (
               <PaneView
-                id={zoomed}
-                session={sessions[zoomed]}
+                id={shownAlone}
+                session={sessions[shownAlone]}
                 focused
-                zoomed
-                closing={closing.has(zoomed)}
-                entering={entering.has(zoomed)}
+                zoomed={shownAlone === zoomed}
+                closing={closing.has(shownAlone)}
+                entering={entering.has(shownAlone)}
                 actions={actions}
                 fontSize={deskFont}
+                cycle={
+                  focusOnly
+                    ? {
+                        index: tabPanes.indexOf(focusOnly),
+                        total: tabPanes.length,
+                        go: (d: number) => {
+                          const n = tabPanes.length;
+                          const next = tabPanes[(tabPanes.indexOf(focusOnly) + d + n) % n];
+                          if (next) actions.onFocus(next);
+                        },
+                      }
+                    : undefined
+                }
               />
             ) : (
               <PaneTree
