@@ -3,8 +3,10 @@
    The daemon renders a Markdown file to a page (internal/workbench/preview)
    and adds this script. ```mermaid blocks arrive as
    <pre><code class="language-mermaid">; each becomes a diagram with zoom
-   (− / + / fit, ⌘ or Ctrl + wheel, pinch), scrolling and drag-to-pan once it
-   is larger than its box, and double-click to fit. Mermaid itself (about
+   (− / + / fit, ⌘ or Ctrl + wheel, pinch) and plain scrolling once it is
+   larger than its box; no drag-to-pan, so its text can be selected and
+   copied, and touch scrolling stays native on a phone (owner, 2026-11-22).
+   The % button fits the diagram to the width. Mermaid itself (about
    1 MB gzipped) loads only when the page has a diagram. The page lives in a
    sandboxed iframe with an opaque origin, so nothing here uses storage. */
 (function () {
@@ -32,7 +34,8 @@
     ".mmd-bar button:hover{background:var(--hl,rgba(0,0,0,.06));color:var(--text,#1d1c1a)}" +
     ".mmd-bar .mmd-pct{min-width:46px;font-variant-numeric:tabular-nums}" +
     ".mmd-view{max-height:72vh;overflow:auto;overscroll-behavior:contain;padding:14px}" +
-    ".mmd-view.can-pan{cursor:grab}.mmd-view.is-panning{cursor:grabbing;user-select:none}" +
+    ".mmd-stage svg text,.mmd-stage svg foreignObject{-webkit-user-select:text;user-select:text}" +
+    "@media (pointer:coarse){.mmd-bar button{min-width:36px;height:32px}.mmd-view{max-height:60vh;padding:10px}}" +
     ".mmd-stage{display:flex;justify-content:center;min-width:min-content}" +
     ".mmd-view.is-wide .mmd-stage{justify-content:flex-start}" +
     ".mmd-stage svg{display:block;max-width:none!important;flex:none}" +
@@ -121,7 +124,6 @@
       pct.textContent = Math.round(scale * 100) + "%";
       var wide = w0 * scale > view.clientWidth - 28;
       view.classList.toggle("is-wide", wide);
-      view.classList.toggle("can-pan", wide || h0 * scale > view.clientHeight - 28);
       view.scrollLeft = cx * scale - px;
       view.scrollTop = cy * scale - py;
     }
@@ -164,31 +166,6 @@
       apply(gestureStart * e.scale);
     });
 
-    /* Drag to pan once the diagram is larger than its box. */
-    view.addEventListener("pointerdown", function (e) {
-      if (e.button !== 0 || !view.classList.contains("can-pan")) return;
-      var sx = e.clientX;
-      var sy = e.clientY;
-      var l0 = view.scrollLeft;
-      var t0 = view.scrollTop;
-      view.setPointerCapture(e.pointerId);
-      view.classList.add("is-panning");
-      function move(ev) {
-        view.scrollLeft = l0 - (ev.clientX - sx);
-        view.scrollTop = t0 - (ev.clientY - sy);
-      }
-      function up() {
-        view.classList.remove("is-panning");
-        view.removeEventListener("pointermove", move);
-        view.removeEventListener("pointerup", up);
-        view.removeEventListener("pointercancel", up);
-      }
-      view.addEventListener("pointermove", move);
-      view.addEventListener("pointerup", up);
-      view.addEventListener("pointercancel", up);
-    });
-
-    view.addEventListener("dblclick", fit);
     fit();
   }
 
