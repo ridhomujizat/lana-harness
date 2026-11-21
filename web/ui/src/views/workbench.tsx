@@ -64,13 +64,14 @@ import {
 } from "./workbench-model";
 import { TermPane, type SendInput } from "./workbench-term";
 import { prune as pruneTermCache } from "./workbench-term-cache";
-import { WorkbenchPreview as PreviewPanel } from "./workbench-preview";
+import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
 import { AgentLogo } from "./agent-logo";
 import { ProgramTile, TabTiles } from "./workbench-tile";
 import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
 import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
+import { Menu, MenuItem, MenuSeparator } from "../ui/gr8r";
 import { LAYOUT_MOTION_MS, holdLayout, reducedMotion } from "../app/layout-motion";
 import { PaneAccessContext, RemoteControlBar, usePaneAccess, useRemoteControl, type PaneAccess } from "./workbench-remote";
 
@@ -145,6 +146,68 @@ function RestoredChip({ session }: { session?: WorkbenchSession }) {
   );
 }
 
+/* Spec 66 REQ-WG-074: a space whose sessions use several worktrees shows
+   their colours and "N worktrees · M terminals"; otherwise its tab count. */
+function SpaceMeta({ space, sessions }: { space: WbSpace; sessions: Sessions }) {
+  const git = useWbGit();
+  const ids = space.tabs.flatMap(tabSessions);
+  const trees = new Map<string, string>();
+  for (const id of ids) {
+    const info = git?.gitOf(id);
+    if (info) trees.set(info.worktree, info.color);
+  }
+  void sessions;
+  if (trees.size > 1) {
+    return (
+      <span className="wb-space-meta wbg-space-meta">
+        <span className="wbg-dots">
+          {Array.from(trees.entries()).map(([w, c]) => (
+            <i key={w} className="wbg-wt-dot" style={{ background: c }} />
+          ))}
+        </span>
+        {trees.size} worktrees · {ids.length} {ids.length === 1 ? "terminal" : "terminals"}
+      </span>
+    );
+  }
+  return <span className="wb-space-meta">{space.tabs.length ? space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs") : ""}</span>;
+}
+
+/* Spec 66 REQ-WG-073: hovering a tab whose panes use more than one worktree
+   shows which pane works where. Fixed, so the tab strip does not clip it. */
+function TabWorktreeCard({ tabId, rect, tab, sessions }: { tabId: string; rect: DOMRect; tab: WbTab | undefined; sessions: Sessions }) {
+  const git = useWbGit();
+  if (!tab || tab.id !== tabId || !git) return null;
+  const ids = tabSessions(tab);
+  const groups = new Map<string, { color: string; short: string; items: string[] }>();
+  for (const id of ids) {
+    const info = git.gitOf(id);
+    if (!info) continue;
+    const g = groups.get(info.worktree) ?? { color: info.color, short: info.short, items: [] };
+    const st = statusOf(sessions[id]);
+    g.items.push(programName(sessions[id]) + " · " + (st === "blocked" ? "needs you" : st));
+    groups.set(info.worktree, g);
+  }
+  if (groups.size < 2) return null;
+  return (
+    <div className="wbg-tab-card" style={{ left: rect.left, top: rect.bottom + 6 }} role="tooltip">
+      <div className="wbg-tab-card-head">
+        {ids.length} panes · {groups.size} worktrees
+      </div>
+      {Array.from(groups.entries()).map(([w, g]) => (
+        <div key={w} className="wbg-tab-card-row">
+          <i className="wbg-wt-dot" style={{ background: g.color }} />
+          <span className="mono">{g.short}</span>
+          <span className="wbg-tab-card-items">
+            {g.items.map((it, i) => (
+              <span key={i}>{it}</span>
+            ))}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SpaceTile({ space, label, size = 22 }: { space: WbSpace; label: string; size?: number }) {
   const letter = label === "~" ? "~" : label.replace(/^[^\p{L}\p{N}]+/u, "")[0]?.toUpperCase() || "?";
   return (
@@ -200,9 +263,11 @@ function Panel(props: PanelProps) {
   const agents = Object.values(sessions).filter(isAgent);
   const spaceOf = (id: string) => locate(layout, id)?.space;
 
+  const git = useWbGit();
   const row = (s: WorkbenchSession, showSpace: boolean) => {
     const owner = s.labels?.["lana.agent"];
     const sp = spaceOf(s.id);
+    const wt = git?.gitOf(s.id);
     return (
       <button
         key={s.id}
@@ -217,6 +282,12 @@ function Panel(props: PanelProps) {
             {showSpace ? " · " : ""}
             {sessionTitle(s)}
           </span>
+          {wt ? (
+            <span className="wbg-agent-wt" title={wt.branch}>
+              <i className="wbg-wt-dot" style={{ background: wt.color }} />
+              {wt.short}
+            </span>
+          ) : null}
         </span>
         {owner ? (
           <span className="wb-lana-av" style={{ background: hashColor(owner) }} title={"Lana agent " + owner}>
@@ -311,7 +382,7 @@ function Panel(props: PanelProps) {
             >
               <SpaceTile space={sp} label={spaceLabel(sp, sessions)} />
               <span className="wb-space-name">{spaceLabel(sp, sessions)}</span>
-              <span className="wb-space-meta">{sp.tabs.length ? sp.tabs.length + (sp.tabs.length === 1 ? " tab" : " tabs") : ""}</span>
+              <SpaceMeta space={sp} sessions={sessions} />
             </button>
             <button
               type="button"
@@ -417,14 +488,38 @@ function PaneView({
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
+  /* Spec 66 REQ-WG-071, 075: the pane's worktree, and a warning when another
+     agent works in the same one. */
+  const git = useWbGit();
+  const info = git?.gitOf(id);
+  const shared = git?.shared.get(id);
   return (
     <div
-      className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "")}
+      className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "") + (info ? " has-wt" : "")}
       data-session={id}
+      style={info ? ({ "--wb-wt": info.color } as CSSProperties) : undefined}
     >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
         <ProgramTile session={session} size="pane" />
         <span className="wb-pane-title">{programName(session)}</span>
+        {info ? (
+          <span className={"wbg-pane-chip" + (shared?.length ? " is-shared" : "")} title={info.branch + " · " + info.worktree}>
+            <i className="wbg-wt-dot" style={{ background: info.color }} />
+            <span className="wbg-pane-chip-label">{info.short}</span>
+          </span>
+        ) : null}
+        {info && shared?.length && git ? (
+          <button
+            type="button"
+            className="wbg-shared"
+            title="Two agents are editing this worktree"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => git.onShared(id)}
+          >
+            <Ic name="triangle-alert" size={12} />
+            <span>shared with {git.describe(shared[0] ?? "")}</span>
+          </button>
+        ) : null}
         {session?.cwd || session?.dir ? (
           <span className="wb-pane-dir">{(session.cwd || session.dir).replace(/^\/Users\/[^/]+/, "~")}</span>
         ) : null}
@@ -555,6 +650,9 @@ interface PhoneProps {
   onClose: (id: string) => void;
   /* Spec 61 REQ-WP-010: a file path was tapped in a terminal. */
   onOpenFile: (id: string, link: string, fallback?: string) => void;
+  /* Spec 66 REQ-WG-090: the Changes button and its count. */
+  onChanges: () => void;
+  changeCount: number;
 }
 
 const PHONE_FONT_KEY = "lana.workbench.phoneFont";
@@ -569,6 +667,64 @@ function readPhoneFont(): number {
   } catch {
     return PHONE_FONT;
   }
+}
+
+/* The phone text size is shared by the terminal and the space menu, where
+   A−/A+ live since spec 66 (REQ-WG-090, D3). */
+const phoneFontListeners = new Set<() => void>();
+
+function subscribePhoneFont(fn: () => void): () => void {
+  phoneFontListeners.add(fn);
+  return () => phoneFontListeners.delete(fn);
+}
+
+function changePhoneFont(delta: number): void {
+  const next = Math.min(PHONE_FONT_MAX, Math.max(PHONE_FONT_MIN, readPhoneFont() + delta));
+  try {
+    window.localStorage.setItem(PHONE_FONT_KEY, String(next));
+  } catch {
+    /* Storage is optional. */
+  }
+  for (const fn of phoneFontListeners) fn();
+}
+
+function usePhoneFont(): number {
+  return useSyncExternalStore(subscribePhoneFont, readPhoneFont, () => PHONE_FONT);
+}
+
+/* REQ-WG-090: the Text size stepper and Files, at the top of the phone's
+   space menu. */
+function PhoneMenuExtra({ onFiles, onDone }: { onFiles: () => void; onDone: () => void }) {
+  const size = usePhoneFont();
+  return (
+    <>
+      <div className="wbg-font-row">
+        <span>Text size</span>
+        <span className="wb-font" role="group" aria-label="Text size">
+          <button type="button" aria-label="Smaller text" onClick={() => changePhoneFont(-1)} disabled={size <= PHONE_FONT_MIN}>
+            A<sup>−</sup>
+          </button>
+          <b>{size}</b>
+          <button type="button" aria-label="Larger text" onClick={() => changePhoneFont(1)} disabled={size >= PHONE_FONT_MAX}>
+            A<sup>+</sup>
+          </button>
+        </span>
+      </div>
+      <button
+        type="button"
+        role="menuitem"
+        className="mi"
+        onClick={() => {
+          onDone();
+          onFiles();
+        }}
+      >
+        <Ic name="files" size={15} />
+        <span className="trunc">Files</span>
+      </button>
+      <div className="msep" role="separator" />
+    </>
+  );
 }
 
 /* The visual viewport (the part above the on-screen keyboard). `keyboard` is
@@ -601,20 +757,9 @@ function PhoneWorkbench(props: PhoneProps) {
   const tab = pickTab(space);
   const [sheet, setSheet] = useState(false);
   const [ctrl, setCtrl] = useState(false);
-  const [fontSize, setFontSize] = useState(readPhoneFont);
+  const fontSize = usePhoneFont();
   const keyboardRef = useRef<{ focus: () => void; blur: () => void } | null>(null);
   const viewport = useVisualViewport();
-  const changeFont = (delta: number) => {
-    setFontSize((size) => {
-      const next = Math.min(PHONE_FONT_MAX, Math.max(PHONE_FONT_MIN, size + delta));
-      try {
-        window.localStorage.setItem(PHONE_FONT_KEY, String(next));
-      } catch {
-        /* Storage is optional. */
-      }
-      return next;
-    });
-  };
   const sendRef = useRef<SendInput | null>(null);
   const claimRef = useRef<(() => void) | null>(null);
   const [owner, setOwner] = useState(true);
@@ -695,14 +840,10 @@ function PhoneWorkbench(props: PhoneProps) {
             <StatusDot status={counts.blocked ? "blocked" : counts.working ? "working" : "idle"} /> {summary}
           </span>
         </div>
-        <span className="wb-font" role="group" aria-label="Text size">
-          <button type="button" aria-label="Smaller text" onClick={() => changeFont(-1)} disabled={fontSize <= PHONE_FONT_MIN}>
-            A<sup>−</sup>
-          </button>
-          <button type="button" aria-label="Larger text" onClick={() => changeFont(1)} disabled={fontSize >= PHONE_FONT_MAX}>
-            A<sup>+</sup>
-          </button>
-        </span>
+        <button type="button" className="wbg-toggle wbg-toggle-lg" aria-label="Files and changes" onClick={props.onChanges}>
+          <Ic name="git-compare" size={18} />
+          {props.changeCount ? <span className="wbg-badge">{props.changeCount}</span> : null}
+        </button>
         <button type="button" className="wb-icon-btn wb-icon-btn-lg" aria-label="New terminal" onClick={props.onNewTerminal}>
           <Ic name="plus" size={18} />
         </button>
@@ -1146,7 +1287,9 @@ export function WorkbenchPage() {
   }, [previewNotice]);
   /* Spec 61 REQ-WP-012: one previewed file at a time; a new activation
      replaces it. The panel itself, not the shared layout document. */
-  const [preview, setPreview] = useState<{ session: string; data: WorkbenchPreview } | null>(null);
+  /* Spec 66 REQ-WG-063: a resolved ⌘+click goes to the git panel's Files tab
+     (set once the git hook below exists). */
+  const showPreviewRef = useRef<(sessionId: string, data: WorkbenchPreview) => void>(() => {});
   const [phoneView, setPhoneView] = useState<"home" | "space">("home");
   const layoutRef = useRef(layout);
   const savedRef = useRef("");
@@ -1236,7 +1379,7 @@ export function WorkbenchPage() {
       })
       .then((data) => {
         setPreviewNotice("");
-        setPreview({ session: sessionId, data });
+        showPreviewRef.current(sessionId, data);
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 404) {
@@ -1404,6 +1547,31 @@ export function WorkbenchPage() {
       setError(errorMessage(err));
     }
   }, [create, update, markEntering]);
+
+  /* Spec 66: Files, Changes and Worktrees. A session started from the panel
+     opens as a new tab of the active space (model A). */
+  const gitOpenTab = (dir: string, program: "claude" | "shell") => {
+    const sp = pickSpace(layoutRef.current);
+    if (!sp) return;
+    create(dir, program === "claude" ? ["claude"] : undefined, program === "claude" ? "Claude Code" : undefined)
+      .then((s) => {
+        markEntering(s.id);
+        update((l) => addTab(l, sp.id, s.id));
+        setPhoneView("space");
+      })
+      .catch((err) => setError(errorMessage(err)));
+  };
+  const git = useWorkbenchGit({ layout, sessions, space, tab, phone, openTab: gitOpenTab });
+  useEffect(() => {
+    showPreviewRef.current = git.showPreview;
+  });
+  /* REQ-WG-073: the tab under the pointer, after a short delay. */
+  const [tabHover, setTabHover] = useState<{ id: string; rect: DOMRect } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  /* REQ-WG-076: the "+" menu. */
+  const plusRef = useRef<HTMLButtonElement | null>(null);
+  const [plusMenu, setPlusMenu] = useState(false);
 
   const actions: PaneActions = {
     onFocus: (id) => {
@@ -1583,6 +1751,7 @@ export function WorkbenchPage() {
           onClose={() => setMenu(null)}
           onRename={() => (menu.kind === "space" ? openRenameSpace(menu.spaceId) : openRenameTab(menu.spaceId, menu.tabId))}
           onCloseTarget={() => (menu.kind === "space" ? askCloseSpace(menu.spaceId) : closeTabNow(menu.spaceId, menu.tabId))}
+          extra={phone && menu.kind === "space" ? <PhoneMenuExtra onFiles={() => git.toggle("files")} onDone={() => setMenu(null)} /> : undefined}
         />
       ) : null}
       {dialog?.kind === "rename-space" ? (
@@ -1790,6 +1959,7 @@ export function WorkbenchPage() {
   if (phone) {
     return (
       <PaneAccessContext.Provider value={paneAccess}>
+      <WbGitContext.Provider value={git.context}>
         {banner}
         {overlays}
         {accountsOverlay}
@@ -1809,9 +1979,12 @@ export function WorkbenchPage() {
           onRestart={actions.onRestart}
           onClose={actions.onClose}
           onOpenFile={openPreview}
+          onChanges={() => git.toggle("changes")}
+          changeCount={git.changeCount}
         />
         <RemoteControlBar control={remoteControl} />
-        {preview ? <PreviewPanel data={preview.data} phone onClose={() => setPreview(null)} /> : null}
+        {git.panel}
+      </WbGitContext.Provider>
       </PaneAccessContext.Provider>
     );
   }
@@ -1821,7 +1994,8 @@ export function WorkbenchPage() {
 
   return (
     <PaneAccessContext.Provider value={paneAccess}>
-    <main id="main" className="wb-page">
+    <WbGitContext.Provider value={git.context}>
+    <main id="main" className={"wb-page" + (git.maximized ? " wbg-maxed" : "")}>
       {overlays}
       {accountsOverlay}
       {panelOpen ? panel : null}
@@ -1853,6 +2027,15 @@ export function WorkbenchPage() {
                 className={"wb-tab" + (t.id === tab?.id ? " is-on" : "")}
                 role="tab"
                 aria-selected={t.id === tab?.id}
+                onMouseEnter={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  clearTimeout(hoverTimer.current);
+                  hoverTimer.current = setTimeout(() => setTabHover({ id: t.id, rect }), 350);
+                }}
+                onMouseLeave={() => {
+                  clearTimeout(hoverTimer.current);
+                  setTabHover(null);
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   if (space) setMenu({ kind: "tab", spaceId: space.id, tabId: t.id, anchor: e.currentTarget });
@@ -1880,9 +2063,69 @@ export function WorkbenchPage() {
               </div>
             );
           })}
-          <button type="button" className="wb-tab-new" aria-label="New terminal" data-tip="New tab ⌘T" onClick={newTerminal}>
+          <button
+            ref={plusRef}
+            type="button"
+            className={"wb-tab-new wbg-plus" + (plusMenu ? " is-open" : "")}
+            aria-label="New tab"
+            aria-haspopup="menu"
+            data-tip="New tab ⌘T"
+            onClick={() => setPlusMenu((m) => !m)}
+          >
             <Ic name="plus" size={15} />
+            <Ic name="chevron-down" size={11} />
           </button>
+          {plusMenu ? (
+            <Menu anchorRef={plusRef} open onClose={() => setPlusMenu(false)} className="wbg-plus-menu">
+              <MenuItem icon="square-terminal" kbd="⌘T" onClick={() => (setPlusMenu(false), void newTerminal())}>
+                New terminal
+              </MenuItem>
+              {git.focused ? (
+                <MenuItem
+                  icon="sparkles"
+                  right={
+                    <span className="wbg-pane-chip">
+                      <i className="wbg-wt-dot" style={{ background: git.focused.color }} />
+                      {git.focused.short}
+                    </span>
+                  }
+                  onClick={() => {
+                    setPlusMenu(false);
+                    const f = git.focused;
+                    if (f) gitOpenTab(f.worktree, "claude");
+                  }}
+                >
+                  Claude Code here
+                </MenuItem>
+              ) : null}
+              {git.inSpace.length ? (
+                <>
+                  <MenuSeparator />
+                  <div className="wbg-menu-label">Claude Code in worktree</div>
+                  {git.inSpace.map((w) => (
+                    <MenuItem
+                      key={w.info.worktree}
+                      onClick={() => {
+                        setPlusMenu(false);
+                        gitOpenTab(w.info.worktree, "claude");
+                      }}
+                      right={<i className="wbg-wt-dot" style={{ background: w.info.color }} />}
+                    >
+                      <span className="mono">{w.info.branch}</span>
+                    </MenuItem>
+                  ))}
+                  <MenuItem icon="folder-git-2" onClick={() => (setPlusMenu(false), git.openWorktrees())}>
+                    All worktrees…
+                  </MenuItem>
+                </>
+              ) : null}
+              <MenuSeparator />
+              <MenuItem icon="folder-plus" kbd="⇧⌘N" onClick={() => (setPlusMenu(false), git.openNewWorktree())}>
+                New worktree…
+              </MenuItem>
+            </Menu>
+          ) : null}
+          {tabHover ? <TabWorktreeCard tabId={tabHover.id} rect={tabHover.rect} tab={space?.tabs.find((x) => x.id === tabHover.id)} sessions={sessions} /> : null}
           <span className="wb-spacer" />
           {accountsReady ? (
             <button
@@ -1901,6 +2144,8 @@ export function WorkbenchPage() {
               <StatusDot status="working" /> {attached > 1 ? "Attached here · " + attached + " clients" : "Attached here"}
             </span>
           ) : null}
+          <span className="wbg-toggle-sep" />
+          {git.toggleButton}
         </div>
         <div className="wb-workspace">
           {!loaded ? (
@@ -1940,8 +2185,9 @@ export function WorkbenchPage() {
         </div>
         <RemoteControlBar control={remoteControl} />
       </section>
-      {preview ? <PreviewPanel data={preview.data} onClose={() => setPreview(null)} /> : null}
+      {git.panel}
     </main>
+    </WbGitContext.Provider>
     </PaneAccessContext.Provider>
   );
 }
