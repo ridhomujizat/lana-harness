@@ -576,6 +576,19 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
   }
 }
 
+/* lana: installed phone app (spec 67). The page uses viewport-fit=cover, so
+   on a phone the bottom of the screen sits under the home indicator. Bottom
+   bars and composers pad themselves by --safe-bottom. While the keyboard is
+   open the app already ends above the keyboard, so lib/viewport.ts sets
+   html.kb-open and the padding drops to 0. */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html.kb-open {
+  --safe-bottom: 0px;
+}
+
 /* lana: phone viewport (owner report 2026-11-19). The app is pinned to the
    visual viewport, the part of the screen the user can see. iOS Safari keeps
    the layout viewport full height when the keyboard opens and pans the visible
@@ -588,8 +601,8 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
    (the height with every browser bar shown). */
 #app {
   position: fixed;
-  left: 0;
-  right: 0;
+  left: env(safe-area-inset-left, 0px);
+  right: env(safe-area-inset-right, 0px);
   top: var(--app-top, 0px);
   height: 100dvh;
   height: min(var(--app-h, 100dvh), 100svh);

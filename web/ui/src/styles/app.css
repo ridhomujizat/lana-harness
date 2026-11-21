@@ -2730,7 +2730,7 @@ pre.json {
 
 .chat-composer {
   flex: 0 0 auto;
-  padding: 8px var(--space-page) 10px;
+  padding: 8px var(--space-page) calc(10px + var(--safe-bottom));
 }
 
 .chat-composer-inner {
@@ -3474,7 +3474,7 @@ pre.json {
   }
 
   .chat-composer {
-    padding: 8px var(--space-card) var(--space-card);
+    padding: 8px var(--space-card) calc(var(--space-card) + var(--safe-bottom));
   }
 
   .chat-slot {

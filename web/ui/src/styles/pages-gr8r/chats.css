@@ -457,7 +457,7 @@
   flex: 0 0 auto;
   flex-direction: column;
   gap: var(--s-2);
-  padding: var(--s-3) var(--gutter) var(--s-4);
+  padding: var(--s-3) var(--gutter) calc(var(--s-4) + var(--safe-bottom));
   border-top: 1px solid var(--border);
   background: var(--surface);
 }

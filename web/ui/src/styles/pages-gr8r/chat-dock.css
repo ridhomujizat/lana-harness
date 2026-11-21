@@ -368,7 +368,7 @@ span.dock-win-who {
 .dock-heads {
   position: fixed;
   right: 16px;
-  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(24px + var(--safe-bottom));
   z-index: 40;
   display: flex;
   align-items: flex-end;
@@ -502,7 +502,7 @@ span.dock-win-who {
   display: flex;
   flex-direction: column;
   padding-top: 14px;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-bottom);
   border-radius: 20px 20px 0 0;
   background: var(--surface);
   overflow: hidden;

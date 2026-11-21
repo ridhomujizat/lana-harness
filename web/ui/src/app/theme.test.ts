@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   THEME_CHOICES,
+  THEME_COLORS,
   THEME_KEY,
   applyTheme,
   readTheme,
@@ -49,6 +50,24 @@ describe("theme persistence", () => {
     expect(applyTheme("light")).toBe("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     expect(applyTheme("system")).toBe("dark");
+  });
+
+  it("paints every theme-color meta with the chosen theme", () => {
+    mockMatchMedia(false);
+    for (const scheme of ["light", "dark"]) {
+      const meta = document.createElement("meta");
+      meta.name = "theme-color";
+      meta.media = `(prefers-color-scheme: ${scheme})`;
+      meta.content = "#000000";
+      document.head.append(meta);
+    }
+    const metas = () =>
+      Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')).map((m) => m.content);
+    applyTheme("dark");
+    expect(metas()).toEqual([THEME_COLORS.dark, THEME_COLORS.dark]);
+    applyTheme("system");
+    expect(metas()).toEqual([THEME_COLORS.light, THEME_COLORS.light]);
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.remove());
   });
 
   it("watches the prefers-color-scheme query", () => {

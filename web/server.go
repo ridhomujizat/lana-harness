@@ -64,6 +64,7 @@ type Server struct {
 	mux              *http.ServeMux
 	assets           fs.FS
 	index            []byte
+	indexRemote      []byte
 	credentials      *credentialStore
 	signInCodes      *signInCodeStore
 	appCodes         *signInCodeStore
@@ -217,6 +218,8 @@ func New(cfg Config) (*Server, error) {
 		stop:           make(chan struct{}),
 		done:           make(chan struct{}),
 	}
+	// Spec 67: the same index with the manifest link, served to remote requests.
+	s.indexRemote = withManifestLink(index)
 	s.signInCodes = newSignInCodeStore(s.nowTime)
 	s.appCodes = newAppCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
@@ -481,9 +484,33 @@ func (s *Server) routes() {
 	s.registerKnowledgeRoutes()
 }
 
-func (s *Server) serveIndex(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Spec 67: only a remote (Tailscale Serve) request offers the web app
+	// manifest, so only the phone can install Lana as an app. The local page
+	// stays unchanged.
+	if _, ok := remoteFromContext(r.Context()); ok {
+		_, _ = w.Write(s.indexRemote)
+		return
+	}
 	_, _ = w.Write(s.index)
+}
+
+// withManifestLink returns index with the spec 67 manifest link inserted right
+// before its first </head>, so a remote (Tailscale Serve) request offers Lana
+// as an installable web app. An index without </head> is returned unchanged,
+// and the input slice is never modified.
+func withManifestLink(index []byte) []byte {
+	const link = "    <link rel=\"manifest\" href=\"/assets/manifest.json\">\n"
+	i := bytes.Index(index, []byte("</head>"))
+	if i < 0 {
+		return index
+	}
+	out := make([]byte, 0, len(index)+len(link))
+	out = append(out, index[:i]...)
+	out = append(out, link...)
+	out = append(out, index[i:]...)
+	return out
 }
 
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
