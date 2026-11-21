@@ -594,3 +594,94 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
   height: 100dvh;
   height: min(var(--app-h, 100dvh), 100svh);
 }
+
+/* lana: the sidebar badge centres its digits on their cap height, not on
+   Geist's line box (which sat them ~2px low in the 16px circle). */
+.sitem .ct.dotc {
+  display: block;
+  box-sizing: border-box;
+  height: 16px;
+  padding: calc((16px - 1cap) / 2) 4px;
+  line-height: 1;
+  text-align: center;
+  text-box: trim-both cap alphabetic;
+}
+
+/* lana: the sidebar slides between the full width and the 52px rail. The
+   rail's content takes its final width at once (icons do not drift) and the
+   expanded content keeps the full width, so the column edge reveals it. */
+@media (min-width: 901px) {
+  .shell {
+    transition: grid-template-columns 220ms var(--ease-drawer);
+  }
+
+  .shell:not(.collapsed) .side > * {
+    min-width: var(--side-w);
+  }
+
+  .shell.collapsed .side > * {
+    width: 52px;
+  }
+
+  .shell:not(.collapsed) .side .sitem > span:not(.pico),
+  .shell:not(.collapsed) .side .sgroup-h,
+  .shell:not(.collapsed) .side .ws-text {
+    animation: fade 200ms ease-out both;
+  }
+
+  html[data-shell="macos-app"] .topbar,
+  html[data-shell="macos-app"] .wb-page:not(.wb-phone) .wb-tabs {
+    transition: padding-left 220ms var(--ease-drawer);
+  }
+}
+
+/* lana: the Workbench panel grows from zero when shown and shrinks to zero
+   when hidden; its sections keep their width and are clipped meanwhile. */
+@keyframes wbPanelIn {
+  from {
+    width: 0;
+    flex-basis: 0;
+  }
+}
+
+@keyframes wbPanelOut {
+  to {
+    width: 0;
+    flex-basis: 0;
+  }
+}
+
+.wb-panel.is-entering,
+.wb-panel.is-leaving {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-panel.is-entering > :not(.wb-resizer),
+.wb-panel.is-leaving > :not(.wb-resizer) {
+  min-width: var(--wb-panel-w, 288px);
+}
+
+.wb-panel.is-entering {
+  animation: wbPanelIn 220ms var(--ease-drawer);
+}
+
+.wb-panel.is-leaving {
+  animation: wbPanelOut 220ms var(--ease-drawer) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell,
+  html[data-shell="macos-app"] .topbar,
+  html[data-shell="macos-app"] .wb-page:not(.wb-phone) .wb-tabs {
+    transition: none !important;
+  }
+
+  .shell .side .sitem > span:not(.pico),
+  .shell .side .sgroup-h,
+  .shell .side .ws-text,
+  .wb-panel.is-entering,
+  .wb-panel.is-leaving {
+    animation: none !important;
+  }
+}

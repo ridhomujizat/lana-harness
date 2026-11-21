@@ -5,6 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { MutableRefObject } from "react";
 
+import { LAYOUT_SETTLED, layoutAnimating } from "../app/layout-motion";
 import { attachURL, uploadWorkbenchDrops, type AttachMode } from "../api/workbench";
 import { dropText, openTerminalLink, takeNativeDragPaths, terminalKey, type NativeDrag } from "./workbench-model";
 import { splitReplay, startsWithSizeMarker } from "./workbench-replay";
@@ -546,10 +547,17 @@ function createEntry(init: TermCacheInit): TermCacheEntry {
     typeof ResizeObserver === "undefined"
       ? null
       : new ResizeObserver(() => {
+          /* A sidebar slide resizes the box every frame: fit once it ends. */
+          if (layoutAnimating()) return;
           refreshShown();
           if (owner) fitBox();
         });
   observer?.observe(host);
+  const layoutSettled = () => {
+    refreshShown();
+    if (owner) fitBox();
+  };
+  window.addEventListener(LAYOUT_SETTLED, layoutSettled);
 
   /* Touch scrolling (phones): xterm.js does not turn a finger drag into
      scrolling. A drag scrolls the scrollback of the normal screen; on the
@@ -762,6 +770,7 @@ function createEntry(init: TermCacheInit): TermCacheEntry {
     clearTimeout(resizeTimer);
     clearTimeout(replayTimer);
     observer?.disconnect();
+    window.removeEventListener(LAYOUT_SETTLED, layoutSettled);
     host.removeEventListener("mousedown", focusHandler);
     host.removeEventListener("touchstart", focusHandler);
     window.removeEventListener("focus", windowFocus);

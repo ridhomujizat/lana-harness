@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { errorMessage, ApiError } from "../api/client";
 import {
@@ -71,6 +71,7 @@ import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from 
 import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
+import { LAYOUT_MOTION_MS, holdLayout, reducedMotion } from "../app/layout-motion";
 import { PaneAccessContext, RemoteControlBar, usePaneAccess, useRemoteControl, type PaneAccess } from "./workbench-remote";
 
 /* Spec 55: the Workbench page. Desktop: panel (Spaces + Agents), tab strip,
@@ -185,6 +186,8 @@ interface PanelProps {
   /* Desktop only: hides the panel (the phone shows it as a page). */
   onCollapse?: () => void;
   width?: number;
+  /* The panel is sliding open ("in") or closed ("out"). */
+  motion?: "in" | "out" | null;
   onResizeStart?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizeReset?: () => void;
 }
@@ -266,7 +269,15 @@ function Panel(props: PanelProps) {
   }
 
   return (
-    <aside className="wb-panel" aria-label="Workbench" style={props.width ? { width: props.width, flexBasis: props.width } : undefined}>
+    <aside
+      className={"wb-panel" + (props.motion === "in" ? " is-entering" : props.motion === "out" ? " is-leaving" : "")}
+      aria-label="Workbench"
+      style={
+        props.width
+          ? ({ width: props.width, flexBasis: props.width, "--wb-panel-w": props.width + "px" } as CSSProperties)
+          : undefined
+      }
+    >
       <section className="wb-spaces">
         <div className="wb-sec-head">
           <span>Spaces</span>
@@ -1053,15 +1064,31 @@ export function WorkbenchPage() {
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
+  /* The panel slides: opening mounts it and grows it from zero; closing
+     shrinks it to zero and unmounts it when the slide ends. */
+  const [panelMotion, setPanelMotion] = useState<"in" | "out" | null>(null);
+  const panelTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(panelTimer.current), []);
   const togglePanel = () => {
-    setPanelOpen((open) => {
-      try {
-        window.localStorage.setItem(PANEL_KEY, open ? "closed" : "open");
-      } catch {
-        /* Storage is optional. */
-      }
-      return !open;
-    });
+    const next = !panelOpen || panelMotion === "out";
+    try {
+      window.localStorage.setItem(PANEL_KEY, next ? "open" : "closed");
+    } catch {
+      /* Storage is optional. */
+    }
+    clearTimeout(panelTimer.current);
+    if (reducedMotion()) {
+      setPanelMotion(null);
+      setPanelOpen(next);
+      return;
+    }
+    holdLayout();
+    setPanelOpen(true);
+    setPanelMotion(next ? "in" : "out");
+    panelTimer.current = setTimeout(() => {
+      setPanelMotion(null);
+      if (!next) setPanelOpen(false);
+    }, LAYOUT_MOTION_MS);
   };
   const [liveSessions, setSessions] = useState<Sessions>({});
   const sessionsRef = useRef(liveSessions);
@@ -1734,6 +1761,7 @@ export function WorkbenchPage() {
         : {
             onCollapse: togglePanel,
             width: panelWidth,
+            motion: panelMotion,
             onResizeStart: startResize,
             onResizeReset: () => {
               setPanelWidth(PANEL_WIDTH);
