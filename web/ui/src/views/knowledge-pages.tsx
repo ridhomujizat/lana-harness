@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { errorMessage } from "../api/client";
 import {
   getKnowledgeGraph,
@@ -103,6 +103,29 @@ export function PageReader({
     };
   }, [path]);
 
+  /* A stable renderer so Markdown re-parses only when the page changes rather
+     than on every parent update. */
+  const renderLink = useCallback(
+    (target: string, written: string) => {
+      const resolved = doc ? resolveTarget(doc, target) : "";
+      const text =
+        written === target ? journalTitle(target, label) || written : written;
+      if (!resolved) {
+        return (
+          <span className="kg-wikilink is-broken" title="No page with this title yet">
+            {text}
+          </span>
+        );
+      }
+      return (
+        <a className="kg-wikilink" href={pageHref(resolved)}>
+          {text}
+        </a>
+      );
+    },
+    [doc, label]
+  );
+
   if (error) {
     return (
       <div className="kg-reader">
@@ -126,22 +149,6 @@ export function PageReader({
   const scope = doc.scope;
   const agent = scope && scope !== "shared" ? scope : defaultAgent;
   const incoming = doc.links_in || [];
-  const renderLink = (target: string, written: string) => {
-    const resolved = resolveTarget(doc, target);
-    const text = written === target ? journalTitle(target, label) || written : written;
-    if (!resolved) {
-      return (
-        <span className="kg-wikilink is-broken" title="No page with this title yet">
-          {text}
-        </span>
-      );
-    }
-    return (
-      <a className="kg-wikilink" href={pageHref(resolved)}>
-        {text}
-      </a>
-    );
-  };
   return (
     <article className="kg-reader" aria-label={displayTitle(doc.path, doc.title, label)}>
       <div className="kg-reader-top">

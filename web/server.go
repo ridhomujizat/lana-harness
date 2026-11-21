@@ -264,7 +264,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerCalendarRoutes()
 	s.registerRouterRoutes()
 	s.registerWorkbenchRoutes()
-	s.handler = s.remoteGate(s.securityHeaders(s.mux))
+	s.handler = s.remoteGate(s.securityHeaders(s.compress(s.mux)))
 	return s, nil
 }
 

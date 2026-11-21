@@ -121,6 +121,8 @@ function TimelineEntry({
   colors: ScopeColors;
 }) {
   const label = useAgentLabel();
+  /* A stable renderer so Markdown re-parses only when its text changes. */
+  const wikiLink = useMemo(() => wikiOpener(label), [label]);
   /* "proposals applied:" with nothing after it says nothing. */
   const lines = entry.lines.filter((line) => !/:\s*$/.test(line));
   return (
@@ -135,7 +137,7 @@ function TimelineEntry({
         <p className="ka-title">{entryTitle(entry, label)}</p>
         {lines.length ? (
           <div className="ka-lines">
-            <Markdown text={lines.map((line) => "- " + line).join("\n")} wikiLink={wikiOpener(label)} />
+            <Markdown text={lines.map((line) => "- " + line).join("\n")} wikiLink={wikiLink} />
           </div>
         ) : null}
       </div>
@@ -145,6 +147,8 @@ function TimelineEntry({
 
 function ReportDrawer({ onClose }: { onClose: () => void }) {
   const label = useAgentLabel();
+  /* A stable renderer so Markdown re-parses only when the report changes. */
+  const wikiLink = useMemo(() => wikiOpener(label), [label]);
   const [report, setReport] = useState<KnowledgeReport | null | undefined>(undefined);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -178,7 +182,7 @@ function ReportDrawer({ onClose }: { onClose: () => void }) {
       ) : report ? (
         <div className="knowledge-report">
           <code className="mono knowledge-path">{report.path}</code>
-          <Markdown text={report.markdown} wikiLink={wikiOpener(label)} />
+          <Markdown text={report.markdown} wikiLink={wikiLink} />
         </div>
       ) : (
         <p className="knowledge-empty">No report yet</p>
