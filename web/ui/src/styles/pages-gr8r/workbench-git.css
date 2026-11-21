@@ -2329,7 +2329,6 @@ body.wb-resizing-col * {
    state and the tools always stay in view. */
 .wb-pane-head {
   min-width: 0;
-  overflow: hidden;
 }
 
 .wb-pane-head > * {
@@ -2417,4 +2416,27 @@ body.wb-resizing-col * {
   .wbg-shared {
     padding: 0 6px;
   }
+}
+
+/* Pane tools sit at the right edge: their tooltips open toward the left so
+   the pane does not cut them. */
+.wb-pane-tools [data-tip]:hover::after,
+.wb-pane-tools [data-tip]:focus-visible::after,
+.wbg-cycle [data-tip]:hover::after,
+.wbg-cycle [data-tip]:focus-visible::after {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+/* Focus mode is on: its unexpand button wears the accent, like the panel's
+   focus button. */
+.wb-pane-tools .wbg-focus-exit {
+  background: color-mix(in srgb, var(--violet) 22%, transparent);
+  color: color-mix(in srgb, var(--violet) 55%, var(--wb-term-text));
+}
+
+.wb-pane-tools .wbg-focus-exit:hover {
+  background: color-mix(in srgb, var(--violet) 32%, transparent);
+  color: var(--wb-term-text);
 }

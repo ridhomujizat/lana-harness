@@ -569,7 +569,7 @@ function PaneView({
           {cycle ? (
             /* Focus mode: no split (the new pane would be hidden at once);
                unexpand shows every pane again, the panel stays. */
-            <button type="button" aria-label="Show all panes" data-tip="Show all panes ⇧⌘↩" onClick={cycle.exit}>
+            <button type="button" className="wbg-focus-exit" aria-label="Show all panes" data-tip="Show all panes ⇧⌘↩" onClick={cycle.exit}>
               <Ic name="minimize-2" size={14} />
             </button>
           ) : (
