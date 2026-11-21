@@ -200,10 +200,10 @@ func (tr *ToolRunner) executeOne(ctx context.Context, state *callState, tc core.
 		state.setOutput(stopToolOutput(ctx))
 		return
 	}
-	// REQ-PCX-003: a successful call appends the <project-context> blocks of
-	// its directory that the session has not seen yet. The digest is taken
-	// before the note is appended, so identical calls keep the same digest for
-	// the loop guard (REQ-LPG-003).
+	// REQ-PCX-003: a successful call appends the project-context note (the
+	// intro line and the <project-context> blocks) of its directory that the
+	// session has not seen yet. The digest is taken before the note is appended,
+	// so identical calls keep the same digest for the loop guard (REQ-LPG-003).
 	if post.Status == core.ToolStatusSuccess && tc.ProjectNote != nil {
 		if note := tc.ProjectNote(state.call.Name, state.call.Input); note != "" {
 			post.Digest = outputDigest(post)

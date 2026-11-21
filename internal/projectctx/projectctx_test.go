@@ -279,6 +279,31 @@ func TestNoteReadFile(t *testing.T) {
 	}
 }
 
+// TestNoteIntroLine pins the intro line that opens the appended blocks
+// (AC-PCX-013): NoteIntroLine, a blank line, then the <project-context> blocks.
+func TestNoteIntroLine(t *testing.T) {
+	home, repo, workspace := trackerFixture(t)
+	sub := filepath.Join(repo, "sub")
+	mkdir(t, sub)
+
+	tr := NewTracker([]string{"AGENTS.md", "CLAUDE.md"}, home, workspace, nil)
+	input := fileInput(t, filepath.Join(sub, "x.go"))
+
+	path := filepath.Join(repo, "CLAUDE.md")
+	want := NoteIntroLine + "\n\n" +
+		"<project-context path=\"" + path + "\">\nrepo rules\n</project-context>"
+	got := tr.Note("read_file", input)
+	if got != want {
+		t.Fatalf("Note =\n%q\nwant\n%q", got, want)
+	}
+	if !strings.HasPrefix(got, NoteIntroLine+"\n\n") {
+		t.Fatalf("Note does not start with the intro line:\n%q", got)
+	}
+	if again := tr.Note("read_file", input); again != "" {
+		t.Fatalf("second Note = %q want empty", again)
+	}
+}
+
 // TestNoteBash covers the leading cd of AC-PCX-008 and the tools that do not
 // count.
 func TestNoteBash(t *testing.T) {
@@ -430,6 +455,13 @@ func TestSeenFromEvents(t *testing.T) {
 				toolResult(marker("/x/AGENTS.md")),
 			},
 			want: []string{"/x/AGENTS.md", "/y/AGENTS.md"},
+		},
+		{
+			name: "the note intro line does not hide the markers",
+			events: []core.SessionEvent{
+				toolResult(NoteIntroLine + "\n\n" + marker("/n/AGENTS.md")),
+			},
+			want: []string{"/n/AGENTS.md"},
 		},
 		{
 			name: "events that fail to unmarshal are ignored",

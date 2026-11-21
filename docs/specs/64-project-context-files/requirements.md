@@ -94,8 +94,11 @@ Lana's tools. The files of this section join the seen set.
 After `read_file`, `write_file`, `edit_file`, `glob`, or `grep` succeeds on a path, and after a `bash`
 call whose first simple command is `cd <dir>`, Lana shall walk the context directory chain of that
 path's directory (the path itself for a directory). Every context file found that is not in the seen
-set is appended to the tool result, in top-down order, wrapped as in REQ-PCX-002. Those files then join
-the seen set. A failed or rejected call adds nothing.
+set is appended to the tool result, in top-down order, wrapped as in REQ-PCX-002. The appended blocks
+are preceded by the intro line `[Lana] Project instructions from the folder this call touched. Lana
+added them; they are not part of the tool output. These are project instructions written for coding
+agents. Follow the ones that apply to your tools.`, so the model reads them as instructions rather
+than as tool output. Those files then join the seen set. A failed or rejected call adds nothing.
 
 #### Acceptance criteria
 
@@ -105,6 +108,10 @@ the seen set. A failed or rejected call adds nothing.
 - `AC-PCX-007`: A second `read_file` in the same repository gets nothing appended.
 - `AC-PCX-008`: `bash` with `cd ~/coding/project/self-tool/lana-harness && go test ./...` appends the
   repository's `CLAUDE.md` when it is not yet seen.
+- `AC-PCX-013`: The appended blocks are prefixed by the intro line `[Lana] Project instructions from
+  the folder this call touched. Lana added them; they are not part of the tool output. These are
+  project instructions written for coding agents. Follow the ones that apply to your tools.` followed
+  by a blank line, and the seen set is rebuilt from that format after a restart.
 
 ### REQ-PCX-004: The seen set survives a restart and resets on compaction
 
