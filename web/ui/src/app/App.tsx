@@ -1,4 +1,5 @@
 import { Fragment, Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { holdLayout } from "./layout-motion";
 import type { ReactNode } from "react";
 import { authSession, logout as apiLogout } from "../api/auth";
 import { setCSRF, setUnauthorizedHandler } from "../api/client";
@@ -520,6 +521,7 @@ export function App() {
   function toggleSidebar() {
     const next = !collapsed;
     saveCollapsed(next);
+    holdLayout();
     setCollapsed(next);
     announce(next ? "Sidebar collapsed." : "Sidebar expanded.");
   }
