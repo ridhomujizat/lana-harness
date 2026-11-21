@@ -2339,8 +2339,14 @@ export function WorkbenchPage() {
               <StatusDot status="working" /> {attached > 1 ? "Attached here · " + attached + " clients" : "Attached here"}
             </span>
           ) : null}
-          <span className="wbg-toggle-sep" />
-          {git.toggleButton}
+          {/* The Changes button hides while the panel is open; the panel has
+              its own close (owner, 2026-11-22). */}
+          {git.open ? null : (
+            <>
+              <span className="wbg-toggle-sep" />
+              {git.toggleButton}
+            </>
+          )}
         </div>
         <div className="wb-workspace">
           {!loaded ? (
