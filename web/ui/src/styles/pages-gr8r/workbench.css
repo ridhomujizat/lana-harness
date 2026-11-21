@@ -2268,3 +2268,22 @@ body.wb-resizing .wb-preview-resizer::after {
   width: 100%;
   justify-content: flex-end;
 }
+
+/* The panel has no card colour of its own: it sits on the same gradient as
+   the terminal workspace (owner, 2026-11-21). */
+.wb-page:not(.wb-phone) {
+  background: var(--wb-bg);
+}
+
+.wb-page:not(.wb-phone) .wb-main {
+  background: transparent;
+}
+
+.wb-page .wb-panel {
+  border-right: 0;
+  background: transparent;
+}
+
+.wb-phone-panel {
+  background: var(--wb-bg);
+}
