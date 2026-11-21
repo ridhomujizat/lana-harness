@@ -2296,3 +2296,88 @@ body.wb-resizing-col * {
     transform: scale(0.98);
   }
 }
+
+/* Agents list: the title on one line, the worktree on the next, and the row
+   grows to hold both. */
+.wb-agent-label.wbg-agent-two {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: normal;
+}
+
+.wbg-agent-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbg-agent-wt {
+  line-height: 1.3;
+}
+
+/* Gr8r buttons have a fixed 30 px height; a two-line agent row needs more. */
+.wb-agent:has(.wbg-agent-two) {
+  height: auto;
+  min-height: 44px;
+  align-items: center;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+/* Pane header in a narrow pane: the branch chip and the folder give way, the
+   state and the tools always stay in view. */
+.wb-pane-head {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-pane-head > * {
+  flex: none;
+}
+
+.wb-pane-head > .wbg-pane-chip {
+  flex: 0 1 auto;
+  min-width: 52px;
+}
+
+.wb-pane-head > .wb-pane-dir {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wb-pane-head > .wb-pane-tools {
+  margin-left: auto;
+}
+
+.wb-pane-head > .wbg-shared {
+  flex: 0 0 auto;
+}
+
+@container wb-pane (max-width: 420px) {
+  .wb-pane-tools button[aria-label="Split right"],
+  .wb-pane-tools button[aria-label="Split down"] {
+    display: none;
+  }
+
+  .wb-pane-head {
+    gap: 6px;
+  }
+}
+
+@container wb-pane (max-width: 300px) {
+  .wb-pane-head > .wbg-pane-chip > .wbg-pane-chip-label {
+    display: none;
+  }
+
+  .wb-pane-head > .wbg-pane-chip {
+    min-width: 0;
+    padding: 0 5px;
+  }
+}
+
+.wb-pane-head > .wbg-cycle + .wb-pane-tools {
+  margin-left: 6px;
+}

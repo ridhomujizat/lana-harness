@@ -288,11 +288,13 @@ function Panel(props: PanelProps) {
         onClick={() => props.onOpenSession(s.id)}
       >
         <ProgramTile session={s} size="pane" />
-        <span className="wb-agent-label">
-          {showSpace ? <b>{sp ? spaceLabel(sp, sessions) : "unplaced"}</b> : null}
-          <span className={showSpace ? "wb-agent-title muted" : "wb-agent-title"}>
-            {showSpace ? " · " : ""}
-            {sessionTitle(s)}
+        <span className={"wb-agent-label" + (wt ? " wbg-agent-two" : "")}>
+          <span className="wbg-agent-main">
+            {showSpace ? <b>{sp ? spaceLabel(sp, sessions) : "unplaced"}</b> : null}
+            <span className={showSpace ? "wb-agent-title muted" : "wb-agent-title"}>
+              {showSpace ? " · " : ""}
+              {sessionTitle(s)}
+            </span>
           </span>
           {wt ? (
             <span className="wbg-agent-wt" title={wt.branch}>
