@@ -320,7 +320,7 @@ export function ApprovalCard({
               Dismiss
             </button>
           </>
-        ) : (
+        ) : isBlock ? null : (
           <div className="approval-actions">
             <button
               type="button"
@@ -353,9 +353,11 @@ export function ApprovalCard({
       </div>
       {hardline ? (
         <p className="approval-hardline">
-          <span className="approval-hardline-rule">{hardline.rule}</span>
-          <span className="approval-hardline-sep" aria-hidden="true">
-            ·
+          <span className="approval-hardline-rule-group">
+            <span className="approval-hardline-rule">{hardline.rule}</span>
+            <span className="approval-hardline-sep" aria-hidden="true">
+              ·
+            </span>
           </span>
           <span className="approval-hardline-reason">{hardline.reason}</span>
         </p>
@@ -367,6 +369,11 @@ export function ApprovalCard({
       </div>
       {isBlock ? (
         <div className="approval-stepup">
+          <p className="approval-stepup-hint">
+            {showCode
+              ? "This command needs your Lana password or a Telegram code to run."
+              : "This command needs your Lana password to run."}
+          </p>
           <div className="approval-stepup-field">
             <label className="label" htmlFor={passwordId}>
               Lana password
@@ -384,39 +391,48 @@ export function ApprovalCard({
             />
           </div>
           {showCode ? (
-            <div className="approval-stepup-code-row">
-              <button
-                type="button"
-                className="button-ui button-ui-tertiary"
-                disabled={busy || sendingCode || cooldown > 0}
-                onClick={() => void sendCode()}
+            <>
+              <div
+                className="approval-stepup-or"
+                data-testid="stepup-or"
+                aria-hidden="true"
               >
-                {cooldown > 0
-                  ? "Send Telegram code (" + cooldown + "s)"
-                  : "Send Telegram code"}
-              </button>
-              <div className="approval-stepup-field">
-                <label className="label" htmlFor={codeId}>
-                  Telegram code
-                </label>
-                <input
-                  id={codeId}
-                  className="input approval-stepup-code"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  value={code}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setCode(
-                      event.target.value.replace(/\D/g, "").slice(0, 6)
-                    )
-                  }
-                  onKeyDown={onFieldKeyDown}
-                />
+                <span className="approval-stepup-or-line" />
+                <span className="approval-stepup-or-text">or</span>
+                <span className="approval-stepup-or-line" />
               </div>
-            </div>
+              <div className="approval-stepup-code-row">
+                <div className="approval-stepup-field">
+                  <label className="label" htmlFor={codeId}>
+                    Telegram code
+                  </label>
+                  <input
+                    id={codeId}
+                    className="input approval-stepup-code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={code}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setCode(
+                        event.target.value.replace(/\D/g, "").slice(0, 6)
+                      )
+                    }
+                    onKeyDown={onFieldKeyDown}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="button-ui button-ui-secondary"
+                  disabled={busy || sendingCode || cooldown > 0}
+                  onClick={() => void sendCode()}
+                >
+                  {cooldown > 0 ? "Send code (" + cooldown + "s)" : "Send code"}
+                </button>
+              </div>
+            </>
           ) : null}
           {cooldown > 0 ? (
             <p className="approval-stepup-note" role="status">
@@ -428,6 +444,26 @@ export function ApprovalCard({
               {localError}
             </p>
           ) : null}
+          {decided ? null : (
+            <div className="approval-stepup-actions">
+              <button
+                type="button"
+                className="button-ui button-ui-tertiary"
+                disabled={busy}
+                onClick={() => void answer("rejected")}
+              >
+                Deny
+              </button>
+              <button
+                type="button"
+                className="button-ui button-ui-primary"
+                disabled={allowDisabled}
+                onClick={() => void answer("allowed_once")}
+              >
+                Allow once
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
       {approval.error ? (

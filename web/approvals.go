@@ -118,9 +118,10 @@ type Approvals struct {
 	// a stream installs it, so a broker used alone treats every session as its
 	// own root.
 	rootOf sessionRootResolver
-	// confirmWith reports the [web.remote] confirm_with setting (API-HLF-004).
-	// The server installs it, like rootOf, so the broker never reads a global.
-	// A nil value means "password".
+	// confirmWith reports the step-up method of a block request (API-HLF-004):
+	// "password_or_telegram" when the setting allows a Telegram code and
+	// Telegram can deliver one, else "password". The server installs it, like
+	// rootOf, so the broker never reads a global. A nil value means "password".
 	confirmWith func() string
 	// observer hears every request open and close, for the notification bus
 	// (spec #42). It is called outside the lock; nil means none.
@@ -140,17 +141,18 @@ func (a *Approvals) setObserver(o approvalObserver) {
 	a.observer = o
 }
 
-// setConfirmWith installs the [web.remote] confirm_with reader. The server
-// calls it so a block request's step_up follows the live setting (API-HLF-004).
+// setConfirmWith installs the step-up reader of a block request. The server
+// calls it so a block's step_up follows the live [web.remote] confirm_with
+// setting and whether Telegram can deliver a code (API-HLF-004).
 func (a *Approvals) setConfirmWith(confirmWith func() string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.confirmWith = confirmWith
 }
 
-// hardlineStepUp returns the step-up method of a block request (API-HLF-004):
-// "password_or_telegram" when confirm_with allows a Telegram code, "password"
-// otherwise.
+// hardlineStepUp returns the step-up method of a block request (API-HLF-004)
+// from the installed reader: "password_or_telegram" when it offers a Telegram
+// code, "password" otherwise.
 func (a *Approvals) hardlineStepUp() string {
 	a.mu.Lock()
 	confirmWith := a.confirmWith

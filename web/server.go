@@ -226,9 +226,10 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.tailscale = tailscale.New()
 	s.SetRemoteConfig(cfg.Remote)
-	// A block request's step-up method follows [web.remote] confirm_with
-	// (API-HLF-004). The broker reads it through this func, like rootOf.
-	s.approvals.setConfirmWith(func() string { return s.remoteConfig().ConfirmWith })
+	// A block request's step-up method follows [web.remote] confirm_with and
+	// whether Telegram can deliver a code (API-HLF-004). The broker reads it
+	// through this func, like rootOf.
+	s.approvals.setConfirmWith(s.blockStepUp)
 	s.mux = http.NewServeMux()
 	s.routes()
 	s.registerSessionRoutes()
@@ -286,6 +287,21 @@ func (s *Server) Approvals() *Approvals {
 // Questions returns the broker that opens browser question requests.
 func (s *Server) Questions() *Questions {
 	return s.questions
+}
+
+// blockStepUp reports the step-up method of a hardline block request
+// (API-HLF-004): "password_or_telegram" only when [web.remote] confirm_with
+// allows a Telegram code and Telegram can deliver one right now, and
+// "password" otherwise. The approval broker reads it through setConfirmWith,
+// so a block card never offers a Telegram option that cannot be used.
+func (s *Server) blockStepUp() string {
+	if s.remoteConfig().ConfirmWith != core.WebRemoteConfirmPasswordOrTelegram {
+		return core.WebRemoteConfirmPassword
+	}
+	if s.telegramOwnerMessenger() == nil || !s.telegramResetAvailable() {
+		return core.WebRemoteConfirmPassword
+	}
+	return core.WebRemoteConfirmPasswordOrTelegram
 }
 
 // Start listens on the configured address and serves in the background.

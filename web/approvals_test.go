@@ -511,8 +511,9 @@ func approvalRequestStillOpen(t *testing.T, s *Server, id string) bool {
 	return err == nil
 }
 
-// AC-HLF-013 / API-HLF-004: a block event carries hardline.step_up, "password"
-// by default and "password_or_telegram" when confirm_with allows a code.
+// AC-HLF-013 / API-HLF-004: a block event carries hardline.step_up,
+// "password_or_telegram" only when confirm_with allows a code and Telegram can
+// deliver one right now, and "password" otherwise.
 func TestApprovalHardlineStepUp(t *testing.T) {
 	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
 
@@ -524,13 +525,31 @@ func TestApprovalHardlineStepUp(t *testing.T) {
 		t.Fatalf("block hardline = %+v", block.Hardline)
 	}
 
+	// confirm_with allows a code but Telegram is not connected: no Telegram
+	// option.
 	s.SetRemoteConfig(core.DefaultWebRemoteConfig())
-	configured, _ := askHardline(t, s.Approvals(), "session-2", core.HardlineBlock)
+	unconnected, _ := askHardline(t, s.Approvals(), "session-2", core.HardlineBlock)
+	if unconnected.Hardline == nil || unconnected.Hardline.StepUp != core.WebRemoteConfirmPassword {
+		t.Fatalf("unconnected block hardline = %+v, want step_up password", unconnected.Hardline)
+	}
+
+	// A connected Telegram messenger lets the card offer a code.
+	s.SetTelegramOwnerMessenger(&fakeOwnerMessenger{})
+	s.SetTelegramResetSender(&fakeTelegramReset{available: true})
+	configured, _ := askHardline(t, s.Approvals(), "session-3", core.HardlineBlock)
 	if configured.Hardline == nil || configured.Hardline.StepUp != core.WebRemoteConfirmPasswordOrTelegram {
 		t.Fatalf("configured block hardline = %+v, want step_up password_or_telegram", configured.Hardline)
 	}
 
-	escalate, _ := askHardline(t, s.Approvals(), "session-3", core.HardlineEscalate)
+	// confirm_with = password keeps the Telegram option away even while
+	// Telegram is connected.
+	s.SetRemoteConfig(core.WebRemoteConfig{ConfirmWith: core.WebRemoteConfirmPassword})
+	passwordOnly, _ := askHardline(t, s.Approvals(), "session-4", core.HardlineBlock)
+	if passwordOnly.Hardline == nil || passwordOnly.Hardline.StepUp != core.WebRemoteConfirmPassword {
+		t.Fatalf("password-only block hardline = %+v, want step_up password", passwordOnly.Hardline)
+	}
+
+	escalate, _ := askHardline(t, s.Approvals(), "session-5", core.HardlineEscalate)
 	if escalate.Hardline == nil || escalate.Hardline.Tier != core.HardlineEscalate || escalate.Hardline.StepUp != "" {
 		t.Fatalf("escalate hardline = %+v, want empty step_up", escalate.Hardline)
 	}
@@ -717,10 +736,13 @@ func TestApprovalCodeNotNeeded(t *testing.T) {
 	passwordOnly, _ := askHardline(t, s.Approvals(), "session-1", core.HardlineBlock)
 	assertAuthError(t, code(passwordOnly.RequestID), http.StatusConflict, "not_needed")
 
-	// Telegram not connected makes the send unavailable.
+	// Telegram goes away after the request opened: the card still offered a
+	// code, so the send reports Telegram unavailable.
 	s.SetRemoteConfig(core.DefaultWebRemoteConfig())
-	s.SetTelegramOwnerMessenger(nil)
+	s.SetTelegramOwnerMessenger(&fakeOwnerMessenger{})
+	s.SetTelegramResetSender(&fakeTelegramReset{available: true})
 	block, _ := askHardline(t, s.Approvals(), "session-1", core.HardlineBlock)
+	s.SetTelegramOwnerMessenger(nil)
 	assertAuthError(t, code(block.RequestID), http.StatusConflict, "telegram_unavailable")
 }
 
