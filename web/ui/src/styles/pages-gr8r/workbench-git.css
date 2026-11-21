@@ -2263,7 +2263,7 @@ body.wb-resizing-col * {
 
 ::view-transition-new(*.wbpane):only-child {
   opacity: 1;
-  animation: wbgPaneIn 200ms ease-out both;
+  animation: wbgPaneIn 150ms ease-out 130ms both;
 }
 
 /* The sidebar leaves quickly too, so nothing stacks over the growing pane. */
@@ -2399,4 +2399,50 @@ body.wb-resizing-col * {
 .wb-pane-tools .wbg-focus-exit:hover {
   background: color-mix(in srgb, var(--violet) 32%, transparent);
   color: var(--wb-term-text);
+}
+
+/* Maximize / restore: the panel box grows or shrinks while its old and new
+   layouts cross-fade, pinned to the top left so nothing is stretched. */
+::view-transition-old(wbg-panel),
+::view-transition-new(wbg-panel) {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  background: var(--surface);
+  object-fit: none;
+  object-position: left top;
+}
+
+::view-transition-group(wbg-panel) {
+  overflow: hidden;
+  border-radius: 14px;
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* No cross-fade between the panel's two layouts (the text would double):
+   the box grows or shrinks and reveals the new layout from the top left.
+   Opening and closing the panel (only one picture) keep their slide. */
+::view-transition-old(wbg-panel) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(wbg-panel) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-new(wbg-panel):only-child {
+  animation: wbgVtFromRight 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(wbg-panel):only-child {
+  opacity: 1;
+  animation: wbgVtToRight 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+/* The panel stays above returning panes while it shrinks back. */
+::view-transition-group(wbg-panel) {
+  z-index: 10;
 }

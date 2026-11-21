@@ -323,8 +323,13 @@ export function useWorkbenchGit({
       }}
       maximized={maximized}
       onMaximize={() => {
-        holdLayout();
-        setMaximized((m) => !m);
+        /* The panel grows to the whole workspace (and back) in one
+           transition; the terminals fade out and in. */
+        if (canViewTransition()) withViewTransition(() => flushSync(() => setMaximized((m) => !m)));
+        else {
+          holdLayout();
+          setMaximized((m) => !m);
+        }
       }}
       onClose={close}
       status={status.data}
