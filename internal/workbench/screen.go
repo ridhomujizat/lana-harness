@@ -55,9 +55,15 @@ func newScreen(cols, rows int, onProgress, onWorkingDir func(string)) *screen {
 	return &screen{emu: emu}
 }
 
-// close ends the emulator's answer pipe, which stops the drain goroutine.
-// Rendering still works afterwards.
-func (s *screen) close() { _ = s.emu.Close() }
+// close ends the emulator's answer pipe, which stops the drain goroutine. It
+// closes the pipe rather than the emulator because Emulator.Close writes an
+// unlocked flag that races with the drain goroutine's Read. Rendering still
+// works afterwards.
+func (s *screen) close() {
+	if c, ok := s.emu.InputPipe().(io.Closer); ok {
+		_ = c.Close()
+	}
+}
 
 // write feeds terminal output to the emulator.
 func (s *screen) write(data []byte) { _, _ = s.emu.Write(data) }
