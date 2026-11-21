@@ -7,6 +7,12 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.15] - 2026-11-21
+
+### Changed
+
+- The Workbench panel is back to its first design, without the bordered card. Spaces and Agents sit on the same gradient as the terminal workspace, with no panel colour or right border of their own.
+
 ## [0.5.0-beta.14] - 2026-11-21
 
 ### Added
