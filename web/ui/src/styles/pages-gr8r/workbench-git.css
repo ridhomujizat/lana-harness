@@ -2534,7 +2534,38 @@ html[data-shell="macos-app"] .wb-page.wbg-open:not(.wb-phone) > .wb-main > .wb-t
 body.wb-pane-dragging,
 body.wb-pane-dragging * {
   cursor: grabbing !important;
+}
+
+/* No text selection while pressing or dragging a pane (Safari needs the
+   prefixed property). */
+.wb-pane-grip,
+body.wb-pane-pressing,
+body.wb-pane-pressing *,
+body.wb-pane-dragging,
+body.wb-pane-dragging * {
+  -webkit-user-select: none !important;
   user-select: none !important;
+}
+
+body.wb-pane-dragging .xterm,
+body.wb-pane-dragging iframe {
+  pointer-events: none;
+}
+
+.wb-drop-marker {
+  display: grid;
+  place-items: center;
+}
+
+.wb-drop-hint {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--accent, #5b7be0);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .wb-pane.is-drag-source {
@@ -2590,4 +2621,8 @@ body.wb-pane-dragging * {
 
 body.wb-pane-dragging [data-tip]::after {
   display: none !important;
+}
+
+.wb-drag-ghost[hidden] {
+  display: none;
 }
