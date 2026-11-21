@@ -65,6 +65,29 @@ export interface GitPanelProps {
 export function GitPanel(props: GitPanelProps) {
   const { phone, tab, onTab, worktree, status } = props;
   const [width, setWidth] = useState(readWidth);
+  const asideRef = useRef<HTMLElement>(null);
+
+  /* In Lana.app the tab strip is the window's title row: it runs on over the
+     panel. The page learns how far through --wbg-panel-space (0 when the
+     panel floats over the terminals or is maximized). */
+  useEffect(() => {
+    const aside = asideRef.current;
+    const page = aside?.closest<HTMLElement>(".wb-page");
+    if (!aside || !page || phone) return;
+    const measure = () => {
+      const floating = getComputedStyle(aside).position === "absolute" || props.maximized;
+      const space = floating ? 0 : Math.round(page.getBoundingClientRect().right - aside.getBoundingClientRect().left);
+      page.style.setProperty("--wbg-panel-space", Math.max(0, space) + "px");
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(aside);
+    ro?.observe(page);
+    return () => {
+      ro?.disconnect();
+      page.style.removeProperty("--wbg-panel-space");
+    };
+  }, [phone, props.maximized]);
   const [scopeKind, setScopeKind] = useState<ScopeKind>(readScopeKind);
   const [commit, setCommit] = useState<string | null>(null);
   const [changeSel, setChangeSel] = useState<string | null>(null);
@@ -158,6 +181,7 @@ export function GitPanel(props: GitPanelProps) {
     <>
     {phone ? <div className="wbg-scrim" onClick={props.onClose} aria-hidden="true" /> : null}
     <aside
+      ref={asideRef}
       className={"wbg-panel" + (phone ? " wbg-sheet" : "") + (props.maximized ? " is-max" : "") + motion}
       style={style}
       aria-label="Files and changes"

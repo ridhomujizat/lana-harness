@@ -2446,3 +2446,11 @@ body.wb-resizing-col * {
 ::view-transition-group(wbg-panel) {
   z-index: 10;
 }
+
+/* Lana.app: the tab strip (the window's title row) runs on over the open
+   panel instead of stopping at the terminals (owner, 2026-11-22). */
+html[data-shell="macos-app"] .wb-page.wbg-open:not(.wb-phone) > .wb-main > .wb-tabs {
+  position: relative;
+  z-index: 2;
+  margin-right: calc(-1 * var(--wbg-panel-space, 0px));
+}
