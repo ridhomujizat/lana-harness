@@ -228,6 +228,14 @@
   animation: riseIn 0.3s var(--ease) both;
 }
 
+/* Perf: rows of older segments skip rendering and layout while off screen. The
+   newest session's rows are left alone, so pinning to the bottom and live
+   streaming are unaffected. */
+.room-timeline .is-old {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
+}
+
 .progress-bar-indeterminate {
   animation: progress-indeterminate 1.4s ease-in-out infinite;
 }

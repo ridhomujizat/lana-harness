@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Markdown } from "./markdown";
 
@@ -53,5 +53,19 @@ describe("markdown", () => {
     render(<Markdown text={"| a | b |\n| --- | --- |\n| 1 | 2 |"} />);
     expect(document.querySelectorAll("table.md-table th")).toHaveLength(2);
     expect(document.querySelectorAll("table.md-table td")).toHaveLength(2);
+  });
+
+  /* Perf: a memoized Markdown skips the parse when a re-render passes the same
+     text and wikiLink. The wiki renderer runs once per wiki link during a
+     parse, so its call count is a parser spy. */
+  it("does not re-parse on a re-render with the same text and wikiLink", () => {
+    const wiki = vi.fn((_target: string, label: string) => <span>{label}</span>);
+    const { rerender } = render(
+      <Markdown text={"[[Home]] and [[Home|start]]"} wikiLink={wiki} />
+    );
+    expect(wiki).toHaveBeenCalledTimes(2);
+
+    rerender(<Markdown text={"[[Home]] and [[Home|start]]"} wikiLink={wiki} />);
+    expect(wiki).toHaveBeenCalledTimes(2);
   });
 });

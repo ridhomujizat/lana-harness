@@ -1,4 +1,4 @@
-import { createElement as h, useEffect, useRef, useState } from "react";
+import { createElement as h, memo, useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 /* Small, dependency-free markdown renderer for assistant text. It parses a
@@ -737,15 +737,14 @@ function parseBlocks(lines: string[]): ReactNode[] {
   return nodes;
 }
 
-/* Assistant text as a markdown block. Empty and null input render an empty
-   `.md` container; callers decide whether to render the component at all. */
-export function Markdown({
-  text,
-  wikiLink,
-}: {
+export interface MarkdownProps {
   text?: string | null;
   wikiLink?: WikiLinkRenderer;
-}): ReactElement {
+}
+
+/* Assistant text as a markdown block. Empty and null input render an empty
+   `.md` container; callers decide whether to render the component at all. */
+function MarkdownImpl({ text, wikiLink }: MarkdownProps): ReactElement {
   const source = text === null || text === undefined ? "" : String(text);
   const previous = wikiLinkRenderer;
   wikiLinkRenderer = wikiLink || null;
@@ -763,3 +762,7 @@ export function Markdown({
     wikiLinkRenderer = previous;
   }
 }
+
+/* Memoized so a re-render with the same text and wikiLink (a busy timeline
+   re-renders often) skips the parse entirely. */
+export const Markdown = memo(MarkdownImpl);

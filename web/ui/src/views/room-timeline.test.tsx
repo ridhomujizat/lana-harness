@@ -41,6 +41,7 @@ import type { RoomRow, RoomsStreamHandlers, Segment } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
 import { ChatsPage } from "./chats";
+import { RoomView } from "./room-timeline";
 
 function room(overrides: Partial<RoomRow> = {}): RoomRow {
   return {
@@ -459,5 +460,105 @@ describe("Secret request card (spec 53)", () => {
     });
     expect(await screen.findByText("A second key.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Replace value" })).toBeTruthy();
+  });
+});
+
+/* Perf: opening a chat used to download the newest session's log three times
+   (the mount effect, the last-message effect on mount, and the stream replay).
+   These cases pin the single load and the stream resume point. */
+describe("Room open loads the log once (perf)", () => {
+  it("loads the newest session's events once on mount, not twice", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockImplementation(async (id: string) => {
+      if (id === "s_web") {
+        return { events: [userText(1, "t1", "hello")], last_seq: 1 };
+      }
+      return { events: [], last_seq: 0 };
+    });
+
+    render(
+      <RoomView
+        room={room({
+          name: "dana",
+          last_message: {
+            role: "user",
+            agent: "dana",
+            preview: "hello",
+            at: 1000,
+            session_id: "s_web",
+            channel: "web",
+          },
+        })}
+      />
+    );
+
+    await screen.findByText("hello");
+    const loads = vi
+      .mocked(listEvents)
+      .mock.calls.filter((call) => call[0] === "s_web").length;
+    expect(loads).toBe(1);
+  });
+
+  it("opens the live stream from the loaded last seq", async () => {
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [userText(1, "t1", "hello"), userText(2, "t1", "again")],
+      last_seq: 4,
+    });
+    const fromSeqs: number[] = [];
+    vi.mocked(openStream).mockImplementation((_id, options) => {
+      fromSeqs.push(Number(options?.fromSeq) || 0);
+      return { close: () => {} };
+    });
+
+    render(<RoomView room={room({ name: "dana" })} />);
+    await screen.findByText("hello");
+
+    await waitFor(() => expect(fromSeqs.length).toBeGreaterThan(0));
+    expect(fromSeqs[fromSeqs.length - 1]).toBe(4);
+  });
+});
+
+/* Perf: the rows loaded with the chat mount without the entrance animation;
+   only a row that arrives later (a streamed message) animates in. */
+describe("Entrance animation (perf)", () => {
+  it("does not animate the initially loaded rows but animates a streamed one", async () => {
+    let handlers: StreamHandlers | null = null;
+    vi.mocked(openStream).mockImplementation((_id, options) => {
+      handlers = options || null;
+      return { close: () => {} };
+    });
+    vi.mocked(roomSegments).mockResolvedValue({
+      segments: [segment({ session_id: "s_web" })],
+      has_more: false,
+    });
+    vi.mocked(listEvents).mockResolvedValue({
+      events: [userText(1, "t1", "hello"), userText(2, "t1", "world")],
+      last_seq: 2,
+    });
+
+    const { container } = render(<RoomView room={room({ name: "dana" })} />);
+    await screen.findByText("hello");
+    await screen.findByText("world");
+
+    expect(
+      container.querySelectorAll(".room-timeline .msg-enter")
+    ).toHaveLength(0);
+
+    await waitFor(() => expect(handlers).not.toBeNull());
+    act(() => {
+      handlers!.onEvent!(userText(3, "t1", "streamed"));
+    });
+
+    const streamed = await screen.findByText("streamed");
+    expect(streamed.closest(".msg-enter")).not.toBeNull();
+    expect(screen.getByText("hello").closest(".msg-enter")).toBeNull();
+    expect(screen.getByText("world").closest(".msg-enter")).toBeNull();
   });
 });

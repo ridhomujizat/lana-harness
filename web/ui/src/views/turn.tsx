@@ -3,7 +3,7 @@ import { DiscussionCard } from "./discussion";
 import type { DiscussionLog } from "../lib/discussion";
 import { parseAttachmentBlock, type MessageFile } from "../lib/attachment-blocks";
 import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./message-files";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { AvatarMood } from "../lib/pixel-avatar";
 import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
 import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
@@ -859,7 +859,17 @@ export function turnMood(
   return "thinking";
 }
 
-export function TurnBlock({
+/* Shared empty defaults, so an unchanged turn keeps the same prop identity and
+   its memoized TurnBlock is skipped (perf: chat load). */
+const EMPTY_TEAM_LABELS: Record<string, string> = {};
+const EMPTY_ROOT_EVENTS: SessionEvent[] = [];
+const EMPTY_CHILD_EVENTS: Record<string, SessionEvent[]> = {};
+const EMPTY_CHILD_LIVE: Record<string, Turn> = {};
+
+/* Memoized: only the live turn's props change (streamingText, liveTool,
+   thinking, liveActivity); an older turn keeps its stable props and does not
+   re-render. */
+export const TurnBlock = memo(function TurnBlock({
   turn,
   agent,
   agentLabel = "",
@@ -868,10 +878,10 @@ export function TurnBlock({
   thinking = false,
   waitingForInput = false,
   team = null,
-  teamLabels = {},
-  rootEvents = [],
-  childEvents = {},
-  childLive = {},
+  teamLabels = EMPTY_TEAM_LABELS,
+  rootEvents = EMPTY_ROOT_EVENTS,
+  childEvents = EMPTY_CHILD_EVENTS,
+  childLive = EMPTY_CHILD_LIVE,
   onLoadChildren = null,
   showStatusCard = false,
   roomAgent = false,
@@ -1093,7 +1103,7 @@ export function TurnBlock({
       ) : null}
     </article>
   );
-}
+});
 
 /* The foot of an agent-room turn, one row in one place: while the turn works
    it is the loading row (the moving avatar, typing dots, "Bima is thinking

@@ -58,7 +58,7 @@ import {
 } from "./room-group";
 import { storedAttachments } from "./session";
 import { buildTurns, ReplyChip, TurnBlock, turnMood, UserBubble } from "./turn";
-import type { ChatTurn, ReplyTarget, ThreadItem } from "./turn";
+import type { ChatTurn, LiveTurnState, ReplyTarget, ThreadItem } from "./turn";
 
 /* The room timeline of REQ-ROOM-002 to REQ-ROOM-005. It joins the room's
    segments into one bottom-anchored thread, streams the newest segment like
@@ -227,6 +227,88 @@ function mergeSegments(current: Segment[], incoming: Segment[]): Segment[] {
   return Array.from(byId.values()).sort(byUpdatedAt);
 }
 
+/* Append a streamed event to a loaded list. The list stays ascending by seq,
+   so a newer seq appends in place without a sort; an out-of-order or duplicate
+   seq falls back to the dedupe and sort. This keeps a stream replay O(n)
+   instead of O(n^2). */
+function mergeEvent(list: SessionEvent[], event: SessionEvent): SessionEvent[] {
+  const last = list.length > 0 ? list[list.length - 1] : null;
+  if (!last || event.seq > last.seq) {
+    return list.concat([event]);
+  }
+  if (list.some((entry) => entry.seq === event.seq)) {
+    return list;
+  }
+  return list.concat([event]).sort((left, right) => left.seq - right.seq);
+}
+
+/* The visible items of one segment: its turns (built from the event log plus
+   the live inputs of the newest segment) and its summary and learned notices.
+   The room memo caches this per segment (perf: chat load). */
+function segmentEntries(
+  segment: Segment,
+  segEvents: SessionEvent[],
+  live: LiveTurnState
+): TimelineNode[] {
+  const threadEvents = segEvents.filter(
+    (event) =>
+      event.kind !== "knowledge/compiled" && event.kind !== "memory/captured"
+  );
+  const thread = buildTurns(threadEvents, live);
+  /* One seq index per segment: a user item looks its event up by seq. */
+  const bySeq = new Map<number, SessionEvent>();
+  for (const event of segEvents) {
+    bySeq.set(event.seq, event);
+  }
+  const entries: TimelineNode[] = [];
+  for (const item of thread) {
+    if (item.kind === "user") {
+      const seq = Number(String(item.key).replace("user-", ""));
+      const event = bySeq.get(seq);
+      entries.push({
+        key: item.key,
+        at: event ? event.created_at : segment.created_at,
+        kind: "user",
+        sessionId: segment.session_id,
+        item,
+      });
+    } else {
+      entries.push({
+        key: item.key,
+        at: item.turn.lastAt || item.turn.startedAt || segment.created_at,
+        kind: "turn",
+        sessionId: segment.session_id,
+        turn: item.turn,
+      });
+    }
+  }
+  for (const event of segEvents) {
+    if (event.kind === "compaction/summary") {
+      entries.push({
+        key: "sum-" + event.seq,
+        at: event.created_at,
+        kind: "summary",
+        sessionId: segment.session_id,
+      });
+    } else if (
+      event.kind === "knowledge/compiled" ||
+      event.kind === "memory/captured"
+    ) {
+      const text = learnedLine(event);
+      if (text) {
+        entries.push({
+          key: "learn-" + event.seq,
+          at: event.created_at,
+          kind: "learned",
+          learnedText: text,
+        });
+      }
+    }
+  }
+  entries.sort((left, right) => left.at - right.at);
+  return entries;
+}
+
 /* A segment still expects a live turn while it is running or waiting on the
    owner; anything else is settled, so the working state clears. */
 function isActiveStatus(status: string): boolean {
@@ -351,7 +433,26 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   const stickRef = useRef(true);
   const prependRef = useRef<number | null>(null);
   const startedRef = useRef(false);
-  const handledSessionRef = useRef("");
+  /* REQ-ROOM-004: the last session the hub named. Seeded with the room's
+     current last message so the reload effect does not fire on mount (the
+     mount effect below already loads the newest page). */
+  const handledSessionRef = useRef(
+    room.last_message ? room.last_message.session_id : ""
+  );
+  /* The last event seq loaded per session, so the live stream opens from what
+     was already read instead of replaying the whole log (perf: chat load). */
+  const loadedSeqRef = useRef<Record<string, number>>({});
+  /* Perf: the visible items of each segment, cached by its events array (and,
+     for the newest segment, by the live-turn inputs it uses), so an unrelated
+     event or live-state change does not rebuild every loaded segment. */
+  const segmentCacheRef = useRef<
+    Map<string, { events: SessionEvent[]; liveKey: string; items: TimelineNode[] }>
+  >(new Map());
+  /* Perf: the node keys already on screen when the chat opened (or when older
+     messages were prepended). Only a row that arrives later animates in. */
+  const heldKeysRef = useRef<Set<string>>(new Set());
+  const firstLoadRef = useRef(false);
+  const prependHoldRef = useRef(false);
   const attachmentDraft = useAttachmentDraft();
   const { byName, rows: roomRows } = useRooms();
 
@@ -420,6 +521,8 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         try {
           const page = await listEvents(id, 0);
           loaded[id] = page.events || [];
+          /* Remember the page's last seq so the live stream can open from it. */
+          loadedSeqRef.current[id] = Number(page.last_seq) || 0;
         } catch {
           loaded[id] = [];
         }
@@ -461,6 +564,9 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   const lastSegment =
     segments.length > 0 ? segments[segments.length - 1] : null;
   const newestId = lastSegment ? lastSegment.session_id : "";
+  /* The newest session's events are loaded (an empty page also counts, so the
+     stream is not held back by a session with no events). */
+  const newestLoaded = newestId ? events[newestId] !== undefined : false;
   /* Spec #42: the newest segment is the session this room shows. */
   useSessionPresence(newestId);
 
@@ -508,14 +614,19 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     };
   }, [lastSession, room.name, loadEvents, finishLive]);
 
-  /* The live tail streams the newest segment exactly like the session view. */
+  /* The live tail streams the newest segment exactly like the session view. It
+     opens only once that segment's events have loaded and resumes from the
+     loaded last seq, so the server replays just what is new. A turn started
+     here replays its own log over the stream. The connect frames (status,
+     approval, question, secret_request) are sent regardless of from_seq, so
+     the running state and the open cards still arrive (see web/sse.go). */
   useEffect(() => {
-    if (!newestId) {
+    if (!newestId || !newestLoaded) {
       return undefined;
     }
     const id = newestId;
     const stream = openStream(id, {
-      fromSeq: 0,
+      fromSeq: loadedSeqRef.current[id] || 0,
       onState: (state) => setStreamState(state),
       onEvent: (event) => {
         /* Child sessions (a member's own session in a team room) stream their
@@ -524,10 +635,11 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         if (typeof childId === "string" && childId) {
           setChildEvents((current) => {
             const list = current[childId] || [];
-            if (list.some((entry) => entry.seq === event.seq)) {
+            const next = mergeEvent(list, event);
+            if (next === list) {
               return current;
             }
-            return { ...current, [childId]: list.concat([event]).sort((a, b) => a.seq - b.seq) };
+            return { ...current, [childId]: next };
           });
           if (event.kind === "turn/start") {
             setLiveChild(childId);
@@ -536,13 +648,11 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         }
         setEvents((current) => {
           const list = current[id] || [];
-          if (list.some((entry) => entry.seq === event.seq)) {
+          const next = mergeEvent(list, event);
+          if (next === list) {
             return current;
           }
-          return {
-            ...current,
-            [id]: list.concat([event]).sort((left, right) => left.seq - right.seq),
-          };
+          return { ...current, [id]: next };
         });
         const payload =
           event.payload && typeof event.payload === "object"
@@ -671,7 +781,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     return () => {
       stream.close();
     };
-  }, [newestId, finishLive, receiveSecret]);
+  }, [newestId, newestLoaded, finishLive, receiveSecret]);
 
   /* REQ-ROOM-005: the room is marked read one second after open or a new
      message, so a burst of rows does not spam the endpoint. */
@@ -686,75 +796,47 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
 
   const nodes = useMemo<TimelineNode[]>(() => {
     /* REQ-ROOM-002: build the visible items of each segment first, so a segment
-       with no visible turn or notice is left out along with its divider. */
+       with no visible turn or notice is left out along with its divider. Each
+       segment's items are cached by its events array (and, for the newest
+       segment, by the live inputs it uses), so an unrelated event or live-state
+       change does not rebuild every loaded segment (perf: chat load). */
+    const cache = segmentCacheRef.current;
+    const liveNow: LiveTurnState = {
+      running: turnRunning,
+      turnId: liveTurnId,
+      startedAt: liveStartedAt,
+    };
+    const liveKey = turnRunning + "|" + liveTurnId + "|" + liveStartedAt;
     const blocks: { segment: Segment; items: TimelineNode[] }[] = [];
+    const liveIds = new Set<string>();
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index];
       if (!segment) {
         continue;
       }
-      const segEvents = events[segment.session_id] || [];
-      const isNewest = segment.session_id === newestId;
-      const threadEvents = segEvents.filter(
-        (event) =>
-          event.kind !== "knowledge/compiled" && event.kind !== "memory/captured"
-      );
-      const thread = buildTurns(
-        threadEvents,
-        isNewest
-          ? { running: turnRunning, turnId: liveTurnId, startedAt: liveStartedAt }
-          : {}
-      );
-      const entries: TimelineNode[] = [];
-      for (const item of thread) {
-        if (item.kind === "user") {
-          const seq = Number(String(item.key).replace("user-", ""));
-          const event = segEvents.find((entry) => entry.seq === seq);
-          entries.push({
-            key: item.key,
-            at: event ? event.created_at : segment.created_at,
-            kind: "user",
-            sessionId: segment.session_id,
-            item,
-          });
-        } else {
-          entries.push({
-            key: item.key,
-            at: item.turn.lastAt || item.turn.startedAt || segment.created_at,
-            kind: "turn",
-            sessionId: segment.session_id,
-            turn: item.turn,
-          });
-        }
+      const id = segment.session_id;
+      const segEvents = events[id] || [];
+      const isNewest = id === newestId;
+      const key = isNewest ? liveKey : "";
+      liveIds.add(id);
+      let cached = cache.get(id);
+      if (!cached || cached.events !== segEvents || cached.liveKey !== key) {
+        cached = {
+          events: segEvents,
+          liveKey: key,
+          items: segmentEntries(segment, segEvents, isNewest ? liveNow : {}),
+        };
+        cache.set(id, cached);
       }
-      for (const event of segEvents) {
-        if (event.kind === "compaction/summary") {
-          entries.push({
-            key: "sum-" + event.seq,
-            at: event.created_at,
-            kind: "summary",
-            sessionId: segment.session_id,
-          });
-        } else if (
-          event.kind === "knowledge/compiled" ||
-          event.kind === "memory/captured"
-        ) {
-          const text = learnedLine(event);
-          if (text) {
-            entries.push({
-              key: "learn-" + event.seq,
-              at: event.created_at,
-              kind: "learned",
-              learnedText: text,
-            });
-          }
-        }
-      }
-      entries.sort((left, right) => left.at - right.at);
-      if (entries.length === 0) {
+      if (cached.items.length === 0) {
         continue;
       }
-      blocks.push({ segment, items: entries });
+      blocks.push({ segment, items: cached.items });
+    }
+    for (const id of Array.from(cache.keys())) {
+      if (!liveIds.has(id)) {
+        cache.delete(id);
+      }
     }
 
     /* A divider opens each visible segment: the full channel and date, or a
@@ -807,6 +889,21 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         lastDay = key;
       }
       withDays.push(node);
+    }
+
+    /* Perf: the rows present at the first load (and at each loadOlder prepend)
+       mount without the entrance animation; only a row that arrives later (a
+       streamed message) gets .msg-enter. */
+    if (prependHoldRef.current) {
+      prependHoldRef.current = false;
+      for (const node of withDays) {
+        heldKeysRef.current.add(node.key);
+      }
+    } else if (!firstLoadRef.current && withDays.length > 0) {
+      firstLoadRef.current = true;
+      for (const node of withDays) {
+        heldKeysRef.current.add(node.key);
+      }
     }
     return withDays;
   }, [segments, events, newestId, turnRunning, liveTurnId, liveStartedAt]);
@@ -895,6 +992,8 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       return;
     }
     setLoadingOlder(true);
+    /* The prepended rows are part of history, so they mount without animating. */
+    prependHoldRef.current = true;
     const node = scrollRef.current;
     prependRef.current = node ? node.scrollHeight : 0;
     const oldest = segments[0];
@@ -1305,6 +1404,15 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     0
   );
 
+  /* Perf: an older segment's rows skip rendering and layout while off screen
+     (`is-old`), and only a row that arrived after the initial load animates in
+     (`msg-enter`). */
+  function rowClass(key: string, sessionId: string): string {
+    const enter = heldKeysRef.current.has(key) ? "" : "msg-enter";
+    const old = sessionId !== newestId ? "is-old" : "";
+    return [enter, old].filter(Boolean).join(" ");
+  }
+
   function renderNode(node: TimelineNode) {
     switch (node.kind) {
       case "divider":
@@ -1332,7 +1440,10 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         );
       case "summary":
         return (
-          <div className="room-summary" key={node.key}>
+          <div
+            className={"room-summary" + (node.sessionId !== newestId ? " is-old" : "")}
+            key={node.key}
+          >
             <BookIcon />
             <span className="room-summary-text">
               {displayLabel(room) + " summarized earlier messages · full log in "}
@@ -1354,7 +1465,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         );
       case "user":
         return (
-          <div className="msg-enter" key={node.key}>
+          <div className={rowClass(node.key, node.sessionId)} key={node.key}>
             <UserBubble
               text={node.item.text}
               continue={node.item.continue === true}
@@ -1365,7 +1476,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         );
       case "turn":
         return (
-          <div className="msg-enter" key={node.key}>
+          <div className={rowClass(node.key, node.sessionId)} key={node.key}>
             {team ? (
               <RoomGroup
                 turn={node.turn}
