@@ -26,14 +26,17 @@ Go code goes through the `dsh-coder` implementer, one task per run. Web code (`w
 
 ## Tasks
 
-- [ ] `T-001` `internal/workbench/gitinfo`: runner, resolve, colour, worktree folder naming
+- [x] `T-001` `internal/workbench/gitinfo`: runner, resolve, colour, worktree folder naming
   - Requirements: REQ-WG-001, 002, 030, 061
   - Scope: new `internal/workbench/gitinfo/{git.go,resolve.go,naming.go}` and tests
+  - Evidence: 2026-11-21, commit 569d66e — 1 implementer run; `go test -race ./internal/workbench/gitinfo/` passes.
 
-- [ ] `T-002` Status, scopes and the diff parser
+- [x] `T-002` Status, scopes and the diff parser
   - Depends on: T-001
   - Requirements: REQ-WG-003, 004, 005, 006
   - Scope: `internal/workbench/gitinfo/{status.go,diff.go}` and tests
+  - Evidence: 2026-11-21, commit 7bfab9e — 1 implementer run; `-race` tests pass. A deleted file's path is
+    checked with its parent folder's symlinks resolved (`resolvedLeaf`), since `/var` is a symlink on macOS.
 
 - [ ] `T-003` Tree, search, file content and the worktree list
   - Depends on: T-001
@@ -52,7 +55,8 @@ Go code goes through the `dsh-coder` implementer, one task per run. Web code (`w
 
 - [ ] `T-006` Web: API client, Changes toggle, sliding panel, Files tab
   - Requirements: REQ-WG-060, 062, 063, 064, 065
-  - Scope: `web/ui/src/api/workbench-git.ts`, `web/ui/src/views/workbench-git-panel.tsx`, `workbench-files.tsx`, `workbench.tsx`, `styles/pages-gr8r/workbench.css`
+  - Scope: `web/ui/src/api/workbench-git.ts`, `web/ui/src/views/workbench-git-panel.tsx`, `workbench-files.tsx`, `workbench.tsx`, `styles/pages-gr8r/workbench-git.css`
+  - Progress: T-006…T-010 code in commit adaed0b (tsc, eslint, 770 vitest pass); live check waits for T-005.
 
 - [ ] `T-007` Web: Changes tab and diff viewer
   - Depends on: T-006
