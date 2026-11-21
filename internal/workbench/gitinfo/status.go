@@ -150,8 +150,8 @@ func (r *Runner) Status(ctx context.Context, worktree string, scope Scope, base 
 		Files:    []FileChange{},
 	}
 
-	switch {
-	case scope == ScopeUncommitted:
+	switch scope {
+	case ScopeUncommitted:
 		counts, err := r.uncommittedCounts(ctx, worktree)
 		if err != nil {
 			return Status{}, err
@@ -159,7 +159,7 @@ func (r *Runner) Status(ctx context.Context, worktree string, scope Scope, base 
 		files := buildChanges(ps.changes, counts)
 		files = append(files, r.untrackedChanges(worktree, ps.untracked)...)
 		status.Files = sortChanges(files)
-	case scope == ScopeBranch:
+	case ScopeBranch:
 		ref, mergeBase, short, err := r.resolveMergeBase(ctx, worktree, base)
 		if err != nil {
 			return Status{}, err
@@ -177,7 +177,7 @@ func (r *Runner) Status(ctx context.Context, worktree string, scope Scope, base 
 			return Status{}, err
 		}
 		status.Commits = commits
-	case scope == ScopeLastCommit:
+	case ScopeLastCommit:
 		rangeArgs, err := r.commitRange(ctx, worktree, "HEAD")
 		if err != nil {
 			return Status{}, err
@@ -543,7 +543,7 @@ func (r *Runner) untrackedChange(worktree, rel string) FileChange {
 	if err != nil {
 		return fc
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return fc

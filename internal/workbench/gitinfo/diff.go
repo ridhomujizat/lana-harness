@@ -73,18 +73,18 @@ func (r *Runner) Diff(ctx context.Context, worktree, path string, scope Scope, b
 		rangeArgs []string
 		untracked bool
 	)
-	switch {
-	case scope == ScopeUncommitted:
+	switch scope {
+	case ScopeUncommitted:
 		untracked = r.isUntracked(ctx, worktree, rel)
 		rangeArgs = []string{"-M", "HEAD"}
-	case scope == ScopeBranch:
+	case ScopeBranch:
 		_, mergeBase, _, err := r.resolveMergeBase(ctx, worktree, base)
 		if err != nil {
 			return FileDiff{}, err
 		}
 		untracked = r.isUntracked(ctx, worktree, rel)
 		rangeArgs = []string{"-M", mergeBase}
-	case scope == ScopeLastCommit:
+	case ScopeLastCommit:
 		args, err := r.commitRange(ctx, worktree, "HEAD")
 		if err != nil {
 			return FileDiff{}, err
