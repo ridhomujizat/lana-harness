@@ -301,7 +301,7 @@ func (s *Server) servePreviewRaw(w http.ResponseWriter, r *http.Request, path st
 		writeAPIError(w, http.StatusNotFound, "not_found", "not found")
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", previewContentType(path, kind))
 	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }

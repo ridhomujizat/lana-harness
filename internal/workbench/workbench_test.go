@@ -34,7 +34,10 @@ func serve(t *testing.T, home string) {
 	t.Cleanup(func() {
 		cancel()
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("Serve: %v", err)
+			}
 		case <-time.After(5 * time.Second):
 			t.Error("Serve did not stop")
 		}

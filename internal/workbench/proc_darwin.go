@@ -45,7 +45,7 @@ func darwinCwd(pid int) string {
 		return ""
 	}
 	var buf [procVnodePathInfoSize]byte
-	_, _, errno := syscall.Syscall6(unix.SYS_PROC_INFO,
+	_, _, errno := syscall.Syscall6(unix.SYS_PROC_INFO, //nolint:staticcheck // proc_info has no libSystem wrapper; darwinCwd uses it too.
 		procInfoCallPidInfo, uintptr(pid), procPidVnodePathInfo, 0,
 		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
 	if errno != 0 {
