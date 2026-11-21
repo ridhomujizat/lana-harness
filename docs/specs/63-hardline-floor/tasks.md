@@ -68,12 +68,12 @@ flowchart LR
     "Open Lana to confirm." suffix is follow-up `T-008`. The 409 `step_up_required` answer is in place,
     so the banner cannot allow a Block call.
 
-- [ ] `T-008` Say "Open Lana to confirm." on a Block-tier macOS banner
+- [x] `T-008` Say "Open Lana to confirm." on a Block-tier macOS banner
   - Depends on: T-003
   - Requirements: REQ-HLF-007 (notification row)
   - Scope: `internal/notify/events.go` (`ApprovalAsked` gets the tier) and its callers; the macOS app
     may hide "Allow once" for a Block banner
-  - Evidence: Pending
+  - Evidence: 2026-11-21 — Block-tier banners are posted without approval_id, so the macOS app shows no Allow action; body ends with "Open Lana to confirm."
 
 - [x] `T-004` Show the step-up approval card in the web UI
   - Depends on: T-003

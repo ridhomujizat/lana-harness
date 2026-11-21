@@ -117,7 +117,7 @@ func TestBusSuppressesReplyOfVisibleSession(t *testing.T) {
 		t.Fatal("reply of another session was dropped")
 	}
 	// Approvals of a visible session still notify.
-	if _, ok := bus.Publish(ApprovalAsked("ap1", "coder", "bash", "ls", ApprovalTarget{SessionID: "s1"})); !ok {
+	if _, ok := bus.Publish(ApprovalAsked("ap1", "coder", "bash", "ls", ApprovalTarget{SessionID: "s1"}, false)); !ok {
 		t.Fatal("approval of a visible session was dropped")
 	}
 	clock.add(PresenceTTL + time.Second)
@@ -193,14 +193,14 @@ func TestEventMapping(t *testing.T) {
 		t.Fatalf("reply = %+v", r)
 	}
 
-	a := ApprovalAsked("ap1", "worker", "bash", strings.Repeat("x", 300), ApprovalTarget{SessionID: "child", RootID: "root"})
+	a := ApprovalAsked("ap1", "worker", "bash", strings.Repeat("x", 300), ApprovalTarget{SessionID: "child", RootID: "root"}, false)
 	if a.Title != "Approval needed · worker" || !a.TimeSensitive || a.ApprovalID != "ap1" || a.URL != "#/sessions/root" || a.Thread != "root" {
 		t.Fatalf("approval = %+v", a)
 	}
 	if n := utf8.RuneCountInString(a.Body); n > ApprovalMax || !strings.HasPrefix(a.Body, "bash: xxx") {
 		t.Fatalf("approval body = %q (%d)", a.Body, n)
 	}
-	wa := ApprovalAsked("ap2", "w", "write_file", "a.txt", ApprovalTarget{SessionID: "ws", WorkflowID: "wf1"})
+	wa := ApprovalAsked("ap2", "w", "write_file", "a.txt", ApprovalTarget{SessionID: "ws", WorkflowID: "wf1"}, false)
 	if wa.URL != "#/workflows/wf1" || wa.Thread != "workflow:wf1" || wa.WorkflowID != "wf1" {
 		t.Fatalf("workflow approval = %+v", wa)
 	}
@@ -233,6 +233,35 @@ func TestEventMapping(t *testing.T) {
 	}
 	if _, _, ok := ParseWorkflowApprovalID("abc"); ok {
 		t.Fatal("a broker id parsed as a workflow id")
+	}
+}
+
+func TestApprovalAskedStepUp(t *testing.T) {
+	target := ApprovalTarget{SessionID: "s1"}
+
+	plain := ApprovalAsked("ap1", "coder", "bash", "ls -la", target, false)
+	if plain.ApprovalID != "ap1" || plain.Body != "bash: ls -la" || plain.Key != "approval_asked:ap1" {
+		t.Fatalf("plain approval = %+v", plain)
+	}
+
+	stepUp := ApprovalAsked("ap1", "coder", "bash", "ls -la", target, true)
+	if stepUp.ApprovalID != "" {
+		t.Fatalf("step-up approval carries approval id %q", stepUp.ApprovalID)
+	}
+	if stepUp.Body != "bash: ls -la Open Lana to confirm." {
+		t.Fatalf("step-up body = %q", stepUp.Body)
+	}
+	if stepUp.Key != plain.Key {
+		t.Fatalf("step-up key = %q, want %q", stepUp.Key, plain.Key)
+	}
+
+	// The ApprovalMax cut applies before the suffix, so the suffix survives.
+	long := ApprovalAsked("ap2", "coder", "bash", strings.Repeat("x", 300), target, true)
+	if !strings.HasSuffix(long.Body, " Open Lana to confirm.") {
+		t.Fatalf("long step-up body = %q", long.Body)
+	}
+	if n := utf8.RuneCountInString(strings.TrimSuffix(long.Body, " Open Lana to confirm.")); n > ApprovalMax {
+		t.Fatalf("long step-up cut = %q (%d)", long.Body, n)
 	}
 }
 

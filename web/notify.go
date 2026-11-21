@@ -81,7 +81,8 @@ func (n brokerNotifier) approvalOpened(id string, req core.ApprovalRequest, argu
 	if agent == "" {
 		agent = req.Label
 	}
-	bus.Publish(notify.ApprovalAsked(id, agent, req.ToolName, argument, target))
+	stepUp := req.Hardline != nil && req.Hardline.Tier == core.HardlineBlock
+	bus.Publish(notify.ApprovalAsked(id, agent, req.ToolName, argument, target, stepUp))
 }
 
 func (n brokerNotifier) approvalClosed(id, sessionID string, outcome core.ApprovalOutcome) {
