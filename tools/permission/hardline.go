@@ -167,23 +167,32 @@ func matchReadPath(p, cwd, home string) *core.HardlineMatch {
 // matchBash analyzes a shell command. depth limits the recursion into
 // bash|sh|zsh -c and eval strings (REQ-HLF-005).
 func matchBash(command, cwd, home string, depth int) *core.HardlineMatch {
+	// Heredoc bodies are data, not commands: split them out first so a body is
+	// never read as its own shell command (spec 63). The opener line, with its
+	// <<WORD operator, still goes through the segment analysis below.
+	stripped, heredocs := splitHeredocs(command)
 	var matches []*core.HardlineMatch
 	// Whole-command checks that survive splitting (HL-B-003, HL-B-002,
 	// HL-E-001).
-	if forkBomb.MatchString(command) {
+	if forkBomb.MatchString(stripped) {
 		matches = append(matches, blockHardline(hlB003, reasonB003))
 	}
-	if hlDiskRedirect.MatchString(command) {
+	if hlDiskRedirect.MatchString(stripped) {
 		matches = append(matches, blockHardline(hlB002, reasonB002))
 	}
-	if pipesDownloadIntoInterpreter(command) {
+	if pipesDownloadIntoInterpreter(stripped) {
 		matches = append(matches, escalateHardline(hlE001, reasonE001))
 	}
-	segments, analyzable := pattern.SplitCommand(command)
+	for _, doc := range heredocs {
+		if m := matchHeredoc(doc, cwd, home, depth); m != nil {
+			matches = append(matches, m)
+		}
+	}
+	segments, analyzable := pattern.SplitCommand(stripped)
 	if !analyzable {
 		// A command the precise splitter cannot analyze: check every rough
 		// piece instead, then fall back to the raw text.
-		segments = roughSegments(command)
+		segments = roughSegments(stripped)
 	}
 	dir := cwd
 	for _, segment := range segments {
@@ -201,7 +210,7 @@ func matchBash(command, cwd, home string, depth int) *core.HardlineMatch {
 		}
 	}
 	if !analyzable && len(matches) == 0 {
-		if m := rawFallback(command, dir, home, depth); m != nil {
+		if m := rawFallback(stripped, dir, home, depth); m != nil {
 			matches = append(matches, m)
 		}
 	}
@@ -1137,6 +1146,319 @@ func interpreterReadsStdin(args string) bool {
 		}
 	}
 	return true
+}
+
+// ---- heredocs (spec 63) ----
+
+// hlHeredoc is one heredoc read out of a command: the body text an interpreter
+// or shell would read from standard input, and the simple command segment that
+// owns its <<WORD operator.
+type hlHeredoc struct {
+	body   string // the body text, without the terminator line
+	owner  string // the segment that carries the <<WORD operator
+	opText string // the operator as written, for example "<<'EOF'"
+	tail   string // the rest of the opener line after the operator
+}
+
+// hlHeredocOp is one heredoc operator found in a line.
+type hlHeredocOp struct {
+	text      string // the operator as written, for example "<<'EOF'"
+	word      string // the delimiter word, with quotes removed
+	stripTabs bool   // <<- strips leading tabs from the body and the terminator
+	end       int    // index just past the operator
+}
+
+// hlHeredocShells are the shells whose heredoc body is analyzed as commands when
+// the shell reads its program from standard input.
+var hlHeredocShells = map[string]bool{
+	"bash": true, "sh": true, "zsh": true, "dash": true, "ksh": true,
+}
+
+// splitHeredocs removes every heredoc body and its terminator line from a
+// command, so pattern.SplitCommand never reads a body as a shell command, and
+// returns the remaining text with one entry per heredoc. A body runs from the
+// line after "…<<WORD" to a line equal to WORD (leading tabs are stripped for
+// <<-); an unterminated body runs to the end of the text. A here-string (<<<)
+// and a "<<" inside quotes are left in place.
+func splitHeredocs(command string) (string, []hlHeredoc) {
+	if !strings.Contains(command, "<<") {
+		return command, nil
+	}
+	lines := strings.Split(command, "\n")
+	var out []string
+	var docs []hlHeredoc
+	for i := 0; i < len(lines); {
+		line := lines[i]
+		ops := heredocOps(line)
+		out = append(out, line)
+		i++
+		for _, op := range ops {
+			var body []string
+			for i < len(lines) {
+				cmp := lines[i]
+				if op.stripTabs {
+					cmp = strings.TrimLeft(cmp, "\t")
+				}
+				if cmp == op.word {
+					i++ // consume the terminator line
+					break
+				}
+				body = append(body, lines[i])
+				i++
+			}
+			docs = append(docs, hlHeredoc{
+				body:   strings.Join(body, "\n"),
+				owner:  heredocOwner(line, op.text),
+				opText: op.text,
+				tail:   line[op.end:],
+			})
+		}
+	}
+	return strings.Join(out, "\n"), docs
+}
+
+// matchHeredoc classifies one heredoc by the simple command that owns its
+// operator (spec 63). An interpreter or shell that reads its program from
+// standard input runs the body as code: the interpreter body goes through the
+// inline-code heuristic and the shell body goes through matchBash one level
+// deeper. For a data command (cat, tee, echo, printf, …) a later stage of the
+// same pipeline may be the consumer, so that case falls through to
+// matchHeredocConsumer. The owner command is still analyzed as a normal segment,
+// whatever the body turns out to be.
+func matchHeredoc(doc hlHeredoc, cwd, home string, depth int) *core.HardlineMatch {
+	fields, _ := segmentFields(heredocCommandText(doc.owner, doc.opText))
+	if len(fields) > 0 {
+		cmd := filepath.Base(fields[0])
+		args := fields[1:]
+		switch {
+		case hlInterpreters[cmd]:
+			if interpreterReadsStdin(strings.Join(args, " ")) {
+				return pickHardline(interpreterMatches(doc.body, cwd, home))
+			}
+			return nil
+		case hlHeredocShells[cmd]:
+			if shellReadsStdin(args) && depth < 1 {
+				return matchBash(doc.body, cwd, home, depth+1)
+			}
+			return nil
+		}
+	}
+	return matchHeredocConsumer(doc, cwd, home, depth)
+}
+
+// matchHeredocConsumer looks for a later stage of a data command's pipeline
+// that reads the heredoc body from standard input (spec 63). When the owner is
+// a data command, a shell or interpreter further along the same line runs the
+// body as code: the shell body is analyzed with matchBash and the interpreter
+// body with interpreterMatches. A stage that only parses its input (grep, jq,
+// a shell given -c, an interpreter given -c or a script) is not a consumer.
+func matchHeredocConsumer(doc hlHeredoc, cwd, home string, depth int) *core.HardlineMatch {
+	for _, stage := range splitPipeline(doc.tail)[1:] {
+		fields, _ := segmentFields(stage)
+		if len(fields) == 0 {
+			continue
+		}
+		cmd := filepath.Base(fields[0])
+		args := fields[1:]
+		switch {
+		case hlHeredocShells[cmd]:
+			if shellReadsStdin(args) && depth < 1 {
+				if m := matchBash(doc.body, cwd, home, depth+1); m != nil {
+					return m
+				}
+			}
+		case hlInterpreters[cmd]:
+			if interpreterReadsStdin(strings.Join(args, " ")) {
+				if m := pickHardline(interpreterMatches(doc.body, cwd, home)); m != nil {
+					return m
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// heredocCommandText removes the heredoc operator from a segment, so a command
+// glued to its operator (bash<<EOF, python3 -<<EOF, cat<<'EOF') is classified
+// by its command word alone.
+func heredocCommandText(owner, opText string) string {
+	if opText == "" {
+		return owner
+	}
+	return strings.Replace(owner, opText, " ", 1)
+}
+
+// splitPipeline splits the text after a heredoc operator on single "|"
+// separators, leaving "||" alone and ignoring pipes inside quotes. The first
+// part is the remainder of the owner segment; every later part is a pipeline
+// stage.
+func splitPipeline(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '\'':
+			i = skipQuotedOrEnd(s, i, '\'')
+		case '"':
+			i = skipQuotedOrEnd(s, i, '"')
+		case '\\':
+			i += 2
+		case '|':
+			if i+1 < len(s) && s[i+1] == '|' {
+				i += 2
+				continue
+			}
+			parts = append(parts, s[start:i])
+			i++
+			start = i
+		default:
+			i++
+		}
+	}
+	return append(parts, s[start:])
+}
+
+// shellReadsStdin reports whether a shell reads its program from standard input:
+// no script argument, "-", or "-s". A shell given an inline -c string or a
+// script file takes its program elsewhere, so its heredoc is only data.
+func shellReadsStdin(args []string) bool {
+	for _, a := range args {
+		switch {
+		case a == "-" || a == "-s":
+			return true
+		case strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--"):
+			if strings.Contains(a[1:], "c") {
+				return false
+			}
+		case !strings.HasPrefix(a, "-"):
+			return false
+		}
+	}
+	return true
+}
+
+// heredocOps returns the heredoc operators of a line, in order. A here-string
+// (<<<) and a "<<" inside single or double quotes are not operators.
+func heredocOps(line string) []hlHeredocOp {
+	var out []hlHeredocOp
+	for i := 0; i < len(line); {
+		c := line[i]
+		switch {
+		case c == '\'':
+			i = skipQuotedOrEnd(line, i, '\'')
+		case c == '"':
+			i = skipQuotedOrEnd(line, i, '"')
+		case c == '\\':
+			i += 2
+		case c == '<' && i+1 < len(line) && line[i+1] == '<' &&
+			!(i+2 < len(line) && line[i+2] == '<'):
+			op, next := heredocOp(line, i)
+			if op.text == "" {
+				i++
+				continue
+			}
+			op.end = next
+			out = append(out, op)
+			i = next
+		default:
+			i++
+		}
+	}
+	return out
+}
+
+// heredocOp reads a heredoc operator at i, where line[i:i+2] == "<<". It returns
+// the operator and the index just past it; an empty text means it is not a
+// heredoc (a missing delimiter).
+func heredocOp(line string, i int) (hlHeredocOp, int) {
+	j := i + 2
+	stripTabs := false
+	if j < len(line) && line[j] == '-' {
+		stripTabs = true
+		j++
+	}
+	if j >= len(line) {
+		return hlHeredocOp{}, i + 1
+	}
+	if q := line[j]; q == '\'' || q == '"' {
+		if end := skipQuoted(line, j, q); end >= 0 {
+			return hlHeredocOp{text: line[i:end], word: line[j+1 : end-1], stripTabs: stripTabs}, end
+		}
+		return hlHeredocOp{}, i + 1
+	}
+	k := j
+	for k < len(line) && heredocWordByte(line[k]) {
+		k++
+	}
+	if k == j {
+		return hlHeredocOp{}, i + 1
+	}
+	return hlHeredocOp{text: line[i:k], word: line[j:k], stripTabs: stripTabs}, k
+}
+
+// skipQuoted returns the index just past a quoted run that starts at open, or -1
+// when the quote is never closed.
+func skipQuoted(s string, open int, quote byte) int {
+	for i := open + 1; i < len(s); i++ {
+		if quote == '"' && s[i] == '\\' && i+1 < len(s) {
+			i++
+			continue
+		}
+		if s[i] == quote {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+// skipQuotedOrEnd is skipQuoted but treats an unterminated quote as running to
+// the end of the string.
+func skipQuotedOrEnd(s string, open int, quote byte) int {
+	if end := skipQuoted(s, open, quote); end >= 0 {
+		return end
+	}
+	return len(s)
+}
+
+// heredocWordByte reports whether b may appear in an unquoted heredoc word.
+func heredocWordByte(b byte) bool {
+	switch b {
+	case ' ', '\t', '\r', '\n', ';', '|', '&', '<', '>', '(', ')', '"', '\'', '`':
+		return false
+	}
+	return true
+}
+
+// heredocOwner returns the simple command segment of a line that owns the
+// operator text opText, so its program-reading behavior can be classified. The
+// match respects the operator's word boundary, so "<<EOF" does not match
+// "<<EOF2".
+func heredocOwner(line, opText string) string {
+	segments, _ := pattern.SplitCommand(line)
+	for _, seg := range segments {
+		if heredocHasOp(seg, opText) {
+			return seg
+		}
+	}
+	return strings.TrimSpace(line)
+}
+
+// heredocHasOp reports whether seg contains the operator text opText not
+// followed by another word byte.
+func heredocHasOp(seg, opText string) bool {
+	for idx := 0; idx < len(seg); {
+		j := strings.Index(seg[idx:], opText)
+		if j < 0 {
+			return false
+		}
+		j += idx
+		end := j + len(opText)
+		if end >= len(seg) || !heredocWordByte(seg[end]) {
+			return true
+		}
+		idx = j + 1
+	}
+	return false
 }
 
 // unquote drops one pair of surrounding single or double quotes.
