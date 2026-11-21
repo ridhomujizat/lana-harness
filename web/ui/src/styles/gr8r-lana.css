@@ -685,3 +685,14 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
     animation: none !important;
   }
 }
+
+/* The collapsed rail: each icon is its own rounded tile with a small gap, so
+   the hover and the active tile never touch (owner report 2026-11-22). */
+@media (min-width: 901px) {
+  .shell.collapsed .side .sitem {
+    width: 36px;
+    height: 34px;
+    margin: 4px auto;
+    border-radius: 9px;
+  }
+}
