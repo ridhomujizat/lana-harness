@@ -23,28 +23,33 @@ type EventDraft struct {
 }
 
 const (
-	KindSessionCreated    = "session/created"
-	KindTurnStart         = "turn/start"
-	KindTurnEnd           = "turn/end"
-	KindStepStart         = "step/start"
-	KindStepEnd           = "step/end"
-	KindSystemMessage     = "system/message"
-	KindUserMessage       = "user/message"
-	KindAssistantMessage  = "assistant/message"
-	KindAssistantAttempt  = "assistant/attempt"
-	KindToolCall          = "tool/call"
-	KindToolResult        = "tool/result"
-	KindApprovalAsked     = "approval/asked"
-	KindApprovalDecided   = "approval/decided"
-	KindApprovalPolicy    = "approval/policy"
-	KindQuestionAsked     = "question/asked"
-	KindQuestionAnswered  = "question/answered"
-	KindModelSelection    = "model/selection"
-	KindCompactionSummary = "compaction/summary"
-	KindToolResultPruned  = "tool_result_pruned"
-	KindMemoryCaptured    = "memory/captured"
-	KindKnowledgeCompiled = "knowledge/compiled"
-	KindFileSent          = "file/sent"
+	KindSessionCreated   = "session/created"
+	KindTurnStart        = "turn/start"
+	KindTurnEnd          = "turn/end"
+	KindStepStart        = "step/start"
+	KindStepEnd          = "step/end"
+	KindSystemMessage    = "system/message"
+	KindUserMessage      = "user/message"
+	KindAssistantMessage = "assistant/message"
+	KindAssistantAttempt = "assistant/attempt"
+	KindToolCall         = "tool/call"
+	KindToolResult       = "tool/result"
+	KindApprovalAsked    = "approval/asked"
+	KindApprovalDecided  = "approval/decided"
+	KindApprovalPolicy   = "approval/policy"
+	// KindPermissionHardline records a hardline call rejected without asking
+	// anyone, for example in a workflow session (API-HLF-003).
+	KindPermissionHardline = "permission/hardline"
+	KindQuestionAsked      = "question/asked"
+	KindQuestionAnswered   = "question/answered"
+	KindModelSelection     = "model/selection"
+	KindCompactionSummary  = "compaction/summary"
+	KindToolResultPruned   = "tool_result_pruned"
+	KindMemoryCaptured     = "memory/captured"
+	KindKnowledgeCompiled  = "knowledge/compiled"
+	KindFileSent           = "file/sent"
+	// KindToolsLoaded records the deferred tools a step loaded (API-DTL-004).
+	KindToolsLoaded = "tools/loaded"
 )
 
 // PayloadError is the error in turn/end and assistant/attempt payloads.
@@ -234,6 +239,8 @@ type ApprovalAsked struct {
 	Tool      string `json:"tool"`
 	Risk      Risk   `json:"risk"`
 	Label     string `json:"label,omitempty"`
+	// Hardline is set only for a hardline match (API-HLF-001).
+	Hardline *HardlineMatch `json:"hardline,omitempty"`
 }
 
 type ApprovalDecided struct {
@@ -247,6 +254,18 @@ type ApprovalDecided struct {
 type ApprovalPolicy struct {
 	V      int    `json:"v"`
 	Policy Policy `json:"policy"`
+}
+
+// PermissionHardline is the payload of a permission/hardline event: a hardline
+// call rejected without asking anyone (API-HLF-003).
+type PermissionHardline struct {
+	V       int    `json:"v"`
+	CallID  string `json:"call_id"`
+	Tool    string `json:"tool"`
+	Rule    string `json:"rule"`
+	Tier    string `json:"tier"`
+	Reason  string `json:"reason"`
+	Outcome string `json:"outcome"`
 }
 
 // QuestionAsked is the payload of a question/asked event.
@@ -278,6 +297,13 @@ type FileSentPayload struct {
 	MediaType string `json:"media_type"`
 	Size      int64  `json:"size"`
 	Caption   string `json:"caption,omitempty"`
+}
+
+// ToolsLoaded is the payload of a tools/loaded event: the deferred tools a step
+// loaded, in the order they were first loaded (API-DTL-004).
+type ToolsLoaded struct {
+	V     int      `json:"v"`
+	Names []string `json:"names"`
 }
 
 type ModelSelection struct {

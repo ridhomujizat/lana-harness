@@ -18,6 +18,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/projectctx"
 )
 
 // Runner holds the state of one session.
@@ -170,9 +171,13 @@ type resolvedAgent struct {
 	workspace  string
 	tools      []string
 	disabled   []string
-	mcp        []string
-	skills     []string
-	maxSteps   int
+	// deferred is the turn's deferrable MCP tool names, rendered into the
+	// prompt's deferred_tools section (REQ-DTL-003). Empty when deferral is off
+	// and for Claude Code turns.
+	deferred []string
+	mcp      []string
+	skills   []string
+	maxSteps int
 	// maxTokens is the agent's output budget for each model step; 0 means the
 	// provider default (REQ-TFB-008 item 6).
 	maxTokens int
@@ -183,6 +188,10 @@ type resolvedAgent struct {
 	// workspaceOnly keeps the file tools inside the workspace when the agent
 	// sets workspace_only = true.
 	workspaceOnly bool
+	// contextFiles are the project context file names the agent reads: the
+	// default list unless the agent set context_files, empty when it turned the
+	// feature off (REQ-PCX-001, REQ-PCX-002).
+	contextFiles []string
 	// reasoningEffort is the thinking effort of every step request; "" means
 	// the provider default (REQ-MDL-001).
 	reasoningEffort string
@@ -349,6 +358,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		child:           info.ParentSessionID != "",
 		vision:          vision,
 		workspaceOnly:   cfg.WorkspaceOnly,
+		contextFiles:    cfg.ContextFileNames(),
 		reasoningEffort: effort,
 	}, nil
 }
@@ -525,12 +535,14 @@ func (rn *Runner) promptPath(res resolvedAgent) (string, error) {
 }
 
 // promptBuild is the result of building one turn's prompt: the full head text,
-// its named sections for diffing, and the <context> block for the first user
-// message.
+// its named sections for diffing, the <context> block for the first user
+// message, and the context file paths of the project section so the turn's
+// tracker can mark them seen (REQ-PCX-002).
 type promptBuild struct {
-	text     string
-	sections []core.PromptSection
-	context  string
+	text         string
+	sections     []core.PromptSection
+	context      string
+	projectFiles []string
 }
 
 // buildPrompt assembles the system prompt from the persona, the agent home
@@ -543,6 +555,9 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	in := agenthome.PromptInput{
 		Agent: res.name, Channel: res.channel, Workspace: res.workspace, Now: time.Now(),
 		Skills: skills, Roster: res.roster, UnavailableMCP: unavailable, ToolNotes: notes, HasMCP: hasMCP,
+		// REQ-DTL-003: the deferred_tools section depends only on the
+		// deferrable set, so loading a tool never rewrites the prompt.
+		DeferredTools: res.deferred,
 	}
 	// Spec 47 REQ-RDS-017: a team lead's root turn learns how to discuss.
 	if res.team != "" && !res.child {
@@ -593,7 +608,29 @@ func (rn *Runner) buildPrompt(res resolvedAgent, skills []agenthome.Skill, unava
 	}
 	in.RelevantKnowledge = rn.relevantKnowledge(ownerText, res.name, toolNames)
 	slog.Debug("system prompt", "agent", res.name, "user_chars", agenthome.Size(in.User), "memory_chars", agenthome.Size(in.Memory))
-	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in)}, nil
+	// REQ-PCX-002: the context files of the workspace chain join the prompt as
+	// the project section, top-down. Their paths are returned so the turn's
+	// tracker can mark them seen.
+	var projectFiles []string
+	if len(res.contextFiles) > 0 && res.workspace != "" {
+		files := projectctx.Discover(res.workspace, userHome(), res.contextFiles)
+		in.Project = projectctx.Section(files)
+		projectFiles = make([]string, 0, len(files))
+		for _, file := range files {
+			projectFiles = append(projectFiles, file.Path)
+		}
+	}
+	return promptBuild{text: agenthome.Build(in), sections: promptSections(in), context: agenthome.ContextBlock(in), projectFiles: projectFiles}, nil
+}
+
+// userHome returns the owner's home directory, or "" when it cannot be
+// resolved. The project context chain stops before it (REQ-PCX-002).
+func userHome() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 // memoryRelevantMax is the most entries put in one turn <context> block
@@ -962,7 +999,16 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 	loopReport := false
 	prompt := ""
 	promptBuilt := false
+	// projectTracker is the per-turn seen set of project context files, built
+	// once with the prompt and shared by every step's tool calls (REQ-PCX-003,
+	// REQ-PCX-004). Nil when the agent has no context files.
+	var projectTracker *projectctx.Tracker
 	turnTools := []string{}
+	// deferrable is the turn's withheld MCP tools, empty when deferral is off
+	// (REQ-DTL-001). loadedNames is the subset already loaded, in load order:
+	// turnTools is base plus loadedNames, and both grow as tools load
+	// (REQ-DTL-002, REQ-DTL-006).
+	var deferrable, loadedNames []string
 	var totalUsage core.Usage
 	// ownerMessage marks that this turn stored at least one message from the
 	// owner, not a runtime note. A capture pass needs one (REQ-MEM-010).
@@ -1202,18 +1248,44 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 		contextBlocks := 0
 		if !promptBuilt {
 			offered, unavailable, skills := rn.offeredTools(ctx, resolved)
-			turnTools = append(turnTools, offered...)
+			// REQ-DTL-001: split the offered tools into the ones a step sends
+			// and the deferrable ones withheld until a load. The session chain
+			// is read once here for both the loaded set (REQ-DTL-006) and the
+			// project-context seen set (REQ-PCX-004).
+			var chain []core.SessionEvent
+			if c, cerr := rn.reg.store.ChainEvents(ctx, rn.sessionID); cerr == nil {
+				chain = c
+			}
+			base, deferred := planDeferral(offered, resolved.cfg.DeferTools, rn.reg.mcpServerDeferrable, rn.toolSearchOK(resolved))
+			deferrable = deferred
+			turnTools = append(turnTools, base...)
+			loadedNames = loadedFromEvents(chain, deferrable)
+			turnTools = append(turnTools, loadedNames...)
 			// REQ-ECX-024: only an owner message can pick relevant memory, and
 			// only the first user message of the turn carries it.
 			ownerText := ""
 			if claimed && !runtimeNote {
 				ownerText = claimedText
 			}
+			// REQ-DTL-003: the deferred_tools section is rendered from the
+			// deferrable set, so a load never rewrites the prompt.
+			resolved.deferred = deferrable
 			built, err := rn.buildPrompt(resolved, skills, unavailable, rn.toolNotes(turnTools), len(resolved.mcp) > 0, ownerText, turnTools)
 			if err != nil {
 				runErr = runtimeError(err)
 				reason = "error"
 				goto finished
+			}
+			// REQ-PCX-003, REQ-PCX-004: one tracker per turn, seeded with the
+			// files already shown in the session since its last compaction and
+			// with this turn's prompt section.
+			if len(resolved.contextFiles) > 0 {
+				var seen []string
+				if chain != nil {
+					seen = projectctx.SeenFromEvents(chain)
+				}
+				projectTracker = projectctx.NewTracker(resolved.contextFiles, userHome(), resolved.workspace, seen)
+				projectTracker.MarkSeen(built.projectFiles...)
 			}
 			head, err := rn.promptHead(ctx)
 			if err != nil {
@@ -1442,6 +1514,9 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_call", CallID: block.ID, Name: block.Name, Input: block.Input})
 			}
 			outputs := make([]core.ToolOutput, len(calls))
+			// enabled is the tool list this step's calls run against; the run
+			// branch sets it and the load collection below reuses it.
+			var enabled []string
 			if budgetReport {
 				// REQ-LPG-015: the report step keeps the offered tools for the
 				// provider prefix cache, but a tool call it returns is not run.
@@ -1455,6 +1530,17 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				// a root turn that stored an owner message, the same values
 				// captureEligible uses (REQ-MEM-010).
 				toolCtx.OwnerTurn = !resolved.child && ownerMessage
+				// REQ-PCX-003: a successful call appends the project context
+				// files of its directory that the session has not seen yet.
+				if projectTracker != nil {
+					toolCtx.ProjectNote = projectTracker.Note
+				}
+				// REQ-DTL-004: tool_search reads the specs of the deferred tools.
+				toolCtx.DeferredTools = rn.deferredSpecs(deferrable)
+				// REQ-DTL-005: a deferred tool may be called directly, so the
+				// step runs against the step's tools plus every not-yet-loaded
+				// deferrable tool; name repair and validation see them too.
+				enabled = enabledTools(turnTools, deferrable)
 				// REQ-LPG-008: a call that matches a block rule is not run; its
 				// synthetic error result takes its place. The other calls run as
 				// usual and every result is stored in call order.
@@ -1490,9 +1576,16 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 					runnableIndex = append(runnableIndex, i)
 				}
 				if len(runnable) > 0 {
-					ran := rn.reg.pipeline.Run(ctx, runnable, turnTools, toolCtx)
+					ran := rn.reg.pipeline.Run(ctx, runnable, enabled, toolCtx)
 					for j, out := range ran {
 						outputs[runnableIndex[j]] = out
+					}
+				}
+				// REQ-DTL-005: a call to a not-yet-loaded deferred tool whose
+				// input is invalid carries the tool's description and schema.
+				for i := range outputs {
+					if text := rn.deferInvalidInput(calls[i], outputs[i], enabled, deferrable, loadedNames); text != "" {
+						outputs[i].Output = text
 					}
 				}
 			}
@@ -1520,6 +1613,19 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				rn.reg.hub.Publish(rn.sessionID, core.LiveFrame{SessionID: rn.sessionID, TurnID: turnID, Kind: "tool_result", CallID: calls[i].CallID, Name: calls[i].Name, Status: string(status), Output: output.Output})
 			}
 			if !budgetReport {
+				// REQ-DTL-002, REQ-DTL-005: record the deferred tools this step
+				// loaded and send them on the next step. The report step runs no
+				// call, so it loads nothing (REQ-LPG-015). The loaded event
+				// follows the step's tool results so replay order is sensible.
+				if added := loadedThisStep(calls, outputs, enabled, deferrable, loadedNames); len(added) > 0 {
+					if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindToolsLoaded, TurnID: turnID, Payload: core.ToolsLoaded{V: core.PayloadVersion, Names: added}}); err != nil {
+						runErr = runtimeError(err)
+						reason = "error"
+						goto finished
+					}
+					turnTools = append(turnTools, added...)
+					loadedNames = append(loadedNames, added...)
+				}
 				// REQ-TRL-010..014, REQ-LPG-002..007: advance the loop guard
 				// over this step's calls and results. The reminder rides the
 				// next request, which is claimed in the pendingTools branch or

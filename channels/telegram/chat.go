@@ -400,6 +400,10 @@ func (w *chat) handleText(ctx context.Context, m *Message, text string, attachme
 		return
 	}
 	// A message with attachments never answers a pending question (REQ-ATT-005).
+	// A typed hardline challenge is checked first (REQ-HLF-007).
+	if len(attachments) == 0 && w.captureApprovalText(ctx, m, text) {
+		return
+	}
 	if len(attachments) == 0 && w.captureQuestionText(ctx, m, text) {
 		return
 	}

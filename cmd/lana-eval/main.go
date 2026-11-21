@@ -22,6 +22,9 @@ func main() {
 // run parses flags, runs the selected tasks, writes the report, and returns the
 // process exit code.
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "hardline-replay" {
+		return hardlineReplay(args[1:], stdout, stderr)
+	}
 	fs := flag.NewFlagSet("lana-eval", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	for _, arg := range args {

@@ -2727,7 +2727,7 @@ func (rt *Runtime) agentFor(ctx context.Context, req Request) (string, error) {
 
 func validApprovalOutcome(outcome core.ApprovalOutcome) bool {
 	switch outcome {
-	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeRejected, core.OutcomeCancelled, core.OutcomeUnavailable:
+	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeAllowedVerified, core.OutcomeRejected, core.OutcomeCancelled, core.OutcomeUnavailable:
 		return true
 	}
 	return false

@@ -301,3 +301,86 @@ func TestSessionPresenceRoute(t *testing.T) {
 		t.Fatalf("no CSRF status = %d", rr.Code)
 	}
 }
+
+// AC-HLF-016 / API-HLF-007: a local notification cannot allow a block request;
+// the request stays open and a rejection still works.
+func TestLocalApprovalBlockRefused(t *testing.T) {
+	s, _, _ := newLoggedInSessionServer(t, newFakeWebBackend())
+	s.SetLocalSecret(localTestSecret)
+
+	_, events, unsubscribe := s.Approvals().subscribe("session-1")
+	defer unsubscribe()
+	outcomes := make(chan core.ApprovalOutcome, 1)
+	go func() {
+		outcomes <- s.Approvals().Ask(context.Background(), core.ApprovalRequest{
+			SessionID: "session-1", ToolName: "bash", Input: json.RawMessage(`{"command":"rm -rf ~"}`),
+			Risk:     core.RiskExec,
+			Hardline: &core.HardlineMatch{Rule: "HL-B-001", Tier: core.HardlineBlock, Reason: "recursive delete of home"},
+		})
+	}()
+	event := nextApprovalEvent(t, events)
+
+	post := func(id, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, LocalApprovalsPath+id, strings.NewReader(body))
+		req.RemoteAddr = localTestAddr
+		req.Header.Set(LocalSecretHeader, localTestSecret)
+		return serveAuth(s, req)
+	}
+	assertAuthError(t, post(event.RequestID, `{"outcome":"allowed_once"}`), http.StatusConflict, "step_up_required")
+	if _, err := s.Approvals().pending(event.RequestID); err != nil {
+		t.Fatalf("block request closed after a local allow: %v", err)
+	}
+	if rr := post(event.RequestID, `{"outcome":"rejected"}`); rr.Code != http.StatusOK {
+		t.Fatalf("local reject status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if outcome := waitApprovalOutcome(t, outcomes); outcome != core.OutcomeRejected {
+		t.Fatalf("outcome = %q, want rejected", outcome)
+	}
+}
+
+// REQ-HLF-007: a Block-tier approval is published without an approval_id and
+// with the "Open Lana to confirm." suffix, so the macOS banner shows no Allow
+// action; an Escalate-tier approval keeps its approval_id.
+func TestApprovalNotificationStepUp(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "worker"})
+	s, _, _ := newLoggedInSessionServer(t, backend)
+	bus := notify.NewBus()
+	s.SetNotifications(bus)
+	_, events, cancel := bus.Subscribe("")
+	defer cancel()
+
+	ask := func(hardline *core.HardlineMatch) func() {
+		ctx, stop := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			s.Approvals().Ask(ctx, core.ApprovalRequest{
+				SessionID: info.ID, AgentName: "worker", ToolName: "bash",
+				Input: json.RawMessage(`{"command":"rm -rf /"}`), Risk: core.RiskExec,
+				Hardline: hardline,
+			})
+			close(done)
+		}()
+		return func() { stop(); <-done }
+	}
+
+	finish := ask(&core.HardlineMatch{Rule: "HL-B-001", Tier: core.HardlineBlock, Reason: "recursive delete"})
+	blocked := nextNotify(t, events, notify.KindApprovalAsked)
+	if blocked.ApprovalID != "" {
+		t.Fatalf("block approval carries approval id %q", blocked.ApprovalID)
+	}
+	if !strings.HasSuffix(blocked.Body, " Open Lana to confirm.") {
+		t.Fatalf("block approval body = %q", blocked.Body)
+	}
+	finish()
+
+	finish = ask(&core.HardlineMatch{Rule: "HL-E-001", Tier: core.HardlineEscalate, Reason: "piped interpreter"})
+	escalated := nextNotify(t, events, notify.KindApprovalAsked)
+	if escalated.ApprovalID == "" {
+		t.Fatalf("escalate approval lost its approval id: %+v", escalated)
+	}
+	if strings.Contains(escalated.Body, "Open Lana to confirm.") {
+		t.Fatalf("escalate approval body = %q", escalated.Body)
+	}
+	finish()
+}

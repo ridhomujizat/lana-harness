@@ -204,6 +204,10 @@ type AgentConfig struct {
 	Subagents     []string `toml:"subagents"`
 	MCP           []string `toml:"mcp"`
 	Skills        []string `toml:"skills"`
+	// ContextFiles are the project context file names the agent reads: nil
+	// means DefaultContextFiles, and an empty list turns the feature off
+	// (REQ-PCX-001). Read them through ContextFileNames.
+	ContextFiles *[]string `toml:"context_files"`
 	// SkillWrite selects how skill_write handles a skill: "approve" (the
 	// default) stages it for owner review, "direct" writes it at once
 	// (spec 46 REQ-DKN-050).
@@ -230,7 +234,11 @@ type AgentConfig struct {
 	WorkspaceOnly bool `toml:"workspace_only"`
 	// Vision turns image input on or off for the agent. Nil means the catalog
 	// flag decides (API-ATT-005).
-	Vision      *bool  `toml:"vision"`
+	Vision *bool `toml:"vision"`
+	// DeferTools controls deferred MCP tool loading (API-DTL-001). Nil defers
+	// when the agent has more than 15 deferrable tools, true defers whenever
+	// it has one, false never defers.
+	DeferTools  *bool  `toml:"defer_tools"`
 	Description string `toml:"description"`
 	// Title is the agent role shown on its profile, at most 60 characters
 	// (REQ-ROOM-009, API-ROOM-006).
@@ -258,6 +266,21 @@ type AgentConfig struct {
 	// AllowScheduled lets calendar items and workflow nodes run the agent's
 	// Claude Code targets (REQ-CCT-008). The default is false.
 	AllowScheduled bool `toml:"allow_scheduled"`
+}
+
+// DefaultContextFiles is the context file list of an agent whose context_files
+// setting is absent (REQ-PCX-001).
+var DefaultContextFiles = []string{"AGENTS.md", "CLAUDE.md"}
+
+// ContextFileNames returns the agent's context file names: a copy of
+// DefaultContextFiles when context_files is absent (nil), and a copy of the
+// configured list otherwise. An empty configured list yields an empty,
+// non-nil slice, which turns project context off for the agent (REQ-PCX-001).
+func (a AgentConfig) ContextFileNames() []string {
+	if a.ContextFiles == nil {
+		return append([]string{}, DefaultContextFiles...)
+	}
+	return append([]string{}, (*a.ContextFiles)...)
 }
 
 type AgentRules struct {
@@ -368,6 +391,10 @@ type MCPConfig struct {
 	URL     string            `toml:"url"`
 	Env     map[string]Secret `toml:"env"`
 	Headers map[string]Secret `toml:"headers"`
+	// Defer makes the server's tools deferrable (API-DTL-002). Nil or true
+	// means deferrable; false always sends them and never counts them toward
+	// the deferral threshold.
+	Defer *bool `toml:"defer"`
 }
 
 // ModuleRow is the effective [[modules]] row.

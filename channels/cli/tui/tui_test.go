@@ -632,6 +632,13 @@ func TestApprovalMenuKeys(t *testing.T) {
 	if !strings.Contains(model.renderApproval(), "1. Yes, once") {
 		t.Fatalf("approval choices not shown:\n%s", model.renderApproval())
 	}
+	// A non-hardline request keeps all three choices.
+	if got := len(model.approval.choices.items); got != 3 {
+		t.Fatalf("choices = %d, want 3", got)
+	}
+	if !strings.Contains(model.renderApproval(), "always for this session") {
+		t.Fatalf("session grant missing:\n%s", model.renderApproval())
+	}
 	model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := <-reply; got != core.OutcomeAllowedSession {
@@ -639,6 +646,113 @@ func TestApprovalMenuKeys(t *testing.T) {
 	}
 	if model.approval != nil {
 		t.Fatal("approval was not closed")
+	}
+}
+
+// TestApprovalHardlineEscalate covers REQ-HLF-008: an Escalate request hides the
+// session grant, shows the rule and reason, and answers "Yes, once" directly.
+func TestApprovalHardlineEscalate(t *testing.T) {
+	model := NewModel(context.Background(), Options{Backend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}})
+	reply := make(chan core.ApprovalOutcome, 1)
+	model.Update(approvalMsg{req: core.ApprovalRequest{
+		CallID:   "c1",
+		ToolName: "bash",
+		Input:    []byte(`{"command":"sudo ls -la /root"}`),
+		Hardline: &core.HardlineMatch{Rule: "HL-E-002", Tier: core.HardlineEscalate, Reason: "privilege change"},
+	}, reply: reply})
+	if got := len(model.approval.choices.items); got != 2 {
+		t.Fatalf("choices = %d, want 2", got)
+	}
+	view := model.renderApproval()
+	if !strings.Contains(view, "⚠ HL-E-002 · privilege change") {
+		t.Fatalf("hardline line missing:\n%s", view)
+	}
+	if strings.Contains(view, "always for this session") {
+		t.Fatalf("session grant shown for a hardline request:\n%s", view)
+	}
+	if !strings.Contains(view, "sudo ls -la /root") {
+		t.Fatalf("full argument missing:\n%s", view)
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if got := <-reply; got != core.OutcomeAllowedOnce {
+		t.Fatalf("outcome = %q, want allowed_once", got)
+	}
+}
+
+// TestApprovalHardlineBlockChallenge covers REQ-HLF-007: a Block request opens
+// the typed challenge on "Yes, once" and the exact code allows the call.
+func TestApprovalHardlineBlockChallenge(t *testing.T) {
+	model := NewModel(context.Background(), Options{Backend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}})
+	reply := make(chan core.ApprovalOutcome, 1)
+	model.Update(approvalMsg{req: core.ApprovalRequest{
+		CallID:   "c1",
+		ToolName: "bash",
+		Input:    []byte(`{"command":"rm -rf ~"}`),
+		Hardline: &core.HardlineMatch{Rule: "HL-B-001", Tier: core.HardlineBlock, Reason: "recursive delete of the home directory"},
+	}, reply: reply})
+	// "Yes, once" starts the challenge instead of answering.
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if model.approval == nil || !model.approval.challenging {
+		t.Fatal("challenge step did not start")
+	}
+	challenge := model.approval.challenge
+	if len(challenge) != 4 {
+		t.Fatalf("challenge = %q, want 4 digits", challenge)
+	}
+	if view := model.renderApproval(); !strings.Contains(view, "Type "+challenge+" to run it, esc to reject") {
+		t.Fatalf("challenge prompt missing:\n%s", view)
+	}
+	for _, r := range challenge {
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	// The challenge keys never reach the chat input.
+	if got := model.input.Value(); got != "" {
+		t.Fatalf("challenge keys reached the chat input: %q", got)
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := <-reply; got != core.OutcomeAllowedVerified {
+		t.Fatalf("outcome = %q, want allowed_verified", got)
+	}
+	if model.approval != nil {
+		t.Fatal("approval was not closed")
+	}
+}
+
+// TestApprovalHardlineBlockWrongChallenge covers REQ-HLF-007: any text that is
+// not the challenge rejects the call.
+func TestApprovalHardlineBlockWrongChallenge(t *testing.T) {
+	model := NewModel(context.Background(), Options{Backend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}})
+	reply := make(chan core.ApprovalOutcome, 1)
+	model.Update(approvalMsg{req: core.ApprovalRequest{
+		CallID:   "c1",
+		ToolName: "bash",
+		Hardline: &core.HardlineMatch{Rule: "HL-B-001", Tier: core.HardlineBlock, Reason: "recursive delete"},
+	}, reply: reply})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	// The challenge is 1000-9999, so "0000" never matches.
+	for _, r := range "0000" {
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := <-reply; got != core.OutcomeRejected {
+		t.Fatalf("outcome = %q, want rejected", got)
+	}
+}
+
+// TestApprovalHardlineBlockEscRejects covers REQ-HLF-007: esc at the challenge
+// rejects the call.
+func TestApprovalHardlineBlockEscRejects(t *testing.T) {
+	model := NewModel(context.Background(), Options{Backend: &fakeBackend{obs: core.NewObserve[core.LiveFrame]()}})
+	reply := make(chan core.ApprovalOutcome, 1)
+	model.Update(approvalMsg{req: core.ApprovalRequest{
+		CallID:   "c1",
+		ToolName: "bash",
+		Hardline: &core.HardlineMatch{Rule: "HL-B-001", Tier: core.HardlineBlock, Reason: "recursive delete"},
+	}, reply: reply})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := <-reply; got != core.OutcomeRejected {
+		t.Fatalf("outcome = %q, want rejected", got)
 	}
 }
 

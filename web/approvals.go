@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -48,6 +50,18 @@ type approvalEvent struct {
 	ChildSessionID string `json:"child_session_id,omitempty"`
 	Agent          string `json:"agent,omitempty"`
 	Label          string `json:"label,omitempty"`
+	// Hardline is set when the call matched a hardline rule (API-HLF-004).
+	Hardline *approvalHardline `json:"hardline,omitempty"`
+}
+
+// approvalHardline is the hardline match of an approval (API-HLF-001,
+// API-HLF-004). StepUp is "password" or "password_or_telegram" for a block
+// request, and empty for an escalate request.
+type approvalHardline struct {
+	Rule   string `json:"rule"`
+	Tier   string `json:"tier"`
+	Reason string `json:"reason"`
+	StepUp string `json:"step_up"`
 }
 
 // sessionRootResolver reports the root session id of a session. The stream
@@ -104,6 +118,11 @@ type Approvals struct {
 	// a stream installs it, so a broker used alone treats every session as its
 	// own root.
 	rootOf sessionRootResolver
+	// confirmWith reports the step-up method of a block request (API-HLF-004):
+	// "password_or_telegram" when the setting allows a Telegram code and
+	// Telegram can deliver one, else "password". The server installs it, like
+	// rootOf, so the broker never reads a global. A nil value means "password".
+	confirmWith func() string
 	// observer hears every request open and close, for the notification bus
 	// (spec #42). It is called outside the lock; nil means none.
 	observer approvalObserver
@@ -121,6 +140,34 @@ func (a *Approvals) setObserver(o approvalObserver) {
 	defer a.mu.Unlock()
 	a.observer = o
 }
+
+// setConfirmWith installs the step-up reader of a block request. The server
+// calls it so a block's step_up follows the live [web.remote] confirm_with
+// setting and whether Telegram can deliver a code (API-HLF-004).
+func (a *Approvals) setConfirmWith(confirmWith func() string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.confirmWith = confirmWith
+}
+
+// hardlineStepUp returns the step-up method of a block request (API-HLF-004)
+// from the installed reader: "password_or_telegram" when it offers a Telegram
+// code, "password" otherwise.
+func (a *Approvals) hardlineStepUp() string {
+	a.mu.Lock()
+	confirmWith := a.confirmWith
+	a.mu.Unlock()
+	if confirmWith != nil && confirmWith() == core.WebRemoteConfirmPasswordOrTelegram {
+		return core.WebRemoteConfirmPasswordOrTelegram
+	}
+	return core.WebRemoteConfirmPassword
+}
+
+// approvalCodes holds the Telegram step-up codes of open block requests, keyed
+// by sha256(request id) (REQ-HLF-007, API-HLF-006). It follows the same rules
+// as the remote control codes: five minutes, single use, at most five wrong
+// tries, one send a minute.
+var approvalCodes = newControlCodeStore()
 
 func newApprovals() *Approvals {
 	return &Approvals{
@@ -169,6 +216,18 @@ func (a *Approvals) Ask(ctx context.Context, req core.ApprovalRequest) core.Appr
 		Argument:  toolfmt.PrimaryArg(req.ToolName, req.Input),
 		Risk:      req.Risk,
 		ExpiresAt: now.Add(approvalTimeout).UnixMilli(),
+	}
+	// Keep the hardline match on the pending entry so the SSE event, the
+	// replay of open requests, and the answer handler all see it (API-HLF-004).
+	if req.Hardline != nil {
+		event.Hardline = &approvalHardline{
+			Rule:   req.Hardline.Rule,
+			Tier:   req.Hardline.Tier,
+			Reason: req.Hardline.Reason,
+		}
+		if req.Hardline.Tier == core.HardlineBlock {
+			event.Hardline.StepUp = a.hardlineStepUp()
+		}
 	}
 	if rootID != req.SessionID {
 		agent := req.AgentName
@@ -261,6 +320,23 @@ func (a *Approvals) resolve(pending *pendingApproval, outcome core.ApprovalOutco
 		observer.approvalClosed(pending.id, pending.sessionID, outcome)
 	}
 	return <-pending.reply
+}
+
+// pending returns the open request entry for id, so a handler can read the
+// request's hardline match before answering it (API-HLF-005, API-HLF-006,
+// API-HLF-007). A known but closed ID returns errApprovalClosed; an ID that
+// never existed returns errApprovalNotFound, like answer.
+func (a *Approvals) pending(id string) (*pendingApproval, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	pending, ok := a.open[id]
+	if !ok {
+		if _, seen := a.closed[id]; seen {
+			return nil, errApprovalClosed
+		}
+		return nil, errApprovalNotFound
+	}
+	return pending, nil
 }
 
 // answer accepts the first response for an open request. A known but closed ID
@@ -412,15 +488,32 @@ func newApprovalRequestID() (string, error) {
 // CSRF checks apply exactly as for the other endpoints.
 func (s *Server) registerApprovalRoutes() {
 	s.Handle("POST /v1/approvals/{id}", http.HandlerFunc(s.handleAnswerApproval))
+	// API-HLF-006: send a Telegram step-up code for a block request.
+	s.Handle("POST /v1/approvals/{id}/code", http.HandlerFunc(s.handleApprovalCode))
 }
 
 type approvalAnswerRequest struct {
 	Outcome string  `json:"outcome"`
 	Reason  *string `json:"reason"`
+	// Password and Code are the step-up proofs of a block request (API-HLF-005).
+	Password *string `json:"password"`
+	Code     *string `json:"code"`
 }
 
 type approvalAnswerResponse struct {
 	Outcome string `json:"outcome"`
+}
+
+// writeApprovalLookupError maps a broker lookup error to its API error.
+func writeApprovalLookupError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errApprovalClosed):
+		writeAPIError(w, http.StatusConflict, "approval_closed", "approval closed")
+	case errors.Is(err, errApprovalNotFound):
+		writeAPIError(w, http.StatusNotFound, "not_found", "approval request not found")
+	default:
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+	}
 }
 
 func (s *Server) handleAnswerApproval(w http.ResponseWriter, r *http.Request) {
@@ -439,7 +532,70 @@ func (s *Server) handleAnswerApproval(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "reason must be at most 500 characters")
 		return
 	}
-	err := s.approvals.answer(r.PathValue("id"), outcome)
+	id := r.PathValue("id")
+	pending, err := s.approvals.pending(id)
+	if err != nil {
+		writeApprovalLookupError(w, err)
+		return
+	}
+	// A hardline request has its own step-up rules (API-HLF-005).
+	if hardline := pending.event.Hardline; hardline != nil {
+		s.answerHardlineApproval(w, id, hardline, outcome, body)
+		return
+	}
+	s.finishApprovalAnswer(w, id, outcome)
+}
+
+// answerHardlineApproval applies API-HLF-005 to an approval whose call matched
+// a hardline rule. A block request is resolved only after a password or, when
+// configured, a Telegram code; an escalate request keeps the ordinary flow.
+func (s *Server) answerHardlineApproval(w http.ResponseWriter, id string, hardline *approvalHardline, outcome core.ApprovalOutcome, body approvalAnswerRequest) {
+	switch outcome {
+	case core.OutcomeAllowedSession:
+		// A hardline call never becomes a session grant (API-HLF-002).
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "a hardline call cannot be allowed for the session")
+		return
+	case core.OutcomeRejected:
+		// A rejection never needs a step-up proof.
+		s.finishApprovalAnswer(w, id, core.OutcomeRejected)
+		return
+	}
+	// The outcome is allowed_once from here.
+	if hardline.Tier != core.HardlineBlock {
+		// An escalate request runs after an ordinary approval.
+		s.finishApprovalAnswer(w, id, core.OutcomeAllowedOnce)
+		return
+	}
+	// A block request needs exactly one of password or code (API-HLF-005).
+	if (body.Password == nil) == (body.Code == nil) {
+		writeAPIError(w, http.StatusBadRequest, "step_up_required", "this call needs your password or a Telegram code")
+		return
+	}
+	if body.Password != nil {
+		// verifyControlPassword writes 401 invalid_password or 429
+		// too_many_attempts and counts the login lockout; either leaves the
+		// request open.
+		if !s.verifyControlPassword(w, *body.Password) {
+			return
+		}
+		s.finishApprovalAnswer(w, id, core.OutcomeAllowedVerified)
+		return
+	}
+	// A code is accepted only when confirm_with allows it.
+	if hardline.StepUp != core.WebRemoteConfirmPasswordOrTelegram {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "a code is not accepted with this configuration")
+		return
+	}
+	if !approvalCodes.verify(approvalCodeKey(id), *body.Code, s.nowTime()) {
+		writeAPIError(w, http.StatusUnauthorized, "invalid_code", invalidCodeMessage)
+		return
+	}
+	s.finishApprovalAnswer(w, id, core.OutcomeAllowedVerified)
+}
+
+// finishApprovalAnswer resolves the request and writes the API-HLF-005 answer.
+func (s *Server) finishApprovalAnswer(w http.ResponseWriter, id string, outcome core.ApprovalOutcome) {
+	err := s.approvals.answer(id, outcome)
 	switch {
 	case errors.Is(err, errApprovalClosed):
 		writeAPIError(w, http.StatusConflict, "approval_closed", "approval closed")
@@ -451,4 +607,57 @@ func (s *Server) handleAnswerApproval(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, approvalAnswerResponse{Outcome: string(outcome)})
 	}
+}
+
+// approvalCodeKey is the approvalCodes key of a request (API-HLF-006).
+func approvalCodeKey(requestID string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(requestID))
+}
+
+// handleApprovalCode answers POST /v1/approvals/{id}/code (API-HLF-006): it
+// sends a fresh Telegram code to the owner for an open block request whose
+// step_up is password_or_telegram.
+func (s *Server) handleApprovalCode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	pending, err := s.approvals.pending(id)
+	if err != nil {
+		writeApprovalLookupError(w, err)
+		return
+	}
+	hardline := pending.event.Hardline
+	if hardline == nil || hardline.Tier != core.HardlineBlock || hardline.StepUp != core.WebRemoteConfirmPasswordOrTelegram {
+		writeAPIError(w, http.StatusConflict, "not_needed", "this call does not need a Telegram code")
+		return
+	}
+	messenger := s.telegramOwnerMessenger()
+	if messenger == nil || !s.telegramResetAvailable() {
+		writeAPIError(w, http.StatusConflict, "telegram_unavailable", "Telegram is not connected, so an approval code cannot be sent.")
+		return
+	}
+	code, err := newResetCode()
+	if err != nil {
+		s.logger.Error("web: approval code: generate code", "error", err)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
+		return
+	}
+	if !approvalCodes.start(approvalCodeKey(id), code, s.nowTime()) {
+		writeAPIError(w, http.StatusTooManyRequests, "too_many_attempts", tooManyAttemptsMessage)
+		return
+	}
+	sent, err := messenger.SendOwnerMessage(r.Context(), approvalCodeMessage(code, hardline, pending.event.Argument))
+	if err != nil {
+		s.logger.Error("web: approval code: send code", "error", err)
+		writeAPIError(w, http.StatusConflict, "telegram_unavailable", "Telegram is not connected, so an approval code cannot be sent.")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, struct {
+		SentTo int `json:"sent_to"`
+	}{SentTo: sent})
+}
+
+// approvalCodeMessage is the plain-text owner message of API-HLF-006: the code,
+// the rule and reason it allows, and a shortened form of the argument.
+func approvalCodeMessage(code string, hardline *approvalHardline, argument string) string {
+	return fmt.Sprintf("Lana approval code: %s\nIt allows %s (%s) for: %s\nIt expires in 5 minutes.",
+		code, hardline.Rule, hardline.Reason, toolfmt.Cut(argument, 200))
 }

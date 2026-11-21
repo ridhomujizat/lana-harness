@@ -7,6 +7,14 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.5.0-beta.16] - 2026-11-21
+
+### Added
+
+- Hardline floor: a short built-in list of destructive commands is checked in every permission mode, `trust` included, and agents or prompts cannot turn it off. Block-tier calls (`rm -rf ~` or `/`, disk wipes, writes to `~/.ssh`, `~/.lana/secrets.env`, `daemon.secret`, or `config.toml`, also inside `bash -c`, `$(...)`, and heredoc code) run only after a stronger confirmation: your Lana password on the web card (or a Telegram code when Telegram is connected), the 4-digit code in Telegram, or the typed code in the TUI. The macOS banner has no Allow button for them. Escalate-tier calls (`sudo`, `git push --force`, `curl … | sh`, reading secret files, `crontab`, `launchctl`) ask for a normal approval even in `trust` mode and never offer "allow for session". Without an approval channel (scheduled or workflow runs) both are refused. `lana-eval hardline-replay -db <lana.db>` replays the rules over recorded tool calls.
+- Project context files: agents read `AGENTS.md` or `CLAUDE.md` from the workspace and its parent folders (up to, not including, your home folder) into the system prompt. When a tool first touches another repository, that repository's file is added once to the tool result, with a line saying Lana added it. Files show again after a compaction. Per-agent setting `context_files` (default `["AGENTS.md", "CLAUDE.md"]`, `[]` turns it off). Files are capped at 16 KiB each, 32 KiB per injection.
+- Deferred tool loading: an agent with more than 15 MCP tools sends only their names, grouped by server, and gets a `tool_search` tool that returns a tool's description and parameters and loads it. A deferred tool can also be called directly by name, and invalid input returns its schema. Loaded tools are appended at the end of the tool list and kept across turns and restarts until the next compaction, so the prompt cache stays valid. With the `sxored-hub`, `kerjan`, and `dbx` servers the first request of a turn drops from about 37k to 11k input tokens. Settings: `defer_tools = true|false` per agent, `defer = false` per `[mcp.<name>]` to always send a server's tools. Claude Code turns are unchanged.
+
 ## [0.5.0-beta.15] - 2026-11-21
 
 ### Changed

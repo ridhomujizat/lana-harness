@@ -48,12 +48,14 @@ var validKinds = map[string]bool{
 	core.KindUserMessage: true, core.KindAssistantMessage: true, core.KindAssistantAttempt: true,
 	core.KindToolCall: true, core.KindToolResult: true, core.KindApprovalAsked: true,
 	core.KindApprovalDecided: true, core.KindApprovalPolicy: true, core.KindModelSelection: true,
-	core.KindQuestionAsked: true, core.KindQuestionAnswered: true,
+	core.KindPermissionHardline: true,
+	core.KindQuestionAsked:      true, core.KindQuestionAnswered: true,
 	core.KindCompactionSummary: true, core.KindToolResultPruned: true,
 	core.KindMemoryCaptured: true, core.KindKnowledgeCompiled: true,
 	core.KindFileSent:        true,
 	core.KindSecretRequested: true, core.KindSecretResolved: true,
 	core.KindDiscussionStarted: true, core.KindDiscussionMessage: true, core.KindDiscussionEnded: true,
+	core.KindToolsLoaded: true,
 }
 
 // Store is the SQLite implementation of core.SessionStore.

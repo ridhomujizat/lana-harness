@@ -28,7 +28,7 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
-var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_window", "description", "disabled_tools", "display_name", "fallback", "max_steps", "max_tokens", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
+var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_files", "context_window", "defer_tools", "description", "disabled_tools", "display_name", "fallback", "max_steps", "max_tokens", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
 
 // claudeCodeRuntime is the runtime key of a Claude Agent (ADR 0018,
 // API-CCR-001).
@@ -64,7 +64,7 @@ func runtimeNames() []string {
 
 var teamKeys = []string{"description", "discuss", "display_name", "extra_rounds", "lead", "learn", "members", "mode", "room_memory", "rounds", "share_summary", "telegram_all"}
 var routeKeys = []string{"agent", "channel", "match"}
-var mcpKeys = []string{"args", "command", "env", "headers", "url"}
+var mcpKeys = []string{"args", "command", "defer", "env", "headers", "url"}
 var moduleKeys = []string{"after", "before", "config", "disabled", "id", "module"}
 var webKeys = []string{"addr", "enabled", "open_browser", "remote"}
 
@@ -608,6 +608,25 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 			}
 		}
 	}
+	// API-PCX-001: context_files is a list of plain file names.
+	if val, ok := v["context_files"]; ok {
+		list, ok := asStringSlice(val)
+		if !ok {
+			add(path+".context_files", typeMsg("array string", val))
+		} else {
+			for i, item := range list {
+				itemPath := fmt.Sprintf("%s.context_files[%d]", path, i)
+				switch {
+				case item == "":
+					add(itemPath, "must not be empty")
+				case item == "." || item == "..":
+					add(itemPath, `must not be "." or ".."`)
+				case strings.ContainsAny(item, `/\`):
+					add(itemPath, "must be a file name without a path separator")
+				}
+			}
+		}
+	}
 	for _, key := range []string{"max_steps", "max_tokens", "context_window"} {
 		if val, ok := v[key]; ok {
 			n, isInt := asInt(val)
@@ -663,6 +682,12 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["vision"]; ok {
 		if _, ok := val.(bool); !ok {
 			add(path+".vision", typeMsg("boolean", val))
+		}
+	}
+	// API-DTL-001: defer_tools turns deferred MCP tool loading on or off.
+	if val, ok := v["defer_tools"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".defer_tools", typeMsg("boolean", val))
 		}
 	}
 	if val, ok := v["toolset"]; ok {
@@ -887,6 +912,12 @@ func validateMCP(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["args"]; ok {
 		if _, ok := asStringSlice(val); !ok {
 			add(path+".args", typeMsg("array string", val))
+		}
+	}
+	// API-DTL-002: defer makes the server's tools deferrable.
+	if val, ok := v["defer"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".defer", typeMsg("boolean", val))
 		}
 	}
 	for _, key := range []string{"env", "headers"} {

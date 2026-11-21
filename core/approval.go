@@ -27,6 +27,10 @@ const (
 	OutcomeRejected       ApprovalOutcome = "rejected"
 	OutcomeCancelled      ApprovalOutcome = "cancelled"
 	OutcomeUnavailable    ApprovalOutcome = "unavailable"
+	// OutcomeAllowedVerified is an owner's allow of one call after a step-up
+	// confirmation: the web password, a Telegram code, or a typed challenge
+	// (REQ-HLF-007). It is never a session grant (API-HLF-002).
+	OutcomeAllowedVerified ApprovalOutcome = "allowed_verified"
 )
 
 // ApprovalRequest is a request for approval of one tool call.
@@ -39,6 +43,10 @@ type ApprovalRequest struct {
 	Input     json.RawMessage
 	Risk      Risk
 	Label     string
+	// Hardline is set when the call matched a hardline rule (spec 63). A Block
+	// match runs only after a step-up confirmation; an Escalate match runs
+	// after an ordinary approval, also under the trust policy.
+	Hardline *HardlineMatch
 }
 
 // ApprovalService runs approvals through the ApprovalRequest hook.
@@ -46,4 +54,20 @@ type ApprovalService interface {
 	Request(ctx context.Context, req ApprovalRequest) (ApprovalOutcome, error)
 	SetPolicy(ctx context.Context, sessionID string, p Policy) error
 	EffectivePolicy(ctx context.Context, sessionID string) (Policy, error)
+}
+
+// Hardline tiers (spec 63). A Block call runs only after a step-up
+// confirmation; an Escalate call runs only after an ordinary approval, also
+// under the trust policy.
+const (
+	HardlineBlock    = "block"
+	HardlineEscalate = "escalate"
+)
+
+// HardlineMatch is one matched hardline rule: a catastrophic or
+// credential-exposing tool call that never runs on the model's word alone.
+type HardlineMatch struct {
+	Rule   string `json:"rule"`
+	Tier   string `json:"tier"`
+	Reason string `json:"reason"`
 }

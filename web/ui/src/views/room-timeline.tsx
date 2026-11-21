@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { answerApproval } from "../api/approvals";
-import type { ApprovalEvent } from "../api/approvals";
+import type { ApprovalEvent, ApprovalProof } from "../api/approvals";
 import { uploadAttachments } from "../api/attachments";
 import { ApiError, errorMessage, openStream } from "../api/client";
 import type { StreamState } from "../api/client";
@@ -982,7 +982,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   }, []);
 
   const handleApprovalAnswer = useCallback(
-    async (approval: ApprovalEvent, outcome: string) => {
+    async (approval: ApprovalEvent, outcome: string, proof?: ApprovalProof) => {
       setApprovals((current) =>
         current.map((item) =>
           item.request_id === approval.request_id
@@ -991,7 +991,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         )
       );
       try {
-        await answerApproval(approval.request_id, outcome);
+        await answerApproval(approval.request_id, outcome, undefined, proof);
         setApprovals((current) =>
           current.map((item) =>
             item.request_id === approval.request_id

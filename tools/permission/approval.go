@@ -55,7 +55,7 @@ func (s *ApprovalService) append(ctx context.Context, sessionID, kind, turnID st
 // Request asks for approval and writes an audit event.
 func (s *ApprovalService) Request(ctx context.Context, req core.ApprovalRequest) (core.ApprovalOutcome, error) {
 	requestID := id.New()
-	asked := core.ApprovalAsked{V: core.PayloadVersion, RequestID: requestID, CallID: req.CallID, Tool: req.ToolName, Risk: req.Risk, Label: req.Label}
+	asked := core.ApprovalAsked{V: core.PayloadVersion, RequestID: requestID, CallID: req.CallID, Tool: req.ToolName, Risk: req.Risk, Label: req.Label, Hardline: req.Hardline}
 	if err := s.append(context.WithoutCancel(ctx), req.SessionID, core.KindApprovalAsked, req.TurnID, asked); err != nil {
 		return core.OutcomeUnavailable, err
 	}
@@ -82,6 +82,13 @@ func (s *ApprovalService) Request(ctx context.Context, req core.ApprovalRequest)
 		outcome = core.OutcomeUnavailable
 		reason = "invalid outcome"
 	}
+	// A hardline match never becomes a session grant: an allowed_session
+	// answer is recorded and returned as allowed_once, so Grants never sees a
+	// hardline grant (REQ-HLF-007, API-HLF-002).
+	if req.Hardline != nil && outcome == core.OutcomeAllowedSession {
+		outcome = core.OutcomeAllowedOnce
+		reason = string(outcome)
+	}
 	decided := core.ApprovalDecided{V: core.PayloadVersion, RequestID: requestID, CallID: req.CallID, Outcome: outcome, Reason: reason}
 	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer writeCancel()
@@ -106,7 +113,7 @@ func (s *ApprovalService) ask(ctx context.Context, req core.ApprovalRequest) (ou
 
 func validOutcome(outcome core.ApprovalOutcome) bool {
 	switch outcome {
-	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeRejected, core.OutcomeCancelled, core.OutcomeUnavailable:
+	case core.OutcomeAllowedOnce, core.OutcomeAllowedSession, core.OutcomeAllowedVerified, core.OutcomeRejected, core.OutcomeCancelled, core.OutcomeUnavailable:
 		return true
 	}
 	return false

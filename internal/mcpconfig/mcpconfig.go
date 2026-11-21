@@ -24,6 +24,10 @@ type Definition struct {
 	URL     string
 	Env     map[string]string
 	Headers map[string]string
+	// Defer is [mcp.<name>] defer (API-DTL-002). Nil or true keeps the
+	// server's tools deferrable; false always sends them. It is carried
+	// through a rewrite so a save never drops it.
+	Defer *bool
 }
 
 // Document is the part of config.toml the MCP handlers read.
@@ -53,6 +57,9 @@ func FromMap(table map[string]any) Definition {
 		URL:     mapString(table, "url"),
 		Env:     stringMap(table["env"]),
 		Headers: stringMap(table["headers"]),
+	}
+	if value, ok := table["defer"].(bool); ok {
+		def.Defer = &value
 	}
 	def.Type = definitionType(def)
 	return def
