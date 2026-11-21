@@ -69,6 +69,13 @@ var (
 	hlWordDisk  = regexp.MustCompile(`\b(mkfs|newfs|dd|diskutil)\b`)
 	hlWriteVerb = regexp.MustCompile(`\b(rm|mv|cp|tee|truncate|chmod|chown|ln)\b`)
 
+	// hlRedirectField matches a redirection at the start of a segment field: an
+	// optional file descriptor, then an operator. A target attached to the same
+	// field is part of the match, so the operator and the target are dropped
+	// together. A field that starts with a quote is not a redirection and never
+	// matches.
+	hlRedirectField = regexp.MustCompile(`^(?:[0-9]+)?(?:<<<|<<-|<<|>>|>&|<&|&>>|&>|<|>)`)
+
 	// Inline interpreter code (REQ-HLF-005). These read the code string as raw
 	// text; they are a heuristic, not a sandbox.
 	hlDeleteCall = regexp.MustCompile(`\b(rmtree|rmSync|rmdirSync|rm_rf|remove_dir_all|rimraf)\b|\brm\s+-[rR]`)
@@ -194,7 +201,7 @@ func matchBash(command, cwd, home string, depth int) *core.HardlineMatch {
 		}
 	}
 	if !analyzable && len(matches) == 0 {
-		if m := rawFallback(command, dir, home); m != nil {
+		if m := rawFallback(command, dir, home, depth); m != nil {
 			matches = append(matches, m)
 		}
 	}
@@ -433,29 +440,173 @@ func codeReferencesHomeOrRoot(code, cwd, home string) bool {
 }
 
 // rawFallback handles a command pattern.SplitCommand cannot analyze and whose
-// rough segments matched nothing (REQ-HLF-005). A raw Block command word is
-// treated as Block; a raw protected path is Block when the text reads like a
-// write, and Escalate when it names a secret.
-func rawFallback(command, cwd, home string) *core.HardlineMatch {
-	if hlWordRm.MatchString(command) {
+// rough segments matched nothing (REQ-HLF-005). matchSimpleSegment already saw
+// every visible segment, including the redirect targets it can read precisely,
+// so the fallback covers only what the segment analysis cannot see: the bodies
+// of command and process substitutions, and redirect targets that are not
+// statically known. A Block command word inside an opaque body is Block; a
+// protected path is Block only on a write; a secret that is only read is
+// Escalate (HL-E-005).
+func rawFallback(command, cwd, home string, depth int) *core.HardlineMatch {
+	opaque := opaqueSpans(command)
+	hidden := strings.Join(opaque, " ")
+	if hlWordRm.MatchString(hidden) {
 		return blockHardline(hlB001, reasonB001)
 	}
-	if hlWordDisk.MatchString(command) {
+	if hlWordDisk.MatchString(hidden) {
 		return blockHardline(hlB002, reasonB002)
 	}
-	for _, token := range rawTokens(command) {
-		resolved := resolveHL(token, cwd, home)
-		if !isProtectedPath(resolved, home) {
-			continue
+	// A substitution body can hold a whole command; analyze each one once more
+	// with the normal rules, up to the same depth limit as a nested shell.
+	if depth < 1 {
+		for _, body := range opaque {
+			if m := matchBash(body, cwd, home, depth+1); m != nil {
+				return m
+			}
 		}
-		if hlWriteVerb.MatchString(command) || strings.Contains(command, ">") {
+	}
+	protectedToken := func() bool {
+		for _, token := range rawTokens(command) {
+			if isProtectedPath(resolveHL(token, cwd, home), home) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, m := range hlRedirectTarget.FindAllStringSubmatch(command, -1) {
+		target := m[1]
+		if isProtectedPath(resolveArg(target, cwd, home), home) {
 			return blockHardline(hlB004, reasonB004)
 		}
-		if isSecretPath(resolved, home) {
+		if targetOpaque(target) && protectedToken() {
+			return blockHardline(hlB004, reasonB004)
+		}
+	}
+	if hlWriteVerb.MatchString(hidden) && protectedToken() {
+		return blockHardline(hlB004, reasonB004)
+	}
+	// A secret that is named but only read is Escalate (HL-E-005).
+	for _, token := range rawTokens(command) {
+		if isSecretPath(resolveHL(token, cwd, home), home) {
 			return escalateHardline(hlE005, reasonE005)
 		}
 	}
 	return nil
+}
+
+// opaqueSpans returns the bodies of the command and process substitutions in a
+// raw command: $(...), `...`, <(...), and >(...). Plain text, including text in
+// single quotes, is skipped; a substitution inside a substitution is returned as
+// part of its outer body.
+func opaqueSpans(command string) []string {
+	var out []string
+	i, n := 0, len(command)
+	single := false
+	for i < n {
+		c := command[i]
+		if single {
+			if c == '\'' {
+				single = false
+			}
+			i++
+			continue
+		}
+		switch {
+		case c == '\\' && i+1 < n:
+			i += 2
+		case c == '\'':
+			single = true
+			i++
+		case c == '$' && i+1 < n && command[i+1] == '(':
+			body, next := balancedBody(command, i+2)
+			out = append(out, body)
+			i = next
+		case (c == '<' || c == '>') && i+1 < n && command[i+1] == '(':
+			body, next := balancedBody(command, i+2)
+			out = append(out, body)
+			i = next
+		case c == '`':
+			body, next := backtickBody(command, i+1)
+			out = append(out, body)
+			i = next
+		default:
+			i++
+		}
+	}
+	return out
+}
+
+// balancedBody returns the text between a substitution's "(" and its matching
+// ")" and the index just past the ")". It counts nested parentheses and skips
+// quoted text. An unbalanced body runs to the end of the command.
+func balancedBody(s string, start int) (string, int) {
+	depth := 1
+	i := start
+	var quote byte
+	for i < len(s) {
+		c := s[i]
+		if quote == '\'' {
+			if c == '\'' {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		if quote == '"' {
+			if c == '\\' && i+1 < len(s) {
+				i += 2
+				continue
+			}
+			if c == '"' {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		switch {
+		case c == '\\' && i+1 < len(s):
+			i += 2
+		case c == '\'':
+			quote = '\''
+			i++
+		case c == '"':
+			quote = '"'
+			i++
+		case c == '(':
+			depth++
+			i++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				return s[start:i], i + 1
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return s[start:], len(s)
+}
+
+// backtickBody returns the text between a pair of backticks and the index just
+// past the closing backtick. An unbalanced body runs to the end of the command.
+func backtickBody(s string, start int) (string, int) {
+	for i := start; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			continue
+		}
+		if s[i] == '`' {
+			return s[start:i], i + 1
+		}
+	}
+	return s[start:], len(s)
+}
+
+// targetOpaque reports whether a redirect target is not statically known: it
+// contains a command substitution or a backtick.
+func targetOpaque(target string) bool {
+	return strings.Contains(target, "$(") || strings.Contains(target, "`")
 }
 
 // ---- path resolution (REQ-HLF-004) ----
@@ -647,11 +798,33 @@ func isLaunchAgentPath(resolved, home string) bool {
 
 // ---- segment helpers ----
 
-// segmentFields splits a segment into its command fields after dropping leading
-// variable assignments and wrapper commands. It reports whether a privilege
-// wrapper (sudo or doas) was present (REQ-HLF-005).
+// segmentFields splits a segment into its command fields after dropping
+// redirections and leading variable assignments and wrapper commands. It
+// reports whether a privilege wrapper (sudo or doas) was present
+// (REQ-HLF-005).
 func segmentFields(segment string) ([]string, bool) {
-	return stripWrappers(strings.Fields(segment))
+	return stripWrappers(stripRedirects(strings.Fields(segment)))
+}
+
+// stripRedirects removes the shell redirections from a segment's fields, so the
+// per-command rules never read a redirect operator or its target as an
+// argument. A redirect that carries its target in the same field (>file,
+// >>file, N>&M, <<WORD) drops that field alone; a bare operator (> or <) also
+// drops the next field, its target. A quoted field that merely contains ">"
+// (for example "a>b") is not a redirection and is kept.
+func stripRedirects(fields []string) []string {
+	var out []string
+	for i := 0; i < len(fields); i++ {
+		op := hlRedirectField.FindString(fields[i])
+		if op == "" {
+			out = append(out, fields[i])
+			continue
+		}
+		if len(fields[i]) == len(op) && i+1 < len(fields) {
+			i++ // the target is the next field
+		}
+	}
+	return out
 }
 
 // stripWrappers removes leading wrapper commands and their own options, so the

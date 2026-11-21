@@ -177,6 +177,41 @@ func TestHardlineMatches(t *testing.T) {
 		{"none find filtered local", "bash", bashInput("find . -name '*.pyc' -delete"), "", ""},
 		{"e002 sudo -n true", "bash", bashInput("sudo -n true"), "HL-E-002", escalate},
 
+		// Spec 63: a plain file redirect makes the command unanalyzable, but
+		// the rough segments already cover the visible text, so the raw
+		// fallback must not re-check the whole command and match.
+		{"none redirect then rm", "bash", bashInput("npm run build > build.log 2>&1 && rm -f tmp.txt"), "", ""},
+		{"none redirect then rm ;", "bash", bashInput("go test ./... > out.txt; rm out.txt"), "", ""},
+		{"none redirect quoted rm", "bash", bashInput(`grep -rn "rm -rf" . > hits.txt`), "", ""},
+		{"none subst then rm file", "bash", bashInput(`echo "$(date)"; rm -f /tmp/x.lock`), "", ""},
+		{"none subst pipe dd word", "bash", bashInput("ls $(pwd) | grep dd"), "", ""},
+		{"none read ssh config to tmp", "bash", bashInput("cat ~/.ssh/config > /tmp/x"), "", ""},
+		{"none read ssh pubkey to tmp", "bash", bashInput("cat ~/.ssh/id_ed25519.pub > /tmp/pub"), "", ""},
+		{"none read ssh key stdin", "bash", bashInput(`wc -l < "$HOME/.ssh/authorized_keys" 2>&1`), "", ""},
+		{"none read ssh keys mixed", "bash", bashInput(`echo "exit=$?"; ls -l "$HOME/.ssh/authorized_keys" 2>&1; wc -l < "$HOME/.ssh/authorized_keys" 2>&1; echo "HOME=$HOME"`), "", ""},
+
+		// Spec 63: an opaque redirect target, a substitution body, and a
+		// secret read still match.
+		{"b004 redirect into subst dir", "bash", bashInput("echo key >> $(echo ~/.ssh)/authorized_keys"), "HL-B-004", block},
+		{"b004 redirect into quoted subst", "bash", bashInput(`echo key > "$(dirname ~/.ssh/x)/authorized_keys"`), "HL-B-004", block},
+		{"b004 redirect ssh config", "bash", bashInput("echo hi > ~/.ssh/config"), "HL-B-004", block},
+		{"b004 read then write ssh", "bash", bashInput("cat ~/.ssh/config > /tmp/x; echo k >> ~/.ssh/authorized_keys"), "HL-B-004", block},
+		{"b001 subst rm home", "bash", bashInput(`echo "$(rm -rf ~)"`), "HL-B-001", block},
+		{"b001 backtick rm root", "bash", bashInput("x=`rm -rf /`"), "HL-B-001", block},
+		{"e005 read secret to tmp", "bash", bashInput("cat ~/.ssh/id_rsa > /tmp/k"), "HL-E-005", escalate},
+
+		// Spec 63: a redirection is not a command argument, so its operator and
+		// target must not be read as fields by the per-command rules.
+		{"b001 bash -c rm home redirect out", "bash", bashInput(`bash -c "rm -rf ~" > out`), "HL-B-001", block},
+		{"b001 sh -c rm home dup tee", "bash", bashInput(`sh -c 'rm -rf ~' 2>&1 | tee log`), "HL-B-001", block},
+		{"b001 rm home redirect log", "bash", bashInput("rm -rf ~ > /tmp/log 2>&1"), "HL-B-001", block},
+		{"b004 cp key onto ssh redirect log", "bash", bashInput("cp id_rsa ~/.ssh/id_rsa > log"), "HL-B-004", block},
+		{"b004 mv key onto ssh devnull", "bash", bashInput("mv key ~/.ssh/authorized_keys 2>/dev/null"), "HL-B-004", block},
+		{"none redirect target quoted gt", "bash", bashInput(`echo "a>b" ~/.ssh/config`), "", ""},
+		{"none cp ssh config redirect log", "bash", bashInput("cp ~/.ssh/config /tmp/c > log"), "", ""},
+		{"none rm modules redirect and npm", "bash", bashInput("rm -rf node_modules > /dev/null 2>&1 && npm i > log"), "", ""},
+		{"none npm test dup tee", "bash", bashInput("npm test 2>&1 | tee test.log"), "", ""},
+
 		// Other tools and bad input.
 		{"none glob", "glob", pathInput("/etc/passwd"), "", ""},
 		{"none web_fetch", "web_fetch", json.RawMessage(`{"url":"https://x"}`), "", ""},
