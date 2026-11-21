@@ -377,8 +377,183 @@ html[data-shell="macos-app"] .shell.collapsed .topbar {
   padding-left: max(12px, calc(var(--shell-lights-w, 78px) - 52px));
 }
 
+/* The collapsed rail in the app starts with the nav right under the
+   traffic-light row: no brand mark and no divider above the first group
+   (owner report 2026-11-21). The narrow-window drawer keeps the brand. */
+@media (min-width: 901px) {
+  html[data-shell="macos-app"] .shell.collapsed .side-top {
+    display: none;
+  }
+
+  html[data-shell="macos-app"] .shell.collapsed .side-scroll > .sgroup:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+
 html[data-shell="macos-app"] .topbar-toggle {
   margin-right: 6px;
+}
+
+/* The app window reads as one chrome (sidebar + topbar, sidebar colour, no
+   dividing lines) holding the page as a card with rounded corners (owner
+   report 2026-11-21). */
+html[data-shell="macos-app"] .side {
+  border-right: 0;
+}
+
+html[data-shell="macos-app"] .main {
+  background: var(--bg-side);
+}
+
+html[data-shell="macos-app"] .topbar {
+  border-bottom: 0;
+}
+
+html[data-shell="macos-app"] .main > .content {
+  margin: 0 8px 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  /* A real border: an outer box-shadow ring sat under the topbar (z-index 5)
+     and lost its top edge. */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* Workbench in the app (option B of the figcraft page "Window chrome ·
+   traffic lights", owner pick 2026-11-21): the top 46px row is chrome, as on
+   every page. It holds the traffic lights, the sidebar toggle (the shell
+   topbar, laid over the row's left end) and the Workbench tab strip; the card
+   below it holds the Spaces panel and the terminals. */
+html[data-shell="macos-app"] .main.is-bare {
+  position: relative;
+}
+
+html[data-shell="macos-app"] .main.is-bare > .content {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-shell="macos-app"] .main.is-bare > .topbar {
+  display: flex;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 6;
+  width: auto;
+  background: transparent;
+}
+
+html[data-shell="macos-app"] .main.is-bare > .topbar > :not(.topbar-toggle):not(.mnav-btn) {
+  display: none;
+}
+
+/* With the sidebar open the toggle lives in the sidebar, so the overlay would
+   be an empty strip over the Workbench's own buttons (the "show panel"
+   button could not be clicked): drop it. A narrow window keeps it for the
+   menu button. */
+@media (min-width: 901px) {
+  html[data-shell="macos-app"] .main.is-bare > .topbar:not(:has(> .topbar-toggle)) {
+    display: none;
+  }
+}
+
+html[data-shell="macos-app"] .wb-page:not(.wb-phone) {
+  position: relative;
+  padding: var(--topbar-h) 8px 8px 0;
+  background: transparent;
+}
+
+/* The card: behind the panel and the terminals, under the chrome row. */
+html[data-shell="macos-app"] .wb-page:not(.wb-phone)::before {
+  content: "";
+  position: absolute;
+  top: var(--topbar-h);
+  right: 8px;
+  bottom: 8px;
+  left: 0;
+  z-index: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--wb-bg);
+  pointer-events: none;
+}
+
+html[data-shell="macos-app"] .wb-page:not(.wb-phone) > .wb-panel,
+html[data-shell="macos-app"] .wb-page:not(.wb-phone) > .wb-main {
+  z-index: 1;
+}
+
+html[data-shell="macos-app"] .wb-page:not(.wb-phone) > .wb-main {
+  position: relative;
+  margin-top: calc(-1 * var(--topbar-h));
+}
+
+/* The tab strip is the chrome row. */
+html[data-shell="macos-app"] .wb-page:not(.wb-phone) .wb-tabs {
+  height: var(--topbar-h);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* The strip scrolls sideways, so it clips a tooltip below its buttons; in the
+   taller row a sliver of it showed as a light line under a hovered button.
+   No tooltips in the strip, as before (they were clipped away entirely). */
+html[data-shell="macos-app"] .wb-page:not(.wb-phone) .wb-tabs [data-tip]::after {
+  display: none;
+}
+
+/* With the Spaces panel hidden the strip starts at the rail: it clears the
+   traffic lights and the sidebar toggle. */
+html[data-shell="macos-app"] .shell.collapsed .wb-page:not(.wb-phone):not(:has(> .wb-panel)) .wb-tabs {
+  padding-left: calc(var(--shell-lights-w, 84px) - 52px + 36px);
+}
+
+/* A divider between the app's sidebar toggle and the Workbench's own
+   "show panel" button (both panel-left) when the rail is collapsed. */
+html[data-shell="macos-app"] .shell.collapsed .wb-page:not(.wb-phone) .wb-panel-toggle {
+  position: relative;
+  margin-left: 10px;
+}
+
+html[data-shell="macos-app"] .shell.collapsed .wb-page:not(.wb-phone) .wb-panel-toggle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -9px;
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  transform: translateY(-50%);
+}
+
+@media (max-width: 900px) {
+  html[data-shell="macos-app"] .wb-page:not(.wb-phone) {
+    padding-left: 8px;
+  }
+
+  html[data-shell="macos-app"] .wb-page:not(.wb-phone)::before {
+    left: 8px;
+  }
+
+  html[data-shell="macos-app"] .wb-page:not(.wb-phone):not(:has(> .wb-panel)) .wb-tabs {
+    padding-left: calc(var(--shell-lights-w, 84px) + 40px);
+  }
+}
+
+/* A narrow window has no sidebar beside the card: inset it on the left too. */
+@media (max-width: 900px) {
+  html[data-shell="macos-app"] .main > .content {
+    margin-left: 8px;
+  }
+
+  html[data-shell="macos-app"] .main.is-bare > .content {
+    margin-left: 0;
+  }
 }
 
 html[data-shell="macos-app"][data-shell-fullscreen] .side-chrome {
