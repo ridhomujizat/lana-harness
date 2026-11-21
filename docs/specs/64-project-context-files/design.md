@@ -13,7 +13,7 @@ flowchart TD
   Turn --> Prompt["buildPrompt"] --> Disc["projectctx.Discover(workspace)"] --> Sec["agenthome section 'project'"]
   Turn --> TR["ToolRunner (Project tracker)"]
   TR --> Exec["ToolsExecute + ToolsPostExecute"] --> Note["tracker.Note(call, output)"]
-  Note --> Out["tool result + <project-context> blocks"]
+  Note --> Out["tool result + NoteIntroLine + <project-context> blocks"]
 ```
 
 ## Repository fit
@@ -56,9 +56,10 @@ type Tracker struct { /* names, home, workspace, seen map[string]bool (cleaned, 
 func NewTracker(names []string, home, workspace string, seen []string) *Tracker
 func (t *Tracker) MarkSeen(paths ...string)
 
-// Note returns the blocks to append after a successful call, or "".
-// Only read_file, write_file, edit_file, glob, grep (field "path", default
-// workspace) and bash (leading `cd <dir>` via pattern.SplitCommand) count.
+// Note returns NoteIntroLine followed by a blank line and the blocks to append
+// after a successful call, or "". Only read_file, write_file, edit_file, glob,
+// grep (field "path", default workspace) and bash (leading `cd <dir>` via
+// pattern.SplitCommand) count.
 func (t *Tracker) Note(tool string, input json.RawMessage) string
 
 // SeenFromEvents rebuilds the seen set from a session chain: the project

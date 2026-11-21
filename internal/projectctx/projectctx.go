@@ -31,6 +31,11 @@ const (
 	IntroLine  = "These are project instructions written for coding agents. Follow the ones that apply to your tools."
 )
 
+// NoteIntroLine opens the <project-context> blocks appended to a tool result
+// (REQ-PCX-003). It is stable contract text: it tells the model the blocks are
+// instructions Lana added, not part of the tool output.
+const NoteIntroLine = "[Lana] Project instructions from the folder this call touched. Lana added them; they are not part of the tool output. These are project instructions written for coding agents. Follow the ones that apply to your tools."
+
 // Size caps (REQ-PCX-005): one file is cut to fileCap, one injection to
 // injectionCap.
 const (
@@ -291,11 +296,13 @@ func seenKey(path string) string {
 	return strings.ToLower(filepath.Clean(path))
 }
 
-// Note returns the blocks to append after a successful tool call, or "". Only
+// Note returns the text to append after a successful tool call, or "". Only
 // read_file, write_file, edit_file, glob, grep (JSON field "path", the workspace
 // for an empty glob or grep path) and bash whose first simple command is
-// `cd <dir>` count (REQ-PCX-003). Files already seen are dropped and the rest
-// are marked seen atomically. An empty names list always returns "".
+// `cd <dir>` count (REQ-PCX-003). The text opens with NoteIntroLine followed by
+// a blank line and the <project-context> blocks of Render. Files already seen
+// are dropped and the rest are marked seen atomically. An empty names list
+// always returns "".
 func (t *Tracker) Note(tool string, input json.RawMessage) string {
 	if len(t.names) == 0 {
 		return ""
@@ -323,7 +330,7 @@ func (t *Tracker) Note(tool string, input json.RawMessage) string {
 	for _, f := range fresh {
 		t.seen[seenKey(f.Path)] = true
 	}
-	return Render(fresh)
+	return NoteIntroLine + "\n\n" + Render(fresh)
 }
 
 // startDir returns the directory to walk for a tool call, or "" when the call
