@@ -60,6 +60,18 @@ type Runner struct {
 	now   func() time.Time
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+
+	// caches holds the worktree-scoped and list-scoped caches of REQ-WG-007,
+	// REQ-WG-008 and REQ-WG-010. Its zero value is usable.
+	caches caches
+}
+
+// caches groups the caches a Runner keeps besides the resolve cache, so the
+// Runner struct gains one field (REQ-WG-007, REQ-WG-008, REQ-WG-010).
+type caches struct {
+	ignored   listCache
+	files     listCache
+	worktrees worktreesCache
 }
 
 // NewRunner builds a Runner with the given path policy and the default 10 s
