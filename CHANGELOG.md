@@ -7,6 +7,36 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.1] - 2026-11-22
+
+### Added
+
+- Workbench Files, Changes and Worktrees panel (spec 66). The Changes button at the right end of the tab strip, with the changed file count, opens a panel beside the terminals; ⇧⌘E opens Files, ⇧⌘G Changes. The panel follows the focused pane's git worktree. Files: a lazy tree with git badges, a ⌘P filter, and a read-only viewer with line numbers, syntax colouring and a git gutter. Changes: the changed files of Uncommitted, Branch vs `development` (the base is set per repo) or Last commit, with a unified or split diff and hunk navigation. ⌘+click on a path in a terminal opens it in Files at its line. Large files and diffs scroll smoothly (only visible lines are drawn), and status refreshes every 3 s while the panel is open.
+- Worktree management in the panel's Worktrees tab: lists the repo's worktrees (in use, active, merged into the base, prunable) and offers New worktree (new or existing branch from `origin/development`, optional fetch, copies git-ignored local files such as `.claude/implementer.local`, opens a tab with Claude Code), Clean up merged worktrees, Remove (with what would be lost and a typed confirmation for unsaved work), Move, Prune and Lock. New worktrees go in `../<repo>-worktree/<name>`. Remote branches are never deleted.
+- Each pane header shows its worktree's branch; two agents working in one worktree get a "shared with …" warning. Hovering a tab whose panes use several worktrees lists them.
+- Focus mode: with the panel open, only the focused pane is shown, with ‹ n/N › to step through the others; the panel header button turns it off. Opening the panel hides the Spaces sidebar and closing it brings the sidebar back.
+- Pane sizes are draggable: drag the gap between two panes, double-click it for equal sizes. The sizes are saved in the shared layout.
+- Panes can be moved: hover the program icon in a pane header (it becomes a move icon) and drag it onto another pane, to its left, right, top or bottom half, or to its middle to swap the two. Esc cancels. Not available while zoomed, in focus mode, or for a tab's only pane.
+- The new-tab button is split in two: "+" opens a terminal (⌘T), "⌄" opens Claude Code here, Claude Code in a worktree, or New worktree (⇧⌘N).
+- The phone Workbench has the Changes button in its header and the panel as a bottom sheet; A−/A+ moved into the ⋯ space menu.
+
+### Changed
+
+- Lana.app: the Workbench tab strip spans the full window width, also over the open panel, and keeps Accounts and Attached in full.
+- The collapsed sidebar rail shows its items as evenly spaced tiles, with Settings and the avatar centred at the bottom; the expanded sidebar aligns the avatar with the icons and the name with the labels.
+
+### Performance
+
+- API and asset responses are gzipped when the client accepts it (SSE, WebSocket, range and error responses are unchanged); chat logs and the JS bundle shrink about 3x, which helps over Tailscale.
+- A chat loads its events once and only renders what changed; the live stream starts from the last loaded event instead of replaying the log.
+- The chat timeline asks for a trimmed view of session events (no system prompt text, thinking signatures or step usage; tool input and output past 4000 characters are cut, with a "Show full" button). The session page keeps full payloads.
+- An open session stream reads only new events on each poll instead of the whole log.
+
+### Fixed
+
+- A data race when a Workbench terminal closes (the emulator's answer pipe is closed instead of the emulator).
+- Lint findings (errcheck, staticcheck) that failed CI.
+
 ## [0.5.0-beta.17] - 2026-11-21
 
 ### Changed

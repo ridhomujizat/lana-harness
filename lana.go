@@ -1884,6 +1884,16 @@ func (rt *Runtime) History(ctx context.Context, sessionID string) ([]core.Sessio
 	return rt.store.ChainEvents(ctx, sessionID)
 }
 
+// HistorySince returns the session's chain events with Seq > fromSeq and the
+// largest Seq in the chain. It is History with a cursor, so a poll of an open
+// session does not reload the inherited parent chain.
+func (rt *Runtime) HistorySince(ctx context.Context, sessionID string, fromSeq int64) ([]core.SessionEvent, int64, error) {
+	if err := rt.closedError(); err != nil {
+		return nil, 0, err
+	}
+	return rt.store.ChainEventsAfter(ctx, sessionID, fromSeq)
+}
+
 // LastSession returns the last cli session for the current workspace.
 func (rt *Runtime) LastSession(ctx context.Context) (core.SessionInfo, error) {
 	workspace, err := normalizeWorkspace(".")

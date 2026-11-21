@@ -6,7 +6,9 @@ import type { WorkbenchSession } from "../api/workbench";
 
 export type PaneNode =
   | { type: "pane"; session: string }
-  | { type: "split"; dir: "row" | "col"; children: PaneNode[] };
+  /* sizes: the children's shares of the split, summing to 1; absent means
+     equal (spec 66 follow-up: draggable pane sizes). */
+  | { type: "split"; dir: "row" | "col"; children: PaneNode[]; sizes?: number[] };
 
 export interface WbTab {
   id: string;
@@ -67,6 +69,60 @@ function isNode(value: unknown): value is PaneNode {
   return false;
 }
 
+/* Shares that sum to 1, or undefined when they are missing or malformed. */
+export function normalSizes(sizes: unknown, count: number): number[] | undefined {
+  if (!Array.isArray(sizes) || sizes.length !== count || count < 2) return undefined;
+  if (!sizes.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)) return undefined;
+  const total = (sizes as number[]).reduce((a, b) => a + b, 0);
+  return (sizes as number[]).map((n) => n / total);
+}
+
+/* A copy of a stored node with only valid sizes kept. */
+function cleanNode(node: PaneNode): PaneNode {
+  if (node.type === "pane") return { type: "pane", session: node.session };
+  const children = node.children.map(cleanNode);
+  const sizes = normalSizes(node.sizes, children.length);
+  return sizes ? { type: "split", dir: node.dir, children, sizes } : { type: "split", dir: node.dir, children };
+}
+
+/* The shares of a split's children: stored ones, else equal. */
+export function splitSizes(node: Extract<PaneNode, { type: "split" }>): number[] {
+  return normalSizes(node.sizes, node.children.length) ?? node.children.map(() => 1 / node.children.length);
+}
+
+/* Moves the border between children i and i+1 by delta (a share of the
+   split); neither side goes under min. */
+export function resizePair(sizes: number[], i: number, delta: number, min: number): number[] {
+  const a = sizes[i];
+  const b = sizes[i + 1];
+  if (a === undefined || b === undefined) return sizes;
+  const pair = a + b;
+  const lo = Math.min(min, pair / 2);
+  const nextA = Math.min(pair - lo, Math.max(lo, a + delta));
+  const next = [...sizes];
+  next[i] = nextA;
+  next[i + 1] = pair - nextA;
+  return next;
+}
+
+function setSizesAt(node: PaneNode, path: number[], sizes: number[] | undefined): PaneNode {
+  if (node.type !== "split") return node;
+  if (!path.length) {
+    const clean = sizes ? normalSizes(sizes, node.children.length) : undefined;
+    const { sizes: _old, ...rest } = node;
+    void _old;
+    return clean ? { ...rest, sizes: clean } : rest;
+  }
+  const [head, ...tail] = path;
+  return { ...node, children: node.children.map((c, i) => (i === head ? setSizesAt(c, tail, sizes) : c)) };
+}
+
+/* Sets the shares of the split at path (child indexes from the tab root);
+   undefined makes it equal again. */
+export function setSplitSizes(layout: WbLayout, spaceId: string, tabId: string, path: number[], sizes: number[] | undefined): WbLayout {
+  return mapSpace(layout, spaceId, (s) => mapTab(s, tabId, (t) => ({ ...t, root: setSizesAt(t.root, path, sizes) })));
+}
+
 /* Reads a stored layout, dropping anything malformed. */
 export function parseLayout(raw: unknown): WbLayout {
   const layout = emptyLayout();
@@ -86,7 +142,7 @@ export function parseLayout(raw: unknown): WbLayout {
           tabs.push({
             id: tab.id,
             title: typeof tab.title === "string" ? tab.title : undefined,
-            root: tab.root,
+            root: cleanNode(tab.root),
             focus: typeof tab.focus === "string" ? tab.focus : undefined,
             zoom: typeof tab.zoom === "string" ? tab.zoom : undefined,
           });
@@ -180,20 +236,27 @@ export function addTab(layout: WbLayout, spaceId: string, sessionId: string, tit
   };
 }
 
-function splitNode(node: PaneNode, target: string, sessionId: string, dir: "row" | "col"): PaneNode {
+function splitNode(node: PaneNode, target: string, sessionId: string, dir: "row" | "col", before = false): PaneNode {
   if (node.type === "pane") {
     if (node.session !== target) return node;
-    return { type: "split", dir, children: [node, { type: "pane", session: sessionId }] };
+    const added: PaneNode = { type: "pane", session: sessionId };
+    return { type: "split", dir, children: before ? [added, node] : [node, added] };
   }
   /* Splitting a pane inside a split of the same direction adds a sibling
      instead of nesting. */
   const index = node.children.findIndex((c) => c.type === "pane" && c.session === target);
   if (index >= 0 && node.dir === dir) {
     const children = [...node.children];
-    children.splice(index + 1, 0, { type: "pane", session: sessionId });
-    return { ...node, children };
+    children.splice(before ? index : index + 1, 0, { type: "pane", session: sessionId });
+    /* The new pane takes half of the pane it split from. */
+    const sizes = normalSizes(node.sizes, node.children.length);
+    if (!sizes) return { type: "split", dir: node.dir, children };
+    const half = (sizes[index] ?? 0) / 2;
+    const next = [...sizes];
+    next.splice(index, 1, half, half);
+    return { type: "split", dir: node.dir, children, sizes: next };
   }
-  return { ...node, children: node.children.map((c) => splitNode(c, target, sessionId, dir)) };
+  return { ...node, children: node.children.map((c) => splitNode(c, target, sessionId, dir, before)) };
 }
 
 export function splitPane(
@@ -209,12 +272,54 @@ export function splitPane(
   );
 }
 
+/* Spec 66 REQ-WG-078: where a dragged pane lands on another pane: beside it
+   on one side, or in its place (the two swap). */
+export type PaneDropSide = "left" | "right" | "top" | "bottom" | "center";
+
+function swapNode(node: PaneNode, a: string, b: string): PaneNode {
+  if (node.type === "pane") return node.session === a ? { type: "pane", session: b } : node.session === b ? { type: "pane", session: a } : node;
+  return { ...node, children: node.children.map((c) => swapNode(c, a, b)) };
+}
+
+/* Moves pane source next to pane target in the same tab, or swaps the two
+   (center). The moved pane takes the focus; a zoom ends. */
+export function movePane(
+  layout: WbLayout,
+  spaceId: string,
+  tabId: string,
+  source: string,
+  target: string,
+  side: PaneDropSide
+): WbLayout {
+  if (source === target) return layout;
+  return mapSpace(layout, spaceId, (s) =>
+    mapTab(s, tabId, (t) => {
+      const ids = paneSessions(t.root);
+      if (!ids.includes(source) || !ids.includes(target)) return t;
+      if (side === "center") return { ...t, root: swapNode(t.root, source, target), focus: source, zoom: undefined };
+      const rest = removeNode(t.root, source);
+      if (!rest) return t;
+      const dir = side === "left" || side === "right" ? "row" : "col";
+      const root = splitNode(rest, target, source, dir, side === "left" || side === "top");
+      return { ...t, root, focus: source, zoom: undefined };
+    })
+  );
+}
+
 function removeNode(node: PaneNode, sessionId: string): PaneNode | null {
   if (node.type === "pane") return node.session === sessionId ? null : node;
-  const children = node.children.map((c) => removeNode(c, sessionId)).filter((c): c is PaneNode => c !== null);
-  if (!children.length) return null;
-  if (children.length === 1) return children[0] ?? null;
-  return { ...node, children };
+  const sizes = normalSizes(node.sizes, node.children.length);
+  const kept: { child: PaneNode; size: number }[] = [];
+  node.children.forEach((c, i) => {
+    const next = removeNode(c, sessionId);
+    if (next) kept.push({ child: next, size: sizes?.[i] ?? 1 });
+  });
+  if (!kept.length) return null;
+  if (kept.length === 1) return kept[0]?.child ?? null;
+  const children = kept.map((k) => k.child);
+  /* The others keep their proportions. */
+  const nextSizes = sizes ? normalSizes(kept.map((k) => k.size), children.length) : undefined;
+  return nextSizes ? { type: "split", dir: node.dir, children, sizes: nextSizes } : { type: "split", dir: node.dir, children };
 }
 
 /* Drops a session from every tab; a tab left empty is removed. */

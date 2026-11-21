@@ -23,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/notify"
 	"github.com/ridhomujizat/lana-harness/internal/tailscale"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
+	"github.com/ridhomujizat/lana-harness/internal/workbench/gitinfo"
 )
 
 // ErrNotLoopback is returned when [web] addr is not a loopback address.
@@ -106,6 +107,16 @@ type Server struct {
 	previewHome    string
 	previewTemps   []string
 	previewGitRoot func(string) string
+	// workbenchGitRunner and workbenchGitStore are the gitinfo runner and the
+	// settings store of the /v1/workbench/git routes (spec 66). workbenchGitOnce
+	// builds them on first use so a server without the Workbench never reads
+	// the settings file; workbenchGitStatus caches a marshalled status body per
+	// worktree and scope, so several polling clients share one git run
+	// (REQ-WG-021).
+	workbenchGitOnce   sync.Once
+	workbenchGitRunner *gitinfo.Runner
+	workbenchGitStore  *gitinfo.SettingsStore
+	workbenchGitStatus workbenchGitStatusCache
 	// routerBackend is the Router page and proxy port (spec 37). It is
 	// guarded by routerMu because the proxy reads it on every request.
 	routerBackend  RouterBackend
@@ -264,7 +275,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerCalendarRoutes()
 	s.registerRouterRoutes()
 	s.registerWorkbenchRoutes()
-	s.handler = s.remoteGate(s.securityHeaders(s.mux))
+	s.handler = s.remoteGate(s.securityHeaders(s.compress(s.mux)))
 	return s, nil
 }
 

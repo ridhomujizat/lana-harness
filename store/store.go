@@ -643,13 +643,11 @@ func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) ite
 		}
 		defer func() { _ = rows.Close() }()
 		for rows.Next() {
-			var event core.SessionEvent
-			var payload string
-			if err := rows.Scan(&event.SessionID, &event.Seq, &event.Kind, &payload, &event.TurnID, &event.CreatedAt); err != nil {
+			event, err := scanEventRow(rows)
+			if err != nil {
 				yield(core.SessionEvent{}, err)
 				return
 			}
-			event.Payload = json.RawMessage(payload)
 			if !yield(event, nil) {
 				return
 			}
@@ -658,6 +656,18 @@ func (s *Store) Events(ctx context.Context, sessionID string, fromSeq int64) ite
 			yield(core.SessionEvent{}, err)
 		}
 	}
+}
+
+// scanEventRow scans one session_events row. The query must select session_id,
+// seq, kind, payload, turn_id, created_at in that order.
+func scanEventRow(rows *sql.Rows) (core.SessionEvent, error) {
+	var event core.SessionEvent
+	var payload string
+	if err := rows.Scan(&event.SessionID, &event.Seq, &event.Kind, &payload, &event.TurnID, &event.CreatedAt); err != nil {
+		return core.SessionEvent{}, err
+	}
+	event.Payload = json.RawMessage(payload)
+	return event, nil
 }
 
 // ScanEvents implements core.EventScanner. It reads events of the given kinds
@@ -813,6 +823,58 @@ func (s *Store) ChainEvents(ctx context.Context, sessionID string) ([]core.Sessi
 	}
 	chain = append(chain, own...)
 	return chain, nil
+}
+
+// ChainEventsAfter returns the ChainEvents entries with Seq > fromSeq, in the
+// same order, together with the largest Seq over the full chain (0 when the
+// chain is empty). When the session has own events and fromSeq is at or past
+// the inherited point, only the session's own rows are read, so a poll of an
+// unchanged session does not reload the inherited parent chain.
+func (s *Store) ChainEventsAfter(ctx context.Context, sessionID string, fromSeq int64) ([]core.SessionEvent, int64, error) {
+	if err := s.assertOpen(); err != nil {
+		return nil, 0, err
+	}
+	info, err := s.info(ctx, sessionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if info.LastSeq > info.InheritedSeq && fromSeq >= info.InheritedSeq {
+		rows, err := s.db.QueryContext(ctx, "SELECT session_id, seq, kind, payload, COALESCE(turn_id, ''), created_at FROM session_events WHERE session_id = ? AND seq > ? ORDER BY seq", sessionID, fromSeq)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer func() { _ = rows.Close() }()
+		var events []core.SessionEvent
+		lastSeq := info.LastSeq
+		for rows.Next() {
+			event, err := scanEventRow(rows)
+			if err != nil {
+				return nil, 0, err
+			}
+			// An append between the info read and this query can pass it.
+			lastSeq = max(lastSeq, event.Seq)
+			events = append(events, event)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, 0, err
+		}
+		return events, lastSeq, nil
+	}
+	chain, err := s.ChainEvents(ctx, sessionID)
+	if err != nil {
+		return nil, 0, err
+	}
+	events := make([]core.SessionEvent, 0, len(chain))
+	var lastSeq int64
+	for _, event := range chain {
+		if event.Seq > lastSeq {
+			lastSeq = event.Seq
+		}
+		if event.Seq > fromSeq {
+			events = append(events, event)
+		}
+	}
+	return events, lastSeq, nil
 }
 
 // DeriveMessages uses core.DeriveMessages.

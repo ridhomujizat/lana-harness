@@ -108,6 +108,9 @@ export interface SessionEvent {
      id and agent. Root events omit both. */
   child_session_id?: string;
   agent?: string;
+  /* The owning session id. The server sets it only in the chat view
+     (view=chat), so a trimmed event can be fetched again in full. */
+  session_id?: string;
 }
 
 export interface ListEventsResponse {
@@ -157,14 +160,27 @@ export function getSession(id: string): Promise<SessionDetail> {
 
 export function listEvents(
   id: string,
-  fromSeq?: number
+  fromSeq?: number,
+  opts?: { view?: "chat" }
 ): Promise<ListEventsResponse> {
   return request<ListEventsResponse>(
     "GET",
     "/v1/sessions/" +
       encodeURIComponent(id) +
       "/events" +
-      queryString({ from_seq: fromSeq })
+      queryString({ from_seq: fromSeq, view: opts?.view })
+  );
+}
+
+/* GET /v1/sessions/{id}/events/{seq}: one stored event in full, without the
+   chat trim. The chat calls it to expand a truncated tool call or result. */
+export function getEvent(id: string, seq: number): Promise<SessionEvent> {
+  return request<SessionEvent>(
+    "GET",
+    "/v1/sessions/" +
+      encodeURIComponent(id) +
+      "/events/" +
+      encodeURIComponent(String(seq))
   );
 }
 

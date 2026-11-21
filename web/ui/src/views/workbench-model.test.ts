@@ -18,6 +18,7 @@ import {
   renameTab,
   spaceLabel,
   splitPane,
+  movePane,
   statusOf,
   tabSessions,
   terminalKey,
@@ -67,6 +68,31 @@ describe("workbench layout", () => {
     l = splitPane(l, sp.id, tab.id, "c", "d", "col");
     expect(tabSessions(l.spaces[0]!.tabs[0]!)).toEqual(["a", "b", "c", "d"]);
     expect(locate(l, "d")?.tab.id).toBe(tab.id);
+  });
+
+  it("moves a pane beside another or swaps the two (REQ-WG-078)", () => {
+    let l = addSpace(emptyLayout(), "home", "");
+    const sp = l.spaces[0]!;
+    l = addTab(l, sp.id, "a");
+    const tab = l.spaces[0]!.tabs[0]!;
+    l = splitPane(l, sp.id, tab.id, "a", "b", "row");
+    l = splitPane(l, sp.id, tab.id, "b", "c", "row");
+    const t = () => l.spaces[0]!.tabs[0]!;
+    /* c to the left of a: a flat row, reordered. */
+    l = movePane(l, sp.id, tab.id, "c", "a", "left");
+    expect(tabSessions(t())).toEqual(["c", "a", "b"]);
+    expect(t().focus).toBe("c");
+    /* Swap. */
+    l = movePane(l, sp.id, tab.id, "c", "b", "center");
+    expect(tabSessions(t())).toEqual(["b", "a", "c"]);
+    /* c below a: a becomes a column of a over c. */
+    l = movePane(l, sp.id, tab.id, "c", "a", "bottom");
+    const root = t().root;
+    expect(root.type === "split" && root.dir).toBe("row");
+    expect(root.type === "split" && root.children[1]).toEqual({ type: "split", dir: "col", children: [{ type: "pane", session: "a" }, { type: "pane", session: "c" }] });
+    /* Same pane, or a pane from elsewhere: nothing changes. */
+    expect(movePane(l, sp.id, tab.id, "a", "a", "left")).toBe(l);
+    expect(tabSessions(movePane(l, sp.id, tab.id, "x", "a", "left").spaces[0]!.tabs[0]!)).toEqual(["b", "a", "c"]);
   });
 
   it("removes sessions and empty tabs", () => {

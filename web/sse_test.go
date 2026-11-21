@@ -525,6 +525,48 @@ func TestStreamReplayFromSeqAndLastEventID(t *testing.T) {
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")
 }
 
+// view=chat trims the streamed payloads too (payload diet).
+func TestStreamChatViewTrimsEvents(t *testing.T) {
+	backend := newFakeWebBackend()
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "helper"})
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindSystemMessage, Payload: json.RawMessage(`{"v":1,"text":"system prompt"}`)})
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindToolResult, Payload: json.RawMessage(`{"v":1,"call_id":"c1","status":"success","output":"` + strings.Repeat("x", chatOutputLimit+1) + `"}`)})
+	s, ts, cookie, _ := newStreamTestServer(t, backend)
+	s.SetHeartbeatInterval(20 * time.Millisecond)
+	s.SetStreamPollInterval(20 * time.Millisecond)
+
+	resp := openStream(t, ts, "/v1/sessions/"+info.ID+"/stream?view=chat", cookie, "")
+	defer func() { _ = resp.Body.Close() }()
+	reader := bufio.NewReader(resp.Body)
+	waitSSE(t, reader, "status")
+
+	seen := map[int64]eventJSON{}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(seen) < 2 {
+		block := nextSSEBlock(t, reader)
+		if block.Name != "event" {
+			continue
+		}
+		var event eventJSON
+		if err := json.Unmarshal([]byte(block.Data), &event); err != nil {
+			t.Fatalf("event data %q: %v", block.Data, err)
+		}
+		seen[event.Seq] = event
+	}
+	if len(seen) != 2 {
+		t.Fatalf("replayed %d events, want 2", len(seen))
+	}
+	if string(seen[1].Payload) != `{"omitted":true}` {
+		t.Fatalf("system payload = %s", seen[1].Payload)
+	}
+	if seen[1].SessionID != info.ID {
+		t.Fatalf("chat event session_id = %q, want %q", seen[1].SessionID, info.ID)
+	}
+	if !strings.Contains(string(seen[2].Payload), `"truncated":true`) {
+		t.Fatalf("tool result payload = %s", seen[2].Payload)
+	}
+}
+
 func TestStreamHeartbeatAndShutdown(t *testing.T) {
 	backend := newFakeWebBackend()
 	info := backend.addSession(core.SessionInfo{ID: id.New(), Channel: "web", Address: "owner", Agent: "helper"})

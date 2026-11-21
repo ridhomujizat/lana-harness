@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -358,6 +360,132 @@ func TestPublicEventPayloadFileSentUnchanged(t *testing.T) {
 	payload := json.RawMessage(`{"v":1,"call_id":"toolu_1","path":"attachments/2026-11-11/a.png","name":"a.png","media_type":"image/png","size":319488}`)
 	if got := publicEventPayload(core.KindFileSent, payload); string(got) != string(payload) {
 		t.Fatalf("file/sent payload changed: %s", got)
+	}
+}
+
+// jsonSame reports whether two JSON values decode to the same value, so a key
+// order difference does not fail a comparison.
+func jsonSame(t *testing.T, got, want json.RawMessage) bool {
+	t.Helper()
+	var a, b any
+	if err := json.Unmarshal(got, &a); err != nil {
+		t.Fatalf("got %s: %v", got, err)
+	}
+	if err := json.Unmarshal(want, &b); err != nil {
+		t.Fatalf("want %s: %v", want, err)
+	}
+	return reflect.DeepEqual(a, b)
+}
+
+// TestChatEventPayload covers the view=chat trim: a system message keeps only
+// its subtype, an assistant message drops the thinking signatures, step/end
+// keeps the step, and a long tool input or output is cut. A payload with
+// nothing to trim, an unparseable one, and any other kind are unchanged.
+func TestChatEventPayload(t *testing.T) {
+	long := strings.Repeat("x", chatOutputLimit+5)
+	cases := []struct {
+		name    string
+		kind    string
+		payload string
+		// want is the expected JSON; "-" means byte-identical to the input.
+		want string
+	}{
+		{
+			name:    "system message drops the prompt text",
+			kind:    core.KindSystemMessage,
+			payload: `{"v":1,"text":"a very long prompt","sections":[{"name":"head","text":"..."}]}`,
+			want:    `{"omitted":true}`,
+		},
+		{
+			name:    "system message keeps a subtype",
+			kind:    core.KindSystemMessage,
+			payload: `{"v":1,"subtype":"runtime","runtime":"claude-code"}`,
+			want:    `{"subtype":"runtime","omitted":true}`,
+		},
+		{
+			name:    "assistant message drops thinking and redacted data",
+			kind:    core.KindAssistantMessage,
+			payload: `{"v":1,"content":[{"type":"thinking","thinking":"hmm","signature":"abc"},{"type":"redacted_thinking","data":"QUFB"},{"type":"text","text":"hi"}],"stop_reason":"end_turn"}`,
+			want:    `{"v":1,"content":[{"type":"thinking","thinking":"hmm"},{"type":"redacted_thinking"},{"type":"text","text":"hi"}],"stop_reason":"end_turn"}`,
+		},
+		{
+			name:    "assistant message without signatures is unchanged",
+			kind:    core.KindAssistantMessage,
+			payload: `{"v":1,"content":[{"type":"text","text":"hi"}]}`,
+			want:    "-",
+		},
+		{
+			name:    "step end keeps the step",
+			kind:    core.KindStepEnd,
+			payload: `{"v":1,"step":3,"provider":"p","model":"m","usage":{"input_tokens":10,"output_tokens":2}}`,
+			want:    `{"step":3}`,
+		},
+		{
+			name:    "step end without a step is empty",
+			kind:    core.KindStepEnd,
+			payload: `{"v":1,"usage":{}}`,
+			want:    `{}`,
+		},
+		{
+			name:    "short tool result is unchanged",
+			kind:    core.KindToolResult,
+			payload: `{"v":1,"call_id":"c1","status":"success","output":"done"}`,
+			want:    "-",
+		},
+		{
+			name:    "long tool result is cut",
+			kind:    core.KindToolResult,
+			payload: `{"v":1,"call_id":"c1","status":"success","output":"` + long + `"}`,
+			want:    `{"v":1,"call_id":"c1","status":"success","output":"` + strings.Repeat("x", chatOutputLimit) + `","truncated":true,"output_length":` + strconv.Itoa(chatOutputLimit+5) + `}`,
+		},
+		{
+			name:    "long tool input string is cut",
+			kind:    core.KindToolCall,
+			payload: `{"v":1,"call_id":"c1","name":"write_file","input":{"path":"a","content":{"body":"` + long + `","short":"ok"}}}`,
+			want:    `{"v":1,"call_id":"c1","name":"write_file","input":{"path":"a","content":{"body":"` + strings.Repeat("x", chatOutputLimit) + `","short":"ok"}},"input_truncated":true}`,
+		},
+		{
+			name:    "short tool input is unchanged",
+			kind:    core.KindToolCall,
+			payload: `{"v":1,"call_id":"c1","name":"bash","input":{"command":"ls"}}`,
+			want:    "-",
+		},
+		{
+			name:    "other kind is unchanged",
+			kind:    core.KindUserMessage,
+			payload: `{"v":1,"content":[{"type":"text","text":"hi"}]}`,
+			want:    "-",
+		},
+		{
+			name:    "unparseable payload is unchanged",
+			kind:    core.KindToolCall,
+			payload: `{not json`,
+			want:    "-",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := chatEventPayload(tc.kind, json.RawMessage(tc.payload))
+			if tc.want == "-" {
+				if string(got) != tc.payload {
+					t.Fatalf("payload changed: %s", got)
+				}
+				return
+			}
+			if !jsonSame(t, got, json.RawMessage(tc.want)) {
+				t.Fatalf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestChatToolCallPayloadDepthLimit covers the walk cap: a string nested past
+// chatInputMaxDepth is left alone.
+func TestChatToolCallPayloadDepthLimit(t *testing.T) {
+	long := strings.Repeat("x", chatOutputLimit+5)
+	deep := `{"v":1,"call_id":"c1","name":"bash","input":{"a":{"b":{"c":{"d":{"e":{"f":{"g":"` + long + `"}}}}}}}}`
+	if got := chatEventPayload(core.KindToolCall, json.RawMessage(deep)); string(got) != deep {
+		t.Fatalf("deep input changed: %s", got)
 	}
 }
 

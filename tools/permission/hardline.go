@@ -1351,7 +1351,7 @@ func heredocOps(line string) []hlHeredocOp {
 		case c == '\\':
 			i += 2
 		case c == '<' && i+1 < len(line) && line[i+1] == '<' &&
-			!(i+2 < len(line) && line[i+2] == '<'):
+			(i+2 >= len(line) || line[i+2] != '<'):
 			op, next := heredocOp(line, i)
 			if op.text == "" {
 				i++
