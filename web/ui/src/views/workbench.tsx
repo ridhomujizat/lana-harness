@@ -157,27 +157,25 @@ function SpaceText({ space, sessions, label }: { space: WbSpace; sessions: Sessi
     if (info) trees.set(info.worktree, info.color);
   }
   void sessions;
-  if (trees.size > 1) {
-    return (
-      <span className="wbg-space-text">
-        <span className="wb-space-name">{label}</span>
-        <span className="wbg-space-line">
-          <span className="wbg-dots">
-            {Array.from(trees.entries()).map(([w, c]) => (
-              <i key={w} className="wbg-wt-dot" style={{ background: c }} />
-            ))}
-          </span>
-          <span className="wbg-space-line-text">
-            {trees.size} worktrees · {ids.length} {ids.length === 1 ? "terminal" : "terminals"}
-          </span>
-        </span>
-      </span>
-    );
-  }
+  const tabs = space.tabs.length ? space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs") : "";
+  /* One line, like every space row: the worktree colours sit before the
+     tab count; the full count is in the tooltip. */
   return (
     <>
       <span className="wb-space-name">{label}</span>
-      <span className="wb-space-meta">{space.tabs.length ? space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs") : ""}</span>
+      <span
+        className={"wb-space-meta" + (trees.size > 1 ? " wbg-space-meta" : "")}
+        title={trees.size > 1 ? trees.size + " worktrees · " + ids.length + " terminals" : undefined}
+      >
+        {trees.size > 1 ? (
+          <span className="wbg-dots">
+            {Array.from(trees.values()).map((c, i) => (
+              <i key={i} className="wbg-wt-dot" style={{ background: c }} />
+            ))}
+          </span>
+        ) : null}
+        {tabs}
+      </span>
     </>
   );
 }
@@ -504,9 +502,8 @@ function PaneView({
   const shared = git?.shared.get(id);
   return (
     <div
-      className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "") + (info ? " has-wt" : "")}
+      className={"wb-pane" + (focused ? " is-focused" : "") + (closing ? " is-closing" : "") + (entering ? " is-entering" : "")}
       data-session={id}
-      style={info ? ({ "--wb-wt": info.color } as CSSProperties) : undefined}
     >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
         <ProgramTile session={session} size="pane" />

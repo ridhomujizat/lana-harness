@@ -67,7 +67,8 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  margin: 0 8px 8px 0;
+  /* The same gaps as the panes (.wb-workspace padding). */
+  margin: 8px 10px 10px 0;
   overflow: hidden;
   border: 1px solid var(--wb-pane-border);
   border-radius: 14px;
@@ -139,7 +140,7 @@
   gap: 4px;
   height: 46px;
   padding: 0 8px 0 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
 }
 
 .wbg-body {
@@ -1467,11 +1468,6 @@ tr.is-target td {
   cursor: pointer;
 }
 
-/* REQ-WG-071: the focused pane's border takes its worktree colour. */
-.wb-pane.has-wt.is-focused {
-  border-color: color-mix(in srgb, var(--wb-wt) 70%, transparent);
-}
-
 /* A narrow split pane keeps the tile, the chip and a state dot. */
 .wb-pane {
   container: wb-pane / inline-size;
@@ -1929,14 +1925,15 @@ tr.is-target > .wbg-ln {
 @container wb-page (max-width: 1180px) {
   .wbg-panel:not(.wbg-sheet):not(.is-max) {
     position: absolute;
-    /* Below the tab strip, so its Changes button stays reachable. */
-    top: 52px;
-    right: 8px;
-    bottom: 0;
+    /* Below the tab strip, so its Changes button stays reachable, with the
+       panes' gaps. */
+    top: 54px;
+    right: 10px;
+    bottom: 10px;
     z-index: 30;
     width: min(var(--wbg-w, 640px), calc(100% - 48px)) !important;
     flex-basis: auto !important;
-    margin: 0 0 8px;
+    margin: 0;
     box-shadow: -24px 0 48px -16px rgba(0, 0, 0, 0.55), var(--wb-card-shadow);
   }
 
@@ -1966,4 +1963,54 @@ tr.is-target > .wbg-ln {
     transform: translateX(24px);
     opacity: 0;
   }
+}
+
+/* Tooltips inside the panel open toward its inside: right-aligned under the
+   button, and above it in the footer, so the panel edge never cuts them. */
+.wbg-panel [data-tip]:hover::after,
+.wbg-panel [data-tip]:focus-visible::after {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+.wbg-viewer-foot [data-tip]:hover::after,
+.wbg-viewer-foot [data-tip]:focus-visible::after {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.wbg-space-meta {
+  flex: none;
+}
+
+/* In Lana.app the tab strip sits in the window chrome above the card, so an
+   overlaid panel starts at the card's top gap. */
+@container wb-page (max-width: 1180px) {
+  html[data-shell="macos-app"] .wbg-panel:not(.wbg-sheet):not(.is-max) {
+    top: 8px;
+  }
+}
+
+/* One divider weight inside the panel: the list column and the viewer header
+   use the same line as the panel header. */
+.wbg-list {
+  border-right-color: var(--border-strong);
+}
+
+.wbg-viewer-head,
+.wbg-viewer-foot {
+  border-color: var(--border-strong);
+  background: var(--wb-pane-bg-focused);
+}
+
+/* The file name wins over its folder when the header is tight. */
+.wbg-viewer-head > .wbg-viewer-name {
+  flex: 0 1 auto;
+  max-width: 60%;
+}
+
+.wbg-viewer-head > .wbg-viewer-dir {
+  flex: 1 1 0;
+  min-width: 0;
 }

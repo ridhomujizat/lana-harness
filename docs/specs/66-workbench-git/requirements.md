@@ -12,7 +12,7 @@ Coding agents run in the Workbench, but the owner cannot see what they changed w
 2. One **Changes** button (git-compare icon + count badge) at the right end of the tab strip opens the panel. No second panel icon. The panel slides in from the right, like the sidebar.
 3. Pane headers keep their tools (split right, split down, zoom, close). The new controls do not go into pane headers.
 4. **Model A: a space is a repo, and a worktree belongs to each session.** A space can hold sessions in different worktrees, also as split panes in one tab. The worktree is derived from the session's working directory.
-5. Tab titles do not show the worktree. The worktree shows in the pane header chip, in the focus ring colour, in the panel's worktree picker, in the Agents list and in a tab hover card.
+5. Tab titles do not show the worktree. The worktree shows in the pane header chip, in the panel's worktree picker, in the Agents list and in a tab hover card.
 6. New worktrees go into `../<repo>-worktree/<name>`, not next to the repo. The Workbench offers to move the existing sibling worktrees there.
 7. On a phone, the Workbench header gets the Changes button. Files and Changes open as a bottom sheet, and a diff opens full screen.
 
@@ -90,10 +90,10 @@ Coding agents run in the Workbench, but the owner cannot see what they changed w
 ### Web: worktree per session (model A)
 
 - **REQ-WG-070** The client resolves each session's `cwd` (else `dir`) with REQ-WG-002, batched and debounced 300 ms, again when the `cwd` changes. Sessions with the same repo id are one repo.
-- **REQ-WG-071** Pane header: after the title, a chip with the worktree colour dot and the short branch (branch without the type prefix). A pane narrower than 500 px shows the program tile, the chip and a state dot, and hides the title and the state chip. The focused pane's border uses the worktree colour. Tab titles do not change.
+- **REQ-WG-071** Pane header: after the title, a chip with the worktree colour dot and the short branch (branch without the type prefix). A pane narrower than 500 px shows the program tile, the chip and a state dot, and hides the title and the state chip. The pane border keeps its normal focus style; it does not take the worktree colour (owner, 2026-11-21). Tab titles do not change.
 - **REQ-WG-072** The panel follows the focused pane's worktree. The worktree picker lists "In this space" (worktrees used by this space's sessions, with the tabs and panes that use them and their change counts), then "Other worktrees" with search. "Pin panel to this worktree" stops it following focus until unpinned. "Manage worktrees…" opens the Worktrees tab.
 - **REQ-WG-073** Hovering a tab whose panes use more than one worktree shows a card: "N panes · M worktrees", then per worktree its dot, short branch, and the programs with their state.
-- **REQ-WG-074** The Agents list shows each agent's worktree dot and short branch under its name. The space row shows the worktree dots and "N worktrees · M terminals".
+- **REQ-WG-074** The Agents list shows each agent's worktree dot and short branch under its name. The space row stays one line: the worktree dots sit before the tab count, and "N worktrees · M terminals" is its tooltip (owner, 2026-11-21).
 - **REQ-WG-075** When two sessions with a working agent (`agent` set) share one worktree, both pane chips turn amber with "shared with Tab n · <program>". The chip opens: "Move this agent to a new worktree…" (the New worktree dialog, then a new tab there), "Go to the other pane", "Don't warn for this worktree" (REQ-WG-050 `warn_shared`).
 - **REQ-WG-076** The new-tab `+` button gets a menu: New terminal (⌘T), Claude Code here (in the focused worktree), Claude Code in worktree ▸ (worktrees in this space, then one more and "All N worktrees…"), New worktree… (⇧⌘N).
 
