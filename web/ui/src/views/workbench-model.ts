@@ -236,17 +236,18 @@ export function addTab(layout: WbLayout, spaceId: string, sessionId: string, tit
   };
 }
 
-function splitNode(node: PaneNode, target: string, sessionId: string, dir: "row" | "col"): PaneNode {
+function splitNode(node: PaneNode, target: string, sessionId: string, dir: "row" | "col", before = false): PaneNode {
   if (node.type === "pane") {
     if (node.session !== target) return node;
-    return { type: "split", dir, children: [node, { type: "pane", session: sessionId }] };
+    const added: PaneNode = { type: "pane", session: sessionId };
+    return { type: "split", dir, children: before ? [added, node] : [node, added] };
   }
   /* Splitting a pane inside a split of the same direction adds a sibling
      instead of nesting. */
   const index = node.children.findIndex((c) => c.type === "pane" && c.session === target);
   if (index >= 0 && node.dir === dir) {
     const children = [...node.children];
-    children.splice(index + 1, 0, { type: "pane", session: sessionId });
+    children.splice(before ? index : index + 1, 0, { type: "pane", session: sessionId });
     /* The new pane takes half of the pane it split from. */
     const sizes = normalSizes(node.sizes, node.children.length);
     if (!sizes) return { type: "split", dir: node.dir, children };
@@ -255,7 +256,7 @@ function splitNode(node: PaneNode, target: string, sessionId: string, dir: "row"
     next.splice(index, 1, half, half);
     return { type: "split", dir: node.dir, children, sizes: next };
   }
-  return { ...node, children: node.children.map((c) => splitNode(c, target, sessionId, dir)) };
+  return { ...node, children: node.children.map((c) => splitNode(c, target, sessionId, dir, before)) };
 }
 
 export function splitPane(
@@ -268,6 +269,40 @@ export function splitPane(
 ): WbLayout {
   return mapSpace(layout, spaceId, (s) =>
     mapTab(s, tabId, (t) => ({ ...t, root: splitNode(t.root, target, sessionId, dir), focus: sessionId, zoom: undefined }))
+  );
+}
+
+/* Spec 66 REQ-WG-078: where a dragged pane lands on another pane: beside it
+   on one side, or in its place (the two swap). */
+export type PaneDropSide = "left" | "right" | "top" | "bottom" | "center";
+
+function swapNode(node: PaneNode, a: string, b: string): PaneNode {
+  if (node.type === "pane") return node.session === a ? { type: "pane", session: b } : node.session === b ? { type: "pane", session: a } : node;
+  return { ...node, children: node.children.map((c) => swapNode(c, a, b)) };
+}
+
+/* Moves pane source next to pane target in the same tab, or swaps the two
+   (center). The moved pane takes the focus; a zoom ends. */
+export function movePane(
+  layout: WbLayout,
+  spaceId: string,
+  tabId: string,
+  source: string,
+  target: string,
+  side: PaneDropSide
+): WbLayout {
+  if (source === target) return layout;
+  return mapSpace(layout, spaceId, (s) =>
+    mapTab(s, tabId, (t) => {
+      const ids = paneSessions(t.root);
+      if (!ids.includes(source) || !ids.includes(target)) return t;
+      if (side === "center") return { ...t, root: swapNode(t.root, source, target), focus: source, zoom: undefined };
+      const rest = removeNode(t.root, source);
+      if (!rest) return t;
+      const dir = side === "left" || side === "right" ? "row" : "col";
+      const root = splitNode(rest, target, source, dir, side === "left" || side === "top");
+      return { ...t, root, focus: source, zoom: undefined };
+    })
   );
 }
 

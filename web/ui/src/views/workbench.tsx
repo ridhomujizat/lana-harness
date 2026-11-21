@@ -49,6 +49,8 @@ import {
   spaceCwd,
   spaceLabel,
   splitPane,
+  movePane,
+  type PaneDropSide,
   splitSizes,
   resizePair,
   setSplitSizes,
@@ -471,6 +473,107 @@ interface PaneActions {
   /* Draggable pane sizes: the shares of the split at path, or undefined for
      equal shares. */
   onResize: (path: number[], sizes: number[] | undefined) => void;
+  /* REQ-WG-078: a pane dragged by its header icon onto another pane. */
+  onMove: (source: string, target: string, side: PaneDropSide) => void;
+}
+
+/* Spec 66 REQ-WG-078: drag a pane by its header icon onto another pane of the
+   tab. Plain pointer events (no HTML drag and drop, which the terminals use
+   for files); the drop marker and the label under the pointer are bare DOM
+   nodes, so nothing re-renders while dragging. Esc cancels. */
+const PANE_DRAG_SLOP = 4;
+const PANE_DROP_EDGE = 0.3;
+
+function startPaneDrag(event: ReactPointerEvent<HTMLElement>, id: string, label: string, onDrop: (target: string, side: PaneDropSide) => void) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const source = event.currentTarget.closest<HTMLElement>(".wb-pane");
+  const page = event.currentTarget.closest(".wb-workspace");
+  if (!source || !page) return;
+  const x0 = event.clientX;
+  const y0 = event.clientY;
+  let started = false;
+  let drop: { target: string; side: PaneDropSide } | null = null;
+  const marker = document.createElement("div");
+  marker.className = "wb-drop-marker";
+  const ghost = document.createElement("div");
+  ghost.className = "wb-drag-ghost";
+  ghost.textContent = label;
+  const place = (x: number, y: number) => {
+    /* Near the window's right or bottom edge the label goes to the other
+       side of the pointer. */
+    const gx = x + 14 + ghost.offsetWidth > window.innerWidth - 8 ? x - 14 - ghost.offsetWidth : x + 14;
+    const gy = y + 12 + ghost.offsetHeight > window.innerHeight - 8 ? y - 12 - ghost.offsetHeight : y + 12;
+    ghost.style.transform = "translate(" + gx + "px, " + gy + "px)";
+    const el = document.elementFromPoint(x, y)?.closest<HTMLElement>(".wb-pane[data-session]");
+    const target = el?.dataset.session;
+    if (!el || !target || target === id || !page.contains(el)) {
+      drop = null;
+      marker.hidden = true;
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const fx = (x - r.left) / r.width;
+    const fy = (y - r.top) / r.height;
+    const edges: [PaneDropSide, number][] = [
+      ["left", fx],
+      ["right", 1 - fx],
+      ["top", fy],
+      ["bottom", 1 - fy],
+    ];
+    const near = edges.reduce((a, b) => (b[1] < a[1] ? b : a));
+    const side: PaneDropSide = near[1] > PANE_DROP_EDGE ? "center" : near[0];
+    drop = { target, side };
+    const half = { w: r.width / 2, h: r.height / 2 };
+    const box =
+      side === "left"
+        ? [r.left, r.top, half.w, r.height]
+        : side === "right"
+          ? [r.left + half.w, r.top, half.w, r.height]
+          : side === "top"
+            ? [r.left, r.top, r.width, half.h]
+            : side === "bottom"
+              ? [r.left, r.top + half.h, r.width, half.h]
+              : [r.left, r.top, r.width, r.height];
+    marker.hidden = false;
+    marker.dataset.side = side;
+    marker.style.cssText = "left:" + box[0] + "px;top:" + box[1] + "px;width:" + box[2] + "px;height:" + box[3] + "px";
+  };
+  const move = (e: PointerEvent) => {
+    if (!started) {
+      if (Math.hypot(e.clientX - x0, e.clientY - y0) < PANE_DRAG_SLOP) return;
+      started = true;
+      marker.hidden = true;
+      document.body.append(marker, ghost);
+      document.body.classList.add("wb-pane-dragging");
+      source.classList.add("is-drag-source");
+    }
+    place(e.clientX, e.clientY);
+  };
+  const end = (commit: boolean) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    window.removeEventListener("keydown", key, true);
+    marker.remove();
+    ghost.remove();
+    document.body.classList.remove("wb-pane-dragging");
+    source.classList.remove("is-drag-source");
+    if (commit && started && drop) onDrop(drop.target, drop.side);
+  };
+  const up = () => end(true);
+  const cancel = () => end(false);
+  const key = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    end(false);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+  window.addEventListener("keydown", key, true);
 }
 
 function PaneView({
@@ -484,6 +587,7 @@ function PaneView({
   fontSize,
   grow,
   cycle,
+  movable,
 }: {
   id: string;
   session?: WorkbenchSession;
@@ -498,6 +602,9 @@ function PaneView({
   /* Focus mode: which of the tab's panes this is, stepping to the others, and
      leaving focus mode (the pane's unexpand button). */
   cycle?: { index: number; total: number; go: (delta: number) => void; exit: () => void };
+  /* REQ-WG-078: the pane can be dragged to another place in the tab (not
+     while zoomed or in focus mode, nor when it is the tab's only pane). */
+  movable?: boolean;
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
@@ -513,7 +620,22 @@ function PaneView({
       style={{ ...(grow !== undefined ? { flexGrow: grow } : {}), viewTransitionName: "wbpane-" + id.replace(/[^A-Za-z0-9_-]/g, "") } as CSSProperties}
     >
       <div className="wb-pane-head" onMouseDown={() => actions.onFocus(id)}>
-        <ProgramTile session={session} size="pane" />
+        {movable ? (
+          <span
+            className="wb-pane-grip"
+            data-tip="Drag to move"
+            aria-label="Drag to move this pane"
+            role="button"
+            onPointerDown={(e) => startPaneDrag(e, id, programName(session), (target, side) => actions.onMove(id, target, side))}
+          >
+            <ProgramTile session={session} size="pane" />
+            <span className="wb-pane-grip-ic" aria-hidden="true">
+              <Ic name="grip-vertical" size={14} />
+            </span>
+          </span>
+        ) : (
+          <ProgramTile session={session} size="pane" />
+        )}
         <span className="wb-pane-title">{programName(session)}</span>
         {info ? (
           <span className={"wbg-pane-chip" + (shared?.length ? " is-shared" : "")} title={info.branch + " · " + info.worktree}>
@@ -654,6 +776,7 @@ function PaneTree({
         actions={actions}
         fontSize={fontSize}
         grow={grow}
+        movable={!tab.zoom && tab.root.type === "split"}
       />
     );
   }
@@ -1811,6 +1934,11 @@ export function WorkbenchPage() {
       const sp = pickSpace(layoutRef.current);
       const t = pickTab(sp);
       if (sp && t) update((l) => setSplitSizes(l, sp.id, t.id, path, sizes));
+    },
+    onMove: (source, target, side) => {
+      const sp = pickSpace(layoutRef.current);
+      const t = pickTab(sp);
+      if (sp && t) withViewTransition(() => flushSync(() => update((l) => movePane(l, sp.id, t.id, source, target, side))));
     },
   };
 
