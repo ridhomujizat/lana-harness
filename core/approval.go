@@ -47,3 +47,19 @@ type ApprovalService interface {
 	SetPolicy(ctx context.Context, sessionID string, p Policy) error
 	EffectivePolicy(ctx context.Context, sessionID string) (Policy, error)
 }
+
+// Hardline tiers (spec 63). A Block call runs only after a step-up
+// confirmation; an Escalate call runs only after an ordinary approval, also
+// under the trust policy.
+const (
+	HardlineBlock    = "block"
+	HardlineEscalate = "escalate"
+)
+
+// HardlineMatch is one matched hardline rule: a catastrophic or
+// credential-exposing tool call that never runs on the model's word alone.
+type HardlineMatch struct {
+	Rule   string `json:"rule"`
+	Tier   string `json:"tier"`
+	Reason string `json:"reason"`
+}

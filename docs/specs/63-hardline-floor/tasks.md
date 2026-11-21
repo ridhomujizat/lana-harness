@@ -1,0 +1,98 @@
+# Tasks: Hardline floor
+
+- **Requirements**: [requirements.md](requirements.md) (revision 1)
+- **Contract**: [api-contract.md](api-contract.md) (revision 1)
+- **Design**: [design.md](design.md) (revision 1)
+- **Status**: Draft
+
+## Execution rules
+
+- Implement only the requirements and acceptance criteria assigned to the task.
+- Stop if requirements, design, or contract conflict with each other.
+- Mark a task complete only after its verification evidence is recorded.
+
+## Task graph
+
+```mermaid
+flowchart LR
+  T1["T-001 matcher"] --> T2["T-002 core + evaluator"]
+  T2 --> T3["T-003 web API"]
+  T3 --> T4["T-004 web UI"]
+  T2 --> T5["T-005 Telegram"]
+  T2 --> T6["T-006 CLI"]
+  T1 --> T7["T-007 replay"]
+```
+
+## Coverage
+
+| Acceptance criterion | Evidence owner | Verification |
+|---|---|---|
+| AC-HLF-003, 004, 005, 007, 008, 009, 010, 011 | T-001 | `go test ./tools/permission/ -run Hardline` |
+| AC-HLF-001, 002, 006, 012, 015, 017, 018, 019 | T-002 | `go test ./tools/permission/ ./core/` |
+| AC-HLF-013, 016 | T-003 | `go test ./web/ -run Approval` |
+| AC-HLF-013 (UI) | T-004 | `npm test` in `web/ui` + manual check |
+| AC-HLF-014 | T-005 | `go test ./channels/telegram/` |
+| AC-HLF-015 (CLI) | T-006 | `go test ./channels/cli/... ./cmd/lana/` |
+| Rollout | T-007 | `lana-eval hardline-replay` report |
+
+## Tasks
+
+- [x] `T-001` Implement the hardline matcher with table tests
+  - Requirements: REQ-HLF-002, 003, 004, 005, 006
+  - Scope: new `tools/permission/hardline.go`, `tools/permission/hardline_test.go`; `HardlineMatch` and
+    tier constants in `core/approval.go`. No wiring into the evaluator.
+  - Verification: `nix develop -c go test ./tools/permission/ ./core/`
+  - Evidence: 2026-11-21 — 2 implementer runs (Command Code) plus a one-line orchestrator fix (bare `*`
+    target). 93 hardline subtests pass; build, vet, gofmt clean. An extra probe of 53 bypass and
+    false-positive cases (quotes, globs, wrappers, `bash -c` variants, inline interpreter code) matches
+    expectations. Not committed.
+
+- [ ] `T-002` Wire the matcher into the evaluator and approval service
+  - Depends on: T-001
+  - Requirements: REQ-HLF-001, 006, 008, 009, 010
+  - Scope: `core/approval.go` (`ApprovalRequest.Hardline`, `OutcomeAllowedVerified`), `core/event.go`
+    (`ApprovalAsked.Hardline`, `permission/hardline`), `lana.go` (`validApprovalOutcome`),
+    `tools/permission/evaluator.go`, `tools/permission/approval.go`, and their tests
+  - Verification: `nix develop -c go test ./tools/permission/ ./core/ .`
+  - Evidence: Pending
+
+- [ ] `T-003` Add step-up to the web approval API
+  - Depends on: T-002
+  - Requirements: REQ-HLF-007; API-HLF-004..007
+  - Scope: `web/approvals.go`, `web/notify.go`, new code route, and tests
+  - Verification: `nix develop -c go test ./web/`
+  - Evidence: Pending
+
+- [ ] `T-004` Show the step-up approval card in the web UI
+  - Depends on: T-003
+  - Requirements: REQ-HLF-007
+  - Scope: `web/ui/src/views/approval.tsx` and its types
+  - Verification: UI build and tests, and a manual check with a fake Block request
+  - Evidence: Pending
+
+- [ ] `T-005` Add the typed challenge to Telegram approvals
+  - Depends on: T-002
+  - Requirements: REQ-HLF-007
+  - Scope: `channels/telegram/approve.go`, `channels/telegram/chat.go`, and tests
+  - Verification: `nix develop -c go test ./channels/telegram/`
+  - Evidence: Pending
+
+- [ ] `T-006` Add the typed challenge to the TUI and line answerer
+  - Depends on: T-002
+  - Requirements: REQ-HLF-007, 008
+  - Scope: `channels/cli/tui/model.go`, `cmd/lana/main.go` (`lineAnswerer`), and tests
+  - Verification: `nix develop -c go test ./channels/cli/... ./cmd/lana/`
+  - Evidence: Pending
+
+- [ ] `T-007` Add `lana-eval hardline-replay` and run it on the owner's DB
+  - Depends on: T-001
+  - Requirements: Rollout
+  - Scope: `cmd/lana-eval`
+  - Verification: the report on `~/.lana/lana.db`, reviewed before release
+  - Evidence: Pending
+
+## Final verification
+
+- [ ] Every acceptance criterion has passing evidence.
+- [ ] `nix develop -c go build ./...` and `nix develop -c go test ./...` pass.
+- [ ] The replay report is reviewed and its false positives are fixed.
