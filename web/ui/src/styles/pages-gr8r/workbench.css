@@ -2354,6 +2354,7 @@ body.wb-resizing .wb-preview-resizer::after {
 
 .wb-sheet-grip.sheet-grip {
   margin: -8px 0 -10px;
+  background-clip: content-box;
 }
 
 .wb-sheet.is-full {

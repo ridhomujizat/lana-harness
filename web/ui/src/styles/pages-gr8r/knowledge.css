@@ -788,6 +788,6 @@
 
 /* Phone: the panel's grip drags it to the full height (ui/sheet-drag.ts). */
 @media (max-width: 760px) {
-  .kg-panel-grip.sheet-grip { margin: -2px auto -10px; }
+  .kg-panel-grip.sheet-grip { margin: -2px auto -10px; background-clip: content-box; }
   .kg-panel.is-full { max-height: none; height: calc(var(--app-h, 100dvh) - 12px - env(safe-area-inset-top)); }
 }

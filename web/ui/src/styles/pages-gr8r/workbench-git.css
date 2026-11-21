@@ -2628,8 +2628,11 @@ body.wb-pane-dragging [data-tip]::after {
 }
 
 /* The git sheet's grip (ui/sheet-drag.ts): full height reaches the top. */
+/* The bar's own `background` shorthand resets the clip: repeat it here so
+   the padding (the touch target) stays transparent. */
 .wbg-grabber.sheet-grip {
   margin: -2px auto -10px;
+  background-clip: content-box;
 }
 
 .wbg-panel.wbg-sheet.is-full {
