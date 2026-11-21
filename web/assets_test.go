@@ -31,7 +31,7 @@ func acceptedAssetContentTypes(name string) []string {
 		// Self-hosted Geist (the CSP blocks third-party font hosts).
 		return []string{"font/woff2"}
 	case ".json":
-		// The web app manifest served at /assets/manifest.json (spec 67).
+		// The web app manifest served at /assets/manifest.json (spec 68).
 		return []string{"application/json"}
 	default:
 		return nil

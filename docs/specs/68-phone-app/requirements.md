@@ -1,4 +1,4 @@
-# Spec 67: Installable phone app over Tailscale
+# Spec 68: Installable phone app over Tailscale
 
 - **Status**: Approved (owner, 2026-11-22: "langsung kerjakan aja di worktree yang berbeda")
 - **Branch**: `feature/phone-pwa`, from `development` (0.6.0-beta.2, 5637bd5)

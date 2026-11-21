@@ -576,7 +576,7 @@ html[data-shell="macos-app"][data-shell-fullscreen] .shell.collapsed .topbar {
   }
 }
 
-/* lana: installed phone app (spec 67). The page uses viewport-fit=cover, so
+/* lana: installed phone app (spec 68). The page uses viewport-fit=cover, so
    on a phone the bottom of the screen sits under the home indicator. Bottom
    bars and composers pad themselves by --safe-bottom. While the keyboard is
    open the app already ends above the keyboard, so lib/viewport.ts sets

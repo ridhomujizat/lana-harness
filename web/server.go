@@ -218,7 +218,7 @@ func New(cfg Config) (*Server, error) {
 		stop:           make(chan struct{}),
 		done:           make(chan struct{}),
 	}
-	// Spec 67: the same index with the manifest link, served to remote requests.
+	// Spec 68: the same index with the manifest link, served to remote requests.
 	s.indexRemote = withManifestLink(index)
 	s.signInCodes = newSignInCodeStore(s.nowTime)
 	s.appCodes = newAppCodeStore(s.nowTime)
@@ -486,7 +486,7 @@ func (s *Server) routes() {
 
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Spec 67: only a remote (Tailscale Serve) request offers the web app
+	// Spec 68: only a remote (Tailscale Serve) request offers the web app
 	// manifest, so only the phone can install Lana as an app. The local page
 	// stays unchanged.
 	if _, ok := remoteFromContext(r.Context()); ok {
@@ -496,7 +496,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(s.index)
 }
 
-// withManifestLink returns index with the spec 67 manifest link inserted right
+// withManifestLink returns index with the spec 68 manifest link inserted right
 // before its first </head>, so a remote (Tailscale Serve) request offers Lana
 // as an installable web app. An index without </head> is returned unchanged,
 // and the input slice is never modified.

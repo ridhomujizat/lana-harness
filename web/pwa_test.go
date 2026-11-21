@@ -10,10 +10,10 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 )
 
-// manifestLink is the line spec 67 inserts before </head>.
+// manifestLink is the line spec 68 inserts before </head>.
 const manifestLink = "    <link rel=\"manifest\" href=\"/assets/manifest.json\">\n"
 
-// TestWithManifestLink covers the pure helper of spec 67: the manifest link is
+// TestWithManifestLink covers the pure helper of spec 68: the manifest link is
 // inserted once, right before the first </head>, and an index without </head>
 // is returned unchanged.
 func TestWithManifestLink(t *testing.T) {
@@ -61,7 +61,7 @@ func TestWithManifestLink(t *testing.T) {
 	})
 }
 
-// TestLocalIndexHasNoManifestLink covers spec 67: the local Mac page never
+// TestLocalIndexHasNoManifestLink covers spec 68: the local Mac page never
 // offers the manifest, so Lana cannot be installed as an app there.
 func TestLocalIndexHasNoManifestLink(t *testing.T) {
 	s, _, _ := newRemoteTestServer(t, core.DefaultWebRemoteConfig())
@@ -75,7 +75,7 @@ func TestLocalIndexHasNoManifestLink(t *testing.T) {
 	}
 }
 
-// TestRemoteIndexHasManifestLink covers spec 67: an allowed remote request gets
+// TestRemoteIndexHasManifestLink covers spec 68: an allowed remote request gets
 // the index with the manifest link.
 func TestRemoteIndexHasManifestLink(t *testing.T) {
 	s, _, _ := newRemoteTestServer(t, remoteEnabledConfig())
@@ -89,7 +89,7 @@ func TestRemoteIndexHasManifestLink(t *testing.T) {
 	}
 }
 
-// TestRemoteManifestIsServed covers spec 67: the manifest is served without a
+// TestRemoteManifestIsServed covers spec 68: the manifest is served without a
 // session and stands alone as an installable app.
 func TestRemoteManifestIsServed(t *testing.T) {
 	s, _, _ := newRemoteTestServer(t, remoteEnabledConfig())

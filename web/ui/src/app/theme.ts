@@ -70,7 +70,7 @@ export function applyTheme(choice: ThemeChoice): "light" | "dark" {
 }
 
 /* The topbar colour (--surface) of each theme. The installed phone app
-   (spec 67) paints the status bar with <meta name="theme-color">. */
+   (spec 68) paints the status bar with <meta name="theme-color">. */
 export const THEME_COLORS = { light: "#ffffff", dark: "#1d1d1c" } as const;
 
 /* index.html carries one theme-color meta per OS scheme. A chosen theme
