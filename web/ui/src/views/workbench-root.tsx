@@ -18,8 +18,10 @@ import {
 import type { WorkbenchPreview } from "../api/workbench";
 import { Ic } from "../ui/icons";
 import { Counts, DiffView, StatusLetter } from "./workbench-changes";
+import { FigcraftView } from "./workbench-figcraft";
+import { isFigcraftPath } from "./workbench-figcraft-model";
 import { ExternalView, FileView } from "./workbench-files";
-import { baseName, defaultOpenGroups, dirName, isUnder, orderRootRepos, rootRows, ROOT_ROW_H, type RootRow } from "./workbench-git-model";
+import { baseName, defaultOpenGroups, dirName, isUnder, orderRootRepos, relativeTo, rootRows, ROOT_ROW_H, type RootRow } from "./workbench-git-model";
 import { useVirtualRows } from "./workbench-virtual";
 
 /* Spec 70: the panel for a pane whose folder holds several repos (a root):
@@ -403,6 +405,16 @@ function join(dir: string, name: string): string {
 
 const TREE_ROW_H = 24;
 
+/* The base folder and relative path a .figcraft file of the root tree is read
+   with: its repo when it has one, else the root, else its own folder. */
+export function figcraftBase(rootPath: string, n: { key: string; worktree?: string; rel?: string }): { worktree: string; path: string } {
+  if (n.worktree !== undefined && n.rel) return { worktree: n.worktree, path: n.rel };
+  const rel = relativeTo(rootPath, n.key);
+  if (rel) return { worktree: rootPath, path: rel };
+  const cut = n.key.lastIndexOf("/");
+  return { worktree: n.key.slice(0, cut) || "/", path: n.key.slice(cut + 1) };
+}
+
 export function RootFilesTab({
   root,
   summary,
@@ -563,7 +575,11 @@ export function RootFilesTab({
               title={n.key}
             >
               {n.kind === "dir" ? <Ic name={isOpen ? "chevron-down" : "chevron-right"} size={13} /> : <span className="wbr-indent" />}
-              {n.repo ? <RepoDot color={n.repo.color} /> : <Ic name={n.kind === "dir" ? (isOpen ? "folder-open" : "folder") : "file"} size={14} />}
+              {n.repo ? <RepoDot color={n.repo.color} /> : n.kind === "file" && isFigcraftPath(n.name) ? (
+                <Ic name="pen-tool" size={14} className="fv-tree-icon" />
+              ) : (
+                <Ic name={n.kind === "dir" ? (isOpen ? "folder-open" : "folder") : "file"} size={14} />
+              )}
               <span className="wbg-tree-name">{n.name}</span>
               {n.repo?.short ? <span className="wbr-tree-branch mono">{n.repo.short}</span> : null}
               {n.repo?.changed || n.changed ? <span className="wbg-dot" /> : n.status ? <span className="wbr-tree-st">{n.status}</span> : null}
@@ -575,8 +591,13 @@ export function RootFilesTab({
     </div>
   );
 
+  /* A .figcraft file opens in the FigCraft viewer, inside a repo or not: the
+     daemon reads it against any allowed base folder. */
+  const figBase = sel && isFigcraftPath(sel.key) ? figcraftBase(root.path, sel) : null;
   const viewer = external ? (
     <ExternalView data={external} />
+  ) : figBase ? (
+    <FigcraftView key={figBase.worktree + "\0" + figBase.path} worktree={figBase.worktree} path={figBase.path} phone={phone} />
   ) : sel ? (
     sel.worktree !== undefined && sel.rel ? (
       <FileView worktree={sel.worktree} path={sel.rel} />

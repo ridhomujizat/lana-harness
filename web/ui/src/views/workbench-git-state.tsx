@@ -9,6 +9,7 @@ import { LAYOUT_MOTION_MS, canViewTransition, holdLayout, reducedMotion, withVie
 import { GitPanel, GIT_TABS, type GitTab, type SpaceWorktree } from "./workbench-git-panel";
 import { readPref, savePref, useGitResolve, useGitStatus } from "./workbench-git-hooks";
 import { groupByWorktree, isUnder, panelWorktree, relativeTo, sessionDir, sharedAgents } from "./workbench-git-model";
+import { isFigcraftPath } from "./workbench-figcraft-model";
 import { useRootSummary } from "./workbench-root";
 import { WorktreesTab } from "./workbench-worktrees";
 import { programName, tabSessions, type WbLayout, type WbSpace, type WbTab } from "./workbench-model";
@@ -280,6 +281,17 @@ export function useWorkbenchGit({
       return;
     }
     const info = gitOf(sessionId);
+    /* A .figcraft file under a non-git root opens in the root's own Files
+       tree, where the FigCraft viewer draws it. */
+    const fileRoot = !info && !pinned ? rootOf(sessionId) : undefined;
+    if (fileRoot && isFigcraftPath(data.path) && relativeTo(fileRoot.path, data.path)) {
+      setChosen(null);
+      setExternal(null);
+      setRootFile(data.path);
+      pickTab("files");
+      if (!open || motion === "out") setOpenSaved(true);
+      return;
+    }
     if (!pinned) setChosen(info?.worktree ?? null);
     const rel = info ? relativeTo(info.worktree, data.path) : null;
     pickTab("files");
