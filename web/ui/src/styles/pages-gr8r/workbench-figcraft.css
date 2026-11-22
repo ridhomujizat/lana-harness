@@ -629,3 +629,28 @@
   flex: 1 1 auto;
   text-align: left;
 }
+
+/* Expand: the viewer over the whole window, like the image viewer. The host
+   carries .wb-page for the Workbench tokens (owner, 2026-11-22). */
+.wb-page.fv-full-host.fv-full-host {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--surface);
+  animation: fade 0.16s ease both;
+}
+
+html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-page.fv-full-host.fv-full-host {
+  padding-top: 28px;
+}
+
+.fv-full-host > .fv.is-full {
+  flex: 1 1 auto;
+}
+
+.fv-placeholder .fv-state {
+  flex: 1;
+}
