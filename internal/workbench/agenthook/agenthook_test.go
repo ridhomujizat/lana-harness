@@ -141,11 +141,11 @@ func TestInstallKeepsOtherKeysAndHooksInOrder(t *testing.T) {
 			t.Fatalf("installed file lost %q:\n%s", key, out)
 		}
 	}
-	if !(strings.Index(out, `"model"`) < strings.Index(out, `"hooks"`) &&
-		strings.Index(out, `"hooks"`) < strings.Index(out, `"statusLine"`)) {
+	if strings.Index(out, `"model"`) >= strings.Index(out, `"hooks"`) ||
+		strings.Index(out, `"hooks"`) >= strings.Index(out, `"statusLine"`) {
 		t.Fatalf("top-level key order changed:\n%s", out)
 	}
-	if !(strings.Index(out, `"PreToolUse"`) < strings.Index(out, `"SessionStart"`)) {
+	if strings.Index(out, `"PreToolUse"`) >= strings.Index(out, `"SessionStart"`) {
 		t.Fatalf("hooks key order changed:\n%s", out)
 	}
 	commands := readCommands(t, path)

@@ -421,10 +421,10 @@ func buildSummary(root, name string, repos []RepoSummary, other []OtherEntry) Ro
 func rootEtag(repos []RepoSummary, other []OtherEntry) string {
 	h := sha256.New()
 	for _, repo := range repos {
-		fmt.Fprintf(h, "%s\x00%s\x00%t\x00", repo.Name, repo.Etag, repo.Slow)
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%t\x00", repo.Name, repo.Etag, repo.Slow)
 	}
 	for _, entry := range other {
-		fmt.Fprintf(h, "%s\x00%s\x00", entry.Name, entry.Kind)
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00", entry.Name, entry.Kind)
 	}
 	return "r-" + hex.EncodeToString(h.Sum(nil))[:etagLen]
 }

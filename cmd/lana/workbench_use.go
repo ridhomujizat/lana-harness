@@ -318,7 +318,7 @@ func workbenchUseNew(stored daemonSecretFile, id, cwd string, opts workbenchUseO
 		return workbenchUseFail(err)
 	}
 	workbenchUsePrint(answer)
-	fmt.Fprintf(os.Stdout, "Created %s\n", created.Path)
+	_, _ = fmt.Fprintf(os.Stdout, "Created %s\n", created.Path)
 	return 0
 }
 
@@ -401,7 +401,7 @@ func workbenchUseClear(stored daemonSecretFile, id string) int {
 	if status != http.StatusNoContent && status != http.StatusOK {
 		return workbenchUseFail(workbenchUseAnswerError(status, data, ""))
 	}
-	fmt.Fprintln(os.Stdout, "Workbench: following the pane's own folder again")
+	_, _ = fmt.Fprintln(os.Stdout, "Workbench: following the pane's own folder again")
 	return 0
 }
 
@@ -455,7 +455,7 @@ func workbenchUseAnswerError(status int, data []byte, path string) error {
 // workbenchUsePrint writes the success line of a report (spec 69 api-contract):
 // one line, the short branch and the worktree root.
 func workbenchUsePrint(answer workbenchUseAnswer) {
-	fmt.Fprintf(os.Stdout, "Workbench: %s (%s)\n", answer.Worktree.Short, answer.Worktree.Worktree)
+	_, _ = fmt.Fprintf(os.Stdout, "Workbench: %s (%s)\n", answer.Worktree.Short, answer.Worktree.Worktree)
 }
 
 // workbenchUseFail prints err to stderr and returns exit 1 (REQ-WA-023): a

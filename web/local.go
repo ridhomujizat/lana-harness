@@ -41,6 +41,10 @@ func (s *Server) registerLocalRoutes() {
 	// return 405. handleLocalSignInLink rejects non-POST itself.
 	s.mux.HandleFunc(LocalSignInPath, s.handleLocalSignInLink)
 	s.mux.HandleFunc(LocalAppLinkPath, s.handleLocalAppLink)
+	// The CLI's Workbench routes of spec 69: the report mirror and the spec 66
+	// create route. They check the method themselves, like the routes above.
+	s.mux.HandleFunc(workbenchLocalWorktreePath, s.handleLocalWorkbenchWorktree)
+	s.mux.HandleFunc(workbenchLocalWorktreesPath, s.handleLocalWorkbenchWorktreeCreate)
 }
 
 // handleLocalSignInLink answers POST /v1/local/sign-in-link (API-WLG-008). A
