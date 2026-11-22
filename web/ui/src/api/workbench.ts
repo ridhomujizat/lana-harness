@@ -77,7 +77,9 @@ export function putWorkbenchLayout(layout: unknown): Promise<unknown> {
 
 /* Spec 61 REQ-WP-001, REQ-WP-002: the daemon reads a file a terminal pointed
    at (a path with an optional :line[:col]) and reports how to show it. */
-export type WorkbenchPreviewKind = "html" | "markdown" | "image" | "pdf" | "text" | "binary";
+/* "dir": the link named a folder; url and raw_url are empty and root is its
+   git root, when it has one. */
+export type WorkbenchPreviewKind = "html" | "markdown" | "image" | "pdf" | "text" | "binary" | "dir";
 
 export interface WorkbenchPreview {
   path: string;
@@ -89,6 +91,8 @@ export interface WorkbenchPreview {
   col: number;
   url: string;
   raw_url: string;
+  /* The git root of a folder link (kind "dir"), absent outside a repo. */
+  root?: string;
 }
 
 export function previewWorkbenchFile(session: string, link: string, dir?: string): Promise<WorkbenchPreview> {

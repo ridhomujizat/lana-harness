@@ -44,6 +44,7 @@ export function FilesTab({
   line,
   onSelect,
   external,
+  reveal,
   phone,
 }: {
   worktree: string;
@@ -53,6 +54,8 @@ export function FilesTab({
   onSelect: (path: string | null, line?: number) => void;
   /* A spec 61 preview of a path outside the worktree (REQ-WG-063). */
   external?: WorkbenchPreview | null;
+  /* A folder to open the tree down to and mark (a ⌘+click on a folder). */
+  reveal?: { dir: string; nonce: number } | null;
   phone?: boolean;
 }) {
   const [tree, setTree] = useState<Tree>({});
@@ -115,6 +118,33 @@ export function FilesTab({
     if (added) setOpen(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
+
+  /* A ⌘+click on a folder: open it and every folder above it, and mark it
+     until a file is picked. Runs after the new-worktree reset above, so a
+     folder in another repo survives the switch. */
+  const [marked, setMarked] = useState<string | null>(null);
+  const scrolled = useRef(0);
+  useEffect(() => {
+    if (!reveal) return;
+    const next = new Set<string>();
+    let dir = "";
+    for (const part of reveal.dir.split("/").filter(Boolean)) {
+      dir = join(dir, part);
+      next.add(dir);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loads the folders down to a folder picked from outside the tree
+      load(dir);
+    }
+    setOpen(next);
+    setQuery("");
+    setHits(null);
+    setMarked(reveal.dir || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal?.nonce, worktree]);
+  const markRef = (el: HTMLButtonElement | null) => {
+    if (!el || !reveal || scrolled.current === reveal.nonce) return;
+    scrolled.current = reveal.nonce;
+    el.scrollIntoView({ block: "nearest" });
+  };
 
   /* ⌘P focuses the filter (REQ-WG-064). */
   useEffect(() => {
@@ -213,11 +243,13 @@ export function FilesTab({
       if (e.kind === "dir") {
         const { label, path } = chainOf(dir, e.name);
         const isOpen = open.has(join(dir, e.name));
+        const isMarked = !selected && marked !== null && (marked === path || marked === join(dir, e.name));
         rows.push(
           <button
             key={path}
+            ref={isMarked ? markRef : undefined}
             type="button"
-            className={"wbg-tree-row" + (e.ignored ? " is-ignored" : "")}
+            className={"wbg-tree-row" + (isMarked ? " is-on" : "") + (e.ignored ? " is-ignored" : "")}
             style={{ paddingLeft: 8 + depth * 14 }}
             onClick={() => toggle(join(dir, e.name))}
           >

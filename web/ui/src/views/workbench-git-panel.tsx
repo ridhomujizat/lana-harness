@@ -58,6 +58,8 @@ export interface GitPanelProps {
   file: { path: string | null; line?: number };
   onFile: (path: string | null, line?: number) => void;
   external: WorkbenchPreview | null;
+  /* A folder to open the Files tree down to (a ⌘+click on a folder path). */
+  reveal?: { dir: string; nonce: number } | null;
   worktreesTab: ReactNode;
   focusMode?: boolean;
   onFocusMode?: (on: boolean) => void;
@@ -166,6 +168,7 @@ export function GitPanel(props: GitPanelProps) {
         line={props.file.line}
         onSelect={props.onFile}
         external={props.external}
+        reveal={props.reveal}
         phone={phone}
       />
     );
