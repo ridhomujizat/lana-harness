@@ -696,6 +696,67 @@ func TestWorkbenchChatImage(t *testing.T) {
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")
 }
 
+func TestWorkbenchChatAgent(t *testing.T) {
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "sid.jsonl")
+	subDir := filepath.Join(dir, "sid", "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Join([]string{
+		`{"type":"user","uuid":"s1","isSidechain":true,"timestamp":"2026-11-23T12:00:00Z","message":{"role":"user","content":"do the thing"}}`,
+		`{"type":"assistant","uuid":"s2","isSidechain":true,"timestamp":"2026-11-23T12:00:01Z","message":{"id":"m1","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/work/a.go"}}]}}`,
+		`{"type":"assistant","uuid":"s3","isSidechain":true,"timestamp":"2026-11-23T12:00:02Z","message":{"id":"m2","role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"done"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(subDir, "agent-abc.jsonl"), []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"agentType":"dsh-coder","description":"T-002 transcript reader","toolUseId":"toolu_1","model":"claude-haiku-5-5","finished":true}`
+	if err := os.WriteFile(filepath.Join(subDir, "agent-abc.meta.json"), []byte(meta), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stubChatLocate(t, claudechat.Conversation{PID: 7, SessionID: "sid", Cwd: "/work", Path: transcriptPath}, true)
+	s, cookie, csrf := newWorkbenchServer(t)
+
+	stopHubsAfter(t, s)
+	fake := newFakeWorkbench()
+	fake.sessions = []workbench.Session{{ID: "abc", Agent: "claude"}}
+	s.SetWorkbench(fake)
+
+	rr := workbenchRequest(s, http.MethodGet, "/v1/workbench/sessions/abc/chat/agents/abc", "", cookie, csrf)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("agent status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		AgentID     string            `json:"agent_id"`
+		AgentType   string            `json:"agent_type"`
+		Description string            `json:"description"`
+		Model       string            `json:"model"`
+		Finished    bool              `json:"finished"`
+		Steps       int               `json:"steps"`
+		Items       []claudechat.Item `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.AgentID != "abc" || body.AgentType != "dsh-coder" || body.Description != "T-002 transcript reader" {
+		t.Fatalf("agent meta = %+v", body)
+	}
+	if body.Model != "claude-haiku-5-5" || !body.Finished || body.Steps != 1 {
+		t.Fatalf("agent model/finished/steps = %+v", body)
+	}
+	if len(body.Items) != 3 {
+		t.Fatalf("agent items = %+v", body.Items)
+	}
+
+	rr = workbenchRequest(s, http.MethodGet, "/v1/workbench/sessions/abc/chat/agents/bad.id", "", cookie, csrf)
+	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
+
+	rr = workbenchRequest(s, http.MethodGet, "/v1/workbench/sessions/abc/chat/agents/missing", "", cookie, csrf)
+	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+}
+
 func TestWorkbenchChatNotClaude(t *testing.T) {
 	stubChatLocate(t, claudechat.Conversation{}, false)
 	s, cookie, csrf := newWorkbenchServer(t)

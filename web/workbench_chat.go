@@ -137,6 +137,7 @@ func (s *Server) registerWorkbenchChatRoutes() {
 	s.Handle("POST /v1/workbench/sessions/{id}/chat/model", http.HandlerFunc(s.handleWorkbenchChatModel))
 	s.Handle("GET /v1/workbench/sessions/{id}/chat/commands", http.HandlerFunc(s.handleWorkbenchChatCommands))
 	s.Handle("GET /v1/workbench/sessions/{id}/chat/image", http.HandlerFunc(s.handleWorkbenchChatImage))
+	s.Handle("GET /v1/workbench/sessions/{id}/chat/agents/{agent_id}", http.HandlerFunc(s.handleWorkbenchChatAgent))
 }
 
 // chatSession loads the Workbench session of a chat route, writing the standard
@@ -538,6 +539,69 @@ func (s *Server) handleWorkbenchChatImage(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write(data)
 }
 
+// chatAgentBody is the GET …/chat/agents/{agent_id} body (REQ-WC-017).
+type chatAgentBody struct {
+	AgentID     string            `json:"agent_id"`
+	AgentType   string            `json:"agent_type"`
+	Description string            `json:"description"`
+	Model       string            `json:"model"`
+	Finished    bool              `json:"finished"`
+	Steps       int               `json:"steps"`
+	Items       []claudechat.Item `json:"items"`
+}
+
+// handleWorkbenchChatAgent answers GET …/chat/agents/{agent_id}: a subagent's own
+// items, its meta and step count (REQ-WC-017).
+func (s *Server) handleWorkbenchChatAgent(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.chatSession(w, r)
+	if !ok {
+		return
+	}
+	agentID := r.PathValue("agent_id")
+	if !claudechat.ValidAgentID(agentID) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "invalid agent id")
+		return
+	}
+	conv, found := chatLocate(sess.PID, chatHomeDir())
+	if !found || conv.Path == "" {
+		writeAPIError(w, http.StatusNotFound, "not_found", "the agent was not found")
+		return
+	}
+	jsonl, metaPath := claudechat.SubagentPaths(conv.Path, agentID)
+	if _, err := os.Stat(jsonl); err != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "the agent was not found")
+		return
+	}
+	tr := claudechat.OpenSubagent(jsonl, conv.Cwd)
+	if _, _, err := tr.Poll(); err != nil {
+		s.writeWorkbenchError(w, "workbench chat agent", err)
+		return
+	}
+	items, _ := tr.Snapshot(chatSnapshotItems)
+	meta, _ := claudechat.ReadSubagentMeta(metaPath)
+	body := chatAgentBody{
+		AgentID:     agentID,
+		AgentType:   meta.AgentType,
+		Description: meta.Description,
+		Model:       meta.Model,
+		Finished:    meta.Finished,
+		Steps:       chatAgentSteps(items),
+		Items:       items,
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// chatAgentSteps counts a subagent's tool items (REQ-WC-017).
+func chatAgentSteps(items []claudechat.Item) int {
+	n := 0
+	for _, it := range items {
+		if it.Kind == "tool" {
+			n++
+		}
+	}
+	return n
+}
+
 // chatTranscript returns the transcript a hub already holds for the session, or
 // reads one fresh, so an image can be served (REQ-WC-036).
 func (s *Server) chatTranscript(id string, sess workbench.Session, home string) *claudechat.Transcript {
@@ -812,6 +876,7 @@ func (h *chatHub) refresh(ctx context.Context) {
 		reason    string
 		agent     string
 		conv      *chatConversation
+		convPath  string
 		tr        *claudechat.Transcript
 	)
 	var items []claudechat.Item
@@ -836,6 +901,9 @@ func (h *chatHub) refresh(ctx context.Context) {
 		}
 		available, agent = true, "claude"
 		conv = conversationUpdate(located, home)
+		// The comparison below uses the absolute path; conv.Path is the
+		// display form with "~".
+		convPath = located.Path
 		h.mu.Lock()
 		same := h.transcript != nil && h.convPath == located.Path
 		h.mu.Unlock()
@@ -864,7 +932,7 @@ func (h *chatHub) refresh(ctx context.Context) {
 	if available {
 		h.conv = conv
 		h.transcript = tr
-		h.convPath = conv.Path
+		h.convPath = convPath
 	}
 	h.mu.Unlock()
 
@@ -961,7 +1029,7 @@ func (h *chatHub) liveDelta(now time.Time) ([]byte, bool) {
 	}
 	h.liveSentJSON = h.liveJSON
 	h.liveSentAt = now
-	delta := chatDelta{Available: true, Agent: "claude", Live: h.live}
+	delta := chatDelta{Available: h.available, Reason: h.reason, Agent: h.agent, Live: h.live}
 	b, err := json.Marshal(delta)
 	if err != nil {
 		return nil, false

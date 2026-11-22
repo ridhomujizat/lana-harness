@@ -17,6 +17,7 @@ Claude Code runs in a Workbench pane as a terminal UI. On a phone, and for readi
 7. AskUserQuestion shows as a question card with tabs, radio or checkbox options, a Recommended tag and an "Other" text input. Plan mode shows the plan as markdown with approval options.
 8. All UI text is English.
 9. Light mode follows the app theme (sample in section 10 of the design).
+10. Subagents and background tasks show in the chat too (owner, 2026-11-23: "soal subagent dan background service muncul juga ya").
 
 ## Defaults (recommended in the plan, accepted with "implement semua fase")
 
@@ -58,6 +59,15 @@ No core protocol change: the daemon uses the existing `Get`, `Attach(view)` and 
 - **REQ-WC-014** Turn timing: when an assistant line is followed by a user line that is a new prompt (not a tool result), the daemon emits a `turn_end` item after the last assistant item of that turn with `{duration_ms, output_tokens}` computed from the first and last line timestamps of the turn.
 - **REQ-WC-015** Snapshot size: the first read of a transcript returns at most the last 400 items; `truncated_before: true` tells the client older items exist. `GET …/chat?before=<item id>` pages back 200 items at a time.
 
+### Subagents and background tasks (Go)
+
+- **REQ-WC-016** Background tasks: the reader keeps `meta.tasks`, a list of `{id, kind, tool_use_id, title, agent_type, status, summary, started, ended}`:
+  - a `Bash` tool_use with `run_in_background: true` whose result line has `toolUseResult.backgroundTaskId` → kind `shell`, title = the command's `description` or its first line;
+  - an `Agent` / `Task` tool_use whose result has `toolUseResult.agentId` → kind `agent`, title = `description`, `agent_type` = `subagent_type`; a synchronous agent (no `isAsync`) is `completed` when its result arrives;
+  - status `running` until a `<task-notification>` with that `<task-id>` arrives (in a `queue-operation` line's `content` or in a user string), which sets `status` (`completed`, `failed`, `killed`) and `summary`; a `TaskStop` / `KillShell` tool_use with a successful result marks its task `killed`;
+  - at most the 50 newest tasks are kept.
+- **REQ-WC-017** Agent tool items carry `agent: {agent_id, agent_type, background}`. A subagent's own transcript is `<transcript dir>/<session id>/subagents/agent-<agent id>.jsonl` (with `agent-<id>.meta.json`). `GET …/chat/agents/{agent_id}` returns its items (sidechain lines are the content there), its meta (`model`, `finished` from the meta file) and `steps` (tool_use count). The agent id must match `^[A-Za-z0-9_-]{1,64}$`.
+
 ### Screen mirror (Go)
 
 - **REQ-WC-020** While at least one chat stream is open for a session, the daemon keeps a view attachment to it and feeds the bytes into a headless `vt` emulator (same library as `internal/workbench/screen.go`), sized from the replay's OSC 7701 size markers and from the session's cols/rows. The mirror stops 30 s after the last stream closes.
@@ -98,6 +108,8 @@ No core protocol change: the daemon uses the existing `Get`, `Attach(view)` and 
 - **REQ-WC-058** States: waiting (spinner + text + "Open terminal"), unsupported agent (button disabled), unknown lines banner ("N unknown transcript lines were skipped" + "Open terminal") when `unknown_lines > 0`, unreadable dialog fallback.
 - **REQ-WC-059** Phone (≤ 700 px): D2, compact composer (`+`, mode, send), large option buttons.
 - **REQ-WC-060** Light and dark themes use the app's tokens.
+- **REQ-WC-061** An Agent tool call shows as a subagent row in its tool group: agent type, description, status (running spinner, done, failed), and when expanded the subagent's own steps and final report (`GET …/chat/agents/{id}`, refreshed every 2 s while it runs).
+- **REQ-WC-062** A "Background" chip above the composer shows the number of running tasks (shells and agents); clicking it opens a list of the tasks with kind icon, title, status, elapsed time and summary. Finished tasks stay in the list, dimmed.
 
 ## Out of scope
 

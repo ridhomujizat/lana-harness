@@ -21,6 +21,7 @@ type Item struct {
 	Model        string          `json:"model,omitempty"`
 	ToolUseID    string          `json:"tool_use_id,omitempty"`
 	Input        json.RawMessage `json:"input,omitempty"`
+	Agent        *AgentRef       `json:"agent,omitempty"`
 	Summary      *ToolSummary    `json:"summary,omitempty"`
 	Diff         *Diff           `json:"diff,omitempty"`
 	Status       string          `json:"status,omitempty"` // running, done, error (tool)
@@ -62,6 +63,39 @@ type ToolResult struct {
 	IsError   bool   `json:"is_error"`
 }
 
+// AgentRef points at the subagent an Agent / Task tool call launched
+// (REQ-WC-017). AgentID is empty until the tool result reveals it.
+type AgentRef struct {
+	AgentID    string `json:"agent_id"`
+	AgentType  string `json:"agent_type,omitempty"`
+	Background bool   `json:"background,omitempty"`
+}
+
+// Task is one background task of a conversation: a background shell or a
+// subagent (REQ-WC-016). Status is running, completed, failed or killed; Title
+// is the command's description or the agent's description.
+type Task struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"` // shell, agent, other
+	ToolUseID string `json:"tool_use_id"`
+	Title     string `json:"title"`
+	AgentType string `json:"agent_type"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary,omitempty"`
+	Started   string `json:"started"`
+	Ended     string `json:"ended,omitempty"`
+}
+
+// SubagentMeta is the agent-<id>.meta.json file Claude Code writes beside a
+// subagent transcript (REQ-WC-017).
+type SubagentMeta struct {
+	AgentType   string `json:"agentType"`
+	Description string `json:"description"`
+	ToolUseID   string `json:"toolUseId"`
+	Model       string `json:"model"`
+	Finished    bool   `json:"finished"`
+}
+
 // Question is one question of an AskUserQuestion tool call.
 type Question struct {
 	Question    string           `json:"question"`
@@ -93,4 +127,5 @@ type Meta struct {
 	Context      Context `json:"context"`
 	UnknownLines int     `json:"unknown_lines"`
 	Version      string  `json:"version"`
+	Tasks        []Task  `json:"tasks,omitempty"`
 }

@@ -12,6 +12,7 @@ All routes are authenticated (cookie + CSRF on writes) like the other `/v1/workb
 | `POST /v1/workbench/sessions/{id}/chat/model` | Set model and/or effort. |
 | `GET /v1/workbench/sessions/{id}/chat/commands` | Slash command list. |
 | `GET /v1/workbench/sessions/{id}/chat/image?item=&i=` | An image from the transcript. |
+| `GET /v1/workbench/sessions/{id}/chat/agents/{agent_id}` | A subagent's items, meta and step count. |
 
 Common errors: 404 `not_found` (session), 503 `workbench_unavailable`, 403 `control_locked` on POST routes (REQ-RA-031), 409 `not_claude` on POST routes when the session runs no Claude Code.
 
@@ -34,7 +35,11 @@ Common errors: 404 `not_found` (session), 503 `workbench_unavailable`, 403 `cont
     "mode": "acceptEdits",
     "context": { "used": 84200, "window": 200000, "cache_read": 71000, "input": 13200, "output": 2300 },
     "unknown_lines": 0,
-    "version": "2.1.330"
+    "version": "2.1.330",
+    "tasks": [
+      { "id": "bogk0ac0c", "kind": "shell", "tool_use_id": "toolu_…", "title": "Run dsh-implement for T-002", "status": "completed", "summary": "Background command … completed (exit code 0)", "started": "…", "ended": "…" },
+      { "id": "a56a9a94b0e1dbb18", "kind": "agent", "tool_use_id": "toolu_…", "title": "T-002 transcript reader", "agent_type": "dsh-coder", "status": "running", "summary": "", "started": "…" }
+    ]
   },
   "live": {
     "state": "working",
@@ -108,3 +113,7 @@ Every item has `id`, `kind`, and `at` (RFC 3339, may be empty).
 `GET …/chat/commands` → `{"commands": [{"name": "/compact", "description": "Free up context by summarizing the conversation so far", "source": "built-in"}]}`.
 
 `GET …/chat/image?item=u1&i=1` → image bytes.
+
+`GET …/chat/agents/{agent_id}` → `{"agent_id": "a56a…", "agent_type": "dsh-coder", "description": "T-002 transcript reader", "model": "claude-haiku-5-5", "finished": true, "steps": 12, "items": [Item…]}`. 404 `not_found` when the file does not exist.
+
+Agent tool items also carry `"agent": {"agent_id": "a56a…", "agent_type": "dsh-coder", "background": true}`.

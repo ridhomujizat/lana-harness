@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ const (
 	maxDiffLines      = 200     // diff lines cut
 	defaultWindow     = 200000
 	longWindow        = 1000000
+	maxTasks          = 50  // newest tasks kept (REQ-WC-016)
+	maxTaskTitle      = 120 // task title cut
 )
 
 // Transcript reads one Claude Code transcript file incrementally. Only the
@@ -36,6 +39,10 @@ type Transcript struct {
 
 	// longSeen is set once usage passed the default window (a 1M session).
 	longSeen bool
+
+	// includeSidechain keeps isSidechain lines, which is what a subagent
+	// transcript holds (REQ-WC-017).
+	includeSidechain bool
 
 	path   string
 	cwd    string
@@ -73,6 +80,53 @@ func Open(path, cwd string) *Transcript {
 		pending:     map[string]int{},
 		lineOffsets: map[string]int64{},
 	}
+}
+
+// OpenSubagent returns a reader for a subagent's own transcript. It is the same
+// reader as Open, except that isSidechain lines are kept: in a subagent file
+// every line is a sidechain (REQ-WC-017).
+func OpenSubagent(path, cwd string) *Transcript {
+	t := Open(path, cwd)
+	t.includeSidechain = true
+	return t
+}
+
+// agentIDPattern is the shape of an agent id accepted from a client: 1 to 64
+// letters, digits, underscores or dashes (REQ-WC-017).
+var agentIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// ValidAgentID reports whether id may name a subagent.
+func ValidAgentID(id string) bool {
+	return agentIDPattern.MatchString(id)
+}
+
+// SubagentPaths returns the transcript and meta paths of a subagent, given the
+// main transcript path and the agent id: <dir>/<base>/subagents/agent-<id>.jsonl
+// and .meta.json. Both paths are "" when the id is not valid (REQ-WC-017).
+func SubagentPaths(transcriptPath, agentID string) (jsonl, meta string) {
+	if transcriptPath == "" || !ValidAgentID(agentID) {
+		return "", ""
+	}
+	base := strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+	prefix := filepath.Join(filepath.Dir(transcriptPath), base, "subagents", "agent-"+agentID)
+	return prefix + ".jsonl", prefix + ".meta.json"
+}
+
+// ReadSubagentMeta reads a subagent meta file. It reports false when the file is
+// missing or unreadable, which is not an error (REQ-WC-017).
+func ReadSubagentMeta(path string) (SubagentMeta, bool) {
+	if path == "" {
+		return SubagentMeta{}, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return SubagentMeta{}, false
+	}
+	var m SubagentMeta
+	if json.Unmarshal(raw, &m) != nil {
+		return SubagentMeta{}, false
+	}
+	return m, true
 }
 
 // Poll reads everything appended since the last call and returns the items that
@@ -171,11 +225,16 @@ func (t *Transcript) Before(id string, n int) ([]Item, bool) {
 	return append([]Item(nil), t.items[start:idx]...), start > 0
 }
 
-// Meta returns the transcript's current meta state.
+// Meta returns the transcript's current meta state. The task list is a copy, so
+// a caller cannot alias the reader's slice (REQ-WC-016).
 func (t *Transcript) Meta() Meta {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.meta
+	m := t.meta
+	if len(t.meta.Tasks) > 0 {
+		m.Tasks = append([]Task(nil), t.meta.Tasks...)
+	}
+	return m
 }
 
 // ImageBytes returns the decoded bytes and media type of the image block a ref
@@ -252,6 +311,22 @@ type rawLine struct {
 	IsCompactSummary bool       `json:"isCompactSummary"`
 	PermissionMode   string     `json:"permissionMode"`
 	Message          rawMessage `json:"message"`
+
+	// Task metadata (REQ-WC-016): a queue-operation carries a task-notification
+	// in Content, and a tool result line carries toolUseResult.
+	Operation     string          `json:"operation"`
+	Content       json.RawMessage `json:"content"`
+	ToolUseResult toolUseResult   `json:"toolUseResult"`
+}
+
+// toolUseResult is the per-tool metadata Claude Code attaches to a result line.
+// Only the fields background tasks and subagents need are read (REQ-WC-016).
+type toolUseResult struct {
+	IsAsync          bool   `json:"isAsync"`
+	Status           string `json:"status"`
+	AgentID          string `json:"agentId"`
+	Description      string `json:"description"`
+	BackgroundTaskID string `json:"backgroundTaskId"`
 }
 
 type rawMessage struct {
@@ -295,7 +370,7 @@ func (t *Transcript) processLine(raw []byte, start int64) {
 
 	switch ln.Type {
 	case "user":
-		if ln.IsSidechain || ln.IsMeta {
+		if (ln.IsSidechain && !t.includeSidechain) || ln.IsMeta {
 			return
 		}
 		if ln.IsCompactSummary {
@@ -304,7 +379,7 @@ func (t *Transcript) processLine(raw []byte, start int64) {
 		}
 		t.processUser(ln, start)
 	case "assistant":
-		if ln.IsSidechain {
+		if ln.IsSidechain && !t.includeSidechain {
 			return
 		}
 		t.processAssistant(ln, start)
@@ -312,6 +387,8 @@ func (t *Transcript) processLine(raw []byte, start int64) {
 		if ln.Subtype == "compact_boundary" {
 			t.addDivider(ln, start)
 		}
+	case "queue-operation":
+		t.processQueueOperation(ln)
 	}
 }
 
@@ -349,6 +426,11 @@ func (t *Transcript) processUser(ln rawLine, start int64) {
 // processUserString maps a user line whose content is a plain string: a slash
 // command, its local stdout, a skipped caveat, or a chat message.
 func (t *Transcript) processUserString(ln rawLine, start int64, s string) {
+	// A task-notification can arrive inside a user string; it is task metadata,
+	// not a chat message (REQ-WC-016).
+	if t.processNotification(ln.Timestamp, s) {
+		return
+	}
 	id := t.baseID(ln, start)
 	if name, ok := extractTag(s, "command-name"); ok {
 		args, _ := extractTag(s, "command-args")
@@ -408,7 +490,7 @@ func (t *Transcript) processUserArray(ln rawLine, start int64, content json.RawM
 				images = append(images, ImageRef{Ref: fmt.Sprintf("%s:%d", id, i), MediaType: blk.Source.MediaType})
 			}
 		case "tool_result":
-			t.applyToolResult(blk.ToolUseID, blk.Content, blk.IsError)
+			t.applyToolResult(ln, blk.ToolUseID, blk.Content, blk.IsError)
 		default:
 			t.bumpUnknown()
 		}
@@ -511,8 +593,9 @@ func (t *Transcript) addToolUse(ln rawLine, id, toolUseID, name string, input js
 }
 
 // applyToolResult updates the tool, question or plan item a tool_result answers
-// and marks it changed. An unknown tool_use_id is ignored.
-func (t *Transcript) applyToolResult(toolUseID string, content json.RawMessage, isError bool) {
+// and marks it changed. An unknown tool_use_id is ignored. ln is the result
+// line, whose toolUseResult may carry background-task metadata (REQ-WC-016).
+func (t *Transcript) applyToolResult(ln rawLine, toolUseID string, content json.RawMessage, isError bool) {
 	if toolUseID == "" {
 		return
 	}
@@ -542,6 +625,174 @@ func (t *Transcript) applyToolResult(toolUseID string, content json.RawMessage, 
 	}
 	t.changed[idx] = true
 	delete(t.pending, toolUseID)
+	t.applyTaskResult(ln, it, toolUseID, isError)
+}
+
+// applyTaskResult folds a tool result's Claude Code metadata into the task list:
+// an Agent / Task call becomes an agent task, a background Bash call a shell
+// task, and a successful TaskStop / KillShell marks its task killed
+// (REQ-WC-016).
+func (t *Transcript) applyTaskResult(ln rawLine, it *Item, toolUseID string, isError bool) {
+	var in struct {
+		Description     string `json:"description"`
+		SubagentType    string `json:"subagent_type"`
+		RunInBackground bool   `json:"run_in_background"`
+		Command         string `json:"command"`
+		TaskID          string `json:"task_id"`
+		ShellID         string `json:"shell_id"`
+	}
+	_ = json.Unmarshal(it.Input, &in)
+
+	switch it.Name {
+	case "Task", "Agent":
+		res := ln.ToolUseResult
+		if res.AgentID == "" {
+			return
+		}
+		background := res.IsAsync || in.RunInBackground
+		it.Agent = &AgentRef{AgentID: res.AgentID, AgentType: in.SubagentType, Background: background}
+		title := res.Description
+		if title == "" {
+			title = in.Description
+		}
+		task := Task{
+			ID:        res.AgentID,
+			Kind:      "agent",
+			ToolUseID: toolUseID,
+			Title:     title,
+			AgentType: in.SubagentType,
+			Status:    "running",
+			Started:   it.At,
+		}
+		if !background {
+			task.Status = "completed"
+			task.Ended = ln.Timestamp
+		}
+		t.addTask(task)
+	case "Bash":
+		if ln.ToolUseResult.BackgroundTaskID == "" {
+			return
+		}
+		title := in.Description
+		if title == "" {
+			title = firstLine(in.Command, maxTaskTitle)
+		}
+		t.addTask(Task{
+			ID:        ln.ToolUseResult.BackgroundTaskID,
+			Kind:      "shell",
+			ToolUseID: toolUseID,
+			Title:     title,
+			Status:    "running",
+			Started:   it.At,
+		})
+	case "TaskStop", "KillShell":
+		if isError {
+			return
+		}
+		id := in.TaskID
+		if id == "" {
+			id = in.ShellID
+		}
+		t.setTaskStatus(id, "killed", "", ln.Timestamp)
+	}
+}
+
+// processQueueOperation reads the task notifications a queue-operation line
+// carries. Other queue operations are not chat items and are ignored
+// (REQ-WC-016).
+func (t *Transcript) processQueueOperation(ln rawLine) {
+	if ln.Operation != "enqueue" || len(ln.Content) == 0 {
+		return
+	}
+	var s string
+	if json.Unmarshal(ln.Content, &s) != nil {
+		return
+	}
+	t.processNotification(ln.Timestamp, s)
+}
+
+// processNotification applies a <task-notification> block: it sets the status,
+// summary and end time of the task the block names, creating a kind-other task
+// for an unknown id. It reports whether s was such a block, so a user line that
+// only carried one adds no chat item. A notification that says the agent is
+// waiting on its own background work leaves the task running.
+func (t *Transcript) processNotification(at, s string) bool {
+	block, ok := extractTag(s, "task-notification")
+	if !ok {
+		return false
+	}
+	id, _ := extractTag(block, "task-id")
+	status, _ := extractTag(block, "status")
+	summary, _ := extractTag(block, "summary")
+	id = strings.TrimSpace(id)
+	status = strings.TrimSpace(status)
+	summary = strings.TrimSpace(summary)
+	if strings.Contains(summary, "is waiting on its own background work") {
+		return true
+	}
+	if status == "" {
+		status = "completed"
+	}
+	if t.setTaskStatus(id, status, summary, at) {
+		return true
+	}
+	if id != "" {
+		t.addTask(Task{ID: id, Kind: "other", Title: summary, Status: status, Summary: summary, Started: at, Ended: at})
+	}
+	return true
+}
+
+// addTask adds or replaces a task by id and trims the list to the newest
+// maxTasks by start time (REQ-WC-016).
+func (t *Transcript) addTask(task Task) {
+	if task.ID != "" {
+		for i := range t.meta.Tasks {
+			if t.meta.Tasks[i].ID == task.ID {
+				t.meta.Tasks[i] = task
+				t.metaChanged = true
+				return
+			}
+		}
+	}
+	t.meta.Tasks = append(t.meta.Tasks, task)
+	t.trimTasks()
+	t.metaChanged = true
+}
+
+// setTaskStatus updates a task the id names, reporting whether it was found.
+// An empty summary keeps the current one.
+func (t *Transcript) setTaskStatus(id, status, summary, at string) bool {
+	if id == "" {
+		return false
+	}
+	for i := range t.meta.Tasks {
+		if t.meta.Tasks[i].ID != id {
+			continue
+		}
+		if summary != "" {
+			t.meta.Tasks[i].Summary = summary
+		}
+		t.meta.Tasks[i].Status = status
+		t.meta.Tasks[i].Ended = at
+		t.metaChanged = true
+		return true
+	}
+	return false
+}
+
+// trimTasks drops the oldest tasks (by start time) until at most maxTasks
+// remain.
+func (t *Transcript) trimTasks() {
+	for len(t.meta.Tasks) > maxTasks {
+		oldest := 0
+		oldestAt := parseTime(t.meta.Tasks[0].Started)
+		for i := 1; i < len(t.meta.Tasks); i++ {
+			if at := parseTime(t.meta.Tasks[i].Started); at.Before(oldestAt) {
+				oldest, oldestAt = i, at
+			}
+		}
+		t.meta.Tasks = append(t.meta.Tasks[:oldest], t.meta.Tasks[oldest+1:]...)
+	}
 }
 
 // addItem stores a new item or replaces an item with the same id in place, and
