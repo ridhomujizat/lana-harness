@@ -46,3 +46,26 @@ describe("root Files tab", () => {
     expect(container.querySelector(".wbg-phone-diff iframe")).not.toBeNull();
   });
 });
+
+describe("figcraftBase", () => {
+  it("reads a repo file against its repo", async () => {
+    const { figcraftBase } = await import("./workbench-root");
+    expect(figcraftBase("/Users/me/hub", { key: "/Users/me/hub/app/d.figcraft", worktree: "/Users/me/hub/app", rel: "d.figcraft" })).toEqual({
+      worktree: "/Users/me/hub/app",
+      path: "d.figcraft",
+    });
+  });
+
+  it("reads a non-git file against the root", async () => {
+    const { figcraftBase } = await import("./workbench-root");
+    expect(figcraftBase("/Users/me/hub", { key: "/Users/me/hub/docs/mockups/x/x.figcraft" })).toEqual({
+      worktree: "/Users/me/hub",
+      path: "docs/mockups/x/x.figcraft",
+    });
+  });
+
+  it("falls back to the file's own folder outside the root", async () => {
+    const { figcraftBase } = await import("./workbench-root");
+    expect(figcraftBase("/Users/me/hub", { key: "/tmp/a/b.figcraft" })).toEqual({ worktree: "/tmp/a", path: "b.figcraft" });
+  });
+});
