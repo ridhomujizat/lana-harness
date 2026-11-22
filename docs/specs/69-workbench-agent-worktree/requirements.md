@@ -87,7 +87,11 @@ Lana's own agents have the same gap. An agent whose runtime is Claude Code (spec
 
 ### Phase 1 — Other agents
 
-- **REQ-WA-050** `lana workbench use` works from any program in a pane, so other agents (omp, Codex) can call it when told to. Giving them the instruction automatically (for example through a global `AGENTS.md`) is out of scope for this spec.
+- **REQ-WA-050** `lana workbench use` works from any program in a pane, so other agents (omp, Codex) can call it when told to. Giving them the instruction automatically is a later phase (below).
+
+### Later — other agents (owner, 2026-11-22)
+
+The owner wants every agent covered eventually, but works with Claude Code only for now. Plan when it is picked up: one adapter per agent, keeping the rule that the instruction appears only in Workbench panes — the agent's own session-start hook gated on `LANA_WORKBENCH_SESSION` where it has one, else a shim earlier on the pane's `PATH` that starts the real binary with an extra-instruction flag. A global instruction file (`~/.codex/AGENTS.md` and the like) is not used, because every terminal would see it. Each agent's hook and flag support must be checked first.
 
 ### Phase 1 — Tests
 
