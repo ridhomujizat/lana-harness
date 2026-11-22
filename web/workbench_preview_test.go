@@ -555,7 +555,7 @@ func TestWorkbenchPreviewHeaderPolicy(t *testing.T) {
 	if state.Code != http.StatusOK {
 		t.Fatalf("state status = %d, body = %q", state.Code, state.Body.String())
 	}
-	want := "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://" + s.Addr() + " wss://" + s.Addr() + "; frame-ancestors 'none'"
+	want := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://" + s.Addr() + " wss://" + s.Addr() + "; frame-ancestors 'none'"
 	if got := state.Header().Get("Content-Security-Policy"); got != want {
 		t.Fatalf("state Content-Security-Policy = %q, want %q", got, want)
 	}

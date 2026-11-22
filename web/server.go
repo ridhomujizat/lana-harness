@@ -23,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/notify"
 	"github.com/ridhomujizat/lana-harness/internal/tailscale"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
+	"github.com/ridhomujizat/lana-harness/internal/workbench/figcraft"
 	"github.com/ridhomujizat/lana-harness/internal/workbench/gitinfo"
 )
 
@@ -117,6 +118,15 @@ type Server struct {
 	workbenchGitRunner *gitinfo.Runner
 	workbenchGitStore  *gitinfo.SettingsStore
 	workbenchGitStatus workbenchGitStatusCache
+	// workbenchFigcraft is the FigCraft viewer service and its settings store
+	// of the /v1/workbench/figcraft routes (spec 67). workbenchFigcraftOnce
+	// builds them on first use so a server without the Workbench never reads
+	// the settings file or looks for the CLI; figcraftOpen is a test hook for
+	// the macOS open call (nil runs the real one).
+	workbenchFigcraftOnce  sync.Once
+	workbenchFigcraft      figcraftBackend
+	workbenchFigcraftStore *figcraft.SettingsStore
+	figcraftOpen           func(ctx context.Context, abs string) error
 	// routerBackend is the Router page and proxy port (spec 37). It is
 	// guarded by routerMu because the proxy reads it on every request.
 	routerBackend  RouterBackend
@@ -528,9 +538,11 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 // terminals with xterm.js, which injects <style> elements (style-src
 // 'unsafe-inline') and opens a WebSocket to the same address (connect-src ws:
 // and wss:, which Safari requires explicitly).
+// img-src allows blob: and data: for images the web UI builds in the page,
+// such as the FigCraft viewer's renders (spec 67).
 func (s *Server) contentSecurityPolicy() string {
 	addr := s.Addr()
-	return "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://" + addr + " wss://" + addr + "; frame-ancestors 'none'"
+	return "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://" + addr + " wss://" + addr + "; frame-ancestors 'none'"
 }
 
 func isAPIPath(path string) bool {

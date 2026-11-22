@@ -131,6 +131,8 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.mux.Handle("GET /v1/workbench/preview/{token}/{name...}", s.checkHost(http.HandlerFunc(s.handleWorkbenchPreviewFile)))
 	// The git routes of spec 66 (REQ-WG-020).
 	s.registerWorkbenchGitRoutes()
+	// The FigCraft viewer routes of spec 67 (REQ-FV-020).
+	s.registerWorkbenchFigcraftRoutes()
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.
