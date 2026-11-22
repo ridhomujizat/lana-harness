@@ -99,6 +99,8 @@ export function useWorkbenchGit({
   const [chosen, setChosen] = useState<string | null>(null);
   const [file, setFile] = useState<{ path: string | null; line?: number }>({ path: null });
   const [external, setExternal] = useState<WorkbenchPreview | null>(null);
+  /* A folder a ⌘+click named: Files opens the tree down to it. */
+  const [reveal, setReveal] = useState<{ worktree: string; dir: string; nonce: number } | null>(null);
   /* Focus mode: only the focused pane shows beside the open panel (owner,
      2026-11-21). Kept per browser. */
   const [focusMode, setFocusMode] = useState(() => readPref("lana.workbench.gitFocus", ["on", "off"] as const, "on") === "on");
@@ -215,6 +217,20 @@ export function useWorkbenchGit({
   /* REQ-WG-063: a ⌘+click lands in Files: inside the pane's worktree as a
      file of the tree, else as an outside preview. */
   const showPreview = (sessionId: string, data: WorkbenchPreview) => {
+    if (data.kind === "dir") {
+      /* A folder opens Files in its own repo, the tree down to the folder,
+         so a file inside it can be picked. */
+      const root = data.root;
+      if (!root) return;
+      setChosen(root);
+      if (pinned) setPinned(root);
+      setExternal(null);
+      setFile({ path: null });
+      setReveal((r) => ({ worktree: root, dir: relativeTo(root, data.path) ?? "", nonce: (r?.nonce ?? 0) + 1 }));
+      pickTab("files");
+      if (!open || motion === "out") setOpenSaved(true);
+      return;
+    }
     const info = gitOf(sessionId);
     if (!pinned) setChosen(info?.worktree ?? null);
     const rel = info ? relativeTo(info.worktree, data.path) : null;
@@ -343,6 +359,7 @@ export function useWorkbenchGit({
         setFile({ path, line });
       }}
       external={external}
+      reveal={reveal && reveal.worktree === shown?.worktree ? reveal : null}
       worktreesTab={worktreesTab}
       focusMode={focusMode}
       onFocusMode={(on) => changeFocusMode(on)}

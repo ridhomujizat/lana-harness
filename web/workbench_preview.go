@@ -118,6 +118,7 @@ type workbenchPreviewResponse struct {
 	Col    int    `json:"col"`
 	URL    string `json:"url"`
 	RawURL string `json:"raw_url"`
+	Root   string `json:"root,omitempty"`
 }
 
 // workbenchPreviewBody is the POST body of REQ-WP-001. dir is the space folder
@@ -131,7 +132,8 @@ type workbenchPreviewBody struct {
 // handleWorkbenchPreview serves POST /v1/workbench/preview (REQ-WP-001): it
 // resolves the link against the session's working directory, the git root and
 // the body's dir, checks the path policy, and answers with the file's kind and
-// a fresh token for the GET route.
+// a fresh token for the GET route. A folder answers with its kind and git root
+// instead, and no token: the client opens the Files panel there.
 func (s *Server) handleWorkbenchPreview(w http.ResponseWriter, r *http.Request) {
 	setPreviewHeaders(w)
 	backend := s.workbenchOrError(w)
@@ -176,7 +178,15 @@ func (s *Server) handleWorkbenchPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	info, err := os.Stat(resolved)
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "not_found", "no such file: "+tried)
+		return
+	}
+	if info.IsDir() {
+		s.previewDirResponse(w, resolved, line, col)
+		return
+	}
+	if !info.Mode().IsRegular() {
 		writeAPIError(w, http.StatusNotFound, "not_found", "no such file: "+tried)
 		return
 	}
@@ -184,10 +194,27 @@ func (s *Server) handleWorkbenchPreview(w http.ResponseWriter, r *http.Request) 
 	s.previewResponse(w, resolved, info.Size(), kind, line, col)
 }
 
+// previewDirResponse writes the spec 61 preview response for a resolved folder
+// (REQ-WP-002): there is no token, so URL and RawURL are empty, and Root is the
+// folder's git root, empty when there is none.
+func (s *Server) previewDirResponse(w http.ResponseWriter, resolved string, line, col int) {
+	writeJSON(w, http.StatusOK, workbenchPreviewResponse{
+		Path: resolved,
+		Name: filepath.Base(resolved),
+		Dir:  resolved,
+		Kind: "dir",
+		Size: 0,
+		Line: line,
+		Col:  col,
+		Root: s.previewGitRootFor(resolved),
+	})
+}
+
 // previewResponse writes the spec 61 preview response for a resolved file
 // (REQ-WP-002): it issues a token for the file's folder and answers with the
-// file's kind, size and token URLs. It is shared by the preview POST and the
-// Workbench git file route (REQ-WG-009), so both answer the same shape.
+// file's kind, size and token URLs, leaving Root empty (it is set for folders
+// only). It is shared by the preview POST and the Workbench git file route
+// (REQ-WG-009), so both answer the same shape.
 func (s *Server) previewResponse(w http.ResponseWriter, resolved string, size int64, kind preview.Kind, line, col int) {
 	token, err := s.previewTokens.issue(filepath.Dir(resolved))
 	if err != nil {
@@ -371,11 +398,11 @@ func withinPreviewDir(root, path string) bool {
 	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-// resolvePreviewLink turns a link into the file it names (REQ-WP-001). A
-// relative link is tried against the session cwd, the git root of that cwd and
-// the body's dir, in order; the first regular file wins. An absolute, ~ or
-// file:// link is tried alone. tried is the cleaned path that was attempted,
-// for the 404 body.
+// resolvePreviewLink turns a link into the file or folder it names
+// (REQ-WP-001). A relative link is tried against the session cwd, the git root
+// of that cwd and the body's dir, in order; the first existing file or folder
+// wins. An absolute, ~ or file:// link is tried alone. tried is the cleaned
+// path that was attempted, for the 404 body.
 func (s *Server) resolvePreviewLink(link, cwd, dir, home string) (path, tried string, line, col int, ok bool) {
 	if rel, isRel := preview.RelativePath(link); isRel {
 		_, line, col = preview.SplitLineCol(link)
@@ -384,7 +411,7 @@ func (s *Server) resolvePreviewLink(link, cwd, dir, home string) (path, tried st
 			if tried == "" {
 				tried = candidate
 			}
-			if isRegularFile(candidate) {
+			if isFileOrDir(candidate) {
 				return candidate, candidate, line, col, true
 			}
 		}
@@ -397,7 +424,7 @@ func (s *Server) resolvePreviewLink(link, cwd, dir, home string) (path, tried st
 	if !ok {
 		return "", "", 0, 0, false
 	}
-	if isRegularFile(p) {
+	if isFileOrDir(p) {
 		return p, p, line, col, true
 	}
 	return "", p, line, col, false
@@ -455,6 +482,16 @@ func gitRoot(dir string) string {
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// isFileOrDir reports whether path is an existing regular file or a folder,
+// the two kinds the preview link resolves to. The stat follows a symlink.
+func isFileOrDir(path string) bool {
+	if isRegularFile(path) {
+		return true
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // previewHomeDir is the home folder the preview policy uses (REQ-WP-003). It
