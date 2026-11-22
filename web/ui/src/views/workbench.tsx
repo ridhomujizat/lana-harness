@@ -69,6 +69,8 @@ import {
   type WbTab,
 } from "./workbench-model";
 import { TermPane, type SendInput } from "./workbench-term";
+import { ChatPane } from "./workbench-chat";
+import { chatSupport, setPaneView, togglePaneView, usePaneView } from "./workbench-chat-view";
 import { prune as pruneTermCache } from "./workbench-term-cache";
 import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
 import { emitGitRootEvent } from "../api/workbench-git";
@@ -639,6 +641,12 @@ function PaneView({
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
+  /* Spec 71: a Claude pane can show its terminal or a chat of the same
+     process. */
+  const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
+  const support = chatSupport(session?.agent);
+  const storedView = usePaneView(id, phone);
+  const view = support === "yes" ? storedView : "terminal";
   /* Spec 66 REQ-WG-071, 075: the pane's worktree, and a warning when another
      agent works in the same one. */
   const git = useWbGit();
@@ -716,6 +724,21 @@ function PaneView({
         ) : null}
         <LanaChip session={session} />
         <RestoredChip session={session} />
+        {support !== "none" ? (
+          <span className="wb-pane-tools wb-view-tools">
+            <button
+              type="button"
+              className={"wb-view-btn" + (view === "chat" ? " is-chat" : "")}
+              disabled={support === "no"}
+              aria-label={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal" : "Show as chat"}
+              data-tip={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal ⇧⌘J" : "Show as chat ⇧⌘J"}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setPaneView(id, view === "chat" ? "terminal" : "chat")}
+            >
+              <Ic name={view === "chat" ? "square-terminal" : "message-square"} size={14} />
+            </button>
+          </span>
+        ) : null}
         <span className={"wb-pane-state wb-pane-state-" + status}>
           <StatusDot status={status} />
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}
@@ -764,8 +787,21 @@ function PaneView({
           </button>
         </span>
       </div>
-      <div className="wb-pane-body">
+      <div className={"wb-pane-body" + (view === "chat" ? " is-chat" : "")}>
+        {session && view === "chat" ? (
+          <div className="wb-chat-host" onMouseDown={() => actions.onFocus(id)}>
+          <ChatPane
+            sessionId={id}
+            session={session}
+            active={view === "chat"}
+            readOnly={access.mode !== "control"}
+            compact={phone}
+            onOpenTerminal={() => setPaneView(id, "terminal")}
+          />
+          </div>
+        ) : null}
         {session ? (
+          <div className="wb-term-host" style={{ width: "100%", height: "100%" }}>
           <TermPane
             key={id + ":" + session.pid + ":" + access.mode}
             sessionId={id}
@@ -778,6 +814,7 @@ function PaneView({
             onOpenFile={actions.onOpenFile}
             sessionSize={{ cols: session.cols, rows: session.rows }}
           />
+          </div>
         ) : (
           <p className="wb-pane-missing">This terminal is gone.</p>
         )}
@@ -2236,6 +2273,10 @@ export function WorkbenchPage() {
       }
       case "rename-tab":
         if (sp && t) openRenameTab(sp.id, t.id);
+        break;
+      case "chat-view":
+        /* Spec 71 REQ-WC-050: ⇧⌘J switches a Claude pane between views. */
+        if (focus && chatSupport(sessionsRef.current[focus]?.agent) === "yes") togglePaneView(focus, readPhone());
         break;
       case "clear":
         if (focus) window.dispatchEvent(new CustomEvent("lana:wb-clear", { detail: focus }));

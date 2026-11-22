@@ -677,6 +677,7 @@ export type WbShortcut =
   | { kind: "tab"; index: number }
   | { kind: "tab-step"; step: 1 | -1 }
   | { kind: "rename-tab" }
+  | { kind: "chat-view" }
   | { kind: "clear" }
   | { kind: "font"; step: 1 | -1 | 0 };
 
@@ -708,6 +709,7 @@ export function workbenchShortcut(e: ShortcutKey): WbShortcut | null {
     if (letter === "d") return { kind: "split", dir: "col" };
     if (letter === "w") return { kind: "close-tab" };
     if (letter === "r") return { kind: "rename-tab" };
+    if (letter === "j") return { kind: "chat-view" };
     if (key === "Enter") return { kind: "zoom" };
     if (code === "BracketLeft" || key === "{") return { kind: "tab-step", step: -1 };
     if (code === "BracketRight" || key === "}") return { kind: "tab-step", step: 1 };
