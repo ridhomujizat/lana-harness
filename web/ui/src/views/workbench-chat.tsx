@@ -79,6 +79,41 @@ function tokens(n: number): string {
   return n >= 1000 ? (n / 1000).toFixed(1) + "k tokens" : n + " tokens";
 }
 
+/* Claude Code can write the same tool_use twice (the second time with an
+   empty input). Keep one item per tool_use_id: the first position, the
+   richest input and the latest status and result. */
+export function dedupeTools(items: ChatItem[]): ChatItem[] {
+  const at = new Map<string, number>();
+  const out: ChatItem[] = [];
+  for (const item of items) {
+    const key = item.tool_use_id;
+    if (!key || (item.kind !== "tool" && item.kind !== "plan" && item.kind !== "question")) {
+      out.push(item);
+      continue;
+    }
+    const i = at.get(key);
+    if (i === undefined) {
+      at.set(key, out.length);
+      out.push(item);
+      continue;
+    }
+    const prev = out[i]!;
+    const richer = (x: ChatItem) => JSON.stringify(x.input ?? {}).length + (x.plan?.length ?? 0) + (x.questions?.length ?? 0);
+    const base = richer(item) > richer(prev) ? item : prev;
+    out[i] = {
+      ...base,
+      id: prev.id,
+      status: item.status && item.status !== "running" ? item.status : prev.status,
+      result: item.result ?? prev.result,
+      state: item.state && item.state !== "pending" ? item.state : prev.state,
+      answered: item.answered || prev.answered,
+      answer: item.answer || prev.answer,
+      agent: item.agent ?? prev.agent,
+    };
+  }
+  return out;
+}
+
 /* Groups the transcript items into what the chat shows (REQ-WC-052). */
 export function toBlocks(items: ChatItem[]): Block[] {
   const out: Block[] = [];
@@ -87,6 +122,14 @@ export function toBlocks(items: ChatItem[]): Block[] {
   for (const item of items) {
     switch (item.kind) {
       case "user":
+        /* Claude Code records an Esc as a user line; show it as a marker. */
+        if (/^\[Request interrupted/.test(item.text || "") && !item.images?.length) {
+          out.push({ type: "divider", item: { ...item, kind: "divider", text: "Interrupted" } });
+        } else {
+          out.push({ type: "user", item });
+        }
+        needHead = true;
+        break;
       case "command":
       case "output":
         out.push({ type: item.kind, item } as Block);
@@ -414,7 +457,8 @@ export function ChatPane(props: ChatPaneProps) {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const blocks = useMemo(() => toBlocks(items), [items]);
+  const view = useMemo(() => dedupeTools(items), [items]);
+  const blocks = useMemo(() => toBlocks(view), [view]);
 
   /* Keep the view pinned to the bottom unless the owner scrolled up. */
   useLayoutEffect(() => {
@@ -446,9 +490,9 @@ export function ChatPane(props: ChatPaneProps) {
   const working = live?.state === "working" || session?.agent_state === "working";
   const blocked = live?.state === "blocked" || session?.agent_state === "blocked";
   const dialog = live?.dialog ?? null;
-  const openQuestion = [...items].reverse().find((i) => i.kind === "question" && !i.answered);
-  const openPlan = [...items].reverse().find((i) => i.kind === "plan" && i.state === "pending");
-  const pendingTool = [...items].reverse().find((i) => i.kind === "tool" && i.status === "running");
+  const openQuestion = [...view].reverse().find((i) => i.kind === "question" && !i.answered);
+  const openPlan = [...view].reverse().find((i) => i.kind === "plan" && i.state === "pending");
+  const pendingTool = [...view].reverse().find((i) => i.kind === "tool" && i.status === "running");
   const mode = live?.mode || meta?.mode || "default";
 
   /* The reply text of each turn, for its copy button. */

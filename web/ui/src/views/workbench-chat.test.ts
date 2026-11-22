@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeItems, type ChatItem } from "../api/workbench-chat";
-import { answerText, toBlocks } from "./workbench-chat";
+import { answerText, dedupeTools, toBlocks } from "./workbench-chat";
 import { modelLabel } from "./workbench-chat-composer";
 
 const u = (id: string, text: string): ChatItem => ({ id, kind: "user", text });
@@ -50,5 +50,21 @@ describe("answerText", () => {
   it("pulls the answers out of the tool result", () => {
     expect(answerText('User has answered your questions: "What is your favorite color?"="Blue". You can now continue.')).toBe("Blue");
     expect(answerText("plain")).toBe("plain");
+  });
+});
+
+describe("dedupeTools", () => {
+  it("merges a repeated tool_use", () => {
+    const out = dedupeTools([
+      { id: "a:0", kind: "plan", tool_use_id: "t1", plan: "# Plan", state: "pending" },
+      { id: "b:0", kind: "plan", tool_use_id: "t1", plan: "", state: "rejected" },
+      { id: "c:0", kind: "tool", tool_use_id: "t2", name: "Bash", input: { command: "ls" }, status: "running" },
+      { id: "d:0", kind: "tool", tool_use_id: "t2", name: "Bash", input: {}, status: "done" },
+    ]);
+    expect(out.map((i) => i.id)).toEqual(["a:0", "c:0"]);
+    expect(out[0]!.plan).toBe("# Plan");
+    expect(out[0]!.state).toBe("rejected");
+    expect(out[1]!.input).toEqual({ command: "ls" });
+    expect(out[1]!.status).toBe("done");
   });
 });
