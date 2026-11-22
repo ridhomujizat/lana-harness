@@ -16,11 +16,16 @@ import (
 const workbenchStopTimeout = 10 * time.Second
 
 // cmdWorkbench runs the Workbench terminal core: `serve` owns the sessions in
-// the foreground, `stop` asks a running core to shut down.
+// the foreground, `stop` asks a running core to shut down, and `hook` is the
+// Claude Code SessionStart hook.
 func cmdWorkbench(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "error: use lana workbench serve|stop")
+		fmt.Fprintln(os.Stderr, "error: use lana workbench serve|stop|hook|use")
 		return 2
+	}
+	if args[0] == "hook" {
+		// The hook never talks to the daemon, so it does not need the home.
+		return cmdWorkbenchHook(args[1:])
 	}
 	home, err := homeDir()
 	if err != nil {

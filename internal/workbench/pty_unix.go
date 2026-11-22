@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	creackpty "github.com/creack/pty"
@@ -20,13 +21,45 @@ type pty struct {
 
 // startPTY runs argv in a new pseudo-terminal of cols×rows.
 func startPTY(path string, argv []string, dir string, env []string, cols, rows int) (*pty, error) {
-	cmd := &exec.Cmd{Path: path, Args: argv, Dir: dir, Env: env}
-	ws := &creackpty.Winsize{Cols: clampSize(cols), Rows: clampSize(rows)}
-	f, err := creackpty.StartWithSize(cmd, ws)
+	p, tty, err := creackpty.Open()
 	if err != nil {
 		return nil, err
 	}
-	return &pty{file: f, cmd: cmd}, nil
+	if err := creackpty.Setsize(p, &creackpty.Winsize{Cols: clampSize(cols), Rows: clampSize(rows)}); err != nil {
+		_ = p.Close()
+		_ = tty.Close()
+		return nil, err
+	}
+	cmd := &exec.Cmd{
+		Path: path, Args: argv, Dir: dir, Env: withWorkbenchTTY(env, tty.Name()),
+		Stdin: tty, Stdout: tty, Stderr: tty,
+		// The child leads a new session and gets the slave as its controlling
+		// terminal, as creack/pty's own Start does (Ctty 0).
+		SysProcAttr: &syscall.SysProcAttr{Setsid: true, Setctty: true},
+	}
+	if err := cmd.Start(); err != nil {
+		_ = p.Close()
+		_ = tty.Close()
+		return nil, err
+	}
+	// The child holds the slave now; the parent keeps only the master, so the
+	// master reads EOF when the program ends.
+	_ = tty.Close()
+	return &pty{file: p, cmd: cmd}, nil
+}
+
+// withWorkbenchTTY returns env with LANA_WORKBENCH_TTY set to tty, replacing
+// any entry the caller passed in: the marker names the pty the program runs on
+// (REQ-WA-001).
+func withWorkbenchTTY(env []string, tty string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); k == "LANA_WORKBENCH_TTY" {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "LANA_WORKBENCH_TTY="+tty)
 }
 
 func (p *pty) read(b []byte) (int, error)  { return p.file.Read(b) }

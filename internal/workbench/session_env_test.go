@@ -47,6 +47,16 @@ func clearEnv(t *testing.T, keys ...string) {
 	}
 }
 
+func TestSessionEnvStripsWorkbenchTTY(t *testing.T) {
+	// A core started from a Workbench terminal inherits the pane's tty marker;
+	// a new terminal must not pass the old value on (REQ-WA-001).
+	t.Setenv("LANA_WORKBENCH_TTY", "/dev/ttys009")
+	env := sessionEnv("s1", nil)
+	if v, found := lookupEnv(env, "LANA_WORKBENCH_TTY"); found {
+		t.Errorf("LANA_WORKBENCH_TTY = %q, want it stripped", v)
+	}
+}
+
 func TestSessionEnvLocale(t *testing.T) {
 	tests := []struct {
 		name string

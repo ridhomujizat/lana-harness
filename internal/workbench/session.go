@@ -281,7 +281,7 @@ func sessionEnv(id string, extra []string) []string {
 		// A core started from inside a Claude Code session inherits its child
 		// markers; a terminal must start clean, like a new window would.
 		if k == "TERM" || k == "COLORTERM" || k == "LANA_WORKBENCH_SESSION" ||
-			k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_CODE_") {
+			k == "LANA_WORKBENCH_TTY" || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_CODE_") {
 			continue
 		}
 		env = append(env, kv)
