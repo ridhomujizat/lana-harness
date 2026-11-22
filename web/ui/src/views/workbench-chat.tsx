@@ -16,6 +16,7 @@ import {
 } from "../api/workbench-chat";
 import { Composer, modelLabel } from "./workbench-chat-composer";
 import { FallbackCard, PermissionCard, PlanCard, QuestionCard, type CardActions } from "./workbench-chat-cards";
+import { BackgroundChip, SubagentRow, TasksContext } from "./workbench-chat-tasks";
 
 /* Spec 71: the Claude Code chat view of a Workbench pane. It reads the
    daemon's chat stream (the transcript plus a mirror of the screen) and is
@@ -51,6 +52,13 @@ type Block =
   | { type: "plan"; item: ChatItem }
   | { type: "divider"; item: ChatItem }
   | { type: "turn_end"; item: ChatItem; text: string };
+
+/* AskUserQuestion results read `…"Question?"="Answer"…`; show the answers. */
+export function answerText(raw: string): string {
+  const picks = [...raw.matchAll(/"[^"]*"="([^"]*)"/g)].map((m) => m[1]);
+  if (picks.length) return picks.join(" · ");
+  return raw.replace(/^User has answered[^:]*:\s*/i, "").slice(0, 160);
+}
 
 function hhmm(at?: string): string {
   if (!at) return "";
@@ -143,9 +151,11 @@ function groupSummary(items: ChatItem[]): string {
   let created = 0;
   let edited = 0;
   let commands = 0;
+  let agents = 0;
   let running = 0;
   for (const t of items) {
-    if (t.name === "Write") created++;
+    if (isAgentTool(t)) agents++;
+    else if (t.name === "Write") created++;
     else if (t.name === "Edit" || t.name === "MultiEdit" || t.name === "NotebookEdit") edited++;
     else if (t.name === "Bash") commands++;
     if (t.status === "running") running++;
@@ -155,6 +165,7 @@ function groupSummary(items: ChatItem[]): string {
   if (created) parts.push(created + " written");
   if (edited) parts.push(edited + " edited");
   if (commands) parts.push(commands + (commands === 1 ? " command" : " commands"));
+  if (agents) parts.push(agents + (agents === 1 ? " subagent" : " subagents"));
   return parts.join(" · ");
 }
 
@@ -177,7 +188,16 @@ function DiffView({ diff }: { diff: { old: string; new: string } }) {
   );
 }
 
+function isAgentTool(item: ChatItem): boolean {
+  return !!item.agent || item.name === "Agent" || item.name === "Task";
+}
+
 function ToolRow({ item }: { item: ChatItem }) {
+  if (isAgentTool(item)) return <SubagentRow item={item} />;
+  return <PlainToolRow item={item} />;
+}
+
+function PlainToolRow({ item }: { item: ChatItem }) {
   const [open, setOpen] = useState(false);
   const s = item.summary;
   const verb = s?.verb || item.name || "Tool";
@@ -299,7 +319,7 @@ const BlockView = memo(function BlockView({ block, sessionId, replyText }: { blo
           <span className="wbc-head-tile" />
           <span className="wbc-head-name">Claude</span>
           <span className="wbc-head-meta">
-            {[modelLabel(block.model), hhmm(block.at)].filter(Boolean).join(" · ")}
+            {[block.model ? modelLabel(block.model) : "", hhmm(block.at)].filter(Boolean).join(" · ")}
           </span>
         </div>
       );
@@ -475,15 +495,23 @@ export function ChatPane(props: ChatPaneProps) {
               ? "The chat appears once the conversation id is known and the first message is in the transcript."
               : "Start claude in the terminal, then switch to Chat."}
           </div>
-          <button type="button" className="wbc-btn" onClick={props.onOpenTerminal}>
-            Open terminal
-          </button>
+          {dialog && dialog.options.length ? (
+            <div className="wbc-empty-card">
+              <PermissionCard dialog={dialog} actions={actions} />
+            </div>
+          ) : (
+            <button type="button" className="wbc-btn" onClick={props.onOpenTerminal}>
+              Open terminal
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
+  const tasks = meta?.tasks ?? [];
   return (
+    <TasksContext.Provider value={{ sessionId, tasks }}>
     <div
       className={"wbc" + (compact ? " is-compact" : "")}
       onDragOver={(e) => {
@@ -547,7 +575,7 @@ export function ChatPane(props: ChatPaneProps) {
                 <div key={key} className="wbc-answered">
                   <Ic name="message-square" size={13} />
                   <span>{b.item.questions?.[0]?.question}</span>
-                  {b.item.answer ? <em>{b.item.answer.replace(/^User has answered[^:]*:\s*/i, "").slice(0, 160)}</em> : null}
+                  {b.item.answer ? <em>{answerText(b.item.answer)}</em> : null}
                 </div>
               );
             }
@@ -604,6 +632,7 @@ export function ChatPane(props: ChatPaneProps) {
         </div>
       ) : null}
       <div className="wbc-dock">
+        <BackgroundChip tasks={tasks} />
         <Composer
           sessionId={sessionId}
           cwd={session?.cwd || session?.dir || ""}
@@ -633,5 +662,6 @@ export function ChatPane(props: ChatPaneProps) {
         ) : null}
       </div>
     </div>
+    </TasksContext.Provider>
   );
 }

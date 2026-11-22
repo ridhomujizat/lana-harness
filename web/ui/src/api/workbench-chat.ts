@@ -46,6 +46,35 @@ export type ChatItemKind =
   | "divider"
   | "turn_end";
 
+export interface ChatAgentRef {
+  agent_id: string;
+  agent_type?: string;
+  background?: boolean;
+}
+
+/* Spec 71 REQ-WC-016: a background shell or a subagent. */
+export interface ChatTask {
+  id: string;
+  kind: "shell" | "agent" | string;
+  tool_use_id?: string;
+  title: string;
+  agent_type?: string;
+  status: "running" | "completed" | "failed" | "killed" | string;
+  summary?: string;
+  started?: string;
+  ended?: string;
+}
+
+export interface ChatAgentDetail {
+  agent_id: string;
+  agent_type?: string;
+  description?: string;
+  model?: string;
+  finished: boolean;
+  steps: number;
+  items: ChatItem[];
+}
+
 export interface ChatItem {
   id: string;
   kind: ChatItemKind;
@@ -68,6 +97,7 @@ export interface ChatItem {
   state?: "pending" | "approved" | "rejected";
   duration_ms?: number;
   output_tokens?: number;
+  agent?: ChatAgentRef;
 }
 
 export interface ChatContext {
@@ -87,6 +117,7 @@ export interface ChatMeta {
   context: ChatContext;
   unknown_lines: number;
   version: string;
+  tasks?: ChatTask[];
 }
 
 export interface ChatDialogOption {
@@ -160,6 +191,15 @@ export function chatModel(id: string, input: { model?: string; effort?: string }
 
 export function chatCommands(id: string): Promise<{ commands: ChatCommand[] }> {
   return request("GET", base(id) + "/commands");
+}
+
+/* Files for the `@` menu: any folder, git or not. */
+export function chatFiles(id: string, q: string): Promise<{ files: string[]; root?: string }> {
+  return request("GET", base(id) + "/files?q=" + encodeURIComponent(q));
+}
+
+export function getChatAgent(id: string, agentId: string): Promise<ChatAgentDetail> {
+  return request("GET", base(id) + "/agents/" + encodeURIComponent(agentId));
 }
 
 export function chatImageURL(id: string, item: string, index: number): string {

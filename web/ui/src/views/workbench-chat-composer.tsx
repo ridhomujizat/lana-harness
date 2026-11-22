@@ -5,6 +5,7 @@ import { uploadWorkbenchDrops } from "../api/workbench";
 import { resolveGitDirs, isGitInfo, searchGitFiles } from "../api/workbench-git";
 import {
   chatCommands,
+  chatFiles,
   chatKeys,
   chatMode,
   chatModel,
@@ -20,7 +21,7 @@ import {
    input on the daemon side. */
 
 export const MODES: { id: ChatMode; label: string; short: string; desc: string; tone: string }[] = [
-  { id: "default", label: "Default", short: "default", desc: "Ask before edits and commands", tone: "" },
+  { id: "default", label: "⏸ Manual", short: "⏸ manual", desc: "Ask before edits and commands", tone: "" },
   { id: "acceptEdits", label: "⏵⏵ Accept edits", short: "⏵⏵ accept edits", desc: "Edit files without asking, still ask for commands", tone: "amber" },
   { id: "plan", label: "⏸ Plan mode", short: "⏸ plan mode", desc: "Plan first, never changes files", tone: "blue" },
   { id: "auto", label: "⏵⏵ Auto mode", short: "⏵⏵ auto mode", desc: "Claude decides, risky actions are still checked", tone: "green" },
@@ -164,29 +165,29 @@ export function Composer(props: ComposerProps) {
   }, [trigger, commands, sessionId]);
 
   useEffect(() => {
-    if (trigger !== "at" || !cwd) return;
+    if (trigger !== "at") return;
     let cancelled = false;
     const run = async () => {
-      let root = worktree;
-      if (!root) {
-        try {
-          const r = await resolveGitDirs([cwd]);
-          const info = r.dirs[cwd];
-          root = isGitInfo(info) ? info.worktree : "";
-          if (!cancelled) setWorktree(root || "-");
-        } catch {
-          root = "-";
-        }
-      }
-      if (!root || root === "-") {
-        if (!cancelled) setFiles([]);
-        return;
-      }
       try {
-        const r = await searchGitFiles(root, query);
-        if (!cancelled) setFiles(r.files || []);
+        const r = await chatFiles(sessionId, query);
+        if (!cancelled) {
+          setFiles(r.files || []);
+          setWorktree(r.root || "");
+        }
       } catch {
-        if (!cancelled) setFiles([]);
+        /* An older daemon without the route: fall back to the git search. */
+        try {
+          const res = await resolveGitDirs([cwd]);
+          const info = res.dirs[cwd];
+          const root = isGitInfo(info) ? info.worktree : "";
+          const r = root ? await searchGitFiles(root, query) : { files: [] };
+          if (!cancelled) {
+            setFiles(r.files || []);
+            setWorktree(root || "-");
+          }
+        } catch {
+          if (!cancelled) setFiles([]);
+        }
       }
     };
     const t = window.setTimeout(run, 80);
@@ -194,7 +195,7 @@ export function Composer(props: ComposerProps) {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [trigger, query, cwd, worktree]);
+  }, [trigger, query, cwd, sessionId]);
 
   const entries: MenuEntry[] = useMemo(() => {
     if (trigger === "slash") {
@@ -372,7 +373,7 @@ export function Composer(props: ComposerProps) {
           <div className="wbc-bigmenu-list">
             {flat.length === 0 ? (
               <div className="wbc-bigmenu-empty">
-                {trigger === "slash" ? (commands ? "No command matches" : "Loading commands…") : worktree === "-" ? "This folder is not a git repo" : "No file matches"}
+                {trigger === "slash" ? (commands ? "No command matches" : "Loading commands…") : "No file matches"}
               </div>
             ) : (
               sections.map((s) => (

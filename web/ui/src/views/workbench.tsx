@@ -1114,6 +1114,12 @@ function PhoneWorkbench(props: PhoneProps) {
   const claimRef = useRef<(() => void) | null>(null);
   const [owner, setOwner] = useState(true);
   const transformRef = useRef<((data: string) => string) | null>(null);
+  /* Spec 71 D2: a Claude pane opens in Chat on a phone. */
+  const phoneIds = tab ? tabSessions(tab) : [];
+  const phoneCurrent = tab && tab.focus && phoneIds.includes(tab.focus) ? tab.focus : phoneIds[0];
+  const phoneSupport = chatSupport(phoneCurrent ? sessions[phoneCurrent]?.agent : undefined);
+  const phoneStored = usePaneView(phoneCurrent || "", true);
+  const phoneView = phoneSupport === "yes" ? phoneStored : "terminal";
   useEffect(() => {
     transformRef.current = ctrl
       ? (data) => {
@@ -1190,6 +1196,17 @@ function PhoneWorkbench(props: PhoneProps) {
             <StatusDot status={counts.blocked ? "blocked" : counts.working ? "working" : "idle"} /> {summary}
           </span>
         </div>
+        {phoneSupport !== "none" && current ? (
+          <button
+            type="button"
+            className={"wb-icon-btn wb-icon-btn-lg wb-view-btn" + (phoneView === "chat" ? " is-chat" : "")}
+            disabled={phoneSupport === "no"}
+            aria-label={phoneView === "chat" ? "Show the terminal" : "Show as chat"}
+            onClick={() => setPaneView(current, phoneView === "chat" ? "terminal" : "chat")}
+          >
+            <Ic name={phoneView === "chat" ? "square-terminal" : "message-square"} size={18} />
+          </button>
+        ) : null}
         <button type="button" className="wbg-toggle wbg-toggle-lg" aria-label="Files and changes" onClick={props.onChanges}>
           <Ic name="git-compare" size={18} />
           {props.changeCount ? <span className="wbg-badge">{props.changeCount}</span> : null}
@@ -1271,7 +1288,20 @@ function PhoneWorkbench(props: PhoneProps) {
               <b>Fit to this screen</b>
             </button>
           ) : null}
-          <div className="wb-phone-term">
+          <div className={"wb-phone-term" + (phoneView === "chat" ? " is-chat" : "")}>
+            {session && current && phoneView === "chat" ? (
+              <div className="wb-chat-host">
+                <ChatPane
+                  sessionId={current}
+                  session={session}
+                  active
+                  readOnly={access.mode !== "control"}
+                  compact
+                  onOpenTerminal={() => setPaneView(current, "terminal")}
+                />
+              </div>
+            ) : null}
+            <div className="wb-term-host" style={{ width: "100%", height: "100%" }}>
             <TermPane
               key={current + ":" + (session?.pid ?? 0) + ":" + access.mode}
               sessionId={current}
@@ -1287,8 +1317,9 @@ function PhoneWorkbench(props: PhoneProps) {
               onOwnerChange={setOwner}
               onOpenFile={props.onOpenFile}
             />
+            </div>
           </div>
-          {status === "exited" ? (
+          {phoneView === "chat" && status !== "exited" ? null : status === "exited" ? (
             <div className="wb-phone-bar">
               <div>
                 <b>Process exited {session?.exit_code ?? 0}</b>
