@@ -12,6 +12,7 @@ import {
 import { Markdown } from "../lib/markdown";
 import { Button, IconButton, Modal, Seg } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
+import { ZoomImage } from "./zoom-image";
 
 /* REQ-CHF-002..REQ-CHF-005: the files of an owner message. Files sit above the
    text bubble as cards; images stay thumbnails. A stored file's card opens a
@@ -727,15 +728,14 @@ export function ImageViewer({
             <Ic name="chevron-left" size={22} />
           </button>
         ) : null}
-        <img
-          className="iv-img"
+        <ZoomImage
           key={image.key}
           src={src}
           alt={image.caption || image.name}
-          onLoad={(event) => {
-            const img = event.currentTarget;
-            setDims({ key: image.key, text: img.naturalWidth + " × " + img.naturalHeight });
-          }}
+          imgClassName="iv-img"
+          keys
+          onBackdrop={onClose}
+          onLoad={(img) => setDims({ key: image.key, text: img.naturalWidth + " × " + img.naturalHeight })}
         />
         {images.length > 1 ? (
           <button
@@ -767,7 +767,7 @@ export function ImageViewer({
         </div>
       ) : null}
       <p className="iv-hint">
-        {(index + 1) + " of " + images.length + (images.length > 1 ? " · ← → to move" : "") + " · Esc to close"}
+        {(index + 1) + " of " + images.length + (images.length > 1 ? " · ← → to move" : "") + " · pinch or ⌘ scroll to zoom · Esc to close"}
       </p>
     </div>,
     document.body

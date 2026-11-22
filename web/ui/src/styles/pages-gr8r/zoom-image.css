@@ -1,0 +1,134 @@
+/* ZoomImage (views/zoom-image.tsx): an image that zooms and pans, with a
+   floating toolbar. Used in Workbench Files and the chat image viewer. */
+
+.zi {
+  position: relative;
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  cursor: zoom-in;
+}
+.zi.is-pannable {
+  cursor: grab;
+}
+.zi.is-pannable:active {
+  cursor: grabbing;
+}
+.zi .zi-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  max-height: none;
+  transform-origin: 0 0;
+  will-change: transform;
+  -webkit-user-drag: none;
+}
+.zi-note {
+  margin: 0;
+  padding: 24px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.zi-bar {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+  cursor: default;
+  opacity: 0.86;
+  transition: opacity 0.15s ease;
+}
+.zi:hover .zi-bar,
+.zi-bar:focus-within {
+  opacity: 1;
+}
+.zi-btn {
+  display: inline-grid;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.zi-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.zi-btn.is-on {
+  color: var(--violet);
+}
+.zi-pct {
+  min-width: 48px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.zi-txt {
+  font-family: var(--mono);
+}
+.zi-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+/* Inside the dark full-screen viewer the toolbar goes dark too. */
+.iv .zi-bar {
+  border-color: #4a4a52;
+  background: rgb(24 24 30 / 0.9);
+}
+.iv .zi-btn {
+  color: #c9c9d1;
+}
+.iv .zi-btn:hover {
+  background: #2c2c34;
+  color: #fff;
+}
+.iv .zi-sep {
+  background: #4a4a52;
+}
+.iv-stage.zi-stage,
+.iv-stage:has(> .zi) {
+  padding: 0;
+}
+.iv-stage:has(> .zi) .iv-nav {
+  z-index: 1;
+}
+
+/* Workbench Files: the image fills the viewer under a checkerboard so
+   transparent pixels show. */
+.wbg-image {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  background-color: var(--surface-2);
+  background-image:
+    linear-gradient(45deg, var(--surface-3) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--surface-3) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--surface-3) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--surface-3) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
