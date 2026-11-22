@@ -2375,3 +2375,70 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-sheet.is-full {
 .is-sheet-dragging {
   transition: none !important;
 }
+
+/* Phone tab strip and tab sheet tidy (owner, 2026-11-22). */
+
+/* The tab count sits flat on the strip like the chips: no button fill, and
+   the focus ring goes on the box, not around the whole strip cell. */
+.wb-strip-count {
+  height: auto;
+  padding: 0 12px;
+  border-radius: 0;
+  background: transparent;
+}
+
+.wb-strip-count span {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.wb-strip-count:focus-visible {
+  outline: none;
+}
+
+.wb-strip-count:focus-visible span {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+/* Chips share one height so the active pill and the count line up. */
+.wb-chip {
+  height: 32px;
+}
+
+/* Two equal card columns: a long tab title truncates instead of widening
+   its column and pushing the second card off the sheet. */
+.wb-sheet {
+  overflow-x: hidden;
+}
+
+.wb-sheet-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wb-card-wrap {
+  min-width: 0;
+}
+
+.wb-sheet .wb-card-foot > span:first-child {
+  flex: 1;
+}
+
+/* The close button is a small quiet circle centred on the preview strip. */
+.wb-sheet .wb-card-x {
+  top: 11px;
+  right: 10px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--wb-term-dim, #c9c5bd);
+}
+
+.wb-sheet .wb-card-x:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
