@@ -3,15 +3,20 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/internal/workbench"
 	"github.com/ridhomujizat/lana-harness/internal/workbench/claudechat"
+	"github.com/ridhomujizat/lana-harness/internal/workbench/gitinfo"
 )
 
 // Spec 71: the Claude Code chat view of a Workbench pane. The conversation is
@@ -136,6 +141,7 @@ func (s *Server) registerWorkbenchChatRoutes() {
 	s.Handle("POST /v1/workbench/sessions/{id}/chat/mode", http.HandlerFunc(s.handleWorkbenchChatMode))
 	s.Handle("POST /v1/workbench/sessions/{id}/chat/model", http.HandlerFunc(s.handleWorkbenchChatModel))
 	s.Handle("GET /v1/workbench/sessions/{id}/chat/commands", http.HandlerFunc(s.handleWorkbenchChatCommands))
+	s.Handle("GET /v1/workbench/sessions/{id}/chat/files", http.HandlerFunc(s.handleWorkbenchChatFiles))
 	s.Handle("GET /v1/workbench/sessions/{id}/chat/image", http.HandlerFunc(s.handleWorkbenchChatImage))
 	s.Handle("GET /v1/workbench/sessions/{id}/chat/agents/{agent_id}", http.HandlerFunc(s.handleWorkbenchChatAgent))
 }
@@ -508,6 +514,237 @@ func (s *Server) handleWorkbenchChatCommands(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, struct {
 		Commands []claudechat.Command `json:"commands"`
 	}{Commands: commands})
+}
+
+// chatFilesTTL is how long the walked file list of a root folder is reused
+// (REQ-WC-055). It is a package var so tests can shorten it.
+var chatFilesTTL = 10 * time.Second
+
+const (
+	// chatFilesLimit caps the files a query returns (REQ-WC-055).
+	chatFilesLimit = 50
+	// chatFilesMaxDepth is how deep a non-git root is walked (REQ-WC-055).
+	chatFilesMaxDepth = 6
+	// chatFilesMaxEntries caps how many entries one walk visits (REQ-WC-055).
+	chatFilesMaxEntries = 20000
+)
+
+// chatFilesCacheMu guards chatFilesCache. chatFilesCache keeps the walked file
+// list of each root folder for chatFilesTTL, so the `@` menu does not walk the
+// tree on every keystroke (REQ-WC-055).
+var (
+	chatFilesCacheMu sync.Mutex
+	chatFilesCache   = map[string]chatFilesEntry{}
+)
+
+// chatFilesEntry is one cached walk: the root's list and when it was stored.
+type chatFilesEntry struct {
+	files []string
+	at    time.Time
+}
+
+// chatFilesBody is the GET …/chat/files answer (REQ-WC-055). Files is never
+// null; Root is the folder the list was taken from.
+type chatFilesBody struct {
+	Files []string `json:"files"`
+	Root  string   `json:"root"`
+}
+
+// handleWorkbenchChatFiles answers GET …/chat/files (REQ-WC-055): the files of
+// the session's folder for the `@` menu, whether that folder is a git
+// repository or not.
+func (s *Server) handleWorkbenchChatFiles(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.chatSession(w, r)
+	if !ok {
+		return
+	}
+	root := chatSessionRoot(sess, chatHomeDir())
+	if root == "" {
+		writeChatFiles(w, []string{}, root)
+		return
+	}
+	// The git runner's resolve checks the spec 61 path policy and tells us
+	// whether the folder sits in a repository (REQ-WC-055).
+	runner, _ := s.workbenchGit()
+	info, err := runner.Resolve(r.Context(), root)
+	switch {
+	case err == nil:
+		// Inside a repository: reuse the spec 66 search over its worktree.
+		files, serr := runner.Search(r.Context(), info.Worktree, r.URL.Query().Get("q"))
+		if serr != nil {
+			s.writeWorkbenchGitError(w, serr)
+			return
+		}
+		writeChatFiles(w, files, root)
+	case errors.Is(err, gitinfo.ErrForbiddenPath):
+		writeAPIError(w, http.StatusForbidden, "forbidden_path", "the path is not allowed")
+	default:
+		// Outside any repository, or the check could not run: walk the folder
+		// itself and match the query against what it holds.
+		writeChatFiles(w, matchChatFiles(s.chatFilesWalk(root), r.URL.Query().Get("q")), root)
+	}
+}
+
+// writeChatFiles writes the …/chat/files answer, keeping Files an empty array
+// rather than null.
+func writeChatFiles(w http.ResponseWriter, files []string, root string) {
+	if files == nil {
+		files = []string{}
+	}
+	writeJSON(w, http.StatusOK, chatFilesBody{Files: files, Root: root})
+}
+
+// chatSessionRoot is the folder the `@` menu lists (REQ-WC-055): the located
+// conversation cwd, else the session's cwd, else its dir.
+func chatSessionRoot(sess workbench.Session, home string) string {
+	root := sess.Cwd
+	if root == "" {
+		root = sess.Dir
+	}
+	if conv, found := chatLocate(sess.PID, home); found && conv.Cwd != "" {
+		root = conv.Cwd
+	}
+	return root
+}
+
+// chatFilesWalk returns the cached walk of a root folder, or walks it and caches
+// the result for chatFilesTTL (REQ-WC-055).
+func (s *Server) chatFilesWalk(root string) []string {
+	key := filepath.Clean(root)
+	now := s.nowTime()
+	chatFilesCacheMu.Lock()
+	entry, ok := chatFilesCache[key]
+	chatFilesCacheMu.Unlock()
+	if ok && now.Sub(entry.at) < chatFilesTTL {
+		return entry.files
+	}
+	files := walkChatFiles(root)
+	chatFilesCacheMu.Lock()
+	chatFilesCache[key] = chatFilesEntry{files: files, at: now}
+	chatFilesCacheMu.Unlock()
+	return files
+}
+
+// walkChatFiles lists a non-git root folder (REQ-WC-055): paths use "/"
+// separators, folders carry a trailing "/", the hidden and vendor folders are
+// left out, and the walk stops after chatFilesMaxDepth levels or
+// chatFilesMaxEntries entries.
+func walkChatFiles(root string) []string {
+	files := []string{}
+	visited := 0
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		if visited >= chatFilesMaxEntries {
+			return filepath.SkipAll
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		depth := strings.Count(rel, "/") + 1
+		if d.IsDir() {
+			if depth > chatFilesMaxDepth || chatFilesSkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			visited++
+			files = append(files, rel+"/")
+			return nil
+		}
+		if depth > chatFilesMaxDepth {
+			return nil
+		}
+		visited++
+		files = append(files, rel)
+		return nil
+	})
+	return files
+}
+
+// chatFilesSkipDir reports whether a folder is left out of the walk
+// (REQ-WC-055): a hidden folder, or one of the vendor and build folders.
+func chatFilesSkipDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "node_modules", "dist", "build", "vendor", "target", "__pycache__":
+		return true
+	}
+	return false
+}
+
+// matchChatFiles ranks a walked list for a query (REQ-WC-055). An empty query
+// returns the first chatFilesLimit paths in order; any other is a
+// case-insensitive subsequence match, with a base-name substring hit first and
+// then the shorter path.
+func matchChatFiles(entries []string, query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		out := append([]string(nil), entries...)
+		sort.Strings(out)
+		if len(out) > chatFilesLimit {
+			out = out[:chatFilesLimit]
+		}
+		return out
+	}
+	lower := strings.ToLower(query)
+	type hit struct {
+		path string
+		base bool
+	}
+	hits := []hit{}
+	for _, entry := range entries {
+		if !chatSubsequence(entry, lower) {
+			continue
+		}
+		hits = append(hits, hit{
+			path: entry,
+			base: strings.Contains(strings.ToLower(filepath.Base(entry)), lower),
+		})
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		a, b := hits[i], hits[j]
+		if a.base != b.base {
+			return a.base
+		}
+		if len(a.path) != len(b.path) {
+			return len(a.path) < len(b.path)
+		}
+		return a.path < b.path
+	})
+	if len(hits) > chatFilesLimit {
+		hits = hits[:chatFilesLimit]
+	}
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.path
+	}
+	return out
+}
+
+// chatSubsequence reports whether the lowercased query is a subsequence of the
+// path, ignoring case (REQ-WC-055).
+func chatSubsequence(path, query string) bool {
+	p := strings.ToLower(path)
+	i := 0
+	for j := 0; j < len(p) && i < len(query); j++ {
+		if p[j] == query[i] {
+			i++
+		}
+	}
+	return i == len(query)
 }
 
 // handleWorkbenchChatImage answers GET …/chat/image (REQ-WC-036).

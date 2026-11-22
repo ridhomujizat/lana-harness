@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -827,4 +830,166 @@ func TestWorkbenchChatUnknownSession(t *testing.T) {
 
 	rr = workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions/missing/chat/keys", `{"keys":["enter"]}`, cookie, csrf)
 	assertAuthError(t, rr, http.StatusNotFound, "not_found")
+}
+
+// newChatFilesServer returns a logged-in server whose preview policy allows a
+// resolved temp tree, so the chat files route can walk it, and root, that tree.
+// The shared walk cache is cleared so a test never reads another test's root.
+func newChatFilesServer(t *testing.T) (*Server, *http.Cookie, string) {
+	t.Helper()
+	s, cookie, _ := newWorkbenchServer(t)
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.previewHome = home
+	s.previewTemps = []string{root}
+	chatFilesCacheMu.Lock()
+	chatFilesCache = map[string]chatFilesEntry{}
+	chatFilesCacheMu.Unlock()
+	return s, cookie, root
+}
+
+// setChatFilesSession installs a fake backend with one Claude session at cwd.
+func setChatFilesSession(s *Server, id, cwd string) *fakeWorkbench {
+	fake := newFakeWorkbench()
+	fake.sessions = []workbench.Session{{ID: id, Agent: "claude", Cwd: cwd}}
+	s.SetWorkbench(fake)
+	return fake
+}
+
+// chatFilesGet sends an authenticated GET to the chat files route and decodes
+// its body.
+func chatFilesGet(t *testing.T, s *Server, cookie *http.Cookie, id, q string) (*httptest.ResponseRecorder, chatFilesBody) {
+	t.Helper()
+	target := "/v1/workbench/sessions/" + id + "/chat/files?q=" + url.QueryEscape(q)
+	rr := workbenchRequest(s, http.MethodGet, target, "", cookie, "")
+	var body chatFilesBody
+	if rr.Code == http.StatusOK {
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+		}
+	}
+	return rr, body
+}
+
+func TestWorkbenchChatFilesWalk(t *testing.T) {
+	stubChatLocate(t, claudechat.Conversation{}, false)
+	s, cookie, root := newChatFilesServer(t)
+	cwd := filepath.Join(root, "proj")
+	writePreviewFile(t, filepath.Join(cwd, "a.txt"), "a")
+	writePreviewFile(t, filepath.Join(cwd, "src", "main.go"), "package main")
+	writePreviewFile(t, filepath.Join(cwd, "src", "sub", "deep.txt"), "deep")
+	writePreviewFile(t, filepath.Join(cwd, "node_modules", "pkg.js"), "x")
+	writePreviewFile(t, filepath.Join(cwd, "dist", "out.js"), "x")
+	writePreviewFile(t, filepath.Join(cwd, ".hidden", "x.txt"), "x")
+	setChatFilesSession(s, "abc", cwd)
+
+	rr, body := chatFilesGet(t, s, cookie, "abc", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if body.Root != cwd {
+		t.Fatalf("root = %q, want %q", body.Root, cwd)
+	}
+	want := []string{"a.txt", "src/", "src/main.go", "src/sub/", "src/sub/deep.txt"}
+	if !reflect.DeepEqual(body.Files, want) {
+		t.Fatalf("files = %v, want %v", body.Files, want)
+	}
+
+	// A query that matches nothing answers an empty list, never null.
+	rr, none := chatFilesGet(t, s, cookie, "abc", "zzz")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("no-match status = %d", rr.Code)
+	}
+	if none.Files == nil || len(none.Files) != 0 {
+		t.Fatalf("no-match files = %#v, want an empty non-null list", none.Files)
+	}
+	if !strings.Contains(rr.Body.String(), `"files":[]`) {
+		t.Fatalf("no-match body = %q, want files []", rr.Body.String())
+	}
+}
+
+func TestWorkbenchChatFilesQueryRanking(t *testing.T) {
+	stubChatLocate(t, claudechat.Conversation{}, false)
+	s, cookie, root := newChatFilesServer(t)
+	cwd := filepath.Join(root, "proj")
+	writePreviewFile(t, filepath.Join(cwd, "src", "main.go"), "x")
+	writePreviewFile(t, filepath.Join(cwd, "m", "a", "i", "n.txt"), "x")
+	writePreviewFile(t, filepath.Join(cwd, "other.txt"), "x")
+	setChatFilesSession(s, "abc", cwd)
+
+	// The base-name substring hit ranks before the subsequence-only hit.
+	rr, body := chatFilesGet(t, s, cookie, "abc", "main")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	want := []string{"src/main.go", "m/a/i/n.txt"}
+	if !reflect.DeepEqual(body.Files, want) {
+		t.Fatalf("files = %v, want %v", body.Files, want)
+	}
+
+	// The match ignores case.
+	_, upper := chatFilesGet(t, s, cookie, "abc", "MAIN")
+	if !reflect.DeepEqual(upper.Files, want) {
+		t.Fatalf("uppercase files = %v, want %v", upper.Files, want)
+	}
+}
+
+func TestWorkbenchChatFilesCache(t *testing.T) {
+	stubChatLocate(t, claudechat.Conversation{}, false)
+	s, cookie, root := newChatFilesServer(t)
+	cwd := filepath.Join(root, "proj")
+	writePreviewFile(t, filepath.Join(cwd, "cacheme.txt"), "x")
+	setChatFilesSession(s, "abc", cwd)
+
+	_, body := chatFilesGet(t, s, cookie, "abc", "cacheme")
+	if !reflect.DeepEqual(body.Files, []string{"cacheme.txt"}) {
+		t.Fatalf("files = %v, want the walked entry", body.Files)
+	}
+
+	// Removing the file does not change the answer while the walk is cached.
+	if err := os.Remove(filepath.Join(cwd, "cacheme.txt")); err != nil {
+		t.Fatal(err)
+	}
+	_, again := chatFilesGet(t, s, cookie, "abc", "cacheme")
+	if !reflect.DeepEqual(again.Files, []string{"cacheme.txt"}) {
+		t.Fatalf("cached files = %v, want the stale entry", again.Files)
+	}
+}
+
+func TestWorkbenchChatFilesGitRepo(t *testing.T) {
+	stubChatLocate(t, claudechat.Conversation{}, false)
+	s, cookie, root := newChatFilesServer(t)
+	repo := filepath.Join(root, "repo")
+	gitRepo(t, repo)
+	gitWriteFile(t, filepath.Join(repo, "src", "main.go"), []byte("package main\n"))
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "add main")
+	setChatFilesSession(s, "abc", repo)
+
+	rr, body := chatFilesGet(t, s, cookie, "abc", "main")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if body.Root != repo {
+		t.Fatalf("root = %q, want %q", body.Root, repo)
+	}
+	if !reflect.DeepEqual(body.Files, []string{"src/main.go"}) {
+		t.Fatalf("files = %v, want the tracked match", body.Files)
+	}
+}
+
+func TestWorkbenchChatFilesForbidden(t *testing.T) {
+	stubChatLocate(t, claudechat.Conversation{}, false)
+	s, cookie, _ := newChatFilesServer(t)
+	forbidden := t.TempDir()
+	setChatFilesSession(s, "abc", forbidden)
+
+	rr, _ := chatFilesGet(t, s, cookie, "abc", "")
+	assertAuthError(t, rr, http.StatusForbidden, "forbidden_path")
 }
