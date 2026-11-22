@@ -1704,11 +1704,7 @@ export function WorkbenchPage() {
         });
       })
       .then((data) => {
-        if (data.kind === "dir" && !data.root) {
-          /* Files shows git repos only; a folder outside one has no tree. */
-          setPreviewNotice(capitalize(data.path.replace(/^\/(?:Users|home)\/[^/]+/, "~")) + " is a folder outside any git repo.");
-          return;
-        }
+        /* A folder outside any git repo opens as a plain tree in Files. */
         setPreviewNotice("");
         showPreviewRef.current(sessionId, data);
       })

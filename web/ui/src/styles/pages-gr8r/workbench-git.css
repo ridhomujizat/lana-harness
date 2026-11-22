@@ -712,6 +712,19 @@
   font-size: 12px;
 }
 
+/* A ⌘+clicked folder outside git: its path, cut at the start of the line. */
+.wbg-summary-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
 .wbg-commit {
   display: flex;
   align-items: center;

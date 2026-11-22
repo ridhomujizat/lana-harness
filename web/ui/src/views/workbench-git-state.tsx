@@ -105,6 +105,8 @@ export function useWorkbenchGit({
   const [chosen, setChosen] = useState<string | null>(null);
   const [file, setFile] = useState<{ path: string | null; line?: number }>({ path: null });
   const [external, setExternal] = useState<WorkbenchPreview | null>(null);
+  /* A ⌘+clicked folder outside git and the file open in it. */
+  const [outside, setOutside] = useState<{ dir: string; file: string | null } | null>(null);
   /* A folder a ⌘+click named: Files opens the tree down to it. */
   const [reveal, setReveal] = useState<{ worktree: string; dir: string; nonce: number } | null>(null);
   /* Focus mode: only the focused pane shows beside the open panel (owner,
@@ -266,6 +268,16 @@ export function useWorkbenchGit({
   /* REQ-WG-063: a ⌘+click lands in Files: inside the pane's worktree as a
      file of the tree, else as an outside preview. */
   const showPreview = (sessionId: string, data: WorkbenchPreview) => {
+    if (data.kind === "dir" && !data.root) {
+      /* A folder outside any git repo (an agent's /tmp plan folder, say)
+         opens as a plain tree; its files read without git. */
+      setExternal(null);
+      setOutside({ dir: data.path, file: null });
+      pickTab("files");
+      if (!open || motion === "out") setOpenSaved(true);
+      return;
+    }
+    setOutside(null);
     if (data.kind === "dir") {
       /* A folder opens Files in its own repo, the tree down to the folder,
          so a file inside it can be picked. */
@@ -452,6 +464,16 @@ export function useWorkbenchGit({
         setFile({ path, line });
       }}
       external={external}
+      outside={
+        outside
+          ? {
+              dir: outside.dir,
+              file: outside.file,
+              onFile: (p) => setOutside((o) => (o ? { ...o, file: p } : o)),
+              onClose: () => setOutside(null),
+            }
+          : null
+      }
       reveal={reveal && reveal.worktree === shown?.worktree ? reveal : null}
       worktreesTab={worktreesTab}
       focusMode={focusMode}
