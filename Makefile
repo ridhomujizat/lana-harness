@@ -68,9 +68,16 @@ clean:
 # binary at Contents/MacOS/lana (spec #52), so every macOS surface shows the
 # lana icon. The menu bar app is a separate Swift package under
 # apps/macos/LanaMenu built with the Xcode toolchain, so the Go build stays
-# CGO-free (ADR 0013) and `make build` never needs Swift. The bundle is ad-hoc
-# signed. Inside `nix develop` the Nix SDK variables are cleared for swift so
-# the Xcode SDK is used.
+# CGO-free (ADR 0013) and `make build` never needs Swift. The bundle is signed
+# with CODESIGN_IDENTITY. Inside `nix develop` the Nix SDK variables are cleared
+# for swift so the Xcode SDK is used.
+#
+#   CODESIGN_IDENTITY  the signing identity: "-" (default) is ad-hoc. A
+#              keychain identity such as "Apple Development: Name (TEAMID)"
+#              gives the daemon binary a stable code identity
+#              (<BUNDLE_ID>.daemon), so macOS privacy grants (Documents, Music,
+#              Full Disk Access) survive updates. Self-update signs a new
+#              binary with the identity it finds on the installed bundle.
 #
 #   BUNDLE_ID  the bundle identifier (default dev.lana.menubar; a test build
 #              takes another one so it never shares the installed app's
@@ -97,6 +104,7 @@ MACOS_PKG := apps/macos/LanaMenu
 MACOS_APP := $(DIST)/$(APP_FILE).app
 MACOS_SHORT_VERSION := $(shell echo '$(VERSION)' | sed 's/-.*//')
 LANA_BIN ?=
+CODESIGN_IDENTITY ?= -
 SWIFT ?= env -u SDKROOT -u DEVELOPER_DIR -u NIX_CFLAGS_COMPILE -u NIX_LDFLAGS -u MACOSX_DEPLOYMENT_TARGET -u CC -u CXX -u LD /usr/bin/xcrun swift
 
 macos-app:
@@ -125,8 +133,8 @@ macos-app:
 		rm -r "$(DIST)/.lana-iconset"; \
 	else echo "macos-app: iconutil not found; the app has no icon"; fi
 	# Sign the nested daemon binary first, then the bundle around it.
-	codesign -s - --force "$(MACOS_APP)/Contents/MacOS/lana"
-	codesign -s - --force "$(MACOS_APP)"
+	codesign -s "$(CODESIGN_IDENTITY)" -i "$(BUNDLE_ID).daemon" --force "$(MACOS_APP)/Contents/MacOS/lana"
+	codesign -s "$(CODESIGN_IDENTITY)" --force "$(MACOS_APP)"
 	codesign --verify --strict "$(MACOS_APP)"
 	@echo "built $(MACOS_APP) ($(VERSION), $(BUNDLE_ID), $(VARIANT))"
 
