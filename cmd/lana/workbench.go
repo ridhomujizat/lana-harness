@@ -50,6 +50,8 @@ func cmdWorkbench(args []string) int {
 			return fail(err, 1)
 		}
 		return 0
+	case "use":
+		return cmdWorkbenchUse(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown workbench command: %s\n", args[0])
 		return 2
