@@ -40,10 +40,10 @@ Identifier=dev.lana.menubar
 Format=app bundle with Mach-O thin (arm64)
 CodeDirectory v=20400 size=12345 flags=0x0(none) hashes=380+3 location=embedded
 Signature size=4800
-Authority=Apple Development: Name (7YK57ZPV98)
+Authority=Apple Development: Name (ABCDE12345)
 Authority=Apple Worldwide Developer Relations Certification Authority
 Authority=Apple Root CA
-TeamIdentifier=7YK57ZPV98
+TeamIdentifier=ABCDE12345
 `
 
 // fakeCodesign records the codesign invocations and answers them with fn.
@@ -192,8 +192,8 @@ func TestParseSignature(t *testing.T) {
 	if identifier != "dev.lana.menubar" {
 		t.Errorf("identifier = %q, want %q", identifier, "dev.lana.menubar")
 	}
-	if authority != "Apple Development: Name (7YK57ZPV98)" {
-		t.Errorf("authority = %q, want %q", authority, "Apple Development: Name (7YK57ZPV98)")
+	if authority != "Apple Development: Name (ABCDE12345)" {
+		t.Errorf("authority = %q, want %q", authority, "Apple Development: Name (ABCDE12345)")
 	}
 }
 
