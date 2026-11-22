@@ -100,6 +100,11 @@ type Server struct {
 	// after Start; nil makes every route answer 503 workbench_unavailable.
 	workbench   WorkbenchBackend
 	workbenchMu sync.RWMutex
+	// chatHubs holds the per-session Claude Code chat hubs of spec 71. chatMu
+	// guards the map; a hub is built lazily by the first chat stream or chat
+	// write. See web/workbench_chat.go.
+	chatMu   sync.Mutex
+	chatHubs map[string]*chatHub
 	// previewTokens is the in-memory credential store of the preview GET route
 	// (spec 61, REQ-WP-004). New creates it.
 	previewTokens *previewTokens
@@ -415,6 +420,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		err = srv.Shutdown(ctx)
 	}
 	s.closeWorkbenchRootWatchers()
+	s.stopChatHubs()
 	s.closeDone()
 	return err
 }

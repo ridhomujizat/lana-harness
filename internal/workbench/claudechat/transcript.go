@@ -90,7 +90,7 @@ func (t *Transcript) Poll() ([]Item, bool, error) {
 		}
 		return nil, false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
 		return nil, false, err
@@ -203,7 +203,7 @@ func (t *Transcript) ImageBytes(ref string) (string, []byte, bool) {
 	if err != nil {
 		return "", nil, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		return "", nil, false
 	}

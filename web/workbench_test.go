@@ -22,18 +22,20 @@ import (
 
 // fakeWorkbench is an in-memory WorkbenchBackend for the /v1/workbench tests.
 type fakeWorkbench struct {
-	mu         sync.Mutex
-	sessions   []workbench.Session
-	layout     json.RawMessage
-	created    []workbench.CreateOptions
-	killed     []string
-	restarted  []string
-	resizes    []workbenchResizeCall
-	attachErr  error
-	listErr    error
-	stream     *fakeWorkbenchStream
-	attachSeen []string
-	subscribe  chan workbench.Event
+	mu          sync.Mutex
+	sessions    []workbench.Session
+	layout      json.RawMessage
+	created     []workbench.CreateOptions
+	killed      []string
+	restarted   []string
+	resizes     []workbenchResizeCall
+	attachErr   error
+	listErr     error
+	stream      *fakeWorkbenchStream
+	streams     map[string]*fakeWorkbenchStream
+	controlHook func([]byte)
+	attachSeen  []string
+	subscribe   chan workbench.Event
 }
 
 type workbenchResizeCall struct {
@@ -135,19 +137,54 @@ func (f *fakeWorkbench) Attach(_ context.Context, id, mode string) (io.ReadWrite
 	if f.attachErr != nil {
 		return nil, f.attachErr
 	}
-	f.stream = newFakeWorkbenchStream()
-	return f.stream, nil
+	stream := newFakeWorkbenchStream()
+	if mode == workbenchModeControl {
+		stream.hook = f.controlHook
+	}
+	if f.streams == nil {
+		f.streams = map[string]*fakeWorkbenchStream{}
+	}
+	f.streams[id+"/"+mode] = stream
+	f.stream = stream
+	return stream, nil
 }
 
-func (f *fakeWorkbench) Subscribe(context.Context) (<-chan workbench.Event, error) {
-	return f.subscribe, nil
+// streamFor returns the most recent stream of one session and mode, or nil.
+func (f *fakeWorkbench) streamFor(id, mode string) *fakeWorkbenchStream {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.streams[id+"/"+mode]
+}
+
+// pushView feeds output into a session's view stream, as a pane would.
+func (f *fakeWorkbench) pushView(id string, data []byte) {
+	if s := f.streamFor(id, workbenchModeView); s != nil {
+		s.push(data)
+	}
+}
+
+// setSession mutates one session under the fake's lock, so a test changing a
+// session while a hub polls it is race-free.
+func (f *fakeWorkbench) setSession(id string, mutate func(*workbench.Session)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.sessions {
+		if f.sessions[i].ID == id {
+			mutate(&f.sessions[i])
+			return
+		}
+	}
 }
 
 // fakeWorkbenchStream is an io.Pipe-based core connection: it records what the
-// handler writes and echoes it back, so a control attach round-trips.
+// handler writes and echoes it back, so a control attach round-trips. The echo
+// is written from its own goroutine so a write never blocks a caller with no
+// reader (the chat hub does not read its control attachment).
 type fakeWorkbenchStream struct {
 	mu      sync.Mutex
 	written []byte
+	closed  bool
+	hook    func([]byte)
 	outR    *io.PipeReader
 	outW    *io.PipeWriter
 }
@@ -162,20 +199,45 @@ func (s *fakeWorkbenchStream) Read(p []byte) (int, error) { return s.outR.Read(p
 func (s *fakeWorkbenchStream) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	s.written = append(s.written, p...)
+	hook := s.hook
 	s.mu.Unlock()
-	return s.outW.Write(p)
+	if hook != nil {
+		hook(p)
+	}
+	echo := append([]byte(nil), p...)
+	go func() { _, _ = s.outW.Write(echo) }()
+	return len(p), nil
+}
+
+// push writes bytes into the stream as if the pty produced them.
+func (s *fakeWorkbenchStream) push(data []byte) {
+	echo := append([]byte(nil), data...)
+	go func() { _, _ = s.outW.Write(echo) }()
 }
 
 func (s *fakeWorkbenchStream) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	_ = s.outR.CloseWithError(io.EOF)
 	_ = s.outW.CloseWithError(io.EOF)
 	return nil
+}
+
+func (s *fakeWorkbenchStream) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 func (s *fakeWorkbenchStream) input() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]byte(nil), s.written...)
+}
+
+func (f *fakeWorkbench) Subscribe(context.Context) (<-chan workbench.Event, error) {
+	return f.subscribe, nil
 }
 
 // newWorkbenchServer returns a server with a logged-in owner cookie and its
