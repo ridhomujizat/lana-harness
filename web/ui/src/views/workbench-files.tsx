@@ -538,7 +538,8 @@ function ImageBody({ data }: { data: WorkbenchPreview }) {
   );
 }
 
-function ExternalView({ data }: { data: WorkbenchPreview }) {
+/* A file outside the shown repo or root, read through the preview token. */
+export function ExternalView({ data }: { data: WorkbenchPreview }) {
   return (
     <div className="wbg-viewer">
       <header className="wbg-viewer-head">

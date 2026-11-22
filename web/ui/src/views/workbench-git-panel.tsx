@@ -5,7 +5,7 @@ import { getGitStatus, listGitWorktrees, type GitInfo, type GitStatus, type GitW
 import { Ic } from "../ui/icons";
 import { useSheetDrag } from "../ui/sheet-drag";
 import { ChangesTab, readScopeKind, type ScopeKind } from "./workbench-changes";
-import { FilesTab } from "./workbench-files";
+import { ExternalView, FilesTab } from "./workbench-files";
 import { useGitStatus } from "./workbench-git-hooks";
 import { shortBranch } from "./workbench-git-model";
 import { RootChangesTab, RootFilesTab, RootPicker, RootRepoChooser } from "./workbench-root";
@@ -171,7 +171,8 @@ export function GitPanel(props: GitPanelProps) {
   if (rv && props.root) {
     const pick = props.root.onPick;
     if (tab === "worktrees") body = <RootRepoChooser root={rv.root} summary={rv.summary} onPick={(w) => pick(w, "worktrees")} />;
-    else if (tab === "files") body = <RootFilesTab root={rv.root} summary={rv.summary} selected={rv.file} onSelect={rv.onFile} phone={phone} />;
+    else if (tab === "files")
+      body = <RootFilesTab root={rv.root} summary={rv.summary} selected={rv.file} onSelect={rv.onFile} external={props.external} phone={phone} />;
     else
       body = (
         <RootChangesTab
@@ -188,6 +189,8 @@ export function GitPanel(props: GitPanelProps) {
         />
       );
   } else if (tab === "worktrees") body = props.worktreesTab;
+  /* A ⌘+clicked file with no repo to show it in still opens on its own. */
+  else if (!root && tab === "files" && props.external) body = <ExternalView data={props.external} />;
   else if (!root)
     body = (
       <div className="wbg-empty wbg-empty-full">

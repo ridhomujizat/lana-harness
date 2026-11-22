@@ -404,7 +404,18 @@ export function useWorkbenchGit({
       }}
       rootView={
         rootMode && focusedRoot
-          ? { root: focusedRoot, summary: rootSummary.summary, repoTags: rootSummary.repoTags, reported, file: rootFile, onFile: setRootFile }
+          ? {
+              root: focusedRoot,
+              summary: rootSummary.summary,
+              repoTags: rootSummary.repoTags,
+              reported,
+              file: rootFile,
+              /* Picking a file of the root closes a ⌘+clicked outside one. */
+              onFile: (p: string | null) => {
+                setExternal(null);
+                setRootFile(p);
+              },
+            }
           : null
       }
       root={
