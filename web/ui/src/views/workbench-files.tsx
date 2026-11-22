@@ -18,6 +18,8 @@ import { CHAR_W, Code, Counts, DiffView, LINE_H, StatusLetter } from "./workbenc
 import { baseName, blockCommentStates, dirName, gutterMarks, type GutterMark } from "./workbench-git-model";
 import { humanSize } from "./workbench-preview";
 import { useVirtualRows } from "./workbench-virtual";
+import { FigcraftView } from "./workbench-figcraft";
+import { isFigcraftPath } from "./workbench-figcraft-model";
 
 /* Spec 66 REQ-WG-064, 065: the Files tab, a lazy tree of the worktree and a
    read-only viewer with a git gutter. */
@@ -237,7 +239,7 @@ export function FilesTab({
             style={{ paddingLeft: 22 + depth * 14 }}
             onClick={() => onSelect(path)}
           >
-            <Ic name="file" size={14} />
+            {isFigcraftPath(path) ? <Ic name="pen-tool" size={14} className="fv-tree-icon" /> : <Ic name="file" size={14} />}
             <span className="wbg-tree-name">{e.name}</span>
             <StatusLetter status={st} />
           </button>
@@ -270,7 +272,7 @@ export function FilesTab({
         {hits
           ? hits.map((p) => (
               <button key={p} type="button" className={"wbg-tree-row wbg-hit" + (p === selected ? " is-on" : "")} onClick={() => onSelect(p)}>
-                <Ic name="file" size={14} />
+                {isFigcraftPath(p) ? <Ic name="pen-tool" size={14} className="fv-tree-icon" /> : <Ic name="file" size={14} />}
                 <span className="wbg-tree-name">{baseName(p)}</span>
                 <small>{dirName(p)}</small>
               </button>
@@ -284,6 +286,8 @@ export function FilesTab({
   const change = selected ? changes.find((c) => c.path === selected) : undefined;
   const viewer = external ? (
     <ExternalView data={external} />
+  ) : selected && isFigcraftPath(selected) ? (
+    <FigcraftView key={worktree + "\0" + selected} worktree={worktree} path={selected} change={change} phone={phone} />
   ) : selected ? (
     <FileView worktree={worktree} path={selected} line={line} change={change} />
   ) : (
