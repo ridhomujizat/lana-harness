@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeItems, type ChatItem } from "../api/workbench-chat";
-import { answerText, dedupeTools, toBlocks } from "./workbench-chat";
+import { answerText, dedupeTools, planTextFor, toBlocks } from "./workbench-chat";
 import { modelLabel } from "./workbench-chat-composer";
 
 const u = (id: string, text: string): ChatItem => ({ id, kind: "user", text });
@@ -66,5 +66,17 @@ describe("dedupeTools", () => {
     expect(out[0]!.state).toBe("rejected");
     expect(out[1]!.input).toEqual({ command: "ls" });
     expect(out[1]!.status).toBe("done");
+  });
+});
+
+describe("planTextFor", () => {
+  it("prefers the plan file written just before ExitPlanMode", () => {
+    const items: ChatItem[] = [
+      { id: "p0", kind: "plan", tool_use_id: "a", plan: "# old" },
+      { id: "w1", kind: "tool", name: "Write", input: { file_path: "/x/plans/cozy.md", content: "# new plan" } },
+      { id: "p1", kind: "plan", tool_use_id: "b", plan: "# old" },
+    ];
+    expect(planTextFor(items, items[2]!)).toBe("# new plan");
+    expect(planTextFor(items, items[0]!)).toBe("");
   });
 });

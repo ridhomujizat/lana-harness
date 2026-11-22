@@ -114,6 +114,23 @@ export function dedupeTools(items: ChatItem[]): ChatItem[] {
   return out;
 }
 
+/* ExitPlanMode's input can lag behind the plan file Claude just wrote (Claude
+   Code shows the file). Use the content of the last Write to a plans/ file
+   before the plan item, when there is one. */
+export function planTextFor(items: ChatItem[], plan: ChatItem): string {
+  const at = items.findIndex((i) => i.id === plan.id);
+  for (let i = at - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if (it.kind === "plan") break;
+    const path = typeof it.input?.file_path === "string" ? (it.input.file_path as string) : "";
+    if (it.kind === "tool" && it.name === "Write" && /\/plans\/[^/]+\.md$/.test(path)) {
+      const content = typeof it.input?.content === "string" ? (it.input.content as string) : it.diff?.new || "";
+      if (content.trim()) return content;
+    }
+  }
+  return "";
+}
+
 /* Groups the transcript items into what the chat shows (REQ-WC-052). */
 export function toBlocks(items: ChatItem[]): Block[] {
   const out: Block[] = [];
@@ -624,7 +641,8 @@ export function ChatPane(props: ChatPaneProps) {
               );
             }
             if (b.type === "plan") {
-              return <PlanCard key={key} item={b.item} dialog={b.item.id === openPlan?.id ? dialog : null} actions={actions} />;
+              const text = planTextFor(view, b.item);
+              return <PlanCard key={key} item={text ? { ...b.item, plan: text } : b.item} dialog={b.item.id === openPlan?.id ? dialog : null} actions={actions} />;
             }
             return <BlockView key={key} block={b} sessionId={sessionId} replyText={b.type === "turn_end" ? replyFor.get(b.item.id) || "" : ""} />;
           })}
