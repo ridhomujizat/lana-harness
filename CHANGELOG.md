@@ -7,6 +7,22 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.3] - 2026-11-22
+
+### Added
+
+- Agents report the worktree they work in (spec 69). A Claude Code session that works in another git worktree runs `lana workbench use <path>`, and its pane chip, the Files and Changes panel and the badge follow that worktree, with a "Following …" notice. `lana workbench use .` (or `--clear`) goes back to the pane's own folder, and `lana workbench use --new <branch>` creates a worktree in `../<repo>-worktree/<name>` and reports it. A reported chip has a ring mark; the panel's worktree picker can clear a report. A report ends when the agent exits.
+- Lana tells Claude Code about this itself: the daemon installs a `SessionStart` hook into `~/.claude/settings.json` and into the folder of each Claude Code account (other settings are kept; the first change writes `settings.json.lana-bak`). The hook adds the instruction only inside a Lana Workbench pane, also for a hand-typed `claude`; Ghostty, herdr, VS Code and a tmux or herdr started inside a pane do not get it. A switch in the Workbench Accounts menu turns it off. Only the daemon on the default `~/.lana` home touches Claude settings. Claude Code sessions that were already running need `/clear` or a restart.
+- Folders of several repos (spec 70). A pane in a folder that is not a repo but holds repos, such as a project root with a backend and a frontend, gets a root chip (`sxored · 4`: four repos changed). The panel then shows Changes grouped by repo (clean repos fold into one row; up to 3 changed repos open by default), Files over the whole folder including folders outside git such as `docs/` (opened as plain files, without a diff), and a picker with "All repos" and each repo to narrow to the usual single-repo view. A repo an agent reported moves to the top with an "agent here" mark, and the chip reads `root › repo`. Repo names drop the folder's name as a prefix.
+- The root view stays light: one shared watcher per folder scans repos with changes every 3 s and the rest every 10 s while an agent works (every 120 s when idle), right away after a commit or checkout, and not at all when no panel shows the folder. All Workbench git runs share a limit of 4 at a time, and pages get a push event instead of polling.
+- Read-only FigCraft viewer in Workbench Files (spec 67): a `.figcraft` file opens with its canvas (pan, zoom, pinch), a page dropdown, Pages and Layers (a sheet on a phone), selection and sharp detail renders; it refreshes when the file changes, and a live mode follows the open FigCraft app.
+- Lana as a phone app over Tailscale (spec 68): the remote page has a web app manifest and iOS meta tags, so the phone can add Lana to its home screen and open it full screen. Settings › Remote access shows how. There is no service worker, so an upgrade is never hidden behind a cache.
+- Images in Workbench Files and the chat image viewer zoom and pan: pinch or ⌘/Ctrl + scroll zooms at the pointer, drag pans, double-click switches fit and 100%, and a toolbar has zoom, fit, 1:1 and full screen (+ − 0 1 keys).
+
+### Changed
+
+- ⌘+click on a folder path in a Workbench terminal opens Files in that folder's repo, with the tree expanded down to it; it used to answer "no such file".
+
 ## [0.6.0-beta.2] - 2026-11-22
 
 ### Added

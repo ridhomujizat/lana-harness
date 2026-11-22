@@ -23,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/notify"
 	"github.com/ridhomujizat/lana-harness/internal/tailscale"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
+	"github.com/ridhomujizat/lana-harness/internal/workbench/figcraft"
 	"github.com/ridhomujizat/lana-harness/internal/workbench/gitinfo"
 )
 
@@ -64,6 +65,7 @@ type Server struct {
 	mux              *http.ServeMux
 	assets           fs.FS
 	index            []byte
+	indexRemote      []byte
 	credentials      *credentialStore
 	signInCodes      *signInCodeStore
 	appCodes         *signInCodeStore
@@ -117,6 +119,34 @@ type Server struct {
 	workbenchGitRunner *gitinfo.Runner
 	workbenchGitStore  *gitinfo.SettingsStore
 	workbenchGitStatus workbenchGitStatusCache
+	// workbenchFigcraft is the FigCraft viewer service and its settings store
+	// of the /v1/workbench/figcraft routes (spec 67). workbenchFigcraftOnce
+	// builds them on first use so a server without the Workbench never reads
+	// the settings file or looks for the CLI; figcraftOpen is a test hook for
+	// the macOS open call (nil runs the real one).
+	workbenchFigcraftOnce  sync.Once
+	workbenchFigcraft      figcraftBackend
+	workbenchFigcraftStore *figcraft.SettingsStore
+	figcraftOpen           func(ctx context.Context, abs string) error
+	// workbenchReports holds the worktree reports of spec 69 (REQ-WA-031),
+	// persisted under the Lana home. workbenchBus fans the session.updated
+	// events a report change publishes (REQ-WA-033) out to the open
+	// /v1/workbench/events streams.
+	workbenchReports *workbenchReportStore
+	workbenchBus     *workbenchEventBus
+	// workbenchRootWatch is the shared root watcher of spec 70 (REQ-WM-080).
+	// workbenchRootWatchOnce builds it with the git runner on first use, so a
+	// server that never sees a root does not start its ticker;
+	// workbenchRootWatchMu guards the field for the shutdown close.
+	// workbenchRootSubs tracks the roots with a live subscription, so the Files
+	// tree reads a cached summary only when the watcher holds one (REQ-WM-004),
+	// and workbenchActivity caches the core session list the watcher's activity
+	// function reads (REQ-WM-081).
+	workbenchRootWatchOnce sync.Once
+	workbenchRootWatch     *gitinfo.RootWatchers
+	workbenchRootWatchMu   sync.Mutex
+	workbenchRootSubs      workbenchRootSubscriptions
+	workbenchActivity      workbenchActivityCache
 	// routerBackend is the Router page and proxy port (spec 37). It is
 	// guarded by routerMu because the proxy reads it on every request.
 	routerBackend  RouterBackend
@@ -217,12 +247,16 @@ func New(cfg Config) (*Server, error) {
 		stop:           make(chan struct{}),
 		done:           make(chan struct{}),
 	}
+	// Spec 68: the same index with the manifest link, served to remote requests.
+	s.indexRemote = withManifestLink(index)
 	s.signInCodes = newSignInCodeStore(s.nowTime)
 	s.appCodes = newAppCodeStore(s.nowTime)
 	s.resetCodes = newResetCodeStore(s.nowTime)
 	s.loginLock = newLoginLock(s.nowTime)
 	s.previewTokens = newPreviewTokens(s.nowTime)
 	s.roomHub = newRoomHub(s)
+	s.workbenchReports = newWorkbenchReportStore(cfg.Home)
+	s.workbenchBus = newWorkbenchEventBus()
 	if cfg.Enabled {
 		sessions, err := loadBrowserSessions(cfg.Home, s.nowTime())
 		if err != nil {
@@ -275,6 +309,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerCalendarRoutes()
 	s.registerRouterRoutes()
 	s.registerWorkbenchRoutes()
+	s.registerWorkbenchAgentHookRoutes()
 	s.handler = s.remoteGate(s.securityHeaders(s.compress(s.mux)))
 	return s, nil
 }
@@ -379,6 +414,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if srv != nil {
 		err = srv.Shutdown(ctx)
 	}
+	s.closeWorkbenchRootWatchers()
 	s.closeDone()
 	return err
 }
@@ -481,9 +517,33 @@ func (s *Server) routes() {
 	s.registerKnowledgeRoutes()
 }
 
-func (s *Server) serveIndex(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Spec 68: only a remote (Tailscale Serve) request offers the web app
+	// manifest, so only the phone can install Lana as an app. The local page
+	// stays unchanged.
+	if _, ok := remoteFromContext(r.Context()); ok {
+		_, _ = w.Write(s.indexRemote)
+		return
+	}
 	_, _ = w.Write(s.index)
+}
+
+// withManifestLink returns index with the spec 68 manifest link inserted right
+// before its first </head>, so a remote (Tailscale Serve) request offers Lana
+// as an installable web app. An index without </head> is returned unchanged,
+// and the input slice is never modified.
+func withManifestLink(index []byte) []byte {
+	const link = "    <link rel=\"manifest\" href=\"/assets/manifest.json\">\n"
+	i := bytes.Index(index, []byte("</head>"))
+	if i < 0 {
+		return index
+	}
+	out := make([]byte, 0, len(index)+len(link))
+	out = append(out, index[:i]...)
+	out = append(out, link...)
+	out = append(out, index[i:]...)
+	return out
 }
 
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request) {
@@ -528,9 +588,11 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 // terminals with xterm.js, which injects <style> elements (style-src
 // 'unsafe-inline') and opens a WebSocket to the same address (connect-src ws:
 // and wss:, which Safari requires explicitly).
+// img-src allows blob: and data: for images the web UI builds in the page,
+// such as the FigCraft viewer's renders (spec 67).
 func (s *Server) contentSecurityPolicy() string {
 	addr := s.Addr()
-	return "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://" + addr + " wss://" + addr + "; frame-ancestors 'none'"
+	return "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://" + addr + " wss://" + addr + "; frame-ancestors 'none'"
 }
 
 func isAPIPath(path string) bool {

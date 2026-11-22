@@ -1,0 +1,631 @@
+/* Spec 67: the read-only FigCraft viewer in Workbench Files. Design: FigCraft
+   page "Workbench · FigCraft viewer". */
+
+.fv-tree-icon,
+.fv-file-icon {
+  color: var(--violet) !important;
+}
+
+.fv {
+  position: relative;
+  container: fv / inline-size;
+}
+
+/* Header */
+.fv-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.fv-live.is-unsaved {
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  color: var(--amber);
+}
+
+.fv-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.fv-layers-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fv-layers-btn:hover,
+.fv-layers-btn.is-on {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.fv-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.fv-more-menu {
+  top: 32px;
+  right: 0;
+  width: 300px;
+}
+
+.fv-menu-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+/* Toolbar */
+.fv-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--wb-pane-bg-focused);
+  white-space: nowrap;
+}
+
+.fv-page-wrap {
+  min-width: 0;
+}
+
+.fv-page-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 300px;
+  height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.fv-page-btn:hover {
+  background: var(--wb-btn-hover);
+}
+
+.fv-page-btn small {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.fv-page-btn .i {
+  flex: none;
+  color: var(--text-3);
+}
+
+.fv-page-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-pages-menu {
+  top: 34px;
+  left: 0;
+  width: 300px;
+}
+
+.fv-pages-menu .wbg-menu-scroll {
+  max-height: min(60vh, 460px);
+}
+
+.fv-menu-count {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.fv-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.fv-crumb b {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.fv-crumb small {
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.fv-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fv-zoom-pct {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.fv-zoom-pct:hover {
+  background: var(--wb-btn-hover);
+}
+
+/* Banners */
+.fv-banner {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: color-mix(in srgb, var(--amber) 14%, var(--surface));
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.fv-banner-dim {
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+/* Body: column + canvas */
+.fv-main {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fv-column {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 248px;
+  min-height: 0;
+  border-right: 1px solid var(--border-strong);
+  background: var(--wb-pane-bg-focused);
+}
+
+.fv-column.is-over {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  box-shadow: 12px 0 32px -16px rgba(0, 0, 0, 0.45);
+  animation: fvSlideIn 160ms ease-out;
+}
+
+@keyframes fvSlideIn {
+  from {
+    transform: translateX(-16px);
+    opacity: 0;
+  }
+}
+
+.fv-col-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+
+.fv-col-head small {
+  margin-left: auto;
+  color: var(--text-4);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+
+.fv-col-head-layers {
+  border-top: 1px solid var(--border);
+}
+
+.fv-pages {
+  flex: 0 1 auto;
+  max-height: 38%;
+  min-height: 60px;
+  padding: 0 6px 6px;
+  overflow: auto;
+}
+
+.fv-layers {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 6px 10px;
+  overflow: auto;
+}
+
+.fv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fv-row:hover {
+  background: var(--wb-btn-hover);
+  color: var(--text);
+}
+
+.fv-row.is-on {
+  background: color-mix(in srgb, var(--violet) 18%, transparent);
+  color: var(--text);
+}
+
+.fv-row.is-hidden {
+  opacity: 0.5;
+}
+
+.fv-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fv-row-note {
+  height: 24px;
+  color: var(--text-4);
+  font-size: 11.5px;
+  line-height: 24px;
+}
+
+.fv-chev {
+  display: inline-grid;
+  flex: none;
+  width: 14px;
+  height: 18px;
+  place-items: center;
+  color: var(--text-4);
+}
+
+.fv-type {
+  flex: none;
+  color: var(--text-4);
+}
+
+.fv-row.is-on .fv-type {
+  color: var(--violet);
+}
+
+/* Canvas (REQ-FV-064) */
+.fv-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  background: #e4e7ec;
+  outline: 0;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+
+.fv-canvas:active {
+  cursor: grabbing;
+}
+
+.fv-img {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+.fv-skeleton {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(120, 128, 140, 0.18);
+  animation: fvPulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes fvPulse {
+  to {
+    opacity: 0.45;
+  }
+}
+
+.fv-label {
+  position: absolute;
+  overflow: hidden;
+  color: #6b6964;
+  font-size: 11px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.fv-label.is-on {
+  color: #6d5bd0;
+}
+
+.fv-sel {
+  position: absolute;
+  outline: 2px solid #8b7cf6;
+  pointer-events: none;
+}
+
+.fv-size {
+  position: absolute;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #8b7cf6;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.fv-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #4a4945;
+  font-size: 12.5px;
+  pointer-events: none;
+}
+
+.fv-spin {
+  animation: fvSpin 0.9s linear infinite;
+}
+
+@keyframes fvSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fv-toast {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 15px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  animation: fvToast 160ms ease-out;
+  pointer-events: none;
+}
+
+.fv-toast .i {
+  color: var(--green);
+}
+
+@keyframes fvToast {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
+.fv-zoom-pill {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  padding: 3px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.4);
+  transform: translateX(-50%);
+}
+
+/* States (REQ-FV-068) */
+.fv-state {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.fv-state b {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.fv-state > span {
+  max-width: 400px;
+}
+
+.fv-state-icon {
+  color: var(--amber);
+}
+
+.fv-state-code {
+  max-width: 100%;
+  padding: 6px 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fv-state-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Footer (REQ-FV-069) */
+.fv-foot {
+  white-space: nowrap;
+}
+
+.fv-foot > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fv-foot-dim {
+  color: var(--text-4);
+}
+
+.fv-foot-amber {
+  color: var(--amber);
+}
+
+/* Phone: Pages | Layers sheet (REQ-FV-063) */
+.fv-sheet-wrap {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.fv-sheet {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 62%;
+  border: 1px solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  background: var(--surface);
+  animation: fvSheetIn 200ms ease-out;
+}
+
+@keyframes fvSheetIn {
+  from {
+    transform: translateY(40px);
+    opacity: 0;
+  }
+}
+
+.fv-sheet-grip {
+  flex: none;
+  width: 40px;
+  height: 4px;
+  margin: 8px auto 6px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.fv-sheet-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 4px 12px 8px 16px;
+}
+
+.fv-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 8px 16px;
+  overflow: auto;
+}
+
+.fv-sheet-body .fv-pages {
+  max-height: none;
+}
+
+.fv-sheet-body .fv-row {
+  height: 40px;
+  font-size: 14px;
+}
+
+.fv.is-phone .fv-page-btn {
+  max-width: none;
+  flex: 1 1 auto;
+}
+
+.fv.is-phone .fv-page-wrap {
+  flex: 1 1 auto;
+}
+
+/* Buttons centre their text by default; rows and the page button read left. */
+.fv-row,
+.fv-page-btn {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.fv-row-name,
+.fv-page-name {
+  flex: 1 1 auto;
+  text-align: left;
+}

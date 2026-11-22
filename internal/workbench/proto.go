@@ -119,6 +119,12 @@ type Session struct {
 	// REQ-WR-040). Both are additive to protocol version 1.
 	Restored     *time.Time `json:"restored,omitempty"`
 	ResumedAgent string     `json:"resumed_agent,omitempty"`
+	// WorkDir is the worktree an agent reported for this session and
+	// WorkDirAt is when it reported it (spec 69 REQ-WA-030). They are
+	// daemon-only: the core never sets them, the daemon fills them in from its
+	// report store, and both are additive to protocol version 1.
+	WorkDir   string     `json:"work_dir,omitempty"`
+	WorkDirAt *time.Time `json:"work_dir_at,omitempty"`
 }
 
 // Event is one line of a subscription stream (REQ-WB-030): what happened, and

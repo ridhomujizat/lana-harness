@@ -2642,3 +2642,288 @@ body.wb-pane-dragging [data-tip]::after {
 html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.is-full {
   top: 44px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Spec 69: reported worktree; spec 70: a folder of several repos      */
+/* ------------------------------------------------------------------ */
+
+.wbg-pane-chip-root {
+  flex: none;
+  color: var(--text-3);
+}
+
+.wbg-pane-chip .wbg-wt-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.wbg-reported {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--violet);
+  border-radius: 50%;
+}
+
+.wbr-notice {
+  height: 22px;
+  margin-right: 6px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--violet) 18%, transparent);
+  color: color-mix(in srgb, var(--violet) 55%, var(--text));
+  font-size: 11.5px;
+  line-height: 22px;
+  white-space: nowrap;
+  animation: wbr-fade 2.5s ease forwards;
+}
+
+@keyframes wbr-fade {
+  0%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.wbr-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: color-mix(in srgb, var(--violet) 55%, var(--text));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbr-back:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbr-rows {
+  outline: none;
+}
+
+.wbr-slot {
+  display: flex;
+  align-items: stretch;
+}
+
+.wbr-slot > * {
+  flex: 1 1 auto;
+}
+
+.wbr-group,
+.wbr-clean,
+.wbr-clean-repo {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbr-group:hover,
+.wbr-clean:hover,
+.wbr-clean-repo:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbr-group.is-here {
+  background: color-mix(in srgb, var(--violet) 9%, transparent);
+}
+
+.wbr-chev {
+  flex: none;
+  color: var(--text-4);
+}
+
+.wbr-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbr-clean-repo .wbr-name {
+  font-weight: 450;
+}
+
+.wbr-branch {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbr-here {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--violet) 20%, transparent);
+  color: color-mix(in srgb, var(--violet) 55%, var(--text));
+  font-size: 11px;
+}
+
+.wbr-here i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--violet);
+}
+
+.wbr-here + .wbr-slow,
+.wbr-here ~ .wbr-count {
+  margin-left: auto;
+}
+
+.wbr-slow {
+  flex: none;
+  color: var(--text-4);
+}
+
+.wbr-count {
+  flex: none;
+  margin-left: auto;
+  color: var(--amber);
+  font-size: 11.5px;
+}
+
+.wbr-file {
+  padding-left: 22px;
+}
+
+.wbr-more {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0 0 0 46px;
+  border: 0;
+  background: transparent;
+  color: var(--text-4);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbr-more:hover {
+  color: var(--text-2);
+}
+
+.wbr-clean {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.wbr-clean-repo {
+  padding-left: 22px;
+}
+
+.wbr-indent {
+  flex: none;
+  width: 13px;
+}
+
+.wbr-tree-branch {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbr-tree-st {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbr-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.wbr-chooser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 520px;
+}
+
+.wbr-chooser-list .wbr-clean-repo {
+  height: 32px;
+  padding-left: 8px;
+}
+
+.wb-acc-hook {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.wb-acc-hook-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wb-acc-hook-row:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wb-acc-hook-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.wb-acc-hook-text small {
+  color: var(--text-3);
+  font-size: 11.5px;
+}

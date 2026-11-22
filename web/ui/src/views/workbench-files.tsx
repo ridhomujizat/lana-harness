@@ -5,6 +5,7 @@ import type { WorkbenchPreview } from "../api/workbench";
 import {
   getGitDiff,
   getGitFile,
+  readPlainFile,
   getGitTree,
   isTextFile,
   searchGitFiles,
@@ -18,6 +19,9 @@ import { CHAR_W, Code, Counts, DiffView, LINE_H, StatusLetter } from "./workbenc
 import { baseName, blockCommentStates, dirName, gutterMarks, type GutterMark } from "./workbench-git-model";
 import { humanSize } from "./workbench-preview";
 import { useVirtualRows } from "./workbench-virtual";
+import { FigcraftView } from "./workbench-figcraft";
+import { isFigcraftPath } from "./workbench-figcraft-model";
+import { ZoomImage, ZoomOverlay } from "./zoom-image";
 
 /* Spec 66 REQ-WG-064, 065: the Files tab, a lazy tree of the worktree and a
    read-only viewer with a git gutter. */
@@ -42,6 +46,7 @@ export function FilesTab({
   line,
   onSelect,
   external,
+  reveal,
   phone,
 }: {
   worktree: string;
@@ -51,6 +56,8 @@ export function FilesTab({
   onSelect: (path: string | null, line?: number) => void;
   /* A spec 61 preview of a path outside the worktree (REQ-WG-063). */
   external?: WorkbenchPreview | null;
+  /* A folder to open the tree down to and mark (a ⌘+click on a folder). */
+  reveal?: { dir: string; nonce: number } | null;
   phone?: boolean;
 }) {
   const [tree, setTree] = useState<Tree>({});
@@ -113,6 +120,33 @@ export function FilesTab({
     if (added) setOpen(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
+
+  /* A ⌘+click on a folder: open it and every folder above it, and mark it
+     until a file is picked. Runs after the new-worktree reset above, so a
+     folder in another repo survives the switch. */
+  const [marked, setMarked] = useState<string | null>(null);
+  const scrolled = useRef(0);
+  useEffect(() => {
+    if (!reveal) return;
+    const next = new Set<string>();
+    let dir = "";
+    for (const part of reveal.dir.split("/").filter(Boolean)) {
+      dir = join(dir, part);
+      next.add(dir);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loads the folders down to a folder picked from outside the tree
+      load(dir);
+    }
+    setOpen(next);
+    setQuery("");
+    setHits(null);
+    setMarked(reveal.dir || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal?.nonce, worktree]);
+  const markRef = (el: HTMLButtonElement | null) => {
+    if (!el || !reveal || scrolled.current === reveal.nonce) return;
+    scrolled.current = reveal.nonce;
+    el.scrollIntoView({ block: "nearest" });
+  };
 
   /* ⌘P focuses the filter (REQ-WG-064). */
   useEffect(() => {
@@ -211,11 +245,13 @@ export function FilesTab({
       if (e.kind === "dir") {
         const { label, path } = chainOf(dir, e.name);
         const isOpen = open.has(join(dir, e.name));
+        const isMarked = !selected && marked !== null && (marked === path || marked === join(dir, e.name));
         rows.push(
           <button
             key={path}
+            ref={isMarked ? markRef : undefined}
             type="button"
-            className={"wbg-tree-row" + (e.ignored ? " is-ignored" : "")}
+            className={"wbg-tree-row" + (isMarked ? " is-on" : "") + (e.ignored ? " is-ignored" : "")}
             style={{ paddingLeft: 8 + depth * 14 }}
             onClick={() => toggle(join(dir, e.name))}
           >
@@ -237,7 +273,7 @@ export function FilesTab({
             style={{ paddingLeft: 22 + depth * 14 }}
             onClick={() => onSelect(path)}
           >
-            <Ic name="file" size={14} />
+            {isFigcraftPath(path) ? <Ic name="pen-tool" size={14} className="fv-tree-icon" /> : <Ic name="file" size={14} />}
             <span className="wbg-tree-name">{e.name}</span>
             <StatusLetter status={st} />
           </button>
@@ -270,7 +306,7 @@ export function FilesTab({
         {hits
           ? hits.map((p) => (
               <button key={p} type="button" className={"wbg-tree-row wbg-hit" + (p === selected ? " is-on" : "")} onClick={() => onSelect(p)}>
-                <Ic name="file" size={14} />
+                {isFigcraftPath(p) ? <Ic name="pen-tool" size={14} className="fv-tree-icon" /> : <Ic name="file" size={14} />}
                 <span className="wbg-tree-name">{baseName(p)}</span>
                 <small>{dirName(p)}</small>
               </button>
@@ -284,6 +320,8 @@ export function FilesTab({
   const change = selected ? changes.find((c) => c.path === selected) : undefined;
   const viewer = external ? (
     <ExternalView data={external} />
+  ) : selected && isFigcraftPath(selected) ? (
+    <FigcraftView key={worktree + "\0" + selected} worktree={worktree} path={selected} change={change} phone={phone} />
   ) : selected ? (
     <FileView worktree={worktree} path={selected} line={line} change={change} />
   ) : (
@@ -316,7 +354,9 @@ export function FilesTab({
 
 /* REQ-WG-065: one file, read-only, with line numbers and the git gutter. A
    changed file can switch to its diff. */
-function FileView({ worktree, path, line, change }: { worktree: string; path: string; line?: number; change?: GitFileChange }) {
+/* plain: path is absolute and outside any repo (spec 70 REQ-WM-005), so it
+   is read without git and has no gutter or diff. */
+export function FileView({ worktree, path, line, change, plain }: { worktree: string; path: string; line?: number; change?: GitFileChange; plain?: boolean }) {
   const [file, setFile] = useState<GitFileContent | null>(null);
   const [error, setError] = useState("");
   const [marks, setMarks] = useState<Map<number, GutterMark>>(new Map());
@@ -329,26 +369,26 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
     setFile(null);
     setError("");
     setMode("file");
-    getGitFile(worktree, path)
+    (plain ? readPlainFile(path) : getGitFile(worktree, path))
       .then((f) => !cancelled && setFile(f))
       .catch((err) => !cancelled && setError(errorMessage(err)));
     return () => {
       cancelled = true;
     };
-  }, [worktree, path]);
+  }, [worktree, path, plain]);
 
   useEffect(() => {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the gutter of the previous file must not linger
     setMarks(new Map());
-    if (!change || change.status === "U" || change.status === "A" || change.binary) return;
+    if (plain || !change || change.status === "U" || change.status === "A" || change.binary) return;
     getGitDiff(worktree, path, "uncommitted")
       .then((d) => !cancelled && setMarks(gutterMarks(d.hunks)))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [worktree, path, change?.add, change?.del, change?.status, change?.binary, change]);
+  }, [worktree, path, plain, change?.add, change?.del, change?.status, change?.binary, change]);
 
   const text = file && isTextFile(file) ? file : null;
   const lines = useMemo(() => {
@@ -474,8 +514,28 @@ function ExternalBody({ data }: { data: WorkbenchPreview }) {
       </div>
     );
   }
+  if (data.kind === "image") return <ImageBody data={data} />;
   /* Never allow-same-origin (spec 61 REQ-WP-013). */
   return <iframe className="wbg-frame" sandbox="allow-scripts allow-forms allow-popups" src={themedUrl(data.url, theme)} title={data.name} />;
+}
+
+/* An image zooms and pans in place and expands to full screen. */
+function ImageBody({ data }: { data: WorkbenchPreview }) {
+  const [expanded, setExpanded] = useState(false);
+  const [dims, setDims] = useState("");
+  const detail = [dims, humanSize(data.size)].filter(Boolean).join(" · ");
+  return (
+    <div className="wbg-image">
+      <ZoomImage
+        key={data.raw_url}
+        src={data.raw_url}
+        alt={data.name}
+        onLoad={(img) => setDims(img.naturalWidth + " × " + img.naturalHeight)}
+        onExpand={() => setExpanded(true)}
+      />
+      {expanded ? <ZoomOverlay src={data.raw_url} name={data.name} detail={detail} onClose={() => setExpanded(false)} /> : null}
+    </div>
+  );
 }
 
 function ExternalView({ data }: { data: WorkbenchPreview }) {

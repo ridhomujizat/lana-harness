@@ -613,6 +613,11 @@ export function SettingsRemotePage() {
                           : "tailscale serve is not running. Turn remote access off and on again."}
                       </li>
                     </ul>
+                    <p className="d remote-install">
+                      Install Lana as a phone app: on iPhone, open the address in
+                      Safari and tap Share, then Add to Home Screen. On Android,
+                      open it in Chrome and tap Install app.
+                    </p>
                   </div>
                   <figure className="remote-qr">
                     <QrCode text={data.url} />

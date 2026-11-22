@@ -31,6 +31,11 @@ export interface WorkbenchSession {
      agent whose resume command was typed into it. */
   restored?: string;
   resumed_agent?: string;
+  /* Spec 69: the worktree the agent in this pane reported with
+     `lana workbench use`, and when. The daemon adds them; the core never
+     sends them. */
+  work_dir?: string;
+  work_dir_at?: string;
   /* Client only, never sent by the core: the agent finished while its pane
      was not in view (herdr's "done"). */
   done?: boolean;
@@ -77,7 +82,9 @@ export function putWorkbenchLayout(layout: unknown): Promise<unknown> {
 
 /* Spec 61 REQ-WP-001, REQ-WP-002: the daemon reads a file a terminal pointed
    at (a path with an optional :line[:col]) and reports how to show it. */
-export type WorkbenchPreviewKind = "html" | "markdown" | "image" | "pdf" | "text" | "binary";
+/* "dir": the link named a folder; url and raw_url are empty and root is its
+   git root, when it has one. */
+export type WorkbenchPreviewKind = "html" | "markdown" | "image" | "pdf" | "text" | "binary" | "dir";
 
 export interface WorkbenchPreview {
   path: string;
@@ -89,6 +96,8 @@ export interface WorkbenchPreview {
   col: number;
   url: string;
   raw_url: string;
+  /* The git root of a folder link (kind "dir"), absent outside a repo. */
+  root?: string;
 }
 
 export function previewWorkbenchFile(session: string, link: string, dir?: string): Promise<WorkbenchPreview> {
@@ -108,9 +117,11 @@ export function attachURL(id: string, mode: AttachMode): string {
 export type WorkbenchEvent =
   | { type: "session.created" | "session.updated"; session: WorkbenchSession }
   | { type: "session.removed"; session: WorkbenchSession }
-  | { type: "layout.changed"; layout: unknown };
+  | { type: "layout.changed"; layout: unknown }
+  /* Spec 70 REQ-WM-083: a subscribed root's summary changed. */
+  | { type: "git.root"; root: string; etag: string; repos: Record<string, string> };
 
-const EVENT_TYPES = ["session.created", "session.updated", "session.removed", "layout.changed"] as const;
+const EVENT_TYPES = ["session.created", "session.updated", "session.removed", "layout.changed", "git.root"] as const;
 
 /* Subscribes to the core events over SSE (REQ-WB-030, REQ-WB-040). The
    browser's EventSource reconnects by itself; onOpen fires on every
@@ -129,6 +140,8 @@ export function subscribeWorkbench(
         const data = JSON.parse(String(message.data)) as Record<string, unknown>;
         if (type === "layout.changed") {
           onEvent({ type, layout: data.layout ?? data });
+        } else if (type === "git.root") {
+          onEvent({ type, root: String(data.root ?? ""), etag: String(data.etag ?? ""), repos: (data.repos ?? {}) as Record<string, string> });
         } else {
           const session = (data.session ?? data) as WorkbenchSession;
           onEvent({ type, session } as WorkbenchEvent);
@@ -163,4 +176,31 @@ export function uploadWorkbenchDrops(files: File[]): Promise<string[]> {
   return request<{ paths?: string[] }>("POST", "/v1/workbench/drops", form).then(
     (response) => (response && response.paths) || [],
   );
+}
+
+/* Spec 69 REQ-WA-021: drop the worktree an agent reported for a session, so
+   the pane follows its process directory again. */
+export function clearWorktreeReport(id: string): Promise<void> {
+  return request("DELETE", "/v1/workbench/sessions/" + encodeURIComponent(id) + "/worktree");
+}
+
+/* Spec 69 REQ-WA-014: the Claude Code SessionStart hook switch. */
+export interface AgentHookFolder {
+  dir: string;
+  account: string;
+  installed: boolean;
+  error?: string;
+}
+
+export interface AgentHookState {
+  enabled: boolean;
+  folders: AgentHookFolder[];
+}
+
+export function getAgentHook(): Promise<AgentHookState> {
+  return request("GET", "/v1/workbench/agent-hook");
+}
+
+export function setAgentHook(enabled: boolean): Promise<AgentHookState> {
+  return request("PUT", "/v1/workbench/agent-hook", { enabled });
 }

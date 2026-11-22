@@ -333,6 +333,123 @@ func TestWorkbenchPreviewMissingFile(t *testing.T) {
 	}
 }
 
+// TestWorkbenchPreviewDirectoryAbsolute checks an absolute folder link answers
+// 200 kind "dir" with the folder's path and a git root, no token and no URLs.
+func TestWorkbenchPreviewDirectoryAbsolute(t *testing.T) {
+	s, cookie, csrf, root := newPreviewServer(t)
+	dir := filepath.Join(root, "folder")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setPreviewSession(s, "s1", root)
+	gitRoot := filepath.Join(root, "gitroot")
+	s.previewGitRoot = func(string) string { return gitRoot }
+
+	body := `{"session":"s1","link":` + strconvQuote(dir) + `}`
+	rr := previewPOST(s, cookie, csrf, body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	assertPreviewHeaders(t, rr.Header())
+	var resp workbenchPreviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	want := preview.Resolve(dir)
+	if resp.Path != want || resp.Name != "folder" || resp.Dir != want {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if resp.Kind != "dir" || resp.Size != 0 || resp.Line != 0 || resp.Col != 0 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if resp.URL != "" || resp.RawURL != "" {
+		t.Fatalf("url = %q, raw_url = %q", resp.URL, resp.RawURL)
+	}
+	if resp.Root != gitRoot {
+		t.Fatalf("root = %q, want %q", resp.Root, gitRoot)
+	}
+	if len(s.previewTokens.tokens) != 0 {
+		t.Fatalf("tokens = %d, want none for a folder", len(s.previewTokens.tokens))
+	}
+}
+
+// TestWorkbenchPreviewDirectoryRelativeLink checks a relative folder link
+// resolves against the session cwd and carries the default git root lookup.
+func TestWorkbenchPreviewDirectoryRelativeLink(t *testing.T) {
+	s, cookie, csrf, root := newPreviewServer(t)
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(repo, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setPreviewSession(s, "s1", repo)
+
+	rr := previewPOST(s, cookie, csrf, `{"session":"s1","link":"sub"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var resp workbenchPreviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	want := preview.Resolve(sub)
+	if resp.Path != want || resp.Name != "sub" || resp.Dir != want || resp.Kind != "dir" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if resp.Root != preview.Resolve(repo) {
+		t.Fatalf("root = %q, want %q", resp.Root, preview.Resolve(repo))
+	}
+}
+
+// TestWorkbenchPreviewDirectoryForbidden checks the policy still refuses a
+// folder outside the allowed roots, exactly as it does for a file.
+func TestWorkbenchPreviewDirectoryForbidden(t *testing.T) {
+	s, cookie, csrf, _ := newPreviewServer(t)
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setPreviewSession(s, "s1", s.previewHome)
+
+	body := `{"session":"s1","link":` + strconvQuote(outside) + `}`
+	rr := previewPOST(s, cookie, csrf, body)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	assertPreviewHeaders(t, rr.Header())
+	assertAuthError(t, rr, http.StatusForbidden, "forbidden_path")
+}
+
+// TestWorkbenchPreviewFileOmitsRoot checks a regular file keeps its file
+// response and carries no "root" key.
+func TestWorkbenchPreviewFileOmitsRoot(t *testing.T) {
+	s, cookie, csrf, root := newPreviewServer(t)
+	cwd := filepath.Join(root, "proj")
+	writePreviewFile(t, filepath.Join(cwd, "main.go"), "package main\n")
+	setPreviewSession(s, "s1", cwd)
+
+	rr := previewPOST(s, cookie, csrf, `{"session":"s1","link":"main.go"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `"root"`) {
+		t.Fatalf("body has a root key: %s", rr.Body.String())
+	}
+	var resp workbenchPreviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Kind != "text" || resp.URL == "" || resp.RawURL == "" {
+		t.Fatalf("resp = %+v", resp)
+	}
+	if resp.Root != "" {
+		t.Fatalf("root = %q, want empty", resp.Root)
+	}
+}
+
 func TestWorkbenchPreviewRefusedPaths(t *testing.T) {
 	s, cookie, csrf, root := newPreviewServer(t)
 	cwd := filepath.Join(root, "proj")
@@ -555,7 +672,7 @@ func TestWorkbenchPreviewHeaderPolicy(t *testing.T) {
 	if state.Code != http.StatusOK {
 		t.Fatalf("state status = %d, body = %q", state.Code, state.Body.String())
 	}
-	want := "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://" + s.Addr() + " wss://" + s.Addr() + "; frame-ancestors 'none'"
+	want := "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ws://" + s.Addr() + " wss://" + s.Addr() + "; frame-ancestors 'none'"
 	if got := state.Header().Get("Content-Security-Policy"); got != want {
 		t.Fatalf("state Content-Security-Policy = %q, want %q", got, want)
 	}

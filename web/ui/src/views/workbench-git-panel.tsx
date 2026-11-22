@@ -8,6 +8,8 @@ import { ChangesTab, readScopeKind, type ScopeKind } from "./workbench-changes";
 import { FilesTab } from "./workbench-files";
 import { useGitStatus } from "./workbench-git-hooks";
 import { shortBranch } from "./workbench-git-model";
+import { RootChangesTab, RootFilesTab, RootPicker, RootRepoChooser } from "./workbench-root";
+import type { GitRootInfo, GitRootSummary } from "../api/workbench-git";
 
 /* Spec 66 REQ-WG-062: the panel at the right of the panes, in the spec 61
    preview slot: Files, Changes and Worktrees for one worktree. */
@@ -58,9 +60,26 @@ export interface GitPanelProps {
   file: { path: string | null; line?: number };
   onFile: (path: string | null, line?: number) => void;
   external: WorkbenchPreview | null;
+  /* A folder to open the Files tree down to (a ⌘+click on a folder path). */
+  reveal?: { dir: string; nonce: number } | null;
   worktreesTab: ReactNode;
   focusMode?: boolean;
   onFocusMode?: (on: boolean) => void;
+  /* Spec 70: the focused pane is in a folder of several repos and no repo
+     is chosen: the panel shows the whole root. */
+  rootView?: {
+    root: GitRootInfo;
+    summary: GitRootSummary | null;
+    repoTags: Record<string, string>;
+    reported?: string;
+    file: string | null;
+    onFile: (path: string | null) => void;
+  } | null;
+  /* Spec 70 REQ-WM-020: narrowed to one repo of a root, with a way back. */
+  root?: { info: GitRootInfo; summary: GitRootSummary | null; narrowed: string | null; onPick: (worktree: string | null, tab?: GitTab) => void } | null;
+  /* Spec 69 REQ-WA-042, 043. */
+  onClearReport?: () => void;
+  notice?: string;
 }
 
 export function GitPanel(props: GitPanelProps) {
@@ -143,12 +162,32 @@ export function GitPanel(props: GitPanelProps) {
     window.addEventListener("pointerup", up);
   };
 
-  const count = status?.totals.files ?? 0;
+  const rv = props.rootView;
+  const count = rv ? (rv.summary?.changed_files ?? 0) : (status?.totals.files ?? 0);
   const motion = props.motion === "in" ? " is-entering" : props.motion === "out" ? " is-leaving" : "";
   const style = phone || props.maximized ? undefined : ({ width, flexBasis: width, ["--wbg-w" as string]: width + "px" } as React.CSSProperties);
 
   let body: ReactNode;
-  if (tab === "worktrees") body = props.worktreesTab;
+  if (rv && props.root) {
+    const pick = props.root.onPick;
+    if (tab === "worktrees") body = <RootRepoChooser root={rv.root} summary={rv.summary} onPick={(w) => pick(w, "worktrees")} />;
+    else if (tab === "files") body = <RootFilesTab root={rv.root} summary={rv.summary} selected={rv.file} onSelect={rv.onFile} phone={phone} />;
+    else
+      body = (
+        <RootChangesTab
+          root={rv.root}
+          summary={rv.summary}
+          repoTags={rv.repoTags}
+          reported={rv.reported}
+          onNarrow={(w, t) => pick(w, t)}
+          onOpenFile={(w, p) => {
+            rv.onFile(w.replace(/\/+$/, "") + "/" + p);
+            onTab("files");
+          }}
+          phone={phone}
+        />
+      );
+  } else if (tab === "worktrees") body = props.worktreesTab;
   else if (!root)
     body = (
       <div className="wbg-empty wbg-empty-full">
@@ -166,6 +205,7 @@ export function GitPanel(props: GitPanelProps) {
         line={props.file.line}
         onSelect={props.onFile}
         external={props.external}
+        reveal={props.reveal}
         phone={phone}
       />
     );
@@ -219,7 +259,50 @@ export function GitPanel(props: GitPanelProps) {
           ))}
         </span>
         <span className="wb-spacer" />
-        {worktree ? (
+        {props.notice ? <span className="wbr-notice">{props.notice}</span> : null}
+        {props.root && (rv || !worktree) ? (
+          <div className="wbg-picker-wrap">
+            <button type="button" className={"wbg-picker" + (picker ? " is-open" : "")} onClick={() => setPicker((p) => !p)} title={props.root.info.path}>
+              <Ic name="folders" size={14} />
+              <span className="wbg-picker-label">All repos · {props.root.info.name}</span>
+              <Ic name="chevrons-up-down" size={13} />
+            </button>
+            {picker ? (
+              <RootPicker
+                root={props.root.info}
+                summary={props.root.summary}
+                current={null}
+                onPick={(w) => {
+                  props.root?.onPick(w);
+                  setPicker(false);
+                }}
+                onClose={() => setPicker(false)}
+                onClearReport={props.onClearReport ? () => { props.onClearReport?.(); setPicker(false); } : undefined}
+              />
+            ) : null}
+          </div>
+        ) : worktree && props.root ? (
+          <div className="wbg-picker-wrap">
+            <button type="button" className={"wbg-picker" + (picker ? " is-open" : "")} onClick={() => setPicker((p) => !p)} title={worktree.worktree}>
+              <i className="wbg-wt-dot" style={{ background: worktree.color }} />
+              <span className="wbg-picker-label">{worktree.worktree.slice(worktree.worktree.lastIndexOf("/") + 1)} · {worktree.short}</span>
+              <Ic name="chevrons-up-down" size={13} />
+            </button>
+            {picker ? (
+              <RootPicker
+                root={props.root.info}
+                summary={props.root.summary}
+                current={props.root.narrowed}
+                onPick={(w) => {
+                  props.root?.onPick(w);
+                  setPicker(false);
+                }}
+                onClose={() => setPicker(false)}
+                onClearReport={props.onClearReport ? () => { props.onClearReport?.(); setPicker(false); } : undefined}
+              />
+            ) : null}
+          </div>
+        ) : worktree ? (
           <div className="wbg-picker-wrap">
             <button type="button" className={"wbg-picker" + (picker ? " is-open" : "")} onClick={() => setPicker((p) => !p)} title={worktree.worktree}>
               <Ic name="git-branch" size={14} />
@@ -242,6 +325,7 @@ export function GitPanel(props: GitPanelProps) {
                   setPicker(false);
                 }}
                 onClose={() => setPicker(false)}
+                onClearReport={props.onClearReport ? () => { props.onClearReport?.(); setPicker(false); } : undefined}
               />
             ) : null}
           </div>
@@ -276,6 +360,12 @@ export function GitPanel(props: GitPanelProps) {
           <Ic name="x" size={15} />
         </button>
       </header>
+      {props.root && !rv && props.root.narrowed ? (
+        <button type="button" className="wbr-back" onClick={() => props.root?.onPick(null)}>
+          <Ic name="chevron-left" size={14} />
+          All repos in {props.root.info.name}
+        </button>
+      ) : null}
       <div className="wbg-body">{body}</div>
     </aside>
     </>
@@ -291,6 +381,7 @@ function WorktreePicker({
   onPick,
   onManage,
   onClose,
+  onClearReport,
 }: {
   current: GitInfo;
   inSpace: SpaceWorktree[];
@@ -299,6 +390,7 @@ function WorktreePicker({
   onPick: (worktree: string) => void;
   onManage: () => void;
   onClose: () => void;
+  onClearReport?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -383,6 +475,15 @@ function WorktreePicker({
           <b>Manage worktrees…</b>
         </span>
       </button>
+      {onClearReport ? (
+        <button type="button" role="menuitem" className="wbg-menu-item" onClick={onClearReport}>
+          <Ic name="undo-2" size={14} />
+          <span className="wbg-menu-text">
+            <b>Clear report</b>
+            <small>Reported by the agent; follow the pane's own folder again</small>
+          </span>
+        </button>
+      ) : null}
     </div>
   );
 }

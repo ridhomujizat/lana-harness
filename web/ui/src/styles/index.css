@@ -57,6 +57,8 @@
 @import "./pages-gr8r/workflows.css" layer(gr8r);
 @import "./pages-gr8r/workbench.css" layer(gr8r);
 @import "./pages-gr8r/workbench-git.css" layer(gr8r);
+@import "./pages-gr8r/workbench-figcraft.css" layer(gr8r);
+@import "./pages-gr8r/zoom-image.css" layer(gr8r);
 @import "./pages-gr8r/observe.css" layer(gr8r);
 @import "./pages-gr8r/tools.css" layer(gr8r);
 @import "./pages-gr8r/calendar.css" layer(gr8r);

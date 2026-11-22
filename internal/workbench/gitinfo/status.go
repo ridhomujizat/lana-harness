@@ -216,12 +216,16 @@ type namedChange struct {
 }
 
 // porcelainInfo is the part of `git status --porcelain=v2` the status uses
-// (REQ-WG-003).
+// (REQ-WG-003). oid is the HEAD commit (or "(initial)" for an unborn branch) and
+// detached marks a HEAD that is not on a branch; both are kept for the root
+// summary scan of REQ-WM-003.
 type porcelainInfo struct {
+	oid       string
 	branch    string
 	upstream  string
 	ahead     int
 	behind    int
+	detached  bool
 	changes   []namedChange
 	untracked []string
 }
@@ -263,10 +267,13 @@ func parsePorcelainV2(out []byte) porcelainInfo {
 // "# branch.ab +2 -0" (REQ-WG-003).
 func parsePorcelainHeader(ps *porcelainInfo, line string) {
 	switch {
+	case strings.HasPrefix(line, "# branch.oid "):
+		ps.oid = strings.TrimPrefix(line, "# branch.oid ")
 	case strings.HasPrefix(line, "# branch.head "):
 		ps.branch = strings.TrimPrefix(line, "# branch.head ")
 		if ps.branch == "(detached)" {
 			ps.branch = "detached"
+			ps.detached = true
 		}
 	case strings.HasPrefix(line, "# branch.upstream "):
 		ps.upstream = strings.TrimPrefix(line, "# branch.upstream ")

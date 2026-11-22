@@ -118,6 +118,9 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.Handle("DELETE /v1/workbench/sessions/{id}", http.HandlerFunc(s.handleWorkbenchKill))
 	s.Handle("POST /v1/workbench/sessions/{id}/restart", http.HandlerFunc(s.handleWorkbenchRestart))
 	s.Handle("POST /v1/workbench/sessions/{id}/resize", http.HandlerFunc(s.handleWorkbenchResize))
+	// The worktree reports of spec 69 (REQ-WA-030).
+	s.Handle("PUT /v1/workbench/sessions/{id}/worktree", http.HandlerFunc(s.handleWorkbenchSetWorktree))
+	s.Handle("DELETE /v1/workbench/sessions/{id}/worktree", http.HandlerFunc(s.handleWorkbenchClearWorktree))
 	s.Handle("GET /v1/workbench/layout", http.HandlerFunc(s.handleWorkbenchLayout))
 	s.Handle("PUT /v1/workbench/layout", http.HandlerFunc(s.handleWorkbenchSetLayout))
 	s.Handle("GET /v1/workbench/events", http.HandlerFunc(s.handleWorkbenchEvents))
@@ -131,6 +134,8 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.mux.Handle("GET /v1/workbench/preview/{token}/{name...}", s.checkHost(http.HandlerFunc(s.handleWorkbenchPreviewFile)))
 	// The git routes of spec 66 (REQ-WG-020).
 	s.registerWorkbenchGitRoutes()
+	// The FigCraft viewer routes of spec 67 (REQ-FV-020).
+	s.registerWorkbenchFigcraftRoutes()
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.
@@ -148,6 +153,12 @@ func (s *Server) handleWorkbenchList(w http.ResponseWriter, r *http.Request) {
 	if sessions == nil {
 		sessions = []workbench.Session{}
 	}
+	// REQ-WA-033: each session carries its reported worktree, and a report of a
+	// session no longer in the list ends (REQ-WA-032).
+	for i := range sessions {
+		sessions[i] = s.decorateWorkbenchSession(sessions[i])
+	}
+	s.dropOrphanWorkbenchReports(sessions)
 	writeJSON(w, http.StatusOK, struct {
 		Sessions []workbench.Session `json:"sessions"`
 	}{Sessions: sessions})
@@ -325,6 +336,10 @@ func (s *Server) handleWorkbenchEvents(w http.ResponseWriter, r *http.Request) {
 		s.writeWorkbenchError(w, "workbench subscribe", err)
 		return
 	}
+	// REQ-WA-033: a report change publishes on the daemon bus; the subscription
+	// lives with the request.
+	bus, cancelBus := s.workbenchBus.subscribe()
+	defer cancelBus()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
@@ -349,7 +364,14 @@ func (s *Server) handleWorkbenchEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			if err := writeSSE(w, flusher, event.Type, "", event); err != nil {
+			if err := writeSSE(w, flusher, event.Type, "", s.decorateWorkbenchEvent(event)); err != nil {
+				return
+			}
+		case busEvent, ok := <-bus:
+			if !ok {
+				return
+			}
+			if err := writeSSE(w, flusher, busEvent.Type, "", busEvent.Data); err != nil {
 				return
 			}
 		}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/browser"
+	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/internal/selfupdate"
 	"github.com/ridhomujizat/lana-harness/internal/workbench"
@@ -379,6 +381,15 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 		// its sessions outlive the daemon (REQ-WB-002, REQ-WB-003).
 		wbBackend := newWorkbenchBackend(home)
 		webServer.SetWorkbench(wbBackend)
+		// Spec 69 REQ-WA-013: install the Claude Code SessionStart hook into
+		// every Claude Code config folder the daemon knows, behind the
+		// Workbench settings switch. Only the main daemon on the owner's
+		// default home touches the real Claude settings.
+		webServer.SetAgentHook(web.AgentHookConfig{
+			Binary:  lanaBinaryPath(),
+			Folders: claudeHookFolders(home),
+			Allowed: isDefaultLanaHome(home),
+		})
 		// Spec 55 A5: agent-finished and agent-needs-you banners. The watcher
 		// subscribes to a core the browser starts through the backend's onLive
 		// hook, and to one already running at start; it never starts a core.
@@ -614,6 +625,83 @@ func webTelegramStatus(status telegram.Status) web.TelegramStatus {
 		})
 	}
 	return converted
+}
+
+// lanaBinaryPath is the absolute path of the running lana binary, with
+// symlinks resolved, for the Claude Code hook command (REQ-WA-012).
+func lanaBinaryPath() string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return "lana"
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe
+}
+
+// isDefaultLanaHome reports whether home is the owner's default Lana home
+// (~/.lana), so only the main daemon rewrites the real Claude settings. A dev,
+// scratch or test daemon has another home and is left out (spec 69, task 3).
+func isDefaultLanaHome(home string) bool {
+	userHome, err := os.UserHomeDir()
+	if err != nil || userHome == "" {
+		return false
+	}
+	return filepath.Clean(home) == filepath.Join(userHome, ".lana")
+}
+
+// claudeHookFolders returns the Claude Code config folders the SessionStart
+// hook is installed into (REQ-WA-013): the daemon's own folder plus every
+// configured Claude Code account. It reads the current config on every call, so
+// an account added in the dashboard is picked up without a restart.
+func claudeHookFolders(home string) func() []web.AgentHookFolder {
+	return func() []web.AgentHookFolder {
+		folders := make([]web.AgentHookFolder, 0, 1)
+		seen := map[string]bool{}
+		add := func(dir, account string) {
+			if dir == "" {
+				return
+			}
+			dir = filepath.Clean(dir)
+			if seen[dir] {
+				return
+			}
+			seen[dir] = true
+			folders = append(folders, web.AgentHookFolder{Dir: dir, Account: account})
+		}
+		add(defaultClaudeDir(), core.ClaudeCodeProvider)
+		result, err := config.Load(context.Background(), config.Options{Home: home})
+		if err != nil {
+			return folders
+		}
+		names := make([]string, 0, len(result.Config.Providers))
+		for name := range result.Config.Providers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			cfg := result.Config.Providers[name]
+			if cfg.Kind != core.ClaudeCodeKind {
+				continue
+			}
+			add(llmcall.ClaudeConfigDir(home, name, cfg), name)
+		}
+		return folders
+	}
+}
+
+// defaultClaudeDir is the daemon's own Claude Code config folder: its
+// CLAUDE_CONFIG_DIR, else ~/.claude.
+func defaultClaudeDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return dir
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(userHome, ".claude")
 }
 
 // startWeb binds the web listener and prints the contract start line.

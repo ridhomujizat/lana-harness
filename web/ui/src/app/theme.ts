@@ -65,7 +65,21 @@ export function resolveTheme(choice: ThemeChoice): "light" | "dark" {
 export function applyTheme(choice: ThemeChoice): "light" | "dark" {
   const resolved = resolveTheme(choice);
   document.documentElement.setAttribute("data-theme", resolved);
+  syncThemeColor(resolved);
   return resolved;
+}
+
+/* The topbar colour (--surface) of each theme. The installed phone app
+   (spec 68) paints the status bar with <meta name="theme-color">. */
+export const THEME_COLORS = { light: "#ffffff", dark: "#1d1d1c" } as const;
+
+/* index.html carries one theme-color meta per OS scheme. A chosen theme
+   overrides both, so the status bar follows the app, not the OS. */
+function syncThemeColor(resolved: "light" | "dark"): void {
+  const metas = document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]');
+  metas.forEach((meta) => {
+    meta.content = THEME_COLORS[resolved];
+  });
 }
 
 export function watchSystemTheme(callback: () => void): () => void {
