@@ -1,6 +1,7 @@
 package claudechat
 
 import (
+	"bytes"
 	"io"
 	"strconv"
 	"strings"
@@ -9,14 +10,19 @@ import (
 	"github.com/charmbracelet/x/vt"
 )
 
-// oscMirrorSizeCommand is the OSC command the Workbench core emits with a pane
-// replay to report its pty size; its payload is ";<cols>;<rows>" (spec 71
-// REQ-WC-020).
-const oscMirrorSizeCommand = 7701
+// oscMirrorSizePrefix is the fixed head of an OSC 7701 size marker, which the
+// Workbench core emits with a pane replay wherever the pty size changed; its
+// payload is ";<cols>;<rows>" terminated by BEL or ST (spec 71 REQ-WC-020).
+const oscMirrorSizePrefix = "\x1b]7701;"
 
 // oscMirrorNoopCommand is registered so the emulator does not treat OSC 7702 as
 // an unknown sequence; the chat does not need it.
 const oscMirrorNoopCommand = 7702
+
+// mirrorMarkerCarryMax is the longest unterminated marker Write holds back for
+// the next call; a longer one is written as ordinary bytes so a lost
+// terminator cannot stall the stream.
+const mirrorMarkerCarryMax = 32
 
 // mirrorScrollback is how many scrollback lines the mirror keeps. It is small
 // because the screen parser only reads the visible rows.
@@ -35,11 +41,10 @@ type Mirror struct {
 	emu    *vt.SafeEmulator
 	closed bool
 
-	// pendingCols/Rows hold a resize requested by an OSC 7701 marker inside the
-	// current Write. The handler runs while the emulator holds its write lock,
-	// so the resize is applied after Write returns instead of from the handler.
-	pendingCols int
-	pendingRows int
+	// carry holds a trailing piece of a Write that may be the head of an OSC
+	// 7701 marker split across two chunks, so it is prepended to the next
+	// Write instead of being fed to the emulator as ordinary bytes.
+	carry []byte
 }
 
 // NewMirror creates a mirror of cols×rows.
@@ -47,12 +52,6 @@ func NewMirror(cols, rows int) *Mirror {
 	m := &Mirror{}
 	m.emu = vt.NewSafeEmulator(cols, rows)
 	m.emu.SetScrollbackSize(mirrorScrollback)
-	m.emu.RegisterOscHandler(oscMirrorSizeCommand, func(data []byte) bool {
-		if c, r, ok := parseMirrorSize(data); ok {
-			m.pendingCols, m.pendingRows = c, r
-		}
-		return true
-	})
 	m.emu.RegisterOscHandler(oscMirrorNoopCommand, func([]byte) bool { return true })
 	// The emulator answers terminal queries (DA1, DSR, …) through an unbuffered
 	// pipe; nothing needs those answers here and an unread pipe would block
@@ -61,20 +60,95 @@ func NewMirror(cols, rows int) *Mirror {
 	return m
 }
 
-// Write feeds terminal output to the emulator. After Close it is a no-op so a
-// late write never panics.
+// Write feeds terminal output to the emulator. Each OSC 7701 size marker in the
+// input is applied with Resize at the point it appears, so the bytes before it
+// render at the old size and the bytes after it at the new one. The marker
+// bytes themselves are dropped. After Close it is a no-op so a late write never
+// panics.
 func (m *Mirror) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return 0, nil
 	}
-	m.pendingCols, m.pendingRows = 0, 0
-	n, err := m.emu.Write(p)
-	if m.pendingCols > 0 && m.pendingRows > 0 {
-		m.emu.Resize(m.pendingCols, m.pendingRows)
+	buf := p
+	if len(m.carry) > 0 {
+		buf = append(append([]byte(nil), m.carry...), p...)
+		m.carry = nil
 	}
-	return n, err
+	// written counts the bytes the emulator has accepted; it is only reported
+	// when a Write is cut short by an error, otherwise Write returns len(p).
+	written := 0
+	write := func(b []byte) error {
+		if len(b) == 0 {
+			return nil
+		}
+		n, err := m.emu.Write(b)
+		written += n
+		return err
+	}
+	rest := buf
+	for {
+		i := bytes.Index(rest, []byte(oscMirrorSizePrefix))
+		if i < 0 {
+			keep := mirrorCarryLen(rest)
+			if err := write(rest[:len(rest)-keep]); err != nil {
+				return written, err
+			}
+			m.carry = append([]byte(nil), rest[len(rest)-keep:]...)
+			return len(p), nil
+		}
+		if err := write(rest[:i]); err != nil {
+			return written, err
+		}
+		payloadStart := i + len(oscMirrorSizePrefix)
+		payloadEnd, next, ok := mirrorMarkerEnd(rest, payloadStart)
+		if !ok {
+			// No terminator yet; hold a short marker back for the next Write
+			// and flush a longer one as ordinary bytes.
+			rem := rest[i:]
+			if len(rem) < mirrorMarkerCarryMax {
+				m.carry = append([]byte(nil), rem...)
+				return len(p), nil
+			}
+			if err := write(rem); err != nil {
+				return written, err
+			}
+			return len(p), nil
+		}
+		if c, r, ok := parseMirrorSize(rest[payloadStart:payloadEnd]); ok {
+			m.emu.Resize(c, r)
+		}
+		rest = rest[next:]
+	}
+}
+
+// mirrorMarkerEnd finds the end of the size marker whose payload starts at
+// from. It returns the index one past the payload and one past the terminator,
+// which is BEL or ST. ok is false when no terminator is present.
+func mirrorMarkerEnd(b []byte, from int) (payloadEnd, next int, ok bool) {
+	for i := from; i < len(b); i++ {
+		switch b[i] {
+		case 0x07:
+			return i, i + 1, true
+		case 0x1b:
+			if i+1 < len(b) && b[i+1] == '\\' {
+				return i, i + 2, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// mirrorCarryLen is the length of rest's longest suffix that could be the head
+// of an OSC 7701 marker, so Write can hold it back for the next call.
+func mirrorCarryLen(rest []byte) int {
+	for k := len(oscMirrorSizePrefix) - 1; k > 0; k-- {
+		if len(rest) >= k && string(rest[len(rest)-k:]) == oscMirrorSizePrefix[:k] {
+			return k
+		}
+	}
+	return 0
 }
 
 // Resize sizes the emulated screen to match the pty.
@@ -109,6 +183,7 @@ func (m *Mirror) Close() {
 		return
 	}
 	m.closed = true
+	m.carry = nil
 	if c, ok := m.emu.InputPipe().(io.Closer); ok {
 		_ = c.Close()
 	}
