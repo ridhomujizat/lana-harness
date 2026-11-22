@@ -60,6 +60,26 @@ Headers: `ETag`. `If-None-Match` with the same value returns 304.
 | 404 | `not_a_root` | the folder is inside a repo, or has no child repos |
 | 403 | `forbidden_path` | the spec 61 path policy refuses the folder |
 
+## Subscribe to a root
+
+`PUT /v1/workbench/git/root/subscribe`
+
+```json
+{"root": "/Users/me/coding/sxored", "client": "c-7f3a"}
+```
+
+204. Renew every 30 s while the panel is open on that root. `DELETE` with the same body unsubscribes. A subscription that is not renewed for 45 s ends. The root watcher (REQ-WM-080) runs while it has at least one subscription.
+
+## `git_root` event
+
+On `GET /v1/workbench/events`, next to the session events:
+
+```json
+{"type": "git_root", "root": "/Users/me/coding/sxored", "etag": "r-91c2", "repos": {"sxored-be-ocrengine": "e-1a0f", "sxored-apigateway": "e-77b3"}}
+```
+
+Sent when the summary of a subscribed root changes. `repos` holds the ETag of each repo with changes, so a client reloads only the opened groups whose ETag changed.
+
 ## Folder listing outside a repo
 
 `GET /v1/workbench/files/tree?dir=<folder>`

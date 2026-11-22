@@ -13,6 +13,8 @@ Go code goes through the `dsh-coder` implementer, one task per run. Web code (`w
 | Requirements | Tasks | Verification |
 |---|---|---|
 | REQ-WM-001, 002, 003 | T-001 | `go test ./internal/workbench/gitinfo/` |
+| REQ-WM-080…083, 085, 086 | T-001b | `go test -race ./internal/workbench/gitinfo/ -run Watcher`, budget test |
+| REQ-WM-084 | T-005 | vitest (virtual rows, no re-render on 304), scroll check on 2,000 rows |
 | REQ-WM-004, 005, 006 | T-002 | `go test ./web/ -run WorkbenchFiles` |
 | design | T-003 | owner approval |
 | REQ-WM-010, 011, 020, 021 | T-004 | vitest, preview screenshots |
@@ -24,7 +26,8 @@ Go code goes through the `dsh-coder` implementer, one task per run. Web code (`w
 ## Tasks
 
 - [ ] `T-001` gitinfo: root detection, resolve field, root summary with cache and ETag
-- [ ] `T-002` Daemon routes: root summary, folder listing and file read outside a repo
+- [ ] `T-001b` Root watcher: shared per root, activity schedule, HEAD/index stat trigger, global limit of 4 git runs, slow mark, singleflight, subscriptions, `git_root` event, budget tests (REQ-WM-080…086)
+- [ ] `T-002` Daemon routes: root summary, subscribe, folder listing and file read outside a repo
 - [ ] `T-003` FigCraft design: chip, picker, grouped Changes, root Files, phone sheet
   - Evidence: 2026-11-22, drawn live in FigCraft (5 frames); waiting for owner approval
 - [ ] `T-004` Web: root chip, badge, picker narrowing and pin
