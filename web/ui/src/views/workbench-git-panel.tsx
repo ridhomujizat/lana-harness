@@ -5,9 +5,9 @@ import { getGitStatus, listGitWorktrees, type GitInfo, type GitStatus, type GitW
 import { Ic } from "../ui/icons";
 import { useSheetDrag } from "../ui/sheet-drag";
 import { ChangesTab, readScopeKind, type ScopeKind } from "./workbench-changes";
-import { FilesTab } from "./workbench-files";
+import { ExternalView, FilesTab } from "./workbench-files";
 import { useGitStatus } from "./workbench-git-hooks";
-import { shortBranch } from "./workbench-git-model";
+import { baseName, shortBranch } from "./workbench-git-model";
 import { RootChangesTab, RootFilesTab, RootPicker, RootRepoChooser } from "./workbench-root";
 import type { GitRootInfo, GitRootSummary } from "../api/workbench-git";
 
@@ -60,6 +60,9 @@ export interface GitPanelProps {
   file: { path: string | null; line?: number };
   onFile: (path: string | null, line?: number) => void;
   external: WorkbenchPreview | null;
+  /* A ⌘+clicked folder outside any git repo, shown as a plain tree in Files
+     over whatever the panel follows, until closed. */
+  outside?: { dir: string; file: string | null; onFile: (path: string | null) => void; onClose: () => void } | null;
   /* A folder to open the Files tree down to (a ⌘+click on a folder path). */
   reveal?: { dir: string; nonce: number } | null;
   worktreesTab: ReactNode;
@@ -168,10 +171,24 @@ export function GitPanel(props: GitPanelProps) {
   const style = phone || props.maximized ? undefined : ({ width, flexBasis: width, ["--wbg-w" as string]: width + "px" } as React.CSSProperties);
 
   let body: ReactNode;
-  if (rv && props.root) {
+  const out = props.outside;
+  if (out && tab === "files")
+    body = (
+      <RootFilesTab
+        key={out.dir}
+        root={{ path: out.dir, name: baseName(out.dir), repos: 0 }}
+        summary={null}
+        selected={out.file}
+        onSelect={out.onFile}
+        onClose={out.onClose}
+        phone={phone}
+      />
+    );
+  else if (rv && props.root) {
     const pick = props.root.onPick;
     if (tab === "worktrees") body = <RootRepoChooser root={rv.root} summary={rv.summary} onPick={(w) => pick(w, "worktrees")} />;
-    else if (tab === "files") body = <RootFilesTab root={rv.root} summary={rv.summary} selected={rv.file} onSelect={rv.onFile} phone={phone} />;
+    else if (tab === "files")
+      body = <RootFilesTab root={rv.root} summary={rv.summary} selected={rv.file} onSelect={rv.onFile} external={props.external} phone={phone} />;
     else
       body = (
         <RootChangesTab
@@ -188,6 +205,8 @@ export function GitPanel(props: GitPanelProps) {
         />
       );
   } else if (tab === "worktrees") body = props.worktreesTab;
+  /* A ⌘+clicked file with no repo to show it in still opens on its own. */
+  else if (!root && tab === "files" && props.external) body = <ExternalView data={props.external} />;
   else if (!root)
     body = (
       <div className="wbg-empty wbg-empty-full">

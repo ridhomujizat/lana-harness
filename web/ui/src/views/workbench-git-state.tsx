@@ -9,6 +9,7 @@ import { LAYOUT_MOTION_MS, canViewTransition, holdLayout, reducedMotion, withVie
 import { GitPanel, GIT_TABS, type GitTab, type SpaceWorktree } from "./workbench-git-panel";
 import { readPref, savePref, useGitResolve, useGitStatus } from "./workbench-git-hooks";
 import { groupByWorktree, isUnder, panelWorktree, relativeTo, sessionDir, sharedAgents } from "./workbench-git-model";
+import { isFigcraftPath } from "./workbench-figcraft-model";
 import { useRootSummary } from "./workbench-root";
 import { WorktreesTab } from "./workbench-worktrees";
 import { programName, tabSessions, type WbLayout, type WbSpace, type WbTab } from "./workbench-model";
@@ -104,6 +105,8 @@ export function useWorkbenchGit({
   const [chosen, setChosen] = useState<string | null>(null);
   const [file, setFile] = useState<{ path: string | null; line?: number }>({ path: null });
   const [external, setExternal] = useState<WorkbenchPreview | null>(null);
+  /* A ⌘+clicked folder outside git and the file open in it. */
+  const [outside, setOutside] = useState<{ dir: string; file: string | null } | null>(null);
   /* A folder a ⌘+click named: Files opens the tree down to it. */
   const [reveal, setReveal] = useState<{ worktree: string; dir: string; nonce: number } | null>(null);
   /* Focus mode: only the focused pane shows beside the open panel (owner,
@@ -265,6 +268,16 @@ export function useWorkbenchGit({
   /* REQ-WG-063: a ⌘+click lands in Files: inside the pane's worktree as a
      file of the tree, else as an outside preview. */
   const showPreview = (sessionId: string, data: WorkbenchPreview) => {
+    if (data.kind === "dir" && !data.root) {
+      /* A folder outside any git repo (an agent's /tmp plan folder, say)
+         opens as a plain tree; its files read without git. */
+      setExternal(null);
+      setOutside({ dir: data.path, file: null });
+      pickTab("files");
+      if (!open || motion === "out") setOpenSaved(true);
+      return;
+    }
+    setOutside(null);
     if (data.kind === "dir") {
       /* A folder opens Files in its own repo, the tree down to the folder,
          so a file inside it can be picked. */
@@ -280,6 +293,17 @@ export function useWorkbenchGit({
       return;
     }
     const info = gitOf(sessionId);
+    /* A .figcraft file under a non-git root opens in the root's own Files
+       tree, where the FigCraft viewer draws it. */
+    const fileRoot = !info && !pinned ? rootOf(sessionId) : undefined;
+    if (fileRoot && isFigcraftPath(data.path) && relativeTo(fileRoot.path, data.path)) {
+      setChosen(null);
+      setExternal(null);
+      setRootFile(data.path);
+      pickTab("files");
+      if (!open || motion === "out") setOpenSaved(true);
+      return;
+    }
     if (!pinned) setChosen(info?.worktree ?? null);
     const rel = info ? relativeTo(info.worktree, data.path) : null;
     pickTab("files");
@@ -404,7 +428,18 @@ export function useWorkbenchGit({
       }}
       rootView={
         rootMode && focusedRoot
-          ? { root: focusedRoot, summary: rootSummary.summary, repoTags: rootSummary.repoTags, reported, file: rootFile, onFile: setRootFile }
+          ? {
+              root: focusedRoot,
+              summary: rootSummary.summary,
+              repoTags: rootSummary.repoTags,
+              reported,
+              file: rootFile,
+              /* Picking a file of the root closes a ⌘+clicked outside one. */
+              onFile: (p: string | null) => {
+                setExternal(null);
+                setRootFile(p);
+              },
+            }
           : null
       }
       root={
@@ -429,6 +464,16 @@ export function useWorkbenchGit({
         setFile({ path, line });
       }}
       external={external}
+      outside={
+        outside
+          ? {
+              dir: outside.dir,
+              file: outside.file,
+              onFile: (p) => setOutside((o) => (o ? { ...o, file: p } : o)),
+              onClose: () => setOutside(null),
+            }
+          : null
+      }
       reveal={reveal && reveal.worktree === shown?.worktree ? reveal : null}
       worktreesTab={worktreesTab}
       focusMode={focusMode}

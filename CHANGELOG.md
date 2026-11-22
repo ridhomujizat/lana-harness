@@ -7,6 +7,17 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.5] - 2026-11-22
+
+### Added
+
+- Workbench: a ⌘+clicked folder outside any git repo, such as an agent's plan folder under `/tmp`, opens in Files as a plain tree instead of a "folder outside any git repo" notice. Its files open on click, `.figcraft` ones in the FigCraft viewer. The tree names the folder's path and has a close button.
+
+### Fixed
+
+- Workbench: a ⌘+clicked file outside every repo, such as an agent's scratchpad file in `/private/tmp`, shows in Files again when the pane is in a folder of several repos or outside git. The panel used to open with the folder's tree and no file.
+- Workbench: a `.figcraft` file in a folder of several repos but outside any repo, such as `docs/mockups`, opens in the FigCraft viewer instead of as plain text, also from a ⌘+click.
+
 ## [0.6.0-beta.4] - 2026-11-22
 
 ### Added
