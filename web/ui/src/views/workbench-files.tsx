@@ -20,6 +20,7 @@ import { humanSize } from "./workbench-preview";
 import { useVirtualRows } from "./workbench-virtual";
 import { FigcraftView } from "./workbench-figcraft";
 import { isFigcraftPath } from "./workbench-figcraft-model";
+import { ZoomImage, ZoomOverlay } from "./zoom-image";
 
 /* Spec 66 REQ-WG-064, 065: the Files tab, a lazy tree of the worktree and a
    read-only viewer with a git gutter. */
@@ -510,8 +511,28 @@ function ExternalBody({ data }: { data: WorkbenchPreview }) {
       </div>
     );
   }
+  if (data.kind === "image") return <ImageBody data={data} />;
   /* Never allow-same-origin (spec 61 REQ-WP-013). */
   return <iframe className="wbg-frame" sandbox="allow-scripts allow-forms allow-popups" src={themedUrl(data.url, theme)} title={data.name} />;
+}
+
+/* An image zooms and pans in place and expands to full screen. */
+function ImageBody({ data }: { data: WorkbenchPreview }) {
+  const [expanded, setExpanded] = useState(false);
+  const [dims, setDims] = useState("");
+  const detail = [dims, humanSize(data.size)].filter(Boolean).join(" · ");
+  return (
+    <div className="wbg-image">
+      <ZoomImage
+        key={data.raw_url}
+        src={data.raw_url}
+        alt={data.name}
+        onLoad={(img) => setDims(img.naturalWidth + " × " + img.naturalHeight)}
+        onExpand={() => setExpanded(true)}
+      />
+      {expanded ? <ZoomOverlay src={data.raw_url} name={data.name} detail={detail} onClose={() => setExpanded(false)} /> : null}
+    </div>
+  );
 }
 
 function ExternalView({ data }: { data: WorkbenchPreview }) {
