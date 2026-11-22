@@ -1,0 +1,39 @@
+
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Haiku 5.5 · Claude Pro
+ ▝▝   ▝▝   /tmp/probe-proj
+
+
+❯ Run this exact shell command with the Bash tool and nothing else: echo chat-probe
+
+  Ran 1 shell command
+
+⏺ chat-probe
+
+✻ Crunched for 1s · done 2:02 AM
+
+❯ Use the AskUserQuestion tool now to ask me exactly one question: my favorite color, with options Red and
+  Blue.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Favorite
+
+What is your favorite color?
+
+  1. Red
+     Choose red as your favorite color.
+❯ 2. Blue
+     Choose blue as your favorite color.
+  3. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+

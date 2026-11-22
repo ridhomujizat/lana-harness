@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Haiku 5.5 · Claude Pro
+ ▝▝   ▝▝   /tmp/probe-proj
+
+
+❯ Run this exact shell command with the Bash tool and nothing else: echo chat-probe
+
+  Ran 1 shell command
+
+⏺ chat-probe
+
+✻ Crunched for 1s · done 2:02 AM
+
+❯ Use the AskUserQuestion tool now to ask me exactly one question: my favorite color, with options Red and
+  Blue.
+
+⏺ Answered Claude's questions:
+  ⎿  · What is your favorite color? → Blue
+
+⏺ Blue.
+
+✻ Sautéed for 1s · done 2:03 AM
+
+
+
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  Echo chat-probe command
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker · restart with CLAUDE_CODE_FORCE_…
+  ⏵⏵ accept edits on (shift+tab to cycle)
