@@ -1,6 +1,6 @@
 # Spec 70: Workbench panel for a folder of several repos
 
-Status: Draft r1, 2026-11-22. Not approved yet. Implementation comes later. Extends spec 66 (Workbench files, git changes and worktrees) and works with spec 69 (agents report their worktree). Design: to be drawn in FigCraft before implementation.
+Status: Draft r1, 2026-11-22. Not approved yet. Implementation comes later. Extends spec 66 (Workbench files, git changes and worktrees) and works with spec 69 (agents report their worktree). Design: FigCraft page "Workbench · Multi-repo root" in `design/lana-design-system.figcraft` (drawn 2026-11-22, awaiting owner approval), PNGs `design/export/multi-repo-1..5-*.png`.
 
 ## Problem
 
@@ -34,6 +34,7 @@ Spec 66 resolves such a folder to `{repo: null}`. The pane gets no chip, and the
 - **REQ-WM-003** Root summary (`GET /v1/workbench/git/root?dir=`): one entry per child repo, sorted by name, with the folder name, the worktree root, the branch and short branch, detached, the colour (REQ-WG-061), the uncommitted changed file count, additions and deletions, ahead/behind its upstream, and `error` when its status failed. It also lists the root's direct child folders and files that are not repos (names only). Status runs at most 4 repos at a time; the summary is cached for 10 s and carries an ETag (a hash of the body), and the same ETag returns 304.
 - **REQ-WM-004** Folder listing outside a repo (`GET /v1/workbench/files/tree?dir=`): one folder, folders first then files, case-insensitive, with name, kind, size and modified time, and for each child folder `repo: true` plus its short branch and changed count when it is a repo (one cached status each, REQ-WM-003). It never lists `.git`. Over 2,000 entries returns the first 2,000 and `truncated: true`. The spec 61 path policy applies to every path, so secret folders and `.env` files are refused as in spec 66.
 - **REQ-WM-005** File read outside a repo (`GET /v1/workbench/files/file?path=`): text up to 1 MB, or the spec 61 preview for other files, like the spec 66 file route without the git parts.
+- **REQ-WM-007** A repo's display name in chips, groups and the picker is its folder name without the root name and a following `-` when it starts with them (`sxored-be-ocrengine` in `sxored` shows as `be-ocrengine`). The Files tree shows the real folder names.
 - **REQ-WM-006** Inside a repo, the existing spec 66 routes (status, diff, tree, search, file) are used as they are, with that repo's worktree.
 
 ### Web: pane and tab strip
