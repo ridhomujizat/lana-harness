@@ -42,6 +42,8 @@ Routes are authenticated like the other `/v1/workbench` routes (spec 55 REQ-WB-0
 
 `DELETE /v1/workbench/sessions/{id}/worktree` removes the report. 204, also when there was none.
 
+The CLI uses local mirrors authenticated with the daemon secret and a loopback check (API-WLG-008): `PUT`/`DELETE /v1/local/workbench/sessions/{id}/worktree` and `POST /v1/local/workbench/git/worktrees` (the spec 66 create body and answer). A report change also sends a `session.updated` event with the new `work_dir`.
+
 ## Sessions carry `work_dir`
 
 `GET /v1/workbench/sessions` and the `session` events of `GET /v1/workbench/events` add two optional fields to each session (spec 55 `Session`):

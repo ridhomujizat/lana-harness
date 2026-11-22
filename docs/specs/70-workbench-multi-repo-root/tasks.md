@@ -26,7 +26,7 @@ Go code goes through the `dsh-coder` implementer, one task per run. Web code (`w
 ## Tasks
 
 - [ ] `T-001` gitinfo: root detection, resolve field, root summary with cache and ETag
-- [ ] `T-001b` Root watcher: shared per root, activity schedule, HEAD/index stat trigger, global limit of 4 git runs, slow mark, singleflight, subscriptions, `git_root` event, budget tests (REQ-WM-080…086)
+- [ ] `T-001b` Root watcher: shared per root, activity schedule, HEAD/index stat trigger, global limit of 4 git runs, slow mark, singleflight, subscriptions, `git.root` event, budget tests (REQ-WM-080…086)
 - [ ] `T-002` Daemon routes: root summary, subscribe, folder listing and file read outside a repo
 - [ ] `T-003` FigCraft design: chip, picker, grouped Changes, root Files, phone sheet
   - Evidence: 2026-11-22, drawn live in FigCraft (5 frames); waiting for owner approval

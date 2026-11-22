@@ -22,6 +22,10 @@ import (
 // defaultTimeout is how long one git command may run (REQ-WG-001).
 const defaultTimeout = 10 * time.Second
 
+// gitLimit is how many git processes the daemon runs at once (REQ-WM-082). All
+// Workbench git runs share it: the spec 66 routes and the root watchers.
+const gitLimit = 4
+
 // ErrForbiddenPath is returned for a path the spec 61 policy does not allow or
 // always refuses (REQ-WG-001).
 var ErrForbiddenPath = errors.New("gitinfo: forbidden path")
@@ -64,14 +68,20 @@ type Runner struct {
 	// caches holds the worktree-scoped and list-scoped caches of REQ-WG-007,
 	// REQ-WG-008 and REQ-WG-010. Its zero value is usable.
 	caches caches
+
+	// gitSem bounds the number of git processes that run at once (REQ-WM-082).
+	// It is created on first use, so the zero Runner works too.
+	gitSem     chan struct{}
+	gitSemOnce sync.Once
 }
 
 // caches groups the caches a Runner keeps besides the resolve cache, so the
-// Runner struct gains one field (REQ-WG-007, REQ-WG-008, REQ-WG-010).
+// Runner struct gains one field (REQ-WG-007, REQ-WG-008, REQ-WG-010, REQ-WM-001).
 type caches struct {
 	ignored   listCache
 	files     listCache
 	worktrees worktreesCache
+	roots     rootCache
 }
 
 // NewRunner builds a Runner with the given path policy and the default 10 s
@@ -98,6 +108,14 @@ func (r *Runner) Git(ctx context.Context, dir string, args ...string) ([]byte, e
 // so a single call can run longer than the runner's default: creating a
 // worktree fetches origin with a 60 s window (REQ-WG-031).
 func (r *Runner) gitTimeout(ctx context.Context, dir string, timeout time.Duration, args ...string) ([]byte, error) {
+	slots := r.gitSlots()
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -130,6 +148,16 @@ func (r *Runner) CheckPath(path string) error {
 		return ErrForbiddenPath
 	}
 	return nil
+}
+
+// gitSlots is the shared git semaphore (REQ-WM-082). It is created on first use
+// so a zero Runner works. A caller takes one slot per git process and returns
+// it when the process ends.
+func (r *Runner) gitSlots() chan struct{} {
+	r.gitSemOnce.Do(func() {
+		r.gitSem = make(chan struct{}, gitLimit)
+	})
+	return r.gitSem
 }
 
 // clock is the time source of the resolve cache: the injected test clock when

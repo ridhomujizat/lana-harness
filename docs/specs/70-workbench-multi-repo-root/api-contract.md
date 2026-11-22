@@ -70,12 +70,12 @@ Headers: `ETag`. `If-None-Match` with the same value returns 304.
 
 204. Renew every 30 s while the panel is open on that root. `DELETE` with the same body unsubscribes. A subscription that is not renewed for 45 s ends. The root watcher (REQ-WM-080) runs while it has at least one subscription.
 
-## `git_root` event
+## `git.root` event
 
 On `GET /v1/workbench/events`, next to the session events:
 
 ```json
-{"type": "git_root", "root": "/Users/me/coding/sxored", "etag": "r-91c2", "repos": {"sxored-be-ocrengine": "e-1a0f", "sxored-apigateway": "e-77b3"}}
+{"type": "git.root", "root": "/Users/me/coding/sxored", "etag": "r-91c2", "repos": {"sxored-be-ocrengine": "e-1a0f", "sxored-apigateway": "e-77b3"}}
 ```
 
 Sent when the summary of a subscribed root changes. `repos` holds the ETag of each repo with changes, so a client reloads only the opened groups whose ETag changed.
