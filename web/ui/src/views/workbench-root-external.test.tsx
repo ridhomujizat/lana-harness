@@ -69,3 +69,17 @@ describe("figcraftBase", () => {
     expect(figcraftBase("/Users/me/hub", { key: "/tmp/a/b.figcraft" })).toEqual({ worktree: "/tmp/a", path: "b.figcraft" });
   });
 });
+
+describe("outside folder", () => {
+  it("names the folder path and closes", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const onClose = vi.fn();
+    render(
+      <RootFilesTab root={{ path: "/private/tmp/plan", name: "plan", repos: 0 }} summary={null} selected={null} onSelect={() => {}} onClose={onClose} />
+    );
+    expect(screen.getByText(/\/private\/tmp\/plan/)).toBeTruthy();
+    expect(screen.queryByText(/repos/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close folder" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+});

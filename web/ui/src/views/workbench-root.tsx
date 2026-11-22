@@ -421,6 +421,7 @@ export function RootFilesTab({
   selected,
   onSelect,
   external,
+  onClose,
   phone,
 }: {
   root: GitRootInfo;
@@ -430,6 +431,9 @@ export function RootFilesTab({
   onSelect: (path: string | null) => void;
   /* A ⌘+clicked file outside every repo of the root (e.g. a temp file). */
   external?: WorkbenchPreview | null;
+  /* A folder opened on its own (a ⌘+clicked folder outside git): the tree
+     names its path, without a repo count, and can be closed. */
+  onClose?: () => void;
   phone?: boolean;
 }) {
   const [kids, setKids] = useState<Kids>({});
@@ -554,9 +558,20 @@ export function RootFilesTab({
   const tree = (
     <div className="wbg-list">
       <div className="wbg-summary">
-        <span>
-          {root.name} · {root.repos} {root.repos === 1 ? "repo" : "repos"}
-        </span>
+        {onClose ? (
+          <>
+            <span className="wbg-summary-path" title={root.path}>
+              <Ic name="folder-open" size={13} /> {root.path.replace(/^\/(?:Users|home)\/[^/]+/, "~")}
+            </span>
+            <button type="button" className="wbg-icon-btn" aria-label="Close folder" data-tip="Close folder" onClick={onClose}>
+              <Ic name="x" size={14} />
+            </button>
+          </>
+        ) : (
+          <span>
+            {root.name} · {root.repos} {root.repos === 1 ? "repo" : "repos"}
+          </span>
+        )}
       </div>
       <div className="wbg-rows" ref={bodyRef}>
         {top === "loading" || top === undefined ? <div className="wbg-tree-note">Loading…</div> : null}
