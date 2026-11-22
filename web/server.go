@@ -128,6 +128,25 @@ type Server struct {
 	workbenchFigcraft      figcraftBackend
 	workbenchFigcraftStore *figcraft.SettingsStore
 	figcraftOpen           func(ctx context.Context, abs string) error
+	// workbenchReports holds the worktree reports of spec 69 (REQ-WA-031),
+	// persisted under the Lana home. workbenchBus fans the session.updated
+	// events a report change publishes (REQ-WA-033) out to the open
+	// /v1/workbench/events streams.
+	workbenchReports *workbenchReportStore
+	workbenchBus     *workbenchEventBus
+	// workbenchRootWatch is the shared root watcher of spec 70 (REQ-WM-080).
+	// workbenchRootWatchOnce builds it with the git runner on first use, so a
+	// server that never sees a root does not start its ticker;
+	// workbenchRootWatchMu guards the field for the shutdown close.
+	// workbenchRootSubs tracks the roots with a live subscription, so the Files
+	// tree reads a cached summary only when the watcher holds one (REQ-WM-004),
+	// and workbenchActivity caches the core session list the watcher's activity
+	// function reads (REQ-WM-081).
+	workbenchRootWatchOnce sync.Once
+	workbenchRootWatch     *gitinfo.RootWatchers
+	workbenchRootWatchMu   sync.Mutex
+	workbenchRootSubs      workbenchRootSubscriptions
+	workbenchActivity      workbenchActivityCache
 	// routerBackend is the Router page and proxy port (spec 37). It is
 	// guarded by routerMu because the proxy reads it on every request.
 	routerBackend  RouterBackend
@@ -236,6 +255,8 @@ func New(cfg Config) (*Server, error) {
 	s.loginLock = newLoginLock(s.nowTime)
 	s.previewTokens = newPreviewTokens(s.nowTime)
 	s.roomHub = newRoomHub(s)
+	s.workbenchReports = newWorkbenchReportStore(cfg.Home)
+	s.workbenchBus = newWorkbenchEventBus()
 	if cfg.Enabled {
 		sessions, err := loadBrowserSessions(cfg.Home, s.nowTime())
 		if err != nil {
@@ -288,6 +309,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerCalendarRoutes()
 	s.registerRouterRoutes()
 	s.registerWorkbenchRoutes()
+	s.registerWorkbenchAgentHookRoutes()
 	s.handler = s.remoteGate(s.securityHeaders(s.compress(s.mux)))
 	return s, nil
 }
@@ -392,6 +414,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if srv != nil {
 		err = srv.Shutdown(ctx)
 	}
+	s.closeWorkbenchRootWatchers()
 	s.closeDone()
 	return err
 }

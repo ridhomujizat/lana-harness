@@ -1,14 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type { WorkbenchPreview, WorkbenchSession } from "../api/workbench";
-import { isGitInfo, type GitInfo } from "../api/workbench-git";
+import { clearWorktreeReport, type WorkbenchPreview, type WorkbenchSession } from "../api/workbench";
+import { isGitInfo, rootOfResolved, type GitInfo, type GitRootInfo } from "../api/workbench-git";
 import { Ic } from "../ui/icons";
 import { flushSync } from "react-dom";
 
 import { LAYOUT_MOTION_MS, canViewTransition, holdLayout, reducedMotion, withViewTransition } from "../app/layout-motion";
 import { GitPanel, GIT_TABS, type GitTab, type SpaceWorktree } from "./workbench-git-panel";
 import { readPref, savePref, useGitResolve, useGitStatus } from "./workbench-git-hooks";
-import { groupByWorktree, panelWorktree, relativeTo, sessionDir, sharedAgents } from "./workbench-git-model";
+import { groupByWorktree, isUnder, panelWorktree, relativeTo, sessionDir, sharedAgents } from "./workbench-git-model";
+import { useRootSummary } from "./workbench-root";
 import { WorktreesTab } from "./workbench-worktrees";
 import { programName, tabSessions, type WbLayout, type WbSpace, type WbTab } from "./workbench-model";
 
@@ -24,6 +25,10 @@ type Sessions = Record<string, WorkbenchSession>;
 
 export interface WbGitContextValue {
   gitOf: (sessionId: string) => GitInfo | undefined;
+  /* Spec 70: the root folder of several repos the pane works in. */
+  rootOf: (sessionId: string) => GitRootInfo | undefined;
+  /* The changed repo count of a root whose summary is loaded. */
+  rootChanged: (rootPath: string) => number | undefined;
   shared: Map<string, string[]>;
   describe: (sessionId: string) => string;
   onShared: (sessionId: string) => void;
@@ -111,8 +116,12 @@ export function useWorkbenchGit({
 
   /* REQ-WG-070: every session's directory, plus a pinned or chosen one. */
   const allIds = useMemo(() => Object.keys(sessions), [sessions]);
+  /* Spec 69/70: the process directory too, so a pane whose agent reported a
+     repo inside a root still knows the root. */
+  const procDir = (s: WorkbenchSession | undefined) => (s?.cwd || s?.dir || "").trim();
   const dirs = useMemo(() => {
     const list = allIds.map((id) => sessionDir(sessions[id]));
+    for (const id of allIds) if (sessions[id]?.work_dir) list.push(procDir(sessions[id]));
     if (pinned) list.push(pinned);
     if (chosen) list.push(chosen);
     return list;
@@ -123,6 +132,14 @@ export function useWorkbenchGit({
       const v = map[sessionDir(sessions[id])];
       return isGitInfo(v) ? v : undefined;
     },
+    [map, sessions]
+  );
+  const rootOf = useCallback(
+    (id: string): GitRootInfo | undefined => {
+      const s = sessions[id];
+      return rootOfResolved(map[procDir(s)]) ?? rootOfResolved(map[sessionDir(s)]);
+    },
+     
     [map, sessions]
   );
   const infoOfDir = (dir: string | null): GitInfo | undefined => {
@@ -149,7 +166,38 @@ export function useWorkbenchGit({
       setChosen(null);
     }
   }, [focused]);
-  const shownPath = panelWorktree(pinned, chosen ?? focusedInfo?.worktree, null);
+  /* Spec 70: a pane in a root shows the whole root until a repo is chosen;
+     a repo the agent reported keeps the root view (REQ-WM-035). */
+  const focusedRoot = focused ? rootOf(focused) : undefined;
+  const focusedSession = focused ? sessions[focused] : undefined;
+  const rootMode = !!focusedRoot && !chosen && !pinned && (!focusedInfo || isUnder(focusedInfo.worktree, focusedRoot.path));
+  const reported = focusedRoot && focusedSession?.work_dir && focusedInfo && isUnder(focusedInfo.worktree, focusedRoot.path) ? focusedInfo.worktree : undefined;
+  const rootSummary = useRootSummary(focusedRoot?.path ?? null, !!focusedRoot, open);
+  const [rootFile, setRootFile] = useState<string | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- another root starts with no file
+    setRootFile(null);
+  }, [focusedRoot?.path]);
+  const rootChanged = useCallback(
+    (path: string) => (rootSummary.summary && rootSummary.summary.root === path ? rootSummary.summary.changed_repos : undefined),
+    [rootSummary.summary]
+  );
+
+  /* Spec 69 REQ-WA-043: a short notice when a report moves the panel. */
+  const [notice, setNotice] = useState("");
+  const lastReport = useRef<{ id?: string; dir?: string }>({});
+  useEffect(() => {
+    const dir = focusedSession?.work_dir;
+    const prev = lastReport.current;
+    lastReport.current = { id: focused, dir };
+    if (prev.id !== focused || !dir || dir === prev.dir || pinned) return;
+     
+    setNotice("Following " + (focusedInfo?.short ?? dir.slice(dir.lastIndexOf("/") + 1)));
+    const t = setTimeout(() => setNotice(""), 2500);
+    return () => clearTimeout(t);
+  }, [focused, focusedSession?.work_dir, focusedInfo?.short, pinned]);
+
+  const shownPath = panelWorktree(pinned, chosen ?? (rootMode ? undefined : focusedInfo?.worktree), null);
   const shown = infoOfDir(shownPath) ?? (focusedInfo && focusedInfo.worktree === shownPath ? focusedInfo : undefined) ?? inSpace.find((w) => w.info.worktree === shownPath)?.info ?? null;
 
   /* REQ-WG-021, 060: the badge needs the count even with the panel closed,
@@ -283,8 +331,8 @@ export function useWorkbenchGit({
     return () => window.removeEventListener("keydown", onKey, true);
   }, []);
 
-  const count = status.data?.totals.files ?? 0;
-  const noRepoDir = !shown && focused ? sessionDir(sessions[focused]) : undefined;
+  const count = rootMode ? (rootSummary.summary?.changed_files ?? 0) : (status.data?.totals.files ?? 0);
+  const noRepoDir = !shown && focused && !focusedRoot ? sessionDir(sessions[focused]) : undefined;
 
   const worktreesTab = shown ? (
     <WorktreesTab
@@ -352,7 +400,29 @@ export function useWorkbenchGit({
       onRefresh={() => {
         status.refresh();
         refreshResolve();
+        rootSummary.refresh();
       }}
+      rootView={
+        rootMode && focusedRoot
+          ? { root: focusedRoot, summary: rootSummary.summary, repoTags: rootSummary.repoTags, reported, file: rootFile, onFile: setRootFile }
+          : null
+      }
+      root={
+        focusedRoot
+          ? {
+              info: focusedRoot,
+              summary: rootSummary.summary,
+              narrowed: rootMode ? null : (chosen ?? null),
+              onPick: (w, t) => {
+                setChosen(w);
+                if (pinned) setPinned(w);
+                if (t) pickTab(t);
+              },
+            }
+          : null
+      }
+      notice={notice}
+      onClearReport={focused && focusedSession?.work_dir ? () => void clearWorktreeReport(focused).catch(() => {}) : undefined}
       file={file}
       onFile={(path, line) => {
         setExternal(null);
@@ -396,10 +466,10 @@ export function useWorkbenchGit({
     };
   });
   const context: WbGitContextValue = useMemo(
-    () => ({ gitOf, shared, describe, onShared: () => onSharedRef.current() }),
+    () => ({ gitOf, rootOf, rootChanged, shared, describe, onShared: () => onSharedRef.current() }),
     // describe reads the space and sessions that gitOf and shared already follow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [gitOf, shared, space]
+    [gitOf, rootOf, rootChanged, shared, space]
   );
 
   void layout;

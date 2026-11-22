@@ -185,8 +185,10 @@ export function blockCommentStates(lines: string[], language: string): boolean[]
 /* --------------------------------------------------- worktree per session */
 
 /* REQ-WG-070: the directory a session is in now. */
-export function sessionDir(s: { cwd?: string; dir: string } | undefined): string {
-  return (s?.cwd || s?.dir || "").trim();
+/* Spec 69 REQ-WA-040: the worktree an agent reported wins over the
+   process directory, which wins over the start directory. */
+export function sessionDir(s: { work_dir?: string; cwd?: string; dir: string } | undefined): string {
+  return (s?.work_dir || s?.cwd || s?.dir || "").trim();
 }
 
 export interface PaneWorktree {
@@ -281,4 +283,96 @@ export function shortAge(iso: string, now = Date.now()): string {
   const w = Math.round(d / 7);
   if (w < 9) return w + "w";
   return Math.round(d / 30) + "mo";
+}
+
+/* ------------------------------------------------------------------ */
+/* Spec 70: a folder of several repos                                  */
+/* ------------------------------------------------------------------ */
+
+/* REQ-WM-007: a repo folder without the "<root>-" prefix. */
+export function repoDisplay(rootName: string, folder: string): string {
+  const prefix = rootName + "-";
+  return folder.startsWith(prefix) && folder.length > prefix.length ? folder.slice(prefix.length) : folder;
+}
+
+/* True when path is dir or inside it. */
+export function isUnder(path: string, dir: string): boolean {
+  const d = dir.replace(/\/+$/, "");
+  return path === d || path.startsWith(d + "/");
+}
+
+export interface RootRepoLike {
+  name: string;
+  worktree: string;
+  changed: number;
+}
+
+/* REQ-WM-030: the reported repo first, then by changed count, then name. */
+export function orderRootRepos<T extends RootRepoLike>(repos: T[], reported?: string): T[] {
+  return repos
+    .filter((r) => r.changed > 0 || r.worktree === reported)
+    .sort((a, b) => {
+      if (reported) {
+        if (a.worktree === reported && b.worktree !== reported) return -1;
+        if (b.worktree === reported && a.worktree !== reported) return 1;
+      }
+      return b.changed - a.changed || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    });
+}
+
+/* REQ-WM-030: groups start open when at most 3 repos changed. */
+export function defaultOpenGroups(changed: RootRepoLike[]): Set<string> {
+  return new Set(changed.length <= 3 ? changed.map((r) => r.worktree) : []);
+}
+
+/* REQ-WM-031: a group shows its first files and "… n more". */
+export const ROOT_GROUP_FILES = 10;
+
+export type RootRow<R, F> =
+  | { kind: "group"; repo: R; open: boolean; here: boolean }
+  | { kind: "file"; repo: R; file: F }
+  | { kind: "more"; repo: R; hidden: number }
+  | { kind: "loading"; repo: R }
+  /* The summary counts a change but no file is listed: an untracked folder
+     holding only a nested repo or empty folders. */
+  | { kind: "empty"; repo: R }
+  | { kind: "clean"; count: number; open: boolean }
+  | { kind: "clean-repo"; repo: R };
+
+export const ROOT_ROW_H = { group: 30, file: 42, more: 26, loading: 26, empty: 26, clean: 34, "clean-repo": 28 } as const;
+
+/* REQ-WM-084: the Changes list as one flat row list for the virtualiser. */
+export function rootRows<R extends RootRepoLike, F>(opts: {
+  changed: R[];
+  clean: R[];
+  open: Set<string>;
+  files: Record<string, F[] | undefined>;
+  showAll: Set<string>;
+  reported?: string;
+  cleanOpen: boolean;
+}): RootRow<R, F>[] {
+  const rows: RootRow<R, F>[] = [];
+  for (const repo of opts.changed) {
+    const here = repo.worktree === opts.reported;
+    const open = here || opts.open.has(repo.worktree);
+    rows.push({ kind: "group", repo, open, here });
+    if (!open) continue;
+    const list = opts.files[repo.worktree];
+    if (!list) {
+      rows.push({ kind: "loading", repo });
+      continue;
+    }
+    if (!list.length) {
+      rows.push({ kind: "empty", repo });
+      continue;
+    }
+    const shown = opts.showAll.has(repo.worktree) ? list : list.slice(0, ROOT_GROUP_FILES);
+    for (const file of shown) rows.push({ kind: "file", repo, file });
+    if (shown.length < list.length) rows.push({ kind: "more", repo, hidden: list.length - shown.length });
+  }
+  if (opts.clean.length) {
+    rows.push({ kind: "clean", count: opts.clean.length, open: opts.cleanOpen });
+    if (opts.cleanOpen) for (const repo of opts.clean) rows.push({ kind: "clean-repo", repo });
+  }
+  return rows;
 }

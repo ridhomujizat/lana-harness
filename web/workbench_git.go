@@ -55,6 +55,12 @@ func (s *Server) registerWorkbenchGitRoutes() {
 	s.Handle("POST /v1/workbench/git/worktrees/lock", http.HandlerFunc(s.handleWorkbenchGitWorktreeLock))
 	s.Handle("GET /v1/workbench/git/settings", http.HandlerFunc(s.handleWorkbenchGitSettingsGet))
 	s.Handle("PUT /v1/workbench/git/settings", http.HandlerFunc(s.handleWorkbenchGitSettingsPut))
+	// The root routes of spec 70 (REQ-WM-002..005, REQ-WM-083).
+	s.Handle("GET /v1/workbench/git/root", http.HandlerFunc(s.handleWorkbenchGitRoot))
+	s.Handle("PUT /v1/workbench/git/root/subscribe", http.HandlerFunc(s.handleWorkbenchRootSubscribe))
+	s.Handle("DELETE /v1/workbench/git/root/subscribe", http.HandlerFunc(s.handleWorkbenchRootSubscribe))
+	s.Handle("GET /v1/workbench/files/tree", http.HandlerFunc(s.handleWorkbenchFilesTree))
+	s.Handle("GET /v1/workbench/files/file", http.HandlerFunc(s.handleWorkbenchFilesFile))
 }
 
 // workbenchGit builds, on first use, the git runner and the settings store of
@@ -189,6 +195,8 @@ func (s *Server) writeWorkbenchGitError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusForbidden, "forbidden_path", "the path is not allowed")
 	case errors.Is(err, gitinfo.ErrNotARepo):
 		writeAPIError(w, http.StatusNotFound, "not_a_repo", "the path is not inside a git repository")
+	case errors.Is(err, gitinfo.ErrNotARoot):
+		writeAPIError(w, http.StatusNotFound, "not_a_root", "the folder is not a workbench root")
 	case errors.Is(err, gitinfo.ErrNotFound), errors.Is(err, os.ErrNotExist):
 		writeAPIError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, gitinfo.ErrBranchExists):
@@ -270,7 +278,8 @@ type workbenchGitResolveBody struct {
 }
 
 // handleWorkbenchGitResolve answers the resolve route (REQ-WG-002): for each
-// dir its Info, {"repo": null} for a directory outside any repo, and
+// dir its Info, {"repo": null, "root": {...}} for a folder of several repos
+// (REQ-WM-002), {"repo": null} for a directory outside any repo, and
 // {"error": "forbidden_path"} for one the path policy refuses.
 func (s *Server) handleWorkbenchGitResolve(w http.ResponseWriter, r *http.Request) {
 	if s.workbenchOrError(w) == nil {
@@ -298,7 +307,10 @@ func (s *Server) handleWorkbenchGitResolve(w http.ResponseWriter, r *http.Reques
 		case errors.Is(err, gitinfo.ErrForbiddenPath):
 			dirs[dir] = map[string]any{"error": "forbidden_path"}
 		case errors.Is(err, gitinfo.ErrNotARepo):
-			dirs[dir] = map[string]any{"repo": nil}
+			if rerr := resolveRootAnswer(r.Context(), runner, dirs, dir); rerr != nil {
+				s.writeWorkbenchGitError(w, rerr)
+				return
+			}
 		default:
 			s.writeWorkbenchGitError(w, err)
 			return
@@ -307,6 +319,27 @@ func (s *Server) handleWorkbenchGitResolve(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, struct {
 		Dirs map[string]any `json:"dirs"`
 	}{Dirs: dirs})
+}
+
+// resolveRootAnswer fills the resolve answer of a directory outside any repo: a
+// root answers {"repo": null, "root": {...}} (REQ-WM-002), any other folder
+// keeps the plain {"repo": null}. It returns the git error to answer when the
+// detection failed for another reason.
+func resolveRootAnswer(ctx context.Context, runner *gitinfo.Runner, dirs map[string]any, dir string) error {
+	switch root, err := runner.DetectRoot(ctx, dir); {
+	case err == nil:
+		dirs[dir] = map[string]any{
+			"repo": nil,
+			"root": workbenchRootInfo{Path: root.Path, Name: root.Name, Repos: len(root.Repos)},
+		}
+	case errors.Is(err, gitinfo.ErrNotARoot):
+		dirs[dir] = map[string]any{"repo": nil}
+	case errors.Is(err, gitinfo.ErrForbiddenPath):
+		dirs[dir] = map[string]any{"error": "forbidden_path"}
+	default:
+		return err
+	}
+	return nil
 }
 
 // handleWorkbenchGitStatus answers the status route (REQ-WG-003, REQ-WG-004).
@@ -440,12 +473,19 @@ func (s *Server) handleWorkbenchGitFile(w http.ResponseWriter, r *http.Request) 
 		s.writeWorkbenchGitError(w, err)
 		return
 	}
+	s.writeWorkbenchFileContent(w, content, filepath.Join(worktree, content.Path))
+}
+
+// writeWorkbenchFileContent answers a file read (REQ-WG-009, REQ-WM-005): a
+// text file is the FileContent JSON, any other kind is the spec 61 preview
+// response for the resolved file. The spec 66 file route and the root file
+// route share it, so both answer the same shapes.
+func (s *Server) writeWorkbenchFileContent(w http.ResponseWriter, content gitinfo.FileContent, resolved string) {
 	if content.Kind == string(preview.KindText) {
 		writeJSON(w, http.StatusOK, content)
 		return
 	}
-	resolved := preview.Resolve(filepath.Join(worktree, content.Path))
-	s.previewResponse(w, resolved, content.Size, preview.Kind(content.Kind), 0, 0)
+	s.previewResponse(w, preview.Resolve(resolved), content.Size, preview.Kind(content.Kind), 0, 0)
 }
 
 // handleWorkbenchGitWorktrees answers the worktree list route (REQ-WG-010).
@@ -535,12 +575,18 @@ type workbenchGitCreateBody struct {
 	Copy      []string `json:"copy"`
 }
 
-// handleWorkbenchGitWorktreeCreate answers the create route (REQ-WG-031). An
-// empty base uses the repo's settings base.
+// handleWorkbenchGitWorktreeCreate answers the create route (REQ-WG-031).
 func (s *Server) handleWorkbenchGitWorktreeCreate(w http.ResponseWriter, r *http.Request) {
 	if s.workbenchOrError(w) == nil {
 		return
 	}
+	s.createWorkbenchWorktree(w, r)
+}
+
+// createWorkbenchWorktree runs the spec 66 create (REQ-WG-031), shared by the
+// browser route and its local mirror (spec 69). An empty base uses the repo's
+// settings base.
+func (s *Server) createWorkbenchWorktree(w http.ResponseWriter, r *http.Request) {
 	var body workbenchGitCreateBody
 	if !decodeJSONObject(w, r, workbenchBodyLimit, &body) {
 		return

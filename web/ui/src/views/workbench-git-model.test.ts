@@ -1,19 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { GitHunk, GitInfo } from "../api/workbench-git";
-import {
-  blockCommentStates,
-  groupByWorktree,
-  gutterMarks,
-  highlightLine,
-  panelWorktree,
-  relativeTo,
-  sharedAgents,
-  shortAge,
-  shortBranch,
-  splitRows,
-  unifiedRows,
-} from "./workbench-git-model";
+import { blockCommentStates, groupByWorktree, gutterMarks, highlightLine, panelWorktree, relativeTo, sharedAgents, shortAge, shortBranch, splitRows, unifiedRows, sessionDir, repoDisplay, isUnder, orderRootRepos, defaultOpenGroups, rootRows, ROOT_GROUP_FILES } from "./workbench-git-model";
 
 const hunk: GitHunk = {
   header: "@@ -10,6 +10,7 @@ fn",
@@ -139,5 +127,62 @@ describe("paths and ages", () => {
     expect(shortAge("2026-11-21T09:00:00Z", now)).toBe("3h");
     expect(shortAge("2026-11-07T12:00:00Z", now)).toBe("2w");
     expect(shortAge("bad", now)).toBe("—");
+  });
+});
+
+describe("spec 69: session worktree order", () => {
+  it("prefers the reported work_dir, then cwd, then dir", () => {
+    expect(sessionDir({ work_dir: "/r/wt", cwd: "/r", dir: "/" })).toBe("/r/wt");
+    expect(sessionDir({ cwd: "/r", dir: "/" })).toBe("/r");
+    expect(sessionDir({ dir: "/d" })).toBe("/d");
+  });
+});
+
+describe("spec 70: root folders", () => {
+  const repo = (name: string, changed: number) => ({ name, worktree: "/root/" + name, changed });
+
+  it("drops the root prefix from repo names", () => {
+    expect(repoDisplay("sxored", "sxored-be-ocrengine")).toBe("be-ocrengine");
+    expect(repoDisplay("sxored", "sxored-")).toBe("sxored-");
+    expect(repoDisplay("rdms", "be-rdms")).toBe("be-rdms");
+  });
+
+  it("checks paths under a folder", () => {
+    expect(isUnder("/a/b", "/a")).toBe(true);
+    expect(isUnder("/a", "/a/")).toBe(true);
+    expect(isUnder("/ab", "/a")).toBe(false);
+  });
+
+  it("orders changed repos: reported first, then count, then name", () => {
+    const list = [repo("b", 2), repo("a", 2), repo("c", 9), repo("d", 0), repo("e", 5)];
+    expect(orderRootRepos(list).map((r) => r.name)).toEqual(["c", "e", "a", "b"]);
+    expect(orderRootRepos(list, "/root/e").map((r) => r.name)).toEqual(["e", "c", "a", "b"]);
+    /* A clean repo the agent reported still shows. */
+    expect(orderRootRepos(list, "/root/d").map((r) => r.name)[0]).toBe("d");
+  });
+
+  it("opens groups by default only for at most 3 changed repos", () => {
+    expect(defaultOpenGroups([repo("a", 1), repo("b", 1), repo("c", 1)]).size).toBe(3);
+    expect(defaultOpenGroups([repo("a", 1), repo("b", 1), repo("c", 1), repo("d", 1)]).size).toBe(0);
+  });
+
+  it("flattens groups, files, the more row and the clean row", () => {
+    const a = repo("a", 12);
+    const b = repo("b", 1);
+    const files = Array.from({ length: 12 }, (_, i) => "f" + i);
+    const rows = rootRows({
+      changed: [a, b],
+      clean: [repo("c", 0), repo("d", 0)],
+      open: new Set([a.worktree]),
+      files: { [a.worktree]: files },
+      showAll: new Set(),
+      cleanOpen: false,
+    });
+    expect(rows.map((r) => r.kind)).toEqual(["group", ...Array(ROOT_GROUP_FILES).fill("file"), "more", "group", "clean"]);
+    const more = rows.find((r) => r.kind === "more");
+    expect(more && more.kind === "more" ? more.hidden : 0).toBe(2);
+    const reported = rootRows({ changed: [b], clean: [], open: new Set(), files: {}, showAll: new Set(), reported: b.worktree, cleanOpen: false });
+    expect(reported.map((r) => r.kind)).toEqual(["group", "loading"]);
+    expect(reported[0]?.kind === "group" && reported[0].here).toBe(true);
   });
 });
