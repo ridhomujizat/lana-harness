@@ -9,7 +9,13 @@ but their config keys, events, and tools may still change between betas.
 
 ## [0.6.0-beta.4] - 2026-11-22
 
+### Added
+
+- The FigCraft viewer has an Expand button: it opens the viewer over the whole window, like the image viewer, with pan, zoom, pages and layers. Esc or the same button goes back.
+
 ### Fixed
+
+- FigCraft viewer text is sharp when zoomed in, also for titles and notes next to frames, and no longer shows twice. Only frames, sections and components get a name label on the canvas; a text layer's label repeated its own text over the render.
 
 - macOS stops asking again for Documents, Music and other privacy access after every update. `make app CODESIGN_IDENTITY="<keychain identity>"` signs Lana.app and its daemon binary (identifier `<bundle id>.daemon`) with a real certificate instead of ad-hoc, so macOS keeps the grants for that identity. Self-update signs the new binary with the identity it finds on the installed bundle and falls back to ad-hoc when that identity cannot sign. The default stays ad-hoc; a one-time build with an identity is needed.
 - Workbench on a phone: the tab sheet keeps two equal card columns, so a long tab title is cut short instead of pushing the second card off the sheet; the card close button is a small circle on the preview strip; the tab count in the strip is one flat box; and the tab chips share one height.
