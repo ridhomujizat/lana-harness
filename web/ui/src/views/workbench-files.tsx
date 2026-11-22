@@ -5,6 +5,7 @@ import type { WorkbenchPreview } from "../api/workbench";
 import {
   getGitDiff,
   getGitFile,
+  readPlainFile,
   getGitTree,
   isTextFile,
   searchGitFiles,
@@ -353,7 +354,9 @@ export function FilesTab({
 
 /* REQ-WG-065: one file, read-only, with line numbers and the git gutter. A
    changed file can switch to its diff. */
-function FileView({ worktree, path, line, change }: { worktree: string; path: string; line?: number; change?: GitFileChange }) {
+/* plain: path is absolute and outside any repo (spec 70 REQ-WM-005), so it
+   is read without git and has no gutter or diff. */
+export function FileView({ worktree, path, line, change, plain }: { worktree: string; path: string; line?: number; change?: GitFileChange; plain?: boolean }) {
   const [file, setFile] = useState<GitFileContent | null>(null);
   const [error, setError] = useState("");
   const [marks, setMarks] = useState<Map<number, GutterMark>>(new Map());
@@ -366,26 +369,26 @@ function FileView({ worktree, path, line, change }: { worktree: string; path: st
     setFile(null);
     setError("");
     setMode("file");
-    getGitFile(worktree, path)
+    (plain ? readPlainFile(path) : getGitFile(worktree, path))
       .then((f) => !cancelled && setFile(f))
       .catch((err) => !cancelled && setError(errorMessage(err)));
     return () => {
       cancelled = true;
     };
-  }, [worktree, path]);
+  }, [worktree, path, plain]);
 
   useEffect(() => {
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the gutter of the previous file must not linger
     setMarks(new Map());
-    if (!change || change.status === "U" || change.status === "A" || change.binary) return;
+    if (plain || !change || change.status === "U" || change.status === "A" || change.binary) return;
     getGitDiff(worktree, path, "uncommitted")
       .then((d) => !cancelled && setMarks(gutterMarks(d.hunks)))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [worktree, path, change?.add, change?.del, change?.status, change?.binary, change]);
+  }, [worktree, path, plain, change?.add, change?.del, change?.status, change?.binary, change]);
 
   const text = file && isTextFile(file) ? file : null;
   const lines = useMemo(() => {

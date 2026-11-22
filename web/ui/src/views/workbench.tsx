@@ -71,6 +71,8 @@ import {
 import { TermPane, type SendInput } from "./workbench-term";
 import { prune as pruneTermCache } from "./workbench-term-cache";
 import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
+import { emitGitRootEvent } from "../api/workbench-git";
+import { baseName, isUnder, repoDisplay } from "./workbench-git-model";
 import { AgentLogo } from "./agent-logo";
 import { ProgramTile, TabTiles } from "./workbench-tile";
 import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
@@ -151,6 +153,13 @@ function RestoredChip({ session }: { session?: WorkbenchSession }) {
       Restored
     </span>
   );
+}
+
+/* Spec 69 REQ-WA-041: "Reported by claude at 14:32". */
+function reportedTip(s: WorkbenchSession | undefined): string {
+  const at = s?.work_dir_at ? new Date(s.work_dir_at) : null;
+  const time = at && !Number.isNaN(at.getTime()) ? " at " + at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  return "Reported by " + (s?.agent || "the agent") + time;
 }
 
 /* Spec 66 REQ-WG-074: a space whose sessions use several worktrees shows
@@ -634,6 +643,8 @@ function PaneView({
      agent works in the same one. */
   const git = useWbGit();
   const info = git?.gitOf(id);
+  const root = git?.rootOf(id);
+  const rootChanged = root ? git?.rootChanged(root.path) : undefined;
   const shared = git?.shared.get(id);
   return (
     <div
@@ -660,9 +671,32 @@ function PaneView({
         )}
         <span className="wb-pane-title">{programName(session)}</span>
         {info ? (
-          <span className={"wbg-pane-chip" + (shared?.length ? " is-shared" : "")} title={info.branch + " · " + info.worktree}>
-            <Ic name="git-branch" size={12} />
-            <span className="wbg-pane-chip-label">{info.short}</span>
+          <span
+            className={"wbg-pane-chip" + (shared?.length ? " is-shared" : "") + (session?.work_dir ? " is-reported" : "")}
+            title={info.branch + " · " + info.worktree + (session?.work_dir ? "\n" + reportedTip(session) : "")}
+          >
+            {root && isUnder(info.worktree, root.path) ? (
+              <>
+                <Ic name="folders" size={12} />
+                <span className="wbg-pane-chip-root">{root.name} ›</span>
+                <i className="wbg-wt-dot" style={{ background: info.color }} />
+                <span className="wbg-pane-chip-label">{repoDisplay(root.name, baseName(info.worktree))}</span>
+              </>
+            ) : (
+              <>
+                <Ic name="git-branch" size={12} />
+                <span className="wbg-pane-chip-label">{info.short}</span>
+              </>
+            )}
+            {session?.work_dir ? <i className="wbg-reported" aria-label="reported by the agent" /> : null}
+          </span>
+        ) : root ? (
+          <span className="wbg-pane-chip is-root" title={root.path + " · " + root.repos + " repos"}>
+            <Ic name="folders" size={12} />
+            <span className="wbg-pane-chip-label">
+              {root.name}
+              {rootChanged ? " · " + rootChanged : ""}
+            </span>
           </span>
         ) : null}
         {info && shared?.length && git ? (
@@ -1718,6 +1752,11 @@ export function WorkbenchPage() {
     void load();
     const stop = subscribeWorkbench(
       (event) => {
+        if (event.type === "git.root") {
+          /* Spec 70 REQ-WM-083: the panel's root view listens on this hub. */
+          emitGitRootEvent(event);
+          return;
+        }
         if (event.type === "layout.changed") {
           const json = JSON.stringify(event.layout);
           if (json === savedRef.current) return;

@@ -15,8 +15,21 @@ export interface GitInfo {
   main: boolean;
 }
 
-/* A dir outside any repo maps to {repo: null}; a refused one to {error}. */
-export type GitResolved = GitInfo | { repo: null } | { error: string };
+/* Spec 70 REQ-WM-002: a folder of several repos. */
+export interface GitRootInfo {
+  path: string;
+  name: string;
+  repos: number;
+}
+
+/* A dir outside any repo maps to {repo: null} (with root when it holds
+   repos); a refused one to {error}. */
+export type GitResolved = GitInfo | { repo: null; root?: GitRootInfo } | { error: string };
+
+export function rootOfResolved(value: GitResolved | undefined): GitRootInfo | undefined {
+  if (!value || isGitInfo(value) || "error" in value) return undefined;
+  return value.root;
+}
 
 export function isGitInfo(value: GitResolved | undefined): value is GitInfo {
   return !!value && typeof (value as GitInfo).repo === "string" && !!(value as GitInfo).worktree;
@@ -240,4 +253,91 @@ export function getGitSettings(repo: string): Promise<GitSettings> {
 
 export function putGitSettings(repo: string, settings: Partial<GitSettings>): Promise<GitSettings> {
   return request("PUT", "/v1/workbench/git/settings?" + new URLSearchParams({ repo }).toString(), settings);
+}
+
+/* Spec 70: the repos of a root folder (REQ-WM-003). */
+export interface GitRootRepo {
+  name: string;
+  display: string;
+  worktree: string;
+  branch?: string;
+  short?: string;
+  detached?: boolean;
+  head?: string;
+  color?: string;
+  changed: number;
+  additions: number;
+  deletions: number;
+  ahead: number;
+  behind: number;
+  error?: string;
+  slow?: boolean;
+  etag?: string;
+}
+
+export interface GitRootSummary {
+  root: string;
+  name: string;
+  repos: GitRootRepo[];
+  other: { name: string; kind: "dir" | "file" }[];
+  changed_repos: number;
+  changed_files: number;
+}
+
+const rootTags = new Map<string, { etag: string; body: GitRootSummary }>();
+
+export async function getGitRoot(dir: string): Promise<GitRootSummary> {
+  const path = "/v1/workbench/git/root?" + new URLSearchParams({ dir }).toString();
+  const cached = rootTags.get(path);
+  const res = await fetch(path, { credentials: "same-origin", headers: cached ? { "If-None-Match": cached.etag } : undefined });
+  if (res.status === 304 && cached) return cached.body;
+  if (!res.ok) return request("GET", path);
+  const body = (await res.json()) as GitRootSummary;
+  const etag = res.headers.get("ETag");
+  if (etag) rootTags.set(path, { etag, body });
+  return body;
+}
+
+/* REQ-WM-083: keeps the daemon's root watcher alive while the panel shows
+   the root; renewed every 30 s by the caller. */
+export function subscribeGitRoot(root: string, client: string): Promise<void> {
+  return request("PUT", "/v1/workbench/git/root/subscribe", { root, client });
+}
+
+export function unsubscribeGitRoot(root: string, client: string): Promise<void> {
+  return request("DELETE", "/v1/workbench/git/root/subscribe", { root, client });
+}
+
+/* REQ-WM-004, 005: folders and files outside any repo. */
+export interface FolderEntry {
+  name: string;
+  kind: "dir" | "file";
+  size?: number;
+  modified?: string;
+  repo?: boolean;
+  short?: string;
+  color?: string;
+  changed?: number;
+}
+
+export function listFolder(dir: string): Promise<{ dir: string; entries: FolderEntry[]; truncated: boolean }> {
+  return request("GET", "/v1/workbench/files/tree?" + new URLSearchParams({ dir }).toString());
+}
+
+export function readPlainFile(path: string): Promise<GitFileContent> {
+  return request("GET", "/v1/workbench/files/file?" + new URLSearchParams({ path }).toString());
+}
+
+/* git.root events reach the panel through this small hub: the page owns the
+   one SSE connection and forwards them here. */
+type RootListener = (ev: { root: string; etag: string; repos: Record<string, string> }) => void;
+const rootListeners = new Set<RootListener>();
+
+export function onGitRootEvent(fn: RootListener): () => void {
+  rootListeners.add(fn);
+  return () => rootListeners.delete(fn);
+}
+
+export function emitGitRootEvent(ev: { root: string; etag: string; repos: Record<string, string> }): void {
+  rootListeners.forEach((fn) => fn(ev));
 }

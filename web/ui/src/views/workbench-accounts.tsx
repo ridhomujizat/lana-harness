@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../api/client";
 import { runCommand } from "../api/toolbox";
+import { getAgentHook, setAgentHook, type AgentHookState } from "../api/workbench";
 import { Popover } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { AgentLogo } from "./agent-logo";
@@ -311,6 +312,60 @@ export function ClaudeAccountsPanel({
           );
         })}
       </div>
+      <AgentHookRow />
+    </div>
+  );
+}
+
+/* Spec 69 REQ-WA-014: the switch for the Claude Code SessionStart hook that
+   tells an agent it runs in a Workbench pane, so it reports its worktree. */
+function AgentHookRow() {
+  const [state, setState] = useState<AgentHookState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    getAgentHook()
+      .then((s) => !cancelled && setState(s))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!state) return null;
+  const broken = state.folders.filter((f) => f.error);
+  return (
+    <div className="wb-acc-hook">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={state.enabled}
+        className="wb-acc-hook-row"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          setError("");
+          setAgentHook(!state.enabled)
+            .then(setState)
+            .catch((err) => setError(errorMessage(err)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        <span className="wb-acc-hook-text">
+          <b>Tell Claude Code it runs in the Workbench</b>
+          <small>
+            Agents report the worktree they work in, so Files and Changes follow them.
+            {state.enabled ? " Installed in " + state.folders.filter((f) => f.installed).length + " of " + state.folders.length + " Claude folders." : ""}
+          </small>
+        </span>
+        <span className={"wbg-switch" + (state.enabled ? " is-on" : "")} />
+      </button>
+      {broken.map((f) => (
+        <p key={f.dir} className="wb-acc-error">
+          {f.dir}: {f.error}
+        </p>
+      ))}
+      {error ? <p className="wb-acc-error">{error}</p> : null}
     </div>
   );
 }
