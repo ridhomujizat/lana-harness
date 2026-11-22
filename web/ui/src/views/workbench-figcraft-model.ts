@@ -104,34 +104,46 @@ export function hitTest(
   return path;
 }
 
-/* When the page render is too coarse for the zoom, ask for the top-level layer
-   that fills most of the view at a sharper scale (REQ-FV-066). */
-export function detailRequest(
+/* When the page render is too coarse for the zoom, ask for the top-level
+   layers in view at a sharper scale (REQ-FV-066): the ones covering most of
+   the view first, at most max of them, returned in page order (bottom first)
+   so they are drawn as FigCraft stacks them. Titles and notes next to frames
+   are their own top-level text layers, so a view between frames gets sharp
+   too. complete is true when every layer in view was asked for: once their
+   renders arrive the coarse page render can go, so it does not show as a
+   blurred halo around the sharp text. */
+export function detailRequests(
   view: View,
   vp: Viewport,
   renderScale: number,
   dpr: number,
-  top: FigLayer[]
-): { node: number; scale: number } | null {
+  top: FigLayer[],
+  max = 8
+): { nodes: number[]; scale: number; complete: boolean } | null {
   const want = view.zoom * dpr;
   if (want <= renderScale * 1.25) return null;
-  const vis = visibleRect(view, vp);
-  const area = vis.width * vis.height;
-  if (area <= 0) return null;
-  let best: FigLayer | null = null;
-  let bestArea = 0;
-  for (const l of top) {
-    if (!l.visible) continue;
-    const a = overlap(vis, l.bounds);
-    if (a > bestArea) {
-      best = l;
-      bestArea = a;
-    }
-  }
-  if (!best || bestArea < area * 0.5) return null;
   const scale = Math.min(4, Math.ceil(want * 2) / 2);
   if (scale <= renderScale) return null;
-  return { node: best.id, scale };
+  const vis = visibleRect(view, vp);
+  if (vis.width * vis.height <= 0) return null;
+  const hits: { index: number; id: number; area: number }[] = [];
+  top.forEach((l, index) => {
+    if (!l.visible) return;
+    const area = overlap(vis, l.bounds);
+    if (area > 0) hits.push({ index, id: l.id, area });
+  });
+  if (!hits.length) return null;
+  const picked = hits.sort((a, b) => b.area - a.area).slice(0, max);
+  picked.sort((a, b) => a.index - b.index);
+  return { nodes: picked.map((h) => h.id), scale, complete: hits.length <= max };
+}
+
+/* Layer types whose name the canvas shows above them, as FigCraft does for
+   frames. A text layer's name is its text, so a label would repeat it. */
+const LABELLED = new Set(["FRAME", "SECTION", "COMPONENT", "COMPONENT_SET"]);
+
+export function showsLabel(type: string): boolean {
+  return LABELLED.has(type);
 }
 
 /* The scale to ask a page render at: sharp enough for the fitted view on this

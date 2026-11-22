@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { ApiError, errorMessage } from "../api/client";
 import type { GitFileChange } from "../api/workbench-git";
@@ -19,12 +20,13 @@ import { Ic } from "../ui/icons";
 import { StatusLetter } from "./workbench-changes";
 import { baseName, dirName } from "./workbench-git-model";
 import {
-  detailRequest,
+  detailRequests,
   fitRect,
   hitTest,
   layerIcon,
   pageRenderScale,
   rectToScreen,
+  showsLabel,
   sizeLabel,
   toPage,
   zoomAt,
@@ -39,6 +41,8 @@ import {
    view shows the render on a pannable canvas with the page and layer lists. */
 
 const POLL_MS = 2000;
+/* Sharp renders kept for one page: the layers in view and a few just left. */
+const DETAIL_KEEP = 24;
 const WIDE_MIN = 900;
 const PHONE_MAX = 640;
 
@@ -79,6 +83,8 @@ function hhmm(d: Date): string {
 
 type Failure = { kind: "missing"; message: string } | { kind: "error"; message: string };
 
+type Detail = FigRender & { node: number };
+
 export function FigcraftView({
   worktree,
   path,
@@ -103,7 +109,7 @@ export function FigcraftView({
   const [selected, setSelected] = useState<FigLayer | null>(null);
   const [view, setView] = useState<View | null>(saved.view ?? null);
   const [render, setRender] = useState<FigRender | null>(null);
-  const [detail, setDetail] = useState<(FigRender & { node: number }) | null>(null);
+  const [details, setDetails] = useState<Map<number, Detail>>(() => new Map());
   const [rendering, setRendering] = useState(false);
   const [renderedAt, setRenderedAt] = useState<Date | null>(null);
   const [toast, setToast] = useState("");
@@ -113,6 +119,7 @@ export function FigcraftView({
   const [sheetTab, setSheetTab] = useState<"pages" | "layers">("layers");
   const [menu, setMenu] = useState<"" | "more" | "pages">("");
   const [live, setLive] = useState<boolean | null>(null);
+  const [full, setFull] = useState(false);
 
   const isPhone = !!phone || (width > 0 && width < PHONE_MAX);
   const wide = width >= WIDE_MIN && !isPhone;
@@ -192,7 +199,7 @@ export function FigcraftView({
     ro.observe(root);
     if (canvasRef.current) ro.observe(canvasRef.current);
     return () => ro.disconnect();
-  }, [info]);
+  }, [info, full]);
 
   /* ----- view: fit on a new page, keep it otherwise (REQ-FV-064) ----- */
   const fitted = useMemo(() => (page && vp.width ? fitRect(pageRect(page), vp) : null), [page, vp]);
@@ -258,35 +265,84 @@ export function FigcraftView({
   );
 
   const want = useMemo(
-    () => (view && page && render ? detailRequest(view, vp, render.scale, dpr, page.layers) : null),
+    () => (view && page && render ? detailRequests(view, vp, render.scale, dpr, page.layers) : null),
     [view, vp, render, dpr, page]
   );
-  const detailUrl = useRef("");
+  const wantKey = want ? want.nodes.join(",") + "@" + want.scale : "";
+  /* Sharp renders of the layers in view, fetched once the view settles. A
+     render at a lower scale stays shown until the sharper one arrives. */
   useEffect(() => {
     if (!want || !fingerprint) return;
-    if (detail && detail.fingerprint === fingerprint && detail.scale >= want.scale && detail.node === want.node) return;
+    const missing = want.nodes.filter((node) => {
+      const d = details.get(node);
+      return !d || d.fingerprint !== fingerprint || d.scale < want.scale;
+    });
+    if (!missing.length) return;
     const ctl = new AbortController();
     const id = window.setTimeout(() => {
-      getFigRender(worktree, path, { node: want.node }, want.scale, fingerprint, ctl.signal)
-        .then((r) => {
-          if (detailUrl.current) URL.revokeObjectURL(detailUrl.current);
-          detailUrl.current = r.url;
-          setDetail({ ...r, node: want.node });
-        })
-        .catch(() => {});
+      for (const node of missing) {
+        getFigRender(worktree, path, { node }, want.scale, fingerprint, ctl.signal)
+          .then((r) =>
+            setDetails((cur) => {
+              const next = new Map(cur);
+              const old = next.get(node);
+              if (old) URL.revokeObjectURL(old.url);
+              next.delete(node);
+              next.set(node, { ...r, node });
+              for (const [k, d] of next) {
+                if (next.size <= DETAIL_KEEP) break;
+                URL.revokeObjectURL(d.url);
+                next.delete(k);
+              }
+              return next;
+            })
+          )
+          .catch(() => {});
+      }
     }, 250);
     return () => {
       window.clearTimeout(id);
       ctl.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [want?.node, want?.scale, fingerprint, worktree, path]);
+  }, [wantKey, fingerprint, worktree, path]);
+  /* Renders of an older file or another page are dropped. */
   useEffect(() => {
-    if (detail && detail.fingerprint !== fingerprint) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- a detail render of an older file is dropped
-      setDetail(null);
-    }
-  }, [detail, fingerprint]);
+    const ids = new Set(page?.layers.map((l) => l.id) ?? []);
+    if (![...details.values()].some((d) => d.fingerprint !== fingerprint || !ids.has(d.node))) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drops renders that no longer match the file or page
+    setDetails((cur) => {
+      const next = new Map<number, Detail>();
+      for (const [k, d] of cur) {
+        if (d.fingerprint === fingerprint && ids.has(d.node)) next.set(k, d);
+        else URL.revokeObjectURL(d.url);
+      }
+      return next;
+    });
+  }, [details, fingerprint, page]);
+  const detailsRef = useRef(details);
+  useEffect(() => {
+    detailsRef.current = details;
+  }, [details]);
+  useEffect(
+    () => () => {
+      for (const d of detailsRef.current.values()) URL.revokeObjectURL(d.url);
+    },
+    []
+  );
+
+  /* Full screen (Expand): Esc goes back unless something inside took it. */
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setFull(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [full]);
 
   /* ----- interaction ----- */
   const selectLayer = useCallback(
@@ -344,7 +400,7 @@ export function FigcraftView({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [info]);
+  }, [info, full]);
 
   /* Pointer: drag pans, a click selects, two touches pinch. */
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -480,6 +536,16 @@ export function FigcraftView({
           {isPhone ? null : <span>Layers</span>}
         </button>
       ) : null}
+      <button
+        type="button"
+        className="wbg-icon-btn"
+        aria-label={full ? "Exit full screen" : "Expand"}
+        data-tip={full ? "Exit full screen  Esc" : "Expand"}
+        aria-pressed={full}
+        onClick={() => setFull(!full)}
+      >
+        <Ic name={full ? "minimize-2" : "maximize-2"} size={15} />
+      </button>
       <span className="fv-menu-wrap">
         <button type="button" className="wbg-icon-btn" aria-label="More" data-tip="More" onClick={() => setMenu(menu === "more" ? "" : "more")}>
           <Ic name="ellipsis" size={15} />
@@ -697,24 +763,29 @@ export function FigcraftView({
   /* ----- canvas contents ----- */
   const content: ReactNode[] = [];
   if (view && page) {
-    if (render) {
+    /* Every layer in view has a sharp render: the page render under them would
+       only add a blurred halo. */
+    const sharp = !!want?.complete && want.nodes.every((n) => details.get(n)?.fingerprint === fingerprint);
+    if (render && !sharp) {
       const w = (render.width / render.scale) * view.zoom;
       const h = (render.height / render.scale) * view.zoom;
       const s = { x: render.originX * view.zoom + view.tx, y: render.originY * view.zoom + view.ty };
       content.push(<img key="page" className="fv-img" src={render.url} alt="" draggable={false} style={{ left: s.x, top: s.y, width: w, height: h }} />);
-    } else {
+    } else if (!render) {
       for (const l of page.layers) {
         if (!l.visible) continue;
         const r = rectToScreen(view, l.bounds);
         content.push(<div key={"sk" + l.id} className="fv-skeleton" style={{ left: r.x, top: r.y, width: r.width, height: r.height }} />);
       }
     }
-    if (detail && want && want.node === detail.node) {
+    for (const node of want?.nodes ?? []) {
+      const detail = details.get(node);
+      if (!detail || detail.fingerprint !== fingerprint) continue;
       const w = (detail.width / detail.scale) * view.zoom;
       const h = (detail.height / detail.scale) * view.zoom;
       content.push(
         <img
-          key="detail"
+          key={"detail" + node}
           className="fv-img"
           src={detail.url}
           alt=""
@@ -724,7 +795,7 @@ export function FigcraftView({
       );
     }
     for (const l of page.layers) {
-      if (!l.visible) continue;
+      if (!l.visible || !showsLabel(l.type)) continue;
       const r = rectToScreen(view, l.bounds);
       if (r.width < 48 || r.x + r.width < 0 || r.x > vp.width) continue;
       content.push(
@@ -747,8 +818,14 @@ export function FigcraftView({
   const warnings = info?.warnings ?? [];
   const n = page?.layers.filter((l) => l.visible).length ?? 0;
 
-  return (
-    <div className={"wbg-viewer fv" + (wide ? " is-wide" : "") + (isPhone ? " is-phone" : "")} ref={rootRef}>
+  const viewer = (
+    <div
+      className={"wbg-viewer fv" + (wide ? " is-wide" : "") + (isPhone ? " is-phone" : "") + (full ? " is-full" : "")}
+      ref={rootRef}
+      role={full ? "dialog" : undefined}
+      aria-modal={full ? true : undefined}
+      aria-label={full ? baseName(path) : undefined}
+    >
       {header}
       <div className="fv-toolbar">
         {pageMenu}
@@ -828,6 +905,21 @@ export function FigcraftView({
         {renderedAt ? <span>rendered {hhmm(renderedAt)}</span> : null}
       </footer>
     </div>
+  );
+  /* Expand moves the viewer over the whole window, like the image viewer. */
+  return full ? (
+    <>
+      <div className="wbg-viewer fv fv-placeholder">
+        {header}
+        <div className="fv-state">
+          <Ic name="maximize-2" size={26} className="fv-state-icon" />
+          <span>Shown full screen.</span>
+        </div>
+      </div>
+      {createPortal(<div className="wb-page fv-full-host">{viewer}</div>, document.body)}
+    </>
+  ) : (
+    viewer
   );
 }
 

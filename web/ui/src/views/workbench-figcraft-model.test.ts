@@ -5,7 +5,8 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
   clampZoom,
-  detailRequest,
+  detailRequests,
+  showsLabel,
   fitRect,
   hitTest,
   isFigcraftPath,
@@ -83,21 +84,49 @@ describe("hitTest", () => {
   });
 });
 
-describe("detailRequest", () => {
+describe("detailRequests", () => {
   const top = [layer(1, 0, 0, 1440, 1625), layer(2, 1540, 0, 1440, 1024)];
   const vp = { width: 1000, height: 700 };
 
   it("asks nothing while the page render is sharp enough", () => {
-    expect(detailRequest({ zoom: 0.5, tx: 0, ty: 0 }, vp, 1, 2, top)).toBeNull();
+    expect(detailRequests({ zoom: 0.5, tx: 0, ty: 0 }, vp, 1, 2, top)).toBeNull();
   });
 
-  it("asks the frame that fills the view at a sharper scale", () => {
-    expect(detailRequest({ zoom: 1.5, tx: -100, ty: -100 }, vp, 1, 2, top)).toEqual({ node: 1, scale: 3 });
-    expect(detailRequest({ zoom: 3, tx: -100, ty: -100 }, vp, 1, 2, top)).toEqual({ node: 1, scale: 4 });
+  it("asks the frames in view at a sharper scale", () => {
+    expect(detailRequests({ zoom: 1.5, tx: -100, ty: -100 }, vp, 1, 2, top)).toEqual({ nodes: [1], scale: 3, complete: true });
+    expect(detailRequests({ zoom: 3, tx: -100, ty: -100 }, vp, 1, 2, top)).toEqual({ nodes: [1], scale: 4, complete: true });
   });
 
-  it("asks nothing when no frame covers half the view", () => {
-    expect(detailRequest({ zoom: 2, tx: -2850, ty: -2100 }, vp, 1, 1, top)).toBeNull();
+  it("asks every layer in view, in page order", () => {
+    /* Page x 1300…1800 is in view: the end of frame 1 and the start of frame 2. */
+    expect(detailRequests({ zoom: 2, tx: -2600, ty: -100 }, vp, 1, 1, top)).toEqual({ nodes: [1, 2], scale: 2, complete: true });
+  });
+
+  it("asks the small title layers next to a frame", () => {
+    const withTitles = [
+      { ...layer(10, 0, -96, 303, 29), type: "TEXT" },
+      { ...layer(11, 0, -62, 1680, 15), type: "TEXT" },
+      layer(12, 0, 0, 1680, 980),
+    ];
+    expect(detailRequests({ zoom: 2, tx: 0, ty: 300 }, vp, 1, 1, withTitles)).toEqual({ nodes: [10, 11, 12], scale: 2, complete: true });
+  });
+
+  it("keeps the layers covering most of the view when there are too many", () => {
+    const many = [layer(1, 0, 0, 10, 10), layer(2, 0, 0, 400, 300), layer(3, 0, 0, 200, 100)];
+    expect(detailRequests({ zoom: 2, tx: 0, ty: 0 }, vp, 1, 1, many, 2)).toEqual({ nodes: [2, 3], scale: 2, complete: false });
+  });
+
+  it("asks nothing when no layer is in view", () => {
+    expect(detailRequests({ zoom: 2, tx: -20000, ty: -20000 }, vp, 1, 1, top)).toBeNull();
+  });
+});
+
+describe("showsLabel", () => {
+  it("labels frames, not text", () => {
+    expect(showsLabel("FRAME")).toBe(true);
+    expect(showsLabel("SECTION")).toBe(true);
+    expect(showsLabel("TEXT")).toBe(false);
+    expect(showsLabel("RECTANGLE")).toBe(false);
   });
 });
 
