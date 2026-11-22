@@ -13,4 +13,7 @@ Go goes through dsh-coder (CLAUDE.md); web UI is coded in the main session.
 | T-007 | Web: composer, toolbar menus, `/` and `@` menus, attachments | REQ-WC-055–057 | `web/ui/src/views/workbench-chat-composer.tsx` |
 | T-008 | Web: needs-you, question and plan cards | REQ-WC-054 | `web/ui/src/views/workbench-chat-cards.tsx` |
 | T-009 | Web: pane header button, ⇧⌘J, per-pane view, phone default, light mode | REQ-WC-050, 051, 059, 060 | `web/ui/src/views/workbench.tsx` |
-| T-010 | Tests, lint, dist build, live check on a scratch daemon | all | — |
+| T-010 | Subagents and background tasks (REQ-WC-016/017, 061/062) | REQ-WC-016, 017, 061, 062 | claudechat transcript.go, items.go, web/workbench_chat.go, web/ui workbench-chat-tasks.tsx |
+| T-011 | File search for `@` in any folder | REQ-WC-055 | web/workbench_chat.go |
+| T-012 | Live-test fixes: dialog block choice, wrapped titles, say/stream dialog agreement | REQ-WC-021, 031 | parse.go, web/workbench_chat.go |
+| T-013 | Tests, lint, dist build, live check on a scratch daemon | all | — |
