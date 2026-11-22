@@ -236,8 +236,11 @@ func matchOption(line string) (rawOption, bool) {
 }
 
 // parseDialog finds the dialog shown near the bottom of the screen, if any. It
-// prefers a run of numbered options; a hint line with "Enter to …" and no
-// numbered options falls back to an unnumbered list (the trust prompt).
+// collects every candidate numbered block, drops the ones that sit above an
+// input box (a dialog replaces the input box), then prefers the block that
+// carries the ❯ cursor. With no marked block it takes the last one, but only
+// when a hint line or a permission title marks it as a real dialog; otherwise
+// it falls back to an unnumbered list (the trust prompt).
 func parseDialog(lines []string) *Dialog {
 	if len(lines) == 0 {
 		return nil
@@ -256,13 +259,73 @@ func parseDialog(lines []string) *Dialog {
 	if len(opts) == 0 {
 		return parseUnnumbered(lines, start)
 	}
-	groups := groupOptions(lines, opts)
-	for g := len(groups) - 1; g >= 0; g-- {
-		if len(groups[g]) >= 2 {
-			return buildDialog(lines, groups[g])
+	boxTop, _, hasBox := findInputBox(lines)
+	blocks := candidateDialogs(groupOptions(lines, opts), boxTop, hasBox)
+	if len(blocks) == 0 {
+		return parseUnnumbered(lines, start)
+	}
+	for b := len(blocks) - 1; b >= 0; b-- {
+		if blockHasCursor(blocks[b]) {
+			return buildDialog(lines, blocks[b])
 		}
 	}
+	last := blocks[len(blocks)-1]
+	_, title := findTitle(lines, last[0].idx)
+	if dialogHint(lines, last) || strings.HasPrefix(title, "Do you want") {
+		return buildDialog(lines, last)
+	}
 	return parseUnnumbered(lines, start)
+}
+
+// candidateDialogs keeps the option runs that could be a dialog: two or more
+// options with no input box below the run. A numbered run above an input box is
+// part of a reply, not a dialog, because a dialog replaces the input box.
+func candidateDialogs(groups [][]rawOption, boxTop int, hasBox bool) [][]rawOption {
+	blocks := make([][]rawOption, 0, len(groups))
+	for _, g := range groups {
+		if len(g) < 2 {
+			continue
+		}
+		if hasBox && boxTop > g[len(g)-1].idx {
+			continue
+		}
+		blocks = append(blocks, g)
+	}
+	return blocks
+}
+
+// blockHasCursor reports whether any option of a run carries the ❯ marker.
+func blockHasCursor(group []rawOption) bool {
+	for _, o := range group {
+		if o.selected {
+			return true
+		}
+	}
+	return false
+}
+
+// dialogHint reports whether a run is followed by a dialog hint: one of the
+// four lines after it, or one of the screen's last three rows.
+func dialogHint(lines []string, group []rawOption) bool {
+	end := group[len(group)-1].idx
+	for i := end + 1; i <= end+4 && i < len(lines); i++ {
+		if isHintLine(lines[i]) {
+			return true
+		}
+	}
+	for i := len(lines) - 3; i < len(lines); i++ {
+		if i >= 0 && isHintLine(lines[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isHintLine reports whether a line is a dialog hint that names a key.
+func isHintLine(line string) bool {
+	return strings.Contains(line, "Esc to cancel") ||
+		strings.Contains(line, "Enter to select") ||
+		strings.Contains(line, "Enter to confirm")
 }
 
 // groupOptions splits option lines into runs. Two options belong to the same
@@ -322,19 +385,52 @@ func buildDialog(lines []string, group []rawOption) *Dialog {
 }
 
 // findTitle returns the nearest line above the first option that ends with "?",
-// else the nearest non-empty line. The index is -1 when there is none.
+// else the nearest non-empty line, joined with the lines its text wraps onto.
+// The index is -1 when there is none.
 func findTitle(lines []string, firstOpt int) (int, string) {
+	idx := -1
 	for i := firstOpt - 1; i >= 0; i-- {
 		if t := strings.TrimSpace(lines[i]); strings.HasSuffix(t, "?") {
-			return i, t
+			idx = i
+			break
 		}
 	}
-	for i := firstOpt - 1; i >= 0; i-- {
-		if t := strings.TrimSpace(lines[i]); t != "" {
-			return i, t
+	if idx < 0 {
+		for i := firstOpt - 1; i >= 0; i-- {
+			if t := strings.TrimSpace(lines[i]); t != "" {
+				idx = i
+				break
+			}
 		}
 	}
-	return -1, ""
+	if idx < 0 {
+		return -1, ""
+	}
+	return joinWrappedTitle(lines, idx)
+}
+
+// joinWrappedTitle joins the lines a wrapped title spans. Starting at the title
+// line it takes up to three lines directly above that share the title's
+// indentation, are non-empty, are not rule lines and do not end a sentence, and
+// prepends them with a space.
+func joinWrappedTitle(lines []string, idx int) (int, string) {
+	title := strings.TrimSpace(lines[idx])
+	indent := leadingIndent(lines[idx])
+	top := idx
+	for n := 0; n < 3 && top-1 >= 0; n++ {
+		prev := lines[top-1]
+		t := strings.TrimSpace(prev)
+		if t == "" || isRule(prev) || leadingIndent(prev) != indent {
+			break
+		}
+		if strings.HasSuffix(t, ".") || strings.HasSuffix(t, "?") ||
+			strings.HasSuffix(t, ":") || strings.HasSuffix(t, "!") {
+			break
+		}
+		title = t + " " + title
+		top--
+	}
+	return top, title
 }
 
 // buildOptions finalizes a run's options: it joins wrapped label continuations,

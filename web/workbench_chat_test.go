@@ -512,6 +512,32 @@ func TestWorkbenchChatSayDialog(t *testing.T) {
 	}
 }
 
+// TestChatHubHasDialog covers that hasDialog follows the hub's live state, the
+// state the stream publishes: a parsed dialog the chat hides must not report an
+// open dialog.
+func TestChatHubHasDialog(t *testing.T) {
+	hub := newChatHub(nil, "abc")
+	mirror := claudechat.NewMirror(200, 40)
+	trust := chatTestdata(t, "screens/00-trust.txt")
+	if _, err := mirror.Write([]byte(strings.ReplaceAll(string(trust), "\n", "\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	hub.mirror = mirror
+
+	// The trust prompt parses as a dialog, but the session is idle and its
+	// kind is one the chat does not show, so the live state holds none.
+	hub.updateLive(workbench.Session{ID: "abc", AgentState: "idle", Cols: 200, Rows: 40})
+	if hub.hasDialog() {
+		t.Fatal("hasDialog = true, want false for a dialog the live state hides")
+	}
+
+	// A blocked session keeps the dialog, and hasDialog follows it.
+	hub.updateLive(workbench.Session{ID: "abc", AgentState: "blocked", Cols: 200, Rows: 40})
+	if !hub.hasDialog() {
+		t.Fatal("hasDialog = false, want true for a blocked session")
+	}
+}
+
 func TestWorkbenchChatKeys(t *testing.T) {
 	shortenChatTimers(t)
 	stubChatLocate(t, claudechat.Conversation{}, false)
@@ -981,6 +1007,32 @@ func TestWorkbenchChatFilesGitRepo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(body.Files, []string{"src/main.go"}) {
 		t.Fatalf("files = %v, want the tracked match", body.Files)
+	}
+}
+
+func TestWorkbenchChatFilesGitRepoEmptyQuery(t *testing.T) {
+	stubChatLocate(t, claudechat.Conversation{}, false)
+	s, cookie, root := newChatFilesServer(t)
+	repo := filepath.Join(root, "repo")
+	gitRepo(t, repo)
+	gitWriteFile(t, filepath.Join(repo, "a.txt"), []byte("a\n"))
+	gitWriteFile(t, filepath.Join(repo, "src", "main.go"), []byte("package main\n"))
+	gitRun(t, repo, "add", "-A")
+	gitRun(t, repo, "commit", "-m", "add files")
+	setChatFilesSession(s, "abc", repo)
+
+	// The runner's search matches nothing without a query, so an empty query
+	// inside a repo lists the worktree walk, like the non-git folder.
+	rr, body := chatFilesGet(t, s, cookie, "abc", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if body.Root != repo {
+		t.Fatalf("root = %q, want %q", body.Root, repo)
+	}
+	want := []string{"a.txt", "src/", "src/main.go"}
+	if !reflect.DeepEqual(body.Files, want) {
+		t.Fatalf("files = %v, want %v", body.Files, want)
 	}
 }
 

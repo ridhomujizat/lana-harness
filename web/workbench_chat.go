@@ -570,6 +570,13 @@ func (s *Server) handleWorkbenchChatFiles(w http.ResponseWriter, r *http.Request
 	switch {
 	case err == nil:
 		// Inside a repository: reuse the spec 66 search over its worktree.
+		// The search matches nothing without a query, so the empty `@` menu
+		// lists the first files of the worktree walk instead, the same shape
+		// the non-git folder returns.
+		if strings.TrimSpace(r.URL.Query().Get("q")) == "" {
+			writeChatFiles(w, matchChatFiles(s.chatFilesWalk(info.Worktree), ""), root)
+			return
+		}
 		files, serr := runner.Search(r.Context(), info.Worktree, r.URL.Query().Get("q"))
 		if serr != nil {
 			s.writeWorkbenchGitError(w, serr)
@@ -1404,15 +1411,14 @@ func (h *chatHub) waitMirror(wait time.Duration) *claudechat.Mirror {
 	}
 }
 
-// hasDialog reports whether the mirror shows an open dialog (REQ-WC-031).
+// hasDialog reports whether the hub's live state holds an open dialog, the same
+// state the stream publishes (REQ-WC-031). Reading h.live keeps `say` in step
+// with the updateLive gating, which hides a parsed dialog the chat does not
+// show.
 func (h *chatHub) hasDialog() bool {
 	h.mu.Lock()
-	mirror := h.mirror
-	h.mu.Unlock()
-	if mirror == nil {
-		return false
-	}
-	return claudechat.ParseScreen(mirror.Lines()).Dialog != nil
+	defer h.mu.Unlock()
+	return h.live != nil && h.live.Dialog != nil
 }
 
 // currentLive returns the hub's last live state, or nil.

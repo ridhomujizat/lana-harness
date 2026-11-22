@@ -181,6 +181,22 @@ func TestParseScreenFixtures(t *testing.T) {
 				{"3", "Tell Claude what to change", false},
 			})
 		}},
+		{"plan-live.txt", func(t *testing.T, s Screen) {
+			d := wantDialog(t, s, "plan", "Claude has written up a plan and is ready to execute. Would you like to proceed?")
+			if d == nil {
+				return
+			}
+			wantOptions(t, d.Options, []optionWant{
+				{"1", "Yes, and use auto mode", true},
+				{"2", "Yes, manually approve edits", false},
+				{"3", "Tell Claude what to change", false},
+			})
+		}},
+		{"idle-numbered.txt", func(t *testing.T, s Screen) {
+			if s.Dialog != nil {
+				t.Errorf("Dialog = %+v, want nil (a numbered reply, not a dialog)", s.Dialog)
+			}
+		}},
 		{"p-permission.txt", func(t *testing.T, s Screen) {
 			d := wantDialog(t, s, "permission", "Do you want to proceed?")
 			if d == nil {
@@ -274,6 +290,33 @@ func TestParseUnnumberedTrustDialog(t *testing.T) {
 	wantOptions(t, d.Options, []optionWant{
 		{"1", "No, exit", true},
 		{"2", "Yes, I trust this folder", false},
+	})
+}
+
+// TestParsePlanWrappedTitle covers a narrow pane whose plan approval title
+// wraps onto two lines: the join puts the sentence back together.
+func TestParsePlanWrappedTitle(t *testing.T) {
+	lines := loadScreen(t, "plan-live.txt")
+	full := "Claude has written up a plan and is ready to execute. Would you like to proceed?"
+	wrapped := make([]string, 0, len(lines)+1)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == full {
+			wrapped = append(wrapped,
+				"   Claude has written up a plan and is ready to execute. Would you",
+				"   like to proceed?")
+			continue
+		}
+		wrapped = append(wrapped, line)
+	}
+	s := ParseScreen(wrapped)
+	d := wantDialog(t, s, "plan", full)
+	if d == nil {
+		return
+	}
+	wantOptions(t, d.Options, []optionWant{
+		{"1", "Yes, and use auto mode", true},
+		{"2", "Yes, manually approve edits", false},
+		{"3", "Tell Claude what to change", false},
 	})
 }
 

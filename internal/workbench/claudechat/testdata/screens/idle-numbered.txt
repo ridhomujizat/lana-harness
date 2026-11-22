@@ -1,0 +1,39 @@
+
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Haiku 5.5 · Claude Pro
+ ▝▝   ▝▝   /tmp/probe-proj
+
+
+❯ Run this exact shell command with the Bash tool and nothing else: echo chat-probe
+
+  Ran 1 shell command
+
+⏺ chat-probe
+
+⏺ Started two things:
+
+  1. Background shell: sleep 40 && echo bg-done
+  2. Subagent: lists the files in this folder
+
+✻ Crunched for 1s · done 2:02 AM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
