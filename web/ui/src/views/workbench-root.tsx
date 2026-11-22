@@ -153,6 +153,8 @@ const RootRowView = memo(function RootRowView({
       );
     case "loading":
       return <div className="wbr-more">Loading…</div>;
+    case "empty":
+      return <div className="wbr-more">Only untracked folders, no files to diff</div>;
     case "clean":
       return (
         <button type="button" className="wbr-clean" onClick={onCleanToggle} aria-expanded={row.open}>
@@ -197,6 +199,9 @@ export function RootChangesTab({
   const [cleanOpen, setCleanOpen] = useState(false);
   const [files, setFiles] = useState<Record<string, GitFileChange[] | undefined>>({});
   const [sel, setSel] = useState<{ worktree: string; path: string } | null>(null);
+  /* Until the user picks a file, the selection follows the first file of the
+     list (groups load in any order). */
+  const [picked, setPicked] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   /* Open by default when at most 3 repos changed; the user's toggles hold
@@ -206,6 +211,7 @@ export function RootChangesTab({
     setOpen(null);
     setFiles({});
     setSel(null);
+    setPicked(false);
   }, [root.path]);
   const openSet = useMemo(() => open ?? defaultOpenGroups(changed), [open, changed]);
 
@@ -235,11 +241,12 @@ export function RootChangesTab({
   /* Keep a selection on desktop: the first file when none or when it left. */
   useEffect(() => {
     if (phone) return;
-    if (sel && fileRows.some((r) => r.repo.worktree === sel.worktree && r.file.path === sel.path)) return;
+    if (picked && sel && fileRows.some((r) => r.repo.worktree === sel.worktree && r.file.path === sel.path)) return;
     const first = fileRows[0];
+    if (first && sel && sel.worktree === first.repo.worktree && sel.path === first.file.path) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- follows the list
     setSel(first ? { worktree: first.repo.worktree, path: first.file.path } : null);
-  }, [fileRows, sel, phone]);
+  }, [fileRows, sel, phone, picked]);
 
   const current = sel ? fileRows.find((r) => r.repo.worktree === sel.worktree && r.file.path === sel.path) : undefined;
   const idx = current ? fileRows.indexOf(current) : -1;
@@ -255,7 +262,10 @@ export function RootChangesTab({
     [changed]
   );
   const more = useCallback((w: string) => setShowAll((s) => new Set(s).add(w)), []);
-  const select = useCallback((repo: GitRootRepo, file: GitFileChange) => setSel({ worktree: repo.worktree, path: file.path }), []);
+  const select = useCallback((repo: GitRootRepo, file: GitFileChange) => {
+    setPicked(true);
+    setSel({ worktree: repo.worktree, path: file.path });
+  }, []);
   const cleanToggle = useCallback(() => setCleanOpen((c) => !c), []);
   const narrow = useCallback((w: string) => onNarrow(w, "files"), [onNarrow]);
 
@@ -269,6 +279,7 @@ export function RootChangesTab({
       const next = fileRows[idx + (e.key === "ArrowDown" ? 1 : -1)];
       if (!next) return;
       e.preventDefault();
+      setPicked(true);
       setSel({ worktree: next.repo.worktree, path: next.file.path });
     };
     el.addEventListener("keydown", onKey);

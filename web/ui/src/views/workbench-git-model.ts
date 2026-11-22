@@ -333,10 +333,13 @@ export type RootRow<R, F> =
   | { kind: "file"; repo: R; file: F }
   | { kind: "more"; repo: R; hidden: number }
   | { kind: "loading"; repo: R }
+  /* The summary counts a change but no file is listed: an untracked folder
+     holding only a nested repo or empty folders. */
+  | { kind: "empty"; repo: R }
   | { kind: "clean"; count: number; open: boolean }
   | { kind: "clean-repo"; repo: R };
 
-export const ROOT_ROW_H = { group: 30, file: 42, more: 26, loading: 26, clean: 34, "clean-repo": 28 } as const;
+export const ROOT_ROW_H = { group: 30, file: 42, more: 26, loading: 26, empty: 26, clean: 34, "clean-repo": 28 } as const;
 
 /* REQ-WM-084: the Changes list as one flat row list for the virtualiser. */
 export function rootRows<R extends RootRepoLike, F>(opts: {
@@ -357,6 +360,10 @@ export function rootRows<R extends RootRepoLike, F>(opts: {
     const list = opts.files[repo.worktree];
     if (!list) {
       rows.push({ kind: "loading", repo });
+      continue;
+    }
+    if (!list.length) {
+      rows.push({ kind: "empty", repo });
       continue;
     }
     const shown = opts.showAll.has(repo.worktree) ? list : list.slice(0, ROOT_GROUP_FILES);

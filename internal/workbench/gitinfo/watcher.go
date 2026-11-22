@@ -331,7 +331,7 @@ func (m *RootWatchers) scanNames(ctx context.Context, root string, names []strin
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
-			repos[i] = m.scan(ctx, root, filepath.Join(root, name))
+			repos[i] = m.scan(ctx, filepath.Base(root), filepath.Join(root, name))
 		}(i, name)
 	}
 	wg.Wait()
