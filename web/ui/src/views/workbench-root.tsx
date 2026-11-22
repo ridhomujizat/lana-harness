@@ -15,9 +15,10 @@ import {
   type GitRootSummary,
   type GitTreeEntry,
 } from "../api/workbench-git";
+import type { WorkbenchPreview } from "../api/workbench";
 import { Ic } from "../ui/icons";
 import { Counts, DiffView, StatusLetter } from "./workbench-changes";
-import { FileView } from "./workbench-files";
+import { ExternalView, FileView } from "./workbench-files";
 import { baseName, defaultOpenGroups, dirName, isUnder, orderRootRepos, rootRows, ROOT_ROW_H, type RootRow } from "./workbench-git-model";
 import { useVirtualRows } from "./workbench-virtual";
 
@@ -407,6 +408,7 @@ export function RootFilesTab({
   summary,
   selected,
   onSelect,
+  external,
   phone,
 }: {
   root: GitRootInfo;
@@ -414,6 +416,8 @@ export function RootFilesTab({
   /* The open file: an absolute path. */
   selected: string | null;
   onSelect: (path: string | null) => void;
+  /* A ⌘+clicked file outside every repo of the root (e.g. a temp file). */
+  external?: WorkbenchPreview | null;
   phone?: boolean;
 }) {
   const [kids, setKids] = useState<Kids>({});
@@ -571,7 +575,9 @@ export function RootFilesTab({
     </div>
   );
 
-  const viewer = sel ? (
+  const viewer = external ? (
+    <ExternalView data={external} />
+  ) : sel ? (
     sel.worktree !== undefined && sel.rel ? (
       <FileView worktree={sel.worktree} path={sel.rel} />
     ) : (
@@ -588,7 +594,7 @@ export function RootFilesTab({
   );
 
   if (phone) {
-    return sel ? (
+    return sel || external ? (
       <div className="wbg-phone-diff">
         <div className="wbg-phone-diff-head">
           <button type="button" className="wbg-back" onClick={() => onSelect(null)}>
