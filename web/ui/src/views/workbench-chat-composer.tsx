@@ -504,7 +504,7 @@ export function Composer(props: ComposerProps) {
             rows={1}
             value={text}
             disabled={disabled}
-            placeholder={locked || (readOnly ? "View only: control is locked" : compact ? "Message Claude Code…" : "Ask Claude anything…  / commands · @ files")}
+            placeholder={locked || (readOnly ? "View only: control is locked" : compact ? "Ask Claude anything…" : "Ask Claude anything…  / commands · @ files")}
             onChange={(e) => {
               setText(e.target.value);
               setCaret(e.target.selectionStart ?? e.target.value.length);

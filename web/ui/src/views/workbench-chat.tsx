@@ -144,6 +144,12 @@ export function planTextFor(items: ChatItem[], plan: ChatItem): string {
   return "";
 }
 
+/* A block that shows nothing once the turn moves on: thinking, or an
+   assistant line with no text. */
+function isQuiet(b: Block): boolean {
+  return b.type === "thinking" || (b.type === "text" && !(b.item.text || "").trim());
+}
+
 /* Groups the transcript items into what the chat shows (REQ-WC-052). */
 export function toBlocks(items: ChatItem[]): Block[] {
   const out: Block[] = [];
@@ -194,6 +200,11 @@ export function toBlocks(items: ChatItem[]): Block[] {
         } else if (item.kind === "plan") {
           out.push({ type: "plan", item });
         } else if (item.kind === "tool") {
+          /* Thinking between two tools is hidden, so it must not split the
+             group: drop it and keep adding to the tools block before it. */
+          let back = out.length - 1;
+          while (back >= 0 && isQuiet(out[back]!)) back--;
+          if (back >= 0 && back < out.length - 1 && out[back]!.type === "tools") out.length = back + 1;
           const last = out[out.length - 1];
           if (last && last.type === "tools") last.items.push(item);
           else out.push({ type: "tools", key: "g:" + item.id, items: [item] });
