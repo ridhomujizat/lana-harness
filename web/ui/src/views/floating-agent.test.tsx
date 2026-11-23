@@ -196,7 +196,7 @@ describe("FloatingAgent on a desktop", () => {
     render(<FloatingAgent route={route("home", "home")} />);
     await screen.findByRole("button", { name: "Open the chat with dana" });
     expect(screen.getByRole("button", { name: /scored, needs you/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open the panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open the chat with dana" }));
     expect(getFloating().open).toBe(true);
     /* The room view: back to the list, which shows every room. */
     fireEvent.click(await screen.findByRole("button", { name: /All chats/ }));
