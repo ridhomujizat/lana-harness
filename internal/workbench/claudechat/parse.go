@@ -116,6 +116,11 @@ func ParseScreen(lines []string) Screen {
 // a question dialog is active. A nil or short marked leaves every tab inactive,
 // which is what ParseScreen does (spec 71 REQ-WC-021).
 func ParseScreenMarked(lines []string, marked [][]bool) Screen {
+	// A wide terminal draws Claude Code's side panel to the right of the
+	// conversation; cut it off before anything reads a line so its text does
+	// not leak into labels, titles or descriptions (spec 71 REQ-WC-021).
+	lines, marked = cutSidePanel(lines, marked)
+
 	var s Screen
 
 	recent := lastNonEmpty(lines, footerLines)
@@ -966,6 +971,138 @@ func cutDialogColumns(lines []string, col, start int) []string {
 		out[i] = strings.TrimRightFunc(string(r), unicode.IsSpace)
 	}
 	return out
+}
+
+// cutSidePanel removes Claude Code's right-hand side panel: a vertical "│"
+// border at a fixed column with the panel's own text to its right (file names,
+// rules, git hints). Every row that carries the border is truncated at the
+// border column and right-trimmed, and the matching mark rows are cut the same
+// way so the marks stay aligned. Rows without the border (full-width rules) are
+// left alone, and with no qualifying column the input is returned unchanged
+// (spec 71 REQ-WC-021).
+func cutSidePanel(lines []string, marked [][]bool) ([]string, [][]bool) {
+	end := sidePanelEnd(lines)
+	col, ok := sidePanelColumn(lines, end)
+	if !ok {
+		return lines, marked
+	}
+	out := make([]string, len(lines))
+	copy(out, lines)
+	var outMarked [][]bool
+	if marked != nil {
+		outMarked = make([][]bool, len(marked))
+		copy(outMarked, marked)
+	}
+	for i := 0; i < end && i < len(out); i++ {
+		r := []rune(out[i])
+		if col >= len(r) || r[col] != '│' {
+			continue
+		}
+		out[i] = strings.TrimRightFunc(string(r[:col]), unicode.IsSpace)
+		if outMarked != nil && i < len(outMarked) && len(outMarked[i]) > col {
+			outMarked[i] = outMarked[i][:col]
+		}
+	}
+	return out, outMarked
+}
+
+// sidePanelEnd is the first row the side panel cannot reach: the input box's
+// top rule when one is present, else the row of the dialog hint line, else the
+// rows above the last footerLines non-empty lines. The panel stops above the
+// input box and footer, which span the full width and carry no "│".
+func sidePanelEnd(lines []string) int {
+	if top, _, ok := findInputBox(lines); ok {
+		return top
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if isHintLine(lines[i]) {
+			return i
+		}
+	}
+	n := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
+		}
+		n++
+		if n == footerLines {
+			return i
+		}
+	}
+	return 0
+}
+
+// sidePanelColumn finds the leftmost column of the side panel's "│" border
+// within the first end rows: a column past the conversation's left margin
+// (index > 20) that carries "│" in at least 8 rows and in at least 60% of the
+// range's non-empty rows, those rows forming one run whose gaps are at most 3
+// rows. A question's preview box is excluded by the row count, and a column is
+// only accepted when its border starts at least 4 rows above the dialog's first
+// option. ok is false when no column qualifies.
+func sidePanelColumn(lines []string, end int) (int, bool) {
+	if end > len(lines) {
+		end = len(lines)
+	}
+	nonEmpty, maxCol := 0, 0
+	runes := make([][]rune, end)
+	for i := 0; i < end; i++ {
+		runes[i] = []rune(lines[i])
+		if strings.TrimSpace(lines[i]) != "" {
+			nonEmpty++
+		}
+		if n := len(runes[i]); n > maxCol {
+			maxCol = n
+		}
+	}
+	if nonEmpty == 0 {
+		return 0, false
+	}
+	firstOpt := firstOptionIndex(lines, end)
+	for c := 21; c < maxCol; c++ {
+		var rows []int
+		for i := 0; i < end; i++ {
+			if c < len(runes[i]) && runes[i][c] == '│' {
+				rows = append(rows, i)
+			}
+		}
+		if len(rows) < 8 || len(rows)*100 < nonEmpty*60 {
+			continue
+		}
+		if !oneRun(rows, 3) {
+			continue
+		}
+		if firstOpt >= 0 && rows[0] > firstOpt-4 {
+			continue
+		}
+		return c, true
+	}
+	return 0, false
+}
+
+// oneRun reports whether row indices form a single run: consecutive indices are
+// at most gap+1 apart, so at most gap rows may be missing between them.
+func oneRun(rows []int, gap int) bool {
+	for i := 1; i < len(rows); i++ {
+		if rows[i]-rows[i-1] > gap+1 {
+			return false
+		}
+	}
+	return true
+}
+
+// firstOptionIndex is the row of the first numbered dialog option within the
+// dialog scope above end, or -1 when the screen has none.
+func firstOptionIndex(lines []string, end int) int {
+	start := end - dialogScope
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < end && i < len(lines); i++ {
+		if _, ok := matchOption(lines[i]); ok {
+			return i
+		}
+	}
+	return -1
 }
 
 // dialogLines returns the non-empty, non-rule, non-Tip text between the block's

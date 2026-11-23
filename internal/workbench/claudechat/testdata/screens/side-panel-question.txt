@@ -1,0 +1,26 @@
+                                                                                                       │                                                                                  
+ ▐▛███▛█   Claude Code v2.1.330                                                                        │                                                                                  
+▝▜██████▀  Haiku 5.5 · Claude Pro                                                                      │                                                                                  
+ ▝▝   ▝▝   /tmp/probe-proj                                                                             │                                                                                  
+  Read 2 files                                                                                         │────────────────────────────────────────────────────────────                      
+                                                                                                       │New file not yet staged.                                                          
+⏺ Dua hal di layar: opsi kartu pertanyaan bocor teks lama dari kanan, dan kolom jawaban kartu terlalu  │Run `git add :/design/export/a.png` to see line counts.                           
+                                                                                                       │+40 files edited before this session (show)                                       
+                                                                                                       │New file not yet staged.                                                          
+                                                                                                       │────────────────────────────────────────────────────────────                      
+  Read 1 file                                                                                          │New file not yet staged.                                                          
+                                                                                                       │Run `git add :/design/export/a.png` to see line counts.                           
+⏺ Membuka pertanyaan di panel kiri.                                                                    │                                                                                  
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Cara buka                                                                                           │                                                                                  
+                                                                                                       │                                                                                  
+How should the exported chat open?                                                                     │                                                                                  
+                                                                                                       │                                                                                  
+❯ 1. Open on port 10000 (Recommended)                                                                  │                                                                                  
+     Open http://localhost:10000 in your browser.                                                      │New file not yet staged.                                                          
+  2. Check on the Mac only                                                                             │Run `git add :/design/export/a.png` to see line counts.                           
+     Open the file directly on this Mac.                                                               │                                                                                  
+  3. Type something.                                                                                   │────────────────────────────────────────────────────────────                      
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this                                                                                   │                                                                                  
+Enter to select · ↑/↓ to navigate · Esc to cancel

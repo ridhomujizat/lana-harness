@@ -631,6 +631,51 @@ func TestParseScreenMarkedNoMarks(t *testing.T) {
 	}
 }
 
+// TestParseSidePanelQuestion covers a wide screen whose right-hand side panel
+// text is glued onto a question dialog's option and description rows: the panel
+// border is cut before parsing so the labels and descriptions stay clean (spec
+// 71 REQ-WC-021).
+func TestParseSidePanelQuestion(t *testing.T) {
+	s := ParseScreen(loadScreen(t, "side-panel-question.txt"))
+	d := wantDialog(t, s, "question", "How should the exported chat open?")
+	if d == nil {
+		return
+	}
+	wantOptions(t, d.Options, []optionWant{
+		{"1", "Open on port 10000 (Recommended)", true},
+		{"2", "Check on the Mac only", false},
+		{"3", "Type something.", false},
+		{"4", "Chat about this", false},
+	})
+	if d.Options[0].Description != "Open http://localhost:10000 in your browser." {
+		t.Errorf("option 1 description = %q, want the clean URL line", d.Options[0].Description)
+	}
+	if d.Options[1].Description != "Open the file directly on this Mac." {
+		t.Errorf("option 2 description = %q, want the clean line", d.Options[1].Description)
+	}
+	for _, o := range d.Options {
+		if strings.ContainsRune(o.Label, '│') || strings.ContainsRune(o.Description, '│') {
+			t.Errorf("option %+v still carries the side panel border", o)
+		}
+	}
+}
+
+// TestParseSidePanelIdle covers a wide screen whose side panel sits beside the
+// conversation above an idle input box: the full-width box rules and footer stay
+// intact and the mode and empty input are read as usual (spec 71 REQ-WC-021).
+func TestParseSidePanelIdle(t *testing.T) {
+	s := ParseScreen(loadScreen(t, "side-panel-idle.txt"))
+	if s.Dialog != nil {
+		t.Errorf("Dialog = %+v, want nil", s.Dialog)
+	}
+	if s.Mode != "auto" {
+		t.Errorf("Mode = %q, want auto", s.Mode)
+	}
+	if !s.InputEmpty || s.Input != "" {
+		t.Errorf("input = (%q, empty=%v), want empty", s.Input, s.InputEmpty)
+	}
+}
+
 func TestParseScreenNeverPanics(t *testing.T) {
 	cases := [][]string{
 		nil,

@@ -1,0 +1,17 @@
+                                                                                                       │                                                                                  
+ ▐▛███▛█   Claude Code v2.1.330                                                                        │                                                                                  
+▝▜██████▀  Haiku 5.5 · Claude Pro                                                                      │                                                                                  
+ ▝▝   ▝▝   /tmp/probe-proj                                                                             │                                                                                  
+  Read 2 files                                                                                         │────────────────────────────────────────────────────────────                      
+                                                                                                       │New file not yet staged.                                                          
+⏺ Dua hal di layar: opsi kartu pertanyaan bocor teks lama dari kanan, dan kolom jawaban kartu terlalu  │Run `git add :/design/export/a.png` to see line counts.                           
+✻ Cooked for 1s · done 8:23 AM                                                                         │                                                                                  
+                                                                                                       │+40 files edited before this session (show)                                       
+⏺ Selesai. Ada yang mau dibuka?                                                                        │New file not yet staged.                                                          
+                                                                                                       │────────────────────────────────────────────────────────────                      
+                                                                                                       │                                                                                  
+                                                                                                       │                                                                                  
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "fix lint errors"
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
