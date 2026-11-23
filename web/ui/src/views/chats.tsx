@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RoomRow } from "../api/rooms";
-import { gr8rColor, PresenceLabel, useRooms } from "./presence";
-import type { AvatarMood } from "../lib/pixel-avatar";
+import { useRooms } from "./presence";
 import { displayLabel } from "./agent-label";
-import { relativeShort, RoomView } from "./room-timeline";
+import { RoomView } from "./room-timeline";
 import {
-  Badge,
   Button,
   EmptyState,
   Menu,
@@ -14,10 +11,8 @@ import {
   Seg,
   Skeleton,
 } from "../ui/gr8r";
-import { AgentAvatar } from "./agent-avatar";
-import { TeamAvatar } from "./discussion";
 import { NewGroupRoom } from "./new-group-room";
-import type { BadgeTone } from "../ui/gr8r";
+import { needsYou, RoomListRow, rowState } from "./room-list-row";
 
 /* The Chats page of REQ-ROOM-001 to REQ-ROOM-005: the room list column and the
    room timeline. The list rows come from the live useRooms() store; the
@@ -35,76 +30,6 @@ export interface ChatsPageProps {
   roomName?: string;
   /* Spec 48: prefilled composer text for the opened room. */
   draft?: string;
-}
-
-function rowState(row: RoomRow): string {
-  return row.presence ? row.presence.state : "";
-}
-
-/* REQ-ROOM-001: "Needs you" is a room that is waiting or has a problem. */
-function needsYou(row: RoomRow): boolean {
-  const state = rowState(row);
-  return state === "waiting" || state === "problem";
-}
-
-function unreadTone(row: RoomRow): BadgeTone {
-  const state = rowState(row);
-  if (state === "waiting") {
-    return "amber";
-  }
-  if (state === "problem") {
-    return "red";
-  }
-  return "accent";
-}
-
-/* The status line: the presence label while busy, waiting or broken; the last
-   message preview otherwise (REQ-ROOM-001). */
-function rowStatus(row: RoomRow) {
-  const state = rowState(row);
-  if (state === "waiting" || state === "working" || state === "problem") {
-    return <PresenceLabel presence={row.presence} />;
-  }
-  const preview = row.last_message ? row.last_message.preview : "";
-  return <span className="rooms-row-preview">{preview || "No messages yet"}</span>;
-}
-
-/* The chat list avatar moves like the turn head, only while its room works
-   or waits on you; a quiet room stays still. "Running bash" style labels
-   name a tool, so they show the tool ring. */
-function rowMood(row: RoomRow): AvatarMood | undefined {
-  const presence = row.presence;
-  switch (presence ? presence.state : "") {
-    case "working": {
-      const label = String(presence?.label || "").toLowerCase();
-      return label.startsWith("running") || label.startsWith("using") ? "tool" : "thinking";
-    }
-    case "waiting":
-      return "ask";
-    default:
-      return undefined;
-  }
-}
-
-function RowFace({ row, colors }: { row: RoomRow; colors: Record<string, string> }) {
-  if (row.kind === "team") {
-    /* REQ-RDS-056: two faces, three faces, or two faces and +N. */
-    const items = [row.lead, ...(row.members || [])]
-      .filter(Boolean)
-      .map((name) => ({ name: String(name), color: gr8rColor(colors[String(name)]) }));
-    return <TeamAvatar items={items} size={44} />;
-  }
-  const state = rowState(row);
-  return (
-    <AgentAvatar
-      name={row.name}
-      color={gr8rColor(row.color)}
-      size="lg"
-      presence={Boolean(row.presence)}
-      mood={rowMood(row)}
-      className={"chat-coin" + (state ? " state-" + state : "")}
-    />
-  );
 }
 
 /* Matches the phone breakpoint in chats.css. */
@@ -271,40 +196,16 @@ export function ChatsPage({ roomName, draft }: ChatsPageProps) {
             />
           ) : (
             <ul className="rooms-rows">
-              {visible.map((row) => {
-                const active = row.name === roomName;
-                const at = row.last_message ? row.last_message.at : row.last_active_at;
-                return (
-                  <li key={row.name}>
-                    <a
-                      className={"rooms-row" + (active ? " on" : "")}
-                      href={"#/chats/" + encodeURIComponent(row.name)}
-                      aria-current={active ? "page" : undefined}
-                    >
-                      <RowFace row={row} colors={colors} />
-                      <span className="rooms-row-body">
-                        <span className="rooms-row-top">
-                          <span className="rooms-row-name">{displayLabel(row)}</span>
-                          <span className="rooms-row-time">{relativeShort(at)}</span>
-                        </span>
-                        <span className="rooms-row-title">
-                          {row.title || (row.kind === "team" ? "Team" : "Agent")}
-                        </span>
-                        <span className="rooms-row-line">{rowStatus(row)}</span>
-                      </span>
-                      {row.unread > 0 ? (
-                        <Badge
-                          className="rooms-row-badge"
-                          tone={unreadTone(row)}
-                          aria-label={row.unread + " unread"}
-                        >
-                          {row.unread > 99 ? "99+" : row.unread}
-                        </Badge>
-                      ) : null}
-                    </a>
-                  </li>
-                );
-              })}
+              {visible.map((row) => (
+                <li key={row.name}>
+                  <RoomListRow
+                    row={row}
+                    colors={colors}
+                    active={row.name === roomName}
+                    href={"#/chats/" + encodeURIComponent(row.name)}
+                  />
+                </li>
+              ))}
             </ul>
           )}
         </div>

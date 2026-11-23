@@ -17,6 +17,7 @@ import { getKnowledge, REVIEW_CHANGED_EVENT } from "../api/knowledge";
 import { useWorkbenchAttention } from "../views/workbench-attention";
 import type { Route } from "./router";
 import { dragRegion, isMacAppShell } from "./shell";
+import { setHidden, useFloatingAgent } from "./floating-agent-store";
 
 export const SIDEBAR_KEY = "lana.sidebar";
 /* The Router tree's manual open/closed choice ("open" | "closed"). */
@@ -618,6 +619,9 @@ export function Sidebar({
   const rail = collapsed && !narrow;
   const reviewPending = useReviewPending();
   const workbenchAttention = useWorkbenchAttention();
+  /* Spec 72 REQ-FA-042: a phone bubble dropped on the hide target comes back
+     from here. */
+  const bubbleHidden = useFloatingAgent().hidden;
   /* Spec 52: in the Lana.app window the traffic lights and the collapse
      toggle share the top row, and the brand moves below it. */
   const shell = isMacAppShell();
@@ -716,6 +720,21 @@ export function Sidebar({
       </div>
 
       <div className="side-bot">
+        {narrow && bubbleHidden ? (
+          <button
+            type="button"
+            className="sitem"
+            onClick={() => {
+              setHidden(false);
+              if (onNavigate) {
+                onNavigate();
+              }
+            }}
+          >
+            <Ic name="message-circle" />
+            <span className="trunc">Show agent bubble</span>
+          </button>
+        ) : null}
         <SItem
           item={SETTINGS_ITEM}
           active={route.section === SETTINGS_ITEM.key}

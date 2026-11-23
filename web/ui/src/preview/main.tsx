@@ -4,7 +4,7 @@ import { ToastProvider } from "../ui/gr8r";
 import { AnnouncerProvider } from "../ui/ui";
 import { applyTheme, isThemeChoice, saveTheme } from "../app/theme";
 import { mockApi } from "./fixtures";
-import { resetDock } from "../app/chat-dock-store";
+import { notify, resetFloating } from "../app/floating-agent-store";
 
 /* Dev-only preview harness (web/ui/preview.html). It renders the real App tree
    with the same providers and stylesheet as src/main.tsx, but answers every
@@ -119,25 +119,30 @@ if (!window.location.hash || window.location.hash === "#") {
   }
 }
 
-/* ?dock=lana:open,researcher pins the chat dock: each room, ":open" for a
-   window, otherwise a minimized tab; all count as recently chatted.
-   &peek=name shows the new-reply card above that tab. */
-const requestedDock = params.get("dock");
-if (requestedDock !== null) {
-  const items = requestedDock
-    .split(",")
-    .filter(Boolean)
-    .map((entry) => {
-      const [name = "", flag] = entry.split(":");
-      return { name, open: flag === "open" };
-    });
-  const now = Date.now();
-  const peek = params.get("peek");
-  resetDock({
-    items,
-    recent: Object.fromEntries(items.map((item) => [item.name, now])),
-    peek: peek ? { name: peek, at: now } : null,
+/* Spec 72 ?fa= pins the floating agent: "lana" (pill on that agent),
+   "lana:open" (panel in its room), "list" (panel on the chat list),
+   "tucked" / "untucked" (Workbench edge); &notif=name[:waiting] raises a
+   notification card; &bubble=left:0.3 places the phone bubble. */
+const requestedFa = params.get("fa");
+if (requestedFa !== null) {
+  const [first = "", flag] = requestedFa.split(":");
+  const bubbleParam = (params.get("bubble") || "").split(":");
+  const side = bubbleParam[0];
+  resetFloating({
+    current: first === "list" || first === "tucked" || first === "untucked" ? "" : first,
+    open: flag === "open" || first === "list",
+    view: first === "list" ? "list" : "room",
+    tucked: first !== "untucked",
+    bubble:
+      side === "left" || side === "right" || side === "top" || side === "bottom"
+        ? { side, pct: Number(bubbleParam[1]) || 0.5 }
+        : { side: "right", pct: 0.62 },
   });
+  const notifParam = params.get("notif");
+  if (notifParam) {
+    const [name = "", kind] = notifParam.split(":");
+    window.setTimeout(() => notify(name, kind === "waiting" ? "waiting" : "reply"), 600);
+  }
 }
 
 installMockApi();

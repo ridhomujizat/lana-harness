@@ -151,6 +151,54 @@ func TestBashErrorResult(t *testing.T) {
 	}
 }
 
+func TestBashErrorWithStringToolUseResult(t *testing.T) {
+	path := writeFile(t,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-11-23T12:00:00Z","message":{"id":"m1","role":"assistant","model":"m","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"git status"}}]}}`,
+		`{"type":"user","uuid":"r1","timestamp":"2026-11-23T12:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Exit code 1\n D web/x","is_error":true}]},"toolUseResult":"Error: Exit code 1\n D web/x"}`,
+	)
+	tr := Open(path, "/work")
+	items, _, err := tr.Poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := tr.Meta().UnknownLines; n != 0 {
+		t.Errorf("unknown = %d, want 0", n)
+	}
+	tool, ok := itemByID(items, "a1:0")
+	if !ok {
+		t.Fatalf("tool item missing: %v", idsOf(items))
+	}
+	if tool.Status != "error" {
+		t.Errorf("status = %q, want error", tool.Status)
+	}
+	if tool.Result == nil || !tool.Result.IsError {
+		t.Fatalf("result = %+v", tool.Result)
+	}
+	if !strings.HasPrefix(tool.Result.Text, "Exit code 1") {
+		t.Errorf("result text = %q", tool.Result.Text)
+	}
+}
+
+func TestToolUseResultNonObjectDecodesZero(t *testing.T) {
+	for _, raw := range []string{`null`, `42`, `["a"]`, `"boom"`, `true`} {
+		var ln rawLine
+		if err := json.Unmarshal([]byte(`{"type":"user","toolUseResult":`+raw+`}`), &ln); err != nil {
+			t.Errorf("toolUseResult %s: unmarshal: %v", raw, err)
+		}
+		if ln.ToolUseResult != (toolUseResult{}) {
+			t.Errorf("toolUseResult %s = %+v, want zero", raw, ln.ToolUseResult)
+		}
+	}
+
+	var ln rawLine
+	if err := json.Unmarshal([]byte(`{"type":"user","toolUseResult":{"backgroundTaskId":"bxr271nj3"}}`), &ln); err != nil {
+		t.Fatalf("object unmarshal: %v", err)
+	}
+	if ln.ToolUseResult.BackgroundTaskID != "bxr271nj3" {
+		t.Errorf("backgroundTaskId = %q", ln.ToolUseResult.BackgroundTaskID)
+	}
+}
+
 func TestAskUserQuestionAnswered(t *testing.T) {
 	path := writeFile(t,
 		`{"type":"assistant","uuid":"a1","timestamp":"2026-11-23T12:00:00Z","message":{"id":"m1","role":"assistant","model":"m","content":[{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"question":"Default scope?","header":"Scope","multiSelect":true,"options":[{"label":"Uncommitted","description":"d"}]}]}}]}}`,

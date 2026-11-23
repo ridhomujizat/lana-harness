@@ -329,6 +329,18 @@ type toolUseResult struct {
 	BackgroundTaskID string `json:"backgroundTaskId"`
 }
 
+// UnmarshalJSON accepts toolUseResult written either as an object (a successful
+// tool) or as a plain string (a failed tool), so a failure line is not dropped
+// as unknown. A non-object value decodes to the zero value.
+func (r *toolUseResult) UnmarshalJSON(data []byte) error {
+	if firstNonSpace(data) != '{' {
+		*r = toolUseResult{}
+		return nil
+	}
+	type plain toolUseResult
+	return json.Unmarshal(data, (*plain)(r))
+}
+
 type rawMessage struct {
 	ID      string          `json:"id"`
 	Role    string          `json:"role"`

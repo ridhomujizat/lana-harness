@@ -1649,8 +1649,25 @@
 
 /* ---- compact (phone) ----------------------------------------------- */
 
+/* Phone field (owner, 2026-11-23): one line sits centred on the send
+   button; 16px text keeps iOS from zooming in on focus, and the hint is a
+   quieter size than what you type. */
+.wbc.is-compact .wbc-field-row {
+  align-items: flex-end;
+  padding: 6px 6px 6px 14px;
+}
+
 .wbc.is-compact .wbc-field textarea {
   min-height: 24px;
+  margin-bottom: 3px;
+  padding: 2px 0;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.wbc.is-compact .wbc-field textarea::placeholder {
+  color: color-mix(in srgb, var(--wb-term-dim) 85%, transparent);
+  font-size: 15px;
 }
 
 .wbc.is-compact .wbc-option,
@@ -2128,6 +2145,15 @@
   max-height: 132px;
 }
 
+/* Phone: menus never run past the screen edge. */
+.wbc-composer.is-compact .wbc-pop {
+  max-width: calc(100vw - 24px);
+}
+
+.wbc-composer.is-compact .wbc-tool {
+  padding: 0 6px;
+}
+
 /* Images sent as paths (phone uploads). */
 .wbc-img-thumb {
   display: block;
@@ -2168,4 +2194,25 @@
   max-height: none;
   border: 0;
   border-radius: 0;
+}
+
+/* Thinking inside a step list (owner, 2026-11-23). */
+.wbc-think-row .wbc-tool-st,
+.wbc-think-row .wbc-target {
+  color: var(--wb-term-dim);
+}
+
+.wbc-think-row .wbc-target {
+  font-style: italic;
+}
+
+.wbc-think-text {
+  margin: 2px 12px 8px 36px;
+  padding-left: 10px;
+  border-left: 2px solid var(--wbc-line);
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

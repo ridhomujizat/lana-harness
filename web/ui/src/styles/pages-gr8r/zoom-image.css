@@ -52,11 +52,28 @@
   backdrop-filter: blur(8px);
   cursor: default;
   opacity: 0.86;
-  transition: opacity 0.15s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 .zi:hover .zi-bar,
 .zi-bar:focus-within {
   opacity: 1;
+}
+
+/* Zoomed in and idle: the controls step aside until the mouse moves or the
+   image is tapped. A full-screen viewer hides its own bars with them. */
+.zi.is-idle .zi-bar:not(:has(:focus-visible)) {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  pointer-events: none;
+}
+.iv :is(.iv-bar, .iv-nav, .iv-strip, .iv-caption) {
+  transition: opacity 0.2s ease;
+}
+.iv:has(.zi.is-idle) :is(.iv-bar, .iv-nav, .iv-strip, .iv-caption) {
+  opacity: 0;
+  pointer-events: none;
 }
 .zi-btn {
   display: inline-grid;
