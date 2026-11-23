@@ -32,11 +32,11 @@ export const MODES: { id: ChatMode; label: string; short: string; desc: string; 
    that version (owner feedback 2026-11-23). */
 const MODELS = [
   { id: "claude-opus-5-5", label: "Opus 5.5", desc: "Most capable, for hard work" },
-  { id: "claude-opus-5-5[1m]", label: "Opus 5.5 · 1M context", desc: "Opus with a 1M token window" },
+  { id: "claude-opus-5-5[1m]", label: "Opus 5.5", tag: "1M", desc: "Opus with a 1M token context" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5", desc: "Fast, for everyday work" },
-  { id: "claude-sonnet-5-5[1m]", label: "Sonnet 5.5 · 1M context", desc: "Sonnet with a 1M token window" },
+  { id: "claude-sonnet-5-5[1m]", label: "Sonnet 5.5", tag: "1M", desc: "Sonnet with a 1M token context" },
   { id: "claude-haiku-5-5", label: "Haiku 5.5", desc: "Fastest and cheapest" },
-  { id: "claude-fable-5-2", label: "Fable 5.2", desc: "Creative writing and long-form text" },
+  { id: "claude-fable-5-2", label: "Fable 5.2", desc: "Creative and long-form writing" },
 ];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
@@ -129,6 +129,12 @@ export function Composer(props: ComposerProps) {
   const [hl, setHl] = useState(0);
   const [caret, setCaret] = useState(0);
   const [busy, setBusy] = useState(false);
+  /* A model or effort just picked shows at once and stays until the daemon
+     reports a change (the transcript only has it after Claude's next reply). */
+  const [pendingModel, setPendingModel] = useState<{ value: string; base: string } | null>(null);
+  const [pendingEffort, setPendingEffort] = useState<{ value: string; base: string } | null>(null);
+  const shownModel = pendingModel && pendingModel.base === props.model ? pendingModel.value : props.model;
+  const shownEffort = pendingEffort && pendingEffort.base === props.effort ? pendingEffort.value : props.effort;
   const field = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const shell = useRef<HTMLDivElement>(null);
@@ -313,7 +319,16 @@ export function Composer(props: ComposerProps) {
     chatMode(sessionId, m).catch((err) => props.onError(errorMessage(err)));
   };
   const pickModel = (input: { model?: string; effort?: string }) => {
-    chatModel(sessionId, input).catch((err) => props.onError(errorMessage(err)));
+    if (input.model) {
+      setPendingModel({ value: input.model, base: props.model });
+      setMenu(null);
+    }
+    if (input.effort) setPendingEffort({ value: input.effort, base: props.effort });
+    chatModel(sessionId, input).catch((err) => {
+      if (input.model) setPendingModel(null);
+      if (input.effort) setPendingEffort(null);
+      props.onError(errorMessage(err));
+    });
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -563,25 +578,25 @@ export function Composer(props: ComposerProps) {
             <Anchor open={menu === "model"}>
               <button type="button" className={"wbc-tool" + (menu === "model" ? " is-on" : "")} disabled={disabled} onClick={() => setMenu(menu === "model" ? null : "model")}>
                 <span>
-                  {modelLabel(props.model)}
-                  {props.effort ? " · " + props.effort : ""}
+                  {modelLabel(shownModel)}
+                  {shownEffort ? " · " + shownEffort : ""}
                 </span>
                 <Ic name="chevron-down" size={12} />
               </button>
               <Pop className="wbc-pop-right" width={300}>
                 <div className="wbc-pop-sec">Model</div>
                 {MODELS.map((m) => (
-                  <PopRow key={m.id} label={m.label} desc={m.desc} right={m.id} checked={sameModel(props.model, m.id)} onClick={() => pickModel({ model: m.id })} />
+                  <PopRow key={m.id} label={m.label} tag={m.tag} desc={m.desc} checked={sameModel(shownModel, m.id)} onClick={() => pickModel({ model: m.id })} />
                 ))}
                 <div className="wbc-pop-sec">Effort</div>
                 <div className="wbc-seg">
                   {EFFORTS.map((e) => (
-                    <button key={e} type="button" className={e === props.effort ? "is-on" : ""} onClick={() => pickModel({ effort: e })}>
+                    <button key={e} type="button" className={e === shownEffort ? "is-on" : ""} onClick={() => pickModel({ effort: e })}>
                       {e}
                     </button>
                   ))}
                 </div>
-                <div className="wbc-pop-foot">Sent to the terminal as /model and /effort{working ? " · wait until Claude is idle" : ""}</div>
+                <div className="wbc-pop-foot">{working ? "Applies when Claude is idle" : "Applied in the terminal with /model and /effort"}</div>
               </Pop>
             </Anchor>
             <Anchor open={menu === "ctx"} hover>
@@ -644,11 +659,14 @@ function Pop({ children, className, width }: { children: ReactNode; className: s
   );
 }
 
-function PopRow({ label, desc, right, tone, checked, onClick }: { label: string; desc?: string; right?: string; tone?: string; checked?: boolean; onClick: () => void }) {
+function PopRow({ label, tag, desc, right, tone, checked, onClick }: { label: string; tag?: string; desc?: string; right?: string; tone?: string; checked?: boolean; onClick: () => void }) {
   return (
     <button type="button" className={"wbc-pop-row" + (checked ? " is-checked" : "")} onClick={onClick}>
       <span className="wbc-pop-text">
-        <span className={"wbc-pop-label" + (tone ? " tone-" + tone : "")}>{label}</span>
+        <span className={"wbc-pop-label" + (tone ? " tone-" + tone : "")}>
+          {label}
+          {tag ? <em className="wbc-pop-tag">{tag}</em> : null}
+        </span>
         {desc ? <span className="wbc-pop-desc">{desc}</span> : null}
       </span>
       {right ? <kbd>{right}</kbd> : null}

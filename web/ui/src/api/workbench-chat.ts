@@ -149,6 +149,7 @@ export interface ChatLive {
   state: "idle" | "working" | "blocked" | "unknown" | "";
   status: string;
   mode: string;
+  effort?: string;
   input_empty: boolean;
   dialog: ChatDialog | null;
 }

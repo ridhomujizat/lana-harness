@@ -1839,3 +1839,14 @@
 .wbc.is-compact .wbc-q-split {
   grid-template-columns: 1fr;
 }
+
+.wbc-pop-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wbc-violet) 16%, transparent);
+  color: var(--wbc-violet);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 600;
+}

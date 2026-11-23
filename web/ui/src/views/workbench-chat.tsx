@@ -762,7 +762,7 @@ export function ChatPane(props: ChatPaneProps) {
           compact={compact}
           mode={mode}
           model={meta?.model || ""}
-          effort={meta?.effort || ""}
+          effort={live?.effort || meta?.effort || ""}
           context={items.length ? meta?.context : undefined}
           onSent={(text, images) => {
             stick.current = true;

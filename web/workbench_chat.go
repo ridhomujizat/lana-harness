@@ -126,6 +126,7 @@ type chatLive struct {
 	State      string             `json:"state"`
 	Status     string             `json:"status,omitempty"`
 	Mode       string             `json:"mode,omitempty"`
+	Effort     string             `json:"effort,omitempty"`
 	InputEmpty bool               `json:"input_empty"`
 	Dialog     *claudechat.Dialog `json:"dialog"`
 }
@@ -1304,6 +1305,7 @@ func (h *chatHub) updateLive(sess workbench.Session) {
 		State:      state,
 		Status:     screen.Status,
 		Mode:       screen.Mode,
+		Effort:     screen.Effort,
 		InputEmpty: screen.InputEmpty,
 		Dialog:     dialog,
 	}
