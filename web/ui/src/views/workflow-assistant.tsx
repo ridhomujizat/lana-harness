@@ -449,6 +449,11 @@ export function WorkflowAssistant({
                       (!live.liveTurnId || item.turn.id === live.liveTurnId) &&
                       live.thinking
                     }
+                    liveThought={
+                      item.turn.running && (!live.liveTurnId || item.turn.id === live.liveTurnId)
+                        ? live.liveThought
+                        : ""
+                    }
                   />
                   {(byTurn.get(item.turn.id) || []).map((message) => (
                     <div className="wf-turn-change" key={message.id}>

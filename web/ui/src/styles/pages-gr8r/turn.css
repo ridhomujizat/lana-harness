@@ -1,6 +1,7 @@
 /* One assistant turn (owner request 2026-11-05: the answer is the main thing).
-   Thinking, tool calls and the text between them fold into one process line
-   above the answer; it opens into a quiet timeline. Shared by chat rooms and
+   Thinking and tool calls fold into a process line that opens into a quiet
+   timeline; a message the agent writes between tool calls splits the process
+   and shows as chat (owner request 2026-11-24). Shared by chat rooms and
    the session view. */
 
 .turn-process {
@@ -64,6 +65,21 @@
   background: var(--accent);
   flex-shrink: 0;
   animation: tpPulse 1.2s var(--ease) infinite;
+}
+/* The live thought under the process head (owner request 2026-11-24): the
+   end of what the model is thinking, two quiet lines at most. */
+.tp-live-thought {
+  margin: 2px 0 0 26px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--text-4);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .turn-process.is-waiting .tp-live-dot {
   background: var(--amber);
@@ -176,14 +192,6 @@
   color: var(--text-2);
   font-weight: 500;
 }
-.tp-note-text {
-  min-width: 0;
-  color: var(--text-2);
-  font-size: var(--fs-sm);
-}
-.tp-note-text p {
-  margin: 0;
-}
 .spin {
   animation: tpSpin 1s linear infinite;
 }
@@ -237,8 +245,10 @@
   color: var(--text);
 }
 
-/* The answer is the reply: full contrast, normal size. */
-.turn-answer {
+/* The answer is the reply: full contrast, normal size. A message the agent
+   wrote between tool calls reads the same way (owner request 2026-11-24). */
+.turn-answer,
+.turn-note {
   color: var(--text);
 }
 
@@ -262,9 +272,6 @@
   min-height: 0;
   padding: 0 8px;
   font-size: var(--fs-xs);
-}
-.tp-note-text .turn-via {
-  margin-bottom: 2px;
 }
 
 /* API reply: the cancelable chip above a composer while a reply is set. */
