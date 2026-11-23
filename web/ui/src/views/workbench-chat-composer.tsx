@@ -94,6 +94,8 @@ export interface ComposerProps {
   onOpenFiles?: () => void;
   dropFiles: File[] | null;
   onDropsTaken: () => void;
+  /* Background shells and subagents, shown inside the shell above the field. */
+  tray?: ReactNode;
 }
 
 interface MenuEntry {
@@ -407,6 +409,7 @@ export function Composer(props: ComposerProps) {
           <div className="wbc-bigmenu-foot">↑↓ choose · ⇥ or Enter insert · Esc close</div>
         </div>
       ) : null}
+      {props.tray}
       <div className={"wbc-field" + (disabled ? " is-locked" : "")}>
         {attachments.length ? (
           <div className="wbc-attachments">

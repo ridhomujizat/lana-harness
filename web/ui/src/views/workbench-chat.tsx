@@ -508,6 +508,7 @@ export function ChatPane(props: ChatPaneProps) {
   const blocked = live?.state === "blocked" || session?.agent_state === "blocked";
   const dialog = live?.dialog ?? null;
   const openQuestion = [...view].reverse().find((i) => i.kind === "question" && !i.answered);
+  const lastPlanId = [...view].reverse().find((i) => i.kind === "plan")?.id;
   const openPlan = [...view].reverse().find((i) => i.kind === "plan" && i.state === "pending");
   const pendingTool = [...view].reverse().find((i) => i.kind === "tool" && i.status === "running");
   const mode = live?.mode || meta?.mode || "default";
@@ -669,7 +670,10 @@ export function ChatPane(props: ChatPaneProps) {
             }
             if (b.type === "plan") {
               const text = planTextFor(view, b.item);
-              return <PlanCard key={key} item={text ? { ...b.item, plan: text } : b.item} dialog={b.item.id === openPlan?.id ? dialog : null} actions={actions} />;
+              /* A pending plan followed by a newer plan was sent back. */
+              const superseded = b.item.state === "pending" && b.item.id !== lastPlanId;
+              const shown = { ...b.item, ...(text ? { plan: text } : {}), ...(superseded ? { state: "rejected" as const } : {}) };
+              return <PlanCard key={key} item={shown} dialog={b.item.id === openPlan?.id ? dialog : null} actions={actions} />;
             }
             return <BlockView key={key} block={b} sessionId={sessionId} replyText={b.type === "turn_end" ? replyFor.get(b.item.id) || "" : ""} />;
           })}
@@ -721,7 +725,6 @@ export function ChatPane(props: ChatPaneProps) {
         </div>
       ) : null}
       <div className="wbc-dock">
-        <BackgroundTray tasks={trayTasks} />
         <Composer
           sessionId={sessionId}
           cwd={session?.cwd || session?.dir || ""}
@@ -741,6 +744,7 @@ export function ChatPane(props: ChatPaneProps) {
           onOpenFiles={props.onOpenFiles}
           dropFiles={drops}
           onDropsTaken={() => setDrops(null)}
+          tray={trayTasks.length ? <BackgroundTray tasks={trayTasks} /> : null}
         />
         {!compact ? (
           <div className="wbc-hint">
