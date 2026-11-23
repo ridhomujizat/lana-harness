@@ -2913,6 +2913,7 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.i
   align-items: center;
   gap: 12px;
   width: 100%;
+  height: auto;
   padding: 6px 4px;
   border: 0;
   border-radius: 8px;
@@ -2923,6 +2924,10 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.i
   cursor: pointer;
 }
 
+.wb-acc-hook-row > .wbg-switch {
+  flex: none;
+}
+
 .wb-acc-hook-row:hover {
   background: var(--wb-btn-hover);
 }
@@ -2930,6 +2935,7 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.i
 .wb-acc-hook-text {
   display: flex;
   flex: 1 1 auto;
+  white-space: normal;
   flex-direction: column;
   gap: 2px;
   min-width: 0;

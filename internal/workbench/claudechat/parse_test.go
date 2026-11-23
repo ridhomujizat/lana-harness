@@ -67,6 +67,33 @@ func wantTabs(t *testing.T, got []DialogTab, want []tabWant) {
 	}
 }
 
+func wantBody(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("body[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// wantActive checks which tabs are active: exactly the given labels, in order.
+// With no labels it requires that no tab is active.
+func wantActive(t *testing.T, got []DialogTab, want ...string) {
+	t.Helper()
+	var labels []string
+	for _, tab := range got {
+		if tab.Active {
+			labels = append(labels, tab.Label)
+		}
+	}
+	if strings.Join(labels, ",") != strings.Join(want, ",") {
+		t.Errorf("active tabs = %q, want %q", labels, want)
+	}
+}
+
 func checkMode(mode string) func(*testing.T, Screen) {
 	return func(t *testing.T, s Screen) {
 		t.Helper()
@@ -174,6 +201,8 @@ func TestParseScreenFixtures(t *testing.T) {
 				{"3", "Type something.", false},
 				{"4", "Chat about this", false},
 			})
+			// A plain question draws nothing between its title and options.
+			wantBody(t, d.Body, nil)
 		}},
 		{"08b-question-down.txt", func(t *testing.T, s Screen) {
 			d := wantDialog(t, s, "question", "What is your favorite color?")
@@ -209,6 +238,28 @@ func TestParseScreenFixtures(t *testing.T) {
 					t.Errorf("option label %q still carries box characters", o.Label)
 				}
 			}
+		}},
+		{"question-review.txt", func(t *testing.T, s Screen) {
+			d := wantDialog(t, s, "question", "Review your answers")
+			if d == nil {
+				return
+			}
+			wantTabs(t, d.Tabs, []tabWant{
+				{"Topik", true},
+				{"Format", true},
+				{"Submit", true},
+			})
+			wantOptions(t, d.Options, []optionWant{
+				{"1", "Submit answers", true},
+				{"2", "Cancel", false},
+			})
+			// The review screen repeats the answered questions below its title.
+			wantBody(t, d.Body, []string{
+				"● Pilih topik pertanyaan yang Anda mau (boleh lebih dari satu):",
+				"→ Coding, API / Postman",
+				"● Format pertanyaan seperti apa yang Anda mau?",
+				"→ Isian singkat",
+			})
 		}},
 		{"13-plan.txt", func(t *testing.T, s Screen) {
 			d := wantDialog(t, s, "plan", "Claude has written up a plan and is ready to execute. Would you like to proceed?")
@@ -481,6 +532,102 @@ func TestParseMultiSelectScreen(t *testing.T) {
 	}
 	if d.Options[3].Checked || d.Options[3].Description != "Sweet or spicy crunch" {
 		t.Errorf("option 4 = %+v, want unchecked with its description", d.Options[3])
+	}
+}
+
+// TestParseQuestionActiveTabMarked covers the active chip of a tabbed
+// AskUserQuestion dialog: the raw pane replay draws the first chip's row with a
+// background highlight, so parsing the marked screen makes Color the only active
+// tab. It checks the marks survive the replay arriving whole and in small writes.
+func TestParseQuestionActiveTabMarked(t *testing.T) {
+	raw := rawPane(t, "question.raw")
+	cases := []struct {
+		name  string
+		chunk int
+	}{
+		{"whole", 0},
+		{"chunked", 37},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewMirror(100, 40)
+			defer m.Close()
+			writeRaw(t, m, raw, tc.chunk)
+			lines, marked := m.Snapshot()
+			s := ParseScreenMarked(lines, marked)
+			d := wantDialog(t, s, "question", "Pick a color.")
+			if d == nil {
+				return
+			}
+			wantTabs(t, d.Tabs, []tabWant{
+				{"Color", false},
+				{"Toppings", false},
+				{"Size", false},
+				{"Submit", true},
+			})
+			wantActive(t, d.Tabs, "Color")
+		})
+	}
+}
+
+// TestParseScreenMarkedSecondChip covers a chips row whose second chip carries
+// the background highlight: the marks make B (the second chip) the active tab
+// and leave the others inactive.
+func TestParseScreenMarkedSecondChip(t *testing.T) {
+	raw := "←  ☒ A  \x1b[48;2;177;185;249m☐ B\x1b[49m  ☐ C  ✔ Submit  →\r\n" +
+		"\r\n" +
+		"Pick one?\r\n" +
+		"\r\n" +
+		"❯ 1. Yes\r\n" +
+		"  2. No\r\n" +
+		"\r\n" +
+		"Enter to select · Esc to cancel"
+	m := NewMirror(100, 12)
+	defer m.Close()
+	if _, err := m.Write([]byte(raw)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	lines, marked := m.Snapshot()
+	d := wantDialog(t, ParseScreenMarked(lines, marked), "question", "Pick one?")
+	if d == nil {
+		return
+	}
+	wantTabs(t, d.Tabs, []tabWant{
+		{"A", true},
+		{"B", false},
+		{"C", false},
+		{"Submit", true},
+	})
+	wantActive(t, d.Tabs, "B")
+}
+
+// TestParseScreenMarkedNoMarks checks that without marks (nil, empty or a short
+// row) no tab is active, keeping the plain-text behaviour.
+func TestParseScreenMarkedNoMarks(t *testing.T) {
+	lines := []string{
+		"←  ☐ A  ☐ B  ✔ Submit  →",
+		"",
+		"Pick one?",
+		"",
+		"❯ 1. Yes",
+		"  2. No",
+		"",
+		"Enter to select · Esc to cancel",
+	}
+	cases := map[string][][]bool{
+		"nil":   nil,
+		"empty": {},
+		"short": {{true}},
+	}
+	for name, marked := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := wantDialog(t, ParseScreenMarked(lines, marked), "question", "Pick one?")
+			if d == nil {
+				return
+			}
+			wantTabs(t, d.Tabs, []tabWant{{"A", false}, {"B", false}, {"Submit", true}})
+			wantActive(t, d.Tabs)
+		})
 	}
 }
 

@@ -66,6 +66,11 @@ var chatMirrorWait = time.Second
 // (REQ-WC-020).
 const chatViewBackoff = 2 * time.Second
 
+// chatViewSwapWait bounds how long a new view attachment opened for a size
+// change waits for the core's replay-end marker before it replaces the current
+// one (REQ-WC-020).
+const chatViewSwapWait = 500 * time.Millisecond
+
 const (
 	// chatSubBuffer is the per-subscriber event queue; a slower reader is
 	// dropped (REQ-WC-041).
@@ -1068,6 +1073,12 @@ type chatHub struct {
 	viewRefs         int
 	viewBackoffUntil time.Time
 
+	// pendingStream and pendingMirror are a view attachment opened for a size
+	// change that is not serving yet: the current pair keeps h.mirror until the
+	// pending mirror has seen the core's replay end (or chatViewSwapWait passes).
+	pendingStream io.ReadWriteCloser
+	pendingMirror *claudechat.Mirror
+
 	live         *chatLive
 	liveJSON     string
 	liveSentJSON string
@@ -1302,10 +1313,11 @@ func (h *chatHub) updateLive(sess workbench.Session) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var lines []string
+	var marked [][]bool
 	if h.mirror != nil {
-		lines = h.mirror.Lines()
+		lines, marked = h.mirror.Snapshot()
 	}
-	screen := claudechat.ParseScreen(lines)
+	screen := claudechat.ParseScreenMarked(lines, marked)
 	state := sess.AgentState
 	if state == "" {
 		state = "idle"
@@ -1329,34 +1341,35 @@ func (h *chatHub) updateLive(sess workbench.Session) {
 	h.screenEffort = screen.Effort
 }
 
-// ensureView opens and sizes the mirror's view attachment when the hub has a
-// viewer (REQ-WC-020).
+// ensureView keeps the hub's view attachment and screen mirror in step with the
+// pane size while it has a viewer (REQ-WC-020). A size change does not resize
+// the running mirror: Claude Code redraws at the new width as soon as it is
+// signalled, and those bytes would land in a mirror still sized the old way and
+// garble the screen. Instead attachView opens a new attachment and mirror at
+// the new size and swaps them in once the new mirror has replayed.
 func (h *chatHub) ensureView(ctx context.Context, sess workbench.Session) {
 	cols, rows := chatSize(sess)
 	h.mu.Lock()
-	if h.viewRefs <= 0 {
+	// A swap already in flight picks up any further size change on the poll
+	// after it finishes; a backed-off attach waits.
+	if h.viewRefs <= 0 || h.pendingStream != nil || time.Now().Before(h.viewBackoffUntil) {
 		h.mu.Unlock()
 		return
 	}
-	if stream := h.viewStream; stream != nil {
-		if h.viewCols != cols || h.viewRows != rows {
-			h.viewCols, h.viewRows = cols, rows
-			mirror := h.mirror
-			h.mu.Unlock()
-			if mirror != nil {
-				mirror.Resize(cols, rows)
-			}
-			return
-		}
-		h.mu.Unlock()
-		return
-	}
-	if time.Now().Before(h.viewBackoffUntil) {
+	if h.viewStream != nil && h.viewCols == cols && h.viewRows == rows {
 		h.mu.Unlock()
 		return
 	}
 	h.mu.Unlock()
+	h.attachView(ctx, cols, rows)
+}
 
+// attachView opens a view attachment at cols×rows and pumps it into a fresh
+// mirror. When the hub already serves an attachment the current pair keeps
+// serving h.mirror until the new mirror has seen the core's replay-end marker
+// (or chatViewSwapWait passes); otherwise the new attachment serves at once. A
+// failed attach keeps the current attachment and arms the view backoff.
+func (h *chatHub) attachView(ctx context.Context, cols, rows int) {
 	stream, err := h.srv.workbenchBackend().Attach(ctx, h.id, workbenchModeView)
 	if err != nil {
 		h.mu.Lock()
@@ -1365,18 +1378,64 @@ func (h *chatHub) ensureView(ctx context.Context, sess workbench.Session) {
 		return
 	}
 	mirror := claudechat.NewMirror(cols, rows)
+
 	h.mu.Lock()
-	if h.viewStream != nil {
+	// A concurrent attach may have won the race, or the size may already
+	// match: drop this attachment.
+	if h.pendingStream != nil || (h.viewStream != nil && h.viewCols == cols && h.viewRows == rows) {
 		h.mu.Unlock()
 		mirror.Close()
 		_ = stream.Close()
 		return
 	}
+	if h.viewStream == nil {
+		// First attachment: serve it at once.
+		h.viewStream = stream
+		h.mirror = mirror
+		h.viewCols, h.viewRows = cols, rows
+		h.mu.Unlock()
+		go h.pumpView(stream, mirror)
+		return
+	}
+	h.pendingStream = stream
+	h.pendingMirror = mirror
+	h.mu.Unlock()
+	go h.pumpView(stream, mirror)
+	go h.finishSwap(stream, mirror, cols, rows)
+}
+
+// finishSwap makes a pending view attachment the hub's current one once its
+// mirror has seen the core's replay-end marker, or chatViewSwapWait has passed,
+// then closes the attachment and mirror it replaced.
+func (h *chatHub) finishSwap(stream io.ReadWriteCloser, mirror *claudechat.Mirror, cols, rows int) {
+	select {
+	case <-mirror.ReplayDone():
+	case <-time.After(chatViewSwapWait):
+	}
+
+	h.mu.Lock()
+	if h.pendingStream != stream {
+		// Replaced or torn down while we waited; drop this attachment.
+		h.mu.Unlock()
+		mirror.Close()
+		_ = stream.Close()
+		return
+	}
+	oldStream := h.viewStream
+	oldMirror := h.mirror
 	h.viewStream = stream
 	h.mirror = mirror
 	h.viewCols, h.viewRows = cols, rows
+	h.pendingStream = nil
+	h.pendingMirror = nil
 	h.mu.Unlock()
-	go h.pumpView(stream, mirror)
+
+	if oldStream != nil {
+		_ = oldStream.Close()
+	}
+	if oldMirror != nil {
+		oldMirror.Close()
+	}
 }
 
 // pumpView feeds the pane's output into the mirror until the attachment ends.
@@ -1529,6 +1588,14 @@ func (h *chatHub) stop() {
 		if h.mirror != nil {
 			h.mirror.Close()
 			h.mirror = nil
+		}
+		if h.pendingStream != nil {
+			_ = h.pendingStream.Close()
+			h.pendingStream = nil
+		}
+		if h.pendingMirror != nil {
+			h.pendingMirror.Close()
+			h.pendingMirror = nil
 		}
 		for ch := range h.subs {
 			delete(h.subs, ch)
