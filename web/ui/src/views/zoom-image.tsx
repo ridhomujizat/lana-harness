@@ -5,10 +5,14 @@ import { Ic } from "../ui/icons";
 /* An image that zooms and pans: a pinch (or ⌘/Ctrl + scroll) zooms at the
    pointer, a plain scroll or a drag pans, a double-click switches between fit
    and 100%, and the toolbar has − / + / fit / 1:1 and, when given, expand.
-   Used by the Workbench Files viewer and the chat image viewer. */
+   Used by the Workbench Files viewer and the chat image viewer.
+   Zoomed in, the toolbar (and a full-screen viewer's own bars, by CSS) hides
+   after a short idle and comes back on mouse move, scroll, a key or a tap on
+   the image (owner, 2026-11-23). */
 
 const MAX_SCALE = 16;
 const STEP = 1.25;
+const IDLE_MS = 2200;
 
 interface View {
   scale: number;
@@ -75,6 +79,8 @@ export function ZoomImage({
   const [img, setImg] = useState<Size>({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ scale: 1, x: 0, y: 0, fit: true });
   const [failed, setFailed] = useState(false);
+  const [idle, setIdle] = useState(false);
+  const idleTimer = useRef<number | undefined>(undefined);
   const viewRef = useRef(view);
   const sizes = useRef({ box, img });
   useLayoutEffect(() => {
@@ -102,6 +108,26 @@ export function ZoomImage({
     setView((v) => (v.fit ? clampView({ scale: fitScale(box, img), x: 0, y: 0, fit: true }, box, img) : clampView(v, box, img)));
   }, [box, img]);
 
+  /* Show the controls and hide them again after IDLE_MS. */
+  const wake = useCallback(() => {
+    setIdle(false);
+    window.clearTimeout(idleTimer.current);
+    idleTimer.current = window.setTimeout(() => setIdle(true), IDLE_MS);
+  }, []);
+  const hide = useCallback(() => {
+    window.clearTimeout(idleTimer.current);
+    setIdle(true);
+  }, []);
+  useEffect(() => () => window.clearTimeout(idleTimer.current), []);
+  /* A mouse anywhere on the page (a full-screen viewer's top bar too) wakes. */
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === "mouse" && !viewRef.current.fit) wake();
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [wake]);
+
   const set = useCallback((fn: (v: View, box: Size, img: Size) => View) => {
     const { box: b, img: i } = sizes.current;
     setView((v) => fn(v, b, i));
@@ -120,6 +146,7 @@ export function ZoomImage({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      wake();
       const r = el.getBoundingClientRect();
       if (e.ctrlKey || e.metaKey) {
         const factor = Math.exp(-e.deltaY * (e.ctrlKey && !e.metaKey ? 0.01 : 0.002));
@@ -130,7 +157,7 @@ export function ZoomImage({
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [set]);
+  }, [set, wake]);
 
   useEffect(() => {
     if (!keys) return;
@@ -142,10 +169,11 @@ export function ZoomImage({
       else if (e.key === "1") actual();
       else return;
       e.preventDefault();
+      wake();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [keys, zoomBy, fit, actual]);
+  }, [keys, zoomBy, fit, actual, wake]);
 
   /* Pointers: one drags, two pinch. */
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -160,7 +188,11 @@ export function ZoomImage({
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || (e.target as HTMLElement).closest(".zi-bar")) return;
+    if ((e.target as HTMLElement).closest(".zi-bar")) {
+      wake();
+      return;
+    }
+    if (e.button !== 0) return;
     boxRef.current?.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, local(e));
     if (pointers.current.size === 1) gesture.current = { moved: false, dist: 0, onImage: e.target instanceof HTMLImageElement };
@@ -186,17 +218,25 @@ export function ZoomImage({
     const dy = p.y - prev.y;
     if (Math.abs(dx) + Math.abs(dy) > 0) {
       if (!gesture.current.moved && Math.hypot(dx, dy) < 2) return;
+      if (!gesture.current.moved && e.pointerType !== "mouse" && !viewRef.current.fit) hide();
       gesture.current.moved = true;
       set((v, b, i) => clampView({ ...v, x: v.x + dx, y: v.y + dy }, b, i));
     }
   };
   const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!pointers.current.delete(e.pointerId)) return;
-    if (pointers.current.size === 0 && !gesture.current.moved && !gesture.current.onImage && e.type === "pointerup") onBackdrop?.();
+    if (pointers.current.size !== 0 || gesture.current.moved || e.type !== "pointerup") return;
+    if (!gesture.current.onImage) onBackdrop?.();
+    /* A tap on the zoomed image shows or hides the controls. */
+    else if (e.pointerType !== "mouse" && !viewRef.current.fit) {
+      if (idle) wake();
+      else hide();
+    }
   };
 
   const onDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest(".zi-bar")) return;
+    wake();
     const p = local(e);
     const { box: b, img: i } = sizes.current;
     const fitS = fitScale(b, i);
@@ -209,7 +249,7 @@ export function ZoomImage({
   return (
     <div
       ref={boxRef}
-      className={"zi" + (view.scale * img.w > box.w + 1 || view.scale * img.h > box.h + 1 ? " is-pannable" : "")}
+      className={"zi" + (view.scale * img.w > box.w + 1 || view.scale * img.h > box.h + 1 ? " is-pannable" : "") + (idle && !view.fit ? " is-idle" : "")}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
