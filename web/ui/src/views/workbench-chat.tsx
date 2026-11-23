@@ -16,7 +16,7 @@ import {
 } from "../api/workbench-chat";
 import { Composer, modelLabel } from "./workbench-chat-composer";
 import { FallbackCard, PermissionCard, PlanCard, QuestionCard, type CardActions } from "./workbench-chat-cards";
-import { BackgroundChip, SubagentRow, TasksContext } from "./workbench-chat-tasks";
+import { BackgroundTray, SubagentRow, TasksContext } from "./workbench-chat-tasks";
 
 /* Spec 71: the Claude Code chat view of a Workbench pane. It reads the
    daemon's chat stream (the transcript plus a mirror of the screen) and is
@@ -539,7 +539,11 @@ export function ChatPane(props: ChatPaneProps) {
     return null;
   };
 
-  if (loaded && !state.available) {
+  /* A new Claude session has no transcript yet: show an empty chat with
+     the composer, so the first message can be typed here (owner feedback
+     2026-11-23). */
+  const fresh = loaded && !state.available && state.reason === "waiting";
+  if (loaded && !state.available && !fresh) {
     return (
       <div className="wbc">
         <div className="wbc-empty">
@@ -571,6 +575,22 @@ export function ChatPane(props: ChatPaneProps) {
   }
 
   const tasks = meta?.tasks ?? [];
+  /* Foreground subagents that are still running join the tray too. */
+  const trayTasks = [
+    ...tasks,
+    ...view
+      .filter((i) => i.kind === "tool" && (i.name === "Agent" || i.name === "Task") && i.status === "running")
+      .filter((i) => !tasks.some((t) => t.tool_use_id === i.tool_use_id || (i.agent && t.id === i.agent.agent_id)))
+      .map((i) => ({
+        id: i.id,
+        kind: "agent",
+        tool_use_id: i.tool_use_id,
+        title: (typeof i.input?.description === "string" ? (i.input.description as string) : "") || i.summary?.target || "Subagent",
+        agent_type: typeof i.input?.subagent_type === "string" ? (i.input.subagent_type as string) : "",
+        status: "running",
+        started: i.at,
+      })),
+  ];
   return (
     <TasksContext.Provider value={{ sessionId, tasks }}>
     <div
@@ -626,6 +646,13 @@ export function ChatPane(props: ChatPaneProps) {
             </div>
           ) : null}
           {!loaded ? <div className="wbc-loading">Loading the conversation…</div> : null}
+          {fresh && !items.length ? (
+            <div className="wbc-fresh">
+              <span className="wbc-head-tile" />
+              <div className="wbc-fresh-title">New Claude Code conversation</div>
+              <div className="wbc-fresh-text">Ask anything below. The message is typed into this pane's claude.</div>
+            </div>
+          ) : null}
           {blocks.map((b) => {
             const key = "item" in b ? b.item.id : b.key;
             if (b.type === "question") {
@@ -694,7 +721,7 @@ export function ChatPane(props: ChatPaneProps) {
         </div>
       ) : null}
       <div className="wbc-dock">
-        <BackgroundChip tasks={tasks} />
+        <BackgroundTray tasks={trayTasks} />
         <Composer
           sessionId={sessionId}
           cwd={session?.cwd || session?.dir || ""}

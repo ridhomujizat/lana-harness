@@ -139,28 +139,40 @@ export function SubagentRow({ item }: { item: ChatItem }) {
   );
 }
 
-/* The Background chip above the composer and its list (REQ-WC-062). */
-export function BackgroundChip({ tasks }: { tasks: ChatTask[] }) {
-  const [open, setOpen] = useState(false);
-  const [, tick] = useState(0);
+/* The background tray (REQ-WC-062, owner feedback 2026-11-23): background
+   shells and subagents in a card docked on top of the composer, in the
+   page flow so nothing is cut off. Collapsed it is one summary row; open it
+   lists the tasks, newest first, and scrolls inside the card. */
+export function BackgroundTray({ tasks }: { tasks: ChatTask[] }) {
   const running = useMemo(() => tasks.filter((t) => t.status === "running"), [tasks]);
+  const [open, setOpen] = useState<boolean | null>(null);
+  const [, tick] = useState(0);
+  const expanded = open ?? false;
   useEffect(() => {
-    if (!open || !running.length) return;
+    if (!running.length) return;
     const t = window.setInterval(() => tick((n) => n + 1), 1000);
     return () => window.clearInterval(t);
-  }, [open, running.length]);
+  }, [running.length]);
   if (!tasks.length) return null;
   const list = [...tasks].reverse();
+  const done = tasks.length - running.length;
+  const agents = running.filter((t) => t.kind === "agent").length;
+  const shells = running.length - agents;
+  const parts: string[] = [];
+  if (agents) parts.push(agents + (agents === 1 ? " subagent" : " subagents"));
+  if (shells) parts.push(shells + (shells === 1 ? " shell" : " shells"));
   return (
-    <div className="wbc-bg">
-      <span className={"wbc-anchor" + (open ? " is-open" : "")}>
-        <button type="button" className={"wbc-bg-chip" + (running.length ? " is-running" : "")} onClick={() => setOpen(!open)}>
-          {running.length ? <Ic name="loader" size={12} className="wbc-spin" /> : <Ic name="layers" size={12} />}
-          {running.length ? running.length + " running in background" : "Background · " + tasks.length}
-          <Ic name={open ? "chevron-down" : "chevron-up"} size={12} />
-        </button>
-        <div className="wbc-pop wbc-pop-left wbc-bg-pop" style={{ width: 460 }} onMouseDown={(e) => e.stopPropagation()}>
-          <div className="wbc-pop-sec">Background tasks</div>
+    <div className={"wbc-tray" + (expanded ? " is-open" : "")}>
+      <button type="button" className="wbc-tray-head" onClick={() => setOpen(!expanded)} aria-expanded={expanded}>
+        {running.length ? <Ic name="loader" size={13} className="wbc-spin wbc-st-running" /> : <Ic name="layers" size={13} />}
+        <span className="wbc-tray-title">{running.length ? parts.join(" · ") + " running" : "Background"}</span>
+        {done ? <span className="wbc-tray-sub">{done} done</span> : null}
+        {!expanded && running[0] ? <span className="wbc-tray-peek">{running[running.length - 1]!.title}</span> : null}
+        <span className="wb-spacer" />
+        <Ic name={expanded ? "chevron-down" : "chevron-up"} size={13} />
+      </button>
+      {expanded ? (
+        <div className="wbc-tray-list">
           {list.map((t) => (
             <div key={t.id} className={"wbc-bg-row" + (t.status === "running" ? "" : " is-done")}>
               <StatusIcon status={t.status} />
@@ -175,9 +187,8 @@ export function BackgroundChip({ tasks }: { tasks: ChatTask[] }) {
               <span className="wbc-bg-time">{t.status === "running" ? elapsed(t.started) : elapsed(t.started, t.ended) || t.status}</span>
             </div>
           ))}
-          <div className="wbc-pop-foot">From the Claude Code transcript · ask Claude to stop a task</div>
         </div>
-      </span>
+      ) : null}
     </div>
   );
 }
