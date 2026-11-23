@@ -11,6 +11,7 @@ import {
 } from "../app/floating-agent-store";
 import type { BubblePos, FaState } from "../app/floating-agent-store";
 import { Ic } from "../ui/icons";
+import { useSheetDrag } from "../ui/sheet-drag";
 import { displayLabel } from "./agent-label";
 import { ChatList, ChatRoom, Count, Face, stackRooms, StatusLine } from "./floating-agent-panel";
 import { needsYou } from "./room-list-row";
@@ -130,11 +131,14 @@ function PhoneSheet({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+  /* Like the Files sheet: drag the grip up for the full height, down to
+     bring it back, and further down to close. */
+  const { attach, full, gripProps } = useSheetDrag(closePanel);
   return (
     <div className="fa-sheet-wrap" role="dialog" aria-modal="true" aria-label="Floating agent">
       <div className="fa-scrim" aria-hidden="true" onClick={closePanel} />
-      <section className="fa-sheet">
-        <span className="fa-sheet-handle" aria-hidden="true" />
+      <section className={"fa-sheet" + (full ? " is-full" : "")} ref={attach}>
+        <span className="fa-sheet-grip sheet-grip" {...gripProps} />
         {view === "room" ? (
           <ChatRoom row={current} rows={rows} colors={colors} onClose={closePanel} />
         ) : (
