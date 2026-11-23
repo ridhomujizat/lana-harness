@@ -35,9 +35,10 @@ import { useRooms } from "./presence";
 import { needsYou } from "./room-list-row";
 
 /* Spec 72: one floating agent at the bottom right of every page but the
-   Chats section. On a desktop it is a pill that opens a panel with the chat
-   list and the room; on the Workbench the pill tucks into the right edge. A
-   notification grows the pill into a card. On a phone it is a draggable
+   Chats section. On a desktop it is a pill stuck to the right edge that opens
+   a panel with the chat list and the room, and tucks into the edge (owner,
+   2026-11-23: the Workbench look on every page). A notification grows the
+   pill into a card. On a phone it is a draggable
    bubble (floating-agent-phone.tsx). */
 
 function useViewportWidth(): number {
@@ -76,10 +77,10 @@ export function FloatingAgent({ route }: { route: Route }) {
   if (onChats) {
     return null;
   }
-  return <FloatingLive workbench={route.section === "workbench"} />;
+  return <FloatingLive />;
 }
 
-function FloatingLive({ workbench }: { workbench: boolean }) {
+function FloatingLive() {
   const fa = useFloatingAgent();
   const { rows, byName } = useRooms();
   const width = useViewportWidth();
@@ -94,7 +95,7 @@ function FloatingLive({ workbench }: { workbench: boolean }) {
     return <FloatingPhone rows={rows} byName={byName} colors={colors} current={current} fa={fa} />;
   }
   return (
-    <FloatingDesktop rows={rows} byName={byName} colors={colors} current={current} fa={fa} workbench={workbench} />
+    <FloatingDesktop rows={rows} byName={byName} colors={colors} current={current} fa={fa} />
   );
 }
 
@@ -138,20 +139,19 @@ interface DesktopProps {
   colors: Record<string, string>;
   current: RoomRow;
   fa: FaState;
-  workbench: boolean;
 }
 
-function FloatingDesktop({ rows, byName, colors, current, fa, workbench }: DesktopProps) {
+function FloatingDesktop({ rows, byName, colors, current, fa }: DesktopProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const notifRow = fa.notif && !fa.open ? byName[fa.notif.name] : undefined;
-  const tucked = workbench && fa.tucked && !fa.open && !notifRow;
+  const tucked = fa.tucked && !fa.open && !notifRow;
 
   /* REQ-FA-032: a notification slides the tucked pill out. */
   useEffect(() => {
-    if (workbench && notifRow && getFloating().tucked) {
+    if (notifRow && getFloating().tucked) {
       setTucked(false);
     }
-  }, [workbench, notifRow]);
+  }, [notifRow]);
 
   /* REQ-FA-011: ⌥Space; REQ-FA-024: Esc steps back from the room to the
      list, then closes. */
@@ -162,9 +162,7 @@ function FloatingDesktop({ rows, byName, colors, current, fa, workbench }: Deskt
           return;
         }
         event.preventDefault();
-        if (workbench) {
-          setTucked(false);
-        }
+        setTucked(false);
         togglePanel();
         return;
       }
@@ -183,7 +181,7 @@ function FloatingDesktop({ rows, byName, colors, current, fa, workbench }: Deskt
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [workbench]);
+  }, []);
 
   /* Reply: put the caret in the room's composer. */
   useEffect(() => {
@@ -201,7 +199,7 @@ function FloatingDesktop({ rows, byName, colors, current, fa, workbench }: Deskt
 
   const roomRow = fa.view === "room" ? current : undefined;
   return (
-    <div className={"fa" + (workbench ? " is-edge" : "")} role="region" aria-label="Floating agent">
+    <div className="fa is-edge" role="region" aria-label="Floating agent">
       {fa.open ? (
         <div className="fa-panel" ref={panelRef}>
           {roomRow ? (
@@ -219,7 +217,7 @@ function FloatingDesktop({ rows, byName, colors, current, fa, workbench }: Deskt
           colors={colors}
           current={current}
           open={fa.open}
-          edge={workbench}
+          edge
           notifRow={notifRow}
           notifKind={fa.notif ? fa.notif.kind : "reply"}
         />
@@ -280,7 +278,7 @@ function Pill({
       openPanel();
     }
   };
-  /* The round button: on the Workbench edge it tucks the pill while the
+  /* The round button: at the edge it tucks the pill while the
      panel is closed; otherwise it opens and closes the panel. */
   const tuckButton = edge && !open;
   return (

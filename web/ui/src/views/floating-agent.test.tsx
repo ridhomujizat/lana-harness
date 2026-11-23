@@ -192,7 +192,7 @@ describe("FloatingAgent on a desktop", () => {
 
   it("shows the pill, opens the panel and goes from the list to a room", async () => {
     installRows(rows);
-    resetFloating({ current: "dana" });
+    resetFloating({ current: "dana", tucked: false });
     render(<FloatingAgent route={route("home", "home")} />);
     await screen.findByRole("button", { name: "Open the chat with dana" });
     expect(screen.getByRole("button", { name: /scored, needs you/ })).toBeTruthy();
@@ -213,9 +213,9 @@ describe("FloatingAgent on a desktop", () => {
     expect(getFloating().current).toBe("lana");
   });
 
-  it("tucks into the edge on the Workbench and slides out on a click", async () => {
+  it("starts tucked into the edge on any page and slides out on a click", async () => {
     installRows(rows);
-    render(<FloatingAgent route={route("workbench", "workbench")} />);
+    render(<FloatingAgent route={route("home", "home")} />);
     fireEvent.click(await screen.findByRole("button", { name: /Show the floating agent/ }));
     expect(getFloating().tucked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Tuck the floating agent into the edge" }));
@@ -225,7 +225,7 @@ describe("FloatingAgent on a desktop", () => {
   it("grows a card when a room starts waiting and opens it", async () => {
     const calm = rows.map((row) => (row.name === "scored" ? room({ name: "scored" }) : row));
     installRows(calm);
-    resetFloating({ current: "dana" });
+    resetFloating({ current: "dana", tucked: false });
     render(<FloatingAgent route={route("home", "home")} />);
     await screen.findByRole("button", { name: "Open the chat with dana" });
     act(() => {

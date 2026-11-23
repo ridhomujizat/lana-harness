@@ -14,7 +14,7 @@ The owner wants one floating agent at the bottom right of every page, with full 
 2. Picking an agent is not a dropdown. The panel has two screens: a chat list like the Chats page sidebar, and the room. A row opens the room; the room header has a back button (`‹`) to the list.
 3. When the panel is open, the launcher pill stays visible under the panel (option 2B). There is no black round close button.
 4. Pill, minimized state and notification are one component: the minimized state is half a pill stuck to the right screen edge; a notification grows the pill upward into a card whose bottom row stays the pill.
-5. No settings menu. On the Workbench the pill starts minimized at the edge.
+5. No settings menu. The pill starts minimized at the edge. First only on the Workbench; later the same day the owner asked for the Workbench look on every page ("terapin di semua halaman").
 6. A notification makes the pill grow by itself; the owner can shrink it again and expand it later.
 7. Phone: a draggable bubble that glides to the nearest screen edge when released, like AssistiveTouch. Several active agents show as a stack of heads; a tap fans them out.
 8. All UI text is English.
@@ -29,14 +29,14 @@ The owner wants one floating agent at the bottom right of every page, with full 
 
 ### State
 
-- **REQ-FA-001** A store `app/floating-agent-store.ts` keeps, per browser in localStorage (`lana.floatingAgent.v1`): the current room name, whether the panel is open, the panel view (`list` or `room`), whether the pill is tucked on the Workbench (default tucked), the phone bubble position (`side` left/right/top/bottom and `pct` 0–1 along that side), and whether the phone bubble is hidden. Blocked storage starts from defaults. The old dock key `lana.chatDock.v1` is removed on first load.
+- **REQ-FA-001** A store `app/floating-agent-store.ts` keeps, per browser in localStorage (`lana.floatingAgent.v1`): the current room name, whether the panel is open, the panel view (`list` or `room`), whether the pill is tucked into the edge (default tucked), the phone bubble position (`side` left/right/top/bottom and `pct` 0–1 along that side), and whether the phone bubble is hidden. Blocked storage starts from defaults. The old dock key `lana.chatDock.v1` is removed on first load.
 - **REQ-FA-002** The current room defaults to, in order: the room the owner last opened in the panel or on the Chats page, a room waiting on the owner, a working room, the room with the newest message.
 
 ### Desktop pill (> 760 px)
 
-- **REQ-FA-010** A pill floats 24 px from the bottom-right corner on every signed-in page except the Chats section. It shows the current room's avatar (a ring while working or waiting), its name and a status line (presence label while busy, else the title), a divider, up to two other rooms that wait on the owner or have unread messages (avatar with a `!` or count badge), and a round chevron button. Clicking an avatar of another room opens the panel in that room.
+- **REQ-FA-010** A pill sits flush to the right screen edge, 24 px above the bottom, on every signed-in page except the Chats section. It shows the current room's avatar (a ring while working or waiting), its name and a status line (presence label while busy, else the title), a divider, up to two other rooms that wait on the owner or have unread messages (avatar with a `!` or count badge), and a round chevron button. Clicking an avatar of another room opens the panel in that room.
 - **REQ-FA-011** The chevron button or a click on the current agent opens and closes the panel; the chevron points up when closed and down when open. ⌥Space toggles the panel from anywhere except a terminal (xterm) and text inputs.
-- **REQ-FA-012** On the Workbench (`#/workbench`) the pill is tucked by default: half a pill flush to the right screen edge with the avatar, a badge (needs-you count, else unread count) and `‹`. Clicking it slides the full pill out, also flush to the edge; its round button becomes `›`, which tucks it again. The choice is remembered.
+- **REQ-FA-012** On every page the pill is tucked by default: half a pill flush to the right screen edge with the avatar, a badge (needs-you count, else unread count) and `‹`. Clicking it slides the full pill out, also flush to the edge; its round button becomes `›`, which tucks it again. The choice is remembered.
 
 ### Panel
 
@@ -50,7 +50,7 @@ The owner wants one floating agent at the bottom right of every page, with full 
 
 - **REQ-FA-030** When the panel is closed and a room starts waiting on the owner, or its unread count goes up, the pill grows upward into a card: the room's avatar, name, "Needs you · now" or "New reply · now", the presence label or the message preview, and **Open** (panel in that room) and, for a reply, **Reply** (same, focusing the composer). A `–` button shrinks the card back to the pill.
 - **REQ-FA-031** A waiting card stays until the owner shrinks it, opens it, or the room stops waiting; a reply card shrinks by itself after 8 s. A newer event replaces the card. No card while the panel shows that room.
-- **REQ-FA-032** When tucked on the Workbench, a notification slides the pill out from the edge with the card; shrinking the card keeps the pill out until `›`.
+- **REQ-FA-032** When tucked, a notification slides the pill out from the edge with the card; shrinking the card keeps the pill out until `›`.
 
 ### Phone (≤ 760 px)
 
