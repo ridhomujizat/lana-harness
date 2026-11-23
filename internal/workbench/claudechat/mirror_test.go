@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // rawPane reads a stored raw pane replay.
@@ -16,6 +17,27 @@ func rawPane(t *testing.T, name string) []byte {
 		t.Fatalf("read raw fixture %s: %v", name, err)
 	}
 	return b
+}
+
+// writeRaw feeds a raw pane replay to a mirror. A chunk of 0 writes it whole;
+// any other size splits it into that many bytes per Write.
+func writeRaw(t *testing.T, m *Mirror, raw []byte, chunk int) {
+	t.Helper()
+	if chunk <= 0 {
+		if _, err := m.Write(raw); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		return
+	}
+	for i := 0; i < len(raw); i += chunk {
+		end := i + chunk
+		if end > len(raw) {
+			end = len(raw)
+		}
+		if _, err := m.Write(raw[i:end]); err != nil {
+			t.Fatalf("write chunk: %v", err)
+		}
+	}
 }
 
 // hasTrimmedPrefix reports whether any line starts with prefix once it is
@@ -181,6 +203,34 @@ func TestMirrorTitleSplitAcrossWrites(t *testing.T) {
 	}
 }
 
+// TestMirrorSnapshotWideCharMarks checks that a background mark stays aligned
+// with its rune when a wide character sits before the marked span: the wide
+// character counts as one rune and its continuation cell does not shift the
+// index.
+func TestMirrorSnapshotWideCharMarks(t *testing.T) {
+	m := NewMirror(20, 3)
+	defer m.Close()
+
+	// "界 X" then a background-marked "Y", then a plain "Z".
+	if _, err := m.Write([]byte("界 X\x1b[48;2;177;185;249mY\x1b[49mZ")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	lines, marked := m.Snapshot()
+	if len(lines) == 0 || len(marked) == 0 {
+		t.Fatalf("Snapshot() = %q, %v; want at least one row", lines, marked)
+	}
+	line, row := lines[0], marked[0]
+	var markedRunes []rune
+	for i, r := range []rune(line) {
+		if i < len(row) && row[i] {
+			markedRunes = append(markedRunes, r)
+		}
+	}
+	if string(markedRunes) != "Y" {
+		t.Errorf("marked runes = %q, want %q; line=%q row=%v", string(markedRunes), "Y", line, row)
+	}
+}
+
 // TestMirrorNoopOSC7702 checks that the no-op OSC 7702 marker does not disturb
 // the screen.
 func TestMirrorNoopOSC7702(t *testing.T) {
@@ -192,6 +242,65 @@ func TestMirrorNoopOSC7702(t *testing.T) {
 	}
 	if lines := m.Lines(); len(lines) != 3 {
 		t.Fatalf("Lines() len = %d, want 3", len(lines))
+	}
+}
+
+// TestMirrorReplayDone checks that ReplayDone is closed once the core's
+// replay-end marker (OSC 7702) arrives, whether it lands in a single Write or
+// split across two.
+func TestMirrorReplayDone(t *testing.T) {
+	cases := []struct {
+		name string
+		head []byte
+		tail []byte // nil when the head carries the whole marker
+	}{
+		{"whole", []byte("hello\x1b]7702\x07"), nil},
+		{"split", []byte("hello\x1b]77"), []byte("02\x07")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewMirror(10, 3)
+			defer m.Close()
+
+			select {
+			case <-m.ReplayDone():
+				t.Fatal("ReplayDone closed before the marker")
+			default:
+			}
+
+			if _, err := m.Write(tc.head); err != nil {
+				t.Fatalf("write head: %v", err)
+			}
+			if tc.tail != nil {
+				select {
+				case <-m.ReplayDone():
+					t.Fatal("ReplayDone closed before the split marker completed")
+				default:
+				}
+				if _, err := m.Write(tc.tail); err != nil {
+					t.Fatalf("write tail: %v", err)
+				}
+			}
+
+			select {
+			case <-m.ReplayDone():
+			case <-time.After(time.Second):
+				t.Fatal("ReplayDone not closed after the replay-end marker")
+			}
+		})
+	}
+}
+
+// TestMirrorReplayDoneOnClose checks that closing the mirror also unblocks a
+// ReplayDone waiter, so a caller never waits on a closed mirror.
+func TestMirrorReplayDoneOnClose(t *testing.T) {
+	m := NewMirror(10, 3)
+	m.Close()
+
+	select {
+	case <-m.ReplayDone():
+	case <-time.After(time.Second):
+		t.Fatal("ReplayDone not closed by Close")
 	}
 }
 

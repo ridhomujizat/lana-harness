@@ -724,21 +724,6 @@ function PaneView({
         ) : null}
         <LanaChip session={session} />
         <RestoredChip session={session} />
-        {support !== "none" ? (
-          <span className="wb-pane-tools wb-view-tools">
-            <button
-              type="button"
-              className={"wb-view-btn" + (view === "chat" ? " is-chat" : "")}
-              disabled={support === "no"}
-              aria-label={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal" : "Show as chat"}
-              data-tip={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal ⇧⌘J" : "Show as chat ⇧⌘J"}
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={() => setPaneView(id, view === "chat" ? "terminal" : "chat")}
-            >
-              <Ic name={view === "chat" ? "square-terminal" : "message-square"} size={14} />
-            </button>
-          </span>
-        ) : null}
         <span className={"wb-pane-state wb-pane-state-" + status}>
           <StatusDot status={status} />
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}
@@ -757,6 +742,24 @@ function PaneView({
           </span>
         ) : null}
         <span className="wb-pane-tools">
+          {/* Terminal ⇄ Chat (spec 71) leads the pane tools, set off from
+              them by a rule (owner, 2026-11-23: it floated mid-header). */}
+          {support !== "none" ? (
+            <>
+              <button
+                type="button"
+                className={"wb-view-btn" + (view === "chat" ? " is-chat" : "")}
+                disabled={support === "no"}
+                aria-label={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal" : "Show as chat"}
+                data-tip={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal ⇧⌘J" : "Show as chat ⇧⌘J"}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => setPaneView(id, view === "chat" ? "terminal" : "chat")}
+              >
+                <Ic name={view === "chat" ? "square-terminal" : "message-square"} size={14} />
+              </button>
+              <i className="wb-pane-tools-sep" aria-hidden="true" />
+            </>
+          ) : null}
           {cycle ? (
             /* Focus mode: no split (the new pane would be hidden at once);
                unexpand shows every pane again, the panel stays. */
@@ -790,13 +793,18 @@ function PaneView({
       <div className={"wb-pane-body" + (view === "chat" ? " is-chat" : "")}>
         {session && view === "chat" ? (
           <div className="wb-chat-host" onMouseDown={() => actions.onFocus(id)}>
+          {/* Keyed by session: PaneView is reused when the tab or space
+              changes, and the chat's own state (pending sends, draft,
+              attachments) must not follow it to another pane. */}
           <ChatPane
+            key={id}
             sessionId={id}
             session={session}
             active={view === "chat"}
             readOnly={access.mode !== "control"}
             compact={phone}
             onOpenTerminal={() => setPaneView(id, "terminal")}
+            onOpenFile={(link, fallback) => actions.onOpenFile(id, link, fallback)}
           />
           </div>
         ) : null}
@@ -1292,12 +1300,14 @@ function PhoneWorkbench(props: PhoneProps) {
             {session && current && phoneView === "chat" ? (
               <div className="wb-chat-host">
                 <ChatPane
+                  key={current}
                   sessionId={current}
                   session={session}
                   active
                   readOnly={access.mode !== "control"}
                   compact
                   onOpenTerminal={() => setPaneView(current, "terminal")}
+                  onOpenFile={(link, fallback) => props.onOpenFile(current, link, fallback)}
                 />
               </div>
             ) : null}

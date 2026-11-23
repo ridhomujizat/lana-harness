@@ -221,7 +221,7 @@ function createEntry(init: TermCacheInit): TermCacheEntry {
             text: match.text,
             activate: (event: MouseEvent) => {
               if (!activationAllowed(event)) return;
-              onOpenFile?.(sessionId, match.text);
+              onOpenFile?.(sessionId, match.text, match.short);
             },
           };
         })

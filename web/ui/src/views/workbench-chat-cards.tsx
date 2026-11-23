@@ -132,7 +132,7 @@ export function QuestionCard({ item, dialog, actions }: { item: ChatItem; dialog
     setOther("");
   };
   return (
-    <div className="wbc-card wbc-card-violet" role="group" aria-label="Claude asks">
+    <div className="wbc-card wbc-card-ask" role="group" aria-label="Claude asks">
       <div className="wbc-card-head">
         <Ic name="message-square" size={15} />
         <div className="wbc-card-title">Claude asks</div>
@@ -262,6 +262,12 @@ export function PlanCard({ item, dialog, actions }: { item: ChatItem; dialog?: C
   );
 }
 
+/* The keys that move a question dialog from tab `from` to tab `to`. */
+export function tabKeys(from: number, to: number): string[] {
+  if (from < 0 || to === from) return [];
+  return Array.from({ length: Math.abs(to - from) }, () => (to > from ? "right" : "left"));
+}
+
 /* AskUserQuestion while it is open: Claude Code writes the question to the
    transcript only once it is answered, so the card is built from the
    screen (tabs, options with descriptions, checkboxes). Choosing moves the
@@ -279,6 +285,10 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
   const preview = dialog.preview || "";
   const cursorAt = Math.max(0, dialog.options.findIndex((o) => o.selected));
   const onPick = (i: number) => actions.keys(preview ? pickKeys(dialog, i, []) : pickKeys(dialog, i));
+  /* Question tabs: Claude Code moves between them with ←/→; the chip on
+     screen is the one the daemon read as highlighted (-1 when unknown). */
+  const tabs = dialog.tabs ?? [];
+  const activeTab = tabs.findIndex((t) => t.active);
   const sendOther = () => {
     const text = other.trim();
     if (!text || typeAt < 0) return;
@@ -286,23 +296,44 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
     setOther("");
   };
   return (
-    <div className="wbc-card wbc-card-violet" role="group" aria-label="Claude asks">
+    <div className="wbc-card wbc-card-ask" role="group" aria-label="Claude asks">
       <div className="wbc-card-head">
         <Ic name="message-square" size={15} />
         <div className="wbc-card-title">Claude asks</div>
         <span className="wb-spacer" />
-        {dialog.tabs?.length ? (
-          <div className="wbc-tabs">
-            {dialog.tabs.map((t, i) => (
-              <span key={i} className={"wbc-tab" + (t.done ? " is-done" : "")}>
+        {tabs.length ? (
+          <div className="wbc-tabs" role="tablist">
+            {tabs.map((t, i) => (
+              <button
+                key={i}
+                type="button"
+                role="tab"
+                aria-selected={i === activeTab}
+                className={"wbc-tab" + (t.done ? " is-done" : "") + (i === activeTab ? " is-active" : "")}
+                disabled={actions.disabled || activeTab < 0}
+                aria-current={i === activeTab ? "step" : undefined}
+                onClick={() => i !== activeTab && actions.keys(tabKeys(activeTab, i))}
+              >
                 {t.done ? <Ic name="check" size={12} /> : null}
                 {t.label}
-              </span>
+              </button>
             ))}
           </div>
         ) : null}
       </div>
-      <div className="wbc-q-title">{dialog.title}</div>
+      <div className="wbc-q-title">{dialog.title.replace(/^[|│┃▎▌]\s*/, "")}</div>
+      {dialog.body?.length ? (
+        <div className="wbc-q-review">
+          {dialog.body.map((line, n) => {
+            const answer = /^[→➜>]\s*/.test(line);
+            return (
+              <div key={n} className={answer ? "wbc-q-review-a" : "wbc-q-review-q"}>
+                {answer ? "→ " + line.replace(/^[→➜>]\s*/, "") : line.replace(/^[●•·]\s*/, "")}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       <div className={preview ? "wbc-q-split" : undefined}>
       <div className="wbc-q-options">
         {choices.map(({ o, i }) => {
@@ -367,6 +398,12 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
           <button type="button" className="wbc-btn" disabled={actions.disabled} onClick={() => actions.keys(["esc"])}>
             Skip
           </button>
+          {activeTab > 0 ? (
+            <button type="button" className="wbc-btn" disabled={actions.disabled} onClick={() => actions.keys(["left"])}>
+              <Ic name="chevron-left" size={13} />
+              Prev
+            </button>
+          ) : null}
           {preview ? (
             <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(["enter"])}>
               Choose {dialog.options[cursorAt]?.label.replace(/\s*\(Recommended\)\s*$/i, "") || ""}
@@ -376,7 +413,7 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
             <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(pickKeys(dialog, nextAt))}>
               {dialog.options[nextAt]!.label.trim()}
             </button>
-          ) : dialog.tabs && dialog.tabs.length > 1 ? (
+          ) : tabs.length > 1 && activeTab !== tabs.length - 1 ? (
             <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(["tab"])}>
               Next
             </button>

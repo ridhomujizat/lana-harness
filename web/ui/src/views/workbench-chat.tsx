@@ -1,6 +1,7 @@
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ic } from "../ui/icons";
-import { Markdown } from "../lib/markdown";
+import { Markdown, type PathLinker } from "../lib/markdown";
+import { matchLinksInLine, type LinkMatch } from "./workbench-links";
 import { errorMessage } from "../api/client";
 import type { WorkbenchSession } from "../api/workbench";
 import {
@@ -32,6 +33,8 @@ export interface ChatPaneProps {
   compact: boolean;
   onOpenTerminal: () => void;
   onOpenFiles?: () => void;
+  /* Opens a path in the Files panel, as ⌘+click does in the terminal. */
+  onOpenFile?: (link: string, fallback?: string) => void;
 }
 
 interface Pending {
@@ -262,6 +265,77 @@ function isAgentTool(item: ChatItem): boolean {
   return !!item.agent || item.name === "Agent" || item.name === "Task";
 }
 
+/* File paths in chat text open the Files panel (owner, 2026-11-23: "like
+   in the terminal"). Plain text only links paths with a slash, so version
+   numbers and "e.g" stay text; an inline code span may also be a bare file
+   name with a letter extension. */
+export function chatPathMatches(text: string): LinkMatch[] {
+  return matchLinksInLine(text).filter((m) => m.text.replace(/:\d+(?::\d+)?$/, "").includes("/"));
+}
+
+export function chatCodePath(text: string): string | null {
+  const s = text.trim();
+  if (!s || s.includes("\n")) return null;
+  /* A code span that is one absolute or ~/ path may hold spaces. */
+  if (/\s/.test(s)) return /^(\/|~\/)/.test(s) && !s.includes("  ") ? s : null;
+  const m = matchLinksInLine(s);
+  if (m.length !== 1 || m[0]!.start !== 0 || m[0]!.end !== s.length) return null;
+  const base = m[0]!.text.replace(/:\d+(?::\d+)?$/, "");
+  if (!base.includes("/") && !/\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(base)) return null;
+  return m[0]!.text;
+}
+
+const OpenFileContext = createContext<((link: string, fallback?: string) => void) | null>(null);
+
+function PathLink({ path, short, children }: { path: string; short?: string; children: ReactNode }) {
+  const open = useContext(OpenFileContext);
+  if (!open) return <>{children}</>;
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      className="wbc-path"
+      title={"Open " + path + " in Files"}
+      onClick={(e) => {
+        e.stopPropagation();
+        open(path, short);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") open(path, short);
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+const PATH_LINKER: PathLinker = {
+  match: chatPathMatches,
+  code: chatCodePath,
+  render: (path, node, key, short) => (
+    <PathLink key={key} path={path} short={short}>
+      {node}
+    </PathLink>
+  ),
+};
+
+/* Plain text with its paths linked. */
+function LinkedText({ text }: { text: string }) {
+  const out: ReactNode[] = [];
+  let at = 0;
+  for (const m of chatPathMatches(text)) {
+    if (m.start > at) out.push(text.slice(at, m.start));
+    out.push(
+      <PathLink key={m.start} path={m.text} short={m.short}>
+        {text.slice(m.start, m.end)}
+      </PathLink>,
+    );
+    at = m.end;
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return <>{out}</>;
+}
+
 function ToolRow({ item }: { item: ChatItem }) {
   if (isAgentTool(item)) return <SubagentRow item={item} />;
   return <PlainToolRow item={item} />;
@@ -282,8 +356,12 @@ function PlainToolRow({ item: raw }: { item: ChatItem }) {
   const s = item.summary;
   const verb = s?.verb || item.name || "Tool";
   const has = !!(item.diff || item.result?.text);
+  const openFile = useContext(OpenFileContext);
+  const fileInput = item.input?.file_path ?? item.input?.notebook_path;
+  const filePath = typeof fileInput === "string" && fileInput ? fileInput : "";
   return (
     <div className={"wbc-tool-row" + (open ? " is-open" : "")}>
+      <div className="wbc-tool-head">
       <button type="button" className="wbc-tool-line" onClick={() => has && setOpen(!open)} aria-expanded={has ? open : undefined}>
         <span className={"wbc-tool-st st-" + (item.status || "running")}>
           {item.status === "done" ? <Ic name="check" size={13} /> : item.status === "error" ? <Ic name="x" size={13} /> : <Ic name="loader" size={13} />}
@@ -294,6 +372,12 @@ function PlainToolRow({ item: raw }: { item: ChatItem }) {
         {s?.meta ? <span className={"wbc-meta" + (verb === "Write" ? " tone-green" : verb === "Edit" ? " tone-amber" : "")}>{s.meta}</span> : null}
         {has ? <Ic name={open ? "chevron-up" : "chevron-down"} size={12} /> : null}
       </button>
+      {filePath && openFile ? (
+        <button type="button" className="wbc-tool-open" aria-label={"Open " + filePath + " in Files"} data-tip="Open in Files" onClick={() => openFile(filePath)}>
+          <Ic name="file-search" size={13} />
+        </button>
+      ) : null}
+      </div>
       {open ? (
         item.diff ? (
           <DiffView diff={item.diff} />
@@ -309,7 +393,12 @@ function PlainToolRow({ item: raw }: { item: ChatItem }) {
 }
 
 function ToolGroup({ items }: { items: ChatItem[] }) {
-  const [open, setOpen] = useState(true);
+  /* Open while a step runs, folded once all are done (owner, 2026-11-23);
+     a click overrides either way. */
+  const running = items.some((i) => i.status === "running");
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? running;
+  const setOpen = (v: boolean) => setUserOpen(v);
   return (
     <div className="wbc-group">
       <button type="button" className="wbc-group-head" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -343,15 +432,79 @@ function Thinking({ item }: { item: ChatItem }) {
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+/* Pasted text arrives in the transcript wrapped as
+   <pasted_content id="…">…</pasted_content id="…">. */
+const PASTED = /<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<[/\\]pasted_content id="[^"]*["”]>/g;
+
+export type UserPart = { kind: "text"; text: string } | { kind: "pasted"; text: string };
+
+export function userParts(text: string): UserPart[] {
+  const parts: UserPart[] = [];
+  let last = 0;
+  for (const m of text.matchAll(PASTED)) {
+    const before = text.slice(last, m.index).trim();
+    if (before) parts.push({ kind: "text", text: before });
+    parts.push({ kind: "pasted", text: m[2] ?? "" });
+    last = (m.index ?? 0) + m[0].length;
+  }
+  const rest = text.slice(last).trim();
+  if (rest) parts.push({ kind: "text", text: rest });
+  /* A message that is one paste (multi-line text from the chat composer
+     arrives this way too) reads as plain text. */
+  if (parts.length === 1 && parts[0]!.kind === "pasted") return [{ kind: "text", text: parts[0]!.text }];
+  return parts.length ? parts : [{ kind: "text", text }];
+}
+
+export function plainUserText(text: string): string {
+  return userParts(text)
+    .map((p) => p.text)
+    .join("\n\n");
+}
+
+function PastedBlock({ text }: { text: string }) {
+  const lines = text.split("\n").length;
+  const long = lines > 6 || text.length > 600;
+  const [open, setOpen] = useState(!long);
+  return (
+    <div className={"wbc-pasted" + (open ? " is-open" : "")}>
+      <button type="button" className="wbc-pasted-head" onClick={() => long && setOpen(!open)} aria-expanded={open}>
+        <Ic name="clipboard" size={12} />
+        <span>Pasted text · {lines} {lines === 1 ? "line" : "lines"}</span>
+        {long ? <Ic name={open ? "chevron-up" : "chevron-down"} size={12} /> : null}
+      </button>
+      <div className={"wbc-pasted-text" + (open ? "" : " is-clipped")}>
+        <LinkedText text={text} />
+      </div>
+    </div>
+  );
+}
+
+function UserText({ text, className }: { text: string; className?: string }) {
+  const parts = userParts(text);
+  return (
+    <div className={"wbc-bubble" + (className ? " " + className : "")}>
+      {parts.map((p, i) =>
+        p.kind === "pasted" ? (
+          <PastedBlock key={i} text={p.text} />
+        ) : (
+          <span key={i} className="wbc-bubble-text">
+            <LinkedText text={p.text} />
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
+
+function CopyButton({ text, label = "Copy reply" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
   if (!text) return null;
   return (
     <button
       type="button"
       className="wbc-copy"
-      aria-label="Copy reply"
-      data-tip={done ? "Copied" : "Copy reply"}
+      aria-label={label}
+      data-tip={done ? "Copied" : label}
       onClick={() => {
         void navigator.clipboard?.writeText(text).then(() => {
           setDone(true);
@@ -378,7 +531,12 @@ const BlockView = memo(function BlockView({ block, sessionId, replyText }: { blo
               })}
             </div>
           ) : null}
-          {it.text ? <div className="wbc-bubble">{it.text}</div> : null}
+          {it.text ? <UserText text={it.text} /> : null}
+          {it.text ? (
+            <div className="wbc-msg-actions">
+              <CopyButton text={plainUserText(it.text)} label="Copy message" />
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -408,7 +566,10 @@ const BlockView = memo(function BlockView({ block, sessionId, replyText }: { blo
     case "text":
       return (
         <div className="wbc-text">
-          <Markdown text={block.item.text} />
+          <Markdown text={block.item.text} pathLink={PATH_LINKER} />
+          <div className="wbc-msg-actions">
+            <CopyButton text={block.item.text || ""} label="Copy reply" />
+          </div>
         </div>
       );
     case "thinking":
@@ -425,7 +586,7 @@ const BlockView = memo(function BlockView({ block, sessionId, replyText }: { blo
       return (
         <div className="wbc-turn-end">
           <span>{block.text}</span>
-          <CopyButton text={replyText} />
+          <CopyButton text={replyText} label="Copy the whole reply" />
         </div>
       );
     default:
@@ -484,7 +645,7 @@ export function ChatPane(props: ChatPaneProps) {
     return pending.filter(
       (p) =>
         !users.some((u) => {
-          const t = (u.kind === "command" ? (u.name || "") + (u.args ? " " + u.args : "") : u.text || "").trim();
+          const t = (u.kind === "command" ? (u.name || "") + (u.args ? " " + u.args : "") : plainUserText(u.text || "")).trim();
           return !!t && (t === p.text || t.startsWith(p.text.slice(0, 60)));
         }),
     );
@@ -529,7 +690,16 @@ export function ChatPane(props: ChatPaneProps) {
   const working = live?.state === "working" || session?.agent_state === "working";
   const blocked = live?.state === "blocked" || session?.agent_state === "blocked";
   const dialog = live?.dialog ?? null;
-  const openQuestion = [...view].reverse().find((i) => i.kind === "question" && !i.answered);
+  /* The transcript question still waiting: the newest one, unanswered, with
+     no user message after it (an Esc leaves it unanswered for good). */
+  const openQuestion = useMemo(() => {
+    for (let i = view.length - 1; i >= 0; i--) {
+      const it = view[i]!;
+      if (it.kind === "user" || it.kind === "command") return undefined;
+      if (it.kind === "question") return it.answered ? undefined : it;
+    }
+    return undefined;
+  }, [view]);
   const lastPlanId = [...view].reverse().find((i) => i.kind === "plan")?.id;
   const openPlan = [...view].reverse().find((i) => i.kind === "plan" && i.state === "pending");
   const pendingTool = [...view].reverse().find((i) => i.kind === "tool" && i.status === "running");
@@ -616,6 +786,7 @@ export function ChatPane(props: ChatPaneProps) {
       })),
   ];
   return (
+    <OpenFileContext.Provider value={props.onOpenFile ?? null}>
     <TasksContext.Provider value={{ sessionId, tasks }}>
     <div
       className={"wbc" + (compact ? " is-compact" : "")}
@@ -727,7 +898,7 @@ export function ChatPane(props: ChatPaneProps) {
                   ))}
                 </div>
               ) : null}
-              {p.text ? <div className={"wbc-bubble" + (p.queued ? " is-queued" : " is-sending")}>{p.text}</div> : null}
+              {p.text ? <UserText text={p.text} className={p.queued ? "is-queued" : "is-sending"} /> : null}
               {p.queued ? (
                 <div className="wbc-queued">
                   Queued · sent when Claude finishes ·{" "}
@@ -784,5 +955,6 @@ export function ChatPane(props: ChatPaneProps) {
       </div>
     </div>
     </TasksContext.Provider>
+    </OpenFileContext.Provider>
   );
 }

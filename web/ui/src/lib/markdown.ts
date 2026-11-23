@@ -163,6 +163,18 @@ function matchEmphasis(
 export type WikiLinkRenderer = (target: string, label: string) => ReactNode;
 let wikiLinkRenderer: WikiLinkRenderer | null = null;
 
+/* Spec 71: the Workbench chat turns file paths into links that open the
+   Files panel. `match` finds paths in plain text, `code` says whether a whole
+   inline code span is one, and `render` wraps the path's node. Set only while
+   one Markdown render runs. */
+export interface PathLinker {
+  match: (text: string) => { start: number; end: number; text: string; short?: string }[];
+  code: (text: string) => string | null;
+  render: (path: string, node: ReactNode, key: string, short?: string) => ReactNode;
+}
+let pathLinker: PathLinker | null = null;
+let pathLinkSeq = 0;
+
 function matchWikiLink(
   text: string,
   index: number
@@ -204,10 +216,19 @@ function parseInline(
   let index = 0;
 
   function flush() {
-    if (buffer) {
+    if (!buffer) return;
+    if (pathLinker && autolink) {
+      let at = 0;
+      for (const m of pathLinker.match(buffer)) {
+        if (m.start > at) nodes.push(buffer.slice(at, m.start));
+        nodes.push(pathLinker.render(m.text, buffer.slice(m.start, m.end), "p" + pathLinkSeq++, m.short));
+        at = m.end;
+      }
+      if (at < buffer.length) nodes.push(buffer.slice(at));
+    } else {
       nodes.push(buffer);
-      buffer = "";
     }
+    buffer = "";
   }
 
   while (index < text.length) {
@@ -217,9 +238,9 @@ function parseInline(
       const end = text.indexOf("`", index + 1);
       if (end > index + 1) {
         flush();
-        nodes.push(
-          h("code", { className: "md-inline-code" }, text.slice(index + 1, end))
-        );
+        const code = h("code", { className: "md-inline-code" }, text.slice(index + 1, end));
+        const path = pathLinker && autolink ? pathLinker.code(text.slice(index + 1, end)) : null;
+        nodes.push(path && pathLinker ? pathLinker.render(path, code, "p" + pathLinkSeq++) : code);
         index = end + 1;
         continue;
       }
@@ -740,14 +761,17 @@ function parseBlocks(lines: string[]): ReactNode[] {
 export interface MarkdownProps {
   text?: string | null;
   wikiLink?: WikiLinkRenderer;
+  pathLink?: PathLinker;
 }
 
 /* Assistant text as a markdown block. Empty and null input render an empty
    `.md` container; callers decide whether to render the component at all. */
-function MarkdownImpl({ text, wikiLink }: MarkdownProps): ReactElement {
+function MarkdownImpl({ text, wikiLink, pathLink }: MarkdownProps): ReactElement {
   const source = text === null || text === undefined ? "" : String(text);
   const previous = wikiLinkRenderer;
+  const previousPath = pathLinker;
   wikiLinkRenderer = wikiLink || null;
+  pathLinker = pathLink || null;
   try {
     const blocks = source.trim()
       ? parseBlocks(
@@ -760,6 +784,7 @@ function MarkdownImpl({ text, wikiLink }: MarkdownProps): ReactElement {
     return h("div", { className: "md" }, ...blocks);
   } finally {
     wikiLinkRenderer = previous;
+    pathLinker = previousPath;
   }
 }
 

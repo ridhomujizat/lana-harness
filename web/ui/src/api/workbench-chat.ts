@@ -131,6 +131,8 @@ export interface ChatDialogOption {
 export interface ChatDialogTab {
   label: string;
   done: boolean;
+  /* The chip of the question on screen (its highlight on the terminal). */
+  active?: boolean;
 }
 
 export interface ChatDialog {
@@ -139,6 +141,9 @@ export interface ChatDialog {
   lines: string[];
   options: ChatDialogOption[];
   tabs?: ChatDialogTab[];
+  /* Text between the title and the options, e.g. the answers on the
+     review step of a multi-question dialog. */
+  body?: string[];
   /* The preview Claude Code shows next to the option under the cursor. */
   preview?: string;
   /* Checkbox options (multi-select). */

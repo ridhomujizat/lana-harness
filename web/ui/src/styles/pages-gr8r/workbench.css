@@ -865,16 +865,19 @@
   white-space: nowrap;
   border: 0;
   border-radius: 999px;
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text-2);
   font: inherit;
   font-size: 13px;
   font-weight: 500;
 }
 
+/* The active chip looks like the active desktop tab (owner, 2026-11-23):
+   the pane surface with a hairline and the card shadow, no accent colour. */
 .wb-chip.is-on {
-  background: var(--acc-l, #1a1831);
-  color: #fff;
+  background: var(--wb-term);
+  box-shadow: inset 0 0 0 1px var(--border), var(--wb-card-shadow);
+  color: var(--text);
 }
 
 .wb-strip-count {
@@ -1580,8 +1583,8 @@ body.wb-resizing {
 }
 
 :root[data-theme="dark"] .wb-chip.is-on {
-  background: #b9a6f2;
-  color: #1a1831;
+  background: #2a2826;
+  color: var(--text);
 }
 
 /* Vertical drags are handled in TermPane (scrollback or wheel reports);

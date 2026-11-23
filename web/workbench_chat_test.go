@@ -232,6 +232,60 @@ func waitChatDialog(t *testing.T, hub *chatHub) {
 	}
 }
 
+// waitFakeStreamChange waits for a session/mode stream other than prev to
+// appear on the fake, so a re-attach can be told from the first attach.
+func waitFakeStreamChange(t *testing.T, fake *fakeWorkbench, id, mode string, prev *fakeWorkbenchStream) *fakeWorkbenchStream {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if s := fake.streamFor(id, mode); s != nil && s != prev {
+			return s
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no new %s/%s stream", id, mode)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// hubMirror reads the hub's current screen mirror.
+func hubMirror(hub *chatHub) *claudechat.Mirror {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	return hub.mirror
+}
+
+// waitHubMirror waits for the hub's mirror to come up.
+func waitHubMirror(t *testing.T, hub *chatHub) *claudechat.Mirror {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if m := hubMirror(hub); m != nil {
+			return m
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("hub has no mirror")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitHubMirrorChange waits for the hub's mirror to become something other than
+// prev, as it does after a view swap.
+func waitHubMirrorChange(t *testing.T, hub *chatHub, prev *claudechat.Mirror) *claudechat.Mirror {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if m := hubMirror(hub); m != nil && m != prev {
+			return m
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("hub mirror did not change")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 // waitChatHubGone waits for the server to drop a session's chat hub.
 func waitChatHubGone(t *testing.T, s *Server, id string) {
 	t.Helper()
@@ -832,6 +886,91 @@ func TestWorkbenchChatHubIdleStop(t *testing.T) {
 	if !view.isClosed() {
 		t.Fatal("view attachment was not closed")
 	}
+}
+
+// TestChatHubResizeReattaches checks that a pane size change makes the hub open
+// a new view attachment instead of resizing the running mirror, and that the new
+// attachment replaces the old stream and mirror once the core's replay-end
+// marker arrives.
+func TestChatHubResizeReattaches(t *testing.T) {
+	shortenChatTimers(t)
+	// addView alone leaves the hub with no subscriber, so keep it from idling
+	// out while the test drives it.
+	chatIdleStop = time.Minute
+	path := chatTranscriptFile(t, chatTestdata(t, "basic.jsonl"))
+	stubChatLocate(t, claudechat.Conversation{PID: 7, SessionID: "sid-1", Cwd: "/work", Path: path}, true)
+
+	s, _, _ := newWorkbenchServer(t)
+
+	stopHubsAfter(t, s)
+	fake := newFakeWorkbench()
+	fake.sessions = []workbench.Session{{ID: "abc", Agent: "claude", AgentState: "idle", Cols: 120, Rows: 40}}
+	s.SetWorkbench(fake)
+
+	hub := s.getChatHub("abc")
+	defer hub.stop()
+	hub.addView()
+
+	view1 := waitFakeStream(t, fake, "abc", "view")
+	mirror1 := waitHubMirror(t, hub)
+
+	fake.setSession("abc", func(sess *workbench.Session) { sess.Cols = 200; sess.Rows = 50 })
+	view2 := waitFakeStreamChange(t, fake, "abc", "view", view1)
+
+	// The old stream and mirror keep serving until the replay-end marker.
+	if got := hubMirror(hub); got != mirror1 {
+		t.Fatal("hub swapped the mirror before the replay-end marker")
+	}
+
+	view2.push([]byte("redrawn\r\n\x1b]7702\x07"))
+	if got := waitHubMirrorChange(t, hub, mirror1); got == mirror1 {
+		t.Fatal("hub kept the old mirror after the replay-end marker")
+	}
+	if !view1.isClosed() {
+		t.Fatal("old view stream was not closed after the swap")
+	}
+}
+
+// TestChatHubResizeWaitsForReplay checks that the old mirror keeps serving until
+// the new attachment has replayed, well before chatViewSwapWait (500ms) passes.
+func TestChatHubResizeWaitsForReplay(t *testing.T) {
+	shortenChatTimers(t)
+	// addView alone leaves the hub with no subscriber, so keep it from idling
+	// out while the test drives it.
+	chatIdleStop = time.Minute
+	path := chatTranscriptFile(t, chatTestdata(t, "basic.jsonl"))
+	stubChatLocate(t, claudechat.Conversation{PID: 7, SessionID: "sid-1", Cwd: "/work", Path: path}, true)
+
+	s, _, _ := newWorkbenchServer(t)
+
+	stopHubsAfter(t, s)
+	fake := newFakeWorkbench()
+	fake.sessions = []workbench.Session{{ID: "abc", Agent: "claude", AgentState: "idle", Cols: 120, Rows: 40}}
+	s.SetWorkbench(fake)
+
+	hub := s.getChatHub("abc")
+	defer hub.stop()
+	hub.addView()
+
+	view1 := waitFakeStream(t, fake, "abc", "view")
+	mirror1 := waitHubMirror(t, hub)
+
+	fake.setSession("abc", func(sess *workbench.Session) { sess.Cols = 200; sess.Rows = 50 })
+	view2 := waitFakeStreamChange(t, fake, "abc", "view", view1)
+
+	// A redraw without the replay-end marker must not swap the mirror, and the
+	// old attachment must stay open, while the 500ms wait has not passed.
+	view2.push([]byte("partial redraw\r\n"))
+	time.Sleep(50 * time.Millisecond)
+	if got := hubMirror(hub); got != mirror1 {
+		t.Fatal("hub swapped the mirror before the replay-end marker")
+	}
+	if view1.isClosed() {
+		t.Fatal("old view stream closed before the replay-end marker")
+	}
+
+	view2.push([]byte("\x1b]7702\x07"))
+	waitHubMirrorChange(t, hub, mirror1)
 }
 
 func TestWorkbenchChatUnavailableWithoutBackend(t *testing.T) {
