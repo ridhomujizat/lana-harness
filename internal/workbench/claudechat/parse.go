@@ -29,13 +29,16 @@ type DialogTab struct {
 }
 
 // Dialog is an open Claude Code dialog read from the screen: a permission
-// prompt, a question, a plan approval or another numbered list.
+// prompt, a question, a plan approval or another numbered list. Preview is the
+// text of the box Claude Code draws beside a question's options for the option
+// under the cursor (spec 71 REQ-WC-021).
 type Dialog struct {
 	Kind    string         `json:"kind"`
 	Title   string         `json:"title"`
 	Lines   []string       `json:"lines"`
 	Tabs    []DialogTab    `json:"tabs,omitempty"`
 	Options []DialogOption `json:"options"`
+	Preview string         `json:"preview,omitempty"`
 }
 
 // Screen is what a mirror's visible rows say about the pane: whether Claude is
@@ -388,6 +391,15 @@ func optionsConnected(lines []string, group []rawOption, nextIdx int) bool {
 
 func buildDialog(lines []string, group []rawOption) *Dialog {
 	firstOpt := group[0].idx
+	// A question can carry a preview box beside its options. Cut every line
+	// that runs into the box at its left edge, and keep the box's inner text.
+	var preview string
+	if col, inner, ok := findPreviewBox(lines, firstOpt); ok {
+		lines = cutDialogColumns(lines, col, firstOpt)
+		group = rematchOptions(lines, group)
+		firstOpt = group[0].idx
+		preview = inner
+	}
 	titleIdx, title := findTitle(lines, firstOpt)
 	var tabs []DialogTab
 	if chipsIdx, t := findChips(lines, firstOpt); chipsIdx >= 0 {
@@ -412,6 +424,7 @@ func buildDialog(lines []string, group []rawOption) *Dialog {
 		Lines:   dialogLines(lines, titleIdx, firstOpt),
 		Tabs:    tabs,
 		Options: opts,
+		Preview: preview,
 	}
 }
 
@@ -550,6 +563,7 @@ func joinWrappedTitle(lines []string, idx int) (int, string) {
 // selection, and repairs the permission prompt whose "1. Yes" was overwritten
 // by a render glitch.
 func buildOptions(lines []string, group []rawOption, title string) []DialogOption {
+	extra, extraIdx := unnumberedOptions(lines, group)
 	opts := make([]DialogOption, 0, len(group))
 	for gi, o := range group {
 		label, checked := parseOptionLabel(o.label)
@@ -561,6 +575,9 @@ func buildOptions(lines []string, group []rawOption, title string) []DialogOptio
 		}
 		labelDone := false
 		for i := o.idx + 1; i < end && i < len(lines); i++ {
+			if extraIdx[i] {
+				break
+			}
 			if isRule(lines[i]) {
 				continue
 			}
@@ -602,7 +619,198 @@ func buildOptions(lines []string, group []rawOption, title string) []DialogOptio
 	if !anySelected {
 		opts[0].Selected = true
 	}
+	opts = append(opts, extra...)
 	return opts
+}
+
+// unnumberedOptions returns the keyless option lines that follow the last
+// numbered option of a dialog after a rule, such as "Chat about this". They sit
+// at the option text column and are not hints. The set of their line indices is
+// returned so the description scan can stop there.
+func unnumberedOptions(lines []string, group []rawOption) ([]DialogOption, map[int]bool) {
+	if len(group) == 0 {
+		return nil, nil
+	}
+	col := optionContentColumn(group)
+	sawRule := false
+	var out []DialogOption
+	idx := make(map[int]bool)
+	for i := group[len(group)-1].idx + 1; i < len(lines); i++ {
+		if isHintLine(lines[i]) {
+			break
+		}
+		t := strings.TrimSpace(lines[i])
+		if t == "" {
+			continue
+		}
+		if isRule(lines[i]) {
+			sawRule = true
+			continue
+		}
+		if !sawRule || leadingIndent(lines[i]) != col {
+			continue
+		}
+		out = append(out, DialogOption{Key: "", Label: t})
+		idx[i] = true
+	}
+	return out, idx
+}
+
+// optionContentColumn is the column an option's text starts at, counting the ❯
+// cursor as the two spaces it replaces.
+func optionContentColumn(group []rawOption) int {
+	col := -1
+	for _, o := range group {
+		c := o.indent
+		if o.selected {
+			c += 2
+		}
+		if col < 0 || c < col {
+			col = c
+		}
+	}
+	return col
+}
+
+// rematchOptions re-reads option lines after they were cut at the preview
+// column, so the labels no longer carry the box characters.
+func rematchOptions(lines []string, group []rawOption) []rawOption {
+	out := make([]rawOption, 0, len(group))
+	for _, o := range group {
+		if o.idx >= 0 && o.idx < len(lines) {
+			if m, ok := matchOption(lines[o.idx]); ok {
+				m.idx = o.idx
+				out = append(out, m)
+				continue
+			}
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+// findPreviewBox locates the preview column of a question dialog: a box whose
+// top-left "┌" and bottom-left "└" sit in the same column C (C > 10) with "│"
+// at C on the lines between. It returns C and the box's inner text, or ok=false.
+func findPreviewBox(lines []string, start int) (int, string, bool) {
+	if start < 0 {
+		start = 0
+	}
+	for t := start; t < len(lines); t++ {
+		for c, ch := range []rune(lines[t]) {
+			if ch != '┌' || c <= 10 {
+				continue
+			}
+			bottom, right, ok := boxFrame(lines, t, c)
+			if !ok {
+				continue
+			}
+			return c, boxInner(lines, t, bottom, c, right), true
+		}
+	}
+	return 0, "", false
+}
+
+// boxFrame finds the bottom-left "└" line of a box whose top-left "┌" sits at
+// (top, col), and the column of the top border's "┐". Every line between must
+// carry "│" at col.
+func boxFrame(lines []string, top, col int) (bottom, right int, ok bool) {
+	topRunes := []rune(lines[top])
+	right = -1
+	for c := col + 1; c < len(topRunes); c++ {
+		if topRunes[c] == '┐' {
+			right = c
+			break
+		}
+	}
+	if right < 0 {
+		return 0, 0, false
+	}
+	for i := top + 1; i < len(lines); i++ {
+		r := []rune(lines[i])
+		if col >= len(r) {
+			return 0, 0, false
+		}
+		switch r[col] {
+		case '│':
+		case '└':
+			return i, right, true
+		default:
+			return 0, 0, false
+		}
+	}
+	return 0, 0, false
+}
+
+// boxInner reads the lines between a box's top and bottom borders, dropping the
+// outer "│" at col and at the box's right edge, right-trimming, and removing the
+// indentation the rows share.
+func boxInner(lines []string, top, bottom, col, right int) string {
+	rows := make([]string, 0, bottom-top-1)
+	for i := top + 1; i < bottom; i++ {
+		r := []rune(lines[i])
+		if col >= len(r) {
+			rows = append(rows, "")
+			continue
+		}
+		rest := r[col+1:]
+		if cut := right - col - 1; cut >= 0 && cut <= len(rest) {
+			rest = rest[:cut]
+		}
+		rows = append(rows, strings.TrimRightFunc(string(rest), unicode.IsSpace))
+	}
+	return trimCommonIndent(rows)
+}
+
+// trimCommonIndent removes the leading whitespace every row shares and joins the
+// rows with "\n".
+func trimCommonIndent(rows []string) string {
+	common := -1
+	for _, row := range rows {
+		n := 0
+		for _, ch := range row {
+			if ch != ' ' && ch != '\t' {
+				break
+			}
+			n++
+		}
+		if common < 0 || n < common {
+			common = n
+		}
+	}
+	if common > 0 {
+		for i, row := range rows {
+			r := []rune(row)
+			if len(r) >= common {
+				rows[i] = string(r[common:])
+			} else {
+				rows[i] = ""
+			}
+		}
+	}
+	return strings.Join(rows, "\n")
+}
+
+// cutDialogColumns returns the lines with every dialog line at or below start
+// truncated at the preview column col (a no-op for shorter lines). It stops at
+// the hint line so the footer is left whole.
+func cutDialogColumns(lines []string, col, start int) []string {
+	out := make([]string, len(lines))
+	copy(out, lines)
+	if col <= 0 {
+		return out
+	}
+	for i := start; i < len(lines); i++ {
+		if isHintLine(lines[i]) {
+			break
+		}
+		r := []rune(out[i])
+		if len(r) > col {
+			r = r[:col]
+		}
+		out[i] = strings.TrimRightFunc(string(r), unicode.IsSpace)
+	}
+	return out
 }
 
 // dialogLines returns the non-empty, non-rule, non-Tip text between the block's

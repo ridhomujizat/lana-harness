@@ -187,6 +187,29 @@ func TestParseScreenFixtures(t *testing.T) {
 				{"4", "Chat about this", false},
 			})
 		}},
+		{"question-preview.txt", func(t *testing.T, s Screen) {
+			d := wantDialog(t, s, "question", "Pilih tampilan untuk ditampilkan:")
+			if d == nil {
+				return
+			}
+			wantOptions(t, d.Options, []optionWant{
+				{"1", "Kartu sederhana", false},
+				{"2", "Dua kolom", false},
+				{"3", "Tabel", true},
+				{"", "Chat about this", false},
+			})
+			if !strings.HasPrefix(d.Preview, "┌──────┬──────────┬───────┐") {
+				t.Errorf("preview = %q, want it to start with the box's inner top border", d.Preview)
+			}
+			if !strings.Contains(d.Preview, "│ 1    │ Alpha    │ 90    │") {
+				t.Errorf("preview = %q, want it to contain the first table row", d.Preview)
+			}
+			for _, o := range d.Options {
+				if strings.ContainsAny(o.Label, "┌│") {
+					t.Errorf("option label %q still carries box characters", o.Label)
+				}
+			}
+		}},
 		{"13-plan.txt", func(t *testing.T, s Screen) {
 			d := wantDialog(t, s, "plan", "Claude has written up a plan and is ready to execute. Would you like to proceed?")
 			if d == nil {
