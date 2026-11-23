@@ -7,6 +7,8 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.8] - 2026-11-23
+
 ### Changed
 
 - Workbench on a phone: the space header is a clean one-line title with one menu; the view switch, Files, Changes (with its count), New terminal and Claude accounts moved into it.
