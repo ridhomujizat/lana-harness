@@ -7,6 +7,8 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.7] - 2026-11-23
+
 ### Added
 
 - Workbench chat: a multi-question dialog moves between questions from its chips (the one on screen is highlighted, as in the terminal) and a Prev button. The review step lists each question with its answer before Submit answers / Cancel.
