@@ -1,0 +1,862 @@
+/* Spec 72 floating agent (views/floating-agent*.tsx): a pill at the bottom
+   right that opens a panel (chat list and room), tucks into the right edge on
+   the Workbench and grows into a card for a notification; on a phone a
+   draggable bubble, a stack of heads and a sheet. */
+
+.fa {
+  --fa-shadow: 0 16px 40px -8px rgba(28, 25, 20, 0.28), 0 2px 6px rgba(28, 25, 20, 0.08);
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.fa > * {
+  pointer-events: auto;
+}
+
+.fa.is-edge {
+  right: 0;
+}
+
+:root[data-theme="dark"] .fa {
+  --fa-bg: var(--surface-2);
+}
+
+/* The legacy button rule (app.css) gives every <button> a fixed height, an
+   accent fill and centred, unwrapped text. These are plain surfaces. */
+.fa-who,
+.fa-mini,
+.fa-back,
+.fa-strip,
+.fa-tuck,
+.fa-fan-item,
+.fa-list-body .rooms-row {
+  height: auto;
+  justify-content: flex-start;
+  font-weight: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
+
+/* ------------------------------------------------------------- faces */
+
+.fa-face {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+}
+
+.fa-face-av {
+  display: inline-grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 28%;
+}
+
+.fa-face-av .agent-avatar,
+.fa-face-av .av {
+  width: 100%;
+  height: 100%;
+}
+
+.fa-face::after {
+  position: absolute;
+  inset: -3px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  content: "";
+  pointer-events: none;
+}
+
+.fa-face.state-waiting::after {
+  border-color: var(--amber);
+}
+
+.fa-face.state-problem::after {
+  border-color: var(--red);
+}
+
+.fa-face.state-working::after {
+  border-color: color-mix(in srgb, var(--violet) 22%, transparent);
+  border-top-color: var(--violet);
+  border-right-color: var(--violet);
+  animation: fa-spin 1.4s linear infinite;
+}
+
+@keyframes fa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fa-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0 5px;
+  border: 2px solid var(--surface);
+  border-radius: 9px;
+  background: var(--red);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.fa-badge.is-waiting {
+  background: var(--amber);
+}
+
+/* -------------------------------------------------------------- pill */
+
+.fa-pill {
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  max-width: min(400px, calc(100vw - 48px));
+  border: 1px solid var(--border-strong);
+  border-radius: 30px;
+  background: var(--fa-bg, var(--surface));
+  box-shadow: var(--fa-shadow);
+  overflow: hidden;
+  transition: border-radius 0.2s var(--ease, ease-out);
+}
+
+.fa-pill.has-card {
+  width: 372px;
+  border-radius: 24px;
+  animation: fa-grow 0.22s var(--ease, ease-out);
+}
+
+.fa.is-edge .fa-pill {
+  border-right: 0;
+  border-radius: 30px 0 0 30px;
+  animation: fa-slide 0.22s var(--ease, ease-out);
+}
+
+.fa.is-edge .fa-pill.has-card {
+  border-radius: 24px 0 0 24px;
+}
+
+@keyframes fa-grow {
+  from {
+    opacity: 0.6;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes fa-slide {
+  from {
+    transform: translateX(40px);
+  }
+}
+
+.fa-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+}
+
+.fa-who {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 4px 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fa-who-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fa-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fa-sub {
+  display: flex;
+  overflow: hidden;
+  max-width: 180px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.fa-sub .presence-label,
+.fa-sub-text {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.fa-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 28px;
+  background: var(--divider);
+}
+
+.fa-others {
+  display: flex;
+  gap: 6px;
+}
+
+.fa-mini {
+  position: relative;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.fa-mini .fa-badge {
+  top: -6px;
+  right: -6px;
+}
+
+.fa-round {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  margin-left: auto;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.fa-round:hover {
+  background: color-mix(in srgb, var(--text) 13%, transparent);
+  color: var(--text);
+}
+
+.fa-round-sm {
+  width: 28px;
+  height: 28px;
+}
+
+/* --------------------------------------------------- notification card */
+
+.fa-card {
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.fa-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fa-card-head .fa-round {
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.fa-card-kind {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.fa-card-kind.is-waiting {
+  color: var(--amber-text, var(--amber));
+}
+
+.fa-card-text {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 10px 0 0 40px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.fa-card-text.is-mono {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.fa-card-actions {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 0 40px;
+}
+
+/* -------------------------------------------------- tucked (Workbench) */
+
+.fa-tuck {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px 8px 8px;
+  border: 1px solid var(--border-strong);
+  border-right: 0;
+  border-radius: 30px 0 0 30px;
+  background: var(--fa-bg, var(--surface));
+  box-shadow: var(--fa-shadow);
+  color: var(--text-2);
+  cursor: pointer;
+  animation: fa-slide 0.22s var(--ease, ease-out);
+}
+
+.fa-tuck:hover {
+  color: var(--text);
+}
+
+.fa-tuck-face {
+  position: relative;
+  display: inline-flex;
+}
+
+/* ---------------------------------------------------------------- panel */
+
+.fa-panel {
+  display: flex;
+  width: 408px;
+  height: min(660px, calc(100dvh - 24px - 74px - 24px));
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--fa-shadow);
+  overflow: hidden;
+  animation: fa-grow 0.18s var(--ease, ease-out);
+}
+
+.fa.is-edge .fa-panel {
+  margin-right: 12px;
+}
+
+.fa-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fa-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.fa-room .fa-head {
+  padding-left: 4px;
+}
+
+.fa-list-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.fa-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  height: 32px;
+  padding: 0 6px 0 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.fa-back:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.fa-back-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.fa-list-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.fa-filters {
+  align-self: flex-start;
+}
+
+.fa-list-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 6px 8px;
+  overflow-y: auto;
+}
+
+.fa-list-body .rooms-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fa-list-body .rooms-row:hover {
+  background: var(--surface-2);
+}
+
+.fa-list-body .rooms-row.on {
+  background: var(--surface-3);
+}
+
+.fa-strip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--amber) 30%, var(--divider));
+  background: color-mix(in srgb, var(--amber) 10%, var(--surface));
+  color: var(--amber-text, var(--text));
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fa-strip-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fa-strip-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+}
+
+.fa-room-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The room timeline, compact inside the panel or the phone sheet. */
+.room-view.is-dock .room-notices {
+  margin: 8px 12px 0;
+}
+
+.room-view.is-dock .room-timeline {
+  gap: 12px;
+  padding: 12px 12px 14px;
+}
+
+.room-view.is-dock .room-composer {
+  gap: 6px;
+  padding: 8px 10px 10px;
+}
+
+/* The page bubble is up to 460px, wider than the panel. A fixed cap (not a
+   percentage: the bubble is shrink-wrapped) keeps long messages inside. */
+.room-view.is-dock .chat-bubble {
+  max-width: min(330px, calc(100vw - 64px));
+}
+
+.room-view.is-dock .cbox textarea {
+  min-height: 22px;
+  max-height: 120px;
+}
+
+.room-view.is-dock .room-timeline .turn,
+.room-view.is-dock .room-timeline .turn-body {
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- phone */
+
+.fa-bubble-wrap {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  width: 60px;
+  height: 60px;
+  transition: opacity 0.4s ease;
+  touch-action: none;
+}
+
+.fa-bubble-wrap.idle {
+  opacity: 0.55;
+}
+
+.fa-bubble-wrap.snapping {
+  transition:
+    transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 0.4s ease;
+}
+
+.fa-orb {
+  position: absolute;
+  inset: 0;
+  display: inline-grid;
+  width: 60px;
+  height: 60px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(28, 25, 20, 0.2);
+  color: var(--text);
+}
+
+.fa-bubble {
+  cursor: grab;
+  touch-action: none;
+}
+
+.fa-bubble-wrap.dragging .fa-bubble {
+  box-shadow: 0 14px 30px rgba(28, 25, 20, 0.28);
+  transform: scale(1.08);
+  cursor: grabbing;
+}
+
+.fa-bubble .fa-badge {
+  top: -3px;
+  right: -3px;
+}
+
+/* Heads behind the front one peek out above it. */
+.fa-behind {
+  box-shadow: 0 4px 12px rgba(28, 25, 20, 0.16);
+  pointer-events: none;
+}
+
+.fanned .fa-behind {
+  opacity: 0;
+}
+
+.fa-behind.b1 {
+  transform: translateY(-20px) scale(0.86);
+}
+
+.fa-behind.b2 {
+  transform: translateY(-36px) scale(0.74);
+}
+
+.fa-stack-count {
+  position: absolute;
+  bottom: -4px;
+  left: -4px;
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0 5px;
+  border: 2px solid var(--surface);
+  border-radius: 10px;
+  background: var(--acc-l, #1a1831);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fa-bubble-label {
+  position: absolute;
+  top: 50%;
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: var(--acc-l, #1a1831);
+  box-shadow: var(--fa-shadow, 0 8px 24px rgba(0, 0, 0, 0.2));
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transform: translateY(-50%);
+  animation: fa-fade 0.18s ease-out;
+  pointer-events: none;
+}
+
+.on-right .fa-bubble-label {
+  right: calc(100% + 10px);
+}
+
+.on-left .fa-bubble-label {
+  left: calc(100% + 10px);
+}
+
+@keyframes fa-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* While dragging: a dark fade at the bottom and the hide target in the
+   inverse of the theme, so it stands out on light and dark pages. */
+.fa-drag-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 38;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0) 45%);
+  pointer-events: none;
+  animation: fa-fade 0.18s ease-out;
+}
+
+.fa-hide-target {
+  position: fixed;
+  bottom: calc(40px + var(--safe-bottom, 0px));
+  left: 50%;
+  z-index: 39;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: fa-fade 0.18s ease-out;
+}
+
+.fa-hide-x {
+  display: inline-grid;
+  width: 60px;
+  height: 60px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--surface) 55%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.4);
+  color: var(--surface);
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
+}
+
+.fa-hide-target.on .fa-hide-x {
+  background: var(--red);
+  color: #fff;
+  transform: scale(1.18);
+}
+
+.fa-hide-label {
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.fa-fan-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(29, 28, 26, 0.35);
+  animation: fa-fade 0.18s ease-out;
+}
+
+.fa-fan {
+  position: absolute;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.fa-fan.up {
+  bottom: 0;
+  flex-direction: column-reverse;
+}
+
+.fa-fan.down {
+  top: 0;
+}
+
+.on-left .fa-fan {
+  right: auto;
+  left: 0;
+  align-items: flex-start;
+}
+
+.fa-fan-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  animation: fa-grow 0.2s var(--ease, ease-out);
+}
+
+.on-left .fa-fan-item {
+  flex-direction: row-reverse;
+}
+
+.fa-fan-item .fa-orb {
+  position: relative;
+  inset: auto;
+}
+
+.fa-fan-label {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(28, 25, 20, 0.18);
+  text-align: left;
+}
+
+.fa-fan-label.is-dark {
+  background: var(--acc-l, #1a1831);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.fa-orb.is-all {
+  width: 46px;
+  height: 46px;
+  margin: 0 7px;
+  background: var(--acc-l, #1a1831);
+  color: #fff;
+}
+
+/* The sheet follows the visual viewport (lib/viewport.ts writes --app-top
+   and --app-h): when the iOS keyboard opens and pans the page, the sheet's
+   header stays on screen and the composer sits right above the keyboard. */
+.fa-sheet-wrap {
+  position: fixed;
+  top: var(--app-top, 0px);
+  right: 0;
+  left: 0;
+  z-index: 70;
+  height: 100dvh;
+  height: min(var(--app-h, 100dvh), 100svh);
+}
+
+.fa-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(29, 28, 26, 0.4);
+  animation: fa-fade 0.18s ease-out;
+}
+
+.fa-sheet {
+  position: absolute;
+  inset: 52px 0 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--safe-bottom, 0px);
+  border-radius: 18px 18px 0 0;
+  background: var(--surface);
+  box-shadow: var(--fa-shadow, 0 -8px 24px rgba(0, 0, 0, 0.2));
+  overflow: hidden;
+  transition: top 0.22s var(--ease, ease-out);
+  animation: fa-sheet-up 0.24s var(--ease, ease-out);
+}
+
+.fa-sheet.is-sheet-dragging {
+  transition: none;
+}
+
+/* Full height: only the status bar stays above it. */
+.fa-sheet.is-full {
+  top: calc(12px + env(safe-area-inset-top, 0px));
+}
+
+/* With the keyboard open there is little room: take it all. */
+html.kb-open .fa-sheet {
+  top: 8px;
+}
+
+@keyframes fa-sheet-up {
+  from {
+    transform: translateY(40px);
+    opacity: 0.6;
+  }
+}
+
+/* The grip bar (sheet-grip in workbench.css gives the touch padding). */
+.fa-sheet-grip.sheet-grip {
+  align-self: center;
+  width: 40px;
+  height: 5px;
+  margin: -4px 0 -10px;
+  border-radius: 3px;
+  background-color: var(--border-strong);
+}
+
+.fa-sheet .fa-panel,
+.fa-sheet .fa-view {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fa-face.state-working::after {
+    animation: none;
+  }
+
+  .fa-bubble-wrap.snapping {
+    transition: none;
+  }
+}
