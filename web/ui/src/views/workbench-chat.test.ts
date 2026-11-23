@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeItems, type ChatItem } from "../api/workbench-chat";
-import { answerText, dedupeTools, planTextFor, toBlocks } from "./workbench-chat";
+import { answerPairs, answerText, dedupeTools, planTextFor, toBlocks } from "./workbench-chat";
 import { modelLabel } from "./workbench-chat-composer";
 
 const u = (id: string, text: string): ChatItem => ({ id, kind: "user", text });
@@ -78,5 +78,12 @@ describe("planTextFor", () => {
     ];
     expect(planTextFor(items, items[2]!)).toBe("# new plan");
     expect(planTextFor(items, items[0]!)).toBe("");
+  });
+});
+
+describe("answerPairs", () => {
+  it("splits a multi-question answer", () => {
+    const item: ChatItem = { id: "q", kind: "question", answer: 'User has answered your questions: "Pick a color."="Blue", "Pick a size."="Large". You can now continue.' };
+    expect(answerPairs(item)).toEqual([["Pick a color.", "Blue"], ["Pick a size.", "Large"]]);
   });
 });

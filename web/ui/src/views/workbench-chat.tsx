@@ -61,6 +61,15 @@ export function answerText(raw: string): string {
   return raw.replace(/^User has answered[^:]*:\s*/i, "").slice(0, 160);
 }
 
+/* One row per question: the question and its answer. */
+export function answerPairs(item: ChatItem): [string, string][] {
+  const raw = item.answer || "";
+  const pairs = [...raw.matchAll(/"([^"]*)"="([^"]*)"/g)].map((m) => [m[1]!, m[2]!] as [string, string]);
+  if (pairs.length) return pairs;
+  const q = item.questions?.[0]?.question || "Question";
+  return [[q, raw ? answerText(raw) : ""]];
+}
+
 function hhmm(at?: string): string {
   if (!at) return "";
   const d = new Date(at);
@@ -678,9 +687,13 @@ export function ChatPane(props: ChatPaneProps) {
                 <QuestionCard key={key} item={b.item} dialog={dialog} actions={actions} />
               ) : (
                 <div key={key} className="wbc-answered">
-                  <Ic name="message-square" size={13} />
-                  <span>{b.item.questions?.[0]?.question}</span>
-                  {b.item.answer ? <em>{answerText(b.item.answer)}</em> : null}
+                  {answerPairs(b.item).map(([q, a], n) => (
+                    <div key={n} className="wbc-answered-row">
+                      <Ic name="message-square" size={13} />
+                      <span>{q}</span>
+                      {a ? <em>{a}</em> : null}
+                    </div>
+                  ))}
                 </div>
               );
             }

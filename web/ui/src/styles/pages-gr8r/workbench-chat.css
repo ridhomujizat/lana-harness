@@ -244,6 +244,12 @@
 
 .wbc-answered {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wbc-answered-row {
+  display: flex;
   align-items: baseline;
   gap: 8px;
   color: var(--wb-term-dim);
