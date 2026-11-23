@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Ic } from "../ui/icons";
 import { errorMessage } from "../api/client";
 import { uploadWorkbenchDrops } from "../api/workbench";
@@ -155,7 +155,8 @@ export function Composer(props: ComposerProps) {
     const el = field.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = Math.min(220, Math.max(compact ? 24 : 44, el.scrollHeight)) + "px";
+    /* A phone keeps the field short and scrolls inside it (owner, 2026-11-23). */
+    el.style.height = Math.min(compact ? 132 : 220, Math.max(compact ? 24 : 44, el.scrollHeight)) + "px";
   }, [text, compact]);
 
   /* Files dropped on the chat (REQ-WC-057). */
@@ -331,6 +332,7 @@ export function Composer(props: ComposerProps) {
     });
   };
 
+  const touchInput = compact || (typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches);
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (trigger && flat.length) {
       if (e.key === "ArrowDown") {
@@ -343,12 +345,12 @@ export function Composer(props: ComposerProps) {
         setHl((h) => (h - 1 + flat.length) % flat.length);
         return;
       }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && trigger === "at")) {
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && trigger === "at" && !touchInput)) {
         e.preventDefault();
         insert(flat[hl]!);
         return;
       }
-      if (e.key === "Enter" && !e.shiftKey && trigger === "slash") {
+      if (e.key === "Enter" && !e.shiftKey && trigger === "slash" && !touchInput) {
         e.preventDefault();
         const entry = flat[hl]!;
         if (text.trim() === entry.label || text.trim() === entry.label.trim()) {
@@ -365,7 +367,9 @@ export function Composer(props: ComposerProps) {
         return;
       }
     }
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    /* On a phone Return is a new line; the send button sends (owner,
+       2026-11-23). */
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchInput) {
       e.preventDefault();
       void send();
       return;
@@ -385,12 +389,39 @@ export function Composer(props: ComposerProps) {
   const ctx = props.context;
   const pct = ctx && ctx.window ? Math.round((ctx.used / ctx.window) * 100) : 0;
   const menuOpen = !!trigger && caret >= 0 && !disabled;
+  /* The / and @ list fits the room above the composer, so it stays in view
+     when a phone keyboard shrinks the screen (owner, 2026-11-23). */
+  const [menuMax, setMenuMax] = useState(0);
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const measure = () => {
+      const el = shell.current;
+      const host = el?.closest(".wbc");
+      if (!el || !host) return;
+      const room = el.getBoundingClientRect().top - host.getBoundingClientRect().top - 12;
+      setMenuMax(Math.max(120, Math.min(460, Math.floor(room))));
+    };
+    measure();
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      vv?.removeEventListener("resize", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [menuOpen]);
 
   let row = -1;
   return (
     <div className={"wbc-composer" + (compact ? " is-compact" : "")} ref={shell}>
       {menuOpen ? (
-        <div className="wbc-bigmenu" role="listbox" aria-label={trigger === "slash" ? "Commands" : "Files"} onMouseDown={(e) => e.preventDefault()}>
+        <div
+          className="wbc-bigmenu"
+          role="listbox"
+          aria-label={trigger === "slash" ? "Commands" : "Files"}
+          style={menuMax ? { maxHeight: menuMax } : undefined}
+          onMouseDown={(e) => e.preventDefault()}
+        >
           <div className="wbc-bigmenu-head">
             <span className="wbc-bigmenu-title">{trigger === "slash" ? "Commands" : "Files"}</span>
             <span className="wbc-bigmenu-count">{trigger === "slash" ? (commands ? flat.length : "…") : flat.length + (worktree && worktree !== "-" ? " · " + worktree.replace(/^.*\//, "") : "")}</span>
@@ -431,7 +462,7 @@ export function Composer(props: ComposerProps) {
               ))
             )}
           </div>
-          <div className="wbc-bigmenu-foot">↑↓ choose · ⇥ or Enter insert · Esc close</div>
+          {touchInput ? null : <div className="wbc-bigmenu-foot">↑↓ choose · ⇥ or Enter insert · Esc close</div>}
         </div>
       ) : null}
       {props.tray}

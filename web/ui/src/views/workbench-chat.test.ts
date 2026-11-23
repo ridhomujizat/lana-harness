@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeItems, type ChatItem } from "../api/workbench-chat";
-import { answerPairs, answerText, chatCodePath, chatPathMatches, dedupeTools, planTextFor, plainUserText, toBlocks, userParts } from "./workbench-chat";
+import { answerPairs, answerText, chatCodePath, chatPathMatches, dedupeTools, planTextFor, plainUserText, splitImagePaths, toBlocks, userParts } from "./workbench-chat";
 import { modelLabel } from "./workbench-chat-composer";
 import { tabKeys } from "./workbench-chat-cards";
 
@@ -129,5 +129,17 @@ describe("chat path links", () => {
     expect(chatCodePath("CHANGELOG.md")).toBe("CHANGELOG.md");
     expect(chatCodePath("0.6.0-beta.6")).toBeNull();
     expect(chatCodePath("git push origin")).toBeNull();
+  });
+});
+
+describe("splitImagePaths", () => {
+  it("pulls image paths out of a message", () => {
+    const out = splitImagePaths("rapihin ini '/Users/r/.lana/workbench/drops/x/IMG_0740.png' '/Users/r/.lana/workbench/drops/x/IMG_0739.png'\nheader berantakan");
+    expect(out.images).toEqual(["/Users/r/.lana/workbench/drops/x/IMG_0740.png", "/Users/r/.lana/workbench/drops/x/IMG_0739.png"]);
+    expect(out.text).toBe("rapihin ini\nheader berantakan");
+  });
+
+  it("leaves text without images alone", () => {
+    expect(splitImagePaths("open web/ui/x.tsx")).toEqual({ text: "open web/ui/x.tsx", images: [] });
   });
 });
