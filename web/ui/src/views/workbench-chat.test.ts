@@ -38,11 +38,12 @@ describe("toBlocks", () => {
     expect(end.text).toBe("1m 5s · 1.2k tokens");
   });
 
-  it("keeps tools in one group across hidden thinking and empty text", () => {
-    const th = (id: string): ChatItem => ({ id, kind: "thinking", text: "hmm" });
-    const blocks = toBlocks([u("1", "go"), t("2", "Bash"), th("3"), t("4", "Bash"), a("5", ""), t("6", "Read"), a("7", "done"), t("8", "Bash")]);
+  it("puts thinking before a tool into the step list", () => {
+    const th = (id: string, text = "hmm"): ChatItem => ({ id, kind: "thinking", text });
+    const blocks = toBlocks([u("1", "go"), th("0"), t("2", "Bash"), th("3"), t("4", "Bash"), a("5", ""), th("5b", ""), t("6", "Read"), a("7", "done"), th("7b"), t("8", "Bash")]);
     expect(blocks.map((b) => b.type)).toEqual(["user", "head", "tools", "text", "tools"]);
-    expect((blocks[2] as { items: ChatItem[] }).items.map((i) => i.id)).toEqual(["2", "4", "6"]);
+    expect((blocks[2] as { items: ChatItem[] }).items.map((i) => i.id)).toEqual(["0", "2", "3", "4", "6"]);
+    expect((blocks[4] as { key: string; items: ChatItem[] }).items.map((i) => i.id)).toEqual(["7b", "8"]);
   });
 
   it("keeps thinking that is not between tools", () => {
