@@ -131,6 +131,16 @@ type chatLive struct {
 	Dialog     *claudechat.Dialog `json:"dialog"`
 }
 
+// stickyEffort keeps the last effort read from the screen: Claude Code shows
+// its effort line only for a while after a change, and the transcript has the
+// new value only after the next reply. The caller holds h.mu or owns h.
+func (h *chatHub) stickyEffort(seen string) string {
+	if seen != "" {
+		h.lastEffort = seen
+	}
+	return h.lastEffort
+}
+
 // registerWorkbenchChatRoutes registers the chat routes of REQ-WC-040. They go
 // through Handle, so the auth middleware applies like the other Workbench
 // routes.
@@ -1030,6 +1040,9 @@ type chatHub struct {
 	srv *Server
 	id  string
 
+	// lastEffort is the last effort read from the screen (stickyEffort).
+	lastEffort string
+
 	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
@@ -1305,7 +1318,7 @@ func (h *chatHub) updateLive(sess workbench.Session) {
 		State:      state,
 		Status:     screen.Status,
 		Mode:       screen.Mode,
-		Effort:     screen.Effort,
+		Effort:     h.stickyEffort(screen.Effort),
 		InputEmpty: screen.InputEmpty,
 		Dialog:     dialog,
 	}
