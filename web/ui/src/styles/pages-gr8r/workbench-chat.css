@@ -319,12 +319,29 @@
   gap: 4px;
 }
 
+/* A long question pushed its answer into a one-word column (owner,
+   2026-11-23): the answer sits under the question instead. */
 .wbc-answered-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
   align-items: baseline;
-  gap: 8px;
   color: var(--wb-term-dim);
   font-size: 12.5px;
+}
+
+.wbc-answered-row > .i {
+  grid-row: span 2;
+  align-self: start;
+  margin-top: 2px;
+}
+
+.wbc-answered-row > span,
+.wbc-answered-row > em {
+  grid-column: 2;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .wbc-answered em {
@@ -1083,6 +1100,8 @@
   flex: 1 1 auto;
   min-height: 44px;
   max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0;
   border: 0;
   outline: 0;
@@ -2093,4 +2112,60 @@
 
 .wbc .wbc-field textarea:focus {
   border: 0;
+}
+
+/* Phone: the / and @ list is compact (its height is set from the room above
+   the composer) and drops the keyboard hints. */
+.wbc-composer.is-compact .wbc-bigmenu-hint {
+  display: none;
+}
+
+.wbc-composer.is-compact .wbc-bigmenu-row {
+  height: 38px;
+}
+
+.wbc-composer.is-compact .wbc-field textarea {
+  max-height: 132px;
+}
+
+/* Images sent as paths (phone uploads). */
+.wbc-img-thumb {
+  display: block;
+  width: 120px;
+  height: 120px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--wbc-line);
+  border-radius: 10px;
+  background: var(--wbc-bubble);
+  cursor: pointer;
+}
+
+.wbc-img-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wbc-img-wait {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--wbc-bubble);
+}
+
+.wbc-img-missing {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--wbc-bubble);
+  color: var(--wb-term-dim);
+  font-size: 12px;
+}
+
+.wbc-user-images .wbc-img-thumb img {
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
 }

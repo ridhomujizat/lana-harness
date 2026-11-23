@@ -820,16 +820,37 @@
 }
 
 .wb-phone-title b {
+  overflow: hidden;
   font-size: 15.5px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-phone-title span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-3);
   font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* The header's one action: the menu. A dot says Changes has something. */
+.wb-phone-top .wb-icon-btn[aria-label="Space actions"] {
+  position: relative;
+}
+
+.wb-phone-menu-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber, #d99a3a);
 }
 
 .wb-strip {

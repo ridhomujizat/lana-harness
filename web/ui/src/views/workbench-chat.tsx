@@ -3,7 +3,7 @@ import { Ic } from "../ui/icons";
 import { Markdown, type PathLinker } from "../lib/markdown";
 import { matchLinksInLine, type LinkMatch } from "./workbench-links";
 import { errorMessage } from "../api/client";
-import type { WorkbenchSession } from "../api/workbench";
+import { previewWorkbenchFile, type WorkbenchSession } from "../api/workbench";
 import {
   chatImageURL,
   chatKeys,
@@ -479,8 +479,81 @@ function PastedBlock({ text }: { text: string }) {
   );
 }
 
+/* Images sent from the chat (a phone upload goes to the daemon's drops
+   folder and reaches Claude as a path) show as images, not paths (owner,
+   2026-11-23). */
+const IMAGE_PATH = /\.(png|jpe?g|gif|webp|heic|bmp|svg)$/i;
+
+export function splitImagePaths(text: string): { text: string; images: string[] } {
+  const images: string[] = [];
+  let out = "";
+  let at = 0;
+  for (const m of chatPathMatches(text)) {
+    if (!m.text.startsWith("/") || !IMAGE_PATH.test(m.text)) continue;
+    images.push(m.text);
+    out += text.slice(at, m.start);
+    at = m.end;
+  }
+  out += text.slice(at);
+  if (!images.length) return { text, images };
+  /* Drop the quotes left around a removed path and the blank runs. */
+  const cleaned = out
+    .replace(/(['"])[ \t]*\1/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text: cleaned, images };
+}
+
+const previewCache = new Map<string, Promise<string>>();
+
+function PathImage({ path }: { path: string }) {
+  const { sessionId } = useContext(TasksContext);
+  const open = useContext(OpenFileContext);
+  const [src, setSrc] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const key = sessionId + "\u0000" + path;
+    let p = previewCache.get(key);
+    if (!p) {
+      p = previewWorkbenchFile(sessionId, path).then((d) => d.raw_url || d.url);
+      previewCache.set(key, p);
+      p.catch(() => previewCache.delete(key));
+    }
+    p.then((u) => alive && setSrc(u)).catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [sessionId, path]);
+  const name = path.replace(/^.*\//, "");
+  if (failed) return <span className="wbc-img-missing">{name}</span>;
+  return (
+    <button type="button" className="wbc-img-thumb" title={name} onClick={() => open?.(path)}>
+      {src ? <img src={src} alt={name} loading="lazy" /> : <span className="wbc-img-wait" />}
+    </button>
+  );
+}
+
 function UserText({ text, className }: { text: string; className?: string }) {
-  const parts = userParts(text);
+  const split = splitImagePaths(text);
+  const parts = split.text ? userParts(split.text) : [];
+  return (
+    <>
+      {split.images.length ? (
+        <div className="wbc-user-images">
+          {split.images.map((p) => (
+            <PathImage key={p} path={p} />
+          ))}
+        </div>
+      ) : null}
+      {parts.length ? <UserBubble parts={parts} className={className} /> : null}
+    </>
+  );
+}
+
+function UserBubble({ parts, className }: { parts: UserPart[]; className?: string }) {
   return (
     <div className={"wbc-bubble" + (className ? " " + className : "")}>
       {parts.map((p, i) =>
@@ -850,8 +923,11 @@ export function ChatPane(props: ChatPaneProps) {
               <div className="wbc-fresh-text">Ask anything below. The message is typed into this pane's claude.</div>
             </div>
           ) : null}
-          {blocks.map((b) => {
+          {blocks.map((b, bi) => {
             const key = "item" in b ? b.item.id : b.key;
+            /* Thinking says nothing once the step is past: it shows only as
+               the live tail of a running turn (owner, 2026-11-23). */
+            if (b.type === "thinking" && !(working && bi === blocks.length - 1)) return null;
             if (b.type === "question") {
               const isOpen = !b.item.answered && b.item.id === openQuestion?.id && blocked;
               return isOpen ? (
