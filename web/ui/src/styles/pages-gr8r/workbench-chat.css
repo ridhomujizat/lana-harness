@@ -1805,3 +1805,30 @@
 .wbc-q-option.is-cursor {
   box-shadow: inset 3px 0 0 var(--tone);
 }
+
+/* AskUserQuestion with previews: options left, the preview of the option
+   under the cursor right; stacked on narrow panes. */
+.wbc-q-split {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 1.3fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.wbc-q-preview {
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--wbc-line);
+  border-radius: 9px;
+  background: var(--wbc-out);
+  color: var(--wb-term-text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.wbc.is-compact .wbc-q-split {
+  grid-template-columns: 1fr;
+}

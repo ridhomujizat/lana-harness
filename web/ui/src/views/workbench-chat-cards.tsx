@@ -272,6 +272,11 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
   const chatAt = dialog.options.findIndex((o) => /^chat about this/i.test(o.label));
   const multi = dialog.options.some((o) => o.checked !== undefined && o.checked);
   const choices = dialog.options.map((o, i) => ({ o, i })).filter(({ i }) => i !== typeAt && i !== chatAt);
+  /* With a preview, a click moves the cursor (the preview follows it) and
+     Choose answers; without one, a click answers at once. */
+  const preview = dialog.preview || "";
+  const cursorAt = Math.max(0, dialog.options.findIndex((o) => o.selected));
+  const onPick = (i: number) => actions.keys(preview ? pickKeys(dialog, i, []) : pickKeys(dialog, i));
   const sendOther = () => {
     const text = other.trim();
     if (!text || typeAt < 0) return;
@@ -296,12 +301,20 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
         ) : null}
       </div>
       <div className="wbc-q-title">{dialog.title}</div>
+      <div className={preview ? "wbc-q-split" : undefined}>
       <div className="wbc-q-options">
         {choices.map(({ o, i }) => {
           const on = multi ? !!o.checked : o.selected;
           const recommended = /\(Recommended\)\s*$/i.test(o.label);
           return (
-            <button key={i} type="button" className={"wbc-q-option" + (on ? " is-on" : "") + (o.selected ? " is-cursor" : "")} disabled={actions.disabled} onClick={() => actions.keys(pickKeys(dialog, i))}>
+            <button
+              key={i}
+              type="button"
+              className={"wbc-q-option" + (on ? " is-on" : "") + (o.selected ? " is-cursor" : "")}
+              disabled={actions.disabled}
+              onClick={() => onPick(i)}
+              onDoubleClick={() => preview && actions.keys(["enter"])}
+            >
               <span className={multi ? "wbc-check" : "wbc-radio"} aria-hidden="true">
                 {on ? multi ? <Ic name="check" size={11} /> : <i /> : null}
               </span>
@@ -334,6 +347,8 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
           </div>
         ) : null}
       </div>
+      {preview ? <pre className="wbc-q-preview">{preview}</pre> : null}
+      </div>
       <div className="wbc-card-foot">
         <span>
           Read from the terminal screen
@@ -350,6 +365,11 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
           <button type="button" className="wbc-btn" disabled={actions.disabled} onClick={() => actions.keys(["esc"])}>
             Skip
           </button>
+          {preview ? (
+            <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(["enter"])}>
+              Choose {dialog.options[cursorAt]?.label.replace(/\s*\(Recommended\)\s*$/i, "") || ""}
+            </button>
+          ) : null}
           {dialog.tabs && dialog.tabs.length > 1 ? (
             <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(["tab"])}>
               Next

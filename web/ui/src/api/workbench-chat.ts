@@ -139,6 +139,8 @@ export interface ChatDialog {
   lines: string[];
   options: ChatDialogOption[];
   tabs?: ChatDialogTab[];
+  /* The preview Claude Code shows next to the option under the cursor. */
+  preview?: string;
 }
 
 export interface ChatLive {
