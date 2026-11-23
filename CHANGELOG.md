@@ -7,6 +7,29 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.9] - 2026-11-23
+
+### Added
+
+- Floating agent (spec 72), replacing the chat dock: one agent at the right edge of every page but Chats, tucked as half a pill until you open it. The pill shows the current agent and the others that need you; it opens a panel with the chat list (search, All / Working / Needs you) and the room, with `‹` back to the list and a strip when another agent needs you. A new reply or a waiting agent grows the pill into a card (Open / Reply); `–` shrinks it, `›` tucks the pill. ⌥Space opens and closes the panel; Esc steps back from the room to the list, then closes.
+- Floating agent on a phone: a bubble you can drag anywhere that glides to the nearest edge on release, like the iOS AssistiveTouch button; drop it on the × to hide it ("Show agent bubble" in the menu brings it back). Several active agents stack into one bubble that fans out on a tap. The chat opens in a sheet that drags to full height and stays above the keyboard.
+- Workbench chat on a phone: the composer shows the model and the context use.
+- Workbench chat: thinking shows as a step in the tool group.
+
+### Changed
+
+- Workbench chat on a phone: shorter, dimmer placeholder aligned with the send button; the field no longer zooms the page on focus.
+- Image zoom controls hide while idle when the image is zoomed in.
+
+### Fixed
+
+- Workbench chat: a failed tool no longer stays "running" (Claude Code's string tool results were dropped).
+- Workbench chat: tool steps stay in one group across hidden thinking instead of one "1 step" row per command.
+
+### Removed
+
+- The chat dock (windows, tabs and chat heads), replaced by the floating agent.
+
 ## [0.6.0-beta.8] - 2026-11-23
 
 ### Changed
