@@ -1466,6 +1466,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
   const [liveStartedAt, setLiveStartedAt] = useState(0);
   const [streamText, setStreamText] = useState("");
   const [liveThinking, setLiveThinking] = useState(false);
+  /* The streamed text of the thought in progress: the process line shows its
+     end while the model thinks (owner request 2026-11-24). */
+  const [liveThought, setLiveThought] = useState("");
   const [holder, setHolder] = useState("none");
   const [holderPid, setHolderPid] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
@@ -1803,6 +1806,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
       setCancelling(false);
       setStreamText("");
       setLiveThinking(false);
+      setLiveThought("");
       setQueued(false);
       setLiveTurnId("");
       setLiveStartedAt(0);
@@ -1910,6 +1914,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
     setApprovals([]);
     setStreamText("");
     setLiveThinking(false);
+    setLiveThought("");
     setQueued(false);
     setPendingText("");
     setNotice(null);
@@ -2053,6 +2058,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
         if (event.kind === "assistant/message" || event.kind === "tool/call") {
           setStreamText("");
           setLiveThinking(false);
+          setLiveThought("");
         }
         if (event.kind === "approval/decided") {
           markApprovalDecided(
@@ -2162,21 +2168,28 @@ export function SessionPage({ id, view }: SessionPageProps) {
         }
         if (frame.kind === "text_delta" && frame.text) {
           setLiveThinking(false);
+          setLiveThought("");
           setStreamText((current) => current + String(frame.text));
         }
-        /* REQ-MDL-006: a thinking delta shows a muted note with no thinking
-           text; the answer text or the next step clears it. */
+        /* REQ-MDL-006: a thinking delta shows the live process line, with the
+           end of the streamed thought under it; the answer text or the next
+           step clears it. */
         if (frame.kind === "thinking_delta") {
           setLiveThinking(true);
+          if (frame.text) {
+            setLiveThought((current) => current + String(frame.text));
+          }
         }
         if (frame.kind === "tool_call" || frame.kind === "tool_result") {
           setLiveThinking(false);
+          setLiveThought("");
           setStreamText("");
         }
         /* REQ-LTC-032: a step_retry drops the partial text of the failed step;
            streamText only ever holds the current step's streamed answer. */
         if (frame.kind === "step_retry") {
           setLiveThinking(false);
+          setLiveThought("");
           setStreamText("");
         }
       },
@@ -2414,6 +2427,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
         }
         setStreamText("");
         setLiveThinking(false);
+        setLiveThought("");
       }
       lastRunningRef.current = true;
       setTurnRunning(true);
@@ -2521,6 +2535,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
         }
         setStreamText("");
         setLiveThinking(false);
+        setLiveThought("");
       }
       lastRunningRef.current = true;
       setTurnRunning(true);
@@ -2946,6 +2961,12 @@ export function SessionPage({ id, view }: SessionPageProps) {
                     item.turn.running &&
                     (liveTurnId ? item.turn.id === liveTurnId : true) &&
                     liveThinking
+                  }
+                  liveThought={
+                    item.turn.running &&
+                    (liveTurnId ? item.turn.id === liveTurnId : true)
+                      ? liveThought
+                      : ""
                   }
                 />
               )

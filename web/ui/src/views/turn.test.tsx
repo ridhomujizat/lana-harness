@@ -12,6 +12,7 @@ import {
   ReplyChip,
   TurnBlock,
   UserBubble,
+  thoughtTail,
   turnEndCard,
   turnSummary,
 } from "./turn";
@@ -363,6 +364,78 @@ describe("turn process line", () => {
     }
     render(<TurnBlock turn={turnItem.turn} agent="lana" thinking />);
     expect(screen.getByText("Thinking…")).toBeTruthy();
+  });
+
+  it("shows a message between tool calls as chat and splits the process at it", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [
+          { type: "thinking", text: "first look" },
+          { type: "tool_use", id: "c1", name: "bash", input: { command: "ls" } },
+        ],
+      }),
+      event(2, "tool/call", "t1", { call_id: "c1", name: "bash", input: { command: "ls" } }),
+      event(3, "tool/result", "t1", { call_id: "c1", status: "ok", output: "a b" }),
+      event(4, "assistant/message", "t1", {
+        content: [
+          { type: "text", text: "I read the code, now building the deck." },
+          { type: "tool_use", id: "c2", name: "bash", input: { command: "make deck" } },
+        ],
+      }),
+      event(5, "tool/call", "t1", { call_id: "c2", name: "bash", input: { command: "make deck" } }),
+      event(6, "tool/result", "t1", { call_id: "c2", status: "ok", output: "ok" }),
+      event(7, "assistant/message", "t1", { content: [{ type: "text", text: "the answer" }] }),
+      event(8, "turn/end", "t1", { reason: "end_turn" }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    const { container } = render(<TurnBlock turn={turnItem.turn} agent="lana" />);
+    const note = container.querySelector(".turn-note");
+    expect(note?.textContent).toContain("I read the code, now building the deck.");
+    expect(note?.closest(".turn-process")).toBeNull();
+    expect(container.querySelectorAll(".turn-process")).toHaveLength(2);
+    const order = Array.from(container.querySelectorAll(".turn-process, .turn-note, .turn-answer")).map(
+      (node) => node.className.split(" ").find((name) => ["turn-process", "turn-note", "turn-answer"].includes(name))
+    );
+    expect(order).toEqual(["turn-process", "turn-note", "turn-process", "turn-answer"]);
+  });
+
+  it("shows the end of the thought under the live process line", () => {
+    const items = buildTurns([
+      event(1, "assistant/message", "t1", {
+        content: [
+          { type: "thinking", text: "The owner wants a deck. Let me read the docs folder first." },
+          { type: "tool_use", id: "c1", name: "bash", input: { command: "ls docs" } },
+        ],
+      }),
+      event(2, "tool/call", "t1", { call_id: "c1", name: "bash", input: { command: "ls docs" } }),
+    ]);
+    const turnItem = items.find((item) => item.kind === "turn");
+    if (!turnItem || turnItem.kind !== "turn") {
+      throw new Error("expected a turn item");
+    }
+    const running = { ...turnItem.turn, running: true };
+    const { container, rerender } = render(<TurnBlock turn={running} agent="lana" />);
+    expect(container.querySelector(".tp-live-thought")?.textContent).toContain(
+      "Let me read the docs folder first."
+    );
+    rerender(<TurnBlock turn={running} agent="lana" thinking liveThought="Now check the README." />);
+    expect(container.querySelector(".tp-live-thought")?.textContent).toBe("Now check the README.");
+    rerender(<TurnBlock turn={{ ...running, running: false }} agent="lana" />);
+    expect(container.querySelector(".tp-live-thought")).toBeNull();
+  });
+});
+
+describe("thoughtTail", () => {
+  it("keeps a short thought and cuts a long one at a word from the end", () => {
+    expect(thoughtTail("  short\n thought ")).toBe("short thought");
+    const long = "word ".repeat(60) + "Let me check the config.";
+    const tail = thoughtTail(long, 40);
+    expect(tail.startsWith("…")).toBe(true);
+    expect(tail.endsWith("Let me check the config.")).toBe(true);
+    expect(tail.length).toBeLessThanOrEqual(41);
   });
 });
 
