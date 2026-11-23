@@ -1802,8 +1802,9 @@
   color: var(--wb-term-text);
 }
 
-.wbc-q-option.is-cursor {
-  box-shadow: inset 3px 0 0 var(--tone);
+/* The cursor row (multi-select) gets the same quiet highlight as a hover. */
+.wbc-q-option.is-cursor:not(.is-on) {
+  border-color: color-mix(in srgb, var(--tone) 40%, transparent);
 }
 
 /* AskUserQuestion with previews: options left, the preview of the option
