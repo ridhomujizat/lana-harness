@@ -2128,7 +2128,7 @@ export function WorkbenchPage() {
       const t = pickTab(sp);
       const target = t?.focus || (t ? tabSessions(t)[0] : undefined);
       if (!sp || !t || !target) {
-        accountActions.newTab(argv, "claude");
+        accountActions.newTab(argv);
         return;
       }
       const dir = sessionsRef.current[target]?.cwd || spaceCwd(sp, sessionsRef.current);

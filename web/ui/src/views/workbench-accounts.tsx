@@ -48,8 +48,10 @@ interface AccountList {
 }
 
 export interface AccountActions {
-  /* Opens `argv` in a new tab of the current space, in the focused folder. */
-  newTab: (argv: string[], title: string) => void;
+  /* Opens `argv` in a new tab of the current space, in the focused folder.
+     Without a title the tab and its session follow the terminal's window
+     title, so a Claude Code tab shows its task or /rename name. */
+  newTab: (argv: string[], title?: string) => void;
   /* Opens `argv` beside the focused pane (a new tab when there is none). */
   beside: (argv: string[]) => void;
 }
@@ -285,7 +287,7 @@ export function ClaudeAccountsPanel({
                   type="button"
                   className="wb-acc-act"
                   onClick={() => {
-                    actions.newTab([binary, "run", String(a.number)], "claude · " + a.number);
+                    actions.newTab([binary, "run", String(a.number)]);
                     onClose();
                   }}
                 >
