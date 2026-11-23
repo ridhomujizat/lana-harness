@@ -31,7 +31,8 @@ type DialogTab struct {
 // Dialog is an open Claude Code dialog read from the screen: a permission
 // prompt, a question, a plan approval or another numbered list. Preview is the
 // text of the box Claude Code draws beside a question's options for the option
-// under the cursor (spec 71 REQ-WC-021).
+// under the cursor, and Multi marks a question whose options carry checkbox
+// markers (spec 71 REQ-WC-021).
 type Dialog struct {
 	Kind    string         `json:"kind"`
 	Title   string         `json:"title"`
@@ -39,6 +40,7 @@ type Dialog struct {
 	Tabs    []DialogTab    `json:"tabs,omitempty"`
 	Options []DialogOption `json:"options"`
 	Preview string         `json:"preview,omitempty"`
+	Multi   bool           `json:"multi,omitempty"`
 }
 
 // Screen is what a mirror's visible rows say about the pane: whether Claude is
@@ -240,18 +242,26 @@ type rawOption struct {
 	key      string
 	label    string
 	indent   int
+	labelCol int // column where the label text, after any checkbox marker, starts
 }
 
 func matchOption(line string) (rawOption, bool) {
-	m := optionRE.FindStringSubmatch(line)
-	if m == nil {
+	loc := optionRE.FindStringSubmatchIndex(line)
+	if loc == nil {
 		return rawOption{}, false
 	}
+	label := strings.TrimRightFunc(line[loc[6]:loc[7]], unicode.IsSpace)
+	stripped, _, _ := parseOptionLabel(label)
+	labelCol := utf8.RuneCountInString(line[:loc[6]])
+	if len(stripped) <= len(label) {
+		labelCol += utf8.RuneCountInString(label) - utf8.RuneCountInString(stripped)
+	}
 	return rawOption{
-		selected: m[1] != "",
-		key:      m[2],
-		label:    strings.TrimRightFunc(m[3], unicode.IsSpace),
+		selected: loc[2] >= 0,
+		key:      line[loc[4]:loc[5]],
+		label:    label,
 		indent:   leadingIndent(line),
+		labelCol: labelCol,
 	}, true
 }
 
@@ -379,7 +389,14 @@ func optionsConnected(lines []string, group []rawOption, nextIdx int) bool {
 		if isRule(lines[i]) {
 			continue
 		}
-		if strings.TrimSpace(lines[i]) == "" {
+		t := strings.TrimSpace(lines[i])
+		if t == "" {
+			return false
+		}
+		// A keyless "Next"/"Submit" row ends the run: the options after it
+		// (across the rule, e.g. "Chat about this") are its tail, not more
+		// numbered options.
+		if isNextKey(t) {
 			return false
 		}
 		if leadingIndent(lines[i]) <= base {
@@ -387,6 +404,16 @@ func optionsConnected(lines []string, group []rawOption, nextIdx int) bool {
 		}
 	}
 	return true
+}
+
+// isNextKey reports whether a line is the keyless "Next"/"Submit" row Claude
+// Code prints at the end of a multi-select option list.
+func isNextKey(t string) bool {
+	switch strings.ToLower(t) {
+	case "next", "submit":
+		return true
+	}
+	return false
 }
 
 func buildDialog(lines []string, group []rawOption) *Dialog {
@@ -425,7 +452,19 @@ func buildDialog(lines []string, group []rawOption) *Dialog {
 		Tabs:    tabs,
 		Options: opts,
 		Preview: preview,
+		Multi:   hasCheckboxOption(group),
 	}
+}
+
+// hasCheckboxOption reports whether any option of a run carries a bracketed
+// checkbox marker, which makes the dialog a multi-select question.
+func hasCheckboxOption(group []rawOption) bool {
+	for _, o := range group {
+		if _, _, checkbox := parseOptionLabel(o.label); checkbox {
+			return true
+		}
+	}
+	return false
 }
 
 // findChips finds the chips line of a question dialog: a line above the first
@@ -491,22 +530,29 @@ func parseChipsLine(line string) ([]DialogTab, bool) {
 	return tabs, true
 }
 
-// parseOptionLabel strips a leading multi-select marker from an option label. A
-// checked marker ("[✔]", "[x]", "[X]", "☒", "✔ ") marks the option checked and
-// is removed; an unchecked marker ("[ ]", "☐ ") is removed and leaves it
-// unchecked.
-func parseOptionLabel(label string) (string, bool) {
-	for _, m := range []string{"[✔]", "[x]", "[X]", "☒", "✔ "} {
+// parseOptionLabel strips a leading multi-select marker from an option label.
+// checkbox reports whether the marker is one of the bracketed checkboxes
+// ("[ ]", "[✔]", "[x]", "[X]") that make an option a checkbox, and checked
+// whether the box is ticked. The bare glyph markers ("☒", "☐ ", "✔ ") are
+// stripped too but do not mark the dialog as multi-select on their own.
+func parseOptionLabel(label string) (text string, checked, checkbox bool) {
+	for _, m := range []string{"[✔]", "[x]", "[X]"} {
 		if rest, ok := strings.CutPrefix(label, m); ok {
-			return strings.TrimSpace(rest), true
+			return strings.TrimSpace(rest), true, true
 		}
 	}
-	for _, m := range []string{"[ ]", "☐ "} {
+	if rest, ok := strings.CutPrefix(label, "[ ]"); ok {
+		return strings.TrimSpace(rest), false, true
+	}
+	for _, m := range []string{"☒", "✔ "} {
 		if rest, ok := strings.CutPrefix(label, m); ok {
-			return strings.TrimSpace(rest), false
+			return strings.TrimSpace(rest), true, false
 		}
 	}
-	return label, false
+	if rest, ok := strings.CutPrefix(label, "☐ "); ok {
+		return strings.TrimSpace(rest), false, false
+	}
+	return label, false, false
 }
 
 // findTitle returns the nearest line above the first option that ends with "?",
@@ -566,7 +612,7 @@ func buildOptions(lines []string, group []rawOption, title string) []DialogOptio
 	extra, extraIdx := unnumberedOptions(lines, group)
 	opts := make([]DialogOption, 0, len(group))
 	for gi, o := range group {
-		label, checked := parseOptionLabel(o.label)
+		label, checked, checkbox := parseOptionLabel(o.label)
 		opt := DialogOption{Key: o.key, Label: label, Selected: o.selected, Checked: checked}
 		hasNext := gi+1 < len(group)
 		end := len(lines)
@@ -586,6 +632,14 @@ func buildOptions(lines []string, group []rawOption, title string) []DialogOptio
 				continue
 			}
 			indent := leadingIndent(lines[i])
+			// A checkbox option's description is indented to the option's label
+			// column, which sits after the marker; it must go to Description and
+			// never be joined into the label. A wrapped label of a plain option
+			// also starts at its label column, so this test is checkbox-only.
+			if !labelDone && hasNext && checkbox && indent == o.labelCol {
+				opt.Description = strings.TrimSpace(opt.Description + " " + t)
+				continue
+			}
 			if !labelDone && hasNext && indent >= optionWrapIndent {
 				opt.Label = strings.TrimSpace(opt.Label + " " + t)
 				continue
@@ -624,14 +678,16 @@ func buildOptions(lines []string, group []rawOption, title string) []DialogOptio
 }
 
 // unnumberedOptions returns the keyless option lines that follow the last
-// numbered option of a dialog after a rule, such as "Chat about this". They sit
-// at the option text column and are not hints. The set of their line indices is
+// numbered option of a dialog: either the "Next"/"Submit" row printed right
+// under the last option before the rule, or a line at the option text column
+// after the rule, such as "Chat about this". The set of their line indices is
 // returned so the description scan can stop there.
 func unnumberedOptions(lines []string, group []rawOption) ([]DialogOption, map[int]bool) {
 	if len(group) == 0 {
 		return nil, nil
 	}
 	col := optionContentColumn(group)
+	lastIndent := group[len(group)-1].indent
 	sawRule := false
 	var out []DialogOption
 	idx := make(map[int]bool)
@@ -647,13 +703,35 @@ func unnumberedOptions(lines []string, group []rawOption) ([]DialogOption, map[i
 			sawRule = true
 			continue
 		}
-		if !sawRule || leadingIndent(lines[i]) != col {
+		indent := leadingIndent(lines[i])
+		if !sawRule {
+			// Before the rule, only the keyless "Next"/"Submit" row, indented
+			// under the last option, is an option.
+			if !isNextKey(t) || indent <= lastIndent {
+				continue
+			}
+			out = append(out, DialogOption{Key: "", Label: t})
+			idx[i] = true
 			continue
 		}
-		out = append(out, DialogOption{Key: "", Label: t})
+		if indent != col {
+			continue
+		}
+		out = append(out, DialogOption{Key: "", Label: optionText(lines[i])})
 		idx[i] = true
 	}
 	return out, idx
+}
+
+// optionText is the label of a trailing option line: a numbered line is read as
+// its numbered option (the key is dropped, the line stays keyless), anything
+// else as its trimmed text.
+func optionText(line string) string {
+	if o, ok := matchOption(line); ok {
+		label, _, _ := parseOptionLabel(o.label)
+		return label
+	}
+	return strings.TrimSpace(line)
 }
 
 // optionContentColumn is the column an option's text starts at, counting the ❯

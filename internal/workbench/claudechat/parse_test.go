@@ -442,6 +442,48 @@ func TestParseMultiSelectQuestion(t *testing.T) {
 	}
 }
 
+// TestParseMultiSelectScreen covers the real multi-select question screen: the
+// tab chips, checkbox options whose descriptions stay out of the labels, the
+// keyless "Next" row under the last option and the keyless "Chat about this"
+// after the rule.
+func TestParseMultiSelectScreen(t *testing.T) {
+	s := ParseScreen(loadScreen(t, "question-multi.txt"))
+	d := wantDialog(t, s, "question", "Pick your toppings.")
+	if d == nil {
+		return
+	}
+	if !d.Multi {
+		t.Errorf("dialog Multi = false, want true")
+	}
+	wantTabs(t, d.Tabs, []tabWant{
+		{"Color", true},
+		{"Toppings", true},
+		{"Size", false},
+		{"Submit", true},
+	})
+	wantOptions(t, d.Options, []optionWant{
+		{"1", "Cheese (Recommended)", false},
+		{"2", "Mushroom", true},
+		{"3", "Olive", false},
+		{"4", "Pepper", false},
+		{"5", "Type something", false},
+		{"", "Next", false},
+		{"", "Chat about this", false},
+	})
+	if d.Options[0].Checked != true || d.Options[0].Description != "Classic, melty base topping" {
+		t.Errorf("option 1 = %+v, want checked with its description", d.Options[0])
+	}
+	if d.Options[1].Checked != true || d.Options[1].Description != "Earthy, savory flavor" {
+		t.Errorf("option 2 = %+v, want checked with its description", d.Options[1])
+	}
+	if d.Options[2].Checked || d.Options[2].Description != "Salty, briny bite" {
+		t.Errorf("option 3 = %+v, want unchecked with its description", d.Options[2])
+	}
+	if d.Options[3].Checked || d.Options[3].Description != "Sweet or spicy crunch" {
+		t.Errorf("option 4 = %+v, want unchecked with its description", d.Options[3])
+	}
+}
+
 func TestParseScreenNeverPanics(t *testing.T) {
 	cases := [][]string{
 		nil,
