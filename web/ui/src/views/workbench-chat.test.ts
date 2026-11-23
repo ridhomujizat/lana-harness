@@ -37,6 +37,18 @@ describe("toBlocks", () => {
     const end = blocks[5] as { text: string };
     expect(end.text).toBe("1m 5s · 1.2k tokens");
   });
+
+  it("keeps tools in one group across hidden thinking and empty text", () => {
+    const th = (id: string): ChatItem => ({ id, kind: "thinking", text: "hmm" });
+    const blocks = toBlocks([u("1", "go"), t("2", "Bash"), th("3"), t("4", "Bash"), a("5", ""), t("6", "Read"), a("7", "done"), t("8", "Bash")]);
+    expect(blocks.map((b) => b.type)).toEqual(["user", "head", "tools", "text", "tools"]);
+    expect((blocks[2] as { items: ChatItem[] }).items.map((i) => i.id)).toEqual(["2", "4", "6"]);
+  });
+
+  it("keeps thinking that is not between tools", () => {
+    const blocks = toBlocks([u("1", "go"), t("2", "Bash"), { id: "3", kind: "thinking", text: "hmm" }]);
+    expect(blocks.map((b) => b.type)).toEqual(["user", "head", "tools", "thinking"]);
+  });
 });
 
 describe("modelLabel", () => {
