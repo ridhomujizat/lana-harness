@@ -41,7 +41,7 @@ describe("toBlocks", () => {
 describe("modelLabel", () => {
   it("shortens Claude model ids", () => {
     expect(modelLabel("claude-opus-5-5")).toBe("Opus 5.5");
-    expect(modelLabel("claude-sonnet-5-5[1m]")).toBe("Sonnet 5.5");
+    expect(modelLabel("claude-sonnet-5-5[1m]")).toBe("Sonnet 5.5 1M");
     expect(modelLabel("")).toBe("Model");
   });
 });

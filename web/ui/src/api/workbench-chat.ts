@@ -124,6 +124,13 @@ export interface ChatDialogOption {
   key: string;
   label: string;
   selected: boolean;
+  description?: string;
+  checked?: boolean;
+}
+
+export interface ChatDialogTab {
+  label: string;
+  done: boolean;
 }
 
 export interface ChatDialog {
@@ -131,6 +138,7 @@ export interface ChatDialog {
   title: string;
   lines: string[];
   options: ChatDialogOption[];
+  tabs?: ChatDialogTab[];
 }
 
 export interface ChatLive {

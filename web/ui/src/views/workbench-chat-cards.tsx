@@ -261,3 +261,102 @@ export function PlanCard({ item, dialog, actions }: { item: ChatItem; dialog?: C
     </div>
   );
 }
+
+/* AskUserQuestion while it is open: Claude Code writes the question to the
+   transcript only once it is answered, so the card is built from the
+   screen (tabs, options with descriptions, checkboxes). Choosing moves the
+   cursor and presses Enter; "Other" picks "Type something." and types. */
+export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; actions: CardActions }) {
+  const [other, setOther] = useState("");
+  const typeAt = dialog.options.findIndex((o) => /^type something/i.test(o.label));
+  const chatAt = dialog.options.findIndex((o) => /^chat about this/i.test(o.label));
+  const multi = dialog.options.some((o) => o.checked !== undefined && o.checked);
+  const choices = dialog.options.map((o, i) => ({ o, i })).filter(({ i }) => i !== typeAt && i !== chatAt);
+  const sendOther = () => {
+    const text = other.trim();
+    if (!text || typeAt < 0) return;
+    actions.keys(pickKeys(dialog, typeAt, ["enter", "text:" + text.slice(0, 200), "enter"]));
+    setOther("");
+  };
+  return (
+    <div className="wbc-card wbc-card-violet" role="group" aria-label="Claude asks">
+      <div className="wbc-card-head">
+        <Ic name="message-square" size={15} />
+        <div className="wbc-card-title">Claude asks</div>
+        <span className="wb-spacer" />
+        {dialog.tabs?.length ? (
+          <div className="wbc-tabs">
+            {dialog.tabs.map((t, i) => (
+              <span key={i} className={"wbc-tab" + (t.done ? " is-done" : "")}>
+                {t.done ? <Ic name="check" size={12} /> : null}
+                {t.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <div className="wbc-q-title">{dialog.title}</div>
+      <div className="wbc-q-options">
+        {choices.map(({ o, i }) => {
+          const on = multi ? !!o.checked : o.selected;
+          const recommended = /\(Recommended\)\s*$/i.test(o.label);
+          return (
+            <button key={i} type="button" className={"wbc-q-option" + (on ? " is-on" : "") + (o.selected ? " is-cursor" : "")} disabled={actions.disabled} onClick={() => actions.keys(pickKeys(dialog, i))}>
+              <span className={multi ? "wbc-check" : "wbc-radio"} aria-hidden="true">
+                {on ? multi ? <Ic name="check" size={11} /> : <i /> : null}
+              </span>
+              <span className="wbc-q-body">
+                <span className="wbc-q-label">
+                  {o.label.replace(/\s*\(Recommended\)\s*$/i, "")}
+                  {recommended ? <em className="wbc-tag">Recommended</em> : null}
+                </span>
+                {o.description ? <span className="wbc-q-desc">{o.description}</span> : null}
+              </span>
+            </button>
+          );
+        })}
+        {typeAt >= 0 ? (
+          <div className="wbc-q-option is-other">
+            <span className="wbc-radio" aria-hidden="true" />
+            <span className="wbc-q-label">Other:</span>
+            <input
+              value={other}
+              placeholder="type your own answer…"
+              disabled={actions.disabled}
+              onChange={(e) => setOther(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  sendOther();
+                }
+              }}
+            />
+          </div>
+        ) : null}
+      </div>
+      <div className="wbc-card-foot">
+        <span>
+          Read from the terminal screen
+          {chatAt >= 0 ? (
+            <>
+              {" · "}
+              <button type="button" className="wbc-link" disabled={actions.disabled} onClick={() => actions.keys(pickKeys(dialog, chatAt))}>
+                Chat about this
+              </button>
+            </>
+          ) : null}
+        </span>
+        <span className="wbc-card-btns">
+          <button type="button" className="wbc-btn" disabled={actions.disabled} onClick={() => actions.keys(["esc"])}>
+            Skip
+          </button>
+          {dialog.tabs && dialog.tabs.length > 1 ? (
+            <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(["tab"])}>
+              Next
+            </button>
+          ) : null}
+        </span>
+      </div>
+    </div>
+  );
+}

@@ -28,16 +28,26 @@ export const MODES: { id: ChatMode; label: string; short: string; desc: string; 
   { id: "bypassPermissions", label: "⏵⏵ Bypass permissions", short: "⏵⏵ bypass", desc: "Never asks (only when enabled)", tone: "red" },
 ];
 
+/* The models of the Claude 5 family by full id, so /model sets exactly
+   that version (owner feedback 2026-11-23). */
 const MODELS = [
-  { id: "opus", label: "Opus", desc: "Most capable, for hard work", match: /opus/i },
-  { id: "sonnet", label: "Sonnet", desc: "Fast, for everyday work", match: /sonnet/i },
-  { id: "haiku", label: "Haiku", desc: "Fastest and cheapest", match: /haiku/i },
+  { id: "claude-opus-5-5", label: "Opus 5.5", desc: "Most capable, for hard work" },
+  { id: "claude-opus-5-5[1m]", label: "Opus 5.5 · 1M context", desc: "Opus with a 1M token window" },
+  { id: "claude-sonnet-5-5", label: "Sonnet 5.5", desc: "Fast, for everyday work" },
+  { id: "claude-sonnet-5-5[1m]", label: "Sonnet 5.5 · 1M context", desc: "Sonnet with a 1M token window" },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5", desc: "Fastest and cheapest" },
+  { id: "claude-fable-5-2", label: "Fable 5.2", desc: "Creative writing and long-form text" },
 ];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
+function sameModel(current: string, id: string): boolean {
+  const base = (x: string) => x.replace(/-\d{8}$/, "");
+  return !!current && base(current) === base(id);
+}
+
 export function modelLabel(model: string): string {
   const m = /claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)/i.exec(model || "");
-  if (m) return m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1) + " " + m[2] + "." + m[3];
+  if (m) return m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1) + " " + m[2] + "." + m[3] + (/\[1m\]/i.test(model) ? " 1M" : "");
   return model ? model.replace(/^claude-/, "") : "Model";
 }
 
@@ -561,7 +571,7 @@ export function Composer(props: ComposerProps) {
               <Pop className="wbc-pop-right" width={300}>
                 <div className="wbc-pop-sec">Model</div>
                 {MODELS.map((m) => (
-                  <PopRow key={m.id} label={m.label} desc={m.desc} checked={m.match.test(props.model)} onClick={() => pickModel({ model: m.id })} />
+                  <PopRow key={m.id} label={m.label} desc={m.desc} right={m.id} checked={sameModel(props.model, m.id)} onClick={() => pickModel({ model: m.id })} />
                 ))}
                 <div className="wbc-pop-sec">Effort</div>
                 <div className="wbc-seg">

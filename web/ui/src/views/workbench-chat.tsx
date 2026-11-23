@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Ic } from "../ui/icons";
 import { Markdown } from "../lib/markdown";
 import { errorMessage } from "../api/client";
@@ -15,7 +15,8 @@ import {
   type ChatUpdate,
 } from "../api/workbench-chat";
 import { Composer, modelLabel } from "./workbench-chat-composer";
-import { FallbackCard, PermissionCard, PlanCard, QuestionCard, type CardActions } from "./workbench-chat-cards";
+import { AgentLogo } from "./agent-logo";
+import { FallbackCard, PermissionCard, PlanCard, QuestionCard, ScreenQuestionCard, type CardActions } from "./workbench-chat-cards";
 import { BackgroundTray, SubagentRow, TasksContext } from "./workbench-chat-tasks";
 
 /* Spec 71: the Claude Code chat view of a Workbench pane. It reads the
@@ -257,8 +258,18 @@ function ToolRow({ item }: { item: ChatItem }) {
   return <PlainToolRow item={item} />;
 }
 
-function PlainToolRow({ item }: { item: ChatItem }) {
+function PlainToolRow({ item: raw }: { item: ChatItem }) {
   const [open, setOpen] = useState(false);
+  /* A background shell's row follows its task, not the launch result. */
+  const { tasks } = useContext(TasksContext);
+  const bg = raw.input?.run_in_background === true ? tasks.find((t) => t.tool_use_id === raw.tool_use_id) : undefined;
+  const item: ChatItem = bg
+    ? {
+        ...raw,
+        status: bg.status === "running" ? "running" : bg.status === "completed" ? "done" : "error",
+        summary: { verb: raw.summary?.verb || "Bash", target: raw.summary?.target || "", meta: bg.status === "running" ? "background" : "background · " + bg.status },
+      }
+    : raw;
   const s = item.summary;
   const verb = s?.verb || item.name || "Tool";
   const has = !!(item.diff || item.result?.text);
@@ -376,7 +387,9 @@ const BlockView = memo(function BlockView({ block, sessionId, replyText }: { blo
     case "head":
       return (
         <div className="wbc-head">
-          <span className="wbc-head-tile" />
+          <span className="wbc-head-tile">
+            <AgentLogo agent="claude" size={18} />
+          </span>
           <span className="wbc-head-name">Claude</span>
           <span className="wbc-head-meta">
             {[block.model ? modelLabel(block.model) : "", hhmm(block.at)].filter(Boolean).join(" · ")}
@@ -535,6 +548,7 @@ export function ChatPane(props: ChatPaneProps) {
     if (!blocked && !dialog) return null;
     if (openQuestion && (blocked || dialog?.kind === "question")) return null; /* shown inline */
     if (openPlan && (blocked || dialog?.kind === "plan")) return null; /* shown inline */
+    if (dialog && dialog.options.length && dialog.kind === "question") return <ScreenQuestionCard dialog={dialog} actions={actions} />;
     if (dialog && dialog.options.length) return <PermissionCard dialog={dialog} pending={pendingTool} actions={actions} />;
     if (blocked) return <FallbackCard actions={actions} />;
     return null;
@@ -649,7 +663,9 @@ export function ChatPane(props: ChatPaneProps) {
           {!loaded ? <div className="wbc-loading">Loading the conversation…</div> : null}
           {fresh && !items.length ? (
             <div className="wbc-fresh">
-              <span className="wbc-head-tile" />
+              <span className="wbc-head-tile">
+                <AgentLogo agent="claude" size={28} />
+              </span>
               <div className="wbc-fresh-title">New Claude Code conversation</div>
               <div className="wbc-fresh-text">Ask anything below. The message is typed into this pane's claude.</div>
             </div>
@@ -680,8 +696,7 @@ export function ChatPane(props: ChatPaneProps) {
           {working && live?.status ? (
             <div className="wbc-status">
               <Ic name="loader" size={13} className="wbc-spin" />
-              <span className="wbc-status-text">{live.status}</span>
-              {!compact ? <span className="wbc-status-src">read from the screen</span> : null}
+              <span className="wbc-status-text">{live.status.replace(/^[·✢✳✶✻✽*]\s+/, "")}</span>
             </div>
           ) : working ? (
             <div className="wbc-status is-quiet">
@@ -735,7 +750,7 @@ export function ChatPane(props: ChatPaneProps) {
           mode={mode}
           model={meta?.model || ""}
           effort={meta?.effort || ""}
-          context={meta?.context}
+          context={items.length ? meta?.context : undefined}
           onSent={(text, images) => {
             stick.current = true;
             setPending((cur) => [...cur, { key: Date.now() + ":" + cur.length, text, images, queued: !!working }]);
