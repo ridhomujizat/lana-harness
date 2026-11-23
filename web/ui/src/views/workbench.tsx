@@ -2002,6 +2002,8 @@ export function WorkbenchPage() {
   /* REQ-WG-076: the "+" menu. */
   const plusRef = useRef<HTMLSpanElement | null>(null);
   const [plusMenu, setPlusMenu] = useState(false);
+  const spaceRef = useRef<HTMLSpanElement | null>(null);
+  const [spaceMenu, setSpaceMenu] = useState(false);
 
   const actions: PaneActions = {
     onFocus: (id) => {
@@ -2484,11 +2486,62 @@ export function WorkbenchPage() {
               <Ic name="panel-left" size={16} />
             </button>
           ) : null}
+          {/* With the panel hidden, the space name picks the space
+              (owner, 2026-11-23). */}
           {!panelOpen && space ? (
-            <span className="wb-tabs-space">
-              <SpaceTile space={space} label={spaceLabel(space, sessions)} size={18} />
-              {spaceLabel(space, sessions)}
+            <span className="wb-tabs-space-wrap" ref={spaceRef}>
+              <button
+                type="button"
+                className={"wb-tabs-space" + (spaceMenu ? " is-open" : "")}
+                aria-haspopup="menu"
+                aria-expanded={spaceMenu}
+                title={spaceCwd(space, sessions) || undefined}
+                onClick={() => setSpaceMenu((m) => !m)}
+              >
+                <SpaceTile space={space} label={spaceLabel(space, sessions)} size={18} />
+                <span className="wb-tabs-space-name">{spaceLabel(space, sessions)}</span>
+                <Ic name="chevron-down" size={13} className="wb-tabs-space-chev" />
+              </button>
             </span>
+          ) : null}
+          {spaceMenu && !panelOpen ? (
+            <Menu anchorRef={spaceRef} open onClose={() => setSpaceMenu(false)} className="wb-space-menu" width={260}>
+              {layout.spaces.map((sp) => {
+                const label = spaceLabel(sp, sessions);
+                const n = sp.tabs.length;
+                return (
+                  <MenuItem
+                    key={sp.id}
+                    className="wb-space-mi"
+                    aria-current={sp.id === space?.id ? "true" : undefined}
+                    right={
+                      <span className="wb-space-mi-r">
+                        <span className="wb-space-mi-n">{n + (n === 1 ? " tab" : " tabs")}</span>
+                        <span className="wb-space-mi-ck">{sp.id === space?.id ? <Ic name="check" size={14} /> : null}</span>
+                      </span>
+                    }
+                    title={spaceCwd(sp, sessions) || undefined}
+                    onClick={() => {
+                      setSpaceMenu(false);
+                      update((l) => selectSpace(l, sp.id));
+                    }}
+                  >
+                    <SpaceTile space={sp} label={label} size={16} />
+                    {label}
+                  </MenuItem>
+                );
+              })}
+              <MenuSeparator />
+              <MenuItem
+                icon="plus"
+                onClick={() => {
+                  setSpaceMenu(false);
+                  newSpace();
+                }}
+              >
+                New space
+              </MenuItem>
+            </Menu>
           ) : null}
           {space?.tabs.map((t) => {
             const s = tabStatus(t, sessions);

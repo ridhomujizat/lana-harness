@@ -10,6 +10,7 @@ but their config keys, events, and tools may still change between betas.
 ### Added
 
 - Workbench: a Claude Code pane can show its conversation as a chat (spec 71). One icon button in the pane header (or ⇧⌘J) switches between Terminal and Chat; it is the same `claude` process, nothing restarts. The chat reads Claude Code's transcript: messages, tool calls grouped per turn with diffs and output, subagents with their own steps and report, background shells and agents, and a live status line read from the screen. Permission prompts, questions (AskUserQuestion) and plan approvals are answered from cards that send the terminal's keys. The composer types into the same terminal and has `/` and `@` menus, the permission mode, model and effort, a context donut and file attachments. On a phone, Claude panes open in Chat.
+- Workbench: with the panel hidden, the space name in the tab bar is a dropdown. It lists every space with its tab count, ticks the current one, switches on click and has New space.
 
 ## [0.6.0-beta.5] - 2026-11-22
 
