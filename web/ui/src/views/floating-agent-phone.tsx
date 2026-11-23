@@ -262,6 +262,7 @@ function Bubble({
   const behind = stacked ? stack.slice(1, 3) : [];
   return (
     <>
+      {drag ? <div className="fa-drag-scrim" aria-hidden="true" /> : null}
       {drag ? (
         <div className={"fa-hide-target" + (overHide(drag.x, drag.y) ? " on" : "")} aria-hidden="true">
           <span className="fa-hide-x">
