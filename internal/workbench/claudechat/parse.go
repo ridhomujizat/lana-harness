@@ -21,11 +21,13 @@ type DialogOption struct {
 }
 
 // DialogTab is one chip of a question dialog's tab row. Done marks the chips
-// whose step is finished ("✔"/"☒"); the active chip renders the same as the
-// others on the visible screen (spec 71 REQ-WC-021).
+// whose step is finished ("✔"/"☒"). Active marks the chip of the question on
+// screen: its span carries a non-default background on the chips row, so it is
+// read from the screen's marks (spec 71 REQ-WC-021).
 type DialogTab struct {
-	Label string `json:"label"`
-	Done  bool   `json:"done"`
+	Label  string `json:"label"`
+	Done   bool   `json:"done"`
+	Active bool   `json:"active,omitempty"`
 }
 
 // Dialog is an open Claude Code dialog read from the screen: a permission
@@ -37,6 +39,7 @@ type Dialog struct {
 	Kind    string         `json:"kind"`
 	Title   string         `json:"title"`
 	Lines   []string       `json:"lines"`
+	Body    []string       `json:"body,omitempty"`
 	Tabs    []DialogTab    `json:"tabs,omitempty"`
 	Options []DialogOption `json:"options"`
 	Preview string         `json:"preview,omitempty"`
@@ -65,6 +68,9 @@ const dialogScope = 30
 
 // maxDialogLines caps a dialog's "lines" block.
 const maxDialogLines = 12
+
+// maxDialogBody caps a dialog's "body" block.
+const maxDialogBody = 24
 
 // optionWrapIndent is the indentation at or beyond which a line under an option
 // is a wrapped label continuation rather than the option's description.
@@ -99,8 +105,17 @@ var (
 
 // ParseScreen reads the visible screen rows a mirror renders into the live
 // state the chat shows. It never panics: a nil or empty slice is accepted and
-// short or odd lines are ignored.
+// short or odd lines are ignored. It is ParseScreenMarked without screen marks.
 func ParseScreen(lines []string) Screen {
+	return ParseScreenMarked(lines, nil)
+}
+
+// ParseScreenMarked is ParseScreen with the per-rune background marks a mirror
+// reports: marked[row][i] is true when the i-th rune of lines[row] sits in a
+// cell whose background colour is not the default. The marks tell which chip of
+// a question dialog is active. A nil or short marked leaves every tab inactive,
+// which is what ParseScreen does (spec 71 REQ-WC-021).
+func ParseScreenMarked(lines []string, marked [][]bool) Screen {
 	var s Screen
 
 	recent := lastNonEmpty(lines, footerLines)
@@ -116,7 +131,7 @@ func ParseScreen(lines []string) Screen {
 	}
 
 	// A dialog replaces the input box; while one is open there is no input.
-	s.Dialog = parseDialog(lines)
+	s.Dialog = parseDialog(lines, marked)
 	if s.Dialog != nil {
 		s.Input, s.InputEmpty = "", false
 	}
@@ -271,7 +286,7 @@ func matchOption(line string) (rawOption, bool) {
 // carries the ❯ cursor. With no marked block it takes the last one, but only
 // when a hint line or a permission title marks it as a real dialog; otherwise
 // it falls back to an unnumbered list (the trust prompt).
-func parseDialog(lines []string) *Dialog {
+func parseDialog(lines []string, marked [][]bool) *Dialog {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -296,13 +311,13 @@ func parseDialog(lines []string) *Dialog {
 	}
 	for b := len(blocks) - 1; b >= 0; b-- {
 		if blockHasCursor(blocks[b]) {
-			return buildDialog(lines, blocks[b])
+			return buildDialog(lines, blocks[b], marked)
 		}
 	}
 	last := blocks[len(blocks)-1]
 	_, title := findTitle(lines, last[0].idx)
 	if dialogHint(lines, last) || strings.HasPrefix(title, "Do you want") {
-		return buildDialog(lines, last)
+		return buildDialog(lines, last, marked)
 	}
 	return parseUnnumbered(lines, start)
 }
@@ -416,7 +431,7 @@ func isNextKey(t string) bool {
 	return false
 }
 
-func buildDialog(lines []string, group []rawOption) *Dialog {
+func buildDialog(lines []string, group []rawOption, marked [][]bool) *Dialog {
 	firstOpt := group[0].idx
 	// A question can carry a preview box beside its options. Cut every line
 	// that runs into the box at its left edge, and keep the box's inner text.
@@ -429,8 +444,8 @@ func buildDialog(lines []string, group []rawOption) *Dialog {
 	}
 	titleIdx, title := findTitle(lines, firstOpt)
 	var tabs []DialogTab
-	if chipsIdx, t := findChips(lines, firstOpt); chipsIdx >= 0 {
-		tabs = t
+	if chipsIdx, spans := findChips(lines, firstOpt); chipsIdx >= 0 {
+		tabs = chipTabs(spans, markRow(marked, chipsIdx))
 		// A chips line names a question dialog: its title is the first line
 		// under the chips, not the nearest "?" line.
 		if ti, tt := titleBelowChips(lines, chipsIdx, firstOpt); ti >= 0 {
@@ -449,6 +464,7 @@ func buildDialog(lines []string, group []rawOption) *Dialog {
 		Kind:    kind,
 		Title:   title,
 		Lines:   dialogLines(lines, titleIdx, firstOpt),
+		Body:    dialogBody(lines, titleIdx, firstOpt),
 		Tabs:    tabs,
 		Options: opts,
 		Preview: preview,
@@ -469,14 +485,14 @@ func hasCheckboxOption(group []rawOption) bool {
 
 // findChips finds the chips line of a question dialog: a line above the first
 // option, inside the dialog box (before its top rule), that carries ☐/☒/✔
-// chips. It returns the line index and the tabs it holds, or -1.
-func findChips(lines []string, firstOpt int) (int, []DialogTab) {
+// chips. It returns the line index and the chips it holds, or -1.
+func findChips(lines []string, firstOpt int) (int, []chipSpan) {
 	for i := firstOpt - 1; i >= 0; i-- {
 		if isRule(lines[i]) {
 			return -1, nil
 		}
-		if tabs, ok := parseChipsLine(lines[i]); ok {
-			return i, tabs
+		if spans, ok := parseChipsLine(lines[i]); ok {
+			return i, spans
 		}
 	}
 	return -1, nil
@@ -497,37 +513,98 @@ func titleBelowChips(lines []string, chipsIdx, firstOpt int) (int, string) {
 	return -1, ""
 }
 
-// parseChipsLine reads a question dialog's chips row into its tabs: each chip
+// chipSpan is one chip of a question dialog's tab row together with the rune
+// span it occupies in the chips line: start is the index of its ☐/☒/✔ marker
+// and end is one past the last rune of its label. The span lets the parser tell
+// which chip a background mark falls in (spec 71 REQ-WC-021).
+type chipSpan struct {
+	tab        DialogTab
+	start, end int
+}
+
+// parseChipsLine reads a question dialog's chips row into its chips: each chip
 // is a ☐/☒/✔ marker followed by its label, and the arrows "←"/"→" that may wrap
-// the row are not labels. ok is false when the line carries no chip.
-func parseChipsLine(line string) ([]DialogTab, bool) {
+// the row are not labels. Each chip keeps the rune span it occupies in the line,
+// from its marker through the end of its label. ok is false when the line
+// carries no chip.
+func parseChipsLine(line string) ([]chipSpan, bool) {
 	if !strings.ContainsAny(line, "☐☒✔") {
 		return nil, false
 	}
-	var tabs []DialogTab
+	var spans []chipSpan
+	base := 0 // rune index in line where rest begins
 	rest := line
 	for {
 		i := strings.IndexAny(rest, "☐☒✔")
 		if i < 0 {
 			break
 		}
+		// start is the marker's rune index in line; after begins one rune later.
+		start := base + utf8.RuneCountInString(rest[:i])
 		marker, size := utf8.DecodeRuneInString(rest[i:])
 		after := rest[i+size:]
+		afterBase := start + 1
 		end := strings.IndexAny(after, "☐☒✔←→")
 		seg := after
 		if end >= 0 {
 			seg = after[:end]
 		}
-		tabs = append(tabs, DialogTab{
-			Label: strings.TrimSpace(seg),
-			Done:  marker == '✔' || marker == '☒',
+		spans = append(spans, chipSpan{
+			tab: DialogTab{
+				Label: strings.TrimSpace(seg),
+				Done:  marker == '✔' || marker == '☒',
+			},
+			start: start,
+			end:   afterBase + labelRunes(seg),
 		})
 		if end < 0 {
 			break
 		}
+		base = afterBase + utf8.RuneCountInString(seg)
 		rest = after[end:]
 	}
-	return tabs, true
+	return spans, true
+}
+
+// labelRunes is the number of runes a chip's segment contributes to its label:
+// its length with the trailing whitespace between it and the next chip removed.
+func labelRunes(seg string) int {
+	return utf8.RuneCountInString(strings.TrimRightFunc(seg, unicode.IsSpace))
+}
+
+// chipTabs turns parsed chips into dialog tabs and marks the first chip whose
+// span falls in a marked cell as active. At most one tab is active (spec 71
+// REQ-WC-021).
+func chipTabs(spans []chipSpan, row []bool) []DialogTab {
+	tabs := make([]DialogTab, 0, len(spans))
+	active := false
+	for _, sp := range spans {
+		tab := sp.tab
+		if !active && spanMarked(sp, row) {
+			tab.Active = true
+			active = true
+		}
+		tabs = append(tabs, tab)
+	}
+	return tabs
+}
+
+// spanMarked reports whether any rune of a chip's span sits in a marked cell.
+func spanMarked(sp chipSpan, row []bool) bool {
+	for i := sp.start; i < sp.end && i < len(row); i++ {
+		if i >= 0 && row[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// markRow returns the marks of one line, or nil when marked does not cover it.
+func markRow(marked [][]bool, idx int) []bool {
+	if idx < 0 || idx >= len(marked) {
+		return nil
+	}
+	return marked[idx]
 }
 
 // parseOptionLabel strips a leading multi-select marker from an option label.
@@ -919,6 +996,28 @@ func dialogLines(lines []string, titleIdx, firstOpt int) []string {
 	return out
 }
 
+// dialogBody returns the non-empty, non-rule lines strictly between the title
+// line and the first option, in screen order, each trimmed and capped at
+// maxDialogBody. A question's review screen puts the answered questions here,
+// under the "Review your answers" title (spec 71 REQ-WC-021).
+func dialogBody(lines []string, titleIdx, firstOpt int) []string {
+	out := []string{}
+	if titleIdx < 0 || titleIdx >= firstOpt {
+		return out
+	}
+	for i := titleIdx + 1; i < firstOpt && i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || isRule(lines[i]) {
+			continue
+		}
+		out = append(out, t)
+		if len(out) >= maxDialogBody {
+			break
+		}
+	}
+	return out
+}
+
 // topRuleAbove finds the top border of the box the title sits in: the topmost
 // rule of the run of non-blank lines directly above the title. When the title
 // is separated from its box by a blank, the nearest rule above is used.
@@ -1027,6 +1126,7 @@ func parseUnnumbered(lines []string, start int) *Dialog {
 		Kind:    dialogKind(lines, title, titleIdx, group[0]),
 		Title:   title,
 		Lines:   dialogLines(lines, titleIdx, group[0]),
+		Body:    dialogBody(lines, titleIdx, group[0]),
 		Options: opts,
 	}
 }
