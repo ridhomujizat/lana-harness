@@ -1649,8 +1649,25 @@
 
 /* ---- compact (phone) ----------------------------------------------- */
 
+/* Phone field (owner, 2026-11-23): one line sits centred on the send
+   button; 16px text keeps iOS from zooming in on focus, and the hint is a
+   quieter size than what you type. */
+.wbc.is-compact .wbc-field-row {
+  align-items: flex-end;
+  padding: 6px 6px 6px 14px;
+}
+
 .wbc.is-compact .wbc-field textarea {
   min-height: 24px;
+  margin-bottom: 3px;
+  padding: 2px 0;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.wbc.is-compact .wbc-field textarea::placeholder {
+  color: color-mix(in srgb, var(--wb-term-dim) 85%, transparent);
+  font-size: 15px;
 }
 
 .wbc.is-compact .wbc-option,
