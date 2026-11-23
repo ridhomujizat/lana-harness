@@ -7,6 +7,19 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.8] - 2026-11-23
+
+### Changed
+
+- Workbench on a phone: the space header is a clean one-line title with one menu; the view switch, Files, Changes (with its count), New terminal and Claude accounts moved into it.
+- Workbench chat on a phone: Return adds a new line (the send button sends), the message field stops growing at about five lines and scrolls, and the `/` and `@` lists fit the room above the field so they stay in view with the keyboard up.
+- Workbench chat: finished "Thinking" rows are hidden; one shows only at the tail of a running turn. An answered question lists each answer under its question.
+
+### Fixed
+
+- Workbench chat: images sent as paths (phone uploads land in the drops folder) show as thumbnails in your message instead of path text.
+- Workbench chat: Claude Code's side panel on a wide terminal (the changed-files column) no longer leaks into question options and descriptions.
+
 ## [0.6.0-beta.7] - 2026-11-23
 
 ### Added

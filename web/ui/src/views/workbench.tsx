@@ -1051,10 +1051,53 @@ function usePhoneFont(): number {
 
 /* REQ-WG-090: the Text size stepper and Files, at the top of the phone's
    space menu. */
-function PhoneMenuExtra({ onFiles, onDone }: { onFiles: () => void; onDone: () => void }) {
+function PhoneMenuExtra({
+  onFiles,
+  onDone,
+  paneId,
+  agent,
+  onChanges,
+  changeCount,
+  onNewTerminal,
+  onAccounts,
+}: {
+  onFiles: () => void;
+  onDone: () => void;
+  paneId?: string;
+  agent?: string;
+  onChanges: () => void;
+  changeCount: number;
+  onNewTerminal: () => void;
+  onAccounts?: () => void;
+}) {
   const size = usePhoneFont();
+  const view = usePaneView(paneId || "", true);
+  const support = chatSupport(agent);
+  const item = (icon: string, label: ReactNode, run: () => void, right?: ReactNode) => (
+    <button
+      type="button"
+      role="menuitem"
+      className="mi"
+      onClick={() => {
+        onDone();
+        run();
+      }}
+    >
+      <Ic name={icon} size={15} />
+      <span className="trunc">{label}</span>
+      {right ? <span className="r">{right}</span> : null}
+    </button>
+  );
   return (
     <>
+      {paneId && support === "yes"
+        ? item(view === "chat" ? "square-terminal" : "message-square", view === "chat" ? "Show the terminal" : "Show as chat", () => setPaneView(paneId, view === "chat" ? "terminal" : "chat"))
+        : null}
+      {item("files", "Files", onFiles)}
+      {item("git-compare", "Changes", onChanges, changeCount ? <span className="wbg-badge">{changeCount}</span> : null)}
+      {item("plus", "New terminal", onNewTerminal)}
+      {onAccounts ? item("users", "Claude accounts", onAccounts) : null}
+      <div className="msep" role="separator" />
       <div className="wbg-font-row">
         <span>Text size</span>
         <span className="wb-font" role="group" aria-label="Text size">
@@ -1067,18 +1110,6 @@ function PhoneMenuExtra({ onFiles, onDone }: { onFiles: () => void; onDone: () =
           </button>
         </span>
       </div>
-      <button
-        type="button"
-        role="menuitem"
-        className="mi"
-        onClick={() => {
-          onDone();
-          onFiles();
-        }}
-      >
-        <Ic name="files" size={15} />
-        <span className="trunc">Files</span>
-      </button>
       <div className="msep" role="separator" />
     </>
   );
@@ -1204,29 +1235,8 @@ function PhoneWorkbench(props: PhoneProps) {
             <StatusDot status={counts.blocked ? "blocked" : counts.working ? "working" : "idle"} /> {summary}
           </span>
         </div>
-        {phoneSupport !== "none" && current ? (
-          <button
-            type="button"
-            className={"wb-icon-btn wb-icon-btn-lg wb-view-btn" + (phoneView === "chat" ? " is-chat" : "")}
-            disabled={phoneSupport === "no"}
-            aria-label={phoneView === "chat" ? "Show the terminal" : "Show as chat"}
-            onClick={() => setPaneView(current, phoneView === "chat" ? "terminal" : "chat")}
-          >
-            <Ic name={phoneView === "chat" ? "square-terminal" : "message-square"} size={18} />
-          </button>
-        ) : null}
-        <button type="button" className="wbg-toggle wbg-toggle-lg" aria-label="Files and changes" onClick={props.onChanges}>
-          <Ic name="git-compare" size={18} />
-          {props.changeCount ? <span className="wbg-badge">{props.changeCount}</span> : null}
-        </button>
-        <button type="button" className="wb-icon-btn wb-icon-btn-lg" aria-label="New terminal" onClick={props.onNewTerminal}>
-          <Ic name="plus" size={18} />
-        </button>
-        {props.onAccounts ? (
-          <button type="button" className="wb-icon-btn wb-icon-btn-lg" aria-label="Claude accounts" onClick={props.onAccounts}>
-            <AgentLogo agent="claude" size={18} />
-          </button>
-        ) : null}
+        {/* Owner, 2026-11-23: a clean title; every action lives in the
+            menu (view, Files and changes, new tab, accounts, space). */}
         <button
           type="button"
           className="wb-icon-btn wb-icon-btn-lg"
@@ -1234,6 +1244,7 @@ function PhoneWorkbench(props: PhoneProps) {
           onClick={(e) => props.onMenu({ kind: "space", spaceId: space.id, anchor: e.currentTarget })}
         >
           <Ic name="ellipsis" size={18} />
+          {props.changeCount ? <span className="wb-phone-menu-dot" aria-hidden="true" /> : null}
         </button>
       </header>
       <div className="wb-strip">
@@ -1901,6 +1912,9 @@ export function WorkbenchPage() {
   const space = pickSpace(layout);
   const tab = pickTab(space);
   const viewFocus = tab?.focus;
+  /* The pane a phone shows: the tab's focus, else its first pane. */
+  const phoneTabIds = tab ? tabSessions(tab) : [];
+  const phonePane = tab?.focus && phoneTabIds.includes(tab.focus) ? tab.focus : phoneTabIds[0];
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- dropDone returns the same set when nothing changes.
     if (windowActive && viewFocus) setDoneIds((prev) => dropDone(prev, viewFocus));
@@ -2210,7 +2224,20 @@ export function WorkbenchPage() {
           onClose={() => setMenu(null)}
           onRename={() => (menu.kind === "space" ? openRenameSpace(menu.spaceId) : openRenameTab(menu.spaceId, menu.tabId))}
           onCloseTarget={() => (menu.kind === "space" ? askCloseSpace(menu.spaceId) : closeTabNow(menu.spaceId, menu.tabId))}
-          extra={phone && menu.kind === "space" ? <PhoneMenuExtra onFiles={() => git.toggle("files")} onDone={() => setMenu(null)} /> : undefined}
+          extra={
+            phone && menu.kind === "space" ? (
+              <PhoneMenuExtra
+                onFiles={() => git.toggle("files")}
+                onDone={() => setMenu(null)}
+                paneId={phonePane}
+                agent={phonePane ? sessions[phonePane]?.agent : undefined}
+                onChanges={() => git.toggle("changes")}
+                changeCount={git.changeCount}
+                onNewTerminal={() => void newTerminal()}
+                onAccounts={accountsReady ? () => setAccountsSheet(true) : undefined}
+              />
+            ) : undefined
+          }
         />
       ) : null}
       {dialog?.kind === "rename-space" ? (
