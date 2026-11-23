@@ -1,10 +1,33 @@
 package claudechat
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 )
+
+// rawPane reads a stored raw pane replay.
+func rawPane(t *testing.T, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "raw", name))
+	if err != nil {
+		t.Fatalf("read raw fixture %s: %v", name, err)
+	}
+	return b
+}
+
+// hasTrimmedPrefix reports whether any line starts with prefix once it is
+// trimmed.
+func hasTrimmedPrefix(lines []string, prefix string) bool {
+	for _, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 // TestMirrorResizeViaOSC7701 checks that an OSC 7701 size marker in the pane
 // output resizes the headless screen.
@@ -88,6 +111,73 @@ func TestMirrorOSC7701MultipleMarkersInOneWrite(t *testing.T) {
 	}
 	if got := strings.TrimRight(lines[1], " "); got != "AB"+line {
 		t.Errorf("lines[1] = %q, want %q (text after the second marker rendered at 30 columns)", got, "AB"+line)
+	}
+}
+
+// TestMirrorStripsWindowTitle checks that a Claude Code window-title OSC does
+// not overwrite the first option of a question dialog, whether the replay
+// arrives in one Write or in small chunks.
+func TestMirrorStripsWindowTitle(t *testing.T) {
+	raw := rawPane(t, "question.raw")
+	cases := []struct {
+		name  string
+		chunk int
+	}{
+		{"whole", 0},
+		{"chunked", 37},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewMirror(100, 40)
+			defer m.Close()
+			if tc.chunk == 0 {
+				if _, err := m.Write(raw); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+			} else {
+				for i := 0; i < len(raw); i += tc.chunk {
+					end := i + tc.chunk
+					if end > len(raw) {
+						end = len(raw)
+					}
+					if _, err := m.Write(raw[i:end]); err != nil {
+						t.Fatalf("write chunk: %v", err)
+					}
+				}
+			}
+			lines := m.Lines()
+			if !hasTrimmedPrefix(lines, "❯ 1. Red (Recommended)") {
+				t.Errorf("no dialog option line; lines = %q", lines)
+			}
+			for _, l := range lines {
+				if strings.Contains(l, "AskUserQuestion tool test") {
+					t.Errorf("title text leaked onto the screen: %q", l)
+				}
+			}
+		})
+	}
+}
+
+// TestMirrorTitleSplitAcrossWrites checks that a window-title OSC split between
+// two Writes is still removed, leaving the text around it untouched.
+func TestMirrorTitleSplitAcrossWrites(t *testing.T) {
+	m := NewMirror(40, 3)
+	defer m.Close()
+
+	if _, err := m.Write([]byte("A\x1b]0;the tit")); err != nil {
+		t.Fatalf("write prefix: %v", err)
+	}
+	if _, err := m.Write([]byte("le\x07B")); err != nil {
+		t.Fatalf("write rest: %v", err)
+	}
+	lines := m.Lines()
+	for _, l := range lines {
+		if strings.Contains(l, "the title") {
+			t.Errorf("title leaked onto the screen: %q", l)
+		}
+	}
+	if !hasTrimmedPrefix(lines, "AB") {
+		t.Errorf("lines = %q, want a line starting with %q", lines, "AB")
 	}
 }
 

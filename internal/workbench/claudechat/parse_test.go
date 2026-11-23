@@ -50,6 +50,23 @@ func wantDialog(t *testing.T, s Screen, kind, title string) *Dialog {
 	return s.Dialog
 }
 
+type tabWant struct {
+	label string
+	done  bool
+}
+
+func wantTabs(t *testing.T, got []DialogTab, want []tabWant) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("tabs = %+v, want %d tabs", got, len(want))
+	}
+	for i, w := range want {
+		if got[i].Label != w.label || got[i].Done != w.done {
+			t.Errorf("tab %d = %+v, want {label:%q done:%v}", i, got[i], w.label, w.done)
+		}
+	}
+}
+
 func checkMode(mode string) func(*testing.T, Screen) {
 	return func(t *testing.T, s Screen) {
 		t.Helper()
@@ -318,6 +335,88 @@ func TestParsePlanWrappedTitle(t *testing.T) {
 		{"2", "Yes, manually approve edits", false},
 		{"3", "Tell Claude what to change", false},
 	})
+}
+
+// TestParseQuestionTabs covers the tabbed AskUserQuestion dialog as rendered
+// from the raw pane replay: a chips row, the title below it, per-option
+// descriptions and the option outside the box.
+func TestParseQuestionTabs(t *testing.T) {
+	m := NewMirror(100, 40)
+	defer m.Close()
+	if _, err := m.Write(rawPane(t, "question.raw")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := ParseScreen(m.Lines())
+	d := wantDialog(t, s, "question", "Pick a color.")
+	if d == nil {
+		return
+	}
+	wantTabs(t, d.Tabs, []tabWant{
+		{"Color", false},
+		{"Toppings", false},
+		{"Size", false},
+		{"Submit", true},
+	})
+	if len(d.Options) != 5 {
+		t.Fatalf("options = %+v, want 5", d.Options)
+	}
+	o := d.Options
+	if o[0].Key != "1" || o[0].Label != "Red (Recommended)" || !o[0].Selected || o[0].Description != "Bold, high-energy choice" {
+		t.Errorf("option 1 = %+v", o[0])
+	}
+	if o[1].Key != "2" || o[1].Label != "Blue" || o[1].Selected || o[1].Description != "Calm, neutral choice" {
+		t.Errorf("option 2 = %+v", o[1])
+	}
+	if o[2].Key != "3" || o[2].Label != "Green" || o[2].Description != "Fresh, natural choice" {
+		t.Errorf("option 3 = %+v", o[2])
+	}
+	if o[3].Key != "4" || o[3].Label != "Type something." {
+		t.Errorf("option 4 = %+v", o[3])
+	}
+	if o[4].Key != "5" || o[4].Label != "Chat about this" {
+		t.Errorf("option 5 = %+v", o[4])
+	}
+}
+
+// TestParseMultiSelectQuestion covers a multi-select question whose options
+// carry checked markers, and whose title comes from below the chips row rather
+// than the "?" line above the box.
+func TestParseMultiSelectQuestion(t *testing.T) {
+	lines := []string{
+		"Something earlier?",
+		"────────────────────────────────────────",
+		"←  ☐ Toppings  ✔ Submit  →",
+		"Pick your toppings.",
+		"❯ 1. [✔] Cheese",
+		"     Aged",
+		"  2. [ ] Mushroom",
+		"     Earthy",
+		"  3. [X] Olive",
+		"────────────────────────────────────────",
+		"  4. Chat about this",
+		"Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+	}
+	s := ParseScreen(lines)
+	d := wantDialog(t, s, "question", "Pick your toppings.")
+	if d == nil {
+		return
+	}
+	wantTabs(t, d.Tabs, []tabWant{{"Toppings", false}, {"Submit", true}})
+	if len(d.Options) != 4 {
+		t.Fatalf("options = %+v, want 4", d.Options)
+	}
+	if d.Options[0].Label != "Cheese" || !d.Options[0].Checked || d.Options[0].Description != "Aged" {
+		t.Errorf("option 1 = %+v", d.Options[0])
+	}
+	if d.Options[1].Label != "Mushroom" || d.Options[1].Checked || d.Options[1].Description != "Earthy" {
+		t.Errorf("option 2 = %+v", d.Options[1])
+	}
+	if d.Options[2].Label != "Olive" || !d.Options[2].Checked {
+		t.Errorf("option 3 = %+v", d.Options[2])
+	}
+	if d.Options[3].Label != "Chat about this" || d.Options[3].Checked {
+		t.Errorf("option 4 = %+v", d.Options[3])
+	}
 }
 
 func TestParseScreenNeverPanics(t *testing.T) {

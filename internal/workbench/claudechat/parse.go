@@ -9,11 +9,23 @@ import (
 )
 
 // DialogOption is one choice of a dialog parsed from the screen. Key is the
-// digit Claude Code prints in front of the option (spec 71 REQ-WC-021).
+// digit Claude Code prints in front of the option, Description is the deeper
+// indented line under it, and Checked is a multi-select mark (spec 71
+// REQ-WC-021).
 type DialogOption struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Selected bool   `json:"selected"`
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Selected    bool   `json:"selected"`
+	Description string `json:"description,omitempty"`
+	Checked     bool   `json:"checked,omitempty"`
+}
+
+// DialogTab is one chip of a question dialog's tab row. Done marks the chips
+// whose step is finished ("✔"/"☒"); the active chip renders the same as the
+// others on the visible screen (spec 71 REQ-WC-021).
+type DialogTab struct {
+	Label string `json:"label"`
+	Done  bool   `json:"done"`
 }
 
 // Dialog is an open Claude Code dialog read from the screen: a permission
@@ -22,6 +34,7 @@ type Dialog struct {
 	Kind    string         `json:"kind"`
 	Title   string         `json:"title"`
 	Lines   []string       `json:"lines"`
+	Tabs    []DialogTab    `json:"tabs,omitempty"`
 	Options []DialogOption `json:"options"`
 }
 
@@ -47,6 +60,10 @@ const dialogScope = 30
 
 // maxDialogLines caps a dialog's "lines" block.
 const maxDialogLines = 12
+
+// optionWrapIndent is the indentation at or beyond which a line under an option
+// is a wrapped label continuation rather than the option's description.
+const optionWrapIndent = 6
 
 // modeWords maps a footer phrase to the permission mode it reports. The manual
 // phrase reports the default mode.
@@ -372,16 +389,111 @@ func optionsConnected(lines []string, group []rawOption, nextIdx int) bool {
 func buildDialog(lines []string, group []rawOption) *Dialog {
 	firstOpt := group[0].idx
 	titleIdx, title := findTitle(lines, firstOpt)
+	var tabs []DialogTab
+	if chipsIdx, t := findChips(lines, firstOpt); chipsIdx >= 0 {
+		tabs = t
+		// A chips line names a question dialog: its title is the first line
+		// under the chips, not the nearest "?" line.
+		if ti, tt := titleBelowChips(lines, chipsIdx, firstOpt); ti >= 0 {
+			titleIdx, title = ti, tt
+		}
+	}
 	opts := buildOptions(lines, group, title)
 	if len(opts) < 2 {
 		return nil
 	}
+	kind := dialogKind(lines, title, titleIdx, firstOpt)
+	if len(tabs) > 0 {
+		kind = "question"
+	}
 	return &Dialog{
-		Kind:    dialogKind(lines, title, titleIdx, firstOpt),
+		Kind:    kind,
 		Title:   title,
 		Lines:   dialogLines(lines, titleIdx, firstOpt),
+		Tabs:    tabs,
 		Options: opts,
 	}
+}
+
+// findChips finds the chips line of a question dialog: a line above the first
+// option, inside the dialog box (before its top rule), that carries ☐/☒/✔
+// chips. It returns the line index and the tabs it holds, or -1.
+func findChips(lines []string, firstOpt int) (int, []DialogTab) {
+	for i := firstOpt - 1; i >= 0; i-- {
+		if isRule(lines[i]) {
+			return -1, nil
+		}
+		if tabs, ok := parseChipsLine(lines[i]); ok {
+			return i, tabs
+		}
+	}
+	return -1, nil
+}
+
+// titleBelowChips returns the first non-empty line between a chips line and the
+// first option: the title of a question dialog. The index is -1 when there is
+// none.
+func titleBelowChips(lines []string, chipsIdx, firstOpt int) (int, string) {
+	for i := chipsIdx + 1; i < firstOpt && i < len(lines); i++ {
+		if isRule(lines[i]) {
+			continue
+		}
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return i, t
+		}
+	}
+	return -1, ""
+}
+
+// parseChipsLine reads a question dialog's chips row into its tabs: each chip
+// is a ☐/☒/✔ marker followed by its label, and the arrows "←"/"→" that may wrap
+// the row are not labels. ok is false when the line carries no chip.
+func parseChipsLine(line string) ([]DialogTab, bool) {
+	if !strings.ContainsAny(line, "☐☒✔") {
+		return nil, false
+	}
+	var tabs []DialogTab
+	rest := line
+	for {
+		i := strings.IndexAny(rest, "☐☒✔")
+		if i < 0 {
+			break
+		}
+		marker, size := utf8.DecodeRuneInString(rest[i:])
+		after := rest[i+size:]
+		end := strings.IndexAny(after, "☐☒✔←→")
+		seg := after
+		if end >= 0 {
+			seg = after[:end]
+		}
+		tabs = append(tabs, DialogTab{
+			Label: strings.TrimSpace(seg),
+			Done:  marker == '✔' || marker == '☒',
+		})
+		if end < 0 {
+			break
+		}
+		rest = after[end:]
+	}
+	return tabs, true
+}
+
+// parseOptionLabel strips a leading multi-select marker from an option label. A
+// checked marker ("[✔]", "[x]", "[X]", "☒", "✔ ") marks the option checked and
+// is removed; an unchecked marker ("[ ]", "☐ ") is removed and leaves it
+// unchecked.
+func parseOptionLabel(label string) (string, bool) {
+	for _, m := range []string{"[✔]", "[x]", "[X]", "☒", "✔ "} {
+		if rest, ok := strings.CutPrefix(label, m); ok {
+			return strings.TrimSpace(rest), true
+		}
+	}
+	for _, m := range []string{"[ ]", "☐ "} {
+		if rest, ok := strings.CutPrefix(label, m); ok {
+			return strings.TrimSpace(rest), false
+		}
+	}
+	return label, false
 }
 
 // findTitle returns the nearest line above the first option that ends with "?",
@@ -433,19 +545,21 @@ func joinWrappedTitle(lines []string, idx int) (int, string) {
 	return top, title
 }
 
-// buildOptions finalizes a run's options: it joins wrapped label continuations,
-// marks a selection, and repairs the permission prompt whose "1. Yes" was
-// overwritten by a render glitch.
+// buildOptions finalizes a run's options: it strips any multi-select marker,
+// joins wrapped label continuations and deeper-indented descriptions, marks a
+// selection, and repairs the permission prompt whose "1. Yes" was overwritten
+// by a render glitch.
 func buildOptions(lines []string, group []rawOption, title string) []DialogOption {
 	opts := make([]DialogOption, 0, len(group))
 	for gi, o := range group {
-		opt := DialogOption{Key: o.key, Label: o.label, Selected: o.selected}
+		label, checked := parseOptionLabel(o.label)
+		opt := DialogOption{Key: o.key, Label: label, Selected: o.selected, Checked: checked}
 		hasNext := gi+1 < len(group)
 		end := len(lines)
 		if hasNext {
 			end = group[gi+1].idx
 		}
-		descSeen := false
+		labelDone := false
 		for i := o.idx + 1; i < end && i < len(lines); i++ {
 			if isRule(lines[i]) {
 				continue
@@ -454,11 +568,16 @@ func buildOptions(lines []string, group []rawOption, title string) []DialogOptio
 			if t == "" {
 				continue
 			}
-			if !descSeen && hasNext && leadingIndent(lines[i]) >= 6 {
+			indent := leadingIndent(lines[i])
+			if !labelDone && hasNext && indent >= optionWrapIndent {
 				opt.Label = strings.TrimSpace(opt.Label + " " + t)
 				continue
 			}
-			descSeen = true
+			if !labelDone && indent > o.indent {
+				opt.Description = strings.TrimSpace(opt.Description + " " + t)
+				continue
+			}
+			labelDone = true
 		}
 		opts = append(opts, opt)
 	}

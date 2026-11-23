@@ -24,6 +24,29 @@ const oscMirrorNoopCommand = 7702
 // terminator cannot stall the stream.
 const mirrorMarkerCarryMax = 32
 
+// mirrorTitleCarryMax caps a title OSC Write holds back while waiting for its
+// terminator. A longer one is dropped so a lost terminator cannot grow the
+// carry unbounded.
+const mirrorTitleCarryMax = 4 * 1024
+
+// oscMirrorSequence is an OSC introducer and command Mirror consumes itself
+// instead of letting the emulator draw it. Title commands (0, 1, 2) are
+// dropped because the emulator would render their text onto the screen, over a
+// dialog's first option; the 7701 size marker is applied with Resize. Every
+// other OSC (7, 8, 9, 7702, …) keeps its current handling.
+type oscMirrorSequence struct {
+	head []byte // introducer and command, e.g. "\x1b]0;" or "\x1b]7701;"
+	size bool   // true for the 7701 size marker, applied with Resize
+}
+
+// oscMirrorSequences lists the OSC sequences Mirror consumes itself.
+var oscMirrorSequences = []oscMirrorSequence{
+	{[]byte("\x1b]0;"), false},
+	{[]byte("\x1b]1;"), false},
+	{[]byte("\x1b]2;"), false},
+	{[]byte(oscMirrorSizePrefix), true},
+}
+
 // mirrorScrollback is how many scrollback lines the mirror keeps. It is small
 // because the screen parser only reads the visible rows.
 const mirrorScrollback = 200
@@ -62,9 +85,10 @@ func NewMirror(cols, rows int) *Mirror {
 
 // Write feeds terminal output to the emulator. Each OSC 7701 size marker in the
 // input is applied with Resize at the point it appears, so the bytes before it
-// render at the old size and the bytes after it at the new one. The marker
-// bytes themselves are dropped. After Close it is a no-op so a late write never
-// panics.
+// render at the old size and the bytes after it at the new one. Title OSC
+// sequences (0, 1, 2) are removed so the emulator does not draw their text onto
+// the screen. The consumed sequences themselves are dropped. After Close it is
+// a no-op so a late write never panics.
 func (m *Mirror) Write(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -89,7 +113,7 @@ func (m *Mirror) Write(p []byte) (int, error) {
 	}
 	rest := buf
 	for {
-		i := bytes.Index(rest, []byte(oscMirrorSizePrefix))
+		i, seq := indexMirrorOSC(rest)
 		if i < 0 {
 			keep := mirrorCarryLen(rest)
 			if err := write(rest[:len(rest)-keep]); err != nil {
@@ -101,31 +125,55 @@ func (m *Mirror) Write(p []byte) (int, error) {
 		if err := write(rest[:i]); err != nil {
 			return written, err
 		}
-		payloadStart := i + len(oscMirrorSizePrefix)
+		payloadStart := i + len(seq.head)
 		payloadEnd, next, ok := mirrorMarkerEnd(rest, payloadStart)
 		if !ok {
-			// No terminator yet; hold a short marker back for the next Write
-			// and flush a longer one as ordinary bytes.
 			rem := rest[i:]
-			if len(rem) < mirrorMarkerCarryMax {
-				m.carry = append([]byte(nil), rem...)
+			if seq.size {
+				// No terminator yet; hold a short marker back for the next
+				// Write and flush a longer one as ordinary bytes.
+				if len(rem) < mirrorMarkerCarryMax {
+					m.carry = append([]byte(nil), rem...)
+					return len(p), nil
+				}
+				if err := write(rem); err != nil {
+					return written, err
+				}
 				return len(p), nil
 			}
-			if err := write(rem); err != nil {
-				return written, err
+			// Title with no terminator yet: hold it back for the next Write,
+			// unless it grew past the cap, in which case drop it.
+			if len(rem) <= mirrorTitleCarryMax {
+				m.carry = append([]byte(nil), rem...)
 			}
 			return len(p), nil
 		}
-		if c, r, ok := parseMirrorSize(rest[payloadStart:payloadEnd]); ok {
-			m.emu.Resize(c, r)
+		if seq.size {
+			if c, r, ok := parseMirrorSize(rest[payloadStart:payloadEnd]); ok {
+				m.emu.Resize(c, r)
+			}
 		}
 		rest = rest[next:]
 	}
 }
 
-// mirrorMarkerEnd finds the end of the size marker whose payload starts at
-// from. It returns the index one past the payload and one past the terminator,
-// which is BEL or ST. ok is false when no terminator is present.
+// indexMirrorOSC returns the earliest index in b at which a consumed OSC
+// sequence begins, together with its descriptor. The index is negative when b
+// holds none.
+func indexMirrorOSC(b []byte) (int, oscMirrorSequence) {
+	best := -1
+	var found oscMirrorSequence
+	for _, seq := range oscMirrorSequences {
+		if i := bytes.Index(b, seq.head); i >= 0 && (best < 0 || i < best) {
+			best, found = i, seq
+		}
+	}
+	return best, found
+}
+
+// mirrorMarkerEnd finds the end of a consumed OSC payload that starts at from.
+// It returns the index one past the payload and one past the terminator, which
+// is BEL or ST. ok is false when no terminator is present.
 func mirrorMarkerEnd(b []byte, from int) (payloadEnd, next int, ok bool) {
 	for i := from; i < len(b); i++ {
 		switch b[i] {
@@ -141,11 +189,23 @@ func mirrorMarkerEnd(b []byte, from int) (payloadEnd, next int, ok bool) {
 }
 
 // mirrorCarryLen is the length of rest's longest suffix that could be the head
-// of an OSC 7701 marker, so Write can hold it back for the next call.
+// of a consumed OSC sequence, so Write can hold it back for the next call.
 func mirrorCarryLen(rest []byte) int {
-	for k := len(oscMirrorSizePrefix) - 1; k > 0; k-- {
-		if len(rest) >= k && string(rest[len(rest)-k:]) == oscMirrorSizePrefix[:k] {
-			return k
+	longest := 1
+	for _, seq := range oscMirrorSequences {
+		if n := len(seq.head); n-1 > longest {
+			longest = n - 1
+		}
+	}
+	for k := longest; k > 0; k-- {
+		if len(rest) < k {
+			continue
+		}
+		suf := rest[len(rest)-k:]
+		for _, seq := range oscMirrorSequences {
+			if k < len(seq.head) && bytes.Equal(suf, seq.head[:k]) {
+				return k
+			}
 		}
 	}
 	return 0
