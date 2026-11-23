@@ -546,11 +546,19 @@
 
 /* ---- cards --------------------------------------------------------- */
 
+/* Text read from the terminal holds long paths and commands with no spaces
+   (owner bug 2026-11-24: an "always allow access to /Users/…" option ran
+   past the card). Every card stays inside the thread: it may shrink, and any
+   long word in it breaks. overflow-wrap inherits to all text in the card;
+   each flex child that holds text also needs min-width: 0. */
 .wbc-card {
   --tone: var(--amber);
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
   border-radius: 12px;
@@ -638,6 +646,10 @@
   gap: 10px;
 }
 
+.wbc-card-head > div {
+  min-width: 0;
+}
+
 .wbc-card-head > .i {
   flex: none;
   margin-top: 2px;
@@ -701,6 +713,24 @@
   cursor: pointer;
 }
 
+/* Option buttons hold terminal text: app.css gives every button
+   white-space: nowrap, which kept a long label on one line past the card. */
+.wbc-option,
+.wbc-q-option {
+  white-space: normal;
+}
+
+.wbc-option > span,
+.wbc-q-body,
+.wbc-card-foot > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wbc-option > kbd {
+  flex: none;
+}
+
 .wbc-option:hover:not(:disabled),
 .wbc-option.is-selected {
   border-color: color-mix(in srgb, var(--tone) 65%, transparent);
@@ -736,6 +766,7 @@
 }
 
 .wbc-card-foot > :last-child {
+  flex: none;
   margin-left: auto;
 }
 
